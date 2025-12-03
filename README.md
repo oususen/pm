@@ -50,12 +50,34 @@ d:\pm\
 
 ### 1. データベースセットアップ (MySQL)
 
-```bash
-# setup_database.batを実行
-setup_database.bat
+以下のいずれかの方法でセットアップします：
 
-# または手動で
-mysql -u root -p < setup_database.sql
+#### 方法1: PowerShellスクリプト（推奨）
+
+```powershell
+# PowerShellで実行
+.\setup_database.ps1
+```
+
+#### 方法2: バッチファイル（英語版）
+
+```cmd
+# コマンドプロンプトで実行
+setup_db.bat
+```
+
+#### 方法3: 手動実行
+
+```bash
+# MySQLに直接接続
+mysql -u root -p
+
+# MySQL内で実行
+CREATE DATABASE IF NOT EXISTS pm_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE pm_db;
+SOURCE schema.sql;
+SHOW TABLES;
+exit;
 ```
 
 MySQLのrootパスワードを入力すると、`pm_db`データベースが作成され、schema.sqlが実行されます。
