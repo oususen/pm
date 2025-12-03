@@ -8,7 +8,7 @@ echo Please enter MySQL root password when prompted
 echo.
 
 cd /d %~dp0
-mysql -u root -p < setup_database.sql
+mysql -u root -p --default-character-set=utf8mb4 < setup_database.sql
 
 echo.
 echo Setup completed!

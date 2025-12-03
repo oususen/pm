@@ -66,11 +66,18 @@ d:\pm\
 setup_db.bat
 ```
 
-#### 方法3: 手動実行
+#### 方法3: 直接SQLファイル実行
+
+```bash
+# PowerShellまたはコマンドプロンプトで
+mysql -u root -p --default-character-set=utf8mb4 < setup_database.sql
+```
+
+#### 方法4: MySQL内で手動実行
 
 ```bash
 # MySQLに直接接続
-mysql -u root -p
+mysql -u root -p --default-character-set=utf8mb4
 
 # MySQL内で実行
 CREATE DATABASE IF NOT EXISTS pm_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

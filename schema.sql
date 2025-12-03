@@ -1,5 +1,9 @@
 -- schema.sql  段階BOM＋セル工程・時間運用＋ライン/購買LT (v3統合版)
 
+-- 文字セット設定
+SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
+
 -- 1) Products
 CREATE TABLE m_product (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
