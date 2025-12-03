@@ -10,7 +10,10 @@
       "Bash(venv/Scripts/pip install:*)",
       "Bash(curl:*)",
       "Bash(python manage.py startapp:*)",
-      "Bash(venv/Scripts/activate)"
+      "Bash(venv/Scripts/activate)",
+      "Bash(cat:*)",
+      "Bash(d:/pm/venv/Scripts/pip install:*)",
+      "Bash(d:/pm/venv/Scripts/python.exe:*)"
     ],
     "deny": [],
     "ask": []

@@ -187,4 +187,51 @@ export default {
   deleteRoutingStep(id) {
     return client.delete(`/routing-steps/${id}/`)
   },
+
+  // Orders
+  getOrders() {
+    return client.get('/orders/')
+  },
+  getOrder(id) {
+    return client.get(`/orders/${id}/`)
+  },
+  createOrder(data) {
+    return client.post('/orders/', data)
+  },
+  updateOrder(id, data) {
+    return client.put(`/orders/${id}/`, data)
+  },
+  deleteOrder(id) {
+    return client.delete(`/orders/${id}/`)
+  },
+
+  // Order Lines
+  getOrderLines(orderId) {
+    return client.get(`/order-lines/?order=${orderId}`)
+  },
+  createOrderLine(data) {
+    return client.post('/order-lines/', data)
+  },
+  updateOrderLine(id, data) {
+    return client.put(`/order-lines/${id}/`, data)
+  },
+  deleteOrderLine(id) {
+    return client.delete(`/order-lines/${id}/`)
+  },
+
+  // Staging Order Raw
+  getStgOrderRaw() {
+    return client.get('/stg-order-raw/')
+  },
+  getStgOrderRawItem(id) {
+    return client.get(`/stg-order-raw/${id}/`)
+  },
+
+  // Staging Order Daily
+  getStgOrderDaily() {
+    return client.get('/stg-order-daily/')
+  },
+  getStgOrderDailyItem(id) {
+    return client.get(`/stg-order-daily/${id}/`)
+  },
 }
