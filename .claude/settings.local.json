@@ -5,7 +5,9 @@
       "Bash(git add:*)",
       "Bash(mysql:*)",
       "Bash(npm install)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(git push:*)",
+      "Bash(venv/Scripts/pip install:*)"
     ],
     "deny": [],
     "ask": []
