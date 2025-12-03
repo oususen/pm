@@ -1,9 +1,9 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">得意先マスタ</h1>
+      <h1 class="page-title">カレンダマスタ</h1>
       <div class="page-actions">
-        <button @click="fetchCustomers" class="btn-primary">更新</button>
+        <button @click="fetchCalendars" class="btn-primary">更新</button>
         <button @click="showNewDialog" class="btn-success">新規</button>
       </div>
     </div>
@@ -12,28 +12,26 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>得意先コード</th>
-            <th>得意先名</th>
-            <th>略称</th>
-            <th>有効</th>
+            <th>カレンダコード</th>
+            <th>カレンダ名</th>
+            <th>説明</th>
             <th>操作</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="customer in customers" :key="customer.id">
-            <td>{{ customer.customer_code }}</td>
-            <td>{{ customer.customer_name }}</td>
-            <td>{{ customer.short_name }}</td>
-            <td>{{ customer.is_active ? '有効' : '無効' }}</td>
+          <tr v-for="calendar in calendars" :key="calendar.id">
+            <td>{{ calendar.calendar_code }}</td>
+            <td>{{ calendar.calendar_name }}</td>
+            <td>{{ calendar.description }}</td>
             <td>
-              <button @click="editCustomer(customer)" class="btn-sm">編集</button>
-              <button @click="deleteCustomer(customer.id)" class="btn-sm btn-danger">削除</button>
+              <button @click="editCalendar(calendar)" class="btn-sm">編集</button>
+              <button @click="deleteCalendar(calendar.id)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
         </tbody>
       </table>
 
-      <div v-if="customers.length === 0" class="no-data">
+      <div v-if="calendars.length === 0" class="no-data">
         データがありません
       </div>
     </div>
@@ -41,34 +39,19 @@
     <!-- 新規/編集ダイアログ -->
     <div v-if="showDialog" class="modal-overlay" @click.self="closeDialog">
       <div class="modal-content">
-        <h2>{{ isEdit ? '得意先編集' : '得意先新規作成' }}</h2>
-        <form @submit.prevent="saveCustomer">
+        <h2>{{ isEdit ? 'カレンダ編集' : 'カレンダ新規作成' }}</h2>
+        <form @submit.prevent="saveCalendar">
           <div class="form-group">
-            <label>得意先コード *</label>
-            <input v-model="formData.customer_code" required :disabled="isEdit" />
+            <label>カレンダコード *</label>
+            <input v-model="formData.calendar_code" required :disabled="isEdit" />
           </div>
           <div class="form-group">
-            <label>得意先名 *</label>
-            <input v-model="formData.customer_name" required />
+            <label>カレンダ名 *</label>
+            <input v-model="formData.calendar_name" required />
           </div>
           <div class="form-group">
-            <label>略称</label>
-            <input v-model="formData.short_name" />
-          </div>
-          <div class="form-group">
-            <label>カレンダ</label>
-            <select v-model="formData.calendar_id">
-              <option :value="null">選択なし</option>
-              <option v-for="cal in calendars" :key="cal.id" :value="cal.id">
-                {{ cal.calendar_name }}
-              </option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>
-              <input type="checkbox" v-model="formData.is_active" />
-              有効
-            </label>
+            <label>説明</label>
+            <textarea v-model="formData.description" rows="3"></textarea>
           </div>
           <div class="form-actions">
             <button type="submit" class="btn-primary">保存</button>
@@ -84,27 +67,14 @@
 import { ref, onMounted } from 'vue'
 import api from '../api/client'
 
-const customers = ref([])
 const calendars = ref([])
 const showDialog = ref(false)
 const isEdit = ref(false)
 const formData = ref({
-  customer_code: '',
-  customer_name: '',
-  short_name: '',
-  calendar_id: null,
-  is_active: true
+  calendar_code: '',
+  calendar_name: '',
+  description: ''
 })
-
-const fetchCustomers = async () => {
-  try {
-    const response = await api.getCustomers()
-    customers.value = response.data
-  } catch (error) {
-    console.error('得意先取得エラー:', error)
-    alert('得意先データの取得に失敗しました')
-  }
-}
 
 const fetchCalendars = async () => {
   try {
@@ -112,24 +82,23 @@ const fetchCalendars = async () => {
     calendars.value = response.data
   } catch (error) {
     console.error('カレンダ取得エラー:', error)
+    alert('カレンダデータの取得に失敗しました')
   }
 }
 
 const showNewDialog = () => {
   isEdit.value = false
   formData.value = {
-    customer_code: '',
-    customer_name: '',
-    short_name: '',
-    calendar_id: null,
-    is_active: true
+    calendar_code: '',
+    calendar_name: '',
+    description: ''
   }
   showDialog.value = true
 }
 
-const editCustomer = (customer) => {
+const editCalendar = (calendar) => {
   isEdit.value = true
-  formData.value = { ...customer }
+  formData.value = { ...calendar }
   showDialog.value = true
 }
 
@@ -137,16 +106,16 @@ const closeDialog = () => {
   showDialog.value = false
 }
 
-const saveCustomer = async () => {
+const saveCalendar = async () => {
   try {
     if (isEdit.value) {
-      await api.updateCustomer(formData.value.id, formData.value)
+      await api.updateCalendar(formData.value.id, formData.value)
       alert('更新しました')
     } else {
-      await api.createCustomer(formData.value)
+      await api.createCalendar(formData.value)
       alert('作成しました')
     }
-    await fetchCustomers()
+    await fetchCalendars()
     closeDialog()
   } catch (error) {
     console.error('保存エラー:', error)
@@ -154,12 +123,12 @@ const saveCustomer = async () => {
   }
 }
 
-const deleteCustomer = async (id) => {
+const deleteCalendar = async (id) => {
   if (!confirm('本当に削除しますか？')) return
 
   try {
-    await api.deleteCustomer(id)
-    await fetchCustomers()
+    await api.deleteCalendar(id)
+    await fetchCalendars()
     alert('削除しました')
   } catch (error) {
     console.error('削除エラー:', error)
@@ -168,7 +137,6 @@ const deleteCustomer = async (id) => {
 }
 
 onMounted(() => {
-  fetchCustomers()
   fetchCalendars()
 })
 </script>
@@ -216,16 +184,13 @@ onMounted(() => {
 }
 
 .form-group input[type="text"],
-.form-group select {
+.form-group textarea {
   width: 100%;
   padding: 0.5rem;
   border: 1px solid #ddd;
   border-radius: 4px;
   font-size: 1rem;
-}
-
-.form-group input[type="checkbox"] {
-  margin-right: 0.5rem;
+  font-family: inherit;
 }
 
 .form-actions {

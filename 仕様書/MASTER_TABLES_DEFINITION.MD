@@ -6,6 +6,7 @@
 - `m_customer` テーブルを **スキーマ＆ERに正式追加**。
 - `m_bom_item` に **調達区分と仕入先の整合チェック**（CHECK制約）を追加。
 - `m_line_default` のPKは **line_id 単独** に統一（ER図表現を修正）。
+- **受注テーブル (`t_order`, `t_order_line`) と取込ステージング (`stg_order_raw`, `stg_order_daily`) を追加**、`t_schedule_detail.order_id` と連携。
 - サンプル: ルーティング `step_no` を **連番** に修正、`time_unit` を明示。
 - サイクルタイム参照の基準を**m_routing_step_output.output_product_id**に統一。
 
@@ -114,9 +115,43 @@
 - **調達整合**：`sourcing_type='BUY'` ⇒ `supplier_id NOT NULL`。`MAKE/SUBCON` ⇒ `supplier_id IS NULL` を推奨。
 - **サイクル参照**：`m_routing_step_output.output_product_id` を `m_cycle_time.product_id` と紐付けて所要を算出。
 
+# 13. 受注（ヘッダ/明細）＋取込ステージング
+## 13.1 受注ヘッダ `t_order`
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | BIGINT PK | |
+| customer_id | BIGINT FK | `m_customer` |
+| order_no | VARCHAR(50) | 受注番号/送付No |
+| order_type | ENUM('FIRM','FORECAST') | 確定/内示 |
+| version_no | VARCHAR(20) | 版管理（内示差し替え時など、デフォルト`v1`） |
+| source_system/source_file | VARCHAR | 取込元識別 |
+| order_date | DATE NULL | 受注日など |
+| freeze_from | DATE NULL | 凍結開始（必要に応じて使用） |
+| status | ENUM('OPEN','CLOSED','CANCELED') | デフォルト OPEN |
+| created_at/updated_at | DATETIME | |
+
+## 13.2 受注明細 `t_order_line`
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | BIGINT PK | |
+| order_id | BIGINT FK | `t_order` |
+| line_no | INT | 行番号（ユニーク/受注内） |
+| product_id | BIGINT FK NULL | `m_product`（未マスタはNULLでproduct_code保持） |
+| product_code | VARCHAR(50) | |
+| quantity | DECIMAL(14,3) | 受注明細数量 |
+| due_date | DATE | 納期 |
+| plant_code/ship_to_code | VARCHAR | 納入先/工場区分など |
+| remark | VARCHAR(200) NULL | |
+| created_at/updated_at | DATETIME | |
+
+## 13.3 取込ステージング
+- `stg_order_raw`：取込ファイルを行単位で保持。`customer_code`, `order_type`, `source_file`, `source_row_no`, `record_token(V1等)`, `start_month`, `due_date`, `product_code`, `quantity`, `raw_payload JSON`, `parse_status(PENDING/PARSED/ERROR)`, `error_message`。
+- `stg_order_daily`：日別に正規化した需要。`raw_id`(←`stg_order_raw`), `customer_id`, `order_type`, `version_no`, `product_code`, `due_date`, `quantity`, `plant_code`, `ship_to_code`, `source_system/file`。`t_order`へUPSERTする前段。
+- `t_schedule_detail.order_id` は `t_order` とFK連携し、スケジュール結果を受注明細と結合可能にする。
+
 ---
 
-# 13. 初期展開SQL（例）
+# 14. 初期展開SQL（例）
 ```sql
 -- DAY行の lead_time_days を、製品×ラインの例外 → ライン既定 の順で展開
 UPDATE m_routing_step rs

@@ -1,9 +1,9 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">得意先マスタ</h1>
+      <h1 class="page-title">ラインマスタ</h1>
       <div class="page-actions">
-        <button @click="fetchCustomers" class="btn-primary">更新</button>
+        <button @click="fetchLines" class="btn-primary">更新</button>
         <button @click="showNewDialog" class="btn-success">新規</button>
       </div>
     </div>
@@ -12,28 +12,26 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>得意先コード</th>
-            <th>得意先名</th>
-            <th>略称</th>
+            <th>ラインコード</th>
+            <th>ライン名</th>
             <th>有効</th>
             <th>操作</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="customer in customers" :key="customer.id">
-            <td>{{ customer.customer_code }}</td>
-            <td>{{ customer.customer_name }}</td>
-            <td>{{ customer.short_name }}</td>
-            <td>{{ customer.is_active ? '有効' : '無効' }}</td>
+          <tr v-for="line in lines" :key="line.id">
+            <td>{{ line.line_code }}</td>
+            <td>{{ line.line_name }}</td>
+            <td>{{ line.is_active ? '有効' : '無効' }}</td>
             <td>
-              <button @click="editCustomer(customer)" class="btn-sm">編集</button>
-              <button @click="deleteCustomer(customer.id)" class="btn-sm btn-danger">削除</button>
+              <button @click="editLine(line)" class="btn-sm">編集</button>
+              <button @click="deleteLine(line.id)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
         </tbody>
       </table>
 
-      <div v-if="customers.length === 0" class="no-data">
+      <div v-if="lines.length === 0" class="no-data">
         データがありません
       </div>
     </div>
@@ -41,28 +39,15 @@
     <!-- 新規/編集ダイアログ -->
     <div v-if="showDialog" class="modal-overlay" @click.self="closeDialog">
       <div class="modal-content">
-        <h2>{{ isEdit ? '得意先編集' : '得意先新規作成' }}</h2>
-        <form @submit.prevent="saveCustomer">
+        <h2>{{ isEdit ? 'ライン編集' : 'ライン新規作成' }}</h2>
+        <form @submit.prevent="saveLine">
           <div class="form-group">
-            <label>得意先コード *</label>
-            <input v-model="formData.customer_code" required :disabled="isEdit" />
+            <label>ラインコード *</label>
+            <input v-model="formData.line_code" required :disabled="isEdit" />
           </div>
           <div class="form-group">
-            <label>得意先名 *</label>
-            <input v-model="formData.customer_name" required />
-          </div>
-          <div class="form-group">
-            <label>略称</label>
-            <input v-model="formData.short_name" />
-          </div>
-          <div class="form-group">
-            <label>カレンダ</label>
-            <select v-model="formData.calendar_id">
-              <option :value="null">選択なし</option>
-              <option v-for="cal in calendars" :key="cal.id" :value="cal.id">
-                {{ cal.calendar_name }}
-              </option>
-            </select>
+            <label>ライン名 *</label>
+            <input v-model="formData.line_name" required />
           </div>
           <div class="form-group">
             <label>
@@ -84,52 +69,38 @@
 import { ref, onMounted } from 'vue'
 import api from '../api/client'
 
-const customers = ref([])
-const calendars = ref([])
+const lines = ref([])
 const showDialog = ref(false)
 const isEdit = ref(false)
 const formData = ref({
-  customer_code: '',
-  customer_name: '',
-  short_name: '',
-  calendar_id: null,
+  line_code: '',
+  line_name: '',
   is_active: true
 })
 
-const fetchCustomers = async () => {
+const fetchLines = async () => {
   try {
-    const response = await api.getCustomers()
-    customers.value = response.data
+    const response = await api.getLines()
+    lines.value = response.data
   } catch (error) {
-    console.error('得意先取得エラー:', error)
-    alert('得意先データの取得に失敗しました')
-  }
-}
-
-const fetchCalendars = async () => {
-  try {
-    const response = await api.getCalendars()
-    calendars.value = response.data
-  } catch (error) {
-    console.error('カレンダ取得エラー:', error)
+    console.error('ライン取得エラー:', error)
+    alert('ラインデータの取得に失敗しました')
   }
 }
 
 const showNewDialog = () => {
   isEdit.value = false
   formData.value = {
-    customer_code: '',
-    customer_name: '',
-    short_name: '',
-    calendar_id: null,
+    line_code: '',
+    line_name: '',
     is_active: true
   }
   showDialog.value = true
 }
 
-const editCustomer = (customer) => {
+const editLine = (line) => {
   isEdit.value = true
-  formData.value = { ...customer }
+  formData.value = { ...line }
   showDialog.value = true
 }
 
@@ -137,16 +108,16 @@ const closeDialog = () => {
   showDialog.value = false
 }
 
-const saveCustomer = async () => {
+const saveLine = async () => {
   try {
     if (isEdit.value) {
-      await api.updateCustomer(formData.value.id, formData.value)
+      await api.updateLine(formData.value.id, formData.value)
       alert('更新しました')
     } else {
-      await api.createCustomer(formData.value)
+      await api.createLine(formData.value)
       alert('作成しました')
     }
-    await fetchCustomers()
+    await fetchLines()
     closeDialog()
   } catch (error) {
     console.error('保存エラー:', error)
@@ -154,12 +125,12 @@ const saveCustomer = async () => {
   }
 }
 
-const deleteCustomer = async (id) => {
+const deleteLine = async (id) => {
   if (!confirm('本当に削除しますか？')) return
 
   try {
-    await api.deleteCustomer(id)
-    await fetchCustomers()
+    await api.deleteLine(id)
+    await fetchLines()
     alert('削除しました')
   } catch (error) {
     console.error('削除エラー:', error)
@@ -168,8 +139,7 @@ const deleteCustomer = async (id) => {
 }
 
 onMounted(() => {
-  fetchCustomers()
-  fetchCalendars()
+  fetchLines()
 })
 </script>
 
@@ -215,8 +185,7 @@ onMounted(() => {
   color: #555;
 }
 
-.form-group input[type="text"],
-.form-group select {
+.form-group input[type="text"] {
   width: 100%;
   padding: 0.5rem;
   border: 1px solid #ddd;

@@ -1,9 +1,9 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">得意先マスタ</h1>
+      <h1 class="page-title">工程マスタ</h1>
       <div class="page-actions">
-        <button @click="fetchCustomers" class="btn-primary">更新</button>
+        <button @click="fetchProcesses" class="btn-primary">更新</button>
         <button @click="showNewDialog" class="btn-success">新規</button>
       </div>
     </div>
@@ -12,28 +12,28 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>得意先コード</th>
-            <th>得意先名</th>
-            <th>略称</th>
+            <th>工程コード</th>
+            <th>工程名</th>
+            <th>外注工程</th>
             <th>有効</th>
             <th>操作</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="customer in customers" :key="customer.id">
-            <td>{{ customer.customer_code }}</td>
-            <td>{{ customer.customer_name }}</td>
-            <td>{{ customer.short_name }}</td>
-            <td>{{ customer.is_active ? '有効' : '無効' }}</td>
+          <tr v-for="process in processes" :key="process.id">
+            <td>{{ process.process_code }}</td>
+            <td>{{ process.process_name }}</td>
+            <td>{{ process.is_outsource ? '外注' : '社内' }}</td>
+            <td>{{ process.is_active ? '有効' : '無効' }}</td>
             <td>
-              <button @click="editCustomer(customer)" class="btn-sm">編集</button>
-              <button @click="deleteCustomer(customer.id)" class="btn-sm btn-danger">削除</button>
+              <button @click="editProcess(process)" class="btn-sm">編集</button>
+              <button @click="deleteProcess(process.id)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
         </tbody>
       </table>
 
-      <div v-if="customers.length === 0" class="no-data">
+      <div v-if="processes.length === 0" class="no-data">
         データがありません
       </div>
     </div>
@@ -41,28 +41,21 @@
     <!-- 新規/編集ダイアログ -->
     <div v-if="showDialog" class="modal-overlay" @click.self="closeDialog">
       <div class="modal-content">
-        <h2>{{ isEdit ? '得意先編集' : '得意先新規作成' }}</h2>
-        <form @submit.prevent="saveCustomer">
+        <h2>{{ isEdit ? '工程編集' : '工程新規作成' }}</h2>
+        <form @submit.prevent="saveProcess">
           <div class="form-group">
-            <label>得意先コード *</label>
-            <input v-model="formData.customer_code" required :disabled="isEdit" />
+            <label>工程コード *</label>
+            <input v-model="formData.process_code" required :disabled="isEdit" />
           </div>
           <div class="form-group">
-            <label>得意先名 *</label>
-            <input v-model="formData.customer_name" required />
+            <label>工程名 *</label>
+            <input v-model="formData.process_name" required />
           </div>
           <div class="form-group">
-            <label>略称</label>
-            <input v-model="formData.short_name" />
-          </div>
-          <div class="form-group">
-            <label>カレンダ</label>
-            <select v-model="formData.calendar_id">
-              <option :value="null">選択なし</option>
-              <option v-for="cal in calendars" :key="cal.id" :value="cal.id">
-                {{ cal.calendar_name }}
-              </option>
-            </select>
+            <label>
+              <input type="checkbox" v-model="formData.is_outsource" />
+              外注工程
+            </label>
           </div>
           <div class="form-group">
             <label>
@@ -84,52 +77,40 @@
 import { ref, onMounted } from 'vue'
 import api from '../api/client'
 
-const customers = ref([])
-const calendars = ref([])
+const processes = ref([])
 const showDialog = ref(false)
 const isEdit = ref(false)
 const formData = ref({
-  customer_code: '',
-  customer_name: '',
-  short_name: '',
-  calendar_id: null,
+  process_code: '',
+  process_name: '',
+  is_outsource: false,
   is_active: true
 })
 
-const fetchCustomers = async () => {
+const fetchProcesses = async () => {
   try {
-    const response = await api.getCustomers()
-    customers.value = response.data
+    const response = await api.getProcesses()
+    processes.value = response.data
   } catch (error) {
-    console.error('得意先取得エラー:', error)
-    alert('得意先データの取得に失敗しました')
-  }
-}
-
-const fetchCalendars = async () => {
-  try {
-    const response = await api.getCalendars()
-    calendars.value = response.data
-  } catch (error) {
-    console.error('カレンダ取得エラー:', error)
+    console.error('工程取得エラー:', error)
+    alert('工程データの取得に失敗しました')
   }
 }
 
 const showNewDialog = () => {
   isEdit.value = false
   formData.value = {
-    customer_code: '',
-    customer_name: '',
-    short_name: '',
-    calendar_id: null,
+    process_code: '',
+    process_name: '',
+    is_outsource: false,
     is_active: true
   }
   showDialog.value = true
 }
 
-const editCustomer = (customer) => {
+const editProcess = (process) => {
   isEdit.value = true
-  formData.value = { ...customer }
+  formData.value = { ...process }
   showDialog.value = true
 }
 
@@ -137,16 +118,16 @@ const closeDialog = () => {
   showDialog.value = false
 }
 
-const saveCustomer = async () => {
+const saveProcess = async () => {
   try {
     if (isEdit.value) {
-      await api.updateCustomer(formData.value.id, formData.value)
+      await api.updateProcess(formData.value.id, formData.value)
       alert('更新しました')
     } else {
-      await api.createCustomer(formData.value)
+      await api.createProcess(formData.value)
       alert('作成しました')
     }
-    await fetchCustomers()
+    await fetchProcesses()
     closeDialog()
   } catch (error) {
     console.error('保存エラー:', error)
@@ -154,12 +135,12 @@ const saveCustomer = async () => {
   }
 }
 
-const deleteCustomer = async (id) => {
+const deleteProcess = async (id) => {
   if (!confirm('本当に削除しますか？')) return
 
   try {
-    await api.deleteCustomer(id)
-    await fetchCustomers()
+    await api.deleteProcess(id)
+    await fetchProcesses()
     alert('削除しました')
   } catch (error) {
     console.error('削除エラー:', error)
@@ -168,8 +149,7 @@ const deleteCustomer = async (id) => {
 }
 
 onMounted(() => {
-  fetchCustomers()
-  fetchCalendars()
+  fetchProcesses()
 })
 </script>
 
@@ -215,8 +195,7 @@ onMounted(() => {
   color: #555;
 }
 
-.form-group input[type="text"],
-.form-group select {
+.form-group input[type="text"] {
   width: 100%;
   padding: 0.5rem;
   border: 1px solid #ddd;

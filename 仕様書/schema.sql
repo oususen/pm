@@ -230,10 +230,92 @@ CREATE TABLE m_calendar_day (
 ALTER TABLE m_customer
   ADD CONSTRAINT fk_customer_calendar FOREIGN KEY (calendar_id) REFERENCES m_calendar(id);
 
--- 9) Scheduling result (transactional)
+-- 9) Orders (header / line) + staging for intake
+CREATE TABLE t_order (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  customer_id BIGINT NOT NULL,
+  order_no VARCHAR(50) NOT NULL,
+  order_type ENUM('FIRM','FORECAST') NOT NULL,
+  version_no VARCHAR(20) NOT NULL DEFAULT 'v1',
+  source_system VARCHAR(50) NULL,
+  source_file VARCHAR(200) NULL,
+  order_date DATE NULL,
+  freeze_from DATE NULL,
+  status ENUM('OPEN','CLOSED','CANCELED') NOT NULL DEFAULT 'OPEN',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_order_customer FOREIGN KEY (customer_id) REFERENCES m_customer(id),
+  UNIQUE KEY uk_order (customer_id, order_no, order_type, version_no),
+  INDEX idx_order_status (status)
+) ENGINE=InnoDB;
+
+CREATE TABLE t_order_line (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  order_id BIGINT NOT NULL,
+  line_no INT NOT NULL,
+  product_id BIGINT NULL,
+  product_code VARCHAR(50) NOT NULL,
+  quantity DECIMAL(14,3) NOT NULL,
+  due_date DATE NOT NULL,
+  plant_code VARCHAR(20) NULL,
+  ship_to_code VARCHAR(40) NULL,
+  remark VARCHAR(200) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_orderline_order FOREIGN KEY (order_id) REFERENCES t_order(id),
+  CONSTRAINT fk_orderline_product FOREIGN KEY (product_id) REFERENCES m_product(id),
+  UNIQUE KEY uk_orderline (order_id, line_no),
+  INDEX idx_orderline_due (due_date),
+  INDEX idx_orderline_product (product_code)
+) ENGINE=InnoDB;
+
+-- Staging: raw rows per file and normalized daily demand
+CREATE TABLE stg_order_raw (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  customer_code VARCHAR(20) NOT NULL,
+  order_type ENUM('FIRM','FORECAST') NOT NULL,
+  source_system VARCHAR(50) NULL,
+  source_file VARCHAR(200) NULL,
+  source_row_no INT NOT NULL,
+  record_token VARCHAR(50) NULL,           -- e.g., V1/V2, 送付Noなど
+  start_month DATE NULL,                   -- forecast開始月度
+  due_date DATE NULL,                      -- 確定系は納期
+  product_code VARCHAR(50) NULL,
+  quantity DECIMAL(14,3) NULL,
+  raw_payload JSON NOT NULL,
+  parse_status ENUM('PENDING','PARSED','ERROR') NOT NULL DEFAULT 'PENDING',
+  error_message VARCHAR(200) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_stg_raw_customer (customer_code),
+  INDEX idx_stg_raw_status (parse_status)
+) ENGINE=InnoDB;
+
+CREATE TABLE stg_order_daily (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  raw_id BIGINT NOT NULL,
+  customer_id BIGINT NULL,
+  order_type ENUM('FIRM','FORECAST') NOT NULL,
+  version_no VARCHAR(20) NOT NULL DEFAULT 'v1',
+  product_code VARCHAR(50) NOT NULL,
+  due_date DATE NOT NULL,
+  quantity DECIMAL(14,3) NOT NULL,
+  plant_code VARCHAR(20) NULL,
+  ship_to_code VARCHAR(40) NULL,
+  source_system VARCHAR(50) NULL,
+  source_file VARCHAR(200) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_stg_daily_raw FOREIGN KEY (raw_id) REFERENCES stg_order_raw(id),
+  CONSTRAINT fk_stg_daily_customer FOREIGN KEY (customer_id) REFERENCES m_customer(id),
+  INDEX idx_stg_daily_due (due_date),
+  INDEX idx_stg_daily_customer (customer_id, due_date)
+) ENGINE=InnoDB;
+
+-- 10) Scheduling result (transactional)
 CREATE TABLE t_schedule_detail (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  order_id BIGINT NOT NULL,                 -- 受注（別テーブル想定）
+  order_id BIGINT NOT NULL,                 -- t_order.id
   routing_step_id BIGINT NOT NULL,          -- どのステップか
   planned_start DATETIME NOT NULL,
   planned_end DATETIME NOT NULL,
@@ -243,6 +325,7 @@ CREATE TABLE t_schedule_detail (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_sched_step FOREIGN KEY (routing_step_id) REFERENCES m_routing_step(id),
+  CONSTRAINT fk_sched_order FOREIGN KEY (order_id) REFERENCES t_order(id),
   INDEX idx_sched_order (order_id),
   INDEX idx_sched_status (status)
 ) ENGINE=InnoDB;

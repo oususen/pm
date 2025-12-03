@@ -15,7 +15,22 @@
 
       <RouterLink to="/masters/customer" class="master-tile">
         <div class="icon-box">🏢</div>
-        <div class="label">取引先マスタ</div>
+        <div class="label">得意先マスタ</div>
+      </RouterLink>
+
+      <RouterLink to="/masters/supplier" class="master-tile">
+        <div class="icon-box">🏭</div>
+        <div class="label">仕入先マスタ</div>
+      </RouterLink>
+
+      <RouterLink to="/masters/process" class="master-tile">
+        <div class="icon-box">⚙️</div>
+        <div class="label">工程マスタ</div>
+      </RouterLink>
+
+      <RouterLink to="/masters/line" class="master-tile">
+        <div class="icon-box">🏗️</div>
+        <div class="label">ラインマスタ</div>
       </RouterLink>
 
       <RouterLink to="/masters/calendar" class="master-tile">
