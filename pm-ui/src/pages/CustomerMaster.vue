@@ -98,7 +98,7 @@ const formData = ref({
 
 const fetchCustomers = async () => {
   try {
-    const response = await api.getCustomers()
+    const response = await api.customers.getCustomers()
     // ページネーションレスポンスの場合はresultsを使用
     customers.value = response.data.results || response.data
   } catch (error) {
@@ -109,7 +109,7 @@ const fetchCustomers = async () => {
 
 const fetchCalendars = async () => {
   try {
-    const response = await api.getCalendars()
+    const response = await api.calendars.getCalendars()
     calendars.value = response.data.results || response.data
   } catch (error) {
     console.error('カレンダ取得エラー:', error)
@@ -148,10 +148,10 @@ const saveCustomer = async () => {
     }
 
     if (isEdit.value) {
-      await api.updateCustomer(dataToSend.id, dataToSend)
+      await api.customers.updateCustomer(dataToSend.id, dataToSend)
       alert('更新しました')
     } else {
-      await api.createCustomer(dataToSend)
+      await api.customers.createCustomer(dataToSend)
       alert('作成しました')
     }
     await fetchCustomers()
@@ -171,7 +171,7 @@ const deleteCustomer = async (id) => {
   if (!confirm('本当に削除しますか？')) return
 
   try {
-    await api.deleteCustomer(id)
+    await api.customers.deleteCustomer(id)
     await fetchCustomers()
     alert('削除しました')
   } catch (error) {

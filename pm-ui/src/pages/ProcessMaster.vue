@@ -89,7 +89,7 @@ const formData = ref({
 
 const fetchProcesses = async () => {
   try {
-    const response = await api.getProcesses()
+    const response = await api.processes.getProcesses()
     processes.value = response.data.results || response.data
   } catch (error) {
     console.error('工程取得エラー:', error)
@@ -121,10 +121,10 @@ const closeDialog = () => {
 const saveProcess = async () => {
   try {
     if (isEdit.value) {
-      await api.updateProcess(formData.value.id, formData.value)
+      await api.processes.updateProcess(formData.value.id, formData.value)
       alert('更新しました')
     } else {
-      await api.createProcess(formData.value)
+      await api.processes.createProcess(formData.value)
       alert('作成しました')
     }
     await fetchProcesses()
@@ -139,7 +139,7 @@ const deleteProcess = async (id) => {
   if (!confirm('本当に削除しますか？')) return
 
   try {
-    await api.deleteProcess(id)
+    await api.processes.deleteProcess(id)
     await fetchProcesses()
     alert('削除しました')
   } catch (error) {

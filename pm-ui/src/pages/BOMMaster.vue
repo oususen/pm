@@ -148,7 +148,7 @@ const sourcingTypeMap = {
 
 const fetchBOMs = async () => {
   try {
-    const response = await api.getBOMs()
+    const response = await api.boms.getBOMs()
     boms.value = response.data.results || response.data
   } catch (error) {
     console.error('BOM取得エラー:', error)
@@ -158,7 +158,7 @@ const fetchBOMs = async () => {
 
 const fetchProducts = async () => {
   try {
-    const response = await api.getProducts()
+    const response = await api.products.getProducts()
     products.value = response.data.results || response.data
   } catch (error) {
     console.error('製品取得エラー:', error)
@@ -167,7 +167,7 @@ const fetchProducts = async () => {
 
 const fetchSuppliers = async () => {
   try {
-    const response = await api.getSuppliers()
+    const response = await api.suppliers.getSuppliers()
     suppliers.value = response.data.results || response.data
   } catch (error) {
     console.error('仕入先取得エラー:', error)
@@ -222,10 +222,10 @@ const saveBOM = async () => {
     }
 
     if (isEdit.value) {
-      await api.updateBOM(dataToSend.id, dataToSend)
+      await api.boms.updateBOM(dataToSend.id, dataToSend)
       alert('更新しました')
     } else {
-      await api.createBOM(dataToSend)
+      await api.boms.createBOM(dataToSend)
       alert('作成しました')
     }
     await fetchBOMs()
@@ -245,7 +245,7 @@ const deleteBOM = async (id) => {
   if (!confirm('本当に削除しますか？')) return
 
   try {
-    await api.deleteBOM(id)
+    await api.boms.deleteBOM(id)
     await fetchBOMs()
     alert('削除しました')
   } catch (error) {
@@ -257,7 +257,7 @@ const deleteBOM = async (id) => {
 const viewDetails = async (bom) => {
   selectedBOM.value = bom
   try {
-    const response = await api.getBOMItems(bom.id)
+    const response = await api.boms.getBOMItems(bom.id)
     bomItems.value = response.data.results || response.data
     showDetailsDialog.value = true
   } catch (error) {

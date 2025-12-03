@@ -80,7 +80,7 @@ const formData = ref({
 
 const fetchLines = async () => {
   try {
-    const response = await api.getLines()
+    const response = await api.lines.getLines()
     lines.value = response.data.results || response.data
   } catch (error) {
     console.error('ライン取得エラー:', error)
@@ -111,10 +111,10 @@ const closeDialog = () => {
 const saveLine = async () => {
   try {
     if (isEdit.value) {
-      await api.updateLine(formData.value.id, formData.value)
+      await api.lines.updateLine(formData.value.id, formData.value)
       alert('更新しました')
     } else {
-      await api.createLine(formData.value)
+      await api.lines.createLine(formData.value)
       alert('作成しました')
     }
     await fetchLines()
@@ -129,7 +129,7 @@ const deleteLine = async (id) => {
   if (!confirm('本当に削除しますか？')) return
 
   try {
-    await api.deleteLine(id)
+    await api.lines.deleteLine(id)
     await fetchLines()
     alert('削除しました')
   } catch (error) {

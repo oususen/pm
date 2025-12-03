@@ -71,7 +71,7 @@ const formData = ref({
 
 const fetchSuppliers = async () => {
   try {
-    const response = await api.getSuppliers()
+    const response = await api.suppliers.getSuppliers()
     suppliers.value = response.data.results || response.data
   } catch (error) {
     console.error('仕入先取得エラー:', error)
@@ -101,10 +101,10 @@ const closeDialog = () => {
 const saveSupplier = async () => {
   try {
     if (isEdit.value) {
-      await api.updateSupplier(formData.value.id, formData.value)
+      await api.suppliers.updateSupplier(formData.value.id, formData.value)
       alert('更新しました')
     } else {
-      await api.createSupplier(formData.value)
+      await api.suppliers.createSupplier(formData.value)
       alert('作成しました')
     }
     await fetchSuppliers()
@@ -119,7 +119,7 @@ const deleteSupplier = async (id) => {
   if (!confirm('本当に削除しますか？')) return
 
   try {
-    await api.deleteSupplier(id)
+    await api.suppliers.deleteSupplier(id)
     await fetchSuppliers()
     alert('削除しました')
   } catch (error) {

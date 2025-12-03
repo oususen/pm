@@ -78,7 +78,7 @@ const formData = ref({
 
 const fetchCalendars = async () => {
   try {
-    const response = await api.getCalendars()
+    const response = await api.calendars.getCalendars()
     calendars.value = response.data.results || response.data
   } catch (error) {
     console.error('カレンダ取得エラー:', error)
@@ -109,10 +109,10 @@ const closeDialog = () => {
 const saveCalendar = async () => {
   try {
     if (isEdit.value) {
-      await api.updateCalendar(formData.value.id, formData.value)
+      await api.calendars.updateCalendar(formData.value.id, formData.value)
       alert('更新しました')
     } else {
-      await api.createCalendar(formData.value)
+      await api.calendars.createCalendar(formData.value)
       alert('作成しました')
     }
     await fetchCalendars()
@@ -127,7 +127,7 @@ const deleteCalendar = async (id) => {
   if (!confirm('本当に削除しますか？')) return
 
   try {
-    await api.deleteCalendar(id)
+    await api.calendars.deleteCalendar(id)
     await fetchCalendars()
     alert('削除しました')
   } catch (error) {

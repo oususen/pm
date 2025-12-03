@@ -126,7 +126,7 @@ const formData = ref({
 // 製品取得
 const fetchProducts = async () => {
   try {
-    const response = await api.getProducts()
+    const response = await api.products.getProducts()
     products.value = response.data.results || response.data
   } catch (error) {
     console.error('製品取得エラー:', error)
@@ -165,10 +165,10 @@ const closeDialog = () => {
 const saveProduct = async () => {
   try {
     if (isEdit.value) {
-      await api.updateProduct(formData.value.id, formData.value)
+      await api.products.updateProduct(formData.value.id, formData.value)
       alert('更新しました')
     } else {
-      await api.createProduct(formData.value)
+      await api.products.createProduct(formData.value)
       alert('作成しました')
     }
     await fetchProducts()
@@ -184,7 +184,7 @@ const deleteProduct = async (id) => {
   if (!confirm('本当に削除しますか？')) return
 
   try {
-    await api.deleteProduct(id)
+    await api.products.deleteProduct(id)
     await fetchProducts()
     alert('削除しました')
   } catch (error) {
