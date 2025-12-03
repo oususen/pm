@@ -25,7 +25,7 @@
           <tr v-for="product in products" :key="product.id">
             <td>{{ product.product_code }}</td>
             <td>{{ product.product_name }}</td>
-            <td>{{ product.category }}</td>
+            <td>{{ getCategoryLabel(product.category) }}</td>
             <td>{{ product.unit }}</td>
             <td>{{ product.standard_lt_days }}</td>
             <td>{{ product.is_active ? '有効' : '無効' }}</td>
@@ -41,6 +41,50 @@
         データがありません
       </div>
     </div>
+
+    <!-- 新規/編集ダイアログ -->
+    <div v-if="showDialog" class="modal-overlay" @click.self="closeDialog">
+      <div class="modal-content">
+        <h2>{{ isEdit ? '製品編集' : '製品新規作成' }}</h2>
+        <form @submit.prevent="saveProduct">
+          <div class="form-group">
+            <label>品番コード *</label>
+            <input v-model="formData.product_code" required :disabled="isEdit" />
+          </div>
+          <div class="form-group">
+            <label>品名 *</label>
+            <input v-model="formData.product_name" required />
+          </div>
+          <div class="form-group">
+            <label>カテゴリ *</label>
+            <select v-model="formData.category" required>
+              <option value="">選択してください</option>
+              <option v-for="cat in categoryOptions" :key="cat.value" :value="cat.value">
+                {{ cat.label }}
+              </option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>単位</label>
+            <input v-model="formData.unit" placeholder="個" />
+          </div>
+          <div class="form-group">
+            <label>標準LT(日)</label>
+            <input v-model.number="formData.standard_lt_days" type="number" min="0" />
+          </div>
+          <div class="form-group">
+            <label>
+              <input type="checkbox" v-model="formData.is_active" />
+              有効
+            </label>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn-primary">保存</button>
+            <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -48,8 +92,38 @@
 import { ref, onMounted } from 'vue'
 import api from '../api/client'
 
-const products = ref([])
+// カテゴリマッピング (DB英語 ⇔ UI日本語)
+const categoryMap = {
+  'ASSEMBLY': '集合',
+  'SINGLE': '単品',
+  'MATERIAL': '材料',
+  'PURCHASED': '購入品'
+}
 
+const categoryOptions = [
+  { value: 'ASSEMBLY', label: '集合' },
+  { value: 'SINGLE', label: '単品' },
+  { value: 'MATERIAL', label: '材料' },
+  { value: 'PURCHASED', label: '購入品' }
+]
+
+const getCategoryLabel = (value) => categoryMap[value] || value
+
+// データ
+const products = ref([])
+const showDialog = ref(false)
+const isEdit = ref(false)
+const formData = ref({
+  product_code: '',
+  product_name: '',
+  category: '',
+  unit: '個',
+  standard_lt_days: 0,
+  is_active: true,
+  is_final_product: false
+})
+
+// 製品取得
 const fetchProducts = async () => {
   try {
     const response = await api.getProducts()
@@ -60,14 +134,52 @@ const fetchProducts = async () => {
   }
 }
 
+// 新規ダイアログ表示
 const showNewDialog = () => {
-  alert('新規作成機能は未実装です')
+  isEdit.value = false
+  formData.value = {
+    product_code: '',
+    product_name: '',
+    category: '',
+    unit: '個',
+    standard_lt_days: 0,
+    is_active: true,
+    is_final_product: false
+  }
+  showDialog.value = true
 }
 
+// 編集ダイアログ表示
 const editProduct = (product) => {
-  alert(`編集機能は未実装です: ${product.product_name}`)
+  isEdit.value = true
+  formData.value = { ...product }
+  showDialog.value = true
 }
 
+// ダイアログを閉じる
+const closeDialog = () => {
+  showDialog.value = false
+}
+
+// 保存
+const saveProduct = async () => {
+  try {
+    if (isEdit.value) {
+      await api.updateProduct(formData.value.id, formData.value)
+      alert('更新しました')
+    } else {
+      await api.createProduct(formData.value)
+      alert('作成しました')
+    }
+    await fetchProducts()
+    closeDialog()
+  } catch (error) {
+    console.error('保存エラー:', error)
+    alert('保存に失敗しました')
+  }
+}
+
+// 削除
 const deleteProduct = async (id) => {
   if (!confirm('本当に削除しますか？')) return
 
@@ -85,3 +197,80 @@ onMounted(() => {
   fetchProducts()
 })
 </script>
+
+<style scoped>
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  min-width: 500px;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.modal-content h2 {
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  color: #333;
+}
+
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: #555;
+}
+
+.form-group input[type="text"],
+.form-group input[type="number"],
+.form-group select {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+.form-group input[type="checkbox"] {
+  margin-right: 0.5rem;
+}
+
+.form-actions {
+  margin-top: 1.5rem;
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+}
+
+.btn-secondary {
+  padding: 0.5rem 1rem;
+  border: 1px solid #ddd;
+  background-color: white;
+  color: #666;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-secondary:hover {
+  background-color: #f5f5f5;
+}
+</style>
