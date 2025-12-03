@@ -1,41 +1,28 @@
 <template>
   <nav class="side-menu">
-    <div class="side-section">
-      <div class="side-section-title">受注管理</div>
-      <ul>
-        <li>受注入力</li>
-        <li>受注一覧</li>
-      </ul>
-    </div>
-
-    <div class="side-section">
-      <div class="side-section-title">出荷管理</div>
-      <ul>
-        <li>出荷指示</li>
-        <li>出荷実績</li>
-      </ul>
-    </div>
-
-    <div class="side-section">
-      <div class="side-section-title">生産管理</div>
-      <ul>
-        <li>生産計画</li>
-        <li>進捗管理</li>
-      </ul>
-    </div>
-
-    <div class="side-section">
-      <div class="side-section-title">品質管理</div>
-      <ul>
-        <li>検査実績</li>
-      </ul>
-    </div>
-
-    <div class="side-section">
-      <div class="side-section-title">マスタメンテ</div>
-      <ul>
-        <li>
-          <RouterLink to="/masters" class="link">マスタメニュー</RouterLink>
+    <div
+      v-for="section in sections"
+      :key="section.id"
+      class="side-section"
+    >
+      <button
+        type="button"
+        class="side-section-title toggle"
+        @click="toggleSection(section.id)"
+      >
+        <span>{{ section.title }}</span>
+        <span class="chevron">{{ isOpen(section.id) ? '▲' : '▼' }}</span>
+      </button>
+      <ul v-if="isOpen(section.id)">
+        <li v-for="item in section.items" :key="item.label">
+          <RouterLink
+            v-if="item.link"
+            :to="item.link"
+            class="link"
+          >
+            {{ item.label }}
+          </RouterLink>
+          <span v-else>{{ item.label }}</span>
         </li>
       </ul>
     </div>
@@ -44,4 +31,57 @@
 
 <script setup>
 import { RouterLink } from "vue-router";
+import { reactive } from "vue";
+
+const sections = [
+  {
+    id: "orders",
+    title: "受注管理",
+    items: [
+      { label: "受注入力" },
+      { label: "受注一覧" },
+    ],
+  },
+  {
+    id: "shipping",
+    title: "出荷管理",
+    items: [
+      { label: "出荷指示" },
+      { label: "出荷実績" },
+    ],
+  },
+  {
+    id: "production",
+    title: "生産管理",
+    items: [
+      { label: "生産計画" },
+      { label: "進捗管理" },
+    ],
+  },
+  {
+    id: "quality",
+    title: "品質管理",
+    items: [{ label: "検査実績" }],
+  },
+  {
+    id: "masters",
+    title: "マスタメンテ",
+    items: [
+      { label: "マスタメニュー", link: "/masters" },
+    ],
+  },
+];
+
+const openState = reactive(
+  sections.reduce((acc, section) => {
+    acc[section.id] = false;
+    return acc;
+  }, {})
+);
+
+const toggleSection = (id) => {
+  openState[id] = !openState[id];
+};
+
+const isOpen = (id) => openState[id];
 </script>
