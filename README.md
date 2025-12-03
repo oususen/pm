@@ -95,11 +95,12 @@ MySQLのrootパスワードを入力すると、`pm_db`データベースが作�
 # 仮想環境を有効化
 venv\Scripts\activate
 
-# MySQLパスワードを設定
-# pm_backend/pm_backend/settings.py の DATABASES['default']['PASSWORD'] を編集
+# .envファイルを設定
+cd pm_backend
+copy .env.example .env
+# .envファイルを開いてDB_PASSWORDにMySQLのrootパスワードを設定
 
 # マイグレーション実行（既存テーブルと同期）
-cd pm_backend
 python manage.py migrate
 
 # 管理ユーザー作成
@@ -107,6 +108,23 @@ python manage.py createsuperuser
 
 # 開発サーバー起動
 python manage.py runserver
+```
+
+#### .envファイルの設定例
+
+`pm_backend/.env` ファイルを編集：
+
+```env
+# Django Settings
+SECRET_KEY=django-insecure-_4wufh_x8tvr3%_0d%!r4b_&uvlgf!nhvl--&(8+%hncxf(9tj
+DEBUG=True
+
+# MySQL Database Settings
+DB_NAME=pm_db
+DB_USER=root
+DB_PASSWORD=your_mysql_password_here  # ← ここにMySQLのパスワードを入力
+DB_HOST=localhost
+DB_PORT=3306
 ```
 
 バックエンドが http://localhost:8000 で起動します。
