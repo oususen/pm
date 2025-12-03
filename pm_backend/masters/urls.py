@@ -1,0 +1,21 @@
+from rest_framework.routers import DefaultRouter
+from .views import (
+    ProductViewSet, CustomerViewSet, ProcessViewSet, LineViewSet,
+    SupplierViewSet, CalendarViewSet, CalendarDayViewSet,
+    BOMViewSet, BOMItemViewSet, RoutingViewSet, RoutingStepViewSet
+)
+
+router = DefaultRouter()
+router.register(r'products', ProductViewSet)
+router.register(r'customers', CustomerViewSet)
+router.register(r'processes', ProcessViewSet)
+router.register(r'lines', LineViewSet)
+router.register(r'suppliers', SupplierViewSet)
+router.register(r'calendars', CalendarViewSet)
+router.register(r'calendar-days', CalendarDayViewSet)
+router.register(r'boms', BOMViewSet)
+router.register(r'bom-items', BOMItemViewSet)
+router.register(r'routings', RoutingViewSet)
+router.register(r'routing-steps', RoutingStepViewSet)
+
+urlpatterns = router.urls
