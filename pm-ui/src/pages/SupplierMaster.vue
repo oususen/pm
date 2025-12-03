@@ -72,7 +72,7 @@ const formData = ref({
 const fetchSuppliers = async () => {
   try {
     const response = await api.getSuppliers()
-    suppliers.value = response.data
+    suppliers.value = response.data.results || response.data
   } catch (error) {
     console.error('仕入先取得エラー:', error)
     alert('仕入先データの取得に失敗しました')

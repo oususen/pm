@@ -79,7 +79,7 @@ const formData = ref({
 const fetchCalendars = async () => {
   try {
     const response = await api.getCalendars()
-    calendars.value = response.data
+    calendars.value = response.data.results || response.data
   } catch (error) {
     console.error('カレンダ取得エラー:', error)
     alert('カレンダデータの取得に失敗しました')

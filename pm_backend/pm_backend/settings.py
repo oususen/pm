@@ -144,6 +144,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:8081",  # Custom port
     "http://127.0.0.1:5173",
     "http://127.0.0.1:8081",
+    "http://10.0.1.194:8081",  # IP address
 ]
 
 CORS_ALLOW_CREDENTIALS = True

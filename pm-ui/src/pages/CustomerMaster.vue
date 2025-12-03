@@ -99,7 +99,8 @@ const formData = ref({
 const fetchCustomers = async () => {
   try {
     const response = await api.getCustomers()
-    customers.value = response.data
+    // ページネーションレスポンスの場合はresultsを使用
+    customers.value = response.data.results || response.data
   } catch (error) {
     console.error('得意先取得エラー:', error)
     alert('得意先データの取得に失敗しました')
@@ -109,7 +110,7 @@ const fetchCustomers = async () => {
 const fetchCalendars = async () => {
   try {
     const response = await api.getCalendars()
-    calendars.value = response.data
+    calendars.value = response.data.results || response.data
   } catch (error) {
     console.error('カレンダ取得エラー:', error)
   }
@@ -139,18 +140,30 @@ const closeDialog = () => {
 
 const saveCustomer = async () => {
   try {
+    // データの前処理：空文字列をnullに変換
+    const dataToSend = {
+      ...formData.value,
+      short_name: formData.value.short_name || null,
+      calendar_id: formData.value.calendar_id || null
+    }
+
     if (isEdit.value) {
-      await api.updateCustomer(formData.value.id, formData.value)
+      await api.updateCustomer(dataToSend.id, dataToSend)
       alert('更新しました')
     } else {
-      await api.createCustomer(formData.value)
+      await api.createCustomer(dataToSend)
       alert('作成しました')
     }
     await fetchCustomers()
     closeDialog()
   } catch (error) {
     console.error('保存エラー:', error)
-    alert('保存に失敗しました')
+    console.error('エラー詳細:', error.response?.data)
+    const errorMessage = error.response?.data?.detail
+      || JSON.stringify(error.response?.data)
+      || error.message
+      || '保存に失敗しました'
+    alert('保存に失敗しました\n\n' + errorMessage)
   }
 }
 

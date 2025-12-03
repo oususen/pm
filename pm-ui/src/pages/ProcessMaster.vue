@@ -90,7 +90,7 @@ const formData = ref({
 const fetchProcesses = async () => {
   try {
     const response = await api.getProcesses()
-    processes.value = response.data
+    processes.value = response.data.results || response.data
   } catch (error) {
     console.error('工程取得エラー:', error)
     alert('工程データの取得に失敗しました')

@@ -127,7 +127,7 @@ const formData = ref({
 const fetchProducts = async () => {
   try {
     const response = await api.getProducts()
-    products.value = response.data
+    products.value = response.data.results || response.data
   } catch (error) {
     console.error('製品取得エラー:', error)
     alert('製品データの取得に失敗しました')

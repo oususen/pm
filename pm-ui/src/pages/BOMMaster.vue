@@ -48,7 +48,7 @@
         <form @submit.prevent="saveBOM">
           <div class="form-group">
             <label>親製品 *</label>
-            <select v-model="formData.parent_product" required :disabled="isEdit">
+            <select v-model="formData.parent_product_id" required :disabled="isEdit">
               <option value="">選択してください</option>
               <option v-for="product in products" :key="product.id" :value="product.id">
                 {{ product.product_code }} - {{ product.product_name }}
@@ -129,7 +129,7 @@ const suppliers = ref([])
 const showDialog = ref(false)
 const isEdit = ref(false)
 const formData = ref({
-  parent_product: '',
+  parent_product_id: '',
   version: 'v1',
   valid_from: '',
   valid_to: '',
@@ -149,7 +149,7 @@ const sourcingTypeMap = {
 const fetchBOMs = async () => {
   try {
     const response = await api.getBOMs()
-    boms.value = response.data
+    boms.value = response.data.results || response.data
   } catch (error) {
     console.error('BOM取得エラー:', error)
     alert('BOMデータの取得に失敗しました')
@@ -159,7 +159,7 @@ const fetchBOMs = async () => {
 const fetchProducts = async () => {
   try {
     const response = await api.getProducts()
-    products.value = response.data
+    products.value = response.data.results || response.data
   } catch (error) {
     console.error('製品取得エラー:', error)
   }
@@ -168,7 +168,7 @@ const fetchProducts = async () => {
 const fetchSuppliers = async () => {
   try {
     const response = await api.getSuppliers()
-    suppliers.value = response.data
+    suppliers.value = response.data.results || response.data
   } catch (error) {
     console.error('仕入先取得エラー:', error)
   }
@@ -191,7 +191,7 @@ const showNewDialog = () => {
   isEdit.value = false
   const today = new Date().toISOString().split('T')[0]
   formData.value = {
-    parent_product: '',
+    parent_product_id: '',
     version: 'v1',
     valid_from: today,
     valid_to: '',
@@ -202,7 +202,10 @@ const showNewDialog = () => {
 
 const editBOM = (bom) => {
   isEdit.value = true
-  formData.value = { ...bom }
+  formData.value = {
+    ...bom,
+    parent_product_id: bom.parent_product
+  }
   showDialog.value = true
 }
 
@@ -212,18 +215,29 @@ const closeDialog = () => {
 
 const saveBOM = async () => {
   try {
+    // データの前処理
+    const dataToSend = {
+      ...formData.value,
+      valid_to: formData.value.valid_to || null
+    }
+
     if (isEdit.value) {
-      await api.updateBOM(formData.value.id, formData.value)
+      await api.updateBOM(dataToSend.id, dataToSend)
       alert('更新しました')
     } else {
-      await api.createBOM(formData.value)
+      await api.createBOM(dataToSend)
       alert('作成しました')
     }
     await fetchBOMs()
     closeDialog()
   } catch (error) {
     console.error('保存エラー:', error)
-    alert('保存に失敗しました')
+    console.error('エラー詳細:', error.response?.data)
+    const errorMessage = error.response?.data?.detail
+      || JSON.stringify(error.response?.data)
+      || error.message
+      || '保存に失敗しました'
+    alert('保存に失敗しました\n\n' + errorMessage)
   }
 }
 
@@ -244,7 +258,7 @@ const viewDetails = async (bom) => {
   selectedBOM.value = bom
   try {
     const response = await api.getBOMItems(bom.id)
-    bomItems.value = response.data
+    bomItems.value = response.data.results || response.data
     showDetailsDialog.value = true
   } catch (error) {
     console.error('BOM明細取得エラー:', error)

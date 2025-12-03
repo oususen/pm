@@ -81,7 +81,7 @@ const formData = ref({
 const fetchLines = async () => {
   try {
     const response = await api.getLines()
-    lines.value = response.data
+    lines.value = response.data.results || response.data
   } catch (error) {
     console.error('ライン取得エラー:', error)
     alert('ラインデータの取得に失敗しました')
