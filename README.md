@@ -235,6 +235,10 @@ Django Admin: http://localhost:8000/admin/
   - 確定受注による内示の自動無効化
   - スケジューリング用の優先度ロジック
   - 詳細は `仕様書/受注管理仕様書.md` 参照
+- ✅ **数量集約機能**
+  - 同一製品・納期の複数注文明細（10行以上）を集約
+  - 個別注文情報を保持しながらスケジューリング用に合計数量を提供
+  - 使用例は `pm_backend/orders/services/scheduling_example.py` 参照
 
 ### CSV Import Service アーキテクチャ
 

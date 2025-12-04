@@ -295,23 +295,44 @@ class CSVImportService:
 
     @staticmethod
     def get_active_order_lines_for_scheduling(customer_id=None, product_code=None,
-                                               start_date=None, end_date=None):
+                                               start_date=None, end_date=None,
+                                               aggregate=True):
         """
         Get active order lines for scheduling.
 
         Priority: FIRM orders with status='OPEN' take precedence over FORECAST orders.
         If a FIRM order exists for a specific product/date, FORECAST orders are ignored.
 
+        When multiple order lines exist for the same product_code + due_date combination
+        (e.g., 10+ order lines with different order numbers), this method can either:
+        - Return aggregated quantities (aggregate=True, default): Sums quantities by
+          product_code + due_date for scheduling calculations
+        - Return individual lines (aggregate=False): Preserves all order line details
+          including individual order numbers for reference
+
         Args:
             customer_id: Filter by customer (optional)
             product_code: Filter by product code (optional)
             start_date: Filter by due_date >= start_date (optional)
             end_date: Filter by due_date <= end_date (optional)
+            aggregate: If True (default), aggregate quantities by product_code + due_date.
+                      If False, return individual order lines with all details.
 
         Returns:
-            QuerySet of OrderLine objects
+            If aggregate=True: QuerySet with aggregated data containing:
+                - customer_id
+                - customer_code
+                - product_code
+                - due_date
+                - total_quantity (sum of all quantities)
+                - order_type (FIRM or FORECAST)
+                - line_count (number of individual order lines)
+                - order_numbers (comma-separated list of order numbers)
+
+            If aggregate=False: QuerySet of OrderLine objects with all details
         """
-        from django.db.models import Q
+        from django.db.models import Q, Sum, Count, F
+        from django.db.models.functions import Coalesce
 
         # Base query: Only OPEN orders
         queryset = OrderLine.objects.filter(order__status='OPEN')
@@ -326,8 +347,28 @@ class CSVImportService:
         if end_date:
             queryset = queryset.filter(due_date__lte=end_date)
 
-        # Priority logic: If FIRM exists for a product/date, exclude FORECAST
-        # For now, return all and let scheduling engine handle priority
-        # Future improvement: Use SQL WINDOW functions or Python filtering
+        if aggregate:
+            # Aggregate quantities by product_code + due_date
+            # Group by customer, product, due_date, and order_type
+            aggregated = queryset.values(
+                'order__customer_id',
+                'order__customer__customer_code',
+                'product_code',
+                'due_date',
+                'order__order_type'
+            ).annotate(
+                total_quantity=Sum('quantity'),
+                line_count=Count('id'),
+                customer_id=F('order__customer_id'),
+                customer_code=F('order__customer__customer_code'),
+                order_type=F('order__order_type')
+            ).order_by('due_date', 'order__order_type', 'product_code')
 
-        return queryset.select_related('order', 'product').order_by('due_date', 'order__order_type')
+            return aggregated
+        else:
+            # Return individual order lines with all details
+            return queryset.select_related(
+                'order',
+                'order__customer',
+                'product'
+            ).order_by('due_date', 'order__order_type', 'product_code', 'order__order_no', 'line_no')
