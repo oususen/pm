@@ -38,8 +38,8 @@ const sections = [
     id: "orders",
     title: "受注管理",
     items: [
-      { label: "受注入力" },
-      { label: "受注一覧" },
+      { label: "受注入力", link: "/csv-upload" },
+      { label: "受注一覧", link: "/orders" },
     ],
   },
   {

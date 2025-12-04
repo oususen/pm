@@ -7,21 +7,45 @@
     <div class="page-content">
       <div class="upload-form">
         <div class="form-group">
-          <label for="customer_code">Customer Code *</label>
-          <select v-model="formData.customer_code" id="customer_code" required>
-            <option value="">Select Customer</option>
-            <option v-for="customer in customers" :key="customer.id" :value="customer.customer_code">
-              {{ customer.customer_code }} - {{ customer.customer_name }}
-            </option>
-          </select>
+          <div class="group-header">
+            <label>Customer *</label>
+            <span class="hint">タイルをクリックして選択してください</span>
+          </div>
+          <div class="tile-grid">
+            <button
+              v-for="customer in customers"
+              :key="customer.id"
+              type="button"
+              class="select-tile"
+              :class="{ active: formData.customer_code === customer.customer_code }"
+              @click="selectCustomer(customer)"
+            >
+              <div class="icon-badge">{{ customer.customer_code?.slice(0, 2) || 'CU' }}</div>
+              <div class="tile-main">{{ customer.customer_code }}</div>
+              <div class="tile-sub" :title="customer.customer_name">{{ customer.customer_name }}</div>
+            </button>
+          </div>
         </div>
 
         <div class="form-group">
-          <label for="order_type">Order Type *</label>
-          <select v-model="formData.order_type" id="order_type" required>
-            <option value="FIRM">FIRM</option>
-            <option value="FORECAST">FORECAST</option>
-          </select>
+          <div class="group-header">
+            <label>Order Type *</label>
+            <span class="hint">用途に応じて選択</span>
+          </div>
+          <div class="tile-grid compact">
+            <button
+              v-for="type in orderTypes"
+              :key="type.value"
+              type="button"
+              class="select-tile"
+              :class="{ active: formData.order_type === type.value }"
+              @click="selectOrderType(type.value)"
+            >
+              <div class="icon-badge">{{ type.badge }}</div>
+              <div class="tile-main">{{ type.label }}</div>
+              <div class="tile-sub">{{ type.desc }}</div>
+            </button>
+          </div>
         </div>
 
         <div class="form-group">
@@ -79,6 +103,10 @@ const selectedFile = ref(null)
 const uploading = ref(false)
 const creatingOrders = ref(false)
 const result = ref(null)
+const orderTypes = [
+  { value: 'FIRM', label: 'FIRM', desc: '確定受注', badge: 'F' },
+  { value: 'FORECAST', label: 'FORECAST', desc: '内示/予測', badge: 'Fc' },
+]
 
 const formData = ref({
   customer_code: '',
@@ -98,6 +126,14 @@ const fetchCustomers = async () => {
 
 const onFileChange = (event) => {
   selectedFile.value = event.target.files[0]
+}
+
+const selectCustomer = (customer) => {
+  formData.value.customer_code = customer.customer_code
+}
+
+const selectOrderType = (type) => {
+  formData.value.order_type = type
 }
 
 const uploadCSV = async () => {
@@ -271,5 +307,76 @@ onMounted(() => {
 .btn-success:disabled {
   background-color: #ccc;
   cursor: not-allowed;
+}
+
+.group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.hint {
+  font-size: 12px;
+  color: #666;
+}
+
+.tile-grid {
+  margin-top: 0.75rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.tile-grid.compact {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.select-tile {
+  width: 100%;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.1s;
+}
+
+.select-tile:hover {
+  border-color: #8aa8ff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+
+.select-tile.active {
+  border-color: #5677ff;
+  box-shadow: 0 2px 10px rgba(86, 119, 255, 0.18);
+}
+
+.icon-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #eef2ff, #d6e0ff);
+  color: #2c3e7a;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.tile-main {
+  font-weight: 600;
+  color: #222;
+}
+
+.tile-sub {
+  font-size: 12px;
+  color: #555;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>
