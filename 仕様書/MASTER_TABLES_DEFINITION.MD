@@ -46,7 +46,16 @@
 
 ---
 
-# 3. 工程 `m_process`（変更なし）
+# 3. 工程 `m_process`
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | BIGINT PK | |
+| process_code | VARCHAR(20) UNIQUE | 工程コード |
+| process_name | VARCHAR(50) | 工程名 |
+| line_id | BIGINT FK NULL | 所属ライン（ライン直下で管理する場合に使用） |
+| is_outsource | TINYINT(1) DEFAULT 0 | 外注フラグ |
+| is_active | TINYINT(1) DEFAULT 1 | |
+| created_at/updated_at | DATETIME | |
 
 # 4. ライン `m_line`（変更なし）
 

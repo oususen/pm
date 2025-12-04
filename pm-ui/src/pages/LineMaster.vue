@@ -141,19 +141,22 @@ const fetchLines = async () => {
 
 const fetchLineSteps = async () => {
   try {
-    const response = await api.routings.getRoutings()
-    const data = response.data.results || response.data
+    // ルーティングではなく工程マスタの line を参照して集計
+    const procRes = await api.processes.getProcesses()
+    const procs = procRes.data.results || procRes.data
     const map = {}
-    data.forEach((routing) => {
-      const steps = routing.steps || []
-      steps.forEach((step) => {
-        if (!step.line) return
-        if (!map[step.line]) map[step.line] = []
-        map[step.line].push({
-          ...step,
-          routing_code: routing.routing_code,
-          product_name: routing.product_name,
-        })
+    procs.forEach((p) => {
+      if (!p.line) return
+      if (!map[p.line]) map[p.line] = []
+      map[p.line].push({
+        id: p.id,
+        process_name: p.process_name,
+        process_code: p.process_code,
+        routing_code: '',
+        product_name: '',
+        time_unit: 'MINUTE',
+        lead_time_days: 0,
+        duration_min: 0,
       })
     })
     lineStepsMap.value = map

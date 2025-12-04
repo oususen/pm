@@ -17,13 +17,26 @@ from .services.csv_import import CSVImportService
 
 class OrderViewSet(viewsets.ModelViewSet):
     """受注ヘッダViewSet"""
-    queryset = Order.objects.all().select_related('customer').prefetch_related('lines')
+    queryset = Order.objects.all()
     serializer_class = OrderSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['customer', 'order_type', 'status', 'order_date']
     search_fields = ['order_no', 'source_file']
-    ordering_fields = ['order_date', 'created_at']
-    ordering = ['-order_date', '-created_at']
+    ordering_fields = ['order_date', 'created_at', 'id']
+    ordering = ['-order_date', '-id']
+
+    def get_queryset(self):
+        qs = Order.objects.select_related('customer')
+        # 詳細取得時のみ明細をプリフェッチしてレスポンスサイズを抑える
+        if self.action != 'list':
+            qs = qs.prefetch_related('lines')
+        return qs
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            from .serializers import OrderListSerializer
+            return OrderListSerializer
+        return super().get_serializer_class()
 
 
 class OrderLineViewSet(viewsets.ModelViewSet):

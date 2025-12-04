@@ -43,6 +43,25 @@ class OrderSerializer(serializers.ModelSerializer):
         return obj.customer.customer_name
 
 
+class OrderListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for order list (ヘッダのみ)"""
+    customer_name = serializers.SerializerMethodField()
+    order_type_display = serializers.CharField(source='get_order_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = Order
+        fields = [
+            'id', 'customer', 'customer_name', 'order_no', 'order_type', 'order_type_display',
+            'version_no', 'source_system', 'source_file', 'order_date', 'freeze_from',
+            'status', 'status_display', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_customer_name(self, obj):
+        return obj.customer.customer_name
+
+
 class StgOrderRawSerializer(serializers.ModelSerializer):
     """Staging order raw data serializer"""
     order_type_display = serializers.CharField(source='get_order_type_display', read_only=True)

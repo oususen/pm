@@ -58,6 +58,7 @@ class Process(models.Model):
     id = models.BigAutoField(primary_key=True)
     process_code = models.CharField(max_length=20, unique=True, verbose_name='工程コード')
     process_name = models.CharField(max_length=50, verbose_name='工程名')
+    line = models.ForeignKey('Line', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='ライン')
     is_outsource = models.BooleanField(default=False, verbose_name='外注工程')
     is_active = models.BooleanField(default=True, verbose_name='有効')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')

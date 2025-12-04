@@ -27,15 +27,7 @@
             <td>{{ process.is_outsource ? '外注' : '社内' }}</td>
             <td>{{ process.is_active ? '有効' : '無効' }}</td>
             <td>
-              <div class="tag-list" v-if="getProcessLines(process.id).length">
-                <span
-                  v-for="line in getProcessLines(process.id)"
-                  :key="line.line_id"
-                  class="tag"
-                >
-                  {{ line.line_code }} ({{ line.count }}件)
-                </span>
-              </div>
+              <span v-if="process.line">{{ lineLabel(process) }}</span>
               <span v-else>-</span>
             </td>
             <td>
@@ -77,22 +69,9 @@
             </label>
           </div>
           <div v-if="isEdit" class="form-group">
-            <label>この工程を使うライン</label>
-            <div class="tag-list" v-if="getProcessLines(formData.id).length">
-              <span
-                v-for="line in getProcessLines(formData.id)"
-                :key="line.line_id"
-                class="tag"
-              >
-                {{ line.line_code }} ({{ line.count }}件)
-              </span>
-            </div>
-            <div v-else class="inline-empty">現在この工程を使用するラインはありません</div>
-          </div>
-          <div v-if="isEdit" class="form-group">
-            <label>ライン一括割当（この工程を使う全ルートを選択ラインに変更）</label>
-            <select v-model="lineBulkSelection" class="select-line">
-              <option :value="null">変更しない</option>
+            <label>使用ライン</label>
+            <select v-model="formData.line" class="select-line">
+              <option :value="null">未設定</option>
               <option v-for="line in lines" :key="line.id" :value="line.id">
                 {{ line.line_code }} - {{ line.line_name }}
               </option>
@@ -113,9 +92,7 @@ import { ref, onMounted } from 'vue'
 import api from '../api/client'
 
 const processes = ref([])
-const routingSteps = ref([])
 const lines = ref([])
-const lineBulkSelection = ref(null)
 const showDialog = ref(false)
 const isEdit = ref(false)
 const formData = ref({
@@ -132,26 +109,6 @@ const fetchProcesses = async () => {
   } catch (error) {
     console.error('工程取得エラー:', error)
     alert('工程データの取得に失敗しました')
-  }
-}
-
-const fetchRoutingSteps = async () => {
-  try {
-    const response = await api.routings.getRoutings()
-    const data = response.data.results || response.data
-    const steps = []
-    data.forEach((routing) => {
-      (routing.steps || []).forEach((step) => {
-        steps.push({
-          ...step,
-          routing_code: routing.routing_code,
-          product_name: routing.product_name,
-        })
-      })
-    })
-    routingSteps.value = steps
-  } catch (error) {
-    console.error('ルーティング工程取得エラー:', error)
   }
 }
 
@@ -172,14 +129,12 @@ const showNewDialog = () => {
     is_outsource: false,
     is_active: true
   }
-  lineBulkSelection.value = null
   showDialog.value = true
 }
 
 const editProcess = (process) => {
   isEdit.value = true
   formData.value = { ...process }
-  lineBulkSelection.value = null
   showDialog.value = true
 }
 
@@ -197,10 +152,7 @@ const saveProcess = async () => {
       alert('作成しました')
     }
     await fetchProcesses()
-    if (isEdit.value && lineBulkSelection.value !== null) {
-      await saveLineAssignments(lineBulkSelection.value)
-      await fetchRoutingSteps()
-    }
+    await fetchProcesses()
     closeDialog()
   } catch (error) {
     console.error('保存エラー:', error)
@@ -223,45 +175,12 @@ const deleteProcess = async (id) => {
 
 onMounted(() => {
   fetchProcesses()
-  fetchRoutingSteps()
   fetchLines()
 })
-
-const getProcessLines = (processId) => {
-  const filtered = routingSteps.value.filter((s) => s.process === processId)
-  const map = {}
-  filtered.forEach((s) => {
-    if (!s.line) return
-    if (!map[s.line]) {
-      map[s.line] = { line_id: s.line, line_name: s.line_name, line_code: s.line_name || `Line#${s.line}`, count: 0 }
-    }
-    map[s.line].count += 1
-  })
-  return Object.values(map)
-}
-
-const saveLineAssignments = async (lineId) => {
-  const targets = routingSteps.value.filter((s) => s.process === formData.value.id)
-  for (const step of targets) {
-    const payload = {
-      routing: step.routing,
-      step_no: step.step_no,
-      process: step.process,
-      line: lineId,
-      time_unit: step.time_unit,
-      lead_time_days: step.lead_time_days,
-      start_offset_min: step.start_offset_min,
-      duration_min: step.duration_min,
-      remark: step.remark,
-    }
-    try {
-      await api.routings.updateRoutingStep(step.id, payload)
-    } catch (e) {
-      console.error('ライン割当更新エラー:', e)
-      alert('ライン割当の更新に失敗しました')
-      throw e
-    }
-  }
+const lineLabel = (process) => {
+  const line = lines.value.find((l) => l.id === process.line)
+  if (line) return `${line.line_code} - ${line.line_name}`
+  return process.line_name || '-'
 }
 </script>
 

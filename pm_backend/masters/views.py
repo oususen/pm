@@ -83,6 +83,7 @@ class BOMItemViewSet(viewsets.ModelViewSet):
     serializer_class = BOMItemSerializer
     filterset_fields = ['bom', 'sourcing_type']
     ordering_fields = ['created_at']
+    ordering = ['id']
 
 
 class RoutingViewSet(viewsets.ModelViewSet):

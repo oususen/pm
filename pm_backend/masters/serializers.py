@@ -18,6 +18,8 @@ class CustomerSerializer(serializers.ModelSerializer):
 
 
 class ProcessSerializer(serializers.ModelSerializer):
+    line_name = serializers.CharField(source='line.line_name', read_only=True)
+
     class Meta:
         model = Process
         fields = '__all__'

@@ -103,6 +103,7 @@ DATABASES = {
         'PORT': os.getenv('DB_PORT', '3306'),
         'OPTIONS': {
             'charset': 'utf8mb4',
+            'init_command': "SET time_zone = '+09:00'",
         },
     }
 }
@@ -164,7 +165,7 @@ CORS_ALLOW_CREDENTIALS = True
 # REST Framework設定
 REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 100,
+    'PAGE_SIZE': 50,
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
     ],

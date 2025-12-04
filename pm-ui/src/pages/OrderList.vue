@@ -8,10 +8,13 @@
     </div>
 
     <div class="page-content">
+      <div v-if="loading" class="info-banner">読み込み中...</div>
+      <div v-else-if="errorMessage" class="error-banner">{{ errorMessage }}</div>
       <table class="data-table">
         <thead>
           <tr>
             <th>受注番号</th>
+            <th>取込ファイル</th>
             <th>得意先</th>
             <th>受注タイプ</th>
             <th>版番号</th>
@@ -23,6 +26,7 @@
         <tbody>
           <tr v-for="order in orders" :key="order.id">
             <td>{{ order.order_no }}</td>
+            <td>{{ order.source_file || '-' }}</td>
             <td>{{ order.customer_name }}</td>
             <td>{{ order.order_type_display }}</td>
             <td>{{ order.version_no }}</td>
@@ -35,7 +39,7 @@
         </tbody>
       </table>
 
-      <div v-if="orders.length === 0" class="no-data">
+      <div v-if="!loading && !errorMessage && orders.length === 0" class="no-data">
         データがありません
       </div>
     </div>
@@ -51,7 +55,8 @@
           <p><strong>版番号:</strong> {{ selectedOrder.version_no }}</p>
           <p><strong>受注日:</strong> {{ selectedOrder.order_date || '-' }}</p>
           <p><strong>ステータス:</strong> {{ selectedOrder.status_display }}</p>
-          <p v-if="selectedOrder.source_file"><strong>ソースファイル:</strong> {{ selectedOrder.source_file }}</p>
+          <p><strong>取込ファイル:</strong> {{ selectedOrder.source_file || '-' }}</p>
+          <p><strong>取込システム:</strong> {{ selectedOrder.source_system || '-' }}</p>
         </div>
         <h3>受注明細</h3>
         <table class="data-table">
@@ -92,14 +97,24 @@ const orders = ref([])
 const showDetailsDialog = ref(false)
 const selectedOrder = ref({})
 const orderLines = ref([])
+const loading = ref(false)
+const errorMessage = ref('')
 
-const fetchOrders = async () => {
+const fetchOrders = async (retry = 2) => {
+  loading.value = true
+  errorMessage.value = ''
   try {
     const response = await api.orders.getOrders()
     orders.value = response.data.results || response.data
   } catch (error) {
     console.error('Error fetching orders:', error)
-    alert('Failed to fetch orders')
+    if (retry > 0) {
+      setTimeout(() => fetchOrders(retry - 1), 800)
+      return
+    }
+    errorMessage.value = '受注データの取得に失敗しました'
+  } finally {
+    loading.value = false
   }
 }
 
@@ -195,5 +210,29 @@ onMounted(() => {
 
 .btn-secondary:hover {
   background-color: #f5f5f5;
+}
+
+.no-data {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #666;
+}
+
+.info-banner {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: #eef5ff;
+  border: 1px solid #cbd9ff;
+  border-radius: 4px;
+  color: #1f3b7a;
+}
+
+.error-banner {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: #fff4f4;
+  border: 1px solid #ffcccc;
+  border-radius: 4px;
+  color: #c12b2b;
 }
 </style>
