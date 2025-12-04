@@ -78,6 +78,7 @@ class Line(models.Model):
     id = models.BigAutoField(primary_key=True)
     line_code = models.CharField(max_length=20, unique=True, verbose_name='ラインコード')
     line_name = models.CharField(max_length=50, verbose_name='ライン名')
+    lead_time_days = models.IntegerField(null=True, blank=True, default=0, verbose_name='リードタイム（日）')
     is_active = models.BooleanField(default=True, verbose_name='有効')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')

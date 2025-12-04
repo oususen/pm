@@ -16,8 +16,7 @@
             <th>ライン名</th>
             <th>有効</th>
             <th>工程数</th>
-            <th>日LT合計</th>
-            <th>分所要合計</th>
+            <th>日LT</th>
             <th>作成日時</th>
             <th>更新日時</th>
             <th>操作</th>
@@ -29,8 +28,7 @@
             <td>{{ line.line_name }}</td>
             <td>{{ line.is_active ? '有効' : '無効' }}</td>
             <td>{{ getStepStats(line.id).count }}</td>
-            <td>{{ getStepStats(line.id).dayLt ?? '-' }}</td>
-            <td>{{ getStepStats(line.id).minuteTotal ?? '-' }}</td>
+            <td>{{ line.lead_time_days ?? '-' }}</td>
             <td>{{ formatDateTime(line.created_at) }}</td>
             <td>{{ formatDateTime(line.updated_at) }}</td>
             <td>
@@ -60,11 +58,14 @@
             <input v-model="formData.line_name" required />
           </div>
           <div class="form-group">
+            <label>日LT（リードタイム）</label>
+            <input v-model.number="formData.lead_time_days" type="number" min="0" />
+          </div>
+          <div class="form-group">
             <label>このラインを使用する工程</label>
             <div class="inline-table" v-if="lineStepsMap[formData.id]?.length">
               <div class="inline-header">
-                <span>製品/ルート/工程</span>
-                <span>LT</span>
+                <span>工程</span>
               </div>
               <div
                 v-for="step in lineStepsMap[formData.id]"
@@ -72,20 +73,8 @@
                 class="inline-row"
               >
                 <div class="inline-main">
-                  <div class="inline-title">
-                    {{ step.product_name || '-' }}（{{ step.routing_code || '-' }}）
-                  </div>
-                  <div class="inline-sub">
-                    #{{ step.step_no }} {{ step.process_name || '工程未設定' }}
-                  </div>
-                </div>
-                <div class="inline-meta">
-                  <span v-if="step.time_unit === 'DAY'">
-                    {{ step.lead_time_days ?? 0 }} 日
-                  </span>
-                  <span v-else>
-                    {{ step.duration_min ?? 0 }} 分
-                  </span>
+                  <div class="inline-title">{{ step.process_name }}</div>
+                  <div class="inline-sub">#{{ step.process_code }}</div>
                 </div>
               </div>
             </div>
@@ -236,16 +225,8 @@ const formatDateTime = (value) => {
 
 const getStepStats = (lineId) => {
   const steps = lineStepsMap.value[lineId] || []
-  const dayLt = steps
-    .filter((s) => s.time_unit === 'DAY')
-    .reduce((acc, cur) => acc + Number(cur.lead_time_days || 0), 0)
-  const minuteTotal = steps
-    .filter((s) => s.time_unit === 'MINUTE')
-    .reduce((acc, cur) => acc + Number(cur.duration_min || 0), 0)
   return {
-    count: steps.length,
-    dayLt,
-    minuteTotal,
+    count: steps.length
   }
 }
 </script>
@@ -326,7 +307,7 @@ const getStepStats = (lineId) => {
 .inline-header,
 .inline-row {
   display: grid;
-  grid-template-columns: 1fr 120px;
+  grid-template-columns: 1fr;
   padding: 8px 10px;
   gap: 8px;
 }

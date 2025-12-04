@@ -58,6 +58,14 @@
 | created_at/updated_at | DATETIME | |
 
 # 4. ライン `m_line`（変更なし）
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | BIGINT PK | |
+| line_code | VARCHAR(20) UNIQUE | ラインコード |
+| line_name | VARCHAR(50) | ライン名 |
+| lead_time_days | INT NULL | リードタイム（日） |
+| is_active | TINYINT(1) DEFAULT 1 | |
+| created_at/updated_at | DATETIME | |
 
 ## 4.1 ライン既定LT `m_line_default`
 - PK: `line_id`（単独）
