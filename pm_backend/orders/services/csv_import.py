@@ -31,9 +31,27 @@ class CSVImportService:
         self.warnings = []
 
         try:
-            # Read CSV file
+            # Read CSV file with encoding detection
             file.seek(0)
-            decoded_file = file.read().decode('utf-8-sig')
+            raw_data = file.read()
+
+            # Try multiple encodings
+            decoded_file = None
+            encodings = ['utf-8-sig', 'utf-8', 'shift-jis', 'cp932', 'iso-2022-jp']
+            for encoding in encodings:
+                try:
+                    decoded_file = raw_data.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+
+            if decoded_file is None:
+                return {
+                    'success': False,
+                    'message': 'Failed to decode CSV file. Unsupported encoding.',
+                    'errors': ['Could not decode file with any supported encoding (utf-8, shift-jis, cp932, iso-2022-jp)']
+                }
+
             csv_data = csv.DictReader(decoded_file.splitlines())
 
             raw_records = []
@@ -59,23 +77,73 @@ class CSVImportService:
 
             # Save to database
             with transaction.atomic():
-                StgOrderRaw.objects.bulk_create(raw_records)
+                # Save raw records
+                created_raws = StgOrderRaw.objects.bulk_create(raw_records)
 
-                # Process raw data to daily
-                daily_records = self._process_to_daily(raw_records)
+                # Re-fetch to ensure we have primary keys
+                raw_records_with_ids = StgOrderRaw.objects.filter(
+                    source_file=file.name,
+                    customer_code=customer_code
+                ).order_by('-id')[:len(raw_records)]
+
+                # Process raw data to daily using saved records
+                daily_records = []
+                error_count = 0
+                success_count = 0
+
+                for raw in raw_records_with_ids:
+                    if not raw.product_code or not raw.due_date or not raw.quantity:
+                        raw.parse_status = 'ERROR'
+                        raw.error_message = 'Missing required fields'
+                        raw.save()
+                        error_count += 1
+                        continue
+
+                    # Find customer
+                    try:
+                        customer = Customer.objects.get(customer_code=raw.customer_code)
+                    except Customer.DoesNotExist:
+                        raw.parse_status = 'ERROR'
+                        raw.error_message = f'Customer not found: {raw.customer_code}'
+                        raw.save()
+                        error_count += 1
+                        continue
+
+                    daily = StgOrderDaily(
+                        raw=raw,
+                        customer=customer,
+                        order_type=raw.order_type,
+                        version_no='v1',
+                        product_code=raw.product_code,
+                        due_date=raw.due_date,
+                        quantity=raw.quantity,
+                        plant_code=raw.raw_payload.get('plant_code', ''),
+                        ship_to_code=raw.raw_payload.get('ship_to_code', ''),
+                        source_system=raw.source_system,
+                        source_file=raw.source_file
+                    )
+                    daily_records.append(daily)
+                    raw.parse_status = 'PARSED'
+                    raw.save()
+                    success_count += 1
+
+                # Save daily records
                 if daily_records:
                     StgOrderDaily.objects.bulk_create(daily_records)
 
             return {
                 'success': True,
-                'message': f'Imported {len(raw_records)} raw records, created {len(daily_records)} daily records',
-                'raw_count': len(raw_records),
+                'message': f'Imported {len(created_raws)} raw records, created {len(daily_records)} daily records',
+                'raw_count': len(created_raws),
                 'daily_count': len(daily_records),
                 'errors': self.errors,
                 'warnings': self.warnings
             }
 
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"CSV Import Exception: {error_details}")
             return {
                 'success': False,
                 'message': f'Import failed: {str(e)}',
@@ -122,41 +190,6 @@ class CSVImportService:
             parse_status='PENDING'
         )
 
-    def _process_to_daily(self, raw_records):
-        """Process raw records to daily normalized records"""
-        daily_records = []
-
-        for raw in raw_records:
-            if not raw.product_code or not raw.due_date or not raw.quantity:
-                raw.parse_status = 'ERROR'
-                raw.error_message = 'Missing required fields'
-                continue
-
-            # Find customer
-            try:
-                customer = Customer.objects.get(customer_code=raw.customer_code)
-            except Customer.DoesNotExist:
-                raw.parse_status = 'ERROR'
-                raw.error_message = f'Customer not found: {raw.customer_code}'
-                continue
-
-            daily = StgOrderDaily(
-                raw=raw,
-                customer=customer,
-                order_type=raw.order_type,
-                version_no='v1',
-                product_code=raw.product_code,
-                due_date=raw.due_date,
-                quantity=raw.quantity,
-                plant_code=raw.raw_payload.get('plant_code', ''),
-                ship_to_code=raw.raw_payload.get('ship_to_code', ''),
-                source_system=raw.source_system,
-                source_file=raw.source_file
-            )
-            daily_records.append(daily)
-            raw.parse_status = 'PARSED'
-
-        return daily_records
 
     def create_orders_from_staging(self):
         """Create orders from staging daily data"""

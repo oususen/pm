@@ -11,7 +11,7 @@
             <label>Customer *</label>
             <span class="hint">タイルをクリックして選択してください</span>
           </div>
-          <div class="tile-grid">
+          <div class="tile-grid customer-grid">
             <button
               v-for="customer in customers"
               :key="customer.id"
@@ -330,6 +330,13 @@ onMounted(() => {
 
 .tile-grid.compact {
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.tile-grid.customer-grid {
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(220px, 1fr);
+  overflow-x: auto;
+  padding-bottom: 4px;
 }
 
 .select-tile {

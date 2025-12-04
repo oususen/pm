@@ -47,6 +47,57 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'due_date']
     ordering = ['-created_at']
 
+    def _get_import_service(self, customer_code, order_type, filename):
+        """Select appropriate import service based on customer code, order type, and filename"""
+        # Import services here to avoid circular imports
+        from .services.csv_import import CSVImportService
+
+        # Extract location from filename
+        filename_lower = filename.lower()
+
+        # Customer: 000001 (ティエラ)
+        if customer_code == '000001':
+            if order_type == 'FORECAST':
+                # ティエラ_内示
+                from .services.tiera_naiji_import import TieraNaijiImportService
+                return TieraNaijiImportService()
+            elif order_type == 'FIRM':
+                # ティエラ_確定
+                from .services.tiera_kakutei_import import TieraKakuteiImportService
+                return TieraKakuteiImportService()
+
+        # Customer: 000196 (クボタ)
+        elif customer_code == '000196':
+            # Detect location from filename
+            if '堺' in filename or 'sakai' in filename_lower:
+                if order_type == 'FORECAST':
+                    # クボタ_堺_内示
+                    from .services.kubota_sakai_naiji_import import KubotaSakaiNaijiImportService
+                    return KubotaSakaiNaijiImportService()
+                elif order_type == 'FIRM':
+                    # クボタ_堺_確定
+                    from .services.kubota_sakai_kakutei_import import KubotaSakaiKakuteiImportService
+                    return KubotaSakaiKakuteiImportService()
+            elif '枚方' in filename or 'hirakata' in filename_lower:
+                if order_type == 'FORECAST':
+                    # クボタ_枚方_内示
+                    from .services.kubota_hirakata_naiji_import import KubotaHirakataNaijiImportService
+                    return KubotaHirakataNaijiImportService()
+                elif order_type == 'FIRM':
+                    # クボタ_枚方_確定
+                    from .services.kubota_hirakata_kakutei_import import KubotaHirakataKakuteiImportService
+                    return KubotaHirakataKakuteiImportService()
+
+        # Customer: 000018 (リーデン)
+        elif customer_code == '000018':
+            if order_type == 'FIRM':
+                # リーデン_確定
+                from .services.rieden_kakutei_import import RiedenKakuteiImportService
+                return RiedenKakuteiImportService()
+
+        # Default service
+        return CSVImportService()
+
     @action(detail=False, methods=['post'], parser_classes=[MultiPartParser, FormParser])
     def upload_csv(self, request):
         """Upload CSV file and import to staging"""
@@ -68,13 +119,15 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Import CSV
-            service = CSVImportService()
+            # Select appropriate import service based on customer code, order type, and filename
+            service = self._get_import_service(customer_code, order_type, file.name)
             result = service.import_csv(file, customer_code, order_type, source_system)
 
             if result['success']:
                 return Response(result, status=status.HTTP_201_CREATED)
             else:
+                # Log error details
+                print(f"CSV Import Error: {result}")
                 return Response(result, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
