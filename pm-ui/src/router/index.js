@@ -7,6 +7,8 @@ import ProcessMaster from "../pages/ProcessMaster.vue";
 import LineMaster from "../pages/LineMaster.vue";
 import CalendarMaster from "../pages/CalendarMaster.vue";
 import BOMMaster from "../pages/BOMMaster.vue";
+import OrderList from "../pages/OrderList.vue";
+import CSVUpload from "../pages/CSVUpload.vue";
 
 const routes = [
   { path: "/", redirect: "/masters" },
@@ -18,6 +20,8 @@ const routes = [
   { path: "/masters/line", name: "LineMaster", component: LineMaster },
   { path: "/masters/calendar", name: "CalendarMaster", component: CalendarMaster },
   { path: "/masters/bom", name: "BOMMaster", component: BOMMaster },
+  { path: "/orders", name: "OrderList", component: OrderList },
+  { path: "/csv-upload", name: "CSVUpload", component: CSVUpload },
 ];
 
 const router = createRouter({

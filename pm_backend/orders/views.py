@@ -1,6 +1,7 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
@@ -11,6 +12,7 @@ from .serializers import (
     StgOrderRawSerializer,
     StgOrderDailySerializer
 )
+from .services.csv_import import CSVImportService
 
 
 class OrderViewSet(viewsets.ModelViewSet):
@@ -44,6 +46,55 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
     search_fields = ['customer_code', 'product_code', 'source_file']
     ordering_fields = ['created_at', 'due_date']
     ordering = ['-created_at']
+
+    @action(detail=False, methods=['post'], parser_classes=[MultiPartParser, FormParser])
+    def upload_csv(self, request):
+        """Upload CSV file and import to staging"""
+        try:
+            file = request.FILES.get('file')
+            customer_code = request.data.get('customer_code')
+            order_type = request.data.get('order_type', 'FIRM')
+            source_system = request.data.get('source_system', 'CSV')
+
+            if not file:
+                return Response(
+                    {'error': 'No file provided'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            if not customer_code:
+                return Response(
+                    {'error': 'Customer code is required'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Import CSV
+            service = CSVImportService()
+            result = service.import_csv(file, customer_code, order_type, source_system)
+
+            if result['success']:
+                return Response(result, status=status.HTTP_201_CREATED)
+            else:
+                return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['post'])
+    def create_orders(self, request):
+        """Create orders from staging data"""
+        try:
+            service = CSVImportService()
+            result = service.create_orders_from_staging()
+            return Response(result, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class StgOrderDailyViewSet(viewsets.ModelViewSet):
