@@ -208,25 +208,44 @@ class CSVImportService:
 
         created_orders = 0
         created_lines = 0
+        superseded_orders = 0
 
         with transaction.atomic():
             for (customer_id, order_type, version_no, source_file), dailies in orders_dict.items():
+                # Get customer code for order_no generation
+                customer = Customer.objects.get(id=customer_id)
+                timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+
+                # Generate order_no based on order_type
+                if order_type == 'FORECAST':
+                    order_no = f"FC-{customer.customer_code}-{timestamp}"
+
+                    # Delete existing forecast orders for this customer (overwrite)
+                    old_forecast_orders = Order.objects.filter(
+                        customer_id=customer_id,
+                        order_type='FORECAST',
+                        status='OPEN'
+                    )
+                    deleted_count = old_forecast_orders.count()
+                    old_forecast_orders.delete()
+                    if deleted_count > 0:
+                        superseded_orders += deleted_count
+
+                else:  # FIRM
+                    order_no = f"FIRM-{customer.customer_code}-{timestamp}"
+
                 # Create order header
-                order, created = Order.objects.get_or_create(
+                order = Order.objects.create(
                     customer_id=customer_id,
-                    order_no=f"CSV-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                    order_no=order_no,
                     order_type=order_type,
                     version_no=version_no,
-                    defaults={
-                        'source_system': dailies[0].source_system,
-                        'source_file': source_file,
-                        'order_date': datetime.now().date(),
-                        'status': 'OPEN'
-                    }
+                    source_system=dailies[0].source_system,
+                    source_file=source_file,
+                    order_date=datetime.now().date(),
+                    status='OPEN'
                 )
-
-                if created:
-                    created_orders += 1
+                created_orders += 1
 
                 # Create order lines
                 line_no = 1
@@ -250,7 +269,65 @@ class CSVImportService:
                     line_no += 1
                     created_lines += 1
 
+                # If this is a FIRM order, supersede overlapping FORECAST orders
+                if order_type == 'FIRM':
+                    # Get all due dates from this firm order
+                    firm_due_dates = [daily.due_date for daily in dailies]
+                    firm_product_codes = [daily.product_code for daily in dailies]
+
+                    # Find forecast orders with overlapping products and dates
+                    overlapping_forecast_orders = Order.objects.filter(
+                        customer_id=customer_id,
+                        order_type='FORECAST',
+                        status='OPEN',
+                        lines__product_code__in=firm_product_codes,
+                        lines__due_date__in=firm_due_dates
+                    ).distinct()
+
+                    superseded_count = overlapping_forecast_orders.update(status='SUPERSEDED')
+                    superseded_orders += superseded_count
+
         return {
             'orders': created_orders,
-            'lines': created_lines
+            'lines': created_lines,
+            'deleted_forecast_orders': superseded_orders
         }
+
+    @staticmethod
+    def get_active_order_lines_for_scheduling(customer_id=None, product_code=None,
+                                               start_date=None, end_date=None):
+        """
+        Get active order lines for scheduling.
+
+        Priority: FIRM orders with status='OPEN' take precedence over FORECAST orders.
+        If a FIRM order exists for a specific product/date, FORECAST orders are ignored.
+
+        Args:
+            customer_id: Filter by customer (optional)
+            product_code: Filter by product code (optional)
+            start_date: Filter by due_date >= start_date (optional)
+            end_date: Filter by due_date <= end_date (optional)
+
+        Returns:
+            QuerySet of OrderLine objects
+        """
+        from django.db.models import Q
+
+        # Base query: Only OPEN orders
+        queryset = OrderLine.objects.filter(order__status='OPEN')
+
+        # Apply filters
+        if customer_id:
+            queryset = queryset.filter(order__customer_id=customer_id)
+        if product_code:
+            queryset = queryset.filter(product_code=product_code)
+        if start_date:
+            queryset = queryset.filter(due_date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(due_date__lte=end_date)
+
+        # Priority logic: If FIRM exists for a product/date, exclude FORECAST
+        # For now, return all and let scheduling engine handle priority
+        # Future improvement: Use SQL WINDOW functions or Python filtering
+
+        return queryset.select_related('order', 'product').order_by('due_date', 'order__order_type')

@@ -13,6 +13,7 @@ class Order(models.Model):
         ('OPEN', 'オープン'),
         ('CLOSED', 'クローズ'),
         ('CANCELED', 'キャンセル'),
+        ('SUPERSEDED', '無効'),
     ]
 
     id = models.BigAutoField(primary_key=True)

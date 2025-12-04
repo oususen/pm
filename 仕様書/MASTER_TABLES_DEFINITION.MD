@@ -28,6 +28,9 @@
 | is_active | TINYINT(1) DEFAULT 1 | |
 | created_at/updated_at | DATETIME | |
 
+- `category` は製品の状態区分（完成/中間/WIP/材料/購買など）として運用する。
+- 受注に載る製品コードは社内最終工程の出力品（ルート末尾の `m_routing_step_output.output_product_id`）と一致させる前提。
+
 ---
 
 # 2. 得意先 `m_customer`（新規・正式追加）
@@ -153,6 +156,7 @@
 - `stg_order_raw`：取込ファイルを行単位で保持。`customer_code`, `order_type`, `source_file`, `source_row_no`, `record_token(V1等)`, `start_month`, `due_date`, `product_code`, `quantity`, `raw_payload JSON`, `parse_status(PENDING/PARSED/ERROR)`, `error_message`。
 - `stg_order_daily`：日別に正規化した需要。`raw_id`(←`stg_order_raw`), `customer_id`, `order_type`, `version_no`, `product_code`, `due_date`, `quantity`, `plant_code`, `ship_to_code`, `source_system/file`。`t_order`へUPSERTする前段。
 - `t_schedule_detail.order_id` は `t_order` とFK連携し、スケジュール結果を受注明細と結合可能にする。
+- 受注明細に載る `product_code` は、最終工程の出力品番（ルート末尾の output_product）をそのまま使用する想定。
 
 ---
 
