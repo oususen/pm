@@ -5,6 +5,7 @@ erDiagram
       BIGINT id PK
       VARCHAR(30) product_code UNIQUE
       VARCHAR(100) product_name
+      VARCHAR(100) product_name_halfwidth
       ENUM category "ASSEMBLY,SINGLE,MATERIAL,PURCHASED"
       VARCHAR(10) unit
       INT standard_lt_days
@@ -68,5 +69,78 @@ erDiagram
       DATETIME updated_at
     }
 
+    t_order {
+      BIGINT id PK
+      BIGINT customer_id FK
+      VARCHAR(50) order_no
+      ENUM order_type "FIRM,FORECAST"
+      VARCHAR(20) version_no
+      DATE order_date
+      VARCHAR(200) source_file
+      ENUM status "PENDING,CONFIRMED,COMPLETED"
+      DATETIME created_at
+      DATETIME updated_at
+    }
+
+    t_order_line {
+      BIGINT id PK
+      BIGINT order_id FK
+      INT line_no
+      BIGINT product_id FK
+      VARCHAR(50) product_code
+      DECIMAL(14,3) quantity
+      DATE due_date
+      VARCHAR(20) plant_code
+      VARCHAR(40) ship_to_code
+      VARCHAR(200) remark
+      DATETIME created_at
+      DATETIME updated_at
+    }
+
+    stg_order_raw {
+      BIGINT id PK
+      VARCHAR(20) customer_code
+      ENUM order_type "FIRM,FORECAST"
+      VARCHAR(50) source_system
+      VARCHAR(200) source_file
+      INT source_row_no
+      VARCHAR(50) record_token
+      DATE start_month
+      DATE due_date
+      VARCHAR(50) product_code
+      VARCHAR(100) product_name
+      VARCHAR(100) product_name_halfwidth
+      DECIMAL(14,3) quantity
+      JSON raw_payload
+      ENUM parse_status "PENDING,PARSED,ERROR"
+      VARCHAR(200) error_message
+      DATETIME created_at
+      DATETIME updated_at
+    }
+
+    stg_order_daily {
+      BIGINT id PK
+      BIGINT raw_id FK
+      BIGINT customer_id FK
+      ENUM order_type "FIRM,FORECAST"
+      VARCHAR(20) version_no
+      VARCHAR(50) product_code
+      VARCHAR(100) product_name
+      VARCHAR(100) product_name_halfwidth
+      DATE due_date
+      DECIMAL(14,3) quantity
+      VARCHAR(20) plant_code
+      VARCHAR(40) ship_to_code
+      VARCHAR(50) source_system
+      VARCHAR(200) source_file
+      DATETIME created_at
+      DATETIME updated_at
+    }
+
     m_customer }o--|| m_calendar : "calendar_id -> id"
+    t_order }o--|| m_customer : "customer_id -> id"
+    t_order_line }o--|| t_order : "order_id -> id"
+    t_order_line }o--|| m_product : "product_id -> id"
+    stg_order_daily }o--|| stg_order_raw : "raw_id -> id"
+    stg_order_daily }o--|| m_customer : "customer_id -> id"
 ```

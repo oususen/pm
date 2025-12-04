@@ -19,12 +19,28 @@ d:\pm\
 │   ├── pm_backend/            # プロジェクト設定
 │   │   ├── settings.py        # DB設定、CORS設定
 │   │   └── urls.py            # APIルーティング
-│   └── masters/               # マスタ管理アプリ
-│       ├── models.py          # Djangoモデル
+│   ├── masters/               # マスタ管理アプリ
+│   │   ├── models.py          # Djangoモデル
+│   │   ├── serializers.py     # RESTシリアライザ
+│   │   ├── views.py           # ViewSet
+│   │   ├── admin.py           # Django Admin設定
+│   │   └── urls.py            # APIエンドポイント
+│   └── orders/                # 受注管理アプリ
+│       ├── models.py          # Order, OrderLine, StgOrderRaw, StgOrderDaily
 │       ├── serializers.py     # RESTシリアライザ
-│       ├── views.py           # ViewSet
+│       ├── views.py           # ViewSet + CSV upload/create_orders
 │       ├── admin.py           # Django Admin設定
-│       └── urls.py            # APIエンドポイント
+│       ├── urls.py            # APIエンドポイント
+│       └── services/          # CSV Import Services
+│           ├── README.md      # インポートサービス仕様書
+│           ├── base_import.py # 基本クラス
+│           ├── csv_import.py  # デフォルトサービス
+│           ├── tiera_naiji_import.py    # ティエラ内示
+│           ├── tiera_kakutei_import.py  # ティエラ確定
+│           ├── kubota_sakai_naiji_import.py
+│           ├── kubota_sakai_kakutei_import.py
+│           ├── kubota_hirakata_kakutei_import.py
+│           └── rieden_kakutei_import.py
 │
 ├── pm-ui/                      # Vue.js フロントエンド
 │   ├── src/
@@ -37,7 +53,9 @@ d:\pm\
 │   │   ├── pages/             # ページ
 │   │   │   ├── MasterMenu.vue
 │   │   │   ├── ProductMaster.vue
-│   │   │   └── CustomerMaster.vue
+│   │   │   ├── CustomerMaster.vue
+│   │   │   ├── OrderList.vue      # 受注一覧
+│   │   │   └── CSVUpload.vue      # CSV受注インポート
 │   │   └── assets/main.css    # スタイル
 │   ├── package.json
 │   └── vite.config.js
@@ -145,7 +163,9 @@ npm run dev
 
 バックエンドは以下のRESTful APIを提供：
 
-- `/api/products/` - 製品マスタ
+### マスタ管理
+
+- `/api/products/` - 製品マスタ（品名・品名半角対応）
 - `/api/customers/` - 得意先マスタ
 - `/api/processes/` - 工程マスタ
 - `/api/lines/` - ラインマスタ
@@ -156,6 +176,15 @@ npm run dev
 - `/api/bom-items/` - BOM明細
 - `/api/routings/` - ルーティングヘッダ
 - `/api/routing-steps/` - ルーティング工程
+
+### 受注管理
+
+- `/api/orders/` - 受注ヘッダ
+- `/api/order-lines/` - 受注明細
+- `/api/stg-order-raw/` - 受注取込ステージング（生データ）
+  - `POST /api/stg-order-raw/upload_csv/` - CSVアップロード
+  - `POST /api/stg-order-raw/create_orders/` - ステージングから受注作成
+- `/api/stg-order-daily/` - 受注取込ステージング（日別）
 
 Django Admin: http://localhost:8000/admin/
 
@@ -189,6 +218,26 @@ Django Admin: http://localhost:8000/admin/
 - API Browser (http://localhost:8000/api/) でAPIをテスト
 - Vue DevTools でフロントエンドをデバッグ
 
+## 実装済み機能
+
+### 受注管理機能 ✅
+
+- ✅ CSV受注インポート（複数客先フォーマット対応）
+  - ティエラ内示・確定
+  - クボタ（堺・枚方）内示・確定
+  - リーデン確定
+- ✅ ステージングテーブル（生データ→日別正規化）
+- ✅ 製品マスタ自動登録（品名・品名半角対応）
+- ✅ 受注一覧・明細表示
+- ✅ 多言語対応UI（日本語）
+
+### CSV Import Service アーキテクチャ
+
+- 客先・受注タイプ・ファイル名による自動サービス選択
+- 複数エンコーディング対応（CP932, Shift-JIS, UTF-8）
+- カラム位置指定による柔軟なフォーマット対応
+- 詳細は `pm_backend/orders/services/README.md` 参照
+
 ## 次のステップ
 
 1. 残りのページコンポーネント実装
@@ -201,9 +250,9 @@ Django Admin: http://localhost:8000/admin/
    - 日跨ぎ計算
    - 移送バッチ・バッファ制御
 
-3. 受注管理機能
-   - 受注入力
+3. 受注管理機能拡張
    - 納期回答
+   - 受注変更履歴
 
 4. 生産計画機能
    - ガントチャート表示

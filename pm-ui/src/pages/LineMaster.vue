@@ -15,6 +15,11 @@
             <th>ラインコード</th>
             <th>ライン名</th>
             <th>有効</th>
+            <th>工程数</th>
+            <th>日LT合計</th>
+            <th>分所要合計</th>
+            <th>作成日時</th>
+            <th>更新日時</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -23,6 +28,11 @@
             <td>{{ line.line_code }}</td>
             <td>{{ line.line_name }}</td>
             <td>{{ line.is_active ? '有効' : '無効' }}</td>
+            <td>{{ getStepStats(line.id).count }}</td>
+            <td>{{ getStepStats(line.id).dayLt ?? '-' }}</td>
+            <td>{{ getStepStats(line.id).minuteTotal ?? '-' }}</td>
+            <td>{{ formatDateTime(line.created_at) }}</td>
+            <td>{{ formatDateTime(line.updated_at) }}</td>
             <td>
               <button @click="editLine(line)" class="btn-sm">編集</button>
               <button @click="deleteLine(line.id)" class="btn-sm btn-danger">削除</button>
@@ -50,6 +60,46 @@
             <input v-model="formData.line_name" required />
           </div>
           <div class="form-group">
+            <label>このラインを使用する工程</label>
+            <div class="inline-table" v-if="lineStepsMap[formData.id]?.length">
+              <div class="inline-header">
+                <span>製品/ルート/工程</span>
+                <span>LT</span>
+              </div>
+              <div
+                v-for="step in lineStepsMap[formData.id]"
+                :key="step.id"
+                class="inline-row"
+              >
+                <div class="inline-main">
+                  <div class="inline-title">
+                    {{ step.product_name || '-' }}（{{ step.routing_code || '-' }}）
+                  </div>
+                  <div class="inline-sub">
+                    #{{ step.step_no }} {{ step.process_name || '工程未設定' }}
+                  </div>
+                </div>
+                <div class="inline-meta">
+                  <span v-if="step.time_unit === 'DAY'">
+                    {{ step.lead_time_days ?? 0 }} 日
+                  </span>
+                  <span v-else>
+                    {{ step.duration_min ?? 0 }} 分
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div v-else class="inline-empty">紐づく工程はありません</div>
+          </div>
+          <div v-if="isEdit && formData.created_at" class="form-group meta">
+            <label>作成日時</label>
+            <div class="meta-value">{{ formatDateTime(formData.created_at) }}</div>
+          </div>
+          <div v-if="isEdit && formData.updated_at" class="form-group meta">
+            <label>更新日時</label>
+            <div class="meta-value">{{ formatDateTime(formData.updated_at) }}</div>
+          </div>
+          <div class="form-group">
             <label>
               <input type="checkbox" v-model="formData.is_active" />
               有効
@@ -70,6 +120,7 @@ import { ref, onMounted } from 'vue'
 import api from '../api/client'
 
 const lines = ref([])
+const lineStepsMap = ref({})
 const showDialog = ref(false)
 const isEdit = ref(false)
 const formData = ref({
@@ -85,6 +136,29 @@ const fetchLines = async () => {
   } catch (error) {
     console.error('ライン取得エラー:', error)
     alert('ラインデータの取得に失敗しました')
+  }
+}
+
+const fetchLineSteps = async () => {
+  try {
+    const response = await api.routings.getRoutings()
+    const data = response.data.results || response.data
+    const map = {}
+    data.forEach((routing) => {
+      const steps = routing.steps || []
+      steps.forEach((step) => {
+        if (!step.line) return
+        if (!map[step.line]) map[step.line] = []
+        map[step.line].push({
+          ...step,
+          routing_code: routing.routing_code,
+          product_name: routing.product_name,
+        })
+      })
+    })
+    lineStepsMap.value = map
+  } catch (error) {
+    console.error('工程取得エラー:', error)
   }
 }
 
@@ -118,6 +192,7 @@ const saveLine = async () => {
       alert('作成しました')
     }
     await fetchLines()
+    await fetchLineSteps()
     closeDialog()
   } catch (error) {
     console.error('保存エラー:', error)
@@ -131,6 +206,7 @@ const deleteLine = async (id) => {
   try {
     await api.lines.deleteLine(id)
     await fetchLines()
+    await fetchLineSteps()
     alert('削除しました')
   } catch (error) {
     console.error('削除エラー:', error)
@@ -140,7 +216,35 @@ const deleteLine = async (id) => {
 
 onMounted(() => {
   fetchLines()
+  fetchLineSteps()
 })
+
+const formatDateTime = (value) => {
+  if (!value) return '-'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mi = String(d.getMinutes()).padStart(2, '0')
+  return `${yyyy}/${mm}/${dd} ${hh}:${mi}`
+}
+
+const getStepStats = (lineId) => {
+  const steps = lineStepsMap.value[lineId] || []
+  const dayLt = steps
+    .filter((s) => s.time_unit === 'DAY')
+    .reduce((acc, cur) => acc + Number(cur.lead_time_days || 0), 0)
+  const minuteTotal = steps
+    .filter((s) => s.time_unit === 'MINUTE')
+    .reduce((acc, cur) => acc + Number(cur.duration_min || 0), 0)
+  return {
+    count: steps.length,
+    dayLt,
+    minuteTotal,
+  }
+}
 </script>
 
 <style scoped>
@@ -178,6 +282,10 @@ onMounted(() => {
   margin-bottom: 1rem;
 }
 
+.form-group.meta {
+  margin-bottom: 0.75rem;
+}
+
 .form-group label {
   display: block;
   margin-bottom: 0.5rem;
@@ -195,6 +303,70 @@ onMounted(() => {
 
 .form-group input[type="checkbox"] {
   margin-right: 0.5rem;
+}
+
+.meta-value {
+  padding: 0.5rem;
+  background: #f7f7f7;
+  border: 1px solid #e5e5e5;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  color: #333;
+}
+
+.inline-table {
+  border: 1px solid #e5e5e5;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.inline-header,
+.inline-row {
+  display: grid;
+  grid-template-columns: 1fr 120px;
+  padding: 8px 10px;
+  gap: 8px;
+}
+
+.inline-header {
+  background: #f7f9ff;
+  font-weight: 600;
+  color: #333;
+}
+
+.inline-row:nth-child(even) {
+  background: #fbfbfb;
+}
+
+.inline-main {
+  display: flex;
+  flex-direction: column;
+}
+
+.inline-title {
+  font-weight: 600;
+  color: #222;
+}
+
+.inline-sub {
+  font-size: 12px;
+  color: #555;
+}
+
+.inline-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  font-weight: 600;
+  color: #333;
+}
+
+.inline-empty {
+  padding: 10px 12px;
+  border: 1px dashed #d0d0d0;
+  border-radius: 6px;
+  color: #666;
+  font-size: 13px;
 }
 
 .form-actions {

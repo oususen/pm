@@ -1,5 +1,5 @@
 # MASTER_TABLES_DEFINITION_v3.MD
-（段階BOM＋セル工程・時間運用＋ライン既定LT／購買LT 対応／time_unit 追加／m_customer 追加／整合性強化）
+（段階BOM＋セル工程・時間運用＋ライン既定LT／購買LT 対応／time_unit 追加／m_customer 追加／整合性強化／量産セル流し向けのフロー・並列対応）
 
 ## 変更サマリ（v2→v3）
 - `m_routing_step` に **`time_unit ENUM('DAY','MINUTE')`** を追加（混在単位の明確化）。
@@ -9,6 +9,7 @@
 - **受注テーブル (`t_order`, `t_order_line`) と取込ステージング (`stg_order_raw`, `stg_order_daily`) を追加**、`t_schedule_detail.order_id` と連携。
 - サンプル: ルーティング `step_no` を **連番** に修正、`time_unit` を明示。
 - サイクルタイム参照の基準を**m_routing_step_output.output_product_id**に統一。
+- 量産セル流し向けに **工程タイプ（FLOW / PARALLEL_POOL）** と **バッファ時間** を追加、サイクルに **yield_rate** を保持。
 
 ---
 
@@ -69,6 +70,7 @@
 | step_no | INT | 連番（1..n） |
 | process_id | BIGINT FK | |
 | line_id | BIGINT FK NULL | |
+| step_type | ENUM('FLOW','PARALLEL_POOL') DEFAULT 'FLOW' | 流し/並列プール |
 | **time_unit** | **ENUM('DAY','MINUTE')** | 単位の明示 |
 | lead_time_days | INT NOT NULL DEFAULT 0 | 日単位（`time_unit='DAY'`で使用） |
 | start_offset_min | INT NULL | 分オフセット |
@@ -85,12 +87,14 @@
 ---
 
 # 7. サイクルタイム `m_cycle_time`
-- 製品×工程×ラインの秒/個 と 段取り（分）
+- 製品×工程×ラインの秒/個 と 段取り（分）、歩留まり（yield_rate）
+- 所要時間計算: `setup_time_min + cycle_time_sec * qty / 60` をベースに、`yield_rate` で実行数量を補正
 
 ---
 
 # 8. 工程パラメータ `m_routing_step_param`
-- ロット、移送バッチ、着手条件、バッファ、日内時間枠（分）
+- ロット、移送バッチ、着手条件、バッファ数量（target/max）、バッファ時間（前後）、日内時間枠（分）
+- `step_type='FLOW'` ではバッファをWIPの緩衝に使い、`'PARALLEL_POOL'` ではプールキャパと組み合わせて所要日数を算出
 
 ---
 
@@ -112,6 +116,7 @@
 
 # 12. 主要制約・整合ルール
 - **時間単位**：`time_unit='DAY'` → `lead_time_days` 必須、`'MINUTE'` → `duration_min` 必須。
+- **工程タイプ**：`step_type='FLOW'` は逐次流し、`'PARALLEL_POOL'` は同一加工を並列に裁くプール。キャパはサイクルタイム×稼働分/日で算出。
 - **調達整合**：`sourcing_type='BUY'` ⇒ `supplier_id NOT NULL`。`MAKE/SUBCON` ⇒ `supplier_id IS NULL` を推奨。
 - **サイクル参照**：`m_routing_step_output.output_product_id` を `m_cycle_time.product_id` と紐付けて所要を算出。
 

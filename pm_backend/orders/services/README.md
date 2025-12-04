@@ -20,22 +20,26 @@ orders/services/
 
 The default service expects CSV files with the following headers:
 
-| Column Name    | Required | Description                    | Format            |
-|----------------|----------|--------------------------------|-------------------|
-| product_code   | Yes      | Product/Part code              | String            |
-| due_date       | Yes      | Delivery date                  | YYYY-MM-DD or YYYY/MM/DD |
-| quantity       | Yes      | Order quantity                 | Number            |
-| plant_code     | No       | Plant/Factory code             | String            |
-| ship_to_code   | No       | Ship-to location code          | String            |
-| record_token   | No       | Unique record identifier       | String            |
+| Column Name            | Required | Description                    | Format            |
+|------------------------|----------|--------------------------------|-------------------|
+| product_code           | Yes      | Product/Part code              | String            |
+| product_name           | No       | Product name (full-width)      | String            |
+| product_name_halfwidth | No       | Product name (half-width)      | String            |
+| due_date               | Yes      | Delivery date                  | YYYY-MM-DD or YYYY/MM/DD |
+| quantity               | Yes      | Order quantity                 | Number            |
+| plant_code             | No       | Plant/Factory code             | String            |
+| ship_to_code           | No       | Ship-to location code          | String            |
+| record_token           | No       | Unique record identifier       | String            |
+
+**Note**: If a product_code does not exist in M_PRODUCT table, it will be automatically registered with both product_name and product_name_halfwidth from CSV (or product_code as default name if not provided).
 
 ### Example CSV:
 
 ```csv
-product_code,due_date,quantity,plant_code,ship_to_code
-PROD001,2025-01-15,100,PLANT01,SHIP01
-PROD002,2025-01-20,200,PLANT01,SHIP02
-PROD003,2025-02-10,150,PLANT02,SHIP01
+product_code,product_name,product_name_halfwidth,due_date,quantity,plant_code,ship_to_code
+PROD001,製品名１,Product Name 1,2025-01-15,100,PLANT01,SHIP01
+PROD002,製品名２,Product Name 2,2025-01-20,200,PLANT01,SHIP02
+PROD003,製品名３,Product Name 3,2025-02-10,150,PLANT02,SHIP01
 ```
 
 Sample file: `d:\pm\sample_order.csv`
@@ -59,14 +63,16 @@ from django.db import transaction
 from orders.models import StgOrderRaw
 from masters.models import Customer
 
-class TieraImportService:
-    """Tiera customer-specific CSV import service"""
+class TieraNaijiImportService:
+    """Tiera Naiji (Forecast) CSV import service"""
 
     # Column index definitions (0-based)
-    COL_ORDER_NUMBER = 7
-    COL_PRODUCT_CODE = 11
-    COL_DELIVERY_DATE = 13
-    COL_QUANTITY = 15
+    IDENTIFIER_COL = 0      # データ区分 = "B17"
+    COL_PRODUCT_CODE = 6    # 図番
+    COL_DELIVERY_DATE = 8   # 納期 (YYYYMMDD)
+    COL_QUANTITY = 11       # 数量
+    COL_PRODUCT_NAME_FULL = 12  # 品名（全角）列13
+    COL_PRODUCT_NAME_HALF = 13  # 品名半角 列14
 
     def __init__(self):
         self.errors = []
@@ -116,6 +122,8 @@ class TieraImportService:
                 try:
                     # Extract data by column index
                     product_code = row[self.COL_PRODUCT_CODE].strip()
+                    product_name_full = row[self.COL_PRODUCT_NAME_FULL].strip() if len(row) > self.COL_PRODUCT_NAME_FULL else ''
+                    product_name_half = row[self.COL_PRODUCT_NAME_HALF].strip() if len(row) > self.COL_PRODUCT_NAME_HALF else ''
                     delivery_date_str = row[self.COL_DELIVERY_DATE].strip()
                     quantity_str = row[self.COL_QUANTITY].strip()
 
@@ -145,6 +153,8 @@ class TieraImportService:
                         record_token='',
                         due_date=due_date,
                         product_code=product_code,
+                        product_name=product_name_full,
+                        product_name_halfwidth=product_name_half,
                         quantity=quantity,
                         raw_payload={'row': row},  # Store entire row for reference
                         parse_status='PENDING'

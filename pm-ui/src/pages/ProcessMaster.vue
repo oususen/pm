@@ -16,6 +16,7 @@
             <th>工程名</th>
             <th>外注工程</th>
             <th>有効</th>
+            <th>使用ライン</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -25,6 +26,18 @@
             <td>{{ process.process_name }}</td>
             <td>{{ process.is_outsource ? '外注' : '社内' }}</td>
             <td>{{ process.is_active ? '有効' : '無効' }}</td>
+            <td>
+              <div class="tag-list" v-if="getProcessLines(process.id).length">
+                <span
+                  v-for="line in getProcessLines(process.id)"
+                  :key="line.line_id"
+                  class="tag"
+                >
+                  {{ line.line_code }} ({{ line.count }}件)
+                </span>
+              </div>
+              <span v-else>-</span>
+            </td>
             <td>
               <button @click="editProcess(process)" class="btn-sm">編集</button>
               <button @click="deleteProcess(process.id)" class="btn-sm btn-danger">削除</button>
@@ -63,6 +76,28 @@
               有効
             </label>
           </div>
+          <div v-if="isEdit" class="form-group">
+            <label>この工程を使うライン</label>
+            <div class="tag-list" v-if="getProcessLines(formData.id).length">
+              <span
+                v-for="line in getProcessLines(formData.id)"
+                :key="line.line_id"
+                class="tag"
+              >
+                {{ line.line_code }} ({{ line.count }}件)
+              </span>
+            </div>
+            <div v-else class="inline-empty">現在この工程を使用するラインはありません</div>
+          </div>
+          <div v-if="isEdit" class="form-group">
+            <label>ライン一括割当（この工程を使う全ルートを選択ラインに変更）</label>
+            <select v-model="lineBulkSelection" class="select-line">
+              <option :value="null">変更しない</option>
+              <option v-for="line in lines" :key="line.id" :value="line.id">
+                {{ line.line_code }} - {{ line.line_name }}
+              </option>
+            </select>
+          </div>
           <div class="form-actions">
             <button type="submit" class="btn-primary">保存</button>
             <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
@@ -78,6 +113,9 @@ import { ref, onMounted } from 'vue'
 import api from '../api/client'
 
 const processes = ref([])
+const routingSteps = ref([])
+const lines = ref([])
+const lineBulkSelection = ref(null)
 const showDialog = ref(false)
 const isEdit = ref(false)
 const formData = ref({
@@ -97,6 +135,35 @@ const fetchProcesses = async () => {
   }
 }
 
+const fetchRoutingSteps = async () => {
+  try {
+    const response = await api.routings.getRoutings()
+    const data = response.data.results || response.data
+    const steps = []
+    data.forEach((routing) => {
+      (routing.steps || []).forEach((step) => {
+        steps.push({
+          ...step,
+          routing_code: routing.routing_code,
+          product_name: routing.product_name,
+        })
+      })
+    })
+    routingSteps.value = steps
+  } catch (error) {
+    console.error('ルーティング工程取得エラー:', error)
+  }
+}
+
+const fetchLines = async () => {
+  try {
+    const response = await api.lines.getLines()
+    lines.value = response.data.results || response.data
+  } catch (error) {
+    console.error('ライン取得エラー:', error)
+  }
+}
+
 const showNewDialog = () => {
   isEdit.value = false
   formData.value = {
@@ -105,12 +172,14 @@ const showNewDialog = () => {
     is_outsource: false,
     is_active: true
   }
+  lineBulkSelection.value = null
   showDialog.value = true
 }
 
 const editProcess = (process) => {
   isEdit.value = true
   formData.value = { ...process }
+  lineBulkSelection.value = null
   showDialog.value = true
 }
 
@@ -128,6 +197,10 @@ const saveProcess = async () => {
       alert('作成しました')
     }
     await fetchProcesses()
+    if (isEdit.value && lineBulkSelection.value !== null) {
+      await saveLineAssignments(lineBulkSelection.value)
+      await fetchRoutingSteps()
+    }
     closeDialog()
   } catch (error) {
     console.error('保存エラー:', error)
@@ -150,7 +223,46 @@ const deleteProcess = async (id) => {
 
 onMounted(() => {
   fetchProcesses()
+  fetchRoutingSteps()
+  fetchLines()
 })
+
+const getProcessLines = (processId) => {
+  const filtered = routingSteps.value.filter((s) => s.process === processId)
+  const map = {}
+  filtered.forEach((s) => {
+    if (!s.line) return
+    if (!map[s.line]) {
+      map[s.line] = { line_id: s.line, line_name: s.line_name, line_code: s.line_name || `Line#${s.line}`, count: 0 }
+    }
+    map[s.line].count += 1
+  })
+  return Object.values(map)
+}
+
+const saveLineAssignments = async (lineId) => {
+  const targets = routingSteps.value.filter((s) => s.process === formData.value.id)
+  for (const step of targets) {
+    const payload = {
+      routing: step.routing,
+      step_no: step.step_no,
+      process: step.process,
+      line: lineId,
+      time_unit: step.time_unit,
+      lead_time_days: step.lead_time_days,
+      start_offset_min: step.start_offset_min,
+      duration_min: step.duration_min,
+      remark: step.remark,
+    }
+    try {
+      await api.routings.updateRoutingStep(step.id, payload)
+    } catch (e) {
+      console.error('ライン割当更新エラー:', e)
+      alert('ライン割当の更新に失敗しました')
+      throw e
+    }
+  }
+}
 </script>
 
 <style scoped>
@@ -205,6 +317,84 @@ onMounted(() => {
 
 .form-group input[type="checkbox"] {
   margin-right: 0.5rem;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #eef5ff;
+  border: 1px solid #cbd9ff;
+  border-radius: 12px;
+  font-size: 12px;
+  color: #1f3b7a;
+}
+
+.inline-table {
+  border: 1px solid #e5e5e5;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.inline-header,
+.inline-row {
+  display: grid;
+  grid-template-columns: 1fr 220px;
+  padding: 8px 10px;
+  gap: 8px;
+}
+
+.inline-header {
+  background: #f7f9ff;
+  font-weight: 600;
+  color: #333;
+}
+
+.inline-row:nth-child(even) {
+  background: #fbfbfb;
+}
+
+.inline-main {
+  display: flex;
+  flex-direction: column;
+}
+
+.inline-title {
+  font-weight: 600;
+  color: #222;
+}
+
+.inline-sub {
+  font-size: 12px;
+  color: #555;
+}
+
+.inline-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.select-line {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.inline-empty {
+  padding: 10px 12px;
+  border: 1px dashed #d0d0d0;
+  border-radius: 6px;
+  color: #666;
+  font-size: 13px;
 }
 
 .form-actions {

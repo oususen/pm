@@ -57,34 +57,34 @@
           <label for="file">CSV File *</label>
           <input type="file" id="file" @change="onFileChange" accept=".csv" required />
           <div v-if="selectedFile" class="file-info">
-            Selected: {{ selectedFile.name }}
+            選択済み: {{ selectedFile.name }}
           </div>
         </div>
 
         <div class="form-actions">
           <button @click="uploadCSV" :disabled="uploading" class="btn-primary">
-            {{ uploading ? 'Uploading...' : 'Upload' }}
+            {{ uploading ? 'アップロード中...' : 'アップロード' }}
           </button>
         </div>
 
         <div v-if="result" class="result-section">
-          <h3>{{ result.success ? 'Success' : 'Error' }}</h3>
+          <h3>{{ result.success ? '成功' : 'エラー' }}</h3>
           <p>{{ result.message }}</p>
           <div v-if="result.errors && result.errors.length > 0" class="errors">
-            <h4>Errors:</h4>
+            <h4>エラー:</h4>
             <ul>
               <li v-for="(error, index) in result.errors" :key="index">{{ error }}</li>
             </ul>
           </div>
           <div v-if="result.warnings && result.warnings.length > 0" class="warnings">
-            <h4>Warnings:</h4>
+            <h4>警告:</h4>
             <ul>
               <li v-for="(warning, index) in result.warnings" :key="index">{{ warning }}</li>
             </ul>
           </div>
           <div v-if="result.success" class="create-orders-section">
             <button @click="createOrders" :disabled="creatingOrders" class="btn-success">
-              {{ creatingOrders ? 'Creating...' : 'Create Orders from Staging' }}
+              {{ creatingOrders ? '受注作成中...' : 'ステージングから受注を作成' }}
             </button>
           </div>
         </div>
@@ -120,7 +120,7 @@ const fetchCustomers = async () => {
     customers.value = response.data.results || response.data
   } catch (error) {
     console.error('Error fetching customers:', error)
-    alert('Failed to fetch customers')
+    alert('得意先の取得に失敗しました')
   }
 }
 
@@ -138,12 +138,12 @@ const selectOrderType = (type) => {
 
 const uploadCSV = async () => {
   if (!formData.value.customer_code) {
-    alert('Please select a customer')
+    alert('得意先を選択してください')
     return
   }
 
   if (!selectedFile.value) {
-    alert('Please select a CSV file')
+    alert('CSVファイルを選択してください')
     return
   }
 
@@ -185,13 +185,13 @@ const createOrders = async () => {
 
   try {
     const response = await axios.post('http://localhost:8002/api/stg-order-raw/create_orders/')
-    alert(`Created ${response.data.orders} orders with ${response.data.lines} lines`)
+    alert(`受注を作成しました: ${response.data.orders}件の受注、${response.data.lines}件の明細`)
     result.value = null
     selectedFile.value = null
     document.getElementById('file').value = ''
   } catch (error) {
     console.error('Create orders error:', error)
-    alert('Failed to create orders: ' + (error.response?.data?.error || error.message))
+    alert('受注作成に失敗しました: ' + (error.response?.data?.error || error.message))
   } finally {
     creatingOrders.value = false
   }

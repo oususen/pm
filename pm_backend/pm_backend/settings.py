@@ -30,7 +30,17 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-_4wufh_x8tvr3%_0d%!r4b_&uv
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = []
+# Allow local access plus any comma-separated hosts from ALLOWED_HOSTS env
+_default_hosts = {"localhost", "127.0.0.1", "10.0.1.194"}
+_env_hosts = {
+    host.strip()
+    for host in os.getenv("ALLOWED_HOSTS", "").split(",")
+    if host.strip()
+}
+ALLOWED_HOSTS = list(_default_hosts | _env_hosts)
+
+# Disable COOP header on insecure dev origins to avoid browser warnings
+SECURE_CROSS_ORIGIN_OPENER_POLICY = None if DEBUG else "same-origin"
 
 
 # Application definition

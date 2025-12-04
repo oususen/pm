@@ -1,20 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(dir:*)",
-      "Bash(git add:*)",
-      "Bash(mysql:*)",
-      "Bash(npm install)",
-      "Bash(npm install:*)",
-      "Bash(git push:*)",
-      "Bash(venv/Scripts/pip install:*)",
-      "Bash(curl:*)",
-      "Bash(python manage.py startapp:*)",
-      "Bash(venv/Scripts/activate)",
-      "Bash(cat:*)",
-      "Bash(d:/pm/venv/Scripts/pip install:*)",
-      "Bash(d:/pm/venv/Scripts/python.exe:*)",
-      "Bash(mkdir:*)"
+      "Bash(../venv/Scripts/python.exe manage.py makemigrations)",
+      "Bash(../venv/Scripts/python.exe manage.py migrate:*)"
     ],
     "deny": [],
     "ask": []

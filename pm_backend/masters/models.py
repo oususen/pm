@@ -13,6 +13,7 @@ class Product(models.Model):
     id = models.BigAutoField(primary_key=True)
     product_code = models.CharField(max_length=30, unique=True, verbose_name='品番コード')
     product_name = models.CharField(max_length=100, verbose_name='品名')
+    product_name_halfwidth = models.CharField(max_length=100, null=True, blank=True, verbose_name='品名半角')
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, verbose_name='カテゴリ')
     unit = models.CharField(max_length=10, default='個', verbose_name='単位')
     standard_lt_days = models.IntegerField(null=True, blank=True, verbose_name='標準LT(日)')
