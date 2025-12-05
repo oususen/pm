@@ -70,6 +70,23 @@
         <div v-if="result" class="result-section">
           <h3>{{ result.success ? '成功' : 'エラー' }}</h3>
           <p>{{ result.message }}</p>
+
+          <!-- Display order creation results if available -->
+          <div v-if="result.success && result.orders_created !== undefined" class="success-details">
+            <h4>受注作成結果:</h4>
+            <ul>
+              <li>受注数: {{ result.orders_created }}件</li>
+              <li>明細数: {{ result.lines_created }}件</li>
+              <li v-if="result.superseded_forecast_orders > 0">上書きされた内示受注: {{ result.superseded_forecast_orders }}件</li>
+            </ul>
+          </div>
+
+          <div v-if="result.order_creation_error" class="warnings">
+            <h4>注意:</h4>
+            <p>CSVはステージングに取り込まれましたが、受注作成時にエラーが発生しました。</p>
+            <p>{{ result.order_creation_error }}</p>
+          </div>
+
           <div v-if="result.errors && result.errors.length > 0" class="errors">
             <h4>エラー:</h4>
             <ul>
@@ -81,11 +98,6 @@
             <ul>
               <li v-for="(warning, index) in result.warnings" :key="index">{{ warning }}</li>
             </ul>
-          </div>
-          <div v-if="result.success" class="create-orders-section">
-            <button @click="createOrders" :disabled="creatingOrders" class="btn-success">
-              {{ creatingOrders ? '受注作成中...' : 'ステージングから受注を作成' }}
-            </button>
           </div>
         </div>
       </div>
@@ -101,7 +113,6 @@ import axios from 'axios'
 const customers = ref([])
 const selectedFile = ref(null)
 const uploading = ref(false)
-const creatingOrders = ref(false)
 const result = ref(null)
 const orderTypes = [
   { value: 'FIRM', label: 'FIRM', desc: '確定受注', badge: 'F' },
@@ -168,6 +179,12 @@ const uploadCSV = async () => {
     )
 
     result.value = response.data
+
+    // If successful, reset the file input for next upload
+    if (response.data.success) {
+      selectedFile.value = null
+      document.getElementById('file').value = ''
+    }
   } catch (error) {
     console.error('Upload error:', error)
     result.value = {
@@ -177,23 +194,6 @@ const uploadCSV = async () => {
     }
   } finally {
     uploading.value = false
-  }
-}
-
-const createOrders = async () => {
-  creatingOrders.value = true
-
-  try {
-    const response = await axios.post('http://localhost:8002/api/stg-order-raw/create_orders/')
-    alert(`受注を作成しました: ${response.data.orders}件の受注、${response.data.lines}件の明細`)
-    result.value = null
-    selectedFile.value = null
-    document.getElementById('file').value = ''
-  } catch (error) {
-    console.error('Create orders error:', error)
-    alert('受注作成に失敗しました: ' + (error.response?.data?.error || error.message))
-  } finally {
-    creatingOrders.value = false
   }
 }
 
@@ -268,6 +268,29 @@ onMounted(() => {
   margin-bottom: 1rem;
 }
 
+.success-details {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #d4edda;
+  border: 1px solid #c3e6cb;
+  border-radius: 4px;
+}
+
+.success-details h4 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+  color: #155724;
+}
+
+.success-details ul {
+  margin: 0;
+  padding-left: 1.5rem;
+}
+
+.success-details li {
+  color: #155724;
+}
+
 .errors {
   margin-top: 1rem;
   padding: 1rem;
@@ -282,31 +305,6 @@ onMounted(() => {
   background: #fff3cd;
   border: 1px solid #ffeeba;
   border-radius: 4px;
-}
-
-.create-orders-section {
-  margin-top: 1.5rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid #ddd;
-}
-
-.btn-success {
-  padding: 0.5rem 1rem;
-  border: none;
-  background-color: #28a745;
-  color: white;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 1rem;
-}
-
-.btn-success:hover {
-  background-color: #218838;
-}
-
-.btn-success:disabled {
-  background-color: #ccc;
-  cursor: not-allowed;
 }
 
 .group-header {

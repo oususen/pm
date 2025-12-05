@@ -133,10 +133,25 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 )
 
             # Select appropriate import service based on customer code, order type, and filename
-            service = self._get_import_service(customer_code, order_type, file.name)
-            result = service.import_csv(file, customer_code, order_type, source_system)
+            import_service = self._get_import_service(customer_code, order_type, file.name)
+            result = import_service.import_csv(file, customer_code, order_type, source_system)
 
             if result['success']:
+                # Automatically create orders from staging after successful upload
+                # Always use CSVImportService for order creation (common logic)
+                try:
+                    order_service = CSVImportService()
+                    order_result = order_service.create_orders_from_staging(source_file=file.name)
+                    # Merge results
+                    result['orders_created'] = order_result.get('orders', 0)
+                    result['lines_created'] = order_result.get('lines', 0)
+                    result['superseded_forecast_orders'] = order_result.get('deleted_forecast_orders', 0)
+                except Exception as e:
+                    # If order creation fails, still return the staging import success
+                    # but include the error
+                    result['order_creation_error'] = str(e)
+                    result['message'] = f"CSV imported to staging successfully, but order creation failed: {str(e)}"
+
                 return Response(result, status=status.HTTP_201_CREATED)
             else:
                 # Log error details

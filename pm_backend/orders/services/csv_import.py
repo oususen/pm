@@ -191,12 +191,23 @@ class CSVImportService:
         )
 
 
-    def create_orders_from_staging(self):
-        """Create orders from staging daily data"""
+    def create_orders_from_staging(self, source_file=None):
+        """
+        Create orders from staging daily data
+
+        Args:
+            source_file: Optional source file name to filter records (only process this file's data)
+        """
         # Get all parsed daily records
-        daily_records = StgOrderDaily.objects.filter(
+        query = StgOrderDaily.objects.filter(
             raw__parse_status='PARSED'
-        ).select_related('customer')
+        )
+
+        # Filter by source file if specified
+        if source_file:
+            query = query.filter(source_file=source_file)
+
+        daily_records = query.select_related('customer')
 
         # Group by customer, order_type, version_no
         orders_dict = {}
