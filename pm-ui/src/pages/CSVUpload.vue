@@ -59,10 +59,13 @@
           <div v-if="selectedFile" class="file-info">
             選択済み: {{ selectedFile.name }}
           </div>
+          <div v-if="fileWarning" class="file-warning">
+            ⚠️ {{ fileWarning }}
+          </div>
         </div>
 
         <div class="form-actions">
-          <button @click="uploadCSV" :disabled="uploading" class="btn-primary">
+          <button @click="uploadCSV" :disabled="uploading || isDuplicateFile" class="btn-primary">
             {{ uploading ? 'アップロード中...' : 'アップロード' }}
           </button>
         </div>
@@ -114,6 +117,8 @@ const customers = ref([])
 const selectedFile = ref(null)
 const uploading = ref(false)
 const result = ref(null)
+const fileWarning = ref(null)
+const isDuplicateFile = ref(false)
 const orderTypes = [
   { value: 'FIRM', label: 'FIRM', desc: '確定受注', badge: 'F' },
   { value: 'FORECAST', label: 'FORECAST', desc: '内示/予測', badge: 'Fc' },
@@ -135,8 +140,35 @@ const fetchCustomers = async () => {
   }
 }
 
-const onFileChange = (event) => {
-  selectedFile.value = event.target.files[0]
+const onFileChange = async (event) => {
+  const file = event.target.files[0]
+  if (!file) {
+    selectedFile.value = null
+    fileWarning.value = null
+    isDuplicateFile.value = false
+    return
+  }
+
+  selectedFile.value = file
+
+  // Check if filename already exists
+  try {
+    const response = await axios.get(
+      `http://localhost:8002/api/stg-order-raw/check_filename/?filename=${encodeURIComponent(file.name)}`
+    )
+
+    if (response.data.exists) {
+      fileWarning.value = response.data.message
+      isDuplicateFile.value = true
+    } else {
+      fileWarning.value = null
+      isDuplicateFile.value = false
+    }
+  } catch (error) {
+    console.error('Error checking filename:', error)
+    fileWarning.value = null
+    isDuplicateFile.value = false
+  }
 }
 
 const selectCustomer = (customer) => {
@@ -183,6 +215,8 @@ const uploadCSV = async () => {
     // If successful, reset the file input for next upload
     if (response.data.success) {
       selectedFile.value = null
+      fileWarning.value = null
+      isDuplicateFile.value = false
       document.getElementById('file').value = ''
     }
   } catch (error) {
@@ -246,6 +280,17 @@ onMounted(() => {
   border-radius: 4px;
   font-size: 0.9rem;
   color: #666;
+}
+
+.file-warning {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background: #fff3cd;
+  border: 2px solid #ffc107;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  color: #856404;
+  font-weight: 600;
 }
 
 .form-actions {

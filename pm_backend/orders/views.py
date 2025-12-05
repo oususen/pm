@@ -132,6 +132,18 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+            # Check for duplicate file name
+            from orders.models import StgOrderRaw
+            if StgOrderRaw.objects.filter(source_file=file.name).exists():
+                return Response(
+                    {
+                        'success': False,
+                        'error': f'このファイル名は既にアップロード済みです: {file.name}',
+                        'message': f'ファイル名 "{file.name}" は既にステージングに存在します。別のファイル名でアップロードしてください。'
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
             # Select appropriate import service based on customer code, order type, and filename
             import_service = self._get_import_service(customer_code, order_type, file.name)
             result = import_service.import_csv(file, customer_code, order_type, source_system)
@@ -181,6 +193,25 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+    @action(detail=False, methods=['get'])
+    def check_filename(self, request):
+        """Check if filename already exists in staging"""
+        filename = request.query_params.get('filename')
+        if not filename:
+            return Response(
+                {'error': 'Filename parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        from orders.models import StgOrderRaw
+        exists = StgOrderRaw.objects.filter(source_file=filename).exists()
+
+        return Response({
+            'exists': exists,
+            'filename': filename,
+            'message': f'ファイル名 "{filename}" は既にアップロード済みです。' if exists else 'このファイル名は使用できます。'
+        })
 
 
 class StgOrderDailyViewSet(viewsets.ModelViewSet):
