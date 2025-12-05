@@ -1,4 +1,7 @@
 from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from datetime import date
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay,
     BOM, BOMItem, Routing, RoutingStep
@@ -76,6 +79,76 @@ class BOMViewSet(viewsets.ModelViewSet):
     filterset_fields = ['parent_product', 'is_active']
     ordering_fields = ['created_at']
     ordering = ['-created_at']
+
+    def _serialize_product(self, product: Product):
+        return {
+            'id': product.id,
+            'code': product.product_code,
+            'name': product.product_name,
+            'is_phantom': product.is_phantom,
+        }
+
+    def _pick_child_bom(self, product: Product):
+        """Active BOM for child product (latest by valid_from)."""
+        today = date.today()
+        qs = BOM.objects.filter(
+            parent_product=product,
+            is_active=True,
+            valid_from__lte=today,
+        ).order_by('-valid_from', '-id')
+        child = qs.first()
+        if child:
+            return child
+        # fallback: any active BOM
+        return BOM.objects.filter(
+            parent_product=product,
+            is_active=True,
+        ).order_by('-valid_from', '-id').first()
+
+    def _build_item_node(self, item: BOMItem, visited_bom_ids: set):
+        child_bom = self._pick_child_bom(item.child_product)
+        # prevent infinite loops
+        if child_bom and child_bom.id in visited_bom_ids:
+            child_tree = None
+        elif child_bom:
+            child_tree = self._build_bom_tree(child_bom, visited_bom_ids)
+        else:
+            child_tree = None
+
+        return {
+            'id': item.id,
+            'bom': item.bom_id,
+            'child_product': self._serialize_product(item.child_product),
+            'quantity': str(item.quantity),
+            'loss_rate': str(item.loss_rate) if item.loss_rate is not None else None,
+            'sourcing_type': item.sourcing_type,
+            'supplier': {
+                'id': item.supplier_id,
+                'name': item.supplier.supplier_name if item.supplier else None,
+            } if item.supplier_id else None,
+            'remark': item.remark,
+            'child_bom': child_tree,
+        }
+
+    def _build_bom_tree(self, bom: BOM, visited_bom_ids: set):
+        visited_bom_ids.add(bom.id)
+        items_qs = BOMItem.objects.filter(bom=bom).select_related('child_product', 'supplier')
+        items = [self._build_item_node(item, visited_bom_ids) for item in items_qs]
+        return {
+            'id': bom.id,
+            'parent_product': self._serialize_product(bom.parent_product),
+            'version': bom.version,
+            'valid_from': bom.valid_from,
+            'valid_to': bom.valid_to,
+            'is_active': bom.is_active,
+            'items': items,
+        }
+
+    @action(detail=True, methods=['get'])
+    def tree(self, request, pk=None):
+        bom = self.get_object()
+        tree = self._build_bom_tree(bom, visited_bom_ids=set())
+        return Response(tree)
 
 
 class BOMItemViewSet(viewsets.ModelViewSet):

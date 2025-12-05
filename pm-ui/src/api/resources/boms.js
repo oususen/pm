@@ -5,6 +5,9 @@ export const createBomsAPI = (client) => ({
   getBOM(id) {
     return client.get(`/boms/${id}/`)
   },
+  getBOMTree(id) {
+    return client.get(`/boms/${id}/tree/`)
+  },
   createBOM(data) {
     return client.post('/boms/', data)
   },

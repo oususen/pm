@@ -99,6 +99,21 @@
           </p>
 
         </div>
+        <div v-if="bomTree" class="tree-section">
+          <h3>階層表示</h3>
+          <div class="tree-container">
+            <ul class="tree-list">
+              <li>
+                <div class="tree-node root-node">
+                  <span class="tree-product">{{ formatProductDisplay(bomTree.parent_product) }}</span>
+                  <span class="tree-meta">BOM ID: {{ bomTree.id }} / 版: {{ bomTree.version }}</span>
+                </div>
+                <TreeBranch v-if="bomTree.items && bomTree.items.length" :items="bomTree.items" />
+              </li>
+            </ul>
+          </div>
+        </div>
+
         <h3>構成品目</h3>
         <div class="item-form">
           <div class="form-row">
@@ -192,7 +207,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, h, defineComponent } from 'vue'
 import api from '../api/client'
 
 const boms = ref([])
@@ -211,6 +226,7 @@ const formData = ref({
 const showDetailsDialog = ref(false)
 const selectedBOM = ref({})
 const bomItems = ref([])
+const bomTree = ref(null)
 const itemForm = ref({
   child_product: '',
   quantity: '1.000',
@@ -284,9 +300,26 @@ const fetchBOMItems = async (bomId, token = bomItemsRequestToken.value) => {
   bomItems.value = items.filter((item) => item.bom === bomId)
 }
 
+const fetchBOMTree = async (bomId) => {
+  try {
+    const response = await api.boms.getBOMTree(bomId)
+    bomTree.value = response.data
+  } catch (error) {
+    console.error('BOMツリー取得エラー:', error)
+    bomTree.value = null
+  }
+}
+
 const getProductName = (productId) => {
   const product = products.value.find(p => p.id === productId)
   return product ? `${product.product_code} - ${product.product_name}` : productId
+}
+
+const formatProductDisplay = (productObj) => {
+  if (!productObj) return ''
+  const code = productObj.code || productObj.product_code || ''
+  const name = productObj.name || productObj.product_name || ''
+  return `${code} - ${name}`.trim()
 }
 
 const isPhantom = (productId) => {
@@ -384,10 +417,12 @@ const viewDetails = async (bom) => {
   resetItemForm()
   childProductFilter.value = ''
   bomItems.value = []
+  bomTree.value = null
   const token = ++bomItemsRequestToken.value
   showDetailsDialog.value = true
   try {
     await fetchBOMItems(bom.id, token)
+    await fetchBOMTree(bom.id)
   } catch (error) {
     console.error('BOM明細取得エラー:', error)
     alert('BOM明細の取得に失敗しました')
@@ -399,6 +434,7 @@ const closeDetailsDialog = () => {
   showDetailsDialog.value = false
   selectedBOM.value = {}
   bomItems.value = []
+  bomTree.value = null
   bomItemsRequestToken.value += 1
   resetItemForm()
   childProductFilter.value = ''
@@ -470,6 +506,38 @@ onMounted(() => {
   fetchProducts()
   fetchSuppliers()
 })
+
+const TreeBranch = defineComponent({
+  name: 'TreeBranch',
+  props: {
+    items: {
+      type: Array,
+      required: true,
+    },
+  },
+  setup(props) {
+    return () =>
+      h(
+        'ul',
+        { class: 'tree-children' },
+        props.items.map((item) =>
+          h('li', { key: item.id }, [
+            h('div', { class: 'tree-node' }, [
+              h('span', { class: 'tree-product' }, formatProductDisplay(item.child_product)),
+              h(
+                'span',
+                { class: 'tree-meta' },
+                `数量: ${item.quantity} / 調達: ${item.sourcing_type}${item.supplier?.name ? ' / 仕入先: ' + item.supplier.name : ''}`
+              ),
+            ]),
+            item.child_bom && item.child_bom.items && item.child_bom.items.length
+              ? h(TreeBranch, { items: item.child_bom.items })
+              : null,
+          ])
+        )
+      )
+  },
+})
 </script>
 
 <style scoped>
@@ -523,6 +591,83 @@ onMounted(() => {
 
 .details-section p {
   margin: 0.5rem 0;
+}
+
+.tree-section {
+  margin-bottom: 1.5rem;
+}
+
+.tree-container {
+  background: #f9fbff;
+  border: 1px solid #e1e8f5;
+  border-radius: 8px;
+  padding: 1rem;
+  overflow-x: auto;
+}
+
+.tree-list,
+.tree-children {
+  list-style: none;
+  margin: 0;
+  padding-left: 1rem;
+  line-height: 1.4;
+}
+
+.tree-children {
+  border-left: 1px solid #d6dce6;
+  margin-left: 0.4rem;
+}
+
+.tree-children > li {
+  position: relative;
+  margin: 0 0 0.35rem 0;
+  padding-left: 0.8rem;
+}
+
+.tree-children > li::before {
+  content: '';
+  position: absolute;
+  left: -0.65rem;
+  top: 0.95rem;
+  width: 12px;
+  height: 1px;
+  border-top: 1px solid #d6dce6;
+}
+
+.tree-node {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  margin: 0.25rem 0;
+  background: #fff;
+  border: 1px solid #d6dce6;
+  border-radius: 6px;
+}
+
+.tree-node.root-node {
+  background: #eef5ff;
+  border-color: #c8dbff;
+}
+
+.tree-node::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4a90e2;
+  margin-right: 6px;
+}
+
+.tree-product {
+  font-weight: 700;
+}
+
+.tree-meta {
+  color: #555;
+  font-size: 0.9rem;
 }
 
 .filter-input {
