@@ -141,7 +141,12 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 # Always use CSVImportService for order creation (common logic)
                 try:
                     order_service = CSVImportService()
-                    order_result = order_service.create_orders_from_staging(source_file=file.name)
+                    # Use raw ID range to filter only records from this import
+                    raw_id_range = (result.get('min_raw_id'), result.get('max_raw_id'))
+                    order_result = order_service.create_orders_from_staging(
+                        source_file=file.name,
+                        raw_id_range=raw_id_range
+                    )
                     # Merge results
                     result['orders_created'] = order_result.get('orders', 0)
                     result['lines_created'] = order_result.get('lines', 0)

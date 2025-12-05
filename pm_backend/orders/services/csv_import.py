@@ -86,6 +86,11 @@ class CSVImportService:
                     customer_code=customer_code
                 ).order_by('-id')[:len(raw_records)]
 
+                # Track min and max IDs for this import
+                raw_ids = [r.id for r in raw_records_with_ids]
+                min_raw_id = min(raw_ids) if raw_ids else None
+                max_raw_id = max(raw_ids) if raw_ids else None
+
                 # Process raw data to daily using saved records
                 daily_records = []
                 error_count = 0
@@ -136,6 +141,8 @@ class CSVImportService:
                 'message': f'Imported {len(created_raws)} raw records, created {len(daily_records)} daily records',
                 'raw_count': len(created_raws),
                 'daily_count': len(daily_records),
+                'min_raw_id': min_raw_id,
+                'max_raw_id': max_raw_id,
                 'errors': self.errors,
                 'warnings': self.warnings
             }
@@ -191,20 +198,24 @@ class CSVImportService:
         )
 
 
-    def create_orders_from_staging(self, source_file=None):
+    def create_orders_from_staging(self, source_file=None, raw_id_range=None):
         """
         Create orders from staging daily data
 
         Args:
             source_file: Optional source file name to filter records (only process this file's data)
+            raw_id_range: Optional tuple of (min_raw_id, max_raw_id) to filter by raw record ID range
         """
         # Get all parsed daily records
         query = StgOrderDaily.objects.filter(
             raw__parse_status='PARSED'
         )
 
-        # Filter by source file if specified
-        if source_file:
+        # Filter by raw ID range if specified (takes priority over source_file)
+        if raw_id_range and raw_id_range[0] is not None and raw_id_range[1] is not None:
+            query = query.filter(raw__id__gte=raw_id_range[0], raw__id__lte=raw_id_range[1])
+        # Otherwise filter by source file if specified
+        elif source_file:
             query = query.filter(source_file=source_file)
 
         daily_records = query.select_related('customer')

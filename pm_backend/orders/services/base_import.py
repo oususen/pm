@@ -69,7 +69,11 @@ class BaseImportService:
             return None
 
     def save_to_database(self, raw_records, file, customer_code):
-        """Save raw records and create daily records"""
+        """Save raw records and create daily records
+
+        Returns:
+            tuple: (raw_count, daily_count, min_raw_id, max_raw_id)
+        """
         with transaction.atomic():
             # Save raw records
             created_raws = StgOrderRaw.objects.bulk_create(raw_records)
@@ -79,6 +83,11 @@ class BaseImportService:
                 source_file=file.name,
                 customer_code=customer_code
             ).order_by('-id')[:len(raw_records)]
+
+            # Track min and max IDs for this import
+            raw_ids = [r.id for r in raw_records_with_ids]
+            min_raw_id = min(raw_ids) if raw_ids else None
+            max_raw_id = max(raw_ids) if raw_ids else None
 
             # Process raw data to daily using saved records
             daily_records = []
@@ -143,7 +152,7 @@ class BaseImportService:
             if daily_records:
                 StgOrderDaily.objects.bulk_create(daily_records)
 
-        return len(created_raws), len(daily_records)
+        return len(created_raws), len(daily_records), min_raw_id, max_raw_id
 
     def import_csv(self, file, customer_code, order_type, source_system='CSV'):
         """

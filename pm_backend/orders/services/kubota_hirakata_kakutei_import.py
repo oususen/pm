@@ -107,13 +107,15 @@ class KubotaHirakataKakuteiImportService(BaseImportService):
                 }
 
             # Save to database
-            raw_count, daily_count = self.save_to_database(raw_records, file, customer_code)
+            raw_count, daily_count, min_raw_id, max_raw_id = self.save_to_database(raw_records, file, customer_code)
 
             return {
                 'success': True,
                 'message': f'Imported {raw_count} raw records, created {daily_count} daily records',
                 'raw_count': raw_count,
                 'daily_count': daily_count,
+                'min_raw_id': min_raw_id,
+                'max_raw_id': max_raw_id,
                 'errors': self.errors,
                 'warnings': self.warnings
             }
