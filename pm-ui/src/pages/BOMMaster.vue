@@ -12,6 +12,7 @@
       <table class="data-table">
         <thead>
           <tr>
+            <th>ID</th>
             <th>親製品</th>
             <th>版</th>
             <th>有効開始日</th>
@@ -22,6 +23,7 @@
         </thead>
         <tbody>
           <tr v-for="bom in boms" :key="bom.id">
+            <td>{{ bom.id }}</td>
             <td>{{ getProductName(bom.parent_product) }}</td>
             <td>{{ bom.version }}</td>
             <td>{{ bom.valid_from }}</td>
@@ -86,12 +88,16 @@
       <div class="modal-content modal-large">
         <h2>BOM詳細</h2>
         <div class="details-section">
+          <p><strong>BOM ID:</strong> {{ selectedBOM.id }}</p>
           <p><strong>親製品:</strong> {{ getProductName(selectedBOM.parent_product) }}</p>
           <p><strong>版:</strong> {{ selectedBOM.version }}</p>
           <p><strong>有効期間:</strong> {{ selectedBOM.valid_from }} 〜 {{ selectedBOM.valid_to || '無期限' }}</p>
-          <p v-if="isPhantom(selectedBOM.parent_product)" class="phantom-info">
-            この親製品は見なし組立です。リードタイム計算や展開ロジックの扱いに注意してください。
-          </p>
+          <p v-if="isPhantom(selectedBOM.parent_product)" class="phantom-info">
+
+            この親製品は見なし組立です。リードタイム計算や展開ロジックの扱いに注意してください。
+
+          </p>
+
         </div>
         <h3>構成品目</h3>
         <div class="item-form">
@@ -214,6 +220,7 @@ const itemForm = ref({
   remark: ''
 })
 const editingItemId = ref(null)
+const bomItemsRequestToken = ref(0)
 const childProductFilter = ref('')
 
 const sourcingTypeMap = {
@@ -269,9 +276,12 @@ const resetItemForm = () => {
   editingItemId.value = null
 }
 
-const fetchBOMItems = async (bomId) => {
+const fetchBOMItems = async (bomId, token = bomItemsRequestToken.value) => {
   const response = await api.boms.getBOMItems(bomId)
-  bomItems.value = response.data.results || response.data
+  if (token !== bomItemsRequestToken.value) return
+  const items = response.data.results || response.data
+  // 念のためクライアント側でもBOM IDで絞り込む
+  bomItems.value = items.filter((item) => item.bom === bomId)
 }
 
 const getProductName = (productId) => {
@@ -372,17 +382,26 @@ const deleteBOM = async (id) => {
 const viewDetails = async (bom) => {
   selectedBOM.value = bom
   resetItemForm()
+  childProductFilter.value = ''
+  bomItems.value = []
+  const token = ++bomItemsRequestToken.value
+  showDetailsDialog.value = true
   try {
-    await fetchBOMItems(bom.id)
-    showDetailsDialog.value = true
+    await fetchBOMItems(bom.id, token)
   } catch (error) {
     console.error('BOM明細取得エラー:', error)
     alert('BOM明細の取得に失敗しました')
+    bomItems.value = []
   }
 }
 
 const closeDetailsDialog = () => {
   showDetailsDialog.value = false
+  selectedBOM.value = {}
+  bomItems.value = []
+  bomItemsRequestToken.value += 1
+  resetItemForm()
+  childProductFilter.value = ''
 }
 
 const startEditItem = (item) => {
