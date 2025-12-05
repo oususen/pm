@@ -98,9 +98,15 @@
           <div class="form-row">
             <div class="form-group">
               <label>子製品 *</label>
+              <input
+                class="filter-input"
+                type="text"
+                v-model="childProductFilter"
+                placeholder="品番/品名で絞り込み"
+              />
               <select v-model="itemForm.child_product" required>
                 <option value="">選択してください</option>
-                <option v-for="product in products" :key="product.id" :value="product.id">
+                <option v-for="product in filteredChildProducts" :key="product.id" :value="product.id">
                   {{ product.product_code }} - {{ product.product_name }}
                 </option>
               </select>
@@ -180,7 +186,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import api from '../api/client'
 
 const boms = ref([])
@@ -208,6 +214,7 @@ const itemForm = ref({
   remark: ''
 })
 const editingItemId = ref(null)
+const childProductFilter = ref('')
 
 const sourcingTypeMap = {
   'MAKE': '自社製造',
@@ -233,7 +240,9 @@ const fetchBOMs = async () => {
 const fetchProducts = async () => {
   try {
     // 全ページ取得（現状フィルタなし）
-    products.value = await api.products.getAllProducts()
+    products.value = (await api.products.getAllProducts()).sort((a, b) =>
+      (b.product_code || '').localeCompare(a.product_code || '')
+    )
   } catch (error) {
     console.error('製品取得エラー:', error)
   }
@@ -274,6 +283,14 @@ const isPhantom = (productId) => {
   const product = products.value.find(p => p.id === productId)
   return Boolean(product?.is_phantom)
 }
+
+const filteredChildProducts = computed(() => {
+  const keyword = childProductFilter.value.trim().toLowerCase()
+  if (!keyword) return products.value
+  return products.value.filter((p) =>
+    `${p.product_code} ${p.product_name}`.toLowerCase().includes(keyword)
+  )
+})
 
 const getSupplierName = (supplierId) => {
   if (!supplierId) return '-'
@@ -487,6 +504,14 @@ onMounted(() => {
 
 .details-section p {
   margin: 0.5rem 0;
+}
+
+.filter-input {
+  width: 100%;
+  margin-bottom: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
 }
 
 .phantom-info {
