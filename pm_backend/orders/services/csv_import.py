@@ -240,23 +240,12 @@ class CSVImportService:
 
                 # Generate order_no based on order_type
                 if order_type == 'FORECAST':
+                    # Always create new forecast order (do not delete old ones)
                     order_no = f"FC-{customer.customer_code}-{timestamp}"
-
-                    # Delete existing forecast orders for this customer (overwrite)
-                    old_forecast_orders = Order.objects.filter(
-                        customer_id=customer_id,
-                        order_type='FORECAST',
-                        status='OPEN'
-                    )
-                    deleted_count = old_forecast_orders.count()
-                    old_forecast_orders.delete()
-                    if deleted_count > 0:
-                        superseded_orders += deleted_count
-
                 else:  # FIRM
                     order_no = f"FIRM-{customer.customer_code}-{timestamp}"
 
-                # Create order header
+                # Create order header (always create new, even for FORECAST)
                 order = Order.objects.create(
                     customer_id=customer_id,
                     order_no=order_no,
@@ -269,27 +258,82 @@ class CSVImportService:
                 )
                 created_orders += 1
 
-                # Create order lines
-                line_no = 1
-                for daily in dailies:
-                    # Find product
-                    try:
-                        product = Product.objects.get(product_code=daily.product_code)
-                    except Product.DoesNotExist:
-                        product = None
+                # Process order lines
+                if order_type == 'FORECAST':
+                    # For FORECAST: Update existing lines (product_code + due_date) or add new ones
+                    # Get all existing OPEN forecast order lines for this customer
+                    existing_lines = OrderLine.objects.filter(
+                        order__customer_id=customer_id,
+                        order__order_type='FORECAST',
+                        order__status='OPEN'
+                    ).select_related('order')
 
-                    OrderLine.objects.create(
-                        order=order,
-                        line_no=line_no,
-                        product=product,
-                        product_code=daily.product_code,
-                        quantity=daily.quantity,
-                        due_date=daily.due_date,
-                        plant_code=daily.plant_code,
-                        ship_to_code=daily.ship_to_code
-                    )
-                    line_no += 1
-                    created_lines += 1
+                    # Create dict for quick lookup: (product_code, due_date) -> OrderLine
+                    existing_lines_dict = {}
+                    for line in existing_lines:
+                        key = (line.product_code, line.due_date)
+                        existing_lines_dict[key] = line
+
+                    line_no = 1
+                    updated_lines = 0
+                    for daily in dailies:
+                        key = (daily.product_code, daily.due_date)
+
+                        # Find product
+                        try:
+                            product = Product.objects.get(product_code=daily.product_code)
+                        except Product.DoesNotExist:
+                            product = None
+
+                        if key in existing_lines_dict:
+                            # Update existing line: move to new order and update quantity
+                            existing_line = existing_lines_dict[key]
+                            existing_line.order = order
+                            existing_line.line_no = line_no
+                            existing_line.quantity = daily.quantity
+                            existing_line.product = product
+                            existing_line.plant_code = daily.plant_code
+                            existing_line.ship_to_code = daily.ship_to_code
+                            existing_line.save()
+                            updated_lines += 1
+                        else:
+                            # Create new line
+                            OrderLine.objects.create(
+                                order=order,
+                                line_no=line_no,
+                                product=product,
+                                product_code=daily.product_code,
+                                quantity=daily.quantity,
+                                due_date=daily.due_date,
+                                plant_code=daily.plant_code,
+                                ship_to_code=daily.ship_to_code
+                            )
+                            created_lines += 1
+
+                        line_no += 1
+
+                else:  # FIRM
+                    # For FIRM: Always create new lines
+                    line_no = 1
+                    for daily in dailies:
+                        # Find product
+                        try:
+                            product = Product.objects.get(product_code=daily.product_code)
+                        except Product.DoesNotExist:
+                            product = None
+
+                        OrderLine.objects.create(
+                            order=order,
+                            line_no=line_no,
+                            product=product,
+                            product_code=daily.product_code,
+                            quantity=daily.quantity,
+                            due_date=daily.due_date,
+                            plant_code=daily.plant_code,
+                            ship_to_code=daily.ship_to_code
+                        )
+                        line_no += 1
+                        created_lines += 1
 
                 # If this is a FIRM order, supersede overlapping FORECAST orders
                 if order_type == 'FIRM':
