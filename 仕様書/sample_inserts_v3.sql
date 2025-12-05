@@ -4,6 +4,9 @@
 SET NAMES utf8mb4;
 SET CHARACTER SET utf8mb4;
 
+-- タイムゾーン設定（日本時間）
+SET time_zone = '+09:00';
+
 -- Products (final & WIP tiers)
 INSERT INTO m_product(product_code, product_name, category, unit, is_final_product) VALUES
 ('P_FINAL','完成品A','ASSEMBLY','個',1),

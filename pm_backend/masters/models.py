@@ -4,6 +4,7 @@ from django.db import models
 class Product(models.Model):
     """製品マスタ"""
     CATEGORY_CHOICES = [
+        ('UNKNOWN', '未定'),
         ('ASSEMBLY', '組立品'),
         ('SINGLE', '単品'),
         ('MATERIAL', '材料'),

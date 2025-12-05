@@ -8,6 +8,9 @@
 SET NAMES utf8mb4;
 SET CHARACTER SET utf8mb4;
 
+-- タイムゾーン設定（日本時間）
+SET time_zone = '+09:00';
+
 -- データベース作成
 CREATE DATABASE IF NOT EXISTS pm_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
