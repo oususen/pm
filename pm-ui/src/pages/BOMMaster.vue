@@ -31,6 +31,7 @@
             <td>{{ bom.is_active ? '有効' : '無効' }}</td>
             <td>
               <button @click="viewDetails(bom)" class="btn-sm">詳細</button>
+              <button @click="viewTreeOnly(bom)" class="btn-sm">階層図</button>
               <button @click="editBOM(bom)" class="btn-sm">編集</button>
               <button @click="deleteBOM(bom.id)" class="btn-sm btn-danger">削除</button>
             </td>
@@ -105,8 +106,7 @@
             <ul class="tree-list">
               <li>
                 <div class="tree-node root-node">
-                  <span class="tree-product">{{ formatProductDisplay(bomTree.parent_product) }}</span>
-                  <span class="tree-meta">BOM ID: {{ bomTree.id }} / 版: {{ bomTree.version }}</span>
+                  <span class="tree-product">{{ formatProductCode(bomTree.parent_product) }}</span>
                 </div>
                 <TreeBranch v-if="bomTree.items && bomTree.items.length" :items="bomTree.items" />
               </li>
@@ -203,6 +203,40 @@
         </div>
       </div>
     </div>
+
+    <!-- 階層図のみダイアログ -->
+    <div v-if="showTreeDialog" class="modal-overlay" @click.self="closeTreeDialog">
+      <div class="modal-content modal-large">
+        <h2>BOM階層図</h2>
+        <div class="tree-section" v-if="!treeLoading">
+          <div v-if="bomTree" class="tree-grid-container">
+            <table class="tree-grid">
+              <thead>
+                <tr>
+                  <th>部番</th>
+                  <th class="level-col">階層</th>
+                  <th class="qty-col">数量</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in treeRows" :key="row.key">
+                  <td>
+                    <span class="tree-line">{{ row.prefix }}</span>{{ row.product }}
+                  </td>
+                  <td class="level-col">{{ row.level }}</td>
+                  <td class="qty-col">{{ row.quantity }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else>データがありません</div>
+        </div>
+        <div v-else>読み込み中...</div>
+        <div class="form-actions">
+          <button type="button" @click="closeTreeDialog" class="btn-secondary">閉じる</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -227,6 +261,42 @@ const showDetailsDialog = ref(false)
 const selectedBOM = ref({})
 const bomItems = ref([])
 const bomTree = ref(null)
+const showTreeDialog = ref(false)
+const treeLoading = ref(false)
+const treeRows = computed(() => {
+  if (!bomTree.value) return []
+  const rows = []
+  rows.push({
+    key: `root-${bomTree.value.id}`,
+    product: formatProductCode(bomTree.value.parent_product),
+    quantity: '',
+    level: 0,
+    prefix: '',
+  })
+  const walk = (items, level, parentPrefix = '', isLastArray = []) => {
+    if (!items) return
+    items.forEach((item, index) => {
+      const isLast = index === items.length - 1
+      const connector = isLast ? '└─ ' : '├─ '
+      const currentPrefix = parentPrefix + connector
+
+      rows.push({
+        key: item.id,
+        product: formatProductCode(item.child_product),
+        quantity: formatQuantity(item.quantity),
+        level,
+        prefix: currentPrefix,
+      })
+
+      if (item.child_bom && item.child_bom.items && item.child_bom.items.length) {
+        const childPrefix = parentPrefix + (isLast ? '   ' : '│  ')
+        walk(item.child_bom.items, level + 1, childPrefix, [...isLastArray, isLast])
+      }
+    })
+  }
+  walk(bomTree.value.items, 1, '', [])
+  return rows
+})
 const itemForm = ref({
   child_product: '',
   quantity: '1.000',
@@ -315,11 +385,16 @@ const getProductName = (productId) => {
   return product ? `${product.product_code} - ${product.product_name}` : productId
 }
 
-const formatProductDisplay = (productObj) => {
+const formatProductCode = (productObj) => {
   if (!productObj) return ''
-  const code = productObj.code || productObj.product_code || ''
-  const name = productObj.name || productObj.product_name || ''
-  return `${code} - ${name}`.trim()
+  return productObj.code || productObj.product_code || ''
+}
+
+const formatQuantity = (quantity) => {
+  if (quantity === null || quantity === undefined) return ''
+  const num = parseFloat(quantity)
+  if (Number.isNaN(num)) return quantity
+  return Math.trunc(num).toString()
 }
 
 const isPhantom = (productId) => {
@@ -440,6 +515,24 @@ const closeDetailsDialog = () => {
   childProductFilter.value = ''
 }
 
+const viewTreeOnly = async (bom) => {
+  showTreeDialog.value = true
+  treeLoading.value = true
+  bomTree.value = null
+  try {
+    await fetchBOMTree(bom.id)
+  } catch (error) {
+    alert('階層図の取得に失敗しました')
+  } finally {
+    treeLoading.value = false
+  }
+}
+
+const closeTreeDialog = () => {
+  showTreeDialog.value = false
+  bomTree.value = null
+}
+
 const startEditItem = (item) => {
   editingItemId.value = item.id
   itemForm.value = {
@@ -523,11 +616,11 @@ const TreeBranch = defineComponent({
         props.items.map((item) =>
           h('li', { key: item.id }, [
             h('div', { class: 'tree-node' }, [
-              h('span', { class: 'tree-product' }, formatProductDisplay(item.child_product)),
+              h('span', { class: 'tree-product' }, formatProductCode(item.child_product)),
               h(
                 'span',
                 { class: 'tree-meta' },
-                `数量: ${item.quantity} / 調達: ${item.sourcing_type}${item.supplier?.name ? ' / 仕入先: ' + item.supplier.name : ''}`
+                `数量: ${formatQuantity(item.quantity)}`
               ),
             ]),
             item.child_bom && item.child_bom.items && item.child_bom.items.length
@@ -597,7 +690,7 @@ const TreeBranch = defineComponent({
   margin-bottom: 1.5rem;
 }
 
-.tree-container {
+.tree-grid-container {
   background: #f9fbff;
   border: 1px solid #e1e8f5;
   border-radius: 8px;
@@ -605,69 +698,38 @@ const TreeBranch = defineComponent({
   overflow-x: auto;
 }
 
-.tree-list,
-.tree-children {
-  list-style: none;
-  margin: 0;
-  padding-left: 1rem;
-  line-height: 1.4;
+.tree-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
 }
 
-.tree-children {
-  border-left: 1px solid #d6dce6;
-  margin-left: 0.4rem;
-}
-
-.tree-children > li {
-  position: relative;
-  margin: 0 0 0.35rem 0;
-  padding-left: 0.8rem;
-}
-
-.tree-children > li::before {
-  content: '';
-  position: absolute;
-  left: -0.65rem;
-  top: 0.95rem;
-  width: 12px;
-  height: 1px;
-  border-top: 1px solid #d6dce6;
-}
-
-.tree-node {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.45rem 0.7rem;
-  margin: 0.25rem 0;
-  background: #fff;
+.tree-grid th,
+.tree-grid td {
   border: 1px solid #d6dce6;
-  border-radius: 6px;
+  padding: 6px 8px;
 }
 
-.tree-node.root-node {
+.tree-grid th {
   background: #eef5ff;
-  border-color: #c8dbff;
+  text-align: left;
 }
 
-.tree-node::before {
-  content: '';
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #4a90e2;
-  margin-right: 6px;
+.level-col {
+  width: 60px;
+  text-align: center;
 }
 
-.tree-product {
-  font-weight: 700;
+.qty-col {
+  width: 90px;
+  text-align: right;
 }
 
-.tree-meta {
-  color: #555;
-  font-size: 0.9rem;
+.tree-line {
+  font-family: 'Courier New', Consolas, monospace;
+  color: #888;
+  user-select: none;
+  white-space: pre;
 }
 
 .filter-input {
