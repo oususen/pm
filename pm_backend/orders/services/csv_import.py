@@ -238,6 +238,9 @@ class CSVImportService:
                 customer = Customer.objects.get(id=customer_id)
                 timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
 
+                # Track latest confirmed due date per product (for Tiera-specific cleanup)
+                product_cutoffs = {}
+
                 # Generate order_no based on order_type
                 if order_type == 'FORECAST':
                     # Always create new forecast order (do not delete old ones)
@@ -322,6 +325,11 @@ class CSVImportService:
                         except Product.DoesNotExist:
                             product = None
 
+                        # Store latest due date per product for Tiera cleanup
+                        cutoff = product_cutoffs.get(daily.product_code)
+                        if cutoff is None or daily.due_date > cutoff:
+                            product_cutoffs[daily.product_code] = daily.due_date
+
                         OrderLine.objects.create(
                             order=order,
                             line_no=line_no,
@@ -337,21 +345,32 @@ class CSVImportService:
 
                 # If this is a FIRM order, supersede overlapping FORECAST orders
                 if order_type == 'FIRM':
-                    # Get all due dates from this firm order
-                    firm_due_dates = [daily.due_date for daily in dailies]
-                    firm_product_codes = [daily.product_code for daily in dailies]
+                    if customer.customer_code == '000001':
+                        # Tiera: delete (supersede) forecasts up to the confirmed due date per product
+                        for product_code, cutoff_date in product_cutoffs.items():
+                            overlapping_forecast_orders = Order.objects.filter(
+                                customer_id=customer_id,
+                                order_type='FORECAST',
+                                status='OPEN',
+                                lines__product_code=product_code,
+                                lines__due_date__lte=cutoff_date
+                            ).distinct()
+                            superseded_orders += overlapping_forecast_orders.update(status='SUPERSEDED')
+                    else:
+                        # Default: supersede only exact matching product and due_date
+                        firm_due_dates = [daily.due_date for daily in dailies]
+                        firm_product_codes = [daily.product_code for daily in dailies]
 
-                    # Find forecast orders with overlapping products and dates
-                    overlapping_forecast_orders = Order.objects.filter(
-                        customer_id=customer_id,
-                        order_type='FORECAST',
-                        status='OPEN',
-                        lines__product_code__in=firm_product_codes,
-                        lines__due_date__in=firm_due_dates
-                    ).distinct()
+                        overlapping_forecast_orders = Order.objects.filter(
+                            customer_id=customer_id,
+                            order_type='FORECAST',
+                            status='OPEN',
+                            lines__product_code__in=firm_product_codes,
+                            lines__due_date__in=firm_due_dates
+                        ).distinct()
 
-                    superseded_count = overlapping_forecast_orders.update(status='SUPERSEDED')
-                    superseded_orders += superseded_count
+                        superseded_count = overlapping_forecast_orders.update(status='SUPERSEDED')
+                        superseded_orders += superseded_count
 
         return {
             'orders': created_orders,
