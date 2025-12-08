@@ -109,15 +109,38 @@
         </div>
         <div v-if="bomTree" class="tree-section">
           <h3>階層表示</h3>
-          <div class="tree-container">
-            <ul class="tree-list">
-              <li>
-                <div class="tree-node root-node">
-                  <span class="tree-product">{{ formatProductCode(bomTree.parent_product) }}</span>
-                </div>
-                <TreeBranch v-if="bomTree.items && bomTree.items.length" :items="bomTree.items" />
-              </li>
-            </ul>
+          <div class="tree-controls">
+            <button type="button" class="btn-sm" @click="expandAllNodes">全展開</button>
+            <button type="button" class="btn-sm" @click="collapseAllNodes">全折りたたみ</button>
+          </div>
+          <div class="tree-grid-container">
+            <table class="tree-grid">
+              <thead>
+                <tr>
+                  <th>部番</th>
+                  <th class="level-col">階層</th>
+                  <th class="qty-col">数量</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in treeRows" :key="row.key">
+                  <td>
+                    <span class="tree-line">{{ row.prefix }}</span>
+                    <button
+                      v-if="row.hasChildren"
+                      @click="toggleNode(row.key)"
+                      class="expand-btn"
+                    >
+                      {{ row.isExpanded ? '－' : '＋' }}
+                    </button>
+                    <span v-else class="expand-placeholder"></span>
+                    {{ row.product }}
+                  </td>
+                  <td class="level-col">{{ row.level }}</td>
+                  <td class="qty-col">{{ row.quantity }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -157,7 +180,7 @@
             </div>
             <div class="form-group">
               <label>仕入先</label>
-              <select v-model="itemForm.supplier">
+              <select v-model="itemForm.supplier" :disabled="itemForm.sourcing_type === 'MAKE'">
                 <option value="">選択しない</option>
                 <option v-for="supplier in suppliers" :key="supplier.id" :value="supplier.id">
                   {{ supplier.supplier_name }}
@@ -166,7 +189,7 @@
             </div>
             <div class="form-group">
               <label>工程 *</label>
-              <select v-model="itemForm.process" required>
+              <select v-model="itemForm.process" :required="itemForm.sourcing_type === 'MAKE'" :disabled="itemForm.sourcing_type === 'BUY'">
                 <option value="">選択してください</option>
                 <option v-for="proc in processes" :key="proc.id" :value="proc.id">
                   {{ proc.process_code }} - {{ proc.process_name }}
@@ -175,7 +198,7 @@
             </div>
             <div class="form-group">
               <label>ライン</label>
-              <select v-model="itemForm.line">
+              <select v-model="itemForm.line" :disabled="itemForm.sourcing_type === 'BUY'">
                 <option value="">選択しない</option>
                 <option v-for="line in lines" :key="line.id" :value="line.id">
                   {{ line.line_code }} - {{ line.line_name }}
@@ -184,18 +207,23 @@
             </div>
             <div class="form-group">
               <label>時間単位</label>
-              <select v-model="itemForm.time_unit">
+              <select v-model="itemForm.time_unit" :disabled="itemForm.sourcing_type === 'BUY'">
                 <option value="MINUTE">分</option>
                 <option value="DAY">日</option>
               </select>
             </div>
             <div class="form-group">
               <label>リードタイム(日)</label>
-              <input type="number" min="0" v-model.number="itemForm.lead_time_days" :disabled="itemForm.time_unit === 'MINUTE'" />
+              <input
+                type="number"
+                min="0"
+                v-model.number="itemForm.lead_time_days"
+                :disabled="itemForm.time_unit === 'MINUTE'"
+              />
             </div>
             <div class="form-group">
               <label>所要時間(分)</label>
-              <input type="number" min="1" v-model.number="itemForm.duration_min" :disabled="itemForm.time_unit === 'DAY'" />
+              <input type="number" min="1" v-model.number="itemForm.duration_min" :disabled="itemForm.time_unit === 'DAY' || itemForm.sourcing_type === 'BUY'" />
             </div>
           </div>
           <div class="form-row">
@@ -540,6 +568,22 @@ const resetItemForm = () => {
   editingItemId.value = null
 }
 
+const applySourcingSideEffects = () => {
+  if (itemForm.value.sourcing_type === 'MAKE') {
+    itemForm.value.supplier = ''
+    if (!itemForm.value.time_unit) itemForm.value.time_unit = 'MINUTE'
+  }
+  if (itemForm.value.sourcing_type === 'BUY') {
+    itemForm.value.process = ''
+    itemForm.value.line = ''
+    itemForm.value.time_unit = 'DAY'
+    itemForm.value.duration_min = null
+    if (!itemForm.value.lead_time_days || itemForm.value.lead_time_days === 0) {
+      itemForm.value.lead_time_days = 1
+    }
+  }
+}
+
 const resetRoutingGenForm = () => {
   routingGenForm.value = {
     process_id: '',
@@ -757,6 +801,7 @@ const viewDetails = async (bom) => {
   try {
     await fetchBOMItems(bom.id, token)
     await fetchBOMTree(bom.id)
+    collapseAllNodes()
   } catch (error) {
     console.error('BOM明細取得エラー:', error)
     alert('BOM明細の取得に失敗しました')
@@ -808,6 +853,15 @@ const expandAllNodes = () => {
   }
   collectKeys(bomTree.value.items)
   expandedNodes.value = allKeys
+}
+
+const collapseAllNodes = () => {
+  if (!bomTree.value) {
+    expandedNodes.value = new Set()
+    return
+  }
+  const rootKey = `root-${bomTree.value.id}`
+  expandedNodes.value = new Set([rootKey])
 }
 
 const closeTreeDialog = () => {
@@ -881,6 +935,7 @@ const startEditItem = (item) => {
     duration_min: item.duration_min ?? 60,
     remark: item.remark ?? ''
   }
+  applySourcingSideEffects()
 }
 
 const saveBOMItem = async () => {
@@ -889,17 +944,25 @@ const saveBOMItem = async () => {
     alert('子製品と数量は必須です')
     return
   }
-  if (!itemForm.value.process) {
-    alert('工程は必須です')
-    return
-  }
-  if (itemForm.value.time_unit === 'MINUTE' && (!itemForm.value.duration_min || itemForm.value.duration_min <= 0)) {
-    alert('時間単位=分のときは所要時間(分)を1以上で入力してください')
-    return
-  }
-  if (itemForm.value.time_unit === 'DAY' && itemForm.value.lead_time_days <= 0) {
-    alert('時間単位=日 のときはリードタイム(日)を1以上で入力してください')
-    return
+  applySourcingSideEffects()
+  if (itemForm.value.sourcing_type === 'MAKE') {
+    if (!itemForm.value.process) {
+      alert('工程は必須です（自社製造）')
+      return
+    }
+    if (itemForm.value.time_unit === 'MINUTE' && (!itemForm.value.duration_min || itemForm.value.duration_min <= 0)) {
+      alert('時間単位=分のときは所要時間(分)を1以上で入力してください')
+      return
+    }
+    if (itemForm.value.time_unit === 'DAY' && itemForm.value.lead_time_days <= 0) {
+      alert('時間単位=日 のときはリードタイム(日)を1以上で入力してください')
+      return
+    }
+  } else if (itemForm.value.sourcing_type === 'BUY') {
+    if (!itemForm.value.lead_time_days || itemForm.value.lead_time_days <= 0) {
+      alert('購買の場合、リードタイム(日)を1以上で入力してください')
+      return
+    }
   }
 
   const payload = {
@@ -908,12 +971,14 @@ const saveBOMItem = async () => {
     quantity: itemForm.value.quantity,
     loss_rate: itemForm.value.loss_rate === '' ? null : itemForm.value.loss_rate,
     sourcing_type: itemForm.value.sourcing_type,
-    supplier: itemForm.value.supplier || null,
-    process: itemForm.value.process || null,
-    line: itemForm.value.line || null,
-    time_unit: itemForm.value.time_unit,
-    lead_time_days: itemForm.value.lead_time_days,
-    duration_min: itemForm.value.time_unit === 'MINUTE' ? itemForm.value.duration_min : null,
+    supplier: itemForm.value.sourcing_type === 'MAKE' ? null : (itemForm.value.supplier || null),
+    process: itemForm.value.sourcing_type === 'MAKE' ? (itemForm.value.process || null) : null,
+    line: itemForm.value.sourcing_type === 'MAKE' ? (itemForm.value.line || null) : null,
+    time_unit: itemForm.value.sourcing_type === 'MAKE' ? itemForm.value.time_unit : 'DAY',
+    lead_time_days: itemForm.value.sourcing_type === 'MAKE' ? itemForm.value.lead_time_days : itemForm.value.lead_time_days,
+    duration_min: itemForm.value.sourcing_type === 'MAKE' && itemForm.value.time_unit === 'MINUTE'
+      ? itemForm.value.duration_min
+      : null,
     remark: itemForm.value.remark || ''
   }
 
@@ -1053,6 +1118,12 @@ const TreeBranch = defineComponent({
   border-radius: 8px;
   padding: 1rem;
   overflow-x: auto;
+}
+
+.tree-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .tree-grid {

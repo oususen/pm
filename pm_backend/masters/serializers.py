@@ -66,17 +66,23 @@ class BOMItemSerializer(serializers.ModelSerializer):
         if sourcing_type == 'MAKE' and process is None:
             raise serializers.ValidationError('自社製造の場合、工程は必須です。')
 
-        if time_unit not in ['MINUTE', 'DAY']:
-            raise serializers.ValidationError('時間単位は MINUTE か DAY を指定してください。')
+        # 工程時間の必須チェックは自社製造のみ
+        if sourcing_type == 'MAKE':
+            if time_unit not in ['MINUTE', 'DAY']:
+                raise serializers.ValidationError('時間単位は MINUTE か DAY を指定してください。')
 
-        if time_unit == 'MINUTE':
-            duration_min = attrs.get('duration_min', getattr(self.instance, 'duration_min', None))
-            if duration_min is None or duration_min <= 0:
-                raise serializers.ValidationError('時間単位=MINUTEのとき、所要時間(分)は1以上で入力してください。')
-        else:
+            if time_unit == 'MINUTE':
+                duration_min = attrs.get('duration_min', getattr(self.instance, 'duration_min', None))
+                if duration_min is None or duration_min <= 0:
+                    raise serializers.ValidationError('時間単位=MINUTEのとき、所要時間(分)は1以上で入力してください。')
+            else:
+                lead_time_days = attrs.get('lead_time_days', getattr(self.instance, 'lead_time_days', 0))
+                if lead_time_days is None or lead_time_days <= 0:
+                    raise serializers.ValidationError('時間単位=DAYのとき、リードタイム(日)は1以上で入力してください。')
+        elif sourcing_type == 'BUY':
             lead_time_days = attrs.get('lead_time_days', getattr(self.instance, 'lead_time_days', 0))
             if lead_time_days is None or lead_time_days <= 0:
-                raise serializers.ValidationError('時間単位=DAYのとき、リードタイム(日)は1以上で入力してください。')
+                raise serializers.ValidationError('購買の場合、リードタイム(日)は1以上で入力してください。')
 
         return attrs
 
