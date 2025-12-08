@@ -24,7 +24,7 @@
         <tbody>
           <tr v-for="bom in boms" :key="bom.id">
             <td>{{ bom.id }}</td>
-            <td>{{ getProductName(bom.parent_product) }}</td>
+            <td>{{ bom.parent_product_code || getProductCodeOnly(bom.parent_product) }}</td>
             <td>{{ bom.version }}</td>
             <td>{{ bom.valid_from }}</td>
             <td>{{ bom.valid_to || '-' }}</td>
@@ -164,6 +164,39 @@
                 </option>
               </select>
             </div>
+            <div class="form-group">
+              <label>工程 *</label>
+              <select v-model="itemForm.process" required>
+                <option value="">選択してください</option>
+                <option v-for="proc in processes" :key="proc.id" :value="proc.id">
+                  {{ proc.process_code }} - {{ proc.process_name }}
+                </option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>ライン</label>
+              <select v-model="itemForm.line">
+                <option value="">選択しない</option>
+                <option v-for="line in lines" :key="line.id" :value="line.id">
+                  {{ line.line_code }} - {{ line.line_name }}
+                </option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>時間単位</label>
+              <select v-model="itemForm.time_unit">
+                <option value="MINUTE">分</option>
+                <option value="DAY">日</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>リードタイム(日)</label>
+              <input type="number" min="0" v-model.number="itemForm.lead_time_days" :disabled="itemForm.time_unit === 'MINUTE'" />
+            </div>
+            <div class="form-group">
+              <label>所要時間(分)</label>
+              <input type="number" min="1" v-model.number="itemForm.duration_min" :disabled="itemForm.time_unit === 'DAY'" />
+            </div>
           </div>
           <div class="form-row">
             <div class="form-group full-width">
@@ -188,6 +221,9 @@
               <th>ロス率</th>
               <th>調達区分</th>
               <th>仕入先</th>
+              <th>工程</th>
+              <th>ライン</th>
+              <th>時間</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -198,13 +234,74 @@
               <td>{{ item.loss_rate || '-' }}</td>
               <td>{{ getSourcingTypeLabel(item.sourcing_type) }}</td>
               <td>{{ getSupplierName(item.supplier) }}</td>
+              <td>{{ getProcessName(item.process) }}</td>
+              <td>{{ getLineName(item.line) }}</td>
               <td>
-                <button class="btn-sm" @click="startEditItem(item)">編集</button>
-                <button class="btn-sm btn-danger" @click="deleteBOMItem(item.id)">削除</button>
+                <span v-if="item.time_unit === 'MINUTE'">分 {{ item.duration_min || '-' }}</span>
+                <span v-else>日 {{ item.lead_time_days }}</span>
+              </td>
+              <td>
+                <button type="button" class="btn-sm" @click="startEditItem(item)">編集</button>
+                <button type="button" class="btn-sm btn-danger" @click="deleteBOMItem(item.id)">削除</button>
               </td>
             </tr>
           </tbody>
         </table>
+        <h3 class="mt-16">ルーティング自動生成</h3>
+        <div class="routing-gen">
+          <div class="form-row">
+            <div class="form-group">
+              <label>工程 *</label>
+              <select v-model="routingGenForm.process_id">
+                <option value="">選択してください</option>
+                <option v-for="proc in processes" :key="proc.id" :value="proc.id">
+                  {{ proc.process_code }} - {{ proc.process_name }}
+                </option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>ライン</label>
+              <select v-model="routingGenForm.line_id">
+                <option value="">選択しない</option>
+                <option v-for="line in lines" :key="line.id" :value="line.id">
+                  {{ line.line_code }} - {{ line.line_name }}
+                </option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>時間単位</label>
+              <select v-model="routingGenForm.time_unit">
+                <option value="MINUTE">分</option>
+                <option value="DAY">日</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>リードタイム(日)</label>
+              <input type="number" min="0" v-model.number="routingGenForm.lead_time_days" :disabled="routingGenForm.time_unit === 'MINUTE'" />
+            </div>
+            <div class="form-group">
+              <label>所要時間(分)</label>
+              <input type="number" min="1" v-model.number="routingGenForm.duration_min" :disabled="routingGenForm.time_unit === 'DAY'" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>ルーティングコード</label>
+              <input type="text" v-model="routingGenForm.routing_code" placeholder="未指定なら自動採番" />
+            </div>
+            <div class="form-group full-width">
+              <label>説明</label>
+              <input type="text" v-model="routingGenForm.description" placeholder="BOMから自動生成 のように記入" />
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn-primary" @click="generateRoutingFromBom" :disabled="!routingGenForm.process_id">
+              BOMからルーティング生成
+            </button>
+            <button type="button" class="btn-secondary" @click="resetRoutingGenForm">リセット</button>
+          </div>
+          <p class="hint-text">MAKEの明細行数分のステップをこの工程・ラインで生成し、既存の自動ルーティングがあれば置き換えます。</p>
+        </div>
         <div class="form-actions">
           <button type="button" @click="closeDetailsDialog" class="btn-secondary">閉じる</button>
         </div>
@@ -264,6 +361,8 @@ import api from '../api/client'
 const boms = ref([])
 const products = ref([])
 const suppliers = ref([])
+const processes = ref([])
+const lines = ref([])
 const showDialog = ref(false)
 const isEdit = ref(false)
 const formData = ref({
@@ -281,6 +380,15 @@ const bomTree = ref(null)
 const showTreeDialog = ref(false)
 const treeLoading = ref(false)
 const expandedNodes = ref(new Set())
+const routingGenForm = ref({
+  process_id: '',
+  line_id: '',
+  time_unit: 'MINUTE',
+  lead_time_days: 0,
+  duration_min: 60,
+  routing_code: '',
+  description: ''
+})
 
 const treeRows = computed(() => {
   if (!bomTree.value) return []
@@ -344,6 +452,11 @@ const itemForm = ref({
   loss_rate: '',
   sourcing_type: 'MAKE',
   supplier: '',
+  process: '',
+  line: '',
+  time_unit: 'MINUTE',
+  lead_time_days: 0,
+  duration_min: 60,
   remark: ''
 })
 const editingItemId = ref(null)
@@ -392,6 +505,24 @@ const fetchSuppliers = async () => {
   }
 }
 
+const fetchProcesses = async () => {
+  try {
+    const response = await api.processes.getProcesses()
+    processes.value = response.data.results || response.data
+  } catch (error) {
+    console.error('工程取得エラー:', error)
+  }
+}
+
+const fetchLines = async () => {
+  try {
+    const response = await api.lines.getLines()
+    lines.value = response.data.results || response.data
+  } catch (error) {
+    console.error('ライン取得エラー:', error)
+  }
+}
+
 const resetItemForm = () => {
   itemForm.value = {
     child_product: '',
@@ -399,9 +530,26 @@ const resetItemForm = () => {
     loss_rate: '',
     sourcing_type: 'MAKE',
     supplier: '',
+    process: '',
+    line: '',
+    time_unit: 'MINUTE',
+    lead_time_days: 0,
+    duration_min: 60,
     remark: ''
   }
   editingItemId.value = null
+}
+
+const resetRoutingGenForm = () => {
+  routingGenForm.value = {
+    process_id: '',
+    line_id: '',
+    time_unit: 'MINUTE',
+    lead_time_days: 0,
+    duration_min: 60,
+    routing_code: '',
+    description: ''
+  }
 }
 
 const fetchBOMItems = async (bomId, token = bomItemsRequestToken.value) => {
@@ -426,6 +574,14 @@ const getProductName = (productId) => {
   const product = products.value.find(p => p.id === productId)
   return product ? `${product.product_code} - ${product.product_name}` : productId
 }
+
+const getProductCodeOnly = (productId) => {
+  const product = products.value.find(p => p.id === productId)
+  return product ? product.product_code : productId
+}
+
+// Backward compatibility: some template renders may still call getProductCode
+const getProductCode = (productId) => getProductCodeOnly(productId)
 
 const formatProductCode = (productObj) => {
   if (!productObj) return ''
@@ -464,6 +620,18 @@ const getSupplierName = (supplierId) => {
   if (!supplierId) return '-'
   const supplier = suppliers.value.find(s => s.id === supplierId)
   return supplier ? supplier.supplier_name : supplierId
+}
+
+const getProcessName = (processId) => {
+  if (!processId) return '-'
+  const proc = processes.value.find(p => p.id === processId)
+  return proc ? `${proc.process_code} - ${proc.process_name}` : processId
+}
+
+const getLineName = (lineId) => {
+  if (!lineId) return '-'
+  const line = lines.value.find(l => l.id === lineId)
+  return line ? `${line.line_code} - ${line.line_name}` : lineId
 }
 
 const getSourcingTypeLabel = (value) => sourcingTypeMap[value] || value
@@ -540,9 +708,47 @@ const deleteBOM = async (id) => {
   }
 }
 
+const generateRoutingFromBom = async () => {
+  if (!selectedBOM.value?.id) {
+    alert('BOMを開いてから実行してください')
+    return
+  }
+  if (!routingGenForm.value.process_id) {
+    alert('工程を選択してください')
+    return
+  }
+
+  const payload = {
+    process_id: routingGenForm.value.process_id,
+    time_unit: routingGenForm.value.time_unit,
+    lead_time_days: routingGenForm.value.lead_time_days,
+    duration_min: routingGenForm.value.duration_min,
+    description: routingGenForm.value.description || undefined,
+    routing_code: routingGenForm.value.routing_code || undefined,
+    is_default: true,
+  }
+  if (routingGenForm.value.line_id) {
+    payload.line_id = routingGenForm.value.line_id
+  }
+
+  try {
+    const res = await api.boms.generateRouting(selectedBOM.value.id, payload)
+    const steps = res.data?.generated_steps ?? '-'
+    alert(`ルーティングを生成しました（ステップ: ${steps}）`)
+  } catch (error) {
+    console.error('ルーティング生成エラー:', error)
+    const errorMessage = error.response?.data?.detail
+      || JSON.stringify(error.response?.data)
+      || error.message
+      || 'ルーティング生成に失敗しました'
+    alert('ルーティング生成に失敗しました\n\n' + errorMessage)
+  }
+}
+
 const viewDetails = async (bom) => {
   selectedBOM.value = bom
   resetItemForm()
+  resetRoutingGenForm()
   childProductFilter.value = ''
   bomItems.value = []
   bomTree.value = null
@@ -668,6 +874,11 @@ const startEditItem = (item) => {
     loss_rate: item.loss_rate ?? '',
     sourcing_type: item.sourcing_type,
     supplier: item.supplier ?? '',
+    process: item.process ?? '',
+    line: item.line ?? '',
+    time_unit: item.time_unit || 'MINUTE',
+    lead_time_days: item.lead_time_days ?? 0,
+    duration_min: item.duration_min ?? 60,
     remark: item.remark ?? ''
   }
 }
@@ -678,6 +889,18 @@ const saveBOMItem = async () => {
     alert('子製品と数量は必須です')
     return
   }
+  if (!itemForm.value.process) {
+    alert('工程は必須です')
+    return
+  }
+  if (itemForm.value.time_unit === 'MINUTE' && (!itemForm.value.duration_min || itemForm.value.duration_min <= 0)) {
+    alert('時間単位=分のときは所要時間(分)を1以上で入力してください')
+    return
+  }
+  if (itemForm.value.time_unit === 'DAY' && itemForm.value.lead_time_days <= 0) {
+    alert('時間単位=日 のときはリードタイム(日)を1以上で入力してください')
+    return
+  }
 
   const payload = {
     bom: selectedBOM.value.id,
@@ -686,6 +909,11 @@ const saveBOMItem = async () => {
     loss_rate: itemForm.value.loss_rate === '' ? null : itemForm.value.loss_rate,
     sourcing_type: itemForm.value.sourcing_type,
     supplier: itemForm.value.supplier || null,
+    process: itemForm.value.process || null,
+    line: itemForm.value.line || null,
+    time_unit: itemForm.value.time_unit,
+    lead_time_days: itemForm.value.lead_time_days,
+    duration_min: itemForm.value.time_unit === 'MINUTE' ? itemForm.value.duration_min : null,
     remark: itemForm.value.remark || ''
   }
 
@@ -725,6 +953,8 @@ onMounted(() => {
   fetchBOMs()
   fetchProducts()
   fetchSuppliers()
+  fetchProcesses()
+  fetchLines()
 })
 
 const TreeBranch = defineComponent({
@@ -954,5 +1184,31 @@ const TreeBranch = defineComponent({
 
 .btn-secondary:hover {
   background-color: #f5f5f5;
+}
+
+.routing-gen {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #e1e8f5;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.routing-gen .form-row {
+  gap: 12px;
+}
+
+.routing-gen .form-group {
+  min-width: 160px;
+}
+
+.mt-16 {
+  margin-top: 16px;
+}
+
+.hint-text {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #666;
 }
 </style>

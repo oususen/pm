@@ -4,7 +4,6 @@ from django.db import models
 class Product(models.Model):
     """製品マスタ"""
     CATEGORY_CHOICES = [
-        ('UNKNOWN', '未定'),
         ('ASSEMBLY', '組立品'),
         ('SINGLE', '単品'),
         ('MATERIAL', '材料'),
@@ -15,7 +14,7 @@ class Product(models.Model):
     product_code = models.CharField(max_length=30, unique=True, verbose_name='品番コード')
     product_name = models.CharField(max_length=100, verbose_name='品名')
     product_name_halfwidth = models.CharField(max_length=100, null=True, blank=True, verbose_name='品名半角')
-    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, verbose_name='カテゴリ')
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, null=True, blank=True, verbose_name='カテゴリ')
     unit = models.CharField(max_length=10, default='個', verbose_name='単位')
     standard_lt_days = models.IntegerField(null=True, blank=True, verbose_name='標準LT(日)')
     self_lt_days = models.IntegerField(null=True, blank=True, verbose_name='自工程LT(日)')
@@ -183,6 +182,15 @@ class BOMItem(models.Model):
     loss_rate = models.DecimalField(max_digits=5, decimal_places=3, null=True, blank=True, verbose_name='ロス率')
     sourcing_type = models.CharField(max_length=20, choices=SOURCING_TYPE_CHOICES, default='MAKE', verbose_name='調達区分')
     supplier = models.ForeignKey(Supplier, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='仕入先')
+    process = models.ForeignKey(Process, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='工程')
+    line = models.ForeignKey(Line, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='ライン')
+    TIME_UNIT_CHOICES = [
+        ('DAY', '日'),
+        ('MINUTE', '分'),
+    ]
+    time_unit = models.CharField(max_length=10, choices=TIME_UNIT_CHOICES, default='MINUTE', verbose_name='時間単位')
+    lead_time_days = models.IntegerField(default=0, verbose_name='リードタイム(日)')
+    duration_min = models.IntegerField(null=True, blank=True, verbose_name='所要時間(分)')
     remark = models.CharField(max_length=200, null=True, blank=True, verbose_name='備考')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')

@@ -1,4 +1,4 @@
-from rest_framework import viewsets
+from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -129,6 +129,13 @@ class BOMViewSet(viewsets.ModelViewSet):
                 'id': item.supplier_id,
                 'name': item.supplier.supplier_name if item.supplier else None,
             } if item.supplier_id else None,
+            'process': item.process_id,
+            'process_name': item.process.process_name if item.process else None,
+            'line': item.line_id,
+            'line_name': item.line.line_name if item.line else None,
+            'time_unit': item.time_unit,
+            'lead_time_days': item.lead_time_days,
+            'duration_min': item.duration_min,
             'remark': item.remark,
             'child_bom': child_tree,
         }
@@ -153,11 +160,77 @@ class BOMViewSet(viewsets.ModelViewSet):
         tree = self._build_bom_tree(bom, visited_bom_ids=set())
         return Response(tree)
 
+    @action(detail=True, methods=['post'])
+    def generate_routing(self, request, pk=None):
+        """Generate or replace routing steps from BOM MAKE items."""
+        bom = self.get_object()
+        make_items = list(BOMItem.objects.filter(bom=bom, sourcing_type='MAKE').select_related('child_product', 'process', 'line'))
+        if not make_items:
+            return Response({'detail': 'No MAKE items found in this BOM. Nothing to generate.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate each item has process/time info
+        for it in make_items:
+            if not it.process_id:
+                return Response({'detail': f'Process is required on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
+            if it.time_unit not in ['MINUTE', 'DAY']:
+                return Response({'detail': f'Invalid time_unit on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
+            if it.time_unit == 'MINUTE':
+                if it.duration_min is None or it.duration_min <= 0:
+                    return Response({'detail': f'duration_min must be >0 (MINUTE) on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                if it.lead_time_days <= 0:
+                    return Response({'detail': f'lead_time_days must be >0 (DAY) on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        routing_code = request.data.get('routing_code') or f"AUTO-{bom.parent_product.product_code}-{bom.version}"
+        description = request.data.get('description') or f"Auto-generated from BOM {bom.id}"
+        set_default = request.data.get('is_default', True)
+
+        routing, created = Routing.objects.get_or_create(
+            product=bom.parent_product,
+            routing_code=routing_code,
+            defaults={
+                'description': description,
+                'is_default': set_default,
+                'is_active': True,
+            }
+        )
+
+        routing.description = description
+        routing.is_active = True
+        if set_default:
+            Routing.objects.filter(product=bom.parent_product).exclude(id=routing.id).update(is_default=False)
+            routing.is_default = True
+        routing.save()
+
+        routing.steps.all().delete()
+        for idx, item in enumerate(make_items, start=1):
+            RoutingStep.objects.create(
+                routing=routing,
+                step_no=idx,
+                process=item.process,
+                line=item.line,
+                time_unit=item.time_unit,
+                lead_time_days=item.lead_time_days if item.time_unit == 'DAY' else 0,
+                duration_min=item.duration_min if item.time_unit == 'MINUTE' else None,
+                remark=f"Auto from BOM item {item.child_product.product_code}"
+            )
+
+        serialized = RoutingSerializer(routing)
+        return Response(
+            {
+                'message': 'Routing generated from BOM',
+                'routing': serialized.data,
+                'generated_steps': len(make_items),
+                'replaced_existing': not created,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        )
+
 
 class BOMItemViewSet(viewsets.ModelViewSet):
     queryset = BOMItem.objects.all()
     serializer_class = BOMItemSerializer
-    filterset_fields = ['bom', 'sourcing_type']
+    filterset_fields = ['bom', 'sourcing_type', 'process', 'line', 'time_unit']
     ordering_fields = ['created_at']
     ordering = ['id']
 

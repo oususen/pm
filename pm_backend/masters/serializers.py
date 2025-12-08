@@ -51,10 +51,34 @@ class CalendarDaySerializer(serializers.ModelSerializer):
 
 class BOMItemSerializer(serializers.ModelSerializer):
     child_product_name = serializers.CharField(source='child_product.product_name', read_only=True)
+    process_name = serializers.CharField(source='process.process_name', read_only=True)
+    line_name = serializers.CharField(source='line.line_name', read_only=True)
 
     class Meta:
         model = BOMItem
         fields = '__all__'
+
+    def validate(self, attrs):
+        sourcing_type = attrs.get('sourcing_type', getattr(self.instance, 'sourcing_type', None))
+        time_unit = attrs.get('time_unit', getattr(self.instance, 'time_unit', 'MINUTE'))
+        process = attrs.get('process', getattr(self.instance, 'process', None))
+
+        if sourcing_type == 'MAKE' and process is None:
+            raise serializers.ValidationError('自社製造の場合、工程は必須です。')
+
+        if time_unit not in ['MINUTE', 'DAY']:
+            raise serializers.ValidationError('時間単位は MINUTE か DAY を指定してください。')
+
+        if time_unit == 'MINUTE':
+            duration_min = attrs.get('duration_min', getattr(self.instance, 'duration_min', None))
+            if duration_min is None or duration_min <= 0:
+                raise serializers.ValidationError('時間単位=MINUTEのとき、所要時間(分)は1以上で入力してください。')
+        else:
+            lead_time_days = attrs.get('lead_time_days', getattr(self.instance, 'lead_time_days', 0))
+            if lead_time_days is None or lead_time_days <= 0:
+                raise serializers.ValidationError('時間単位=DAYのとき、リードタイム(日)は1以上で入力してください。')
+
+        return attrs
 
 
 class BOMSerializer(serializers.ModelSerializer):

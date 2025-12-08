@@ -17,6 +17,9 @@ export const createBomsAPI = (client) => ({
   deleteBOM(id) {
     return client.delete(`/boms/${id}/`)
   },
+  generateRouting(bomId, data) {
+    return client.post(`/boms/${bomId}/generate_routing/`, data)
+  },
 
   // BOM Items
   getBOMItems(bomId) {
