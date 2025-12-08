@@ -345,8 +345,8 @@ class CSVImportService:
 
                 # If this is a FIRM order, supersede overlapping FORECAST orders
                 if order_type == 'FIRM':
-                    if customer.customer_code == '000001':
-                        # Tiera: delete (supersede) forecasts up to the confirmed due date per product
+                    if customer.customer_code in {'000001', '000196'}:
+                        # Tiera / Kubota: delete (supersede) forecasts up to the confirmed due date per product
                         for product_code, cutoff_date in product_cutoffs.items():
                             overlapping_forecast_orders = Order.objects.filter(
                                 customer_id=customer_id,
