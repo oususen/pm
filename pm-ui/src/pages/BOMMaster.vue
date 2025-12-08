@@ -249,6 +249,7 @@
         </div>
         <div v-else>読み込み中...</div>
         <div class="form-actions">
+          <button type="button" @click="exportToExcel" class="btn-primary" :disabled="!bomTree">Excel出力</button>
           <button type="button" @click="closeTreeDialog" class="btn-secondary">閉じる</button>
         </div>
       </div>
@@ -607,6 +608,56 @@ const closeTreeDialog = () => {
   showTreeDialog.value = false
   bomTree.value = null
   expandedNodes.value = new Set()
+}
+
+const exportToExcel = () => {
+  if (!bomTree.value) return
+
+  // CSVヘッダー
+  const headers = ['部番', '階層', '数量']
+  const rows = [headers]
+
+  // データ行を追加
+  treeRows.value.forEach((row) => {
+    // 罫線とボタン部分を含めた部番表示
+    const productDisplay = row.prefix + row.product
+    rows.push([
+      productDisplay,
+      row.level.toString(),
+      row.quantity || ''
+    ])
+  })
+
+  // CSV形式に変換
+  const csvContent = rows.map(row =>
+    row.map(cell => {
+      // セル内にカンマや改行、ダブルクォートがある場合はエスケープ
+      const cellStr = String(cell)
+      if (cellStr.includes(',') || cellStr.includes('\n') || cellStr.includes('"')) {
+        return '"' + cellStr.replace(/"/g, '""') + '"'
+      }
+      return cellStr
+    }).join(',')
+  ).join('\n')
+
+  // BOM UTF-8付きでダウンロード（Excelで正しく開けるように）
+  const bom = '\uFEFF'
+  const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' })
+  const link = document.createElement('a')
+  const url = URL.createObjectURL(blob)
+
+  // ファイル名を生成
+  const parentProduct = formatProductCode(bomTree.value.parent_product)
+  const timestamp = new Date().toISOString().slice(0, 10)
+  const filename = `BOM階層図_${parentProduct}_${timestamp}.csv`
+
+  link.setAttribute('href', url)
+  link.setAttribute('download', filename)
+  link.style.visibility = 'hidden'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
 }
 
 const startEditItem = (item) => {
