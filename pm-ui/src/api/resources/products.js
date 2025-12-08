@@ -1,6 +1,6 @@
 export const createProductsAPI = (client) => ({
-  getProducts() {
-    return client.get('/products/')
+  getProducts(params = {}) {
+    return client.get('/products/', { params })
   },
   async getAllProducts(params = {}) {
     // ページネーション対応：全ページをまとめて取得

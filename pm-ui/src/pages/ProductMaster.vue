@@ -9,6 +9,38 @@
     </div>
 
     <div class="page-content">
+      <div class="filter-bar">
+        <div class="filter-field">
+          <label>品番/品名</label>
+          <input
+            v-model="filters.search"
+            @keyup.enter="fetchProducts"
+            placeholder="品番・品名で検索"
+          />
+        </div>
+        <div class="filter-field">
+          <label>カテゴリ</label>
+          <select v-model="filters.category">
+            <option value="">すべて</option>
+            <option v-for="cat in categoryOptions" :key="cat.value" :value="cat.value">
+              {{ cat.label }}
+            </option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label>有効</label>
+          <select v-model="filters.is_active">
+            <option value="">すべて</option>
+            <option value="true">有効</option>
+            <option value="false">無効</option>
+          </select>
+        </div>
+        <div class="filter-actions">
+          <button @click="fetchProducts" class="btn-primary">検索</button>
+          <button @click="resetFilters" class="btn-secondary">リセット</button>
+        </div>
+      </div>
+
       <table class="data-table">
         <thead>
           <tr>
@@ -113,6 +145,11 @@ const getCategoryLabel = (value) => categoryMap[value] || value
 const products = ref([])
 const showDialog = ref(false)
 const isEdit = ref(false)
+const filters = ref({
+  search: '',
+  category: '',
+  is_active: ''
+})
 const formData = ref({
   product_code: '',
   product_name: '',
@@ -123,10 +160,26 @@ const formData = ref({
   is_final_product: false
 })
 
+// クエリパラメータを組み立て
+const buildQueryParams = () => {
+  const params = {}
+  if (filters.value.search.trim()) {
+    params.search = filters.value.search.trim()
+  }
+  if (filters.value.category) {
+    params.category = filters.value.category
+  }
+  if (filters.value.is_active !== '') {
+    params.is_active = filters.value.is_active === 'true'
+  }
+  return params
+}
+
 // 製品取得
 const fetchProducts = async () => {
   try {
-    const response = await api.products.getProducts()
+    const params = buildQueryParams()
+    const response = await api.products.getProducts(params)
     products.value = response.data.results || response.data
   } catch (error) {
     console.error('製品取得エラー:', error)
@@ -159,6 +212,16 @@ const editProduct = (product) => {
 // ダイアログを閉じる
 const closeDialog = () => {
   showDialog.value = false
+}
+
+// フィルタリセット
+const resetFilters = async () => {
+  filters.value = {
+    search: '',
+    category: '',
+    is_active: ''
+  }
+  await fetchProducts()
 }
 
 // 保存
@@ -197,6 +260,33 @@ onMounted(() => {
   fetchProducts()
 })
 </script>
+
+<style scoped>
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+}
+
+.filter-field label {
+  font-size: 12px;
+  color: #555;
+  margin-bottom: 4px;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 8px;
+}
+</style>
 
 <style scoped>
 .modal-overlay {
