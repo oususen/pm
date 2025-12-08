@@ -51,9 +51,16 @@
         <form @submit.prevent="saveBOM">
           <div class="form-group">
             <label>親製品 *</label>
+            <input
+              class="filter-input"
+              type="text"
+              v-model="parentProductFilter"
+              placeholder="品番/品名で絞り込み"
+              :disabled="isEdit"
+            />
             <select v-model="formData.parent_product" required :disabled="isEdit">
               <option value="">選択してください</option>
-              <option v-for="product in products" :key="product.id" :value="product.id">
+              <option v-for="product in filteredParentProducts" :key="product.id" :value="product.id">
                 {{ product.product_code }} - {{ product.product_name }}
               </option>
             </select>
@@ -221,7 +228,16 @@
               <tbody>
                 <tr v-for="row in treeRows" :key="row.key">
                   <td>
-                    <span class="tree-line">{{ row.prefix }}</span>{{ row.product }}
+                    <span class="tree-line">{{ row.prefix }}</span>
+                    <button
+                      v-if="row.hasChildren"
+                      @click="toggleNode(row.key)"
+                      class="expand-btn"
+                    >
+                      {{ row.isExpanded ? '－' : '＋' }}
+                    </button>
+                    <span v-else class="expand-placeholder"></span>
+                    {{ row.product }}
                   </td>
                   <td class="level-col">{{ row.level }}</td>
                   <td class="qty-col">{{ row.quantity }}</td>
@@ -263,40 +279,64 @@ const bomItems = ref([])
 const bomTree = ref(null)
 const showTreeDialog = ref(false)
 const treeLoading = ref(false)
+const expandedNodes = ref(new Set())
+
 const treeRows = computed(() => {
   if (!bomTree.value) return []
   const rows = []
+  const rootKey = `root-${bomTree.value.id}`
+
   rows.push({
-    key: `root-${bomTree.value.id}`,
+    key: rootKey,
     product: formatProductCode(bomTree.value.parent_product),
     quantity: '',
     level: 0,
     prefix: '',
+    hasChildren: bomTree.value.items && bomTree.value.items.length > 0,
+    isExpanded: expandedNodes.value.has(rootKey),
+    parentKey: null,
   })
-  const walk = (items, level, parentPrefix = '', isLastArray = []) => {
-    if (!items) return
+
+  const walk = (items, level, parentPrefix = '', parentKey = null, parentExpanded = true) => {
+    if (!items || !parentExpanded) return
     items.forEach((item, index) => {
       const isLast = index === items.length - 1
       const connector = isLast ? '└─ ' : '├─ '
       const currentPrefix = parentPrefix + connector
+      const itemKey = `item-${item.id}`
+      const hasChildren = item.child_bom && item.child_bom.items && item.child_bom.items.length > 0
 
       rows.push({
-        key: item.id,
+        key: itemKey,
         product: formatProductCode(item.child_product),
         quantity: formatQuantity(item.quantity),
         level,
         prefix: currentPrefix,
+        hasChildren,
+        isExpanded: expandedNodes.value.has(itemKey),
+        parentKey,
       })
 
-      if (item.child_bom && item.child_bom.items && item.child_bom.items.length) {
+      if (hasChildren) {
         const childPrefix = parentPrefix + (isLast ? '   ' : '│  ')
-        walk(item.child_bom.items, level + 1, childPrefix, [...isLastArray, isLast])
+        const isExpanded = expandedNodes.value.has(itemKey)
+        walk(item.child_bom.items, level + 1, childPrefix, itemKey, isExpanded)
       }
     })
   }
-  walk(bomTree.value.items, 1, '', [])
+
+  const rootExpanded = expandedNodes.value.has(rootKey)
+  walk(bomTree.value.items, 1, '', rootKey, rootExpanded)
   return rows
 })
+
+const toggleNode = (key) => {
+  if (expandedNodes.value.has(key)) {
+    expandedNodes.value.delete(key)
+  } else {
+    expandedNodes.value.add(key)
+  }
+}
 const itemForm = ref({
   child_product: '',
   quantity: '1.000',
@@ -308,6 +348,7 @@ const itemForm = ref({
 const editingItemId = ref(null)
 const bomItemsRequestToken = ref(0)
 const childProductFilter = ref('')
+const parentProductFilter = ref('')
 
 const sourcingTypeMap = {
   'MAKE': '自社製造',
@@ -410,6 +451,14 @@ const filteredChildProducts = computed(() => {
   )
 })
 
+const filteredParentProducts = computed(() => {
+  const keyword = parentProductFilter.value.trim().toLowerCase()
+  if (!keyword) return products.value
+  return products.value.filter((p) =>
+    `${p.product_code} ${p.product_name}`.toLowerCase().includes(keyword)
+  )
+})
+
 const getSupplierName = (supplierId) => {
   if (!supplierId) return '-'
   const supplier = suppliers.value.find(s => s.id === supplierId)
@@ -420,6 +469,7 @@ const getSourcingTypeLabel = (value) => sourcingTypeMap[value] || value
 
 const showNewDialog = () => {
   isEdit.value = false
+  parentProductFilter.value = ''
   const today = new Date().toISOString().split('T')[0]
   formData.value = {
     parent_product: '',
@@ -433,6 +483,7 @@ const showNewDialog = () => {
 
 const editBOM = (bom) => {
   isEdit.value = true
+  parentProductFilter.value = ''
   formData.value = {
     ...bom,
     parent_product: bom.parent_product
@@ -442,6 +493,7 @@ const editBOM = (bom) => {
 
 const closeDialog = () => {
   showDialog.value = false
+  parentProductFilter.value = ''
 }
 
 const saveBOM = async () => {
@@ -519,8 +571,11 @@ const viewTreeOnly = async (bom) => {
   showTreeDialog.value = true
   treeLoading.value = true
   bomTree.value = null
+  expandedNodes.value = new Set()
   try {
     await fetchBOMTree(bom.id)
+    // 初期状態：全て展開
+    expandAllNodes()
   } catch (error) {
     alert('階層図の取得に失敗しました')
   } finally {
@@ -528,9 +583,30 @@ const viewTreeOnly = async (bom) => {
   }
 }
 
+const expandAllNodes = () => {
+  if (!bomTree.value) return
+  const allKeys = new Set()
+  const rootKey = `root-${bomTree.value.id}`
+  allKeys.add(rootKey)
+
+  const collectKeys = (items) => {
+    if (!items) return
+    items.forEach((item) => {
+      const itemKey = `item-${item.id}`
+      allKeys.add(itemKey)
+      if (item.child_bom && item.child_bom.items && item.child_bom.items.length) {
+        collectKeys(item.child_bom.items)
+      }
+    })
+  }
+  collectKeys(bomTree.value.items)
+  expandedNodes.value = allKeys
+}
+
 const closeTreeDialog = () => {
   showTreeDialog.value = false
   bomTree.value = null
+  expandedNodes.value = new Set()
 }
 
 const startEditItem = (item) => {
@@ -730,6 +806,34 @@ const TreeBranch = defineComponent({
   color: #888;
   user-select: none;
   white-space: pre;
+}
+
+.expand-btn {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  margin: 0 4px;
+  border: 1px solid #ccc;
+  background: #fff;
+  color: #333;
+  font-size: 14px;
+  line-height: 18px;
+  text-align: center;
+  cursor: pointer;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.expand-btn:hover {
+  background: #f0f0f0;
+  border-color: #999;
+}
+
+.expand-placeholder {
+  display: inline-block;
+  width: 20px;
+  margin: 0 4px;
 }
 
 .filter-input {
