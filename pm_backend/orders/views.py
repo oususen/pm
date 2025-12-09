@@ -271,14 +271,15 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def expand(self, request):
         """
-        後工程ラインの計画数量を前工程への発注としてバックログに書き込む。
+        後ラインの計画数量を前ラインへの発注としてバックログに書き込む。
+        一つのラインずつ展開し、そのラインに使うすべての製品（みなし組立品以外）を展開する。
         期待payload: { line_id, items: [{product_id, process_id, plan_date, quantity, source_routing_step_id?}] }
-        line_id は「後工程（画面で選択中のライン=source_line）」として扱い、前工程ラインはルーティングから自動判定する。
+        line_id は「後ライン（画面で選択中のライン=source_line）」として扱い、前ラインはルーティングから自動判定する。
         """
         source_line_id = request.data.get('line_id')
         items = request.data.get('items', [])
         if not source_line_id:
-            return Response({'detail': 'line_id is required (後工程ライン)'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': 'line_id is required (後ライン)'}, status=status.HTTP_400_BAD_REQUEST)
         if not isinstance(items, list) or not items:
             return Response({'detail': 'items is required'}, status=status.HTTP_400_BAD_REQUEST)
         created = 0
@@ -298,8 +299,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         def resolve_prev_step(product_id, process_id, src_line_id):
             """
-            後工程のステップに対して、直前の前工程ステップ(1つ)を特定する。
+            後ラインのステップに対して、直前の前ラインのステップ(1つ)を特定する。
             一つのラインずつ展開するための関数。
+            各製品ごとに前ラインを特定することで、そのラインに使うすべての製品（みなし組立品以外）を展開する。
             """
             # まず最終製品を特定
             final_product_id = find_final_product(product_id)
@@ -330,7 +332,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             if not current:
                 raise ValueError(f'no step found for line_id={src_line_id} in routing for product_id={final_product_id}')
 
-            # 直前の前工程ステップを取得（step_noがcurrentより小さく、line_idが異なる最大のstep_no）
+            # 直前の前ラインのステップを取得（step_noがcurrentより小さく、line_idが異なる最大のstep_no）
             prev = (
                 RoutingStep.objects.filter(
                     routing_id=routing.id,
@@ -346,7 +348,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             if not prev:
                 raise ValueError(f'no previous step found for current step_no={current.step_no} in routing')
 
-            # 前工程のステップのoutput_productを使用（なければ最終製品を使用）
+            # 前ラインのステップのoutput_productを使用（なければ最終製品を使用）
             target_product_id = prev.output_product_id if prev.output_product_id else final_product_id
 
             return {
@@ -370,12 +372,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     skipped.append({'item': it, 'reason': str(e)})
                     continue
 
-                # 前工程のステップ情報を使ってLineBacklogに登録
+                # 前ラインのステップ情報を使ってLineBacklogに登録
                 obj, is_created = LineBacklog.objects.update_or_create(
                     plan_date=plan_date,
-                    process_id=prev_step['process_id'],  # 前工程のprocess_id
-                    product_id=prev_step['product_id'],  # 前工程のoutput_product_id
-                    line_id=prev_step['line_id'],        # 前工程のline_id
+                    process_id=prev_step['process_id'],  # 前ラインのprocess_id
+                    product_id=prev_step['product_id'],  # 前ラインのoutput_product_id
+                    line_id=prev_step['line_id'],        # 前ラインのline_id
                     defaults={
                         'demand_qty_plan': qty,
                         'source_line_id': source_line_id,
@@ -394,8 +396,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
     def pickup(self, request):
         """
         ラインの需要を取得する。
-        - LineBacklogにデータがあればLineBacklogから取得（中間工程）
-        - なければLineDemandから取得（最終工程）
+        - LineBacklogにデータがあればLineBacklogから取得（中間ライン - 後ラインからの需要）
+        - なければLineDemandから取得（最終ライン - 受注からの需要）
         - みなし組立品(is_phantom=True)は除外
         期待payload: { line_id, start_date?, end_date? }
         """
@@ -419,11 +421,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         backlog_qs = backlog_qs.filter(product__is_phantom=False)
 
         if backlog_qs.exists():
-            # 中間工程：LineBacklogから取得
+            # 中間ライン：LineBacklogから取得（後ラインからの需要）
             serializer = self.get_serializer(backlog_qs, many=True)
             return Response(serializer.data)
         else:
-            # 最終工程：LineDemandから取得（みなし組立品を除外）
+            # 最終ライン：LineDemandから取得（受注からの需要、みなし組立品を除外）
             demand_qs = LineDemand.objects.filter(line_id=line_id).select_related('product', 'routing_step__process')
             if start_date:
                 demand_qs = demand_qs.filter(plan_date__gte=start_date)
