@@ -4,17 +4,22 @@
 
     <div class="master-grid">
       <RouterLink to="/production/progress" class="master-tile">
-        <div class="icon-box">📈</div>
+        <div class="icon-box">??</div>
         <div class="label">進捗管理</div>
       </RouterLink>
 
+      <RouterLink to="/production/plan-input" class="master-tile">
+        <div class="icon-box">??</div>
+        <div class="label">生産計画入力</div>
+      </RouterLink>
+
       <RouterLink to="/production/line-demands" class="master-tile">
-        <div class="icon-box">🧭</div>
+        <div class="icon-box">??</div>
         <div class="label">ライン需要一覧</div>
       </RouterLink>
 
       <RouterLink to="/production/inventory" class="master-tile">
-        <div class="icon-box">📦</div>
+        <div class="icon-box">??</div>
         <div class="label">在庫/残量一覧</div>
       </RouterLink>
     </div>
