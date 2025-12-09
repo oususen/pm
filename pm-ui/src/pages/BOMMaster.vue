@@ -31,6 +31,7 @@
             <td>{{ bom.is_active ? '有効' : '無効' }}</td>
             <td>
               <button @click="viewDetails(bom)" class="btn-sm">詳細</button>
+              <button @click="openDetailsInNewTab(bom)" class="btn-sm">別タブ</button>
               <button @click="viewTreeOnly(bom)" class="btn-sm">階層図</button>
               <button @click="editBOM(bom)" class="btn-sm">編集</button>
               <button @click="deleteBOM(bom.id)" class="btn-sm btn-danger">削除</button>
@@ -92,21 +93,34 @@
     </div>
 
     <!-- 詳細ダイアログ -->
-    <div v-if="showDetailsDialog" class="modal-overlay" @click.self="closeDetailsDialog">
-      <div class="modal-content modal-large">
+    <div
+      v-if="showDetailsDialog || isStandaloneDetail"
+      :class="['modal-overlay', { 'as-page': isStandaloneDetail }]"
+      @click.self="handleDetailsBackdropClick"
+    >
+      <div :class="['modal-content', 'modal-large', { 'detail-page-card': isStandaloneDetail }]">
         <h2>BOM詳細</h2>
-        <div class="details-section">
-          <p><strong>BOM ID:</strong> {{ selectedBOM.id }}</p>
-          <p><strong>親製品:</strong> {{ getProductName(selectedBOM.parent_product) }}</p>
-          <p><strong>版:</strong> {{ selectedBOM.version }}</p>
-          <p><strong>有効期間:</strong> {{ selectedBOM.valid_from }} 〜 {{ selectedBOM.valid_to || '無期限' }}</p>
-          <p v-if="isPhantom(selectedBOM.parent_product)" class="phantom-info">
-
-            この親製品は見なし組立です。リードタイム計算や展開ロジックの扱いに注意してください。
-
-          </p>
-
+        <div class="details-section summary-grid">
+          <div class="summary-item">
+            <span class="summary-label">BOM ID</span>
+            <span class="summary-value">{{ selectedBOM.id }}</span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">親製品</span>
+            <span class="summary-value">{{ getProductName(selectedBOM.parent_product) }}</span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">版</span>
+            <span class="summary-value">{{ selectedBOM.version }}</span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">有効期間</span>
+            <span class="summary-value">{{ selectedBOM.valid_from }} ～ {{ selectedBOM.valid_to || '無期限' }}</span>
+          </div>
         </div>
+        <p v-if="isPhantom(selectedBOM.parent_product)" class="phantom-info">
+          この親製品は見なし組立です。リードタイム計算や展開ロジックの扱いに注意してください。
+        </p>
         <div v-if="bomTree" class="tree-section">
           <h3>階層表示</h3>
           <div class="tree-controls">
@@ -164,7 +178,7 @@
             </div>
             <div class="form-group">
               <label>数量 *</label>
-              <input type="number" step="0.001" min="0" v-model="itemForm.quantity" required />
+              <input type="number" step="1" min="1" v-model.number="itemForm.quantity" required />
             </div>
             <div class="form-group">
               <label>ロス率</label>
@@ -258,7 +272,7 @@
           <tbody>
             <tr v-for="item in bomItems" :key="item.id">
               <td>{{ getProductName(item.child_product) }}</td>
-              <td>{{ item.quantity }}</td>
+              <td>{{ formatQuantity(item.quantity) }}</td>
               <td>{{ item.loss_rate || '-' }}</td>
               <td>{{ getSourcingTypeLabel(item.sourcing_type) }}</td>
               <td>{{ getSupplierName(item.supplier) }}</td>
@@ -323,15 +337,17 @@
             </div>
           </div>
           <div class="form-actions">
-            <button type="button" class="btn-primary" @click="generateRoutingFromBom" :disabled="!routingGenForm.process_id">
+            <button type="button" class="btn-primary" @click="generateRoutingFromBom" :disabled="!selectedBOM.id">
               BOMからルーティング生成
             </button>
             <button type="button" class="btn-secondary" @click="resetRoutingGenForm">リセット</button>
           </div>
-          <p class="hint-text">MAKEの明細行数分のステップをこの工程・ラインで生成し、既存の自動ルーティングがあれば置き換えます。</p>
+          <p class="hint-text">MAKEの明細に登録された工程/ライン/時間をそのまま順番にステップ化します。ここではルーティングコードと説明だけ指定できます。</p>
         </div>
         <div class="form-actions">
-          <button type="button" @click="closeDetailsDialog" class="btn-secondary">閉じる</button>
+          <button type="button" @click="closeDetailsDialog" class="btn-secondary">
+            {{ isStandaloneDetail ? '一覧に戻る' : '閉じる' }}
+          </button>
         </div>
       </div>
     </div>
@@ -383,8 +399,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, h, defineComponent } from 'vue'
+import { ref, onMounted, computed, h, defineComponent, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import api from '../api/client'
+
+const route = useRoute()
+const router = useRouter()
 
 const boms = ref([])
 const products = ref([])
@@ -417,6 +437,15 @@ const routingGenForm = ref({
   routing_code: '',
   description: ''
 })
+
+const routeBomId = computed(() => {
+  const raw = route.query.bomId
+  if (raw === undefined || raw === null || raw === '') return null
+  const parsed = Number(raw)
+  return Number.isNaN(parsed) ? raw : parsed
+})
+
+const isStandaloneDetail = computed(() => route.query.detail === 'full' && !!routeBomId.value)
 
 const treeRows = computed(() => {
   if (!bomTree.value) return []
@@ -476,7 +505,7 @@ const toggleNode = (key) => {
 }
 const itemForm = ref({
   child_product: '',
-  quantity: '1.000',
+  quantity: 1,
   loss_rate: '',
   sourcing_type: 'MAKE',
   supplier: '',
@@ -551,10 +580,28 @@ const fetchLines = async () => {
   }
 }
 
+const findBomById = (bomId) => boms.value.find((b) => `${b.id}` === `${bomId}`)
+
+const ensureBomLoaded = async (bomId) => {
+  const existing = findBomById(bomId)
+  if (existing) return existing
+  try {
+    const response = await api.boms.getBOM(bomId)
+    const bom = response.data
+    if (bom && !findBomById(bom.id)) {
+      boms.value.push(bom)
+    }
+    return bom
+  } catch (error) {
+    console.error('BOM取得エラー(単体):', error)
+    return null
+  }
+}
+
 const resetItemForm = () => {
   itemForm.value = {
     child_product: '',
-    quantity: '1.000',
+    quantity: 1,
     loss_rate: '',
     sourcing_type: 'MAKE',
     supplier: '',
@@ -637,6 +684,11 @@ const formatQuantity = (quantity) => {
   const num = parseFloat(quantity)
   if (Number.isNaN(num)) return quantity
   return Math.trunc(num).toString()
+}
+
+const normalizeQuantityValue = (value) => {
+  const num = Math.trunc(Number(value))
+  return Number.isFinite(num) && num > 0 ? num : null
 }
 
 const isPhantom = (productId) => {
@@ -757,22 +809,11 @@ const generateRoutingFromBom = async () => {
     alert('BOMを開いてから実行してください')
     return
   }
-  if (!routingGenForm.value.process_id) {
-    alert('工程を選択してください')
-    return
-  }
 
   const payload = {
-    process_id: routingGenForm.value.process_id,
-    time_unit: routingGenForm.value.time_unit,
-    lead_time_days: routingGenForm.value.lead_time_days,
-    duration_min: routingGenForm.value.duration_min,
     description: routingGenForm.value.description || undefined,
     routing_code: routingGenForm.value.routing_code || undefined,
     is_default: true,
-  }
-  if (routingGenForm.value.line_id) {
-    payload.line_id = routingGenForm.value.line_id
   }
 
   try {
@@ -789,7 +830,15 @@ const generateRoutingFromBom = async () => {
   }
 }
 
-const viewDetails = async (bom) => {
+const openDetailsInNewTab = (bom) => {
+  const target = router.resolve({
+    name: 'BOMMaster',
+    query: { bomId: bom.id, detail: 'full' }
+  })
+  window.open(target.href, '_blank', 'noopener')
+}
+
+const viewDetails = async (bom, { openDialog = true } = {}) => {
   selectedBOM.value = bom
   resetItemForm()
   resetRoutingGenForm()
@@ -797,7 +846,7 @@ const viewDetails = async (bom) => {
   bomItems.value = []
   bomTree.value = null
   const token = ++bomItemsRequestToken.value
-  showDetailsDialog.value = true
+  showDetailsDialog.value = openDialog && !isStandaloneDetail.value
   try {
     await fetchBOMItems(bom.id, token)
     await fetchBOMTree(bom.id)
@@ -809,7 +858,20 @@ const viewDetails = async (bom) => {
   }
 }
 
+const openDetailFromRoute = async () => {
+  if (!routeBomId.value || !isStandaloneDetail.value) return
+  const bom = await ensureBomLoaded(routeBomId.value)
+  if (bom) {
+    await viewDetails(bom, { openDialog: false })
+  } else {
+    alert('指定のBOMが見つかりませんでした')
+  }
+}
+
 const closeDetailsDialog = () => {
+  if (isStandaloneDetail.value) {
+    router.replace({ name: 'BOMMaster' })
+  }
   showDetailsDialog.value = false
   selectedBOM.value = {}
   bomItems.value = []
@@ -817,6 +879,12 @@ const closeDetailsDialog = () => {
   bomItemsRequestToken.value += 1
   resetItemForm()
   childProductFilter.value = ''
+}
+
+const handleDetailsBackdropClick = () => {
+  if (!isStandaloneDetail.value) {
+    closeDetailsDialog()
+  }
 }
 
 const viewTreeOnly = async (bom) => {
@@ -924,7 +992,7 @@ const startEditItem = (item) => {
   editingItemId.value = item.id
   itemForm.value = {
     child_product: item.child_product,
-    quantity: item.quantity,
+    quantity: normalizeQuantityValue(item.quantity) ?? 1,
     loss_rate: item.loss_rate ?? '',
     sourcing_type: item.sourcing_type,
     supplier: item.supplier ?? '',
@@ -940,8 +1008,13 @@ const startEditItem = (item) => {
 
 const saveBOMItem = async () => {
   if (!selectedBOM.value?.id) return
-  if (!itemForm.value.child_product || !itemForm.value.quantity) {
-    alert('子製品と数量は必須です')
+  if (!itemForm.value.child_product) {
+    alert('子製品は必須です')
+    return
+  }
+  const normalizedQuantity = normalizeQuantityValue(itemForm.value.quantity)
+  if (!normalizedQuantity) {
+    alert('数量は1以上の整数で入力してください')
     return
   }
   applySourcingSideEffects()
@@ -968,7 +1041,7 @@ const saveBOMItem = async () => {
   const payload = {
     bom: selectedBOM.value.id,
     child_product: itemForm.value.child_product,
-    quantity: itemForm.value.quantity,
+    quantity: normalizedQuantity,
     loss_rate: itemForm.value.loss_rate === '' ? null : itemForm.value.loss_rate,
     sourcing_type: itemForm.value.sourcing_type,
     supplier: itemForm.value.sourcing_type === 'MAKE' ? null : (itemForm.value.supplier || null),
@@ -1014,13 +1087,29 @@ const deleteBOMItem = async (id) => {
   }
 }
 
-onMounted(() => {
-  fetchBOMs()
-  fetchProducts()
-  fetchSuppliers()
-  fetchProcesses()
-  fetchLines()
+onMounted(async () => {
+  await Promise.all([
+    fetchProducts(),
+    fetchSuppliers(),
+    fetchProcesses(),
+    fetchLines(),
+  ])
+  await fetchBOMs()
+  if (isStandaloneDetail.value && routeBomId.value) {
+    await openDetailFromRoute()
+  }
 })
+
+watch(
+  () => [route.query.bomId, route.query.detail],
+  () => {
+    if (isStandaloneDetail.value) {
+      openDetailFromRoute()
+    } else if (showDetailsDialog.value) {
+      closeDetailsDialog()
+    }
+  }
+)
 
 const TreeBranch = defineComponent({
   name: 'TreeBranch',
@@ -1069,6 +1158,14 @@ const TreeBranch = defineComponent({
   z-index: 1000;
 }
 
+.modal-overlay.as-page {
+  position: static;
+  background-color: transparent;
+  justify-content: flex-start;
+  align-items: flex-start;
+  padding: 0;
+}
+
 .modal-content {
   background: white;
   padding: 2rem;
@@ -1083,6 +1180,15 @@ const TreeBranch = defineComponent({
 .modal-large {
   min-width: 800px;
   max-width: 900px;
+}
+
+.detail-page-card {
+  max-width: none;
+  width: 100%;
+  max-height: none;
+  box-shadow: none;
+  border: 1px solid #e5e7eb;
+  min-width: 0;
 }
 
 .modal-content h2 {
@@ -1106,6 +1212,36 @@ const TreeBranch = defineComponent({
 
 .details-section p {
   margin: 0.5rem 0;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem 1rem;
+  align-items: center;
+}
+
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+@media (min-width: 640px) {
+  .summary-item {
+    flex-direction: row;
+    align-items: center;
+  }
+}
+
+.summary-label {
+  font-weight: 600;
+  color: #444;
+  min-width: 90px;
+}
+
+.summary-value {
+  color: #111;
 }
 
 .tree-section {
