@@ -104,11 +104,26 @@ class BOMAdmin(admin.ModelAdmin):
             if level == 0:
                 root_label = '最上位組立（最終工程）'
                 display_name = f"{root_label} [{bom.parent_product.product_code}]" if bom.parent_product else root_label
+                process_display = ''
+                line_display = ''
+                if bom.parent_product_id:
+                    default_routing = Routing.objects.filter(product_id=bom.parent_product_id, is_default=True).order_by('-id').first()
+                    if default_routing:
+                        last_step = default_routing.steps.order_by('step_no').last()
+                        if last_step:
+                            if last_step.process:
+                                process_display = f"{last_step.process.process_code} - {last_step.process.process_name}"
+                            if last_step.line:
+                                line_display = f"{last_step.line.line_code} - {last_step.line.line_name}"
+
                 ws.append([
                     bom.id,
                     bom.parent_product.product_code if bom.parent_product else '',
                     display_name,
                     level,
+                    '',
+                    process_display,
+                    line_display,
                     ''
                 ])
 

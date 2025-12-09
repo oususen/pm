@@ -291,11 +291,12 @@
         </table>
         <h3 class="mt-16">ルーティング自動生成</h3>
         <div class="routing-gen">
+          <p class="section-label">最終工程（任意）</p>
           <div class="form-row">
             <div class="form-group">
-              <label>工程 *</label>
-              <select v-model="routingGenForm.process_id">
-                <option value="">選択してください</option>
+              <label>工程</label>
+              <select v-model="routingGenForm.final_process_id">
+                <option value="">指定しない</option>
                 <option v-for="proc in processes" :key="proc.id" :value="proc.id">
                   {{ proc.process_code }} - {{ proc.process_name }}
                 </option>
@@ -303,8 +304,8 @@
             </div>
             <div class="form-group">
               <label>ライン</label>
-              <select v-model="routingGenForm.line_id">
-                <option value="">選択しない</option>
+              <select v-model="routingGenForm.final_line_id">
+                <option value="">指定しない</option>
                 <option v-for="line in lines" :key="line.id" :value="line.id">
                   {{ line.line_code }} - {{ line.line_name }}
                 </option>
@@ -312,18 +313,28 @@
             </div>
             <div class="form-group">
               <label>時間単位</label>
-              <select v-model="routingGenForm.time_unit">
+              <select v-model="routingGenForm.final_time_unit">
                 <option value="MINUTE">分</option>
                 <option value="DAY">日</option>
               </select>
             </div>
             <div class="form-group">
               <label>リードタイム(日)</label>
-              <input type="number" min="0" v-model.number="routingGenForm.lead_time_days" :disabled="routingGenForm.time_unit === 'MINUTE'" />
+              <input
+                type="number"
+                min="0"
+                v-model.number="routingGenForm.final_lead_time_days"
+                :disabled="routingGenForm.final_time_unit === 'MINUTE'"
+              />
             </div>
             <div class="form-group">
               <label>所要時間(分)</label>
-              <input type="number" min="1" v-model.number="routingGenForm.duration_min" :disabled="routingGenForm.time_unit === 'DAY'" />
+              <input
+                type="number"
+                min="1"
+                v-model.number="routingGenForm.final_duration_min"
+                :disabled="routingGenForm.final_time_unit === 'DAY'"
+              />
             </div>
           </div>
           <div class="form-row">
@@ -342,7 +353,9 @@
             </button>
             <button type="button" class="btn-secondary" @click="resetRoutingGenForm">リセット</button>
           </div>
-          <p class="hint-text">MAKEの明細に登録された工程/ライン/時間をそのまま順番にステップ化します。ここではルーティングコードと説明だけ指定できます。</p>
+          <p class="hint-text">
+            MAKEの明細に登録された工程/ライン/時間をそのまま順番にステップ化します。必要なら最後に「最終工程」を追加できます（任意）。
+          </p>
         </div>
         <div class="form-actions">
           <button type="button" @click="closeDetailsDialog" class="btn-secondary">
@@ -429,13 +442,13 @@ const showTreeDialog = ref(false)
 const treeLoading = ref(false)
 const expandedNodes = ref(new Set())
 const routingGenForm = ref({
-  process_id: '',
-  line_id: '',
-  time_unit: 'MINUTE',
-  lead_time_days: 0,
-  duration_min: 60,
   routing_code: '',
-  description: ''
+  description: '',
+  final_process_id: '',
+  final_line_id: '',
+  final_time_unit: 'MINUTE',
+  final_lead_time_days: 0,
+  final_duration_min: 60,
 })
 
 const routeBomId = computed(() => {
@@ -633,13 +646,13 @@ const applySourcingSideEffects = () => {
 
 const resetRoutingGenForm = () => {
   routingGenForm.value = {
-    process_id: '',
-    line_id: '',
-    time_unit: 'MINUTE',
-    lead_time_days: 0,
-    duration_min: 60,
     routing_code: '',
-    description: ''
+    description: '',
+    final_process_id: '',
+    final_line_id: '',
+    final_time_unit: 'MINUTE',
+    final_lead_time_days: 0,
+    final_duration_min: 60,
   }
 }
 
@@ -814,6 +827,30 @@ const generateRoutingFromBom = async () => {
     description: routingGenForm.value.description || undefined,
     routing_code: routingGenForm.value.routing_code || undefined,
     is_default: true,
+  }
+
+  // 最終工程のオプション指定がある場合だけ付与
+  if (routingGenForm.value.final_process_id) {
+    payload.final_process_id = routingGenForm.value.final_process_id
+    if (routingGenForm.value.final_line_id) {
+      payload.final_line_id = routingGenForm.value.final_line_id
+    }
+    payload.final_time_unit = routingGenForm.value.final_time_unit
+    if (routingGenForm.value.final_time_unit === 'MINUTE') {
+      if (!routingGenForm.value.final_duration_min || routingGenForm.value.final_duration_min <= 0) {
+        alert('最終工程の所要時間(分)を1以上で入力してください')
+        return
+      }
+      payload.final_duration_min = routingGenForm.value.final_duration_min
+      payload.final_lead_time_days = 0
+    } else {
+      if (!routingGenForm.value.final_lead_time_days || routingGenForm.value.final_lead_time_days <= 0) {
+        alert('最終工程のリードタイム(日)を1以上で入力してください')
+        return
+      }
+      payload.final_lead_time_days = routingGenForm.value.final_lead_time_days
+      payload.final_duration_min = null
+    }
   }
 
   try {
@@ -1399,6 +1436,12 @@ const TreeBranch = defineComponent({
   border: 1px solid #e1e8f5;
   border-radius: 8px;
   background: #f8fbff;
+}
+
+.section-label {
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: #444;
 }
 
 .routing-gen .form-row {
