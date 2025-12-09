@@ -190,11 +190,17 @@ const loadData = async () => {
       const inRange = !d.plan_date || (d.plan_date >= dateColumns.value[0].key && d.plan_date <= dateColumns.value[dateColumns.value.length - 1].key)
       return okLine && inRange
     })
+    const productMap = new Map(products.value.map((p) => [p.id, p]))
     const uniqueProducts = Array.from(
       new Map(
         filtered
-          .filter((d) => d.product)
-          .map((d) => [d.product, { id: d.product, code: d.product_code || '', name: d.product_name || '' }])
+          .map((d) => {
+            const p = productMap.get(d.product)
+            if (!d.product || !p) return null
+            if (p.is_phantom) return null
+            return [d.product, { id: d.product, code: p.product_code || d.product_code || '', name: p.product_name || d.product_name || '' }]
+          })
+          .filter(Boolean)
       ).values()
     )
     if (uniqueProducts.length === 0) {
@@ -219,9 +225,9 @@ const fetchLines = async () => {
   lines.value = res.data.results || res.data || []
 }
 const fetchProducts = async () => {
-  products.value = (await api.products.getAllProducts()).sort((a, b) =>
-    (a.product_code || '').localeCompare(b.product_code || '')
-  )
+  products.value = (await api.products.getAllProducts())
+    .filter((p) => !p.is_phantom)
+    .sort((a, b) => (a.product_code || '').localeCompare(b.product_code || ''))
 }
 
 onMounted(async () => {
