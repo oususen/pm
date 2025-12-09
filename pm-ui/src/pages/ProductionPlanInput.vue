@@ -39,6 +39,8 @@
         <button class="btn" @click="addRow">新規行追加</button>
         <button class="btn" @click="resetRows" :disabled="!rows.length">クリア</button>
         <button class="btn" @click="savePlan" :disabled="!rows.length">保存（ダミー）</button>
+        <button class="btn primary" @click="doPickup" :disabled="!selectedLine">取り込み</button>
+        <button class="btn primary" @click="doExpand" :disabled="!selectedLine || !rows.length">展開</button>
       </div>
     </div>
 
@@ -46,6 +48,7 @@
       <table class="plan-grid">
         <thead>
           <tr class="head-level1">
+            <th rowspan="2" class="sticky-col number-col">No</th>
             <th rowspan="2" class="sticky-col code-col">品番</th>
             <th rowspan="2" class="sticky-col name-col">品名</th>
             <th v-for="c in dateColumns" :key="c.key" colspan="5" class="date-head">
@@ -63,12 +66,15 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in filteredRows" :key="row.id">
+          <tr v-for="(row, idx) in filteredRows" :key="row.id">
+            <td class="sticky-col number-col">
+              <span class="product-info">{{ idx + 1 }}</span>
+            </td>
             <td class="sticky-col code-col">
-              <input type="text" v-model="row.product_code" />
+              <span class="product-info">{{ row.product_code || getProductCode(row.product_id) }}</span>
             </td>
             <td class="sticky-col name-col">
-              <input type="text" v-model="row.product_name" />
+              <span class="product-info">{{ row.product_name || getProductName(row.product_id) }}</span>
             </td>
             <template v-for="c in dateColumns" :key="c.key">
               <td class="num">
@@ -89,7 +95,7 @@
             </template>
           </tr>
           <tr v-if="!filteredRows.length">
-            <td :colspan="2 + dateColumns.length * 5" class="no-data">行を追加してください</td>
+            <td :colspan="3 + dateColumns.length * 5" class="no-data">行を追加してください</td>
           </tr>
         </tbody>
       </table>
@@ -119,6 +125,12 @@ const lines = ref([])
 const products = ref([])
 const rows = ref([])
 let tempId = 1
+
+const endDate = computed(() => {
+  const d = new Date(startDate.value)
+  d.setDate(d.getDate() + horizonDays.value - 1)
+  return d.toISOString().slice(0, 10)
+})
 
 const dateColumns = computed(() => {
   const cols = []
@@ -185,43 +197,8 @@ const refreshDates = () => {
 }
 
 const loadData = async () => {
+  // 取り込み前は空表示（手動で「取り込み」を押す運用）
   rows.value = []
-  try {
-    const res = await api.lineDemands.list()
-    const data = (res.data && (res.data.results || res.data)) || []
-    const filtered = data.filter((d) => {
-      const okLine = !selectedLine.value || `${d.line}` === `${selectedLine.value}`
-      const inRange = !d.plan_date || (d.plan_date >= dateColumns.value[0].key && d.plan_date <= dateColumns.value[dateColumns.value.length - 1].key)
-      return okLine && inRange
-    })
-    const productMap = new Map(products.value.map((p) => [p.id, p]))
-    const uniqueProducts = Array.from(
-      new Map(
-        filtered
-          .map((d) => {
-            const p = productMap.get(d.product)
-            if (!d.product || !p) return null
-            if (p.is_phantom) return null
-            return [d.product, { id: d.product, code: p.product_code || d.product_code || '', name: p.product_name || d.product_name || '' }]
-          })
-          .filter(Boolean)
-      ).values()
-    )
-    if (uniqueProducts.length === 0) {
-      addRow()
-      return
-    }
-    rows.value = uniqueProducts.map((p) => ({
-      id: `auto-${p.id}`,
-      product_id: p.id,
-      product_code: p.code,
-      product_name: p.name,
-      daily: initDaily(),
-    }))
-  } catch (e) {
-    console.error('ライン需要取得エラー', e)
-    if (!rows.value.length) addRow()
-  }
 }
 
 const fetchLines = async () => {
@@ -242,6 +219,77 @@ onMounted(async () => {
     console.error('初期データ取得エラー', e)
   }
 })
+
+const doPickup = async () => {
+  if (!selectedLine.value) return
+  try {
+    const res = await api.lineBacklogs.pickup({
+      line_id: selectedLine.value,
+      start_date: startDate.value,
+      end_date: endDate.value,
+    })
+    const data = res.data || []
+    const grouped = new Map()
+    data.forEach((d) => {
+      if (!d.product) return
+      const key = d.product
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          id: `bk-${key}`,
+          product_id: d.product,
+          product_code: d.product_code || '',
+          product_name: d.product_name || '',
+          process_id: d.process,
+          daily: initDaily(),
+        })
+      }
+      const row = grouped.get(key)
+      const dateKey = d.plan_date
+      if (row.daily[dateKey]) {
+        row.daily[dateKey].demand = Number(d.demand_qty_plan || 0)
+      }
+    })
+    rows.value = Array.from(grouped.values())
+
+    if (!rows.value.length) addRow()
+  } catch (e) {
+    console.error('バックログ取り込みエラー', e)
+    alert('取り込みに失敗しました。')
+  }
+}
+
+const doExpand = async () => {
+  if (!selectedLine.value) return
+  const items = []
+  rows.value.forEach((r) => {
+    if (!r.product_id || !r.process_id) return
+    dateColumns.value.forEach((c) => {
+      const qty = Number(r.daily[c.key]?.plan || 0)
+      if (!qty) return
+      items.push({
+        product_id: r.product_id,
+        process_id: r.process_id,
+        plan_date: c.key,
+        quantity: qty,
+      })
+    })
+  })
+  if (!items.length) {
+    alert('展開する計画がありません。')
+    return
+  }
+  try {
+    const res = await api.lineBacklogs.expand({
+      line_id: selectedLine.value,
+      items,
+    })
+    console.info('展開結果', res.data)
+    alert('展開しました。')
+  } catch (e) {
+    console.error('展開エラー', e)
+    alert('展開に失敗しました。')
+  }
+}
 </script>
 
 <style scoped>
@@ -325,17 +373,33 @@ onMounted(async () => {
 thead .sticky-col {
   z-index: 4;
 }
+.number-col {
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  text-align: center;
+}
 .code-col {
+  left: 40px;
   width: 120px;
   min-width: 120px;
   max-width: 120px;
 }
 .name-col {
-  left: 120px;
+  left: 160px;
   width: 100px;
   min-width: 100px;
   max-width: 100px;
   border-right: 2px solid #b5c1d2 !important;
+}
+.product-info {
+  display: block;
+  padding: 3px 4px;
+  font-size: 12px;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .plan-grid input,
 .plan-grid select {
@@ -400,5 +464,10 @@ thead .sticky-col {
 .btn:hover,
 .btn-secondary:hover {
   background: #f3f4f6;
+}
+.btn.primary {
+  background: #4a7ae5;
+  color: #fff;
+  border-color: #3865c7;
 }
 </style>

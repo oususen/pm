@@ -10,6 +10,7 @@ import { createRoutingsAPI } from './resources/routings'
 import { createOrdersAPI } from './resources/orders'
 import { createStagingAPI } from './resources/staging'
 import { createLineDemandsAPI } from './resources/lineDemands'
+import { createLineBacklogsAPI } from './resources/lineBacklogs'
 
 const API_BASE_URL = 'http://localhost:8002/api'
 
@@ -32,5 +33,6 @@ export default {
   staging: createStagingAPI(client),
   processes: createProcessesAPI(client),
   lineDemands: createLineDemandsAPI(client),
+  lineBacklogs: createLineBacklogsAPI(client),
 }
 

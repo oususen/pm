@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 from .models import LineDemand, Order, OrderLine, StgOrderRaw, StgOrderDaily
+from .models_line_backlog import LineBacklog
 from masters.models import Customer, Product
 
 
@@ -107,11 +108,12 @@ class LineDemandSerializer(serializers.ModelSerializer):
     line_code = serializers.SerializerMethodField()
     product_name = serializers.SerializerMethodField()
     required_qty = serializers.SerializerMethodField()
+    process = serializers.SerializerMethodField()
 
     class Meta:
         model = LineDemand
         fields = [
-            'id', 'line', 'line_code', 'line_name', 'routing_step', 'product', 'product_code', 'product_name',
+            'id', 'line', 'line_code', 'line_name', 'routing_step', 'process', 'product', 'product_code', 'product_name',
             'plan_date', 'lead_time_days',
             'forecast_qty', 'firm_qty', 'plan_qty', 'actual_qty',
             'plan_progress', 'actual_progress', 'required_qty',
@@ -130,3 +132,27 @@ class LineDemandSerializer(serializers.ModelSerializer):
 
     def get_required_qty(self, obj):
         return (obj.firm_qty or Decimal('0')) + (obj.forecast_qty or Decimal('0'))
+
+    def get_process(self, obj):
+        if obj.routing_step_id and obj.routing_step and obj.routing_step.process_id:
+            return obj.routing_step.process_id
+        return None
+
+
+class LineBacklogSerializer(serializers.ModelSerializer):
+    product_code = serializers.CharField(source='product.product_code', read_only=True)
+    product_name = serializers.CharField(source='product.product_name', read_only=True)
+    process_code = serializers.CharField(source='process.process_code', read_only=True)
+    process_name = serializers.CharField(source='process.process_name', read_only=True)
+    line_code = serializers.CharField(source='line.line_code', read_only=True)
+    line_name = serializers.CharField(source='line.line_name', read_only=True)
+
+    class Meta:
+        model = LineBacklog
+        fields = [
+            'id', 'plan_date', 'process', 'process_code', 'process_name',
+            'product', 'product_code', 'product_name',
+            'line', 'line_code', 'line_name',
+            'demand_qty_plan', 'source_line', 'source_routing_step', 'updated_at',
+        ]
+        read_only_fields = ['id', 'updated_at']

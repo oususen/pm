@@ -1,5 +1,6 @@
 from django.db import models
 from masters.models import Customer, Line, Product, RoutingStep
+from .models_line_backlog import LineBacklog
 
 
 class Order(models.Model):
