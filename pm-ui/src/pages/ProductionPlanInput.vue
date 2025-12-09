@@ -64,23 +64,27 @@
         </thead>
         <tbody>
           <tr v-for="row in filteredRows" :key="row.id">
-            <td class="sticky-col code-col">{{ row.product_code || getProductCode(row.product_id) }}</td>
-            <td class="sticky-col name-col">{{ row.product_name || getProductName(row.product_id) }}</td>
+            <td class="sticky-col code-col">
+              <input type="text" v-model="row.product_code" />
+            </td>
+            <td class="sticky-col name-col">
+              <input type="text" v-model="row.product_name" />
+            </td>
             <template v-for="c in dateColumns" :key="c.key">
               <td class="num">
-                <input type="number" v-model.number="row.daily[c.key].demand" />
+                <span class="readonly-value">{{ row.daily[c.key].demand || 0 }}</span>
               </td>
               <td class="num">
-                <input type="number" v-model.number="row.daily[c.key].actual" />
+                <span class="readonly-value">{{ row.daily[c.key].actual || 0 }}</span>
               </td>
               <td class="num stock">
-                <input type="number" v-model.number="row.daily[c.key].stock" />
+                <span class="readonly-value">{{ row.daily[c.key].stock || 0 }}</span>
               </td>
               <td class="num plan">
-                <input type="number" v-model.number="row.daily[c.key].plan" />
+                <input type="number" v-model.number="row.daily[c.key].plan" @keydown.up.prevent @keydown.down.prevent />
               </td>
               <td class="num stock-plan">
-                <input type="number" v-model.number="row.daily[c.key].plan_stock" />
+                <span class="readonly-value">{{ row.daily[c.key].plan_stock || 0 }}</span>
               </td>
             </template>
           </tr>
@@ -316,13 +320,22 @@ onMounted(async () => {
   position: sticky;
   left: 0;
   background: #f8fafc;
-  z-index: 2;
+  z-index: 3;
 }
-.name-col {
-  left: 120px;
+thead .sticky-col {
+  z-index: 4;
 }
 .code-col {
   width: 120px;
+  min-width: 120px;
+  max-width: 120px;
+}
+.name-col {
+  left: 120px;
+  width: 100px;
+  min-width: 100px;
+  max-width: 100px;
+  border-right: 2px solid #b5c1d2 !important;
 }
 .plan-grid input,
 .plan-grid select {
@@ -335,6 +348,27 @@ onMounted(async () => {
 }
 .num {
   text-align: right;
+}
+.num input {
+  width: 40px;
+  text-align: right;
+}
+.num input[type="number"]::-webkit-outer-spin-button,
+.num input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.num input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.readonly-value {
+  display: inline-block;
+  width: 40px;
+  padding: 3px 4px;
+  text-align: right;
+  color: #666;
+  font-size: 12px;
 }
 .stock {
   background: #f7f9fb;
