@@ -161,16 +161,44 @@ class BOMViewSet(viewsets.ModelViewSet):
         tree = self._build_bom_tree(bom, visited_bom_ids=set())
         return Response(tree)
 
+    def _collect_make_items_recursive(self, bom: BOM, visited_bom_ids: set, collector: list, depth: int = 0, path_prefix: tuple = ()):
+        """
+        Depth-first collect MAKE items from bom and its descendants.
+
+        - Child BOMs are traversed before appending the parent item (post-order) so
+          downstream工程が先に生成される（前後関係を表す工程順に近づける）。
+        - collector に (depth, path, item) を詰める。path は階層内の通し。
+        """
+        if bom.id in visited_bom_ids:
+            return
+        visited_bom_ids.add(bom.id)
+
+        items_qs = BOMItem.objects.filter(bom=bom).select_related('child_product', 'process', 'line').order_by('id')
+        for idx, item in enumerate(items_qs, start=1):
+            child_bom = self._pick_child_bom(item.child_product)
+            if child_bom:
+                self._collect_make_items_recursive(
+                    child_bom,
+                    visited_bom_ids,
+                    collector,
+                    depth=depth + 1,
+                    path_prefix=path_prefix + (idx,)
+                )
+            if item.sourcing_type == 'MAKE':
+                collector.append((depth, path_prefix + (idx,), item))
+
     @action(detail=True, methods=['post'])
     def generate_routing(self, request, pk=None):
-        """Generate or replace routing steps from BOM MAKE items."""
+        """Generate or replace routing steps from BOM MAKE items (recursive)."""
         bom = self.get_object()
-        make_items = list(BOMItem.objects.filter(bom=bom, sourcing_type='MAKE').select_related('child_product', 'process', 'line'))
-        if not make_items:
-            return Response({'detail': 'No MAKE items found in this BOM. Nothing to generate.'}, status=status.HTTP_400_BAD_REQUEST)
+        make_items_info = []
+        self._collect_make_items_recursive(bom, visited_bom_ids=set(), collector=make_items_info)
+
+        if not make_items_info:
+            return Response({'detail': 'No MAKE items found in this BOM tree. Nothing to generate.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Validate each item has process/time info
-        for it in make_items:
+        for _, _, it in make_items_info:
             if not it.process_id:
                 return Response({'detail': f'Process is required on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
             if it.time_unit not in ['MINUTE', 'DAY']:
@@ -204,24 +232,42 @@ class BOMViewSet(viewsets.ModelViewSet):
         routing.save()
 
         routing.steps.all().delete()
-        for idx, item in enumerate(make_items, start=1):
-            RoutingStep.objects.create(
+        created_steps = []
+        for idx, (_, _, item) in enumerate(make_items_info, start=1):
+            step = RoutingStep.objects.create(
                 routing=routing,
                 step_no=idx,
                 process=item.process,
                 line=item.line,
+                output_product=item.child_product,
                 time_unit=item.time_unit,
                 lead_time_days=item.lead_time_days if item.time_unit == 'DAY' else 0,
                 duration_min=item.duration_min if item.time_unit == 'MINUTE' else None,
                 remark=f"Auto from BOM item {item.child_product.product_code}"
             )
+            created_steps.append((item, step))
+
+        # 自動で工程別部品を付与（対象ステップの商品に紐づく子BOMの明細を消費部品とする）
+        for item, step in created_steps:
+            child_bom = self._pick_child_bom(item.child_product)
+            if not child_bom:
+                continue
+            child_items = BOMItem.objects.filter(bom=child_bom).select_related('child_product')
+            for child_item in child_items:
+                RoutingStepMaterial.objects.create(
+                    routing_step=step,
+                    component=child_item.child_product,
+                    quantity=child_item.quantity,
+                    consume_timing='START',
+                    remark=f"Auto from child BOM {child_bom.id}"
+                )
 
         serialized = RoutingSerializer(routing)
         return Response(
             {
-                'message': 'Routing generated from BOM',
+                'message': 'Routing generated from BOM (recursive)',
                 'routing': serialized.data,
-                'generated_steps': len(make_items),
+                'generated_steps': len(make_items_info),
                 'replaced_existing': not created,
             },
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
