@@ -14,6 +14,7 @@ import ProductionMenu from "../pages/ProductionMenu.vue";
 import LineDemandList from "../pages/LineDemandList.vue";
 import ProductionProgress from "../pages/ProductionProgress.vue";
 import ProductionInventory from "../pages/ProductionInventory.vue";
+import ProductionPlanInput from "../pages/ProductionPlanInput.vue";
 import ShippingMenu from "../pages/ShippingMenu.vue";
 import ShippingInstruction from "../pages/ShippingInstruction.vue";
 import ShippingActual from "../pages/ShippingActual.vue";
@@ -34,6 +35,7 @@ const routes = [
   { path: "/production/menu", name: "ProductionMenu", component: ProductionMenu },
   { path: "/production/line-demands", name: "LineDemandList", component: LineDemandList },
   { path: "/production/progress", name: "ProductionProgress", component: ProductionProgress },
+  { path: "/production/plan-input", name: "ProductionPlanInput", component: ProductionPlanInput },
   { path: "/production/inventory", name: "ProductionInventory", component: ProductionInventory },
   { path: "/shipping/menu", name: "ShippingMenu", component: ShippingMenu },
   { path: "/shipping/instruction", name: "ShippingInstruction", component: ShippingInstruction },
