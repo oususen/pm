@@ -233,17 +233,20 @@ class BOMViewSet(viewsets.ModelViewSet):
 
         routing.steps.all().delete()
         created_steps = []
-        for idx, (_, _, item) in enumerate(make_items_info, start=1):
+        for idx, (depth, path, item) in enumerate(make_items_info, start=1):
+            path_str = ".".join(str(p) for p in path) if path else "1"
             step = RoutingStep.objects.create(
                 routing=routing,
                 step_no=idx,
                 process=item.process,
                 line=item.line,
                 output_product=item.child_product,
+                hierarchy_depth=depth,
+                hierarchy_path=path_str,
                 time_unit=item.time_unit,
                 lead_time_days=item.lead_time_days if item.time_unit == 'DAY' else 0,
                 duration_min=item.duration_min if item.time_unit == 'MINUTE' else None,
-                remark=f"Auto from BOM item {item.child_product.product_code}"
+                remark=f"Auto from BOM item {item.child_product.product_code} (path {path_str}, depth {depth})"
             )
             created_steps.append((item, step))
 
