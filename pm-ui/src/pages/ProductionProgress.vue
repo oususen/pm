@@ -78,7 +78,7 @@ const rows = computed(() => {
     const within =
       d.plan_date >= columns.value[0] &&
       d.plan_date <= columns.value[columns.value.length - 1];
-    const lineText = `${d.line_name || ""}${d.line || ""}`.toLowerCase();
+    const lineText = `${d.line_code || ""}${d.line_name || ""}${d.line || ""}`.toLowerCase();
     const okLine =
       !lineFilter.value ||
       lineText.includes(lineFilter.value.trim().toLowerCase());
@@ -87,11 +87,11 @@ const rows = computed(() => {
 
   const map = new Map();
   for (const d of filtered) {
-    const key = `${d.line || d.line_name || ""}__${d.product_code}`;
+    const key = `${d.line_code || d.line_name || d.line || ""}__${d.product_code}`;
     if (!map.has(key)) {
       map.set(key, {
         key,
-        label: `${d.line_name || d.line} / ${d.product_code}`,
+        label: `${d.line_code || d.line_name || d.line || "-"} / ${d.product_code}`,
         cells: {},
       });
     }

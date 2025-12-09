@@ -104,13 +104,14 @@ class LineDemandSerializer(serializers.ModelSerializer):
     """ライン別需要展開のシリアライザ"""
 
     line_name = serializers.SerializerMethodField()
+    line_code = serializers.SerializerMethodField()
     product_name = serializers.SerializerMethodField()
     required_qty = serializers.SerializerMethodField()
 
     class Meta:
         model = LineDemand
         fields = [
-            'id', 'line', 'line_name', 'routing_step', 'product', 'product_code', 'product_name',
+            'id', 'line', 'line_code', 'line_name', 'routing_step', 'product', 'product_code', 'product_name',
             'plan_date', 'lead_time_days',
             'forecast_qty', 'firm_qty', 'plan_qty', 'actual_qty',
             'plan_progress', 'actual_progress', 'required_qty',
@@ -120,6 +121,9 @@ class LineDemandSerializer(serializers.ModelSerializer):
 
     def get_line_name(self, obj):
         return obj.line.line_name if obj.line_id else None
+
+    def get_line_code(self, obj):
+        return obj.line.line_code if obj.line_id else None
 
     def get_product_name(self, obj):
         return obj.product.product_name if obj.product_id else None
