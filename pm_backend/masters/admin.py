@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay,
-    BOM, BOMItem, Routing, RoutingStep
+    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial
 )
 
 
@@ -67,6 +67,19 @@ class BOMAdmin(admin.ModelAdmin):
 class RoutingStepInline(admin.TabularInline):
     model = RoutingStep
     extra = 1
+
+
+class RoutingStepMaterialInline(admin.TabularInline):
+    model = RoutingStepMaterial
+    extra = 1
+
+
+@admin.register(RoutingStep)
+class RoutingStepAdmin(admin.ModelAdmin):
+    list_display = ['routing', 'step_no', 'process', 'line', 'output_product', 'time_unit', 'lead_time_days', 'duration_min']
+    list_filter = ['process', 'line', 'time_unit']
+    search_fields = ['routing__routing_code', 'routing__product__product_code', 'process__process_code', 'line__line_code']
+    inlines = [RoutingStepMaterialInline]
 
 
 @admin.register(Routing)

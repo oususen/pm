@@ -2,7 +2,8 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     ProductViewSet, CustomerViewSet, ProcessViewSet, LineViewSet,
     SupplierViewSet, CalendarViewSet, CalendarDayViewSet,
-    BOMViewSet, BOMItemViewSet, RoutingViewSet, RoutingStepViewSet
+    BOMViewSet, BOMItemViewSet, RoutingViewSet, RoutingStepViewSet,
+    RoutingStepMaterialViewSet
 )
 
 router = DefaultRouter()
@@ -17,5 +18,6 @@ router.register(r'boms', BOMViewSet)
 router.register(r'bom-items', BOMItemViewSet)
 router.register(r'routings', RoutingViewSet)
 router.register(r'routing-steps', RoutingStepViewSet)
+router.register(r'routing-step-materials', RoutingStepMaterialViewSet)
 
 urlpatterns = router.urls

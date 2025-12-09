@@ -38,6 +38,7 @@ const sections = [
     id: "orders",
     title: "受注管理",
     items: [
+      { label: "受注メニュー", link: "/orders/menu" },
       { label: "受注入力", link: "/csv-upload" },
       { label: "受注一覧", link: "/orders" },
     ],
@@ -46,16 +47,19 @@ const sections = [
     id: "shipping",
     title: "出荷管理",
     items: [
-      { label: "出荷指示" },
-      { label: "出荷実績" },
+      { label: "出荷メニュー", link: "/shipping/menu" },
+      { label: "出荷指示", link: "/shipping/instruction" },
+      { label: "出荷実績", link: "/shipping/actual" },
     ],
   },
   {
     id: "production",
     title: "生産管理",
     items: [
-      { label: "生産計画" },
-      { label: "進捗管理" },
+      { label: "生産メニュー", link: "/production/menu" },
+      { label: "進捗管理", link: "/production/progress" },
+      { label: "在庫/残量", link: "/production/inventory" },
+      { label: "ライン需要", link: "/production/line-demands" },
     ],
   },
   {

@@ -6,12 +6,13 @@ from django_filters.rest_framework import DjangoFilterBackend
 from datetime import date
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay,
-    BOM, BOMItem, Routing, RoutingStep
+    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial
 )
 from .serializers import (
     ProductSerializer, CustomerSerializer, ProcessSerializer, LineSerializer,
     SupplierSerializer, CalendarSerializer, CalendarDaySerializer,
-    BOMSerializer, BOMItemSerializer, RoutingSerializer, RoutingStepSerializer
+    BOMSerializer, BOMItemSerializer, RoutingSerializer, RoutingStepSerializer,
+    RoutingStepMaterialSerializer
 )
 
 
@@ -249,3 +250,13 @@ class RoutingStepViewSet(viewsets.ModelViewSet):
     filterset_fields = ['routing', 'process', 'line', 'time_unit']
     ordering_fields = ['step_no']
     ordering = ['routing', 'step_no']
+
+
+class RoutingStepMaterialViewSet(viewsets.ModelViewSet):
+    queryset = RoutingStepMaterial.objects.all().select_related('routing_step', 'component')
+    serializer_class = RoutingStepMaterialSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['routing_step', 'component', 'consume_timing']
+    search_fields = ['component__product_code', 'component__product_name']
+    ordering_fields = ['routing_step', 'component']
+    ordering = ['routing_step', 'component']

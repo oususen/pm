@@ -5,14 +5,16 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
-from .models import Order, OrderLine, StgOrderRaw, StgOrderDaily
+from .models import LineDemand, Order, OrderLine, StgOrderRaw, StgOrderDaily
 from .serializers import (
+    LineDemandSerializer,
     OrderSerializer,
     OrderLineSerializer,
     StgOrderRawSerializer,
     StgOrderDailySerializer
 )
 from .services.csv_import import CSVImportService
+from .services.order_expansion import OrderExpansionService
 
 
 class OrderViewSet(viewsets.ModelViewSet):
@@ -223,3 +225,31 @@ class StgOrderDailyViewSet(viewsets.ModelViewSet):
     search_fields = ['product_code']
     ordering_fields = ['due_date', 'created_at']
     ordering = ['due_date']
+
+
+class LineDemandViewSet(viewsets.ModelViewSet):
+    """ライン需要展開ViewSet"""
+
+    queryset = LineDemand.objects.all().select_related('line', 'product', 'routing_step')
+    serializer_class = LineDemandSerializer
+    pagination_class = None  # 小規模データ想定のためページングなしで返却
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['line', 'routing_step', 'product', 'plan_date']
+    search_fields = ['product_code', 'order_numbers']
+    ordering_fields = ['plan_date', 'line', 'product_code', 'created_at']
+    ordering = ['plan_date', 'line']
+
+    @action(detail=False, methods=['post'])
+    def expand(self, request):
+        """OPEN受注をライン別に展開してt_line_demandを再生成"""
+        clear_param = request.data.get('clear_existing', True)
+        if isinstance(clear_param, str):
+            clear_existing = clear_param.lower() not in ['false', '0', 'no']
+        else:
+            clear_existing = bool(clear_param)
+
+        service = OrderExpansionService()
+        result = service.expand_open_orders(clear_existing=clear_existing)
+
+        status_code = status.HTTP_201_CREATED if not result.get('errors') else status.HTTP_400_BAD_REQUEST
+        return Response(result, status=status_code)

@@ -222,7 +222,13 @@ class Routing(models.Model):
         unique_together = [['product', 'routing_code']]
 
     def __str__(self):
-        return f"{self.product.product_code} - {self.routing_code}"
+        code = None
+        if self.product_id:
+            try:
+                code = self.product.product_code
+            except Product.DoesNotExist:
+                code = f"(missing product id={self.product_id})"
+        return f"{code or ''} - {self.routing_code}"
 
 
 class RoutingStep(models.Model):
@@ -237,6 +243,7 @@ class RoutingStep(models.Model):
     step_no = models.IntegerField(verbose_name='工程番号')
     process = models.ForeignKey(Process, on_delete=models.CASCADE, verbose_name='工程')
     line = models.ForeignKey(Line, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='ライン')
+    output_product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='加工後品目')
     time_unit = models.CharField(max_length=10, choices=TIME_UNIT_CHOICES, default='DAY', verbose_name='時間単位')
     lead_time_days = models.IntegerField(default=0, verbose_name='リードタイム(日)')
     start_offset_min = models.IntegerField(null=True, blank=True, verbose_name='開始オフセット(分)')
@@ -254,3 +261,29 @@ class RoutingStep(models.Model):
 
     def __str__(self):
         return f"{self.routing} - Step {self.step_no}"
+
+
+class RoutingStepMaterial(models.Model):
+    """工程別部品消費"""
+    CONSUME_TIMING_CHOICES = [
+        ('START', '工程開始'),
+        ('END', '工程完了'),
+    ]
+
+    id = models.BigAutoField(primary_key=True)
+    routing_step = models.ForeignKey(RoutingStep, on_delete=models.CASCADE, related_name='materials', verbose_name='工程')
+    component = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='routing_step_materials', verbose_name='部品')
+    quantity = models.DecimalField(max_digits=12, decimal_places=3, verbose_name='数量')
+    consume_timing = models.CharField(max_length=10, choices=CONSUME_TIMING_CHOICES, default='START', verbose_name='消費タイミング')
+    remark = models.CharField(max_length=200, null=True, blank=True, verbose_name='備考')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'm_routing_step_material'
+        verbose_name = '工程別部品消費'
+        verbose_name_plural = '工程別部品消費'
+        unique_together = [['routing_step', 'component']]
+
+    def __str__(self):
+        return f"{self.routing_step} uses {self.component.product_code} x {self.quantity}"

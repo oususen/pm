@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Order, OrderLine, StgOrderRaw, StgOrderDaily
+from .models import LineDemand, Order, OrderLine, StgOrderRaw, StgOrderDaily
 
 
 class OrderLineInline(admin.TabularInline):
@@ -39,3 +39,10 @@ class StgOrderDailyAdmin(admin.ModelAdmin):
     list_filter = ['order_type', 'due_date']
     search_fields = ['product_code', 'customer__customer_name']
     date_hierarchy = 'due_date'
+
+
+@admin.register(LineDemand)
+class LineDemandAdmin(admin.ModelAdmin):
+    list_display = ['line', 'product_code', 'plan_date', 'firm_qty', 'forecast_qty', 'plan_qty', 'actual_qty']
+    list_filter = ['line', 'plan_date']
+    search_fields = ['product_code', 'order_numbers']

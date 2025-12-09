@@ -9,6 +9,14 @@ import CalendarMaster from "../pages/CalendarMaster.vue";
 import BOMMaster from "../pages/BOMMaster.vue";
 import OrderList from "../pages/OrderList.vue";
 import CSVUpload from "../pages/CSVUpload.vue";
+import OrderMenu from "../pages/OrderMenu.vue";
+import ProductionMenu from "../pages/ProductionMenu.vue";
+import LineDemandList from "../pages/LineDemandList.vue";
+import ProductionProgress from "../pages/ProductionProgress.vue";
+import ProductionInventory from "../pages/ProductionInventory.vue";
+import ShippingMenu from "../pages/ShippingMenu.vue";
+import ShippingInstruction from "../pages/ShippingInstruction.vue";
+import ShippingActual from "../pages/ShippingActual.vue";
 
 const routes = [
   { path: "/", redirect: "/masters" },
@@ -20,8 +28,16 @@ const routes = [
   { path: "/masters/line", name: "LineMaster", component: LineMaster },
   { path: "/masters/calendar", name: "CalendarMaster", component: CalendarMaster },
   { path: "/masters/bom", name: "BOMMaster", component: BOMMaster },
+  { path: "/orders/menu", name: "OrderMenu", component: OrderMenu },
   { path: "/orders", name: "OrderList", component: OrderList },
   { path: "/csv-upload", name: "CSVUpload", component: CSVUpload },
+  { path: "/production/menu", name: "ProductionMenu", component: ProductionMenu },
+  { path: "/production/line-demands", name: "LineDemandList", component: LineDemandList },
+  { path: "/production/progress", name: "ProductionProgress", component: ProductionProgress },
+  { path: "/production/inventory", name: "ProductionInventory", component: ProductionInventory },
+  { path: "/shipping/menu", name: "ShippingMenu", component: ShippingMenu },
+  { path: "/shipping/instruction", name: "ShippingInstruction", component: ShippingInstruction },
+  { path: "/shipping/actual", name: "ShippingActual", component: ShippingActual },
 ];
 
 const router = createRouter({

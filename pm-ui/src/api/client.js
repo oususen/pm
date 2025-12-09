@@ -9,6 +9,7 @@ import { createBomsAPI } from './resources/boms'
 import { createRoutingsAPI } from './resources/routings'
 import { createOrdersAPI } from './resources/orders'
 import { createStagingAPI } from './resources/staging'
+import { createLineDemandsAPI } from './resources/lineDemands'
 
 const API_BASE_URL = 'http://localhost:8002/api'
 
@@ -22,7 +23,6 @@ const client = axios.create({
 export default {
   products: createProductsAPI(client),
   customers: createCustomersAPI(client),
-  processes: createProcessesAPI(client),
   lines: createLinesAPI(client),
   suppliers: createSuppliersAPI(client),
   calendars: createCalendarsAPI(client),
@@ -30,5 +30,7 @@ export default {
   routings: createRoutingsAPI(client),
   orders: createOrdersAPI(client),
   staging: createStagingAPI(client),
+  processes: createProcessesAPI(client),
+  lineDemands: createLineDemandsAPI(client),
 }
 

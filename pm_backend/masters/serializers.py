@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay,
-    BOM, BOMItem, Routing, RoutingStep
+    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial
 )
 
 
@@ -111,4 +111,14 @@ class RoutingSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Routing
+        fields = '__all__'
+
+
+class RoutingStepMaterialSerializer(serializers.ModelSerializer):
+    component_code = serializers.CharField(source='component.product_code', read_only=True)
+    component_name = serializers.CharField(source='component.product_name', read_only=True)
+    step_no = serializers.IntegerField(source='routing_step.step_no', read_only=True)
+
+    class Meta:
+        model = RoutingStepMaterial
         fields = '__all__'
