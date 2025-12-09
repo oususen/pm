@@ -1,129 +1,217 @@
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <h2 class="page-title">生産計画入力</h2>
-      <div class="page-actions">
-        <input type="date" v-model="planDate" />
-        <select v-model="selectedLine">
-          <option value="">ラインを選択</option>
-          <option v-for="line in lines" :key="line.id" :value="line.id">
-            {{ line.line_code }} - {{ line.line_name }}
-          </option>
-        </select>
-        <button class="btn-primary" @click="addRow">行を追加</button>
-        <button class="btn-secondary" @click="resetRows" :disabled="rows.length === 0">クリア</button>
-        <button class="btn-primary" @click="savePlan" :disabled="rows.length === 0">保存（ダミー）</button>
+  <div class="plan-container">
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <div class="field">
+          <label>処理区分</label>
+          <select v-model="mode">
+            <option value="plan">1:生産計画</option>
+            <option value="result">2:実績</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>ライン</label>
+          <select v-model="selectedLine" @change="loadData">
+            <option value="">すべて</option>
+            <option v-for="line in lines" :key="line.id" :value="line.id">
+              {{ line.line_code }} - {{ line.line_name }}
+            </option>
+          </select>
+        </div>
+        <div class="field">
+          <label>表示開始日</label>
+          <input type="date" v-model="startDate" @change="refreshDates" />
+        </div>
+        <div class="field">
+          <label>期間</label>
+          <select v-model.number="horizonDays" @change="refreshDates">
+            <option :value="60">60日</option>
+            <option :value="30">30日</option>
+            <option :value="14">14日</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>検索</label>
+          <input type="text" v-model="keyword" placeholder="品番/品名で絞り込み" />
+        </div>
+      </div>
+      <div class="toolbar-right">
+        <button class="btn" @click="addRow">新規行追加</button>
+        <button class="btn" @click="resetRows" :disabled="!rows.length">クリア</button>
+        <button class="btn" @click="savePlan" :disabled="!rows.length">保存（ダミー）</button>
       </div>
     </div>
 
-    <div class="page-content">
-      <div class="note">※ 現状は画面内で入力・確認するのみです。保存はデモアクションで、サーバー連携は未実装です。</div>
-      <table class="plan-table">
+    <div class="grid-wrapper">
+      <table class="plan-grid">
         <thead>
-          <tr>
-            <th style="width: 50px;">行</th>
-            <th style="min-width: 160px;">製品番号</th>
-            <th style="min-width: 220px;">品名</th>
-            <th style="min-width: 200px;">備考/仕様</th>
-            <th style="width: 120px;">計画数量</th>
-            <th style="min-width: 140px;">工程</th>
-            <th style="min-width: 140px;">ライン</th>
-            <th style="min-width: 160px;">メモ</th>
-            <th style="width: 80px;">操作</th>
+          <tr class="head-level1">
+            <th rowspan="2" class="sticky-col code-col">品番</th>
+            <th rowspan="2" class="sticky-col name-col">品名</th>
+            <th v-for="c in dateColumns" :key="c.key" colspan="5" class="date-head">
+              {{ c.label }}
+            </th>
+          </tr>
+          <tr class="head-level2">
+            <template v-for="c in dateColumns" :key="c.key">
+              <th class="mini">需要</th>
+              <th class="mini">実績</th>
+              <th class="mini">在庫</th>
+              <th class="mini">計画</th>
+              <th class="mini">計画在庫</th>
+            </template>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(row, idx) in rows" :key="row.id">
-            <td class="center">{{ idx + 1 }}</td>
-            <td>
-              <select v-model="row.product_id">
-                <option value="">選択</option>
-                <option v-for="p in products" :key="p.id" :value="p.id">
-                  {{ p.product_code }} - {{ p.product_name }}
-                </option>
-              </select>
-            </td>
-            <td class="text">
-              {{ getProductName(row.product_id) }}
-            </td>
-            <td>
-              <input type="text" v-model="row.spec" placeholder="仕様/備考" />
-            </td>
-            <td>
-              <input type="number" min="0" v-model.number="row.plan_qty" />
-            </td>
-            <td>
-              <select v-model="row.process_id">
-                <option value="">選択</option>
-                <option v-for="proc in processes" :key="proc.id" :value="proc.id">
-                  {{ proc.process_code }} - {{ proc.process_name }}
-                </option>
-              </select>
-            </td>
-            <td>
-              <select v-model="row.line_id">
-                <option value="">選択</option>
-                <option v-for="line in lines" :key="line.id" :value="line.id">
-                  {{ line.line_code }} - {{ line.line_name }}
-                </option>
-              </select>
-            </td>
-            <td>
-              <input type="text" v-model="row.remark" placeholder="メモ" />
-            </td>
-            <td class="center">
-              <button class="btn-sm btn-danger" @click="removeRow(idx)">削除</button>
-            </td>
+          <tr v-for="row in filteredRows" :key="row.id">
+            <td class="sticky-col code-col">{{ row.product_code || getProductCode(row.product_id) }}</td>
+            <td class="sticky-col name-col">{{ row.product_name || getProductName(row.product_id) }}</td>
+            <template v-for="c in dateColumns" :key="c.key">
+              <td class="num">
+                <input type="number" v-model.number="row.daily[c.key].demand" />
+              </td>
+              <td class="num">
+                <input type="number" v-model.number="row.daily[c.key].actual" />
+              </td>
+              <td class="num stock">
+                <input type="number" v-model.number="row.daily[c.key].stock" />
+              </td>
+              <td class="num plan">
+                <input type="number" v-model.number="row.daily[c.key].plan" />
+              </td>
+              <td class="num stock-plan">
+                <input type="number" v-model.number="row.daily[c.key].plan_stock" />
+              </td>
+            </template>
           </tr>
-          <tr v-if="rows.length === 0">
-            <td colspan="9" class="no-data">行を追加してください</td>
+          <tr v-if="!filteredRows.length">
+            <td :colspan="2 + dateColumns.length * 5" class="no-data">行を追加してください</td>
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <div class="footer-actions">
+      <button class="btn-secondary">F1: 終了</button>
+      <button class="btn-secondary">F3: クリア</button>
+      <button class="btn-secondary">F5: 備考</button>
+      <button class="btn-secondary">F10: 印刷</button>
+      <button class="btn-secondary">F12: 更新</button>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import api from '../api/client'
 
-const planDate = ref(new Date().toISOString().slice(0, 10))
+const mode = ref('plan')
 const selectedLine = ref('')
+const startDate = ref(new Date().toISOString().slice(0, 10))
+const horizonDays = ref(60) // 表示日から2か月（約60日）
+const keyword = ref('')
+
 const lines = ref([])
 const products = ref([])
-const processes = ref([])
-
 const rows = ref([])
 let tempId = 1
+
+const dateColumns = computed(() => {
+  const cols = []
+  const base = new Date(startDate.value)
+  for (let i = 0; i < horizonDays.value; i++) {
+    const d = new Date(base)
+    d.setDate(d.getDate() + i)
+    const label = `${d.getMonth() + 1}/${d.getDate()}(${['日','月','火','水','木','金','土'][d.getDay()]})`
+    const key = d.toISOString().slice(0, 10)
+    cols.push({ key, label })
+  }
+  return cols
+})
+
+const initDaily = () => {
+  const daily = {}
+  dateColumns.value.forEach((c) => {
+    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: 0, plan_stock: 0 }
+  })
+  return daily
+}
 
 const addRow = () => {
   rows.value.push({
     id: `tmp-${tempId++}`,
     product_id: '',
-    process_id: '',
-    line_id: selectedLine.value || '',
-    plan_qty: 0,
-    spec: '',
-    remark: '',
+    product_code: '',
+    product_name: '',
+    daily: initDaily(),
   })
-}
-
-const removeRow = (idx) => {
-  rows.value.splice(idx, 1)
 }
 
 const resetRows = () => {
   rows.value = []
 }
 
-const getProductName = (id) => {
-  const p = products.value.find((x) => x.id === id)
-  return p ? `${p.product_code} - ${p.product_name}` : ''
+const savePlan = () => {
+  alert('デモ画面のため保存処理は未実装です。')
 }
 
-const savePlan = () => {
-  alert('現状はデモのため、保存処理は未実装です。')
+const getProductName = (id) => {
+  const p = products.value.find((x) => x.id === id)
+  return p ? p.product_name : ''
+}
+const getProductCode = (id) => {
+  const p = products.value.find((x) => x.id === id)
+  return p ? p.product_code : ''
+}
+
+const filteredRows = computed(() => {
+  if (!keyword.value) return rows.value
+  const k = keyword.value.toLowerCase()
+  return rows.value.filter((r) => {
+    const txt = `${r.product_code || ''}${r.product_name || ''}${getProductCode(r.product_id)}${getProductName(r.product_id)}`.toLowerCase()
+    return txt.includes(k)
+  })
+})
+
+const refreshDates = () => {
+  // 再初期化は既存データの初期化だけ（簡易対応）
+  rows.value.forEach((r) => {
+    r.daily = initDaily()
+  })
+}
+
+const loadData = async () => {
+  rows.value = []
+  try {
+    const res = await api.lineDemands.list()
+    const data = (res.data && (res.data.results || res.data)) || []
+    const filtered = data.filter((d) => {
+      const okLine = !selectedLine.value || `${d.line}` === `${selectedLine.value}`
+      const inRange = !d.plan_date || (d.plan_date >= dateColumns.value[0].key && d.plan_date <= dateColumns.value[dateColumns.value.length - 1].key)
+      return okLine && inRange
+    })
+    const uniqueProducts = Array.from(
+      new Map(
+        filtered
+          .filter((d) => d.product)
+          .map((d) => [d.product, { id: d.product, code: d.product_code || '', name: d.product_name || '' }])
+      ).values()
+    )
+    if (uniqueProducts.length === 0) {
+      addRow()
+      return
+    }
+    rows.value = uniqueProducts.map((p) => ({
+      id: `auto-${p.id}`,
+      product_id: p.id,
+      product_code: p.code,
+      product_name: p.name,
+      daily: initDaily(),
+    }))
+  } catch (e) {
+    console.error('ライン需要取得エラー', e)
+    if (!rows.value.length) addRow()
+  }
 }
 
 const fetchLines = async () => {
@@ -135,14 +223,11 @@ const fetchProducts = async () => {
     (a.product_code || '').localeCompare(b.product_code || '')
   )
 }
-const fetchProcesses = async () => {
-  const res = await api.processes.getProcesses()
-  processes.value = res.data.results || res.data || []
-}
 
 onMounted(async () => {
   try {
-    await Promise.all([fetchLines(), fetchProducts(), fetchProcesses()])
+    await Promise.all([fetchLines(), fetchProducts()])
+    loadData()
   } catch (e) {
     console.error('初期データ取得エラー', e)
   }
@@ -150,100 +235,130 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.page-container {
-  padding: 16px;
-}
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-.page-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.page-actions input,
-.page-actions select {
-  padding: 6px 8px;
-  font-size: 12px;
-}
-.page-content {
-  margin-top: 8px;
-}
-.note {
-  margin-bottom: 8px;
-  color: #666;
-  font-size: 12px;
-}
-.plan-table {
-  width: 100%;
-  border-collapse: collapse;
+.plan-container {
+  padding: 8px 10px 14px;
+  background: #eef2f6;
   font-size: 13px;
 }
-.plan-table th,
-.plan-table td {
-  border: 1px solid #dfe4ea;
-  padding: 6px 8px;
-  vertical-align: middle;
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  background: #e1e8f4;
+  border: 1px solid #c5cfde;
+  padding: 8px;
+  border-radius: 4px;
 }
-.plan-table thead {
-  background: #f6f8fb;
+.toolbar-left {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
-.plan-table input,
-.plan-table select {
-  width: 100%;
-  padding: 4px 6px;
-  box-sizing: border-box;
+.toolbar-right {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
 }
-.center {
-  text-align: center;
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-.text {
+.field label {
+  font-size: 12px;
   color: #444;
+}
+.field input,
+.field select {
+  padding: 6px 8px;
+  min-width: 140px;
+  border: 1px solid #cfd6e1;
+  border-radius: 3px;
+}
+.grid-wrapper {
+  margin-top: 10px;
+  overflow-x: auto;
+  background: #fff;
+  border: 1px solid #c5cfde;
+  border-radius: 4px;
+}
+.plan-grid {
+  width: 100%;
+  border-collapse: collapse;
+}
+.plan-grid th,
+.plan-grid td {
+  border: 1px solid #d7dfe8;
+  padding: 4px 6px;
+  white-space: nowrap;
+}
+.head-level1 {
+  background: #d7e2f5;
+}
+.head-level2 {
+  background: #eef2f7;
+}
+.date-head {
+  text-align: center;
+  font-weight: 700;
+}
+.mini {
+  text-align: center;
+  font-size: 12px;
+}
+.sticky-col {
+  position: sticky;
+  left: 0;
+  background: #f8fafc;
+  z-index: 2;
+}
+.name-col {
+  left: 120px;
+}
+.code-col {
+  width: 120px;
+}
+.plan-grid input,
+.plan-grid select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 3px 4px;
+  border: 1px solid #d1d5db;
+  border-radius: 2px;
+  font-size: 12px;
+}
+.num {
+  text-align: right;
+}
+.stock {
+  background: #f7f9fb;
+}
+.plan {
+  background: #fffbe6;
+}
+.stock-plan {
+  background: #f1f7ff;
 }
 .no-data {
   text-align: center;
   color: #888;
-  padding: 12px 0;
+  padding: 10px 0;
 }
-.btn-primary {
-  padding: 6px 10px;
-  background: #3b82f6;
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
+.footer-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
 }
+.btn,
 .btn-secondary {
   padding: 6px 10px;
-  background: #fff;
-  color: #555;
-  border: 1px solid #d1d5db;
+  border: 1px solid #b5c1d2;
   border-radius: 4px;
-  cursor: pointer;
-}
-.btn-sm {
-  padding: 4px 8px;
-  border-radius: 4px;
-  border: 1px solid #d1d5db;
   background: #fff;
   cursor: pointer;
-  font-size: 12px;
 }
-.btn-danger {
-  color: #d9534f;
-  border-color: #d9534f;
-}
-.btn-primary:hover {
-  background: #2563eb;
-}
-.btn-secondary:hover,
-.btn-sm:hover {
+.btn:hover,
+.btn-secondary:hover {
   background: #f3f4f6;
-}
-.btn-danger:hover {
-  background: #fef2f2;
 }
 </style>
