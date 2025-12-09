@@ -62,6 +62,91 @@ class BOMAdmin(admin.ModelAdmin):
     list_display = ['parent_product', 'version', 'valid_from', 'valid_to', 'is_active']
     list_filter = ['is_active']
     inlines = [BOMItemInline]
+    actions = ['export_bom_tree_excel']
+
+    def export_bom_tree_excel(self, request, queryset):
+        try:
+            from openpyxl import Workbook
+        except ImportError:
+            self.message_user(request, "openpyxl がインストールされていません。pip install openpyxl を実行してください。", level='error')
+            return
+
+        from datetime import date
+        wb = Workbook()
+        ws = wb.active
+        ws.title = 'BOM Tree'
+        ws.append(['BOM ID', '親製品', '部番表示', '階層', '数量', '工程', 'ライン', '仕入先'])
+
+        today = date.today()
+
+        def pick_child_bom(product):
+            qs = BOM.objects.filter(
+                parent_product=product,
+                is_active=True,
+                valid_from__lte=today,
+            ).order_by('-valid_from', '-id')
+            child = qs.first()
+            if child:
+                return child
+            return BOM.objects.filter(
+                parent_product=product,
+                is_active=True,
+            ).order_by('-valid_from', '-id').first()
+
+        def walk_bom(bom, parent_prefix='', level=0, visited=None):
+            if visited is None:
+                visited = set()
+            if bom.id in visited:
+                return
+            visited.add(bom.id)
+
+            # root row
+            if level == 0:
+                root_label = '最上位組立（最終工程）'
+                display_name = f"{root_label} [{bom.parent_product.product_code}]" if bom.parent_product else root_label
+                ws.append([
+                    bom.id,
+                    bom.parent_product.product_code if bom.parent_product else '',
+                    display_name,
+                    level,
+                    ''
+                ])
+
+            items = list(BOMItem.objects.filter(bom=bom).select_related('child_product', 'process', 'line', 'supplier').order_by('id'))
+            for idx, item in enumerate(items):
+                is_last = idx == len(items) - 1
+                connector = '└─ ' if is_last else '├─ '
+                display_prefix = parent_prefix + connector
+                display_name = display_prefix + (item.child_product.product_code if item.child_product else '')
+
+                ws.append([
+                    bom.id,
+                    bom.parent_product.product_code if bom.parent_product else '',
+                    display_name,
+                    level + 1,
+                    item.quantity,
+                    f"{item.process.process_code} - {item.process.process_name}" if item.process else '',
+                    f"{item.line.line_code} - {item.line.line_name}" if item.line else '',
+                    item.supplier.supplier_name if item.supplier else '',
+                ])
+
+                child_bom = pick_child_bom(item.child_product) if item.child_product else None
+                if child_bom and child_bom.id not in visited:
+                    child_prefix = parent_prefix + ('   ' if is_last else '│  ')
+                    walk_bom(child_bom, parent_prefix=child_prefix, level=level + 1, visited=visited)
+
+        for bom in queryset.select_related('parent_product'):
+            walk_bom(bom, parent_prefix='', level=0, visited=set())
+
+        from django.http import HttpResponse
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename=\"bom_tree.xlsx\"'
+        wb.save(response)
+        return response
+
+    export_bom_tree_excel.short_description = '選択BOMの階層をExcel出力'
 
 
 class RoutingStepInline(admin.TabularInline):
@@ -97,3 +182,46 @@ class RoutingAdmin(admin.ModelAdmin):
     list_display = ['product', 'routing_code', 'is_default', 'is_active']
     list_filter = ['is_active', 'is_default']
     inlines = [RoutingStepInline]
+    actions = ['export_excel']
+
+    def export_excel(self, request, queryset):
+        from openpyxl import Workbook
+        from django.http import HttpResponse
+        wb = Workbook()
+        ws = wb.active
+        ws.title = 'Routing'
+        ws.append([
+            'Routing Code', 'Product Code', 'Product Name',
+            'Step No', 'Hierarchy Path', 'Process Code', 'Process Name',
+            'Line Code', 'Line Name', 'Output Product', 'Time Unit',
+            'Lead Time (Days)', 'Duration (Min)', 'Remark'
+        ])
+
+        for routing in queryset.select_related('product'):
+            steps = routing.steps.select_related('process', 'line', 'output_product').order_by('step_no')
+            for step in steps:
+                ws.append([
+                    routing.routing_code,
+                    routing.product.product_code if routing.product else '',
+                    routing.product.product_name if routing.product else '',
+                    step.step_no,
+                    step.hierarchy_path or '',
+                    step.process.process_code if step.process else '',
+                    step.process.process_name if step.process else '',
+                    step.line.line_code if step.line else '',
+                    step.line.line_name if step.line else '',
+                    step.output_product.product_code if step.output_product else '',
+                    step.time_unit,
+                    step.lead_time_days,
+                    step.duration_min or '',
+                    step.remark or '',
+                ])
+
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename="routings.xlsx"'
+        wb.save(response)
+        return response
+
+    export_excel.short_description = '選択したルーティングをExcel出力'

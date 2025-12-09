@@ -197,6 +197,40 @@ class BOMViewSet(viewsets.ModelViewSet):
         if not make_items_info:
             return Response({'detail': 'No MAKE items found in this BOM tree. Nothing to generate.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Optional final step (manual input)
+        final_process_id = request.data.get('final_process_id')
+        final_line_id = request.data.get('final_line_id')
+        final_time_unit = request.data.get('final_time_unit', 'MINUTE')
+        final_lead_time_days = request.data.get('final_lead_time_days')
+        final_duration_min = request.data.get('final_duration_min')
+
+        final_process = None
+        final_line = None
+
+        if final_process_id:
+            try:
+                final_process = Process.objects.get(id=final_process_id)
+            except Process.DoesNotExist:
+                return Response({'detail': f'Final process not found: id={final_process_id}'}, status=status.HTTP_400_BAD_REQUEST)
+
+            if final_line_id:
+                try:
+                    final_line = Line.objects.get(id=final_line_id)
+                except Line.DoesNotExist:
+                    return Response({'detail': f'Final line not found: id={final_line_id}'}, status=status.HTTP_400_BAD_REQUEST)
+
+            if final_time_unit not in ['MINUTE', 'DAY']:
+                return Response({'detail': 'final_time_unit must be MINUTE or DAY'}, status=status.HTTP_400_BAD_REQUEST)
+
+            if final_time_unit == 'MINUTE':
+                if not final_duration_min or int(final_duration_min) <= 0:
+                    return Response({'detail': 'final_duration_min must be >0 when final_time_unit=MINUTE'}, status=status.HTTP_400_BAD_REQUEST)
+                final_lead_time_days = 0
+            else:
+                if not final_lead_time_days or int(final_lead_time_days) <= 0:
+                    return Response({'detail': 'final_lead_time_days must be >0 when final_time_unit=DAY'}, status=status.HTTP_400_BAD_REQUEST)
+                final_duration_min = None
+
         # Validate each item has process/time info
         for _, _, it in make_items_info:
             if not it.process_id:
@@ -249,6 +283,22 @@ class BOMViewSet(viewsets.ModelViewSet):
                 remark=f"Auto from BOM item {item.child_product.product_code} (path {path_str}, depth {depth})"
             )
             created_steps.append((item, step))
+
+        # Append final step if provided
+        if final_process:
+            RoutingStep.objects.create(
+                routing=routing,
+                step_no=len(created_steps) + 1,
+                process=final_process,
+                line=final_line,
+                output_product=bom.parent_product,
+                hierarchy_depth=0,
+                hierarchy_path="final",
+                time_unit=final_time_unit,
+                lead_time_days=int(final_lead_time_days) if final_time_unit == 'DAY' else 0,
+                duration_min=int(final_duration_min) if final_time_unit == 'MINUTE' else None,
+                remark='Final step (manual input)'
+            )
 
         # 自動で工程別部品を付与（対象ステップの商品に紐づく子BOMの明細を消費部品とする）
         for item, step in created_steps:
