@@ -15,6 +15,11 @@ class LineBacklog(models.Model):
     # 需要（後ラインからの需要、または受注展開からの需要）
     demand_qty_plan = models.DecimalField(max_digits=14, decimal_places=3, default=0)
 
+    # 発注数/受注数（取り込み時に計算される需要数）
+    # 最終ライン：LineDemandからの受注数
+    # 他ライン：後ラインのplan_qtyを集計 × BOM個数
+    order_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0)
+
     # 計画（ユーザーが入力する生産計画数量）
     plan_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0)
 

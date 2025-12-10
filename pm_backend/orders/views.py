@@ -269,141 +269,22 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
     ordering = ['plan_date', 'line']
 
     @action(detail=False, methods=['post'])
-    def expand(self, request):
-        """
-        後ラインの計画数量を前ラインへの発注としてバックログに書き込む。
-        一つのラインずつ展開し、そのラインに使うすべての製品（みなし組立品以外）を展開する。
-        期待payload: { line_id, items: [{product_id, process_id, plan_date, quantity, source_routing_step_id?}] }
-        line_id は「後ライン（画面で選択中のライン=source_line）」として扱い、前ラインはルーティングから自動判定する。
-        """
-        source_line_id = request.data.get('line_id')
-        items = request.data.get('items', [])
-        if not source_line_id:
-            return Response({'detail': 'line_id is required (後ライン)'}, status=status.HTTP_400_BAD_REQUEST)
-        if not isinstance(items, list) or not items:
-            return Response({'detail': 'items is required'}, status=status.HTTP_400_BAD_REQUEST)
-        created = 0
-        updated = 0
-        skipped = []
-
-        def find_final_product(product_id):
-            """
-            中間品から最終製品を逆引きする。
-            product_idがRoutingのoutput_productとして使われている場合、そのRoutingのproduct（最終製品）を返す。
-            見つからなければproduct_id自体が最終製品とみなす。
-            """
-            step = RoutingStep.objects.filter(output_product_id=product_id).select_related('routing').first()
-            if step and step.routing:
-                return step.routing.product_id
-            return product_id
-
-        def resolve_prev_step(product_id, process_id, src_line_id):
-            """
-            後ラインのステップに対して、直前の前ラインのステップ(1つ)を特定する。
-            一つのラインずつ展開するための関数。
-            各製品ごとに前ラインを特定することで、そのラインに使うすべての製品（みなし組立品以外）を展開する。
-            """
-            # まず最終製品を特定
-            final_product_id = find_final_product(product_id)
-
-            # 最終製品のルーティングを取得
-            routing = Routing.objects.filter(product_id=final_product_id, is_default=True).prefetch_related('steps').first()
-            if not routing:
-                raise ValueError(f'default routing not found for final_product_id={final_product_id}')
-            steps = list(routing.steps.order_by('step_no').select_related('output_product', 'process', 'line'))
-
-            # 現在のラインに一致するステップを探す（複数マッチング戦略）
-            current = None
-
-            # 戦略1: product_idとprocess_idとline_idが全て一致
-            current = next((st for st in steps if st.line_id == src_line_id and st.process_id == process_id and
-                           (st.output_product_id == product_id or st.routing.product_id == product_id)), None)
-
-            # 戦略2: line_idとprocess_idが一致
-            if not current:
-                current = next((st for st in steps if st.line_id == src_line_id and st.process_id == process_id), None)
-
-            # 戦略3: line_idのみ一致（最後のステップ）
-            if not current:
-                matching_steps = [st for st in steps if st.line_id == src_line_id]
-                if matching_steps:
-                    current = matching_steps[-1]
-
-            if not current:
-                raise ValueError(f'no step found for line_id={src_line_id} in routing for product_id={final_product_id}')
-
-            # 直前の前ラインのステップを取得（step_noがcurrentより小さく、line_idが異なる最大のstep_no）
-            prev = (
-                RoutingStep.objects.filter(
-                    routing_id=routing.id,
-                    step_no__lt=current.step_no,
-                    line__isnull=False
-                )
-                .exclude(line_id=src_line_id)
-                .select_related('output_product', 'process', 'line')
-                .order_by('-step_no')
-                .first()
-            )
-
-            if not prev:
-                raise ValueError(f'no previous step found for current step_no={current.step_no} in routing')
-
-            # 前ラインのステップのoutput_productを使用（なければ最終製品を使用）
-            target_product_id = prev.output_product_id if prev.output_product_id else final_product_id
-
-            return {
-                'line_id': prev.line_id,
-                'process_id': prev.process_id,
-                'product_id': target_product_id,
-            }
-
-        for it in items:
-            try:
-                product_id = it.get('product_id')
-                process_id = it.get('process_id')
-                plan_date = it.get('plan_date')
-                # quantity: ユーザーが入力した計画数量（plan_qty）
-                plan_qty = Decimal(str(it.get('quantity', 0)))
-                if not product_id or not process_id or not plan_date:
-                    skipped.append({'item': it, 'reason': 'product_id/process_id/plan_date required'})
-                    continue
-                try:
-                    prev_step = resolve_prev_step(product_id, process_id, source_line_id)
-                except Exception as e:
-                    skipped.append({'item': it, 'reason': str(e)})
-                    continue
-
-                # 前ラインのLineBacklogに需要として登録
-                # 後ラインの計画数量（plan_qty）→ 前ラインの需要数量（demand_qty_plan）
-                obj, is_created = LineBacklog.objects.update_or_create(
-                    plan_date=plan_date,
-                    process_id=prev_step['process_id'],  # 前ラインのprocess_id
-                    product_id=prev_step['product_id'],  # 前ラインのoutput_product_id
-                    line_id=prev_step['line_id'],        # 前ラインのline_id
-                    defaults={
-                        'demand_qty_plan': plan_qty,  # 前ラインの需要
-                        'source_line_id': source_line_id,
-                        'source_routing_step_id': it.get('source_routing_step_id'),
-                    }
-                )
-                if is_created:
-                    created += 1
-                else:
-                    updated += 1
-            except Exception as e:
-                return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({'created': created, 'updated': updated, 'skipped': skipped})
-
-    @action(detail=False, methods=['post'])
     def pickup(self, request):
         """
-        ラインの需要を取得する。
-        - LineBacklogにデータがあればLineBacklogから取得（中間ライン - 後ラインからの需要）
-        - なければLineDemandから取得（最終ライン - 受注からの需要）
-        - みなし組立品(is_phantom=True)は除外
+        ラインの需要を取得・計算する。
+
+        処理フロー：
+        1. LineBacklogにデータがあればそのまま返す
+        2. なければ需要を計算：
+           - 後ラインからplan_qtyを集計 × BOM個数 → order_qty
+           - 後ラインがなければLineDemandから → order_qty（最終ライン）
+        3. 計算結果をLineBacklogに保存して返す
+
         期待payload: { line_id, start_date?, end_date? }
         """
         from orders.models import LineDemand
+        from masters.models import BOMItem, RoutingStep
+        from collections import defaultdict
 
         line_id = request.data.get('line_id')
         if not line_id:
@@ -412,49 +293,108 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         start_date = request.data.get('start_date')
         end_date = request.data.get('end_date')
 
-        # まずLineBacklogにデータがあるかチェック
-        backlog_qs = self.get_queryset().filter(line_id=line_id).select_related('product')
+        # このラインの製品を特定（このラインが生産する製品 = output_product）
+        target_products = set()
+        routing_steps = RoutingStep.objects.filter(line_id=line_id).select_related('output_product', 'routing__product', 'process')
+
+        # このラインの製品とprocess_idのマッピング
+        product_process_map = {}
+        for step in routing_steps:
+            product = step.output_product or step.routing.product
+            if product and not product.is_phantom:
+                target_products.add(product.id)
+                product_process_map[product.id] = step.process_id
+
+        if not target_products:
+            # このラインが生産する製品がない
+            return Response([])
+
+        # 需要を計算：(product_id, plan_date) -> order_qty
+        demand_map = defaultdict(Decimal)
+
+        # 既存バックログを先に取得し、ゼロ需要でもレコードを返せるよう初期化
+        backlog_qs = self.get_queryset().filter(line_id=line_id, product_id__in=target_products).select_related('product', 'process')
         if start_date:
             backlog_qs = backlog_qs.filter(plan_date__gte=start_date)
         if end_date:
             backlog_qs = backlog_qs.filter(plan_date__lte=end_date)
-
-        # みなし組立品を除外
         backlog_qs = backlog_qs.filter(product__is_phantom=False)
+        for existing in backlog_qs:
+            demand_map[(existing.product_id, existing.plan_date)] = Decimal('0')
 
-        if backlog_qs.exists():
-            # 中間ライン：LineBacklogから取得（後ラインからの需要）
-            serializer = self.get_serializer(backlog_qs, many=True)
-            return Response(serializer.data)
-        else:
-            # 最終ライン：LineDemandから取得（受注からの需要、みなし組立品を除外）
-            demand_qs = LineDemand.objects.filter(line_id=line_id).select_related('product', 'routing_step__process')
+        # 1. 後ライン（親製品を作るライン）からplan_qtyを集計 × BOM個数
+        downstream_found = False
+        for product_id in target_products:
+            # この製品を部品として使うBOMを取得（child=この製品）
+            bom_items = BOMItem.objects.filter(child_product_id=product_id).select_related('bom__parent_product')
+            for bom_item in bom_items:
+                parent_product = bom_item.bom.parent_product
+                if not parent_product or parent_product.is_phantom:
+                    continue
+
+                qty_per = bom_item.quantity or Decimal('0')
+                if qty_per == 0:
+                    continue
+
+                # 親製品を作るライン（後工程）をRoutingStepから特定
+                downstream_steps = RoutingStep.objects.filter(
+                    output_product_id=parent_product.id
+                ).select_related('routing', 'line')
+
+                for d_step in downstream_steps:
+                    downstream_product_id = d_step.output_product_id or (d_step.routing.product_id if d_step.routing else None)
+                    downstream_line_id = d_step.line_id
+                    if not downstream_product_id or not downstream_line_id:
+                        continue
+
+                    backlog_items = LineBacklog.objects.filter(
+                        line_id=downstream_line_id,
+                        product_id=downstream_product_id,
+                        product__is_phantom=False
+                    )
+                    if start_date:
+                        backlog_items = backlog_items.filter(plan_date__gte=start_date)
+                    if end_date:
+                        backlog_items = backlog_items.filter(plan_date__lte=end_date)
+
+                    for backlog in backlog_items:
+                        key = (product_id, backlog.plan_date)
+                        demand_map[key] += backlog.plan_qty * qty_per
+                        downstream_found = True
+
+        # 2. 後ラインからの需要が無い場合は最終ラインとしてLineDemandを使用
+        if not downstream_found:
+            demand_qs = LineDemand.objects.filter(line_id=line_id, product_id__in=target_products)
             if start_date:
                 demand_qs = demand_qs.filter(plan_date__gte=start_date)
             if end_date:
                 demand_qs = demand_qs.filter(plan_date__lte=end_date)
-
-            # みなし組立品を除外
             demand_qs = demand_qs.filter(product__is_phantom=False)
 
-            result = []
             for demand in demand_qs:
-                result.append({
-                    'plan_date': demand.plan_date,
-                    'product': demand.product.id if demand.product else None,
-                    'product_code': demand.product_code,
-                    'product_name': demand.product.product_name if demand.product else '',
-                    'process': demand.routing_step.process.id if demand.routing_step and demand.routing_step.process else None,
-                    'line': line_id,
-                    'demand_qty_plan': demand.plan_qty,
-                    'plan_qty': 0,  # 計画（ユーザーが入力する）
-                    'actual_qty': 0,  # 実績
-                    'stock_qty': 0,  # 在庫
-                    'planned_stock_qty': 0,  # 計画在庫
-                    'source_line': None,
-                })
+                if demand.product_id:
+                    key = (demand.product_id, demand.plan_date)
+                    demand_map[key] = demand.plan_qty
 
-            return Response(result)
+        # 3. LineBacklogに保存（order_qtyのみ更新、他の数量は維持）
+        upserted_items = []
+        for (product_id, plan_date), order_qty in demand_map.items():
+            process_id = product_process_map.get(product_id)
+            if not process_id:
+                continue
+
+            obj, _ = LineBacklog.objects.update_or_create(
+                plan_date=plan_date,
+                process_id=process_id,
+                product_id=product_id,
+                line_id=line_id,
+                defaults={'order_qty': order_qty}
+            )
+            upserted_items.append(obj)
+
+        # 4. 最新状態を返す
+        serializer = self.get_serializer(upserted_items or backlog_qs, many=True)
+        return Response(serializer.data)
 
     @action(detail=False, methods=['post'])
     def save(self, request):

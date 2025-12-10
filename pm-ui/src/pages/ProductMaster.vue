@@ -49,6 +49,7 @@
             <th>カテゴリ</th>
             <th>単位</th>
             <th>標準LT(日)</th>
+            <th>みなし組立</th>
             <th>有効</th>
             <th>操作</th>
           </tr>
@@ -60,6 +61,7 @@
             <td>{{ getCategoryLabel(product.category) }}</td>
             <td>{{ product.unit }}</td>
             <td>{{ product.standard_lt_days }}</td>
+            <td>{{ product.is_phantom ? 'はい' : 'いいえ' }}</td>
             <td>{{ product.is_active ? '有効' : '無効' }}</td>
             <td>
               <button @click="editProduct(product)" class="btn-sm">編集</button>

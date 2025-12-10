@@ -40,7 +40,6 @@
         <button class="btn" @click="resetRows" :disabled="!rows.length">クリア</button>
         <button class="btn" @click="savePlan" :disabled="!rows.length || !selectedLine">保存</button>
         <button class="btn primary" @click="doPickup" :disabled="!selectedLine">取り込み</button>
-        <button class="btn primary" @click="doExpand" :disabled="!selectedLine || !rows.length">展開</button>
       </div>
     </div>
 
@@ -280,7 +279,7 @@ const doPickup = async () => {
       const row = grouped.get(key)
       const dateKey = d.plan_date
       if (row.daily[dateKey]) {
-        row.daily[dateKey].demand = Number(d.demand_qty_plan || 0)
+        row.daily[dateKey].demand = Number(d.order_qty || 0)  // 需要=order_qty（取り込み時に計算された受注数/発注数）
         row.daily[dateKey].plan = Number(d.plan_qty || 0)
         row.daily[dateKey].actual = Number(d.actual_qty || 0)
         row.daily[dateKey].stock = Number(d.stock_qty || 0)
@@ -296,38 +295,6 @@ const doPickup = async () => {
   }
 }
 
-const doExpand = async () => {
-  if (!selectedLine.value) return
-  const items = []
-  rows.value.forEach((r) => {
-    if (!r.product_id || !r.process_id) return
-    dateColumns.value.forEach((c) => {
-      const qty = Number(r.daily[c.key]?.plan || 0)
-      if (!qty) return
-      items.push({
-        product_id: r.product_id,
-        process_id: r.process_id,
-        plan_date: c.key,
-        quantity: qty,
-      })
-    })
-  })
-  if (!items.length) {
-    alert('展開する計画がありません。')
-    return
-  }
-  try {
-    const res = await api.lineBacklogs.expand({
-      line_id: selectedLine.value,
-      items,
-    })
-    console.info('展開結果', res.data)
-    alert('展開しました。')
-  } catch (e) {
-    console.error('展開エラー', e)
-    alert('展開に失敗しました。')
-  }
-}
 </script>
 
 <style scoped>

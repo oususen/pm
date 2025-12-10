@@ -153,7 +153,7 @@ class LineBacklogSerializer(serializers.ModelSerializer):
             'id', 'plan_date', 'process', 'process_code', 'process_name',
             'product', 'product_code', 'product_name',
             'line', 'line_code', 'line_name',
-            'demand_qty_plan', 'plan_qty', 'actual_qty', 'stock_qty', 'planned_stock_qty',
+            'demand_qty_plan', 'order_qty', 'plan_qty', 'actual_qty', 'stock_qty', 'planned_stock_qty',
             'source_line', 'source_routing_step', 'updated_at',
         ]
         read_only_fields = ['id', 'updated_at']

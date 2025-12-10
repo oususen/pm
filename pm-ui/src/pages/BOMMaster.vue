@@ -134,6 +134,7 @@
                   <th>部番</th>
                   <th class="level-col">階層</th>
                   <th class="qty-col">数量</th>
+                  <th class="phantom-col">みなし組立</th>
                 </tr>
               </thead>
               <tbody>
@@ -152,6 +153,7 @@
                   </td>
                   <td class="level-col">{{ row.level }}</td>
                   <td class="qty-col">{{ row.quantity }}</td>
+                  <td class="phantom-col">{{ row.isPhantom ? '1' : '' }}</td>
                 </tr>
               </tbody>
             </table>
@@ -377,6 +379,7 @@
                   <th>部番</th>
                   <th class="level-col">階層</th>
                   <th class="qty-col">数量</th>
+                  <th class="phantom-col">みなし組立</th>
                 </tr>
               </thead>
               <tbody>
@@ -395,6 +398,7 @@
                   </td>
                   <td class="level-col">{{ row.level }}</td>
                   <td class="qty-col">{{ row.quantity }}</td>
+                  <td class="phantom-col">{{ row.isPhantom ? '1' : '' }}</td>
                 </tr>
               </tbody>
             </table>
@@ -474,6 +478,7 @@ const treeRows = computed(() => {
     hasChildren: bomTree.value.items && bomTree.value.items.length > 0,
     isExpanded: expandedNodes.value.has(rootKey),
     parentKey: null,
+    isPhantom: isPhantom(bomTree.value.parent_product?.id),
   })
 
   const walk = (items, level, parentPrefix = '', parentKey = null, parentExpanded = true) => {
@@ -494,6 +499,7 @@ const treeRows = computed(() => {
         hasChildren,
         isExpanded: expandedNodes.value.has(itemKey),
         parentKey,
+        isPhantom: isPhantom(item.child_product?.id || item.child_product),
       })
 
       if (hasChildren) {
@@ -979,7 +985,7 @@ const exportToExcel = () => {
   if (!bomTree.value) return
 
   // CSVヘッダー
-  const headers = ['部番', '階層', '数量']
+  const headers = ['部番', '階層', '数量', 'みなし組立']
   const rows = [headers]
 
   // データ行を追加
@@ -989,7 +995,8 @@ const exportToExcel = () => {
     rows.push([
       productDisplay,
       row.level.toString(),
-      row.quantity || ''
+      row.quantity || '',
+      row.isPhantom ? '1' : ''
     ])
   })
 
@@ -1309,6 +1316,11 @@ const TreeBranch = defineComponent({
 .tree-grid td {
   border: 1px solid #d6dce6;
   padding: 6px 8px;
+}
+
+.phantom-col {
+  width: 90px;
+  text-align: center;
 }
 
 .tree-grid th {

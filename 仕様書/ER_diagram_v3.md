@@ -160,7 +160,8 @@ erDiagram
       BIGINT process_id FK
       BIGINT product_id FK
       BIGINT line_id FK
-      DECIMAL(14,3) demand_qty_plan "後ラインからの需要または受注からの需要"
+      DECIMAL(14,3) demand_qty_plan "旧：後ラインからの需要または受注からの需要（廃止予定）"
+      DECIMAL(14,3) order_qty "発注数/受注数：最終ラインはLineDemandから、他ラインは後ラインのplan_qty×BOM個数を集計"
       DECIMAL(14,3) plan_qty "ユーザー入力の生産計画数量"
       DECIMAL(14,3) actual_qty "実際の生産数量"
       DECIMAL(14,3) stock_qty "在庫"
