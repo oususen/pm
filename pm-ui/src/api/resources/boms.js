@@ -22,8 +22,13 @@ export const createBomsAPI = (client) => ({
   },
 
   // BOM Items
-  getBOMItems(bomId) {
-    return client.get(`/bom-items/?bom=${bomId}`)
+  getBOMItems(params = {}) {
+    const queryParams = new URLSearchParams()
+    if (params.bom) queryParams.append('bom', params.bom)
+    if (params.sourcing_type) queryParams.append('sourcing_type', params.sourcing_type)
+    if (params.supplier) queryParams.append('supplier', params.supplier)
+    const query = queryParams.toString()
+    return client.get(`/bom-items/${query ? '?' + query : ''}`)
   },
   createBOMItem(data) {
     return client.post('/bom-items/', data)

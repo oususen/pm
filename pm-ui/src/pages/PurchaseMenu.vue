@@ -4,7 +4,7 @@
 
     <div class="master-grid">
       <RouterLink to="/purchase/plan-input" class="master-tile">
-        <div class="icon-box">??</div>
+        <div class="icon-box">📦</div>
         <div class="label">仕入れ計画</div>
       </RouterLink>
     </div>

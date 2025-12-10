@@ -21,13 +21,16 @@ const client = axios.create({
   },
 })
 
+const bomsAPI = createBomsAPI(client)
+
 export default {
   products: createProductsAPI(client),
   customers: createCustomersAPI(client),
   lines: createLinesAPI(client),
   suppliers: createSuppliersAPI(client),
   calendars: createCalendarsAPI(client),
-  boms: createBomsAPI(client),
+  boms: bomsAPI,
+  bomItems: { getBOMItems: bomsAPI.getBOMItems }, // BOMItemsに直接アクセス
   routings: createRoutingsAPI(client),
   orders: createOrdersAPI(client),
   staging: createStagingAPI(client),
