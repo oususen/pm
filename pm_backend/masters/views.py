@@ -331,7 +331,7 @@ class BOMItemViewSet(viewsets.ModelViewSet):
     queryset = BOMItem.objects.all()
     serializer_class = BOMItemSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['bom', 'sourcing_type', 'process', 'line', 'time_unit']
+    filterset_fields = ['bom', 'sourcing_type', 'process', 'line', 'time_unit', 'supplier']
     ordering_fields = ['created_at']
     ordering = ['id']
 

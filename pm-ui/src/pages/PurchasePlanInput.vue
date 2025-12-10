@@ -249,6 +249,13 @@ const refreshDates = () => {
 
 const loadData = async () => {
   rows.value = []
+  // 仕入先が選択されている場合、その仕入先の製品リストを更新
+  if (selectedSupplier.value) {
+    await fetchProducts(selectedSupplier.value)
+  } else {
+    // 仕入先が未選択の場合は全製品を表示
+    await fetchProducts()
+  }
 }
 
 const onPlanInput = (row, dateKey, value) => {
@@ -260,10 +267,14 @@ const fetchSuppliers = async () => {
   suppliers.value = res.data.results || res.data || []
 }
 
-const fetchProducts = async () => {
+const fetchProducts = async (supplierId = null) => {
   // 仕入れ対象製品を取得（sourcing_type='BUY'の部品）
   try {
-    const bomItemsRes = await api.bomItems.getBOMItems({ sourcing_type: 'BUY' })
+    const params = { sourcing_type: 'BUY' }
+    if (supplierId) {
+      params.supplier = supplierId
+    }
+    const bomItemsRes = await api.bomItems.getBOMItems(params)
     const bomItems = bomItemsRes.data.results || bomItemsRes.data || []
 
     // 子製品のIDリストを取得
@@ -295,6 +306,9 @@ const doPickup = async () => {
     return
   }
   try {
+    // 選択した仕入先の製品リストを再取得
+    await fetchProducts(selectedSupplier.value)
+
     // 仕入先に紐づく既存バックログを取得（line_idに仕入先IDを流用）
     const res = await api.lineBacklogs.pickup({
       line_id: selectedSupplier.value,
