@@ -137,10 +137,51 @@ erDiagram
       DATETIME updated_at
     }
 
+    t_line_demand {
+      BIGINT id PK
+      BIGINT line_id FK
+      BIGINT routing_step_id FK
+      BIGINT product_id FK
+      VARCHAR(50) product_code
+      DATE plan_date
+      INT lead_time_days
+      DECIMAL(14,3) forecast_qty
+      DECIMAL(14,3) firm_qty
+      DECIMAL(14,3) plan_qty
+      DECIMAL(14,3) actual_qty
+      TEXT order_numbers
+      DATETIME created_at
+      DATETIME updated_at
+    }
+
+    line_backlog {
+      BIGINT id PK
+      DATE plan_date
+      BIGINT process_id FK
+      BIGINT product_id FK
+      BIGINT line_id FK
+      DECIMAL(14,3) demand_qty_plan "後ラインからの需要または受注からの需要"
+      DECIMAL(14,3) plan_qty "ユーザー入力の生産計画数量"
+      DECIMAL(14,3) actual_qty "実際の生産数量"
+      DECIMAL(14,3) stock_qty "在庫"
+      DECIMAL(14,3) planned_stock_qty "計画在庫"
+      BIGINT source_line_id FK
+      BIGINT source_routing_step_id FK
+      DATETIME updated_at
+    }
+
     m_customer }o--|| m_calendar : "calendar_id -> id"
     t_order }o--|| m_customer : "customer_id -> id"
     t_order_line }o--|| t_order : "order_id -> id"
     t_order_line }o--|| m_product : "product_id -> id"
     stg_order_daily }o--|| stg_order_raw : "raw_id -> id"
     stg_order_daily }o--|| m_customer : "customer_id -> id"
+    t_line_demand }o--|| m_line : "line_id -> id"
+    t_line_demand }o--|| m_product : "product_id -> id"
+    t_line_demand }o--|| m_routing_step : "routing_step_id -> id"
+    line_backlog }o--|| m_process : "process_id -> id"
+    line_backlog }o--|| m_product : "product_id -> id"
+    line_backlog }o--|| m_line : "line_id -> id"
+    line_backlog }o--o| m_line : "source_line_id -> id"
+    line_backlog }o--o| m_routing_step : "source_routing_step_id -> id"
 ```

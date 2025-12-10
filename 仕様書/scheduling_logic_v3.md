@@ -111,21 +111,69 @@ VALUES (...)
 - トリガ: `/api/line-demands/expand/`（clear_existing オプション）で再生成。
 - 表示: 進捗管理画面では `t_line_demand` をそのまま表示。バックログは参照しない。
 
-### 在庫管理（前後工程間のバケツリレー）
-- コンセプト: 「後工程（ライン）（お客さん）」の計画を直前の前工程に需要として渡す。後工程が展開ボタンを押す→前工程が取り込みボタンで吸い上げる。
-- 入力源: 後工程ラインの「計画」値（需要=計画、内示/確定の区分なし）。
-- 保存先: `line_backlog(plan_date, process, product, line, demand_qty_plan, source_line, source_routing_step, updated_at)`。
-  - `line` … 供給する側（前工程ライン）
-  - `source_line` … 発注した側（後工程ライン＝画面選択ライン）
-- 前工程ラインの判定: デフォルトルーティングで該当 `process_id` と `source_line` のステップを特定し、その直前で「line が設定され、かつ source_line と異なる」ステップの `line` を採用。見つからなければ `skipped`。
+### 在庫管理（前後ライン間のバケツリレー）
+
+- コンセプト: 「後ライン（お客さん）」の計画を直前の前ラインに需要として渡す。後ラインが展開ボタンを押す→前ラインが取り込みボタンで吸い上げる。
+- 入力源: 後ラインの「計画」値（需要=計画、内示/確定の区分なし）。
+- 保存先: `line_backlog`テーブル
+
+  ```python
+  line_backlog(
+    plan_date,
+    process_id,           # 工程ID
+    product_id,          # 製品ID
+    line_id,             # 供給する側（前ライン）
+    demand_qty_plan,     # 需要数量（後ラインからの需要、または受注展開からの需要）
+    plan_qty,            # 計画数量（ユーザーが入力する生産計画）
+    actual_qty,          # 実績数量（実際の生産数量）
+    stock_qty,           # 在庫数量
+    planned_stock_qty,   # 計画在庫数量
+    source_line_id,      # 発注した側（後ライン＝画面選択ライン）
+    source_routing_step_id,
+    updated_at
+  )
+  ```
+
+  - `line_id` … 供給する側（前ライン）
+  - `source_line_id` … 発注した側（後ライン＝画面選択ライン）
+  - `demand_qty_plan` … 需要（後ラインの計画、または受注展開からの最終ライン需要）
+  - `plan_qty` … ユーザーが入力する生産計画数量
+  - `actual_qty` … 実績
+  - `stock_qty` … 在庫
+  - `planned_stock_qty` … 計画在庫
+- 前ラインの判定: デフォルトルーティングで該当 `process_id` と `source_line_id` のステップを特定し、その直前で「line が設定され、かつ source_line と異なる」ステップの `line` を採用。見つからなければ `skipped`。
 - トリガ:
-  - 展開: `/api/line-backlogs/expand/`（後工程→前工程へ upsert）
-  - 取り込み: `/api/line-backlogs/pickup/`（前工程が自ライン需要を取得）
-- 表示: 生産計画入力画面はバックログ取り込み後のデータのみ表示（`line_demand` へのフォールバックなし）。
+  - 取り込み: `/api/line-backlogs/pickup/`（前ラインが自ライン需要を取得。LineBacklogにデータがあればLineBacklogから、なければLineDemandから取得）
+  - 保存: `/api/line-backlogs/save/`（ユーザーが入力した計画データをLineBacklogに保存）
+  - 展開: `/api/line-backlogs/expand/`（保存された計画を前ラインの需要として展開。後ライン→前ラインへ upsert）
+- 表示: 生産計画入力画面はバックログ取り込み後のデータを表示。需要、計画、実績、在庫、計画在庫の5列を表示。
 
 ### 違いのまとめ
-- 目的: 進捗管理=全工程俯瞰、在庫管理=前後工程の発注/受注つなぎ。
-- 展開範囲: 進捗管理は全工程一括、在庫管理は常に直前1層のみ。
-- データ源: 進捗管理=受注（確定/内示）、在庫管理=後工程計画。
+
+- 目的: 進捗管理=全工程俯瞰、在庫管理=前後ラインの発注/受注つなぎ。
+- 展開範囲: 進捗管理は全工程一括、在庫管理は常に直前1層のみ（一つのラインずつ展開）。
+- データ源: 進捗管理=受注（確定/内示）、在庫管理=後ライン計画。
 - 表示データ: 進捗管理=`t_line_demand`、在庫管理=`line_backlog`。
-- ボタン: 進捗管理は一括展開（API）、在庫管理はライン単位で「展開」「取り込み」を手動実行。
+- ボタン: 進捗管理は一括展開（API）、在庫管理はライン単位で「取り込み」「保存」「展開」を手動実行。
+
+### 生産計画入力画面のフロー
+
+1. **ラインを選択**
+   - ユーザーが生産計画を立てたいラインを選択
+
+2. **取り込み** (`/api/line-backlogs/pickup/`)
+   - 選択したラインの需要データを取得
+   - LineBacklogにデータがあればLineBacklogから、なければLineDemandから取得
+   - 画面に需要、計画、実績、在庫、計画在庫を表示
+
+3. **計画入力**
+   - ユーザーが各製品・日付の計画数量を入力
+
+4. **保存** (`/api/line-backlogs/save/`)
+   - 入力した計画データをLineBacklogに保存
+   - plan_qty、actual_qty、stock_qty、planned_stock_qtyを更新
+
+5. **展開** (`/api/line-backlogs/expand/`)
+   - 保存された計画（plan_qty）を前ラインの需要（demand_qty_plan）として展開
+   - 中間品を使う場合は、output_product_idを使って前ラインを特定
+   - 前ラインのLineBacklogにdemand_qty_planをupsert
