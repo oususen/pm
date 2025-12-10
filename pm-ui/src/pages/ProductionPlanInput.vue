@@ -38,7 +38,7 @@
       <div class="toolbar-right">
         <button class="btn" @click="addRow">新規行追加</button>
         <button class="btn" @click="resetRows" :disabled="!rows.length">クリア</button>
-        <button class="btn" @click="savePlan" :disabled="!rows.length">保存（ダミー）</button>
+        <button class="btn" @click="savePlan" :disabled="!rows.length || !selectedLine">保存</button>
         <button class="btn primary" @click="doPickup" :disabled="!selectedLine">取り込み</button>
         <button class="btn primary" @click="doExpand" :disabled="!selectedLine || !rows.length">展開</button>
       </div>
@@ -167,8 +167,42 @@ const resetRows = () => {
   rows.value = []
 }
 
-const savePlan = () => {
-  alert('デモ画面のため保存処理は未実装です。')
+const savePlan = async () => {
+  if (!selectedLine.value) {
+    alert('ラインを選択してください。')
+    return
+  }
+  const items = []
+  rows.value.forEach((r) => {
+    if (!r.product_id || !r.process_id) return
+    dateColumns.value.forEach((c) => {
+      const daily = r.daily[c.key]
+      items.push({
+        product_id: r.product_id,
+        process_id: r.process_id,
+        plan_date: c.key,
+        plan_qty: Number(daily.plan || 0),
+        actual_qty: Number(daily.actual || 0),
+        stock_qty: Number(daily.stock || 0),
+        planned_stock_qty: Number(daily.plan_stock || 0),
+      })
+    })
+  })
+  if (!items.length) {
+    alert('保存するデータがありません。')
+    return
+  }
+  try {
+    const res = await api.lineBacklogs.save({
+      line_id: selectedLine.value,
+      items,
+    })
+    console.info('保存結果', res.data)
+    alert('保存しました。')
+  } catch (e) {
+    console.error('保存エラー', e)
+    alert('保存に失敗しました。')
+  }
 }
 
 const getProductName = (id) => {
@@ -247,6 +281,10 @@ const doPickup = async () => {
       const dateKey = d.plan_date
       if (row.daily[dateKey]) {
         row.daily[dateKey].demand = Number(d.demand_qty_plan || 0)
+        row.daily[dateKey].plan = Number(d.plan_qty || 0)
+        row.daily[dateKey].actual = Number(d.actual_qty || 0)
+        row.daily[dateKey].stock = Number(d.stock_qty || 0)
+        row.daily[dateKey].plan_stock = Number(d.planned_stock_qty || 0)
       }
     })
     rows.value = Array.from(grouped.values())

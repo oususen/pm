@@ -362,7 +362,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 product_id = it.get('product_id')
                 process_id = it.get('process_id')
                 plan_date = it.get('plan_date')
-                qty = Decimal(str(it.get('quantity', 0)))
+                # quantity: ユーザーが入力した計画数量（plan_qty）
+                plan_qty = Decimal(str(it.get('quantity', 0)))
                 if not product_id or not process_id or not plan_date:
                     skipped.append({'item': it, 'reason': 'product_id/process_id/plan_date required'})
                     continue
@@ -372,14 +373,15 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     skipped.append({'item': it, 'reason': str(e)})
                     continue
 
-                # 前ラインのステップ情報を使ってLineBacklogに登録
+                # 前ラインのLineBacklogに需要として登録
+                # 後ラインの計画数量（plan_qty）→ 前ラインの需要数量（demand_qty_plan）
                 obj, is_created = LineBacklog.objects.update_or_create(
                     plan_date=plan_date,
                     process_id=prev_step['process_id'],  # 前ラインのprocess_id
                     product_id=prev_step['product_id'],  # 前ラインのoutput_product_id
                     line_id=prev_step['line_id'],        # 前ラインのline_id
                     defaults={
-                        'demand_qty_plan': qty,
+                        'demand_qty_plan': plan_qty,  # 前ラインの需要
                         'source_line_id': source_line_id,
                         'source_routing_step_id': it.get('source_routing_step_id'),
                     }
@@ -445,7 +447,65 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     'process': demand.routing_step.process.id if demand.routing_step and demand.routing_step.process else None,
                     'line': line_id,
                     'demand_qty_plan': demand.plan_qty,
+                    'plan_qty': 0,  # 計画（ユーザーが入力する）
+                    'actual_qty': 0,  # 実績
+                    'stock_qty': 0,  # 在庫
+                    'planned_stock_qty': 0,  # 計画在庫
                     'source_line': None,
                 })
 
             return Response(result)
+
+    @action(detail=False, methods=['post'])
+    def save(self, request):
+        """
+        ユーザーが入力した計画データをLineBacklogに保存する
+        期待payload: { line_id, items: [{product_id, process_id, plan_date, plan_qty?, actual_qty?, stock_qty?, planned_stock_qty?}] }
+        """
+        line_id = request.data.get('line_id')
+        items = request.data.get('items', [])
+        if not line_id:
+            return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(items, list) or not items:
+            return Response({'detail': 'items is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        created = 0
+        updated = 0
+        skipped = []
+
+        for it in items:
+            try:
+                product_id = it.get('product_id')
+                process_id = it.get('process_id')
+                plan_date = it.get('plan_date')
+                if not product_id or not process_id or not plan_date:
+                    skipped.append({'item': it, 'reason': 'product_id/process_id/plan_date required'})
+                    continue
+
+                # 更新するフィールドを準備
+                defaults = {}
+                if 'plan_qty' in it:
+                    defaults['plan_qty'] = Decimal(str(it['plan_qty']))
+                if 'actual_qty' in it:
+                    defaults['actual_qty'] = Decimal(str(it['actual_qty']))
+                if 'stock_qty' in it:
+                    defaults['stock_qty'] = Decimal(str(it['stock_qty']))
+                if 'planned_stock_qty' in it:
+                    defaults['planned_stock_qty'] = Decimal(str(it['planned_stock_qty']))
+
+                # LineBacklogに保存
+                obj, is_created = LineBacklog.objects.update_or_create(
+                    plan_date=plan_date,
+                    process_id=process_id,
+                    product_id=product_id,
+                    line_id=line_id,
+                    defaults=defaults
+                )
+                if is_created:
+                    created += 1
+                else:
+                    updated += 1
+            except Exception as e:
+                return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({'created': created, 'updated': updated, 'skipped': skipped})
