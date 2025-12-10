@@ -18,6 +18,8 @@ import ProductionPlanInput from "../pages/ProductionPlanInput.vue";
 import ShippingMenu from "../pages/ShippingMenu.vue";
 import ShippingInstruction from "../pages/ShippingInstruction.vue";
 import ShippingActual from "../pages/ShippingActual.vue";
+import PurchaseMenu from "../pages/PurchaseMenu.vue";
+import PurchasePlanInput from "../pages/PurchasePlanInput.vue";
 
 const routes = [
   { path: "/", redirect: "/masters" },
@@ -37,6 +39,8 @@ const routes = [
   { path: "/production/progress", name: "ProductionProgress", component: ProductionProgress },
   { path: "/production/plan-input", name: "ProductionPlanInput", component: ProductionPlanInput },
   { path: "/production/inventory", name: "ProductionInventory", component: ProductionInventory },
+  { path: "/purchase/menu", name: "PurchaseMenu", component: PurchaseMenu },
+  { path: "/purchase/plan-input", name: "PurchasePlanInput", component: PurchasePlanInput },
   { path: "/shipping/menu", name: "ShippingMenu", component: ShippingMenu },
   { path: "/shipping/instruction", name: "ShippingInstruction", component: ShippingInstruction },
   { path: "/shipping/actual", name: "ShippingActual", component: ShippingActual },

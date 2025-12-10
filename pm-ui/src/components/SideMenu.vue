@@ -63,6 +63,14 @@ const sections = [
     ],
   },
   {
+    id: "purchase",
+    title: "仕入れ管理",
+    items: [
+      { label: "仕入れメニュー", link: "/purchase/menu" },
+      { label: "仕入れ計画", link: "/purchase/plan-input" },
+    ],
+  },
+  {
     id: "quality",
     title: "品質管理",
     items: [{ label: "検査実績" }],
