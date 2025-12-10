@@ -44,23 +44,29 @@
     </div>
 
     <div class="grid-wrapper">
-      <table class="plan-grid">
+      <table class="plan-grid" :style="{ minWidth: tableMinWidth + 'px' }">
         <thead>
           <tr class="head-level1">
             <th rowspan="2" class="sticky-col number-col">No</th>
             <th rowspan="2" class="sticky-col code-col">品番</th>
             <th rowspan="2" class="sticky-col name-col">品名</th>
-            <th v-for="c in dateColumns" :key="c.key" colspan="5" class="date-head">
+            <th
+              v-for="c in dateColumns"
+              :key="c.key"
+              colspan="5"
+              class="date-head day-end"
+              :class="c.dayClass"
+            >
               {{ c.label }}
             </th>
           </tr>
           <tr class="head-level2">
             <template v-for="c in dateColumns" :key="c.key">
-              <th class="mini">需要</th>
-              <th class="mini">実績</th>
-              <th class="mini">在庫</th>
-              <th class="mini">計画</th>
-              <th class="mini">計画在庫</th>
+              <th class="mini" :class="c.dayClass">需要</th>
+              <th class="mini" :class="c.dayClass">実績</th>
+              <th class="mini" :class="c.dayClass">在庫</th>
+              <th class="mini" :class="c.dayClass">計画</th>
+              <th class="mini day-end" :class="c.dayClass">計画在庫</th>
             </template>
           </tr>
         </thead>
@@ -76,19 +82,26 @@
               <span class="product-info">{{ row.product_name || getProductName(row.product_id) }}</span>
             </td>
             <template v-for="c in dateColumns" :key="c.key">
-              <td class="num">
+              <td class="num" :class="c.dayClass">
                 <span class="readonly-value">{{ row.daily[c.key].demand || 0 }}</span>
               </td>
-              <td class="num">
+              <td class="num" :class="c.dayClass">
                 <span class="readonly-value">{{ row.daily[c.key].actual || 0 }}</span>
               </td>
-              <td class="num stock">
+              <td class="num stock" :class="c.dayClass">
                 <span class="readonly-value">{{ row.daily[c.key].stock || 0 }}</span>
               </td>
-              <td class="num plan">
-                <input type="number" v-model.number="row.daily[c.key].plan" @keydown.up.prevent @keydown.down.prevent />
+              <td class="num plan" :class="c.dayClass">
+                <input
+                  type="text"
+                  inputmode="decimal"
+                  :value="row.daily[c.key].plan === 0 || row.daily[c.key].plan === '' || row.daily[c.key].plan == null ? '' : row.daily[c.key].plan"
+                  @input="onPlanInput(row, c.key, $event.target.value)"
+                  @keydown.up.prevent
+                  @keydown.down.prevent
+                />
               </td>
-              <td class="num stock-plan">
+              <td class="num stock-plan day-end" :class="c.dayClass">
                 <span class="readonly-value">{{ row.daily[c.key].plan_stock || 0 }}</span>
               </td>
             </template>
@@ -134,20 +147,30 @@ const endDate = computed(() => {
 const dateColumns = computed(() => {
   const cols = []
   const base = new Date(startDate.value)
+  const weekday = ['日', '月', '火', '水', '木', '金', '土']
   for (let i = 0; i < horizonDays.value; i++) {
     const d = new Date(base)
     d.setDate(d.getDate() + i)
-    const label = `${d.getMonth() + 1}/${d.getDate()}(${['日','月','火','水','木','金','土'][d.getDay()]})`
+    const day = d.getDay()
+    const label = `${d.getMonth() + 1}/${d.getDate()}(${weekday[day]})`
     const key = d.toISOString().slice(0, 10)
-    cols.push({ key, label })
+    const dayClass = day === 0 ? 'sun' : day === 6 ? 'sat' : ''
+    cols.push({ key, label, dayClass })
   }
   return cols
+})
+
+// テーブルの最小幅を計算して、縮みすぎを防ぐ
+const tableMinWidth = computed(() => {
+  const fixedColsWidth = 40 + 120 + 100 // No + 品番 + 品名
+  const perDayWidth = 80 * 5 // 5列×80px
+  return fixedColsWidth + dateColumns.value.length * perDayWidth
 })
 
 const initDaily = () => {
   const daily = {}
   dateColumns.value.forEach((c) => {
-    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: 0, plan_stock: 0 }
+    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0 }
   })
   return daily
 }
@@ -180,7 +203,7 @@ const savePlan = async () => {
         product_id: r.product_id,
         process_id: r.process_id,
         plan_date: c.key,
-        plan_qty: Number(daily.plan || 0),
+        plan_qty: daily.plan === '' || daily.plan === null || daily.plan === undefined ? 0 : Number(daily.plan),
         actual_qty: Number(daily.actual || 0),
         stock_qty: Number(daily.stock || 0),
         planned_stock_qty: Number(daily.plan_stock || 0),
@@ -234,6 +257,10 @@ const loadData = async () => {
   rows.value = []
 }
 
+const onPlanInput = (row, dateKey, value) => {
+  row.daily[dateKey].plan = value === '' ? '' : value
+}
+
 const fetchLines = async () => {
   const res = await api.lines.getLines()
   lines.value = res.data.results || res.data || []
@@ -280,7 +307,8 @@ const doPickup = async () => {
       const dateKey = d.plan_date
       if (row.daily[dateKey]) {
         row.daily[dateKey].demand = Number(d.order_qty || 0)  // 需要=order_qty（取り込み時に計算された受注数/発注数）
-        row.daily[dateKey].plan = Number(d.plan_qty || 0)
+        row.daily[dateKey].plan =
+          d.plan_qty === null || d.plan_qty === undefined ? '' : d.plan_qty === 0 ? '' : d.plan_qty
         row.daily[dateKey].actual = Number(d.actual_qty || 0)
         row.daily[dateKey].stock = Number(d.stock_qty || 0)
         row.daily[dateKey].plan_stock = Number(d.planned_stock_qty || 0)
@@ -302,6 +330,8 @@ const doPickup = async () => {
   padding: 8px 10px 14px;
   background: #eef2f6;
   font-size: 13px;
+  font-family: "Noto Sans JP", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  color: #1f2a44;
 }
 .toolbar {
   display: flex;
@@ -348,26 +378,46 @@ const doPickup = async () => {
 .plan-grid {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 .plan-grid th,
 .plan-grid td {
   border: 1px solid #d7dfe8;
   padding: 4px 6px;
   white-space: nowrap;
+  font-size: 1.288rem; /* 0.92rem を1.4倍 */
+  font-weight: 500;
+  color: #000;
+}
+.plan-grid th {
+  font-weight: 700;
+}
+.sat {
+  background: #ffe8cc;
+}
+.sun {
+  background: #ffd6d6;
 }
 .head-level1 {
-  background: #d7e2f5;
+  background: #cfd8ec;
+  color: #1a2140;
 }
 .head-level2 {
-  background: #eef2f7;
+  background: #e7edf7;
+  color: #1a2140;
 }
 .date-head {
   text-align: center;
   font-weight: 700;
+  min-width: 400px; /* 5列ぶんの幅をさらに広げて文字潰れを防ぐ */
 }
 .mini {
   text-align: center;
   font-size: 12px;
+  min-width: 80px; /* サブ列の最小幅を広げて視認性を上げる */
+}
+.day-end {
+  border-right: 4px solid #a2b0c5 !important;
 }
 .sticky-col {
   position: sticky;
@@ -386,9 +436,9 @@ thead .sticky-col {
 }
 .code-col {
   left: 40px;
-  width: 120px;
-  min-width: 120px;
-  max-width: 120px;
+  width: 156px; /* 120px の1.3倍 */
+  min-width: 156px;
+  max-width: 156px;
 }
 .name-col {
   left: 160px;
@@ -400,8 +450,9 @@ thead .sticky-col {
 .product-info {
   display: block;
   padding: 3px 4px;
-  font-size: 12px;
-  color: #333;
+  font-size: 1.288rem; /* 0.92rem を1.4倍 */
+  font-weight: 500;
+  color: #000;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -413,13 +464,16 @@ thead .sticky-col {
   padding: 3px 4px;
   border: 1px solid #d1d5db;
   border-radius: 2px;
-  font-size: 12px;
+  font-size: 1.288rem; /* 0.92rem を1.4倍 */
+  font-weight: 500;
+  color: #000;
 }
 .num {
   text-align: right;
+  min-width: 80px; /* セル幅を広げて日付列が潰れないようにする */
 }
 .num input {
-  width: 40px;
+  width: 100%;
   text-align: right;
 }
 .num input[type="number"]::-webkit-outer-spin-button,
@@ -437,7 +491,9 @@ thead .sticky-col {
   padding: 3px 4px;
   text-align: right;
   color: #666;
-  font-size: 12px;
+  font-size: 1.288rem; /* 0.92rem を1.4倍 */
+  font-weight: 500;
+  color: #000;
 }
 .stock {
   background: #f7f9fb;
