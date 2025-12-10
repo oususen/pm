@@ -150,7 +150,10 @@ VALUES (...)
        - phantom製品のBOMを再帰的に探索し、最終的な非phantom製品（final_parent）を特定
        - BOM個数は階層を通して累積（total_qty_per = qty1 × qty2 × ...）
      - **ステップ3**: final_parentを output_product に持つ RoutingStep（後工程ライン）を取得
-     - **ステップ4**: 後工程ラインの LineBacklog.plan_qty を取得し、total_qty_per を掛け算
+    - **ステップ4**: 後工程ラインの LineBacklog.plan_qty を取得し、total_qty_per を掛け算  
+       - リードタイム考慮：稼働日ベースで lt_days 日前倒し  
+         - 優先順: RoutingStep.lead_time_days > Line.lead_time_days > BOMItem.lead_time_days  
+         - 使用カレンダ: `calendar_code='tiera_muke'` を参照（未設定時は暦日）
      - 複数ライン・複数親製品があればすべて合計
   3. 後ラインからの需要が 0 件の場合（最終ライン）は LineDemand から取得
 

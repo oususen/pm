@@ -1,5 +1,6 @@
 from rest_framework import viewsets, status
 from decimal import Decimal
+from datetime import timedelta
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -283,7 +284,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         期待payload: { line_id, start_date?, end_date? }
         """
         from orders.models import LineDemand
-        from masters.models import BOMItem, RoutingStep
+        from masters.models import BOMItem, RoutingStep, Calendar, CalendarDay
         from collections import defaultdict
 
         line_id = request.data.get('line_id')
@@ -311,6 +312,31 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         # 需要を計算：(product_id, plan_date) -> order_qty
         demand_map = defaultdict(Decimal)
+
+        # 使用するカレンダ（tiera_muke）を取得
+        calendar_id = Calendar.objects.filter(calendar_code='tiera_muke').values_list('id', flat=True).first()
+
+        def shift_business_days(target_date, days):
+            """
+            稼働日で日付をシフトする。
+            days > 0 なら過去方向へ、days < 0 なら未来方向へ。
+            カレンダが無い場合は暦日でシフト。
+            """
+            if not days:
+                return target_date
+            if not calendar_id:
+                return target_date + timedelta(days=-days)
+
+            step = -1 if days > 0 else 1  # 正:過去へ、負:未来へ
+            remaining = abs(int(days))
+            current = target_date
+            while remaining > 0:
+                current = current + timedelta(days=step)
+                cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=current).first()
+                is_work = cal.is_working_day if cal is not None else True
+                if is_work:
+                    remaining -= 1
+            return current
 
         # 既存バックログを先に取得し、ゼロ需要でもレコードを返せるよう初期化
         backlog_qs = self.get_queryset().filter(line_id=line_id, product_id__in=target_products).select_related('product', 'process')
@@ -378,6 +404,15 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     if not downstream_line_id:
                         continue
 
+                    # リードタイム（日）を考慮：RoutingStep > Line > BOM明細 の順で優先
+                    lt_days = 0
+                    if d_step.lead_time_days:
+                        lt_days = d_step.lead_time_days
+                    elif d_step.line and d_step.line.lead_time_days:
+                        lt_days = d_step.line.lead_time_days
+                    elif bom_item.lead_time_days:
+                        lt_days = bom_item.lead_time_days
+
                     # ステップ5: 後工程ラインのLineBacklogから計画数を取得
                     backlog_items = LineBacklog.objects.filter(
                         line_id=downstream_line_id,
@@ -391,7 +426,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
                     # ステップ6: 後工程の計画数 × BOM個数 = 現在ラインの必要数
                     for backlog in backlog_items:
-                        key = (current_output_product, backlog.plan_date)
+                        plan_date = backlog.plan_date
+                        if lt_days:
+                            plan_date = shift_business_days(plan_date, lt_days)
+                        key = (current_output_product, plan_date)
                         demand_map[key] += backlog.plan_qty * total_qty_per
                         downstream_found = True
 
