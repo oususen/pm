@@ -322,34 +322,66 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         for existing in backlog_qs:
             demand_map[(existing.product_id, existing.plan_date)] = Decimal('0')
 
-        # 1. 後ライン（親製品を作るライン）からplan_qtyを集計 × BOM個数
+        # 1. 後ライン（次工程）から需要を取得
+        # ロジック：
+        #   ステップ1: 現在ラインのoutput_product（例：中間品C）を特定
+        #   ステップ2: 中間品Cを子部品として使う親製品（例：中間品B）をBOMから探す
+        #   ステップ3: 親製品がphantomの場合、さらにその親を辿る（最終製品まで）
+        #   ステップ4: 親製品を出力するラインをRoutingStepから探す
+        #   ステップ5: そのライン（例：溶接ライン）のLineBacklogから計画数を取得
+        #   ステップ6: BOM個数を掛けて現在ラインの必要数を計算
         downstream_found = False
         for product_id in target_products:
-            # この製品を部品として使うBOMを取得（child=この製品）
-            bom_items = BOMItem.objects.filter(child_product_id=product_id).select_related('bom__parent_product')
+            # 現在ラインのoutput_product（例：ブレーキラインなら中間品C）
+            current_output_product = product_id
+
+            # ステップ2: この製品を子部品として使うBOMを取得
+            # （parent ← current_output_product の関係）
+            bom_items = BOMItem.objects.filter(
+                child_product_id=current_output_product
+            ).select_related('bom__parent_product')
+
             for bom_item in bom_items:
                 parent_product = bom_item.bom.parent_product
-                if not parent_product or parent_product.is_phantom:
+                if not parent_product:
                     continue
 
                 qty_per = bom_item.quantity or Decimal('0')
                 if qty_per == 0:
                     continue
 
-                # 親製品を作るライン（後工程）をRoutingStepから特定
+                # ステップ3: 親製品がphantomの場合、さらにその親を辿る
+                final_parent = parent_product
+                total_qty_per = qty_per
+                while final_parent and final_parent.is_phantom:
+                    # phantom製品のBOMを探す
+                    phantom_bom_items = BOMItem.objects.filter(
+                        child_product_id=final_parent.id
+                    ).select_related('bom__parent_product').first()
+
+                    if phantom_bom_items:
+                        total_qty_per *= (phantom_bom_items.quantity or Decimal('1'))
+                        final_parent = phantom_bom_items.bom.parent_product
+                    else:
+                        break
+
+                if not final_parent or final_parent.is_phantom:
+                    continue
+
+                # ステップ4: 最終親製品を出力するライン（後工程）をRoutingStepから特定
                 downstream_steps = RoutingStep.objects.filter(
-                    output_product_id=parent_product.id
+                    output_product_id=final_parent.id
                 ).select_related('routing', 'line')
 
                 for d_step in downstream_steps:
-                    downstream_product_id = d_step.output_product_id or (d_step.routing.product_id if d_step.routing else None)
                     downstream_line_id = d_step.line_id
-                    if not downstream_product_id or not downstream_line_id:
+                    if not downstream_line_id:
                         continue
 
+                    # ステップ5: 後工程ラインのLineBacklogから計画数を取得
                     backlog_items = LineBacklog.objects.filter(
                         line_id=downstream_line_id,
-                        product_id=downstream_product_id,
+                        product_id=final_parent.id,
                         product__is_phantom=False
                     )
                     if start_date:
@@ -357,9 +389,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     if end_date:
                         backlog_items = backlog_items.filter(plan_date__lte=end_date)
 
+                    # ステップ6: 後工程の計画数 × BOM個数 = 現在ラインの必要数
                     for backlog in backlog_items:
-                        key = (product_id, backlog.plan_date)
-                        demand_map[key] += backlog.plan_qty * qty_per
+                        key = (current_output_product, backlog.plan_date)
+                        demand_map[key] += backlog.plan_qty * total_qty_per
                         downstream_found = True
 
         # 2. 後ラインからの需要が無い場合は最終ラインとしてLineDemandを使用
