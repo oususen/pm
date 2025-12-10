@@ -436,9 +436,9 @@ thead .sticky-col {
 }
 .code-col {
   left: 40px;
-  width: 156px; /* 120px の1.3倍 */
-  min-width: 156px;
-  max-width: 156px;
+  width: 187px; /* 156px の1.2倍 */
+  min-width: 187px;
+  max-width: 187px;
 }
 .name-col {
   left: 160px;
