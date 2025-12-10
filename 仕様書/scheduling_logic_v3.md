@@ -143,13 +143,23 @@ VALUES (...)
   - `planned_stock_qty` … 計画在庫
 
 - order_qtyの計算ロジック（pickup時）:
-  1. このラインが生産する製品（output_product）を特定
+  1. このラインが生産する製品（output_product）を特定（phantom製品は除外）
   2. 各製品について：
-     - child_product にこの製品を持つ BOM 明細を取得（親製品 = 後工程で作る品）
-     - 親製品を output_product に持つ RoutingStep（後工程ライン）を取得
-     - 後工程ラインの LineBacklog.plan_qty を取得し、BOM quantity を掛け算
+     - **ステップ1**: child_product にこの製品を持つ BOM 明細を取得（親製品 = 後工程で作る品）
+     - **ステップ2**: 親製品がphantom製品の場合、さらにその親を辿る
+       - phantom製品のBOMを再帰的に探索し、最終的な非phantom製品（final_parent）を特定
+       - BOM個数は階層を通して累積（total_qty_per = qty1 × qty2 × ...）
+     - **ステップ3**: final_parentを output_product に持つ RoutingStep（後工程ライン）を取得
+     - **ステップ4**: 後工程ラインの LineBacklog.plan_qty を取得し、total_qty_per を掛け算
      - 複数ライン・複数親製品があればすべて合計
   3. 後ラインからの需要が 0 件の場合（最終ライン）は LineDemand から取得
+
+  **phantom製品の処理例**:
+  - 現在ライン: Line 7、output_product = 195 (YD40000608)
+  - BOM: 195 → 324 (YD60000441S, phantom, qty=1) → 113 (YD60000441, qty=1)
+  - final_parent = 113、total_qty_per = 1 × 1 = 1
+  - 後工程ライン: Line 5 (113を出力)
+  - order_qty = Line 5の plan_qty × 1
 
 - トリガ:
   - 取り込み: `/api/line-backlogs/pickup/`
