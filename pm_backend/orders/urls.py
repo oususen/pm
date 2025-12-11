@@ -6,8 +6,12 @@ from .views import (
     OrderViewSet,
     OrderLineViewSet,
     StgOrderRawViewSet,
-    StgOrderDailyViewSet
+    StgOrderDailyViewSet,
+    StockAllocationViewSet,
+    ProductionOrderViewSet,
+    ProcessActualViewSet,
 )
+from .views_services import CRPViewSet, BOMServiceViewSet
 
 router = DefaultRouter()
 router.register(r'orders', OrderViewSet, basename='order')
@@ -16,6 +20,15 @@ router.register(r'stg-order-raw', StgOrderRawViewSet, basename='stgorderraw')
 router.register(r'stg-order-daily', StgOrderDailyViewSet, basename='stgorderdaily')
 router.register(r'line-demands', LineDemandViewSet, basename='linedemand')
 router.register(r'line-backlogs', LineBacklogViewSet, basename='linebacklog')
+
+# 製造実行系
+router.register(r'stock-allocations', StockAllocationViewSet, basename='stockallocation')
+router.register(r'production-orders', ProductionOrderViewSet, basename='productionorder')
+router.register(r'process-actuals', ProcessActualViewSet, basename='processactual')
+
+# サービス系API
+router.register(r'crp', CRPViewSet, basename='crp')
+router.register(r'bom-service', BOMServiceViewSet, basename='bom-service')
 
 urlpatterns = [
     path('', include(router.urls)),

@@ -20,6 +20,11 @@ class Product(models.Model):
     self_lt_days = models.IntegerField(null=True, blank=True, verbose_name='自工程LT(日)')
     is_final_product = models.BooleanField(default=False, verbose_name='最終製品')
     is_phantom = models.BooleanField(default=False, verbose_name='見なし組立')
+    is_virtual_set = models.BooleanField(
+        default=False,
+        verbose_name='仮想セット品番',
+        help_text='連産品を表す仮想的なセット品番（この品番自体は在庫を持たない）'
+    )
     is_active = models.BooleanField(default=True, verbose_name='有効')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
@@ -55,11 +60,23 @@ class Customer(models.Model):
 
 class Process(models.Model):
     """工程マスタ"""
+    UNIT_CHOICES = [
+        ('DAY', '日単位管理'),
+        ('MINUTE', '分単位管理'),
+    ]
+
     id = models.BigAutoField(primary_key=True)
     process_code = models.CharField(max_length=20, unique=True, verbose_name='工程コード')
     process_name = models.CharField(max_length=50, verbose_name='工程名')
     line = models.ForeignKey('Line', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='ライン')
     is_outsource = models.BooleanField(default=False, verbose_name='外注工程')
+    management_unit = models.CharField(
+        max_length=10,
+        choices=UNIT_CHOICES,
+        default='MINUTE',
+        verbose_name='管理単位',
+        help_text='日単位管理（マクロ計画）または分単位管理（ミクロ実行）'
+    )
     is_active = models.BooleanField(default=True, verbose_name='有効')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
@@ -154,6 +171,11 @@ class BOM(models.Model):
     valid_from = models.DateField(verbose_name='有効開始日')
     valid_to = models.DateField(null=True, blank=True, verbose_name='有効終了日')
     is_active = models.BooleanField(default=True, verbose_name='有効')
+    is_coproduct = models.BooleanField(
+        default=False,
+        verbose_name='連産品BOM',
+        help_text='1つの工程で複数の製品が同時に生産されるBOM（親製品は仮想セット品番）'
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
 
@@ -289,3 +311,70 @@ class RoutingStepMaterial(models.Model):
 
     def __str__(self):
         return f"{self.routing_step} uses {self.component.product_code} x {self.quantity}"
+
+
+class ProcessCycleTime(models.Model):
+    """部品×工程の標準サイクル時間（多品種対応）"""
+    id = models.BigAutoField(primary_key=True)
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        verbose_name='製品'
+    )
+    process = models.ForeignKey(
+        Process,
+        on_delete=models.CASCADE,
+        verbose_name='工程'
+    )
+    line = models.ForeignKey(
+        Line,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name='ライン'
+    )
+    cycle_time_min = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        verbose_name='標準サイクル時間(分)',
+        help_text='1個あたりの標準加工時間（分）'
+    )
+    setup_time_min = models.IntegerField(
+        default=0,
+        verbose_name='段取り時間(分)',
+        help_text='ロット開始時の準備時間（分）'
+    )
+    lot_size = models.IntegerField(
+        default=1,
+        verbose_name='標準ロットサイズ',
+        help_text='標準的な生産ロットサイズ'
+    )
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name='有効'
+    )
+    valid_from = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name='有効開始日'
+    )
+    valid_to = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name='有効終了日'
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'm_process_cycle_time'
+        verbose_name = '工程別サイクル時間'
+        verbose_name_plural = '工程別サイクル時間'
+        unique_together = [['product', 'process', 'line', 'valid_from']]
+        indexes = [
+            models.Index(fields=['product', 'process']),
+            models.Index(fields=['is_active']),
+        ]
+
+    def __str__(self):
+        return f"{self.product.product_code} @ {self.process.process_code} ({self.cycle_time_min}分)"

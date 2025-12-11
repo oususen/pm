@@ -10,6 +10,7 @@ import django_filters
 
 from .models import LineDemand, Order, OrderLine, StgOrderRaw, StgOrderDaily
 from .models_line_backlog import LineBacklog
+from .models_production import StockAllocation, ProductionOrder, ProcessActual
 from .serializers import (
     LineDemandSerializer,
     OrderSerializer,
@@ -17,6 +18,10 @@ from .serializers import (
     StgOrderRawSerializer,
     StgOrderDailySerializer,
     LineBacklogSerializer,
+    StockAllocationSerializer,
+    ProductionOrderSerializer,
+    ProductionOrderListSerializer,
+    ProcessActualSerializer,
 )
 from .services.csv_import import CSVImportService
 from .services.order_expansion import OrderExpansionService
@@ -546,3 +551,228 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({'created': created, 'updated': updated, 'skipped': skipped})
+
+
+# ========================================
+# 製造実行系ViewSet
+# ========================================
+
+class StockAllocationFilter(django_filters.FilterSet):
+    """在庫引当フィルタ"""
+    product_code = django_filters.CharFilter(field_name='product__product_code', lookup_expr='icontains')
+    is_bottleneck = django_filters.BooleanFilter()
+    location = django_filters.CharFilter(lookup_expr='icontains')
+
+    class Meta:
+        model = StockAllocation
+        fields = ['product', 'product_code', 'location', 'is_bottleneck']
+
+
+class StockAllocationViewSet(viewsets.ModelViewSet):
+    """在庫引当ViewSet"""
+    queryset = StockAllocation.objects.all().select_related('product')
+    serializer_class = StockAllocationSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = StockAllocationFilter
+    search_fields = ['product__product_code', 'product__product_name', 'location']
+    ordering_fields = ['current_stock', 'reserved_qty', 'min_stock_qty', 'updated_at']
+    ordering = ['-updated_at']
+
+    @action(detail=True, methods=['post'])
+    def reserve(self, request, pk=None):
+        """
+        在庫引当
+        payload: { quantity: Decimal }
+        """
+        allocation = self.get_object()
+        qty = request.data.get('quantity')
+
+        if not qty:
+            return Response({'detail': 'quantity is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            qty = Decimal(str(qty))
+            if qty <= 0:
+                return Response({'detail': 'quantity must be positive'}, status=status.HTTP_400_BAD_REQUEST)
+
+            if allocation.available_qty < qty:
+                return Response({
+                    'detail': f'Insufficient stock. Available: {allocation.available_qty}, Requested: {qty}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            allocation.reserved_qty += qty
+            allocation.save()
+
+            serializer = self.get_serializer(allocation)
+            return Response(serializer.data)
+
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'])
+    def release(self, request, pk=None):
+        """
+        引当解除
+        payload: { quantity: Decimal }
+        """
+        allocation = self.get_object()
+        qty = request.data.get('quantity')
+
+        if not qty:
+            return Response({'detail': 'quantity is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            qty = Decimal(str(qty))
+            if qty <= 0:
+                return Response({'detail': 'quantity must be positive'}, status=status.HTTP_400_BAD_REQUEST)
+
+            if allocation.reserved_qty < qty:
+                return Response({
+                    'detail': f'Cannot release more than reserved. Reserved: {allocation.reserved_qty}, Requested: {qty}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            allocation.reserved_qty -= qty
+            allocation.save()
+
+            serializer = self.get_serializer(allocation)
+            return Response(serializer.data)
+
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ProductionOrderFilter(django_filters.FilterSet):
+    """製造指示フィルタ"""
+    product_code = django_filters.CharFilter(field_name='product__product_code', lookup_expr='icontains')
+    status = django_filters.MultipleChoiceFilter(choices=ProductionOrder._meta.get_field('status').choices)
+    scheduled_start_date_from = django_filters.DateFilter(field_name='scheduled_start_date', lookup_expr='gte')
+    scheduled_start_date_to = django_filters.DateFilter(field_name='scheduled_start_date', lookup_expr='lte')
+
+    class Meta:
+        model = ProductionOrder
+        fields = ['product', 'product_code', 'line', 'status', 'scheduled_start_date']
+
+
+class ProductionOrderViewSet(viewsets.ModelViewSet):
+    """製造指示ViewSet"""
+    queryset = ProductionOrder.objects.all().select_related(
+        'product', 'routing', 'line', 'allocation'
+    )
+    serializer_class = ProductionOrderSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = ProductionOrderFilter
+    search_fields = ['order_no', 'product__product_code', 'product__product_name']
+    ordering_fields = ['scheduled_start_date', 'scheduled_end_date', 'priority', 'created_at']
+    ordering = ['-scheduled_start_date', 'priority']
+
+    def get_queryset(self):
+        qs = ProductionOrder.objects.select_related('product', 'routing', 'line', 'allocation')
+        # 詳細取得時のみ工程実績をプリフェッチ
+        if self.action != 'list':
+            qs = qs.prefetch_related('processactual_set__process', 'processactual_set__line')
+        return qs
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return ProductionOrderListSerializer
+        return super().get_serializer_class()
+
+    @action(detail=True, methods=['post'])
+    def release(self, request, pk=None):
+        """
+        製造指示発行（計画済→指示済）
+        """
+        order = self.get_object()
+
+        if order.status != 'PLANNED':
+            return Response({
+                'detail': f'Cannot release order with status: {order.get_status_display()}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        order.status = 'RELEASED'
+        order.save()
+
+        serializer = self.get_serializer(order)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def start(self, request, pk=None):
+        """
+        製造開始（指示済→進行中）
+        """
+        order = self.get_object()
+
+        if order.status != 'RELEASED':
+            return Response({
+                'detail': f'Cannot start order with status: {order.get_status_display()}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        from django.utils import timezone
+        order.status = 'IN_PROGRESS'
+        order.actual_start_date = timezone.now()
+        order.save()
+
+        serializer = self.get_serializer(order)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def complete(self, request, pk=None):
+        """
+        製造完了（進行中→完了）
+        """
+        order = self.get_object()
+
+        if order.status != 'IN_PROGRESS':
+            return Response({
+                'detail': f'Cannot complete order with status: {order.get_status_display()}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        from django.utils import timezone
+        order.status = 'COMPLETED'
+        order.actual_end_date = timezone.now()
+        order.save()
+
+        serializer = self.get_serializer(order)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        """
+        製造中止
+        """
+        order = self.get_object()
+
+        if order.status == 'COMPLETED':
+            return Response({
+                'detail': 'Cannot cancel completed order'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        order.status = 'CANCELED'
+        order.save()
+
+        serializer = self.get_serializer(order)
+        return Response(serializer.data)
+
+
+class ProcessActualFilter(django_filters.FilterSet):
+    """工程実績フィルタ"""
+    production_order_no = django_filters.CharFilter(field_name='production_order__order_no', lookup_expr='icontains')
+    completed_at_from = django_filters.DateTimeFilter(field_name='completed_at', lookup_expr='gte')
+    completed_at_to = django_filters.DateTimeFilter(field_name='completed_at', lookup_expr='lte')
+
+    class Meta:
+        model = ProcessActual
+        fields = ['production_order', 'process', 'line', 'operator']
+
+
+class ProcessActualViewSet(viewsets.ModelViewSet):
+    """工程実績ViewSet"""
+    queryset = ProcessActual.objects.all().select_related(
+        'production_order', 'production_order__product', 'routing_step', 'process', 'line'
+    )
+    serializer_class = ProcessActualSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = ProcessActualFilter
+    search_fields = ['production_order__order_no', 'process__process_code', 'operator']
+    ordering_fields = ['completed_at', 'actual_duration_min', 'created_at']
+    ordering = ['-completed_at']

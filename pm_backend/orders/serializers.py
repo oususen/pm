@@ -4,6 +4,7 @@ from decimal import Decimal
 from rest_framework import serializers
 from .models import LineDemand, Order, OrderLine, StgOrderRaw, StgOrderDaily
 from .models_line_backlog import LineBacklog
+from .models_production import StockAllocation, ProductionOrder, ProcessActual
 from masters.models import Customer, Product
 
 
@@ -157,3 +158,88 @@ class LineBacklogSerializer(serializers.ModelSerializer):
             'source_line', 'source_routing_step', 'updated_at',
         ]
         read_only_fields = ['id', 'updated_at']
+
+
+# ========================================
+# 製造実行系シリアライザー
+# ========================================
+
+class StockAllocationSerializer(serializers.ModelSerializer):
+    """在庫引当シリアライザー"""
+    product_code = serializers.CharField(source='product.product_code', read_only=True)
+    product_name = serializers.CharField(source='product.product_name', read_only=True)
+    available_qty = serializers.DecimalField(
+        max_digits=14,
+        decimal_places=3,
+        read_only=True,
+        source='available_qty'
+    )
+
+    class Meta:
+        model = StockAllocation
+        fields = [
+            'id', 'product', 'product_code', 'product_name', 'location',
+            'current_stock', 'reserved_qty', 'available_qty', 'min_stock_qty',
+            'is_bottleneck', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'available_qty', 'created_at', 'updated_at']
+
+
+class ProcessActualSerializer(serializers.ModelSerializer):
+    """工程実績シリアライザー"""
+    process_code = serializers.CharField(source='process.process_code', read_only=True)
+    process_name = serializers.CharField(source='process.process_name', read_only=True)
+    line_code = serializers.CharField(source='line.line_code', read_only=True)
+    line_name = serializers.CharField(source='line.line_name', read_only=True)
+
+    class Meta:
+        model = ProcessActual
+        fields = [
+            'id', 'production_order', 'routing_step', 'process', 'process_code', 'process_name',
+            'line', 'line_code', 'line_name', 'completed_qty', 'actual_duration_min',
+            'completed_at', 'operator', 'remark', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ProductionOrderSerializer(serializers.ModelSerializer):
+    """製造指示シリアライザー（詳細）"""
+    product_code = serializers.CharField(source='product.product_code', read_only=True)
+    product_name = serializers.CharField(source='product.product_name', read_only=True)
+    line_code = serializers.CharField(source='line.line_code', read_only=True)
+    line_name = serializers.CharField(source='line.line_name', read_only=True)
+    routing_code = serializers.CharField(source='routing.routing_code', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    actuals = ProcessActualSerializer(many=True, read_only=True, source='processactual_set')
+
+    class Meta:
+        model = ProductionOrder
+        fields = [
+            'id', 'order_no', 'product', 'product_code', 'product_name',
+            'routing', 'routing_code', 'line', 'line_code', 'line_name',
+            'order_qty', 'status', 'status_display',
+            'scheduled_start_date', 'scheduled_end_date',
+            'actual_start_date', 'actual_end_date',
+            'priority', 'allocation', 'remark', 'actuals',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ProductionOrderListSerializer(serializers.ModelSerializer):
+    """製造指示シリアライザー（一覧用・軽量版）"""
+    product_code = serializers.CharField(source='product.product_code', read_only=True)
+    product_name = serializers.CharField(source='product.product_name', read_only=True)
+    line_code = serializers.CharField(source='line.line_code', read_only=True)
+    line_name = serializers.CharField(source='line.line_name', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = ProductionOrder
+        fields = [
+            'id', 'order_no', 'product', 'product_code', 'product_name',
+            'line', 'line_code', 'line_name', 'order_qty', 'status', 'status_display',
+            'scheduled_start_date', 'scheduled_end_date', 'priority',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']

@@ -1,14 +1,14 @@
 from django.contrib import admin
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay,
-    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial
+    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProcessCycleTime
 )
 
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ['product_code', 'product_name', 'category', 'unit', 'is_active']
-    list_filter = ['category', 'is_active', 'is_final_product']
+    list_display = ['product_code', 'product_name', 'category', 'unit', 'is_virtual_set', 'is_active']
+    list_filter = ['category', 'is_active', 'is_final_product', 'is_virtual_set']
     search_fields = ['product_code', 'product_name']
 
 
@@ -21,8 +21,8 @@ class CustomerAdmin(admin.ModelAdmin):
 
 @admin.register(Process)
 class ProcessAdmin(admin.ModelAdmin):
-    list_display = ['process_code', 'process_name', 'is_outsource', 'is_active']
-    list_filter = ['is_outsource', 'is_active']
+    list_display = ['process_code', 'process_name', 'line', 'management_unit', 'is_outsource', 'is_active']
+    list_filter = ['management_unit', 'is_outsource', 'is_active', 'line']
     search_fields = ['process_code', 'process_name']
 
 
@@ -59,8 +59,8 @@ class BOMItemInline(admin.TabularInline):
 
 @admin.register(BOM)
 class BOMAdmin(admin.ModelAdmin):
-    list_display = ['parent_product', 'version', 'valid_from', 'valid_to', 'is_active']
-    list_filter = ['is_active']
+    list_display = ['parent_product', 'version', 'valid_from', 'valid_to', 'is_coproduct', 'is_active']
+    list_filter = ['is_active', 'is_coproduct']
     inlines = [BOMItemInline]
     actions = ['export_bom_tree_excel']
 
@@ -240,3 +240,27 @@ class RoutingAdmin(admin.ModelAdmin):
         return response
 
     export_excel.short_description = '選択したルーティングをExcel出力'
+
+
+@admin.register(ProcessCycleTime)
+class ProcessCycleTimeAdmin(admin.ModelAdmin):
+    list_display = ['product', 'process', 'line', 'cycle_time_min', 'setup_time_min', 'lot_size', 'is_active', 'valid_from', 'valid_to']
+    list_filter = ['is_active', 'process', 'line']
+    search_fields = ['product__product_code', 'product__product_name', 'process__process_code', 'process__process_name']
+    readonly_fields = ['created_at', 'updated_at']
+    fieldsets = (
+        ('基本情報', {
+            'fields': ('product', 'process', 'line')
+        }),
+        ('時間設定', {
+            'fields': ('cycle_time_min', 'setup_time_min', 'lot_size')
+        }),
+        ('有効期間', {
+            'fields': ('is_active', 'valid_from', 'valid_to')
+        }),
+        ('システム情報', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
