@@ -6,7 +6,7 @@
       <div class="toolbar-left">
         <div class="field">
           <label>仕入先</label>
-          <select v-model="selectedSupplier" @change="loadData">
+          <select v-model.number="selectedSupplier" @change="loadData">
             <option value="">すべて</option>
             <option v-for="s in suppliers" :key="s.id" :value="s.id">
               {{ s.supplier_code }} - {{ s.supplier_name }}
@@ -249,13 +249,7 @@ const refreshDates = () => {
 
 const loadData = async () => {
   rows.value = []
-  // 仕入先が選択されている場合、その仕入先の製品リストを更新
-  if (selectedSupplier.value) {
-    await fetchProducts(selectedSupplier.value)
-  } else {
-    // 仕入先が未選択の場合は全製品を表示
-    await fetchProducts()
-  }
+  await fetchProducts(selectedSupplier.value || null)
 }
 
 const onPlanInput = (row, dateKey, value) => {
@@ -268,23 +262,23 @@ const fetchSuppliers = async () => {
 }
 
 const fetchProducts = async (supplierId = null) => {
-  // 仕入れ対象製品を取得（sourcing_type='BUY'の部品）
   try {
     const params = { sourcing_type: 'BUY' }
-    if (supplierId) {
-      params.supplier = supplierId
-    }
+    if (supplierId) params.supplier = supplierId
     const bomItemsRes = await api.bomItems.getBOMItems(params)
     const bomItems = bomItemsRes.data.results || bomItemsRes.data || []
 
-    // 子製品のIDリストを取得
-    const buyProductIds = new Set(bomItems.map(item => item.child_product))
+    // 子製品IDを抽出
+    const targetProductIds = new Set(bomItems.map((item) => item.child_product))
 
-    // 全製品から仕入れ対象のみをフィルタ
+    // 全製品から対象のみを抽出（仕入先指定時は該当BOMがあるもののみ）
     const allProducts = await api.products.getAllProducts()
-    products.value = allProducts
-      .filter((p) => !p.is_phantom && buyProductIds.has(p.id))
-      .sort((a, b) => (a.product_code || '').localeCompare(b.product_code || ''))
+    const filtered =
+      supplierId && targetProductIds.size
+        ? allProducts.filter((p) => !p.is_phantom && targetProductIds.has(p.id))
+        : allProducts.filter((p) => !p.is_phantom)
+
+    products.value = filtered.sort((a, b) => (a.product_code || '').localeCompare(b.product_code || ''))
   } catch (e) {
     console.error('仕入れ対象製品の取得エラー', e)
     products.value = []
@@ -294,7 +288,7 @@ const fetchProducts = async (supplierId = null) => {
 onMounted(async () => {
   try {
     await Promise.all([fetchSuppliers(), fetchProducts()])
-    loadData()
+    await loadData()
   } catch (e) {
     console.error('初期データ取得エラー', e)
   }
@@ -306,31 +300,50 @@ const doPickup = async () => {
     return
   }
   try {
-    // 選択した仕入先の製品リストを再取得
+    // 選択仕入先の製品リストを最新取得
     await fetchProducts(selectedSupplier.value)
 
-    // 仕入先に紐づく既存バックログを取得（line_idに仕入先IDを流用）
-    const res = await api.lineBacklogs.pickup({
-      line_id: selectedSupplier.value,
-      start_date: startDate.value,
-      end_date: endDate.value,
+    // 対象製品のIDリストを取得
+    const productIds = products.value.map(p => p.id)
+
+    if (!productIds.length) {
+      alert('この仕入先の購入部品が見つかりません。')
+      rows.value = []
+      return
+    }
+
+    // 既存のLineBacklogデータを取得（line_idは仕入先IDとして使用）
+    // 注：pickup APIは使わず、直接バックログを取得
+    const backlogRes = await api.lineBacklogs.getLineBacklogs({
+      line: selectedSupplier.value,
+      product__in: productIds.join(','),
+      plan_date__gte: startDate.value,
+      plan_date__lte: endDate.value,
     })
-    const data = res.data || []
+
+    const backlogs = backlogRes.data.results || backlogRes.data || []
+
+    // 製品ごとにグルーピング
     const grouped = new Map()
-    data.forEach((d) => {
+
+    // まず製品リストから空行を作成
+    products.value.forEach((p) => {
+      grouped.set(p.id, {
+        id: `prod-${p.id}`,
+        product_id: p.id,
+        product_code: p.product_code,
+        product_name: p.product_name,
+        process_id: 1, // 仕入れ用ダミー値
+        daily: initDaily(),
+      })
+    })
+
+    // バックログデータがあれば上書き
+    backlogs.forEach((d) => {
       if (!d.product) return
-      const key = d.product
-      if (!grouped.has(key)) {
-        grouped.set(key, {
-          id: `bk-${key}`,
-          product_id: d.product,
-          product_code: d.product_code || '',
-          product_name: d.product_name || '',
-          process_id: d.process || 1, // 仕入れ用ダミー値
-          daily: initDaily(),
-        })
-      }
-      const row = grouped.get(key)
+      const row = grouped.get(d.product)
+      if (!row) return
+
       const dateKey = d.plan_date
       if (row.daily[dateKey]) {
         row.daily[dateKey].demand = Number(d.order_qty || 0)
@@ -342,19 +355,6 @@ const doPickup = async () => {
     })
 
     rows.value = Array.from(grouped.values())
-    if (!rows.value.length) {
-      // データが無い場合は仕入れ対象製品の空行を自動追加
-      products.value.forEach((p) => {
-        rows.value.push({
-          id: `prod-${p.id}`,
-          product_id: p.id,
-          product_code: p.product_code,
-          product_name: p.product_name,
-          process_id: 1, // 仕入れ用ダミー値
-          daily: initDaily(),
-        })
-      })
-    }
   } catch (e) {
     console.error('仕入れ計画 取り込みエラー', e)
     alert('取り込みに失敗しました。')

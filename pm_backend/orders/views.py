@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+import django_filters
 
 from .models import LineDemand, Order, OrderLine, StgOrderRaw, StgOrderDaily
 from .models_line_backlog import LineBacklog
@@ -260,12 +261,23 @@ class LineDemandViewSet(viewsets.ModelViewSet):
         return Response(result, status=status_code)
 
 
+class LineBacklogFilter(django_filters.FilterSet):
+    """LineBacklogのカスタムフィルタ"""
+    product__in = django_filters.BaseInFilter(field_name='product', lookup_expr='in')
+    plan_date__gte = django_filters.DateFilter(field_name='plan_date', lookup_expr='gte')
+    plan_date__lte = django_filters.DateFilter(field_name='plan_date', lookup_expr='lte')
+
+    class Meta:
+        model = LineBacklog
+        fields = ['line', 'process', 'product', 'plan_date']
+
+
 class LineBacklogViewSet(viewsets.ModelViewSet):
     queryset = LineBacklog.objects.all().select_related('process', 'product', 'line')
     serializer_class = LineBacklogSerializer
     pagination_class = None
     filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ['line', 'process', 'product', 'plan_date']
+    filterset_class = LineBacklogFilter
     ordering_fields = ['plan_date', 'line', 'product']
     ordering = ['plan_date', 'line']
 
