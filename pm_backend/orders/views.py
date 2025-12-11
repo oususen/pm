@@ -263,13 +263,23 @@ class LineDemandViewSet(viewsets.ModelViewSet):
 
 class LineBacklogFilter(django_filters.FilterSet):
     """LineBacklogのカスタムフィルタ"""
-    product__in = django_filters.BaseInFilter(field_name='product', lookup_expr='in')
+    product__in = django_filters.CharFilter(method='filter_product_in')
     plan_date__gte = django_filters.DateFilter(field_name='plan_date', lookup_expr='gte')
     plan_date__lte = django_filters.DateFilter(field_name='plan_date', lookup_expr='lte')
 
     class Meta:
         model = LineBacklog
         fields = ['line', 'process', 'product', 'plan_date']
+
+    def filter_product_in(self, queryset, name, value):
+        """カンマ区切りの製品IDリストでフィルタ"""
+        if value:
+            try:
+                product_ids = [int(x.strip()) for x in value.split(',') if x.strip()]
+                return queryset.filter(product_id__in=product_ids)
+            except (ValueError, TypeError):
+                return queryset.none()
+        return queryset
 
 
 class LineBacklogViewSet(viewsets.ModelViewSet):
