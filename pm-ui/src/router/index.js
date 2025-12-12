@@ -20,6 +20,11 @@ import ShippingInstruction from "../pages/ShippingInstruction.vue";
 import ShippingActual from "../pages/ShippingActual.vue";
 import PurchaseMenu from "../pages/PurchaseMenu.vue";
 import PurchasePlanInput from "../pages/PurchasePlanInput.vue";
+import StockAllocationList from "../pages/StockAllocationList.vue";
+import StockAllocationForm from "../pages/StockAllocationForm.vue";
+import ProductionOrderList from "../pages/ProductionOrderList.vue";
+import ProductionOrderForm from "../pages/ProductionOrderForm.vue";
+import ProcessActualEntry from "../pages/ProcessActualEntry.vue";
 
 const routes = [
   { path: "/", redirect: "/masters" },
@@ -39,6 +44,13 @@ const routes = [
   { path: "/production/progress", name: "ProductionProgress", component: ProductionProgress },
   { path: "/production/plan-input", name: "ProductionPlanInput", component: ProductionPlanInput },
   { path: "/production/inventory", name: "ProductionInventory", component: ProductionInventory },
+  { path: "/production/stock-allocations", name: "StockAllocationList", component: StockAllocationList },
+  { path: "/production/stock-allocations/new", name: "StockAllocationCreate", component: StockAllocationForm },
+  { path: "/production/stock-allocations/:id/edit", name: "StockAllocationEdit", component: StockAllocationForm, props: true },
+  { path: "/production/orders", name: "ProductionOrderList", component: ProductionOrderList },
+  { path: "/production/orders/new", name: "ProductionOrderCreate", component: ProductionOrderForm },
+  { path: "/production/orders/:id/edit", name: "ProductionOrderEdit", component: ProductionOrderForm, props: true },
+  { path: "/production/orders/:id/actuals", name: "ProcessActualEntry", component: ProcessActualEntry, props: true },
   { path: "/purchase/menu", name: "PurchaseMenu", component: PurchaseMenu },
   { path: "/purchase/plan-input", name: "PurchasePlanInput", component: PurchasePlanInput },
   { path: "/shipping/menu", name: "ShippingMenu", component: ShippingMenu },

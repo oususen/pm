@@ -1,128 +1,130 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">在庫引当管理</h1>
+      <div class="header-left">
+        <h1 class="page-title">在庫引当一覧</h1>
+        <p class="helper-text">
+          可用在庫と最小在庫を並べて確認し、引当/解除を素早く実行します。
+        </p>
+      </div>
       <div class="page-actions">
-        <button @click="fetchAllocations" class="btn-primary">更新</button>
-        <button @click="showNewDialog" class="btn-success">新規</button>
+        <button @click="fetchAllocations" class="btn-secondary">再読込</button>
+        <button @click="downloadCsv" class="btn-secondary">CSV出力</button>
+        <button @click="bulkRelease" class="btn-danger" :disabled="!selectedIds.length">一括解除</button>
+        <button @click="goNew" class="btn-success">新規</button>
       </div>
     </div>
 
     <div class="page-content">
       <div class="filter-bar">
-        <div class="filter-field">
-          <label>品番/品名</label>
-          <input
-            v-model="filters.search"
-            @keyup.enter="fetchAllocations"
-            placeholder="品番・品名で検索"
-          />
-        </div>
-        <div class="filter-field">
-          <label>保管場所</label>
-          <input
-            v-model="filters.location"
-            @keyup.enter="fetchAllocations"
-            placeholder="保管場所"
-          />
-        </div>
-        <div class="filter-field">
-          <label>ボトルネック</label>
-          <select v-model="filters.is_bottleneck">
-            <option value="">すべて</option>
-            <option value="true">ボトルネック</option>
-            <option value="false">通常</option>
-          </select>
-        </div>
-        <div class="filter-actions">
-          <button @click="fetchAllocations" class="btn-primary">検索</button>
-          <button @click="resetFilters" class="btn-secondary">リセット</button>
-        </div>
-      </div>
-
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>品番</th>
-            <th>品名</th>
-            <th>保管場所</th>
-            <th>現在在庫</th>
-            <th>引当済</th>
-            <th>引当可能</th>
-            <th>最小在庫</th>
-            <th>ボトルネック</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="allocation in allocations" :key="allocation.id">
-            <td>{{ allocation.product_code }}</td>
-            <td>{{ allocation.product_name }}</td>
-            <td>{{ allocation.location }}</td>
-            <td class="text-right">{{ formatNumber(allocation.current_stock) }}</td>
-            <td class="text-right">{{ formatNumber(allocation.reserved_qty) }}</td>
-            <td class="text-right" :class="{ 'text-danger': allocation.available_qty < allocation.min_stock_qty }">
-              {{ formatNumber(allocation.available_qty) }}
-            </td>
-            <td class="text-right">{{ formatNumber(allocation.min_stock_qty) }}</td>
-            <td>
-              <span v-if="allocation.is_bottleneck" class="badge badge-warning">ボトルネック</span>
-            </td>
-            <td>
-              <button @click="showReserveDialog(allocation)" class="btn-sm btn-primary">引当</button>
-              <button @click="showReleaseDialog(allocation)" class="btn-sm btn-secondary">解除</button>
-              <button @click="editAllocation(allocation)" class="btn-sm">編集</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div v-if="allocations.length === 0" class="no-data">
-        データがありません
-      </div>
-    </div>
-
-    <!-- 新規/編集ダイアログ -->
-    <div v-if="showDialog" class="modal-overlay" @click.self="closeDialog">
-      <div class="modal-content">
-        <h2>{{ isEdit ? '在庫引当編集' : '在庫引当新規作成' }}</h2>
-        <form @submit.prevent="saveAllocation">
-          <div class="form-group">
-            <label>製品 *</label>
-            <select v-model="formData.product" required :disabled="isEdit">
-              <option value="">選択してください</option>
-              <option v-for="product in products" :key="product.id" :value="product.id">
-                {{ product.product_code }} - {{ product.product_name }}
-              </option>
+        <div class="filter-row">
+          <div class="filter-field wide">
+            <label>品番/品名</label>
+            <input
+              v-model="filters.search"
+              @keyup.enter="fetchAllocations"
+              placeholder="品番・品名で検索"
+            />
+          </div>
+          <div class="filter-field">
+            <label>保管場所</label>
+            <input
+              v-model="filters.location"
+              @keyup.enter="fetchAllocations"
+              placeholder="保管場所"
+            />
+          </div>
+          <div class="filter-field">
+            <label>ボトルネック</label>
+            <select v-model="filters.is_bottleneck">
+              <option value="">すべて</option>
+              <option value="true">ボトルネック</option>
+              <option value="false">通常</option>
             </select>
           </div>
-          <div class="form-group">
-            <label>保管場所 *</label>
-            <input v-model="formData.location" required />
-          </div>
-          <div class="form-group">
-            <label>現在在庫 *</label>
-            <input v-model.number="formData.current_stock" type="number" step="0.001" required />
-          </div>
-          <div class="form-group">
-            <label>引当済数量</label>
-            <input v-model.number="formData.reserved_qty" type="number" step="0.001" />
-          </div>
-          <div class="form-group">
-            <label>最小在庫数量 *</label>
-            <input v-model.number="formData.min_stock_qty" type="number" step="0.001" required />
-          </div>
-          <div class="form-group">
+          <div class="filter-field checkbox-field">
             <label>
-              <input type="checkbox" v-model="formData.is_bottleneck" />
-              ボトルネック部品
+              <input type="checkbox" v-model="filters.shortageOnly" />
+              最小在庫割れのみ
             </label>
           </div>
-          <div class="form-actions">
-            <button type="submit" class="btn-primary">保存</button>
-            <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
+          <div class="filter-actions">
+            <button @click="fetchAllocations" class="btn-primary">検索</button>
+            <button @click="resetFilters" class="btn-secondary">リセット</button>
           </div>
-        </form>
+        </div>
+      </div>
+
+      <div class="summary-bar">
+        <span>件数: {{ filteredAllocations.length }} / {{ allocations.length }}</span>
+        <span :class="{ 'text-danger': shortageCount > 0 }">最小在庫割れ: {{ shortageCount }}件</span>
+      </div>
+
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width: 36px">
+                <input type="checkbox" :checked="isAllSelected" @change="toggleAll" />
+              </th>
+              <th>品番</th>
+              <th>品名</th>
+              <th>保管場所</th>
+              <th class="text-right">現在在庫</th>
+              <th class="text-right">引当済</th>
+              <th class="text-right">可用在庫</th>
+              <th class="text-right">最小在庫</th>
+              <th class="text-right">差分</th>
+              <th>ボトルネック</th>
+              <th>更新</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="allocation in filteredAllocations" :key="allocation.id">
+              <td class="text-center">
+                <input
+                  type="checkbox"
+                  :value="allocation.id"
+                  v-model="selectedIds"
+                />
+              </td>
+              <td>{{ allocation.product_code }}</td>
+              <td>{{ allocation.product_name }}</td>
+              <td>{{ allocation.location }}</td>
+              <td class="text-right">{{ formatNumber(allocation.current_stock) }}</td>
+              <td class="text-right">{{ formatNumber(allocation.reserved_qty) }}</td>
+              <td
+                class="text-right"
+                :class="{ 'text-danger': allocation.available_qty < allocation.min_stock_qty }"
+              >
+                {{ formatNumber(allocation.available_qty) }}
+              </td>
+              <td class="text-right">{{ formatNumber(allocation.min_stock_qty) }}</td>
+              <td
+                class="text-right"
+                :class="{ 'text-danger': allocation.available_qty < allocation.min_stock_qty }"
+              >
+                {{ formatNumber(allocation.available_qty - allocation.min_stock_qty) }}
+              </td>
+              <td>
+                <span v-if="allocation.is_bottleneck" class="badge badge-warning">ボトルネック</span>
+              </td>
+              <td>{{ formatDateTime(allocation.updated_at) }}</td>
+              <td>
+                <div class="btn-group">
+                  <button @click="showReserveDialog(allocation)" class="btn-sm btn-primary">引当</button>
+                  <button @click="showReleaseDialog(allocation)" class="btn-sm btn-secondary">解除</button>
+                  <button @click="goEdit(allocation.id)" class="btn-sm">編集</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div v-if="!filteredAllocations.length" class="no-data">
+        条件に合致するデータがありません
       </div>
     </div>
 
@@ -175,118 +177,87 @@
 <script>
 import axios from 'axios'
 
-const API_BASE_URL = 'http://localhost:8000/api/orders'
+const API_BASE = 'http://localhost:8000/api'
 
 export default {
   name: 'StockAllocationList',
   data() {
     return {
       allocations: [],
-      products: [],
       filters: {
         search: '',
         location: '',
-        is_bottleneck: ''
+        is_bottleneck: '',
+        shortageOnly: false
       },
-      showDialog: false,
-      isEdit: false,
-      formData: {
-        product: '',
-        location: '',
-        current_stock: 0,
-        reserved_qty: 0,
-        min_stock_qty: 0,
-        is_bottleneck: false
-      },
+      selectedIds: [],
       showReserveDialogFlag: false,
       showReleaseDialogFlag: false,
       selectedAllocation: null,
       reserveQty: 0,
-      releaseQty: 0
+      releaseQty: 0,
+      loading: false
+    }
+  },
+  computed: {
+    filteredAllocations() {
+      return this.allocations.filter((item) => {
+        if (this.filters.shortageOnly && !(parseFloat(item.available_qty) < parseFloat(item.min_stock_qty))) {
+          return false
+        }
+        return true
+      })
+    },
+    shortageCount() {
+      return this.allocations.filter(
+        (item) => parseFloat(item.available_qty) < parseFloat(item.min_stock_qty)
+      ).length
+    },
+    isAllSelected() {
+      return this.filteredAllocations.length > 0 &&
+        this.filteredAllocations.every((item) => this.selectedIds.includes(item.id))
     }
   },
   mounted() {
     this.fetchAllocations()
-    this.fetchProducts()
   },
   methods: {
     async fetchAllocations() {
+      this.loading = true
       try {
         const params = {}
         if (this.filters.search) params.search = this.filters.search
         if (this.filters.location) params.location = this.filters.location
         if (this.filters.is_bottleneck) params.is_bottleneck = this.filters.is_bottleneck === 'true'
 
-        const response = await axios.get(`${API_BASE_URL}/stock-allocations/`, { params })
+        const response = await axios.get(`${API_BASE}/orders/stock-allocations/`, { params })
         this.allocations = response.data
+        this.selectedIds = []
       } catch (error) {
         console.error('在庫引当取得エラー:', error)
         alert('在庫引当の取得に失敗しました')
-      }
-    },
-    async fetchProducts() {
-      try {
-        const response = await axios.get('http://localhost:8000/api/masters/products/')
-        this.products = response.data
-      } catch (error) {
-        console.error('製品取得エラー:', error)
+      } finally {
+        this.loading = false
       }
     },
     resetFilters() {
       this.filters = {
         search: '',
         location: '',
-        is_bottleneck: ''
+        is_bottleneck: '',
+        shortageOnly: false
       }
       this.fetchAllocations()
     },
-    showNewDialog() {
-      this.isEdit = false
-      this.formData = {
-        product: '',
-        location: '',
-        current_stock: 0,
-        reserved_qty: 0,
-        min_stock_qty: 0,
-        is_bottleneck: false
-      }
-      this.showDialog = true
+    goNew() {
+      this.$router.push('/production/stock-allocations/new')
     },
-    editAllocation(allocation) {
-      this.isEdit = true
-      this.formData = {
-        id: allocation.id,
-        product: allocation.product,
-        location: allocation.location,
-        current_stock: allocation.current_stock,
-        reserved_qty: allocation.reserved_qty,
-        min_stock_qty: allocation.min_stock_qty,
-        is_bottleneck: allocation.is_bottleneck
-      }
-      this.showDialog = true
-    },
-    async saveAllocation() {
-      try {
-        if (this.isEdit) {
-          await axios.put(`${API_BASE_URL}/stock-allocations/${this.formData.id}/`, this.formData)
-          alert('在庫引当を更新しました')
-        } else {
-          await axios.post(`${API_BASE_URL}/stock-allocations/`, this.formData)
-          alert('在庫引当を作成しました')
-        }
-        this.closeDialog()
-        this.fetchAllocations()
-      } catch (error) {
-        console.error('保存エラー:', error)
-        alert('保存に失敗しました: ' + (error.response?.data?.detail || error.message))
-      }
-    },
-    closeDialog() {
-      this.showDialog = false
+    goEdit(id) {
+      this.$router.push(`/production/stock-allocations/${id}/edit`)
     },
     showReserveDialog(allocation) {
       this.selectedAllocation = allocation
-      this.reserveQty = 0
+      this.reserveQty = allocation.available_qty > 0 ? allocation.available_qty : 0
       this.showReserveDialogFlag = true
     },
     closeReserveDialog() {
@@ -295,7 +266,7 @@ export default {
     },
     async reserveStock() {
       try {
-        await axios.post(`${API_BASE_URL}/stock-allocations/${this.selectedAllocation.id}/reserve/`, {
+        await axios.post(`${API_BASE}/orders/stock-allocations/${this.selectedAllocation.id}/reserve/`, {
           quantity: this.reserveQty
         })
         alert('在庫を引当しました')
@@ -308,7 +279,7 @@ export default {
     },
     showReleaseDialog(allocation) {
       this.selectedAllocation = allocation
-      this.releaseQty = 0
+      this.releaseQty = allocation.reserved_qty
       this.showReleaseDialogFlag = true
     },
     closeReleaseDialog() {
@@ -317,7 +288,7 @@ export default {
     },
     async releaseStock() {
       try {
-        await axios.post(`${API_BASE_URL}/stock-allocations/${this.selectedAllocation.id}/release/`, {
+        await axios.post(`${API_BASE}/orders/stock-allocations/${this.selectedAllocation.id}/release/`, {
           quantity: this.releaseQty
         })
         alert('引当を解除しました')
@@ -328,24 +299,190 @@ export default {
         alert('解除に失敗しました: ' + (error.response?.data?.detail || error.message))
       }
     },
+    async bulkRelease() {
+      const targets = this.allocations.filter(
+        (item) => this.selectedIds.includes(item.id) && parseFloat(item.reserved_qty) > 0
+      )
+      if (!targets.length) {
+        alert('解除対象がありません')
+        return
+      }
+      if (!confirm(`選択した${targets.length}件の引当を全量解除します。よろしいですか？`)) return
+
+      for (const target of targets) {
+        try {
+          await axios.post(`${API_BASE}/orders/stock-allocations/${target.id}/release/`, {
+            quantity: target.reserved_qty
+          })
+        } catch (error) {
+          console.error('一括解除エラー:', error)
+          alert(`ID ${target.id} の解除に失敗しました: ${error.response?.data?.detail || error.message}`)
+          break
+        }
+      }
+      this.fetchAllocations()
+    },
+    toggleAll(event) {
+      if (event.target.checked) {
+        this.selectedIds = this.filteredAllocations.map((item) => item.id)
+      } else {
+        this.selectedIds = []
+      }
+    },
+    downloadCsv() {
+      if (!this.filteredAllocations.length) {
+        alert('出力対象がありません')
+        return
+      }
+      const header = [
+        'id',
+        'product_code',
+        'product_name',
+        'location',
+        'current_stock',
+        'reserved_qty',
+        'available_qty',
+        'min_stock_qty',
+        'is_bottleneck',
+        'updated_at'
+      ]
+      const rows = this.filteredAllocations.map((item) =>
+        [
+          item.id,
+          item.product_code,
+          item.product_name,
+          item.location,
+          item.current_stock,
+          item.reserved_qty,
+          item.available_qty,
+          item.min_stock_qty,
+          item.is_bottleneck,
+          item.updated_at
+        ].map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')
+      )
+      const csv = [header.join(','), ...rows].join('\n')
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'stock_allocations.csv'
+      a.click()
+      window.URL.revokeObjectURL(url)
+    },
     formatNumber(value) {
       if (value == null) return '0'
       return parseFloat(value).toLocaleString('ja-JP', {
         minimumFractionDigits: 0,
         maximumFractionDigits: 3
       })
+    },
+    formatDateTime(value) {
+      if (!value) return ''
+      return new Date(value).toLocaleString('ja-JP')
     }
   }
 }
 </script>
 
 <style scoped>
+.header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.helper-text {
+  margin: 0;
+  color: #5c6670;
+  font-size: 0.9rem;
+}
+
+.filter-bar {
+  background: #fff;
+  border: 1px solid #e3e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.filter-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) 220px;
+  gap: 12px;
+  align-items: end;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filter-field.wide {
+  grid-column: span 2;
+}
+
+.filter-field input,
+.filter-field select {
+  padding: 8px;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+}
+
+.checkbox-field {
+  justify-content: center;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.summary-bar {
+  display: flex;
+  gap: 16px;
+  font-size: 0.95rem;
+  margin-bottom: 8px;
+}
+
+.table-wrapper {
+  overflow: auto;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e3e7eb;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table thead {
+  background: #f8fafc;
+}
+
+.data-table th,
+.data-table td {
+  padding: 10px;
+  border-bottom: 1px solid #edf1f5;
+}
+
+.btn-group {
+  display: flex;
+  gap: 4px;
+}
+
 .text-right {
   text-align: right;
 }
 
+.text-center {
+  text-align: center;
+}
+
 .text-danger {
-  color: #dc3545;
+  color: #d13438;
   font-weight: bold;
 }
 

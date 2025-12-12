@@ -1,191 +1,149 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">製造指示管理</h1>
+      <div>
+        <h1 class="page-title">製造指示一覧</h1>
+        <p class="helper-text">ステータス別の製造指示を一覧し、発行/開始/完了/中止を操作できます。</p>
+      </div>
       <div class="page-actions">
-        <button @click="fetchOrders" class="btn-primary">更新</button>
-        <button @click="showNewDialog" class="btn-success">新規</button>
+        <button class="btn-secondary" @click="fetchOrders">再読込</button>
+        <button class="btn-success" @click="goNew">新規指示作成</button>
       </div>
     </div>
 
     <div class="page-content">
       <div class="filter-bar">
-        <div class="filter-field">
-          <label>指示番号/品番</label>
-          <input
-            v-model="filters.search"
-            @keyup.enter="fetchOrders"
-            placeholder="指示番号・品番で検索"
-          />
-        </div>
-        <div class="filter-field">
-          <label>ライン</label>
-          <select v-model="filters.line">
-            <option value="">すべて</option>
-            <option v-for="line in lines" :key="line.id" :value="line.id">
-              {{ line.line_code }} - {{ line.line_name }}
-            </option>
-          </select>
-        </div>
-        <div class="filter-field">
-          <label>ステータス</label>
-          <select v-model="filters.status">
-            <option value="">すべて</option>
-            <option value="PLANNED">計画済</option>
-            <option value="RELEASED">指示済</option>
-            <option value="IN_PROGRESS">進行中</option>
-            <option value="COMPLETED">完了</option>
-            <option value="CANCELED">中止</option>
-          </select>
-        </div>
-        <div class="filter-field">
-          <label>開始予定日</label>
-          <input v-model="filters.scheduled_start_date" type="date" />
-        </div>
-        <div class="filter-actions">
-          <button @click="fetchOrders" class="btn-primary">検索</button>
-          <button @click="resetFilters" class="btn-secondary">リセット</button>
-        </div>
-      </div>
-
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>指示番号</th>
-            <th>品番</th>
-            <th>品名</th>
-            <th>ライン</th>
-            <th>指示数量</th>
-            <th>開始予定日</th>
-            <th>終了予定日</th>
-            <th>優先度</th>
-            <th>ステータス</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="order in orders" :key="order.id">
-            <td>{{ order.order_no }}</td>
-            <td>{{ order.product_code }}</td>
-            <td>{{ order.product_name }}</td>
-            <td>{{ order.line_code }}</td>
-            <td class="text-right">{{ formatNumber(order.order_qty) }}</td>
-            <td>{{ formatDate(order.scheduled_start_date) }}</td>
-            <td>{{ formatDate(order.scheduled_end_date) }}</td>
-            <td class="text-center">{{ order.priority }}</td>
-            <td>
-              <span :class="getStatusClass(order.status)">
-                {{ order.status_display }}
-              </span>
-            </td>
-            <td>
-              <div class="btn-group">
-                <button
-                  v-if="order.status === 'PLANNED'"
-                  @click="releaseOrder(order)"
-                  class="btn-sm btn-primary"
-                  title="製造指示発行"
-                >
-                  発行
-                </button>
-                <button
-                  v-if="order.status === 'RELEASED'"
-                  @click="startOrder(order)"
-                  class="btn-sm btn-success"
-                  title="製造開始"
-                >
-                  開始
-                </button>
-                <button
-                  v-if="order.status === 'IN_PROGRESS'"
-                  @click="completeOrder(order)"
-                  class="btn-sm btn-info"
-                  title="製造完了"
-                >
-                  完了
-                </button>
-                <button
-                  v-if="['PLANNED', 'RELEASED', 'IN_PROGRESS'].includes(order.status)"
-                  @click="cancelOrder(order)"
-                  class="btn-sm btn-danger"
-                  title="製造中止"
-                >
-                  中止
-                </button>
-                <button @click="viewDetails(order)" class="btn-sm">詳細</button>
-                <button @click="editOrder(order)" class="btn-sm">編集</button>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div v-if="orders.length === 0" class="no-data">
-        データがありません
-      </div>
-    </div>
-
-    <!-- 新規/編集ダイアログ -->
-    <div v-if="showDialog" class="modal-overlay" @click.self="closeDialog">
-      <div class="modal-content">
-        <h2>{{ isEdit ? '製造指示編集' : '製造指示新規作成' }}</h2>
-        <form @submit.prevent="saveOrder">
-          <div class="form-group">
-            <label>指示番号 *</label>
-            <input v-model="formData.order_no" required :disabled="isEdit" />
+        <div class="filter-row">
+          <div class="filter-field">
+            <label>指示番号/品番</label>
+            <input v-model="filters.search" @keyup.enter="fetchOrders" placeholder="指示番号・品番で検索" />
           </div>
-          <div class="form-group">
-            <label>製品 *</label>
-            <select v-model="formData.product" required @change="onProductChange">
-              <option value="">選択してください</option>
-              <option v-for="product in products" :key="product.id" :value="product.id">
-                {{ product.product_code }} - {{ product.product_name }}
-              </option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>ルーティング</label>
-            <select v-model="formData.routing">
-              <option value="">選択してください</option>
-              <option v-for="routing in routings" :key="routing.id" :value="routing.id">
-                {{ routing.routing_code }}
-              </option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>ライン *</label>
-            <select v-model="formData.line" required>
-              <option value="">選択してください</option>
+          <div class="filter-field">
+            <label>ライン</label>
+            <select v-model="filters.line">
+              <option value="">すべて</option>
               <option v-for="line in lines" :key="line.id" :value="line.id">
                 {{ line.line_code }} - {{ line.line_name }}
               </option>
             </select>
           </div>
-          <div class="form-group">
-            <label>指示数量 *</label>
-            <input v-model.number="formData.order_qty" type="number" step="0.001" required />
+          <div class="filter-field">
+            <label>開始予定日(From)</label>
+            <input v-model="filters.scheduled_start_date_from" type="date" />
           </div>
-          <div class="form-group">
-            <label>開始予定日 *</label>
-            <input v-model="formData.scheduled_start_date" type="date" required />
+          <div class="filter-field">
+            <label>開始予定日(To)</label>
+            <input v-model="filters.scheduled_start_date_to" type="date" />
           </div>
-          <div class="form-group">
-            <label>終了予定日</label>
-            <input v-model="formData.scheduled_end_date" type="date" />
+          <div class="filter-field">
+            <label>優先度≧</label>
+            <input v-model.number="filters.priority_min" type="number" min="0" />
           </div>
-          <div class="form-group">
-            <label>優先度</label>
-            <input v-model.number="formData.priority" type="number" />
+        </div>
+        <div class="filter-row">
+          <div class="filter-field">
+            <label>ステータス</label>
+            <div class="status-group">
+              <label v-for="opt in statusOptions" :key="opt.value" class="status-check">
+                <input type="checkbox" :value="opt.value" v-model="filters.statuses" />
+                <span :class="getStatusClass(opt.value)">{{ opt.label }}</span>
+              </label>
+            </div>
           </div>
-          <div class="form-group">
-            <label>備考</label>
-            <textarea v-model="formData.remark" rows="3"></textarea>
+          <div class="filter-field checkbox-field">
+            <label>
+              <input type="checkbox" v-model="filters.unallocatedOnly" />
+              在庫引当未紐付のみ
+            </label>
           </div>
-          <div class="form-actions">
-            <button type="submit" class="btn-primary">保存</button>
-            <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
+          <div class="filter-actions">
+            <button class="btn-primary" @click="fetchOrders">検索</button>
+            <button class="btn-secondary" @click="resetFilters">リセット</button>
           </div>
-        </form>
+        </div>
+      </div>
+
+      <div class="summary-bar">
+        <span>件数: {{ filteredOrders.length }}</span>
+        <span v-for="opt in statusOptions" :key="opt.value">
+          {{ opt.label }}: {{ statusCount[opt.value] || 0 }}
+        </span>
+      </div>
+
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>指示番号</th>
+              <th>品番</th>
+              <th>品名</th>
+              <th>ライン</th>
+              <th class="text-right">指示数量</th>
+              <th>予定期間</th>
+              <th class="text-center">優先度</th>
+              <th>ステータス</th>
+              <th>引当状況</th>
+              <th>更新</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="order in filteredOrders" :key="order.id">
+              <td>{{ order.order_no }}</td>
+              <td>{{ order.product_code }}</td>
+              <td>{{ order.product_name }}</td>
+              <td>{{ order.line_code }}</td>
+              <td class="text-right">{{ formatNumber(order.order_qty) }}</td>
+              <td>{{ formatDate(order.scheduled_start_date) }} ~ {{ formatDate(order.scheduled_end_date) }}</td>
+              <td class="text-center">{{ order.priority ?? 0 }}</td>
+              <td><span :class="getStatusClass(order.status)">{{ order.status_display }}</span></td>
+              <td>
+                <span v-if="order.allocation" class="badge badge-success">紐付済</span>
+                <span v-else class="badge badge-warning">未紐付</span>
+              </td>
+              <td>{{ formatDateTime(order.updated_at) }}</td>
+              <td>
+                <div class="btn-group">
+                  <button class="btn-sm" @click="openDetail(order)">詳細</button>
+                  <button class="btn-sm" @click="goEdit(order.id)">編集</button>
+                  <button class="btn-sm btn-secondary" @click="goActuals(order.id)">実績入力</button>
+                  <button
+                    v-if="order.status === 'PLANNED'"
+                    class="btn-sm btn-primary"
+                    @click="transition(order, 'release')"
+                  >
+                    発行
+                  </button>
+                  <button
+                    v-if="order.status === 'RELEASED'"
+                    class="btn-sm btn-success"
+                    @click="transition(order, 'start')"
+                  >
+                    開始
+                  </button>
+                  <button
+                    v-if="order.status === 'IN_PROGRESS'"
+                    class="btn-sm btn-info"
+                    @click="transition(order, 'complete')"
+                  >
+                    完了
+                  </button>
+                  <button
+                    v-if="['PLANNED', 'RELEASED', 'IN_PROGRESS'].includes(order.status)"
+                    class="btn-sm btn-danger"
+                    @click="transition(order, 'cancel')"
+                  >
+                    中止
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div v-if="!filteredOrders.length" class="no-data">
+        条件に合致するデータがありません
       </div>
     </div>
 
@@ -193,89 +151,19 @@
     <div v-if="showDetailDialog" class="modal-overlay" @click.self="closeDetailDialog">
       <div class="modal-content modal-lg">
         <h2>製造指示詳細</h2>
-        <div v-if="selectedOrder" class="detail-content">
-          <div class="detail-section">
-            <h3>基本情報</h3>
-            <div class="detail-grid">
-              <div class="detail-item">
-                <label>指示番号:</label>
-                <span>{{ selectedOrder.order_no }}</span>
-              </div>
-              <div class="detail-item">
-                <label>品番:</label>
-                <span>{{ selectedOrder.product_code }}</span>
-              </div>
-              <div class="detail-item">
-                <label>品名:</label>
-                <span>{{ selectedOrder.product_name }}</span>
-              </div>
-              <div class="detail-item">
-                <label>ライン:</label>
-                <span>{{ selectedOrder.line_code }} - {{ selectedOrder.line_name }}</span>
-              </div>
-              <div class="detail-item">
-                <label>指示数量:</label>
-                <span>{{ formatNumber(selectedOrder.order_qty) }}</span>
-              </div>
-              <div class="detail-item">
-                <label>ステータス:</label>
-                <span :class="getStatusClass(selectedOrder.status)">
-                  {{ selectedOrder.status_display }}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div class="detail-section">
-            <h3>スケジュール</h3>
-            <div class="detail-grid">
-              <div class="detail-item">
-                <label>開始予定日:</label>
-                <span>{{ formatDate(selectedOrder.scheduled_start_date) }}</span>
-              </div>
-              <div class="detail-item">
-                <label>終了予定日:</label>
-                <span>{{ formatDate(selectedOrder.scheduled_end_date) }}</span>
-              </div>
-              <div class="detail-item">
-                <label>実績開始日:</label>
-                <span>{{ formatDateTime(selectedOrder.actual_start_date) }}</span>
-              </div>
-              <div class="detail-item">
-                <label>実績終了日:</label>
-                <span>{{ formatDateTime(selectedOrder.actual_end_date) }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="detail-section" v-if="selectedOrder.actuals && selectedOrder.actuals.length > 0">
-            <h3>工程実績</h3>
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>工程</th>
-                  <th>ライン</th>
-                  <th>完了数量</th>
-                  <th>実績時間(分)</th>
-                  <th>完了日時</th>
-                  <th>作業者</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="actual in selectedOrder.actuals" :key="actual.id">
-                  <td>{{ actual.process_code }} - {{ actual.process_name }}</td>
-                  <td>{{ actual.line_code }}</td>
-                  <td class="text-right">{{ formatNumber(actual.completed_qty) }}</td>
-                  <td class="text-right">{{ actual.actual_duration_min }}</td>
-                  <td>{{ formatDateTime(actual.completed_at) }}</td>
-                  <td>{{ actual.operator }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+        <div v-if="selectedOrder" class="detail-grid">
+          <div><label>指示番号</label><span>{{ selectedOrder.order_no }}</span></div>
+          <div><label>製品</label><span>{{ selectedOrder.product_code }} - {{ selectedOrder.product_name }}</span></div>
+          <div><label>ライン</label><span>{{ selectedOrder.line_code }}</span></div>
+          <div><label>ルーティング</label><span>{{ selectedOrder.routing_code || '-' }}</span></div>
+          <div><label>数量</label><span>{{ formatNumber(selectedOrder.order_qty) }}</span></div>
+          <div><label>予定期間</label><span>{{ formatDate(selectedOrder.scheduled_start_date) }} ~ {{ formatDate(selectedOrder.scheduled_end_date) }}</span></div>
+          <div><label>ステータス</label><span>{{ selectedOrder.status_display }}</span></div>
+          <div><label>在庫引当</label><span>{{ selectedOrder.allocation ? '紐付済' : '未紐付' }}</span></div>
+          <div class="full-row"><label>備考</label><span>{{ selectedOrder.remark || '-' }}</span></div>
         </div>
-        <div class="form-actions">
-          <button @click="closeDetailDialog" class="btn-secondary">閉じる</button>
+        <div class="modal-actions">
+          <button class="btn-secondary" @click="closeDetailDialog">閉じる</button>
         </div>
       </div>
     </div>
@@ -285,212 +173,160 @@
 <script>
 import axios from 'axios'
 
-const API_BASE_URL = 'http://localhost:8000/api/orders'
+const API_BASE = 'http://localhost:8000/api'
 
 export default {
   name: 'ProductionOrderList',
   data() {
     return {
       orders: [],
-      products: [],
-      routings: [],
       lines: [],
       filters: {
         search: '',
         line: '',
-        status: '',
-        scheduled_start_date: ''
+        statuses: [],
+        scheduled_start_date_from: '',
+        scheduled_start_date_to: '',
+        priority_min: null,
+        unallocatedOnly: false
       },
-      showDialog: false,
+      statusOptions: [
+        { value: 'PLANNED', label: '計画済' },
+        { value: 'RELEASED', label: '指示済' },
+        { value: 'IN_PROGRESS', label: '進行中' },
+        { value: 'COMPLETED', label: '完了' },
+        { value: 'CANCELED', label: '中止' }
+      ],
       showDetailDialog: false,
-      isEdit: false,
-      formData: this.getEmptyFormData(),
-      selectedOrder: null
+      selectedOrder: null,
+      loading: false
+    }
+  },
+  computed: {
+    filteredOrders() {
+      let data = [...this.orders]
+      if (this.filters.priority_min != null && this.filters.priority_min !== '') {
+        data = data.filter((o) => Number(o.priority || 0) >= Number(this.filters.priority_min))
+      }
+      if (this.filters.unallocatedOnly) {
+        data = data.filter((o) => !o.allocation)
+      }
+      return data
+    },
+    statusCount() {
+      return this.orders.reduce((acc, cur) => {
+        acc[cur.status] = (acc[cur.status] || 0) + 1
+        return acc
+      }, {})
     }
   },
   mounted() {
-    this.fetchOrders()
-    this.fetchProducts()
     this.fetchLines()
+    this.fetchOrders()
   },
   methods: {
-    getEmptyFormData() {
-      return {
-        order_no: '',
-        product: '',
-        routing: '',
-        line: '',
-        order_qty: 0,
-        scheduled_start_date: '',
-        scheduled_end_date: '',
-        priority: 100,
-        remark: ''
+    async fetchLines() {
+      try {
+        const res = await axios.get(`${API_BASE}/masters/lines/`)
+        this.lines = res.data
+      } catch (error) {
+        console.error('ライン取得エラー', error)
       }
     },
     async fetchOrders() {
+      this.loading = true
       try {
         const params = {}
         if (this.filters.search) params.search = this.filters.search
         if (this.filters.line) params.line = this.filters.line
-        if (this.filters.status) params.status = this.filters.status
-        if (this.filters.scheduled_start_date) params.scheduled_start_date = this.filters.scheduled_start_date
+        if (this.filters.statuses.length) params.status = this.filters.statuses.join(',')
+        if (this.filters.scheduled_start_date_from) params.scheduled_start_date_from = this.filters.scheduled_start_date_from
+        if (this.filters.scheduled_start_date_to) params.scheduled_start_date_to = this.filters.scheduled_start_date_to
 
-        const response = await axios.get(`${API_BASE_URL}/production-orders/`, { params })
-        this.orders = response.data
+        const listRes = await axios.get(`${API_BASE}/orders/production-orders/`, { params })
+        let items = listRes.data
+
+        // 詳細を取得して allocation などの付加情報を含める
+        const detailed = await Promise.all(
+          items.map(async (item) => {
+            try {
+              const res = await axios.get(`${API_BASE}/orders/production-orders/${item.id}/`)
+              return res.data
+            } catch (error) {
+              console.error('詳細取得エラー', error)
+              return item
+            }
+          })
+        )
+        this.orders = detailed
       } catch (error) {
-        console.error('製造指示取得エラー:', error)
+        console.error('製造指示取得エラー', error)
         alert('製造指示の取得に失敗しました')
+      } finally {
+        this.loading = false
       }
-    },
-    async fetchProducts() {
-      try {
-        const response = await axios.get('http://localhost:8000/api/masters/products/')
-        this.products = response.data
-      } catch (error) {
-        console.error('製品取得エラー:', error)
-      }
-    },
-    async fetchLines() {
-      try {
-        const response = await axios.get('http://localhost:8000/api/masters/lines/')
-        this.lines = response.data
-      } catch (error) {
-        console.error('ライン取得エラー:', error)
-      }
-    },
-    async fetchRoutings(productId) {
-      if (!productId) {
-        this.routings = []
-        return
-      }
-      try {
-        const response = await axios.get(`http://localhost:8000/api/masters/routings/?product=${productId}`)
-        this.routings = response.data
-      } catch (error) {
-        console.error('ルーティング取得エラー:', error)
-      }
-    },
-    onProductChange() {
-      this.fetchRoutings(this.formData.product)
     },
     resetFilters() {
       this.filters = {
         search: '',
         line: '',
-        status: '',
-        scheduled_start_date: ''
+        statuses: [],
+        scheduled_start_date_from: '',
+        scheduled_start_date_to: '',
+        priority_min: null,
+        unallocatedOnly: false
       }
       this.fetchOrders()
     },
-    showNewDialog() {
-      this.isEdit = false
-      this.formData = this.getEmptyFormData()
-      this.routings = []
-      this.showDialog = true
-    },
-    editOrder(order) {
-      this.isEdit = true
-      this.formData = {
-        id: order.id,
-        order_no: order.order_no,
-        product: order.product,
-        routing: order.routing,
-        line: order.line,
-        order_qty: order.order_qty,
-        scheduled_start_date: order.scheduled_start_date,
-        scheduled_end_date: order.scheduled_end_date,
-        priority: order.priority,
-        remark: order.remark
+    async transition(order, action) {
+      const allowMap = {
+        release: ['PLANNED'],
+        start: ['RELEASED'],
+        complete: ['IN_PROGRESS'],
+        cancel: ['PLANNED', 'RELEASED', 'IN_PROGRESS']
       }
-      this.fetchRoutings(order.product)
-      this.showDialog = true
-    },
-    async saveOrder() {
+      if (!allowMap[action].includes(order.status)) {
+        alert('現在のステータスでは実行できません')
+        return
+      }
+      const labels = { release: '発行', start: '開始', complete: '完了', cancel: '中止' }
+      if (!confirm(`製造指示「${order.order_no}」を${labels[action]}しますか？`)) return
+
       try {
-        if (this.isEdit) {
-          await axios.put(`${API_BASE_URL}/production-orders/${this.formData.id}/`, this.formData)
-          alert('製造指示を更新しました')
-        } else {
-          await axios.post(`${API_BASE_URL}/production-orders/`, this.formData)
-          alert('製造指示を作成しました')
-        }
-        this.closeDialog()
+        await axios.post(`${API_BASE}/orders/production-orders/${order.id}/${action}/`)
+        alert(`製造指示を${labels[action]}しました`)
         this.fetchOrders()
       } catch (error) {
-        console.error('保存エラー:', error)
-        alert('保存に失敗しました: ' + (error.response?.data?.detail || error.message))
+        console.error('ステータス変更エラー', error)
+        alert(`${labels[action]}に失敗しました: ${error.response?.data?.detail || error.message}`)
       }
     },
-    closeDialog() {
-      this.showDialog = false
+    goNew() {
+      this.$router.push('/production/orders/new')
     },
-    async viewDetails(order) {
-      try {
-        const response = await axios.get(`${API_BASE_URL}/production-orders/${order.id}/`)
-        this.selectedOrder = response.data
-        this.showDetailDialog = true
-      } catch (error) {
-        console.error('詳細取得エラー:', error)
-        alert('詳細の取得に失敗しました')
-      }
+    goEdit(id) {
+      this.$router.push(`/production/orders/${id}/edit`)
+    },
+    goActuals(id) {
+      this.$router.push(`/production/orders/${id}/actuals`)
+    },
+    openDetail(order) {
+      this.selectedOrder = order
+      this.showDetailDialog = true
     },
     closeDetailDialog() {
       this.showDetailDialog = false
       this.selectedOrder = null
     },
-    async releaseOrder(order) {
-      if (!confirm(`製造指示「${order.order_no}」を発行しますか？`)) return
-      try {
-        await axios.post(`${API_BASE_URL}/production-orders/${order.id}/release/`)
-        alert('製造指示を発行しました')
-        this.fetchOrders()
-      } catch (error) {
-        console.error('発行エラー:', error)
-        alert('発行に失敗しました: ' + (error.response?.data?.detail || error.message))
-      }
-    },
-    async startOrder(order) {
-      if (!confirm(`製造指示「${order.order_no}」を開始しますか？`)) return
-      try {
-        await axios.post(`${API_BASE_URL}/production-orders/${order.id}/start/`)
-        alert('製造を開始しました')
-        this.fetchOrders()
-      } catch (error) {
-        console.error('開始エラー:', error)
-        alert('開始に失敗しました: ' + (error.response?.data?.detail || error.message))
-      }
-    },
-    async completeOrder(order) {
-      if (!confirm(`製造指示「${order.order_no}」を完了しますか？`)) return
-      try {
-        await axios.post(`${API_BASE_URL}/production-orders/${order.id}/complete/`)
-        alert('製造を完了しました')
-        this.fetchOrders()
-      } catch (error) {
-        console.error('完了エラー:', error)
-        alert('完了に失敗しました: ' + (error.response?.data?.detail || error.message))
-      }
-    },
-    async cancelOrder(order) {
-      if (!confirm(`製造指示「${order.order_no}」を中止しますか？`)) return
-      try {
-        await axios.post(`${API_BASE_URL}/production-orders/${order.id}/cancel/`)
-        alert('製造を中止しました')
-        this.fetchOrders()
-      } catch (error) {
-        console.error('中止エラー:', error)
-        alert('中止に失敗しました: ' + (error.response?.data?.detail || error.message))
-      }
-    },
     getStatusClass(status) {
-      const statusClasses = {
-        'PLANNED': 'badge badge-secondary',
-        'RELEASED': 'badge badge-primary',
-        'IN_PROGRESS': 'badge badge-warning',
-        'COMPLETED': 'badge badge-success',
-        'CANCELED': 'badge badge-danger'
+      const classes = {
+        PLANNED: 'badge badge-secondary',
+        RELEASED: 'badge badge-primary',
+        IN_PROGRESS: 'badge badge-warning',
+        COMPLETED: 'badge badge-success',
+        CANCELED: 'badge badge-danger'
       }
-      return statusClasses[status] || 'badge'
+      return classes[status] || 'badge'
     },
     formatNumber(value) {
       if (value == null) return '0'
@@ -500,8 +336,7 @@ export default {
       })
     },
     formatDate(value) {
-      if (!value) return ''
-      return value
+      return value || ''
     },
     formatDateTime(value) {
       if (!value) return ''
@@ -512,6 +347,97 @@ export default {
 </script>
 
 <style scoped>
+.helper-text {
+  margin: 0;
+  color: #5c6670;
+  font-size: 0.9rem;
+}
+
+.filter-bar {
+  background: #fff;
+  border: 1px solid #e3e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.filter-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filter-field input,
+.filter-field select {
+  padding: 8px;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+}
+
+.status-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.status-check {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.checkbox-field {
+  justify-content: center;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.summary-bar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+}
+
+.table-wrapper {
+  background: #fff;
+  border: 1px solid #e3e7eb;
+  border-radius: 8px;
+  overflow: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table thead {
+  background: #f8fafc;
+}
+
+.data-table th,
+.data-table td {
+  padding: 10px;
+  border-bottom: 1px solid #edf1f5;
+}
+
+.btn-group {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
 .text-right {
   text-align: right;
 }
@@ -557,43 +483,29 @@ export default {
   color: white;
 }
 
-.btn-group {
-  display: flex;
-  gap: 0.25rem;
-  flex-wrap: wrap;
-}
-
 .modal-lg {
   max-width: 900px;
 }
 
-.detail-content {
-  padding: 1rem 0;
-}
-
-.detail-section {
-  margin-bottom: 2rem;
-}
-
-.detail-section h3 {
-  margin-bottom: 1rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 2px solid #dee2e6;
-}
-
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
 }
 
-.detail-item {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.detail-item label {
+.detail-grid label {
   font-weight: bold;
-  min-width: 120px;
+  margin-right: 6px;
+}
+
+.detail-grid .full-row {
+  grid-column: span 2;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 </style>
