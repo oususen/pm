@@ -15,6 +15,7 @@
             <th>ID</th>
             <th>親製品</th>
             <th>版</th>
+            <th>連産品</th>
             <th>有効開始日</th>
             <th>有効終了日</th>
             <th>有効</th>
@@ -26,6 +27,7 @@
             <td>{{ bom.id }}</td>
             <td>{{ bom.parent_product_code || getProductCodeOnly(bom.parent_product) }}</td>
             <td>{{ bom.version }}</td>
+            <td>{{ bom.is_coproduct ? 'はい' : '' }}</td>
             <td>{{ bom.valid_from }}</td>
             <td>{{ bom.valid_to || '-' }}</td>
             <td>{{ bom.is_active ? '有効' : '無効' }}</td>
@@ -65,6 +67,15 @@
                 {{ product.product_code }} - {{ product.product_name }}
               </option>
             </select>
+          </div>
+          <div class="form-group">
+            <label>
+              <input type="checkbox" v-model="formData.is_coproduct" :disabled="isEdit" />
+              連産品BOM（仮想セット品番を親にして複数製品を同時生産）
+            </label>
+            <p v-if="formData.is_coproduct" class="helper-text">
+              親製品は仮想セット品番（製品マスタで「仮想セット」をオン）から選択してください。
+            </p>
           </div>
           <div class="form-group">
             <label>版 *</label>
@@ -725,8 +736,12 @@ const filteredChildProducts = computed(() => {
 
 const filteredParentProducts = computed(() => {
   const keyword = parentProductFilter.value.trim().toLowerCase()
-  if (!keyword) return products.value
-  return products.value.filter((p) =>
+  let pool = products.value
+  if (formData.value.is_coproduct) {
+    pool = pool.filter(p => p.is_virtual_set)
+  }
+  if (!keyword) return pool
+  return pool.filter((p) =>
     `${p.product_code} ${p.product_name}`.toLowerCase().includes(keyword)
   )
 })
@@ -760,7 +775,8 @@ const showNewDialog = () => {
     version: 'v1',
     valid_from: today,
     valid_to: '',
-    is_active: true
+    is_active: true,
+    is_coproduct: false,
   }
   showDialog.value = true
 }
@@ -787,7 +803,8 @@ const saveBOM = async () => {
       version: formData.value.version,
       valid_from: formData.value.valid_from,
       valid_to: formData.value.valid_to || null,
-      is_active: formData.value.is_active
+      is_active: formData.value.is_active,
+      is_coproduct: formData.value.is_coproduct,
     }
 
     if (isEdit.value) {

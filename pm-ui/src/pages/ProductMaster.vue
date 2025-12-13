@@ -50,6 +50,7 @@
             <th>単位</th>
             <th>標準LT(日)</th>
             <th>みなし組立</th>
+            <th>仮想セット</th>
             <th>有効</th>
             <th>操作</th>
           </tr>
@@ -62,6 +63,7 @@
             <td>{{ product.unit }}</td>
             <td>{{ product.standard_lt_days }}</td>
             <td>{{ product.is_phantom ? 'はい' : 'いいえ' }}</td>
+            <td>{{ product.is_virtual_set ? 'はい' : 'いいえ' }}</td>
             <td>{{ product.is_active ? '有効' : '無効' }}</td>
             <td>
               <button @click="editProduct(product)" class="btn-sm">編集</button>
@@ -105,6 +107,12 @@
           <div class="form-group">
             <label>標準LT(日)</label>
             <input v-model.number="formData.standard_lt_days" type="number" min="0" />
+          </div>
+          <div class="form-group">
+            <label>
+              <input type="checkbox" v-model="formData.is_virtual_set" />
+              仮想セット品番（連産品用、在庫を持たない親品番）
+            </label>
           </div>
           <div class="form-group">
             <label>
@@ -159,7 +167,8 @@ const formData = ref({
   unit: '個',
   standard_lt_days: 0,
   is_active: true,
-  is_final_product: false
+  is_final_product: false,
+  is_virtual_set: false,
 })
 
 // クエリパラメータを組み立て
@@ -196,10 +205,11 @@ const showNewDialog = () => {
     product_code: '',
     product_name: '',
     category: '',
-    unit: '個',
-    standard_lt_days: 0,
-    is_active: true,
-    is_final_product: false
+  unit: '個',
+  standard_lt_days: 0,
+  is_active: true,
+  is_final_product: false,
+  is_virtual_set: false,
   }
   showDialog.value = true
 }
