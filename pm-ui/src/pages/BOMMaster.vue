@@ -674,11 +674,11 @@ const resetRoutingGenForm = () => {
 }
 
 const fetchBOMItems = async (bomId, token = bomItemsRequestToken.value) => {
-  const response = await api.boms.getBOMItems(bomId)
+  const response = await api.boms.getBOMItems({ bom: bomId })
   if (token !== bomItemsRequestToken.value) return
-  const items = response.data.results || response.data
-  // 念のためクライアント側でもBOM IDで絞り込む
-  bomItems.value = items.filter((item) => item.bom === bomId)
+  const items = response.data.results || response.data || []
+  // API側で絞られている前提でそのまま表示（過剰フィルタで消えないようにする）
+  bomItems.value = items
 }
 
 const fetchBOMTree = async (bomId) => {
