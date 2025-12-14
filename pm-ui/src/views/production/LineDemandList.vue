@@ -49,7 +49,7 @@
 
 <script setup>
 import { onMounted, ref } from "vue";
-import api from "../api/client";
+import api from "@/api/client";
 
 const items = ref([]);
 const loading = ref(false);

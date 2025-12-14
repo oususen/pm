@@ -1,15 +1,20 @@
 <template>
   <div class="plan-container">
-    <h2 class="page-title">仕入れ計画</h2>
-
     <div class="toolbar">
       <div class="toolbar-left">
         <div class="field">
-          <label>仕入先</label>
-          <select v-model.number="selectedSupplier" @change="loadData">
+          <label>処理区分</label>
+          <select v-model="mode">
+            <option value="plan">1:生産計画</option>
+            <option value="result">2:実績</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>ライン</label>
+          <select v-model="selectedLine" @change="loadData">
             <option value="">すべて</option>
-            <option v-for="s in suppliers" :key="s.id" :value="s.id">
-              {{ s.supplier_code }} - {{ s.supplier_name }}
+            <option v-for="line in lines" :key="line.id" :value="line.id">
+              {{ line.line_code }} - {{ line.line_name }}
             </option>
           </select>
         </div>
@@ -33,8 +38,8 @@
       <div class="toolbar-right">
         <button class="btn" @click="addRow">新規行追加</button>
         <button class="btn" @click="resetRows" :disabled="!rows.length">クリア</button>
-        <button class="btn" @click="savePlan" :disabled="!rows.length || !selectedSupplier">保存</button>
-        <button class="btn primary" @click="doPickup" :disabled="!selectedSupplier">取り込み</button>
+        <button class="btn" @click="savePlan" :disabled="!rows.length || !selectedLine">保存</button>
+        <button class="btn primary" @click="doPickup" :disabled="!selectedLine">取り込み</button>
       </div>
     </div>
 
@@ -120,14 +125,15 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import api from '../api/client'
+import api from '@/api/client'
 
-const selectedSupplier = ref('')
+const mode = ref('plan')
+const selectedLine = ref('')
 const startDate = ref(new Date().toISOString().slice(0, 10))
-const horizonDays = ref(60)
+const horizonDays = ref(60) // 表示日から2か月（約60日）
 const keyword = ref('')
 
-const suppliers = ref([])
+const lines = ref([])
 const products = ref([])
 const rows = ref([])
 let tempId = 1
@@ -154,9 +160,10 @@ const dateColumns = computed(() => {
   return cols
 })
 
+// テーブルの最小幅を計算して、縮みすぎを防ぐ
 const tableMinWidth = computed(() => {
-  const fixedColsWidth = 40 + 187 + 100
-  const perDayWidth = 80 * 5
+  const fixedColsWidth = 40 + 120 + 100 // No + 品番 + 品名
+  const perDayWidth = 80 * 5 // 5列×80px
   return fixedColsWidth + dateColumns.value.length * perDayWidth
 })
 
@@ -183,22 +190,20 @@ const resetRows = () => {
 }
 
 const savePlan = async () => {
-  if (!selectedSupplier.value) {
-    alert('仕入先を選択してください。')
+  if (!selectedLine.value) {
+    alert('ラインを選択してください。')
     return
   }
   const items = []
   rows.value.forEach((r) => {
-    if (!r.product_id) return
-    // 仕入れ用のprocess_idはダミー値（1固定）を使用
-    const process_id = r.process_id || 1
+    if (!r.product_id || !r.process_id) return
     dateColumns.value.forEach((c) => {
       const daily = r.daily[c.key]
       items.push({
         product_id: r.product_id,
-        process_id: process_id,
+        process_id: r.process_id,
         plan_date: c.key,
-        plan_qty: daily.plan === '' || daily.plan == null ? 0 : Number(daily.plan),
+        plan_qty: daily.plan === '' || daily.plan === null || daily.plan === undefined ? 0 : Number(daily.plan),
         actual_qty: Number(daily.actual || 0),
         stock_qty: Number(daily.stock || 0),
         planned_stock_qty: Number(daily.plan_stock || 0),
@@ -210,9 +215,8 @@ const savePlan = async () => {
     return
   }
   try {
-    // 仕入先IDをline_idとして使用（暫定）
     const res = await api.lineBacklogs.save({
-      line_id: selectedSupplier.value,
+      line_id: selectedLine.value,
       items,
     })
     console.info('保存結果', res.data)
@@ -242,124 +246,83 @@ const filteredRows = computed(() => {
 })
 
 const refreshDates = () => {
+  // 再初期化は既存データの初期化だけ（簡易対応）
   rows.value.forEach((r) => {
     r.daily = initDaily()
   })
 }
 
 const loadData = async () => {
+  // 取り込み前は空表示（手動で「取り込み」を押す運用）
   rows.value = []
-  await fetchProducts(selectedSupplier.value || null)
 }
 
 const onPlanInput = (row, dateKey, value) => {
   row.daily[dateKey].plan = value === '' ? '' : value
 }
 
-const fetchSuppliers = async () => {
-  const res = await api.suppliers.getSuppliers()
-  suppliers.value = res.data.results || res.data || []
+const fetchLines = async () => {
+  const res = await api.lines.getLines()
+  lines.value = res.data.results || res.data || []
 }
-
-const fetchProducts = async (supplierId = null) => {
-  try {
-    const params = { sourcing_type: 'BUY' }
-    if (supplierId) params.supplier = supplierId
-    const bomItemsRes = await api.bomItems.getBOMItems(params)
-    const bomItems = bomItemsRes.data.results || bomItemsRes.data || []
-
-    // 子製品IDを抽出
-    const targetProductIds = new Set(bomItems.map((item) => item.child_product))
-
-    // 全製品から対象のみを抽出（仕入先指定時は該当BOMがあるもののみ）
-    const allProducts = await api.products.getAllProducts()
-    const filtered =
-      supplierId && targetProductIds.size
-        ? allProducts.filter((p) => !p.is_phantom && targetProductIds.has(p.id))
-        : allProducts.filter((p) => !p.is_phantom)
-
-    products.value = filtered.sort((a, b) => (a.product_code || '').localeCompare(b.product_code || ''))
-  } catch (e) {
-    console.error('仕入れ対象製品の取得エラー', e)
-    products.value = []
-  }
+const fetchProducts = async () => {
+  products.value = (await api.products.getAllProducts())
+    .filter((p) => !p.is_phantom)
+    .sort((a, b) => (a.product_code || '').localeCompare(b.product_code || ''))
 }
 
 onMounted(async () => {
   try {
-    await Promise.all([fetchSuppliers(), fetchProducts()])
-    await loadData()
+    await Promise.all([fetchLines(), fetchProducts()])
+    loadData()
   } catch (e) {
     console.error('初期データ取得エラー', e)
   }
 })
 
 const doPickup = async () => {
-  if (!selectedSupplier.value) {
-    alert('仕入先を選択してください。')
-    return
-  }
+  if (!selectedLine.value) return
   try {
-    // 選択仕入先の製品リストを最新取得
-    await fetchProducts(selectedSupplier.value)
-
-    // 対象製品のIDリストを取得
-    const productIds = products.value.map(p => p.id)
-
-    if (!productIds.length) {
-      alert('この仕入先の購入部品が見つかりません。')
-      rows.value = []
-      return
-    }
-
-    // 既存のLineBacklogデータを取得（line_idは仕入先IDとして使用）
-    // 注：pickup APIは使わず、直接バックログを取得
-    const backlogRes = await api.lineBacklogs.getLineBacklogs({
-      line: selectedSupplier.value,
-      product__in: productIds.join(','),
-      plan_date__gte: startDate.value,
-      plan_date__lte: endDate.value,
+    const res = await api.lineBacklogs.pickup({
+      line_id: selectedLine.value,
+      start_date: startDate.value,
+      end_date: endDate.value,
     })
-
-    const backlogs = backlogRes.data.results || backlogRes.data || []
-
-    // 製品ごとにグルーピング
+    const data = res.data || []
     const grouped = new Map()
-
-    // まず製品リストから空行を作成
-    products.value.forEach((p) => {
-      grouped.set(p.id, {
-        id: `prod-${p.id}`,
-        product_id: p.id,
-        product_code: p.product_code,
-        product_name: p.product_name,
-        process_id: 1, // 仕入れ用ダミー値
-        daily: initDaily(),
-      })
-    })
-
-    // バックログデータがあれば上書き
-    backlogs.forEach((d) => {
+    data.forEach((d) => {
       if (!d.product) return
-      const row = grouped.get(d.product)
-      if (!row) return
-
+      const key = d.product
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          id: `bk-${key}`,
+          product_id: d.product,
+          product_code: d.product_code || '',
+          product_name: d.product_name || '',
+          process_id: d.process,
+          daily: initDaily(),
+        })
+      }
+      const row = grouped.get(key)
       const dateKey = d.plan_date
       if (row.daily[dateKey]) {
-        row.daily[dateKey].demand = Number(d.order_qty || 0)
-        row.daily[dateKey].plan = d.plan_qty === null || d.plan_qty === undefined ? '' : d.plan_qty === 0 ? '' : d.plan_qty
+        row.daily[dateKey].demand = Number(d.order_qty || 0)  // 需要=order_qty（取り込み時に計算された受注数/発注数）
+        row.daily[dateKey].plan =
+          d.plan_qty === null || d.plan_qty === undefined ? '' : d.plan_qty === 0 ? '' : d.plan_qty
         row.daily[dateKey].actual = Number(d.actual_qty || 0)
         row.daily[dateKey].stock = Number(d.stock_qty || 0)
         row.daily[dateKey].plan_stock = Number(d.planned_stock_qty || 0)
       }
     })
-
     rows.value = Array.from(grouped.values())
+
+    if (!rows.value.length) addRow()
   } catch (e) {
-    console.error('仕入れ計画 取り込みエラー', e)
+    console.error('バックログ取り込みエラー', e)
     alert('取り込みに失敗しました。')
   }
 }
+
 </script>
 
 <style scoped>
@@ -367,13 +330,8 @@ const doPickup = async () => {
   padding: 8px 10px 14px;
   background: #eef2f6;
   font-size: 13px;
-  font-family: 'Segoe UI', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
+  font-family: "Noto Sans JP", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   color: #1f2a44;
-}
-.page-title {
-  margin: 0 0 6px;
-  font-size: 16px;
-  font-weight: 700;
 }
 .toolbar {
   display: flex;
@@ -427,7 +385,7 @@ const doPickup = async () => {
   border: 1px solid #d7dfe8;
   padding: 4px 6px;
   white-space: nowrap;
-  font-size: 1.288rem;
+  font-size: 1.288rem; /* 0.92rem を1.4倍 */
   font-weight: 500;
   color: #000;
 }
@@ -451,12 +409,12 @@ const doPickup = async () => {
 .date-head {
   text-align: center;
   font-weight: 700;
-  min-width: 400px;
+  min-width: 400px; /* 5列ぶんの幅をさらに広げて文字潰れを防ぐ */
 }
 .mini {
   text-align: center;
   font-size: 12px;
-  min-width: 80px;
+  min-width: 80px; /* サブ列の最小幅を広げて視認性を上げる */
 }
 .day-end {
   border-right: 4px solid #a2b0c5 !important;
@@ -478,12 +436,12 @@ thead .sticky-col {
 }
 .code-col {
   left: 40px;
-  width: 187px;
+  width: 187px; /* 156px の1.2倍 */
   min-width: 187px;
   max-width: 187px;
 }
 .name-col {
-  left: 227px;
+  left: 160px;
   width: 100px;
   min-width: 100px;
   max-width: 100px;
@@ -492,7 +450,7 @@ thead .sticky-col {
 .product-info {
   display: block;
   padding: 3px 4px;
-  font-size: 1.288rem;
+  font-size: 1.288rem; /* 0.92rem を1.4倍 */
   font-weight: 500;
   color: #000;
   white-space: nowrap;
@@ -506,13 +464,13 @@ thead .sticky-col {
   padding: 3px 4px;
   border: 1px solid #d1d5db;
   border-radius: 2px;
-  font-size: 1.288rem;
+  font-size: 1.288rem; /* 0.92rem を1.4倍 */
   font-weight: 500;
   color: #000;
 }
 .num {
   text-align: right;
-  min-width: 80px;
+  min-width: 80px; /* セル幅を広げて日付列が潰れないようにする */
 }
 .num input {
   width: 100%;
@@ -533,7 +491,7 @@ thead .sticky-col {
   padding: 3px 4px;
   text-align: right;
   color: #666;
-  font-size: 1.288rem;
+  font-size: 1.288rem; /* 0.92rem を1.4倍 */
   font-weight: 500;
   color: #000;
 }

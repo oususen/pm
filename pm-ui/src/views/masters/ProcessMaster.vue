@@ -89,7 +89,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import api from '../api/client'
+import api from '@/api/client'
 
 const processes = ref([])
 const lines = ref([])

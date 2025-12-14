@@ -1,9 +1,9 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">仕入先マスタ</h1>
+      <h1 class="page-title">カレンダマスタ</h1>
       <div class="page-actions">
-        <button @click="fetchSuppliers" class="btn-primary">更新</button>
+        <button @click="fetchCalendars" class="btn-primary">更新</button>
         <button @click="showNewDialog" class="btn-success">新規</button>
       </div>
     </div>
@@ -12,24 +12,26 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>仕入先コード</th>
-            <th>仕入先名</th>
+            <th>カレンダコード</th>
+            <th>カレンダ名</th>
+            <th>説明</th>
             <th>操作</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="supplier in suppliers" :key="supplier.id">
-            <td>{{ supplier.supplier_code }}</td>
-            <td>{{ supplier.supplier_name }}</td>
+          <tr v-for="calendar in calendars" :key="calendar.id">
+            <td>{{ calendar.calendar_code }}</td>
+            <td>{{ calendar.calendar_name }}</td>
+            <td>{{ calendar.description }}</td>
             <td>
-              <button @click="editSupplier(supplier)" class="btn-sm">編集</button>
-              <button @click="deleteSupplier(supplier.id)" class="btn-sm btn-danger">削除</button>
+              <button @click="editCalendar(calendar)" class="btn-sm">編集</button>
+              <button @click="deleteCalendar(calendar.id)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
         </tbody>
       </table>
 
-      <div v-if="suppliers.length === 0" class="no-data">
+      <div v-if="calendars.length === 0" class="no-data">
         データがありません
       </div>
     </div>
@@ -37,15 +39,19 @@
     <!-- 新規/編集ダイアログ -->
     <div v-if="showDialog" class="modal-overlay" @click.self="closeDialog">
       <div class="modal-content">
-        <h2>{{ isEdit ? '仕入先編集' : '仕入先新規作成' }}</h2>
-        <form @submit.prevent="saveSupplier">
+        <h2>{{ isEdit ? 'カレンダ編集' : 'カレンダ新規作成' }}</h2>
+        <form @submit.prevent="saveCalendar">
           <div class="form-group">
-            <label>仕入先コード *</label>
-            <input v-model="formData.supplier_code" required :disabled="isEdit" />
+            <label>カレンダコード *</label>
+            <input v-model="formData.calendar_code" required :disabled="isEdit" />
           </div>
           <div class="form-group">
-            <label>仕入先名 *</label>
-            <input v-model="formData.supplier_name" required />
+            <label>カレンダ名 *</label>
+            <input v-model="formData.calendar_name" required />
+          </div>
+          <div class="form-group">
+            <label>説明</label>
+            <textarea v-model="formData.description" rows="3"></textarea>
           </div>
           <div class="form-actions">
             <button type="submit" class="btn-primary">保存</button>
@@ -59,38 +65,40 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import api from '../api/client'
+import api from '@/api/client'
 
-const suppliers = ref([])
+const calendars = ref([])
 const showDialog = ref(false)
 const isEdit = ref(false)
 const formData = ref({
-  supplier_code: '',
-  supplier_name: ''
+  calendar_code: '',
+  calendar_name: '',
+  description: ''
 })
 
-const fetchSuppliers = async () => {
+const fetchCalendars = async () => {
   try {
-    const response = await api.suppliers.getSuppliers()
-    suppliers.value = response.data.results || response.data
+    const response = await api.calendars.getCalendars()
+    calendars.value = response.data.results || response.data
   } catch (error) {
-    console.error('仕入先取得エラー:', error)
-    alert('仕入先データの取得に失敗しました')
+    console.error('カレンダ取得エラー:', error)
+    alert('カレンダデータの取得に失敗しました')
   }
 }
 
 const showNewDialog = () => {
   isEdit.value = false
   formData.value = {
-    supplier_code: '',
-    supplier_name: ''
+    calendar_code: '',
+    calendar_name: '',
+    description: ''
   }
   showDialog.value = true
 }
 
-const editSupplier = (supplier) => {
+const editCalendar = (calendar) => {
   isEdit.value = true
-  formData.value = { ...supplier }
+  formData.value = { ...calendar }
   showDialog.value = true
 }
 
@@ -98,16 +106,16 @@ const closeDialog = () => {
   showDialog.value = false
 }
 
-const saveSupplier = async () => {
+const saveCalendar = async () => {
   try {
     if (isEdit.value) {
-      await api.suppliers.updateSupplier(formData.value.id, formData.value)
+      await api.calendars.updateCalendar(formData.value.id, formData.value)
       alert('更新しました')
     } else {
-      await api.suppliers.createSupplier(formData.value)
+      await api.calendars.createCalendar(formData.value)
       alert('作成しました')
     }
-    await fetchSuppliers()
+    await fetchCalendars()
     closeDialog()
   } catch (error) {
     console.error('保存エラー:', error)
@@ -115,12 +123,12 @@ const saveSupplier = async () => {
   }
 }
 
-const deleteSupplier = async (id) => {
+const deleteCalendar = async (id) => {
   if (!confirm('本当に削除しますか？')) return
 
   try {
-    await api.suppliers.deleteSupplier(id)
-    await fetchSuppliers()
+    await api.calendars.deleteCalendar(id)
+    await fetchCalendars()
     alert('削除しました')
   } catch (error) {
     console.error('削除エラー:', error)
@@ -129,7 +137,7 @@ const deleteSupplier = async (id) => {
 }
 
 onMounted(() => {
-  fetchSuppliers()
+  fetchCalendars()
 })
 </script>
 
@@ -175,12 +183,14 @@ onMounted(() => {
   color: #555;
 }
 
-.form-group input[type="text"] {
+.form-group input[type="text"],
+.form-group textarea {
   width: 100%;
   padding: 0.5rem;
   border: 1px solid #ddd;
   border-radius: 4px;
   font-size: 1rem;
+  font-family: inherit;
 }
 
 .form-actions {

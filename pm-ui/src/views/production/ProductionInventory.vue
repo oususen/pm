@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2 class="page-title">進捗管理</h2>
+      <h2 class="page-title">在庫 / 残量一覧</h2>
       <div class="page-actions">
         <input
           type="text"
@@ -34,8 +34,9 @@
               <td>{{ r.label }}</td>
               <td v-for="d in columns" :key="d" class="num">
                 <template v-if="r.cells[d]">
-                  <div>P: {{ fmt(r.cells[d].plan) }}</div>
-                  <div>A: {{ fmt(r.cells[d].actual) }}</div>
+                  <div>計画: {{ fmt(r.cells[d].plan) }}</div>
+                  <div>実績: {{ fmt(r.cells[d].actual) }}</div>
+                  <div>残: {{ fmt(r.cells[d].remaining) }}</div>
                 </template>
               </td>
             </tr>
@@ -49,8 +50,8 @@
 
 <script setup>
 import { computed, onMounted, ref } from "vue";
-import api from "../api/client";
-import { addDays, formatISODate, parseISODate } from "../utils/dateUtil";
+import api from "@/api/client";
+import { addDays, formatISODate, parseISODate } from "@/utils/dateUtil";
 
 const lineFilter = ref("");
 const startDate = ref(formatISODate(new Date()));
@@ -78,7 +79,7 @@ const rows = computed(() => {
     const within =
       d.plan_date >= columns.value[0] &&
       d.plan_date <= columns.value[columns.value.length - 1];
-    const lineText = `${d.line_code || ""}${d.line_name || ""}${d.line || ""}`.toLowerCase();
+    const lineText = `${d.line_name || ""}${d.line || ""}`.toLowerCase();
     const okLine =
       !lineFilter.value ||
       lineText.includes(lineFilter.value.trim().toLowerCase());
@@ -87,18 +88,21 @@ const rows = computed(() => {
 
   const map = new Map();
   for (const d of filtered) {
-    const key = `${d.line_code || d.line_name || d.line || ""}__${d.product_code}`;
+    const key = `${d.line || d.line_name || ""}__${d.product_code}`;
     if (!map.has(key)) {
       map.set(key, {
         key,
-        label: `${d.line_code || d.line_name || d.line || "-"} / ${d.product_code}`,
+        label: `${d.line_name || d.line} / ${d.product_code}`,
         cells: {},
       });
     }
     const row = map.get(key);
+    const plan = Number(d.plan_qty || 0);
+    const actual = Number(d.actual_qty || 0);
     row.cells[d.plan_date] = {
-      plan: Number(d.plan_qty || 0),
-      actual: Number(d.actual_qty || 0),
+      plan,
+      actual,
+      remaining: plan - actual,
     };
   }
   return Array.from(map.values());
@@ -134,7 +138,7 @@ onMounted(load);
 <style scoped>
 .num {
   text-align: right;
-  min-width: 120px;
+  min-width: 140px;
 }
 
 input,

@@ -91,7 +91,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import api from '../api/client'
+import api from '@/api/client'
 
 const orders = ref([])
 const showDetailsDialog = ref(false)

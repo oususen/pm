@@ -39,7 +39,7 @@
 <script setup>
 import { ref } from "vue";
 import { RouterLink } from "vue-router";
-import api from "../api/client";
+import api from "@/api/client";
 
 const running = ref(false);
 const message = ref("");
