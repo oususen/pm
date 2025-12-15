@@ -195,9 +195,10 @@ class RoutingStepAdmin(admin.ModelAdmin):
         """
         ルーティング名に加工後品目コードを付与して、同じルート内でも識別しやすくする。
         """
-        base = str(obj.routing)
+        # 製品コードを一度だけ表示
+        product_code = obj.routing.product.product_code if obj.routing.product_id else ''
         out_code = obj.output_product.product_code if obj.output_product_id else ''
-        return f"{base} -> {out_code}" if out_code else base
+        return f"{product_code} -> {out_code}" if out_code else product_code
     routing_label.short_description = 'ルーティング'
 
 
