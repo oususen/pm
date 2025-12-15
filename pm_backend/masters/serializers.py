@@ -90,10 +90,16 @@ class BOMItemSerializer(serializers.ModelSerializer):
 class BOMSerializer(serializers.ModelSerializer):
     items = BOMItemSerializer(many=True, read_only=True)
     parent_product_name = serializers.CharField(source='parent_product.product_name', read_only=True)
+    parent_is_final = serializers.SerializerMethodField()
 
     class Meta:
         model = BOM
         fields = '__all__'
+
+    def get_parent_is_final(self, obj: BOM):
+        if obj.parent_product_id:
+            return bool(getattr(obj.parent_product, 'is_final_product', False))
+        return False
 
 
 class RoutingStepSerializer(serializers.ModelSerializer):
