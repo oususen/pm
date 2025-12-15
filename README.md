@@ -42,21 +42,26 @@ d:\pm\
 │           ├── kubota_hirakata_kakutei_import.py
 │           └── rieden_kakutei_import.py
 │
-├── pm-ui/                      # Vue.js フロントエンド
+├── pm-ui/                      # Vue.js フロントエンド (Vite)
 │   ├── src/
 │   │   ├── App.vue            # メインアプリ
 │   │   ├── main.js
-│   │   ├── router/index.js    # ルーティング
-│   │   ├── api/client.js      # APIクライアント
-│   │   ├── components/        # コンポーネント
-│   │   │   └── SideMenu.vue
-│   │   ├── pages/             # ページ
-│   │   │   ├── MasterMenu.vue
-│   │   │   ├── ProductMaster.vue
-│   │   │   ├── CustomerMaster.vue
-│   │   │   ├── OrderList.vue      # 受注一覧
-│   │   │   └── CSVUpload.vue      # CSV受注インポート
-│   │   └── assets/main.css    # スタイル
+│   │   ├── api/client.js      # APIクライアント (API_BASE_URL をバックエンドに合わせて変更)
+│   │   ├── router/
+│   │   │   ├── index.js       # ルーター統合
+│   │   │   ├── masters.js
+│   │   │   ├── orders.js
+│   │   │   ├── production.js
+│   │   │   ├── purchase.js
+│   │   │   └── shipping.js
+│   │   ├── views/             # 画面コンポーネント
+│   │   │   ├── masters/*.vue  # マスタ類
+│   │   │   ├── orders/*.vue   # 受注メニュー・一覧・CSV取込
+│   │   │   ├── production/*.vue # 生産メニュー・計画・在庫・進捗など
+│   │   │   ├── purchase/*.vue   # 仕入れメニュー・計画
+│   │   │   └── shipping/*.vue   # 出荷メニュー・指示・実績
+│   │   ├── components/SideMenu.vue
+│   │   └── assets/main.css
 │   ├── package.json
 │   └── vite.config.js
 │
@@ -124,8 +129,8 @@ python manage.py migrate
 # 管理ユーザー作成
 python manage.py createsuperuser
 
-# 開発サーバー起動
-python manage.py runserver
+# 開発サーバー起動（必要なら ALLOWED_HOSTS にクライアントIPを追加）
+python manage.py runserver 0.0.0.0:8001
 ```
 
 #### .envファイルの設定例
@@ -152,12 +157,18 @@ DB_PORT=3306
 ```bash
 # 別のターミナルで
 cd pm-ui
+# 依存インストール
+npm install
 
-# 開発サーバー起動
+# 開発サーバー起動（デフォルト: http://localhost:8081）
 npm run dev
 ```
 
-フロントエンドが http://localhost:5173 で起動します。
+API の接続先は `src/api/client.js` の `API_BASE_URL` をバックエンドの URL/ポートに合わせて調整してください（デフォルトは `http://localhost:8002/api`）。
+
+### 開発ポート例
+- バックエンド: http://localhost:8001
+- フロントエンド (Vite dev): http://localhost:8081
 
 ## APIエンドポイント
 
@@ -220,22 +231,22 @@ Django Admin: http://localhost:8000/admin/
 
 ## 実装済み機能
 
-### 受注管理機能 ✅
+### 受注管理機能
 
-- ✅ CSV受注インポート（複数客先フォーマット対応）
+- CSV受注インポート（複数客先フォーマット対応）
   - ティエラ内示・確定
   - クボタ（堺・枚方）内示・確定
   - リーデン確定
-- ✅ ステージングテーブル（生データ→日別正規化）
-- ✅ 製品マスタ自動登録（品名・品名半角対応）
-- ✅ 受注一覧・明細表示
-- ✅ 多言語対応UI（日本語）
-- ✅ **内示・確定の優先順位制御**
+- ステージングテーブル（生データ→日別正規化）
+- 製品マスタ自動登録（品名・品名半角対応）
+- 受注一覧・明細表示
+- 多言語対応UI（日本語）
+- **内示・確定の優先順位制御**
   - 内示の自動上書き（新しい内示で古い内示を削除）
   - 確定受注による内示の自動無効化
   - スケジューリング用の優先度ロジック
   - 詳細は `仕様書/受注管理仕様書.md` 参照
-- ✅ **数量集約機能**
+- **数量集約機能**
   - 同一製品・納期の複数注文明細（10行以上）を集約
   - 個別注文情報を保持しながらスケジューリング用に合計数量を提供
   - 使用例は `pm_backend/orders/services/scheduling_example.py` 参照
@@ -249,20 +260,15 @@ Django Admin: http://localhost:8000/admin/
 
 ## 次のステップ
 
-1. 残りのページコンポーネント実装
-   - CalendarMaster.vue
-   - BomMaster.vue
-   - RoutingMaster.vue
-
+1. 未実装画面の追加
+   - RoutingMaster.vue（生産マスタ系）
 2. スケジューリングロジック実装
    - 逆算ロジック (scheduling_logic_v3.md参照)
    - 日跨ぎ計算
    - 移送バッチ・バッファ制御
-
 3. 受注管理機能拡張
    - 納期回答
    - 受注変更履歴
-
 4. 生産計画機能
    - ガントチャート表示
    - 負荷グラフ

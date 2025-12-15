@@ -385,7 +385,7 @@ const doPickup = async () => {
   border: 1px solid #d7dfe8;
   padding: 4px 6px;
   white-space: nowrap;
-  font-size: 1.288rem; /* 0.92rem を1.4倍 */
+  font-size: 13px;
   font-weight: 500;
   color: #000;
 }
@@ -450,7 +450,7 @@ thead .sticky-col {
 .product-info {
   display: block;
   padding: 3px 4px;
-  font-size: 1.288rem; /* 0.92rem を1.4倍 */
+  font-size: 13px;
   font-weight: 500;
   color: #000;
   white-space: nowrap;
@@ -464,7 +464,7 @@ thead .sticky-col {
   padding: 3px 4px;
   border: 1px solid #d1d5db;
   border-radius: 2px;
-  font-size: 1.288rem; /* 0.92rem を1.4倍 */
+  font-size: 13px;
   font-weight: 500;
   color: #000;
 }
@@ -491,7 +491,7 @@ thead .sticky-col {
   padding: 3px 4px;
   text-align: right;
   color: #666;
-  font-size: 1.288rem; /* 0.92rem を1.4倍 */
+  font-size: 13px;
   font-weight: 500;
   color: #000;
 }
