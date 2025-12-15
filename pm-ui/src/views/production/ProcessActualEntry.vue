@@ -130,9 +130,7 @@
 </template>
 
 <script>
-import axios from 'axios'
-
-const API_BASE = 'http://localhost:8000/api'
+import api from '@/api/client'
 
 export default {
   name: 'ProcessActualEntry',
@@ -169,11 +167,11 @@ export default {
     async fetchMaster() {
       try {
         const [processRes, lineRes] = await Promise.all([
-          axios.get(`${API_BASE}/masters/processes/`),
-          axios.get(`${API_BASE}/masters/lines/`)
+          api.processes.getProcesses({ is_active: true }),
+          api.lines.getLines()
         ])
-        this.processes = processRes.data
-        this.lines = lineRes.data
+        this.processes = processRes.data?.results || processRes.data || []
+        this.lines = lineRes.data?.results || lineRes.data || []
       } catch (error) {
         console.error('マスタ取得エラー', error)
       }
@@ -181,13 +179,14 @@ export default {
     async fetchOrder() {
       try {
         const { id } = this.$route.params
-        const res = await axios.get(`${API_BASE}/orders/production-orders/${id}/`)
-        this.order = res.data
-        this.actuals = res.data.actuals || []
-        this.form.line = res.data.line
+        const res = await api.orders.getProductionOrder(id)
+        const data = res.data?.results || res.data
+        this.order = data
+        this.actuals = data.actuals || []
+        this.form.line = data.line
         this.form.completed_at = this.toDateTimeLocal(new Date())
-        if (res.data.routing) {
-          this.fetchRoutingSteps(res.data.routing)
+        if (data.routing) {
+          this.fetchRoutingSteps(data.routing)
         }
       } catch (error) {
         console.error('製造指示取得エラー', error)
@@ -196,8 +195,8 @@ export default {
     },
     async fetchRoutingSteps(routingId) {
       try {
-        const res = await axios.get(`${API_BASE}/masters/routing-steps/`, { params: { routing: routingId } })
-        this.routingSteps = res.data
+        const res = await api.routings.getRoutingSteps({ routing: routingId })
+        this.routingSteps = res.data?.results || res.data || []
       } catch (error) {
         console.error('ルーティング工程取得エラー', error)
       }
@@ -246,10 +245,10 @@ export default {
       }
       try {
         if (this.editingId) {
-          await axios.put(`${API_BASE}/orders/process-actuals/${this.editingId}/`, payload)
+          await api.orders.updateProcessActual(this.editingId, payload)
           alert('実績を更新しました')
         } else {
-          await axios.post(`${API_BASE}/orders/process-actuals/`, payload)
+          await api.orders.createProcessActual(payload)
           alert('実績を登録しました')
         }
         this.resetForm()
@@ -276,7 +275,7 @@ export default {
       if (this.orderLocked) return
       if (!confirm('この実績を削除しますか？')) return
       try {
-        await axios.delete(`${API_BASE}/orders/process-actuals/${actual.id}/`)
+        await api.orders.deleteProcessActual(actual.id)
         alert('削除しました')
         this.fetchOrder()
       } catch (error) {

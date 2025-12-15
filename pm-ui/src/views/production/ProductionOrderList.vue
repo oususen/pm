@@ -171,9 +171,7 @@
 </template>
 
 <script>
-import axios from 'axios'
-
-const API_BASE = 'http://localhost:8000/api'
+import api from '@/api/client'
 
 export default {
   name: 'ProductionOrderList',
@@ -227,8 +225,8 @@ export default {
   methods: {
     async fetchLines() {
       try {
-        const res = await axios.get(`${API_BASE}/masters/lines/`)
-        this.lines = res.data
+        const res = await api.lines.getLines()
+        this.lines = res.data?.results || res.data || []
       } catch (error) {
         console.error('ライン取得エラー', error)
       }
@@ -243,15 +241,15 @@ export default {
         if (this.filters.scheduled_start_date_from) params.scheduled_start_date_from = this.filters.scheduled_start_date_from
         if (this.filters.scheduled_start_date_to) params.scheduled_start_date_to = this.filters.scheduled_start_date_to
 
-        const listRes = await axios.get(`${API_BASE}/orders/production-orders/`, { params })
-        let items = listRes.data
+        const listRes = await api.orders.getProductionOrders(params)
+        let items = listRes.data?.results || listRes.data || []
 
         // 詳細を取得して allocation などの付加情報を含める
         const detailed = await Promise.all(
           items.map(async (item) => {
             try {
-              const res = await axios.get(`${API_BASE}/orders/production-orders/${item.id}/`)
-              return res.data
+              const res = await api.orders.getProductionOrder(item.id)
+              return res.data?.results || res.data || item
             } catch (error) {
               console.error('詳細取得エラー', error)
               return item
@@ -293,7 +291,7 @@ export default {
       if (!confirm(`製造指示「${order.order_no}」を${labels[action]}しますか？`)) return
 
       try {
-        await axios.post(`${API_BASE}/orders/production-orders/${order.id}/${action}/`)
+        await api.orders.transitionProductionOrder(order.id, action)
         alert(`製造指示を${labels[action]}しました`)
         this.fetchOrders()
       } catch (error) {

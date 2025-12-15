@@ -113,9 +113,7 @@
 </template>
 
 <script>
-import axios from 'axios'
-
-const API_BASE = 'http://localhost:8000/api'
+import api from '@/api/client'
 
 export default {
   name: 'ProductionOrderForm',
@@ -171,16 +169,16 @@ export default {
       try {
         const params = {}
         if (this.productSearch) params.search = this.productSearch
-        const res = await axios.get(`${API_BASE}/masters/products/`, { params })
-        this.products = res.data
+        const res = await api.products.getProducts(params)
+        this.products = res.data?.results || res.data || []
       } catch (error) {
         console.error('製品取得エラー', error)
       }
     },
     async fetchLines() {
       try {
-        const res = await axios.get(`${API_BASE}/masters/lines/`)
-        this.lines = res.data
+        const res = await api.lines.getLines()
+        this.lines = res.data?.results || res.data || []
       } catch (error) {
         console.error('ライン取得エラー', error)
       }
@@ -191,10 +189,8 @@ export default {
         return
       }
       try {
-        const res = await axios.get(`${API_BASE}/masters/routings/`, {
-          params: { product: productId, is_active: true }
-        })
-        this.routings = res.data
+        const res = await api.routings.getRoutings({ product: productId, is_active: true })
+        this.routings = res.data?.results || res.data || []
       } catch (error) {
         console.error('ルーティング取得エラー', error)
       }
@@ -205,8 +201,8 @@ export default {
         return
       }
       try {
-        const res = await axios.get(`${API_BASE}/orders/stock-allocations/`, { params: { product: productId } })
-        this.allocations = res.data
+        const res = await api.orders.getStockAllocations({ product: productId })
+        this.allocations = res.data?.results || res.data || []
       } catch (error) {
         console.error('在庫引当取得エラー', error)
       }
@@ -215,8 +211,8 @@ export default {
       this.loading = true
       try {
         const { id } = this.$route.params
-        const res = await axios.get(`${API_BASE}/orders/production-orders/${id}/`)
-        const data = res.data
+        const res = await api.orders.getProductionOrder(id)
+        const data = res.data?.results || res.data
         this.form = {
           order_no: data.order_no,
           product: data.product,
@@ -267,10 +263,10 @@ export default {
       if (!this.validate()) return
       try {
         if (this.isEdit) {
-          await axios.put(`${API_BASE}/orders/production-orders/${this.$route.params.id}/`, this.form)
+          await api.orders.updateProductionOrder(this.$route.params.id, this.form)
           alert('製造指示を更新しました')
         } else {
-          await axios.post(`${API_BASE}/orders/production-orders/`, this.form)
+          await api.orders.createProductionOrder(this.form)
           alert('製造指示を登録しました')
         }
         this.goList()
@@ -285,11 +281,11 @@ export default {
         return
       }
       try {
-        const res = await axios.post(`${API_BASE}/orders/crp/calculate-line-load/`, {
+        const res = await api.orders.calculateLineLoad({
           line_id: this.form.line,
           target_date: this.form.scheduled_start_date
         })
-        this.crpResult = res.data
+        this.crpResult = res.data?.results || res.data
       } catch (error) {
         console.error('CRPエラー', error)
         alert('負荷計算に失敗しました: ' + (error.response?.data?.detail || error.message))

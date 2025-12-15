@@ -35,6 +35,14 @@
             <option value="false">無効</option>
           </select>
         </div>
+        <div class="filter-field">
+          <label>作成日 From</label>
+          <input type="date" v-model="filters.created_from" />
+        </div>
+        <div class="filter-field">
+          <label>作成日 To</label>
+          <input type="date" v-model="filters.created_to" />
+        </div>
         <div class="filter-actions">
           <button @click="fetchProducts" class="btn-primary">検索</button>
           <button @click="resetFilters" class="btn-secondary">リセット</button>
@@ -158,7 +166,9 @@ const isEdit = ref(false)
 const filters = ref({
   search: '',
   category: '',
-  is_active: ''
+  is_active: '',
+  created_from: '',
+  created_to: ''
 })
 const formData = ref({
   product_code: '',
@@ -182,6 +192,12 @@ const buildQueryParams = () => {
   }
   if (filters.value.is_active !== '') {
     params.is_active = filters.value.is_active === 'true'
+  }
+  if (filters.value.created_from) {
+    params.created_from = filters.value.created_from
+  }
+  if (filters.value.created_to) {
+    params.created_to = filters.value.created_to
   }
   return params
 }
@@ -231,7 +247,9 @@ const resetFilters = async () => {
   filters.value = {
     search: '',
     category: '',
-    is_active: ''
+    is_active: '',
+    created_from: '',
+    created_to: ''
   }
   await fetchProducts()
 }

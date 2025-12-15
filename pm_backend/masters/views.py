@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
+import django_filters
 from datetime import date
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay,
@@ -16,11 +17,20 @@ from .serializers import (
 )
 
 
+class ProductFilter(django_filters.FilterSet):
+    created_from = django_filters.DateFilter(field_name='created_at', lookup_expr='gte')
+    created_to = django_filters.DateFilter(field_name='created_at', lookup_expr='lte')
+
+    class Meta:
+        model = Product
+        fields = ['category', 'is_active', 'created_from', 'created_to']
+
+
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['category', 'is_active']
+    filterset_class = ProductFilter
     search_fields = ['product_code', 'product_name']
     ordering_fields = ['product_code', 'created_at']
     ordering = ['product_code']

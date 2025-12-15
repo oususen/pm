@@ -245,7 +245,6 @@
                 type="number"
                 min="0"
                 v-model.number="itemForm.lead_time_days"
-                :disabled="itemForm.time_unit === 'MINUTE'"
               />
             </div>
             <div class="form-group">
@@ -1073,6 +1072,7 @@ const saveBOMItem = async () => {
     alert('子製品は必須です')
     return
   }
+
   const normalizedQuantity = normalizeQuantityValue(itemForm.value.quantity)
   if (!normalizedQuantity) {
     alert('数量は1以上の整数で入力してください')
@@ -1109,7 +1109,7 @@ const saveBOMItem = async () => {
     process: itemForm.value.sourcing_type === 'MAKE' ? (itemForm.value.process || null) : null,
     line: itemForm.value.sourcing_type === 'MAKE' ? (itemForm.value.line || null) : null,
     time_unit: itemForm.value.sourcing_type === 'MAKE' ? itemForm.value.time_unit : 'DAY',
-    lead_time_days: itemForm.value.sourcing_type === 'MAKE' ? itemForm.value.lead_time_days : itemForm.value.lead_time_days,
+    lead_time_days: itemForm.value.lead_time_days,
     duration_min: itemForm.value.sourcing_type === 'MAKE' && itemForm.value.time_unit === 'MINUTE'
       ? itemForm.value.duration_min
       : null,

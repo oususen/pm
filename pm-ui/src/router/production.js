@@ -62,6 +62,11 @@ const production = [
     component: () => import("@/views/production/ProcessActualEntry.vue"),
     props: true,
   },
+  {
+    path: "/production/sequence-board",
+    name: "ProductionSequenceBoard",
+    component: () => import("@/views/production/ProductionSequenceBoard.vue"),
+  },
 ];
 
 export default production;
