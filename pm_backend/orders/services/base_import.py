@@ -122,7 +122,8 @@ class BaseImportService:
                         'product_name_halfwidth': product_name_half_for_master,
                         'category': 'PURCHASED',  # Default to purchased item
                         'unit': '個',
-                        'is_active': True
+                        'is_active': True,
+                        'is_final_product': True
                     }
                 )
                 if created:
