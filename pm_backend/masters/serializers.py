@@ -105,10 +105,29 @@ class BOMSerializer(serializers.ModelSerializer):
 class RoutingStepSerializer(serializers.ModelSerializer):
     process_name = serializers.CharField(source='process.process_name', read_only=True)
     line_name = serializers.CharField(source='line.line_name', read_only=True)
+    output_product_code = serializers.CharField(source='output_product.product_code', read_only=True)
+    output_product_name = serializers.CharField(source='output_product.product_name', read_only=True)
+    display_label = serializers.SerializerMethodField()
 
     class Meta:
         model = RoutingStep
         fields = '__all__'
+
+    def get_display_label(self, obj: RoutingStep) -> str:
+        """
+        A compact label used by UI dropdowns: step_no / process / line / output product code.
+        """
+        proc = obj.process.process_name if obj.process_id else ''
+        line = obj.line.line_code if obj.line_id else ''
+        out_code = obj.output_product.product_code if obj.output_product_id else ''
+        parts = [
+            f"Step {obj.step_no}",
+            proc or '-',
+            line or 'ライン無し',
+        ]
+        if out_code:
+            parts.append(f"-> {out_code}")
+        return " / ".join(parts)
 
 
 class RoutingSerializer(serializers.ModelSerializer):

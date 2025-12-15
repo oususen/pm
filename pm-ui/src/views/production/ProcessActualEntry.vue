@@ -31,7 +31,11 @@
               <select v-model="form.routing_step" @change="onRoutingStepChange">
                 <option value="">選択してください</option>
                 <option v-for="step in routingSteps" :key="step.id" :value="step.id">
-                  {{ step.step_no }}: {{ step.process_name }} ({{ step.line_name || 'ライン指定なし' }})
+                  {{
+                    (step.display_label ||
+                      (step.step_no + ': ' + step.process_name + ' (' + (step.line_name || 'ライン指定なし') + ')')
+                    ) + (step.output_product_code ? ' → ' + step.output_product_code : '')
+                  }}
                 </option>
               </select>
             </div>

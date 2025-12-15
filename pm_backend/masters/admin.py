@@ -186,10 +186,19 @@ class RoutingStepMaterialInline(admin.TabularInline):
 
 @admin.register(RoutingStep)
 class RoutingStepAdmin(admin.ModelAdmin):
-    list_display = ['routing', 'step_no', 'hierarchy_path', 'process', 'line', 'output_product', 'time_unit', 'lead_time_days', 'duration_min']
+    list_display = ['routing_label', 'step_no', 'hierarchy_path', 'process', 'line', 'output_product', 'time_unit', 'lead_time_days', 'duration_min']
     list_filter = ['process', 'line', 'time_unit']
     search_fields = ['routing__routing_code', 'routing__product__product_code', 'process__process_code', 'line__line_code']
     inlines = [RoutingStepMaterialInline]
+
+    def routing_label(self, obj):
+        """
+        ルーティング名に加工後品目コードを付与して、同じルート内でも識別しやすくする。
+        """
+        base = str(obj.routing)
+        out_code = obj.output_product.product_code if obj.output_product_id else ''
+        return f"{base} -> {out_code}" if out_code else base
+    routing_label.short_description = 'ルーティング'
 
 
 @admin.register(Routing)
@@ -263,4 +272,3 @@ class ProcessCycleTimeAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
-
