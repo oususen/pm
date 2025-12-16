@@ -72,6 +72,16 @@ const production = [
     name: "ProductionSequenceBoard",
     component: () => import("@/views/production/ProductionSequenceBoard.vue"),
   },
+  {
+    path: "/production/line-monitor",
+    name: "LineRealtimeMonitor",
+    component: () => import("@/views/production/LineRealtimeMonitor.vue"),
+  },
+  {
+    path: "/production/mobile-input",
+    name: "MobileLineInput",
+    component: () => import("@/views/production/MobileLineInput.vue"),
+  },
 ];
 
 export default production;

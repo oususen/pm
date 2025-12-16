@@ -11,6 +11,7 @@ import { createOrdersAPI } from './resources/orders'
 import { createStagingAPI } from './resources/staging'
 import { createLineDemandsAPI } from './resources/lineDemands'
 import { createLineBacklogsAPI } from './resources/lineBacklogs'
+import { createLineRealtimeAPI } from './resources/lineRealtime'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8002 → localhost。
 const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
@@ -43,4 +44,5 @@ export default {
   processes: createProcessesAPI(client),
   lineDemands: createLineDemandsAPI(client),
   lineBacklogs: createLineBacklogsAPI(client),
+  lineRealtime: createLineRealtimeAPI(client),
 }

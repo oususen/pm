@@ -42,6 +42,16 @@
         <div class="icon-box">🎛</div>
         <div class="label">ミックス順序ボード</div>
       </RouterLink>
+
+      <RouterLink to="/production/line-monitor" class="master-tile accent">
+        <div class="icon-box">📺</div>
+        <div class="label">ライン稼働監視</div>
+      </RouterLink>
+
+      <RouterLink to="/production/mobile-input" class="master-tile">
+        <div class="icon-box">📱</div>
+        <div class="label">モバイル作業入力</div>
+      </RouterLink>
     </div>
 
     <p class="helper-text">

@@ -12,6 +12,7 @@ from .views import (
     ProcessActualViewSet,
 )
 from .views_services import CRPViewSet, BOMServiceViewSet
+from .views_line_realtime import LineRealtimeRecordViewSet, LineStatusViewSet
 
 router = DefaultRouter()
 router.register(r'orders', OrderViewSet, basename='order')
@@ -29,6 +30,10 @@ router.register(r'process-actuals', ProcessActualViewSet, basename='processactua
 # サービス系API
 router.register(r'crp', CRPViewSet, basename='crp')
 router.register(r'bom-service', BOMServiceViewSet, basename='bom-service')
+
+# ライン実時間記録
+router.register(r'line-realtime-records', LineRealtimeRecordViewSet, basename='linerealtimerecord')
+router.register(r'line-status', LineStatusViewSet, basename='linestatus')
 
 urlpatterns = [
     path('', include(router.urls)),
