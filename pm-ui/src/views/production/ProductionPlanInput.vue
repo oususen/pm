@@ -76,7 +76,13 @@
         <tbody>
           <tr v-for="(row, idx) in filteredRows" :key="row.id">
             <td class="sticky-col number-col">
-              <span class="product-info">{{ idx + 1 }}</span>
+              <div class="row-controls">
+                <span class="product-info">{{ idx + 1 }}</span>
+                <div class="reorder">
+                  <button class="mini-btn" @click="moveRow(row.id, -1)" :disabled="rowIndex(row.id) <= 0">↑</button>
+                  <button class="mini-btn" @click="moveRow(row.id, 1)" :disabled="rowIndex(row.id) >= rows.length - 1">↓</button>
+                </div>
+              </div>
             </td>
             <td class="sticky-col code-col">
               <span class="product-info">{{ row.product_code || getProductCode(row.product_id) }}</span>
@@ -228,13 +234,13 @@ const dateColumns = computed(() => {
 
 // テーブルの最小幅を計算して、縮みすぎを防ぐ
 const tableMinWidth = computed(() => {
-  const fixedColsWidth = 40 + 120 + 100 // No + 品番 + 品名
+  const fixedColsWidth = 60 + 187 + 100 // No(並べ替えボタン含む) + 品番 + 品名
   const perDayWidth = 80 * 5 // 5列×80px
   return fixedColsWidth + dateColumns.value.length * perDayWidth
 })
 
 const processTableMinWidth = computed(() => {
-  const fixedColsWidth = 40 + 187 + 100
+  const fixedColsWidth = 60 + 187 + 100
   const perDayWidth = 100
   return fixedColsWidth + dateColumns.value.length * perDayWidth
 })
@@ -263,6 +269,19 @@ const addRow = () => {
     product_name: '',
     daily: initDaily(),
   })
+}
+
+const rowIndex = (rowId) => rows.value.findIndex((r) => r.id === rowId)
+
+const moveRow = (rowId, direction) => {
+  const idx = rowIndex(rowId)
+  if (idx < 0) return
+  const target = idx + direction
+  if (target < 0 || target >= rows.value.length) return
+  const reordered = [...rows.value]
+  const [item] = reordered.splice(idx, 1)
+  reordered.splice(target, 0, item)
+  rows.value = reordered
 }
 
 const resetRows = () => {
@@ -331,6 +350,7 @@ const clearProcessPlans = () => {
 }
 
 const buildProcessPlans = (backlogs = []) => {
+  const productOrder = new Map(rows.value.map((r, idx) => [r.product_id, idx]))
   const grouped = new Map()
   backlogs.forEach((d) => {
     if (!d.process) return
@@ -363,7 +383,18 @@ const buildProcessPlans = (backlogs = []) => {
       row.daily[dateKey].capacity = d.work_minutes == null ? null : Number(d.work_minutes)
     }
   })
-  processPlans.value = Array.from(grouped.values())
+  const procs = Array.from(grouped.values())
+  procs.forEach((proc) => {
+    proc.rows.sort((a, b) => {
+      const ao = productOrder.has(a.product_id) ? productOrder.get(a.product_id) : Number.POSITIVE_INFINITY
+      const bo = productOrder.has(b.product_id) ? productOrder.get(b.product_id) : Number.POSITIVE_INFINITY
+      if (ao === bo) {
+        return (a.product_code || '').localeCompare(b.product_code || '')
+      }
+      return ao - bo
+    })
+  })
+  processPlans.value = procs
 }
 
 const refreshDates = () => {
@@ -595,23 +626,47 @@ thead .sticky-col {
   z-index: 4;
 }
 .number-col {
-  width: 40px;
-  min-width: 40px;
-  max-width: 40px;
+  width: 60px;
+  min-width: 60px;
+  max-width: 60px;
   text-align: center;
 }
 .code-col {
-  left: 40px;
+  left: 60px;
   width: 187px; /* 156px の1.2倍 */
   min-width: 187px;
   max-width: 187px;
 }
 .name-col {
-  left: 160px;
+  left: 247px;
   width: 100px;
   min-width: 100px;
   max-width: 100px;
   border-right: 2px solid #b5c1d2 !important;
+}
+.row-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.reorder {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mini-btn {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 2px;
+  background: #fff;
+  cursor: pointer;
+  line-height: 1;
+}
+.mini-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .product-info {
   display: block;
