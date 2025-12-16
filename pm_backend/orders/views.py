@@ -1,12 +1,13 @@
 from rest_framework import viewsets, status
 from decimal import Decimal
-from datetime import timedelta
+from datetime import timedelta, datetime
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 import django_filters
+from django.db.models import Q
 
 from .models import LineDemand, Order, OrderLine, StgOrderRaw, StgOrderDaily
 from .models_line_backlog import LineBacklog
@@ -25,7 +26,7 @@ from .serializers import (
 )
 from .services.csv_import import CSVImportService
 from .services.order_expansion import OrderExpansionService
-from masters.models import Routing, RoutingStep
+from masters.models import Routing, RoutingStep, ProcessCycleTime, Line, Calendar, CalendarDay
 
 
 class OrderViewSet(viewsets.ModelViewSet):
@@ -315,7 +316,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         期待payload: { line_id, start_date?, end_date? }
         """
         from orders.models import LineDemand
-        from masters.models import BOMItem, RoutingStep, Calendar, CalendarDay
+        from masters.models import BOMItem, RoutingStep
         from collections import defaultdict
 
         line_id = request.data.get('line_id')
@@ -347,8 +348,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         # 需要を計算：(product_id, plan_date) -> order_qty
         demand_map = defaultdict(Decimal)
 
-        # 使用するカレンダ（tiera_muke）を取得
-        calendar_id = Calendar.objects.filter(calendar_code='tiera_muke').values_list('id', flat=True).first()
+        # 使用するカレンダ（ライン紐付があれば優先、無ければtiera_muke）
+        line_obj = Line.objects.filter(id=line_id).first()
+        calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(calendar_code='tiera_muke').values_list('id', flat=True).first()
 
         def shift_business_days(target_date, days):
             """
@@ -538,6 +540,228 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         # 5. 最新状態を返す
         serializer = self.get_serializer(upserted_items or backlog_qs, many=True)
         return Response(serializer.data)
+
+    @action(detail=False, methods=['post'])
+    def expand_processes(self, request):
+        """
+        指定ラインの計画数量を工程レベルに展開する。
+        期待payload: { line_id, start_date, end_date, items?: [{product_id, plan_date, plan_qty?, order_qty?, demand_qty_plan?}] }
+        """
+        from collections import defaultdict
+        from masters.models import RoutingStep, Calendar, CalendarDay
+
+        line_id = request.data.get('line_id')
+        start_date = request.data.get('start_date')
+        end_date = request.data.get('end_date')
+        items = request.data.get('items', [])
+
+        if not line_id:
+            return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not start_date or not end_date:
+            return Response({'detail': 'start_date and end_date are required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            line_id = int(line_id)
+        except (TypeError, ValueError):
+            return Response({'detail': 'line_id must be numeric'}, status=status.HTTP_400_BAD_REQUEST)
+
+        def parse_date(val):
+            if val is None:
+                return None
+            if hasattr(val, 'year'):
+                return val
+            try:
+                return datetime.strptime(str(val), '%Y-%m-%d').date()
+            except Exception:
+                return None
+
+        # 先に対象期間内のベース計画を集める（フロントからのitems優先、無ければDBから取得）
+        base_plans = []
+        if isinstance(items, list) and items:
+            for it in items:
+                plan_date = parse_date(it.get('plan_date'))
+                if not plan_date:
+                    continue
+                product_id = it.get('product_id')
+                if not product_id:
+                    continue
+                plan_qty_raw = it.get('plan_qty', 0)
+                order_qty_raw = it.get('order_qty', 0)
+                demand_qty_raw = it.get('demand_qty_plan', order_qty_raw)
+                try:
+                    plan_qty = Decimal(str(plan_qty_raw or 0))
+                    order_qty = Decimal(str(order_qty_raw or 0))
+                    demand_qty_plan = Decimal(str(demand_qty_raw or 0))
+                except Exception:
+                    continue
+                # 期間外は除外
+                if str(plan_date) < str(start_date) or str(plan_date) > str(end_date):
+                    continue
+                base_plans.append({
+                    'product_id': product_id,
+                    'plan_date': plan_date,
+                    'plan_qty': plan_qty,
+                    'order_qty': order_qty,
+                    'demand_qty_plan': demand_qty_plan,
+                })
+        else:
+            qs = self.get_queryset().filter(line_id=line_id)
+            qs = qs.filter(plan_date__gte=start_date, plan_date__lte=end_date)
+            for obj in qs:
+                base_plans.append({
+                    'product_id': obj.product_id,
+                    'plan_date': obj.plan_date,
+                    'plan_qty': Decimal(str(obj.plan_qty or 0)),
+                    'order_qty': Decimal(str(obj.order_qty or 0)),
+                    'demand_qty_plan': Decimal(str(obj.demand_qty_plan or 0)),
+                })
+
+        if not base_plans:
+            return Response({'detail': '展開対象の計画が見つかりません。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ラインに紐づくカレンダがあれば使用、無ければtiera_mukeを使用
+        line_obj = Line.objects.filter(id=line_id).first()
+        calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(calendar_code='tiera_muke').values_list('id', flat=True).first()
+        calendar_work_map = {}
+        if calendar_id:
+            cal_qs = CalendarDay.objects.filter(
+                calendar_id=calendar_id,
+                target_date__gte=start_date,
+                target_date__lte=end_date
+            )
+            for c in cal_qs:
+                calendar_work_map[c.target_date] = c.work_minutes
+
+        def shift_business_days(target_date, days):
+            if not days:
+                return target_date
+            if not calendar_id:
+                return target_date + timedelta(days=-days)
+            step = -1 if days > 0 else 1
+            remaining = abs(int(days))
+            current = target_date
+            while remaining > 0:
+                current = current + timedelta(days=step)
+                cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=current).first()
+                is_work = cal.is_working_day if cal is not None else True
+                if is_work:
+                    remaining -= 1
+            return current
+
+        # 対象ラインのRoutingStepを製品別にグルーピング
+        steps_map = defaultdict(list)
+        steps_qs = RoutingStep.objects.filter(line_id=line_id).select_related('routing', 'output_product', 'process')
+        process_ids = set()
+        cycle_product_ids = set(p['product_id'] for p in base_plans)
+        for step in steps_qs:
+            product_keys = []
+            if step.output_product_id:
+                product_keys.append(step.output_product_id)
+            if step.routing_id and step.routing.product_id:
+                product_keys.append(step.routing.product_id)
+            process_ids.add(step.process_id)
+            if step.output_product_id:
+                cycle_product_ids.add(step.output_product_id)
+            if step.routing_id and step.routing.product_id:
+                cycle_product_ids.add(step.routing.product_id)
+            for pid in set(product_keys):
+                steps_map[pid].append(step)
+
+        # サイクルタイムをまとめて取得（ライン特定優先、なければライン指定なしを使用）
+        cycle_time_map = defaultdict(list)
+        if process_ids and cycle_product_ids:
+            ct_qs = ProcessCycleTime.objects.filter(
+                process_id__in=process_ids,
+                product_id__in=cycle_product_ids,
+                is_active=True,
+            ).filter(Q(line_id=line_id) | Q(line__isnull=True))
+            for ct in ct_qs:
+                cycle_time_map[(ct.product_id, ct.process_id)].append(ct)
+
+        def pick_cycle_time(product_id, process_id, plan_date):
+            candidates = cycle_time_map.get((product_id, process_id), [])
+            best = None
+            for ct in candidates:
+                if ct.valid_from and plan_date < ct.valid_from:
+                    continue
+                if ct.valid_to and plan_date > ct.valid_to:
+                    continue
+                if best is None:
+                    best = ct
+                    continue
+                # ライン指定がある方を優先
+                if best.line_id is None and ct.line_id == line_id:
+                    best = ct
+            return best
+
+        created = 0
+        updated = 0
+        skipped = []
+        upserted = []
+
+        for plan in base_plans:
+            product_id = plan['product_id']
+            plan_date = plan['plan_date']
+            plan_qty = plan['plan_qty']
+            order_qty = plan['order_qty']
+            demand_qty_plan = plan['demand_qty_plan']
+
+            steps = steps_map.get(product_id, [])
+            if not steps:
+                skipped.append({'product_id': product_id, 'plan_date': plan_date, 'reason': 'RoutingStep not found on line'})
+                continue
+
+            for step in sorted(steps, key=lambda s: s.step_no or 0):
+                target_date = shift_business_days(plan_date, step.lead_time_days or 0)
+                target_product_id = step.output_product_id or product_id
+
+                computed_time_min = None
+                ct = pick_cycle_time(target_product_id, step.process_id, target_date)
+                if not ct and step.routing_id and step.routing.product_id and step.routing.product_id != target_product_id:
+                    ct = pick_cycle_time(step.routing.product_id, step.process_id, target_date)
+                if not ct and product_id != target_product_id:
+                    ct = pick_cycle_time(product_id, step.process_id, target_date)
+
+                if step.process and step.process.management_unit == 'MINUTE':
+                    if ct:
+                        try:
+                            total_min = (Decimal(plan_qty) * Decimal(ct.cycle_time_min or 0)) + Decimal(ct.setup_time_min or 0)
+                            computed_time_min = float(total_min)
+                        except Exception:
+                            computed_time_min = None
+                    elif step.time_unit == 'MINUTE' and step.duration_min is not None:
+                        # サイクルタイム未設定時はRoutingStepのduration_minを1個当たり時間として使用
+                        try:
+                            total_min = Decimal(plan_qty) * Decimal(step.duration_min or 0)
+                            computed_time_min = float(total_min)
+                        except Exception:
+                            computed_time_min = None
+
+                obj, is_created = LineBacklog.objects.update_or_create(
+                    plan_date=target_date,
+                    process_id=step.process_id,
+                    product_id=target_product_id,
+                    line_id=line_id,
+                    defaults={
+                        'plan_qty': int(plan_qty),
+                        'order_qty': int(order_qty),
+                        'demand_qty_plan': int(demand_qty_plan),
+                        'source_line_id': line_id,
+                        'source_routing_step_id': step.id,
+                    }
+                )
+                created += 1 if is_created else 0
+                updated += 0 if is_created else 1
+                obj.computed_time_min = computed_time_min
+                obj.work_minutes = calendar_work_map.get(target_date)
+                upserted.append(obj)
+
+        serializer = self.get_serializer(upserted, many=True)
+        return Response({
+            'items': serializer.data,
+            'created': created,
+            'updated': updated,
+            'skipped': skipped,
+        })
 
     @action(detail=False, methods=['post'])
     def save(self, request):

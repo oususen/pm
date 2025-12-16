@@ -12,6 +12,9 @@ export const createLineBacklogsAPI = (client) => ({
   pickup(payload) {
     return client.post('/line-backlogs/pickup/', payload)
   },
+  expandProcesses(payload) {
+    return client.post('/line-backlogs/expand_processes/', payload)
+  },
   save(payload) {
     return client.post('/line-backlogs/save/', payload)
   },

@@ -10,6 +10,11 @@ const production = [
     component: () => import("@/views/production/LineDemandList.vue"),
   },
   {
+    path: "/production/line-calendars",
+    name: "LineCalendar",
+    component: () => import("@/views/production/LineCalendar.vue"),
+  },
+  {
     path: "/production/progress",
     name: "ProductionProgress",
     component: () => import("@/views/production/ProductionProgress.vue"),

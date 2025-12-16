@@ -94,9 +94,33 @@ class CalendarViewSet(viewsets.ModelViewSet):
 class CalendarDayViewSet(viewsets.ModelViewSet):
     queryset = CalendarDay.objects.all()
     serializer_class = CalendarDaySerializer
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['calendar', 'is_working_day']
     ordering_fields = ['target_date']
     ordering = ['target_date']
+    pagination_class = None  # all days are returned to support range updates
+
+    def create(self, request, *args, **kwargs):
+        """
+        Upsert by (calendar, target_date) so bulk range registration does not
+        fail with unique constraint errors when records already exist.
+        """
+        calendar_id = request.data.get('calendar')
+        target_date = request.data.get('target_date')
+        existing = None
+        if calendar_id and target_date:
+            existing = CalendarDay.objects.filter(
+                calendar_id=calendar_id,
+                target_date=target_date
+            ).first()
+
+        serializer = self.get_serializer(instance=existing, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        headers = {} if existing else self.get_success_headers(serializer.data)
+        status_code = status.HTTP_200_OK if existing else status.HTTP_201_CREATED
+        return Response(serializer.data, status=status_code, headers=headers)
 
 
 class BOMViewSet(viewsets.ModelViewSet):

@@ -40,6 +40,9 @@
         <button class="btn" @click="resetRows" :disabled="!rows.length">クリア</button>
         <button class="btn" @click="savePlan" :disabled="!rows.length || !selectedLine">保存</button>
         <button class="btn primary" @click="doPickup" :disabled="!selectedLine">取り込み</button>
+        <button class="btn accent" @click="doProcessExpand" :disabled="!selectedLine || expanding">
+          工程展開
+        </button>
       </div>
     </div>
 
@@ -113,6 +116,67 @@
       </table>
     </div>
 
+    <div class="process-section">
+      <div class="process-header">
+        <div>
+          <div class="process-title">工程展開</div>
+          <div class="process-hint">選択期間内の計画を工程別に展開して表示します。</div>
+        </div>
+        <div class="process-actions">
+          <span v-if="expanding" class="process-status">展開中...</span>
+          <button class="btn" @click="clearProcessPlans" :disabled="!processPlans.length">非表示</button>
+        </div>
+      </div>
+
+      <div v-if="processPlans.length" class="process-panels">
+        <div v-for="proc in processPlans" :key="proc.process_id" class="process-card">
+          <div class="process-card__head">
+            <div class="process-card__title">{{ proc.process_name || ('工程ID: ' + proc.process_id) }}</div>
+            <div class="process-card__sub">{{ proc.line_name }}</div>
+          </div>
+            <div class="process-card__body">
+              <div class="process-table-wrap">
+                <table class="process-table" :style="{ minWidth: processTableMinWidth + 'px' }">
+                  <thead>
+                    <tr>
+                      <th class="sticky-col number-col">No</th>
+                      <th class="sticky-col code-col">品番</th>
+                      <th class="sticky-col name-col">品名</th>
+                      <th v-for="c in dateColumns" :key="c.key" class="mini-head" :class="c.dayClass">
+                        {{ c.label }}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(row, idx) in proc.rows" :key="row.product_id">
+                      <td class="sticky-col number-col">{{ idx + 1 }}</td>
+                      <td class="sticky-col code-col">{{ row.product_code }}</td>
+                    <td class="sticky-col name-col">{{ row.product_name }}</td>
+                    <td v-for="c in dateColumns" :key="c.key" class="mini-cell" :class="c.dayClass">
+                      <div class="cell-line">計 {{ row.daily[c.key].plan || 0 }}</div>
+                      <div class="cell-line sub">需 {{ row.daily[c.key].order || 0 }}</div>
+                      <div class="cell-line time" v-if="row.daily[c.key].time != null">
+                        工 {{ row.daily[c.key].time }} 分
+                        <span v-if="row.daily[c.key].capacity != null" class="capacity">/ 勤 {{ row.daily[c.key].capacity }} 分</span>
+                      </div>
+                      <div class="cell-line muted" v-else>
+                        <span v-if="row.daily[c.key].capacity != null">勤 {{ row.daily[c.key].capacity }} 分</span>
+                        <span v-else>工 情報なし</span>
+                      </div>
+                    </td>
+                  </tr>
+                    <tr v-if="!proc.rows.length">
+                      <td :colspan="3 + dateColumns.length" class="no-data">データがありません</td>
+                    </tr>
+                  </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div v-else class="process-empty">工程展開を実行すると、工程別の計画がここに表示されます。</div>
+    </div>
+
     <div class="footer-actions">
       <button class="btn-secondary">F1: 終了</button>
       <button class="btn-secondary">F3: クリア</button>
@@ -136,6 +200,8 @@ const keyword = ref('')
 const lines = ref([])
 const products = ref([])
 const rows = ref([])
+const processPlans = ref([])
+const expanding = ref(false)
 let tempId = 1
 
 const endDate = computed(() => {
@@ -167,10 +233,24 @@ const tableMinWidth = computed(() => {
   return fixedColsWidth + dateColumns.value.length * perDayWidth
 })
 
+const processTableMinWidth = computed(() => {
+  const fixedColsWidth = 40 + 187 + 100
+  const perDayWidth = 100
+  return fixedColsWidth + dateColumns.value.length * perDayWidth
+})
+
 const initDaily = () => {
   const daily = {}
   dateColumns.value.forEach((c) => {
     daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0 }
+  })
+  return daily
+}
+
+const initProcessDaily = () => {
+  const daily = {}
+  dateColumns.value.forEach((c) => {
+    daily[c.key] = { plan: 0, order: 0, time: null, capacity: null }
   })
   return daily
 }
@@ -187,6 +267,7 @@ const addRow = () => {
 
 const resetRows = () => {
   rows.value = []
+  processPlans.value = []
 }
 
 const savePlan = async () => {
@@ -245,16 +326,58 @@ const filteredRows = computed(() => {
   })
 })
 
+const clearProcessPlans = () => {
+  processPlans.value = []
+}
+
+const buildProcessPlans = (backlogs = []) => {
+  const grouped = new Map()
+  backlogs.forEach((d) => {
+    if (!d.process) return
+    const procKey = d.process
+    if (!grouped.has(procKey)) {
+      grouped.set(procKey, {
+        process_id: procKey,
+        process_name: d.process_name || '',
+        line_name: d.line_name || '',
+        rows: [],
+      })
+    }
+    const proc = grouped.get(procKey)
+    const productKey = d.product
+    let row = proc.rows.find((r) => r.product_id === productKey)
+    if (!row) {
+      row = {
+        product_id: productKey,
+        product_code: d.product_code || '',
+        product_name: d.product_name || '',
+        daily: initProcessDaily(),
+      }
+      proc.rows.push(row)
+    }
+    const dateKey = d.plan_date
+    if (row.daily[dateKey]) {
+      row.daily[dateKey].plan = Number(d.plan_qty || 0)
+      row.daily[dateKey].order = Number(d.order_qty || 0)
+      row.daily[dateKey].time = d.computed_time_min == null ? null : Number(d.computed_time_min)
+      row.daily[dateKey].capacity = d.work_minutes == null ? null : Number(d.work_minutes)
+    }
+  })
+  processPlans.value = Array.from(grouped.values())
+}
+
 const refreshDates = () => {
   // 再初期化は既存データの初期化だけ（簡易対応）
   rows.value.forEach((r) => {
     r.daily = initDaily()
   })
+  processPlans.value = []
 }
 
 const loadData = async () => {
   // 取り込み前は空表示（手動で「取り込み」を押す運用）
   rows.value = []
+  processPlans.value = []
 }
 
 const onPlanInput = (row, dateKey, value) => {
@@ -279,6 +402,48 @@ onMounted(async () => {
     console.error('初期データ取得エラー', e)
   }
 })
+
+const doProcessExpand = async () => {
+  if (!selectedLine.value) {
+    alert('ラインを選択してください。')
+    return
+  }
+  expanding.value = true
+  try {
+    const payloadItems = []
+    rows.value.forEach((r) => {
+      if (!r.product_id) return
+      dateColumns.value.forEach((c) => {
+        const daily = r.daily[c.key]
+        if (daily.plan === '' || daily.plan === null || daily.plan === undefined) return
+        const planQty = Number(daily.plan || 0)
+        payloadItems.push({
+          product_id: r.product_id,
+          process_id: r.process_id,
+          plan_date: c.key,
+          plan_qty: planQty,
+          order_qty: Number(daily.demand || 0),
+          demand_qty_plan: Number(daily.demand || 0),
+        })
+      })
+    })
+
+    const res = await api.lineBacklogs.expandProcesses({
+      line_id: selectedLine.value,
+      start_date: startDate.value,
+      end_date: endDate.value,
+      items: payloadItems,
+    })
+    const payload = Array.isArray(res.data) ? res.data : res.data?.items || []
+    buildProcessPlans(payload)
+    alert('工程展開が完了しました。')
+  } catch (e) {
+    console.error('工程展開エラー', e)
+    alert('工程展開に失敗しました。')
+  } finally {
+    expanding.value = false
+  }
+}
 
 const doPickup = async () => {
   if (!selectedLine.value) return
@@ -315,6 +480,7 @@ const doPickup = async () => {
       }
     })
     rows.value = Array.from(grouped.values())
+    processPlans.value = []
 
     if (!rows.value.length) addRow()
   } catch (e) {
@@ -530,5 +696,115 @@ thead .sticky-col {
   background: #4a7ae5;
   color: #fff;
   border-color: #3865c7;
+}
+.btn.accent {
+  background: #16a34a;
+  color: #fff;
+  border-color: #0f8a3c;
+}
+.btn.accent:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+.process-section {
+  margin-top: 14px;
+  background: #fff;
+  border: 1px solid #c5cfde;
+  border-radius: 6px;
+  padding: 10px;
+}
+.process-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.process-title {
+  font-weight: 700;
+  font-size: 14px;
+}
+.process-hint {
+  font-size: 12px;
+  color: #64748b;
+}
+.process-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.process-status {
+  font-size: 12px;
+  color: #2563eb;
+}
+.process-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.process-card {
+  border: 1px solid #d7dfe8;
+  border-radius: 6px;
+  background: #f9fbff;
+}
+.process-card__head {
+  padding: 8px 10px 0;
+}
+.process-card__title {
+  font-weight: 700;
+}
+.process-card__sub {
+  color: #4b5563;
+  font-size: 12px;
+}
+.process-card__body {
+  padding: 8px 10px 10px;
+}
+.process-table-wrap {
+  overflow-x: auto;
+}
+.process-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.process-table th,
+.process-table td {
+  border: 1px solid #d7dfe8;
+  padding: 4px 6px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.process-table .mini-head {
+  text-align: center;
+  background: #eef2f7;
+}
+.process-table .mini-cell {
+  text-align: right;
+  min-width: 90px;
+}
+.process-table .cell-line {
+  text-align: right;
+  font-size: 12px;
+}
+.process-table .cell-line.sub {
+  color: #6b7280;
+}
+.process-table .cell-line.time {
+  color: #0f766e;
+  font-weight: 700;
+}
+.process-table .capacity {
+  color: #475569;
+  font-weight: 500;
+  margin-left: 4px;
+}
+.process-table .cell-line.muted {
+  color: #94a3b8;
+}
+.process-empty {
+  font-size: 12px;
+  color: #6b7280;
+  padding: 4px 0;
 }
 </style>

@@ -147,6 +147,8 @@ class LineBacklogSerializer(serializers.ModelSerializer):
     process_name = serializers.CharField(source='process.process_name', read_only=True)
     line_code = serializers.CharField(source='line.line_code', read_only=True)
     line_name = serializers.CharField(source='line.line_name', read_only=True)
+    computed_time_min = serializers.SerializerMethodField()
+    work_minutes = serializers.SerializerMethodField()
 
     class Meta:
         model = LineBacklog
@@ -156,8 +158,15 @@ class LineBacklogSerializer(serializers.ModelSerializer):
             'line', 'line_code', 'line_name',
             'demand_qty_plan', 'order_qty', 'plan_qty', 'actual_qty', 'stock_qty', 'planned_stock_qty',
             'source_line', 'source_routing_step', 'updated_at',
+            'computed_time_min', 'work_minutes',
         ]
         read_only_fields = ['id', 'updated_at']
+
+    def get_computed_time_min(self, obj):
+        return getattr(obj, 'computed_time_min', None)
+
+    def get_work_minutes(self, obj):
+        return getattr(obj, 'work_minutes', None)
 
 
 # ========================================

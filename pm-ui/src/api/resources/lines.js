@@ -11,6 +11,9 @@ export const createLinesAPI = (client) => ({
   updateLine(id, data) {
     return client.put(`/lines/${id}/`, data)
   },
+  patchLine(id, data) {
+    return client.patch(`/lines/${id}/`, data)
+  },
   deleteLine(id) {
     return client.delete(`/lines/${id}/`)
   },

@@ -18,6 +18,11 @@
         <div class="label">ライン需要一覧</div>
       </RouterLink>
 
+      <RouterLink to="/production/line-calendars" class="master-tile">
+        <div class="icon-box" aria-label="勤">⏱</div>
+        <div class="label">ライン勤務カレンダ</div>
+      </RouterLink>
+
       <RouterLink to="/production/inventory" class="master-tile">
         <div class="icon-box" aria-label="在庫">📦</div>
         <div class="label">在庫/残量一覧</div>
