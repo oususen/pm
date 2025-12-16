@@ -91,6 +91,7 @@ class BOMSerializer(serializers.ModelSerializer):
     items = BOMItemSerializer(many=True, read_only=True)
     parent_product_name = serializers.CharField(source='parent_product.product_name', read_only=True)
     parent_is_final = serializers.SerializerMethodField()
+    parent_is_line_final = serializers.SerializerMethodField()
 
     class Meta:
         model = BOM
@@ -98,7 +99,18 @@ class BOMSerializer(serializers.ModelSerializer):
 
     def get_parent_is_final(self, obj: BOM):
         if obj.parent_product_id:
-            return bool(getattr(obj.parent_product, 'is_final_product', False))
+            try:
+                return bool(getattr(obj.parent_product, 'is_final_product', False))
+            except Product.DoesNotExist:
+                return False
+        return False
+
+    def get_parent_is_line_final(self, obj: BOM):
+        if obj.parent_product_id:
+            try:
+                return bool(getattr(obj.parent_product, 'is_line_final_product', False))
+            except Product.DoesNotExist:
+                return False
         return False
 
 

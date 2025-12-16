@@ -19,6 +19,11 @@ class Product(models.Model):
     standard_lt_days = models.IntegerField(null=True, blank=True, verbose_name='標準LT(日)')
     self_lt_days = models.IntegerField(null=True, blank=True, verbose_name='自工程LT(日)')
     is_final_product = models.BooleanField(default=False, verbose_name='最終製品')
+    is_line_final_product = models.BooleanField(
+        default=False,
+        verbose_name='ライン最終品',
+        help_text='そのラインで最後に出力される製品（次のラインへ渡す中間品）'
+    )
     is_phantom = models.BooleanField(default=False, verbose_name='見なし組立')
     is_virtual_set = models.BooleanField(
         default=False,
@@ -310,7 +315,19 @@ class RoutingStepMaterial(models.Model):
         unique_together = [['routing_step', 'component']]
 
     def __str__(self):
-        return f"{self.routing_step} uses {self.component.product_code} x {self.quantity}"
+        routing_label = ''
+        if self.routing_step_id:
+            try:
+                routing_label = str(self.routing_step)
+            except RoutingStep.DoesNotExist:
+                routing_label = f"(missing RoutingStep id={self.routing_step_id})"
+        component_code = ''
+        if self.component_id:
+            try:
+                component_code = self.component.product_code
+            except Product.DoesNotExist:
+                component_code = f"(missing Product id={self.component_id})"
+        return f"{routing_label} uses {component_code} x {self.quantity}"
 
 
 class ProcessCycleTime(models.Model):

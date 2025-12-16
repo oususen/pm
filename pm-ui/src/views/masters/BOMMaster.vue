@@ -15,6 +15,7 @@
             <th>ID</th>
             <th>親製品</th>
             <th>最終品</th>
+            <th>ライン最終品</th>
             <th>版</th>
             <th>連産品</th>
             <th>有効開始日</th>
@@ -28,6 +29,7 @@
             <td>{{ bom.id }}</td>
             <td>{{ bom.parent_product_code || getProductCodeOnly(bom.parent_product) }}</td>
             <td>{{ bom.parent_is_final ? '最終' : '' }}</td>
+            <td>{{ bom.parent_is_line_final ? 'はい' : '' }}</td>
             <td>{{ bom.version }}</td>
             <td>{{ bom.is_coproduct ? 'はい' : '' }}</td>
             <td>{{ bom.valid_from }}</td>

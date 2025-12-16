@@ -7,8 +7,8 @@ from .models import (
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ['product_code', 'product_name', 'category', 'unit', 'is_virtual_set', 'is_active']
-    list_filter = ['category', 'is_active', 'is_final_product', 'is_virtual_set']
+    list_display = ['product_code', 'product_name', 'category', 'unit', 'is_final_product', 'is_line_final_product', 'is_virtual_set', 'is_active']
+    list_filter = ['category', 'is_active', 'is_final_product', 'is_line_final_product', 'is_virtual_set']
     search_fields = ['product_code', 'product_name']
 
 
@@ -196,7 +196,12 @@ class RoutingStepAdmin(admin.ModelAdmin):
         ルーティング名に加工後品目コードを付与して、同じルート内でも識別しやすくする。
         """
         # 製品コードを一度だけ表示
-        product_code = obj.routing.product.product_code if obj.routing.product_id else ''
+        product_code = ''
+        if obj.routing_id:
+            try:
+                product_code = obj.routing.product.product_code if obj.routing.product_id else ''
+            except Product.DoesNotExist:
+                product_code = f"(missing Product id={obj.routing.product_id})"
         out_code = obj.output_product.product_code if obj.output_product_id else ''
         return f"{product_code} -> {out_code}" if out_code else product_code
     routing_label.short_description = 'ルーティング'
@@ -204,10 +209,22 @@ class RoutingStepAdmin(admin.ModelAdmin):
 
 @admin.register(Routing)
 class RoutingAdmin(admin.ModelAdmin):
-    list_display = ['product', 'routing_code', 'is_default', 'is_active']
+    list_display = ['product_display', 'routing_code', 'is_default', 'is_active']
     list_filter = ['is_active', 'is_default']
     inlines = [RoutingStepInline]
     actions = ['export_excel']
+
+    @admin.display(description='製品', ordering='product__product_code')
+    def product_display(self, obj):
+        """
+        Product FK might point to a missing row (legacy data); avoid crashing the admin list.
+        """
+        if not obj.product_id:
+            return ''
+        try:
+            return obj.product
+        except Product.DoesNotExist:
+            return f"(missing Product id={obj.product_id})"
 
     def export_excel(self, request, queryset):
         from openpyxl import Workbook

@@ -28,6 +28,22 @@
           </select>
         </div>
         <div class="filter-field">
+          <label>ライン最終品</label>
+          <select v-model="filters.is_line_final_product">
+            <option value="">すべて</option>
+            <option value="true">はい</option>
+            <option value="false">いいえ</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label>BOM持ち</label>
+          <select v-model="filters.has_bom">
+            <option value="">すべて</option>
+            <option value="true">あり</option>
+            <option value="false">なし</option>
+          </select>
+        </div>
+        <div class="filter-field">
           <label>有効</label>
           <select v-model="filters.is_active">
             <option value="">すべて</option>
@@ -57,6 +73,7 @@
             <th>カテゴリ</th>
             <th>単位</th>
             <th>標準LT(日)</th>
+            <th>ライン最終品</th>
             <th>みなし組立</th>
             <th>仮想セット</th>
             <th>有効</th>
@@ -70,6 +87,7 @@
             <td>{{ getCategoryLabel(product.category) }}</td>
             <td>{{ product.unit }}</td>
             <td>{{ product.standard_lt_days }}</td>
+            <td>{{ product.is_line_final_product ? 'はい' : '' }}</td>
             <td>{{ product.is_phantom ? 'はい' : 'いいえ' }}</td>
             <td>{{ product.is_virtual_set ? 'はい' : 'いいえ' }}</td>
             <td>{{ product.is_active ? '有効' : '無効' }}</td>
@@ -115,6 +133,12 @@
           <div class="form-group">
             <label>標準LT(日)</label>
             <input v-model.number="formData.standard_lt_days" type="number" min="0" />
+          </div>
+          <div class="form-group">
+            <label>
+              <input type="checkbox" v-model="formData.is_line_final_product" />
+              ライン最終品（ラインで最後に出力される品目）
+            </label>
           </div>
           <div class="form-group">
             <label>
@@ -166,6 +190,8 @@ const isEdit = ref(false)
 const filters = ref({
   search: '',
   category: '',
+  is_line_final_product: '',
+  has_bom: '',
   is_active: '',
   created_from: '',
   created_to: ''
@@ -177,6 +203,7 @@ const formData = ref({
   unit: '個',
   standard_lt_days: 0,
   is_active: true,
+  is_line_final_product: false,
   is_final_product: false,
   is_virtual_set: false,
 })
@@ -189,6 +216,12 @@ const buildQueryParams = () => {
   }
   if (filters.value.category) {
     params.category = filters.value.category
+  }
+  if (filters.value.is_line_final_product !== '') {
+    params.is_line_final_product = filters.value.is_line_final_product === 'true'
+  }
+  if (filters.value.has_bom !== '') {
+    params.has_bom = filters.value.has_bom === 'true'
   }
   if (filters.value.is_active !== '') {
     params.is_active = filters.value.is_active === 'true'
@@ -221,11 +254,12 @@ const showNewDialog = () => {
     product_code: '',
     product_name: '',
     category: '',
-  unit: '個',
-  standard_lt_days: 0,
-  is_active: true,
-  is_final_product: false,
-  is_virtual_set: false,
+    unit: '個',
+    standard_lt_days: 0,
+    is_active: true,
+    is_line_final_product: false,
+    is_final_product: false,
+    is_virtual_set: false,
   }
   showDialog.value = true
 }
@@ -247,6 +281,8 @@ const resetFilters = async () => {
   filters.value = {
     search: '',
     category: '',
+    is_line_final_product: '',
+    has_bom: '',
     is_active: '',
     created_from: '',
     created_to: ''
