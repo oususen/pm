@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
+from django.db.models import Exists, OuterRef
 import django_filters
 from datetime import date
 from .models import (
@@ -20,10 +21,21 @@ from .serializers import (
 class ProductFilter(django_filters.FilterSet):
     created_from = django_filters.DateFilter(field_name='created_at', lookup_expr='gte')
     created_to = django_filters.DateFilter(field_name='created_at', lookup_expr='lte')
+    is_line_final_product = django_filters.BooleanFilter(field_name='is_line_final_product')
+    has_bom = django_filters.BooleanFilter(method='filter_has_bom')
 
     class Meta:
         model = Product
-        fields = ['category', 'is_active', 'created_from', 'created_to']
+        fields = ['category', 'is_active', 'is_line_final_product', 'has_bom', 'created_from', 'created_to']
+
+    def filter_has_bom(self, queryset, name, value):
+        if value is None:
+            return queryset
+        bom_exists = BOM.objects.filter(parent_product_id=OuterRef('pk'))
+        queryset = queryset.annotate(_has_bom=Exists(bom_exists))
+        if value:
+            return queryset.filter(_has_bom=True)
+        return queryset.filter(_has_bom=False)
 
 
 class ProductViewSet(viewsets.ModelViewSet):

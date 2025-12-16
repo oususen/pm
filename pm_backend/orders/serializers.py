@@ -210,7 +210,7 @@ class ProductionOrderSerializer(serializers.ModelSerializer):
     line_name = serializers.CharField(source='line.line_name', read_only=True)
     routing_code = serializers.CharField(source='routing.routing_code', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
-    actuals = ProcessActualSerializer(many=True, read_only=True, source='processactual_set')
+    actuals = ProcessActualSerializer(many=True, read_only=True, source='actuals')
 
     class Meta:
         model = ProductionOrder
