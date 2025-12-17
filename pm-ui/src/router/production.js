@@ -82,6 +82,11 @@ const production = [
     name: "MobileLineInput",
     component: () => import("@/views/production/MobileLineInput.vue"),
   },
+  {
+    path: "/production/mobile-process-input",
+    name: "MobileProcessInput",
+    component: () => import("@/views/production/MobileProcessInput.vue"),
+  },
 ];
 
 export default production;

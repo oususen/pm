@@ -3,7 +3,7 @@
 """
 from rest_framework import serializers
 from .models_line_realtime import LineRealtimeRecord, LineStatus
-from masters.models import Line
+from masters.models import Line, Product
 
 
 class LineRealtimeRecordSerializer(serializers.ModelSerializer):
@@ -13,6 +13,8 @@ class LineRealtimeRecordSerializer(serializers.ModelSerializer):
     line_name = serializers.CharField(source='line.line_name', read_only=True)
     record_type_display = serializers.CharField(source='get_record_type_display', read_only=True)
     equipment_state_display = serializers.CharField(source='get_equipment_state_display', read_only=True)
+    product_code = serializers.CharField(read_only=True)
+    product_name = serializers.CharField(read_only=True)
 
     class Meta:
         model = LineRealtimeRecord
@@ -21,6 +23,9 @@ class LineRealtimeRecordSerializer(serializers.ModelSerializer):
             'line',
             'line_code',
             'line_name',
+            'product',
+            'product_code',
+            'product_name',
             'timestamp',
             'record_type',
             'record_type_display',
@@ -72,6 +77,9 @@ class LineRealtimeCreateSerializer(serializers.Serializer):
     """ライン実時間記録作成用Serializer（簡易入力）"""
 
     line_id = serializers.IntegerField()
+    product_id = serializers.IntegerField(required=False, allow_null=True)
+    product_code = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    product_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
     record_type = serializers.ChoiceField(choices=LineRealtimeRecord.RECORD_TYPE_CHOICES)
     qty = serializers.DecimalField(max_digits=10, decimal_places=3, default=0)
     equipment_state = serializers.ChoiceField(
@@ -84,18 +92,49 @@ class LineRealtimeCreateSerializer(serializers.Serializer):
     remarks = serializers.CharField(required=False, allow_blank=True)
     event_data = serializers.JSONField(required=False, allow_null=True)
 
+    def validate(self, attrs):
+        if attrs.get('record_type') == 'PRODUCTION':
+            has_product_id = bool(attrs.get('product_id'))
+            has_product_code = bool((attrs.get('product_code') or '').strip())
+            if not has_product_id and not has_product_code:
+                raise serializers.ValidationError({'product_id': '生産記録は製品（品番）の指定が必要です。'})
+        return attrs
+
     def create(self, validated_data):
         """記録を作成"""
         line_id = validated_data.pop('line_id')
-        line = Line.objects.get(id=line_id)
+        try:
+            line = Line.objects.get(id=line_id)
+        except Line.DoesNotExist as exc:
+            raise serializers.ValidationError({'line_id': '指定されたラインが存在しません。'}) from exc
+
+        product = None
+        product_id = validated_data.pop('product_id', None)
+        product_code = (validated_data.pop('product_code', None) or '').strip() or None
+        product_name = (validated_data.pop('product_name', None) or '').strip() or None
+
+        if product_id:
+            try:
+                product = Product.objects.get(id=product_id)
+            except Product.DoesNotExist as exc:
+                raise serializers.ValidationError({'product_id': '指定された製品が存在しません。'}) from exc
+        elif product_code:
+            product = Product.objects.filter(product_code=product_code).first()
+
+        if product:
+            product_code = product.product_code
+            product_name = product.product_name
 
         record = LineRealtimeRecord.objects.create(
             line=line,
+            product=product,
+            product_code=product_code,
+            product_name=product_name,
             **validated_data
         )
 
         # ライン状態も更新
-        self._update_line_status(line, validated_data)
+        self._update_line_status(line, {**validated_data, 'product_code': product_code, 'product_name': product_name})
 
         return record
 
@@ -110,5 +149,8 @@ class LineRealtimeCreateSerializer(serializers.Serializer):
         # 生産記録の場合、本日生産数を加算
         if data.get('record_type') == 'PRODUCTION':
             line_status.today_output += data.get('qty', 0)
+            if data.get('product_code'):
+                line_status.current_product_code = data.get('product_code')
+                line_status.current_product_name = data.get('product_name') or ''
 
         line_status.save()

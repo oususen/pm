@@ -2,7 +2,7 @@
 ライン実時間記録モデル（品質管理機能は除く）
 """
 from django.db import models
-from masters.models import Line
+from masters.models import Line, Product
 
 
 class LineRealtimeRecord(models.Model):
@@ -25,6 +25,25 @@ class LineRealtimeRecord(models.Model):
 
     id = models.BigAutoField(primary_key=True)
     line = models.ForeignKey(Line, on_delete=models.CASCADE, verbose_name='ライン')
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name='製品'
+    )
+    product_code = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        verbose_name='製品コード'
+    )
+    product_name = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        verbose_name='品名'
+    )
 
     # 高精度タイムスタンプ
     timestamp = models.DateTimeField(auto_now_add=True, verbose_name='記録時刻', db_index=True)
@@ -87,6 +106,7 @@ class LineRealtimeRecord(models.Model):
         indexes = [
             models.Index(fields=['line', 'timestamp']),
             models.Index(fields=['record_type']),
+            models.Index(fields=['product_code']),
         ]
         ordering = ['-timestamp']
 

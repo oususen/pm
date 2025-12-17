@@ -1,6 +1,6 @@
 export const createProcessesAPI = (client) => ({
-  getProcesses() {
-    return client.get('/processes/')
+  getProcesses(params = {}) {
+    return client.get('/processes/', { params })
   },
   getProcess(id) {
     return client.get(`/processes/${id}/`)

@@ -37,6 +37,11 @@
         <div class="icon-box">📅</div>
         <div class="label">カレンダマスタ</div>
       </RouterLink>
+
+      <RouterLink to="/masters/work-pattern" class="master-tile">
+        <div class="icon-box">⏰</div>
+        <div class="label">勤務パターン</div>
+      </RouterLink>
     </div>
 
     <p class="helper-text">

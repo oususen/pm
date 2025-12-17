@@ -35,6 +35,11 @@ const masters = [
     component: () => import("@/views/masters/CalendarMaster.vue"),
   },
   {
+    path: "/masters/work-pattern",
+    name: "WorkPatternMaster",
+    component: () => import("@/views/masters/WorkPatternMaster.vue"),
+  },
+  {
     path: "/masters/bom",
     name: "BOMMaster",
     component: () => import("@/views/masters/BOMMaster.vue"),

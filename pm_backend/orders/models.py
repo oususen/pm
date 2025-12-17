@@ -3,6 +3,7 @@ from masters.models import Customer, Line, Product, RoutingStep
 from .models_line_backlog import LineBacklog
 from .models_production import StockAllocation, ProductionOrder, ProcessActual
 from .models_line_realtime import LineRealtimeRecord, LineStatus
+from .models_process_realtime import ProcessRealtimeRecord
 
 
 class Order(models.Model):

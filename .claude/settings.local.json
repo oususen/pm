@@ -12,7 +12,10 @@
       "Bash(python manage.py shell:*)",
       "Bash(d:/pm/venv/Scripts/python.exe manage.py shell:*)",
       "Bash(d:/pm/venv/Scripts/python.exe:*)",
-      "Bash(d:\\pm\\venv\\Scripts\\python.exe:*)"
+      "Bash(d:\\pm\\venv\\Scripts\\python.exe:*)",
+      "Bash(..venvScriptspython.exe manage.py makemigrations masters)",
+      "Bash(python:*)",
+      "Bash(venv/Scripts/python.exe:*)"
     ],
     "deny": [],
     "ask": []

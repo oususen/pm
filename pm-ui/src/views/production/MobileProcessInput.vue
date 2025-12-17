@@ -1,26 +1,23 @@
 <template>
   <div class="mobile-input">
-    <!-- ヘッダー -->
     <div class="mobile-header">
-      <h2>ライン作業記録</h2>
+      <h2>工程作業記録</h2>
       <div class="header-info">
         <span class="date">{{ currentDate }}</span>
       </div>
     </div>
 
-    <!-- ライン選択 -->
     <div class="section">
-      <label class="label-required">ライン</label>
-      <select v-model="selectedLineId" @change="onLineChange" class="input-large">
-        <option value="">-- ラインを選択 --</option>
-        <option v-for="line in lines" :key="line.id" :value="line.id">
-          {{ line.line_code }} - {{ line.line_name }}
+      <label class="label-required">工程</label>
+      <select v-model="selectedProcessId" @change="onProcessChange" class="input-large">
+        <option value="">-- 工程を選択 --</option>
+        <option v-for="p in processes" :key="p.id" :value="p.id">
+          {{ p.process_code }} - {{ p.process_name }}
         </option>
       </select>
     </div>
 
-    <!-- 記録タイプ選択 -->
-    <div v-if="selectedLineId" class="section">
+    <div v-if="selectedProcessId" class="section">
       <label class="label-required">記録タイプ</label>
       <div class="type-buttons">
         <button
@@ -35,42 +32,45 @@
       </div>
     </div>
 
-    <!-- 製品選択 -->
     <div v-if="record.record_type" class="section">
       <label :class="record.record_type === 'PRODUCTION' ? 'label-required' : ''">製品</label>
-      <template v-if="plannedProducts.length">
-        <select v-model="record.product_id" class="input-large">
-          <option value="">-- 製品を選択 --</option>
-          <option
-            v-for="p in plannedProducts"
-            :key="`${p.plan_date}-${p.product_code}`"
-            :value="p.product"
-          >
-            {{ p.product_code }} - {{ p.product_name || '' }}（計画: {{ formatNumber(p.plan_qty || 0) }}）
-          </option>
-        </select>
+
+      <template v-if="!manualProduct">
+        <input
+          type="text"
+          v-model="productQuery"
+          placeholder="品番/品名で検索（2文字以上）"
+          class="input-normal"
+        />
+        <div v-if="productQuery && productOptions.length" class="select-wrap">
+          <select v-model="record.product_id" class="input-large">
+            <option value="">-- 検索結果から選択 --</option>
+            <option v-for="p in productOptions" :key="p.id" :value="p.id">
+              {{ p.product_code }} - {{ p.product_name }}
+            </option>
+          </select>
+        </div>
         <button type="button" class="btn-link" @click="toggleManualProduct">
-          {{ manualProduct ? '選択に戻る' : '手入力する' }}
+          手入力する
         </button>
       </template>
-      <template v-if="manualProduct || !plannedProducts.length">
+
+      <template v-else>
         <input
           type="text"
           v-model="record.product_code"
           placeholder="品番を入力（例: YD60000000）"
           class="input-normal"
         />
-        <div v-if="!plannedProducts.length" class="hint">
-          本日の計画が未取得のため手入力になります（ライン需要展開が未実行の可能性があります）。
-        </div>
+        <button type="button" class="btn-link" @click="toggleManualProduct">
+          検索に戻る
+        </button>
       </template>
     </div>
 
-    <!-- 生産記録フォーム -->
     <div v-if="record.record_type === 'PRODUCTION'" class="form-section">
       <h3 class="section-title">生産記録</h3>
 
-      <!-- 生産数量 -->
       <div class="section">
         <label class="label-required">生産数量</label>
         <input
@@ -84,7 +84,6 @@
         />
       </div>
 
-      <!-- クイック入力ボタン -->
       <div class="quick-btns">
         <button
           v-for="preset in quickQtyPresets"
@@ -96,7 +95,6 @@
         </button>
       </div>
 
-      <!-- ロット番号 -->
       <div class="section">
         <label>ロット番号</label>
         <input
@@ -107,7 +105,6 @@
         />
       </div>
 
-      <!-- 作業者名 -->
       <div class="section">
         <label>作業者名</label>
         <input
@@ -118,7 +115,6 @@
         />
       </div>
 
-      <!-- 備考 -->
       <div class="section">
         <label>備考</label>
         <textarea
@@ -130,7 +126,6 @@
       </div>
     </div>
 
-    <!-- 設備状態変更フォーム -->
     <div v-if="record.record_type === 'EQUIPMENT_STATE'" class="form-section">
       <h3 class="section-title">設備状態変更</h3>
 
@@ -152,7 +147,6 @@
         </div>
       </div>
 
-      <!-- 備考 -->
       <div class="section">
         <label>備考</label>
         <textarea
@@ -164,7 +158,6 @@
       </div>
     </div>
 
-    <!-- 送信ボタン -->
     <div v-if="record.record_type" class="action-section">
       <button
         @click="submitRecord"
@@ -175,8 +168,7 @@
       </button>
     </div>
 
-    <!-- 最近の記録 -->
-    <div v-if="selectedLineId && recentRecords.length" class="recent-section">
+    <div v-if="selectedProcessId && recentRecords.length" class="recent-section">
       <h3 class="section-title">最近の記録</h3>
       <div class="record-list">
         <div v-for="rec in recentRecords" :key="rec.id" class="record-item">
@@ -199,13 +191,15 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/api/client'
 
-const lines = ref([])
-const selectedLineId = ref('')
+const processes = ref([])
+const selectedProcessId = ref('')
 const recentRecords = ref([])
 const submitting = ref(false)
-const plannedProducts = ref([])
-const defaultProductId = ref(null)
+
+const productQuery = ref('')
+const productOptions = ref([])
 const manualProduct = ref(false)
+let productSearchTimer = null
 
 const record = ref({
   record_type: '',
@@ -243,16 +237,8 @@ const currentDate = computed(() => {
   })
 })
 
-const currentDateYmd = computed(() => {
-  const now = new Date()
-  const y = now.getFullYear()
-  const m = String(now.getMonth() + 1).padStart(2, '0')
-  const d = String(now.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-})
-
 const canSubmit = computed(() => {
-  if (!selectedLineId.value || !record.value.record_type) return false
+  if (!selectedProcessId.value || !record.value.record_type) return false
 
   if (record.value.record_type === 'PRODUCTION') {
     const hasProduct = !!record.value.product_id || !!(record.value.product_code || '').trim()
@@ -266,13 +252,6 @@ const canSubmit = computed(() => {
   return false
 })
 
-const onLineChange = () => {
-  // ラインが変わったらフォームリセット
-  resetForm()
-  loadPlannedProducts()
-  loadRecentRecords()
-}
-
 const resetForm = () => {
   record.value = {
     record_type: '',
@@ -284,17 +263,34 @@ const resetForm = () => {
     operator_name: '',
     remarks: '',
   }
+  productQuery.value = ''
+  productOptions.value = []
   manualProduct.value = false
+}
+
+const onProcessChange = () => {
+  resetForm()
+  loadRecentRecords()
+}
+
+const toggleManualProduct = () => {
+  manualProduct.value = !manualProduct.value
+  productQuery.value = ''
+  productOptions.value = []
+  if (manualProduct.value) {
+    record.value.product_id = ''
+  } else {
+    record.value.product_code = ''
+  }
 }
 
 const submitRecord = async () => {
   if (!canSubmit.value) return
 
   submitting.value = true
-
   try {
     const data = {
-      line_id: selectedLineId.value,
+      process_id: selectedProcessId.value,
       record_type: record.value.record_type,
     }
 
@@ -315,7 +311,7 @@ const submitRecord = async () => {
 
     data.remarks = record.value.remarks
 
-    await api.lineRealtime.create(data)
+    await api.processRealtime.create(data)
 
     alert('記録を登録しました')
     resetForm()
@@ -329,50 +325,53 @@ const submitRecord = async () => {
 }
 
 const loadRecentRecords = async () => {
-  if (!selectedLineId.value) return
+  if (!selectedProcessId.value) return
 
   try {
-    const res = await api.lineRealtime.list({
-      line_id: selectedLineId.value,
+    const res = await api.processRealtime.list({
+      process_id: selectedProcessId.value,
       limit: 10,
     })
     recentRecords.value = res.data.results || res.data || []
-
-    const lastProduction = recentRecords.value.find(r => r.record_type === 'PRODUCTION' && r.product)
-    defaultProductId.value = lastProduction ? lastProduction.product : defaultProductId.value
   } catch (error) {
     console.error('最近の記録取得エラー:', error)
   }
 }
 
-const loadPlannedProducts = async () => {
-  if (!selectedLineId.value) return
-
-  plannedProducts.value = []
+const searchProducts = async (q) => {
+  const query = (q || '').trim()
+  if (query.length < 2) {
+    productOptions.value = []
+    return
+  }
   try {
-    const res = await api.lineDemands.list({
-      line: selectedLineId.value,
-      plan_date: currentDateYmd.value,
-    })
-    const items = res.data.results || res.data || []
-    plannedProducts.value = Array.isArray(items) ? items : []
-
-    if (plannedProducts.value.length === 1 && plannedProducts.value[0].product) {
-      defaultProductId.value = plannedProducts.value[0].product
-    }
+    const res = await api.products.getProducts({ search: query, page_size: 20 })
+    productOptions.value = res.data?.results || res.data || []
   } catch (error) {
-    console.error('本日の計画取得エラー:', error)
+    console.error('製品検索エラー:', error)
+    productOptions.value = []
   }
 }
 
-const toggleManualProduct = () => {
-  manualProduct.value = !manualProduct.value
-  if (manualProduct.value) {
-    record.value.product_id = ''
-  } else {
-    record.value.product_code = ''
+watch(productQuery, (q) => {
+  if (manualProduct.value) return
+  if (productSearchTimer) clearTimeout(productSearchTimer)
+  productSearchTimer = setTimeout(() => {
+    searchProducts(q)
+  }, 300)
+})
+
+watch(
+  () => record.value.record_type,
+  (type) => {
+    if (!type) return
+    if (type !== 'PRODUCTION') {
+      record.value.qty = null
+      record.value.batch_no = ''
+      record.value.operator_name = ''
+    }
   }
-}
+)
 
 const formatTime = (timestamp) => {
   const date = new Date(timestamp)
@@ -382,34 +381,19 @@ const formatTime = (timestamp) => {
   })
 }
 
-const formatNumber = (value) => {
-  if (value === null || value === undefined) return '0'
-  return Number(value).toLocaleString()
-}
-
-const loadLines = async () => {
+const loadProcesses = async () => {
   try {
-    const res = await api.lines.getLines()
-    lines.value = res.data.results || res.data || []
+    const res = await api.processes.getProcesses({ is_active: true })
+    processes.value = res.data.results || res.data || []
   } catch (error) {
-    console.error('ライン一覧取得エラー:', error)
-    alert('ライン情報の取得に失敗しました')
+    console.error('工程一覧取得エラー:', error)
+    alert('工程情報の取得に失敗しました')
   }
 }
 
 onMounted(() => {
-  loadLines()
+  loadProcesses()
 })
-
-watch(
-  () => record.value.record_type,
-  (type) => {
-    if (!type) return
-    if (!record.value.product_id && defaultProductId.value) {
-      record.value.product_id = defaultProductId.value
-    }
-  }
-)
 </script>
 
 <style scoped>
@@ -634,10 +618,9 @@ label {
   color: #16a34a;
 }
 
-.hint {
-  margin-top: 8px;
-  font-size: 12px;
-  color: #64748b;
+.record-state {
+  font-weight: 600;
+  color: #4a7ae5;
 }
 
 .btn-link {
@@ -652,8 +635,8 @@ label {
   text-decoration: underline;
 }
 
-.record-state {
-  font-weight: 600;
-  color: #4a7ae5;
+.select-wrap {
+  margin-top: 8px;
 }
 </style>
+

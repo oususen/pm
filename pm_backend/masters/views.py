@@ -7,12 +7,12 @@ from django.db.models import Exists, OuterRef
 import django_filters
 from datetime import date
 from .models import (
-    Product, Customer, Process, Line, Supplier, Calendar, CalendarDay,
+    Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern,
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial
 )
 from .serializers import (
     ProductSerializer, CustomerSerializer, ProcessSerializer, LineSerializer,
-    SupplierSerializer, CalendarSerializer, CalendarDaySerializer,
+    SupplierSerializer, CalendarSerializer, CalendarDaySerializer, WorkPatternSerializer,
     BOMSerializer, BOMItemSerializer, RoutingSerializer, RoutingStepSerializer,
     RoutingStepMaterialSerializer
 )
@@ -89,6 +89,14 @@ class CalendarViewSet(viewsets.ModelViewSet):
     search_fields = ['calendar_code', 'calendar_name']
     ordering_fields = ['calendar_code', 'created_at']
     ordering = ['calendar_code']
+
+
+class WorkPatternViewSet(viewsets.ModelViewSet):
+    queryset = WorkPattern.objects.all()
+    serializer_class = WorkPatternSerializer
+    search_fields = ['pattern_code', 'pattern_name']
+    ordering_fields = ['pattern_code', 'created_at']
+    ordering = ['pattern_code']
 
 
 class CalendarDayViewSet(viewsets.ModelViewSet):

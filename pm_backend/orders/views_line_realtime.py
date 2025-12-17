@@ -24,7 +24,7 @@ class LineRealtimeRecordViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """クエリパラメータでフィルタリング"""
-        queryset = LineRealtimeRecord.objects.select_related('line')
+        queryset = LineRealtimeRecord.objects.select_related('line', 'product')
 
         # ラインでフィルタ
         line_id = self.request.query_params.get('line_id')
@@ -43,6 +43,14 @@ class LineRealtimeRecordViewSet(viewsets.ModelViewSet):
         record_type = self.request.query_params.get('record_type')
         if record_type:
             queryset = queryset.filter(record_type=record_type)
+
+        # 製品でフィルタ
+        product_id = self.request.query_params.get('product_id')
+        if product_id:
+            queryset = queryset.filter(product_id=product_id)
+        product_code = self.request.query_params.get('product_code')
+        if product_code:
+            queryset = queryset.filter(product_code=product_code)
 
         return queryset.order_by('-timestamp')
 

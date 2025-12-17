@@ -51,6 +51,15 @@
             <label>終了日</label>
             <input type="date" v-model="range.end" />
           </div>
+          <div class="field">
+            <label>勤務パターン</label>
+            <select v-model.number="range.workPattern" @change="onPatternChange">
+              <option value="">選択なし</option>
+              <option v-for="p in workPatterns" :key="p.id" :value="p.id">
+                {{ p.pattern_name }} ({{ p.start_time }} / {{ formatMinutes(p.work_minutes) }})
+              </option>
+            </select>
+          </div>
           <div class="field small">
             <label>稼働分</label>
             <input type="number" v-model.number="range.workMinutes" min="0" />
@@ -120,6 +129,7 @@
               <th>日付</th>
               <th>稼働</th>
               <th>稼働分</th>
+              <th>勤務パターン</th>
             </tr>
           </thead>
           <tbody>
@@ -127,6 +137,7 @@
               <td>{{ d.target_date }}</td>
               <td>{{ d.is_working_day ? '○' : '×' }}</td>
               <td class="num">{{ d.work_minutes ?? '' }}</td>
+              <td>{{ d.work_pattern_name ?? '' }}</td>
             </tr>
           </tbody>
         </table>
@@ -143,6 +154,7 @@ import api from '@/api/client'
 const lines = ref([])
 const calendars = ref([])
 const calendarDays = ref([])
+const workPatterns = ref([])
 const showCreator = ref(false)
 const showAssign = ref(false)
 
@@ -170,7 +182,15 @@ const range = ref({
   end: '',
   workMinutes: 480,
   isWorkingDay: true,
+  workPattern: '',
 })
+
+const formatMinutes = (minutes) => {
+  if (!minutes && minutes !== 0) return '-'
+  const hours = Math.floor(minutes / 60)
+  const mins = minutes % 60
+  return `${hours}h${mins}m`
+}
 
 const currentCalendarLabel = computed(() => {
   const c = calendars.value.find((x) => x.id === selectedCalendar.value)
@@ -201,6 +221,18 @@ const loadLines = async () => {
 const loadCalendars = async () => {
   const res = await api.calendars.getCalendars()
   calendars.value = res.data.results || res.data || []
+}
+
+const loadWorkPatterns = async () => {
+  const res = await api.workPatterns.getWorkPatterns()
+  workPatterns.value = res.data.results || res.data || []
+}
+
+const onPatternChange = () => {
+  const pattern = workPatterns.value.find((p) => p.id === range.value.workPattern)
+  if (pattern) {
+    range.value.workMinutes = pattern.work_minutes - pattern.break_minutes
+  }
 }
 
 const onLineChange = () => {
@@ -281,6 +313,7 @@ const applyRange = async () => {
         target_date: key,
         is_working_day: !!range.value.isWorkingDay,
         work_minutes: range.value.workMinutes,
+        work_pattern: range.value.workPattern || null,
       }
       if (existing.has(key)) {
         ops.push(api.calendars.updateCalendarDay(existing.get(key).id, payload))
@@ -300,7 +333,7 @@ const applyRange = async () => {
 }
 
 onMounted(async () => {
-  await Promise.all([loadLines(), loadCalendars()])
+  await Promise.all([loadLines(), loadCalendars(), loadWorkPatterns()])
 })
 </script>
 

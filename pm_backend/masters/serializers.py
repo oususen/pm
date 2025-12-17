@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import (
-    Product, Customer, Process, Line, Supplier, Calendar, CalendarDay,
+    Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern,
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial
 )
 
@@ -43,7 +43,15 @@ class CalendarSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class WorkPatternSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WorkPattern
+        fields = '__all__'
+
+
 class CalendarDaySerializer(serializers.ModelSerializer):
+    work_pattern_name = serializers.CharField(source='work_pattern.pattern_name', read_only=True)
+
     class Meta:
         model = CalendarDay
         fields = '__all__'

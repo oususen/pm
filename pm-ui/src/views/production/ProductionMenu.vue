@@ -50,7 +50,12 @@
 
       <RouterLink to="/production/mobile-input" class="master-tile">
         <div class="icon-box">📱</div>
-        <div class="label">モバイル作業入力</div>
+        <div class="label">モバイル作業入力（ライン）</div>
+      </RouterLink>
+
+      <RouterLink to="/production/mobile-process-input" class="master-tile">
+        <div class="icon-box">📱</div>
+        <div class="label">モバイル作業入力（工程）</div>
       </RouterLink>
     </div>
 

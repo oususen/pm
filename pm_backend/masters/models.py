@@ -148,6 +148,27 @@ class Calendar(models.Model):
         return f"{self.calendar_code} - {self.calendar_name}"
 
 
+class WorkPattern(models.Model):
+    """勤務パターンマスタ"""
+    id = models.BigAutoField(primary_key=True)
+    pattern_code = models.CharField(max_length=20, unique=True, verbose_name='パターンコード')
+    pattern_name = models.CharField(max_length=50, verbose_name='パターン名')
+    start_time = models.TimeField(verbose_name='開始時刻')
+    work_minutes = models.IntegerField(verbose_name='勤務時間(分)')
+    break_minutes = models.IntegerField(default=0, verbose_name='休憩時間(分)')
+    description = models.TextField(null=True, blank=True, verbose_name='説明')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'm_work_pattern'
+        verbose_name = '勤務パターン'
+        verbose_name_plural = '勤務パターン'
+
+    def __str__(self):
+        return f"{self.pattern_code} - {self.pattern_name}"
+
+
 class CalendarDay(models.Model):
     """カレンダ日マスタ"""
     id = models.BigAutoField(primary_key=True)
@@ -155,6 +176,7 @@ class CalendarDay(models.Model):
     target_date = models.DateField(verbose_name='対象日')
     is_working_day = models.BooleanField(verbose_name='稼働日')
     work_minutes = models.IntegerField(null=True, blank=True, verbose_name='稼働分')
+    work_pattern = models.ForeignKey(WorkPattern, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='勤務パターン')
     note = models.CharField(max_length=100, null=True, blank=True, verbose_name='備考')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')

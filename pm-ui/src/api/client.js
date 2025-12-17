@@ -5,6 +5,7 @@ import { createProcessesAPI } from './resources/processes'
 import { createLinesAPI } from './resources/lines'
 import { createSuppliersAPI } from './resources/suppliers'
 import { createCalendarsAPI } from './resources/calendars'
+import { createWorkPatternsAPI } from './resources/workPatterns'
 import { createBomsAPI } from './resources/boms'
 import { createRoutingsAPI } from './resources/routings'
 import { createOrdersAPI } from './resources/orders'
@@ -12,6 +13,7 @@ import { createStagingAPI } from './resources/staging'
 import { createLineDemandsAPI } from './resources/lineDemands'
 import { createLineBacklogsAPI } from './resources/lineBacklogs'
 import { createLineRealtimeAPI } from './resources/lineRealtime'
+import { createProcessRealtimeAPI } from './resources/processRealtime'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8002 → localhost。
 const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
@@ -36,6 +38,7 @@ export default {
   lines: createLinesAPI(client),
   suppliers: createSuppliersAPI(client),
   calendars: createCalendarsAPI(client),
+  workPatterns: createWorkPatternsAPI(client),
   boms: bomsAPI,
   bomItems: { getBOMItems: bomsAPI.getBOMItems }, // BOMItemsに直接アクセス
   routings: createRoutingsAPI(client),
@@ -45,4 +48,5 @@ export default {
   lineDemands: createLineDemandsAPI(client),
   lineBacklogs: createLineBacklogsAPI(client),
   lineRealtime: createLineRealtimeAPI(client),
+  processRealtime: createProcessRealtimeAPI(client),
 }
