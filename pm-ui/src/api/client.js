@@ -16,18 +16,34 @@ import { createLineRealtimeAPI } from './resources/lineRealtime'
 import { createProcessRealtimeAPI } from './resources/processRealtime'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8002 → localhost。
-const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ||
-  `http://${host}:8002/api` ||
-  `http://${host}:8000/api` ||
-  'http://localhost:8002/api'
+  (typeof window !== 'undefined' ? `${window.location.origin}/api` : 'http://localhost:8002/api')
+
+// CSRFトークンをクッキーから取得する関数
+function getCookie(name) {
+  if (typeof document === 'undefined') return null
+  const value = `; ${document.cookie}`
+  const parts = value.split(`; ${name}=`)
+  if (parts.length === 2) return parts.pop().split(';').shift()
+  return null
+}
 
 const client = axios.create({
   baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true, // クッキーを送受信
+})
+
+// CSRFトークンを自動的に付与
+client.interceptors.request.use((config) => {
+  const csrfToken = getCookie('csrftoken')
+  if (csrfToken) {
+    config.headers['X-CSRFToken'] = csrfToken
+  }
+  return config
 })
 
 const bomsAPI = createBomsAPI(client)

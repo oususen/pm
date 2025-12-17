@@ -34,6 +34,21 @@ a {
   font-size: 13px;
 }
 
+.menu-toggle {
+  display: none;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-right: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sidebar-overlay {
+  display: none;
+}
+
 .app-title {
   font-weight: bold;
 }
@@ -45,7 +60,7 @@ a {
 }
 
 .app-sidebar {
-  width: 220px;
+  width: 110px;
   background: #fafafa;
   border-right: 1px solid #ccc;
   padding: 8px;
@@ -75,6 +90,55 @@ a {
 .logout-btn {
   font-size: 12px;
   padding: 2px 8px;
+}
+
+/* Mobile: hide sidebar by default (drawer) */
+@media (max-width: 768px) {
+  .app-header {
+    padding: 0 10px;
+  }
+
+  .menu-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .app-body {
+    position: relative;
+  }
+
+  .app-sidebar {
+    position: fixed;
+    top: 40px;
+    bottom: 32px;
+    left: 0;
+    width: 260px;
+    max-width: 85vw;
+    z-index: 1000;
+    transform: translateX(-100%);
+    transition: transform 0.18s ease-out;
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.18);
+  }
+
+  .app-root.sidebar-open .app-sidebar {
+    transform: translateX(0);
+  }
+
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    top: 40px;
+    bottom: 32px;
+    left: 0;
+    right: 0;
+    z-index: 900;
+    background: rgba(0, 0, 0, 0.25);
+  }
+
+  .app-main {
+    padding: 10px;
+  }
 }
 
 /* Side menu */

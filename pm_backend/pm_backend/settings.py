@@ -166,6 +166,22 @@ CORS_ALLOWED_ORIGINS = [
 
 CORS_ALLOW_CREDENTIALS = True
 
+# CSRF設定（JavaScriptからクッキーを読み取れるようにする）
+CSRF_COOKIE_HTTPONLY = False
+CSRF_COOKIE_SAMESITE = 'Lax'
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:8501",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8501",
+    "http://10.0.1.194:8501",
+    "http://192.168.0.10",
+    "http://192.168.0.9",
+    "http://192.168.0.9:8501",
+    "http://192.168.0.10:8501",
+]
+
 # REST Framework設定
 REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',

@@ -17,4 +17,18 @@ export const createWorkPatternsAPI = (client) => ({
   deleteWorkPattern(id) {
     return client.delete(`/work-patterns/${id}/`)
   },
+
+  // Break Times
+  getBreakTimes(workPatternId) {
+    return client.get(`/break-times/?work_pattern=${workPatternId}`)
+  },
+  createBreakTime(data) {
+    return client.post('/break-times/', data)
+  },
+  updateBreakTime(id, data) {
+    return client.put(`/break-times/${id}/`, data)
+  },
+  deleteBreakTime(id) {
+    return client.delete(`/break-times/${id}/`)
+  },
 })

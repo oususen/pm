@@ -56,7 +56,7 @@
             <select v-model.number="range.workPattern" @change="onPatternChange">
               <option value="">選択なし</option>
               <option v-for="p in workPatterns" :key="p.id" :value="p.id">
-                {{ p.pattern_name }} ({{ p.start_time }} / {{ formatMinutes(p.work_minutes) }})
+                {{ p.pattern_name }} ({{ p.start_time }}〜{{ p.end_time }} / {{ formatMinutes(calculateWorkMinutes(p)) }})
               </option>
             </select>
           </div>
@@ -192,6 +192,45 @@ const formatMinutes = (minutes) => {
   return `${hours}h${mins}m`
 }
 
+// 勤務パターンから稼働分を計算
+const calculateWorkMinutes = (pattern) => {
+  if (!pattern || !pattern.start_time || !pattern.end_time) return 0
+
+  // 時刻を分に変換
+  const timeToMinutes = (timeStr) => {
+    const [hours, minutes] = timeStr.split(':').map(Number)
+    return hours * 60 + minutes
+  }
+
+  const startMinutes = timeToMinutes(pattern.start_time)
+  let endMinutes = timeToMinutes(pattern.end_time)
+
+  // 終了時刻が開始時刻より早い場合は翌日とみなす（二勤対応）
+  if (endMinutes <= startMinutes) {
+    endMinutes += 24 * 60
+  }
+
+  const totalMinutes = endMinutes - startMinutes
+
+  // 休憩時間の合計を計算
+  let breakMinutes = 0
+  if (pattern.break_times && pattern.break_times.length > 0) {
+    for (const bt of pattern.break_times) {
+      const breakStart = timeToMinutes(bt.break_start)
+      let breakEnd = timeToMinutes(bt.break_end)
+
+      // 休憩終了が休憩開始より早い場合は翌日とみなす
+      if (breakEnd <= breakStart) {
+        breakEnd += 24 * 60
+      }
+
+      breakMinutes += breakEnd - breakStart
+    }
+  }
+
+  return totalMinutes - breakMinutes
+}
+
 const currentCalendarLabel = computed(() => {
   const c = calendars.value.find((x) => x.id === selectedCalendar.value)
   return c ? `${c.calendar_code} - ${c.calendar_name}` : '未選択'
@@ -231,7 +270,7 @@ const loadWorkPatterns = async () => {
 const onPatternChange = () => {
   const pattern = workPatterns.value.find((p) => p.id === range.value.workPattern)
   if (pattern) {
-    range.value.workMinutes = pattern.work_minutes - pattern.break_minutes
+    range.value.workMinutes = calculateWorkMinutes(pattern)
   }
 }
 

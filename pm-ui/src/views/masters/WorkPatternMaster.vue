@@ -28,15 +28,36 @@
             <input type="time" v-model="formData.start_time" required class="form-input" />
           </div>
           <div class="form-group">
-            <label>勤務時間（分） *</label>
-            <input type="number" v-model.number="formData.work_minutes" required min="0" class="form-input" />
-            <small class="help-text">例: 1090分 = 18時間10分（8:00〜翌2:10）</small>
-          </div>
-          <div class="form-group">
-            <label>休憩時間（分）</label>
-            <input type="number" v-model.number="formData.break_minutes" min="0" class="form-input" />
+            <label>終了時刻 *</label>
+            <input type="time" v-model="formData.end_time" required class="form-input" />
+            <small class="help-text">例: 開始08:00、終了26:10（翌日02:10）の場合は02:10と入力</small>
           </div>
         </div>
+
+        <!-- 休憩時間設定 -->
+        <div class="break-section">
+          <div class="break-header">
+            <h3>休憩時間設定</h3>
+            <button type="button" @click="addBreak" class="btn-secondary btn-sm">休憩追加</button>
+          </div>
+          <div v-if="formData.break_times.length === 0" class="no-breaks">
+            休憩時間が設定されていません
+          </div>
+          <div v-for="(breakTime, index) in formData.break_times" :key="index" class="break-item">
+            <div class="break-row">
+              <div class="form-group">
+                <label>休憩開始 *</label>
+                <input type="time" v-model="breakTime.break_start" required class="form-input" />
+              </div>
+              <div class="form-group">
+                <label>休憩終了 *</label>
+                <input type="time" v-model="breakTime.break_end" required class="form-input" />
+              </div>
+              <button type="button" @click="removeBreak(index)" class="btn-danger btn-sm">削除</button>
+            </div>
+          </div>
+        </div>
+
         <div class="form-group">
           <label>説明</label>
           <textarea v-model="formData.description" rows="3" class="form-input"></textarea>
@@ -55,7 +76,7 @@
             <th>パターンコード</th>
             <th>パターン名</th>
             <th>開始時刻</th>
-            <th>勤務時間</th>
+            <th>終了時刻</th>
             <th>休憩時間</th>
             <th>説明</th>
             <th>操作</th>
@@ -66,8 +87,8 @@
             <td>{{ pattern.pattern_code }}</td>
             <td>{{ pattern.pattern_name }}</td>
             <td>{{ pattern.start_time }}</td>
-            <td>{{ formatMinutes(pattern.work_minutes) }}</td>
-            <td>{{ formatMinutes(pattern.break_minutes) }}</td>
+            <td>{{ pattern.end_time }}</td>
+            <td>{{ formatBreakTimes(pattern.break_times) }}</td>
             <td>{{ pattern.description }}</td>
             <td>
               <button @click="editPattern(pattern)" class="btn-sm">編集</button>
@@ -95,16 +116,14 @@ const formData = ref({
   pattern_code: '',
   pattern_name: '',
   start_time: '',
-  work_minutes: 0,
-  break_minutes: 0,
-  description: ''
+  end_time: '',
+  description: '',
+  break_times: []
 })
 
-const formatMinutes = (minutes) => {
-  if (!minutes && minutes !== 0) return '-'
-  const hours = Math.floor(minutes / 60)
-  const mins = minutes % 60
-  return `${hours}時間${mins}分 (${minutes}分)`
+const formatBreakTimes = (breakTimes) => {
+  if (!breakTimes || breakTimes.length === 0) return 'なし'
+  return breakTimes.map(bt => `${bt.break_start}〜${bt.break_end}`).join(', ')
 }
 
 const fetchPatterns = async () => {
@@ -127,17 +146,36 @@ const toggleForm = () => {
       pattern_code: '',
       pattern_name: '',
       start_time: '',
-      work_minutes: 0,
-      break_minutes: 0,
-      description: ''
+      end_time: '',
+      description: '',
+      break_times: []
     }
     showForm.value = true
   }
 }
 
-const editPattern = (pattern) => {
+const addBreak = () => {
+  formData.value.break_times.push({
+    break_start: '',
+    break_end: '',
+    order: formData.value.break_times.length + 1
+  })
+}
+
+const removeBreak = (index) => {
+  formData.value.break_times.splice(index, 1)
+  // 順序を再調整
+  formData.value.break_times.forEach((bt, idx) => {
+    bt.order = idx + 1
+  })
+}
+
+const editPattern = async (pattern) => {
   isEdit.value = true
-  formData.value = { ...pattern }
+  formData.value = {
+    ...pattern,
+    break_times: pattern.break_times ? [...pattern.break_times] : []
+  }
   showForm.value = true
 }
 
@@ -148,13 +186,48 @@ const cancelEdit = () => {
 
 const savePattern = async () => {
   try {
+    let patternId
+
     if (isEdit.value) {
-      await api.workPatterns.updateWorkPattern(formData.value.id, formData.value)
-      alert('更新しました')
+      // パターン更新
+      await api.workPatterns.updateWorkPattern(formData.value.id, {
+        pattern_code: formData.value.pattern_code,
+        pattern_name: formData.value.pattern_name,
+        start_time: formData.value.start_time,
+        end_time: formData.value.end_time,
+        description: formData.value.description
+      })
+      patternId = formData.value.id
+
+      // サーバーから既存の休憩時間をすべて取得して削除
+      const existingBreaksResponse = await api.workPatterns.getBreakTimes(patternId)
+      const existingBreaks = existingBreaksResponse.data.results || existingBreaksResponse.data || []
+      for (const bt of existingBreaks) {
+        await api.workPatterns.deleteBreakTime(bt.id)
+      }
     } else {
-      await api.workPatterns.createWorkPattern(formData.value)
-      alert('作成しました')
+      // パターン作成
+      const res = await api.workPatterns.createWorkPattern({
+        pattern_code: formData.value.pattern_code,
+        pattern_name: formData.value.pattern_name,
+        start_time: formData.value.start_time,
+        end_time: formData.value.end_time,
+        description: formData.value.description
+      })
+      patternId = res.data.id
     }
+
+    // 休憩時間を作成
+    for (const bt of formData.value.break_times) {
+      await api.workPatterns.createBreakTime({
+        work_pattern: patternId,
+        break_start: bt.break_start,
+        break_end: bt.break_end,
+        order: bt.order
+      })
+    }
+
+    alert(isEdit.value ? '更新しました' : '作成しました')
     await fetchPatterns()
     showForm.value = false
     isEdit.value = false
@@ -201,12 +274,12 @@ onMounted(() => {
 .pattern-form {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.5rem;
 }
 
 .form-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 1rem;
 }
 
@@ -246,6 +319,76 @@ onMounted(() => {
   color: #64748b;
   font-size: 0.75rem;
   margin-top: 0.25rem;
+}
+
+.break-section {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 1rem;
+  background: white;
+}
+
+.break-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.break-header h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 0;
+}
+
+.no-breaks {
+  padding: 1rem;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 0.875rem;
+}
+
+.break-item {
+  margin-bottom: 0.75rem;
+  padding: 0.75rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+}
+
+.break-row {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+.break-row .form-group {
+  flex: 1;
+}
+
+.btn-sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  border-radius: 4px;
+  border: 1px solid #cbd5e1;
+  background: white;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-sm:hover {
+  background: #f8fafc;
+}
+
+.btn-danger {
+  background: #dc2626;
+  color: white;
+  border-color: #dc2626;
+}
+
+.btn-danger:hover {
+  background: #b91c1c;
 }
 
 .form-actions {
