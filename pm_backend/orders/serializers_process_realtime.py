@@ -1,8 +1,11 @@
 """
 工程実時間記録用のSerializer
 """
+from decimal import Decimal
+
 from rest_framework import serializers
-from masters.models import Process, Product
+from django.db import transaction
+from masters.models import Process, Product, BOM
 from .models_process_realtime import ProcessRealtimeRecord
 
 
@@ -91,11 +94,45 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
             product_code = product.product_code
             product_name = product.product_name
 
-        return ProcessRealtimeRecord.objects.create(
-            process=process,
-            product=product,
-            product_code=product_code,
-            product_name=product_name,
-            **validated_data
-        )
+        with transaction.atomic():
+            parent_record = ProcessRealtimeRecord.objects.create(
+                process=process,
+                product=product,
+                product_code=product_code,
+                product_name=product_name,
+                **validated_data
+            )
 
+            # 連産品（仮想セット品番）の場合、子製品にも実績を保存する
+            if (
+                validated_data.get('record_type') == 'PRODUCTION'
+                and product
+                and getattr(product, 'is_virtual_set', False)
+            ):
+                bom = BOM.objects.filter(parent_product=product, is_active=True).order_by('-valid_from').first()
+                if bom and bom.is_coproduct:
+                    parent_qty = validated_data.get('qty', Decimal('0')) or Decimal('0')
+                    child_common = {
+                        'record_type': 'PRODUCTION',
+                        'equipment_state': None,
+                        'batch_no': validated_data.get('batch_no', ''),
+                        'operator_name': validated_data.get('operator_name', ''),
+                        'remarks': validated_data.get('remarks', ''),
+                        'event_data': {
+                            'coproduct_parent_product_code': product.product_code,
+                            'coproduct_parent_record_id': parent_record.id,
+                        },
+                    }
+                    for item in bom.items.select_related('child_product').all():
+                        child_product = item.child_product
+                        child_qty = parent_qty * (item.quantity or Decimal('0'))
+                        ProcessRealtimeRecord.objects.create(
+                            process=process,
+                            product=child_product,
+                            product_code=child_product.product_code,
+                            product_name=child_product.product_name,
+                            qty=child_qty,
+                            **child_common
+                        )
+
+            return parent_record

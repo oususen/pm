@@ -14,6 +14,7 @@ import { createLineDemandsAPI } from './resources/lineDemands'
 import { createLineBacklogsAPI } from './resources/lineBacklogs'
 import { createLineRealtimeAPI } from './resources/lineRealtime'
 import { createProcessRealtimeAPI } from './resources/processRealtime'
+import { createBomServiceAPI } from './resources/bomService'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8002 → localhost。
 const API_BASE_URL =
@@ -65,4 +66,5 @@ export default {
   lineBacklogs: createLineBacklogsAPI(client),
   lineRealtime: createLineRealtimeAPI(client),
   processRealtime: createProcessRealtimeAPI(client),
+  bomService: createBomServiceAPI(client),
 }

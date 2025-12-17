@@ -375,12 +375,41 @@ const loadPlannedProducts = async () => {
       )
     }
 
+    await filterCoproductChildren()
+
     if (plannedProducts.value.length === 1 && plannedProducts.value[0].product) {
       defaultProductId.value = plannedProducts.value[0].product
     }
   } catch (error) {
     console.error('本日の計画取得エラー:', error)
   }
+}
+
+const filterCoproductChildren = async () => {
+  const candidates = plannedProducts.value || []
+  const parentSetItems = candidates.filter(
+    (it) => it.product && typeof it.product_code === 'string' && it.product_code.startsWith('STYD')
+  )
+  if (parentSetItems.length === 0) return
+
+  const parentIds = [...new Set(parentSetItems.map((it) => it.product))]
+  const childIds = new Set()
+
+  for (const parentId of parentIds) {
+    try {
+      const res = await api.bomService.getBomTree(parentId)
+      const tree = res.data
+      if (!tree || !tree.is_coproduct) continue
+      for (const ch of tree.children || []) {
+        if (ch?.product_id) childIds.add(ch.product_id)
+      }
+    } catch (error) {
+      console.error('連産品BOM取得エラー:', error)
+    }
+  }
+
+  if (childIds.size === 0) return
+  plannedProducts.value = candidates.filter((it) => !childIds.has(it.product))
 }
 
 watch(
