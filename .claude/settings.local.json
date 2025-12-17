@@ -8,7 +8,11 @@
       "Bash(git add:*)",
       "Bash(../venv/Scripts/python.exe:*)",
       "Bash(where:*)",
-      "Bash(git push)"
+      "Bash(git push)",
+      "Bash(python manage.py shell:*)",
+      "Bash(d:/pm/venv/Scripts/python.exe manage.py shell:*)",
+      "Bash(d:/pm/venv/Scripts/python.exe:*)",
+      "Bash(d:\\pm\\venv\\Scripts\\python.exe:*)"
     ],
     "deny": [],
     "ask": []

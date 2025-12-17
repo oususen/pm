@@ -26,7 +26,7 @@ from .serializers import (
 )
 from .services.csv_import import CSVImportService
 from .services.order_expansion import OrderExpansionService
-from masters.models import Routing, RoutingStep, ProcessCycleTime, Line, Calendar, CalendarDay
+from masters.models import Routing, RoutingStep, ProcessCycleTime, Line, Calendar, CalendarDay, BOM, BOMItem
 
 
 class OrderViewSet(viewsets.ModelViewSet):
@@ -602,6 +602,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     'plan_qty': plan_qty,
                     'order_qty': order_qty,
                     'demand_qty_plan': demand_qty_plan,
+                    'sequence_no': it.get('sequence_no'),
                 })
         else:
             qs = self.get_queryset().filter(line_id=line_id)
@@ -613,10 +614,80 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     'plan_qty': Decimal(str(obj.plan_qty or 0)),
                     'order_qty': Decimal(str(obj.order_qty or 0)),
                     'demand_qty_plan': Decimal(str(obj.demand_qty_plan or 0)),
+                    'sequence_no': obj.sequence_no,
                 })
 
         if not base_plans:
             return Response({'detail': '展開対象の計画が見つかりません。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 連産品（コプロダクト）用の補助マップ
+        # child_to_parent: 子製品 -> (親セットID, qty_per)
+        # parent_children: 親セット -> [(child_id, qty_per)]
+        # copro_set_qty: (親セット, 日付) -> 必要セット数（子計画から逆算した最大値）
+        # copro_driver: (親セット, 日付) -> 工数を計上する代表子ID（最優先:計画>0かつIDが小さいもの）
+        copro_child_map = {}
+        parent_children = {}
+        copro_set_qty = {}
+        copro_driver = {}
+        plan_qty_map = {}
+
+        # plan_qty_mapを先に作成（Decimal化）
+        for plan in base_plans:
+            try:
+                plan_qty_map[(plan['product_id'], plan['plan_date'])] = Decimal(str(plan['plan_qty'] or 0))
+            except Exception:
+                plan_qty_map[(plan['product_id'], plan['plan_date'])] = Decimal('0')
+
+        # is_coproduct=True のBOMから子→親の対応を構築（最新valid_from優先）
+        copro_boms = BOM.objects.filter(is_coproduct=True, is_active=True).order_by('-valid_from', '-id').prefetch_related('items')
+        for bom in copro_boms:
+            for item in bom.items.all():
+                try:
+                    qty_decimal = Decimal(item.quantity)
+                except Exception:
+                    continue
+                if qty_decimal == 0:
+                    continue
+                if item.child_product_id not in copro_child_map:
+                    copro_child_map[item.child_product_id] = {
+                        'parent_id': bom.parent_product_id,
+                        'qty_per': qty_decimal,
+                    }
+                parent_children.setdefault(bom.parent_product_id, []).append((item.child_product_id, qty_decimal))
+
+        # 親セットごとに日付別セット数と代表子を決定
+        for parent_id, children in parent_children.items():
+            # その親に紐づく日付一覧を抽出
+            dates = set()
+            for child_id, _ in children:
+                for (pid, d), qty in plan_qty_map.items():
+                    if pid == child_id and qty is not None:
+                        dates.add(d)
+            for plan_date in dates:
+                max_set = None
+                driver_id = None
+                for child_id, qty_per in children:
+                    if qty_per == 0:
+                        continue
+                    qty = plan_qty_map.get((child_id, plan_date))
+                    if qty is None:
+                        continue
+                    try:
+                        set_qty = qty / qty_per
+                    except Exception:
+                        continue
+                    if max_set is None or set_qty > max_set:
+                        max_set = set_qty
+                    if qty > 0:
+                        if driver_id is None or child_id < driver_id:
+                            driver_id = child_id
+                if max_set is not None:
+                    copro_set_qty[(parent_id, plan_date)] = max_set
+                if driver_id is None and children:
+                    # 需要が0でも最小IDを代表として扱う
+                    driver_id = min(c[0] for c in children)
+                if driver_id is not None:
+                    copro_driver[(parent_id, plan_date)] = driver_id
 
         # ラインに紐づくカレンダがあれば使用、無ければtiera_mukeを使用
         line_obj = Line.objects.filter(id=line_id).first()
@@ -697,6 +768,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         updated = 0
         skipped = []
         upserted = []
+        processed_combinations = set()  # (親製品ID, 工程ID, 日付)の重複を防ぐ
 
         for plan in base_plans:
             product_id = plan['product_id']
@@ -704,6 +776,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             plan_qty = plan['plan_qty']
             order_qty = plan['order_qty']
             demand_qty_plan = plan['demand_qty_plan']
+            sequence_no = plan.get('sequence_no')
 
             steps = steps_map.get(product_id, [])
             if not steps:
@@ -714,40 +787,75 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 target_date = shift_business_days(plan_date, step.lead_time_days or 0)
                 target_product_id = step.output_product_id or product_id
 
+                # 連産品の子製品の場合、親製品に置き換える
+                original_target_product_id = target_product_id
+                copro_info_target = copro_child_map.get(target_product_id)
+                if copro_info_target:
+                    # 子製品を親製品に置き換え
+                    target_product_id = copro_info_target['parent_id']
+
+                # 既に処理済みの(親製品, 工程, 日付)の組み合わせはスキップ
+                combination_key = (target_product_id, step.process_id, target_date)
+                if combination_key in processed_combinations:
+                    continue
+                processed_combinations.add(combination_key)
+
+                # 連産品（コプロダクト）の場合、セット数ベースで工数を計算
+                time_qty = plan_qty
+                is_copro_driver = True
+
+                if copro_info_target:
+                    copro_key = (copro_info_target['parent_id'], plan_date)
+                    set_qty = copro_set_qty.get(copro_key)
+                    if set_qty is not None:
+                        time_qty = set_qty
+                        plan_qty = set_qty
+                    driver_id = copro_driver.get(copro_key)
+                    # 代表child以外は工数0として扱い、重複計上を防ぐ
+                    is_copro_driver = driver_id in (None, original_target_product_id, product_id)
+
                 computed_time_min = None
-                ct = pick_cycle_time(target_product_id, step.process_id, target_date)
-                if not ct and step.routing_id and step.routing.product_id and step.routing.product_id != target_product_id:
+                # サイクルタイム取得は元の製品IDで行う
+                ct = pick_cycle_time(original_target_product_id, step.process_id, target_date)
+                if not ct and step.routing_id and step.routing.product_id and step.routing.product_id != original_target_product_id:
                     ct = pick_cycle_time(step.routing.product_id, step.process_id, target_date)
-                if not ct and product_id != target_product_id:
+                if not ct and product_id != original_target_product_id:
                     ct = pick_cycle_time(product_id, step.process_id, target_date)
 
                 if step.process and step.process.management_unit == 'MINUTE':
                     if ct:
                         try:
-                            total_min = (Decimal(plan_qty) * Decimal(ct.cycle_time_min or 0)) + Decimal(ct.setup_time_min or 0)
+                            total_min = (Decimal(time_qty) * Decimal(ct.cycle_time_min or 0)) + Decimal(ct.setup_time_min or 0)
                             computed_time_min = float(total_min)
                         except Exception:
                             computed_time_min = None
                     elif step.time_unit == 'MINUTE' and step.duration_min is not None:
                         # サイクルタイム未設定時はRoutingStepのduration_minを1個当たり時間として使用
                         try:
-                            total_min = Decimal(plan_qty) * Decimal(step.duration_min or 0)
+                            total_min = Decimal(time_qty) * Decimal(step.duration_min or 0)
                             computed_time_min = float(total_min)
                         except Exception:
                             computed_time_min = None
+
+                if not is_copro_driver:
+                    computed_time_min = 0
+
+                defaults_dict = {
+                    'plan_qty': int(plan_qty),
+                    'order_qty': int(order_qty),
+                    'demand_qty_plan': int(demand_qty_plan),
+                    'source_line_id': line_id,
+                    'source_routing_step_id': step.id,
+                }
+                if sequence_no is not None:
+                    defaults_dict['sequence_no'] = sequence_no
 
                 obj, is_created = LineBacklog.objects.update_or_create(
                     plan_date=target_date,
                     process_id=step.process_id,
                     product_id=target_product_id,
                     line_id=line_id,
-                    defaults={
-                        'plan_qty': int(plan_qty),
-                        'order_qty': int(order_qty),
-                        'demand_qty_plan': int(demand_qty_plan),
-                        'source_line_id': line_id,
-                        'source_routing_step_id': step.id,
-                    }
+                    defaults=defaults_dict
                 )
                 created += 1 if is_created else 0
                 updated += 0 if is_created else 1
@@ -799,6 +907,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     defaults['stock_qty'] = Decimal(str(it['stock_qty']))
                 if 'planned_stock_qty' in it:
                     defaults['planned_stock_qty'] = Decimal(str(it['planned_stock_qty']))
+                if 'sequence_no' in it:
+                    defaults['sequence_no'] = it['sequence_no']
 
                 # LineBacklogに保存
                 obj, is_created = LineBacklog.objects.update_or_create(

@@ -32,6 +32,9 @@ class LineBacklog(models.Model):
     # 計画在庫
     planned_stock_qty = models.IntegerField(default=0)
 
+    # 生産順序番号（日をまたいだ通し番号）
+    sequence_no = models.IntegerField(null=True, blank=True)
+
     source_line = models.ForeignKey(Line, on_delete=models.SET_NULL, null=True, blank=True, related_name='backlog_sources')
     source_routing_step = models.ForeignKey(RoutingStep, on_delete=models.SET_NULL, null=True, blank=True, related_name='backlog_sources')
     updated_at = models.DateTimeField(auto_now=True)

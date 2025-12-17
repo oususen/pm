@@ -157,6 +157,7 @@ class LineBacklogSerializer(serializers.ModelSerializer):
             'product', 'product_code', 'product_name',
             'line', 'line_code', 'line_name',
             'demand_qty_plan', 'order_qty', 'plan_qty', 'actual_qty', 'stock_qty', 'planned_stock_qty',
+            'sequence_no',
             'source_line', 'source_routing_step', 'updated_at',
             'computed_time_min', 'work_minutes',
         ]

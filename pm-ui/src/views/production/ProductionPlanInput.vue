@@ -56,7 +56,7 @@
             <th
               v-for="c in dateColumns"
               :key="c.key"
-              colspan="5"
+              colspan="6"
               class="date-head day-end"
               :class="c.dayClass"
             >
@@ -69,6 +69,7 @@
               <th class="mini" :class="c.dayClass">実績</th>
               <th class="mini" :class="c.dayClass">在庫</th>
               <th class="mini" :class="c.dayClass">計画</th>
+              <th class="mini" :class="c.dayClass">順序</th>
               <th class="mini day-end" :class="c.dayClass">計画在庫</th>
             </template>
           </tr>
@@ -110,13 +111,23 @@
                   @keydown.down.prevent
                 />
               </td>
+              <td class="num sequence" :class="c.dayClass">
+                <input
+                  type="text"
+                  inputmode="numeric"
+                  :value="row.daily[c.key].sequence_no === 0 || row.daily[c.key].sequence_no === '' || row.daily[c.key].sequence_no == null ? '' : row.daily[c.key].sequence_no"
+                  @input="onSequenceInput(row, c.key, $event.target.value)"
+                  @keydown.up.prevent
+                  @keydown.down.prevent
+                />
+              </td>
               <td class="num stock-plan day-end" :class="c.dayClass">
                 <span class="readonly-value">{{ row.daily[c.key].plan_stock || 0 }}</span>
               </td>
             </template>
           </tr>
           <tr v-if="!filteredRows.length">
-            <td :colspan="3 + dateColumns.length * 5" class="no-data">行を追加してください</td>
+            <td :colspan="3 + dateColumns.length * 6" class="no-data">行を追加してください</td>
           </tr>
         </tbody>
       </table>
@@ -137,8 +148,13 @@
       <div v-if="processPlans.length" class="process-panels">
         <div v-for="proc in processPlans" :key="proc.process_id" class="process-card">
           <div class="process-card__head">
-            <div class="process-card__title">{{ proc.process_name || ('工程ID: ' + proc.process_id) }}</div>
-            <div class="process-card__sub">{{ proc.line_name }}</div>
+            <div>
+              <div class="process-card__title">{{ proc.process_name || ('工程ID: ' + proc.process_id) }}</div>
+              <div class="process-card__sub">{{ proc.line_name }}</div>
+            </div>
+            <div class="setup-count">
+              段取り回数: <span class="setup-count__value">{{ proc.setupCount || 0 }}</span>回
+            </div>
           </div>
             <div class="process-card__body">
               <div class="process-table-wrap">
@@ -158,24 +174,38 @@
                       <td class="sticky-col number-col">{{ idx + 1 }}</td>
                       <td class="sticky-col code-col">{{ row.product_code }}</td>
                     <td class="sticky-col name-col">{{ row.product_name }}</td>
-                    <td v-for="c in dateColumns" :key="c.key" class="mini-cell" :class="c.dayClass">
-                      <div class="cell-line">計 {{ row.daily[c.key].plan || 0 }}</div>
-                      <div class="cell-line sub">需 {{ row.daily[c.key].order || 0 }}</div>
-                      <div class="cell-line time" v-if="row.daily[c.key].time != null">
-                        工 {{ row.daily[c.key].time }} 分
-                        <span v-if="row.daily[c.key].capacity != null" class="capacity">/ 勤 {{ row.daily[c.key].capacity }} 分</span>
+                  <td v-for="c in dateColumns" :key="c.key" class="mini-cell" :class="c.dayClass">
+                    <div class="cell-line">計 {{ row.daily[c.key].plan || 0 }}</div>
+                    <div class="cell-line sub">需 {{ row.daily[c.key].order || 0 }}</div>
+                    <div class="cell-line time" v-if="row.daily[c.key].time != null">
+                      工 {{ row.daily[c.key].time }} 分
+                      <span v-if="row.daily[c.key].capacity != null" class="capacity">/ 勤 {{ row.daily[c.key].capacity }} 分</span>
+                    </div>
+                    <div class="cell-line muted" v-else>
+                      <span v-if="row.daily[c.key].capacity != null">勤 {{ row.daily[c.key].capacity }} 分</span>
+                      <span v-else>工 情報なし</span>
+                    </div>
+                  </td>
+                </tr>
+                <tr class="total-row">
+                  <td class="sticky-col number-col">-</td>
+                  <td class="sticky-col code-col">合計</td>
+                  <td class="sticky-col name-col">合計工数</td>
+                  <td v-for="c in dateColumns" :key="c.key" class="mini-cell total" :class="c.dayClass">
+                    <template v-if="proc.totalDaily && proc.totalDaily[c.key] && proc.totalDaily[c.key].time != null">
+                      <div class="cell-line time">
+                        工 {{ proc.totalDaily[c.key].time }} 分
+                        <span v-if="proc.totalDaily[c.key].capacity != null" class="capacity">/ 勤 {{ proc.totalDaily[c.key].capacity }} 分</span>
                       </div>
-                      <div class="cell-line muted" v-else>
-                        <span v-if="row.daily[c.key].capacity != null">勤 {{ row.daily[c.key].capacity }} 分</span>
-                        <span v-else>工 情報なし</span>
-                      </div>
-                    </td>
-                  </tr>
-                    <tr v-if="!proc.rows.length">
-                      <td :colspan="3 + dateColumns.length" class="no-data">データがありません</td>
-                    </tr>
-                  </tbody>
-              </table>
+                    </template>
+                    <div v-else class="cell-line muted">-</div>
+                  </td>
+                </tr>
+                <tr v-if="!proc.rows.length">
+                  <td :colspan="3 + dateColumns.length" class="no-data">データがありません</td>
+                </tr>
+              </tbody>
+          </table>
             </div>
           </div>
         </div>
@@ -234,21 +264,21 @@ const dateColumns = computed(() => {
 
 // テーブルの最小幅を計算して、縮みすぎを防ぐ
 const tableMinWidth = computed(() => {
-  const fixedColsWidth = 60 + 187 + 100 // No(並べ替えボタン含む) + 品番 + 品名
-  const perDayWidth = 80 * 5 // 5列×80px
+  const fixedColsWidth = 60 + 187 + 100 // No + 品番 + 品名
+  const perDayWidth = 80 * 6 // 6列×80px (需要、実績、在庫、計画、順序、計画在庫)
   return fixedColsWidth + dateColumns.value.length * perDayWidth
 })
 
 const processTableMinWidth = computed(() => {
   const fixedColsWidth = 60 + 187 + 100
-  const perDayWidth = 100
+  const perDayWidth = 200 // 工程日付列を広く表示（約2倍）
   return fixedColsWidth + dateColumns.value.length * perDayWidth
 })
 
 const initDaily = () => {
   const daily = {}
   dateColumns.value.forEach((c) => {
-    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0 }
+    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, sequence_no: '' }
   })
   return daily
 }
@@ -299,6 +329,7 @@ const savePlan = async () => {
     if (!r.product_id || !r.process_id) return
     dateColumns.value.forEach((c) => {
       const daily = r.daily[c.key]
+      const seqNo = daily.sequence_no === '' || daily.sequence_no === null || daily.sequence_no === undefined ? null : Number(daily.sequence_no)
       items.push({
         product_id: r.product_id,
         process_id: r.process_id,
@@ -307,6 +338,7 @@ const savePlan = async () => {
         actual_qty: Number(daily.actual || 0),
         stock_qty: Number(daily.stock || 0),
         planned_stock_qty: Number(daily.plan_stock || 0),
+        sequence_no: seqNo,  // 日付ごとの順序番号
       })
     })
   })
@@ -350,7 +382,6 @@ const clearProcessPlans = () => {
 }
 
 const buildProcessPlans = (backlogs = []) => {
-  const productOrder = new Map(rows.value.map((r, idx) => [r.product_id, idx]))
   const grouped = new Map()
   backlogs.forEach((d) => {
     if (!d.process) return
@@ -381,18 +412,69 @@ const buildProcessPlans = (backlogs = []) => {
       row.daily[dateKey].order = Number(d.order_qty || 0)
       row.daily[dateKey].time = d.computed_time_min == null ? null : Number(d.computed_time_min)
       row.daily[dateKey].capacity = d.work_minutes == null ? null : Number(d.work_minutes)
+      row.daily[dateKey].sequence_no = d.sequence_no  // 日付ごとの順序番号を保存
     }
   })
   const procs = Array.from(grouped.values())
   procs.forEach((proc) => {
+    // 製品コード順でソート（表示用）
     proc.rows.sort((a, b) => {
-      const ao = productOrder.has(a.product_id) ? productOrder.get(a.product_id) : Number.POSITIVE_INFINITY
-      const bo = productOrder.has(b.product_id) ? productOrder.get(b.product_id) : Number.POSITIVE_INFINITY
-      if (ao === bo) {
-        return (a.product_code || '').localeCompare(b.product_code || '')
-      }
-      return ao - bo
+      return (a.product_code || '').localeCompare(b.product_code || '')
     })
+    // 合計工数（日別）を集計
+    const totals = {}
+    dateColumns.value.forEach((c) => {
+      totals[c.key] = { time: 0, capacity: null, hasTime: false }
+    })
+    proc.rows.forEach((r) => {
+      dateColumns.value.forEach((c) => {
+        const cell = r.daily[c.key]
+        if (!cell) return
+        if (cell.time != null) {
+          totals[c.key].time += Number(cell.time)
+          totals[c.key].hasTime = true
+        }
+        if (totals[c.key].capacity == null && cell.capacity != null) {
+          totals[c.key].capacity = Number(cell.capacity)
+        }
+      })
+    })
+    // hasTimeがない日はnullで非表示扱い
+    Object.keys(totals).forEach((k) => {
+      if (!totals[k].hasTime) totals[k].time = null
+      delete totals[k].hasTime
+    })
+    proc.totalDaily = totals
+
+    // 段取り回数を計算（日ごとにsequence_noでソートした順序で製品が切り替わる回数）
+    let setupCount = 0
+    let prevProductId = null
+    dateColumns.value.forEach((c) => {
+      // その日に計画がある製品を取得し、sequence_noでソート
+      const productsForDay = proc.rows
+        .map(r => ({
+          product_id: r.product_id,
+          plan: r.daily[c.key].plan,
+          sequence_no: r.daily[c.key].sequence_no
+        }))
+        .filter(p => p.plan > 0)
+        .sort((a, b) => {
+          const aSeq = a.sequence_no != null ? a.sequence_no : Number.POSITIVE_INFINITY
+          const bSeq = b.sequence_no != null ? b.sequence_no : Number.POSITIVE_INFINITY
+          if (aSeq === bSeq) {
+            return 0
+          }
+          return aSeq - bSeq
+        })
+
+      productsForDay.forEach(p => {
+        if (prevProductId !== null && prevProductId !== p.product_id) {
+          setupCount++
+        }
+        prevProductId = p.product_id
+      })
+    })
+    proc.setupCount = setupCount
   })
   processPlans.value = procs
 }
@@ -413,6 +495,10 @@ const loadData = async () => {
 
 const onPlanInput = (row, dateKey, value) => {
   row.daily[dateKey].plan = value === '' ? '' : value
+}
+
+const onSequenceInput = (row, dateKey, value) => {
+  row.daily[dateKey].sequence_no = value === '' ? '' : value
 }
 
 const fetchLines = async () => {
@@ -508,6 +594,7 @@ const doPickup = async () => {
         row.daily[dateKey].actual = Number(d.actual_qty || 0)
         row.daily[dateKey].stock = Number(d.stock_qty || 0)
         row.daily[dateKey].plan_stock = Number(d.planned_stock_qty || 0)
+        row.daily[dateKey].sequence_no = d.sequence_no === null || d.sequence_no === undefined ? '' : d.sequence_no
       }
     })
     rows.value = Array.from(grouped.values())
@@ -722,6 +809,9 @@ thead .sticky-col {
 .plan {
   background: #fffbe6;
 }
+.sequence {
+  background: #e0f2fe;
+}
 .stock-plan {
   background: #f1f7ff;
 }
@@ -803,6 +893,9 @@ thead .sticky-col {
   background: #f9fbff;
 }
 .process-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   padding: 8px 10px 0;
 }
 .process-card__title {
@@ -811,6 +904,19 @@ thead .sticky-col {
 .process-card__sub {
   color: #4b5563;
   font-size: 12px;
+}
+.setup-count {
+  font-size: 13px;
+  color: #6b7280;
+  padding: 4px 8px;
+  background: #fef3c7;
+  border-radius: 4px;
+  border: 1px solid #fbbf24;
+}
+.setup-count__value {
+  font-weight: 700;
+  color: #d97706;
+  font-size: 14px;
 }
 .process-card__body {
   padding: 8px 10px 10px;
@@ -833,10 +939,11 @@ thead .sticky-col {
 .process-table .mini-head {
   text-align: center;
   background: #eef2f7;
+  min-width: 180px;
 }
 .process-table .mini-cell {
   text-align: right;
-  min-width: 90px;
+  min-width: 180px; /* 日付列幅を約2倍に拡大 */
 }
 .process-table .cell-line {
   text-align: right;
@@ -856,6 +963,13 @@ thead .sticky-col {
 }
 .process-table .cell-line.muted {
   color: #94a3b8;
+}
+.process-table .total-row {
+  background: #fefce8;
+  font-weight: 700;
+}
+.process-table .total .cell-line {
+  font-weight: 700;
 }
 .process-empty {
   font-size: 12px;
