@@ -35,27 +35,23 @@
     <div v-if="record.record_type" class="section">
       <label :class="record.record_type === 'PRODUCTION' ? 'label-required' : ''">製品</label>
 
-      <template v-if="!manualProduct">
-        <input
-          type="text"
-          v-model="productQuery"
-          placeholder="品番/品名で検索（2文字以上）"
-          class="input-normal"
-        />
-        <div v-if="productQuery && productOptions.length" class="select-wrap">
-          <select v-model="record.product_id" class="input-large">
-            <option value="">-- 検索結果から選択 --</option>
-            <option v-for="p in productOptions" :key="p.id" :value="p.id">
-              {{ p.product_code }} - {{ p.product_name }}
-            </option>
-          </select>
-        </div>
+      <template v-if="plannedProducts.length && !manualProduct">
+        <select v-model="record.product_id" class="input-large">
+          <option value="">-- 製品を選択 --</option>
+          <option
+            v-for="p in plannedProducts"
+            :key="`${p.plan_date}-${p.product_code}`"
+            :value="p.product"
+          >
+            {{ p.product_code }} - {{ p.product_name || '' }}（計画: {{ formatNumber(p.plan_qty || 0) }}）
+          </option>
+        </select>
         <button type="button" class="btn-link" @click="toggleManualProduct">
           手入力する
         </button>
       </template>
 
-      <template v-else>
+      <template v-if="manualProduct || !plannedProducts.length">
         <input
           type="text"
           v-model="record.product_code"
@@ -65,6 +61,9 @@
         <button type="button" class="btn-link" @click="toggleManualProduct">
           検索に戻る
         </button>
+        <div v-if="!plannedProducts.length" class="hint">
+          本日の計画が未取得のため手入力になります（工程の所属ラインが未設定、または需要展開が未実行の可能性があります）。
+        </div>
       </template>
     </div>
 
@@ -196,10 +195,9 @@ const selectedProcessId = ref('')
 const recentRecords = ref([])
 const submitting = ref(false)
 
-const productQuery = ref('')
-const productOptions = ref([])
 const manualProduct = ref(false)
-let productSearchTimer = null
+const plannedProducts = ref([])
+const defaultProductId = ref(null)
 
 const record = ref({
   record_type: '',
@@ -237,6 +235,14 @@ const currentDate = computed(() => {
   })
 })
 
+const currentDateYmd = computed(() => {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+})
+
 const canSubmit = computed(() => {
   if (!selectedProcessId.value || !record.value.record_type) return false
 
@@ -263,20 +269,17 @@ const resetForm = () => {
     operator_name: '',
     remarks: '',
   }
-  productQuery.value = ''
-  productOptions.value = []
   manualProduct.value = false
 }
 
 const onProcessChange = () => {
   resetForm()
+  loadPlannedProducts()
   loadRecentRecords()
 }
 
 const toggleManualProduct = () => {
   manualProduct.value = !manualProduct.value
-  productQuery.value = ''
-  productOptions.value = []
   if (manualProduct.value) {
     record.value.product_id = ''
   } else {
@@ -333,33 +336,37 @@ const loadRecentRecords = async () => {
       limit: 10,
     })
     recentRecords.value = res.data.results || res.data || []
+
+    const lastProduction = recentRecords.value.find(r => r.record_type === 'PRODUCTION' && r.product)
+    defaultProductId.value = lastProduction ? lastProduction.product : defaultProductId.value
   } catch (error) {
     console.error('最近の記録取得エラー:', error)
   }
 }
 
-const searchProducts = async (q) => {
-  const query = (q || '').trim()
-  if (query.length < 2) {
-    productOptions.value = []
-    return
-  }
+const loadPlannedProducts = async () => {
+  if (!selectedProcessId.value) return
+
+  plannedProducts.value = []
   try {
-    const res = await api.products.getProducts({ search: query, page_size: 20 })
-    productOptions.value = res.data?.results || res.data || []
+    const process = processes.value.find(p => String(p.id) === String(selectedProcessId.value))
+    const lineId = process?.line
+    if (!lineId) return
+
+    const res = await api.lineDemands.list({
+      line: lineId,
+      plan_date: currentDateYmd.value,
+    })
+    const items = res.data.results || res.data || []
+    plannedProducts.value = Array.isArray(items) ? items : []
+
+    if (plannedProducts.value.length === 1 && plannedProducts.value[0].product) {
+      defaultProductId.value = plannedProducts.value[0].product
+    }
   } catch (error) {
-    console.error('製品検索エラー:', error)
-    productOptions.value = []
+    console.error('本日の計画取得エラー:', error)
   }
 }
-
-watch(productQuery, (q) => {
-  if (manualProduct.value) return
-  if (productSearchTimer) clearTimeout(productSearchTimer)
-  productSearchTimer = setTimeout(() => {
-    searchProducts(q)
-  }, 300)
-})
 
 watch(
   () => record.value.record_type,
@@ -370,6 +377,9 @@ watch(
       record.value.batch_no = ''
       record.value.operator_name = ''
     }
+    if (!record.value.product_id && defaultProductId.value) {
+      record.value.product_id = defaultProductId.value
+    }
   }
 )
 
@@ -379,6 +389,11 @@ const formatTime = (timestamp) => {
     hour: '2-digit',
     minute: '2-digit'
   })
+}
+
+const formatNumber = (value) => {
+  if (value === null || value === undefined) return '0'
+  return Number(value).toLocaleString()
 }
 
 const loadProcesses = async () => {
@@ -623,6 +638,12 @@ label {
   color: #4a7ae5;
 }
 
+.hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #64748b;
+}
+
 .btn-link {
   margin-top: 8px;
   padding: 0;
@@ -634,9 +655,4 @@ label {
   cursor: pointer;
   text-decoration: underline;
 }
-
-.select-wrap {
-  margin-top: 8px;
-}
 </style>
-
