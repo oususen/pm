@@ -353,12 +353,27 @@ const loadPlannedProducts = async () => {
     const lineId = process?.line
     if (!lineId) return
 
-    const res = await api.lineDemands.list({
+    // 工程に紐づく「当日の予定製品」を優先的に取得（line-backlogs は process 単位で絞れる）
+    const listRes = await api.lineBacklogs.getLineBacklogs({
       line: lineId,
+      process: selectedProcessId.value,
       plan_date: currentDateYmd.value,
     })
-    const items = res.data.results || res.data || []
-    plannedProducts.value = Array.isArray(items) ? items : []
+    const listItems = listRes.data.results || listRes.data || []
+    if (Array.isArray(listItems) && listItems.length > 0) {
+      plannedProducts.value = listItems
+    } else {
+      // まだ line-backlogs が計算されていない場合は pickup で生成（当日のみ）
+      const pickupRes = await api.lineBacklogs.pickup({
+        line_id: lineId,
+        start_date: currentDateYmd.value,
+        end_date: currentDateYmd.value,
+      })
+      const pickupItems = pickupRes.data.results || pickupRes.data || []
+      plannedProducts.value = (Array.isArray(pickupItems) ? pickupItems : []).filter(
+        (it) => String(it.process) === String(selectedProcessId.value) && String(it.plan_date) === String(currentDateYmd.value)
+      )
+    }
 
     if (plannedProducts.value.length === 1 && plannedProducts.value[0].product) {
       defaultProductId.value = plannedProducts.value[0].product
