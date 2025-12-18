@@ -138,10 +138,7 @@
 
     <div class="process-section">
       <div class="process-header">
-        <div>
-          <div class="process-title">工程展開</div>
-          <div class="process-hint">選択期間内の計画を工程別に展開して表示します。</div>
-        </div>
+        <div class="process-title">工程展開</div>
         <div class="process-actions">
           <span v-if="expanding" class="process-status">展開中...</span>
           <button class="btn" @click="clearProcessPlans" :disabled="!processPlans.length">非表示</button>
@@ -213,14 +210,12 @@
           </div>
         </div>
       </div>
-    <div v-else class="process-empty">工程展開を実行すると、工程別の計画がここに表示されます。</div>
+    <div v-else class="process-empty"></div>
 
     <div class="gantt-section" v-if="showProcessGantt">
       <div class="process-header">
-        <div>
-          <div class="process-title">工程ガント（3日・勤務時間のみ表示）</div>
-          <div class="process-hint">ライン{{ selectedLine || '' }} / 基準日 {{ startDate }}</div>
-        </div>
+        <div class="process-title">工程ガント（3日・勤務時間のみ表示）</div>
+        <div class="process-meta">ライン {{ selectedLine || '' }} ／ 基準日 {{ startDate }}</div>
       </div>
       <ProcessGanttView :embedded="true" :preset-line="selectedLine" :preset-base-date="startDate" />
     </div>
@@ -875,11 +870,11 @@ thead .sticky-col {
   cursor: not-allowed;
 }
 .process-section {
-  margin-top: 14px;
+  margin-top: 8px;
   background: #fff;
   border: 1px solid #c5cfde;
   border-radius: 6px;
-  padding: 10px;
+  padding: 8px 10px;
 }
 .process-header {
   display: flex;
@@ -891,10 +886,6 @@ thead .sticky-col {
 .process-title {
   font-weight: 700;
   font-size: 14px;
-}
-.process-hint {
-  font-size: 12px;
-  color: #64748b;
 }
 .process-actions {
   display: flex;
@@ -999,9 +990,14 @@ thead .sticky-col {
   color: #6b7280;
   padding: 4px 0;
 }
+.process-meta {
+  color: #111827;
+  font-size: 13px;
+  white-space: nowrap;
+}
 .gantt-section {
-  margin-top: 16px;
-  padding: 12px;
+  margin-top: 8px;
+  padding: 10px;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #fff;

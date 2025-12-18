@@ -62,7 +62,6 @@
             >
               <div class="gantt-row-label">
                 <div class="product-code">{{ item.product_code }}</div>
-                <div class="product-name">{{ item.product_name }}</div>
                 <div class="product-qty">計画: {{ item.plan_qty }}</div>
               </div>
               <div class="gantt-row-bars" :style="{ width: timelineWidthPx + 'px' }">
@@ -131,9 +130,9 @@ const threeDays = computed(() => {
   const tomorrow = new Date(base)
   tomorrow.setDate(tomorrow.getDate() + 1)
   return [
-    { date: yesterday.toISOString().slice(0, 10), label: '昨日' },
-    { date: base.toISOString().slice(0, 10), label: '今日' },
-    { date: tomorrow.toISOString().slice(0, 10), label: '明日' },
+    { date: yesterday.toISOString().slice(0, 10), label: formatDayLabel(yesterday) },
+    { date: base.toISOString().slice(0, 10), label: formatDayLabel(base) },
+    { date: tomorrow.toISOString().slice(0, 10), label: formatDayLabel(tomorrow) },
   ]
 })
 
@@ -227,6 +226,14 @@ function pad2(val) {
 
 function formatTime(date) {
   return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+
+function formatDayLabel(dateObj) {
+  const weekday = ['日', '月', '火', '水', '木', '金', '土']
+  const m = dateObj.getMonth() + 1
+  const d = dateObj.getDate()
+  const w = weekday[dateObj.getDay()]
+  return `${m}/${d}(${w})`
 }
 
 function addMinutes(date, min) {
@@ -615,7 +622,7 @@ onMounted(async () => {
 .gantt-wrapper {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
 }
 .gantt-scroll {
   overflow-x: auto;
@@ -624,15 +631,16 @@ onMounted(async () => {
   background: #fff;
   border: 1px solid #d1d5db;
   border-radius: 8px;
-  padding: 12px;
+  padding: 8px;
 }
 .process-gantt-head {
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 .process-info {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
 }
 .process-name {
   font-size: 16px;
@@ -646,6 +654,7 @@ onMounted(async () => {
 .gantt-chart {
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 .timeline-header {
   display: flex;
@@ -653,8 +662,8 @@ onMounted(async () => {
   margin-bottom: 4px;
 }
 .timeline-label {
-  width: 200px;
-  min-width: 200px;
+  width: 120px;
+  min-width: 120px;
   padding: 4px 8px;
   font-size: 13px;
   font-weight: 700;
@@ -663,6 +672,9 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
+  position: sticky;
+  left: 0;
+  z-index: 3;
 }
 .timeline-axis {
   display: flex;
@@ -697,27 +709,26 @@ onMounted(async () => {
 .gantt-row {
   display: flex;
   border-bottom: 1px solid #e5e7eb;
-  min-height: 56px;
+  min-height: 42px;
   position: relative;
 }
 .gantt-row-label {
-  width: 200px;
-  min-width: 200px;
-  padding: 6px 8px;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  width: 120px;
+  min-width: 120px;
+  padding: 4px 6px;
   border-right: 1px solid #d1d5db;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   background: #fafafa;
 }
 .product-code {
   font-size: 13px;
   font-weight: 700;
   color: #111827;
-}
-.product-name {
-  font-size: 11px;
-  color: #6b7280;
 }
 .product-qty {
   font-size: 11px;
@@ -726,12 +737,12 @@ onMounted(async () => {
 .gantt-row-bars {
   position: relative;
   flex: 1;
-  min-height: 46px;
+  min-height: 36px;
 }
 .gantt-bar-wrapper {
   position: absolute;
-  top: 10px;
-  height: 32px;
+  top: 6px;
+  height: 28px;
   display: flex;
   align-items: center;
 }
