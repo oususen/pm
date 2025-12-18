@@ -343,13 +343,23 @@ function buildTimeSlots() {
 
 function alignToWorkingSegments(targetTime, segments) {
   if (!segments.length || !targetTime) return null
+
+  // targetTime の日付を取得（YYYY-MM-DD形式）
+  const targetDate = targetTime.toISOString().slice(0, 10)
+
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i]
-    if (targetTime <= seg.start) {
-      return { index: i, cursor: new Date(seg.start) }
-    }
-    if (targetTime >= seg.start && targetTime < seg.end) {
-      return { index: i, cursor: new Date(targetTime) }
+
+    // セグメントが targetTime の日付と同じ、またはそれ以降の場合
+    if (seg.date >= targetDate) {
+      // targetTime がセグメント内にある場合、targetTime を使用
+      if (targetTime >= seg.start && targetTime < seg.end) {
+        return { index: i, cursor: new Date(targetTime) }
+      }
+      // targetTime がセグメント開始前の場合、セグメントの開始時刻を使用
+      if (targetTime <= seg.start) {
+        return { index: i, cursor: new Date(seg.start) }
+      }
     }
   }
   return null
@@ -523,9 +533,13 @@ function buildProcessGantt(rawData) {
       if (durationMin <= 0) return
 
       if (rec.plan_date) {
-        const desired = alignToWorkingSegments(new Date(`${rec.plan_date}T00:00:00`), segments)
-        if (desired && desired.cursor > cursorState.cursor) {
-          cursorState = desired
+        // plan_date の日付で最初のセグメントを探す（タイムゾーン問題を避けるため、seg.dateと直接比較）
+        const firstSegOfDay = segments.find(s => s.date === rec.plan_date)
+        if (firstSegOfDay) {
+          const desired = { index: segments.indexOf(firstSegOfDay), cursor: new Date(firstSegOfDay.start) }
+          if (desired.cursor > cursorState.cursor) {
+            cursorState = desired
+          }
         }
       }
 
