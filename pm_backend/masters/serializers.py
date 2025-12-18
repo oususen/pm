@@ -66,6 +66,7 @@ class CalendarDaySerializer(serializers.ModelSerializer):
 
 
 class BOMItemSerializer(serializers.ModelSerializer):
+    child_product_code = serializers.CharField(source='child_product.product_code', read_only=True)
     child_product_name = serializers.CharField(source='child_product.product_name', read_only=True)
     process_name = serializers.CharField(source='process.process_name', read_only=True)
     line_name = serializers.CharField(source='line.line_name', read_only=True)
@@ -106,6 +107,7 @@ class BOMItemSerializer(serializers.ModelSerializer):
 class BOMSerializer(serializers.ModelSerializer):
     items = BOMItemSerializer(many=True, read_only=True)
     parent_product_name = serializers.CharField(source='parent_product.product_name', read_only=True)
+    parent_product_code = serializers.CharField(source='parent_product.product_code', read_only=True)
     parent_is_final = serializers.SerializerMethodField()
     parent_is_line_final = serializers.SerializerMethodField()
 

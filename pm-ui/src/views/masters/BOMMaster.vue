@@ -27,7 +27,7 @@
         <tbody>
           <tr v-for="bom in boms" :key="bom.id">
             <td>{{ bom.id }}</td>
-            <td>{{ bom.parent_product_code || getProductCodeOnly(bom.parent_product) }}</td>
+            <td>{{ getParentProductCode(bom) }}</td>
             <td>{{ bom.parent_is_final ? '最終' : '' }}</td>
             <td>{{ bom.parent_is_line_final ? 'はい' : '' }}</td>
             <td>{{ bom.version }}</td>
@@ -287,7 +287,7 @@
           </thead>
           <tbody>
             <tr v-for="item in bomItems" :key="item.id">
-              <td>{{ getProductName(item.child_product) }}</td>
+              <td>{{ getChildProductCode(item) }}</td>
               <td>{{ formatQuantity(item.quantity) }}</td>
               <td>{{ item.loss_rate || '-' }}</td>
               <td>{{ getSourcingTypeLabel(item.sourcing_type) }}</td>
@@ -697,6 +697,24 @@ const fetchBOMTree = async (bomId) => {
 const getProductName = (productId) => {
   const product = products.value.find(p => p.id === productId)
   return product ? `${product.product_code} - ${product.product_name}` : productId
+}
+
+const getChildProductCode = (item) => {
+  if (!item) return ''
+  if (item.child_product_code) return item.child_product_code
+  if (item.child_product && typeof item.child_product === 'object') {
+    return item.child_product.product_code || item.child_product.code || ''
+  }
+  return getProductCodeOnly(item.child_product)
+}
+
+const getParentProductCode = (bom) => {
+  if (!bom) return ''
+  if (bom.parent_product_code) return bom.parent_product_code
+  if (bom.parent_product && typeof bom.parent_product === 'object') {
+    return bom.parent_product.product_code || bom.parent_product.code || ''
+  }
+  return getProductCodeOnly(bom.parent_product)
 }
 
 const getProductCodeOnly = (productId) => {
