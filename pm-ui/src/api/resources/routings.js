@@ -2,6 +2,9 @@ export const createRoutingsAPI = (client) => ({
   getRoutings() {
     return client.get('/routings/')
   },
+  getRoutingStepsByLine(lineId) {
+    return client.get(`/routing-steps/?line=${lineId}`)
+  },
   getRouting(id) {
     return client.get(`/routings/${id}/`)
   },

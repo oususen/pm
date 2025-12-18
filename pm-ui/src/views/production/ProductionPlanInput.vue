@@ -43,6 +43,9 @@
         <button class="btn accent" @click="doProcessExpand" :disabled="!selectedLine || expanding">
           工程展開
         </button>
+        <button class="btn accent" @click="goProcessGantt" :disabled="!selectedLine">
+          工程ガント表示
+        </button>
       </div>
     </div>
 
@@ -225,6 +228,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '@/api/client'
 
 const mode = ref('plan')
@@ -238,6 +242,7 @@ const products = ref([])
 const rows = ref([])
 const processPlans = ref([])
 const expanding = ref(false)
+const router = useRouter()
 let tempId = 1
 
 const endDate = computed(() => {
@@ -560,6 +565,17 @@ const doProcessExpand = async () => {
   } finally {
     expanding.value = false
   }
+}
+
+const goProcessGantt = () => {
+  if (!selectedLine.value) {
+    alert('ラインを選択してください。')
+    return
+  }
+  router.push({
+    name: 'ProcessGanttView',
+    query: { line: selectedLine.value, base: startDate.value },
+  })
 }
 
 const doPickup = async () => {

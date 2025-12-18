@@ -87,6 +87,11 @@ const production = [
     name: "MobileProcessInput",
     component: () => import("@/views/production/MobileProcessInput.vue"),
   },
+  {
+    path: "/production/process-gantt",
+    name: "ProcessGanttView",
+    component: () => import("@/views/production/ProcessGanttView.vue"),
+  },
 ];
 
 export default production;
