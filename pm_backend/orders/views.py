@@ -545,7 +545,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
     def expand_processes(self, request):
         """
         指定ラインの計画数量を工程レベルに展開する。
-        期待payload: { line_id, start_date, end_date, items?: [{product_id, plan_date, plan_qty?, order_qty?, demand_qty_plan?}] }
+        期待payload: { line_id, start_date, end_date, items?: [{product_id, plan_date, plan_qty?, order_qty?, demand_qty_plan?}], read_only?: bool }
+        read_only=True の場合、LineBacklogに保存せず計算結果のみを返す
+        read_only=False の場合、計算結果をLineBacklogに保存（plan_qtyを計算値で更新）
         """
         from collections import defaultdict
         from masters.models import RoutingStep, Calendar, CalendarDay
@@ -554,6 +556,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         start_date = request.data.get('start_date')
         end_date = request.data.get('end_date')
         items = request.data.get('items', [])
+        read_only = request.data.get('read_only', False)  # デフォルトはFalse（保存する）
 
         if not line_id:
             return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -607,6 +610,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         else:
             qs = self.get_queryset().filter(line_id=line_id)
             qs = qs.filter(plan_date__gte=start_date, plan_date__lte=end_date)
+            # 最終製品（is_line_final_product=True）で plan_qty > 0 のレコードのみを対象とする
+            qs = qs.filter(plan_qty__gt=0, product__is_line_final_product=True)
             for obj in qs:
                 base_plans.append({
                     'product_id': obj.product_id,
@@ -840,37 +845,61 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if not is_copro_driver:
                     computed_time_min = 0
 
-                # 既存のレコードがあるか確認し、plan_qtyが手動入力されている場合は保持
-                existing = LineBacklog.objects.filter(
-                    plan_date=target_date,
-                    process_id=step.process_id,
-                    product_id=target_product_id,
-                    line_id=line_id,
-                ).first()
+                # read_only=True の場合はDBに保存せず、計算結果のみを作成
+                if read_only:
+                    # 既存レコードを取得（あれば）、なければ新規作成（メモリ上のみ）
+                    obj = LineBacklog.objects.filter(
+                        plan_date=target_date,
+                        process_id=step.process_id,
+                        product_id=target_product_id,
+                        line_id=line_id,
+                    ).first()
 
-                defaults_dict = {
-                    'order_qty': int(order_qty),
-                    'demand_qty_plan': int(demand_qty_plan),
-                    'source_line_id': line_id,
-                    'source_routing_step_id': step.id,
-                }
+                    if not obj:
+                        obj = LineBacklog(
+                            plan_date=target_date,
+                            process_id=step.process_id,
+                            product_id=target_product_id,
+                            line_id=line_id,
+                            plan_qty=int(plan_qty),
+                            order_qty=int(order_qty),
+                            demand_qty_plan=int(demand_qty_plan),
+                            source_line_id=line_id,
+                            source_routing_step_id=step.id,
+                            sequence_no=sequence_no if sequence_no is not None else None,
+                        )
+                else:
+                    # read_only=False の場合はDBに保存
+                    # 既存のレコードがあるか確認し、plan_qtyが手動入力されている場合は保持
+                    existing = LineBacklog.objects.filter(
+                        plan_date=target_date,
+                        process_id=step.process_id,
+                        product_id=target_product_id,
+                        line_id=line_id,
+                    ).first()
 
-                # 既存レコードがない場合、または既存のplan_qtyが0の場合のみplan_qtyを更新
-                if not existing or existing.plan_qty == 0:
+                    defaults_dict = {
+                        'order_qty': int(order_qty),
+                        'demand_qty_plan': int(demand_qty_plan),
+                        'source_line_id': line_id,
+                        'source_routing_step_id': step.id,
+                    }
+                    # 工程ガント表示時は計算値でplan_qtyを更新
                     defaults_dict['plan_qty'] = int(plan_qty)
 
-                if sequence_no is not None:
-                    defaults_dict['sequence_no'] = sequence_no
+                    if sequence_no is not None:
+                        defaults_dict['sequence_no'] = sequence_no
 
-                obj, is_created = LineBacklog.objects.update_or_create(
-                    plan_date=target_date,
-                    process_id=step.process_id,
-                    product_id=target_product_id,
-                    line_id=line_id,
-                    defaults=defaults_dict
-                )
-                created += 1 if is_created else 0
-                updated += 0 if is_created else 1
+                    obj, is_created = LineBacklog.objects.update_or_create(
+                        plan_date=target_date,
+                        process_id=step.process_id,
+                        product_id=target_product_id,
+                        line_id=line_id,
+                        defaults=defaults_dict
+                    )
+                    created += 1 if is_created else 0
+                    updated += 0 if is_created else 1
+
                 obj.computed_time_min = computed_time_min
                 obj.work_minutes = calendar_work_map.get(target_date)
                 upserted.append(obj)

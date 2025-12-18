@@ -188,6 +188,7 @@ const loadData = async () => {
         line_id: selectedLine.value,
         start_date: yesterday,
         end_date: tomorrow,
+        read_only: false,  // 計算結果をDBに保存（工程別の計画数を自動計算）
       }),
     ])
 
