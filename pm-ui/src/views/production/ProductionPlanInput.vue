@@ -96,19 +96,19 @@
             </td>
             <template v-for="c in dateColumns" :key="c.key">
               <td class="num" :class="c.dayClass">
-                <span class="readonly-value">{{ row.daily[c.key].demand || 0 }}</span>
+                <span class="readonly-value">{{ (row.daily?.[c.key]?.demand) || 0 }}</span>
               </td>
               <td class="num" :class="c.dayClass">
-                <span class="readonly-value">{{ row.daily[c.key].actual || 0 }}</span>
+                <span class="readonly-value">{{ (row.daily?.[c.key]?.actual) || 0 }}</span>
               </td>
               <td class="num stock" :class="c.dayClass">
-                <span class="readonly-value">{{ row.daily[c.key].stock || 0 }}</span>
+                <span class="readonly-value">{{ (row.daily?.[c.key]?.stock) || 0 }}</span>
               </td>
               <td class="num plan" :class="c.dayClass">
                 <input
                   type="text"
                   inputmode="decimal"
-                  :value="row.daily[c.key].plan === 0 || row.daily[c.key].plan === '' || row.daily[c.key].plan == null ? '' : row.daily[c.key].plan"
+                  :value="row.daily?.[c.key]?.plan === 0 || row.daily?.[c.key]?.plan === '' || row.daily?.[c.key]?.plan == null ? '' : row.daily?.[c.key]?.plan"
                   @input="onPlanInput(row, c.key, $event.target.value)"
                   @keydown.up.prevent
                   @keydown.down.prevent
@@ -118,14 +118,14 @@
                 <input
                   type="text"
                   inputmode="numeric"
-                  :value="row.daily[c.key].sequence_no === 0 || row.daily[c.key].sequence_no === '' || row.daily[c.key].sequence_no == null ? '' : row.daily[c.key].sequence_no"
+                  :value="row.daily?.[c.key]?.sequence_no === 0 || row.daily?.[c.key]?.sequence_no === '' || row.daily?.[c.key]?.sequence_no == null ? '' : row.daily?.[c.key]?.sequence_no"
                   @input="onSequenceInput(row, c.key, $event.target.value)"
                   @keydown.up.prevent
                   @keydown.down.prevent
                 />
               </td>
               <td class="num stock-plan day-end" :class="c.dayClass">
-                <span class="readonly-value">{{ row.daily[c.key].plan_stock || 0 }}</span>
+                <span class="readonly-value">{{ (row.daily?.[c.key]?.plan_stock) || 0 }}</span>
               </td>
             </template>
           </tr>
@@ -217,7 +217,12 @@
         <div class="process-title">工程ガント（3日・勤務時間のみ表示）</div>
         <div class="process-meta">ライン {{ selectedLine || '' }} ／ 基準日 {{ startDate }}</div>
       </div>
-      <ProcessGanttView :embedded="true" :preset-line="selectedLine" :preset-base-date="startDate" />
+      <ProcessGanttView
+        :key="ganttReloadKey"
+        :embedded="true"
+        :preset-line="selectedLine"
+        :preset-base-date="startDate"
+      />
     </div>
     </div>
 
@@ -248,6 +253,7 @@ const rows = ref([])
 const processPlans = ref([])
 const expanding = ref(false)
 const showProcessGantt = ref(false)
+const ganttReloadKey = ref(0)
 let tempId = 1
 
 const endDate = computed(() => {
@@ -301,6 +307,14 @@ const initProcessDaily = () => {
   return daily
 }
 
+const ensureDailyCell = (row, dateKey) => {
+  if (!row.daily) row.daily = initDaily()
+  if (!row.daily[dateKey]) {
+    row.daily[dateKey] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, sequence_no: '' }
+  }
+  return row.daily[dateKey]
+}
+
 const addRow = () => {
   rows.value.push({
     id: `tmp-${tempId++}`,
@@ -335,25 +349,39 @@ const savePlan = async () => {
     return
   }
   const items = []
+  console.log('保存対象の行数:', rows.value.length)
   rows.value.forEach((r) => {
-    if (!r.product_id || !r.process_id) return
+    console.log('保存チェック:', { product_id: r.product_id, process_id: r.process_id, product_code: r.product_code })
+    if (!r.product_id || !r.process_id) {
+      console.warn('スキップ: product_idまたはprocess_idがありません', r)
+      return
+    }
     dateColumns.value.forEach((c) => {
-      const daily = r.daily[c.key]
+      const daily = ensureDailyCell(r, c.key)
+      const planQty = daily.plan === '' || daily.plan === null || daily.plan === undefined ? null : Number(daily.plan)
       const seqNo = daily.sequence_no === '' || daily.sequence_no === null || daily.sequence_no === undefined ? null : Number(daily.sequence_no)
-      items.push({
-        product_id: r.product_id,
-        process_id: r.process_id,
-        plan_date: c.key,
-        plan_qty: daily.plan === '' || daily.plan === null || daily.plan === undefined ? 0 : Number(daily.plan),
-        actual_qty: Number(daily.actual || 0),
-        stock_qty: Number(daily.stock || 0),
-        planned_stock_qty: Number(daily.plan_stock || 0),
-        sequence_no: seqNo,  // 日付ごとの順序番号
-      })
+
+      // 計画数または順序番号に値がある場合のみ保存
+      if (planQty !== null || seqNo !== null) {
+        items.push({
+          product_id: r.product_id,
+          process_id: r.process_id,
+          plan_date: c.key,
+          plan_qty: planQty === null ? 0 : planQty,
+          actual_qty: Number(daily.actual || 0),
+          stock_qty: Number(daily.stock || 0),
+          planned_stock_qty: Number(daily.plan_stock || 0),
+          sequence_no: seqNo,  // 日付ごとの順序番号
+        })
+      }
     })
   })
+  console.log('保存アイテム数:', items.length)
+  if (items.length > 0) {
+    console.log('サンプルアイテム:', items[0])
+  }
   if (!items.length) {
-    alert('保存するデータがありません。')
+    alert('保存するデータがありません。product_idとprocess_idを確認してください。')
     return
   }
   try {
@@ -362,7 +390,14 @@ const savePlan = async () => {
       items,
     })
     console.info('保存結果', res.data)
-    alert('保存しました。')
+    alert(`保存しました。\n作成: ${res.data.created}件, 更新: ${res.data.updated}件`)
+    // 保存後にデータを再取り込みして最新状態を表示
+    await doPickup()
+    // 保存後に自動で工程展開・ガントを再計算
+    await runProcessExpand({ silent: true })
+    if (showProcessGantt.value) {
+      ganttReloadKey.value += 1
+    }
   } catch (e) {
     console.error('保存エラー', e)
     alert('保存に失敗しました。')
@@ -504,11 +539,13 @@ const loadData = async () => {
 }
 
 const onPlanInput = (row, dateKey, value) => {
-  row.daily[dateKey].plan = value === '' ? '' : value
+  const daily = ensureDailyCell(row, dateKey)
+  daily.plan = value === '' ? '' : value
 }
 
 const onSequenceInput = (row, dateKey, value) => {
-  row.daily[dateKey].sequence_no = value === '' ? '' : value
+  const daily = ensureDailyCell(row, dateKey)
+  daily.sequence_no = value === '' ? '' : value
 }
 
 const fetchLines = async () => {
@@ -530,9 +567,9 @@ onMounted(async () => {
   }
 })
 
-const doProcessExpand = async () => {
+const runProcessExpand = async ({ silent = false } = {}) => {
   if (!selectedLine.value) {
-    alert('ラインを選択してください。')
+    if (!silent) alert('ラインを選択してください。')
     return
   }
   expanding.value = true
@@ -541,7 +578,7 @@ const doProcessExpand = async () => {
     rows.value.forEach((r) => {
       if (!r.product_id) return
       dateColumns.value.forEach((c) => {
-        const daily = r.daily[c.key]
+        const daily = ensureDailyCell(r, c.key)
         if (daily.plan === '' || daily.plan === null || daily.plan === undefined) return
         const planQty = Number(daily.plan || 0)
         payloadItems.push({
@@ -563,13 +600,20 @@ const doProcessExpand = async () => {
     })
     const payload = Array.isArray(res.data) ? res.data : res.data?.items || []
     buildProcessPlans(payload)
-    alert('工程展開が完了しました。')
+    if (showProcessGantt.value) {
+      ganttReloadKey.value += 1
+    }
+    if (!silent) alert('工程展開が完了しました。')
   } catch (e) {
     console.error('工程展開エラー', e)
-    alert('工程展開に失敗しました。')
+    if (!silent) alert('工程展開に失敗しました。')
   } finally {
     expanding.value = false
   }
+}
+
+const doProcessExpand = async () => {
+  await runProcessExpand({ silent: false })
 }
 
 const toggleProcessGantt = async () => {
@@ -578,6 +622,9 @@ const toggleProcessGantt = async () => {
     return
   }
   showProcessGantt.value = !showProcessGantt.value
+  if (showProcessGantt.value) {
+    ganttReloadKey.value += 1
+  }
 }
 
 const doPickup = async () => {
@@ -605,15 +652,13 @@ const doPickup = async () => {
       }
       const row = grouped.get(key)
       const dateKey = d.plan_date
-      if (row.daily[dateKey]) {
-        row.daily[dateKey].demand = Number(d.order_qty || 0)  // 需要=order_qty（取り込み時に計算された受注数/発注数）
-        row.daily[dateKey].plan =
-          d.plan_qty === null || d.plan_qty === undefined ? '' : d.plan_qty === 0 ? '' : d.plan_qty
-        row.daily[dateKey].actual = Number(d.actual_qty || 0)
-        row.daily[dateKey].stock = Number(d.stock_qty || 0)
-        row.daily[dateKey].plan_stock = Number(d.planned_stock_qty || 0)
-        row.daily[dateKey].sequence_no = d.sequence_no === null || d.sequence_no === undefined ? '' : d.sequence_no
-      }
+      const daily = ensureDailyCell(row, dateKey)
+      daily.demand = Number(d.order_qty || 0)  // 需要=order_qty（取り込み時に計算された受注数/発注数）
+      daily.plan = d.plan_qty === null || d.plan_qty === undefined ? '' : d.plan_qty === 0 ? '' : d.plan_qty
+      daily.actual = Number(d.actual_qty || 0)
+      daily.stock = Number(d.stock_qty || 0)
+      daily.plan_stock = Number(d.planned_stock_qty || 0)
+      daily.sequence_no = d.sequence_no === null || d.sequence_no === undefined ? '' : d.sequence_no
     })
     rows.value = Array.from(grouped.values())
     processPlans.value = []

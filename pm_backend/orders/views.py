@@ -840,13 +840,25 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if not is_copro_driver:
                     computed_time_min = 0
 
+                # 既存のレコードがあるか確認し、plan_qtyが手動入力されている場合は保持
+                existing = LineBacklog.objects.filter(
+                    plan_date=target_date,
+                    process_id=step.process_id,
+                    product_id=target_product_id,
+                    line_id=line_id,
+                ).first()
+
                 defaults_dict = {
-                    'plan_qty': int(plan_qty),
                     'order_qty': int(order_qty),
                     'demand_qty_plan': int(demand_qty_plan),
                     'source_line_id': line_id,
                     'source_routing_step_id': step.id,
                 }
+
+                # 既存レコードがない場合、または既存のplan_qtyが0の場合のみplan_qtyを更新
+                if not existing or existing.plan_qty == 0:
+                    defaults_dict['plan_qty'] = int(plan_qty)
+
                 if sequence_no is not None:
                     defaults_dict['sequence_no'] = sequence_no
 
