@@ -43,8 +43,8 @@
         <button class="btn accent" @click="doProcessExpand" :disabled="!selectedLine || expanding">
           工程展開
         </button>
-        <button class="btn accent" @click="goProcessGantt" :disabled="!selectedLine">
-          工程ガント表示
+        <button class="btn accent" @click="toggleProcessGantt" :disabled="!selectedLine">
+          {{ showProcessGantt ? '工程ガントを閉じる' : '工程ガント表示' }}
         </button>
       </div>
     </div>
@@ -213,7 +213,17 @@
           </div>
         </div>
       </div>
-      <div v-else class="process-empty">工程展開を実行すると、工程別の計画がここに表示されます。</div>
+    <div v-else class="process-empty">工程展開を実行すると、工程別の計画がここに表示されます。</div>
+
+    <div class="gantt-section" v-if="showProcessGantt">
+      <div class="process-header">
+        <div>
+          <div class="process-title">工程ガント（3日・勤務時間のみ表示）</div>
+          <div class="process-hint">ライン{{ selectedLine || '' }} / 基準日 {{ startDate }}</div>
+        </div>
+      </div>
+      <ProcessGanttView :embedded="true" :preset-line="selectedLine" :preset-base-date="startDate" />
+    </div>
     </div>
 
     <div class="footer-actions">
@@ -228,8 +238,8 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import api from '@/api/client'
+import ProcessGanttView from './ProcessGanttView.vue'
 
 const mode = ref('plan')
 const selectedLine = ref('')
@@ -242,7 +252,7 @@ const products = ref([])
 const rows = ref([])
 const processPlans = ref([])
 const expanding = ref(false)
-const router = useRouter()
+const showProcessGantt = ref(false)
 let tempId = 1
 
 const endDate = computed(() => {
@@ -567,15 +577,12 @@ const doProcessExpand = async () => {
   }
 }
 
-const goProcessGantt = () => {
+const toggleProcessGantt = async () => {
   if (!selectedLine.value) {
     alert('ラインを選択してください。')
     return
   }
-  router.push({
-    name: 'ProcessGanttView',
-    query: { line: selectedLine.value, base: startDate.value },
-  })
+  showProcessGantt.value = !showProcessGantt.value
 }
 
 const doPickup = async () => {
@@ -991,5 +998,12 @@ thead .sticky-col {
   font-size: 12px;
   color: #6b7280;
   padding: 4px 0;
+}
+.gantt-section {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
 }
 </style>

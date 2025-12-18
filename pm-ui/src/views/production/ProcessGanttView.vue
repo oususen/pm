@@ -1,6 +1,6 @@
 <template>
-  <div class="gantt-container">
-    <div class="toolbar">
+  <div class="gantt-container" :data-embedded="props.embedded">
+    <div class="toolbar" v-if="!props.embedded">
       <div class="toolbar-left">
         <div class="field">
           <label>ライン</label>
@@ -101,9 +101,15 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch, defineProps } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api/client'
+
+const props = defineProps({
+  embedded: { type: Boolean, default: false },
+  presetLine: { type: [String, Number], default: '' },
+  presetBaseDate: { type: String, default: '' },
+})
 
 const route = useRoute()
 const selectedLine = ref('')
@@ -492,9 +498,34 @@ function getBarColor(productId) {
   return colors[hash]
 }
 
+watch(
+  () => props.presetBaseDate,
+  (val) => {
+    if (val) baseDate.value = String(val)
+  },
+  { immediate: true }
+)
+
+watch(
+  () => props.presetLine,
+  async (val) => {
+    selectedLine.value = val ? String(val) : ''
+    if (selectedLine.value && props.embedded) {
+      await loadData()
+    }
+  },
+  { immediate: true }
+)
+
 onMounted(async () => {
   try {
     await Promise.all([fetchLines(), fetchWorkPatterns()])
+    if (props.embedded) {
+      if (selectedLine.value) {
+        await loadData()
+      }
+      return
+    }
     const qLine = route.query.line
     const qBase = route.query.base || route.query.base_date
     if (qBase) {
@@ -516,6 +547,11 @@ onMounted(async () => {
   background: #f3f4f6;
   min-height: 100vh;
   font-family: 'Noto Sans JP', sans-serif;
+}
+[data-embedded='true'] {
+  padding: 0;
+  background: transparent;
+  min-height: auto;
 }
 .toolbar {
   display: flex;
