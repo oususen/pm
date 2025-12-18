@@ -121,6 +121,7 @@ const processStepOrders = ref({})
 
 const slotWidth = 60 // 1時間あたりのピクセル幅
 const minuteWidth = computed(() => slotWidth / 60)
+const BUFFER_FACTOR = 3 // バッファ台数（将来設定する場合ここをパラメータ化）
 
 // 3日間（昨日、今日、明日）
 const threeDays = computed(() => {
@@ -377,13 +378,56 @@ function advanceCursor(state, minutes, segments) {
   return idx < segments.length ? { index: idx, cursor } : null
 }
 
+function findSegmentIndexByTime(segments, targetTime) {
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]
+    if (targetTime >= seg.start && targetTime < seg.end) return i
+  }
+  return -1
+}
+
+function timeToOffsetMinutes(segments, time) {
+  const idx = findSegmentIndexByTime(segments, time)
+  if (idx < 0) return 0
+  const seg = segments[idx]
+  return seg.offsetMin + (time.getTime() - seg.start.getTime()) / (60 * 1000)
+}
+
+function rewindTime(segments, anchorTime, offsetMin) {
+  if (!segments.length || !anchorTime) return anchorTime
+  let remaining = offsetMin
+  let idx = findSegmentIndexByTime(segments, anchorTime)
+  let cursor = anchorTime
+  if (idx < 0) {
+    if (anchorTime < segments[0].start) return segments[0].start
+    idx = segments.length - 1
+    cursor = new Date(segments[idx].end)
+  }
+  while (remaining > 0 && idx >= 0) {
+    const seg = segments[idx]
+    const available = (cursor.getTime() - seg.start.getTime()) / (60 * 1000)
+    if (available >= remaining) {
+      return new Date(cursor.getTime() - remaining * 60 * 1000)
+    }
+    remaining -= available
+    idx -= 1
+    if (idx >= 0) {
+      cursor = new Date(segments[idx].end)
+    }
+  }
+  return segments[0].start
+}
+
 function pickDurationMinutes(rec) {
+  // ルーティングで計算されたcomputed_time_minを最優先で使用し、
+  // cycle_time_min（m_process_cycle_time）は参照しない。
   if (rec.computed_time_min != null) return Number(rec.computed_time_min)
-  const cycle = Number(rec.cycle_time_min || 0)
-  const setup = Number(rec.setup_time_min || 0)
   const qty = Number(rec.plan_qty || 0)
-  if (cycle <= 0 || qty <= 0) return 0
-  return qty * cycle + setup
+  const durationPer = rec.duration_min != null ? Number(rec.duration_min) : 0
+  if (durationPer > 0 && qty > 0) {
+    return qty * durationPer
+  }
+  return 0
 }
 
 function recordSorter(a, b) {
@@ -413,6 +457,7 @@ function buildProcessGantt(rawData) {
   if (!segments.length) return []
 
   const processMap = new Map()
+  const productProcessMeta = new Map() // key: `${productId}_${processId}` -> { cycleMin, stepNo }
   rawData.forEach((d) => {
     if (!d.process) return
     if (!processMap.has(d.process)) {
@@ -448,6 +493,15 @@ function buildProcessGantt(rawData) {
       item.sequence_no = seq
     }
     item.records.push(d)
+
+    const cycle = Number(d.cycle_time_min || 0)
+    const metaKey = `${d.product}_${d.process}`
+    if (!productProcessMeta.has(metaKey)) {
+      productProcessMeta.set(metaKey, {
+        cycleMin: cycle > 0 ? cycle : null,
+        stepNo: d.step_no || processStepOrders.value[d.process] || 0,
+      })
+    }
   })
 
   processMap.forEach((proc) => {
@@ -478,6 +532,8 @@ function buildProcessGantt(rawData) {
       const startOffsetMin =
         seg.offsetMin + (cursorState.cursor.getTime() - seg.start.getTime()) / (60 * 1000)
 
+      const startTime = new Date(cursorState.cursor)
+
       const bar = {
         key: `${rec.product}_${rec.plan_date || 'na'}_${rec.process}`,
         leftPx: startOffsetMin * minuteWidth.value,
@@ -485,11 +541,65 @@ function buildProcessGantt(rawData) {
         color: getBarColor(rec.product),
         label: formatTimeRange(cursorState.cursor, durationMin),
         planQty: Number(rec.plan_qty || 0),
+        startTime,
+        durationMin,
       }
 
       rec.productRef.bars.push(bar)
       cursorState = advanceCursor(cursorState, durationMin, segments)
     })
+  })
+
+  // 後工程の開始からバッファ分（cycle×BUFFER_FACTOR）前倒しで前工程を配置（同一製品内）
+  const processList = Array.from(processMap.values()).sort((a, b) => {
+    const stepDiff = (b.step_no || 0) - (a.step_no || 0)
+    if (stepDiff !== 0) return stepDiff
+    return (b.process_id || 0) - (a.process_id || 0)
+  })
+
+  const productChains = new Map() // product_id -> [{procRef, item, meta}]
+  processList.forEach((proc) => {
+    proc.items.forEach((item) => {
+      const key = item.product_id
+      if (!productChains.has(key)) productChains.set(key, [])
+      productChains.get(key).push({
+        proc,
+        item,
+        meta: productProcessMeta.get(`${item.product_id}_${proc.process_id}`) || { stepNo: proc.step_no || 0, cycleMin: null },
+      })
+    })
+  })
+
+  const calcCycleMin = (meta, bars) => {
+    if (meta && meta.cycleMin && meta.cycleMin > 0) return meta.cycleMin
+    if (bars && bars.length && bars[0].planQty) {
+      return Math.max(1, bars[0].durationMin / bars[0].planQty)
+    }
+    return 0
+  }
+
+  productChains.forEach((chain) => {
+    chain.sort((a, b) => (b.meta.stepNo || 0) - (a.meta.stepNo || 0)) // 後→前
+    for (let i = 0; i < chain.length - 1; i++) {
+      const later = chain[i]
+      const earlier = chain[i + 1]
+      if (!later.item.bars.length || !earlier.item.bars.length) continue
+
+      const laterStart = later.item.bars[0].startTime
+      const cycleMin = calcCycleMin(earlier.meta, earlier.item.bars)
+      if (!cycleMin || !laterStart) continue
+
+      const offsetMin = cycleMin * BUFFER_FACTOR
+      const desiredStart = rewindTime(segments, laterStart, offsetMin)
+
+      earlier.item.bars.forEach((bar) => {
+        const newStart = desiredStart < bar.startTime ? desiredStart : bar.startTime
+        const offsetMinVal = timeToOffsetMinutes(segments, newStart)
+        bar.leftPx = offsetMinVal * minuteWidth.value
+        bar.startTime = newStart
+        bar.label = formatTimeRange(newStart, bar.durationMin)
+      })
+    }
   })
 
   return Array.from(processMap.values()).sort((a, b) => {

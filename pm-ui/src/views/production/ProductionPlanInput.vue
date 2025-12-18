@@ -40,9 +40,6 @@
         <button class="btn" @click="resetRows" :disabled="!rows.length">クリア</button>
         <button class="btn" @click="savePlan" :disabled="!rows.length || !selectedLine">保存</button>
         <button class="btn primary" @click="doPickup" :disabled="!selectedLine">取り込み</button>
-        <button class="btn accent" @click="doProcessExpand" :disabled="!selectedLine || expanding">
-          工程展開
-        </button>
         <button class="btn accent" @click="toggleProcessGantt" :disabled="!selectedLine">
           {{ showProcessGantt ? '工程ガントを閉じる' : '工程ガント表示' }}
         </button>
@@ -136,82 +133,6 @@
       </table>
     </div>
 
-    <div class="process-section">
-      <div class="process-header">
-        <div class="process-title">工程展開</div>
-        <div class="process-actions">
-          <span v-if="expanding" class="process-status">展開中...</span>
-          <button class="btn" @click="clearProcessPlans" :disabled="!processPlans.length">非表示</button>
-        </div>
-      </div>
-
-      <div v-if="processPlans.length" class="process-panels">
-        <div v-for="proc in processPlans" :key="proc.process_id" class="process-card">
-          <div class="process-card__head">
-            <div>
-              <div class="process-card__title">{{ proc.process_name || ('工程ID: ' + proc.process_id) }}</div>
-              <div class="process-card__sub">{{ proc.line_name }}</div>
-            </div>
-            <div class="setup-count">
-              段取り回数: <span class="setup-count__value">{{ proc.setupCount || 0 }}</span>回
-            </div>
-          </div>
-            <div class="process-card__body">
-              <div class="process-table-wrap">
-                <table class="process-table" :style="{ minWidth: processTableMinWidth + 'px' }">
-                  <thead>
-                    <tr>
-                      <th class="sticky-col number-col">No</th>
-                      <th class="sticky-col code-col">品番</th>
-                      <th class="sticky-col name-col">品名</th>
-                      <th v-for="c in dateColumns" :key="c.key" class="mini-head" :class="c.dayClass">
-                        {{ c.label }}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="(row, idx) in proc.rows" :key="row.product_id">
-                      <td class="sticky-col number-col">{{ idx + 1 }}</td>
-                      <td class="sticky-col code-col">{{ row.product_code }}</td>
-                    <td class="sticky-col name-col">{{ row.product_name }}</td>
-                  <td v-for="c in dateColumns" :key="c.key" class="mini-cell" :class="c.dayClass">
-                    <div class="cell-line">計 {{ row.daily[c.key].plan || 0 }}</div>
-                    <div class="cell-line sub">需 {{ row.daily[c.key].order || 0 }}</div>
-                    <div class="cell-line time" v-if="row.daily[c.key].time != null">
-                      工 {{ row.daily[c.key].time }} 分
-                      <span v-if="row.daily[c.key].capacity != null" class="capacity">/ 勤 {{ row.daily[c.key].capacity }} 分</span>
-                    </div>
-                    <div class="cell-line muted" v-else>
-                      <span v-if="row.daily[c.key].capacity != null">勤 {{ row.daily[c.key].capacity }} 分</span>
-                      <span v-else>工 情報なし</span>
-                    </div>
-                  </td>
-                </tr>
-                <tr class="total-row">
-                  <td class="sticky-col number-col">-</td>
-                  <td class="sticky-col code-col">合計</td>
-                  <td class="sticky-col name-col">合計工数</td>
-                  <td v-for="c in dateColumns" :key="c.key" class="mini-cell total" :class="c.dayClass">
-                    <template v-if="proc.totalDaily && proc.totalDaily[c.key] && proc.totalDaily[c.key].time != null">
-                      <div class="cell-line time">
-                        工 {{ proc.totalDaily[c.key].time }} 分
-                        <span v-if="proc.totalDaily[c.key].capacity != null" class="capacity">/ 勤 {{ proc.totalDaily[c.key].capacity }} 分</span>
-                      </div>
-                    </template>
-                    <div v-else class="cell-line muted">-</div>
-                  </td>
-                </tr>
-                <tr v-if="!proc.rows.length">
-                  <td :colspan="3 + dateColumns.length" class="no-data">データがありません</td>
-                </tr>
-              </tbody>
-          </table>
-            </div>
-          </div>
-        </div>
-      </div>
-    <div v-else class="process-empty"></div>
-
     <div class="gantt-section" v-if="showProcessGantt">
       <div class="process-header">
         <div class="process-title">工程ガント（3日・勤務時間のみ表示）</div>
@@ -223,7 +144,6 @@
         :preset-line="selectedLine"
         :preset-base-date="startDate"
       />
-    </div>
     </div>
 
     <div class="footer-actions">
@@ -240,7 +160,6 @@
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
 import ProcessGanttView from './ProcessGanttView.vue'
-
 const mode = ref('plan')
 const selectedLine = ref('')
 const startDate = ref(new Date().toISOString().slice(0, 10))
@@ -250,8 +169,6 @@ const keyword = ref('')
 const lines = ref([])
 const products = ref([])
 const rows = ref([])
-const processPlans = ref([])
-const expanding = ref(false)
 const showProcessGantt = ref(false)
 const ganttReloadKey = ref(0)
 let tempId = 1
@@ -285,24 +202,10 @@ const tableMinWidth = computed(() => {
   return fixedColsWidth + dateColumns.value.length * perDayWidth
 })
 
-const processTableMinWidth = computed(() => {
-  const fixedColsWidth = 60 + 187 + 100
-  const perDayWidth = 200 // 工程日付列を広く表示（約2倍）
-  return fixedColsWidth + dateColumns.value.length * perDayWidth
-})
-
 const initDaily = () => {
   const daily = {}
   dateColumns.value.forEach((c) => {
     daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, sequence_no: '' }
-  })
-  return daily
-}
-
-const initProcessDaily = () => {
-  const daily = {}
-  dateColumns.value.forEach((c) => {
-    daily[c.key] = { plan: 0, order: 0, time: null, capacity: null }
   })
   return daily
 }
@@ -340,7 +243,6 @@ const moveRow = (rowId, direction) => {
 
 const resetRows = () => {
   rows.value = []
-  processPlans.value = []
 }
 
 const savePlan = async () => {
@@ -391,13 +293,7 @@ const savePlan = async () => {
     })
     console.info('保存結果', res.data)
     alert(`保存しました。\n作成: ${res.data.created}件, 更新: ${res.data.updated}件`)
-    // 保存後にデータを再取り込みして最新状態を表示
-    await doPickup()
-    // 保存後に自動で工程展開・ガントを再計算
-    await runProcessExpand({ silent: true })
-    if (showProcessGantt.value) {
-      ganttReloadKey.value += 1
-    }
+    // 保存後の自動工程展開・ガント再計算は実行しない
   } catch (e) {
     console.error('保存エラー', e)
     alert('保存に失敗しました。')
@@ -422,120 +318,16 @@ const filteredRows = computed(() => {
   })
 })
 
-const clearProcessPlans = () => {
-  processPlans.value = []
-}
-
-const buildProcessPlans = (backlogs = []) => {
-  const grouped = new Map()
-  backlogs.forEach((d) => {
-    if (!d.process) return
-    const procKey = d.process
-    if (!grouped.has(procKey)) {
-      grouped.set(procKey, {
-        process_id: procKey,
-        process_name: d.process_name || '',
-        line_name: d.line_name || '',
-        rows: [],
-      })
-    }
-    const proc = grouped.get(procKey)
-    const productKey = d.product
-    let row = proc.rows.find((r) => r.product_id === productKey)
-    if (!row) {
-      row = {
-        product_id: productKey,
-        product_code: d.product_code || '',
-        product_name: d.product_name || '',
-        daily: initProcessDaily(),
-      }
-      proc.rows.push(row)
-    }
-    const dateKey = d.plan_date
-    if (row.daily[dateKey]) {
-      row.daily[dateKey].plan = Number(d.plan_qty || 0)
-      row.daily[dateKey].order = Number(d.order_qty || 0)
-      row.daily[dateKey].time = d.computed_time_min == null ? null : Number(d.computed_time_min)
-      row.daily[dateKey].capacity = d.work_minutes == null ? null : Number(d.work_minutes)
-      row.daily[dateKey].sequence_no = d.sequence_no  // 日付ごとの順序番号を保存
-    }
-  })
-  const procs = Array.from(grouped.values())
-  procs.forEach((proc) => {
-    // 製品コード順でソート（表示用）
-    proc.rows.sort((a, b) => {
-      return (a.product_code || '').localeCompare(b.product_code || '')
-    })
-    // 合計工数（日別）を集計
-    const totals = {}
-    dateColumns.value.forEach((c) => {
-      totals[c.key] = { time: 0, capacity: null, hasTime: false }
-    })
-    proc.rows.forEach((r) => {
-      dateColumns.value.forEach((c) => {
-        const cell = r.daily[c.key]
-        if (!cell) return
-        if (cell.time != null) {
-          totals[c.key].time += Number(cell.time)
-          totals[c.key].hasTime = true
-        }
-        if (totals[c.key].capacity == null && cell.capacity != null) {
-          totals[c.key].capacity = Number(cell.capacity)
-        }
-      })
-    })
-    // hasTimeがない日はnullで非表示扱い
-    Object.keys(totals).forEach((k) => {
-      if (!totals[k].hasTime) totals[k].time = null
-      delete totals[k].hasTime
-    })
-    proc.totalDaily = totals
-
-    // 段取り回数を計算（日ごとにsequence_noでソートした順序で製品が切り替わる回数）
-    let setupCount = 0
-    let prevProductId = null
-    dateColumns.value.forEach((c) => {
-      // その日に計画がある製品を取得し、sequence_noでソート
-      const productsForDay = proc.rows
-        .map(r => ({
-          product_id: r.product_id,
-          plan: r.daily[c.key].plan,
-          sequence_no: r.daily[c.key].sequence_no
-        }))
-        .filter(p => p.plan > 0)
-        .sort((a, b) => {
-          const aSeq = a.sequence_no != null ? a.sequence_no : Number.POSITIVE_INFINITY
-          const bSeq = b.sequence_no != null ? b.sequence_no : Number.POSITIVE_INFINITY
-          if (aSeq === bSeq) {
-            return 0
-          }
-          return aSeq - bSeq
-        })
-
-      productsForDay.forEach(p => {
-        if (prevProductId !== null && prevProductId !== p.product_id) {
-          setupCount++
-        }
-        prevProductId = p.product_id
-      })
-    })
-    proc.setupCount = setupCount
-  })
-  processPlans.value = procs
-}
-
 const refreshDates = () => {
   // 再初期化は既存データの初期化だけ（簡易対応）
   rows.value.forEach((r) => {
     r.daily = initDaily()
   })
-  processPlans.value = []
 }
 
 const loadData = async () => {
   // 取り込み前は空表示（手動で「取り込み」を押す運用）
   rows.value = []
-  processPlans.value = []
 }
 
 const onPlanInput = (row, dateKey, value) => {
@@ -546,6 +338,17 @@ const onPlanInput = (row, dateKey, value) => {
 const onSequenceInput = (row, dateKey, value) => {
   const daily = ensureDailyCell(row, dateKey)
   daily.sequence_no = value === '' ? '' : value
+}
+
+const toggleProcessGantt = async () => {
+  if (!selectedLine.value) {
+    alert('ラインを選択してください。')
+    return
+  }
+  showProcessGantt.value = !showProcessGantt.value
+  if (showProcessGantt.value) {
+    ganttReloadKey.value += 1
+  }
 }
 
 const fetchLines = async () => {
@@ -566,66 +369,6 @@ onMounted(async () => {
     console.error('初期データ取得エラー', e)
   }
 })
-
-const runProcessExpand = async ({ silent = false } = {}) => {
-  if (!selectedLine.value) {
-    if (!silent) alert('ラインを選択してください。')
-    return
-  }
-  expanding.value = true
-  try {
-    const payloadItems = []
-    rows.value.forEach((r) => {
-      if (!r.product_id) return
-      dateColumns.value.forEach((c) => {
-        const daily = ensureDailyCell(r, c.key)
-        if (daily.plan === '' || daily.plan === null || daily.plan === undefined) return
-        const planQty = Number(daily.plan || 0)
-        payloadItems.push({
-          product_id: r.product_id,
-          process_id: r.process_id,
-          plan_date: c.key,
-          plan_qty: planQty,
-          order_qty: Number(daily.demand || 0),
-          demand_qty_plan: Number(daily.demand || 0),
-        })
-      })
-    })
-
-    const res = await api.lineBacklogs.expandProcesses({
-      line_id: selectedLine.value,
-      start_date: startDate.value,
-      end_date: endDate.value,
-      items: payloadItems,
-    })
-    const payload = Array.isArray(res.data) ? res.data : res.data?.items || []
-    buildProcessPlans(payload)
-    if (showProcessGantt.value) {
-      ganttReloadKey.value += 1
-    }
-    if (!silent) alert('工程展開が完了しました。')
-  } catch (e) {
-    console.error('工程展開エラー', e)
-    if (!silent) alert('工程展開に失敗しました。')
-  } finally {
-    expanding.value = false
-  }
-}
-
-const doProcessExpand = async () => {
-  await runProcessExpand({ silent: false })
-}
-
-const toggleProcessGantt = async () => {
-  if (!selectedLine.value) {
-    alert('ラインを選択してください。')
-    return
-  }
-  showProcessGantt.value = !showProcessGantt.value
-  if (showProcessGantt.value) {
-    ganttReloadKey.value += 1
-  }
-}
 
 const doPickup = async () => {
   if (!selectedLine.value) return
@@ -661,7 +404,6 @@ const doPickup = async () => {
       daily.sequence_no = d.sequence_no === null || d.sequence_no === undefined ? '' : d.sequence_no
     })
     rows.value = Array.from(grouped.values())
-    processPlans.value = []
 
     if (!rows.value.length) addRow()
   } catch (e) {
