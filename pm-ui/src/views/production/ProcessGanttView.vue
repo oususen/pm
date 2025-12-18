@@ -426,6 +426,10 @@ function rewindTime(segments, anchorTime, offsetMin) {
       cursor = new Date(segments[idx].end)
     }
   }
+    // まだ残り時間がある場合、最後のセグメントの開始時刻からさらに巻き戻す
+  if (remaining > 0 && segments.length > 0) {
+    return new Date(segments[0].start.getTime() - remaining * 60 * 1000)
+  }
   return segments[0].start
 }
 
