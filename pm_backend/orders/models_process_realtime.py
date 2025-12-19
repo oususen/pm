@@ -10,6 +10,7 @@ class ProcessRealtimeRecord(models.Model):
 
     RECORD_TYPE_CHOICES = [
         ('PRODUCTION', '生産完成'),
+        ('SCRAP', '仕損'),
         ('EQUIPMENT_STATE', '設備状態変更'),
         ('OPERATOR_ACTION', '作業者アクション'),
     ]

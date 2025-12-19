@@ -63,7 +63,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
     event_data = serializers.JSONField(required=False, allow_null=True)
 
     def validate(self, attrs):
-        if attrs.get('record_type') == 'PRODUCTION':
+        if attrs.get('record_type') in ['PRODUCTION', 'SCRAP']:
             has_product_id = bool(attrs.get('product_id'))
             has_product_code = bool((attrs.get('product_code') or '').strip())
             if not has_product_id and not has_product_code:

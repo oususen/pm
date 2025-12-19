@@ -2,9 +2,12 @@
 from decimal import Decimal
 
 from rest_framework import serializers
+from django.db.models import Sum
+from django.db.models.functions import Coalesce
 from .models import LineDemand, Order, OrderLine, StgOrderRaw, StgOrderDaily
 from .models_line_backlog import LineBacklog
 from .models_production import StockAllocation, ProductionOrder, ProcessActual
+from .models_process_realtime import ProcessRealtimeRecord
 from masters.models import Customer, Product
 
 
@@ -189,6 +192,8 @@ class StockAllocationSerializer(serializers.ModelSerializer):
     """在庫引当シリアライザー"""
     product_code = serializers.CharField(source='product.product_code', read_only=True)
     product_name = serializers.CharField(source='product.product_name', read_only=True)
+    scrap_qty = serializers.SerializerMethodField()
+    available_qty_net = serializers.SerializerMethodField()
     available_qty = serializers.DecimalField(
         max_digits=14,
         decimal_places=3,
@@ -200,10 +205,21 @@ class StockAllocationSerializer(serializers.ModelSerializer):
         model = StockAllocation
         fields = [
             'id', 'product', 'product_code', 'product_name', 'location',
-            'current_stock', 'reserved_qty', 'available_qty', 'min_stock_qty',
+            'current_stock', 'reserved_qty', 'scrap_qty', 'available_qty', 'available_qty_net', 'min_stock_qty',
             'is_bottleneck', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'available_qty', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'scrap_qty', 'available_qty', 'available_qty_net', 'created_at', 'updated_at']
+
+    def get_scrap_qty(self, obj):
+        agg = ProcessRealtimeRecord.objects.filter(
+            record_type='SCRAP',
+            product_id=obj.product_id,
+        ).aggregate(total=Coalesce(Sum('qty'), Decimal('0')))
+        return agg['total'] or Decimal('0')
+
+    def get_available_qty_net(self, obj):
+        scrap = self.get_scrap_qty(obj)
+        return obj.current_stock - obj.reserved_qty - scrap
 
 
 class ProcessActualSerializer(serializers.ModelSerializer):
