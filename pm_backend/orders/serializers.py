@@ -149,6 +149,9 @@ class LineBacklogSerializer(serializers.ModelSerializer):
     line_name = serializers.CharField(source='line.line_name', read_only=True)
     computed_time_min = serializers.SerializerMethodField()
     work_minutes = serializers.SerializerMethodField()
+    step_no = serializers.SerializerMethodField()
+    cycle_time_min = serializers.SerializerMethodField()
+    routing_product_id = serializers.SerializerMethodField()
 
     class Meta:
         model = LineBacklog
@@ -159,12 +162,20 @@ class LineBacklogSerializer(serializers.ModelSerializer):
             'demand_qty_plan', 'order_qty', 'plan_qty', 'actual_qty', 'stock_qty', 'planned_stock_qty',
             'sequence_no',
             'source_line', 'source_routing_step', 'updated_at',
-            'computed_time_min', 'work_minutes',
+            'computed_time_min', 'work_minutes', 'step_no', 'cycle_time_min', 'routing_product_id',
         ]
         read_only_fields = ['id', 'updated_at']
 
     def get_computed_time_min(self, obj):
         return getattr(obj, 'computed_time_min', None)
+    def get_step_no(self, obj):
+        return getattr(obj, 'step_no', None)
+
+    def get_cycle_time_min(self, obj):
+        return getattr(obj, 'cycle_time_min', None)
+
+    def get_routing_product_id(self, obj):
+        return getattr(obj, 'routing_product_id', None)
 
     def get_work_minutes(self, obj):
         return getattr(obj, 'work_minutes', None)

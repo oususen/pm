@@ -902,6 +902,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
                 obj.computed_time_min = computed_time_min
                 obj.work_minutes = calendar_work_map.get(target_date)
+                obj.step_no = step.step_no
+                obj.cycle_time_min = float(ct.cycle_time_min) if ct and ct.cycle_time_min else None
+                obj.routing_product_id = step.routing.product_id if step.routing_id and step.routing else None
                 upserted.append(obj)
 
         serializer = self.get_serializer(upserted, many=True)

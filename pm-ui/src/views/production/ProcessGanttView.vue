@@ -248,14 +248,22 @@ function buildWorkingSegments() {
   const patternMap = new Map()
   workPatterns.value.forEach((p) => patternMap.set(p.id, p))
 
+  console.log('[buildWorkingSegments] lineCalendarDays:', lineCalendarDays.value)
+  console.log('[buildWorkingSegments] workPatterns:', workPatterns.value)
+
   const segments = []
   let offset = 0
 
   threeDays.value.forEach((day) => {
     const cal = calMap.get(day.date)
-    if (cal && cal.is_working_day === false) return
+    console.log(`[buildWorkingSegments] day=${day.date}, cal=`, cal)
+    if (cal && cal.is_working_day === false) {
+      console.log(`[buildWorkingSegments] ${day.date} is non-working day, skipping`)
+      return
+    }
 
     const pattern = cal && cal.work_pattern ? patternMap.get(cal.work_pattern) : null
+    console.log(`[buildWorkingSegments] ${day.date} pattern=`, pattern)
     let startMin = pattern && pattern.start_time ? timeToMinutes(pattern.start_time) : 8 * 60
     let endMin
     if (pattern && pattern.end_time) {
@@ -267,6 +275,7 @@ function buildWorkingSegments() {
       const workMinutes = cal && cal.work_minutes != null ? Number(cal.work_minutes) : 8 * 60
       endMin = startMin + workMinutes
     }
+    console.log(`[buildWorkingSegments] ${day.date} startMin=${startMin} (${Math.floor(startMin/60)}:${(startMin%60).toString().padStart(2,'0')}), endMin=${endMin} (${Math.floor(endMin/60)}:${(endMin%60).toString().padStart(2,'0')})`)
 
     const breaks = []
     if (pattern && Array.isArray(pattern.break_times)) {
@@ -311,6 +320,11 @@ function buildWorkingSegments() {
     if (cursor < endMin) {
       pushSeg(cursor, endMin)
     }
+  })
+
+  console.log('[buildWorkingSegments] Total segments created:', segments.length)
+  segments.forEach((seg, idx) => {
+    console.log(`  [${idx}] date=${seg.date}, start=${formatTime(seg.start)}, end=${formatTime(seg.end)}, duration=${seg.durationMin}min, offset=${seg.offsetMin}min`)
   })
 
   return segments
@@ -405,31 +419,41 @@ function timeToOffsetMinutes(segments, time) {
 }
 
 function rewindTime(segments, anchorTime, offsetMin) {
+  console.log('[rewindTime] anchorTime:', formatTime(anchorTime), 'offsetMin:', offsetMin)
   if (!segments.length || !anchorTime) return anchorTime
   let remaining = offsetMin
   let idx = findSegmentIndexByTime(segments, anchorTime)
   let cursor = anchorTime
+  console.log('[rewindTime] initial idx:', idx, 'cursor:', formatTime(cursor))
   if (idx < 0) {
     if (anchorTime < segments[0].start) return segments[0].start
     idx = segments.length - 1
     cursor = new Date(segments[idx].end)
   }
+  let iteration = 0
   while (remaining > 0 && idx >= 0) {
     const seg = segments[idx]
     const available = (cursor.getTime() - seg.start.getTime()) / (60 * 1000)
+    console.log(`[rewindTime] iteration ${iteration}: idx=${idx}, seg.date=${seg.date}, seg.start=${formatTime(seg.start)}, seg.end=${formatTime(seg.end)}, cursor=${formatTime(cursor)}, available=${available.toFixed(2)}min, remaining=${remaining.toFixed(2)}min`)
     if (available >= remaining) {
-      return new Date(cursor.getTime() - remaining * 60 * 1000)
+      const result = new Date(cursor.getTime() - remaining * 60 * 1000)
+      console.log('[rewindTime] DONE: result =', formatTime(result))
+      return result
     }
     remaining -= available
     idx -= 1
     if (idx >= 0) {
       cursor = new Date(segments[idx].end)
     }
+    iteration++
   }
-    // まだ残り時間がある場合、最後のセグメントの開始時刻からさらに巻き戻す
+  // まだ残り時間がある場合、最後のセグメントの開始時刻からさらに巻き戻す
   if (remaining > 0 && segments.length > 0) {
-    return new Date(segments[0].start.getTime() - remaining * 60 * 1000)
+    const result = new Date(segments[0].start.getTime() - remaining * 60 * 1000)
+    console.log('[rewindTime] OUT OF SEGMENTS: remaining =', remaining, 'result =', formatTime(result))
+    return result
   }
+  console.log('[rewindTime] FALLBACK: return segments[0].start =', formatTime(segments[0].start))
   return segments[0].start
 }
 
@@ -497,6 +521,7 @@ function buildProcessGantt(rawData) {
         product_name: d.product_name || '',
         plan_qty: 0,
         sequence_no: d.sequence_no != null ? d.sequence_no : null,
+        routing_product_id: d.routing_product_id || d.product,  // ルーティングの親製品ID
         records: [],
         bars: [],
       }
@@ -576,10 +601,10 @@ function buildProcessGantt(rawData) {
     return (b.process_id || 0) - (a.process_id || 0)
   })
 
-  const productChains = new Map() // product_id -> [{procRef, item, meta}]
+  const productChains = new Map() // routing_product_id -> [{procRef, item, meta}]
   processList.forEach((proc) => {
     proc.items.forEach((item) => {
-      const key = item.product_id
+      const key = item.routing_product_id || item.product_id  // ルーティングの親製品IDでグループ化
       if (!productChains.has(key)) productChains.set(key, [])
       productChains.get(key).push({
         proc,
@@ -597,8 +622,9 @@ function buildProcessGantt(rawData) {
     return 0
   }
 
-  productChains.forEach((chain) => {
+  productChains.forEach((chain, productId) => {
     chain.sort((a, b) => (b.meta.stepNo || 0) - (a.meta.stepNo || 0)) // 後→前
+    console.log(`[buildProcessGantt] Product ${productId} chain:`, chain.map(c => ({ process: c.proc.process_name, step: c.meta.stepNo, cycleMin: c.meta.cycleMin })))
     for (let i = 0; i < chain.length - 1; i++) {
       const later = chain[i]
       const earlier = chain[i + 1]
@@ -606,10 +632,14 @@ function buildProcessGantt(rawData) {
 
       const laterStart = later.item.bars[0].startTime
       const cycleMin = calcCycleMin(earlier.meta, earlier.item.bars)
+      console.log(`[buildProcessGantt] Processing: later=${later.proc.process_name}(step=${later.meta.stepNo}), earlier=${earlier.proc.process_name}(step=${earlier.meta.stepNo})`)
+      console.log(`[buildProcessGantt] laterStart=${formatTime(laterStart)}, cycleMin=${cycleMin}, BUFFER_FACTOR=${BUFFER_FACTOR}`)
       if (!cycleMin || !laterStart) continue
 
       const offsetMin = cycleMin * BUFFER_FACTOR
+      console.log(`[buildProcessGantt] Calling rewindTime with offsetMin=${offsetMin}`)
       const desiredStart = rewindTime(segments, laterStart, offsetMin)
+      console.log(`[buildProcessGantt] desiredStart=${formatTime(desiredStart)}, original bar.startTime=${formatTime(earlier.item.bars[0].startTime)}`)
 
       earlier.item.bars.forEach((bar) => {
         const newStart = desiredStart < bar.startTime ? desiredStart : bar.startTime
@@ -617,6 +647,7 @@ function buildProcessGantt(rawData) {
         bar.leftPx = offsetMinVal * minuteWidth.value
         bar.startTime = newStart
         bar.label = formatTimeRange(newStart, bar.durationMin)
+        console.log(`[buildProcessGantt] Updated ${earlier.proc.process_name} bar: newStart=${formatTime(newStart)}`)
       })
     }
   })

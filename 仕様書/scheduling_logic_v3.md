@@ -201,3 +201,40 @@ VALUES (...)
    - 入力した計画データをLineBacklogに保存
    - plan_qty、actual_qty、stock_qty、planned_stock_qtyを更新
    - **保存後、前ラインが「取り込み」を押すと、この保存したplan_qtyが自動集計される**
+
+---
+
+## 9. 工程ガント表示（フロント仕様）
+
+- **データソース**: `line_backlog` を読み取り専用で取得（API: `GET /line-backlogs/` with `line`, `plan_date__gte`, `plan_date__lte`）。`expand_processes` はガント表示時には呼び出さない（書き込み抑止）。
+- **期間**: 3日固定（基準日を中心に前日・当日・翌日）。ラインの勤務カレンダ＋勤務パターンから稼働時間帯を生成し、休憩を除いた連続セグメントを時間軸に使用。
+- **所要時間の算出**:
+  - `computed_time_min` を最優先に使用。
+  - 無い場合はルーティングの `duration_min × plan_qty`（0なら最小1分扱い）。`cycle_time_min`（m_process_cycle_time）は参照しない。
+- **工程順序**: `step_no` を基準に「最終工程→前工程→…→頭工程」の順で並べる（step_no が無い場合は工程IDで降順）。
+- **前倒しロジック**: 後工程の開始時刻からサイクル×3台分（固定値、将来パラメータ化可）を前工程の開始に巻き戻す。勤務時間外に食い込む場合は前営業日の稼働セグメントへシフト。
+- **バー配置**: 同一工程・同一製品につき1本のバーを配置。時間ラベルは「開始–終了（HH:MM）」で表示。バー左に計画ロット数を表示。
+- **表示専用**: ガント表示では DB への書き込みは行わない（LineBacklog の読込のみ）。
+---
+
+## 10. 生産計画入力画面のUI仕様（現状確認）
+
+- ボタン構成: 「新規行追加」「クリア」「保存」「取り込み」「工程ガント表示」の5つに集約。旧「工程展開」ボタンと工程展開グリッドは廃止。
+- 取り込み: 選択中ライン・期間で `/api/line-backlogs/pickup/` を呼び、order_qty/plan_qty/実績/在庫を行データに展開。
+- 保存: 編集した行のうち `product_id` と `process_id` がある日別セルだけを `/api/line-backlogs/save/` に送信。plan_qty・sequence_no などを更新。
+- ガント表示: ページ内下部に `ProcessGanttView` を埋め込み。トグル表示で、開くたびに現在のライン・期間で GET `/api/line-backlogs/` を読み込み、上記ガント仕様（§9）で描画。表示のみで DB 書き込みなし。
+- 行リセット: クリアは現在の rows を初期化するだけ（工程展開結果など他セクションは存在しない）。
+- その他: 新規行は `process_id` が空のままだと保存対象外。pickup で取得した行は process_id を保持するため保存可。
+
+---
+
+## 11. BOM→ルーティング自動生成（現行実装）
+
+- トリガ: BOM画面のPOST `/api/boms/{bom_id}/generate_routing/`。BOMツリーからルーティングを作り直す（既存ステップは削除）。
+- 対象データ: `sourcing_type='MAKE'` のBOM明細だけを再帰的に収集。子BOMを先に辿るポストオーダーで集め、(depth, path) を持たせて工程順を決定。
+- 必須項目: 各明細に `process` と `time_unit(MINUTE/DAY)` が必要。MINUTEなら `duration_min>0`、DAYなら `lead_time_days>0`。lineは指定あれば反映。
+- ルーティングヘッダ: `AUTO-{parent_product_code}-{bom.version}` をデフォルト発番。description自動生成、`is_default=true` を指定すると同製品の他ルートは非デフォルト化。
+- ステップ生成: 収集順に `step_no=1..` を振り、`process/item.line/output_product=item.child_product` を設定。`hierarchy_depth` と `hierarchy_path`（例: 1.2.3）でBOM階層を保持。`time_unit` と `duration_min/lead_time_days` は明細値を転記。
+- 最終工程オプション: リクエストに `final_process` を渡した場合、親製品を `output_product` にした終端ステップを末尾に追加（line/time_unit/duration_min/lead_time_daysはリクエスト値）。
+- 材料自動紐付け: 各ステップの `output_product` に有効BOMがあれば、その子明細を `routing_step_material` として `consume_timing='START'` で登録。
+- 出力/更新対象: `m_routing` ヘッダ、`m_routing_step`、`m_routing_step_material` のみを更新。その他テーブルへの書き込みは行わない。

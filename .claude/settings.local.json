@@ -15,7 +15,8 @@
       "Bash(d:\\pm\\venv\\Scripts\\python.exe:*)",
       "Bash(..venvScriptspython.exe manage.py makemigrations masters)",
       "Bash(python:*)",
-      "Bash(venv/Scripts/python.exe:*)"
+      "Bash(venv/Scripts/python.exe:*)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []
