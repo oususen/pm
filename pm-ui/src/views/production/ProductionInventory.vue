@@ -49,6 +49,22 @@
               <span class="info-label">工程コード</span>
               <span class="info-value">{{ g.process_code || '-' }}</span>
             </div>
+            <div class="info-row">
+              <span class="info-label">予定</span>
+              <span class="info-value"></span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">確定</span>
+              <span class="info-value"></span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">翌月</span>
+              <span class="info-value"></span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">翌々月</span>
+              <span class="info-value"></span>
+            </div>
           </div>
 
           <div class="matrix-block">
@@ -143,7 +159,7 @@ const groups = computed(() => {
         line_name: d.line_name,
         product_code: d.product_code,
         product_name: d.product_name,
-        process_code: d.process_code || d.routing_step || d.process || "",
+        process_code: d.process_code || d.process || "",
         process_name: d.process_name || "",
         cells: {},
       });
@@ -161,8 +177,13 @@ const groups = computed(() => {
       };
     }
     const c = g.cells[d.plan_date];
-    c.forecast += Number(d.forecast_qty || 0);
-    c.firm += Number(d.firm_qty || 0);
+    // 内示: この製品を加工するラインの直後ラインの計画数の合計
+    // → 在庫側では line_backlog.order_qty を利用
+    c.forecast += Number(d.order_qty || d.demand_qty_plan || 0);
+    // 確定: 直後ラインの実績の合計に相当する値として
+    // このラインの実績数量(actual_qty)を集計
+    c.firm += Number(d.actual_qty || 0);
+    // 計画・在庫・計画在庫は line_backlog から取得
     c.plan += Number(d.plan_qty || 0);
     c.adjust += 0; // 調整は現状データ無しのため0
     c.scrap += 0; // 仕損は在庫計算側で集計予定のため0表示
@@ -188,7 +209,8 @@ const load = async () => {
   loading.value = true;
   error.value = "";
   try {
-    const res = await api.lineDemands.list({ page_size: 5000 });
+    // 在庫/残量は line_backlog ベースで集計する
+    const res = await api.lineBacklogs.getLineBacklogs();
     const payload = res.data || [];
     demands.value = Array.isArray(payload) ? payload : payload.results || [];
     if (!userSetStart && demands.value.length) {

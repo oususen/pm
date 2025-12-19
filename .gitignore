@@ -51,3 +51,16 @@ pm_backend/pm_backend/__pycache__/
 # Image files
 *.png
 *.jpg
+*.jpeg
+
+# Video files
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm  
+
+# excel files
+*.xls
+*.xlsx
+*.csv   
