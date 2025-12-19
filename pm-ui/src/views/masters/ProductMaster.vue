@@ -135,6 +135,20 @@
             <input v-model.number="formData.standard_lt_days" type="number" min="0" />
           </div>
           <div class="form-group">
+            <label>画像URL</label>
+            <input v-model="formData.image_url" placeholder="/media/products/..." />
+            <div class="upload-row">
+              <input type="file" ref="fileInput" @change="onFileSelected" accept="image/*" />
+              <button type="button" class="btn-secondary" @click="triggerFileInput" :disabled="!isEdit && !formData.id">
+                画像をアップロード
+              </button>
+              <span class="hint-small" v-if="!isEdit && !formData.id">保存後にアップロードできます</span>
+            </div>
+            <div class="image-preview" v-if="formData.image_url">
+              <img :src="formData.image_url" alt="Product image" />
+            </div>
+          </div>
+          <div class="form-group">
             <label>
               <input type="checkbox" v-model="formData.is_line_final_product" />
               ライン最終品（ラインで最後に出力される品目）
@@ -206,7 +220,9 @@ const formData = ref({
   is_line_final_product: false,
   is_final_product: false,
   is_virtual_set: false,
+  image_url: '',
 })
+const fileInput = ref(null)
 
 // クエリパラメータを組み立て
 const buildQueryParams = () => {
@@ -260,6 +276,7 @@ const showNewDialog = () => {
     is_line_final_product: false,
     is_final_product: false,
     is_virtual_set: false,
+    image_url: '',
   }
   showDialog.value = true
 }
@@ -268,12 +285,16 @@ const showNewDialog = () => {
 const editProduct = (product) => {
   isEdit.value = true
   formData.value = { ...product }
+  if (!formData.value.image_url) {
+    formData.value.image_url = ''
+  }
   showDialog.value = true
 }
 
 // ダイアログを閉じる
 const closeDialog = () => {
   showDialog.value = false
+  if (fileInput.value) fileInput.value.value = ''
 }
 
 // フィルタリセット
@@ -305,6 +326,33 @@ const saveProduct = async () => {
   } catch (error) {
     console.error('保存エラー:', error)
     alert('保存に失敗しました')
+  }
+}
+
+const triggerFileInput = () => {
+  if (fileInput.value) {
+    fileInput.value.click()
+  }
+}
+
+const onFileSelected = async (e) => {
+  const file = e.target.files && e.target.files[0]
+  if (!file) return
+  if (!formData.value.id) {
+    alert('先に保存してからアップロードしてください。')
+    return
+  }
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    const res = await api.products.uploadProductImage(formData.value.id, fd)
+    formData.value.image_url = res.data.image_url || ''
+    alert('画像をアップロードしました')
+  } catch (error) {
+    console.error('画像アップロードエラー:', error)
+    alert('画像のアップロードに失敗しました')
+  } finally {
+    if (fileInput.value) fileInput.value.value = ''
   }
 }
 
@@ -387,6 +435,21 @@ onMounted(() => {
 
 .form-group {
   margin-bottom: 1rem;
+}
+.upload-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hint-small {
+  font-size: 12px;
+  color: #64748b;
+}
+.image-preview img {
+  max-height: 120px;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  margin-top: 6px;
 }
 
 .form-group label {

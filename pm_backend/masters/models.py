@@ -17,6 +17,7 @@ class Product(models.Model):
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, null=True, blank=True, verbose_name='カテゴリ')
     unit = models.CharField(max_length=10, default='個', verbose_name='単位')
     standard_lt_days = models.IntegerField(null=True, blank=True, verbose_name='標準LT(日)')
+    image_url = models.CharField(max_length=255, null=True, blank=True, verbose_name='画像URL')
     self_lt_days = models.IntegerField(null=True, blank=True, verbose_name='自工程LT(日)')
     is_final_product = models.BooleanField(default=False, verbose_name='最終製品')
     is_line_final_product = models.BooleanField(

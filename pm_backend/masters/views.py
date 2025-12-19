@@ -1,10 +1,13 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Exists, OuterRef
+from django.core.files.storage import default_storage
 import django_filters
+import os
+import uuid
 from datetime import date
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
@@ -46,6 +49,21 @@ class ProductViewSet(viewsets.ModelViewSet):
     search_fields = ['product_code', 'product_name']
     ordering_fields = ['product_code', 'created_at']
     ordering = ['product_code']
+
+    @action(detail=True, methods=['post'], url_path='upload_image', parser_classes=[parsers.MultiPartParser, parsers.FormParser])
+    def upload_image(self, request, pk=None):
+        product = self.get_object()
+        file_obj = request.FILES.get('file')
+        if not file_obj:
+            return Response({'detail': 'ファイルがありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        ext = os.path.splitext(file_obj.name)[1] or ''
+        filename = f"products/{product.product_code}_{uuid.uuid4().hex}{ext}"
+        saved_path = default_storage.save(filename, file_obj)
+        url = default_storage.url(saved_path)
+        product.image_url = url
+        product.save(update_fields=['image_url', 'updated_at'])
+        return Response({'image_url': url}, status=status.HTTP_200_OK)
 
 
 class CustomerViewSet(viewsets.ModelViewSet):

@@ -21,6 +21,11 @@ export const createProductsAPI = (client) => ({
   updateProduct(id, data) {
     return client.put(`/products/${id}/`, data)
   },
+  uploadProductImage(id, formData) {
+    return client.post(`/products/${id}/upload_image/`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
   deleteProduct(id) {
     return client.delete(`/products/${id}/`)
   },

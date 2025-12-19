@@ -39,7 +39,26 @@
       class="planned-buttons"
     >
       <span class="planned-label">本日の計画対象:</span>
-      <div class="planned-list">
+      <div v-if="record.record_type === 'SCRAP'" class="planned-cards">
+        <div
+          v-for="p in currentProductList"
+          :key="`${p.plan_date}-${p.product}-${p.process}`"
+          class="planned-card"
+          :class="{ active: record.product_id === p.product }"
+          @click="selectPlannedProduct(p)"
+        >
+          <div class="card-image">
+            <img v-if="getImageUrl(p)" :src="getImageUrl(p)" alt="product image" />
+            <div v-else class="no-image">No Image</div>
+          </div>
+          <div class="card-body">
+            <div class="card-code">{{ p.product_code || '品番未設定' }}</div>
+            <div class="card-name">{{ p.product_name || '' }}</div>
+            <div class="card-plan" v-if="p.plan_qty != null">計画: {{ p.plan_qty }}</div>
+          </div>
+        </div>
+      </div>
+      <div v-else class="planned-list">
         <button
           v-for="p in currentProductList"
           :key="`${p.plan_date}-${p.product}-${p.process}`"
@@ -232,6 +251,7 @@ const manualProduct = ref(false)
 const productionProducts = ref([])
 const scrapProducts = ref([])
 const defaultProductId = ref(null)
+const productImageMap = ref({})
 
 const record = ref({
   record_type: '',
@@ -295,6 +315,14 @@ const currentProductList = computed(() => {
   }
   return []
 })
+
+const getImageUrl = (p) => {
+  const url = productImageMap.value[p.product] || ''
+  if (!url) return ''
+  if (url.startsWith('http://') || url.startsWith('https://')) return url
+  if (url.startsWith('/media')) return `${mediaBaseUrl}${url}`
+  return url
+}
 
 const canSubmit = computed(() => {
   if (!selectedProcessId.value || !record.value.record_type) return false
@@ -500,6 +528,13 @@ const loadScrapProducts = async (processId, baseProducts) => {
 
     scrapProducts.value = Array.from(scrapMap.values())
     console.log('仕損品記録: 最終リスト件数:', scrapProducts.value.length)
+
+    // 画像マップを構築
+    const idSet = new Set([
+      ...productionProducts.value.map((p) => p.product).filter(Boolean),
+      ...scrapProducts.value.map((p) => p.product).filter(Boolean),
+    ])
+    await loadProductImages(idSet)
   } catch (error) {
     console.error('仕損品記録用製品リスト取得エラー:', error)
     // エラー時は基本リストのみを使用
@@ -531,6 +566,21 @@ const filterCoproductChildrenFromList = async (candidates) => {
 
   if (childIds.size === 0) return candidates
   return candidates.filter((it) => !childIds.has(it.product))
+}
+
+const loadProductImages = async (idSet) => {
+  try {
+    const all = await api.products.getAllProducts({ page_size: 5000 })
+    const map = {}
+    all.forEach((p) => {
+      if (idSet.has(p.id)) {
+        map[p.id] = p.image_url || ''
+      }
+    })
+    productImageMap.value = map
+  } catch (error) {
+    console.error('製品画像取得エラー:', error)
+  }
 }
 
 const selectPlannedProduct = (p) => {
@@ -915,6 +965,62 @@ label {
   flex-wrap: wrap;
   gap: 8px;
 }
+.planned-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+.planned-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px;
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.planned-card.active {
+  border-color: #4a7ae5;
+  box-shadow: 0 2px 8px rgba(74, 122, 229, 0.25);
+}
+.card-image {
+  width: 100%;
+  aspect-ratio: 4/3;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f8fafc;
+}
+.card-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.no-image {
+  font-size: 12px;
+  color: #94a3b8;
+}
+.card-body {
+  display: grid;
+  gap: 2px;
+}
+.card-code {
+  font-weight: 700;
+  font-size: 14px;
+}
+.card-name {
+  font-size: 12px;
+  color: #475569;
+}
+.card-plan {
+  font-size: 12px;
+  color: #111827;
+}
 .btn-planned {
   padding: 8px 12px;
   border: 1px solid #cbd5e1;
@@ -999,3 +1105,15 @@ label {
   margin-top: 0;
 }
 </style>
+const apiBaseUrl =
+  import.meta.env.VITE_API_BASE_URL ||
+  (typeof window !== 'undefined' ? `${window.location.origin}/api` : '')
+let mediaBaseUrl = ''
+try {
+  mediaBaseUrl = new URL(apiBaseUrl).origin
+} catch (e) {
+  mediaBaseUrl = typeof window !== 'undefined' ? window.location.origin : ''
+}
+if (mediaBaseUrl.endsWith(':8501')) {
+  mediaBaseUrl = mediaBaseUrl.replace(':8501', ':8002')
+}
