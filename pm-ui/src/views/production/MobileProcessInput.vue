@@ -7,28 +7,30 @@
       </div>
     </div>
 
-    <div class="section">
-      <label class="label-required">工程</label>
-      <select v-model="selectedProcessId" @change="onProcessChange" class="input-large">
-        <option value="">-- 工程を選択 --</option>
-        <option v-for="p in processes" :key="p.id" :value="p.id">
-          {{ p.process_code }} - {{ p.process_name }}
-        </option>
-      </select>
-    </div>
+    <div class="section inline-row dual-row">
+      <div class="inline-group">
+        <label class="label-required inline-label">工程</label>
+        <select v-model="selectedProcessId" @change="onProcessChange" class="input-large flex-input">
+          <option value="">-- 工程を選択 --</option>
+          <option v-for="p in processes" :key="p.id" :value="p.id">
+            {{ p.process_code }} - {{ p.process_name }}
+          </option>
+        </select>
+      </div>
 
-    <div v-if="selectedProcessId" class="section">
-      <label class="label-required">記録タイプ</label>
-      <div class="type-buttons">
-        <button
-          v-for="type in recordTypes"
-          :key="type.value"
-          @click="record.record_type = type.value"
-          class="type-btn"
-          :class="{ active: record.record_type === type.value }"
-        >
-          {{ type.label }}
-        </button>
+      <div v-if="selectedProcessId" class="inline-group">
+        <label class="label-required inline-label">記録タイプ</label>
+        <div class="type-buttons inline-buttons">
+          <button
+            v-for="type in recordTypes"
+            :key="type.value"
+            @click="record.record_type = type.value"
+            class="type-btn"
+            :class="{ active: record.record_type === type.value }"
+          >
+            {{ type.label }}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -471,12 +473,22 @@ onMounted(() => {
   border-radius: 8px;
   margin-bottom: 16px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .mobile-header h2 {
-  margin: 0 0 8px 0;
+  margin: 0;
   font-size: 18px;
   color: #1f2a44;
+}
+
+.header-info .date {
+  font-size: 14px;
+  font-weight: 600;
+  color: #475569;
 }
 
 .header-info {
@@ -533,7 +545,12 @@ label {
   font-weight: 700;
 }
 
-.type-buttons,
+.type-buttons {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+}
+
 .state-buttons {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -698,5 +715,30 @@ label {
   font-weight: 600;
   cursor: pointer;
   text-decoration: underline;
+}
+
+.inline-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dual-row {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.inline-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 280px;
+}
+
+.inline-label {
+  margin: 0;
+  min-width: 64px;
+}
+
+.flex-input {
+  flex: 1;
 }
 </style>
