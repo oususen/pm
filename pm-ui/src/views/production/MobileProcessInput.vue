@@ -247,6 +247,26 @@ const selectedProcessId = ref('')
 const recentRecords = ref([])
 const submitting = ref(false)
 
+const apiBaseUrl =
+  import.meta.env.VITE_API_BASE_URL ||
+  (typeof window !== 'undefined' ? `${window.location.origin}/api` : '')
+const mediaEnvBase = import.meta.env.VITE_MEDIA_BASE_URL || ''
+let mediaBaseUrl = ''
+if (mediaEnvBase) {
+  mediaBaseUrl = mediaEnvBase.replace(/\/$/, '')
+} else {
+  try {
+    mediaBaseUrl = new URL(apiBaseUrl).origin
+  } catch (e) {
+    mediaBaseUrl = typeof window !== 'undefined' ? window.location.origin : ''
+  }
+  if (mediaBaseUrl.endsWith(':8501')) {
+    mediaBaseUrl = mediaBaseUrl.replace(':8501', ':8002')
+  } else if (mediaBaseUrl.endsWith(':5173')) {
+    mediaBaseUrl = mediaBaseUrl.replace(':5173', ':8002')
+  }
+}
+
 const manualProduct = ref(false)
 const productionProducts = ref([])
 const scrapProducts = ref([])
@@ -317,10 +337,24 @@ const currentProductList = computed(() => {
 })
 
 const getImageUrl = (p) => {
-  const url = productImageMap.value[p.product] || ''
+  const url =
+    productImageMap.value[p.product] ||
+    productImageMap.value[String(p.product)] ||
+    ''
+  // DEBUG: 画像URL解決ログ
+  console.debug('[image-url]', {
+    product: p.product,
+    product_code: p.product_code,
+    raw_url: url,
+    mediaBaseUrl,
+    apiBaseUrl,
+  })
   if (!url) return ''
   if (url.startsWith('http://') || url.startsWith('https://')) return url
-  if (url.startsWith('/media')) return `${mediaBaseUrl}${url}`
+  if (url.startsWith('/media')) {
+    // 通常は backend の MEDIA_URL を指す。フロントが 8501 の場合は 8002 に差し替え済み。
+    return `${mediaBaseUrl}${url}`
+  }
   return url
 }
 
@@ -534,6 +568,10 @@ const loadScrapProducts = async (processId, baseProducts) => {
       ...productionProducts.value.map((p) => p.product).filter(Boolean),
       ...scrapProducts.value.map((p) => p.product).filter(Boolean),
     ])
+    console.debug('[image-load]', {
+      idCount: idSet.size,
+      ids: Array.from(idSet).slice(0, 20),
+    })
     await loadProductImages(idSet)
   } catch (error) {
     console.error('仕損品記録用製品リスト取得エラー:', error)
@@ -570,12 +608,47 @@ const filterCoproductChildrenFromList = async (candidates) => {
 
 const loadProductImages = async (idSet) => {
   try {
+    if (!idSet || idSet.size === 0) {
+      productImageMap.value = {}
+      return
+    }
+    // 1) まとめて取得
     const all = await api.products.getAllProducts({ page_size: 5000 })
     const map = {}
     all.forEach((p) => {
-      if (idSet.has(p.id)) {
-        map[p.id] = p.image_url || ''
+      const pidNum = p.id
+      const pidStr = String(p.id)
+      if (idSet.has(pidNum) || idSet.has(pidStr)) {
+        const val = p.image_url || ''
+        map[pidNum] = val
+        map[pidStr] = val
       }
+    })
+
+    // 2) 取りこぼしがあれば個別に取得（ページング漏れ対策）
+    const missingIds = [...idSet].filter((id) => !(String(id) in map))
+    if (missingIds.length) {
+      console.debug('[image-map] fetch missing individually', missingIds.slice(0, 10))
+      for (const mid of missingIds) {
+        try {
+          const res = await api.products.getProduct(mid)
+          const p = res.data || res
+          if (p) {
+            const pidNum = p.id
+            const pidStr = String(p.id)
+            const val = p.image_url || ''
+            map[pidNum] = val
+            map[pidStr] = val
+          }
+        } catch (err) {
+          console.warn('製品詳細取得失敗 (画像用):', mid, err)
+        }
+      }
+    }
+
+    console.debug('[image-map]', {
+      count: Object.keys(map).length,
+      sample: Object.entries(map).slice(0, 5),
     })
     productImageMap.value = map
   } catch (error) {
@@ -1105,15 +1178,3 @@ label {
   margin-top: 0;
 }
 </style>
-const apiBaseUrl =
-  import.meta.env.VITE_API_BASE_URL ||
-  (typeof window !== 'undefined' ? `${window.location.origin}/api` : '')
-let mediaBaseUrl = ''
-try {
-  mediaBaseUrl = new URL(apiBaseUrl).origin
-} catch (e) {
-  mediaBaseUrl = typeof window !== 'undefined' ? window.location.origin : ''
-}
-if (mediaBaseUrl.endsWith(':8501')) {
-  mediaBaseUrl = mediaBaseUrl.replace(':8501', ':8002')
-}
