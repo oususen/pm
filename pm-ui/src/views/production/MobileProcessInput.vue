@@ -35,13 +35,13 @@
     </div>
 
     <div
-      v-if="(record.record_type === 'PRODUCTION' || record.record_type === 'SCRAP') && plannedProducts.length"
+      v-if="(record.record_type === 'PRODUCTION' || record.record_type === 'SCRAP') && currentProductList.length"
       class="planned-buttons"
     >
       <span class="planned-label">本日の計画対象:</span>
       <div class="planned-list">
         <button
-          v-for="p in plannedProducts"
+          v-for="p in currentProductList"
           :key="`${p.plan_date}-${p.product}-${p.process}`"
           class="btn-planned"
           :class="{ active: record.product_id === p.product }"
@@ -65,12 +65,12 @@
       </div>
 
       <div class="product-inputs">
-        <template v-if="plannedProducts.length && !manualProduct">
+        <template v-if="currentProductList.length && !manualProduct">
           <div class="product-select-row">
             <select v-model="record.product_id" class="input-large flex-input">
               <option value="">-- 製品を選択 --</option>
               <option
-                v-for="p in plannedProducts"
+                v-for="p in currentProductList"
                 :key="`${p.plan_date}-${p.product_code}`"
                 :value="p.product"
               >
@@ -80,7 +80,7 @@
           </div>
         </template>
 
-        <template v-if="manualProduct || !plannedProducts.length">
+        <template v-if="manualProduct || !currentProductList.length">
           <div class="product-select-row">
             <input
               type="text"
@@ -89,7 +89,7 @@
               class="input-normal flex-input"
             />
           </div>
-          <div v-if="!plannedProducts.length" class="hint">
+          <div v-if="!currentProductList.length" class="hint">
             本日の計画が未取得のため手入力になります（工程の所属ラインが未設定、または需要展開が未実行の可能性があります）。
           </div>
         </template>
@@ -229,7 +229,8 @@ const recentRecords = ref([])
 const submitting = ref(false)
 
 const manualProduct = ref(false)
-const plannedProducts = ref([])
+const productionProducts = ref([])
+const scrapProducts = ref([])
 const defaultProductId = ref(null)
 
 const record = ref({
@@ -284,6 +285,15 @@ const currentDateYmd = computed(() => {
   const m = String(logical.getMonth() + 1).padStart(2, '0')
   const d = String(logical.getDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
+})
+
+const currentProductList = computed(() => {
+  if (record.value.record_type === 'PRODUCTION') {
+    return productionProducts.value
+  } else if (record.value.record_type === 'SCRAP') {
+    return scrapProducts.value
+  }
+  return []
 })
 
 const canSubmit = computed(() => {
@@ -390,7 +400,8 @@ const loadRecentRecords = async () => {
 const loadPlannedProducts = async () => {
   if (!selectedProcessId.value) return
 
-  plannedProducts.value = []
+  productionProducts.value = []
+  scrapProducts.value = []
   try {
     const process = processes.value.find(p => String(p.id) === String(selectedProcessId.value))
     const lineId = process?.line
@@ -403,8 +414,9 @@ const loadPlannedProducts = async () => {
       plan_date: currentDateYmd.value,
     })
     const listItems = listRes.data.results || listRes.data || []
+    let tempProducts = []
     if (Array.isArray(listItems) && listItems.length > 0) {
-      plannedProducts.value = listItems
+      tempProducts = listItems
     } else {
       // まだ line-backlogs が計算されていない場合は pickup で生成（当日のみ）
       const pickupRes = await api.lineBacklogs.pickup({
@@ -413,7 +425,7 @@ const loadPlannedProducts = async () => {
         end_date: currentDateYmd.value,
       })
       const pickupItems = pickupRes.data.results || pickupRes.data || []
-      plannedProducts.value = (Array.isArray(pickupItems) ? pickupItems : []).filter(
+      tempProducts = (Array.isArray(pickupItems) ? pickupItems : []).filter(
         (it) => String(it.process) === String(selectedProcessId.value) && String(it.plan_date) === String(currentDateYmd.value)
       )
     }
@@ -427,31 +439,35 @@ const loadPlannedProducts = async () => {
       })
       const allItems = allRes.data.results || allRes.data || []
       const merged = new Map()
-      ;[...(plannedProducts.value || []), ...(allItems || [])].forEach((it) => {
+      ;[...(tempProducts || []), ...(allItems || [])].forEach((it) => {
         const key = `${it.product}_${it.process}`
         if (!merged.has(key)) merged.set(key, it)
       })
-      plannedProducts.value = Array.from(merged.values())
+      tempProducts = Array.from(merged.values())
     } catch (e) {
       console.error('工程全体の候補取得エラー:', e)
     }
 
-    await filterCoproductChildren()
+    // 連産品の子品番を除外（生産記録用）
+    const filteredForProduction = await filterCoproductChildrenFromList(tempProducts)
 
-    if (plannedProducts.value.length === 1 && plannedProducts.value[0].product) {
-      defaultProductId.value = plannedProducts.value[0].product
+    // 生産記録用と仕損品記録用に独立したコピーを作成
+    productionProducts.value = [...filteredForProduction]
+    scrapProducts.value = [...filteredForProduction]
+
+    if (productionProducts.value.length === 1 && productionProducts.value[0].product) {
+      defaultProductId.value = productionProducts.value[0].product
     }
   } catch (error) {
     console.error('本日の計画取得エラー:', error)
   }
 }
 
-const filterCoproductChildren = async () => {
-  const candidates = plannedProducts.value || []
+const filterCoproductChildrenFromList = async (candidates) => {
   const parentSetItems = candidates.filter(
     (it) => it.product && typeof it.product_code === 'string' && it.product_code.startsWith('STYD')
   )
-  if (parentSetItems.length === 0) return
+  if (parentSetItems.length === 0) return candidates
 
   const parentIds = [...new Set(parentSetItems.map((it) => it.product))]
   const childIds = new Set()
@@ -469,8 +485,8 @@ const filterCoproductChildren = async () => {
     }
   }
 
-  if (childIds.size === 0) return
-  plannedProducts.value = candidates.filter((it) => !childIds.has(it.product))
+  if (childIds.size === 0) return candidates
+  return candidates.filter((it) => !childIds.has(it.product))
 }
 
 const selectPlannedProduct = (p) => {
@@ -500,7 +516,7 @@ watch(
     }
     if (!record.value.product_id && defaultProductId.value) {
       record.value.product_id = defaultProductId.value
-      const plan = plannedProducts.value.find(
+      const plan = currentProductList.value.find(
         (p) => String(p.product) === String(defaultProductId.value)
       )
       if (plan && plan.plan_qty != null && !Number.isNaN(Number(plan.plan_qty))) {
