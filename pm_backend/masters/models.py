@@ -9,6 +9,10 @@ class Product(models.Model):
         ('MATERIAL', '材料'),
         ('PURCHASED', '購入品'),
     ]
+    MANAGEMENT_UNIT_CHOICES = [
+        ('DAY', '日単位管理'),
+        ('MINUTE', '分単位管理'),
+    ]
 
     id = models.BigAutoField(primary_key=True)
     product_code = models.CharField(max_length=30, unique=True, verbose_name='品番コード')
@@ -18,6 +22,15 @@ class Product(models.Model):
     unit = models.CharField(max_length=10, default='個', verbose_name='単位')
     standard_lt_days = models.IntegerField(null=True, blank=True, verbose_name='標準LT(日)')
     image_url = models.CharField(max_length=255, null=True, blank=True, verbose_name='画像URL')
+    line = models.ForeignKey('Line', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='ライン情報')
+    process = models.ForeignKey('Process', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='工程情報')
+    management_unit = models.CharField(
+        max_length=10,
+        choices=MANAGEMENT_UNIT_CHOICES,
+        null=True,
+        blank=True,
+        verbose_name='管理区分'
+    )
     self_lt_days = models.IntegerField(null=True, blank=True, verbose_name='自工程LT(日)')
     is_final_product = models.BooleanField(default=False, verbose_name='最終製品')
     is_line_final_product = models.BooleanField(

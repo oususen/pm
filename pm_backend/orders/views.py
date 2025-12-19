@@ -242,7 +242,7 @@ class StgOrderDailyViewSet(viewsets.ModelViewSet):
 class LineDemandViewSet(viewsets.ModelViewSet):
     """ライン需要展開ViewSet"""
 
-    queryset = LineDemand.objects.all().select_related('line', 'product', 'routing_step')
+    queryset = LineDemand.objects.all().select_related('line', 'product', 'routing_step', 'routing_step__process')
     serializer_class = LineDemandSerializer
     pagination_class = None  # 小規模データ想定のためページングなしで返却
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
