@@ -475,6 +475,27 @@ function formatTimeRange(start, durationMin) {
   return `${formatTime(start)} - ${formatTime(end)}`
 }
 
+function computeEndTime(start, durationMin, segments) {
+  if (!start || durationMin <= 0) return start
+  let idx = findSegmentIndexByTime(segments, start)
+  let cursor = new Date(start)
+  if (idx < 0) {
+    if (segments.length && start < segments[0].start) {
+      idx = 0
+      cursor = new Date(segments[0].start)
+    } else {
+      return addMinutes(start, durationMin)
+    }
+  }
+  const endState = advanceCursor({ index: idx, cursor }, durationMin, segments)
+  return endState ? endState.cursor : addMinutes(start, durationMin)
+}
+
+function formatTimeRangeWithSegments(start, durationMin, segments) {
+  const end = computeEndTime(start, durationMin, segments)
+  return `${formatTime(start)} - ${formatTime(end)}`
+}
+
 function buildProcessGantt(rawData) {
   const segments = workingSegments.value
   if (!segments.length) return []
@@ -567,7 +588,7 @@ function buildProcessGantt(rawData) {
         leftPx: startOffsetMin * minuteWidth.value,
         widthPx: durationMin * minuteWidth.value,
         color: getBarColor(rec.product),
-        label: formatTimeRange(cursorState.cursor, durationMin),
+        label: formatTimeRangeWithSegments(cursorState.cursor, durationMin, segments),
         planQty: Number(rec.plan_qty || 0),
         startTime,
         durationMin,
@@ -625,7 +646,7 @@ function buildProcessGantt(rawData) {
         const offsetMinVal = timeToOffsetMinutes(segments, newStart)
         bar.leftPx = offsetMinVal * minuteWidth.value
         bar.startTime = newStart
-        bar.label = formatTimeRange(newStart, bar.durationMin)
+        bar.label = formatTimeRangeWithSegments(newStart, bar.durationMin, segments)
       })
     }
   })
