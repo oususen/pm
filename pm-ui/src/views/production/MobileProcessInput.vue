@@ -1,5 +1,5 @@
 <template>
-  <div class="mobile-input">
+  <div class="mobile-input" :class="pageModeClass">
     <div class="mobile-header">
       <h2>工程作業記録</h2>
       <div class="header-info">
@@ -34,58 +34,88 @@
       </div>
     </div>
 
-    <div v-if="record.record_type" class="section">
-      <label :class="record.record_type === 'PRODUCTION' ? 'label-required' : ''">製品</label>
-
-      <template v-if="plannedProducts.length && !manualProduct">
-        <select v-model="record.product_id" class="input-large">
-          <option value="">-- 製品を選択 --</option>
-          <option
-            v-for="p in plannedProducts"
-            :key="`${p.plan_date}-${p.product_code}`"
-            :value="p.product"
-          >
-            {{ p.product_code }} - {{ p.product_name || '' }}（計画: {{ formatNumber(p.plan_qty || 0) }}）
-          </option>
-        </select>
-        <button type="button" class="btn-link" @click="toggleManualProduct">
-          手入力する
+    <div
+      v-if="(record.record_type === 'PRODUCTION' || record.record_type === 'SCRAP') && plannedProducts.length"
+      class="planned-buttons"
+    >
+      <span class="planned-label">本日の計画対象:</span>
+      <div class="planned-list">
+        <button
+          v-for="p in plannedProducts"
+          :key="`${p.plan_date}-${p.product}-${p.process}`"
+          class="btn-planned"
+          :class="{ active: record.product_id === p.product }"
+          type="button"
+          @click="selectPlannedProduct(p)"
+        >
+          {{ p.product_code || '品番未設定' }}
+          <span v-if="p.plan_qty != null" class="plan-qty">({{ p.plan_qty }})</span>
         </button>
-      </template>
-
-      <template v-if="manualProduct || !plannedProducts.length">
-        <input
-          type="text"
-          v-model="record.product_code"
-          placeholder="品番を入力（例: YD60000000）"
-          class="input-normal"
-        />
-        <button type="button" class="btn-link" @click="toggleManualProduct">
-          検索に戻る
-        </button>
-        <div v-if="!plannedProducts.length" class="hint">
-          本日の計画が未取得のため手入力になります（工程の所属ラインが未設定、または需要展開が未実行の可能性があります）。
-        </div>
-      </template>
+      </div>
     </div>
 
-    <div v-if="record.record_type === 'PRODUCTION'" class="form-section">
-      <h3 class="section-title">生産記録</h3>
+    <div v-if="record.record_type" class="section inline-row product-row">
+      <label :class="record.record_type === 'PRODUCTION' ? 'label-required inline-label' : 'inline-label'">製品</label>
 
-      <div class="section">
-        <label class="label-required">生産数量</label>
+      <div class="product-inputs">
+        <template v-if="plannedProducts.length && !manualProduct">
+          <div class="product-select-row">
+            <select v-model="record.product_id" class="input-large flex-input">
+              <option value="">-- 製品を選択 --</option>
+              <option
+                v-for="p in plannedProducts"
+                :key="`${p.plan_date}-${p.product_code}`"
+                :value="p.product"
+              >
+                {{ p.product_code }} - {{ p.product_name || '' }}（計画: {{ formatNumber(p.plan_qty || 0) }}）
+              </option>
+            </select>
+            <button type="button" class="btn-link inline-link" @click="toggleManualProduct">
+              手入力する
+            </button>
+          </div>
+        </template>
+
+        <template v-if="manualProduct || !plannedProducts.length">
+          <div class="product-select-row">
+            <input
+              type="text"
+              v-model="record.product_code"
+              placeholder="品番を入力（例: YD60000000）"
+              class="input-normal flex-input"
+            />
+            <button type="button" class="btn-link inline-link" @click="toggleManualProduct">
+              検索に戻る
+            </button>
+          </div>
+          <div v-if="!plannedProducts.length" class="hint">
+            本日の計画が未取得のため手入力になります（工程の所属ラインが未設定、または需要展開が未実行の可能性があります）。
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <div
+      v-if="record.record_type === 'PRODUCTION' || record.record_type === 'SCRAP'"
+      class="form-section"
+      :class="formModeClass"
+    >
+      <div class="section inline-row qty-row">
+        <label class="label-required inline-label">
+          {{ record.record_type === 'SCRAP' ? '仕損数量' : '生産数量' }}
+        </label>
         <input
           type="number"
           v-model.number="record.qty"
           min="1"
           step="1"
           inputmode="numeric"
-          class="input-large input-qty"
+          class="input-large input-qty flex-input"
           placeholder="数量を入力"
         />
       </div>
 
-      <div class="quick-btns">
+      <div class="quick-btns" v-if="quickQtyPresets.length">
         <button
           v-for="preset in quickQtyPresets"
           :key="preset"
@@ -215,6 +245,7 @@ const record = ref({
 const recordTypes = [
   { value: 'PRODUCTION', label: '生産記録' },
   { value: 'EQUIPMENT_STATE', label: '設備状態変更' },
+  { value: 'SCRAP', label: '仕損品記録' },
 ]
 
 const equipmentStates = [
@@ -226,7 +257,7 @@ const equipmentStates = [
   { value: 'STOPPED', label: '停止' },
 ]
 
-const quickQtyPresets = ref([10, 50, 100, 500])
+const quickQtyPresets = ref([])
 
 const currentDate = computed(() => {
   return new Date().toLocaleDateString('ja-JP', {
@@ -248,7 +279,7 @@ const currentDateYmd = computed(() => {
 const canSubmit = computed(() => {
   if (!selectedProcessId.value || !record.value.record_type) return false
 
-  if (record.value.record_type === 'PRODUCTION') {
+  if (record.value.record_type === 'PRODUCTION' || record.value.record_type === 'SCRAP') {
     const hasProduct = !!record.value.product_id || !!(record.value.product_code || '').trim()
     return record.value.qty > 0 && hasProduct
   }
@@ -305,7 +336,7 @@ const submitRecord = async () => {
       data.product_code = record.value.product_code.trim()
     }
 
-    if (record.value.record_type === 'PRODUCTION') {
+    if (record.value.record_type === 'PRODUCTION' || record.value.record_type === 'SCRAP') {
       data.qty = record.value.qty
       data.batch_no = record.value.batch_no
       data.operator_name = record.value.operator_name
@@ -414,17 +445,39 @@ const filterCoproductChildren = async () => {
   plannedProducts.value = candidates.filter((it) => !childIds.has(it.product))
 }
 
+const selectPlannedProduct = (p) => {
+  record.value.product_id = p.product || ''
+  record.value.product_code = p.product_code || ''
+  manualProduct.value = false
+  if (record.value.record_type === 'PRODUCTION') {
+    const qtyNum = Number(p.plan_qty)
+    if (!Number.isNaN(qtyNum)) {
+      record.value.qty = qtyNum
+    }
+  }
+}
+
 watch(
   () => record.value.record_type,
   (type) => {
     if (!type) return
-    if (type !== 'PRODUCTION') {
+    if (type === 'EQUIPMENT_STATE') {
       record.value.qty = null
       record.value.batch_no = ''
       record.value.operator_name = ''
+    } else if (type === 'SCRAP') {
+      if (!record.value.qty || record.value.qty <= 0) {
+        record.value.qty = 1
+      }
     }
     if (!record.value.product_id && defaultProductId.value) {
       record.value.product_id = defaultProductId.value
+      const plan = plannedProducts.value.find(
+        (p) => String(p.product) === String(defaultProductId.value)
+      )
+      if (plan && plan.plan_qty != null && !Number.isNaN(Number(plan.plan_qty))) {
+        record.value.qty = Number(plan.plan_qty)
+      }
     }
   }
 )
@@ -441,6 +494,31 @@ const formatNumber = (value) => {
   if (value === null || value === undefined) return '0'
   return Number(value).toLocaleString()
 }
+
+const pageModeClass = computed(() => {
+  switch (record.value.equipment_state) {
+    case 'RUNNING':
+      return 'page-run'
+    case 'IDLE':
+      return 'page-idle'
+    case 'SETUP':
+      return 'page-setup'
+    case 'MAINTENANCE':
+      return 'page-maintenance'
+    case 'BREAKDOWN':
+      return 'page-breakdown'
+    case 'STOPPED':
+      return 'page-stopped'
+    default:
+      return ''
+  }
+})
+
+const formModeClass = computed(() => {
+  if (record.value.record_type === 'PRODUCTION') return 'mode-production'
+  if (record.value.record_type === 'SCRAP') return 'mode-scrap'
+  return ''
+})
 
 const loadProcesses = async () => {
   try {
@@ -465,6 +543,24 @@ onMounted(() => {
   background: #eef2f6;
   min-height: 100vh;
   font-family: "Noto Sans JP", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+.mobile-input.page-run {
+  background: #86efac;
+}
+.mobile-input.page-idle {
+  background: #f97316;
+}
+.mobile-input.page-setup {
+  background: #fed7aa;
+}
+.mobile-input.page-maintenance {
+  background: #93c5fd;
+}
+.mobile-input.page-breakdown {
+  background: #ef4444;
+}
+.mobile-input.page-stopped {
+  background: #ffffff;
 }
 
 .mobile-header {
@@ -544,6 +640,9 @@ label {
   text-align: center;
   font-weight: 700;
 }
+.qty-row .input-qty {
+  max-width: 220px;
+}
 
 .type-buttons {
   display: flex;
@@ -620,6 +719,16 @@ label {
   padding: 16px;
   border-radius: 8px;
   margin-bottom: 16px;
+  border: 1px solid transparent;
+}
+.form-section.mode-production {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+}
+.form-section.mode-scrap {
+  background: #ffd6d6;
+  border-color: #ffb3b3;
 }
 
 .action-section {
@@ -704,6 +813,37 @@ label {
   font-size: 12px;
   color: #64748b;
 }
+.planned-buttons {
+  margin-top: -2px;
+  display: grid;
+  gap: 6px;
+}
+.planned-label {
+  font-size: 12px;
+  color: #475569;
+}
+.planned-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.btn-planned {
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-planned .plan-qty {
+  margin-left: 4px;
+  color: #475569;
+}
+.btn-planned.active {
+  border-color: #4a7ae5;
+  background: #eff6ff;
+  color: #1f2a44;
+}
 
 .btn-link {
   margin-top: 8px;
@@ -740,5 +880,23 @@ label {
 
 .flex-input {
   flex: 1;
+}
+
+.product-row {
+  align-items: flex-start;
+}
+.product-inputs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.product-select-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.inline-link {
+  margin-top: 0;
 }
 </style>
