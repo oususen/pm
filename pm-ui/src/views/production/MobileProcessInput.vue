@@ -55,7 +55,14 @@
     </div>
 
     <div v-if="record.record_type" class="section inline-row product-row">
-      <label :class="record.record_type === 'PRODUCTION' ? 'label-required inline-label' : 'inline-label'">製品</label>
+      <div class="label-stack">
+        <label :class="record.record_type === 'PRODUCTION' ? 'label-required inline-label' : 'inline-label'">製品</label>
+        <div v-if="record.record_type === 'SCRAP'" class="product-toggle">
+          <button type="button" class="btn-link toggle-link" @click="toggleManualProduct">
+            {{ manualProduct ? '検索に戻る' : '手入力する' }}
+          </button>
+        </div>
+      </div>
 
       <div class="product-inputs">
         <template v-if="plannedProducts.length && !manualProduct">
@@ -70,9 +77,6 @@
                 {{ p.product_code }} - {{ p.product_name || '' }}（計画: {{ formatNumber(p.plan_qty || 0) }}）
               </option>
             </select>
-            <button type="button" class="btn-link inline-link" @click="toggleManualProduct">
-              手入力する
-            </button>
           </div>
         </template>
 
@@ -84,9 +88,6 @@
               placeholder="品番を入力（例: YD60000000）"
               class="input-normal flex-input"
             />
-            <button type="button" class="btn-link inline-link" @click="toggleManualProduct">
-              検索に戻る
-            </button>
           </div>
           <div v-if="!plannedProducts.length" class="hint">
             本日の計画が未取得のため手入力になります（工程の所属ラインが未設定、または需要展開が未実行の可能性があります）。
@@ -415,6 +416,24 @@ const loadPlannedProducts = async () => {
       plannedProducts.value = (Array.isArray(pickupItems) ? pickupItems : []).filter(
         (it) => String(it.process) === String(selectedProcessId.value) && String(it.plan_date) === String(currentDateYmd.value)
       )
+    }
+
+    // 追加: この工程の加工物全体を候補に含める（当日以外のバックログも統合）
+    try {
+      const allRes = await api.lineBacklogs.getLineBacklogs({
+        line: lineId,
+        process: selectedProcessId.value,
+        page_size: 500,
+      })
+      const allItems = allRes.data.results || allRes.data || []
+      const merged = new Map()
+      ;[...(plannedProducts.value || []), ...(allItems || [])].forEach((it) => {
+        const key = `${it.product}_${it.process}`
+        if (!merged.has(key)) merged.set(key, it)
+      })
+      plannedProducts.value = Array.from(merged.values())
+    } catch (e) {
+      console.error('工程全体の候補取得エラー:', e)
     }
 
     await filterCoproductChildren()
@@ -871,6 +890,11 @@ label {
   align-items: center;
   gap: 10px;
 }
+.label-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 .dual-row {
   flex-wrap: wrap;
   align-items: flex-start;
@@ -904,6 +928,12 @@ label {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.product-toggle {
+  margin-top: 0;
+}
+.toggle-link {
+  padding: 0;
 }
 .inline-link {
   margin-top: 0;
