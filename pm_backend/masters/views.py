@@ -65,6 +65,86 @@ class ProcessViewSet(viewsets.ModelViewSet):
     ordering_fields = ['process_code', 'created_at']
     ordering = ['process_code']
 
+    @action(detail=True, methods=['get'], url_path='related-products')
+    def related_products(self, request, pk=None):
+        """
+        工程に関連する製品を取得:
+        - 連産品（仮想セット品番）: BOM.is_coproduct=true の親製品
+        - 連産品の子品番: 連産品のBOM配下にある実際の製品
+        - 使用する社内生産品: RoutingStepMaterial から取得した中間品
+        - 使用する購入品: RoutingStepMaterial から取得した購入部品
+        """
+        process = self.get_object()
+        products_map = {}  # key: product_id, value: {product, relation_type}
+
+        # 1. この工程を含むルーティングステップを取得
+        routing_steps = RoutingStep.objects.filter(process=process).select_related('routing')
+
+        for step in routing_steps:
+            routing = step.routing
+            if not routing or not routing.product:
+                continue
+
+            # 2. ルーティングの親製品を取得
+            parent_product = routing.product
+
+            # 2-1. 親製品が連産品かチェック
+            try:
+                bom = BOM.objects.get(parent_product=parent_product, is_coproduct=True)
+                # 連産品の場合、親製品を追加
+                if parent_product.id not in products_map:
+                    products_map[parent_product.id] = {
+                        'product': parent_product,
+                        'relation_type': 'coproduct_parent'
+                    }
+
+                # 連産品の子品番を追加
+                for child in bom.bom_items.all():
+                    if child.child_product and child.child_product.id not in products_map:
+                        products_map[child.child_product.id] = {
+                            'product': child.child_product,
+                            'relation_type': 'coproduct_child'
+                        }
+            except BOM.DoesNotExist:
+                pass
+
+            # 3. このルーティングステップで使用する材料を取得
+            materials = RoutingStepMaterial.objects.filter(
+                routing_step=step
+            ).select_related('component')
+
+            for material in materials:
+                component = material.component
+                if not component or component.id in products_map:
+                    continue
+
+                # カテゴリで社内生産品か購入品かを判定
+                if component.category in ('ASSEMBLY', 'SINGLE'):
+                    relation_type = 'intermediate'
+                elif component.category in ('PURCHASED', 'MATERIAL'):
+                    relation_type = 'purchased'
+                else:
+                    relation_type = 'other'
+
+                products_map[component.id] = {
+                    'product': component,
+                    'relation_type': relation_type
+                }
+
+        # 結果をシリアライズ
+        result = []
+        for item in products_map.values():
+            product = item['product']
+            result.append({
+                'id': product.id,
+                'product_code': product.product_code,
+                'product_name': product.product_name,
+                'category': product.category,
+                'relation_type': item['relation_type']
+            })
+
+        return Response(result)
+
 
 class LineViewSet(viewsets.ModelViewSet):
     queryset = Line.objects.all()

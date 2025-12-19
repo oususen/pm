@@ -14,4 +14,7 @@ export const createProcessesAPI = (client) => ({
   deleteProcess(id) {
     return client.delete(`/processes/${id}/`)
   },
+  getRelatedProducts(processId) {
+    return client.get(`/processes/${processId}/related-products/`)
+  },
 })

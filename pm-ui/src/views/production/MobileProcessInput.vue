@@ -451,15 +451,59 @@ const loadPlannedProducts = async () => {
     // 連産品の子品番を除外（生産記録用）
     const filteredForProduction = await filterCoproductChildrenFromList(tempProducts)
 
-    // 生産記録用と仕損品記録用に独立したコピーを作成
+    // 生産記録用リストを作成
     productionProducts.value = [...filteredForProduction]
-    scrapProducts.value = [...filteredForProduction]
+
+    // 仕損品記録用リストを作成: related-products APIから工程関連製品を追加
+    await loadScrapProducts(selectedProcessId.value, filteredForProduction)
 
     if (productionProducts.value.length === 1 && productionProducts.value[0].product) {
       defaultProductId.value = productionProducts.value[0].product
     }
   } catch (error) {
     console.error('本日の計画取得エラー:', error)
+  }
+}
+
+const loadScrapProducts = async (processId, baseProducts) => {
+  try {
+    // 基本リスト（生産記録と同じ）から開始
+    const scrapMap = new Map()
+    baseProducts.forEach((it) => {
+      const key = `${it.product}_${it.process}`
+      if (!scrapMap.has(key)) scrapMap.set(key, it)
+    })
+
+    console.log('仕損品記録: 基本リスト件数:', baseProducts.length)
+
+    // related-products APIから工程関連製品を取得して追加
+    const relatedRes = await api.processes.getRelatedProducts(processId)
+    const relatedProducts = relatedRes.data || []
+
+    console.log('仕損品記録: 工程関連製品件数:', relatedProducts.length, relatedProducts)
+
+    relatedProducts.forEach((prod) => {
+      const key = `${prod.id}_${processId}`
+      if (!scrapMap.has(key)) {
+        // line-backlog形式に変換して追加
+        scrapMap.set(key, {
+          product: prod.id,
+          product_code: prod.product_code,
+          product_name: prod.product_name,
+          process: processId,
+          plan_qty: 0,
+          plan_date: null,
+          relation_type: prod.relation_type, // 'coproduct_parent', 'coproduct_child', 'intermediate', 'purchased'
+        })
+      }
+    })
+
+    scrapProducts.value = Array.from(scrapMap.values())
+    console.log('仕損品記録: 最終リスト件数:', scrapProducts.value.length)
+  } catch (error) {
+    console.error('仕損品記録用製品リスト取得エラー:', error)
+    // エラー時は基本リストのみを使用
+    scrapProducts.value = [...baseProducts]
   }
 }
 
