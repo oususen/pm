@@ -127,17 +127,28 @@
           <thead>
             <tr>
               <th>日付</th>
+              <th>曜</th>
               <th>稼働</th>
               <th>稼働分</th>
               <th>勤務パターン</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="d in visibleDays" :key="d.id">
               <td>{{ d.target_date }}</td>
+              <td class="weekday">{{ formatWeekday(d.target_date) }}</td>
               <td>{{ d.is_working_day ? '○' : '×' }}</td>
               <td class="num">{{ d.work_minutes ?? '' }}</td>
               <td>{{ d.work_pattern_name ?? '' }}</td>
+              <td class="actions-inline">
+                <button class="btn tiny" @click="setHoliday(d)" :disabled="updatingDayId === d.id">
+                  休日にする
+                </button>
+                <button class="btn tiny secondary" @click="setWorkingDay(d)" :disabled="updatingDayId === d.id">
+                  稼働日にする
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -164,6 +175,7 @@ const selectedCalendar = ref('')
 const savingAssign = ref(false)
 const creatingCalendar = ref(false)
 const applyingRange = ref(false)
+const updatingDayId = ref(null)
 
 const newCalendar = ref({
   code: '',
@@ -247,6 +259,11 @@ const visibleDays = computed(() => {
     return true
   })
 })
+
+const formatWeekday = (dateStr) => {
+  const w = new Date(dateStr).getDay()
+  return ['日', '月', '火', '水', '木', '金', '土'][w] || ''
+}
 
 const loadLines = async () => {
   const res = await api.lines.getLines()
@@ -371,6 +388,46 @@ const applyRange = async () => {
   }
 }
 
+const setHoliday = async (day) => {
+  if (!day?.id) return
+  updatingDayId.value = day.id
+  try {
+    await api.calendars.updateCalendarDay(day.id, {
+      calendar: day.calendar,
+      target_date: day.target_date,
+      is_working_day: false,
+      work_minutes: 0,
+      work_pattern: null,
+    })
+    await loadCalendarDays()
+  } catch (e) {
+    console.error('休日設定エラー', e)
+    alert('休日設定に失敗しました。')
+  } finally {
+    updatingDayId.value = null
+  }
+}
+
+const setWorkingDay = async (day) => {
+  if (!day?.id) return
+  updatingDayId.value = day.id
+  try {
+    await api.calendars.updateCalendarDay(day.id, {
+      calendar: day.calendar,
+      target_date: day.target_date,
+      is_working_day: true,
+      work_minutes: (day.work_minutes ?? range.value.workMinutes ?? 480),
+      work_pattern: (day.work_pattern ?? range.value.workPattern) || null,
+    })
+    await loadCalendarDays()
+  } catch (e) {
+    console.error('稼働日設定エラー', e)
+    alert('稼働日設定に失敗しました。')
+  } finally {
+    updatingDayId.value = null
+  }
+}
+
 onMounted(async () => {
   await Promise.all([loadLines(), loadCalendars(), loadWorkPatterns()])
 })
@@ -470,6 +527,14 @@ onMounted(async () => {
   max-height: 360px;
   overflow: auto;
   margin-top: 8px;
+}
+.actions-inline {
+  display: flex;
+  gap: 6px;
+}
+.btn.tiny {
+  padding: 4px 8px;
+  font-size: 12px;
 }
 .filter-row {
   display: flex;
