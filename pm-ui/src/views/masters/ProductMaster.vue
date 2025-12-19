@@ -135,6 +135,32 @@
             <input v-model.number="formData.standard_lt_days" type="number" min="0" />
           </div>
           <div class="form-group">
+            <label>ライン情報</label>
+            <select v-model="formData.line">
+              <option :value="null">未設定</option>
+              <option v-for="line in lines" :key="line.id" :value="line.id">
+                {{ line.line_code }} - {{ line.line_name }}
+              </option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>工程情報</label>
+            <select v-model="formData.process">
+              <option :value="null">未設定</option>
+              <option v-for="proc in processes" :key="proc.id" :value="proc.id">
+                {{ proc.process_code }} - {{ proc.process_name }}
+              </option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>管理区分（日/分）</label>
+            <select v-model="formData.management_unit">
+              <option :value="null">未設定</option>
+              <option value="DAY">日</option>
+              <option value="MINUTE">分</option>
+            </select>
+          </div>
+          <div class="form-group">
             <label>画像URL</label>
             <input v-model="formData.image_url" placeholder="/media/products/..." />
             <div class="upload-row">
@@ -199,6 +225,8 @@ const getCategoryLabel = (value) => categoryMap[value] || value
 
 // データ
 const products = ref([])
+const lines = ref([])
+const processes = ref([])
 const showDialog = ref(false)
 const isEdit = ref(false)
 const filters = ref({
@@ -216,6 +244,9 @@ const formData = ref({
   category: '',
   unit: '個',
   standard_lt_days: 0,
+  line: null,
+  process: null,
+  management_unit: null,
   is_active: true,
   is_line_final_product: false,
   is_final_product: false,
@@ -263,6 +294,24 @@ const fetchProducts = async () => {
   }
 }
 
+const fetchLines = async () => {
+  try {
+    const response = await api.lines.getLines()
+    lines.value = response.data.results || response.data
+  } catch (error) {
+    console.error('ライン取得エラー:', error)
+  }
+}
+
+const fetchProcesses = async () => {
+  try {
+    const response = await api.processes.getProcesses()
+    processes.value = response.data.results || response.data
+  } catch (error) {
+    console.error('工程取得エラー:', error)
+  }
+}
+
 // 新規ダイアログ表示
 const showNewDialog = () => {
   isEdit.value = false
@@ -272,6 +321,9 @@ const showNewDialog = () => {
     category: '',
     unit: '個',
     standard_lt_days: 0,
+    line: null,
+    process: null,
+    management_unit: null,
     is_active: true,
     is_line_final_product: false,
     is_final_product: false,
@@ -284,7 +336,12 @@ const showNewDialog = () => {
 // 編集ダイアログ表示
 const editProduct = (product) => {
   isEdit.value = true
-  formData.value = { ...product }
+  formData.value = {
+    ...product,
+    line: product.line ?? null,
+    process: product.process ?? null,
+    management_unit: product.management_unit ?? null,
+  }
   if (!formData.value.image_url) {
     formData.value.image_url = ''
   }
@@ -372,6 +429,8 @@ const deleteProduct = async (id) => {
 
 onMounted(() => {
   fetchProducts()
+  fetchLines()
+  fetchProcesses()
 })
 </script>
 
