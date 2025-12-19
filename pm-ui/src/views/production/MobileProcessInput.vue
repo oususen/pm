@@ -259,8 +259,17 @@ const equipmentStates = [
 
 const quickQtyPresets = ref([])
 
+const getWorkDate = () => {
+  // 勤務開始 08:00 を日付の境目にする。08:00 未満は前日扱い。
+  const now = new Date()
+  const logical = new Date(now)
+  logical.setHours(logical.getHours() - 8)
+  return logical
+}
+
 const currentDate = computed(() => {
-  return new Date().toLocaleDateString('ja-JP', {
+  const logical = getWorkDate()
+  return logical.toLocaleDateString('ja-JP', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
@@ -269,10 +278,10 @@ const currentDate = computed(() => {
 })
 
 const currentDateYmd = computed(() => {
-  const now = new Date()
-  const y = now.getFullYear()
-  const m = String(now.getMonth() + 1).padStart(2, '0')
-  const d = String(now.getDate()).padStart(2, '0')
+  const logical = getWorkDate()
+  const y = logical.getFullYear()
+  const m = String(logical.getMonth() + 1).padStart(2, '0')
+  const d = String(logical.getDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
 })
 
