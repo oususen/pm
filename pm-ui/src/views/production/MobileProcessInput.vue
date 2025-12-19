@@ -341,14 +341,6 @@ const getImageUrl = (p) => {
     productImageMap.value[p.product] ||
     productImageMap.value[String(p.product)] ||
     ''
-  // DEBUG: 画像URL解決ログ
-  console.debug('[image-url]', {
-    product: p.product,
-    product_code: p.product_code,
-    raw_url: url,
-    mediaBaseUrl,
-    apiBaseUrl,
-  })
   if (!url) return ''
   if (url.startsWith('http://') || url.startsWith('https://')) return url
   if (url.startsWith('/media')) {
@@ -536,13 +528,9 @@ const loadScrapProducts = async (processId, baseProducts) => {
       if (!scrapMap.has(key)) scrapMap.set(key, it)
     })
 
-    console.log('仕損品記録: 基本リスト件数:', baseProducts.length)
-
     // related-products APIから工程関連製品を取得して追加
     const relatedRes = await api.processes.getRelatedProducts(processId)
     const relatedProducts = relatedRes.data || []
-
-    console.log('仕損品記録: 工程関連製品件数:', relatedProducts.length, relatedProducts)
 
     relatedProducts.forEach((prod) => {
       const key = `${prod.id}_${processId}`
@@ -561,17 +549,12 @@ const loadScrapProducts = async (processId, baseProducts) => {
     })
 
     scrapProducts.value = Array.from(scrapMap.values())
-    console.log('仕損品記録: 最終リスト件数:', scrapProducts.value.length)
 
     // 画像マップを構築
     const idSet = new Set([
       ...productionProducts.value.map((p) => p.product).filter(Boolean),
       ...scrapProducts.value.map((p) => p.product).filter(Boolean),
     ])
-    console.debug('[image-load]', {
-      idCount: idSet.size,
-      ids: Array.from(idSet).slice(0, 20),
-    })
     await loadProductImages(idSet)
   } catch (error) {
     console.error('仕損品記録用製品リスト取得エラー:', error)
@@ -628,7 +611,6 @@ const loadProductImages = async (idSet) => {
     // 2) 取りこぼしがあれば個別に取得（ページング漏れ対策）
     const missingIds = [...idSet].filter((id) => !(String(id) in map))
     if (missingIds.length) {
-      console.debug('[image-map] fetch missing individually', missingIds.slice(0, 10))
       for (const mid of missingIds) {
         try {
           const res = await api.products.getProduct(mid)
@@ -646,10 +628,6 @@ const loadProductImages = async (idSet) => {
       }
     }
 
-    console.debug('[image-map]', {
-      count: Object.keys(map).length,
-      sample: Object.entries(map).slice(0, 5),
-    })
     productImageMap.value = map
   } catch (error) {
     console.error('製品画像取得エラー:', error)
