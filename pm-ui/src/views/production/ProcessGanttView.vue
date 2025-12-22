@@ -443,29 +443,48 @@ function buildProcessGantt(plans) {
           plan_qty: 0,
           sequence_no: plan.sequence_no != null ? Number(plan.sequence_no) : null,
           bars: [],
+          barsMap: new Map(),
         }
         procEntry.itemsMap.set(itemKey, item)
         procEntry.items.push(item)
       }
-      item.plan_qty += Number(proc.quantity ?? plan.plan_qty ?? 0)
+      const qtyValue = Number(proc.quantity ?? plan.plan_qty ?? 0)
+      if (proc.coproduct_group_key) {
+        item.plan_qty = Math.max(item.plan_qty, qtyValue)
+      } else {
+        item.plan_qty += qtyValue
+      }
       const seq = plan.sequence_no != null ? Number(plan.sequence_no) : null
       if (seq != null && (item.sequence_no == null || seq < item.sequence_no)) {
         item.sequence_no = seq
       }
 
-      item.bars.push({
-        key: `${plan.plan_id}_${proc.process_id}`,
-        planId: plan.plan_id,
-        processId: proc.process_id,
-        startTime,
-        endTime,
-        durationMs: endTime.getTime() - startTime.getTime(),
-        planQty: Number(proc.quantity ?? plan.plan_qty ?? 0),
-        color: getBarColor(outputProductId),
-        label: '',
-        leftPx: 0,
-        widthPx: 0,
-      })
+      const barKey = proc.coproduct_group_key || `${plan.plan_id}_${proc.process_id}_${proc.output_product_id}`
+      const existingBar = proc.coproduct_group_key ? item.barsMap.get(barKey) : null
+      if (existingBar) {
+        existingBar.startTime = new Date(Math.min(existingBar.startTime.getTime(), startTime.getTime()))
+        existingBar.endTime = new Date(Math.max(existingBar.endTime.getTime(), endTime.getTime()))
+        existingBar.durationMs = existingBar.endTime.getTime() - existingBar.startTime.getTime()
+        existingBar.planQty = Math.max(existingBar.planQty, qtyValue)
+      } else {
+        const newBar = {
+          key: barKey,
+          planId: plan.plan_id,
+          processId: proc.process_id,
+          startTime,
+          endTime,
+          durationMs: endTime.getTime() - startTime.getTime(),
+          planQty: qtyValue,
+          color: getBarColor(outputProductId),
+          label: '',
+          leftPx: 0,
+          widthPx: 0,
+        }
+        item.bars.push(newBar)
+        if (proc.coproduct_group_key) {
+          item.barsMap.set(barKey, newBar)
+        }
+      }
     })
   })
 

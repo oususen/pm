@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 from django.db.models import Q
 import logging
 
-from masters.models import RoutingStep, ProcessCycleTime, Line, Calendar, CalendarDay, WorkPattern, BreakTime, BOM, BOMItem
+from masters.models import RoutingStep, ProcessCycleTime, Line, Calendar, CalendarDay, WorkPattern, BreakTime, BOM, BOMItem, Product
 from orders.models_line_backlog import LineBacklog
 
 logger = logging.getLogger(__name__)
@@ -313,6 +313,24 @@ def _build_bom_multiplier_map(final_product_id: int, plan_date) -> Dict[int, Dec
     return multipliers
 
 
+def _build_coproduct_parent_map(plan_date) -> Dict[int, Product]:
+    coproduct_boms = BOM.objects.filter(
+        is_coproduct=True,
+        is_active=True,
+        valid_from__lte=plan_date,
+    ).filter(Q(valid_to__gte=plan_date) | Q(valid_to__isnull=True)).select_related('parent_product')
+    parent_map: Dict[int, Product] = {}
+    for bom in coproduct_boms:
+        for item in bom.items.select_related('child_product'):
+            if item.child_product_id:
+                parent_map[item.child_product_id] = bom.parent_product
+    return parent_map
+
+
+def _is_coproduct_sub_process(spec: ProcessSpec, coproduct_parent_map: Dict[int, Product]) -> bool:
+    return bool(spec.process_name and 'サブ' in spec.process_name and spec.output_product_id in coproduct_parent_map)
+
+
 def _overlaps(start: datetime, end: datetime, item: Dict) -> bool:
     return start < item['end'] and end > item['start']
 
@@ -447,6 +465,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
     for obj in base_plans:
         product = obj.product
         multiplier_map = _build_bom_multiplier_map(product.id, obj.plan_date)
+        coproduct_parent_map = _build_coproduct_parent_map(obj.plan_date)
         steps = sorted(steps_by_product.get(product.id, []), key=lambda s: (s.step_no or 0, getattr(s, 'parallel_group', 1) or 1))
         if not steps:
             steps = default_steps
@@ -461,15 +480,80 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
         sequence = obj.sequence_no or 0
         plan_id = f"{product.product_code}_{obj.plan_date.strftime('%Y%m%d')}_{qty_label}_{sequence}"
 
-        current_end_time = calendar.get_day_end(obj.plan_date)
-        processes_plan = []
-
-        reversed_specs = list(reversed(process_specs))
-        for i, spec in enumerate(reversed_specs):
+        coproduct_groups = {}
+        for spec in process_specs:
+            if not _is_coproduct_sub_process(spec, coproduct_parent_map):
+                continue
+            parent = coproduct_parent_map[spec.output_product_id]
+            group_key = f"{plan_id}_{spec.process_id}_{parent.id}"
             qty_product_id = spec.output_product_id or obj.product_id
             process_qty = multiplier_map.get(qty_product_id, Decimal('1')) * obj.plan_qty
             total_minutes = _calculate_total_minutes(spec, process_qty)
             effective_minutes = total_minutes / max(spec.parallel_count, 1)
+            group = coproduct_groups.get(group_key)
+            if not group:
+                coproduct_groups[group_key] = {
+                    'max_total_minutes': total_minutes,
+                    'max_effective_minutes': effective_minutes,
+                    'max_qty': process_qty,
+                    'cycle_time_minutes': spec.cycle_time_minutes,
+                    'setup_time_minutes': spec.setup_time_minutes,
+                    'order_spec': spec,
+                }
+                continue
+            group['order_spec'] = spec
+            if total_minutes > group['max_total_minutes']:
+                group['max_total_minutes'] = total_minutes
+                group['cycle_time_minutes'] = spec.cycle_time_minutes
+                group['setup_time_minutes'] = spec.setup_time_minutes
+            if effective_minutes > group['max_effective_minutes']:
+                group['max_effective_minutes'] = effective_minutes
+            if process_qty > group['max_qty']:
+                group['max_qty'] = process_qty
+
+        scheduled_specs = []
+        for spec in process_specs:
+            if _is_coproduct_sub_process(spec, coproduct_parent_map):
+                parent = coproduct_parent_map[spec.output_product_id]
+                group_key = f"{plan_id}_{spec.process_id}_{parent.id}"
+                group = coproduct_groups.get(group_key)
+                if not group or group['order_spec'] is not spec:
+                    continue
+                scheduled_specs.append({
+                    'spec': spec,
+                    'process_qty': group['max_qty'],
+                    'total_minutes': group['max_total_minutes'],
+                    'effective_minutes': group['max_effective_minutes'],
+                    'cycle_time_minutes': group.get('cycle_time_minutes', spec.cycle_time_minutes),
+                    'setup_time_minutes': group.get('setup_time_minutes', spec.setup_time_minutes),
+                    'coproduct_group_key': group_key,
+                    'coproduct_child_id': None,
+                })
+                continue
+            qty_product_id = spec.output_product_id or obj.product_id
+            process_qty = multiplier_map.get(qty_product_id, Decimal('1')) * obj.plan_qty
+            total_minutes = _calculate_total_minutes(spec, process_qty)
+            effective_minutes = total_minutes / max(spec.parallel_count, 1)
+            scheduled_specs.append({
+                'spec': spec,
+                'process_qty': process_qty,
+                'total_minutes': total_minutes,
+                'effective_minutes': effective_minutes,
+                'cycle_time_minutes': spec.cycle_time_minutes,
+                'setup_time_minutes': spec.setup_time_minutes,
+                'coproduct_group_key': None,
+                'coproduct_child_id': None,
+            })
+
+        current_end_time = calendar.get_day_end(obj.plan_date)
+        processes_plan = []
+
+        reversed_specs = list(reversed(scheduled_specs))
+        for i, entry in enumerate(reversed_specs):
+            spec = entry['spec']
+            process_qty = entry['process_qty']
+            total_minutes = entry['total_minutes']
+            effective_minutes = entry['effective_minutes']
             end_time = current_end_time
             lanes = _ensure_resource_lanes(resource_schedules, spec.process_id, 1)
             start_time, end_time, lane_idx = _reserve_process_slot(calendar, end_time, effective_minutes, lanes)
@@ -478,17 +562,32 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 'end': end_time,
                 'plan_id': plan_id,
             })
+            output_product_id = spec.output_product_id
+            output_product_code = spec.output_product_code
+            output_product_name = spec.output_product_name
+            coproduct_group_key = entry['coproduct_group_key']
+            coproduct_child_id = entry['coproduct_child_id']
+            if spec.process_name and 'サブ' in spec.process_name and output_product_id in coproduct_parent_map:
+                parent = coproduct_parent_map[output_product_id]
+                coproduct_child_id = coproduct_child_id or output_product_id
+                output_product_id = parent.id
+                output_product_code = parent.product_code
+                output_product_name = parent.product_name
+                coproduct_group_key = coproduct_group_key or f"{plan_id}_{spec.process_id}_{parent.id}"
+
             process_plan = {
                 'process_id': spec.process_id,
                 'process_name': spec.process_name,
                 'process_number': spec.process_number,
                 'parallel_group': spec.parallel_group,
-                'output_product_id': spec.output_product_id,
-                'output_product_code': spec.output_product_code,
-                'output_product_name': spec.output_product_name,
+                'output_product_id': output_product_id,
+                'output_product_code': output_product_code,
+                'output_product_name': output_product_name,
+                'coproduct_group_key': coproduct_group_key,
+                'coproduct_child_id': coproduct_child_id,
                 'quantity': float(process_qty),
-                'cycle_time_minutes': spec.cycle_time_minutes,
-                'setup_time_minutes': spec.setup_time_minutes,
+                'cycle_time_minutes': entry['cycle_time_minutes'],
+                'setup_time_minutes': entry['setup_time_minutes'],
                 'total_minutes_required': total_minutes,
                 'effective_minutes': effective_minutes,
                 'parallel_count': spec.parallel_count,
@@ -500,19 +599,17 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
             processes_plan.insert(0, process_plan)
 
             if i + 1 < len(reversed_specs):
-                prev_spec = reversed_specs[i + 1]
-                prev_qty_product_id = prev_spec.output_product_id or obj.product_id
-                prev_qty = multiplier_map.get(prev_qty_product_id, Decimal('1')) * obj.plan_qty
-                prev_total = _calculate_total_minutes(prev_spec, prev_qty)
-                prev_effective = prev_total / max(prev_spec.parallel_count, 1)
+                prev_entry = reversed_specs[i + 1]
+                prev_spec = prev_entry['spec']
+                prev_effective = prev_entry['effective_minutes']
                 gap_minutes = prev_spec.transfer_time_minutes
                 limit_e2e = calendar.subtract_working_minutes(
                     process_plan['end_time'],
-                    spec.cycle_time_minutes + gap_minutes
+                    entry['cycle_time_minutes'] + gap_minutes
                 )
                 limit_s2s_start = calendar.subtract_working_minutes(
                     process_plan['start_time'],
-                    prev_spec.cycle_time_minutes + gap_minutes
+                    prev_entry['cycle_time_minutes'] + gap_minutes
                 )
                 limit_s2s_end = calendar.add_working_minutes(
                     limit_s2s_start,
