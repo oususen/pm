@@ -123,18 +123,16 @@ const slotWidth = 60 // 1時間あたりのピクセル幅
 const minuteWidth = computed(() => slotWidth / 60)
 const BUFFER_FACTOR = 3 // バッファ台数（将来設定する場合ここをパラメータ化）
 
-// 3日間（昨日、今日、明日）
-const threeDays = computed(() => {
+// 5日間（一昨日、昨日、今日、明日、明後日）
+const displayDays = computed(() => {
   const base = new Date(baseDate.value)
-  const yesterday = new Date(base)
-  yesterday.setDate(yesterday.getDate() - 1)
-  const tomorrow = new Date(base)
-  tomorrow.setDate(tomorrow.getDate() + 1)
-  return [
-    { date: yesterday.toISOString().slice(0, 10), label: formatDayLabel(yesterday) },
-    { date: base.toISOString().slice(0, 10), label: formatDayLabel(base) },
-    { date: tomorrow.toISOString().slice(0, 10), label: formatDayLabel(tomorrow) },
-  ]
+  const days = []
+  for (let offset = -2; offset <= 2; offset++) {
+    const d = new Date(base)
+    d.setDate(d.getDate() + offset)
+    days.push({ date: d.toISOString().slice(0, 10), label: formatDayLabel(d) })
+  }
+  return days
 })
 
 // 非稼働時間を除いた連続タイムライン
@@ -168,8 +166,8 @@ const loadData = async () => {
   lineCalendarDays.value = []
 
   try {
-    const yesterday = threeDays.value[0].date
-    const tomorrow = threeDays.value[2].date
+    const startDate = displayDays.value[0].date
+    const endDate = displayDays.value[displayDays.value.length - 1].date
 
     if (!workPatterns.value.length) {
       await fetchWorkPatterns()
@@ -186,8 +184,8 @@ const loadData = async () => {
       api.routings.getRoutingStepsByLine(selectedLine.value),
       api.lineBacklogs.expandProcesses({
         line_id: selectedLine.value,
-        start_date: yesterday,
-        end_date: tomorrow,
+        start_date: startDate,
+        end_date: endDate,
         read_only: false,  // 計算結果をDBに保存（工程別の計画数を自動計算）
       }),
     ])
@@ -252,7 +250,7 @@ function buildWorkingSegments() {
   const segments = []
   let offset = 0
 
-  threeDays.value.forEach((day) => {
+  displayDays.value.forEach((day) => {
     const cal = calMap.get(day.date)
     if (cal && cal.is_working_day === false) {
       return

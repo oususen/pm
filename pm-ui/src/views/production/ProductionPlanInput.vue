@@ -135,7 +135,7 @@
 
     <div class="gantt-section" v-if="showProcessGantt">
       <div class="process-header">
-        <div class="process-title">工程ガント（3日・勤務時間のみ表示）</div>
+        <div class="process-title">工程ガント（5日・勤務時間のみ表示）</div>
         <div class="process-meta">ライン {{ selectedLine || '' }} ／ 基準日 {{ startDate }}</div>
       </div>
       <ProcessGanttView
