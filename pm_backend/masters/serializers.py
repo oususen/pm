@@ -151,7 +151,7 @@ class RoutingStepSerializer(serializers.ModelSerializer):
         line = obj.line.line_code if obj.line_id else ''
         out_code = obj.output_product.product_code if obj.output_product_id else ''
         parts = [
-            f"Step {obj.step_no}",
+            f"Step {obj.step_no}-G{getattr(obj, 'parallel_group', 1)}",
             proc or '-',
             line or 'ライン無し',
         ]

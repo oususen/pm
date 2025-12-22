@@ -12,6 +12,7 @@ import { createOrdersAPI } from './resources/orders'
 import { createStagingAPI } from './resources/staging'
 import { createLineDemandsAPI } from './resources/lineDemands'
 import { createLineBacklogsAPI } from './resources/lineBacklogs'
+import { createLineGanttPlansAPI } from './resources/lineGanttPlans'
 import { createLineRealtimeAPI } from './resources/lineRealtime'
 import { createProcessRealtimeAPI } from './resources/processRealtime'
 import { createBomServiceAPI } from './resources/bomService'
@@ -44,8 +45,27 @@ client.interceptors.request.use((config) => {
   if (csrfToken) {
     config.headers['X-CSRFToken'] = csrfToken
   }
+  // デバッグ: リクエスト情報をコンソールに出力
+  console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`, { params: config.params, data: config.data })
   return config
 })
+
+client.interceptors.response.use(
+  (response) => {
+    // デバッグ: レスポンス情報をコンソールに出力
+    console.log(`[API Response] ${response.status} ${response.config.url}`, {
+      isArray: Array.isArray(response.data),
+      length: Array.isArray(response.data) ? response.data.length : 'N/A',
+      data: response.data
+    })
+    return response
+  },
+  (error) => {
+    // デバッグ: エラー情報をコンソールに出力
+    console.error(`[API Error] ${error.config?.url}`, error.response || error)
+    return Promise.reject(error)
+  }
+)
 
 const bomsAPI = createBomsAPI(client)
 
@@ -64,6 +84,7 @@ export default {
   processes: createProcessesAPI(client),
   lineDemands: createLineDemandsAPI(client),
   lineBacklogs: createLineBacklogsAPI(client),
+  lineGanttPlans: createLineGanttPlansAPI(client),
   lineRealtime: createLineRealtimeAPI(client),
   processRealtime: createProcessRealtimeAPI(client),
   bomService: createBomServiceAPI(client),

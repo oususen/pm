@@ -17,8 +17,14 @@
         </div>
       </div>
       <div class="toolbar-right">
-        <button class="btn primary" @click="loadData" :disabled="!selectedLine">
+        <button class="btn" @click="loadData" :disabled="!selectedLine">
           読込
+        </button>
+        <button class="btn primary" @click="generateSchedule" :disabled="!selectedLine">
+          実行
+        </button>
+        <button class="btn" @click="saveSchedule" :disabled="!processGanttData.length">
+          保存
         </button>
       </div>
     </div>
@@ -43,13 +49,13 @@
               <div class="timeline-label">品番</div>
               <div class="timeline-axis" :style="{ width: timelineWidthPx + 'px' }">
                 <div
-                  v-for="slot in timeSlots"
+                  v-for="slot in timelineSlots"
                   :key="slot.key"
                   class="time-slot-header"
                   :class="slot.dayClass"
-                  :style="{ width: slot.widthPx + 'px' }"
+                  :style="{ width: pixelsPerDay + 'px' }"
                 >
-                  <div v-if="slot.showDay" class="time-slot-day">{{ slot.dayLabel }}</div>
+                  <div class="time-slot-day">{{ slot.dayLabel }}</div>
                   <div class="time-slot-label">{{ slot.label }}</div>
                 </div>
               </div>
@@ -73,6 +79,10 @@
                     left: bar.leftPx + 'px',
                     width: bar.widthPx + 'px',
                   }"
+                  :data-plan-id="bar.planId"
+                  :data-process-id="bar.processId"
+                  :data-duration-ms="bar.durationMs"
+                  @mousedown="handleDragStart"
                 >
                   <span class="lot-badge">{{ bar.planQty }}</span>
                   <div
@@ -115,13 +125,15 @@ const selectedLine = ref('')
 const baseDate = ref(new Date().toISOString().slice(0, 10))
 const lines = ref([])
 const processGanttData = ref([])
-const workPatterns = ref([])
-const lineCalendarDays = ref([])
-const processStepOrders = ref({})
+const pixelsPerDay = 100
+const timelineStart = ref(null)
+const timelineEnd = ref(null)
+const timelineSlots = ref([])
+const debugEnabled = true
 
-const slotWidth = 60 // 1時間あたりのピクセル幅
-const minuteWidth = computed(() => slotWidth / 60)
-const BUFFER_FACTOR = 3 // バッファ台数（将来設定する場合ここをパラメータ化）
+const logDebug = (...args) => {
+  if (debugEnabled) console.info('[ProcessGanttView]', ...args)
+}
 
 // 5日間（一昨日、昨日、今日、明日、明後日）
 const displayDays = computed(() => {
@@ -135,12 +147,7 @@ const displayDays = computed(() => {
   return days
 })
 
-// 非稼働時間を除いた連続タイムライン
-const workingSegments = computed(() => buildWorkingSegments())
-const timelineWidthPx = computed(() =>
-  workingSegments.value.reduce((sum, seg) => sum + seg.durationMin * minuteWidth.value, 0)
-)
-const timeSlots = computed(() => buildTimeSlots())
+const timelineWidthPx = computed(() => timelineSlots.value.length * pixelsPerDay)
 
 function getDayClass(dateStr) {
   const d = new Date(dateStr)
@@ -155,69 +162,209 @@ const fetchLines = async () => {
   lines.value = res.data.results || res.data || []
 }
 
-const fetchWorkPatterns = async () => {
-  const res = await api.workPatterns.getWorkPatterns()
-  workPatterns.value = res.data.results || res.data || []
-}
-
 const loadData = async () => {
   if (!selectedLine.value) return
   processGanttData.value = []
-  lineCalendarDays.value = []
 
   try {
     const startDate = displayDays.value[0].date
     const endDate = displayDays.value[displayDays.value.length - 1].date
 
-    if (!workPatterns.value.length) {
-      await fetchWorkPatterns()
+    logDebug('loadData', { line: selectedLine.value, startDate, endDate })
+    const ganttRes = await api.lineGanttPlans.getLineGanttPlans({
+      line: selectedLine.value,
+      plan_date__gte: startDate,
+      plan_date__lte: endDate,
+    })
+    const rawPlans = ganttRes.data?.results || ganttRes.data || []
+    logDebug('loadData response', { count: rawPlans.length, sample: rawPlans[0] })
+    if (!rawPlans.length && props.embedded) {
+      logDebug('loadData no data, auto-generate')
+      await generateSchedule(false)
+      return
     }
-
-    const line =
-      lines.value.find((l) => l.id === selectedLine.value) ||
-      (await api.lines.getLine(selectedLine.value)).data
-
-    const [calRes, stepRes, ganttRes] = await Promise.all([
-      line?.calendar
-        ? api.calendars.getCalendarDays(line.calendar)
-        : Promise.resolve({ data: [] }),
-      api.routings.getRoutingStepsByLine(selectedLine.value),
-      api.lineBacklogs.expandProcesses({
-        line_id: selectedLine.value,
-        start_date: startDate,
-        end_date: endDate,
-        read_only: false,  // 計算結果をDBに保存（工程別の計画数を自動計算）
-      }),
-    ])
-
-    lineCalendarDays.value = calRes.data?.results || calRes.data || []
-    const stepList = stepRes.data?.results || stepRes.data || []
-    processStepOrders.value = buildProcessStepMap(stepList)
-
-    const rawData = ganttRes.data?.items || ganttRes.data?.results || ganttRes.data || []
-    processGanttData.value = buildProcessGantt(rawData)
+    processGanttData.value = buildProcessGantt(rawPlans)
   } catch (e) {
     console.error('工程ガント読込エラー', e)
     alert('データ読込に失敗しました')
   }
 }
 
-function buildProcessStepMap(steps = []) {
-  const map = {}
-  steps.forEach((s) => {
-    if (!s.process) return
-    const stepNo = s.step_no || 0
-    if (!map[s.process] || stepNo > map[s.process]) {
-      map[s.process] = stepNo
-    }
-  })
-  return map
+const generateSchedule = async (clearExisting = true) => {
+  if (!selectedLine.value) return
+  processGanttData.value = []
+
+  try {
+    const startDate = displayDays.value[0].date
+    const endDate = displayDays.value[displayDays.value.length - 1].date
+    logDebug('generateSchedule', { line: selectedLine.value, startDate, endDate, clearExisting })
+    const ganttRes = await api.lineGanttPlans.generate({
+      line_id: selectedLine.value,
+      start_date: startDate,
+      end_date: endDate,
+      clear_existing: clearExisting,
+    })
+    const rawPlans = ganttRes.data?.results || ganttRes.data || []
+    logDebug('generateSchedule response', { count: rawPlans.length, sample: rawPlans[0] })
+    processGanttData.value = buildProcessGantt(rawPlans)
+    return rawPlans
+  } catch (e) {
+    console.error('工程ガント生成エラー', e)
+    alert('ガント計画の生成に失敗しました')
+  }
 }
 
-function timeToMinutes(timeStr) {
-  if (!timeStr) return 0
-  const [h, m] = timeStr.split(':').map(Number)
-  return h * 60 + (m || 0)
+const saveSchedule = async () => {
+  if (!timelineStart.value) {
+    alert('保存するスケジュールがありません')
+    return
+  }
+  const bars = document.querySelectorAll('.gantt-bar-wrapper')
+  if (!bars.length) {
+    alert('保存するスケジュールがありません')
+    return
+  }
+
+  const updates = []
+  const msPerDay = 1000 * 60 * 60 * 24
+  bars.forEach((bar) => {
+    const planId = bar.dataset.planId
+    const processId = Number(bar.dataset.processId)
+    const durationMs = Number(bar.dataset.durationMs)
+    if (!planId || !processId || !durationMs) return
+
+    const currentLeft = parseFloat(bar.style.left || '0')
+    const daysFromStart = currentLeft / pixelsPerDay
+    const newStartMs = timelineStart.value.getTime() + (daysFromStart * msPerDay)
+
+    const roundMs = 1000 * 60 * 5
+    const roundedStartMs = Math.round(newStartMs / roundMs) * roundMs
+    const finalStart = new Date(roundedStartMs)
+    const finalEnd = new Date(roundedStartMs + durationMs)
+
+    updates.push({
+      plan_id: planId,
+      process_id: processId,
+      start_time: toLocalISO(finalStart),
+      end_time: toLocalISO(finalEnd),
+    })
+  })
+
+  if (!updates.length) {
+    alert('保存対象のデータがありません')
+    return
+  }
+
+  try {
+    logDebug('saveSchedule', { updates: updates.length })
+    await api.lineGanttPlans.bulkUpdate(updates)
+    alert('保存しました')
+  } catch (e) {
+    console.error('保存エラー', e)
+    alert('保存に失敗しました')
+  }
+}
+
+let draggedBar = null
+let dragStartX = 0
+let dragOriginalLeft = 0
+let isDragging = false
+
+function getDragTooltip() {
+  let tooltip = document.getElementById('dragTooltip')
+  if (!tooltip) {
+    tooltip = document.createElement('div')
+    tooltip.id = 'dragTooltip'
+    tooltip.style.position = 'fixed'
+    tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)'
+    tooltip.style.color = '#fff'
+    tooltip.style.padding = '4px 8px'
+    tooltip.style.borderRadius = '4px'
+    tooltip.style.fontSize = '12px'
+    tooltip.style.zIndex = '9999'
+    tooltip.style.pointerEvents = 'none'
+    tooltip.style.display = 'none'
+    document.body.appendChild(tooltip)
+  }
+  return tooltip
+}
+
+function handleDragStart(e) {
+  if (e.button !== 0) return
+  draggedBar = e.currentTarget
+  dragStartX = e.clientX
+  dragOriginalLeft = parseFloat(draggedBar.style.left || '0')
+  isDragging = false
+
+  draggedBar.style.cursor = 'grabbing'
+  draggedBar.style.zIndex = 10
+  draggedBar.classList.remove('was-dragged')
+
+  document.addEventListener('mousemove', handleDragMove)
+  document.addEventListener('mouseup', handleDragEnd)
+
+  const tooltip = getDragTooltip()
+  tooltip.style.display = 'block'
+  updateDragTooltip(e)
+
+  e.preventDefault()
+}
+
+function handleDragMove(e) {
+  if (!draggedBar) return
+  const dx = e.clientX - dragStartX
+  if (Math.abs(dx) > 3) {
+    isDragging = true
+    draggedBar.classList.add('was-dragged')
+  }
+  const newLeft = dragOriginalLeft + dx
+  draggedBar.style.left = `${newLeft}px`
+  updateDragTooltip(e)
+}
+
+function updateDragTooltip(e) {
+  const tooltip = getDragTooltip()
+  if (!timelineStart.value) return
+  const msPerDay = 1000 * 60 * 60 * 24
+  const currentLeft = parseFloat(draggedBar.style.left || '0')
+  const daysFromStart = currentLeft / pixelsPerDay
+  const newStartMs = timelineStart.value.getTime() + (daysFromStart * msPerDay)
+  const roundMs = 1000 * 60 * 5
+  const roundedStartMs = Math.round(newStartMs / roundMs) * roundMs
+  const newStartDate = new Date(roundedStartMs)
+
+  const durationMs = Number(draggedBar.dataset.durationMs || 0)
+  const newEndDate = new Date(roundedStartMs + durationMs)
+
+  const fmt = (d) => `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+  tooltip.textContent = `${fmt(newStartDate)} - ${fmt(newEndDate)}`
+  tooltip.style.left = `${e.clientX + 15}px`
+  tooltip.style.top = `${e.clientY + 15}px`
+}
+
+function handleDragEnd() {
+  if (!draggedBar) return
+  document.removeEventListener('mousemove', handleDragMove)
+  document.removeEventListener('mouseup', handleDragEnd)
+
+  draggedBar.style.cursor = 'grab'
+  draggedBar.style.zIndex = ''
+
+  const tooltip = getDragTooltip()
+  tooltip.style.display = 'none'
+
+  if (isDragging) {
+    alert('位置を調整しました。保存ボタンで確定してください。')
+  }
+
+  draggedBar = null
+  isDragging = false
+}
+
+const toLocalISO = (date) => {
+  const offset = date.getTimezoneOffset() * 60000
+  const localDate = new Date(date.getTime() - offset)
+  return localDate.toISOString().slice(0, 19)
 }
 
 function pad2(val) {
@@ -236,422 +383,132 @@ function formatDayLabel(dateObj) {
   return `${m}/${d}(${w})`
 }
 
-function addMinutes(date, min) {
-  return new Date(date.getTime() + min * 60 * 1000)
-}
-
-function buildWorkingSegments() {
-  const calMap = new Map()
-  lineCalendarDays.value.forEach((d) => calMap.set(d.target_date, d))
-  const patternMap = new Map()
-  workPatterns.value.forEach((p) => patternMap.set(p.id, p))
-
-
-  const segments = []
-  let offset = 0
-
-  displayDays.value.forEach((day) => {
-    const cal = calMap.get(day.date)
-    if (cal && cal.is_working_day === false) {
-      return
-    }
-
-    const pattern = cal && cal.work_pattern ? patternMap.get(cal.work_pattern) : null
-    let startMin = pattern && pattern.start_time ? timeToMinutes(pattern.start_time) : 8 * 60
-    let endMin
-    if (pattern && pattern.end_time) {
-      endMin = timeToMinutes(pattern.end_time)
-      if (endMin <= startMin) {
-        endMin += 24 * 60
-      }
-    } else {
-      const workMinutes = cal && cal.work_minutes != null ? Number(cal.work_minutes) : 8 * 60
-      endMin = startMin + workMinutes
-    }
-
-    const breaks = []
-    if (pattern && Array.isArray(pattern.break_times)) {
-      pattern.break_times.forEach((bt) => {
-        const bs = timeToMinutes(bt.break_start)
-        let be = timeToMinutes(bt.break_end)
-        if (be <= bs) {
-          be += 24 * 60
-        }
-        breaks.push({ start: bs, end: be })
-      })
-      breaks.sort((a, b) => a.start - b.start)
-    }
-
-    const base = new Date(`${day.date}T00:00:00`)
-    let cursor = startMin
-
-    const pushSeg = (sMin, eMin) => {
-      if (eMin <= sMin) return
-      const start = new Date(base.getTime() + sMin * 60 * 1000)
-      const end = new Date(base.getTime() + eMin * 60 * 1000)
-      const durationMin = eMin - sMin
-      segments.push({
-        start,
-        end,
-        date: day.date,
-        dayLabel: day.label,
-        dayClass: getDayClass(day.date),
-        durationMin,
-        offsetMin: offset,
-      })
-      offset += durationMin
-    }
-
-    breaks.forEach((br) => {
-      if (br.start > cursor) {
-        pushSeg(cursor, Math.min(br.start, endMin))
-      }
-      cursor = Math.max(cursor, br.end)
-    })
-
-    if (cursor < endMin) {
-      pushSeg(cursor, endMin)
-    }
-  })
-
-
-  return segments
-}
-
-function buildTimeSlots() {
+function buildTimelineSlots(startDate, endDate) {
   const slots = []
-  workingSegments.value.forEach((seg) => {
-    let current = new Date(seg.start)
-    let first = true
-    while (current < seg.end) {
-      const nextHour = new Date(current)
-      nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0)
-      const next = nextHour > seg.end ? seg.end : nextHour
-      const widthMin = (next.getTime() - current.getTime()) / (60 * 1000)
-      slots.push({
-        key: `${seg.date}_${current.getHours()}_${current.getMinutes()}`,
-        label: `${pad2(current.getHours())}:${pad2(current.getMinutes())}`,
-        dayLabel: seg.dayLabel,
-        dayClass: seg.dayClass,
-        widthPx: widthMin * minuteWidth.value,
-        showDay: first,
-      })
-      current = next
-      first = false
-    }
-  })
+  const current = new Date(startDate)
+  while (current <= endDate) {
+    slots.push({
+      key: current.toISOString().slice(0, 10),
+      dayLabel: formatDayLabel(current),
+      label: `${current.getMonth() + 1}/${current.getDate()}`,
+      dayClass: getDayClass(current.toISOString().slice(0, 10)),
+    })
+    current.setDate(current.getDate() + 1)
+  }
   return slots
 }
 
-function alignToWorkingSegments(targetTime, segments) {
-  if (!segments.length || !targetTime) return null
-
-  // targetTime の日付を取得（YYYY-MM-DD形式）
-  const targetDate = targetTime.toISOString().slice(0, 10)
-
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i]
-
-    // セグメントが targetTime の日付と同じ、またはそれ以降の場合
-    if (seg.date >= targetDate) {
-      // targetTime がセグメント内にある場合、targetTime を使用
-      if (targetTime >= seg.start && targetTime < seg.end) {
-        return { index: i, cursor: new Date(targetTime) }
-      }
-      // targetTime がセグメント開始前の場合、セグメントの開始時刻を使用
-      if (targetTime <= seg.start) {
-        return { index: i, cursor: new Date(seg.start) }
-      }
-    }
-  }
-  return null
+function formatDateTime(date) {
+  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
 }
 
-function advanceCursor(state, minutes, segments) {
-  if (!state) return null
-  let remaining = minutes
-  let idx = state.index
-  let cursor = new Date(state.cursor)
-
-  while (remaining > 0 && idx < segments.length) {
-    const seg = segments[idx]
-    const available = (seg.end.getTime() - cursor.getTime()) / (60 * 1000)
-    if (available > remaining) {
-      cursor = addMinutes(cursor, remaining)
-      remaining = 0
-      return { index: idx, cursor }
-    }
-    remaining -= available
-    idx += 1
-    if (idx < segments.length) {
-      cursor = new Date(segments[idx].start)
-    }
-  }
-
-  return idx < segments.length ? { index: idx, cursor } : null
+function formatTimeRange(start, end) {
+  return `${formatDateTime(start)} - ${formatDateTime(end)}`
 }
 
-function findSegmentIndexByTime(segments, targetTime) {
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i]
-    if (targetTime >= seg.start && targetTime < seg.end) return i
-  }
-  return -1
-}
-
-function timeToOffsetMinutes(segments, time) {
-  const idx = findSegmentIndexByTime(segments, time)
-  if (idx < 0) return 0
-  const seg = segments[idx]
-  return seg.offsetMin + (time.getTime() - seg.start.getTime()) / (60 * 1000)
-}
-
-function rewindTime(segments, anchorTime, offsetMin) {
-  if (!segments.length || !anchorTime) return anchorTime
-  let remaining = offsetMin
-  let idx = findSegmentIndexByTime(segments, anchorTime)
-  let cursor = anchorTime
-  if (idx < 0) {
-    if (anchorTime < segments[0].start) return segments[0].start
-    idx = segments.length - 1
-    cursor = new Date(segments[idx].end)
-  }
-  let iteration = 0
-  while (remaining > 0 && idx >= 0) {
-    const seg = segments[idx]
-    const available = (cursor.getTime() - seg.start.getTime()) / (60 * 1000)
-    if (available >= remaining) {
-      const result = new Date(cursor.getTime() - remaining * 60 * 1000)
-      return result
-    }
-    remaining -= available
-    idx -= 1
-    if (idx >= 0) {
-      cursor = new Date(segments[idx].end)
-    }
-    iteration++
-  }
-  // まだ残り時間がある場合、最後のセグメントの開始時刻からさらに巻き戻す
-  if (remaining > 0 && segments.length > 0) {
-    const result = new Date(segments[0].start.getTime() - remaining * 60 * 1000)
-    return result
-  }
-  return segments[0].start
-}
-
-function pickDurationMinutes(rec) {
-  // ルーティングで計算されたcomputed_time_minを最優先で使用し、
-  // cycle_time_min（m_process_cycle_time）は参照しない。
-  if (rec.computed_time_min != null) return Number(rec.computed_time_min)
-  const qty = Number(rec.plan_qty || 0)
-  const durationPer = rec.duration_min != null ? Number(rec.duration_min) : 0
-  if (durationPer > 0 && qty > 0) {
-    return qty * durationPer
-  }
-  return 0
-}
-
-function recordSorter(a, b) {
-  if (a.plan_date !== b.plan_date) {
-    return String(a.plan_date || '').localeCompare(String(b.plan_date || ''))
-  }
-  const aSeq = a.sequence_no != null ? a.sequence_no : Number.POSITIVE_INFINITY
-  const bSeq = b.sequence_no != null ? b.sequence_no : Number.POSITIVE_INFINITY
-  if (aSeq !== bSeq) return aSeq - bSeq
-  return (a.product_code || '').localeCompare(b.product_code || '')
-}
-
-function itemSorter(a, b) {
-  const aSeq = a.sequence_no != null ? a.sequence_no : Number.POSITIVE_INFINITY
-  const bSeq = b.sequence_no != null ? b.sequence_no : Number.POSITIVE_INFINITY
-  if (aSeq !== bSeq) return aSeq - bSeq
-  return (a.product_code || '').localeCompare(b.product_code || '')
-}
-
-function formatTimeRange(start, durationMin) {
-  const end = addMinutes(start, durationMin)
-  return `${formatTime(start)} - ${formatTime(end)}`
-}
-
-function computeEndTime(start, durationMin, segments) {
-  if (!start || durationMin <= 0) return start
-  let idx = findSegmentIndexByTime(segments, start)
-  let cursor = new Date(start)
-  if (idx < 0) {
-    if (segments.length && start < segments[0].start) {
-      idx = 0
-      cursor = new Date(segments[0].start)
-    } else {
-      return addMinutes(start, durationMin)
-    }
-  }
-  const endState = advanceCursor({ index: idx, cursor }, durationMin, segments)
-  return endState ? endState.cursor : addMinutes(start, durationMin)
-}
-
-function formatTimeRangeWithSegments(start, durationMin, segments) {
-  const end = computeEndTime(start, durationMin, segments)
-  return `${formatTime(start)} - ${formatTime(end)}`
-}
-
-function buildProcessGantt(rawData) {
-  const segments = workingSegments.value
-  if (!segments.length) return []
-
+function buildProcessGantt(plans) {
   const processMap = new Map()
-  const productProcessMeta = new Map() // key: `${productId}_${processId}` -> { cycleMin, stepNo }
-  rawData.forEach((d) => {
-    if (!d.process) return
-    if (!processMap.has(d.process)) {
-      processMap.set(d.process, {
-        process_id: d.process,
-        process_name: d.process_name || '',
-        line_name: d.line_name || '',
-        step_no: processStepOrders.value[d.process] || 0,
-        items: [],
-      })
-    }
-  })
+  const allDates = []
 
-  rawData.forEach((d) => {
-    if (!d.process || !d.product) return
-    const proc = processMap.get(d.process)
-    let item = proc.items.find((it) => it.product_id === d.product)
-    if (!item) {
-      item = {
-        product_id: d.product,
-        product_code: d.product_code || '',
-        product_name: d.product_name || '',
-        plan_qty: 0,
-        sequence_no: d.sequence_no != null ? d.sequence_no : null,
-        routing_product_id: d.routing_product_id || d.product,  // ルーティングの親製品ID
-        records: [],
-        bars: [],
+  plans.forEach((plan) => {
+    const processes = Array.isArray(plan.processes_plan) ? plan.processes_plan : []
+    processes.forEach((proc) => {
+      if (!proc.process_id) return
+      const startTime = new Date(proc.start_time)
+      const endTime = new Date(proc.end_time)
+      if (Number.isNaN(startTime.getTime()) || Number.isNaN(endTime.getTime())) return
+      allDates.push(startTime, endTime)
+
+      const key = proc.process_id
+      if (!processMap.has(key)) {
+        processMap.set(key, {
+          process_id: proc.process_id,
+          process_name: proc.process_name || '',
+          process_number: proc.process_number || 0,
+          items: [],
+          itemsMap: new Map(),
+        })
       }
-      proc.items.push(item)
-    }
-    item.plan_qty += Number(d.plan_qty || 0)
-    const seq = d.sequence_no != null ? Number(d.sequence_no) : null
-    if (seq != null && (item.sequence_no == null || seq < item.sequence_no)) {
-      item.sequence_no = seq
-    }
-    item.records.push(d)
-
-    const cycle = Number(d.cycle_time_min || 0)
-    const metaKey = `${d.product}_${d.process}`
-    if (!productProcessMeta.has(metaKey)) {
-      productProcessMeta.set(metaKey, {
-        cycleMin: cycle > 0 ? cycle : null,
-        stepNo: d.step_no || processStepOrders.value[d.process] || 0,
-      })
-    }
-  })
-
-  processMap.forEach((proc) => {
-    proc.items.sort(itemSorter)
-    const flatRecords = []
-    proc.items.forEach((item) => {
-      item.bars = []
-      item.records.forEach((rec) => {
-        flatRecords.push({ ...rec, productRef: item })
-      })
-    })
-    flatRecords.sort(recordSorter)
-
-    let cursorState = alignToWorkingSegments(segments[0]?.start, segments)
-    flatRecords.forEach((rec) => {
-      if (!cursorState) return
-      const durationMin = pickDurationMinutes(rec)
-      if (durationMin <= 0) return
-
-      if (rec.plan_date) {
-        // plan_date の日付で最初のセグメントを探す（タイムゾーン問題を避けるため、seg.dateと直接比較）
-        const firstSegOfDay = segments.find(s => s.date === rec.plan_date)
-        if (firstSegOfDay) {
-          const desired = { index: segments.indexOf(firstSegOfDay), cursor: new Date(firstSegOfDay.start) }
-          if (desired.cursor > cursorState.cursor) {
-            cursorState = desired
-          }
+      const procEntry = processMap.get(key)
+      const outputProductId = proc.output_product_id != null ? proc.output_product_id : plan.product
+      const outputProductCode = proc.output_product_code || plan.product_code || ''
+      const outputProductName = proc.output_product_name || plan.product_name || ''
+      const itemKey = outputProductCode || outputProductId
+      let item = procEntry.itemsMap.get(itemKey)
+      if (!item) {
+        item = {
+          product_id: outputProductId,
+          product_code: outputProductCode,
+          product_name: outputProductName,
+          plan_qty: 0,
+          sequence_no: plan.sequence_no != null ? Number(plan.sequence_no) : null,
+          bars: [],
         }
+        procEntry.itemsMap.set(itemKey, item)
+        procEntry.items.push(item)
+      }
+      item.plan_qty += Number(proc.quantity ?? plan.plan_qty ?? 0)
+      const seq = plan.sequence_no != null ? Number(plan.sequence_no) : null
+      if (seq != null && (item.sequence_no == null || seq < item.sequence_no)) {
+        item.sequence_no = seq
       }
 
-      const seg = segments[cursorState.index]
-      const startOffsetMin =
-        seg.offsetMin + (cursorState.cursor.getTime() - seg.start.getTime()) / (60 * 1000)
-
-      const startTime = new Date(cursorState.cursor)
-
-      const bar = {
-        key: `${rec.product}_${rec.plan_date || 'na'}_${rec.process}`,
-        leftPx: startOffsetMin * minuteWidth.value,
-        widthPx: durationMin * minuteWidth.value,
-        color: getBarColor(rec.product),
-        label: formatTimeRangeWithSegments(cursorState.cursor, durationMin, segments),
-        planQty: Number(rec.plan_qty || 0),
+      item.bars.push({
+        key: `${plan.plan_id}_${proc.process_id}`,
+        planId: plan.plan_id,
+        processId: proc.process_id,
         startTime,
-        durationMin,
-      }
-
-      rec.productRef.bars.push(bar)
-      cursorState = advanceCursor(cursorState, durationMin, segments)
-    })
-  })
-
-  // 後工程の開始からバッファ分（cycle×BUFFER_FACTOR）前倒しで前工程を配置（同一製品内）
-  const processList = Array.from(processMap.values()).sort((a, b) => {
-    const stepDiff = (b.step_no || 0) - (a.step_no || 0)
-    if (stepDiff !== 0) return stepDiff
-    return (b.process_id || 0) - (a.process_id || 0)
-  })
-
-  const productChains = new Map() // routing_product_id -> [{procRef, item, meta}]
-  processList.forEach((proc) => {
-    proc.items.forEach((item) => {
-      const key = item.routing_product_id || item.product_id  // ルーティングの親製品IDでグループ化
-      if (!productChains.has(key)) productChains.set(key, [])
-      productChains.get(key).push({
-        proc,
-        item,
-        meta: productProcessMeta.get(`${item.product_id}_${proc.process_id}`) || { stepNo: proc.step_no || 0, cycleMin: null },
+        endTime,
+        durationMs: endTime.getTime() - startTime.getTime(),
+        planQty: Number(proc.quantity ?? plan.plan_qty ?? 0),
+        color: getBarColor(outputProductId),
+        label: '',
+        leftPx: 0,
+        widthPx: 0,
       })
     })
   })
 
-  const calcCycleMin = (meta, bars) => {
-    if (meta && meta.cycleMin && meta.cycleMin > 0) return meta.cycleMin
-    if (bars && bars.length && bars[0].planQty) {
-      return Math.max(1, bars[0].durationMin / bars[0].planQty)
-    }
-    return 0
+  if (!allDates.length) {
+    timelineStart.value = null
+    timelineEnd.value = null
+    timelineSlots.value = []
+    return []
   }
 
-  productChains.forEach((chain, productId) => {
-    chain.sort((a, b) => (b.meta.stepNo || 0) - (a.meta.stepNo || 0)) // 後→前
-    for (let i = 0; i < chain.length - 1; i++) {
-      const later = chain[i]
-      const earlier = chain[i + 1]
-      if (!later.item.bars.length || !earlier.item.bars.length) continue
+  const minDate = new Date(Math.min(...allDates.map((d) => d.getTime())))
+  const maxDate = new Date(Math.max(...allDates.map((d) => d.getTime())))
+  const startDate = new Date(minDate)
+  const endDate = new Date(maxDate)
+  endDate.setDate(endDate.getDate() + 1)
 
-      const laterStart = later.item.bars[0].startTime
-      const cycleMin = calcCycleMin(earlier.meta, earlier.item.bars)
-      if (!cycleMin || !laterStart) continue
+  timelineStart.value = startDate
+  timelineEnd.value = endDate
+  timelineSlots.value = buildTimelineSlots(startDate, endDate)
 
-      const offsetMin = cycleMin * BUFFER_FACTOR
-      const desiredStart = rewindTime(segments, laterStart, offsetMin)
-
-      earlier.item.bars.forEach((bar) => {
-        const newStart = desiredStart < bar.startTime ? desiredStart : bar.startTime
-        const offsetMinVal = timeToOffsetMinutes(segments, newStart)
-        bar.leftPx = offsetMinVal * minuteWidth.value
-        bar.startTime = newStart
-        bar.label = formatTimeRangeWithSegments(newStart, bar.durationMin, segments)
+  const msPerDay = 1000 * 60 * 60 * 24
+  processMap.forEach((procEntry) => {
+    procEntry.items.sort((a, b) => {
+      const aSeq = a.sequence_no != null ? a.sequence_no : Number.POSITIVE_INFINITY
+      const bSeq = b.sequence_no != null ? b.sequence_no : Number.POSITIVE_INFINITY
+      if (aSeq !== bSeq) return aSeq - bSeq
+      return (a.product_code || '').localeCompare(b.product_code || '')
+    })
+    procEntry.items.forEach((item) => {
+      item.bars.sort((a, b) => a.startTime - b.startTime)
+      item.bars.forEach((bar) => {
+        const left = ((bar.startTime.getTime() - startDate.getTime()) / msPerDay) * pixelsPerDay
+        const width = Math.max(((bar.endTime.getTime() - bar.startTime.getTime()) / msPerDay) * pixelsPerDay, 20)
+        bar.leftPx = left
+        bar.widthPx = width
+        bar.label = formatTimeRange(bar.startTime, bar.endTime)
       })
-    }
+    })
   })
 
   return Array.from(processMap.values()).sort((a, b) => {
-    const stepDiff = (b.step_no || 0) - (a.step_no || 0)
-    if (stepDiff !== 0) return stepDiff
+    const diff = (b.process_number || 0) - (a.process_number || 0)
+    if (diff !== 0) return diff
     return (b.process_id || 0) - (a.process_id || 0)
   })
 }
@@ -683,7 +540,7 @@ watch(
 
 onMounted(async () => {
   try {
-    await Promise.all([fetchLines(), fetchWorkPatterns()])
+    await Promise.all([fetchLines()])
     if (props.embedded) {
       if (selectedLine.value) {
         await loadData()
@@ -902,6 +759,8 @@ onMounted(async () => {
   height: 28px;
   display: flex;
   align-items: center;
+  cursor: grab;
+  user-select: none;
 }
 .gantt-bar {
   height: 100%;

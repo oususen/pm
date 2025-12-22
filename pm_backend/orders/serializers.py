@@ -6,6 +6,7 @@ from django.db.models import Sum
 from django.db.models.functions import Coalesce
 from .models import LineDemand, Order, OrderLine, StgOrderRaw, StgOrderDaily
 from .models_line_backlog import LineBacklog
+from .models_line_gantt_plan import LineGanttPlan
 from .models_production import StockAllocation, ProductionOrder, ProcessActual
 from .models_process_realtime import ProcessRealtimeRecord
 from masters.models import Customer, Product
@@ -195,6 +196,31 @@ class LineBacklogSerializer(serializers.ModelSerializer):
 
     def get_work_minutes(self, obj):
         return getattr(obj, 'work_minutes', None)
+
+
+class LineGanttPlanSerializer(serializers.ModelSerializer):
+    line_code = serializers.CharField(source='line.line_code', read_only=True)
+    line_name = serializers.CharField(source='line.line_name', read_only=True)
+    product_code = serializers.CharField(source='product.product_code', read_only=True)
+    product_name = serializers.CharField(source='product.product_name', read_only=True)
+
+    class Meta:
+        model = LineGanttPlan
+        fields = [
+            'plan_id',
+            'line',
+            'line_code',
+            'line_name',
+            'product',
+            'product_code',
+            'product_name',
+            'plan_date',
+            'plan_qty',
+            'sequence_no',
+            'start_datetime',
+            'end_datetime',
+            'processes_plan',
+        ]
 
 
 # ========================================

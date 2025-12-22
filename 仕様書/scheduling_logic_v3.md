@@ -44,6 +44,15 @@ duration_min = step.duration_min or (ct.setup_time_min + ct.cycle_time_sec * qty
 
 ---
 
+## 2.1 工程順序（step_no + parallel_group）
+- `m_routing_step.step_no` は工程の基本順序として使用する。
+- 同一工程でも中間品が異なる場合、`step_no` の重複が必要になるため **`parallel_group` を追加**して重複を許可する。
+- **ユニークキー**：`(routing_id, step_no, parallel_group)`。
+- **スケジューリング順序**：`step_no` 昇順 → `parallel_group` 昇順。
+- 現行仕様では **parallel_group 内も直列**。並列処理はしない（同工程の同時実行は不可）。
+
+---
+
 ## 3. 逐次着手（transfer_batch）の具体化
 前工程（P）→後工程（S）で `transfer_batch_qty=B` のとき：
 1) Pの `duration_min` を qty で均等割り：`per_unit = (duration_min - setup) / qty`

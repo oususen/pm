@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     LineDemandViewSet,
     LineBacklogViewSet,
+    LineGanttPlanViewSet,
     OrderViewSet,
     OrderLineViewSet,
     StgOrderRawViewSet,
@@ -22,6 +23,7 @@ router.register(r'stg-order-raw', StgOrderRawViewSet, basename='stgorderraw')
 router.register(r'stg-order-daily', StgOrderDailyViewSet, basename='stgorderdaily')
 router.register(r'line-demands', LineDemandViewSet, basename='linedemand')
 router.register(r'line-backlogs', LineBacklogViewSet, basename='linebacklog')
+router.register(r'line-gantt-plans', LineGanttPlanViewSet, basename='lineganttplan')
 
 # 製造実行系
 router.register(r'stock-allocations', StockAllocationViewSet, basename='stockallocation')

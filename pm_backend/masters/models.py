@@ -333,6 +333,8 @@ class RoutingStep(models.Model):
     lead_time_days = models.IntegerField(default=0, verbose_name='リードタイム(日)')
     start_offset_min = models.IntegerField(null=True, blank=True, verbose_name='開始オフセット(分)')
     duration_min = models.IntegerField(null=True, blank=True, verbose_name='所要時間(分)')
+    parallel_count = models.IntegerField(default=1, verbose_name='並列数')
+    parallel_group = models.IntegerField(default=1, verbose_name='並列グループ')
     remark = models.CharField(max_length=200, null=True, blank=True, verbose_name='備考')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
@@ -341,8 +343,8 @@ class RoutingStep(models.Model):
         db_table = 'm_routing_step'
         verbose_name = 'ルーティング工程'
         verbose_name_plural = 'ルーティング工程'
-        unique_together = [['routing', 'step_no']]
-        ordering = ['routing', 'step_no']
+        unique_together = [['routing', 'step_no', 'parallel_group']]
+        ordering = ['routing', 'step_no', 'parallel_group']
 
     def __str__(self):
         return f"{self.routing} - Step {self.step_no}"

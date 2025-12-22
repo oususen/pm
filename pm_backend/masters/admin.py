@@ -168,7 +168,7 @@ class RoutingStepInline(admin.TabularInline):
     model = RoutingStep
     extra = 1
     readonly_fields = ['hierarchy_indicator']
-    fields = ['hierarchy_indicator', 'step_no', 'process', 'line', 'output_product', 'time_unit', 'lead_time_days', 'duration_min', 'remark']
+    fields = ['hierarchy_indicator', 'step_no', 'parallel_group', 'process', 'line', 'output_product', 'time_unit', 'lead_time_days', 'duration_min', 'remark']
 
     def hierarchy_indicator(self, obj):
         if not obj:
@@ -186,7 +186,7 @@ class RoutingStepMaterialInline(admin.TabularInline):
 
 @admin.register(RoutingStep)
 class RoutingStepAdmin(admin.ModelAdmin):
-    list_display = ['routing_label', 'step_no', 'hierarchy_path', 'process', 'line', 'output_product', 'time_unit', 'lead_time_days', 'duration_min']
+    list_display = ['routing_label', 'step_no', 'parallel_group', 'hierarchy_path', 'process', 'line', 'output_product', 'time_unit', 'lead_time_days', 'duration_min']
     list_filter = ['process', 'line', 'time_unit']
     search_fields = ['routing__routing_code', 'routing__product__product_code', 'process__process_code', 'line__line_code']
     inlines = [RoutingStepMaterialInline]

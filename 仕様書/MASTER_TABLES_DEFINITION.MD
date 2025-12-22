@@ -118,6 +118,7 @@
 | id | BIGINT PK | |
 | routing_id | BIGINT FK | |
 | step_no | INT | 連番（1..n） |
+| parallel_group | INT | 同一step_no内の順序グループ（重複許可用、デフォルト1） |
 | process_id | BIGINT FK | |
 | line_id | BIGINT FK NULL | |
 | step_type | ENUM('FLOW','PARALLEL_POOL') DEFAULT 'FLOW' | 流し/並列プール |
@@ -127,6 +128,8 @@
 | duration_min | INT NULL | 分所要（段取り+サイクル×数量） |
 | remark | VARCHAR(200) NULL | |
 | created_at/updated_at | DATETIME | |
+
+**ユニークキー**: `(routing_id, step_no, parallel_group)`
 
 ---
 

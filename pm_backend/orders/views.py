@@ -8,10 +8,12 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 import django_filters
 from django.db.models import Q
+import logging
 
 from .models import LineDemand, Order, OrderLine, StgOrderRaw, StgOrderDaily
 from .models_line_backlog import LineBacklog
 from .models_production import StockAllocation, ProductionOrder, ProcessActual
+from .models_line_gantt_plan import LineGanttPlan
 from .serializers import (
     LineDemandSerializer,
     OrderSerializer,
@@ -19,6 +21,7 @@ from .serializers import (
     StgOrderRawSerializer,
     StgOrderDailySerializer,
     LineBacklogSerializer,
+    LineGanttPlanSerializer,
     StockAllocationSerializer,
     ProductionOrderSerializer,
     ProductionOrderListSerializer,
@@ -26,8 +29,10 @@ from .serializers import (
 )
 from .services.csv_import import CSVImportService
 from .services.order_expansion import OrderExpansionService
+from .services.gantt_planning import generate_line_gantt_plans
 from masters.models import Routing, RoutingStep, ProcessCycleTime, Line, Calendar, CalendarDay, BOM, BOMItem
 
+logger = logging.getLogger(__name__)
 
 class OrderViewSet(viewsets.ModelViewSet):
     """受注ヘッダViewSet"""
@@ -290,6 +295,19 @@ class LineBacklogFilter(django_filters.FilterSet):
             except (ValueError, TypeError):
                 return queryset.none()
         return queryset
+
+
+class LineGanttPlanFilter(django_filters.FilterSet):
+    """LineGanttPlanのカスタムフィルタ"""
+    line = django_filters.NumberFilter(field_name='line_id')
+    product = django_filters.NumberFilter(field_name='product_id')
+    plan_date = django_filters.DateFilter(field_name='plan_date')
+    plan_date__gte = django_filters.DateFilter(field_name='plan_date', lookup_expr='gte')
+    plan_date__lte = django_filters.DateFilter(field_name='plan_date', lookup_expr='lte')
+
+    class Meta:
+        model = LineGanttPlan
+        fields = []
 
 
 class LineBacklogViewSet(viewsets.ModelViewSet):
@@ -970,6 +988,114 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({'created': created, 'updated': updated, 'skipped': skipped})
+
+
+class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = LineGanttPlan.objects.all().select_related('line', 'product')
+    serializer_class = LineGanttPlanSerializer
+    pagination_class = None
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_class = LineGanttPlanFilter
+    ordering_fields = ['plan_date', 'line', 'product']
+    ordering = ['plan_date', 'line']
+
+    @action(detail=False, methods=['post'])
+    def generate(self, request):
+        """
+        ガント用ライン計画を生成して保存する。
+        期待payload: { line_id, start_date, end_date, clear_existing?: bool }
+        """
+        line_id = request.data.get('line_id')
+        start_date = request.data.get('start_date')
+        end_date = request.data.get('end_date')
+        clear_existing = bool(request.data.get('clear_existing'))
+
+        logger.info(
+            'line_gantt_plans.generate: line_id=%s start=%s end=%s clear=%s',
+            line_id, start_date, end_date, clear_existing
+        )
+
+        if not line_id:
+            return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not start_date or not end_date:
+            return Response({'detail': 'start_date and end_date are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            line_id = int(line_id)
+        except (TypeError, ValueError):
+            return Response({'detail': 'line_id must be numeric'}, status=status.HTTP_400_BAD_REQUEST)
+
+        plans = generate_line_gantt_plans(line_id, start_date, end_date, clear_existing=clear_existing)
+        logger.info('line_gantt_plans.generate: plans=%s', len(plans))
+
+        upserted = []
+        for plan in plans:
+            obj, _ = LineGanttPlan.objects.update_or_create(
+                plan_id=plan['plan_id'],
+                defaults={
+                    'line_id': plan['line_id'],
+                    'product_id': plan['product_id'],
+                    'plan_date': plan['plan_date'],
+                    'plan_qty': plan['plan_qty'],
+                    'sequence_no': plan['sequence_no'],
+                    'start_datetime': plan['start_datetime'],
+                    'end_datetime': plan['end_datetime'],
+                    'processes_plan': plan['processes_plan'],
+                }
+            )
+            upserted.append(obj)
+
+        serializer = self.get_serializer(upserted, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['put'], url_path='bulk-update')
+    def bulk_update(self, request):
+        """
+        ガントのドラッグ調整結果を一括保存する。
+        期待payload: [{ plan_id, process_id, start_time, end_time }, ...]
+        """
+        updates = request.data
+        if not isinstance(updates, list) or not updates:
+            return Response({'detail': 'updates must be a non-empty list'}, status=status.HTTP_400_BAD_REQUEST)
+
+        updated_count = 0
+        for update in updates:
+            plan_id = update.get('plan_id')
+            process_id = update.get('process_id')
+            if not plan_id or not process_id:
+                continue
+
+            plan = LineGanttPlan.objects.filter(plan_id=plan_id).first()
+            if not plan or not plan.processes_plan:
+                continue
+
+            processes_plan = list(plan.processes_plan)
+            changed = False
+            for proc in processes_plan:
+                if str(proc.get('process_id')) == str(process_id):
+                    proc['start_time'] = update.get('start_time')
+                    proc['end_time'] = update.get('end_time')
+                    changed = True
+                    updated_count += 1
+                    break
+
+            if changed:
+                starts = []
+                ends = []
+                for proc in processes_plan:
+                    try:
+                        starts.append(datetime.fromisoformat(proc['start_time']))
+                        ends.append(datetime.fromisoformat(proc['end_time']))
+                    except Exception:
+                        continue
+                if starts:
+                    plan.start_datetime = min(starts)
+                if ends:
+                    plan.end_datetime = max(ends)
+                plan.processes_plan = processes_plan
+                plan.save()
+
+        return Response({'updated': updated_count})
 
 
 # ========================================

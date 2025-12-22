@@ -1,0 +1,546 @@
+from dataclasses import dataclass
+from datetime import datetime, timedelta, time
+from decimal import Decimal
+from typing import Dict, List, Optional, Tuple
+
+from django.db.models import Q
+import logging
+
+from masters.models import RoutingStep, ProcessCycleTime, Line, Calendar, CalendarDay, WorkPattern, BreakTime, BOM, BOMItem
+from orders.models_line_backlog import LineBacklog
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class ProcessSpec:
+    process_id: int
+    process_name: str
+    process_number: int
+    cycle_time_minutes: float
+    setup_time_minutes: float
+    parallel_count: int
+    parallel_group: int = 1
+    output_product_id: Optional[int] = None
+    output_product_code: str = ''
+    output_product_name: str = ''
+    transfer_time_minutes: float = 0.0
+
+
+class LineWorkCalendar:
+    def __init__(self, line: Line):
+        self.line = line
+        self.calendar_id = line.calendar_id or Calendar.objects.filter(calendar_code='tiera_muke').values_list('id', flat=True).first()
+        self._calendar_cache: Dict = {}
+        self._pattern_cache: Dict = {}
+        self._break_cache: Dict = {}
+        self._segments_cache: Dict = {}
+
+    def _get_calendar_day(self, target_date):
+        if not self.calendar_id:
+            return None
+        if target_date in self._calendar_cache:
+            return self._calendar_cache[target_date]
+        cal = CalendarDay.objects.filter(calendar_id=self.calendar_id, target_date=target_date).first()
+        self._calendar_cache[target_date] = cal
+        return cal
+
+    def _get_work_pattern(self, pattern_id):
+        if not pattern_id:
+            return None
+        if pattern_id in self._pattern_cache:
+            return self._pattern_cache[pattern_id]
+        pattern = WorkPattern.objects.filter(id=pattern_id).first()
+        self._pattern_cache[pattern_id] = pattern
+        return pattern
+
+    def _get_breaks(self, pattern_id):
+        if not pattern_id:
+            return []
+        if pattern_id in self._break_cache:
+            return self._break_cache[pattern_id]
+        breaks = list(BreakTime.objects.filter(work_pattern_id=pattern_id).order_by('order'))
+        self._break_cache[pattern_id] = breaks
+        return breaks
+
+    def _time_to_minutes(self, t: time) -> int:
+        return t.hour * 60 + t.minute
+
+    def _build_segments(self, target_date) -> List[Tuple[datetime, datetime]]:
+        cal = self._get_calendar_day(target_date)
+        if cal and cal.is_working_day is False:
+            return []
+
+        pattern = self._get_work_pattern(cal.work_pattern_id if cal else None)
+        start_time = pattern.start_time if pattern and pattern.start_time else time(8, 0)
+        start_min = self._time_to_minutes(start_time)
+
+        if pattern and pattern.end_time:
+            end_min = self._time_to_minutes(pattern.end_time)
+            if end_min <= start_min:
+                end_min += 24 * 60
+        else:
+            work_minutes = cal.work_minutes if cal and cal.work_minutes is not None else 480
+            end_min = start_min + int(work_minutes)
+
+        breaks = []
+        if pattern:
+            for br in self._get_breaks(pattern.id):
+                br_start = self._time_to_minutes(br.break_start)
+                br_end = self._time_to_minutes(br.break_end)
+                if br_end <= br_start:
+                    br_end += 24 * 60
+                breaks.append((br_start, br_end))
+            breaks.sort(key=lambda b: b[0])
+
+        base = datetime.combine(target_date, time(0, 0))
+        segments = []
+        cursor = start_min
+        for br_start, br_end in breaks:
+            if br_start > cursor:
+                segments.append((base + timedelta(minutes=cursor), base + timedelta(minutes=min(br_start, end_min))))
+            cursor = max(cursor, br_end)
+        if cursor < end_min:
+            segments.append((base + timedelta(minutes=cursor), base + timedelta(minutes=end_min)))
+        return segments
+
+    def get_segments(self, target_date) -> List[Tuple[datetime, datetime]]:
+        if target_date in self._segments_cache:
+            return self._segments_cache[target_date]
+        segments = self._build_segments(target_date)
+        self._segments_cache[target_date] = segments
+        return segments
+
+    def _get_previous_working_end(self, start_date):
+        check_date = start_date - timedelta(days=1)
+        while True:
+            segments = self.get_segments(check_date)
+            if segments:
+                return segments[-1][1]
+            check_date -= timedelta(days=1)
+
+    def _get_next_working_start(self, start_date):
+        check_date = start_date + timedelta(days=1)
+        while True:
+            segments = self.get_segments(check_date)
+            if segments:
+                return segments[0][0]
+            check_date += timedelta(days=1)
+
+    def _get_workday_date(self, dt: datetime):
+        segments = self.get_segments(dt.date())
+        if not segments or dt < segments[0][0]:
+            prev_date = dt.date() - timedelta(days=1)
+            prev_segments = self.get_segments(prev_date)
+            if prev_segments and prev_segments[-1][1] >= dt:
+                return prev_date
+        return dt.date()
+
+    def _find_segment_index_before_or_containing(self, dt, segments):
+        for i in range(len(segments) - 1, -1, -1):
+            start, end = segments[i]
+            if start <= dt <= end:
+                return i
+            if dt > end:
+                return i
+        return None
+
+    def _find_segment_index_containing_or_after(self, dt, segments):
+        for i, (start, end) in enumerate(segments):
+            if start <= dt <= end:
+                return i
+            if dt < start:
+                return i
+        return None
+
+    def subtract_working_minutes(self, end_dt: datetime, minutes: float) -> datetime:
+        remaining = minutes
+        current = end_dt
+        while remaining > 0:
+            work_date = self._get_workday_date(current)
+            segments = self.get_segments(work_date)
+            if not segments:
+                current = self._get_previous_working_end(work_date)
+                continue
+            idx = self._find_segment_index_before_or_containing(current, segments)
+            if idx is None:
+                current = self._get_previous_working_end(work_date)
+                continue
+            seg_start, seg_end = segments[idx]
+            if current > seg_end:
+                current = seg_end
+            if current < seg_start:
+                current = self._get_previous_working_end(work_date)
+                continue
+            available = (current - seg_start).total_seconds() / 60
+            if remaining <= available:
+                return current - timedelta(minutes=remaining)
+            remaining -= available
+            current = seg_start
+            if idx > 0:
+                current = segments[idx - 1][1]
+            else:
+                current = self._get_previous_working_end(work_date)
+        return current
+
+    def add_working_minutes(self, start_dt: datetime, minutes: float) -> datetime:
+        remaining = minutes
+        current = start_dt
+        while remaining > 0:
+            work_date = self._get_workday_date(current)
+            segments = self.get_segments(work_date)
+            if not segments:
+                current = self._get_next_working_start(work_date)
+                continue
+            idx = self._find_segment_index_containing_or_after(current, segments)
+            if idx is None:
+                current = self._get_next_working_start(work_date)
+                continue
+            seg_start, seg_end = segments[idx]
+            if current < seg_start:
+                current = seg_start
+            available = (seg_end - current).total_seconds() / 60
+            if remaining <= available:
+                return current + timedelta(minutes=remaining)
+            remaining -= available
+            current = seg_end
+            if idx + 1 < len(segments):
+                current = segments[idx + 1][0]
+            else:
+                current = self._get_next_working_start(work_date)
+        return current
+
+    def get_day_end(self, target_date):
+        segments = self.get_segments(target_date)
+        if segments:
+            return segments[-1][1]
+        return self._get_previous_working_end(target_date)
+
+
+def _pick_cycle_time(step: RoutingStep, product_id: int, plan_date) -> Optional[ProcessCycleTime]:
+    candidates = ProcessCycleTime.objects.filter(
+        process_id=step.process_id,
+        product_id=product_id,
+        is_active=True,
+    ).filter(Q(line_id=step.line_id) | Q(line__isnull=True))
+    best = None
+    for ct in candidates:
+        if ct.valid_from and plan_date < ct.valid_from:
+            continue
+        if ct.valid_to and plan_date > ct.valid_to:
+            continue
+        if best is None:
+            best = ct
+            continue
+        if best.line_id is None and ct.line_id == step.line_id:
+            best = ct
+    return best
+
+
+def _get_cycle_setup(step: RoutingStep, product_id: int, plan_date) -> Tuple[float, float]:
+    ct = _pick_cycle_time(step, product_id, plan_date)
+    if not ct and step.output_product_id and step.output_product_id != product_id:
+        ct = _pick_cycle_time(step, step.output_product_id, plan_date)
+    if not ct and step.routing_id and step.routing.product_id and step.routing.product_id != product_id:
+        ct = _pick_cycle_time(step, step.routing.product_id, plan_date)
+    if ct:
+        return float(ct.cycle_time_min or 0), float(ct.setup_time_min or 0)
+    if step.time_unit == 'MINUTE' and step.duration_min is not None:
+        return float(step.duration_min or 0), 0.0
+    return 0.0, 0.0
+
+
+def _build_process_specs(steps: List[RoutingStep], plan_qty: Decimal, plan_date, product_id: int) -> List[ProcessSpec]:
+    specs = []
+    for step in steps:
+        output_product = step.output_product or (step.routing.product if step.routing_id else None)
+        cycle_time_min, setup_time_min = _get_cycle_setup(step, product_id, plan_date)
+        parallel_count = step.parallel_count or 1
+        parallel_group = getattr(step, 'parallel_group', 1) or 1
+        specs.append(ProcessSpec(
+            process_id=step.process_id,
+            process_name=step.process.process_name if step.process_id else '',
+            process_number=step.step_no or 0,
+            cycle_time_minutes=cycle_time_min,
+            setup_time_minutes=setup_time_min,
+            parallel_count=parallel_count,
+            parallel_group=parallel_group,
+            output_product_id=output_product.id if output_product else None,
+            output_product_code=output_product.product_code if output_product else '',
+            output_product_name=output_product.product_name if output_product else '',
+        ))
+    return specs
+
+
+def _calculate_total_minutes(spec: ProcessSpec, quantity: Decimal) -> float:
+    if spec.cycle_time_minutes <= 0:
+        return 0.0
+    return (spec.cycle_time_minutes * float(quantity)) + spec.setup_time_minutes
+
+
+def _pick_active_bom(parent_product_id: int, plan_date):
+    return BOM.objects.filter(
+        parent_product_id=parent_product_id,
+        is_active=True,
+        valid_from__lte=plan_date,
+    ).filter(Q(valid_to__gte=plan_date) | Q(valid_to__isnull=True)).order_by('-valid_from').first()
+
+
+def _build_bom_multiplier_map(final_product_id: int, plan_date) -> Dict[int, Decimal]:
+    multipliers: Dict[int, Decimal] = {final_product_id: Decimal('1')}
+    expanded: Dict[int, Decimal] = {final_product_id: Decimal('0')}
+    queue = [final_product_id]
+    while queue:
+        product_id = queue.pop(0)
+        total_mult = multipliers.get(product_id, Decimal('0'))
+        prev_expanded = expanded.get(product_id, Decimal('0'))
+        if total_mult <= prev_expanded:
+            continue
+        delta = total_mult - prev_expanded
+        expanded[product_id] = total_mult
+
+        bom = _pick_active_bom(product_id, plan_date)
+        if not bom:
+            continue
+        for item in BOMItem.objects.filter(bom_id=bom.id):
+            if item.quantity is None:
+                continue
+            qty = Decimal(item.quantity)
+            if item.loss_rate is not None:
+                qty = qty * (Decimal('1') + Decimal(item.loss_rate))
+            child_id = item.child_product_id
+            multipliers[child_id] = multipliers.get(child_id, Decimal('0')) + (delta * qty)
+            queue.append(child_id)
+    return multipliers
+
+
+def _overlaps(start: datetime, end: datetime, item: Dict) -> bool:
+    return start < item['end'] and end > item['start']
+
+
+def _ensure_resource_lanes(resource_schedules: Dict[int, List[List[Dict]]], process_id: int, parallel_count: int):
+    lanes = resource_schedules.setdefault(process_id, [])
+    while len(lanes) < parallel_count:
+        lanes.append([])
+    return lanes
+
+
+def _find_available_lane(lanes: List[List[Dict]], start: datetime, end: datetime) -> Optional[int]:
+    for idx, lane in enumerate(lanes):
+        has_conflict = False
+        for item in lane:
+            if _overlaps(start, end, item):
+                has_conflict = True
+                break
+        if not has_conflict:
+            return idx
+    return None
+
+
+def _latest_conflict_start(lanes: List[List[Dict]], start: datetime, end: datetime) -> Optional[datetime]:
+    latest = None
+    for lane in lanes:
+        for item in lane:
+            if _overlaps(start, end, item):
+                if latest is None or item['start'] > latest:
+                    latest = item['start']
+    return latest
+
+
+def _reserve_process_slot(calendar: LineWorkCalendar, target_end_time: datetime, minutes: float,
+                          lanes: List[List[Dict]]):
+    end_time = target_end_time
+    attempts = 0
+    while True:
+        start_time = calendar.subtract_working_minutes(end_time, minutes)
+        lane_idx = _find_available_lane(lanes, start_time, end_time)
+        if lane_idx is not None:
+            return start_time, end_time, lane_idx
+        conflict_start = _latest_conflict_start(lanes, start_time, end_time)
+        if conflict_start and conflict_start < end_time:
+            end_time = conflict_start
+        else:
+            end_time = calendar.subtract_working_minutes(end_time, 1)
+        attempts += 1
+        if attempts > 10000:
+            logger.warning('gantt_plans: no available slot found after %s attempts', attempts)
+            return start_time, end_time, 0
+
+
+def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing: bool = False):
+    line = Line.objects.filter(id=line_id).first()
+    if not line:
+        raise ValueError('line_id not found')
+
+    calendar = LineWorkCalendar(line)
+    qs_all = LineBacklog.objects.filter(
+        line_id=line_id,
+        plan_date__gte=start_date,
+        plan_date__lte=end_date,
+        plan_qty__gt=0,
+    ).select_related('product', 'process')
+    qs_final = qs_all.filter(product__is_line_final_product=True)
+    qs = qs_final if qs_final.exists() else qs_all
+
+    logger.info(
+        'gantt_plans: line_id=%s start=%s end=%s clear=%s backlog_all=%s backlog_final=%s using=%s',
+        line_id, start_date, end_date, clear_existing, qs_all.count(), qs_final.count(),
+        'final' if qs is qs_final else 'all'
+    )
+
+    # 最終工程のプロセスを特定
+    product_ids = list({obj.product_id for obj in qs})
+    steps_qs = RoutingStep.objects.filter(
+        line_id=line_id
+    ).select_related('routing', 'process', 'output_product')
+
+    steps_by_product: Dict[int, List[RoutingStep]] = {}
+    for step in steps_qs:
+        product_keys = []
+        if step.output_product_id:
+            product_keys.append(step.output_product_id)
+        if step.routing_id and step.routing.product_id:
+            product_keys.append(step.routing.product_id)
+        for pid in set(product_keys):
+            steps_by_product.setdefault(pid, []).append(step)
+
+    logger.info(
+        'gantt_plans: product_ids=%s steps_products=%s steps_total=%s',
+        len(product_ids), len(steps_by_product.keys()), steps_qs.count()
+    )
+
+    step_no_by_process = {}
+    for steps in steps_by_product.values():
+        for step in steps:
+            step_no_by_process.setdefault(step.process_id, step.step_no or 0)
+
+    default_steps = sorted(steps_qs, key=lambda s: (s.step_no or 0, getattr(s, 'parallel_group', 1) or 1))
+
+    grouped = {}
+    for obj in qs:
+        key = (obj.product_id, obj.plan_date, obj.sequence_no or 0)
+        current = grouped.get(key)
+        obj_step_no = step_no_by_process.get(obj.process_id, 0)
+        if not current:
+            grouped[key] = (obj, obj_step_no)
+            continue
+        _, current_step_no = current
+        if obj_step_no >= current_step_no:
+            grouped[key] = (obj, obj_step_no)
+    base_plans = [item[0] for item in grouped.values()]
+    base_plans.sort(key=lambda o: (o.plan_date, -(o.sequence_no or 0), o.product_id))
+    logger.info('gantt_plans: base_plans grouped=%s', len(base_plans))
+
+    if clear_existing:
+        plan_ids = []
+        for obj in base_plans:
+            qty_label = str(obj.plan_qty).rstrip('0').rstrip('.')
+            if '.' in qty_label:
+                qty_label = qty_label.replace('.', 'p')
+            sequence = obj.sequence_no or 0
+            plan_ids.append(f"{obj.product.product_code}_{obj.plan_date.strftime('%Y%m%d')}_{qty_label}_{sequence}")
+        if plan_ids:
+            from orders.models_line_gantt_plan import LineGanttPlan
+            LineGanttPlan.objects.filter(plan_id__in=plan_ids).delete()
+
+    resource_schedules: Dict[int, List[List[Dict]]] = {}
+    plans = []
+    for obj in base_plans:
+        product = obj.product
+        multiplier_map = _build_bom_multiplier_map(product.id, obj.plan_date)
+        steps = sorted(steps_by_product.get(product.id, []), key=lambda s: (s.step_no or 0, getattr(s, 'parallel_group', 1) or 1))
+        if not steps:
+            steps = default_steps
+        if not steps:
+            continue
+        process_specs = _build_process_specs(steps, obj.plan_qty, obj.plan_date, product.id)
+        process_specs.sort(key=lambda s: (s.process_number or 0, s.parallel_group or 1))
+
+        qty_label = str(obj.plan_qty).rstrip('0').rstrip('.')
+        if '.' in qty_label:
+            qty_label = qty_label.replace('.', 'p')
+        sequence = obj.sequence_no or 0
+        plan_id = f"{product.product_code}_{obj.plan_date.strftime('%Y%m%d')}_{qty_label}_{sequence}"
+
+        current_end_time = calendar.get_day_end(obj.plan_date)
+        processes_plan = []
+
+        reversed_specs = list(reversed(process_specs))
+        for i, spec in enumerate(reversed_specs):
+            qty_product_id = spec.output_product_id or obj.product_id
+            process_qty = multiplier_map.get(qty_product_id, Decimal('1')) * obj.plan_qty
+            total_minutes = _calculate_total_minutes(spec, process_qty)
+            effective_minutes = total_minutes / max(spec.parallel_count, 1)
+            end_time = current_end_time
+            lanes = _ensure_resource_lanes(resource_schedules, spec.process_id, 1)
+            start_time, end_time, lane_idx = _reserve_process_slot(calendar, end_time, effective_minutes, lanes)
+            lanes[lane_idx].append({
+                'start': start_time,
+                'end': end_time,
+                'plan_id': plan_id,
+            })
+            process_plan = {
+                'process_id': spec.process_id,
+                'process_name': spec.process_name,
+                'process_number': spec.process_number,
+                'parallel_group': spec.parallel_group,
+                'output_product_id': spec.output_product_id,
+                'output_product_code': spec.output_product_code,
+                'output_product_name': spec.output_product_name,
+                'quantity': float(process_qty),
+                'cycle_time_minutes': spec.cycle_time_minutes,
+                'setup_time_minutes': spec.setup_time_minutes,
+                'total_minutes_required': total_minutes,
+                'effective_minutes': effective_minutes,
+                'parallel_count': spec.parallel_count,
+                'start_time': start_time,
+                'end_time': end_time,
+                'transfer_time_minutes': spec.transfer_time_minutes,
+                'is_continuous': True,
+            }
+            processes_plan.insert(0, process_plan)
+
+            if i + 1 < len(reversed_specs):
+                prev_spec = reversed_specs[i + 1]
+                prev_qty_product_id = prev_spec.output_product_id or obj.product_id
+                prev_qty = multiplier_map.get(prev_qty_product_id, Decimal('1')) * obj.plan_qty
+                prev_total = _calculate_total_minutes(prev_spec, prev_qty)
+                prev_effective = prev_total / max(prev_spec.parallel_count, 1)
+                gap_minutes = prev_spec.transfer_time_minutes
+                limit_e2e = calendar.subtract_working_minutes(
+                    process_plan['end_time'],
+                    spec.cycle_time_minutes + gap_minutes
+                )
+                limit_s2s_start = calendar.subtract_working_minutes(
+                    process_plan['start_time'],
+                    prev_spec.cycle_time_minutes + gap_minutes
+                )
+                limit_s2s_end = calendar.add_working_minutes(
+                    limit_s2s_start,
+                    prev_effective
+                )
+                current_end_time = min(limit_e2e, limit_s2s_end)
+
+        start_dt = processes_plan[0]['start_time'] if processes_plan else current_end_time
+        end_dt = processes_plan[-1]['end_time'] if processes_plan else current_end_time
+
+        serialized_plan = []
+        for pp in processes_plan:
+            pp_copy = pp.copy()
+            pp_copy['start_time'] = pp['start_time'].isoformat()
+            pp_copy['end_time'] = pp['end_time'].isoformat()
+            serialized_plan.append(pp_copy)
+
+        plans.append({
+            'plan_id': plan_id,
+            'line_id': line_id,
+            'product_id': product.id,
+            'plan_date': obj.plan_date,
+            'plan_qty': obj.plan_qty,
+            'sequence_no': obj.sequence_no,
+            'start_datetime': start_dt,
+            'end_datetime': end_dt,
+            'processes_plan': serialized_plan,
+        })
+
+    logger.info('gantt_plans: generated_plans=%s', len(plans))
+    return plans
