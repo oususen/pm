@@ -53,7 +53,7 @@
                   :key="slot.key"
                   class="time-slot-header"
                   :class="slot.dayClass"
-                  :style="{ width: pixelsPerDay + 'px' }"
+                  :style="{ width: pixelsPerSlot + 'px' }"
                 >
                   <div class="time-slot-day">{{ slot.dayLabel }}</div>
                   <div class="time-slot-label">{{ slot.label }}</div>
@@ -125,7 +125,8 @@ const selectedLine = ref('')
 const baseDate = ref(new Date().toISOString().slice(0, 10))
 const lines = ref([])
 const processGanttData = ref([])
-const pixelsPerDay = 100
+const slotHours = 4
+const pixelsPerSlot = 80
 const timelineStart = ref(null)
 const timelineEnd = ref(null)
 const timelineSlots = ref([])
@@ -147,7 +148,7 @@ const displayDays = computed(() => {
   return days
 })
 
-const timelineWidthPx = computed(() => timelineSlots.value.length * pixelsPerDay)
+const timelineWidthPx = computed(() => timelineSlots.value.length * pixelsPerSlot)
 
 function getDayClass(dateStr) {
   const d = new Date(dateStr)
@@ -226,7 +227,8 @@ const saveSchedule = async () => {
   }
 
   const updates = []
-  const msPerDay = 1000 * 60 * 60 * 24
+  const msPerSlot = slotHours * 60 * 60 * 1000
+  const msPerPixel = msPerSlot / pixelsPerSlot
   bars.forEach((bar) => {
     const planId = bar.dataset.planId
     const processId = Number(bar.dataset.processId)
@@ -234,8 +236,7 @@ const saveSchedule = async () => {
     if (!planId || !processId || !durationMs) return
 
     const currentLeft = parseFloat(bar.style.left || '0')
-    const daysFromStart = currentLeft / pixelsPerDay
-    const newStartMs = timelineStart.value.getTime() + (daysFromStart * msPerDay)
+    const newStartMs = timelineStart.value.getTime() + (currentLeft * msPerPixel)
 
     const roundMs = 1000 * 60 * 5
     const roundedStartMs = Math.round(newStartMs / roundMs) * roundMs
@@ -325,10 +326,10 @@ function handleDragMove(e) {
 function updateDragTooltip(e) {
   const tooltip = getDragTooltip()
   if (!timelineStart.value) return
-  const msPerDay = 1000 * 60 * 60 * 24
+  const msPerSlot = slotHours * 60 * 60 * 1000
+  const msPerPixel = msPerSlot / pixelsPerSlot
   const currentLeft = parseFloat(draggedBar.style.left || '0')
-  const daysFromStart = currentLeft / pixelsPerDay
-  const newStartMs = timelineStart.value.getTime() + (daysFromStart * msPerDay)
+  const newStartMs = timelineStart.value.getTime() + (currentLeft * msPerPixel)
   const roundMs = 1000 * 60 * 5
   const roundedStartMs = Math.round(newStartMs / roundMs) * roundMs
   const newStartDate = new Date(roundedStartMs)
@@ -383,17 +384,42 @@ function formatDayLabel(dateObj) {
   return `${m}/${d}(${w})`
 }
 
+function floorToSlot(date) {
+  const d = new Date(date)
+  const base = new Date(d)
+  base.setHours(0, 0, 0, 0)
+  const minutes = Math.floor((d.getTime() - base.getTime()) / 60000)
+  const slotMinutes = slotHours * 60
+  const slotStartMinutes = Math.floor(minutes / slotMinutes) * slotMinutes
+  return new Date(base.getTime() + slotStartMinutes * 60000)
+}
+
+function ceilToSlot(date) {
+  const d = new Date(date)
+  const base = new Date(d)
+  base.setHours(0, 0, 0, 0)
+  const slotMinutes = slotHours * 60
+  const minutes = Math.floor((d.getTime() - base.getTime()) / 60000)
+  const remainder = minutes % slotMinutes
+  const isExact = remainder === 0 && d.getMinutes() === 0 && d.getSeconds() === 0 && d.getMilliseconds() === 0
+  if (isExact) {
+    return new Date(d)
+  }
+  const slotStartMinutes = Math.floor(minutes / slotMinutes) * slotMinutes + slotMinutes
+  return new Date(base.getTime() + slotStartMinutes * 60000)
+}
+
 function buildTimelineSlots(startDate, endDate) {
   const slots = []
   const current = new Date(startDate)
-  while (current <= endDate) {
+  while (current < endDate) {
     slots.push({
-      key: current.toISOString().slice(0, 10),
-      dayLabel: formatDayLabel(current),
-      label: `${current.getMonth() + 1}/${current.getDate()}`,
+      key: current.toISOString(),
+      dayLabel: current.getHours() === 0 ? formatDayLabel(current) : '',
+      label: formatTime(current),
       dayClass: getDayClass(current.toISOString().slice(0, 10)),
     })
-    current.setDate(current.getDate() + 1)
+    current.setHours(current.getHours() + slotHours)
   }
   return slots
 }
@@ -497,15 +523,14 @@ function buildProcessGantt(plans) {
 
   const minDate = new Date(Math.min(...allDates.map((d) => d.getTime())))
   const maxDate = new Date(Math.max(...allDates.map((d) => d.getTime())))
-  const startDate = new Date(minDate)
-  const endDate = new Date(maxDate)
-  endDate.setDate(endDate.getDate() + 1)
+  const startDate = floorToSlot(minDate)
+  const endDate = ceilToSlot(maxDate)
 
   timelineStart.value = startDate
   timelineEnd.value = endDate
   timelineSlots.value = buildTimelineSlots(startDate, endDate)
 
-  const msPerDay = 1000 * 60 * 60 * 24
+  const msPerSlot = slotHours * 60 * 60 * 1000
   processMap.forEach((procEntry) => {
     procEntry.items.sort((a, b) => {
       const aSeq = a.sequence_no != null ? a.sequence_no : Number.POSITIVE_INFINITY
@@ -516,8 +541,8 @@ function buildProcessGantt(plans) {
     procEntry.items.forEach((item) => {
       item.bars.sort((a, b) => a.startTime - b.startTime)
       item.bars.forEach((bar) => {
-        const left = ((bar.startTime.getTime() - startDate.getTime()) / msPerDay) * pixelsPerDay
-        const width = Math.max(((bar.endTime.getTime() - bar.startTime.getTime()) / msPerDay) * pixelsPerDay, 20)
+        const left = ((bar.startTime.getTime() - startDate.getTime()) / msPerSlot) * pixelsPerSlot
+        const width = Math.max(((bar.endTime.getTime() - bar.startTime.getTime()) / msPerSlot) * pixelsPerSlot, 20)
         bar.leftPx = left
         bar.widthPx = width
         bar.label = formatTimeRange(bar.startTime, bar.endTime)
