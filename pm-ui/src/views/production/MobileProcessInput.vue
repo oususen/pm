@@ -251,14 +251,18 @@ const apiBaseUrl =
   import.meta.env.VITE_API_BASE_URL ||
   (typeof window !== 'undefined' ? `${window.location.origin}/api` : '')
 const mediaEnvBase = import.meta.env.VITE_MEDIA_BASE_URL || ''
+const browserOrigin = typeof window !== 'undefined' ? window.location.origin : ''
 let mediaBaseUrl = ''
 if (mediaEnvBase) {
   mediaBaseUrl = mediaEnvBase.replace(/\/$/, '')
+} else if (import.meta.env.DEV) {
+  // In dev (Vite) we keep the current origin so the dev server can proxy /media for remote devices.
+  mediaBaseUrl = browserOrigin
 } else {
   try {
-    mediaBaseUrl = new URL(apiBaseUrl).origin
+    mediaBaseUrl = new URL(apiBaseUrl, browserOrigin || undefined).origin
   } catch (e) {
-    mediaBaseUrl = typeof window !== 'undefined' ? window.location.origin : ''
+    mediaBaseUrl = browserOrigin
   }
   if (mediaBaseUrl.endsWith(':8501')) {
     mediaBaseUrl = mediaBaseUrl.replace(':8501', ':8002')
@@ -336,17 +340,30 @@ const currentProductList = computed(() => {
   return []
 })
 
+const normalizeImageUrl = (rawUrl) => {
+  if (!rawUrl) return ''
+  const base = mediaBaseUrl || browserOrigin
+  if (rawUrl.startsWith('/media')) {
+    return `${base}${rawUrl}`
+  }
+  try {
+    const urlObj = new URL(rawUrl, base || undefined)
+    const localHosts = ['localhost', '127.0.0.1', '0.0.0.0', '::1']
+    if (localHosts.includes(urlObj.hostname)) {
+      return `${base}${urlObj.pathname}${urlObj.search}${urlObj.hash}`
+    }
+    return urlObj.toString()
+  } catch (e) {
+    return rawUrl
+  }
+}
+
 const getImageUrl = (p) => {
-  const url =
+  const url = normalizeImageUrl(
     productImageMap.value[p.product] ||
     productImageMap.value[String(p.product)] ||
     ''
-  if (!url) return ''
-  if (url.startsWith('http://') || url.startsWith('https://')) return url
-  if (url.startsWith('/media')) {
-    // 通常は backend の MEDIA_URL を指す。フロントが 8501 の場合は 8002 に差し替え済み。
-    return `${mediaBaseUrl}${url}`
-  }
+  )
   return url
 }
 
