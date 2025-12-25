@@ -61,6 +61,10 @@
         <div class="icon-box">🛠️</div>
         <div class="label">仕損品記録</div>
       </RouterLink>
+      <RouterLink to="/production/scrap-history" class="master-tile">
+        <div class="icon-box">📜</div>
+        <div class="label">仕損履歴</div>
+      </RouterLink>
     </div>
 
     <p class="helper-text">

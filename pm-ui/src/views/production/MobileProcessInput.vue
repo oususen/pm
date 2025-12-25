@@ -170,6 +170,27 @@
         </button>
       </div>
 
+      <div v-if="isScrapRecord" class="section">
+        <label class="label-required">理由</label>
+        <select v-model="record.reason" class="input-large">
+          <option value="">-- 理由を選択 --</option>
+          <option v-for="reason in scrapReasons" :key="reason.value" :value="reason.value">
+            {{ reason.label }}
+          </option>
+        </select>
+        <div v-if="record.reason === 'OTHER'" class="hint">※ その他を選んだ場合は理由詳細の入力が必須です。</div>
+      </div>
+
+      <div v-if="record.reason === 'OTHER'" class="section">
+        <label class="label-required">理由詳細</label>
+        <input
+          type="text"
+          v-model="record.reason_detail"
+          placeholder="その他の内容を入力"
+          class="input-normal"
+        />
+      </div>
+
       <div class="section">
         <label>ロット番号</label>
         <input
@@ -181,11 +202,11 @@
       </div>
 
       <div class="section">
-        <label>作業者名</label>
+        <label class="label-required">記入者</label>
         <input
           type="text"
           v-model="record.operator_name"
-          placeholder="作業者名（任意）"
+          placeholder="記入者名を入力"
           class="input-normal"
         />
       </div>
@@ -195,7 +216,7 @@
         <textarea
           v-model="record.remarks"
           rows="3"
-          placeholder="特記事項があれば入力"
+          placeholder="その他の内容や特記事項を入力"
           class="textarea-normal"
         ></textarea>
       </div>
@@ -311,6 +332,8 @@ const record = ref({
   product_id: '',
   product_code: '',
   qty: null,
+  reason: '',
+  reason_detail: '',
   equipment_state: '',
   batch_no: '',
   operator_name: '',
@@ -321,6 +344,19 @@ const recordTypeOptions = [
   { value: 'PRODUCTION', label: '生産記録' },
   { value: 'EQUIPMENT_STATE', label: '設備状態変更' },
   { value: 'SCRAP', label: '仕損品記録' },
+]
+
+const scrapReasons = [
+  { value: 'RUST', label: 'サビ' },
+  { value: 'DEFORMATION', label: '変形/キズ' },
+  { value: 'BEAD_MISALIGN', label: 'ビードずれ' },
+  { value: 'BLOW_HOLE', label: 'ブローホール' },
+  { value: 'WELD_PINHOLE', label: '溶接穴あき' },
+  { value: 'UNDERCUT', label: 'アンダーカット' },
+  { value: 'PRECISION_NG', label: '精度不良' },
+  { value: 'MISSING_OR_WRONG_ASSEMBLY', label: '欠品/誤組' },
+  { value: 'MATERIAL_WIP_DEFECT', label: '素材/仕掛不良' },
+  { value: 'OTHER', label: 'その他' },
 ]
 
 const availableRecordTypes = computed(() => {
@@ -338,6 +374,8 @@ const filteredProcesses = computed(() => {
   if (!selectedLineId.value) return processes.value
   return processes.value.filter((p) => String(p.line) === String(selectedLineId.value))
 })
+
+const isScrapRecord = computed(() => record.value.record_type === 'SCRAP')
 
 const equipmentStates = [
   { value: 'RUNNING', label: '運転中' },
@@ -367,6 +405,24 @@ const ensureDefaultRecordType = () => {
     record.value.record_type = ''
   }
 }
+
+const resolveDefaultOperator = () => {
+  if (typeof window === 'undefined') return ''
+  const candidates = [
+    'currentUserName',
+    'userName',
+    'username',
+    'loginUser',
+    'operatorName',
+  ]
+  for (const key of candidates) {
+    const v = window.localStorage ? window.localStorage.getItem(key) : ''
+    if (v && v.trim()) return v.trim()
+  }
+  return ''
+}
+
+const defaultOperatorName = ref(resolveDefaultOperator())
 
 watch(
   availableRecordTypes,
@@ -443,7 +499,14 @@ const canSubmit = computed(() => {
 
   if (record.value.record_type === 'PRODUCTION' || record.value.record_type === 'SCRAP') {
     const hasProduct = !!record.value.product_id || !!(record.value.product_code || '').trim()
-    return record.value.qty > 0 && hasProduct
+    if (!(record.value.qty > 0 && hasProduct)) return false
+    if (record.value.record_type === 'SCRAP') {
+      if (!record.value.reason) return false
+      const detailText = (record.value.reason_detail || '').trim()
+      if (record.value.reason === 'OTHER' && !detailText) return false
+      if (!(record.value.operator_name || '').trim()) return false
+    }
+    return true
   }
 
   if (record.value.record_type === 'EQUIPMENT_STATE') {
@@ -459,9 +522,11 @@ const resetForm = () => {
     product_id: '',
     product_code: '',
     qty: null,
+    reason: '',
+    reason_detail: '',
     equipment_state: '',
     batch_no: '',
-    operator_name: '',
+    operator_name: defaultOperatorName.value || '',
     remarks: '',
   }
   manualProduct.value = false
@@ -524,6 +589,16 @@ const submitRecord = async () => {
     }
 
     data.remarks = record.value.remarks
+
+    if (record.value.record_type === 'SCRAP' && record.value.reason) {
+      const eventData = {
+        reason: record.value.reason,
+      }
+      if (record.value.reason === 'OTHER' && (record.value.reason_detail || '').trim()) {
+        eventData.reason_detail = record.value.reason_detail.trim()
+      }
+      data.event_data = eventData
+    }
 
     await api.processRealtime.create(data)
 
@@ -760,7 +835,17 @@ watch(
     scrapProducts.value = []
     defaultProductId.value = null
     productImageMap.value = {}
+    record.value.operator_name = defaultOperatorName.value || ''
     resetForm()
+  }
+)
+
+watch(
+  () => record.value.reason,
+  (val) => {
+    if (val !== 'OTHER') {
+      record.value.reason_detail = ''
+    }
   }
 )
 
@@ -772,10 +857,18 @@ watch(
       record.value.qty = null
       record.value.batch_no = ''
       record.value.operator_name = ''
+      record.value.reason_detail = ''
+      record.value.reason = ''
     } else if (type === 'SCRAP') {
       if (!record.value.qty || record.value.qty <= 0) {
         record.value.qty = 1
       }
+      if (!(record.value.operator_name || '').trim()) {
+        record.value.operator_name = defaultOperatorName.value || ''
+      }
+    } else {
+      record.value.reason_detail = ''
+      record.value.reason = ''
     }
     if (!record.value.product_id && defaultProductId.value) {
       record.value.product_id = defaultProductId.value

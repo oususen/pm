@@ -5,6 +5,7 @@ from .models_line_gantt_plan import LineGanttPlan
 from .models_production import StockAllocation, ProductionOrder, ProcessActual
 from .models_line_realtime import LineRealtimeRecord, LineStatus
 from .models_process_realtime import ProcessRealtimeRecord
+from .models_scrap import ScrapRecord
 
 
 class Order(models.Model):

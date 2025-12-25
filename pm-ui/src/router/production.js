@@ -105,6 +105,11 @@ const production = [
     name: "ProcessGanttView",
     component: () => import("@/views/production/ProcessGanttView.vue"),
   },
+  {
+    path: "/production/scrap-history",
+    name: "ScrapHistory",
+    component: () => import("@/views/production/ScrapHistory.vue"),
+  },
 ];
 
 export default production;

@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     LineDemand, Order, OrderLine, StgOrderRaw, StgOrderDaily,
-    StockAllocation, ProductionOrder, ProcessActual
+    StockAllocation, ProductionOrder, ProcessActual, ScrapRecord
 )
 
 
@@ -103,3 +103,11 @@ class ProcessActualAdmin(admin.ModelAdmin):
     search_fields = ['production_order__order_no', 'process__process_code', 'operator']
     date_hierarchy = 'completed_at'
     readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(ScrapRecord)
+class ScrapRecordAdmin(admin.ModelAdmin):
+    list_display = ['product_code', 'product_name', 'process', 'line', 'qty', 'recorded_at', 'reason', 'reason_detail', 'is_replenished', 'replenished_at']
+    list_filter = ['process', 'line', 'reason', 'is_replenished']
+    search_fields = ['product_code', 'product_name', 'batch_no', 'operator_name', 'reason_detail', 'remarks']
+    readonly_fields = ['recorded_at']

@@ -222,3 +222,26 @@ LEFT JOIN m_line_default ld ON ld.line_id=rs.line_id
 SET rs.lead_time_days = COALESCE(lpl.lt_days, ld.default_lt_days, rs.lead_time_days)
 WHERE rs.time_unit='DAY';
 ```
+
+---
+
+# 15. 仕損記録 `t_scrap_record`（当面の暫定テーブル）
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | BIGINT PK | |
+| line_id | BIGINT FK NULL | 所属ライン（工程から引き継ぎ） |
+| process_id | BIGINT FK | 工程 |
+| product_id | BIGINT FK NULL | 製品 |
+| product_code | VARCHAR(50) | 品番（必須。マスタ未登録時はコードのみ保持） |
+| product_name | VARCHAR(100) NULL | 品名 |
+| qty | DECIMAL(14,3) | 仕損数量 |
+| recorded_at | DATETIME | 記録時刻（auto_now_add） |
+| reason | VARCHAR(100) NULL | 理由/区分（サビ, 変形/キズ, ビードずれ, ブローホール, 溶接穴あき, アンダーカット, 精度不良, 欠品/誤組, 素材/仕掛不良, その他） |
+| reason_detail | VARCHAR(200) NULL | 理由詳細（「その他」選択時に必須） |
+| batch_no | VARCHAR(100) NULL | ロット番号 |
+| operator_name | VARCHAR(50) | 記入者（UIで必須。ログインユーザー名を初期セット） |
+| remarks | TEXT NULL | 備考 |
+
+- 取得元: 工程リアルタイム記録 API の `record_type='SCRAP'` 送信時に同時書き込み。`event_data.reason/reason_detail` を反映。
+- 暫定運用: 将来的にライン/工程 backlog 集計へ統合予定。現行はシンプル記録用途で先行稼働。
+- インデックス: `(process_id, recorded_at)`, `(line_id, recorded_at)`, `product_code`。

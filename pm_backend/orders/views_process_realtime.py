@@ -3,12 +3,20 @@
 """
 from rest_framework import viewsets, status
 from rest_framework.response import Response
+from rest_framework.decorators import action
+from django.utils.dateparse import parse_date
+from django.utils import timezone
+from datetime import datetime, time
 
 from .models_process_realtime import ProcessRealtimeRecord
 from .serializers_process_realtime import (
     ProcessRealtimeRecordSerializer,
     ProcessRealtimeCreateSerializer,
+    build_scrap_multiplier_map,
+    build_scrap_multiplier_details,
 )
+from masters.models import Product, Process, Supplier
+from .models_scrap import ScrapRecordDetail
 
 
 class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
@@ -18,7 +26,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
     serializer_class = ProcessRealtimeRecordSerializer
 
     def get_queryset(self):
-        queryset = ProcessRealtimeRecord.objects.select_related('process', 'product')
+        queryset = ProcessRealtimeRecord.objects.select_related('process', 'product', 'scrap_detail')
 
         process_id = self.request.query_params.get('process_id')
         if process_id:
@@ -27,9 +35,19 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         start_date = self.request.query_params.get('start_date')
         end_date = self.request.query_params.get('end_date')
         if start_date:
-            queryset = queryset.filter(timestamp__gte=start_date)
+            d = parse_date(start_date)
+            if d:
+                start_dt = timezone.make_aware(datetime.combine(d, time.min))
+                queryset = queryset.filter(timestamp__gte=start_dt)
+            else:
+                queryset = queryset.filter(timestamp__gte=start_date)
         if end_date:
-            queryset = queryset.filter(timestamp__lte=end_date)
+            d = parse_date(end_date)
+            if d:
+                end_dt = timezone.make_aware(datetime.combine(d, time.max))
+                queryset = queryset.filter(timestamp__lte=end_dt)
+            else:
+                queryset = queryset.filter(timestamp__lte=end_date)
 
         record_type = self.request.query_params.get('record_type')
         if record_type:
@@ -50,3 +68,137 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         record = serializer.save()
         return Response(ProcessRealtimeRecordSerializer(record).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=['get'], url_path='scrap-breakdown')
+    def scrap_breakdown(self, request, pk=None):
+        """仕損のBOM展開明細を返す"""
+        record = self.get_object()
+        if record.record_type != 'SCRAP' or not record.product_id:
+            return Response([])
+
+        details_qs = ScrapRecordDetail.objects.filter(scrap_record__process_record=record)
+        # 既存明細がなければ（古いデータ用）作成してから返す
+        if not details_qs.exists() and getattr(record, 'scrap_detail', None):
+            qty = record.qty or 0
+            gen_details = build_scrap_multiplier_details(record.product_id, qty)
+            if gen_details:
+                products = {
+                    p.id: p for p in Product.objects.filter(id__in=[d['product_id'] for d in gen_details if d.get('product_id')])
+                }
+                objs = []
+                for d in gen_details:
+                    pid = d.get('product_id')
+                    prod = products.get(pid) if pid else None
+                    objs.append(ScrapRecordDetail(
+                        scrap_record=record.scrap_detail,
+                        product=prod,
+                        product_code=prod.product_code if prod else None,
+                        product_name=prod.product_name if prod else None,
+                        process_id=d.get('process_id'),
+                        line_id=d.get('line_id'),
+                        supplier_id=d.get('supplier_id'),
+                        sourcing_type=d.get('sourcing_type'),
+                        deduct_qty=d.get('qty') or 0,
+                    ))
+                ScrapRecordDetail.objects.bulk_create(objs)
+                details_qs = ScrapRecordDetail.objects.filter(scrap_record__process_record=record)
+
+        details = []
+        products = {p.id: p for p in Product.objects.filter(id__in=details_qs.values_list('product_id', flat=True))}
+        processes = {p.id: p for p in Process.objects.filter(id__in=details_qs.values_list('process_id', flat=True))}
+        suppliers = {s.id: s for s in Supplier.objects.filter(id__in=details_qs.values_list('supplier_id', flat=True))}
+        for d in details_qs:
+            p = products.get(d.product_id)
+            proc = processes.get(d.process_id) if d.process_id else None
+            supplier = suppliers.get(d.supplier_id) if d.supplier_id else None
+            details.append({
+                'detail_id': d.id,
+                'product_id': d.product_id,
+                'product_code': d.product_code or (p.product_code if p else None),
+                'product_name': d.product_name or (p.product_name if p else None),
+                'deduct_qty': float(d.deduct_qty or 0),
+                'process_id': d.process_id,
+                'process_code': proc.process_code if proc else None,
+                'process_name': proc.process_name if proc else None,
+                'supplier_id': d.supplier_id,
+                'supplier_code': supplier.supplier_code if supplier else None,
+                'supplier_name': supplier.supplier_name if supplier else None,
+                'sourcing_type': d.sourcing_type,
+                'is_replenished': d.is_replenished,
+                'replenished_at': d.replenished_at,
+                'replenished_by': d.replenished_by,
+            })
+        details.sort(key=lambda x: (x['product_code'] or '', x['product_id']))
+        return Response(details)
+
+    @action(detail=True, methods=['post'], url_path='mark-replenished')
+    def mark_replenished(self, request, pk=None):
+        """仕損補充完了フラグを立てる（全明細まとめて）"""
+        record = self.get_object()
+        if record.record_type != 'SCRAP':
+            return Response({'detail': 'SCRAP以外は対象外です。'}, status=status.HTTP_400_BAD_REQUEST)
+        sd = getattr(record, 'scrap_detail', None)
+        if not sd:
+            return Response({'detail': '対応する仕損記録がありません。'}, status=status.HTTP_400_BAD_REQUEST)
+        from django.utils import timezone
+        sd.is_replenished = True
+        sd.replenished_at = timezone.now()
+        user = getattr(request, 'user', None)
+        if user and getattr(user, 'is_authenticated', False):
+            sd.replenished_by = getattr(user, 'username', None) or sd.replenished_by
+        sd.save()
+        ScrapRecordDetail.objects.filter(scrap_record=sd).update(
+            is_replenished=True,
+            replenished_at=sd.replenished_at,
+            replenished_by=sd.replenished_by,
+        )
+        # ProcessRealtimeRecord の serializer で拾えるよう event_data にも反映（任意）
+        record.event_data = record.event_data or {}
+        record.event_data['is_replenished'] = True
+        record.save(update_fields=['event_data'])
+        return Response({
+            'scrap_record_id': sd.id,
+            'is_replenished': sd.is_replenished,
+            'replenished_at': sd.replenished_at,
+            'replenished_by': sd.replenished_by,
+        })
+
+    @action(detail=True, methods=['post'], url_path='mark-detail-replenished')
+    def mark_detail_replenished(self, request, pk=None):
+        """仕損明細単位で補充完了を立てる"""
+        record = self.get_object()
+        if record.record_type != 'SCRAP':
+            return Response({'detail': 'SCRAP以外は対象外です。'}, status=status.HTTP_400_BAD_REQUEST)
+        detail_id = request.data.get('detail_id')
+        if not detail_id:
+            return Response({'detail': 'detail_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            detail = ScrapRecordDetail.objects.get(id=detail_id, scrap_record__process_record=record)
+        except ScrapRecordDetail.DoesNotExist:
+            return Response({'detail': '明細が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+        from django.utils import timezone
+        detail.is_replenished = True
+        detail.replenished_at = timezone.now()
+        user = getattr(request, 'user', None)
+        if user and getattr(user, 'is_authenticated', False):
+            detail.replenished_by = getattr(user, 'username', None) or detail.replenished_by
+        detail.save()
+
+        # すべて完了なら親も完了
+        sd = getattr(record, 'scrap_detail', None)
+        if sd:
+            all_done = not ScrapRecordDetail.objects.filter(scrap_record=sd, is_replenished=False).exists()
+            if all_done:
+                sd.is_replenished = True
+                sd.replenished_at = detail.replenished_at
+                sd.replenished_by = detail.replenished_by
+                sd.save()
+                record.event_data = record.event_data or {}
+                record.event_data['is_replenished'] = True
+                record.save(update_fields=['event_data'])
+
+        return Response({
+            'detail_id': detail.id,
+            'is_replenished': detail.is_replenished,
+            'replenished_at': detail.replenished_at,
+            'replenished_by': detail.replenished_by,
+        })

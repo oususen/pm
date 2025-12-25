@@ -9,6 +9,15 @@ export function createProcessRealtimeAPI(client) {
     create(data) {
       return client.post('/process-realtime-records/', data)
     },
+    getScrapBreakdown(id) {
+      return client.get(`/process-realtime-records/${id}/scrap-breakdown/`)
+    },
+    markReplenished(id) {
+      return client.post(`/process-realtime-records/${id}/mark-replenished/`)
+    },
+    markDetailReplenished(id, detailId) {
+      return client.post(`/process-realtime-records/${id}/mark-detail-replenished/`, { detail_id: detailId })
+    },
   }
 }
 
