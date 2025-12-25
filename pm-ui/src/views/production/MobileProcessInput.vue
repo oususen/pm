@@ -1,7 +1,7 @@
 <template>
   <div class="mobile-input" :class="pageModeClass">
     <div class="mobile-header">
-      <h2>工程作業記録</h2>
+      <h2>{{ pageTitle }}</h2>
       <div class="header-info">
         <span class="date">{{ currentDate }}</span>
       </div>
@@ -9,20 +9,37 @@
 
     <div class="section inline-row dual-row">
       <div class="inline-group">
-        <label class="label-required inline-label">工程</label>
-        <select v-model="selectedProcessId" @change="onProcessChange" class="input-large flex-input">
-          <option value="">-- 工程を選択 --</option>
-          <option v-for="p in processes" :key="p.id" :value="p.id">
-            {{ p.process_code }} - {{ p.process_name }}
+        <label class="label-required inline-label">ライン</label>
+        <select v-model="selectedLineId" @change="onLineChange" class="input-large flex-input">
+          <option value="">-- ラインを選択 --</option>
+          <option v-for="line in lines" :key="line.id" :value="String(line.id)">
+            {{ line.line_code }} - {{ line.line_name }}
           </option>
         </select>
       </div>
 
-      <div v-if="selectedProcessId" class="inline-group">
+      <div class="inline-group">
+        <label class="label-required inline-label">工程</label>
+        <select
+          v-model="selectedProcessId"
+          @change="onProcessChange"
+          class="input-large flex-input"
+          :disabled="!selectedLineId"
+        >
+          <option value="">-- 工程を選択 --</option>
+          <option v-for="p in filteredProcesses" :key="p.id" :value="p.id">
+            {{ p.process_code }} - {{ p.process_name }}
+          </option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section inline-row dual-row">
+      <div v-if="selectedProcessId && showRecordTypeSelection" class="inline-group">
         <label class="label-required inline-label">記録タイプ</label>
         <div class="type-buttons inline-buttons">
           <button
-            v-for="type in recordTypes"
+            v-for="type in availableRecordTypes"
             :key="type.value"
             @click="record.record_type = type.value"
             class="type-btn"
@@ -31,6 +48,13 @@
             {{ type.label }}
           </button>
         </div>
+      </div>
+      <div
+        v-else-if="selectedProcessId && availableRecordTypes.length === 1"
+        class="inline-group"
+      >
+        <label class="inline-label">記録タイプ</label>
+        <div class="single-type">{{ availableRecordTypes[0].label }}</div>
       </div>
     </div>
 
@@ -240,9 +264,14 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import api from '@/api/client'
 
+const route = useRoute()
+
 const processes = ref([])
+const lines = ref([])
+const selectedLineId = ref('')
 const selectedProcessId = ref('')
 const recentRecords = ref([])
 const submitting = ref(false)
@@ -288,11 +317,27 @@ const record = ref({
   remarks: '',
 })
 
-const recordTypes = [
+const recordTypeOptions = [
   { value: 'PRODUCTION', label: '生産記録' },
   { value: 'EQUIPMENT_STATE', label: '設備状態変更' },
   { value: 'SCRAP', label: '仕損品記録' },
 ]
+
+const availableRecordTypes = computed(() => {
+  const allowed = route.meta?.allowedRecordTypes
+  if (Array.isArray(allowed) && allowed.length) {
+    return recordTypeOptions.filter((type) => allowed.includes(type.value))
+  }
+  return recordTypeOptions
+})
+
+const showRecordTypeSelection = computed(() => availableRecordTypes.value.length > 1)
+const pageTitle = computed(() => route.meta?.pageTitle || '工程作業記録')
+
+const filteredProcesses = computed(() => {
+  if (!selectedLineId.value) return processes.value
+  return processes.value.filter((p) => String(p.line) === String(selectedLineId.value))
+})
 
 const equipmentStates = [
   { value: 'RUNNING', label: '運転中' },
@@ -304,6 +349,32 @@ const equipmentStates = [
 ]
 
 const quickQtyPresets = ref([])
+
+const ensureDefaultRecordType = () => {
+  const types = availableRecordTypes.value
+  if (!types.length) {
+    record.value.record_type = ''
+    return
+  }
+
+  const exists = types.some((t) => t.value === record.value.record_type)
+  if (types.length === 1) {
+    record.value.record_type = types[0].value
+    return
+  }
+
+  if (!exists) {
+    record.value.record_type = ''
+  }
+}
+
+watch(
+  availableRecordTypes,
+  () => {
+    ensureDefaultRecordType()
+  },
+  { immediate: true }
+)
 
 const getWorkDate = () => {
   // 勤務開始 08:00 を日付の境目にする。08:00 未満は前日扱い。
@@ -394,12 +465,28 @@ const resetForm = () => {
     remarks: '',
   }
   manualProduct.value = false
+  ensureDefaultRecordType()
 }
 
 const onProcessChange = () => {
+  const proc = processes.value.find((p) => String(p.id) === String(selectedProcessId.value))
+  if (proc?.line) {
+    selectedLineId.value = String(proc.line)
+  }
+
   resetForm()
   loadPlannedProducts()
   loadRecentRecords()
+}
+
+const onLineChange = () => {
+  selectedProcessId.value = ''
+  recentRecords.value = []
+  productionProducts.value = []
+  scrapProducts.value = []
+  defaultProductId.value = null
+  productImageMap.value = {}
+  resetForm()
 }
 
 const toggleManualProduct = () => {
@@ -664,6 +751,20 @@ const selectPlannedProduct = (p) => {
 }
 
 watch(
+  () => route.name,
+  () => {
+    selectedLineId.value = ''
+    selectedProcessId.value = ''
+    recentRecords.value = []
+    productionProducts.value = []
+    scrapProducts.value = []
+    defaultProductId.value = null
+    productImageMap.value = {}
+    resetForm()
+  }
+)
+
+watch(
   () => record.value.record_type,
   (type) => {
     if (!type) return
@@ -736,7 +837,18 @@ const loadProcesses = async () => {
   }
 }
 
+const loadLines = async () => {
+  try {
+    const res = await api.lines.getLines()
+    lines.value = res.data.results || res.data || []
+  } catch (error) {
+    console.error('ライン一覧取得エラー:', error)
+    alert('ライン情報の取得に失敗しました')
+  }
+}
+
 onMounted(() => {
+  loadLines()
   loadProcesses()
 })
 </script>
@@ -829,7 +941,7 @@ label {
 .textarea-normal {
   width: 100%;
   padding: 12px;
-  font-size: 15px;
+  font-size: 14px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   box-sizing: border-box;
@@ -837,7 +949,7 @@ label {
 }
 
 .input-large {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -854,6 +966,13 @@ label {
   display: flex;
   gap: 10px;
   flex: 1;
+}
+.single-type {
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  font-weight: 700;
 }
 
 .state-buttons {
@@ -1121,7 +1240,7 @@ label {
 
 .inline-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
 }
 .label-stack {
@@ -1130,19 +1249,21 @@ label {
   gap: 4px;
 }
 .dual-row {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: flex-start;
 }
 .inline-group {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1 1 280px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .inline-label {
   margin: 0;
-  min-width: 64px;
+  min-width: 0;
 }
 
 .flex-input {

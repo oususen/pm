@@ -57,6 +57,10 @@
         <div class="icon-box">📱</div>
         <div class="label">モバイル作業入力（工程）</div>
       </RouterLink>
+      <RouterLink to="/production/scrap-record" class="master-tile">
+        <div class="icon-box">🛠️</div>
+        <div class="label">仕損品記録</div>
+      </RouterLink>
     </div>
 
     <p class="helper-text">

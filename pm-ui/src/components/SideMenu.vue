@@ -62,6 +62,7 @@ const sections = [
       { label: "ライン需要", link: "/production/line-demands" },
       { label: "在庫引当", link: "/production/stock-allocations" },
       { label: "製造指示", link: "/production/orders" },
+      { label: "仕損品記録", link: "/production/scrap-record" },
     ],
   },
   {

@@ -86,6 +86,19 @@ const production = [
     path: "/production/mobile-process-input",
     name: "MobileProcessInput",
     component: () => import("@/views/production/MobileProcessInput.vue"),
+    meta: {
+      pageTitle: "工程作業記録",
+      allowedRecordTypes: ["PRODUCTION", "EQUIPMENT_STATE"],
+    },
+  },
+  {
+    path: "/production/scrap-record",
+    name: "ScrapRecordInput",
+    component: () => import("@/views/production/MobileProcessInput.vue"),
+    meta: {
+      pageTitle: "仕損品記録",
+      allowedRecordTypes: ["SCRAP"],
+    },
   },
   {
     path: "/production/process-gantt",
