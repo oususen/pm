@@ -1,34 +1,38 @@
 {% extends "admin/change_form.html" %}
 
 {% block content %}
+  <form id="process-filter-form" method="get">
+    {% for key, value in request.GET.items %}
+      {% if key != 'process' %}
+        <input type="hidden" name="{{ key }}" value="{{ value }}">
+      {% endif %}
+    {% endfor %}
+  </form>
+  {{ block.super }}
+{% endblock %}
+
+{% block after_field_sets %}
   <div class="module aligned">
     <h2>工程フィルタ</h2>
-    <form method="get">
-      <div class="form-row">
-        <div>
-          <label for="process-filter">工程</label>
-          <select name="process" id="process-filter">
-            <option value="">すべて</option>
-            {% for proc in process_filter_choices %}
-              <option value="{{ proc.id }}" {% if proc.id|stringformat:"s" == selected_process_filter %}selected{% endif %}>
-                {{ proc.process_code }} - {{ proc.process_name }}
-              </option>
-            {% endfor %}
-          </select>
-        </div>
+    <div class="form-row">
+      <div>
+        <label for="process-filter">工程</label>
+        <select name="process" id="process-filter" form="process-filter-form">
+          <option value="">すべて</option>
+          {% for proc in process_filter_choices %}
+            <option value="{{ proc.id }}" {% if proc.id|stringformat:"s" == selected_process_filter %}selected{% endif %}>
+              {{ proc.process_code }} - {{ proc.process_name }}
+            </option>
+          {% endfor %}
+        </select>
       </div>
-      {% for key, value in request.GET.items %}
-        {% if key != 'process' %}
-          <input type="hidden" name="{{ key }}" value="{{ value }}">
-        {% endif %}
-      {% endfor %}
-      <div class="submit-row">
-        <input type="submit" value="絞り込み" class="default" />
-        {% if selected_process_filter %}
-          <a class="button" href="?{{ process_filter_query }}">解除</a>
-        {% endif %}
-      </div>
-    </form>
+    </div>
+    <div class="submit-row">
+      <input type="submit" value="絞り込み" class="default" form="process-filter-form" />
+      {% if selected_process_filter %}
+        <a class="button" href="?{{ process_filter_query }}">解除</a>
+      {% endif %}
+    </div>
   </div>
   {{ block.super }}
 {% endblock %}
