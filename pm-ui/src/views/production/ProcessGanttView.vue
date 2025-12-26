@@ -118,6 +118,8 @@ const props = defineProps({
   embedded: { type: Boolean, default: false },
   presetLine: { type: [String, Number], default: '' },
   presetBaseDate: { type: String, default: '' },
+  presetStartDate: { type: String, default: '' },
+  presetEndDate: { type: String, default: '' },
 })
 
 const route = useRoute()
@@ -136,8 +138,10 @@ const logDebug = (...args) => {
   if (debugEnabled) console.info('[ProcessGanttView]', ...args)
 }
 
-// 5日間（一昨日、昨日、今日、明日、明後日）
 const displayDays = computed(() => {
+  if (props.presetStartDate && props.presetEndDate) {
+    return buildDisplayDays(props.presetStartDate, props.presetEndDate)
+  }
   const base = new Date(baseDate.value)
   const days = []
   for (let offset = -2; offset <= 2; offset++) {
@@ -384,6 +388,21 @@ function formatDayLabel(dateObj) {
   return `${m}/${d}(${w})`
 }
 
+function buildDisplayDays(startStr, endStr) {
+  const start = new Date(startStr)
+  const end = new Date(endStr)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return []
+  const from = start <= end ? start : end
+  const to = start <= end ? end : start
+  const days = []
+  const current = new Date(from)
+  while (current <= to) {
+    days.push({ date: current.toISOString().slice(0, 10), label: formatDayLabel(current) })
+    current.setDate(current.getDate() + 1)
+  }
+  return days
+}
+
 function floorToSlot(date) {
   const d = new Date(date)
   const base = new Date(d)
@@ -425,7 +444,7 @@ function buildTimelineSlots(startDate, endDate) {
 }
 
 function formatDateTime(date) {
-  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+  return `${date.getDate()} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
 }
 
 function formatTimeRange(start, end) {
@@ -821,6 +840,7 @@ onMounted(async () => {
   box-sizing: border-box;
 }
 .gantt-bar-label {
+  color: #111827;
   white-space: nowrap;
   padding: 0 6px;
 }
