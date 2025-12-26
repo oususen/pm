@@ -1077,6 +1077,26 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
             )
             upserted.append(obj)
 
+        if clear_existing:
+            def parse_date(val):
+                try:
+                    return datetime.strptime(str(val), '%Y-%m-%d').date()
+                except Exception:
+                    return None
+
+            start_dt = parse_date(start_date)
+            end_dt = parse_date(end_date)
+            qs = LineGanttPlan.objects.filter(line_id=line_id)
+            if start_dt:
+                qs = qs.filter(plan_date__gte=start_dt)
+            if end_dt:
+                qs = qs.filter(plan_date__lte=end_dt)
+            plan_ids = [p['plan_id'] for p in plans]
+            if plan_ids:
+                qs = qs.exclude(plan_id__in=plan_ids)
+            deleted_count, _ = qs.delete()
+            logger.info('line_gantt_plans.generate: cleared=%s', deleted_count)
+
         serializer = self.get_serializer(upserted, many=True)
         return Response(serializer.data)
 

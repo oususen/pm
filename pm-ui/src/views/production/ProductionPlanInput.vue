@@ -294,8 +294,25 @@ const savePlan = async () => {
       items,
     })
     console.info('保存結果', res.data)
+    try {
+      await api.lineBacklogs.expandProcesses({
+        line_id: selectedLine.value,
+        start_date: startDate.value,
+        end_date: endDate.value,
+        read_only: false,
+      })
+      await api.lineGanttPlans.generate({
+        line_id: selectedLine.value,
+        start_date: startDate.value,
+        end_date: endDate.value,
+        clear_existing: true,
+      })
+    } catch (expandError) {
+      console.error('工程展開/ガント再計算エラー', expandError)
+      alert('保存は完了しましたが、工程展開/ガント再計算に失敗しました。')
+      return
+    }
     alert(`保存しました。\n作成: ${res.data.created}件, 更新: ${res.data.updated}件`)
-    // 保存後の自動工程展開・ガント再計算は実行しない
   } catch (e) {
     console.error('保存エラー', e)
     alert('保存に失敗しました。')
