@@ -170,6 +170,13 @@ class RoutingStepInline(admin.TabularInline):
     readonly_fields = ['hierarchy_indicator']
     fields = ['hierarchy_indicator', 'step_no', 'parallel_group', 'process', 'line', 'output_product', 'time_unit', 'lead_time_days', 'duration_min', 'remark']
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        process_id = request.GET.get('process')
+        if process_id:
+            return qs.filter(process_id=process_id)
+        return qs
+
     def hierarchy_indicator(self, obj):
         if not obj:
             return ''
@@ -209,6 +216,7 @@ class RoutingStepAdmin(admin.ModelAdmin):
 
 @admin.register(Routing)
 class RoutingAdmin(admin.ModelAdmin):
+    change_form_template = 'admin/masters/routing/change_form.html'
     list_display = ['product_display', 'routing_code', 'is_default', 'is_active']
     list_filter = ['is_active', 'is_default']
     inlines = [RoutingStepInline]
@@ -225,6 +233,21 @@ class RoutingAdmin(admin.ModelAdmin):
             return obj.product
         except Product.DoesNotExist:
             return f"(missing Product id={obj.product_id})"
+
+    def changeform_view(self, request, object_id=None, form_url='', extra_context=None):
+        extra_context = extra_context or {}
+        extra_context['process_filter_choices'] = Process.objects.order_by('process_code', 'process_name')
+        extra_context['selected_process_filter'] = request.GET.get('process', '')
+        params = request.GET.copy()
+        if 'process' in params:
+            params.pop('process')
+        extra_context['process_filter_query'] = params.urlencode()
+        return super().changeform_view(
+            request,
+            object_id=object_id,
+            form_url=form_url,
+            extra_context=extra_context,
+        )
 
     def export_excel(self, request, queryset):
         from openpyxl import Workbook

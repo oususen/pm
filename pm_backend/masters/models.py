@@ -347,7 +347,30 @@ class RoutingStep(models.Model):
         ordering = ['routing', 'step_no', 'parallel_group']
 
     def __str__(self):
-        return f"{self.routing} - Step {self.step_no}"
+        product_code = ''
+        routing_code = ''
+        if self.routing_id:
+            try:
+                routing = self.routing
+                if routing.product_id:
+                    product_code = routing.product.product_code
+                routing_code = routing.routing_code or ''
+            except Routing.DoesNotExist:
+                product_code = f"(missing Routing id={self.routing_id})"
+
+        output_code = ''
+        if self.output_product_id:
+            try:
+                output_code = self.output_product.product_code
+            except Product.DoesNotExist:
+                output_code = f"(missing Product id={self.output_product_id})"
+
+        label_mid = output_code or routing_code
+        if label_mid and product_code:
+            return f"{product_code} - {label_mid} - Step {self.step_no}"
+        if product_code:
+            return f"{product_code} - Step {self.step_no}"
+        return f"Step {self.step_no}"
 
 
 class RoutingStepMaterial(models.Model):
