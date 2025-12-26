@@ -4,8 +4,10 @@
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
+from django.db import transaction
 from django.utils.dateparse import parse_date
 from django.utils import timezone
+from decimal import Decimal, InvalidOperation
 from datetime import datetime, time
 
 from .models_process_realtime import ProcessRealtimeRecord
@@ -14,6 +16,7 @@ from .serializers_process_realtime import (
     ProcessRealtimeCreateSerializer,
     build_scrap_multiplier_map,
     build_scrap_multiplier_details,
+    apply_scrap_return_to_stock,
 )
 from masters.models import Product, Process, Supplier
 from .models_scrap import ScrapRecordDetail
@@ -201,4 +204,75 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             'is_replenished': detail.is_replenished,
             'replenished_at': detail.replenished_at,
             'replenished_by': detail.replenished_by,
+        })
+
+    @action(detail=True, methods=['post'], url_path='scrap-disposition')
+    def scrap_disposition(self, request, pk=None):
+        """仕損の判定（戻し/仕損確定）"""
+        record = self.get_object()
+        if record.record_type != 'SCRAP':
+            return Response({'detail': 'SCRAP以外は対象外です。'}, status=status.HTTP_400_BAD_REQUEST)
+        sd = getattr(record, 'scrap_detail', None)
+        if not sd:
+            return Response({'detail': '対応する仕損記録がありません。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        action = (request.data.get('action') or '').strip().upper()
+        if action not in ('RETURN', 'CONFIRM_SCRAP'):
+            return Response({'detail': 'action is required (RETURN or CONFIRM_SCRAP)'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = getattr(request, 'user', None)
+        decided_by = None
+        if user and getattr(user, 'is_authenticated', False):
+            decided_by = getattr(user, 'username', None)
+
+        with transaction.atomic():
+            if action == 'RETURN':
+                try:
+                    qty = Decimal(str(request.data.get('qty')))
+                except (InvalidOperation, TypeError):
+                    return Response({'detail': 'qty must be a valid number.'}, status=status.HTTP_400_BAD_REQUEST)
+                if qty <= 0:
+                    return Response({'detail': 'qty must be greater than 0.'}, status=status.HTTP_400_BAD_REQUEST)
+                product_id = record.product_id
+                if not product_id and record.product_code:
+                    prod = Product.objects.filter(product_code=record.product_code).first()
+                    product_id = prod.id if prod else None
+                if not product_id:
+                    return Response({'detail': '製品が未設定のため在庫戻しができません。'}, status=status.HTTP_400_BAD_REQUEST)
+
+                current_return = sd.return_qty or Decimal('0')
+                scrap_qty = sd.qty or Decimal('0')
+                new_return = current_return + qty
+                if new_return > scrap_qty:
+                    return Response({'detail': '戻し数量が仕損数量を超えています。'}, status=status.HTTP_400_BAD_REQUEST)
+
+                multipliers = build_scrap_multiplier_map(product_id, qty)
+                if multipliers:
+                    apply_scrap_return_to_stock(multipliers)
+
+                sd.return_qty = new_return
+                if new_return == scrap_qty:
+                    sd.disposition_status = 'APPROVED'
+                else:
+                    sd.disposition_status = 'PARTIAL'
+                sd.decided_at = timezone.now()
+                if decided_by:
+                    sd.decided_by = decided_by
+                sd.save()
+            elif action == 'CONFIRM_SCRAP':
+                if (sd.return_qty or Decimal('0')) > 0:
+                    sd.disposition_status = 'PARTIAL'
+                else:
+                    sd.disposition_status = 'REJECTED'
+                sd.decided_at = timezone.now()
+                if decided_by:
+                    sd.decided_by = decided_by
+                sd.save()
+
+        return Response({
+            'scrap_record_id': sd.id,
+            'disposition_status': sd.disposition_status,
+            'return_qty': sd.return_qty,
+            'decided_at': sd.decided_at,
+            'decided_by': sd.decided_by,
         })

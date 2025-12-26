@@ -171,6 +171,17 @@
       </div>
 
       <div v-if="isScrapRecord" class="section">
+        <label class="label-required">判定</label>
+        <select v-model="record.disposition_status" class="input-large">
+          <option value="">-- 判定を選択 --</option>
+          <option v-for="opt in scrapDispositionOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
+        <div class="hint">※ 判定待ちは後で仕損履歴から戻し/確定できます。</div>
+      </div>
+
+      <div v-if="isScrapRecord" class="section">
         <label class="label-required">理由</label>
         <select v-model="record.reason" class="input-large">
           <option value="">-- 理由を選択 --</option>
@@ -334,6 +345,7 @@ const record = ref({
   qty: null,
   reason: '',
   reason_detail: '',
+  disposition_status: '',
   equipment_state: '',
   batch_no: '',
   operator_name: '',
@@ -357,6 +369,11 @@ const scrapReasons = [
   { value: 'MISSING_OR_WRONG_ASSEMBLY', label: '欠品/誤組' },
   { value: 'MATERIAL_WIP_DEFECT', label: '素材/仕掛不良' },
   { value: 'OTHER', label: 'その他' },
+]
+
+const scrapDispositionOptions = [
+  { value: 'REJECTED', label: '仕損確定' },
+  { value: 'PENDING', label: '判定待ち' },
 ]
 
 const availableRecordTypes = computed(() => {
@@ -505,6 +522,7 @@ const canSubmit = computed(() => {
       const detailText = (record.value.reason_detail || '').trim()
       if (record.value.reason === 'OTHER' && !detailText) return false
       if (!(record.value.operator_name || '').trim()) return false
+      if (!(record.value.disposition_status || '').trim()) return false
     }
     return true
   }
@@ -524,6 +542,7 @@ const resetForm = () => {
     qty: null,
     reason: '',
     reason_detail: '',
+    disposition_status: '',
     equipment_state: '',
     batch_no: '',
     operator_name: defaultOperatorName.value || '',
@@ -593,6 +612,7 @@ const submitRecord = async () => {
     if (record.value.record_type === 'SCRAP' && record.value.reason) {
       const eventData = {
         reason: record.value.reason,
+        disposition_status: record.value.disposition_status || 'REJECTED',
       }
       if (record.value.reason === 'OTHER' && (record.value.reason_detail || '').trim()) {
         eventData.reason_detail = record.value.reason_detail.trim()
@@ -866,9 +886,13 @@ watch(
       if (!(record.value.operator_name || '').trim()) {
         record.value.operator_name = defaultOperatorName.value || ''
       }
+      if (!(record.value.disposition_status || '').trim()) {
+        record.value.disposition_status = 'REJECTED'
+      }
     } else {
       record.value.reason_detail = ''
       record.value.reason = ''
+      record.value.disposition_status = ''
     }
     if (!record.value.product_id && defaultProductId.value) {
       record.value.product_id = defaultProductId.value
@@ -879,7 +903,8 @@ watch(
         record.value.qty = Number(plan.plan_qty)
       }
     }
-  }
+  },
+  { immediate: true }
 )
 
 const formatTime = (timestamp) => {

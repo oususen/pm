@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 from django.db import transaction
+from django.utils import timezone
 from masters.models import Process, Product, BOM
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_scrap import ScrapRecord, ScrapRecordDetail
@@ -125,6 +126,28 @@ def apply_scrap_to_stock(multipliers: dict):
             )
 
 
+def apply_scrap_return_to_stock(multipliers: dict):
+    """
+    仕損の戻し数量を在庫に反映する。location が複数ある場合は最初のレコードを使用。
+    """
+    for pid, qty in multipliers.items():
+        if qty == 0:
+            continue
+        allocation = StockAllocation.objects.filter(product_id=pid).order_by('id').first()
+        if allocation:
+            allocation.current_stock = (allocation.current_stock or Decimal('0')) + qty
+            allocation.save()
+        else:
+            StockAllocation.objects.create(
+                product_id=pid,
+                location='DEFAULT',
+                current_stock=qty,
+                reserved_qty=Decimal('0'),
+                min_stock_qty=Decimal('0'),
+                is_bottleneck=False,
+            )
+
+
 class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
     """工程実時間記録Serializer"""
 
@@ -137,6 +160,11 @@ class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
     scrap_record_id = serializers.SerializerMethodField()
     scrap_is_replenished = serializers.SerializerMethodField()
     scrap_replenished_at = serializers.SerializerMethodField()
+    scrap_disposition_status = serializers.SerializerMethodField()
+    scrap_disposition_display = serializers.SerializerMethodField()
+    scrap_return_qty = serializers.SerializerMethodField()
+    scrap_decided_at = serializers.SerializerMethodField()
+    scrap_decided_by = serializers.SerializerMethodField()
 
     class Meta:
         model = ProcessRealtimeRecord
@@ -161,6 +189,11 @@ class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
             'scrap_record_id',
             'scrap_is_replenished',
             'scrap_replenished_at',
+            'scrap_disposition_status',
+            'scrap_disposition_display',
+            'scrap_return_qty',
+            'scrap_decided_at',
+            'scrap_decided_by',
         ]
         read_only_fields = ['id', 'timestamp']
 
@@ -174,6 +207,26 @@ class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
     def get_scrap_replenished_at(self, obj):
         sd = getattr(obj, 'scrap_detail', None)
         return sd.replenished_at if sd else None
+
+    def get_scrap_disposition_status(self, obj):
+        sd = getattr(obj, 'scrap_detail', None)
+        return sd.disposition_status if sd else None
+
+    def get_scrap_disposition_display(self, obj):
+        sd = getattr(obj, 'scrap_detail', None)
+        return sd.get_disposition_status_display() if sd else None
+
+    def get_scrap_return_qty(self, obj):
+        sd = getattr(obj, 'scrap_detail', None)
+        return sd.return_qty if sd else None
+
+    def get_scrap_decided_at(self, obj):
+        sd = getattr(obj, 'scrap_detail', None)
+        return sd.decided_at if sd else None
+
+    def get_scrap_decided_by(self, obj):
+        sd = getattr(obj, 'scrap_detail', None)
+        return sd.decided_by if sd else None
 
 
 class ProcessRealtimeCreateSerializer(serializers.Serializer):
@@ -272,47 +325,58 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
             # 仕損は別テーブルにも保存
             if validated_data.get('record_type') == 'SCRAP':
                 qty_decimal = validated_data.get('qty', Decimal('0')) or Decimal('0')
-            sr = ScrapRecord.objects.create(
-                process=process,
-                line=getattr(process, 'line', None),
-                product=product,
-                product_code=product_code,
-                product_name=product_name,
-                qty=qty_decimal,
-                reason=scrap_event.get('reason') or '',
-                reason_detail=scrap_event.get('reason_detail') or '',
-                batch_no=validated_data.get('batch_no', ''),
-                operator_name=validated_data.get('operator_name', ''),
-                remarks=validated_data.get('remarks', ''),
-                process_record=parent_record,
-            )
+                status_raw = (scrap_event.get('disposition_status') or '').strip().upper()
+                valid_statuses = {s for s, _ in ScrapRecord.DISPOSITION_STATUS_CHOICES}
+                disposition_status = status_raw if status_raw in valid_statuses else 'REJECTED'
+                decided_at = timezone.now() if disposition_status != 'PENDING' else None
+                decided_by = validated_data.get('operator_name') if decided_at else None
 
-            # 明細を保存（BOM展開結果）
-            details = build_scrap_multiplier_details(product.id if product else None, qty_decimal)
-            if details:
-                products = {
-                    p.id: p for p in Product.objects.filter(id__in=[d['product_id'] for d in details if d.get('product_id')])
-                }
-                objs = []
-                for d in details:
-                    pid = d.get('product_id')
-                    prod = products.get(pid) if pid else None
-                    objs.append(ScrapRecordDetail(
-                        scrap_record=sr,
-                        product=prod,
-                        product_code=prod.product_code if prod else None,
-                        product_name=prod.product_name if prod else None,
-                        process_id=d.get('process_id'),
-                        line_id=d.get('line_id'),
-                        supplier_id=d.get('supplier_id'),
-                        sourcing_type=d.get('sourcing_type'),
-                        deduct_qty=d.get('qty') or Decimal('0'),
-                    ))
-                ScrapRecordDetail.objects.bulk_create(objs)
+                sr = ScrapRecord.objects.create(
+                    process=process,
+                    line=getattr(process, 'line', None),
+                    product=product,
+                    product_code=product_code,
+                    product_name=product_name,
+                    qty=qty_decimal,
+                    reason=scrap_event.get('reason') or '',
+                    reason_detail=scrap_event.get('reason_detail') or '',
+                    batch_no=validated_data.get('batch_no', ''),
+                    operator_name=validated_data.get('operator_name', ''),
+                    remarks=validated_data.get('remarks', ''),
+                    process_record=parent_record,
+                    disposition_status=disposition_status,
+                    decided_at=decided_at,
+                    decided_by=decided_by,
+                )
 
-            # 在庫への転嫁：BOMを最下層まで展開し、在庫引当テーブルに反映
-            multipliers = build_scrap_multiplier_map(product.id if product else None, qty_decimal)
-            if multipliers:
-                apply_scrap_to_stock(multipliers)
+                # 明細を保存（BOM展開結果）
+                details = build_scrap_multiplier_details(product.id if product else None, qty_decimal)
+                if details:
+                    products = {
+                        p.id: p for p in Product.objects.filter(
+                            id__in=[d['product_id'] for d in details if d.get('product_id')]
+                        )
+                    }
+                    objs = []
+                    for d in details:
+                        pid = d.get('product_id')
+                        prod = products.get(pid) if pid else None
+                        objs.append(ScrapRecordDetail(
+                            scrap_record=sr,
+                            product=prod,
+                            product_code=prod.product_code if prod else None,
+                            product_name=prod.product_name if prod else None,
+                            process_id=d.get('process_id'),
+                            line_id=d.get('line_id'),
+                            supplier_id=d.get('supplier_id'),
+                            sourcing_type=d.get('sourcing_type'),
+                            deduct_qty=d.get('qty') or Decimal('0'),
+                        ))
+                    ScrapRecordDetail.objects.bulk_create(objs)
+
+                # 在庫への転嫁：BOMを最下層まで展開し、在庫引当テーブルに反映
+                multipliers = build_scrap_multiplier_map(product.id if product else None, qty_decimal)
+                if multipliers:
+                    apply_scrap_to_stock(multipliers)
 
             return parent_record

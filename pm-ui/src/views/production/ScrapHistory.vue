@@ -52,6 +52,8 @@
             <th>品番</th>
             <th>品名</th>
             <th class="num">仕損数</th>
+            <th>判定</th>
+            <th class="num">戻し数量</th>
             <th>理由</th>
             <th>理由詳細</th>
             <th>ロット</th>
@@ -68,6 +70,8 @@
             <td>{{ rec.product_code || '-' }}</td>
             <td>{{ rec.product_name || '' }}</td>
             <td class="num">{{ formatNumber(rec.qty) }}</td>
+            <td>{{ dispositionLabel(rec.scrap_disposition_status) }}</td>
+            <td class="num">{{ formatNumber(rec.scrap_return_qty) }}</td>
             <td>{{ reasonLabel(rec.event_data?.reason) }}</td>
             <td>{{ rec.event_data?.reason_detail || '' }}</td>
             <td>{{ rec.batch_no || '' }}</td>
@@ -81,7 +85,7 @@
             </td>
           </tr>
           <tr v-if="!filteredRecords.length">
-            <td colspan="12" class="no-data">データがありません</td>
+            <td colspan="14" class="no-data">データがありません</td>
           </tr>
         </tbody>
       </table>
@@ -138,6 +142,48 @@
           </tr>
         </tbody>
       </table>
+
+      <div class="decision-box">
+        <div class="decision-info">
+          <div class="decision-item">
+            <span class="label">判定</span>
+            <span class="value">{{ dispositionLabel(selectedRecord?.scrap_disposition_status) || '判定待ち' }}</span>
+          </div>
+          <div class="decision-item">
+            <span class="label">仕損数量</span>
+            <span class="value">{{ formatNumber(selectedScrapQty) }}</span>
+          </div>
+          <div class="decision-item">
+            <span class="label">戻し済</span>
+            <span class="value">{{ formatNumber(selectedReturnQty) }}</span>
+          </div>
+          <div class="decision-item">
+            <span class="label">残数量</span>
+            <span class="value">{{ formatNumber(remainingQty) }}</span>
+          </div>
+        </div>
+        <div class="decision-actions">
+          <input
+            v-model.number="returnQty"
+            type="number"
+            min="0"
+            :max="remainingQty"
+            step="0.001"
+            placeholder="戻し数量"
+          />
+          <button
+            class="btn"
+            :disabled="decisioning || !(returnQty > 0) || remainingQty <= 0"
+            @click="returnToStock"
+          >
+            使用可として戻す
+          </button>
+          <button class="btn" :disabled="decisioning" @click="confirmScrap">
+            仕損確定
+          </button>
+        </div>
+        <div class="decision-hint">※ 戻し数量は残数量以内で入力してください。</div>
+      </div>
       <div class="panel-actions">
         <button class="btn" :disabled="marking || selectedRecord?.scrap_is_replenished" @click="markReplenished(selectedRecord)">
           全品目を完了にする
@@ -159,6 +205,8 @@ const breakdown = ref([])
 const breakdownLoading = ref(false)
 const selectedRecord = ref(null)
 const marking = ref(false)
+const decisioning = ref(false)
+const returnQty = ref(null)
 
 const today = new Date()
 const toISODate = (d) => d.toISOString().slice(0, 10)
@@ -184,6 +232,15 @@ const scrapReasons = [
 const reasonMap = scrapReasons.reduce((acc, r) => ({ ...acc, [r.value]: r.label }), {})
 const reasonLabel = (val) => reasonMap[val] || ''
 
+const dispositionStatuses = [
+  { value: 'PENDING', label: '判定待ち' },
+  { value: 'APPROVED', label: '使用可' },
+  { value: 'REJECTED', label: '仕損確定' },
+  { value: 'PARTIAL', label: '一部使用可' },
+]
+const dispositionMap = dispositionStatuses.reduce((acc, s) => ({ ...acc, [s.value]: s.label }), {})
+const dispositionLabel = (val) => dispositionMap[val] || ''
+
 const filteredRecords = computed(() => {
   let list = records.value
   if (reason.value) {
@@ -202,6 +259,15 @@ const formatNumber = (n) => {
   if (Number.isNaN(num)) return ''
   return num.toLocaleString()
 }
+
+const toNumber = (n) => {
+  const num = Number(n)
+  return Number.isNaN(num) ? 0 : num
+}
+
+const selectedScrapQty = computed(() => toNumber(selectedRecord.value?.qty))
+const selectedReturnQty = computed(() => toNumber(selectedRecord.value?.scrap_return_qty))
+const remainingQty = computed(() => Math.max(selectedScrapQty.value - selectedReturnQty.value, 0))
 
 const resetFilters = () => {
   processId.value = ''
@@ -225,6 +291,11 @@ const loadBreakdown = async (rec) => {
     selectedRecord.value.scrap_replenished_at = selectedRecord.value.scrap_is_replenished
       ? new Date().toISOString()
       : null
+    if (remainingQty.value > 0) {
+      returnQty.value = remainingQty.value
+    } else {
+      returnQty.value = null
+    }
   } catch (e) {
     console.error('展開明細取得エラー', e)
   } finally {
@@ -259,6 +330,55 @@ const markDetailReplenished = async (detailId) => {
     console.error('明細補充完了更新エラー', e)
   } finally {
     marking.value = false
+  }
+}
+
+const returnToStock = async () => {
+  if (!selectedRecord.value?.id) return
+  const qty = Number(returnQty.value)
+  if (!qty || qty <= 0) return
+  if (qty > remainingQty.value) {
+    alert('戻し数量が残数量を超えています。')
+    return
+  }
+  const recordId = selectedRecord.value.id
+  decisioning.value = true
+  try {
+    await api.processRealtime.updateScrapDisposition(recordId, {
+      action: 'RETURN',
+      qty,
+    })
+    await load()
+    const target = records.value.find((r) => r.id === recordId)
+    if (target) {
+      await loadBreakdown(target)
+    }
+  } catch (e) {
+    console.error('戻し処理エラー', e)
+    alert('戻し処理に失敗しました')
+  } finally {
+    decisioning.value = false
+  }
+}
+
+const confirmScrap = async () => {
+  if (!selectedRecord.value?.id) return
+  const recordId = selectedRecord.value.id
+  decisioning.value = true
+  try {
+    await api.processRealtime.updateScrapDisposition(recordId, {
+      action: 'CONFIRM_SCRAP',
+    })
+    await load()
+    const target = records.value.find((r) => r.id === recordId)
+    if (target) {
+      await loadBreakdown(target)
+    }
+  } catch (e) {
+    console.error('仕損確定エラー', e)
+    alert('仕損確定に失敗しました')
+  } finally {
+    decisioning.value = false
   }
 }
 
@@ -430,6 +550,49 @@ onMounted(() => {
   margin-top: 8px;
   display: flex;
   justify-content: flex-end;
+}
+.decision-box {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.decision-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 13px;
+}
+.decision-item {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.decision-item .label {
+  font-weight: 600;
+  color: #334155;
+}
+.decision-item .value {
+  color: #111827;
+}
+.decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.decision-actions input {
+  padding: 6px 8px;
+  min-height: 32px;
+  width: 140px;
+}
+.decision-hint {
+  font-size: 12px;
+  color: #64748b;
 }
 .btn {
   padding: 8px 12px;

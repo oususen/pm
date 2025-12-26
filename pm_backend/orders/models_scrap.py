@@ -6,6 +6,13 @@ from .models_process_realtime import ProcessRealtimeRecord
 class ScrapRecord(models.Model):
     """仕損記録（当面の簡易テーブル。将来 backlog へ統合予定）"""
 
+    DISPOSITION_STATUS_CHOICES = [
+        ('PENDING', '判定待ち'),
+        ('APPROVED', '使用可'),
+        ('REJECTED', '仕損確定'),
+        ('PARTIAL', '一部使用可'),
+    ]
+
     id = models.BigAutoField(primary_key=True)
     line = models.ForeignKey(
         Line,
@@ -33,6 +40,16 @@ class ScrapRecord(models.Model):
 
     qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='仕損数量')
     recorded_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name='記録時刻')
+
+    disposition_status = models.CharField(
+        max_length=20,
+        choices=DISPOSITION_STATUS_CHOICES,
+        default='REJECTED',
+        verbose_name='判定ステータス'
+    )
+    return_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='戻し数量')
+    decided_at = models.DateTimeField(null=True, blank=True, verbose_name='判定日時')
+    decided_by = models.CharField(max_length=50, null=True, blank=True, verbose_name='判定者')
 
     reason = models.CharField(max_length=100, null=True, blank=True, verbose_name='理由/区分')
     reason_detail = models.CharField(max_length=200, null=True, blank=True, verbose_name='理由詳細')

@@ -18,6 +18,9 @@ export function createProcessRealtimeAPI(client) {
     markDetailReplenished(id, detailId) {
       return client.post(`/process-realtime-records/${id}/mark-detail-replenished/`, { detail_id: detailId })
     },
+    updateScrapDisposition(id, payload) {
+      return client.post(`/process-realtime-records/${id}/scrap-disposition/`, payload)
+    },
   }
 }
 
