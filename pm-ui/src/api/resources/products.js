@@ -3,14 +3,22 @@ export const createProductsAPI = (client) => ({
     return client.get('/products/', { params })
   },
   async getAllProducts(params = {}) {
-    // シンプルに1リクエストで全件取得（page_sizeを大きめに指定）
-    const res = await client.get('/products/', {
-      params: { page_size: 5000, ...params },
-    })
-    const data = res.data
-    if (Array.isArray(data)) return data
-    if (data?.results) return data.results
-    return []
+    // ページング有りでも全件取得できるように順次取得
+    const collected = []
+    let page = 1
+    while (true) {
+      const res = await client.get('/products/', {
+        params: { page, page_size: 5000, ...params },
+      })
+      const data = res.data
+      if (Array.isArray(data)) return data
+      if (data?.results) {
+        collected.push(...data.results)
+      }
+      if (!data?.next) break
+      page += 1
+    }
+    return collected
   },
   getProduct(id) {
     return client.get(`/products/${id}/`)
