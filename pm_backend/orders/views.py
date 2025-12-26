@@ -347,6 +347,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         # このラインの「ライン最終品」を特定（is_line_final_product フラグを使用）
         target_products = set()
         product_process_map = {}
+        product_step_map = {}
 
         # このラインに属する全工程を取得し、is_line_final_product=True の製品のみを対象とする
         steps_on_line = RoutingStep.objects.filter(
@@ -358,6 +359,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             if product and product.is_line_final_product:
                 target_products.add(product.id)
                 product_process_map[product.id] = step.process_id
+                if product.id not in product_step_map:
+                    product_step_map[product.id] = step
 
         if not target_products:
             # このラインが生産する製品（ライン最終品）がない
@@ -391,6 +394,17 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if is_work:
                     remaining -= 1
             return current
+
+        def resolve_lead_time_days(current_product_id, bom_item=None):
+            """現ラインのLTを優先して解決する。"""
+            step = product_step_map.get(current_product_id)
+            if step and step.lead_time_days:
+                return step.lead_time_days
+            if step and step.line and step.line.lead_time_days:
+                return step.line.lead_time_days
+            if bom_item and bom_item.lead_time_days:
+                return bom_item.lead_time_days
+            return 0
 
         # 既存バックログを先に取得し、ゼロ需要でもレコードを返せるよう初期化
         backlog_qs = self.get_queryset().filter(line_id=line_id, product_id__in=target_products).select_related('product', 'process')
@@ -438,14 +452,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     if not downstream_line_id:
                         continue
 
-                    # リードタイム（日）を考慮：RoutingStep > Line > BOM明細 の順で優先
-                    lt_days = 0
-                    if d_step.lead_time_days:
-                        lt_days = d_step.lead_time_days
-                    elif d_step.line and d_step.line.lead_time_days:
-                        lt_days = d_step.line.lead_time_days
-                    elif bom_item.lead_time_days:
-                        lt_days = bom_item.lead_time_days
+                    # リードタイム（日）を考慮：現ラインのRoutingStep > Line > BOM明細 の順で優先
+                    lt_days = resolve_lead_time_days(current_output_product, bom_item)
 
                     # ステップ4: 後工程ラインのLineBacklogから計画数を取得
                     # 親製品が中間品の場合、そのRoutingの最終品（ライン最終品）を基準にする
@@ -455,11 +463,13 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         if d_step.routing.product.is_line_final_product:
                             routing_final_product = d_step.routing.product
 
-                    # LineBacklog取得：ライン最終品を優先、なければ親製品を使用
-                    target_product_for_backlog = routing_final_product or parent_product
+                    # LineBacklog取得：親製品が計画済みなら親製品、なければライン最終品
+                    target_ids = [parent_product.id]
+                    if routing_final_product and routing_final_product != parent_product:
+                        target_ids.append(routing_final_product.id)
                     backlog_items = LineBacklog.objects.filter(
                         line_id=downstream_line_id,
-                        product_id=target_product_for_backlog.id
+                        product_id__in=target_ids
                     )
                     if start_date:
                         backlog_items = backlog_items.filter(plan_date__gte=start_date)
@@ -477,13 +487,35 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     else:
                         total_qty_per = qty_per
 
-                    for backlog in backlog_items:
-                        plan_date = backlog.plan_date
-                        if lt_days:
-                            plan_date = shift_business_days(plan_date, lt_days)
-                        key = (current_output_product, plan_date)
-                        demand_map[key] += backlog.plan_qty * total_qty_per
-                        downstream_found = True
+                    if len(target_ids) > 1:
+                        parent_map = {}
+                        final_map = {}
+                        for backlog in backlog_items:
+                            plan_date = backlog.plan_date
+                            qty = Decimal(str(backlog.plan_qty or 0))
+                            if backlog.product_id == parent_product.id:
+                                parent_map[plan_date] = parent_map.get(plan_date, Decimal('0')) + qty
+                            else:
+                                final_map[plan_date] = final_map.get(plan_date, Decimal('0')) + qty
+
+                        for plan_date in set(parent_map) | set(final_map):
+                            qty = parent_map.get(plan_date)
+                            if qty is None or qty <= 0:
+                                qty = final_map.get(plan_date, Decimal('0'))
+                            if qty == 0:
+                                continue
+                            shifted_date = shift_business_days(plan_date, lt_days) if lt_days else plan_date
+                            key = (current_output_product, shifted_date)
+                            demand_map[key] += qty * total_qty_per
+                            downstream_found = True
+                    else:
+                        for backlog in backlog_items:
+                            plan_date = backlog.plan_date
+                            if lt_days:
+                                plan_date = shift_business_days(plan_date, lt_days)
+                            key = (current_output_product, plan_date)
+                            demand_map[key] += (backlog.plan_qty or Decimal('0')) * total_qty_per
+                            downstream_found = True
 
         # 2. RoutingStepベースの展開が失敗した場合、BOMベースの展開を試みる
         if not downstream_found:
@@ -516,7 +548,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         backlog_items = backlog_items.filter(plan_date__lte=end_date)
 
                     # リードタイムを考慮
-                    lt_days = bom_item.lead_time_days or 0
+                    lt_days = resolve_lead_time_days(current_output_product, bom_item)
 
                     for backlog in backlog_items:
                         plan_date = backlog.plan_date
