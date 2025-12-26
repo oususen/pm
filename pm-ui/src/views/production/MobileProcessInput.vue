@@ -405,6 +405,16 @@ const equipmentStates = [
 
 const quickQtyPresets = ref([])
 
+const ensureScrapDefaults = () => {
+  if (record.value.record_type !== 'SCRAP') return
+  if (!record.value.qty || record.value.qty <= 0) {
+    record.value.qty = 1
+  }
+  if (!(record.value.disposition_status || '').trim()) {
+    record.value.disposition_status = 'REJECTED'
+  }
+}
+
 const ensureDefaultRecordType = () => {
   const types = availableRecordTypes.value
   if (!types.length) {
@@ -880,15 +890,10 @@ watch(
       record.value.reason_detail = ''
       record.value.reason = ''
     } else if (type === 'SCRAP') {
-      if (!record.value.qty || record.value.qty <= 0) {
-        record.value.qty = 1
-      }
       if (!(record.value.operator_name || '').trim()) {
         record.value.operator_name = defaultOperatorName.value || ''
       }
-      if (!(record.value.disposition_status || '').trim()) {
-        record.value.disposition_status = 'REJECTED'
-      }
+      ensureScrapDefaults()
     } else {
       record.value.reason_detail = ''
       record.value.reason = ''
@@ -905,6 +910,13 @@ watch(
     }
   },
   { immediate: true }
+)
+
+watch(
+  () => [record.value.product_id, record.value.product_code],
+  () => {
+    ensureScrapDefaults()
+  }
 )
 
 const formatTime = (timestamp) => {
