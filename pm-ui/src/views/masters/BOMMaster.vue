@@ -220,7 +220,7 @@
             </div>
             <div class="form-group">
               <label>工程 *</label>
-              <select v-model="itemForm.process" :required="itemForm.sourcing_type === 'MAKE'" :disabled="itemForm.sourcing_type === 'BUY'">
+              <select v-model="itemForm.process" :required="itemForm.sourcing_type === 'MAKE' || itemForm.sourcing_type === 'SUBCON'" :disabled="itemForm.sourcing_type === 'BUY'">
                 <option value="">選択してください</option>
                 <option v-for="proc in processes" :key="proc.id" :value="proc.id">
                   {{ proc.process_code }} - {{ proc.process_name }}
@@ -653,6 +653,9 @@ const applySourcingSideEffects = () => {
     itemForm.value.supplier = ''
     if (!itemForm.value.time_unit) itemForm.value.time_unit = 'MINUTE'
   }
+  if (itemForm.value.sourcing_type === 'SUBCON') {
+    if (!itemForm.value.time_unit) itemForm.value.time_unit = 'DAY'
+  }
   if (itemForm.value.sourcing_type === 'BUY') {
     itemForm.value.process = ''
     itemForm.value.line = ''
@@ -741,6 +744,8 @@ const normalizeQuantityValue = (value) => {
   const num = Math.trunc(Number(value))
   return Number.isFinite(num) && num > 0 ? num : null
 }
+
+const requiresRoutingDetails = (sourcingType) => sourcingType === 'MAKE' || sourcingType === 'SUBCON'
 
 const isPhantom = (productId) => {
   const product = products.value.find(p => p.id === productId)
@@ -1101,9 +1106,9 @@ const saveBOMItem = async () => {
     return
   }
   applySourcingSideEffects()
-  if (itemForm.value.sourcing_type === 'MAKE') {
+  if (requiresRoutingDetails(itemForm.value.sourcing_type)) {
     if (!itemForm.value.process) {
-      alert('工程は必須です（自社製造）')
+      alert('工程は必須です（自社製造/外注）')
       return
     }
     if (itemForm.value.time_unit === 'MINUTE' && (!itemForm.value.duration_min || itemForm.value.duration_min <= 0)) {
@@ -1128,11 +1133,11 @@ const saveBOMItem = async () => {
     loss_rate: itemForm.value.loss_rate === '' ? null : itemForm.value.loss_rate,
     sourcing_type: itemForm.value.sourcing_type,
     supplier: itemForm.value.sourcing_type === 'MAKE' ? null : (itemForm.value.supplier || null),
-    process: itemForm.value.sourcing_type === 'MAKE' ? (itemForm.value.process || null) : null,
-    line: itemForm.value.sourcing_type === 'MAKE' ? (itemForm.value.line || null) : null,
-    time_unit: itemForm.value.sourcing_type === 'MAKE' ? itemForm.value.time_unit : 'DAY',
+    process: requiresRoutingDetails(itemForm.value.sourcing_type) ? (itemForm.value.process || null) : null,
+    line: requiresRoutingDetails(itemForm.value.sourcing_type) ? (itemForm.value.line || null) : null,
+    time_unit: requiresRoutingDetails(itemForm.value.sourcing_type) ? itemForm.value.time_unit : 'DAY',
     lead_time_days: itemForm.value.lead_time_days,
-    duration_min: itemForm.value.sourcing_type === 'MAKE' && itemForm.value.time_unit === 'MINUTE'
+    duration_min: requiresRoutingDetails(itemForm.value.sourcing_type) && itemForm.value.time_unit === 'MINUTE'
       ? itemForm.value.duration_min
       : null,
     remark: itemForm.value.remark || ''

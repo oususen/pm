@@ -80,11 +80,11 @@ class BOMItemSerializer(serializers.ModelSerializer):
         time_unit = attrs.get('time_unit', getattr(self.instance, 'time_unit', 'MINUTE'))
         process = attrs.get('process', getattr(self.instance, 'process', None))
 
-        if sourcing_type == 'MAKE' and process is None:
-            raise serializers.ValidationError('自社製造の場合、工程は必須です。')
+        if sourcing_type in ['MAKE', 'SUBCON'] and process is None:
+            raise serializers.ValidationError('自社製造/外注の場合、工程は必須です。')
 
-        # 工程時間の必須チェックは自社製造のみ
-        if sourcing_type == 'MAKE':
+        # 工程時間の必須チェックは自社製造/外注のみ
+        if sourcing_type in ['MAKE', 'SUBCON']:
             if time_unit not in ['MINUTE', 'DAY']:
                 raise serializers.ValidationError('時間単位は MINUTE か DAY を指定してください。')
 

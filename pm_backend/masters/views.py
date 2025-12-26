@@ -322,9 +322,9 @@ class BOMViewSet(viewsets.ModelViewSet):
         tree = self._build_bom_tree(bom, visited_bom_ids=set())
         return Response(tree)
 
-    def _collect_make_items_recursive(self, bom: BOM, visited_bom_ids: set, collector: list, depth: int = 0, path_prefix: tuple = ()):
+    def _collect_routing_items_recursive(self, bom: BOM, visited_bom_ids: set, collector: list, depth: int = 0, path_prefix: tuple = ()):
         """
-        Depth-first collect MAKE items from bom and its descendants.
+        Depth-first collect routing items (MAKE/SUBCON) from bom and its descendants.
 
         - Child BOMs are traversed before appending the parent item (post-order) so
           downstream工程が先に生成される（前後関係を表す工程順に近づける）。
@@ -338,25 +338,25 @@ class BOMViewSet(viewsets.ModelViewSet):
         for idx, item in enumerate(items_qs, start=1):
             child_bom = self._pick_child_bom(item.child_product)
             if child_bom:
-                self._collect_make_items_recursive(
+                self._collect_routing_items_recursive(
                     child_bom,
                     visited_bom_ids,
                     collector,
                     depth=depth + 1,
                     path_prefix=path_prefix + (idx,)
                 )
-            if item.sourcing_type == 'MAKE':
+            if item.sourcing_type in ['MAKE', 'SUBCON']:
                 collector.append((depth, path_prefix + (idx,), item))
 
     @action(detail=True, methods=['post'])
     def generate_routing(self, request, pk=None):
-        """Generate or replace routing steps from BOM MAKE items (recursive)."""
+        """Generate or replace routing steps from BOM MAKE/SUBCON items (recursive)."""
         bom = self.get_object()
-        make_items_info = []
-        self._collect_make_items_recursive(bom, visited_bom_ids=set(), collector=make_items_info)
+        routing_items_info = []
+        self._collect_routing_items_recursive(bom, visited_bom_ids=set(), collector=routing_items_info)
 
-        if not make_items_info:
-            return Response({'detail': 'No MAKE items found in this BOM tree. Nothing to generate.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not routing_items_info:
+            return Response({'detail': 'No MAKE/SUBCON items found in this BOM tree. Nothing to generate.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Optional final step (manual input)
         final_process_id = request.data.get('final_process_id')
@@ -393,9 +393,9 @@ class BOMViewSet(viewsets.ModelViewSet):
                 final_duration_min = None
 
         # Validate each item has process/time info
-        for _, _, it in make_items_info:
+        for _, _, it in routing_items_info:
             if not it.process_id:
-                return Response({'detail': f'Process is required on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'detail': f'Process is required on BOM item {it.child_product.product_code} ({it.sourcing_type})'}, status=status.HTTP_400_BAD_REQUEST)
             if it.time_unit not in ['MINUTE', 'DAY']:
                 return Response({'detail': f'Invalid time_unit on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
             if it.time_unit == 'MINUTE':
@@ -428,7 +428,7 @@ class BOMViewSet(viewsets.ModelViewSet):
 
         routing.steps.all().delete()
         created_steps = []
-        for idx, (depth, path, item) in enumerate(make_items_info, start=1):
+        for idx, (depth, path, item) in enumerate(routing_items_info, start=1):
             path_str = ".".join(str(p) for p in path) if path else "1"
             step = RoutingStep.objects.create(
                 routing=routing,
@@ -481,7 +481,7 @@ class BOMViewSet(viewsets.ModelViewSet):
             {
                 'message': 'Routing generated from BOM (recursive)',
                 'routing': serialized.data,
-                'generated_steps': len(make_items_info),
+                'generated_steps': len(routing_items_info),
                 'replaced_existing': not created,
             },
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
