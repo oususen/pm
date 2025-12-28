@@ -21,13 +21,17 @@ def build_scrap_multiplier_map(root_product_id: int, root_qty: Decimal) -> dict:
         return {}
 
     multipliers = {}
-    stack = [(root_product_id, Decimal(root_qty))]
+    stack = [(root_product_id, Decimal(root_qty), None)]
 
     while stack:
-        pid, qty = stack.pop()
+        pid, qty, sourcing_type = stack.pop()
         if qty == 0:
             continue
         multipliers[pid] = multipliers.get(pid, Decimal('0')) + qty
+
+        st = (sourcing_type or '').upper()
+        if st == 'BUY':
+            continue
 
         bom = BOM.objects.filter(parent_product_id=pid, is_active=True).order_by('-valid_from', '-id').first()
         if not bom:
@@ -36,7 +40,7 @@ def build_scrap_multiplier_map(root_product_id: int, root_qty: Decimal) -> dict:
             if item.quantity is None:
                 continue
             child_qty = qty * Decimal(item.quantity)
-            stack.append((item.child_product_id, child_qty))
+            stack.append((item.child_product_id, child_qty, item.sourcing_type))
 
     return multipliers
 
@@ -73,6 +77,10 @@ def build_scrap_multiplier_details(root_product_id: int, root_qty: Decimal):
             detail_map[pid]['supplier_id'] = supplier_id
         if detail_map[pid]['sourcing_type'] is None and sourcing_type is not None:
             detail_map[pid]['sourcing_type'] = sourcing_type
+
+        st = (sourcing_type or '').upper()
+        if st == 'BUY':
+            continue
 
         bom = BOM.objects.filter(parent_product_id=pid, is_active=True).order_by('-valid_from', '-id').first()
         if not bom:

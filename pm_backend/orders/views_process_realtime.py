@@ -105,6 +105,16 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 ScrapRecordDetail.objects.bulk_create(objs)
                 details_qs = ScrapRecordDetail.objects.filter(scrap_record__process_record=record)
 
+        # BOM展開結果に含まれる品目のみ表示（購入品はここで止める）
+        qty = record.qty or 0
+        allowed_ids = {
+            d.get('product_id')
+            for d in build_scrap_multiplier_details(record.product_id, qty)
+            if d.get('product_id')
+        }
+        if allowed_ids:
+            details_qs = details_qs.filter(product_id__in=allowed_ids)
+
         details = []
         products = {p.id: p for p in Product.objects.filter(id__in=details_qs.values_list('product_id', flat=True))}
         processes = {p.id: p for p in Process.objects.filter(id__in=details_qs.values_list('process_id', flat=True))}

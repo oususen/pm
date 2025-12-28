@@ -682,15 +682,20 @@ const loadPlannedProducts = async () => {
       tempProducts = listItems
     } else {
       // まだ line-backlogs が計算されていない場合は pickup で生成（当日のみ）
-      const pickupRes = await api.lineBacklogs.pickup({
-        line_id: lineId,
-        start_date: currentDateYmd.value,
-        end_date: currentDateYmd.value,
-      })
-      const pickupItems = pickupRes.data.results || pickupRes.data || []
-      tempProducts = (Array.isArray(pickupItems) ? pickupItems : []).filter(
-        (it) => String(it.process) === String(selectedProcessId.value) && String(it.plan_date) === String(currentDateYmd.value)
-      )
+      try {
+        const pickupRes = await api.lineBacklogs.pickup({
+          line_id: lineId,
+          start_date: currentDateYmd.value,
+          end_date: currentDateYmd.value,
+        })
+        const pickupItems = pickupRes.data.results || pickupRes.data || []
+        tempProducts = (Array.isArray(pickupItems) ? pickupItems : []).filter(
+          (it) => String(it.process) === String(selectedProcessId.value) && String(it.plan_date) === String(currentDateYmd.value)
+        )
+      } catch (e) {
+        console.error('本日の計画ピックアップエラー:', e)
+        tempProducts = []
+      }
     }
 
     // 追加: この工程の加工物全体を候補に含める（当日以外のバックログも統合）
@@ -718,7 +723,7 @@ const loadPlannedProducts = async () => {
     productionProducts.value = [...filteredForProduction]
 
     // 仕損品記録用リストを作成: related-products APIから工程関連製品を追加
-    await loadScrapProducts(selectedProcessId.value, filteredForProduction)
+    await loadScrapProducts(selectedProcessId.value, filteredForProduction, lineId)
 
     if (productionProducts.value.length === 1 && productionProducts.value[0].product) {
       defaultProductId.value = productionProducts.value[0].product
@@ -728,7 +733,7 @@ const loadPlannedProducts = async () => {
   }
 }
 
-const loadScrapProducts = async (processId, baseProducts) => {
+const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null) => {
   try {
     // 基本リスト（生産記録と同じ）から開始
     const scrapMap = new Map()
@@ -736,6 +741,28 @@ const loadScrapProducts = async (processId, baseProducts) => {
       const key = `${it.product}_${it.process}`
       if (!scrapMap.has(key)) scrapMap.set(key, it)
     })
+
+    // 工程計画が無い場合はラインの当日計画を候補に加える
+    if (!scrapMap.size && fallbackLineId) {
+      try {
+        const lineRes = await api.lineBacklogs.getLineBacklogs({
+          line: fallbackLineId,
+          plan_date: currentDateYmd.value,
+        })
+        const lineItems = lineRes.data.results || lineRes.data || []
+        ;(Array.isArray(lineItems) ? lineItems : []).forEach((it) => {
+          if (!it || !it.product) return
+          const normalized = {
+            ...it,
+            process: processId,
+          }
+          const key = `${normalized.product}_${normalized.process}`
+          if (!scrapMap.has(key)) scrapMap.set(key, normalized)
+        })
+      } catch (e) {
+        console.error('仕損品記録用ライン計画取得エラー:', e)
+      }
+    }
 
     // related-products APIから工程関連製品を取得して追加
     const relatedRes = await api.processes.getRelatedProducts(processId)

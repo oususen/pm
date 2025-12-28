@@ -91,6 +91,7 @@ class ProcessViewSet(viewsets.ModelViewSet):
         - 連産品の子品番: 連産品のBOM配下にある実際の製品
         - 使用する社内生産品: RoutingStepMaterial から取得した中間品
         - 使用する購入品: RoutingStepMaterial から取得した購入部品
+        - BOM明細で工程が一致する子品番（中間品/連産品の子品番を補完）
         """
         process = self.get_object()
         products_map = {}  # key: product_id, value: {product, relation_type}
@@ -102,6 +103,14 @@ class ProcessViewSet(viewsets.ModelViewSet):
             routing = step.routing
             if not routing or not routing.product:
                 continue
+
+            # 1-0. この工程の出力品目（中間品）を追加
+            output_product = step.output_product
+            if output_product and output_product.id not in products_map:
+                products_map[output_product.id] = {
+                    'product': output_product,
+                    'relation_type': 'output_product'
+                }
 
             # 2. ルーティングの親製品を取得
             parent_product = routing.product
@@ -148,6 +157,31 @@ class ProcessViewSet(viewsets.ModelViewSet):
                     'product': component,
                     'relation_type': relation_type
                 }
+
+        # 4. BOM明細で工程が一致する子品番を追加（中間品/連産品の子品番補完）
+        bom_items = BOMItem.objects.filter(process=process).select_related(
+            'child_product',
+            'bom__parent_product'
+        )
+        for item in bom_items:
+            child = item.child_product
+            if not child:
+                continue
+            if child.id not in products_map:
+                relation_type = 'coproduct_child' if item.bom and item.bom.is_coproduct else 'bom_process_item'
+                products_map[child.id] = {
+                    'product': child,
+                    'relation_type': relation_type
+                }
+
+            # 連産品BOMの場合は親（仮想セット）も追加
+            if item.bom and item.bom.is_coproduct and item.bom.parent_product:
+                parent = item.bom.parent_product
+                if parent.id not in products_map:
+                    products_map[parent.id] = {
+                        'product': parent,
+                        'relation_type': 'coproduct_parent'
+                    }
 
         # 結果をシリアライズ
         result = []
