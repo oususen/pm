@@ -1089,7 +1089,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
     def save(self, request):
         """
         ユーザーが入力した計画データをLineBacklogに保存する
-        期待payload: { line_id, items: [{product_id, process_id, plan_date, plan_qty?, actual_qty?, stock_qty?, planned_stock_qty?, sequence_no?}] }
+        期待payload: { line_id, items: [{product_id, process_id, plan_date, plan_qty?, actual_qty?, stock_qty?, planned_stock_qty?, adjust_qty?, sequence_no?}] }
 
         plan_id ロジック:
         - plan_id = 製品コード_日付_数量_順番
@@ -1161,6 +1161,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             actual_qty = resolve_qty('actual_qty')
                             stock_qty = resolve_qty('stock_qty')
                             planned_stock_qty = resolve_qty('planned_stock_qty')
+                            adjust_qty = resolve_qty('adjust_qty')
                             order_qty = Decimal(str(existing.order_qty or 0))
                             demand_qty_plan = Decimal(str(existing.demand_qty_plan or 0))
                             seq_in = it.get('sequence_no', existing.sequence_no)
@@ -1170,6 +1171,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                                 actual_qty == 0
                                 and stock_qty == 0
                                 and planned_stock_qty == 0
+                                and adjust_qty == 0
                                 and order_qty == 0
                                 and demand_qty_plan == 0
                                 and seq_val in (0, None, '')
@@ -1183,21 +1185,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if sequence_no is None:
                     sequence_no = 1
 
-                # plan_idを生成: 製品コード_YYYYMMDD_数量_順番
-                # gantt_planning.pyと同じフォーマットを使用
-                from datetime import datetime
-                if isinstance(plan_date, str):
-                    plan_date_obj = datetime.strptime(plan_date, '%Y-%m-%d').date()
-                else:
-                    plan_date_obj = plan_date
-
-                # 数量ラベルを生成（小数点以下の0を除去、小数点を'p'に変換）
-                qty_label = str(plan_qty_value).rstrip('0').rstrip('.')
-                if '.' in qty_label:
-                    qty_label = qty_label.replace('.', 'p')
-
-                new_plan_id = f"{product_code}_{plan_date_obj.strftime('%Y%m%d')}_{qty_label}_{sequence_no}"
-
                 # 既存レコードを取得
                 existing = LineBacklog.objects.filter(
                     plan_date=plan_date,
@@ -1206,18 +1193,35 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     line_id=line_id,
                 ).first()
 
-                # 既存レコードがあり、plan_idが変更された場合、古いplan_idのレコードを削除
-                if existing and existing.plan_id and existing.plan_id != new_plan_id:
-                    # 古いplan_idに紐づく全てのLineBacklogレコードを削除
-                    old_plan_id = existing.plan_id
-                    LineBacklog.objects.filter(plan_id=old_plan_id).delete()
-                    # existingは削除されたので、新規作成扱いになる
-                    existing = None
+                new_plan_id = None
+                if plan_qty_provided:
+                    # plan_idを生成: 製品コード_YYYYMMDD_数量_順番
+                    # gantt_planning.pyと同じフォーマットを使用
+                    from datetime import datetime
+                    if isinstance(plan_date, str):
+                        plan_date_obj = datetime.strptime(plan_date, '%Y-%m-%d').date()
+                    else:
+                        plan_date_obj = plan_date
+
+                    # 数量ラベルを生成（小数点以下の0を除去、小数点を'p'に変換）
+                    qty_label = str(plan_qty_value).rstrip('0').rstrip('.')
+                    if '.' in qty_label:
+                        qty_label = qty_label.replace('.', 'p')
+
+                    new_plan_id = f"{product_code}_{plan_date_obj.strftime('%Y%m%d')}_{qty_label}_{sequence_no}"
+
+                    # 既存レコードがあり、plan_idが変更された場合、古いplan_idのレコードを削除
+                    if existing and existing.plan_id and existing.plan_id != new_plan_id:
+                        # 古いplan_idに紐づく全てのLineBacklogレコードを削除
+                        old_plan_id = existing.plan_id
+                        LineBacklog.objects.filter(plan_id=old_plan_id).delete()
+                        # existingは削除されたので、新規作成扱いになる
+                        existing = None
 
                 # 更新するフィールドを準備
                 defaults = {}
-                defaults['plan_id'] = new_plan_id
                 if plan_qty_provided:
+                    defaults['plan_id'] = new_plan_id
                     defaults['plan_qty'] = plan_qty_value
                 if 'actual_qty' in it:
                     defaults['actual_qty'] = Decimal(str(it['actual_qty']))
@@ -1225,6 +1229,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     defaults['stock_qty'] = Decimal(str(it['stock_qty']))
                 if 'planned_stock_qty' in it:
                     defaults['planned_stock_qty'] = Decimal(str(it['planned_stock_qty']))
+                if 'adjust_qty' in it:
+                    defaults['adjust_qty'] = Decimal(str(it['adjust_qty']))
                 if 'sequence_no' in it:
                     defaults['sequence_no'] = sequence_no
 

@@ -91,7 +91,20 @@
                     :key="`${row.key}-${d}`"
                     class="cell" :class="getCellClass(g, d, row.key)"
                   >
-                    {{ fmt(getValue(g, d, row.key)) }}
+                    <template v-if="row.key === 'adjust' && !g.isChild">
+                      <input
+                        class="cell-input"
+                        type="number"
+                        :value="getAdjustInputValue(g, d)"
+                        :disabled="isAdjustSaving(g, d)"
+                        @input="onAdjustInput(g, d, $event)"
+                        @blur="saveAdjust(g, d)"
+                        @keydown.enter.prevent="onAdjustEnter($event)"
+                      />
+                    </template>
+                    <template v-else>
+                      {{ fmt(getValue(g, d, row.key)) }}
+                    </template>
                   </td>
                 </tr>
               </tbody>
@@ -135,7 +148,20 @@
                         :key="`${row.key}-${d}`"
                         class="cell" :class="getCellClass(child, d, row.key)"
                       >
-                        {{ fmt(getValue(child, d, row.key)) }}
+                        <template v-if="row.key === 'adjust' && !child.isChild">
+                          <input
+                            class="cell-input"
+                            type="number"
+                            :value="getAdjustInputValue(child, d)"
+                            :disabled="isAdjustSaving(child, d)"
+                            @input="onAdjustInput(child, d, $event)"
+                            @blur="saveAdjust(child, d)"
+                            @keydown.enter.prevent="onAdjustEnter($event)"
+                          />
+                        </template>
+                        <template v-else>
+                          {{ fmt(getValue(child, d, row.key)) }}
+                        </template>
                       </td>
                     </tr>
                   </tbody>
@@ -164,6 +190,8 @@ const loading = ref(false);
 const error = ref("");
 const recalculating = ref(false);
 const demands = ref([]);
+const adjustInputs = ref({});
+const adjustSaving = ref({});
 let userSetStart = false;
 const onStartChange = () => {
   userSetStart = true;
@@ -187,6 +215,25 @@ const rowDefs = [
   { key: "stock", label: "在庫" },
   { key: "planned_stock", label: "計画在庫" },
 ];
+
+const applyDemands = (payload) => {
+  const list = Array.isArray(payload) ? payload : payload.results || [];
+  demands.value = list;
+  if (!userSetStart && demands.value.length) {
+    const minDate = demands.value
+      .map((d) => d.plan_date)
+      .sort()[0];
+    if (minDate) {
+      startDate.value = minDate;
+    }
+  }
+};
+
+const reloadDemands = async () => {
+  const res = await api.lineBacklogs.getLineBacklogs();
+  const payload = res.data || [];
+  applyDemands(payload);
+};
 
 const groups = computed(() => {
   if (!demands.value.length) return [];
@@ -220,11 +267,14 @@ const groups = computed(() => {
         product_code: d.product_code,
         product_name: d.product_name,
         product_id: d.product,
+        line_id: d.line,
+        process_id: d.process,
         process_code: d.process_code || d.process || "",
         process_name: d.process_name || "",
         cells: {},
         children: [],
         showChildren: false,
+        isChild: false,
       });
     }
     const g = map.get(key);
@@ -277,6 +327,124 @@ const getCellClass = (group, date, rowKey) => {
     }
   }
   return '';
+};
+
+const adjustKey = (group, date) => `${group.key}__${date}`;
+
+const getAdjustInputValue = (group, date) => {
+  const key = adjustKey(group, date);
+  if (Object.prototype.hasOwnProperty.call(adjustInputs.value, key)) {
+    return adjustInputs.value[key];
+  }
+  const current = getValue(group, date, 'adjust');
+  if (current === null || current === undefined) return '';
+  const num = Number(current);
+  if (Number.isNaN(num) || num === 0) return '';
+  return String(num);
+};
+
+const onAdjustInput = (group, date, event) => {
+  adjustInputs.value[adjustKey(group, date)] = event.target.value;
+};
+
+const onAdjustEnter = (event) => {
+  event.target.blur();
+};
+
+const isAdjustSaving = (group, date) => {
+  return Boolean(adjustSaving.value[adjustKey(group, date)]);
+};
+
+const updateAdjustDemand = (group, date, adjustQty) => {
+  const idx = demands.value.findIndex(
+    (d) =>
+      d.line === group.line_id &&
+      d.process === group.process_id &&
+      d.product === group.product_id &&
+      d.plan_date === date
+  );
+  if (idx >= 0) {
+    demands.value[idx].adjust_qty = adjustQty;
+    return;
+  }
+  demands.value.push({
+    line: group.line_id,
+    line_code: group.line_code,
+    line_name: group.line_name,
+    process: group.process_id,
+    process_code: group.process_code,
+    process_name: group.process_name,
+    product: group.product_id,
+    product_code: group.product_code,
+    product_name: group.product_name,
+    plan_date: date,
+    order_qty: 0,
+    actual_qty: 0,
+    plan_qty: 0,
+    adjust_qty: adjustQty,
+    scrap_qty: 0,
+    stock_qty: 0,
+    planned_stock_qty: 0,
+  });
+};
+
+const saveAdjust = async (group, date) => {
+  if (group.isChild) return;
+  if (!group.line_id || !group.process_id || !group.product_id) {
+    alert('調整の保存に必要な情報が不足しています。');
+    return;
+  }
+  const key = adjustKey(group, date);
+  if (adjustSaving.value[key]) return;
+  const raw = adjustInputs.value[key];
+  let adjustQty = 0;
+  if (raw !== '' && raw !== null && raw !== undefined) {
+    const parsed = Number(raw);
+    if (Number.isNaN(parsed) || !Number.isFinite(parsed)) {
+      alert('調整数は数値で入力してください。');
+      return;
+    }
+    if (!Number.isInteger(parsed)) {
+      alert('調整数は整数で入力してください。');
+      return;
+    }
+    adjustQty = parsed;
+  }
+  const current = Number(getValue(group, date, 'adjust') || 0);
+  if (adjustQty === current) {
+    delete adjustInputs.value[key];
+    return;
+  }
+
+  adjustSaving.value[key] = true;
+  try {
+    await api.lineBacklogs.save({
+      line_id: group.line_id,
+      items: [
+        {
+          product_id: group.product_id,
+          process_id: group.process_id,
+          plan_date: date,
+          adjust_qty: adjustQty,
+        },
+      ],
+    });
+    updateAdjustDemand(group, date, adjustQty);
+    const start = columns.value[0];
+    const end = columns.value[columns.value.length - 1];
+    await api.lineBacklogs.recalculateInventory({
+      line_id: group.line_id,
+      start_date: start,
+      end_date: end,
+    });
+    await reloadDemands();
+    delete adjustInputs.value[key];
+  } catch (e) {
+    console.error('調整の保存に失敗:', e);
+    alert('調整の保存に失敗しました。');
+  } finally {
+    delete adjustSaving.value[key];
+  }
 };
 
 const loadBOMChildren = async (group) => {
@@ -345,12 +513,16 @@ const loadBOMChildren = async (group) => {
         children.push({
           product_code: childDemand.product_code,
           product_name: childDemand.product_name,
+          product_id: childDemand.product,
           process_code: childDemand.process_code,
           process_name: childDemand.process_name,
+          process_id: childDemand.process,
           line_code: childDemand.line_code,
           line_name: childDemand.line_name,
+          line_id: childDemand.line,
           bom_quantity: item.quantity,
           cells: childCells,
+          isChild: true,
         });
       }
     }
@@ -398,22 +570,12 @@ const load = async () => {
     // 在庫/残量は line_backlog ベースで集計する
     const res = await api.lineBacklogs.getLineBacklogs();
     const payload = res.data || [];
-    demands.value = Array.isArray(payload) ? payload : payload.results || [];
-    if (!userSetStart && demands.value.length) {
-      const minDate = demands.value
-        .map((d) => d.plan_date)
-        .sort()[0];
-      if (minDate) {
-        startDate.value = minDate;
-      }
-    }
+    applyDemands(payload);
     const refreshed = await refreshOrderQty();
     if (refreshed) {
       const refreshRes = await api.lineBacklogs.getLineBacklogs();
       const refreshPayload = refreshRes.data || [];
-      demands.value = Array.isArray(refreshPayload)
-        ? refreshPayload
-        : refreshPayload.results || [];
+      applyDemands(refreshPayload);
     }
   } catch (e) {
     error.value = e?.message || "読み込みに失敗しました";
@@ -565,6 +727,20 @@ onMounted(load);
     font-weight: bold;
   }
   background: #fff;
+}
+.cell-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  padding: 4px 6px;
+  text-align: right;
+  font-size: 12px;
+  background: #fff;
+}
+.cell-input:disabled {
+  background: #f3f4f6;
+  color: #9ca3af;
 }
 .no-data,
 .loading {
