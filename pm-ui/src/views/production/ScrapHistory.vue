@@ -112,7 +112,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in breakdown" :key="row.product_id">
+          <tr v-for="row in breakdown" :key="row.detail_id">
             <td>{{ row.product_code || '-' }}</td>
             <td>{{ row.product_name || '' }}</td>
             <td>

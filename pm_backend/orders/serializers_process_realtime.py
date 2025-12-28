@@ -49,6 +49,7 @@ def build_scrap_multiplier_details(root_product_id: int, root_qty: Decimal):
     """
     BOMを最下層まで展開し、各製品ごとの仕損数量と加工先工程/ライン情報を返す。
     （process_id/line_id は BOM 明細に設定されていれば一緒に返す）
+    同じ製品でも異なる工程/サプライヤからの調達は別明細として扱う。
     """
     if not root_product_id or root_qty is None:
         return []
@@ -60,23 +61,22 @@ def build_scrap_multiplier_details(root_product_id: int, root_qty: Decimal):
         pid, qty, proc_id, line_id, supplier_id, sourcing_type = stack.pop()
         if qty == 0:
             continue
-        if pid not in detail_map:
-            detail_map[pid] = {
+
+        # 同じ製品でも工程/サプライヤが異なれば別明細とする
+        key = (pid, proc_id, supplier_id)
+        if key not in detail_map:
+            detail_map[key] = {
                 'qty': Decimal('0'),
                 'process_id': proc_id,
                 'line_id': line_id,
                 'supplier_id': supplier_id,
                 'sourcing_type': sourcing_type,
             }
-        detail_map[pid]['qty'] += qty
-        if detail_map[pid]['process_id'] is None and proc_id is not None:
-            detail_map[pid]['process_id'] = proc_id
-        if detail_map[pid]['line_id'] is None and line_id is not None:
-            detail_map[pid]['line_id'] = line_id
-        if detail_map[pid]['supplier_id'] is None and supplier_id is not None:
-            detail_map[pid]['supplier_id'] = supplier_id
-        if detail_map[pid]['sourcing_type'] is None and sourcing_type is not None:
-            detail_map[pid]['sourcing_type'] = sourcing_type
+        detail_map[key]['qty'] += qty
+        if detail_map[key]['line_id'] is None and line_id is not None:
+            detail_map[key]['line_id'] = line_id
+        if detail_map[key]['sourcing_type'] is None and sourcing_type is not None:
+            detail_map[key]['sourcing_type'] = sourcing_type
 
         st = (sourcing_type or '').upper()
         if st == 'BUY':
@@ -99,7 +99,7 @@ def build_scrap_multiplier_details(root_product_id: int, root_qty: Decimal):
             ))
 
     result = []
-    for pid, info in detail_map.items():
+    for (pid, proc_id, supplier_id), info in detail_map.items():
         result.append({
             'product_id': pid,
             'qty': info['qty'],

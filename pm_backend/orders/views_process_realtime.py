@@ -115,32 +115,70 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         if allowed_ids:
             details_qs = details_qs.filter(product_id__in=allowed_ids)
 
-        details = []
+        # 同じ(product_id, process_id, supplier_id)の組み合わせで集約（既存データの重複対策）
+        from collections import defaultdict
+        aggregated = defaultdict(lambda: {
+            'deduct_qty': Decimal('0'),
+            'detail_ids': [],
+            'is_replenished_list': [],
+        })
+
         products = {p.id: p for p in Product.objects.filter(id__in=details_qs.values_list('product_id', flat=True))}
         processes = {p.id: p for p in Process.objects.filter(id__in=details_qs.values_list('process_id', flat=True))}
         suppliers = {s.id: s for s in Supplier.objects.filter(id__in=details_qs.values_list('supplier_id', flat=True))}
+
         for d in details_qs:
+            key = (d.product_id, d.process_id, d.supplier_id)
             p = products.get(d.product_id)
             proc = processes.get(d.process_id) if d.process_id else None
             supplier = suppliers.get(d.supplier_id) if d.supplier_id else None
+
+            if key not in aggregated:
+                aggregated[key] = {
+                    'product_id': d.product_id,
+                    'product_code': d.product_code or (p.product_code if p else None),
+                    'product_name': d.product_name or (p.product_name if p else None),
+                    'process_id': d.process_id,
+                    'process_code': proc.process_code if proc else None,
+                    'process_name': proc.process_name if proc else None,
+                    'supplier_id': d.supplier_id,
+                    'supplier_code': supplier.supplier_code if supplier else None,
+                    'supplier_name': supplier.supplier_name if supplier else None,
+                    'sourcing_type': d.sourcing_type,
+                    'deduct_qty': Decimal('0'),
+                    'detail_ids': [],
+                    'is_replenished_list': [],
+                    'replenished_at': d.replenished_at,
+                    'replenished_by': d.replenished_by,
+                }
+
+            aggregated[key]['deduct_qty'] += (d.deduct_qty or Decimal('0'))
+            aggregated[key]['detail_ids'].append(d.id)
+            aggregated[key]['is_replenished_list'].append(d.is_replenished)
+
+        details = []
+        for key, item in aggregated.items():
+            # 全明細が補充完了している場合のみ完了とする
+            all_replenished = all(item['is_replenished_list']) if item['is_replenished_list'] else False
             details.append({
-                'detail_id': d.id,
-                'product_id': d.product_id,
-                'product_code': d.product_code or (p.product_code if p else None),
-                'product_name': d.product_name or (p.product_name if p else None),
-                'deduct_qty': float(d.deduct_qty or 0),
-                'process_id': d.process_id,
-                'process_code': proc.process_code if proc else None,
-                'process_name': proc.process_name if proc else None,
-                'supplier_id': d.supplier_id,
-                'supplier_code': supplier.supplier_code if supplier else None,
-                'supplier_name': supplier.supplier_name if supplier else None,
-                'sourcing_type': d.sourcing_type,
-                'is_replenished': d.is_replenished,
-                'replenished_at': d.replenished_at,
-                'replenished_by': d.replenished_by,
+                'detail_id': item['detail_ids'][0],  # 代表IDとして最初のdetail_idを使用
+                'product_id': item['product_id'],
+                'product_code': item['product_code'],
+                'product_name': item['product_name'],
+                'deduct_qty': float(item['deduct_qty']),
+                'process_id': item['process_id'],
+                'process_code': item['process_code'],
+                'process_name': item['process_name'],
+                'supplier_id': item['supplier_id'],
+                'supplier_code': item['supplier_code'],
+                'supplier_name': item['supplier_name'],
+                'sourcing_type': item['sourcing_type'],
+                'is_replenished': all_replenished,
+                'replenished_at': item['replenished_at'],
+                'replenished_by': item['replenished_by'],
             })
-        details.sort(key=lambda x: (x['product_code'] or '', x['product_id']))
+
+        details.sort(key=lambda x: (x['product_code'] or '', x['product_id'] or 0))
         return Response(details)
 
     @action(detail=True, methods=['post'], url_path='mark-replenished')
