@@ -65,3 +65,5 @@ pm_backend/pm_backend/__pycache__/
 *.xls
 *.xlsx
 *.csv   
+
+*nul*

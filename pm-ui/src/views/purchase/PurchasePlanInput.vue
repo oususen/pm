@@ -123,6 +123,8 @@ import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
 
 const selectedSupplier = ref('')
+const purchaseLineId = ref('')
+const purchaseProcessId = ref('')
 const startDate = ref(new Date().toISOString().slice(0, 10))
 const horizonDays = ref(60)
 const keyword = ref('')
@@ -187,11 +189,16 @@ const savePlan = async () => {
     alert('仕入先を選択してください。')
     return
   }
+  const lineId = await resolvePurchaseLineId()
+  if (!lineId || !purchaseProcessId.value) {
+    alert('仕入れラインの解決に失敗しました。')
+    return
+  }
   const items = []
   rows.value.forEach((r) => {
     if (!r.product_id) return
     // 仕入れ用のprocess_idはダミー値（1固定）を使用
-    const process_id = r.process_id || 1
+    const process_id = r.process_id || purchaseProcessId.value
     dateColumns.value.forEach((c) => {
       const daily = r.daily[c.key]
       items.push({
@@ -210,9 +217,8 @@ const savePlan = async () => {
     return
   }
   try {
-    // 仕入先IDをline_idとして使用（暫定）
     const res = await api.lineBacklogs.save({
-      line_id: selectedSupplier.value,
+      line_id: lineId,
       items,
     })
     console.info('保存結果', res.data)
@@ -249,6 +255,8 @@ const refreshDates = () => {
 
 const loadData = async () => {
   rows.value = []
+  purchaseLineId.value = ''
+  purchaseProcessId.value = ''
   await fetchProducts(selectedSupplier.value || null)
 }
 
@@ -263,10 +271,21 @@ const fetchSuppliers = async () => {
 
 const fetchProducts = async (supplierId = null) => {
   try {
-    const params = { sourcing_type: 'BUY' }
-    if (supplierId) params.supplier = supplierId
-    const bomItemsRes = await api.bomItems.getBOMItems(params)
-    const bomItems = bomItemsRes.data.results || bomItemsRes.data || []
+    let bomItems = []
+    if (supplierId) {
+      const baseParams = { supplier: supplierId }
+      const [buyRes, subconRes] = await Promise.all([
+        api.bomItems.getBOMItems({ ...baseParams, sourcing_type: 'BUY' }),
+        api.bomItems.getBOMItems({ ...baseParams, sourcing_type: 'SUBCON' }),
+      ])
+      const buyItems = buyRes.data.results || buyRes.data || []
+      const subconItems = subconRes.data.results || subconRes.data || []
+      bomItems = [...buyItems, ...subconItems]
+    } else {
+      const params = { sourcing_type: 'BUY' }
+      const bomItemsRes = await api.bomItems.getBOMItems(params)
+      bomItems = bomItemsRes.data.results || bomItemsRes.data || []
+    }
 
     // 子製品IDを抽出
     const targetProductIds = new Set(bomItems.map((item) => item.child_product))
@@ -312,10 +331,23 @@ const doPickup = async () => {
       return
     }
 
+    const pickupRes = await api.lineBacklogs.pickupPurchase({
+      supplier_id: selectedSupplier.value,
+      start_date: startDate.value,
+      end_date: endDate.value,
+    })
+    purchaseLineId.value = pickupRes?.data?.line_id || ''
+    purchaseProcessId.value = pickupRes?.data?.process_id || ''
+    if (!purchaseLineId.value || !purchaseProcessId.value) {
+      alert('仕入れラインの解決に失敗しました。')
+      rows.value = []
+      return
+    }
+
     // 既存のLineBacklogデータを取得（line_idは仕入先IDとして使用）
-    // 注：pickup APIは使わず、直接バックログを取得
+    // 注：購買需要はpickup_purchaseで更新済み
     const backlogRes = await api.lineBacklogs.getLineBacklogs({
-      line: selectedSupplier.value,
+      line: purchaseLineId.value,
       product__in: productIds.join(','),
       plan_date__gte: startDate.value,
       plan_date__lte: endDate.value,
@@ -333,7 +365,7 @@ const doPickup = async () => {
         product_id: p.id,
         product_code: p.product_code,
         product_name: p.product_name,
-        process_id: 1, // 仕入れ用ダミー値
+        process_id: purchaseProcessId.value,
         daily: initDaily(),
       })
     })
@@ -360,13 +392,31 @@ const doPickup = async () => {
     alert('取り込みに失敗しました。')
   }
 }
+
+const resolvePurchaseLineId = async () => {
+  if (purchaseLineId.value) return purchaseLineId.value
+  if (!selectedSupplier.value) return ''
+  try {
+    const res = await api.lineBacklogs.pickupPurchase({
+      supplier_id: selectedSupplier.value,
+      start_date: startDate.value,
+      end_date: endDate.value,
+    })
+    purchaseLineId.value = res?.data?.line_id || ''
+    purchaseProcessId.value = res?.data?.process_id || ''
+    return purchaseLineId.value
+  } catch (e) {
+    console.error('仕入れライン解決エラー', e)
+    return ''
+  }
+}
 </script>
 
 <style scoped>
 .plan-container {
   padding: 8px 10px 14px;
   background: #eef2f6;
-  font-size: 13px;
+  font-size: 12px;
   font-family: 'Segoe UI', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
   color: #1f2a44;
 }
@@ -427,7 +477,7 @@ const doPickup = async () => {
   border: 1px solid #d7dfe8;
   padding: 4px 6px;
   white-space: nowrap;
-  font-size: 1.288rem;
+  font-size: 12px;
   font-weight: 500;
   color: #000;
 }
@@ -492,7 +542,7 @@ thead .sticky-col {
 .product-info {
   display: block;
   padding: 3px 4px;
-  font-size: 1.288rem;
+  font-size: 12px;
   font-weight: 500;
   color: #000;
   white-space: nowrap;
@@ -506,7 +556,7 @@ thead .sticky-col {
   padding: 3px 4px;
   border: 1px solid #d1d5db;
   border-radius: 2px;
-  font-size: 1.288rem;
+  font-size: 12px;
   font-weight: 500;
   color: #000;
 }
@@ -533,7 +583,7 @@ thead .sticky-col {
   padding: 3px 4px;
   text-align: right;
   color: #666;
-  font-size: 1.288rem;
+  font-size: 12px;
   font-weight: 500;
   color: #000;
 }

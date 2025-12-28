@@ -7,7 +7,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 import django_filters
-from django.db.models import Q
+from django.db.models import Q, Max
 import logging
 
 from .models import LineDemand, Order, OrderLine, StgOrderRaw, StgOrderDaily
@@ -30,7 +30,7 @@ from .serializers import (
 from .services.csv_import import CSVImportService
 from .services.order_expansion import OrderExpansionService
 from .services.gantt_planning import generate_line_gantt_plans
-from masters.models import Routing, RoutingStep, ProcessCycleTime, Line, Calendar, CalendarDay, BOM, BOMItem
+from masters.models import Routing, RoutingStep, ProcessCycleTime, Line, Supplier, Process, Calendar, CalendarDay, BOM, BOMItem
 
 logger = logging.getLogger(__name__)
 
@@ -701,9 +701,204 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         print(f"[DEBUG] upserted_items件数: {len(upserted_items)}")
 
         # 5. 最新状態を返す
-        serializer = self.get_serializer(upserted_items or backlog_qs, many=True)
+        items_to_serialize = upserted_items
+        if not items_to_serialize:
+            existing_items = list(backlog_qs)
+            if existing_items:
+                items_to_serialize = existing_items
+            else:
+                placeholder_date = start_dt or end_dt or datetime.today().date()
+                placeholders = []
+                for product_id in target_products:
+                    process_id = product_process_map.get(product_id)
+                    if not process_id:
+                        continue
+                    placeholders.append(LineBacklog(
+                        plan_date=placeholder_date,
+                        process_id=process_id,
+                        product_id=product_id,
+                        line_id=line_id,
+                        order_qty=0,
+                        demand_qty_plan=0,
+                        plan_qty=0,
+                        actual_qty=0,
+                        stock_qty=0,
+                        planned_stock_qty=0,
+                    ))
+                items_to_serialize = placeholders
+        serializer = self.get_serializer(items_to_serialize, many=True)
         print(f"[DEBUG] serializer.data件数: {len(serializer.data)}")
         return Response(serializer.data)
+
+    @action(detail=False, methods=['post'], url_path='pickup_purchase')
+    def pickup_purchase(self, request):
+        """
+        購買/外注部品の需要を集計してLineBacklogに反映する。
+
+        期待payload: { supplier_id or line_id, start_date?, end_date? }
+        """
+        from collections import defaultdict
+
+        supplier_id = request.data.get('supplier_id') or request.data.get('line_id')
+        if not supplier_id:
+            return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            supplier_id = int(supplier_id)
+        except (TypeError, ValueError):
+            return Response({'detail': 'supplier_id must be numeric'}, status=status.HTTP_400_BAD_REQUEST)
+
+        supplier = Supplier.objects.filter(id=supplier_id).first()
+        if not supplier:
+            return Response({'detail': 'supplier not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        line_code = f"SUP{supplier.id}"
+        line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
+        if len(line_name) > 50:
+            line_name = line_name[:50]
+        line_obj, _ = Line.objects.get_or_create(
+            line_code=line_code,
+            defaults={
+                'line_name': line_name,
+                'is_active': False,
+            }
+        )
+        line_id = line_obj.id
+        process_code = 'PURCHASE'
+        process_name = '購買'
+        process_obj, _ = Process.objects.get_or_create(
+            process_code=process_code,
+            defaults={
+                'process_name': process_name,
+                'line': line_obj,
+                'management_unit': 'DAY',
+                'is_active': False,
+            }
+        )
+        process_id = process_obj.id
+
+        start_date = request.data.get('start_date')
+        end_date = request.data.get('end_date')
+
+        def parse_date(val):
+            if val is None:
+                return None
+            if hasattr(val, 'year'):
+                return val
+            try:
+                return datetime.strptime(str(val), '%Y-%m-%d').date()
+            except Exception:
+                return None
+
+        start_dt = parse_date(start_date)
+        end_dt = parse_date(end_date)
+
+        bom_items = BOMItem.objects.filter(
+            sourcing_type__in=['BUY', 'SUBCON'],
+            supplier_id=supplier_id,
+            bom__is_active=True,
+        ).select_related('bom', 'bom__parent_product')
+
+        if not bom_items.exists():
+            return Response({'created': 0, 'updated': 0, 'items': 0, 'line_id': line_id, 'process_id': process_id})
+
+        parent_to_children = defaultdict(list)
+        parent_ids = set()
+        child_ids = set()
+        for item in bom_items:
+            parent_id = item.bom.parent_product_id if item.bom_id else None
+            if not parent_id:
+                continue
+            qty = Decimal(str(item.quantity or 0))
+            if qty == 0:
+                continue
+            lead_time_days = item.lead_time_days or 0
+            parent_ids.add(parent_id)
+            child_ids.add(item.child_product_id)
+            parent_to_children[parent_id].append((item.child_product_id, qty, lead_time_days))
+
+        if not parent_ids or not child_ids:
+            return Response({'created': 0, 'updated': 0, 'items': 0})
+
+        parent_qs = LineBacklog.objects.filter(product_id__in=parent_ids)
+        if start_dt:
+            parent_qs = parent_qs.filter(plan_date__gte=start_dt)
+        if end_dt:
+            parent_qs = parent_qs.filter(plan_date__lte=end_dt)
+
+        parent_orders = parent_qs.values('product_id', 'line_id', 'plan_date').annotate(plan_qty=Max('plan_qty'))
+
+        calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
+            calendar_code='tiera_muke'
+        ).values_list('id', flat=True).first()
+
+        def shift_business_days(target_date, days):
+            if not days:
+                return target_date
+            if not calendar_id:
+                return target_date + timedelta(days=-days)
+            step = -1 if days > 0 else 1
+            remaining = abs(int(days))
+            current = target_date
+            while remaining > 0:
+                current = current + timedelta(days=step)
+                cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=current).first()
+                is_work = cal.is_working_day if cal is not None else True
+                if is_work:
+                    remaining -= 1
+            return current
+
+        demand_map = defaultdict(Decimal)
+        for row in parent_orders:
+            parent_id = row['product_id']
+            plan_date = row['plan_date']
+            plan_qty = Decimal(str(row['plan_qty'] or 0))
+            if plan_qty == 0:
+                continue
+            for child_id, qty, lead_time_days in parent_to_children.get(parent_id, []):
+                target_date = shift_business_days(plan_date, lead_time_days)
+                demand_map[(child_id, target_date)] += plan_qty * qty
+
+        existing_qs = LineBacklog.objects.filter(
+            line_id=line_id,
+            process_id=process_id,
+            product_id__in=child_ids,
+        )
+        if start_dt:
+            existing_qs = existing_qs.filter(plan_date__gte=start_dt)
+        if end_dt:
+            existing_qs = existing_qs.filter(plan_date__lte=end_dt)
+
+        existing_map = {(obj.product_id, obj.plan_date): obj for obj in existing_qs}
+
+        created = 0
+        updated = 0
+
+        for (child_id, plan_date), demand in demand_map.items():
+            qty_val = int(demand)
+            obj, is_created = LineBacklog.objects.update_or_create(
+                plan_date=plan_date,
+                process_id=process_id,
+                product_id=child_id,
+                line_id=line_id,
+                defaults={
+                    'order_qty': qty_val,
+                    'demand_qty_plan': qty_val,
+                }
+            )
+            if is_created:
+                created += 1
+            else:
+                updated += 1
+            existing_map.pop((child_id, plan_date), None)
+
+        for obj in existing_map.values():
+            if (obj.order_qty or 0) != 0 or (obj.demand_qty_plan or 0) != 0:
+                obj.order_qty = 0
+                obj.demand_qty_plan = 0
+                obj.save(update_fields=['order_qty', 'demand_qty_plan', 'updated_at'])
+                updated += 1
+
+        return Response({'created': created, 'updated': updated, 'items': len(demand_map), 'line_id': line_id, 'process_id': process_id})
 
     @action(detail=False, methods=['post'])
     def expand_processes(self, request):
