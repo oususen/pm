@@ -40,6 +40,7 @@ class ScrapRecord(models.Model):
 
     qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='仕損数量')
     recorded_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name='記録時刻')
+    plan_date = models.DateField(null=True, blank=True, db_index=True, verbose_name='計画日')
 
     disposition_status = models.CharField(
         max_length=20,

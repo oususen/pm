@@ -32,6 +32,15 @@ class LineBacklog(models.Model):
     # 計画在庫
     planned_stock_qty = models.IntegerField(default=0)
 
+    # 調整数（手動調整、棚卸差異など）
+    adjust_qty = models.IntegerField(default=0, verbose_name="調整数")
+
+    # 仕損数（自工程仕損 + 後工程仕損の展開分）
+    scrap_qty = models.IntegerField(default=0, verbose_name="仕損数")
+
+    # 実績出庫数（後工程への実績出庫）
+    actual_shipment_qty = models.IntegerField(default=0, verbose_name="実績出庫数")
+
     # 生産順序番号（日をまたいだ通し番号）
     sequence_no = models.IntegerField(null=True, blank=True)
 

@@ -24,6 +24,7 @@
           <option :value="30">30日</option>
         </select>
         <button @click="load" :disabled="loading">更新</button>
+        <button @click="recalculateInventory" :disabled="loading || recalculating">在庫再計算</button>
       </div>
     </div>
 
@@ -78,10 +79,9 @@
               <tbody>
                 <tr v-for="row in rowDefs" :key="row.key">
                   <th class="label-col">{{ row.label }}</th>
-                  <td
-                    v-for="d in columns"
+                  <td v-for="d in columns"
                     :key="`${row.key}-${d}`"
-                    class="cell"
+                    class="cell" :class="getCellClass(g, d, row.key)"
                   >
                     {{ fmt(getValue(g, d, row.key)) }}
                   </td>
@@ -107,6 +107,7 @@ const startDate = ref(formatISODate(new Date()));
 const horizon = ref(14);
 const loading = ref(false);
 const error = ref("");
+const recalculating = ref(false);
 const demands = ref([]);
 let userSetStart = false;
 const onStartChange = () => {
@@ -185,8 +186,8 @@ const groups = computed(() => {
     c.firm += Number(d.actual_qty || 0);
     // 計画・在庫・計画在庫は line_backlog から取得
     c.plan += Number(d.plan_qty || 0);
-    c.adjust += 0; // 調整は現状データ無しのため0
-    c.scrap += 0; // 仕損は在庫計算側で集計予定のため0表示
+    c.adjust += Number(d.adjust_qty || 0); // 調整数
+    c.scrap += Number(d.scrap_qty || 0); // 仕損数
     c.stock += Number(d.stock_qty || 0);
     c.planned_stock += Number(d.planned_stock_qty || 0);
   }
@@ -203,6 +204,17 @@ const fmt = (n) => {
 
 const getValue = (group, date, key) => {
   return group.cells?.[date]?.[key] ?? "";
+};
+
+const getCellClass = (group, date, rowKey) => {
+  // 在庫・計画在庫がマイナスの場合は赤色表示
+  if (rowKey === 'stock' || rowKey === 'planned_stock') {
+    const value = getValue(group, date, rowKey);
+    if (value !== null && value !== undefined && Number(value) < 0) {
+      return 'negative';
+    }
+  }
+  return '';
 };
 
 const load = async () => {
@@ -225,6 +237,47 @@ const load = async () => {
     error.value = e?.message || "読み込みに失敗しました";
   } finally {
     loading.value = false;
+  }
+};
+
+const recalculateInventory = async () => {
+  if (!confirm('在庫と計画在庫を再計算しますか？\n※全ラインの在庫データが更新されます。')) {
+    return;
+  }
+  
+  recalculating.value = true;
+  error.value = "";
+  try {
+    // 現在表示中の期間で再計算
+    const start = columns.value[0];
+    const end = columns.value[columns.value.length - 1];
+    
+    // 表示中の全ラインを取得
+    const lines = [...new Set(demands.value.map(d => d.line).filter(Boolean))];
+    
+    if (lines.length === 0) {
+      alert('再計算対象のラインがありません');
+      return;
+    }
+    
+    // 各ラインごとに再計算
+    for (const lineId of lines) {
+      await api.lineBacklogs.recalculateInventory({
+        line_id: lineId,
+        start_date: start,
+        end_date: end
+      });
+    }
+    
+    alert('在庫再計算が完了しました');
+    
+    // データを再読み込み
+    await load();
+  } catch (e) {
+    error.value = e?.response?.data?.detail || e?.message || "在庫再計算に失敗しました";
+    alert('エラー: ' + error.value);
+  } finally {
+    recalculating.value = false;
   }
 };
 
@@ -324,6 +377,11 @@ onMounted(load);
   min-width: 100px;
 }
 .cell {
+  &.negative {
+    background: #fee;
+    color: #c00;
+    font-weight: bold;
+  }
   background: #fff;
 }
 .no-data,

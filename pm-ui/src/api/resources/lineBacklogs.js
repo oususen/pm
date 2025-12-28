@@ -18,4 +18,7 @@ export const createLineBacklogsAPI = (client) => ({
   save(payload) {
     return client.post('/line-backlogs/save/', payload)
   },
+  recalculateInventory(payload) {
+    return client.post('/line-backlogs/recalculate_inventory/', payload)
+  },
 })

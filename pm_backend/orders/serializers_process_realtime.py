@@ -346,6 +346,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                     product_code=product_code,
                     product_name=product_name,
                     qty=qty_decimal,
+                    plan_date=timezone.now().date(),  # 計画日を自動設定
                     reason=scrap_event.get('reason') or '',
                     reason_detail=scrap_event.get('reason_detail') or '',
                     batch_no=validated_data.get('batch_no', ''),
