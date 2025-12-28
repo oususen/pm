@@ -258,6 +258,35 @@ Django Admin: http://localhost:8000/admin/
 - カラム位置指定による柔軟なフォーマット対応
 - 詳細は `pm_backend/orders/services/README.md` 参照
 
+### 在庫管理機能
+
+- **在庫計算エンジン** (`pm_backend/orders/inventory_calculator.py`)
+  - 仕損数の自動集計（自工程＋後工程展開分）
+  - 実績出庫数の自動計算（後工程実績からBOM展開）
+  - 実在庫の日次計算
+  - 計画在庫の時制考慮計算
+    - 過去（実績あり）: 実績生産＋実績出庫ベース
+    - 過去（実績なし）: 生産ゼロ＋計画出庫ベース
+    - 未来: 計画生産＋計画出庫ベース
+
+- **在庫データモデル** (`LineBacklog`)
+  - `adjust_qty`: 調整数（手動調整、棚卸差異）
+  - `scrap_qty`: 仕損数（自動集計）
+  - `actual_shipment_qty`: 実績出庫数（自動計算）
+  - `stock_qty`: 実在庫
+  - `planned_stock_qty`: 計画在庫
+
+- **仕損管理** (`ScrapRecord`)
+  - `plan_date`: 生産計画日との紐付け
+  - 後工程仕損のBOM展開（`ScrapRecordDetail`）
+  - 仕損確定ステータス管理
+
+- **在庫一覧画面** (`ProductionInventory.vue`)
+  - 日別在庫推移の表示
+  - マイナス在庫の赤字強調表示
+  - 在庫再計算機能
+  - 0値の空白表示
+
 ## 次のステップ
 
 1. 未実装画面の追加
