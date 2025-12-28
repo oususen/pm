@@ -207,7 +207,7 @@ const tableMinWidth = computed(() => {
 const initDaily = () => {
   const daily = {}
   dateColumns.value.forEach((c) => {
-    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, sequence_no: '' }
+    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, sequence_no: '', has_row: false }
   })
   return daily
 }
@@ -215,7 +215,7 @@ const initDaily = () => {
 const ensureDailyCell = (row, dateKey) => {
   if (!row.daily) row.daily = initDaily()
   if (!row.daily[dateKey]) {
-    row.daily[dateKey] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, sequence_no: '' }
+    row.daily[dateKey] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, sequence_no: '', has_row: false }
   }
   return row.daily[dateKey]
 }
@@ -264,9 +264,11 @@ const savePlan = async () => {
       const daily = ensureDailyCell(r, c.key)
       const planQty = daily.plan === '' || daily.plan === null || daily.plan === undefined ? null : Number(daily.plan)
       const seqNo = daily.sequence_no === '' || daily.sequence_no === null || daily.sequence_no === undefined ? null : Number(daily.sequence_no)
+      const hasExistingRow = !!daily.has_row
 
-      // 計画数または順序番号に値がある場合のみ保存
-      if (planQty !== null || seqNo !== null) {
+      // 既存行がある場合は0クリアも反映する
+      if (planQty !== null || seqNo !== null || hasExistingRow) {
+        daily.has_row = true
         items.push({
           product_id: r.product_id,
           process_id: r.process_id,
@@ -421,6 +423,7 @@ const doPickup = async () => {
       daily.stock = Number(d.stock_qty || 0)
       daily.plan_stock = Number(d.planned_stock_qty || 0)
       daily.sequence_no = d.sequence_no === null || d.sequence_no === undefined ? '' : d.sequence_no
+      daily.has_row = true
     })
     rows.value = Array.from(grouped.values())
 

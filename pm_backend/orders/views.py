@@ -344,6 +344,19 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         start_date = request.data.get('start_date')
         end_date = request.data.get('end_date')
 
+        def parse_date(val):
+            if val is None:
+                return None
+            if hasattr(val, 'year'):
+                return val
+            try:
+                return datetime.strptime(str(val), '%Y-%m-%d').date()
+            except Exception:
+                return None
+
+        start_dt = parse_date(start_date)
+        end_dt = parse_date(end_date)
+
         # このラインの「ライン最終品」を特定（is_line_final_product フラグを使用）
         target_products = set()
         product_process_map = {}
@@ -394,6 +407,51 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if is_work:
                     remaining -= 1
             return current
+
+        gantt_usage_cache = {}
+
+        def build_line_start_map(line_id, product_ids):
+            key = (
+                line_id,
+                tuple(sorted(product_ids)),
+                start_date,
+                end_date,
+            )
+            if key in gantt_usage_cache:
+                return gantt_usage_cache[key]
+
+            qs = LineGanttPlan.objects.filter(
+                line_id=line_id,
+                product_id__in=product_ids,
+            )
+
+            usage_map = {}
+            for plan in qs:
+                start_dt_value = plan.start_datetime
+                if not start_dt_value:
+                    continue
+                try:
+                    plan_day = start_dt_value.date()
+                except Exception:
+                    try:
+                        ts = str(start_dt_value).replace('Z', '+00:00')
+                        plan_day = datetime.fromisoformat(ts).date()
+                    except Exception:
+                        continue
+                if start_dt and plan_day < start_dt:
+                    continue
+                if end_dt and plan_day > end_dt:
+                    continue
+                try:
+                    qty = Decimal(str(plan.plan_qty or 0))
+                except Exception:
+                    qty = Decimal('0')
+                if qty == 0:
+                    continue
+                usage_map[plan_day] = usage_map.get(plan_day, Decimal('0')) + qty
+
+            gantt_usage_cache[key] = usage_map
+            return usage_map
 
         def resolve_lead_time_days(current_product_id, bom_item=None):
             """現ラインのLTを優先して解決する。"""
@@ -463,10 +521,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         if d_step.routing.product.is_line_final_product:
                             routing_final_product = d_step.routing.product
 
-                    # LineBacklog取得：親製品が計画済みなら親製品、なければライン最終品
                     target_ids = [parent_product.id]
                     if routing_final_product and routing_final_product != parent_product:
                         target_ids.append(routing_final_product.id)
+
+                    # LineBacklog取得：ガントのstart_datetimeを優先し、無ければ親製品/ライン最終品の計画を使用
+                    line_start_map = build_line_start_map(downstream_line_id, target_ids)
                     backlog_items = LineBacklog.objects.filter(
                         line_id=downstream_line_id,
                         product_id__in=target_ids
@@ -477,45 +537,48 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         backlog_items = backlog_items.filter(plan_date__lte=end_date)
 
                     # ステップ5: 後工程の計画数 × BOM個数 = 現在ラインの必要数
-                    # routing_final_productを使った場合、BOMチェーン全体の個数を計算する必要がある
                     if routing_final_product and routing_final_product != parent_product:
-                        # BOMチェーンをたどって総個数を計算
-                        # current_output_product → ... → parent_product → ... → routing_final_product
-                        # ここでは簡易的に、全経路の個数を掛け合わせる
-                        # TODO: より正確な計算が必要な場合は再帰的にBOMをたどる
-                        total_qty_per = qty_per  # とりあえず直接の個数を使用
+                        total_qty_per = qty_per
                     else:
                         total_qty_per = qty_per
 
+                    fallback_map = {}
                     if len(target_ids) > 1:
                         parent_map = {}
                         final_map = {}
                         for backlog in backlog_items:
                             plan_date = backlog.plan_date
                             qty = Decimal(str(backlog.plan_qty or 0))
+                            if qty == 0:
+                                continue
                             if backlog.product_id == parent_product.id:
                                 parent_map[plan_date] = parent_map.get(plan_date, Decimal('0')) + qty
                             else:
                                 final_map[plan_date] = final_map.get(plan_date, Decimal('0')) + qty
-
                         for plan_date in set(parent_map) | set(final_map):
                             qty = parent_map.get(plan_date)
                             if qty is None or qty <= 0:
                                 qty = final_map.get(plan_date, Decimal('0'))
-                            if qty == 0:
-                                continue
-                            shifted_date = shift_business_days(plan_date, lt_days) if lt_days else plan_date
-                            key = (current_output_product, shifted_date)
-                            demand_map[key] += qty * total_qty_per
-                            downstream_found = True
+                            if qty:
+                                fallback_map[plan_date] = qty
                     else:
                         for backlog in backlog_items:
                             plan_date = backlog.plan_date
-                            if lt_days:
-                                plan_date = shift_business_days(plan_date, lt_days)
-                            key = (current_output_product, plan_date)
-                            demand_map[key] += (backlog.plan_qty or Decimal('0')) * total_qty_per
-                            downstream_found = True
+                            qty = Decimal(str(backlog.plan_qty or 0))
+                            if qty == 0:
+                                continue
+                            fallback_map[plan_date] = fallback_map.get(plan_date, Decimal('0')) + qty
+
+                    for plan_date in set(line_start_map) | set(fallback_map):
+                        qty = line_start_map.get(plan_date)
+                        if qty is None or qty <= 0:
+                            qty = fallback_map.get(plan_date, Decimal('0'))
+                        if qty == 0:
+                            continue
+                        shifted_date = shift_business_days(plan_date, lt_days) if lt_days else plan_date
+                        key = (current_output_product, shifted_date)
+                        demand_map[key] += qty * total_qty_per
+                        downstream_found = True
 
         # 2. RoutingStepベースの展開が失敗した場合、BOMベースの展開を試みる
         if not downstream_found:
@@ -673,7 +736,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 })
 
         if not base_plans:
-            return Response({'detail': '展開対象の計画が見つかりません。'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response([])
 
         # 連産品（コプロダクト）用の補助マップ
         # child_to_parent: 子製品 -> (親セットID, qty_per)
@@ -980,6 +1043,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         created = 0
         updated = 0
+        deleted = 0
         skipped = []
 
         for it in items:
@@ -991,10 +1055,48 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     skipped.append({'item': it, 'reason': 'product_id/process_id/plan_date required'})
                     continue
 
+                # plan_qty=0 の場合、他の数量が全て0なら削除
+                plan_qty_provided = 'plan_qty' in it
+                plan_qty_value = None
+                if plan_qty_provided:
+                    plan_qty_value = Decimal(str(it['plan_qty'] or 0))
+                    if plan_qty_value == 0:
+                        existing = LineBacklog.objects.filter(
+                            plan_date=plan_date,
+                            process_id=process_id,
+                            product_id=product_id,
+                            line_id=line_id,
+                        ).first()
+                        if existing:
+                            def resolve_qty(field_name):
+                                if field_name in it:
+                                    return Decimal(str(it[field_name] or 0))
+                                return Decimal(str(getattr(existing, field_name, 0) or 0))
+
+                            actual_qty = resolve_qty('actual_qty')
+                            stock_qty = resolve_qty('stock_qty')
+                            planned_stock_qty = resolve_qty('planned_stock_qty')
+                            order_qty = Decimal(str(existing.order_qty or 0))
+                            demand_qty_plan = Decimal(str(existing.demand_qty_plan or 0))
+                            seq_in = it.get('sequence_no', existing.sequence_no)
+                            seq_val = 0 if seq_in is None else seq_in
+
+                            if (
+                                actual_qty == 0
+                                and stock_qty == 0
+                                and planned_stock_qty == 0
+                                and order_qty == 0
+                                and demand_qty_plan == 0
+                                and seq_val in (0, None, '')
+                            ):
+                                existing.delete()
+                                deleted += 1
+                                continue
+
                 # 更新するフィールドを準備
                 defaults = {}
-                if 'plan_qty' in it:
-                    defaults['plan_qty'] = Decimal(str(it['plan_qty']))
+                if plan_qty_provided:
+                    defaults['plan_qty'] = plan_qty_value
                 if 'actual_qty' in it:
                     defaults['actual_qty'] = Decimal(str(it['actual_qty']))
                 if 'stock_qty' in it:
@@ -1019,7 +1121,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             except Exception as e:
                 return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({'created': created, 'updated': updated, 'skipped': skipped})
+        return Response({'created': created, 'updated': updated, 'deleted': deleted, 'skipped': skipped})
 
 
 class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
