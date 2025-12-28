@@ -13,6 +13,11 @@
         />
         <input
           type="text"
+          v-model="processFilter"
+          placeholder="工程コード/名称で絞り込み"
+        />
+        <input
+          type="text"
           v-model="productFilter"
           placeholder="品番/品名で絞り込み"
         />
@@ -37,6 +42,9 @@
             <div class="info-row">
               <span class="info-label">品番</span>
               <span class="info-value">{{ g.product_code || '-' }}</span>
+              <button @click="toggleChildren(g)" class="expand-btn">
+                {{ g.showChildren ? '▼' : '▶' }} BOM展開
+              </button>
             </div>
             <div class="info-row">
               <span class="info-label">品名</span>
@@ -89,6 +97,52 @@
               </tbody>
             </table>
           </div>
+
+          <!-- BOM子製品表示 -->
+          <div v-if="g.showChildren" class="children-list">
+            <div v-if="g.children.length === 0" class="no-children">BOM子製品がありません</div>
+            <div v-for="(child, idx) in g.children" :key="idx" class="child-card">
+              <div class="child-info">
+                <div class="child-row">
+                  <span class="child-label">品番</span>
+                  <span class="child-value">{{ child.product_code }}</span>
+                </div>
+                <div class="child-row">
+                  <span class="child-label">品名</span>
+                  <span class="child-value">{{ child.product_name }}</span>
+                </div>
+                <div class="child-row">
+                  <span class="child-label">工程</span>
+                  <span class="child-value">{{ child.process_code }}</span>
+                </div>
+                <div class="child-row">
+                  <span class="child-label">BOM数量</span>
+                  <span class="child-value">{{ child.bom_quantity }}</span>
+                </div>
+              </div>
+              <div class="child-matrix">
+                <table class="matrix-table">
+                  <thead>
+                    <tr>
+                      <th class="label-col">項目</th>
+                      <th v-for="d in columns" :key="d" class="day-col">{{ d }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in rowDefs" :key="row.key">
+                      <th class="label-col">{{ row.label }}</th>
+                      <td v-for="d in columns"
+                        :key="`${row.key}-${d}`"
+                        class="cell" :class="getCellClass(child, d, row.key)"
+                      >
+                        {{ fmt(getValue(child, d, row.key)) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <div v-else class="no-data">データがありません</div>
@@ -102,6 +156,7 @@ import api from "@/api/client";
 import { addDays, formatISODate, parseISODate } from "@/utils/dateUtil";
 
 const lineFilter = ref("");
+const processFilter = ref("");
 const productFilter = ref("");
 const startDate = ref(formatISODate(new Date()));
 const horizon = ref(14);
@@ -139,20 +194,24 @@ const groups = computed(() => {
     const within =
       d.plan_date >= columns.value[0] &&
       d.plan_date <= columns.value[columns.value.length - 1];
-    const lineText = `${d.line_name || ""}${d.line || ""}`.toLowerCase();
+    const lineText = `${d.line_code || ""}${d.line_name || ""}`.toLowerCase();
+    const processText = `${d.process_code || ""}${d.process_name || ""}`.toLowerCase();
     const prodText = `${d.product_code || ""}${d.product_name || ""}`.toLowerCase();
     const okLine =
       !lineFilter.value ||
       lineText.includes(lineFilter.value.trim().toLowerCase());
+    const okProcess =
+      !processFilter.value ||
+      processText.includes(processFilter.value.trim().toLowerCase());
     const okProd =
       !productFilter.value ||
       prodText.includes(productFilter.value.trim().toLowerCase());
-    return within && okLine && okProd;
+    return within && okLine && okProcess && okProd;
   });
 
   const map = new Map();
   for (const d of filtered) {
-    const key = `${d.line || d.line_name || ""}__${d.product_code || ""}`;
+    const key = `${d.line || d.line_name || ""}__${d.process_code || d.process || ""}__${d.product_code || ""}`;
     if (!map.has(key)) {
       map.set(key, {
         key,
@@ -160,9 +219,12 @@ const groups = computed(() => {
         line_name: d.line_name,
         product_code: d.product_code,
         product_name: d.product_name,
+        product_id: d.product,
         process_code: d.process_code || d.process || "",
         process_name: d.process_name || "",
         cells: {},
+        children: [],
+        showChildren: false,
       });
     }
     const g = map.get(key);
@@ -215,6 +277,96 @@ const getCellClass = (group, date, rowKey) => {
     }
   }
   return '';
+};
+
+const loadBOMChildren = async (group) => {
+  if (!group.product_id) return;
+
+  try {
+    // この製品を親とするBOMを取得
+    const bomRes = await api.boms.getBOMs({ parent_product: group.product_id });
+    const boms = bomRes.data || [];
+
+    if (!boms.length) {
+      group.children = [];
+      return;
+    }
+
+    // 最新のアクティブなBOMを使用
+    const activeBoms = boms.filter(b => b.is_active);
+    if (!activeBoms.length) {
+      group.children = [];
+      return;
+    }
+
+    const bom = activeBoms[0];
+
+    // BOM明細を取得
+    const itemsRes = await api.bomItems.getBOMItems({ bom: bom.id });
+    const items = itemsRes.data || [];
+
+    // 各子製品の在庫データを取得
+    const children = [];
+    for (const item of items) {
+      // この子製品の在庫データを取得（日付範囲は親と同じ）
+      const childDemands = demands.value.filter(d =>
+        d.product === item.child_product &&
+        d.plan_date >= columns.value[0] &&
+        d.plan_date <= columns.value[columns.value.length - 1]
+      );
+
+      if (childDemands.length > 0) {
+        // 子製品のセルデータを作成
+        const childCells = {};
+        for (const d of childDemands) {
+          if (!childCells[d.plan_date]) {
+            childCells[d.plan_date] = {
+              forecast: 0,
+              firm: 0,
+              plan: 0,
+              adjust: 0,
+              scrap: 0,
+              stock: 0,
+              planned_stock: 0,
+            };
+          }
+          const c = childCells[d.plan_date];
+          c.forecast += Number(d.order_qty || d.demand_qty_plan || 0);
+          c.firm += Number(d.actual_qty || 0);
+          c.plan += Number(d.plan_qty || 0);
+          c.adjust += Number(d.adjust_qty || 0);
+          c.scrap += Number(d.scrap_qty || 0);
+          c.stock += Number(d.stock_qty || 0);
+          c.planned_stock += Number(d.planned_stock_qty || 0);
+        }
+
+        // 子製品情報を追加
+        const childDemand = childDemands[0];
+        children.push({
+          product_code: childDemand.product_code,
+          product_name: childDemand.product_name,
+          process_code: childDemand.process_code,
+          process_name: childDemand.process_name,
+          line_code: childDemand.line_code,
+          line_name: childDemand.line_name,
+          bom_quantity: item.quantity,
+          cells: childCells,
+        });
+      }
+    }
+
+    group.children = children;
+  } catch (e) {
+    console.error('BOM子製品の読み込みに失敗:', e);
+    group.children = [];
+  }
+};
+
+const toggleChildren = async (group) => {
+  group.showChildren = !group.showChildren;
+  if (group.showChildren && group.children.length === 0) {
+    await loadBOMChildren(group);
+  }
 };
 
 const load = async () => {
@@ -389,5 +541,78 @@ onMounted(load);
   padding: 24px;
   text-align: center;
   color: #6b7280;
+}
+
+.expand-btn {
+  margin-left: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.expand-btn:hover {
+  background: #2563eb;
+}
+
+.children-list {
+  padding: 12px;
+  background: #f1f5f9;
+  border-top: 2px solid #cbd5e1;
+}
+
+.no-children {
+  padding: 12px;
+  text-align: center;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.child-card {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  margin-bottom: 12px;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.child-card:last-child {
+  margin-bottom: 0;
+}
+
+.child-info {
+  padding: 8px;
+  background: #fefce8;
+  border-right: 1px solid #e5e7eb;
+}
+
+.child-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px;
+  font-size: 12px;
+  border-bottom: 1px solid #fde68a;
+}
+
+.child-row:last-child {
+  border-bottom: none;
+}
+
+.child-label {
+  font-weight: 600;
+  color: #92400e;
+}
+
+.child-value {
+  color: #451a03;
+}
+
+.child-matrix {
+  overflow: auto;
 }
 </style>

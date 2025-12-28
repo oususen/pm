@@ -309,6 +309,8 @@ const savePlan = async () => {
         end_date: endDate.value,
         clear_existing: true,
       })
+      // 工程ガントを再読み込み
+      ganttReloadKey.value += 1
     } catch (expandError) {
       console.error('工程展開/ガント再計算エラー', expandError)
       alert('保存は完了しましたが、工程展開/ガント再計算に失敗しました。')
@@ -400,8 +402,10 @@ const doPickup = async () => {
       end_date: endDate.value,
     })
     const data = res.data || []
+    // 生産計画画面ではライン最終品のみを表示
+    const lineFinalData = data.filter(d => d.is_line_final_product === true)
     const grouped = new Map()
-    data.forEach((d) => {
+    lineFinalData.forEach((d) => {
       if (!d.product) return
       const key = d.product
       if (!grouped.has(key)) {

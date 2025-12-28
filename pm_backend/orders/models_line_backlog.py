@@ -44,6 +44,9 @@ class LineBacklog(models.Model):
     # 生産順序番号（日をまたいだ通し番号）
     sequence_no = models.IntegerField(null=True, blank=True)
 
+    # ライン計画との紐付けID（ライン_製品_日付_順番で一意）
+    plan_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+
     source_line = models.ForeignKey(Line, on_delete=models.SET_NULL, null=True, blank=True, related_name='backlog_sources')
     source_routing_step = models.ForeignKey(RoutingStep, on_delete=models.SET_NULL, null=True, blank=True, related_name='backlog_sources')
     updated_at = models.DateTimeField(auto_now=True)
