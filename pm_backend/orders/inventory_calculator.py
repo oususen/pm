@@ -164,31 +164,67 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date):
         plan_date__range=[start_date, end_date]
     ).order_by('plan_date')
 
+    calendar_id = None
+    workday_cache = {}
+    if line_id:
+        from masters.models import Line, Calendar, CalendarDay
+        line_obj = Line.objects.filter(id=line_id).first()
+        calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
+            calendar_code='tiera_muke'
+        ).values_list('id', flat=True).first()
+
+    def is_working_day(target_date):
+        if not calendar_id:
+            return True
+        if target_date in workday_cache:
+            return workday_cache[target_date]
+        cal = CalendarDay.objects.filter(
+            calendar_id=calendar_id,
+            target_date=target_date
+        ).first()
+        is_work = cal.is_working_day if cal is not None else True
+        workday_cache[target_date] = is_work
+        return is_work
+
+    def get_prev_working_day(target_date):
+        prev_date = target_date - timedelta(days=1)
+        if not calendar_id:
+            return prev_date
+        while not is_working_day(prev_date):
+            prev_date = prev_date - timedelta(days=1)
+        return prev_date
+
+    today = datetime.now().date()
     prev_stock = 0
 
     for backlog in backlogs:
         # 前日在庫を取得
         if backlog.plan_date > start_date:
-            prev_day = backlog.plan_date - timedelta(days=1)
+            prev_day = get_prev_working_day(backlog.plan_date)
             prev = LineBacklog.objects.filter(
                 line_id=line_id,
                 product_id=product_id,
                 plan_date=prev_day
             ).first()
-            prev_stock = prev.stock_qty if prev else 0
+            if prev:
+                prev_stock = prev.stock_qty
 
         # 実在庫計算
         actual_production = backlog.actual_qty or 0
 
         # 実績出庫数を計算
-        actual_shipment = backlog.actual_shipment_qty or 0
-        if actual_shipment == 0:
-            # actual_shipment_qtyが未設定の場合、後工程から計算
-            calculated_shipment = calculate_actual_shipment(backlog)
-            if calculated_shipment is not None:
-                actual_shipment = calculated_shipment
-                # 計算結果を保存
-                backlog.actual_shipment_qty = actual_shipment
+        if backlog.plan_date < today:
+            actual_shipment = backlog.actual_shipment_qty or 0
+            if actual_shipment == 0:
+                # actual_shipment_qtyが未設定の場合、後工程から計算
+                calculated_shipment = calculate_actual_shipment(backlog)
+                if calculated_shipment is not None:
+                    actual_shipment = calculated_shipment
+                    # 計算結果を保存
+                    backlog.actual_shipment_qty = actual_shipment
+        else:
+            # 今日以降は需要（内示）を出庫として扱う
+            actual_shipment = backlog.order_qty or 0
 
         backlog.stock_qty = (
             prev_stock
@@ -222,19 +258,50 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date):
         plan_date__range=[start_date, end_date]
     ).order_by('plan_date')
 
+    calendar_id = None
+    workday_cache = {}
+    if line_id:
+        from masters.models import Line, Calendar, CalendarDay
+        line_obj = Line.objects.filter(id=line_id).first()
+        calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
+            calendar_code='tiera_muke'
+        ).values_list('id', flat=True).first()
+
+    def is_working_day(target_date):
+        if not calendar_id:
+            return True
+        if target_date in workday_cache:
+            return workday_cache[target_date]
+        cal = CalendarDay.objects.filter(
+            calendar_id=calendar_id,
+            target_date=target_date
+        ).first()
+        is_work = cal.is_working_day if cal is not None else True
+        workday_cache[target_date] = is_work
+        return is_work
+
+    def get_prev_working_day(target_date):
+        prev_date = target_date - timedelta(days=1)
+        if not calendar_id:
+            return prev_date
+        while not is_working_day(prev_date):
+            prev_date = prev_date - timedelta(days=1)
+        return prev_date
+
     today = datetime.now().date()
     prev_planned = 0
 
     for backlog in backlogs:
         # 前日の計画在庫を取得
         if backlog.plan_date > start_date:
-            prev_day = backlog.plan_date - timedelta(days=1)
+            prev_day = get_prev_working_day(backlog.plan_date)
             prev = LineBacklog.objects.filter(
                 line_id=line_id,
                 product_id=product_id,
                 plan_date=prev_day
             ).first()
-            prev_planned = prev.planned_stock_qty if prev else 0
+            if prev:
+                prev_planned = prev.planned_stock_qty
 
         # 時制による計算分岐
         if backlog.plan_date < today:
@@ -251,7 +318,7 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date):
                         actual_shipment = calculated_shipment
                     elif has_downstream_actual(backlog):
                         # 後工程に実績があるなら、計画値で代用
-                        actual_shipment = backlog.demand_qty_plan or backlog.order_qty or 0
+                        actual_shipment = backlog.order_qty or 0
                     else:
                         # 後工程も実績なし = 出庫ゼロ
                         actual_shipment = 0
@@ -266,7 +333,7 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date):
             else:
                 # 実績なし：生産しなかった
                 # しかし、計画出庫（後工程の需要）は考慮する
-                planned_shipment = backlog.demand_qty_plan or backlog.order_qty or 0
+                planned_shipment = backlog.order_qty or 0
                 backlog.planned_stock_qty = (
                     prev_planned
                     + 0  # 生産ゼロ
@@ -279,7 +346,7 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date):
             backlog.planned_stock_qty = (
                 prev_planned
                 + (backlog.plan_qty or 0)
-                - (backlog.demand_qty_plan or backlog.order_qty or 0)
+                - (backlog.order_qty or 0)
                 + (backlog.adjust_qty or 0)
                 # 仕損は含めない（未来の仕損は予測不可）
             )

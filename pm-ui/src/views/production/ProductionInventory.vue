@@ -242,7 +242,7 @@ const groups = computed(() => {
     const c = g.cells[d.plan_date];
     // 内示: この製品を加工するラインの直後ラインの計画数の合計
     // → 在庫側では line_backlog.order_qty を利用
-    c.forecast += Number(d.order_qty || d.demand_qty_plan || 0);
+    c.forecast += Number(d.order_qty || 0);
     // 確定: 直後ラインの実績の合計に相当する値として
     // このラインの実績数量(actual_qty)を集計
     c.firm += Number(d.actual_qty || 0);
@@ -331,7 +331,7 @@ const loadBOMChildren = async (group) => {
             };
           }
           const c = childCells[d.plan_date];
-          c.forecast += Number(d.order_qty || d.demand_qty_plan || 0);
+          c.forecast += Number(d.order_qty || 0);
           c.firm += Number(d.actual_qty || 0);
           c.plan += Number(d.plan_qty || 0);
           c.adjust += Number(d.adjust_qty || 0);
@@ -369,6 +369,28 @@ const toggleChildren = async (group) => {
   }
 };
 
+const refreshOrderQty = async () => {
+  const lineIds = [...new Set(demands.value.map((d) => d.line).filter(Boolean))];
+  if (!lineIds.length) return false;
+
+  const start = columns.value[0];
+  const end = columns.value[columns.value.length - 1];
+  let updated = false;
+  for (const lineId of lineIds) {
+    try {
+      await api.lineBacklogs.pickup({
+        line_id: lineId,
+        start_date: start,
+        end_date: end,
+      });
+      updated = true;
+    } catch (e) {
+      console.error('内示再計算に失敗:', e);
+    }
+  }
+  return updated;
+};
+
 const load = async () => {
   loading.value = true;
   error.value = "";
@@ -384,6 +406,14 @@ const load = async () => {
       if (minDate) {
         startDate.value = minDate;
       }
+    }
+    const refreshed = await refreshOrderQty();
+    if (refreshed) {
+      const refreshRes = await api.lineBacklogs.getLineBacklogs();
+      const refreshPayload = refreshRes.data || [];
+      demands.value = Array.isArray(refreshPayload)
+        ? refreshPayload
+        : refreshPayload.results || [];
     }
   } catch (e) {
     error.value = e?.message || "読み込みに失敗しました";
