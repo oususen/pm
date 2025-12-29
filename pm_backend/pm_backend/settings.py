@@ -192,7 +192,7 @@ CSRF_TRUSTED_ORIGINS = [
 
 # REST Framework設定
 REST_FRAMEWORK = {
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'DEFAULT_PAGINATION_CLASS': 'pm_backend.pagination.StandardResultsSetPagination',
     'PAGE_SIZE': 50,
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
