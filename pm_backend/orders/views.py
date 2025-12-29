@@ -825,7 +825,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         if end_dt:
             parent_qs = parent_qs.filter(plan_date__lte=end_dt)
 
-        parent_orders = parent_qs.values('product_id', 'line_id', 'plan_date').annotate(plan_qty=Max('plan_qty'))
+        parent_orders = parent_qs.values('product_id', 'line_id', 'plan_date').annotate(
+            plan_qty=Max('plan_qty'),
+            order_qty=Max('order_qty')
+        )
 
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
             calendar_code='tiera_muke'
@@ -852,11 +855,16 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             parent_id = row['product_id']
             plan_date = row['plan_date']
             plan_qty = Decimal(str(row['plan_qty'] or 0))
-            if plan_qty == 0:
+            order_qty = Decimal(str(row['order_qty'] or 0))
+
+            # plan_qtyを優先し、0の場合はorder_qtyを使用
+            qty_to_use = plan_qty if plan_qty > 0 else order_qty
+
+            if qty_to_use == 0:
                 continue
             for child_id, qty, lead_time_days in parent_to_children.get(parent_id, []):
                 target_date = shift_business_days(plan_date, lead_time_days)
-                demand_map[(child_id, target_date)] += plan_qty * qty
+                demand_map[(child_id, target_date)] += qty_to_use * qty
 
         existing_qs = LineBacklog.objects.filter(
             line_id=line_id,

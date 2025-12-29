@@ -50,6 +50,7 @@ const sections = [
       { label: "出荷メニュー", link: "/shipping/menu" },
       { label: "出荷指示", link: "/shipping/instruction" },
       { label: "出荷実績", link: "/shipping/actual" },
+      { label: "出荷進度照会", link: "/shipping/progress" },
     ],
   },
   {

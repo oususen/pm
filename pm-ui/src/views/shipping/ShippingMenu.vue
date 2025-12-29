@@ -12,6 +12,11 @@
         <div class="icon-box">📦</div>
         <div class="label">出荷実績</div>
       </RouterLink>
+
+      <RouterLink to="/shipping/progress" class="master-tile">
+        <div class="icon-box">📊</div>
+        <div class="label">出荷進度照会</div>
+      </RouterLink>
     </div>
 
     <p class="helper-text">

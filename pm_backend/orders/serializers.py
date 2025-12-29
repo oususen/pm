@@ -15,11 +15,14 @@ from masters.models import Customer, Product
 class OrderLineSerializer(serializers.ModelSerializer):
     """Order line serializer"""
     product_name = serializers.SerializerMethodField()
+    order_type = serializers.CharField(source='order.order_type', read_only=True)
+    order_type_display = serializers.CharField(source='order.get_order_type_display', read_only=True)
 
     class Meta:
         model = OrderLine
         fields = [
             'id', 'order', 'line_no', 'product', 'product_code', 'product_name',
+            'order_type', 'order_type_display',
             'quantity', 'due_date', 'plant_code', 'ship_to_code', 'remark',
             'created_at', 'updated_at'
         ]
@@ -112,6 +115,7 @@ class LineDemandSerializer(serializers.ModelSerializer):
     line_name = serializers.SerializerMethodField()
     line_code = serializers.SerializerMethodField()
     product_name = serializers.SerializerMethodField()
+    is_final_product = serializers.BooleanField(source='product.is_final_product', read_only=True)
     required_qty = serializers.SerializerMethodField()
     process = serializers.SerializerMethodField()
     process_code = serializers.SerializerMethodField()
@@ -121,7 +125,7 @@ class LineDemandSerializer(serializers.ModelSerializer):
         model = LineDemand
         fields = [
             'id', 'line', 'line_code', 'line_name', 'routing_step', 'process', 'process_code', 'process_name',
-            'product', 'product_code', 'product_name',
+            'product', 'product_code', 'product_name', 'is_final_product',
             'plan_date', 'lead_time_days',
             'forecast_qty', 'firm_qty', 'plan_qty', 'actual_qty',
             'plan_progress', 'actual_progress', 'required_qty',
@@ -164,6 +168,7 @@ class LineBacklogSerializer(serializers.ModelSerializer):
     process_name = serializers.CharField(source='process.process_name', read_only=True)
     line_code = serializers.CharField(source='line.line_code', read_only=True)
     line_name = serializers.CharField(source='line.line_name', read_only=True)
+    is_final_product = serializers.BooleanField(source='product.is_final_product', read_only=True)
     is_line_final_product = serializers.BooleanField(source='product.is_line_final_product', read_only=True)
     computed_time_min = serializers.SerializerMethodField()
     work_minutes = serializers.SerializerMethodField()
@@ -175,7 +180,7 @@ class LineBacklogSerializer(serializers.ModelSerializer):
         model = LineBacklog
         fields = [
             'id', 'plan_date', 'process', 'process_code', 'process_name',
-            'product', 'product_code', 'product_name', 'is_line_final_product',
+            'product', 'product_code', 'product_name', 'is_final_product', 'is_line_final_product',
             'line', 'line_code', 'line_name',
             'demand_qty_plan', 'order_qty', 'plan_qty', 'actual_qty', 'stock_qty', 'planned_stock_qty',
             'adjust_qty', 'scrap_qty', 'actual_shipment_qty',

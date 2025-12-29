@@ -213,6 +213,169 @@ VALUES (...)
 
 ---
 
+## 8.1. 購買需要展開（pickup_purchase）
+
+購入品・外注品の需要を仕入先ライン（SUPライン）に展開する処理。
+
+### 処理概要
+
+- **エンドポイント**: `POST /api/line-backlogs/pickup_purchase/`
+- **目的**: 親製品の計画から、BOM構成に基づいて購入品・外注品の需要を計算し、仕入先ラインのLineBacklogに反映する
+- **対象BOM**: `sourcing_type='BUY'` または `'SUBCON'` かつ `supplier_id` が設定されているBOM明細
+
+### リクエストパラメータ
+
+```json
+{
+  "supplier_id": 2,           // 仕入先ID（必須）
+  "start_date": "2025-12-26", // 開始日（任意）
+  "end_date": "2026-01-31"    // 終了日（任意）
+}
+```
+
+### 処理フロー
+
+1. **仕入先ラインの作成・取得**
+   - Line: `line_code = "SUP{supplier_id}"`, `line_name = "仕入:{supplier_code} {supplier_name}"`
+   - Process: `process_code = "PURCHASE"`, `process_name = "購買"`
+
+2. **対象BOM明細の抽出**
+   - 条件: `sourcing_type IN ('BUY', 'SUBCON')`, `supplier_id = {supplier_id}`, `bom.is_active = True`
+   - 取得項目: 親製品ID、子製品ID（購入品）、BOM数量、リードタイム日数
+
+3. **親製品の計画・受注数の取得**
+   ```python
+   parent_qs = LineBacklog.objects.filter(product_id__in=parent_ids)
+   if start_date: parent_qs = parent_qs.filter(plan_date__gte=start_date)
+   if end_date: parent_qs = parent_qs.filter(plan_date__lte=end_date)
+
+   parent_orders = parent_qs.values('product_id', 'line_id', 'plan_date').annotate(
+       plan_qty=Max('plan_qty'),
+       order_qty=Max('order_qty')
+   )
+   ```
+
+4. **需要計算**
+   - 各親製品の計画日・数量に対して:
+     ```python
+     # plan_qtyを優先し、0の場合はorder_qtyを使用（要検討）
+     qty_to_use = plan_qty if plan_qty > 0 else order_qty
+
+     if qty_to_use == 0:
+         continue
+
+     # リードタイムを考慮した需要日を計算
+     target_date = shift_business_days(plan_date, lead_time_days)
+
+     # 子製品の需要を集計
+     demand_map[(child_id, target_date)] += qty_to_use * bom_qty
+     ```
+
+5. **LineBacklogへの保存**
+   ```python
+   LineBacklog.objects.update_or_create(
+       plan_date=target_date,
+       process_id=purchase_process_id,
+       product_id=child_id,
+       line_id=supplier_line_id,
+       defaults={
+           'order_qty': demand_qty,      # 計算した需要
+           'demand_qty_plan': demand_qty
+       }
+   )
+   ```
+
+6. **既存データのクリア**
+   - 期間内で需要がなくなった製品の `order_qty` と `demand_qty_plan` を0に更新
+
+### リードタイムによる日付調整
+
+- **稼働日カレンダーを考慮**: `calendar_code='tiera_muke'` を使用
+- **調整方向**: リードタイム日数分、親製品の計画日から過去に遡る
+- **ロジック**:
+  ```python
+  def shift_business_days(target_date, days):
+      # days > 0 の場合、過去に遡る（マイナス方向）
+      step = -1 if days > 0 else 1
+      remaining = abs(int(days))
+      current = target_date
+      while remaining > 0:
+          current = current + timedelta(days=step)
+          cal = CalendarDay.objects.filter(
+              calendar_id=calendar_id,
+              target_date=current
+          ).first()
+          is_work = cal.is_working_day if cal is not None else True
+          if is_work:
+              remaining -= 1
+      return current
+  ```
+
+### 重要な変更点（2025-12-29修正）
+
+#### 問題
+従来は親製品の`plan_qty`のみを参照していたため、以下のケースで需要が展開されなかった:
+
+```
+親製品（最終品）
+  plan_qty = 12
+  ↓
+中間品（MAKE）
+  plan_qty = 0        ← pickup処理で自動計算されていない
+  order_qty = 12      ← 親からBOM展開で設定される
+  ↓
+購入品（BUY）
+  order_qty = 0       ← pickup_purchaseがplan_qtyのみを見るため展開されない
+```
+
+#### 修正内容
+親製品の数量取得時に`order_qty`も取得し、`plan_qty`が0の場合は`order_qty`を使用するように変更:
+
+```python
+# 修正前
+plan_qty = Decimal(str(row['plan_qty'] or 0))
+if plan_qty == 0:
+    continue
+
+# 修正後
+plan_qty = Decimal(str(row['plan_qty'] or 0))
+order_qty = Decimal(str(row['order_qty'] or 0))
+
+# plan_qtyを優先し、0の場合はorder_qtyを使用
+qty_to_use = plan_qty if plan_qty > 0 else order_qty
+
+if qty_to_use == 0:
+    continue
+```
+
+#### 検討事項
+**⚠️ order_qty参照は要検討**
+
+- **利点**: 中間品経由の購入品需要を正しく展開できる
+- **懸念点**:
+  - `order_qty`は親製品のBOM展開で設定されるが、親製品の計画変更時に自動更新されない可能性がある
+  - `plan_qty`と`order_qty`の整合性が保証されないケースで、意図しない需要展開が発生する可能性
+  - 本来は中間品の`plan_qty`も正しく計算されるべき（pickup処理の改善が根本的な解決）
+
+#### 代替案
+1. **中間品のpickup処理を改善**: 後工程の`plan_qty`から中間品の`plan_qty`を自動計算する
+2. **需要展開の再設計**: `demand_qty_plan`を活用した需要チェーンの構築
+3. **明示的な需要伝播処理**: 計画変更時に全階層の需要を再計算するバッチ処理
+
+### レスポンス
+
+```json
+{
+  "created": 15,        // 新規作成件数
+  "updated": 8,         // 更新件数
+  "items": 23,          // 需要計算した製品×日付の組み合わせ数
+  "line_id": 25,        // 仕入先ラインID
+  "process_id": 10      // 購買プロセスID
+}
+```
+
+---
+
 ## 9. 工程ガント表示（フロント仕様・最新版）
 
 - **データソース**: `line_backlog` を読み取り専用で取得（API: `GET /line-backlogs/` with `line`, `plan_date__gte`, `plan_date__lte`）。`expand_processes` は使用しない（書き込み抑止）。

@@ -14,6 +14,11 @@ const shipping = [
     name: "ShippingActual",
     component: () => import("@/views/shipping/ShippingActual.vue"),
   },
+  {
+    path: "/shipping/progress",
+    name: "ShippingProgress",
+    component: () => import("@/views/shipping/ShippingProgress.vue"),
+  },
 ];
 
 export default shipping;
