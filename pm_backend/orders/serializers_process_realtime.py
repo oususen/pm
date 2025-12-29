@@ -10,6 +10,7 @@ from masters.models import Process, Product, BOM
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_scrap import ScrapRecord, ScrapRecordDetail
 from .models_production import StockAllocation
+from .models import LineBacklog
 
 
 def build_scrap_multiplier_map(root_product_id: int, root_qty: Decimal) -> dict:
@@ -156,6 +157,40 @@ def apply_scrap_return_to_stock(multipliers: dict):
             )
 
 
+def update_line_backlog_production(process, product, qty, plan_date):
+    """
+    生産実績をLineBacklogのactual_qtyに反映する
+
+    Args:
+        process: Process オブジェクト
+        product: Product オブジェクト (Noneの場合はスキップ)
+        qty: 生産数量 (Decimal)
+        plan_date: 計画日 (date)
+    """
+    if not product or not qty or qty <= 0:
+        return
+
+    line = getattr(process, 'line', None)
+    if not line:
+        return
+
+    # 該当するLineBacklogレコードを取得または作成
+    backlog, created = LineBacklog.objects.get_or_create(
+        line=line,
+        process=process,
+        product=product,
+        plan_date=plan_date,
+        defaults={
+            'actual_qty': int(qty),
+        }
+    )
+
+    if not created:
+        # 既存レコードの場合は加算
+        backlog.actual_qty = (backlog.actual_qty or 0) + int(qty)
+        backlog.save(update_fields=['actual_qty'])
+
+
 class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
     """工程実時間記録Serializer"""
 
@@ -298,6 +333,12 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                 **validated_data
             )
 
+            # 生産実績の場合、LineBacklogに反映
+            if validated_data.get('record_type') == 'PRODUCTION':
+                qty_decimal = validated_data.get('qty', Decimal('0')) or Decimal('0')
+                plan_date = timezone.now().date()
+                update_line_backlog_production(process, product, qty_decimal, plan_date)
+
             # 連産品（仮想セット品番）の場合、子製品にも実績を保存する
             if (
                 validated_data.get('record_type') == 'PRODUCTION'
@@ -307,6 +348,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                 bom = BOM.objects.filter(parent_product=product, is_active=True).order_by('-valid_from').first()
                 if bom and bom.is_coproduct:
                     parent_qty = validated_data.get('qty', Decimal('0')) or Decimal('0')
+                    plan_date = timezone.now().date()
                     child_common = {
                         'record_type': 'PRODUCTION',
                         'equipment_state': None,
@@ -321,7 +363,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                     for item in bom.items.select_related('child_product').all():
                         child_product = item.child_product
                         child_qty = parent_qty * (item.quantity or Decimal('0'))
-                        ProcessRealtimeRecord.objects.create(
+                        child_record = ProcessRealtimeRecord.objects.create(
                             process=process,
                             product=child_product,
                             product_code=child_product.product_code,
@@ -329,6 +371,8 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                             qty=child_qty,
                             **child_common
                         )
+                        # 子製品の実績もLineBacklogに反映
+                        update_line_backlog_production(process, child_product, child_qty, plan_date)
 
             # 仕損は別テーブルにも保存
             if validated_data.get('record_type') == 'SCRAP':

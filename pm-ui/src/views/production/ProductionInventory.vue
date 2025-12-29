@@ -35,6 +35,9 @@
 
     <div v-if="loading" class="loading">読込中...</div>
     <div v-else-if="error" class="no-data">エラー: {{ error }}</div>
+    <div v-else-if="!lineFilter && !processFilter" class="no-data">
+      ラインまたは工程を選択してください
+    </div>
     <div v-else>
       <div v-if="groups.length" class="group-list">
         <div v-for="g in groups" :key="g.key" class="group-card">
@@ -210,6 +213,7 @@ const rowDefs = [
   { key: "forecast", label: "内示" },
   { key: "firm", label: "確定" },
   { key: "plan", label: "計画" },
+  { key: "actual", label: "実績" },
   { key: "adjust", label: "調整" },
   { key: "scrap", label: "仕損" },
   { key: "stock", label: "在庫" },
@@ -283,6 +287,7 @@ const groups = computed(() => {
         forecast: 0,
         firm: 0,
         plan: 0,
+        actual: 0,
         adjust: 0,
         scrap: 0,
         stock: 0,
@@ -294,10 +299,12 @@ const groups = computed(() => {
     // → 在庫側では line_backlog.order_qty を利用
     c.forecast += Number(d.order_qty || 0);
     // 確定: 直後ラインの実績の合計に相当する値として
-    // このラインの実績数量(actual_qty)を集計
-    c.firm += Number(d.actual_qty || 0);
+    // このラインの実績数量(actual_shipment_qty)を集計
+    c.firm += Number(d.actual_shipment_qty || 0);
     // 計画・在庫・計画在庫は line_backlog から取得
     c.plan += Number(d.plan_qty || 0);
+    // 実績: このラインの生産実績
+    c.actual += Number(d.actual_qty || 0);
     c.adjust += Number(d.adjust_qty || 0); // 調整数
     c.scrap += Number(d.scrap_qty || 0); // 仕損数
     c.stock += Number(d.stock_qty || 0);
@@ -492,6 +499,7 @@ const loadBOMChildren = async (group) => {
               forecast: 0,
               firm: 0,
               plan: 0,
+              actual: 0,
               adjust: 0,
               scrap: 0,
               stock: 0,
@@ -500,8 +508,9 @@ const loadBOMChildren = async (group) => {
           }
           const c = childCells[d.plan_date];
           c.forecast += Number(d.order_qty || 0);
-          c.firm += Number(d.actual_qty || 0);
+          c.firm += Number(d.actual_shipment_qty || 0);
           c.plan += Number(d.plan_qty || 0);
+          c.actual += Number(d.actual_qty || 0);
           c.adjust += Number(d.adjust_qty || 0);
           c.scrap += Number(d.scrap_qty || 0);
           c.stock += Number(d.stock_qty || 0);
