@@ -294,15 +294,17 @@ const groups = computed(() => {
       totalAdjust += cell.adjust;
     }
 
-    const denom = totalFirm > 0 ? totalFirm : totalForecast;
-    const rate = denom > 0 ? `${Math.round((totalActual / denom) * 100)}%` : "-";
+    // サマリーの累積進度計算
+    // 累積進度 = 0 - 合計需要 + 合計実績 + 合計調整
+    const totalDemand = totalFirm > 0 ? totalFirm : totalForecast;
+    const cumulativeProgress = 0 - totalDemand + totalActual + totalAdjust;
 
     g.summary = {
       forecast: totalForecast,
       firm: totalFirm,
       actual: totalActual,
       adjust: totalAdjust,
-      progressRate: rate,
+      progressRate: cumulativeProgress.toLocaleString(),
     };
 
     return g;
@@ -319,12 +321,33 @@ const formatValue = (val) => {
 };
 
 const getProgressRate = (group, date) => {
-  const firm = getValue(group, date, "firm");
-  const forecast = getValue(group, date, "forecast");
-  const actual = getValue(group, date, "actual");
-  const denom = firm > 0 ? firm : forecast;
-  if (denom <= 0) return "-";
-  return `${Math.round((actual / denom) * 100)}%`;
+  // 累積進度を計算
+  // 累積進度(本日) = 累積進度(前日) - 確定(ないときは内示) + 実績 + 調整
+
+  let cumulativeProgress = 0;
+
+  // 日付順にソートして累積計算
+  const sortedDates = columns.value;
+  const currentIndex = sortedDates.indexOf(date);
+
+  if (currentIndex === -1) return "-";
+
+  // 初日から本日まで累積計算
+  for (let i = 0; i <= currentIndex; i++) {
+    const d = sortedDates[i];
+    const firm = getValue(group, d, "firm");
+    const forecast = getValue(group, d, "forecast");
+    const actual = getValue(group, d, "actual");
+    const adjust = getValue(group, d, "adjust");
+
+    // 需要（確定優先、なければ内示）
+    const demand = firm > 0 ? firm : forecast;
+
+    // 累積進度 = 前日累積進度 - 需要 + 実績 + 調整
+    cumulativeProgress = cumulativeProgress - demand + actual + adjust;
+  }
+
+  return cumulativeProgress.toLocaleString();
 };
 
 const load = async () => {
