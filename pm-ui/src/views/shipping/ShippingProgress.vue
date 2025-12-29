@@ -8,20 +8,16 @@
       <div class="page-actions">
         <input
           type="text"
-          v-model="lineFilter"
-          placeholder="ラインコード/名称で絞り込み"
-        />
-        <input
-          type="text"
           v-model="productFilter"
           placeholder="品番/品名で絞り込み"
         />
-        <input type="date" v-model="startDate" @change="onStartChange" />
+        <input type="date" v-model="startDate" />
         <select v-model.number="horizon">
           <option :value="7">7日</option>
           <option :value="14">14日</option>
           <option :value="21">21日</option>
           <option :value="30">30日</option>
+          <option :value="60">60日</option>
         </select>
         <button @click="load" :disabled="loading">更新</button>
       </div>
@@ -42,29 +38,21 @@
               <span class="info-value">{{ g.product_name || "-" }}</span>
             </div>
             <div class="info-row">
-              <span class="info-label">ライン</span>
-              <span class="info-value">{{ formatLine(g) }}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">工程</span>
-              <span class="info-value">{{ formatProcess(g) }}</span>
-            </div>
-            <div class="info-row">
               <span class="info-label">合計内示</span>
-              <span class="info-value">{{ fmtSummary(g.summary.forecast) }}</span>
+              <span class="info-value">{{ g.summary.forecast }}</span>
             </div>
             <div class="info-row">
               <span class="info-label">合計確定</span>
-              <span class="info-value">{{ fmtSummary(g.summary.firm) }}</span>
+              <span class="info-value">{{ g.summary.firm }}</span>
             </div>
             <div class="info-row">
               <span class="info-label">合計実績</span>
-              <span class="info-value">{{ fmtSummary(g.summary.actual) }}</span>
+              <span class="info-value">{{ g.summary.actual }}</span>
             </div>
             <div class="info-row">
               <span class="info-label">合計調整</span>
               <span class="info-value" :class="{ negative: g.summary.adjust < 0 }">
-                {{ fmtSummary(g.summary.adjust) }}
+                {{ g.summary.adjust }}
               </span>
             </div>
             <div class="info-row">
@@ -78,19 +66,59 @@
               <thead>
                 <tr>
                   <th class="label-col">項目</th>
-                  <th v-for="d in columns" :key="d" class="day-col">{{ d }}</th>
+                  <th v-for="d in columns" :key="d" class="day-col">{{ formatDateHeader(d) }}</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="row in rowDefs" :key="row.key">
-                  <th class="label-col">{{ row.label }}</th>
+                <tr>
+                  <th class="label-col">内示</th>
                   <td
                     v-for="d in columns"
-                    :key="`${row.key}-${d}`"
+                    :key="`forecast-${d}`"
                     class="cell"
-                    :class="getCellClass(g, d, row.key)"
                   >
-                    {{ row.key === "progress" ? getProgressRate(g, d) : fmt(getValue(g, d, row.key)) }}
+                    {{ formatValue(getValue(g, d, "forecast")) }}
+                  </td>
+                </tr>
+                <tr>
+                  <th class="label-col">確定</th>
+                  <td
+                    v-for="d in columns"
+                    :key="`firm-${d}`"
+                    class="cell"
+                  >
+                    {{ formatValue(getValue(g, d, "firm")) }}
+                  </td>
+                </tr>
+                <tr>
+                  <th class="label-col">実績</th>
+                  <td
+                    v-for="d in columns"
+                    :key="`actual-${d}`"
+                    class="cell"
+                  >
+                    {{ formatValue(getValue(g, d, "actual")) }}
+                  </td>
+                </tr>
+                <tr>
+                  <th class="label-col">調整</th>
+                  <td
+                    v-for="d in columns"
+                    :key="`adjust-${d}`"
+                    class="cell"
+                    :class="{ negative: getValue(g, d, 'adjust') < 0 }"
+                  >
+                    {{ formatValue(getValue(g, d, "adjust")) }}
+                  </td>
+                </tr>
+                <tr>
+                  <th class="label-col">進度</th>
+                  <td
+                    v-for="d in columns"
+                    :key="`progress-${d}`"
+                    class="cell"
+                  >
+                    {{ getProgressRate(g, d) }}
                   </td>
                 </tr>
               </tbody>
@@ -106,197 +134,158 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import api from "@/api/client";
-import { addDays, formatISODate, parseISODate } from "@/utils/dateUtil";
 
-const lineFilter = ref("");
 const productFilter = ref("");
-const startDate = ref(formatISODate(new Date()));
-const horizon = ref(14);
+const startDate = ref(formatDate(new Date()));
+const horizon = ref(30); // デフォルト30日
 const loading = ref(false);
 const error = ref("");
 const orderLines = ref([]);
 const backlogs = ref([]);
-let userSetStart = false;
-const onStartChange = () => {
-  userSetStart = true;
-};
+
+function formatDate(date) {
+  const d = new Date(date);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function formatDateHeader(dateStr) {
+  const d = new Date(dateStr);
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  return `${m}/${day}`;
+}
 
 const columns = computed(() => {
-  const start = parseISODate(startDate.value);
+  const start = new Date(startDate.value);
   const cols = [];
   for (let i = 0; i < horizon.value; i++) {
-    cols.push(formatISODate(addDays(start, i)));
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
+    cols.push(formatDate(d));
   }
   return cols;
 });
 
-const rowDefs = [
-  { key: "forecast", label: "内示" },
-  { key: "firm", label: "確定" },
-  { key: "actual", label: "実績" },
-  { key: "adjust", label: "調整" },
-  { key: "progress", label: "進度" },
-];
-
-const normalizeList = (payload) => {
-  return Array.isArray(payload) ? payload : payload.results || [];
-};
-
-const applyOrderLines = (payload) => {
-  const list = normalizeList(payload);
-  orderLines.value = list;
-  if (!userSetStart && orderLines.value.length) {
-    const minDate = orderLines.value
-      .map((d) => d.due_date)
-      .sort()[0];
-    if (minDate) {
-      startDate.value = minDate;
-    }
-  }
-};
-
-const backlogKey = (productCode, date) => `${productCode || ""}__${date || ""}`;
-
-const backlogMap = computed(() => {
-  const map = new Map();
-  for (const b of backlogs.value) {
-    const key = backlogKey(b.product_code, b.plan_date);
-    const current = map.get(key) || { actual: 0, adjust: 0 };
-    current.actual += Number(b.actual_shipment_qty || 0);
-    current.adjust += Number(b.adjust_qty || 0);
-    map.set(key, current);
-  }
-  return map;
-});
-
 const groups = computed(() => {
   if (!orderLines.value.length) return [];
-  const filtered = orderLines.value.filter((d) => {
-    if (!d.due_date) return false;
-    const within =
-      d.due_date >= columns.value[0] &&
-      d.due_date <= columns.value[columns.value.length - 1];
-    const lineText = `${d.plant_code || ""}${d.ship_to_code || ""}`.toLowerCase();
-    const prodText = `${d.product_code || ""}${d.product_name || ""}`.toLowerCase();
-    const okLine =
-      !lineFilter.value ||
-      lineText.includes(lineFilter.value.trim().toLowerCase());
-    const okProd =
-      !productFilter.value ||
-      prodText.includes(productFilter.value.trim().toLowerCase());
-    return within && okLine && okProd;
-  });
 
+  // 製品コード別にグループ化
   const map = new Map();
-  for (const d of filtered) {
-    const key = `${d.product_code || ""}`;
-    if (!map.has(key)) {
-      map.set(key, {
-        key,
-        line_code: "",
-        line_name: "",
-        product_code: d.product_code,
-        product_name: d.product_name,
-        process_code: "",
-        process_name: "",
+
+  for (const order of orderLines.value) {
+    if (!order.due_date || !order.product_code) continue;
+
+    const dueDate = formatDate(new Date(order.due_date));
+    const productCode = order.product_code;
+
+    // 製品フィルタ
+    if (productFilter.value) {
+      const filter = productFilter.value.toLowerCase();
+      const text = `${order.product_code || ""}${order.product_name || ""}`.toLowerCase();
+      if (!text.includes(filter)) continue;
+    }
+
+    // グループ作成
+    if (!map.has(productCode)) {
+      map.set(productCode, {
+        key: productCode,
+        product_code: order.product_code,
+        product_name: order.product_name,
         cells: {},
-        totals: { forecast: 0, firm: 0, actual: 0, adjust: 0 },
         summary: { forecast: 0, firm: 0, actual: 0, adjust: 0, progressRate: "-" },
       });
     }
-    const g = map.get(key);
-    if (!g.cells[d.due_date]) {
-      g.cells[d.due_date] = {
+
+    const group = map.get(productCode);
+
+    // セル初期化
+    if (!group.cells[dueDate]) {
+      group.cells[dueDate] = {
         forecast: 0,
         firm: 0,
         actual: 0,
         adjust: 0,
       };
     }
-    const c = g.cells[d.due_date];
-    const qty = Number(d.quantity || 0);
-    if (d.order_type === "FORECAST") {
-      c.forecast += qty;
-    } else if (d.order_type === "FIRM") {
-      c.firm += qty;
+
+    const cell = group.cells[dueDate];
+    const qty = Number(order.quantity || 0);
+
+    // 受注タイプ別に集計
+    if (order.order_type === "FORECAST") {
+      cell.forecast += qty;
     } else {
-      c.firm += qty;
+      // FIRM または未設定の場合は確定として扱う
+      cell.firm += qty;
     }
   }
 
+  // backlogから実績と調整を取得
+  const backlogMap = new Map();
+  for (const b of backlogs.value) {
+    if (!b.product_code || !b.plan_date) continue;
+    const key = `${b.product_code}__${b.plan_date}`;
+    const current = backlogMap.get(key) || { actual: 0, adjust: 0 };
+    current.actual += Number(b.actual_shipment_qty || 0);
+    current.adjust += Number(b.adjust_qty || 0);
+    backlogMap.set(key, current);
+  }
+
+  // サマリー計算
   return Array.from(map.values()).map((g) => {
-    g.totals = { forecast: 0, firm: 0, actual: 0, adjust: 0 };
-    Object.entries(g.cells).forEach(([date, cell]) => {
-      const backlog = backlogMap.value.get(backlogKey(g.product_code, date));
-      cell.actual = backlog ? backlog.actual : 0;
-      cell.adjust = backlog ? backlog.adjust : 0;
-      g.totals.forecast += cell.forecast;
-      g.totals.firm += cell.firm;
-      g.totals.actual += cell.actual;
-      g.totals.adjust += cell.adjust;
-    });
-    const denom = g.totals.firm > 0 ? g.totals.firm : g.totals.forecast;
-    const rate = denom > 0 ? `${Math.round((g.totals.actual / denom) * 100)}%` : "-";
+    let totalForecast = 0;
+    let totalFirm = 0;
+    let totalActual = 0;
+    let totalAdjust = 0;
+
+    // 各日付のデータに実績・調整を追加
+    for (const [date, cell] of Object.entries(g.cells)) {
+      const backlog = backlogMap.get(`${g.product_code}__${date}`);
+      if (backlog) {
+        cell.actual = backlog.actual;
+        cell.adjust = backlog.adjust;
+      }
+
+      totalForecast += cell.forecast;
+      totalFirm += cell.firm;
+      totalActual += cell.actual;
+      totalAdjust += cell.adjust;
+    }
+
+    const denom = totalFirm > 0 ? totalFirm : totalForecast;
+    const rate = denom > 0 ? `${Math.round((totalActual / denom) * 100)}%` : "-";
+
     g.summary = {
-      forecast: g.totals.forecast,
-      firm: g.totals.firm,
-      actual: g.totals.actual,
-      adjust: g.totals.adjust,
+      forecast: totalForecast,
+      firm: totalFirm,
+      actual: totalActual,
+      adjust: totalAdjust,
       progressRate: rate,
     };
+
     return g;
   });
 });
 
-const fmt = (n) => {
-  if (n === null || n === undefined) return "";
-  const num = Number(n);
-  if (Number.isNaN(num)) return "";
-  if (num === 0) return "";
-  return num.toLocaleString();
-};
-
-const fmtSummary = (n) => {
-  if (n === null || n === undefined) return "-";
-  const num = Number(n);
-  if (Number.isNaN(num)) return "-";
-  return num.toLocaleString();
-};
-
 const getValue = (group, date, key) => {
-  return group.cells?.[date]?.[key] ?? "";
+  return group.cells?.[date]?.[key] ?? 0;
+};
+
+const formatValue = (val) => {
+  if (val === 0) return "-";
+  return val.toLocaleString();
 };
 
 const getProgressRate = (group, date) => {
-  const firm = group.cells?.[date]?.firm ?? 0;
-  const forecast = group.cells?.[date]?.forecast ?? 0;
-  const actual = group.cells?.[date]?.actual ?? 0;
+  const firm = getValue(group, date, "firm");
+  const forecast = getValue(group, date, "forecast");
+  const actual = getValue(group, date, "actual");
   const denom = firm > 0 ? firm : forecast;
   if (denom <= 0) return "-";
   return `${Math.round((actual / denom) * 100)}%`;
-};
-
-const getCellClass = (group, date, rowKey) => {
-  if (rowKey === "progress") return "";
-  const value = getValue(group, date, rowKey);
-  if (value !== null && value !== undefined && Number(value) < 0) {
-    return "negative";
-  }
-  return "";
-};
-
-const formatLine = (group) => {
-  if (group.line_code && group.line_name) {
-    return `${group.line_code} / ${group.line_name}`;
-  }
-  return group.line_code || group.line_name || "-";
-};
-
-const formatProcess = (group) => {
-  if (group.process_code && group.process_name) {
-    return `${group.process_code} / ${group.process_name}`;
-  }
-  return group.process_code || group.process_name || "-";
 };
 
 const load = async () => {
@@ -305,11 +294,17 @@ const load = async () => {
   try {
     const [orderLinesRes, backlogsRes] = await Promise.all([
       api.orders.listOrderLines({ page_size: 10000 }),
-      api.lineBacklogs.getLineBacklogs(),
+      api.lineBacklogs.getLineBacklogs({ page_size: 10000 }),
     ]);
-    applyOrderLines(orderLinesRes.data || []);
+
+    const normalizeList = (payload) => {
+      return Array.isArray(payload) ? payload : payload.results || [];
+    };
+
+    orderLines.value = normalizeList(orderLinesRes.data || []);
     backlogs.value = normalizeList(backlogsRes.data || []);
   } catch (e) {
+    console.error("データ読み込みエラー:", e);
     error.value = e?.message || "読み込みに失敗しました";
   } finally {
     loading.value = false;
@@ -324,6 +319,7 @@ onMounted(load);
   display: flex;
   flex-direction: column;
   gap: 12px;
+  padding: 16px;
 }
 .page-header {
   display: flex;
@@ -332,6 +328,16 @@ onMounted(load);
   gap: 12px;
   flex-wrap: wrap;
 }
+.page-title {
+  margin: 0 0 4px 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+.subtitle {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+}
 .page-actions {
   display: flex;
   gap: 8px;
@@ -339,50 +345,66 @@ onMounted(load);
   align-items: center;
 }
 .page-actions input,
-.page-actions select {
-  padding: 6px 8px;
-}
-.subtitle {
-  margin: 0;
-  color: #64748b;
+.page-actions select,
+.page-actions button {
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
   font-size: 13px;
+}
+.page-actions button {
+  background: #3b82f6;
+  color: white;
+  cursor: pointer;
+  font-weight: 500;
+}
+.page-actions button:hover:not(:disabled) {
+  background: #2563eb;
+}
+.page-actions button:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
 }
 
 .group-list {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
 }
 .group-card {
   display: grid;
-  grid-template-columns: 260px 1fr;
-  border: 1px solid #dce3ef;
-  border-radius: 10px;
+  grid-template-columns: 240px 1fr;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
   overflow: hidden;
   background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 .info-block {
-  padding: 10px;
+  padding: 12px;
   border-right: 1px solid #e5e7eb;
-  background: #f8fafc;
+  background: #f9fafb;
 }
 .info-row {
   display: flex;
   justify-content: space-between;
-  padding: 6px 4px;
+  padding: 6px 0;
   border-bottom: 1px solid #e5e7eb;
   font-size: 13px;
 }
+.info-row:last-child {
+  border-bottom: none;
+}
 .info-label {
-  font-weight: 700;
+  font-weight: 600;
   color: #374151;
 }
 .info-value {
   color: #111827;
-  margin-left: 8px;
+  font-weight: 500;
 }
 .info-value.negative {
-  color: #c00;
+  color: #dc2626;
   font-weight: 700;
 }
 .matrix-block {
@@ -390,20 +412,21 @@ onMounted(load);
 }
 .matrix-table {
   border-collapse: collapse;
-  min-width: 960px;
   width: 100%;
+  min-width: 800px;
 }
 .matrix-table th,
 .matrix-table td {
   border: 1px solid #e5e7eb;
   padding: 6px 8px;
   text-align: right;
-  min-width: 80px;
+  font-size: 12px;
 }
 .matrix-table thead th {
   position: sticky;
   top: 0;
-  background: #f4f6fb;
+  background: #f3f4f6;
+  font-weight: 600;
   z-index: 1;
   text-align: center;
 }
@@ -412,21 +435,26 @@ onMounted(load);
   left: 0;
   background: #f9fafb;
   z-index: 2;
-  text-align: left;
-  min-width: 100px;
+  text-align: left !important;
+  font-weight: 600;
+  min-width: 80px;
+}
+.day-col {
+  min-width: 60px;
 }
 .cell {
   background: #fff;
 }
 .cell.negative {
   background: #fee;
-  color: #c00;
+  color: #dc2626;
   font-weight: 700;
 }
 .no-data,
 .loading {
-  padding: 24px;
+  padding: 40px;
   text-align: center;
   color: #6b7280;
+  font-size: 14px;
 }
 </style>
