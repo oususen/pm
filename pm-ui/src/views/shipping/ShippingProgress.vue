@@ -331,17 +331,14 @@ const load = async () => {
   loading.value = true;
   error.value = "";
   try {
-    const [orderLinesRes, backlogsRes] = await Promise.all([
-      api.orders.listOrderLines({ page_size: 10000 }),
-      api.lineBacklogs.getLineBacklogs({ page_size: 10000 }),
-    ]);
+    const orderLinesRes = await api.orders.listOrderLines({ page_size: 10000 });
 
     const normalizeList = (payload) => {
       return Array.isArray(payload) ? payload : payload.results || [];
     };
 
     orderLines.value = normalizeList(orderLinesRes.data || []);
-    backlogs.value = normalizeList(backlogsRes.data || []);
+    backlogs.value = []; // LineBacklog APIは使用しない
 
     // 開始日を受注データの最も古い納期に自動設定
     if (orderLines.value.length > 0) {
