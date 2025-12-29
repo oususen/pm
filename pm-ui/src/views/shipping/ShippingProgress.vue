@@ -144,6 +144,11 @@ const orderLines = ref([]);
 const backlogs = ref([]);
 
 function formatDate(date) {
+  // 日付文字列の場合はそのまま返す（YYYY-MM-DD形式）
+  if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return date;
+  }
+  // Date オブジェクトの場合は変換
   const d = new Date(date);
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -170,23 +175,44 @@ const columns = computed(() => {
 });
 
 const groups = computed(() => {
-  if (!orderLines.value.length) return [];
+  if (!orderLines.value.length) {
+    console.log("[ShippingProgress] 受注明細データなし");
+    return [];
+  }
+
+  console.log("[ShippingProgress] グループ化開始");
+  console.log("[ShippingProgress] 期間範囲:", columns.value[0], "～", columns.value[columns.value.length - 1]);
 
   // 製品コード別にグループ化
   const map = new Map();
+  let processedCount = 0;
+  let skippedCount = 0;
 
   for (const order of orderLines.value) {
-    if (!order.due_date || !order.product_code) continue;
+    if (!order.due_date || !order.product_code) {
+      skippedCount++;
+      continue;
+    }
 
     const dueDate = formatDate(new Date(order.due_date));
     const productCode = order.product_code;
+
+    // YD60009848のデバッグ
+    if (productCode.includes('9848')) {
+      console.log("[9848] due_date:", order.due_date, "→ dueDate:", dueDate, "qty:", order.quantity, "type:", order.order_type);
+    }
 
     // 製品フィルタ
     if (productFilter.value) {
       const filter = productFilter.value.toLowerCase();
       const text = `${order.product_code || ""}${order.product_name || ""}`.toLowerCase();
-      if (!text.includes(filter)) continue;
+      if (!text.includes(filter)) {
+        skippedCount++;
+        continue;
+      }
     }
+
+    processedCount++;
 
     // グループ作成
     if (!map.has(productCode)) {
@@ -232,6 +258,18 @@ const groups = computed(() => {
     current.actual += Number(b.actual_shipment_qty || 0);
     current.adjust += Number(b.adjust_qty || 0);
     backlogMap.set(key, current);
+  }
+
+  console.log("[ShippingProgress] 処理件数:", processedCount, "スキップ:", skippedCount);
+  console.log("[ShippingProgress] グループ数:", map.size);
+
+  // YD60009848のグループ詳細を確認
+  if (map.has('YD60009848')) {
+    const g = map.get('YD60009848');
+    console.log("[9848] グループ詳細:");
+    console.log("[9848] product_name:", g.product_name);
+    console.log("[9848] cells:", g.cells);
+    console.log("[9848] cells keys:", Object.keys(g.cells));
   }
 
   // サマリー計算
@@ -303,6 +341,25 @@ const load = async () => {
 
     orderLines.value = normalizeList(orderLinesRes.data || []);
     backlogs.value = normalizeList(backlogsRes.data || []);
+
+    // 開始日を受注データの最も古い納期に自動設定
+    if (orderLines.value.length > 0) {
+      const dates = orderLines.value
+        .map(o => o.due_date)
+        .filter(d => d)
+        .sort();
+      if (dates.length > 0) {
+        startDate.value = dates[0];
+      }
+    }
+
+    console.log("[ShippingProgress] データロード完了");
+    console.log("[ShippingProgress] 受注明細件数:", orderLines.value.length);
+    console.log("[ShippingProgress] バックログ件数:", backlogs.value.length);
+    console.log("[ShippingProgress] 受注明細サンプル:", orderLines.value.slice(0, 3));
+    console.log("[ShippingProgress] 開始日:", startDate.value);
+    console.log("[ShippingProgress] 期間:", horizon.value);
+    console.log("[ShippingProgress] カラム:", columns.value.slice(0, 5));
   } catch (e) {
     console.error("データ読み込みエラー:", e);
     error.value = e?.message || "読み込みに失敗しました";
