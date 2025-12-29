@@ -194,7 +194,8 @@ const groups = computed(() => {
       continue;
     }
 
-    const dueDate = formatDate(new Date(order.due_date));
+    // due_dateはAPIから文字列で返されるので、new Date()を通さない
+    const dueDate = formatDate(order.due_date);
     const productCode = order.product_code;
 
     // YD60009848のデバッグ
