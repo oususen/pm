@@ -314,7 +314,7 @@ const getValue = (group, date, key) => {
 };
 
 const formatValue = (val) => {
-  if (val === 0) return "-";
+  if (val === 0) return "";
   return val.toLocaleString();
 };
 
