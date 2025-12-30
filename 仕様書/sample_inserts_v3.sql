@@ -16,6 +16,12 @@ INSERT INTO m_product(product_code, product_name, category, unit, is_final_produ
 ('P_SUB2','サブ2','ASSEMBLY','個',0),
 ('P_SUB1','サブ1','ASSEMBLY','個',0);
 
+SET @P_SUB1   = (SELECT id FROM m_product WHERE product_code='P_SUB1');
+SET @P_SUB2   = (SELECT id FROM m_product WHERE product_code='P_SUB2');
+SET @P_COMP   = (SELECT id FROM m_product WHERE product_code='P_COMP');
+SET @P_AIR    = (SELECT id FROM m_product WHERE product_code='P_AIR');
+SET @P_OUTFIT = (SELECT id FROM m_product WHERE product_code='P_OUTFIT');
+
 -- Processes
 INSERT INTO m_process(process_code, process_name) VALUES
 ('LASER','レーザ切断'),
@@ -51,36 +57,21 @@ SET @LINE_WELD  = (SELECT id FROM m_line WHERE line_code='LINE_WELD');
 
 -- Routing steps (day-level for top 3, minute-level for weld chain)
 -- time_unit='DAY' を明示
-INSERT INTO m_routing_step(routing_id, step_no, process_id, line_id, time_unit, lead_time_days, remark)
+INSERT INTO m_routing_step(routing_id, step_no, process_id, line_id, time_unit, lead_time_days, output_product_id, remark)
 VALUES
-(@RID,1,@PROC_LASER,@LINE_LASER,'DAY',1,'日扱い'),
-(@RID,2,@PROC_BEND ,@LINE_PRESS,'DAY',1,'日扱い'),
-(@RID,3,@PROC_SPOT ,@LINE_SPOT ,'DAY',1,'日扱い');
+(@RID,1,@PROC_LASER,@LINE_LASER,'DAY',1,NULL,'日扱い'),
+(@RID,2,@PROC_BEND ,@LINE_PRESS,'DAY',1,NULL,'日扱い'),
+(@RID,3,@PROC_SPOT ,@LINE_SPOT ,'DAY',1,NULL,'日扱い');
 
 -- Weld chain as minute-level steps (5 stations, 240 min time-window each as param)
 -- time_unit='MINUTE' を明示
-INSERT INTO m_routing_step(routing_id, step_no, process_id, line_id, time_unit, start_offset_min, duration_min, remark)
+INSERT INTO m_routing_step(routing_id, step_no, process_id, line_id, time_unit, start_offset_min, duration_min, output_product_id, remark)
 VALUES
-(@RID,41,@PROC_WELD,@LINE_WELD,'MINUTE',0,NULL,'サブ1'),
-(@RID,42,@PROC_WELD,@LINE_WELD,'MINUTE',0,NULL,'サブ2'),
-(@RID,43,@PROC_WELD,@LINE_WELD,'MINUTE',0,NULL,'コンプ'),
-(@RID,44,@PROC_WELD,@LINE_WELD,'MINUTE',0,NULL,'気密'),
-(@RID,45,@PROC_WELD,@LINE_WELD,'MINUTE',0,NULL,'艤装');
-
--- Step outputs (what product becomes available at each station)
-SET @P_SUB1   = (SELECT id FROM m_product WHERE product_code='P_SUB1');
-SET @P_SUB2   = (SELECT id FROM m_product WHERE product_code='P_SUB2');
-SET @P_COMP   = (SELECT id FROM m_product WHERE product_code='P_COMP');
-SET @P_AIR    = (SELECT id FROM m_product WHERE product_code='P_AIR');
-SET @P_OUTFIT = (SELECT id FROM m_product WHERE product_code='P_OUTFIT');
-
-INSERT INTO m_routing_step_output(routing_step_id, output_product_id, is_final_stage)
-VALUES
-((SELECT id FROM m_routing_step WHERE routing_id=@RID AND step_no=41), @P_SUB1, 0),
-((SELECT id FROM m_routing_step WHERE routing_id=@RID AND step_no=42), @P_SUB2, 0),
-((SELECT id FROM m_routing_step WHERE routing_id=@RID AND step_no=43), @P_COMP, 0),
-((SELECT id FROM m_routing_step WHERE routing_id=@RID AND step_no=44), @P_AIR,  0),
-((SELECT id FROM m_routing_step WHERE routing_id=@RID AND step_no=45), @P_OUTFIT, 1);
+(@RID,41,@PROC_WELD,@LINE_WELD,'MINUTE',0,NULL,@P_SUB1,'サブ1'),
+(@RID,42,@PROC_WELD,@LINE_WELD,'MINUTE',0,NULL,@P_SUB2,'サブ2'),
+(@RID,43,@PROC_WELD,@LINE_WELD,'MINUTE',0,NULL,@P_COMP,'コンプ'),
+(@RID,44,@PROC_WELD,@LINE_WELD,'MINUTE',0,NULL,@P_AIR,'気密'),
+(@RID,45,@PROC_WELD,@LINE_WELD,'MINUTE',0,NULL,@P_OUTFIT,'艤装');
 
 -- Step params: lot=40, transfer batch=4, daily time-window=240min
 INSERT INTO m_routing_step_param(routing_step_id, lot_size, transfer_batch_qty, start_trigger, target_buffer_qty, max_buffer_qty, daily_time_window_min)
@@ -124,10 +115,11 @@ SELECT '=== ライン ===' AS '';
 SELECT line_code, line_name FROM m_line;
 
 SELECT '=== ルーティング工程 ===' AS '';
-SELECT rs.step_no, p.process_name, l.line_name, rs.time_unit, rs.lead_time_days, rs.remark
+SELECT rs.step_no, p.process_name, l.line_name, rs.time_unit, rs.lead_time_days, op.product_code AS output_product_code, rs.remark
 FROM m_routing_step rs
 JOIN m_process p ON p.id = rs.process_id
 LEFT JOIN m_line l ON l.id = rs.line_id
+LEFT JOIN m_product op ON op.id = rs.output_product_id
 WHERE rs.routing_id = @RID
 ORDER BY rs.step_no;
 

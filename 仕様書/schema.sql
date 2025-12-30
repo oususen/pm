@@ -12,12 +12,19 @@ CREATE TABLE m_product (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   product_code VARCHAR(30) NOT NULL UNIQUE,
   product_name VARCHAR(100) NOT NULL,
-  category ENUM('ASSEMBLY','SINGLE','MATERIAL','PURCHASED') NOT NULL,
+  product_name_halfwidth VARCHAR(100) NULL,
+  category VARCHAR(20) NULL,
   unit VARCHAR(10) NOT NULL DEFAULT '個',
   standard_lt_days INT NULL,
+  image_url VARCHAR(255) NULL,
+  line_id BIGINT NULL,
+  process_id BIGINT NULL,
+  management_unit VARCHAR(10) NULL,
   self_lt_days INT NULL,
   is_final_product TINYINT(1) NOT NULL DEFAULT 0,
+  is_line_final_product TINYINT(1) NOT NULL DEFAULT 0,
   is_phantom TINYINT(1) NOT NULL DEFAULT 0,
+  is_virtual_set TINYINT(1) NOT NULL DEFAULT 0,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -40,7 +47,8 @@ CREATE TABLE m_line (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   line_code VARCHAR(20) NOT NULL UNIQUE,
   line_name VARCHAR(50) NOT NULL,
-  lead_time_days INT NULL,
+  calendar_id BIGINT NULL,
+  lead_time_days INT NULL DEFAULT 0,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -52,11 +60,16 @@ CREATE TABLE m_process (
   process_name VARCHAR(50) NOT NULL,
   line_id BIGINT NULL,
   is_outsource TINYINT(1) NOT NULL DEFAULT 0,
+  management_unit VARCHAR(10) NOT NULL DEFAULT 'MINUTE',
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_process_line FOREIGN KEY (line_id) REFERENCES m_line(id)
 ) ENGINE=InnoDB;
+
+ALTER TABLE m_product
+  ADD CONSTRAINT fk_product_line FOREIGN KEY (line_id) REFERENCES m_line(id),
+  ADD CONSTRAINT fk_product_process FOREIGN KEY (process_id) REFERENCES m_process(id);
 
 -- Optional defaults for line LT
 CREATE TABLE m_line_default (
@@ -94,32 +107,38 @@ CREATE TABLE m_routing_step (
   step_no INT NOT NULL,
   process_id BIGINT NOT NULL,
   line_id BIGINT NULL,
+  output_product_id BIGINT NULL,
+  hierarchy_path VARCHAR(100) NOT NULL DEFAULT '',
+  hierarchy_depth INT NOT NULL DEFAULT 0,
   step_type ENUM('FLOW','PARALLEL_POOL') NOT NULL DEFAULT 'FLOW',
   time_unit ENUM('DAY','MINUTE') NOT NULL DEFAULT 'DAY',
   lead_time_days INT NOT NULL DEFAULT 0,
   start_offset_min INT NULL,
   duration_min INT NULL,
+  parallel_count INT NOT NULL DEFAULT 1,
+  parallel_group INT NOT NULL DEFAULT 1,
   remark VARCHAR(200) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_rstep_routing FOREIGN KEY (routing_id) REFERENCES m_routing(id),
   CONSTRAINT fk_rstep_process FOREIGN KEY (process_id) REFERENCES m_process(id),
   CONSTRAINT fk_rstep_line FOREIGN KEY (line_id) REFERENCES m_line(id),
-  UNIQUE KEY uk_rstep (routing_id, step_no)
+  CONSTRAINT fk_rstep_output_product FOREIGN KEY (output_product_id) REFERENCES m_product(id),
+  UNIQUE KEY uk_rstep (routing_id, step_no, parallel_group)
 ) ENGINE=InnoDB;
 
-CREATE TABLE m_routing_step_output (
+CREATE TABLE m_routing_step_material (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   routing_step_id BIGINT NOT NULL,
-  output_product_id BIGINT NOT NULL,
-  yield_rate DECIMAL(5,3) NULL,
-  is_final_stage TINYINT(1) NOT NULL DEFAULT 0,
+  component_id BIGINT NOT NULL,
+  quantity DECIMAL(12,3) NOT NULL,
+  consume_timing VARCHAR(10) NOT NULL DEFAULT 'START',
   remark VARCHAR(200) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  CONSTRAINT fk_rstepout_step FOREIGN KEY (routing_step_id) REFERENCES m_routing_step(id),
-  CONSTRAINT fk_rstepout_product FOREIGN KEY (output_product_id) REFERENCES m_product(id),
-  UNIQUE KEY uk_rstepout (routing_step_id, output_product_id)
+  CONSTRAINT fk_rstepmat_step FOREIGN KEY (routing_step_id) REFERENCES m_routing_step(id),
+  CONSTRAINT fk_rstepmat_component FOREIGN KEY (component_id) REFERENCES m_product(id),
+  UNIQUE KEY uk_rstepmat (routing_step_id, component_id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE m_routing_step_param (
@@ -159,6 +178,25 @@ CREATE TABLE m_cycle_time (
   UNIQUE KEY uk_ct (product_id, process_id, line_id, valid_from)
 ) ENGINE=InnoDB;
 
+CREATE TABLE m_process_cycle_time (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  product_id BIGINT NOT NULL,
+  process_id BIGINT NOT NULL,
+  line_id BIGINT NULL,
+  cycle_time_min DECIMAL(10,2) NOT NULL,
+  setup_time_min INT NOT NULL DEFAULT 0,
+  lot_size INT NOT NULL DEFAULT 1,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  valid_from DATE NULL,
+  valid_to DATE NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_pct_product FOREIGN KEY (product_id) REFERENCES m_product(id),
+  CONSTRAINT fk_pct_process FOREIGN KEY (process_id) REFERENCES m_process(id),
+  CONSTRAINT fk_pct_line FOREIGN KEY (line_id) REFERENCES m_line(id),
+  UNIQUE KEY uk_pct (product_id, process_id, line_id, valid_from)
+) ENGINE=InnoDB;
+
 -- 6) BOM
 CREATE TABLE m_bom (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -167,6 +205,7 @@ CREATE TABLE m_bom (
   valid_from DATE NOT NULL,
   valid_to DATE NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
+  is_coproduct TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_bom_parent FOREIGN KEY (parent_product_id) REFERENCES m_product(id),
@@ -181,11 +220,18 @@ CREATE TABLE m_bom_item (
   loss_rate DECIMAL(5,3) NULL,
   sourcing_type ENUM('MAKE','BUY','SUBCON') NOT NULL DEFAULT 'MAKE',
   supplier_id BIGINT NULL,
+  process_id BIGINT NULL,
+  line_id BIGINT NULL,
+  time_unit VARCHAR(10) NOT NULL DEFAULT 'MINUTE',
+  lead_time_days INT NOT NULL DEFAULT 0,
+  duration_min INT NULL,
   remark VARCHAR(200) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_bi_bom FOREIGN KEY (bom_id) REFERENCES m_bom(id),
   CONSTRAINT fk_bi_child FOREIGN KEY (child_product_id) REFERENCES m_product(id),
+  CONSTRAINT fk_bi_process FOREIGN KEY (process_id) REFERENCES m_process(id),
+  CONSTRAINT fk_bi_line FOREIGN KEY (line_id) REFERENCES m_line(id),
   CONSTRAINT chk_bi_sourcing CHECK (
     (sourcing_type = 'MAKE' AND supplier_id IS NULL) OR
     (sourcing_type IN ('BUY', 'SUBCON') AND supplier_id IS NOT NULL)
@@ -223,18 +269,46 @@ CREATE TABLE m_calendar (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
+CREATE TABLE m_work_pattern (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  pattern_code VARCHAR(20) NOT NULL UNIQUE,
+  pattern_name VARCHAR(50) NOT NULL,
+  start_time TIME NOT NULL,
+  end_time TIME NULL,
+  description TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+CREATE TABLE m_break_time (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  work_pattern_id BIGINT NOT NULL,
+  break_start TIME NOT NULL,
+  break_end TIME NOT NULL,
+  `order` INT NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_break_time_work_pattern FOREIGN KEY (work_pattern_id) REFERENCES m_work_pattern(id)
+) ENGINE=InnoDB;
+
 CREATE TABLE m_calendar_day (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   calendar_id BIGINT NOT NULL,
   target_date DATE NOT NULL,
   is_working_day TINYINT(1) NOT NULL,
   work_minutes INT NULL,
+  work_pattern_id BIGINT NULL,
   note VARCHAR(100) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_cday_calendar FOREIGN KEY (calendar_id) REFERENCES m_calendar(id),
+  CONSTRAINT fk_cday_work_pattern FOREIGN KEY (work_pattern_id) REFERENCES m_work_pattern(id),
   UNIQUE KEY uk_cday (calendar_id, target_date)
 ) ENGINE=InnoDB;
+
+-- Add FK constraint for m_line.calendar_id
+ALTER TABLE m_line
+  ADD CONSTRAINT fk_line_calendar FOREIGN KEY (calendar_id) REFERENCES m_calendar(id);
 
 -- Add FK constraint for m_customer.calendar_id
 ALTER TABLE m_customer
@@ -251,7 +325,7 @@ CREATE TABLE t_order (
   source_file VARCHAR(200) NULL,
   order_date DATE NULL,
   freeze_from DATE NULL,
-  status ENUM('OPEN','CLOSED','CANCELED') NOT NULL DEFAULT 'OPEN',
+  status ENUM('OPEN','CLOSED','CANCELED','SUPERSEDED') NOT NULL DEFAULT 'OPEN',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_order_customer FOREIGN KEY (customer_id) REFERENCES m_customer(id),
@@ -291,6 +365,8 @@ CREATE TABLE stg_order_raw (
   start_month DATE NULL,                   -- forecast開始月度
   due_date DATE NULL,                      -- 確定系は納期
   product_code VARCHAR(50) NULL,
+  product_name VARCHAR(100) NULL,
+  product_name_halfwidth VARCHAR(100) NULL,
   quantity DECIMAL(14,3) NULL,
   raw_payload JSON NOT NULL,
   parse_status ENUM('PENDING','PARSED','ERROR') NOT NULL DEFAULT 'PENDING',
@@ -308,6 +384,8 @@ CREATE TABLE stg_order_daily (
   order_type ENUM('FIRM','FORECAST') NOT NULL,
   version_no VARCHAR(20) NOT NULL DEFAULT 'v1',
   product_code VARCHAR(50) NOT NULL,
+  product_name VARCHAR(100) NULL,
+  product_name_halfwidth VARCHAR(100) NULL,
   due_date DATE NOT NULL,
   quantity DECIMAL(14,3) NOT NULL,
   plant_code VARCHAR(20) NULL,
@@ -340,6 +418,253 @@ CREATE TABLE t_schedule_detail (
   INDEX idx_sched_status (status)
 ) ENGINE=InnoDB;
 
+-- 11) Line backlog (transactional)
+CREATE TABLE line_backlog (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  plan_date DATE NOT NULL,
+  line_id BIGINT NOT NULL,
+  process_id BIGINT NOT NULL,
+  product_id BIGINT NOT NULL,
+  source_line_id BIGINT NULL,
+  source_routing_step_id BIGINT NULL,
+  plan_id VARCHAR(255) NULL,
+  sequence_no INT NULL,
+  demand_qty_plan INT NOT NULL DEFAULT 0,
+  order_qty INT NOT NULL DEFAULT 0,
+  plan_qty INT NOT NULL DEFAULT 0,
+  actual_qty INT NOT NULL DEFAULT 0,
+  actual_shipment_qty INT NOT NULL DEFAULT 0,
+  adjust_qty INT NOT NULL DEFAULT 0,
+  scrap_qty INT NOT NULL DEFAULT 0,
+  stock_qty INT NOT NULL DEFAULT 0,
+  planned_stock_qty INT NOT NULL DEFAULT 0,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_backlog_line FOREIGN KEY (line_id) REFERENCES m_line(id),
+  CONSTRAINT fk_backlog_process FOREIGN KEY (process_id) REFERENCES m_process(id),
+  CONSTRAINT fk_backlog_product FOREIGN KEY (product_id) REFERENCES m_product(id),
+  CONSTRAINT fk_backlog_source_line FOREIGN KEY (source_line_id) REFERENCES m_line(id),
+  CONSTRAINT fk_backlog_source_step FOREIGN KEY (source_routing_step_id) REFERENCES m_routing_step(id),
+  UNIQUE KEY uniq_backlog_date_process_product_line (plan_date, process_id, product_id, line_id),
+  INDEX idx_backlog_date_line (plan_date, line_id),
+  INDEX idx_backlog_plan_id (plan_id)
+) ENGINE=InnoDB;
+
+-- 12) Line demand / gantt / realtime / status
+CREATE TABLE t_line_demand (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  line_id BIGINT NOT NULL,
+  routing_step_id BIGINT NULL,
+  product_id BIGINT NULL,
+  product_code VARCHAR(50) NOT NULL,
+  plan_date DATE NOT NULL,
+  lead_time_days INT NOT NULL DEFAULT 0,
+  forecast_qty DECIMAL(14,3) NOT NULL DEFAULT 0,
+  firm_qty DECIMAL(14,3) NOT NULL DEFAULT 0,
+  plan_qty DECIMAL(14,3) NOT NULL DEFAULT 0,
+  actual_qty DECIMAL(14,3) NOT NULL DEFAULT 0,
+  plan_progress DECIMAL(9,3) NOT NULL DEFAULT 0,
+  actual_progress DECIMAL(9,3) NOT NULL DEFAULT 0,
+  order_numbers VARCHAR(500) NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_linedemand_line FOREIGN KEY (line_id) REFERENCES m_line(id),
+  CONSTRAINT fk_linedemand_step FOREIGN KEY (routing_step_id) REFERENCES m_routing_step(id),
+  CONSTRAINT fk_linedemand_product FOREIGN KEY (product_id) REFERENCES m_product(id),
+  UNIQUE KEY uk_line_demand (line_id, product_code, plan_date),
+  INDEX idx_line_demand_line_date (line_id, plan_date),
+  INDEX idx_line_demand_product (product_code)
+) ENGINE=InnoDB;
+
+CREATE TABLE t_line_gantt_plan (
+  plan_id VARCHAR(160) PRIMARY KEY,
+  plan_date DATE NOT NULL,
+  plan_qty DECIMAL(14,3) NOT NULL DEFAULT 0,
+  sequence_no INT NULL,
+  start_datetime DATETIME NOT NULL,
+  end_datetime DATETIME NOT NULL,
+  processes_plan JSON NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  line_id BIGINT NOT NULL,
+  product_id BIGINT NOT NULL,
+  CONSTRAINT fk_gantt_line FOREIGN KEY (line_id) REFERENCES m_line(id),
+  CONSTRAINT fk_gantt_product FOREIGN KEY (product_id) REFERENCES m_product(id),
+  INDEX idx_gantt_line_date (line_id, plan_date)
+) ENGINE=InnoDB;
+
+CREATE TABLE t_line_realtime_record (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  record_type VARCHAR(20) NOT NULL,
+  qty DECIMAL(10,3) NOT NULL DEFAULT 0,
+  equipment_state VARCHAR(20) NULL,
+  event_data JSON NULL,
+  batch_no VARCHAR(100) NULL,
+  operator_name VARCHAR(50) NULL,
+  remarks TEXT NULL,
+  line_id BIGINT NOT NULL,
+  product_id BIGINT NULL,
+  product_code VARCHAR(50) NULL,
+  product_name VARCHAR(100) NULL,
+  CONSTRAINT fk_line_rt_line FOREIGN KEY (line_id) REFERENCES m_line(id),
+  CONSTRAINT fk_line_rt_product FOREIGN KEY (product_id) REFERENCES m_product(id),
+  INDEX idx_line_rt_line_ts (line_id, timestamp),
+  INDEX idx_line_rt_record_type (record_type),
+  INDEX idx_line_rt_product_code (product_code)
+) ENGINE=InnoDB;
+
+CREATE TABLE t_line_status (
+  line_id BIGINT PRIMARY KEY,
+  current_state VARCHAR(20) NOT NULL DEFAULT 'STOPPED',
+  today_output DECIMAL(10,3) NOT NULL DEFAULT 0,
+  today_plan DECIMAL(10,3) NOT NULL DEFAULT 0,
+  current_product_code VARCHAR(50) NULL,
+  current_product_name VARCHAR(100) NULL,
+  last_update DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_line_status_line FOREIGN KEY (line_id) REFERENCES m_line(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE t_process_realtime_record (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  product_code VARCHAR(50) NULL,
+  product_name VARCHAR(100) NULL,
+  timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  record_type VARCHAR(20) NOT NULL,
+  qty DECIMAL(10,3) NOT NULL DEFAULT 0,
+  equipment_state VARCHAR(20) NULL,
+  event_data JSON NULL,
+  batch_no VARCHAR(100) NULL,
+  operator_name VARCHAR(50) NULL,
+  remarks TEXT NULL,
+  process_id BIGINT NOT NULL,
+  product_id BIGINT NULL,
+  CONSTRAINT fk_proc_rt_process FOREIGN KEY (process_id) REFERENCES m_process(id),
+  CONSTRAINT fk_proc_rt_product FOREIGN KEY (product_id) REFERENCES m_product(id),
+  INDEX idx_proc_rt_process_ts (process_id, timestamp),
+  INDEX idx_proc_rt_record_type (record_type),
+  INDEX idx_proc_rt_product_code (product_code)
+) ENGINE=InnoDB;
+
+-- 13) Production / inventory / actual / scrap
+CREATE TABLE t_stock_allocation (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  location VARCHAR(50) NOT NULL,
+  current_stock DECIMAL(14,3) NOT NULL,
+  reserved_qty DECIMAL(14,3) NOT NULL DEFAULT 0,
+  min_stock_qty DECIMAL(14,3) NOT NULL,
+  is_bottleneck TINYINT(1) NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  product_id BIGINT NOT NULL,
+  CONSTRAINT fk_stock_alloc_product FOREIGN KEY (product_id) REFERENCES m_product(id),
+  UNIQUE KEY uk_stock_alloc (product_id, location),
+  INDEX idx_stock_alloc_product (product_id),
+  INDEX idx_stock_alloc_bottleneck (is_bottleneck)
+) ENGINE=InnoDB;
+
+CREATE TABLE t_production_order (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  order_no VARCHAR(50) NOT NULL UNIQUE,
+  order_qty DECIMAL(14,3) NOT NULL,
+  scheduled_start_date DATE NOT NULL,
+  scheduled_end_date DATE NOT NULL,
+  actual_start_date DATE NULL,
+  actual_end_date DATE NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'PLANNED',
+  priority INT NOT NULL DEFAULT 0,
+  remark TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  line_id BIGINT NULL,
+  product_id BIGINT NOT NULL,
+  routing_id BIGINT NULL,
+  allocation_id BIGINT NULL,
+  CONSTRAINT fk_prod_order_line FOREIGN KEY (line_id) REFERENCES m_line(id),
+  CONSTRAINT fk_prod_order_product FOREIGN KEY (product_id) REFERENCES m_product(id),
+  CONSTRAINT fk_prod_order_routing FOREIGN KEY (routing_id) REFERENCES m_routing(id),
+  CONSTRAINT fk_prod_order_allocation FOREIGN KEY (allocation_id) REFERENCES t_stock_allocation(id),
+  INDEX idx_prod_order_status (status),
+  INDEX idx_prod_order_start (scheduled_start_date),
+  INDEX idx_prod_order_product (product_id),
+  INDEX idx_prod_order_line (line_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE t_process_actual (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  completed_qty DECIMAL(14,3) NOT NULL,
+  actual_duration_min INT NOT NULL,
+  completed_at DATETIME NOT NULL,
+  operator VARCHAR(50) NULL,
+  remark TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  line_id BIGINT NOT NULL,
+  process_id BIGINT NOT NULL,
+  routing_step_id BIGINT NOT NULL,
+  production_order_id BIGINT NOT NULL,
+  CONSTRAINT fk_actual_line FOREIGN KEY (line_id) REFERENCES m_line(id),
+  CONSTRAINT fk_actual_process FOREIGN KEY (process_id) REFERENCES m_process(id),
+  CONSTRAINT fk_actual_step FOREIGN KEY (routing_step_id) REFERENCES m_routing_step(id),
+  CONSTRAINT fk_actual_order FOREIGN KEY (production_order_id) REFERENCES t_production_order(id),
+  INDEX idx_actual_order_step (production_order_id, routing_step_id),
+  INDEX idx_actual_completed (completed_at),
+  INDEX idx_actual_process (process_id),
+  INDEX idx_actual_line (line_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE t_scrap_record (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  product_code VARCHAR(50) NULL,
+  product_name VARCHAR(100) NULL,
+  qty DECIMAL(14,3) NOT NULL DEFAULT 0,
+  recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  reason VARCHAR(100) NULL,
+  batch_no VARCHAR(100) NULL,
+  operator_name VARCHAR(50) NULL,
+  remarks TEXT NULL,
+  line_id BIGINT NULL,
+  process_id BIGINT NULL,
+  product_id BIGINT NULL,
+  reason_detail VARCHAR(200) NULL,
+  is_replenished TINYINT(1) NOT NULL DEFAULT 0,
+  process_record_id BIGINT NULL,
+  replenished_at DATETIME NULL,
+  replenished_by VARCHAR(50) NULL,
+  decided_at DATETIME NULL,
+  decided_by VARCHAR(50) NULL,
+  disposition_status VARCHAR(20) NOT NULL DEFAULT 'REJECTED',
+  return_qty DECIMAL(14,3) NOT NULL DEFAULT 0,
+  plan_date DATE NULL,
+  CONSTRAINT fk_scrap_line FOREIGN KEY (line_id) REFERENCES m_line(id),
+  CONSTRAINT fk_scrap_process FOREIGN KEY (process_id) REFERENCES m_process(id),
+  CONSTRAINT fk_scrap_product FOREIGN KEY (product_id) REFERENCES m_product(id),
+  CONSTRAINT fk_scrap_process_record FOREIGN KEY (process_record_id) REFERENCES t_process_realtime_record(id),
+  UNIQUE KEY uk_scrap_process_record (process_record_id),
+  INDEX idx_scrap_process_time (process_id, recorded_at),
+  INDEX idx_scrap_line_time (line_id, recorded_at),
+  INDEX idx_scrap_product_code (product_code),
+  INDEX idx_scrap_plan_date (plan_date)
+) ENGINE=InnoDB;
+
+CREATE TABLE t_scrap_record_detail (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  product_code VARCHAR(50) NULL,
+  product_name VARCHAR(100) NULL,
+  process_id BIGINT NULL,
+  line_id BIGINT NULL,
+  supplier_id BIGINT NULL,
+  sourcing_type VARCHAR(20) NULL,
+  deduct_qty DECIMAL(14,3) NOT NULL DEFAULT 0,
+  is_replenished TINYINT(1) NOT NULL DEFAULT 0,
+  replenished_at DATETIME NULL,
+  replenished_by VARCHAR(50) NULL,
+  product_id BIGINT NULL,
+  scrap_record_id BIGINT NOT NULL,
+  CONSTRAINT fk_scrap_detail_product FOREIGN KEY (product_id) REFERENCES m_product(id),
+  CONSTRAINT fk_scrap_detail_record FOREIGN KEY (scrap_record_id) REFERENCES t_scrap_record(id),
+  INDEX idx_scrap_detail_product_code (product_code)
+) ENGINE=InnoDB;
+
 -- ============================================================
 -- 運用ルール・補足説明
 -- ============================================================
@@ -357,5 +682,5 @@ CREATE TABLE t_schedule_detail (
 --   - sourcing_type='MAKE' の場合、supplier_id は NULL
 --
 -- 【サイクルタイム参照】
---   - m_routing_step_output.output_product_id を基準に m_cycle_time を参照
+--   - m_routing_step.output_product_id を基準に m_cycle_time を参照
 --   - 所要時間 = setup_time_min + (cycle_time_sec × 数量 / 60)

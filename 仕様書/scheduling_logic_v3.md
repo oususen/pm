@@ -34,13 +34,15 @@ return cursor
 ## 2. MINUTE工程の所要算出
 ```
 qty = lot_size or order_qty
+step_output_product = step.output_product  # m_routing_step.output_product_id
 ct = lookup_cycle_time(product=step_output_product, process=step.process, line=step.line, date=ref_date)
 duration_min = step.duration_min or (ct.setup_time_min + ct.cycle_time_sec * qty / 60)
 ```
 
-> **基準製品**：`m_routing_step_output.output_product_id` を使用。  
+> **基準製品**：`m_routing_step.output_product_id` を使用。  
 > 溶接ステーションごとに output_product を変えることで、サイクル差を自然に表現。
 > 受注品番も最終工程の output_product と一致させ、進度・在庫・スケジュールを同一コードで追う。
+> 連産品はBOMの`is_coproduct`で表現するため、`m_routing_step_output`は廃止。
 
 ---
 

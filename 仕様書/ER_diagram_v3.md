@@ -47,6 +47,7 @@ erDiagram
       INT step_no
       BIGINT process_id FK
       BIGINT line_id FK
+      BIGINT output_product_id FK
       ENUM time_unit "DAY,MINUTE"
       INT lead_time_days
       INT start_offset_min
@@ -156,18 +157,23 @@ erDiagram
 
     line_backlog {
       BIGINT id PK
-      DATE plan_date
+      BIGINT line_id FK
       BIGINT process_id FK
       BIGINT product_id FK
-      BIGINT line_id FK
-      DECIMAL(14,3) demand_qty_plan "旧：後ラインからの需要または受注からの需要（廃止予定）"
-      DECIMAL(14,3) order_qty "発注数/受注数：最終ラインはLineDemandから、他ラインは後ラインのplan_qty×BOM個数を集計"
-      DECIMAL(14,3) plan_qty "ユーザー入力の生産計画数量"
-      DECIMAL(14,3) actual_qty "実際の生産数量"
-      DECIMAL(14,3) stock_qty "在庫"
-      DECIMAL(14,3) planned_stock_qty "計画在庫"
+      DATE plan_date
       BIGINT source_line_id FK
       BIGINT source_routing_step_id FK
+      BIGINT plan_id FK
+      INT sequence_no
+      DECIMAL(14,3) demand_qty_plan "需要計画数量"
+      DECIMAL(14,3) order_qty "必要数量（最終ラインは受注、中間ラインは後工程からの引当）"
+      DECIMAL(14,3) plan_qty "計画数量（生産予定）"
+      DECIMAL(14,3) actual_qty "生産実績数量（このラインでの生産実績）"
+      DECIMAL(14,3) actual_shipment_qty "出荷実績数量（後工程への引き渡し実績）"
+      DECIMAL(14,3) adjust_qty "調整数量"
+      DECIMAL(14,3) scrap_qty "仕損数量"
+      DECIMAL(14,3) stock_qty "実在庫数量"
+      DECIMAL(14,3) planned_stock_qty "計画在庫数量"
       DATETIME updated_at
     }
 

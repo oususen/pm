@@ -8,8 +8,16 @@
 - `m_line_default` のPKは **line_id 単独** に統一（ER図表現を修正）。
 - **受注テーブル (`t_order`, `t_order_line`) と取込ステージング (`stg_order_raw`, `stg_order_daily`) を追加**、`t_schedule_detail.order_id` と連携。
 - サンプル: ルーティング `step_no` を **連番** に修正、`time_unit` を明示。
-- サイクルタイム参照の基準を**m_routing_step_output.output_product_id**に統一。
+- サイクルタイム参照の基準を**m_routing_step.output_product_id**に統一（連産品はBOMの`is_coproduct`で表現するため`m_routing_step_output`は廃止）。
 - 量産セル流し向けに **工程タイプ（FLOW / PARALLEL_POOL）** と **バッファ時間** を追加、サイクルに **yield_rate** を保持。
+- `m_product`/`m_process`/`m_line` に管理系カラム（`product_name_halfwidth`, `is_virtual_set`, `is_line_final_product`, `image_url`, `line_id`, `process_id`, `management_unit`, `calendar_id`）を追加。
+- `m_bom` に `is_coproduct`、`m_bom_item` に工程/ライン/時間情報を追加。
+- `m_routing_step` に階層パス/深さ/並列数を追加。
+- 勤務パターン/休憩（`m_work_pattern`, `m_break_time`）と `m_calendar_day.work_pattern_id` を追加。
+- 工程別部品/工程別サイクル時間（`m_routing_step_material`, `m_process_cycle_time`）を追加。
+- 需要/ガント/リアルタイム系（`t_line_demand`, `t_line_gantt_plan`, `t_line_realtime_record`, `t_line_status`, `t_process_realtime_record`）と製造実行系（`t_stock_allocation`, `t_production_order`, `t_process_actual`, `t_scrap_record_detail`）を追加。
+- `t_order.status` に `SUPERSEDED` を追加。
+- `stg_order_raw` / `stg_order_daily` に `product_name`, `product_name_halfwidth` を追加。
 
 ---
 
@@ -19,17 +27,24 @@
 | id | BIGINT PK | |
 | product_code | VARCHAR(30) UNIQUE | 品番コード |
 | product_name | VARCHAR(100) | 品名 |
-| category | VARCHAR(20) | 集合/単品/材料/購入品（実運用はENUM想定） |
+| product_name_halfwidth | VARCHAR(100) NULL | 品名半角 |
+| category | VARCHAR(20) NULL | 集合/単品/材料/購入品（実運用はENUM想定） |
 | unit | VARCHAR(10) | 単位 |
 | standard_lt_days | INT NULL | 完成品標準LT（日） |
+| image_url | VARCHAR(255) NULL | 画像URL |
+| line_id | BIGINT FK NULL | ライン情報 |
+| process_id | BIGINT FK NULL | 工程情報 |
+| management_unit | VARCHAR(10) NULL | 管理区分（DAY/MINUTE） |
 | self_lt_days | INT NULL | 親内オフセット（日） |
 | is_final_product | TINYINT(1) DEFAULT 0 | 最終製品 |
+| is_line_final_product | TINYINT(1) DEFAULT 0 | ライン最終品 |
 | is_phantom | TINYINT(1) DEFAULT 0 | 見なし組立 |
+| is_virtual_set | TINYINT(1) DEFAULT 0 | 仮想セット品番 |
 | is_active | TINYINT(1) DEFAULT 1 | |
 | created_at/updated_at | DATETIME | |
 
 - `category` は製品の状態区分（完成/中間/WIP/材料/購買など）として運用する。
-- 受注に載る製品コードは社内最終工程の出力品（ルート末尾の `m_routing_step_output.output_product_id`）と一致させる前提。
+- 受注に載る製品コードは社内最終工程の出力品（ルート末尾の `m_routing_step.output_product_id`）と一致させる前提。
 
 ## 主要フィールド詳細
 
@@ -61,6 +76,16 @@
 - TRUE時、「顧客に出荷する最終製品」として扱われる
 - 受注データに載る製品コードは、通常この最終製品フラグがONのものが対象
 
+**`is_line_final_product`（ライン最終品）**
+
+- ライン内で最後に出力される製品フラグ（次ラインへ渡す中間品を含む）
+- ライン別の最終出力品を明示したい場合に使用
+
+**`is_virtual_set`（仮想セット品番）**
+
+- 連産品を表す仮想的なセット品番
+- BOMの親に使用し、この品番自体は在庫を持たない
+
 ---
 
 # 2. 得意先 `m_customer`（新規・正式追加）
@@ -84,15 +109,17 @@
 | process_name | VARCHAR(50) | 工程名 |
 | line_id | BIGINT FK NULL | 所属ライン（ライン直下で管理する場合に使用） |
 | is_outsource | TINYINT(1) DEFAULT 0 | 外注フラグ |
+| management_unit | VARCHAR(10) DEFAULT 'MINUTE' | 管理単位（DAY/MINUTE） |
 | is_active | TINYINT(1) DEFAULT 1 | |
 | created_at/updated_at | DATETIME | |
 
-# 4. ライン `m_line`（変更なし）
+# 4. ライン `m_line`
 | カラム | 型 | 説明 |
 |---|---|---|
 | id | BIGINT PK | |
 | line_code | VARCHAR(20) UNIQUE | ラインコード |
 | line_name | VARCHAR(50) | ライン名 |
+| calendar_id | BIGINT FK NULL | 勤務カレンダ |
 | lead_time_days | INT NULL | リードタイム（日） |
 | is_active | TINYINT(1) DEFAULT 1 | |
 | created_at/updated_at | DATETIME | |
@@ -118,14 +145,18 @@
 | id | BIGINT PK | |
 | routing_id | BIGINT FK | |
 | step_no | INT | 連番（1..n） |
-| parallel_group | INT | 同一step_no内の順序グループ（重複許可用、デフォルト1） |
 | process_id | BIGINT FK | |
 | line_id | BIGINT FK NULL | |
+| output_product_id | BIGINT FK NULL | 工程の出力品目（連産品はBOMで表現） |
+| hierarchy_path | VARCHAR(100) DEFAULT '' | 工程階層パス |
+| hierarchy_depth | INT DEFAULT 0 | 工程階層深さ |
 | step_type | ENUM('FLOW','PARALLEL_POOL') DEFAULT 'FLOW' | 流し/並列プール |
 | **time_unit** | **ENUM('DAY','MINUTE')** | 単位の明示 |
 | lead_time_days | INT NOT NULL DEFAULT 0 | 日単位（`time_unit='DAY'`で使用） |
 | start_offset_min | INT NULL | 分オフセット |
 | duration_min | INT NULL | 分所要（段取り+サイクル×数量） |
+| parallel_count | INT DEFAULT 1 | 並列数 |
+| parallel_group | INT DEFAULT 1 | 同一step_no内の順序グループ（重複許可用） |
 | remark | VARCHAR(200) NULL | |
 | created_at/updated_at | DATETIME | |
 
@@ -133,8 +164,9 @@
 
 ---
 
-# 6. 工程出来高 `m_routing_step_output`
-- ステップ完了で出来上がる **WIP/製品** を定義。
+# 6. 工程出力（`m_routing_step.output_product`）
+- ステップ完了で出来上がる **WIP/製品** は `m_routing_step.output_product_id` で管理する。
+- 連産品（複数出力）はBOMの`is_coproduct`で親(仮想セット)と子(実品)を表現するため、`m_routing_step_output`は廃止。
 - サイクルタイム参照の基準は **この `output_product_id`** を用いる。
 
 ---
@@ -145,14 +177,29 @@
 
 ---
 
+## 7.1 工程別サイクル時間 `m_process_cycle_time`
+- 製品×工程×ラインの **分/個** と **段取り（分）**、標準ロットサイズを管理
+- ライン指定が無い場合は `line_id` を NULL で登録
+- 有効期間: `valid_from` / `valid_to`、`is_active`
+
+---
+
 # 8. 工程パラメータ `m_routing_step_param`
 - ロット、移送バッチ、着手条件、バッファ数量（target/max）、バッファ時間（前後）、日内時間枠（分）
 - `step_type='FLOW'` ではバッファをWIPの緩衝に使い、`'PARALLEL_POOL'` ではプールキャパと組み合わせて所要日数を算出
 
 ---
 
+## 8.1 工程別部品消費 `m_routing_step_material`
+- 1工程で消費する部品・数量・消費タイミングを保持
+- 主な列: `routing_step_id`, `component_id`, `quantity`, `consume_timing(START/END)`, `remark`
+
+---
+
 # 9. 構成 `m_bom` / `m_bom_item`
 - 段階BOM
+- `m_bom.is_coproduct` は連産品BOMフラグ（親は仮想セット品番）
+- `m_bom_item` に `process_id`, `line_id`, `time_unit`, `lead_time_days`, `duration_min` を保持（BOM→ルーティング自動生成に使用）
 - `m_bom_item.sourcing_type`（MAKE/BUY/SUBCON）と `supplier_id` 整合の **CHECK制約** を追加。
 
 ---
@@ -166,6 +213,32 @@
 
 # 11. カレンダ `m_calendar` / `m_calendar_day`
 - `work_minutes` を持ち、日跨ぎ計算を支援。
+- `m_calendar_day.work_pattern_id` で勤務パターンを指定可能。
+- 勤務パターン: `m_work_pattern`（開始/終了時刻、説明）
+- 休憩: `m_break_time`（勤務パターンに対する休憩枠）
+
+---
+
+## 11.1 勤務パターン `m_work_pattern`
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | BIGINT PK | |
+| pattern_code | VARCHAR(20) UNIQUE | パターンコード |
+| pattern_name | VARCHAR(50) | パターン名 |
+| start_time | TIME | 開始時刻 |
+| end_time | TIME NULL | 終了時刻 |
+| description | TEXT NULL | 説明 |
+| created_at/updated_at | DATETIME | |
+
+## 11.2 休憩 `m_break_time`
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | BIGINT PK | |
+| work_pattern_id | BIGINT FK | 勤務パターン |
+| break_start | TIME | 休憩開始時刻 |
+| break_end | TIME | 休憩終了時刻 |
+| order | INT DEFAULT 1 | 順序 |
+| created_at/updated_at | DATETIME | |
 
 ---
 
@@ -173,7 +246,7 @@
 - **時間単位**：`time_unit='DAY'` → `lead_time_days` 必須、`'MINUTE'` → `duration_min` 必須。
 - **工程タイプ**：`step_type='FLOW'` は逐次流し、`'PARALLEL_POOL'` は同一加工を並列に裁くプール。キャパはサイクルタイム×稼働分/日で算出。
 - **調達整合**：`sourcing_type='BUY'` ⇒ `supplier_id NOT NULL`。`MAKE/SUBCON` ⇒ `supplier_id IS NULL` を推奨。
-- **サイクル参照**：`m_routing_step_output.output_product_id` を `m_cycle_time.product_id` と紐付けて所要を算出。
+- **サイクル参照**：`m_routing_step.output_product_id` を `m_cycle_time.product_id` と紐付けて所要を算出。
 
 # 13. 受注（ヘッダ/明細）＋取込ステージング
 ## 13.1 受注ヘッダ `t_order`
@@ -187,7 +260,7 @@
 | source_system/source_file | VARCHAR | 取込元識別 |
 | order_date | DATE NULL | 受注日など |
 | freeze_from | DATE NULL | 凍結開始（必要に応じて使用） |
-| status | ENUM('OPEN','CLOSED','CANCELED') | デフォルト OPEN |
+| status | ENUM('OPEN','CLOSED','CANCELED','SUPERSEDED') | デフォルト OPEN |
 | created_at/updated_at | DATETIME | |
 
 ## 13.2 受注明細 `t_order_line`
@@ -205,8 +278,8 @@
 | created_at/updated_at | DATETIME | |
 
 ## 13.3 取込ステージング
-- `stg_order_raw`：取込ファイルを行単位で保持。`customer_code`, `order_type`, `source_file`, `source_row_no`, `record_token(V1等)`, `start_month`, `due_date`, `product_code`, `quantity`, `raw_payload JSON`, `parse_status(PENDING/PARSED/ERROR)`, `error_message`。
-- `stg_order_daily`：日別に正規化した需要。`raw_id`(←`stg_order_raw`), `customer_id`, `order_type`, `version_no`, `product_code`, `due_date`, `quantity`, `plant_code`, `ship_to_code`, `source_system/file`。`t_order`へUPSERTする前段。
+- `stg_order_raw`：取込ファイルを行単位で保持。`customer_code`, `order_type`, `source_file`, `source_row_no`, `record_token(V1等)`, `start_month`, `due_date`, `product_code`, `product_name`, `product_name_halfwidth`, `quantity`, `raw_payload JSON`, `parse_status(PENDING/PARSED/ERROR)`, `error_message`。
+- `stg_order_daily`：日別に正規化した需要。`raw_id`(←`stg_order_raw`), `customer_id`, `order_type`, `version_no`, `product_code`, `product_name`, `product_name_halfwidth`, `due_date`, `quantity`, `plant_code`, `ship_to_code`, `source_system/file`。`t_order`へUPSERTする前段。
 - `t_schedule_detail.order_id` は `t_order` とFK連携し、スケジュール結果を受注明細と結合可能にする。
 - 受注明細に載る `product_code` は、最終工程の出力品番（ルート末尾の output_product）をそのまま使用する想定。
 
@@ -236,12 +309,223 @@ WHERE rs.time_unit='DAY';
 | product_name | VARCHAR(100) NULL | 品名 |
 | qty | DECIMAL(14,3) | 仕損数量 |
 | recorded_at | DATETIME | 記録時刻（auto_now_add） |
+| plan_date | DATE NULL | 計画日（任意） |
+| disposition_status | VARCHAR(20) | 判定ステータス（PENDING/APPROVED/REJECTED/PARTIAL） |
+| return_qty | DECIMAL(14,3) | 戻し数量 |
+| decided_at | DATETIME NULL | 判定日時 |
+| decided_by | VARCHAR(50) NULL | 判定者 |
 | reason | VARCHAR(100) NULL | 理由/区分（サビ, 変形/キズ, ビードずれ, ブローホール, 溶接穴あき, アンダーカット, 精度不良, 欠品/誤組, 素材/仕掛不良, その他） |
 | reason_detail | VARCHAR(200) NULL | 理由詳細（「その他」選択時に必須） |
 | batch_no | VARCHAR(100) NULL | ロット番号 |
 | operator_name | VARCHAR(50) | 記入者（UIで必須。ログインユーザー名を初期セット） |
 | remarks | TEXT NULL | 備考 |
+| process_record_id | BIGINT NULL | 工程実時間記録（1:1） |
+| is_replenished | TINYINT(1) DEFAULT 0 | 補充完了 |
+| replenished_at | DATETIME NULL | 補充完了日時 |
+| replenished_by | VARCHAR(50) NULL | 補充完了者 |
 
 - 取得元: 工程リアルタイム記録 API の `record_type='SCRAP'` 送信時に同時書き込み。`event_data.reason/reason_detail` を反映。
 - 暫定運用: 将来的にライン/工程 backlog 集計へ統合予定。現行はシンプル記録用途で先行稼働。
 - インデックス: `(process_id, recorded_at)`, `(line_id, recorded_at)`, `product_code`。
+
+---
+
+## 15.1. 仕損明細 `t_scrap_record_detail`
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | BIGINT PK | |
+| scrap_record_id | BIGINT FK | 仕損記録 |
+| product_id | BIGINT FK NULL | 製品 |
+| product_code | VARCHAR(50) NULL | 品番 |
+| product_name | VARCHAR(100) NULL | 品名 |
+| process_id | BIGINT NULL | 工程ID |
+| line_id | BIGINT NULL | ラインID |
+| supplier_id | BIGINT NULL | 仕入先ID |
+| sourcing_type | VARCHAR(20) NULL | 調達区分 |
+| deduct_qty | DECIMAL(14,3) DEFAULT 0 | 減算数量 |
+| is_replenished | TINYINT(1) DEFAULT 0 | 補充完了 |
+| replenished_at | DATETIME NULL | 補充完了日時 |
+| replenished_by | VARCHAR(50) NULL | 補充完了者 |
+
+---
+
+# 16. ライン工程別バックログ `line_backlog`（トランザクションテーブル）
+
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | BIGINT PK | |
+| line_id | BIGINT FK | ライン（m_line） |
+| process_id | BIGINT FK | 工程（m_process） |
+| product_id | BIGINT FK | 製品（m_product） |
+| plan_date | DATE | 計画日 |
+| source_line_id | BIGINT FK NULL | 元ライン（後工程の場合、前工程のラインID） |
+| source_routing_step_id | BIGINT FK NULL | 元ルーティングステップ |
+| plan_id | VARCHAR(255) NULL | 計画ID（将来的な計画バージョン管理用） |
+| sequence_no | INT NULL | 順序番号（同一日内の優先順位） |
+| demand_qty_plan | INT DEFAULT 0 | 需要計画数量 |
+| order_qty | INT DEFAULT 0 | 必要数量（最終ラインは受注、中間ラインは後工程からの引当） |
+| plan_qty | INT DEFAULT 0 | 計画数量（生産予定） |
+| actual_qty | INT DEFAULT 0 | 生産実績数量（このラインでの生産実績） |
+| actual_shipment_qty | INT DEFAULT 0 | 出荷実績数量（後工程への引き渡し実績） |
+| adjust_qty | INT DEFAULT 0 | 調整数量 |
+| scrap_qty | INT DEFAULT 0 | 仕損数量 |
+| stock_qty | INT DEFAULT 0 | 実在庫数量 |
+| planned_stock_qty | INT DEFAULT 0 | 計画在庫数量 |
+| updated_at | DATETIME | 更新日時 |
+
+**ユニークキー**: `(line_id, process_id, product_id, plan_date)`
+
+## 用途
+
+- ライン×工程×製品×日別の計画・実績・在庫を一元管理
+- 生産進度照会、在庫照会の基礎データとして使用
+- 工程リアルタイム記録（PRODUCTION）から `actual_qty` へ自動反映
+- 出荷実績記録から `actual_shipment_qty` へ反映
+- 後工程の「確定」値 = 前工程の `actual_shipment_qty`（引き渡し実績）
+- 当工程の「実績」値 = 当工程の `actual_qty`（生産実績）
+
+## 更新タイミング
+
+- 計画生成時：`plan_qty`, `planned_stock_qty` 等を更新
+- 生産実績登録時：`actual_qty` を加算（工程リアルタイム記録 API経由）
+- 出荷実績登録時：`actual_shipment_qty` を更新
+- 仕損記録時：`scrap_qty` を加算
+- 在庫調整時：`adjust_qty`, `stock_qty` を更新
+
+## インデックス
+
+- `(line_id, process_id, product_id, plan_date)` - ユニークキー兼検索用
+- `(plan_date)` - 日付範囲検索用
+- `(product_id, plan_date)` - 製品別検索用
+
+---
+
+# 17. ライン需要/ガント/リアルタイム
+
+## 17.1 ライン需要 `t_line_demand`
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | BIGINT PK | |
+| line_id | BIGINT FK | ライン |
+| routing_step_id | BIGINT FK NULL | ルーティング工程 |
+| product_id | BIGINT FK NULL | 製品 |
+| product_code | VARCHAR(50) | 製品コード |
+| plan_date | DATE | 必要日 |
+| lead_time_days | INT DEFAULT 0 | リードタイム（日） |
+| forecast_qty | DECIMAL(14,3) DEFAULT 0 | 内示数量 |
+| firm_qty | DECIMAL(14,3) DEFAULT 0 | 確定数量 |
+| plan_qty | DECIMAL(14,3) DEFAULT 0 | 計画数 |
+| actual_qty | DECIMAL(14,3) DEFAULT 0 | 実績数 |
+| plan_progress | DECIMAL(9,3) DEFAULT 0 | 計画進度 |
+| actual_progress | DECIMAL(9,3) DEFAULT 0 | 実績進度 |
+| order_numbers | VARCHAR(500) DEFAULT '' | 展開元受注番号 |
+| created_at/updated_at | DATETIME | |
+
+## 17.2 ラインガント計画 `t_line_gantt_plan`
+| カラム | 型 | 説明 |
+|---|---|---|
+| plan_id | VARCHAR(160) PK | 計画ID |
+| line_id | BIGINT FK | ライン |
+| product_id | BIGINT FK | 製品 |
+| plan_date | DATE | 計画日 |
+| plan_qty | DECIMAL(14,3) DEFAULT 0 | 計画数量 |
+| sequence_no | INT NULL | 順序番号 |
+| start_datetime | DATETIME | 開始 |
+| end_datetime | DATETIME | 終了 |
+| processes_plan | JSON NULL | 工程計画 |
+| created_at/updated_at | DATETIME | |
+
+## 17.3 ライン実時間記録 `t_line_realtime_record`
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | BIGINT PK | |
+| line_id | BIGINT FK | ライン |
+| product_id | BIGINT FK NULL | 製品 |
+| product_code | VARCHAR(50) NULL | 製品コード |
+| product_name | VARCHAR(100) NULL | 品名 |
+| timestamp | DATETIME | 記録時刻 |
+| record_type | VARCHAR(20) | 記録タイプ |
+| qty | DECIMAL(10,3) DEFAULT 0 | 数量 |
+| equipment_state | VARCHAR(20) NULL | 設備状態 |
+| event_data | JSON NULL | 付帯情報 |
+| batch_no | VARCHAR(100) NULL | ロット番号 |
+| operator_name | VARCHAR(50) NULL | 作業者名 |
+| remarks | TEXT NULL | 備考 |
+
+## 17.4 ライン状態 `t_line_status`
+| カラム | 型 | 説明 |
+|---|---|---|
+| line_id | BIGINT PK | ライン |
+| current_state | VARCHAR(20) DEFAULT 'STOPPED' | 現在状態 |
+| today_output | DECIMAL(10,3) DEFAULT 0 | 本日生産数 |
+| today_plan | DECIMAL(10,3) DEFAULT 0 | 本日計画数 |
+| current_product_code | VARCHAR(50) NULL | 現在生産品番 |
+| current_product_name | VARCHAR(100) NULL | 現在生産品名 |
+| last_update | DATETIME | 最終更新時刻 |
+
+## 17.5 工程実時間記録 `t_process_realtime_record`
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | BIGINT PK | |
+| process_id | BIGINT FK | 工程 |
+| product_id | BIGINT FK NULL | 製品 |
+| product_code | VARCHAR(50) NULL | 製品コード |
+| product_name | VARCHAR(100) NULL | 品名 |
+| timestamp | DATETIME | 記録時刻 |
+| record_type | VARCHAR(20) | 記録タイプ |
+| qty | DECIMAL(10,3) DEFAULT 0 | 数量 |
+| equipment_state | VARCHAR(20) NULL | 設備状態 |
+| event_data | JSON NULL | 付帯情報 |
+| batch_no | VARCHAR(100) NULL | ロット番号 |
+| operator_name | VARCHAR(50) NULL | 作業者名 |
+| remarks | TEXT NULL | 備考 |
+
+---
+
+# 18. 製造実行/在庫/実績
+
+## 18.1 在庫引当 `t_stock_allocation`
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | BIGINT PK | |
+| product_id | BIGINT FK | 製品 |
+| location | VARCHAR(50) | 保管場所 |
+| current_stock | DECIMAL(14,3) | 現在庫数 |
+| reserved_qty | DECIMAL(14,3) DEFAULT 0 | 引当済数量 |
+| min_stock_qty | DECIMAL(14,3) | 最小在庫数 |
+| is_bottleneck | TINYINT(1) DEFAULT 0 | ボトルネック品 |
+| created_at/updated_at | DATETIME | |
+
+## 18.2 製造指示 `t_production_order`
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | BIGINT PK | |
+| order_no | VARCHAR(50) UNIQUE | 製造指示番号 |
+| product_id | BIGINT FK | 製品 |
+| routing_id | BIGINT FK NULL | ルーティング |
+| line_id | BIGINT FK NULL | ライン |
+| order_qty | DECIMAL(14,3) | 指示数量 |
+| scheduled_start_date | DATE | 予定開始日 |
+| scheduled_end_date | DATE | 予定完了日 |
+| actual_start_date | DATE NULL | 実績開始日 |
+| actual_end_date | DATE NULL | 実績完了日 |
+| status | VARCHAR(20) DEFAULT 'PLANNED' | ステータス |
+| allocation_id | BIGINT FK NULL | 在庫引当 |
+| priority | INT DEFAULT 0 | 優先度 |
+| remark | TEXT NULL | 備考 |
+| created_at/updated_at | DATETIME | |
+
+## 18.3 工程別実績 `t_process_actual`
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | BIGINT PK | |
+| production_order_id | BIGINT FK | 製造指示 |
+| routing_step_id | BIGINT FK | ルーティング工程 |
+| process_id | BIGINT FK | 工程 |
+| line_id | BIGINT FK | ライン |
+| completed_qty | DECIMAL(14,3) | 完了数量 |
+| actual_duration_min | INT | 実績工数（分） |
+| completed_at | DATETIME | 完了日時 |
+| operator | VARCHAR(50) NULL | 作業者 |
+| remark | TEXT NULL | 備考 |
+| created_at/updated_at | DATETIME | |

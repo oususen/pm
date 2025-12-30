@@ -1,5 +1,8 @@
 from django.db import migrations
 
+# NOTE: Legacy m_routing_step_output was dropped because coproduct BOM handles
+# multi-output cases, and RoutingStep.output_product is the canonical output.
+
 
 class Migration(migrations.Migration):
 
