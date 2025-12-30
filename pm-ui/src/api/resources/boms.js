@@ -1,6 +1,24 @@
 export const createBomsAPI = (client) => ({
-  getBOMs() {
-    return client.get('/boms/')
+  getBOMs(params = {}) {
+    const queryParams = new URLSearchParams()
+    if (params.search) queryParams.append('search', params.search)
+    if (params.parent_is_final !== undefined && params.parent_is_final !== '') {
+      queryParams.append('parent_is_final', params.parent_is_final)
+    }
+    if (params.parent_is_line_final !== undefined && params.parent_is_line_final !== '') {
+      queryParams.append('parent_is_line_final', params.parent_is_line_final)
+    }
+    if (params.is_coproduct !== undefined && params.is_coproduct !== '') {
+      queryParams.append('is_coproduct', params.is_coproduct)
+    }
+    if (params.version) queryParams.append('version', params.version)
+    if (params.created_from) queryParams.append('created_from', params.created_from)
+    if (params.created_to) queryParams.append('created_to', params.created_to)
+    if (params.is_active !== undefined && params.is_active !== '') {
+      queryParams.append('is_active', params.is_active)
+    }
+    const query = queryParams.toString()
+    return client.get(`/boms/${query ? '?' + query : ''}`)
   },
   getBOM(id) {
     return client.get(`/boms/${id}/`)

@@ -3,7 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, Q
 from django.core.files.storage import default_storage
 import django_filters
 import os
@@ -278,6 +278,66 @@ class BOMViewSet(viewsets.ModelViewSet):
     filterset_fields = ['parent_product', 'is_active']
     ordering_fields = ['created_at']
     ordering = ['-created_at']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        # デバッグログ
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"BOM Filter Params: {dict(self.request.query_params)}")
+
+        # 親製品（品番/品名）検索
+        search = self.request.query_params.get('search', None)
+        if search:
+            queryset = queryset.filter(
+                Q(parent_product__product_code__icontains=search) |
+                Q(parent_product__product_name__icontains=search)
+            )
+
+        # 最終品フィルタ（親製品のis_final_productフィールドで絞り込み）
+        is_final = self.request.query_params.get('parent_is_final', None)
+        if is_final is not None and is_final != '':
+            is_final_bool = is_final.lower() == 'true'
+            queryset = queryset.filter(parent_product__is_final_product=is_final_bool)
+
+        # ライン最終品フィルタ（親製品のis_line_final_productフィールドで絞り込み）
+        is_line_final = self.request.query_params.get('parent_is_line_final', None)
+        if is_line_final is not None and is_line_final != '':
+            is_line_final_bool = is_line_final.lower() == 'true'
+            queryset = queryset.filter(parent_product__is_line_final_product=is_line_final_bool)
+
+        # 連産品フィルタ
+        is_coproduct = self.request.query_params.get('is_coproduct', None)
+        if is_coproduct is not None and is_coproduct != '':
+            is_coproduct_bool = is_coproduct.lower() == 'true'
+            queryset = queryset.filter(is_coproduct=is_coproduct_bool)
+
+        # 版フィルタ
+        version = self.request.query_params.get('version', None)
+        if version:
+            queryset = queryset.filter(version__icontains=version)
+
+        # 作成日フィルタ（From）
+        created_from = self.request.query_params.get('created_from', None)
+        if created_from:
+            logger.info(f"Filtering by created_from: {created_from}")
+            from datetime import datetime
+            created_from_dt = datetime.strptime(created_from, '%Y-%m-%d')
+            queryset = queryset.filter(created_at__gte=created_from_dt)
+
+        # 作成日フィルタ（To）
+        created_to = self.request.query_params.get('created_to', None)
+        if created_to:
+            logger.info(f"Filtering by created_to: {created_to}")
+            from datetime import datetime, timedelta
+            created_to_dt = datetime.strptime(created_to, '%Y-%m-%d')
+            # その日の23:59:59まで含めるため、翌日の00:00:00未満とする
+            created_to_dt = created_to_dt + timedelta(days=1)
+            queryset = queryset.filter(created_at__lt=created_to_dt)
+
+        logger.info(f"Final queryset count: {queryset.count()}")
+        return queryset
 
     def _serialize_product(self, product: Product):
         return {

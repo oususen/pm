@@ -9,6 +9,69 @@
     </div>
 
     <div class="page-content">
+      <div class="filter-bar">
+        <div class="filter-field">
+          <label>親製品（品番/品名）</label>
+          <input
+            v-model="filters.search"
+            @keyup.enter="fetchBOMs"
+            placeholder="品番・品名で検索"
+          />
+        </div>
+        <div class="filter-field">
+          <label>最終品</label>
+          <select v-model="filters.is_final">
+            <option value="">すべて</option>
+            <option value="true">最終</option>
+            <option value="false">それ以外</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label>ライン最終品</label>
+          <select v-model="filters.is_line_final">
+            <option value="">すべて</option>
+            <option value="true">はい</option>
+            <option value="false">いいえ</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label>連産品</label>
+          <select v-model="filters.is_coproduct">
+            <option value="">すべて</option>
+            <option value="true">はい</option>
+            <option value="false">いいえ</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label>版</label>
+          <input
+            v-model="filters.version"
+            @keyup.enter="fetchBOMs"
+            placeholder="版で検索"
+          />
+        </div>
+        <div class="filter-field">
+          <label>作成日 From</label>
+          <input type="date" v-model="filters.created_from" />
+        </div>
+        <div class="filter-field">
+          <label>作成日 To</label>
+          <input type="date" v-model="filters.created_to" />
+        </div>
+        <div class="filter-field">
+          <label>有効</label>
+          <select v-model="filters.is_active">
+            <option value="">すべて</option>
+            <option value="true">有効</option>
+            <option value="false">無効</option>
+          </select>
+        </div>
+        <div class="filter-actions">
+          <button @click="fetchBOMs" class="btn-primary">検索</button>
+          <button @click="resetFilters" class="btn-secondary">リセット</button>
+        </div>
+      </div>
+
       <table class="data-table">
         <thead>
           <tr>
@@ -452,6 +515,17 @@ const formData = ref({
   is_active: true
 })
 
+const filters = ref({
+  search: '',
+  is_final: '',
+  is_line_final: '',
+  is_coproduct: '',
+  version: '',
+  created_from: '',
+  created_to: '',
+  is_active: ''
+})
+
 const showDetailsDialog = ref(false)
 const selectedBOM = ref({})
 const bomItems = ref([])
@@ -565,9 +639,50 @@ const sourcingTypeOptions = [
   { value: 'SUBCON', label: '外注' }
 ]
 
+const resetFilters = () => {
+  filters.value = {
+    search: '',
+    is_final: '',
+    is_line_final: '',
+    is_coproduct: '',
+    version: '',
+    created_from: '',
+    created_to: '',
+    is_active: ''
+  }
+  fetchBOMs()
+}
+
 const fetchBOMs = async () => {
   try {
-    const response = await api.boms.getBOMs()
+    const params = {}
+
+    if (filters.value.search) {
+      params.search = filters.value.search
+    }
+    if (filters.value.is_final !== '') {
+      params.parent_is_final = filters.value.is_final
+    }
+    if (filters.value.is_line_final !== '') {
+      params.parent_is_line_final = filters.value.is_line_final
+    }
+    if (filters.value.is_coproduct !== '') {
+      params.is_coproduct = filters.value.is_coproduct
+    }
+    if (filters.value.version) {
+      params.version = filters.value.version
+    }
+    if (filters.value.created_from) {
+      params.created_from = filters.value.created_from
+    }
+    if (filters.value.created_to) {
+      params.created_to = filters.value.created_to
+    }
+    if (filters.value.is_active !== '') {
+      params.is_active = filters.value.is_active
+    }
+
+    const response = await api.boms.getBOMs(params)
     boms.value = response.data.results || response.data
   } catch (error) {
     console.error('BOM取得エラー:', error)
@@ -1233,6 +1348,39 @@ const TreeBranch = defineComponent({
 </script>
 
 <style scoped>
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+}
+
+.filter-field label {
+  font-size: 12px;
+  color: #555;
+  margin-bottom: 4px;
+}
+
+.filter-field input,
+.filter-field select {
+  padding: 6px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .modal-overlay {
   position: fixed;
   top: 0;
