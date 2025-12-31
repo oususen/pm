@@ -312,7 +312,7 @@ class KubotaHirakataNaijiImportService:
                     product, created = Product.objects.get_or_create(
                         product_code=raw.product_code,
                         defaults={
-                            'product_name': raw.product_code,
+                            'product_name': raw.product_name if raw.product_name else raw.product_code,
                             'category': 'PURCHASED',
                             'unit': '個',
                             'is_active': True,
