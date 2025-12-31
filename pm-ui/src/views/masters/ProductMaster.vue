@@ -3,7 +3,7 @@
     <div class="page-header">
       <h1 class="page-title">製品マスタ</h1>
       <div class="page-actions">
-        <button @click="fetchProducts" class="btn-primary">更新</button>
+        <button @click="fetchProducts(1)" class="btn-primary">更新</button>
         <button @click="showNewDialog" class="btn-success">新規</button>
       </div>
     </div>
@@ -14,7 +14,7 @@
           <label>品番/品名</label>
           <input
             v-model="filters.search"
-            @keyup.enter="fetchProducts"
+            @keyup.enter="fetchProducts(1)"
             placeholder="品番・品名で検索"
           />
         </div>
@@ -68,7 +68,7 @@
           <input type="date" v-model="filters.created_to" />
         </div>
         <div class="filter-actions">
-          <button @click="fetchProducts" class="btn-primary">検索</button>
+          <button @click="fetchProducts(1)" class="btn-primary">検索</button>
           <button @click="resetFilters" class="btn-secondary">リセット</button>
         </div>
       </div>
@@ -81,6 +81,7 @@
             <th>カテゴリ</th>
             <th>単位</th>
             <th>標準LT(日)</th>
+            <th>最終品</th>
             <th>ライン最終品</th>
             <th>みなし組立</th>
             <th>仮想セット</th>
@@ -95,6 +96,7 @@
             <td>{{ getCategoryLabel(product.category) }}</td>
             <td>{{ product.unit }}</td>
             <td>{{ product.standard_lt_days }}</td>
+            <td>{{ product.is_final_product ? '最終' : '' }}</td>
             <td>{{ product.is_line_final_product ? 'はい' : '' }}</td>
             <td>{{ product.is_phantom ? 'はい' : 'いいえ' }}</td>
             <td>{{ product.is_virtual_set ? 'はい' : 'いいえ' }}</td>
@@ -106,6 +108,33 @@
           </tr>
         </tbody>
       </table>
+
+      <div class="pagination-area">
+        <div class="pagination" v-if="totalPages > 1">
+          <button class="pagination-btn" :disabled="currentPage === 1" @click="changePage(1)">
+            最初
+          </button>
+          <button class="pagination-btn" :disabled="currentPage === 1" @click="changePage(currentPage - 1)">
+            前へ
+          </button>
+          <button
+            v-for="page in visiblePages"
+            :key="page"
+            class="pagination-btn"
+            :class="{ 'is-active': page === currentPage }"
+            @click="changePage(page)"
+          >
+            {{ page }}
+          </button>
+          <button class="pagination-btn" :disabled="currentPage >= totalPages" @click="changePage(currentPage + 1)">
+            次へ
+          </button>
+          <button class="pagination-btn" :disabled="currentPage >= totalPages" @click="changePage(totalPages)">
+            最後
+          </button>
+        </div>
+        <div class="pagination-info">{{ pageRangeLabel }}</div>
+      </div>
 
       <div v-if="products.length === 0" class="no-data">
         データがありません
@@ -211,7 +240,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import api from '@/api/client'
 
 // カテゴリマッピング (DB英語 ⇔ UI日本語)
@@ -237,6 +266,9 @@ const lines = ref([])
 const processes = ref([])
 const showDialog = ref(false)
 const isEdit = ref(false)
+const currentPage = ref(1)
+const pageSize = ref(50)
+const totalCount = ref(0)
 const filters = ref({
   search: '',
   category: '',
@@ -263,6 +295,31 @@ const formData = ref({
   image_url: '',
 })
 const fileInput = ref(null)
+
+const totalPages = computed(() => {
+  if (totalCount.value === 0) return 1
+  return Math.ceil(totalCount.value / pageSize.value)
+})
+
+const visiblePages = computed(() => {
+  const total = totalPages.value
+  const current = currentPage.value
+  const windowSize = 2
+  const start = Math.max(1, current - windowSize)
+  const end = Math.min(total, current + windowSize)
+  const pages = []
+  for (let i = start; i <= end; i += 1) {
+    pages.push(i)
+  }
+  return pages
+})
+
+const pageRangeLabel = computed(() => {
+  if (totalCount.value === 0) return '0件'
+  const start = (currentPage.value - 1) * pageSize.value + 1
+  const end = Math.min(currentPage.value * pageSize.value, totalCount.value)
+  return `${totalCount.value}件中 ${start}-${end}件`
+})
 
 // クエリパラメータを組み立て
 const buildQueryParams = () => {
@@ -295,11 +352,21 @@ const buildQueryParams = () => {
 }
 
 // 製品取得
-const fetchProducts = async () => {
+const fetchProducts = async (page = 1) => {
   try {
     const params = buildQueryParams()
+    params.page = page
+    params.page_size = pageSize.value
     const response = await api.products.getProducts(params)
-    products.value = response.data.results || response.data
+    const data = response.data
+    if (data?.results) {
+      products.value = data.results
+      totalCount.value = data.count ?? data.results.length
+    } else {
+      products.value = Array.isArray(data) ? data : []
+      totalCount.value = products.value.length
+    }
+    currentPage.value = page
   } catch (error) {
     console.error('製品取得エラー:', error)
     alert('製品データの取得に失敗しました')
@@ -378,7 +445,7 @@ const resetFilters = async () => {
     created_from: '',
     created_to: ''
   }
-  await fetchProducts()
+  await fetchProducts(1)
 }
 
 // 保存
@@ -440,8 +507,14 @@ const deleteProduct = async (id) => {
   }
 }
 
+const changePage = async (page) => {
+  const target = Math.min(Math.max(page, 1), totalPages.value)
+  if (target === currentPage.value) return
+  await fetchProducts(target)
+}
+
 onMounted(() => {
-  fetchProducts()
+  fetchProducts(1)
   fetchLines()
   fetchProcesses()
 })
@@ -471,6 +544,44 @@ onMounted(() => {
 .filter-actions {
   display: flex;
   gap: 8px;
+}
+
+.pagination-area {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pagination-btn {
+  padding: 4px 10px;
+  border: 1px solid #d1d5db;
+  background-color: #fff;
+  color: #374151;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.pagination-btn.is-active {
+  background-color: #1f2937;
+  border-color: #1f2937;
+  color: #fff;
+}
+
+.pagination-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pagination-info {
+  font-size: 12px;
+  color: #6b7280;
 }
 </style>
 
