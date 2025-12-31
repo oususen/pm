@@ -206,14 +206,26 @@ class CSVImportService:
             source_file: Optional source file name to filter records (only process this file's data)
             raw_id_range: Optional tuple of (min_raw_id, max_raw_id) to filter by raw record ID range
         """
+        from django.db.models import Q
+
         # Get all parsed daily records
+        # Support multiple raw table types (raw, raw_kubota, raw_tiera, raw_rieden)
         query = StgOrderDaily.objects.filter(
-            raw__parse_status='PARSED'
+            Q(raw__parse_status='PARSED') |
+            Q(raw_kubota__parse_status='PARSED') |
+            Q(raw_tiera__parse_status='PARSED') |
+            Q(raw_rieden__parse_status='PARSED')
         )
 
         # Filter by raw ID range if specified (takes priority over source_file)
         if raw_id_range and raw_id_range[0] is not None and raw_id_range[1] is not None:
-            query = query.filter(raw__id__gte=raw_id_range[0], raw__id__lte=raw_id_range[1])
+            # Check which raw field is populated and filter accordingly
+            query = query.filter(
+                Q(raw__id__gte=raw_id_range[0], raw__id__lte=raw_id_range[1]) |
+                Q(raw_kubota__id__gte=raw_id_range[0], raw_kubota__id__lte=raw_id_range[1]) |
+                Q(raw_tiera__id__gte=raw_id_range[0], raw_tiera__id__lte=raw_id_range[1]) |
+                Q(raw_rieden__id__gte=raw_id_range[0], raw_rieden__id__lte=raw_id_range[1])
+            )
         # Otherwise filter by source file if specified
         elif source_file:
             query = query.filter(source_file=source_file)
