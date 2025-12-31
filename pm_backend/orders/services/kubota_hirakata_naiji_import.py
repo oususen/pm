@@ -28,7 +28,7 @@ class KubotaHirakataNaijiImportService:
     DATA_NO = '36'
     COL_DATA_NO = 0
     COL_PRODUCT_CODE = 8
-    COL_PRODUCT_NAME = 10  # 品名 (if exists)
+    COL_PRODUCT_NAME = 12  # 品名
     COL_INSPECTION_TYPE = 17  # Different from Sakai (18)
     COL_RECORD_TYPE = 24
     COL_START_MONTH = 25  # Different from Sakai (26)
