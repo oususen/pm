@@ -28,6 +28,7 @@ class KubotaHirakataNaijiImportService:
     DATA_NO = '36'
     COL_DATA_NO = 0
     COL_PRODUCT_CODE = 8
+    COL_PRODUCT_NAME = 10  # 品名 (if exists)
     COL_INSPECTION_TYPE = 17  # Different from Sakai (18)
     COL_RECORD_TYPE = 24
     COL_START_MONTH = 25  # Different from Sakai (26)
@@ -192,6 +193,9 @@ class KubotaHirakataNaijiImportService:
                 product_code, inspection_type = key
 
                 try:
+                    # Extract product name
+                    product_name = v2_row[self.COL_PRODUCT_NAME].strip() if len(v2_row) > self.COL_PRODUCT_NAME else ''
+
                     # Extract date headers and quantities
                     date_headers = []
                     quantities = []
@@ -220,6 +224,7 @@ class KubotaHirakataNaijiImportService:
                         data_no=self.DATA_NO,
                         record_type='V2+V3',
                         product_code=product_code,
+                        product_name=product_name,
                         inspection_type=inspection_type,
                         date_headers=date_headers,
                         quantities=quantities,

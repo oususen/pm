@@ -30,6 +30,7 @@ class KubotaSakaiNaijiImportService:
     DATA_NO = '36'
     COL_DATA_NO = 0
     COL_PRODUCT_CODE = 8
+    COL_PRODUCT_NAME = 12  # 品名
     COL_INSPECTION_TYPE = 18
     COL_RECORD_TYPE = 24
     COL_START_MONTH = 26
@@ -206,6 +207,9 @@ class KubotaSakaiNaijiImportService:
                 try:
                     product_code, inspection_type = key
 
+                    # Extract product name
+                    product_name = v2_row[self.COL_PRODUCT_NAME].strip() if len(v2_row) > self.COL_PRODUCT_NAME else ''
+
                     # Extract start month
                     start_month = v2_row[self.COL_START_MONTH].strip() if len(v2_row) > self.COL_START_MONTH else ''
 
@@ -231,6 +235,7 @@ class KubotaSakaiNaijiImportService:
                         data_no=self.DATA_NO,
                         record_type='V2+V3',  # Indicate this is a pair
                         product_code=product_code,
+                        product_name=product_name,
                         inspection_type=inspection_type,
                         start_month=start_month,
                         date_headers=date_headers,

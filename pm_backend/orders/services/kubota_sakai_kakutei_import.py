@@ -26,6 +26,7 @@ class KubotaSakaiKakuteiImportService:
     COL_DATA_NO = 0
     COL_PRODUCT_CODE = 5
     COL_ORDER_NO = 8  # 注番
+    COL_PRODUCT_NAME = 11  # 品名
     COL_DELIVERY_DATE = 18  # 納入指示日
     COL_QUANTITY = 19  # 納入指示数
 
@@ -150,6 +151,7 @@ class KubotaSakaiKakuteiImportService:
                 try:
                     # Extract data
                     product_code = row[self.COL_PRODUCT_CODE].strip() if len(row) > self.COL_PRODUCT_CODE else ''
+                    product_name = row[self.COL_PRODUCT_NAME].strip() if len(row) > self.COL_PRODUCT_NAME else ''
                     delivery_date_str = row[self.COL_DELIVERY_DATE].strip() if len(row) > self.COL_DELIVERY_DATE else ''
                     quantity_str = row[self.COL_QUANTITY].strip() if len(row) > self.COL_QUANTITY else ''
                     order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
@@ -177,6 +179,7 @@ class KubotaSakaiKakuteiImportService:
                         source_row_no=row_no,
                         data_no=self.DATA_NO,
                         record_type='',  # Not applicable for 47番
+                        product_name=product_name,
                         product_code=product_code,
                         delivery_date=delivery_date,
                         quantity=quantity,
