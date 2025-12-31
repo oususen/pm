@@ -325,9 +325,13 @@ class KubotaHirakataNaijiImportService:
                     # Convert horizontal data to daily records
                     for idx, (date_str, qty_str) in enumerate(zip(raw.date_headers, raw.quantities)):
                         due_date = self.parse_date_from_yymdd(date_str)
-                        quantity = self.parse_quantity(qty_str)
 
-                        if not due_date or not quantity:
+                        # Skip if date cannot be parsed (e.g., AA01, A011, 10, 0)
+                        if not due_date:
+                            continue
+
+                        quantity = self.parse_quantity(qty_str)
+                        if not quantity:
                             continue
 
                         daily = StgOrderDaily(

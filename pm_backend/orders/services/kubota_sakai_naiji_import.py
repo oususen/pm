@@ -329,8 +329,9 @@ class KubotaSakaiNaijiImportService:
                     for idx, (date_str, qty_str) in enumerate(zip(raw.date_headers, raw.quantities)):
                         # Parse date
                         due_date = self.parse_date_from_yymdd(date_str)
+
+                        # Skip if date cannot be parsed (e.g., AA01, A011, 10, 0)
                         if not due_date:
-                            self.warnings.append(f"Product {raw.product_code}: Invalid date format: {date_str}")
                             continue
 
                         # Parse quantity
