@@ -8,19 +8,23 @@ class TieraKakuteiImportService(BaseImportService):
 
     Format: Y55 type
     - Column 0: Data Type (データ区分) = "Y55"
-    - Column 6: Product Code (図番)
-    - Column 13: Delivery Date (納期) - YYYYMMDD format
-    - Column 11: Product Name (品名)
-    - Column 15: Quantity (数量)
+    - Column 11: Product Code (図番) - Header name: "図番"
+    - Column 13: Delivery Date (納期) - YYYYMMDD format, Header name: "納期"
+    - Column 15: Quantity (数量) - Header name: "数量" or "注文数量"
     - Column 43: C表No/不良通知Ｎｏ
-    - Header names are used when present: 図番 / 納期 / 注文数量(数量) / 品名(納品書用品名) / C表No/不良通知Ｎｏ
+    - Column 47: Product Name (納品書用品名)
+    - Column 48: Product Name Kana (納品書用品名カナ)
+
+    Note: Header names take precedence over column indices.
+    The "図番" column contains the actual product code (e.g., YD00001838).
     """
 
     IDENTIFIER_COL = 0  # データ区分
     IDENTIFIER_VALUE = 'Y55'
-    COL_PRODUCT_CODE = 6   # 図番
+    COL_PRODUCT_CODE = 11  # 図番
     COL_DELIVERY_DATE = 13  # 納期 (YYYYMMDD format)
-    COL_PRODUCT_NAME = 11  # 品名
+    COL_PRODUCT_NAME = 47  # 納品書用品名
+    COL_PRODUCT_NAME_KANA = 48  # 納品書用品名カナ
     COL_QUANTITY = 15      # 数量
     COL_C_TABLE_NO = 43    # C表No/不良通知Ｎｏ
 
@@ -76,18 +80,25 @@ class TieraKakuteiImportService(BaseImportService):
                     continue
 
                 try:
-                    # Extract data
+                    # Extract data using column name mapping (prefer header names)
+                    # 図番列が製品コード
+                    product_code_col = col_map.get('図番', self.COL_PRODUCT_CODE)
                     product_code = row[product_code_col].strip()
+
                     delivery_date_str = row[delivery_date_col].strip()
                     quantity_str = row[quantity_col].strip()
-                    product_name_col = (
-                        col_map.get('品名')
-                        or col_map.get('納品書用品名')
-                        or self.COL_PRODUCT_NAME
-                    )
+
+                    # 納品書用品名（製品マスタにない場合に使用）
+                    product_name_col = col_map.get('納品書用品名', self.COL_PRODUCT_NAME)
                     product_name = ''
                     if product_name_col is not None and len(row) > product_name_col:
                         product_name = row[product_name_col].strip()
+
+                    # 納品書用品名カナ
+                    product_name_kana_col = col_map.get('納品書用品名カナ', self.COL_PRODUCT_NAME_KANA)
+                    product_name_kana = ''
+                    if product_name_kana_col is not None and len(row) > product_name_kana_col:
+                        product_name_kana = row[product_name_kana_col].strip()
                     c_table_col = col_map.get('C表No/不良通知Ｎｏ', self.COL_C_TABLE_NO)
                     c_table_no = ''
                     if c_table_col is not None and len(row) > c_table_col:
@@ -114,6 +125,7 @@ class TieraKakuteiImportService(BaseImportService):
                         due_date=due_date,
                         product_code=product_code,
                         product_name=product_name,
+                        product_name_halfwidth=product_name_kana,
                         quantity=quantity,
                         raw_payload={
                             'row': row,
