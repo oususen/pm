@@ -55,10 +55,11 @@ class KubotaSakaiNaijiImportService:
         return None, None
 
     def parse_date_from_yymdd(self, date_str, start_year=None):
-        """Parse date string in YYMDD format (5 digits)
+        """Parse date string in YYMDD or YMMDD format (5 digits)
 
         Args:
             date_str: Date string like "51201" (year=25, month=12, day=01)
+                     or "60209" (year=6→2026, month=02, day=09)
             start_year: Optional start year (YY format) to handle year boundary
 
         Returns:
@@ -69,7 +70,19 @@ class KubotaSakaiNaijiImportService:
 
         date_str = str(date_str).strip()
 
-        # YYMDD format (5 digits)
+        # YMMDD format (5 digits) - single digit year
+        # Example: "60209" → year=6 (2026), month=02, day=09
+        if len(date_str) == 5 and date_str.isdigit():
+            try:
+                y = int(date_str[0])
+                mm = int(date_str[1:3])
+                dd = int(date_str[3:5])
+                yyyy = 2020 + y  # Assume 2020s decade
+                return datetime(yyyy, mm, dd).date()
+            except (ValueError, IndexError):
+                pass
+
+        # YYMDD format (5 digits) - fallback for two-digit year with single-digit month
         if len(date_str) == 5 and date_str.isdigit():
             try:
                 yy = int(date_str[:2])
