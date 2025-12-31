@@ -24,12 +24,21 @@ from .serializers import (
 class ProductFilter(django_filters.FilterSet):
     created_from = django_filters.DateFilter(field_name='created_at', lookup_expr='gte')
     created_to = django_filters.DateFilter(field_name='created_at', lookup_expr='lte')
+    is_final_product = django_filters.BooleanFilter(field_name='is_final_product')
     is_line_final_product = django_filters.BooleanFilter(field_name='is_line_final_product')
     has_bom = django_filters.BooleanFilter(method='filter_has_bom')
 
     class Meta:
         model = Product
-        fields = ['category', 'is_active', 'is_line_final_product', 'has_bom', 'created_from', 'created_to']
+        fields = [
+            'category',
+            'is_active',
+            'is_final_product',
+            'is_line_final_product',
+            'has_bom',
+            'created_from',
+            'created_to',
+        ]
 
     def filter_has_bom(self, queryset, name, value):
         if value is None:

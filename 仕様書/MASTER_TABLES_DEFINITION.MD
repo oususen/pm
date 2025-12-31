@@ -36,11 +36,11 @@
 | process_id | BIGINT FK NULL | 工程情報 |
 | management_unit | VARCHAR(10) NULL | 管理区分（DAY/MINUTE） |
 | self_lt_days | INT NULL | 親内オフセット（日） |
-| is_final_product | TINYINT(1) DEFAULT 0 | 最終製品 |
-| is_line_final_product | TINYINT(1) DEFAULT 0 | ライン最終品 |
-| is_phantom | TINYINT(1) DEFAULT 0 | 見なし組立 |
-| is_virtual_set | TINYINT(1) DEFAULT 0 | 仮想セット品番 |
-| is_active | TINYINT(1) DEFAULT 1 | |
+| is_final_product | TINYINT(1)| 最終製品 |
+| is_line_final_product | TINYINT(1)| ライン最終品 |
+| is_phantom | TINYINT(1)| 見なし組立 |
+| is_virtual_set | TINYINT(1)| 仮想セット品番 |
+| is_active | TINYINT(1)| |
 | created_at/updated_at | DATETIME | |
 
 - `category` は製品の状態区分（完成/中間/WIP/材料/購買など）として運用する。
@@ -96,7 +96,7 @@
 | customer_name | VARCHAR(100) | |
 | short_name | VARCHAR(40) NULL | |
 | calendar_id | BIGINT FK NULL | 稼働カレンダ |
-| is_active | TINYINT(1) DEFAULT 1 | |
+| is_active | TINYINT(1)| |
 | created_at/updated_at | DATETIME | |
 
 ---
@@ -108,9 +108,9 @@
 | process_code | VARCHAR(20) UNIQUE | 工程コード |
 | process_name | VARCHAR(50) | 工程名 |
 | line_id | BIGINT FK NULL | 所属ライン（ライン直下で管理する場合に使用） |
-| is_outsource | TINYINT(1) DEFAULT 0 | 外注フラグ |
-| management_unit | VARCHAR(10) DEFAULT 'MINUTE' | 管理単位（DAY/MINUTE） |
-| is_active | TINYINT(1) DEFAULT 1 | |
+| is_outsource | TINYINT(1)| 外注フラグ |
+| management_unit | VARCHAR(10)| 管理単位（DAY/MINUTE） |
+| is_active | TINYINT(1)| |
 | created_at/updated_at | DATETIME | |
 
 # 4. ライン `m_line`
@@ -121,7 +121,7 @@
 | line_name | VARCHAR(50) | ライン名 |
 | calendar_id | BIGINT FK NULL | 勤務カレンダ |
 | lead_time_days | INT NULL | リードタイム（日） |
-| is_active | TINYINT(1) DEFAULT 1 | |
+| is_active | TINYINT(1)| |
 | created_at/updated_at | DATETIME | |
 
 ## 4.1 ライン既定LT `m_line_default`
@@ -148,15 +148,15 @@
 | process_id | BIGINT FK | |
 | line_id | BIGINT FK NULL | |
 | output_product_id | BIGINT FK NULL | 工程の出力品目（連産品はBOMで表現） |
-| hierarchy_path | VARCHAR(100) DEFAULT '' | 工程階層パス |
-| hierarchy_depth | INT DEFAULT 0 | 工程階層深さ |
-| step_type | ENUM('FLOW','PARALLEL_POOL') DEFAULT 'FLOW' | 流し/並列プール |
+| hierarchy_path | VARCHAR(100)| 工程階層パス |
+| hierarchy_depth | INT| 工程階層深さ |
+| step_type | ENUM('FLOW','PARALLEL_POOL')| 流し/並列プール |
 | **time_unit** | **ENUM('DAY','MINUTE')** | 単位の明示 |
-| lead_time_days | INT NOT NULL DEFAULT 0 | 日単位（`time_unit='DAY'`で使用） |
+| lead_time_days | INT NOT NULL| 日単位（`time_unit='DAY'`で使用） |
 | start_offset_min | INT NULL | 分オフセット |
 | duration_min | INT NULL | 分所要（段取り+サイクル×数量） |
-| parallel_count | INT DEFAULT 1 | 並列数 |
-| parallel_group | INT DEFAULT 1 | 同一step_no内の順序グループ（重複許可用） |
+| parallel_count | INT| 並列数 |
+| parallel_group | INT| 同一step_no内の順序グループ（重複許可用） |
 | remark | VARCHAR(200) NULL | |
 | created_at/updated_at | DATETIME | |
 
@@ -237,7 +237,7 @@
 | work_pattern_id | BIGINT FK | 勤務パターン |
 | break_start | TIME | 休憩開始時刻 |
 | break_end | TIME | 休憩終了時刻 |
-| order | INT DEFAULT 1 | 順序 |
+| order | INT| 順序 |
 | created_at/updated_at | DATETIME | |
 
 ---
@@ -320,7 +320,7 @@ WHERE rs.time_unit='DAY';
 | operator_name | VARCHAR(50) | 記入者（UIで必須。ログインユーザー名を初期セット） |
 | remarks | TEXT NULL | 備考 |
 | process_record_id | BIGINT NULL | 工程実時間記録（1:1） |
-| is_replenished | TINYINT(1) DEFAULT 0 | 補充完了 |
+| is_replenished | TINYINT(1)| 補充完了 |
 | replenished_at | DATETIME NULL | 補充完了日時 |
 | replenished_by | VARCHAR(50) NULL | 補充完了者 |
 
@@ -342,8 +342,8 @@ WHERE rs.time_unit='DAY';
 | line_id | BIGINT NULL | ラインID |
 | supplier_id | BIGINT NULL | 仕入先ID |
 | sourcing_type | VARCHAR(20) NULL | 調達区分 |
-| deduct_qty | DECIMAL(14,3) DEFAULT 0 | 減算数量 |
-| is_replenished | TINYINT(1) DEFAULT 0 | 補充完了 |
+| deduct_qty | DECIMAL(14,3)| 減算数量 |
+| is_replenished | TINYINT(1)| 補充完了 |
 | replenished_at | DATETIME NULL | 補充完了日時 |
 | replenished_by | VARCHAR(50) NULL | 補充完了者 |
 
@@ -362,15 +362,15 @@ WHERE rs.time_unit='DAY';
 | source_routing_step_id | BIGINT FK NULL | 元ルーティングステップ |
 | plan_id | VARCHAR(255) NULL | 計画ID（将来的な計画バージョン管理用） |
 | sequence_no | INT NULL | 順序番号（同一日内の優先順位） |
-| demand_qty_plan | INT DEFAULT 0 | 需要計画数量 |
-| order_qty | INT DEFAULT 0 | 必要数量（最終ラインは受注、中間ラインは後工程からの引当） |
-| plan_qty | INT DEFAULT 0 | 計画数量（生産予定） |
-| actual_qty | INT DEFAULT 0 | 生産実績数量（このラインでの生産実績） |
-| actual_shipment_qty | INT DEFAULT 0 | 出荷実績数量（後工程への引き渡し実績） |
-| adjust_qty | INT DEFAULT 0 | 調整数量 |
-| scrap_qty | INT DEFAULT 0 | 仕損数量 |
-| stock_qty | INT DEFAULT 0 | 実在庫数量 |
-| planned_stock_qty | INT DEFAULT 0 | 計画在庫数量 |
+| demand_qty_plan | INT| 需要計画数量 |
+| order_qty | INT| 必要数量（最終ラインは受注、中間ラインは後工程からの引当） |
+| plan_qty | INT| 計画数量（生産予定） |
+| actual_qty | INT| 生産実績数量（このラインでの生産実績） |
+| actual_shipment_qty | INT| 出荷実績数量（後工程への引き渡し実績） |
+| adjust_qty | INT| 調整数量 |
+| scrap_qty | INT| 仕損数量 |
+| stock_qty | INT| 実在庫数量 |
+| planned_stock_qty | INT| 計画在庫数量 |
 | updated_at | DATETIME | 更新日時 |
 
 **ユニークキー**: `(line_id, process_id, product_id, plan_date)`
@@ -411,14 +411,14 @@ WHERE rs.time_unit='DAY';
 | product_id | BIGINT FK NULL | 製品 |
 | product_code | VARCHAR(50) | 製品コード |
 | plan_date | DATE | 必要日 |
-| lead_time_days | INT DEFAULT 0 | リードタイム（日） |
-| forecast_qty | DECIMAL(14,3) DEFAULT 0 | 内示数量 |
-| firm_qty | DECIMAL(14,3) DEFAULT 0 | 確定数量 |
-| plan_qty | DECIMAL(14,3) DEFAULT 0 | 計画数 |
-| actual_qty | DECIMAL(14,3) DEFAULT 0 | 実績数 |
-| plan_progress | DECIMAL(9,3) DEFAULT 0 | 計画進度 |
-| actual_progress | DECIMAL(9,3) DEFAULT 0 | 実績進度 |
-| order_numbers | VARCHAR(500) DEFAULT '' | 展開元受注番号 |
+| lead_time_days | INT| リードタイム（日） |
+| forecast_qty | DECIMAL(14,3)| 内示数量 |
+| firm_qty | DECIMAL(14,3)| 確定数量 |
+| plan_qty | DECIMAL(14,3)| 計画数 |
+| actual_qty | DECIMAL(14,3)| 実績数 |
+| plan_progress | DECIMAL(9,3)| 計画進度 |
+| actual_progress | DECIMAL(9,3)| 実績進度 |
+| order_numbers | VARCHAR(500)| 展開元受注番号 |
 | created_at/updated_at | DATETIME | |
 
 ## 17.2 ラインガント計画 `t_line_gantt_plan`
@@ -428,7 +428,7 @@ WHERE rs.time_unit='DAY';
 | line_id | BIGINT FK | ライン |
 | product_id | BIGINT FK | 製品 |
 | plan_date | DATE | 計画日 |
-| plan_qty | DECIMAL(14,3) DEFAULT 0 | 計画数量 |
+| plan_qty | DECIMAL(14,3)| 計画数量 |
 | sequence_no | INT NULL | 順序番号 |
 | start_datetime | DATETIME | 開始 |
 | end_datetime | DATETIME | 終了 |
@@ -445,7 +445,7 @@ WHERE rs.time_unit='DAY';
 | product_name | VARCHAR(100) NULL | 品名 |
 | timestamp | DATETIME | 記録時刻 |
 | record_type | VARCHAR(20) | 記録タイプ |
-| qty | DECIMAL(10,3) DEFAULT 0 | 数量 |
+| qty | DECIMAL(10,3)| 数量 |
 | equipment_state | VARCHAR(20) NULL | 設備状態 |
 | event_data | JSON NULL | 付帯情報 |
 | batch_no | VARCHAR(100) NULL | ロット番号 |
@@ -456,9 +456,9 @@ WHERE rs.time_unit='DAY';
 | カラム | 型 | 説明 |
 |---|---|---|
 | line_id | BIGINT PK | ライン |
-| current_state | VARCHAR(20) DEFAULT 'STOPPED' | 現在状態 |
-| today_output | DECIMAL(10,3) DEFAULT 0 | 本日生産数 |
-| today_plan | DECIMAL(10,3) DEFAULT 0 | 本日計画数 |
+| current_state | VARCHAR(20)| 現在状態 |
+| today_output | DECIMAL(10,3)| 本日生産数 |
+| today_plan | DECIMAL(10,3)| 本日計画数 |
 | current_product_code | VARCHAR(50) NULL | 現在生産品番 |
 | current_product_name | VARCHAR(100) NULL | 現在生産品名 |
 | last_update | DATETIME | 最終更新時刻 |
@@ -473,7 +473,7 @@ WHERE rs.time_unit='DAY';
 | product_name | VARCHAR(100) NULL | 品名 |
 | timestamp | DATETIME | 記録時刻 |
 | record_type | VARCHAR(20) | 記録タイプ |
-| qty | DECIMAL(10,3) DEFAULT 0 | 数量 |
+| qty | DECIMAL(10,3)| 数量 |
 | equipment_state | VARCHAR(20) NULL | 設備状態 |
 | event_data | JSON NULL | 付帯情報 |
 | batch_no | VARCHAR(100) NULL | ロット番号 |
@@ -491,9 +491,9 @@ WHERE rs.time_unit='DAY';
 | product_id | BIGINT FK | 製品 |
 | location | VARCHAR(50) | 保管場所 |
 | current_stock | DECIMAL(14,3) | 現在庫数 |
-| reserved_qty | DECIMAL(14,3) DEFAULT 0 | 引当済数量 |
+| reserved_qty | DECIMAL(14,3)| 引当済数量 |
 | min_stock_qty | DECIMAL(14,3) | 最小在庫数 |
-| is_bottleneck | TINYINT(1) DEFAULT 0 | ボトルネック品 |
+| is_bottleneck | TINYINT(1)| ボトルネック品 |
 | created_at/updated_at | DATETIME | |
 
 ## 18.2 製造指示 `t_production_order`
@@ -509,9 +509,9 @@ WHERE rs.time_unit='DAY';
 | scheduled_end_date | DATE | 予定完了日 |
 | actual_start_date | DATE NULL | 実績開始日 |
 | actual_end_date | DATE NULL | 実績完了日 |
-| status | VARCHAR(20) DEFAULT 'PLANNED' | ステータス |
+| status | VARCHAR(20)| ステータス |
 | allocation_id | BIGINT FK NULL | 在庫引当 |
-| priority | INT DEFAULT 0 | 優先度 |
+| priority | INT| 優先度 |
 | remark | TEXT NULL | 備考 |
 | created_at/updated_at | DATETIME | |
 

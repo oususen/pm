@@ -28,6 +28,14 @@
           </select>
         </div>
         <div class="filter-field">
+          <label>最終品</label>
+          <select v-model="filters.is_final_product">
+            <option value="">すべて</option>
+            <option value="true">はい</option>
+            <option value="false">いいえ</option>
+          </select>
+        </div>
+        <div class="filter-field">
           <label>ライン最終品</label>
           <select v-model="filters.is_line_final_product">
             <option value="">すべて</option>
@@ -232,6 +240,7 @@ const isEdit = ref(false)
 const filters = ref({
   search: '',
   category: '',
+  is_final_product: '',
   is_line_final_product: '',
   has_bom: '',
   is_active: '',
@@ -263,6 +272,9 @@ const buildQueryParams = () => {
   }
   if (filters.value.category) {
     params.category = filters.value.category
+  }
+  if (filters.value.is_final_product !== '') {
+    params.is_final_product = filters.value.is_final_product === 'true'
   }
   if (filters.value.is_line_final_product !== '') {
     params.is_line_final_product = filters.value.is_line_final_product === 'true'
@@ -359,6 +371,7 @@ const resetFilters = async () => {
   filters.value = {
     search: '',
     category: '',
+    is_final_product: '',
     is_line_final_product: '',
     has_bom: '',
     is_active: '',
