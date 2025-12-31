@@ -73,71 +73,73 @@
         </div>
       </div>
 
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>品番コード</th>
-            <th>品名</th>
-            <th>カテゴリ</th>
-            <th>単位</th>
-            <th>標準LT(日)</th>
-            <th>最終品</th>
-            <th>ライン最終品</th>
-            <th>みなし組立</th>
-            <th>仮想セット</th>
-            <th>有効</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="product in products" :key="product.id">
-            <td>{{ product.product_code }}</td>
-            <td>{{ product.product_name }}</td>
-            <td>{{ getCategoryLabel(product.category) }}</td>
-            <td>{{ product.unit }}</td>
-            <td>{{ product.standard_lt_days }}</td>
-            <td>{{ product.is_final_product ? '最終' : '' }}</td>
-            <td>{{ product.is_line_final_product ? 'はい' : '' }}</td>
-            <td>{{ product.is_phantom ? 'はい' : 'いいえ' }}</td>
-            <td>{{ product.is_virtual_set ? 'はい' : 'いいえ' }}</td>
-            <td>{{ product.is_active ? '有効' : '無効' }}</td>
-            <td>
-              <button @click="editProduct(product)" class="btn-sm">編集</button>
-              <button @click="deleteProduct(product.id)" class="btn-sm btn-danger">削除</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="list-area">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>品番コード</th>
+              <th>品名</th>
+              <th>カテゴリ</th>
+              <th>単位</th>
+              <th>標準LT(日)</th>
+              <th>最終品</th>
+              <th>ライン最終品</th>
+              <th>みなし組立</th>
+              <th>仮想セット</th>
+              <th>有効</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="product in products" :key="product.id">
+              <td>{{ product.product_code }}</td>
+              <td>{{ product.product_name }}</td>
+              <td>{{ getCategoryLabel(product.category) }}</td>
+              <td>{{ product.unit }}</td>
+              <td>{{ product.standard_lt_days }}</td>
+              <td>{{ product.is_final_product ? '最終' : '' }}</td>
+              <td>{{ product.is_line_final_product ? 'はい' : '' }}</td>
+              <td>{{ product.is_phantom ? 'はい' : 'いいえ' }}</td>
+              <td>{{ product.is_virtual_set ? 'はい' : 'いいえ' }}</td>
+              <td>{{ product.is_active ? '有効' : '無効' }}</td>
+              <td>
+                <button @click="editProduct(product)" class="btn-sm">編集</button>
+                <button @click="deleteProduct(product.id)" class="btn-sm btn-danger">削除</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
 
-      <div class="pagination-area">
-        <div class="pagination" v-if="totalPages > 1">
-          <button class="pagination-btn" :disabled="currentPage === 1" @click="changePage(1)">
-            最初
-          </button>
-          <button class="pagination-btn" :disabled="currentPage === 1" @click="changePage(currentPage - 1)">
-            前へ
-          </button>
-          <button
-            v-for="page in visiblePages"
-            :key="page"
-            class="pagination-btn"
-            :class="{ 'is-active': page === currentPage }"
-            @click="changePage(page)"
-          >
-            {{ page }}
-          </button>
-          <button class="pagination-btn" :disabled="currentPage >= totalPages" @click="changePage(currentPage + 1)">
-            次へ
-          </button>
-          <button class="pagination-btn" :disabled="currentPage >= totalPages" @click="changePage(totalPages)">
-            最後
-          </button>
+        <div class="pagination-area">
+          <div class="pagination" v-if="totalPages > 1">
+            <button class="pagination-btn" :disabled="currentPage === 1" @click="changePage(1)">
+              最初
+            </button>
+            <button class="pagination-btn" :disabled="currentPage === 1" @click="changePage(currentPage - 1)">
+              前へ
+            </button>
+            <button
+              v-for="page in visiblePages"
+              :key="page"
+              class="pagination-btn"
+              :class="{ 'is-active': page === currentPage }"
+              @click="changePage(page)"
+            >
+              {{ page }}
+            </button>
+            <button class="pagination-btn" :disabled="currentPage >= totalPages" @click="changePage(currentPage + 1)">
+              次へ
+            </button>
+            <button class="pagination-btn" :disabled="currentPage >= totalPages" @click="changePage(totalPages)">
+              最後
+            </button>
+          </div>
+          <div class="pagination-info">{{ pageRangeLabel }}</div>
         </div>
-        <div class="pagination-info">{{ pageRangeLabel }}</div>
-      </div>
 
-      <div v-if="products.length === 0" class="no-data">
-        データがありません
+        <div v-if="products.length === 0" class="no-data">
+          データがありません
+        </div>
       </div>
     </div>
 
@@ -521,6 +523,17 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.page-container {
+  height: 100%;
+}
+
+.page-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .filter-bar {
   display: flex;
   flex-wrap: wrap;
@@ -544,6 +557,18 @@ onMounted(() => {
 .filter-actions {
   display: flex;
   gap: 8px;
+}
+
+.list-area {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 
 .pagination-area {
