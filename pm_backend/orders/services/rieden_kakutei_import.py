@@ -1,29 +1,102 @@
 import csv
-from orders.models import StgOrderRaw
-from .base_import import BaseImportService
+from datetime import datetime
+from decimal import Decimal
+from django.db import transaction
+from orders.models import StgOrderRawRieden, StgOrderDaily
+from masters.models import Customer, Product
 
 
-class RiedenKakuteiImportService(BaseImportService):
+class RiedenKakuteiImportService:
     """Rieden Kakutei (Confirmed) CSV Import Service
 
     Format: 発注コード=509 type
-    - Identifier column contains "発注コード" with value "509"
+    - Column 0: Order Code (発注コード) = "509"
+    - Simple 1 row = 1 order line format
 
-    TODO: Determine actual column positions from CSV file
-    - Which column contains 発注コード?
-    - Which column contains Product Code?
-    - Which column contains Delivery Date?
-    - Which column contains Quantity?
+    Column mapping (TODO: Verify with actual CSV file):
+    - Column 0: order_code (発注コード)
+    - Column 1: product_code (製品コード)
+    - Column 2: delivery_date (納期)
+    - Column 3: quantity (数量)
     """
 
-    # TODO: Verify these column positions with actual CSV file
-    IDENTIFIER_COL = 0  # Column containing 発注コード (needs verification)
-    IDENTIFIER_VALUE = '509'  # Value to match
-    COL_PRODUCT_CODE = 1  # TODO: Determine from actual CSV
-    COL_DELIVERY_DATE = 2  # TODO: Determine from actual CSV
-    COL_QUANTITY = 3  # TODO: Determine from actual CSV
+    IDENTIFIER_COL = 0  # 発注コード
+    IDENTIFIER_VALUE = '509'
+    COL_PRODUCT_CODE = 1  # TODO: Verify
+    COL_DELIVERY_DATE = 2  # TODO: Verify
+    COL_QUANTITY = 3  # TODO: Verify
+
+    def __init__(self):
+        self.errors = []
+        self.warnings = []
+
+    def decode_file(self, file):
+        """Decode CSV file with multiple encoding attempts"""
+        file.seek(0)
+        raw_data = file.read()
+
+        encodings = ['cp932', 'shift-jis', 'utf-8-sig', 'utf-8', 'iso-2022-jp']
+        for encoding in encodings:
+            try:
+                return raw_data.decode(encoding), encoding
+            except UnicodeDecodeError:
+                continue
+
+        return None, None
+
+    def parse_date(self, date_str):
+        """Parse date string in multiple formats"""
+        if not date_str or date_str == '':
+            return None
+
+        date_str = str(date_str).strip()
+
+        # Try YYYYMMDD format
+        if len(date_str) == 8 and date_str.isdigit():
+            try:
+                return datetime.strptime(date_str, '%Y%m%d').date()
+            except ValueError:
+                pass
+
+        # Try YYYY/MM/DD format
+        if '/' in date_str:
+            try:
+                return datetime.strptime(date_str, '%Y/%m/%d').date()
+            except ValueError:
+                pass
+
+        # Try YYYY-MM-DD format
+        if '-' in date_str:
+            try:
+                return datetime.strptime(date_str, '%Y-%m-%d').date()
+            except ValueError:
+                pass
+
+        return None
+
+    def parse_quantity(self, quantity_str):
+        """Parse quantity string to Decimal"""
+        if not quantity_str or quantity_str == '':
+            return None
+
+        try:
+            quantity_str = str(quantity_str).strip().replace(',', '')
+            return Decimal(quantity_str)
+        except:
+            return None
 
     def import_csv(self, file, customer_code, order_type, source_system='CSV'):
+        """Import Rieden confirmed order CSV (発注コード=509)
+
+        Args:
+            file: Uploaded file object
+            customer_code: Customer code (should be Rieden's code)
+            order_type: Should be 'FIRM'
+            source_system: Source system name
+
+        Returns:
+            dict: Import result with statistics
+        """
         self.errors = []
         self.warnings = []
 
@@ -58,7 +131,6 @@ class RiedenKakuteiImportService(BaseImportService):
                     continue
 
                 # Filter by identifier
-                # TODO: Verify this logic with actual CSV file
                 identifier_value = row[self.IDENTIFIER_COL].strip() if len(row) > self.IDENTIFIER_COL else ''
                 if identifier_value != self.IDENTIFIER_VALUE:
                     continue
@@ -69,26 +141,31 @@ class RiedenKakuteiImportService(BaseImportService):
                     delivery_date_str = row[self.COL_DELIVERY_DATE].strip() if len(row) > self.COL_DELIVERY_DATE else ''
                     quantity_str = row[self.COL_QUANTITY].strip() if len(row) > self.COL_QUANTITY else ''
 
+                    if not product_code:
+                        continue
+
                     # Parse date
                     due_date = self.parse_date(delivery_date_str)
                     if not due_date:
                         self.warnings.append(f"Row {row_no}: Invalid date: {delivery_date_str}")
+                        continue
 
                     # Parse quantity
                     quantity = self.parse_quantity(quantity_str)
                     if not quantity:
-                        self.warnings.append(f"Row {row_no}: Invalid quantity: {quantity_str}")
+                        self.warnings.append(f"Row {row_no}: Invalid or zero quantity: {quantity_str}")
+                        continue
 
                     # Create raw record
-                    raw_record = StgOrderRaw(
+                    raw_record = StgOrderRawRieden(
                         customer_code=customer_code,
                         order_type=order_type,
                         source_system=source_system,
                         source_file=file.name,
                         source_row_no=row_no,
-                        record_token='',
-                        due_date=due_date,
+                        order_code=self.IDENTIFIER_VALUE,
                         product_code=product_code,
+                        due_date=due_date,
                         quantity=quantity,
                         raw_payload={'row': row, 'encoding': encoding},
                         parse_status='PENDING'
@@ -129,3 +206,87 @@ class RiedenKakuteiImportService(BaseImportService):
                 'message': f'Import failed: {str(e)}',
                 'errors': self.errors + [str(e)]
             }
+
+    def save_to_database(self, raw_records, file, customer_code):
+        """Save raw records and create daily records
+
+        Returns:
+            tuple: (raw_count, daily_count, min_raw_id, max_raw_id)
+        """
+        with transaction.atomic():
+            # Save raw records
+            StgOrderRawRieden.objects.bulk_create(raw_records)
+
+            # Re-fetch to get primary keys
+            raw_records_with_ids = StgOrderRawRieden.objects.filter(
+                source_file=file.name,
+                customer_code=customer_code
+            ).order_by('-id')[:len(raw_records)]
+
+            # Track min and max IDs
+            raw_ids = [r.id for r in raw_records_with_ids]
+            min_raw_id = min(raw_ids) if raw_ids else None
+            max_raw_id = max(raw_ids) if raw_ids else None
+
+            # Find customer
+            try:
+                customer = Customer.objects.get(customer_code=customer_code)
+            except Customer.DoesNotExist:
+                raise ValueError(f'Customer not found: {customer_code}')
+
+            # Create daily records
+            daily_records = []
+            error_count = 0
+
+            for raw in raw_records_with_ids:
+                if not raw.product_code or not raw.due_date or not raw.quantity:
+                    raw.parse_status = 'ERROR'
+                    raw.error_message = 'Missing required fields'
+                    raw.save()
+                    error_count += 1
+                    continue
+
+                try:
+                    # Auto-register product if not exists
+                    product, created = Product.objects.get_or_create(
+                        product_code=raw.product_code,
+                        defaults={
+                            'product_name': raw.product_code,  # Use code as name initially
+                            'category': 'PURCHASED',
+                            'unit': '個',
+                            'is_active': True,
+                            'is_final_product': True
+                        }
+                    )
+                    if created:
+                        self.warnings.append(f'Auto-registered new product: {raw.product_code}')
+
+                    # Create daily record
+                    daily = StgOrderDaily(
+                        raw_rieden=raw,
+                        customer=customer,
+                        order_type=raw.order_type,
+                        version_no='v1',
+                        product_code=raw.product_code,
+                        due_date=raw.due_date,
+                        quantity=raw.quantity,
+                        source_system=raw.source_system,
+                        source_file=raw.source_file
+                    )
+                    daily_records.append(daily)
+
+                    raw.parse_status = 'PARSED'
+                    raw.save()
+
+                except Exception as e:
+                    raw.parse_status = 'ERROR'
+                    raw.error_message = str(e)
+                    raw.save()
+                    error_count += 1
+                    self.errors.append(f"Product {raw.product_code}: {str(e)}")
+
+            # Save daily records
+            if daily_records:
+                StgOrderDaily.objects.bulk_create(daily_records)
+
+        return len(raw_records), len(daily_records), min_raw_id, max_raw_id

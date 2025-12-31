@@ -79,12 +79,19 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'due_date']
     ordering = ['-created_at']
 
-    def _get_import_service(self, customer_code, order_type, filename):
-        """Select appropriate import service based on customer code, order type, and filename"""
+    def _get_import_service(self, customer_code, order_type, filename, factory=None):
+        """Select appropriate import service based on customer code, order type, and factory
+
+        Args:
+            customer_code: Customer code
+            order_type: 'FIRM' or 'FORECAST'
+            filename: CSV filename (for fallback detection)
+            factory: Explicit factory code (e.g., 'SAKAI', 'HIRAKATA')
+        """
         # Import services here to avoid circular imports
         from .services.csv_import import CSVImportService
 
-        # Extract location from filename
+        # Extract location from filename (fallback)
         filename_lower = filename.lower()
 
         # Customer: 000001 (ティエラ)
@@ -100,8 +107,15 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
 
         # Customer: 000196 (クボタ)
         elif customer_code == '000196':
-            # Detect location from filename
-            if '堺' in filename or 'sakai' in filename_lower:
+            # Determine factory: explicit parameter > filename detection
+            detected_factory = factory
+            if not detected_factory:
+                if '堺' in filename or 'sakai' in filename_lower:
+                    detected_factory = 'SAKAI'
+                elif '枚方' in filename or 'hirakata' in filename_lower:
+                    detected_factory = 'HIRAKATA'
+
+            if detected_factory == 'SAKAI':
                 if order_type == 'FORECAST':
                     # クボタ_堺_内示
                     from .services.kubota_sakai_naiji_import import KubotaSakaiNaijiImportService
@@ -110,7 +124,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     # クボタ_堺_確定
                     from .services.kubota_sakai_kakutei_import import KubotaSakaiKakuteiImportService
                     return KubotaSakaiKakuteiImportService()
-            elif '枚方' in filename or 'hirakata' in filename_lower:
+            elif detected_factory == 'HIRAKATA':
                 if order_type == 'FORECAST':
                     # クボタ_枚方_内示
                     from .services.kubota_hirakata_naiji_import import KubotaHirakataNaijiImportService
@@ -138,6 +152,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             customer_code = request.data.get('customer_code')
             order_type = request.data.get('order_type', 'FIRM')
             source_system = request.data.get('source_system', 'CSV')
+            factory = request.data.get('factory')  # Optional: for multi-factory customers like Kubota
 
             if not file:
                 return Response(
@@ -163,8 +178,8 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Select appropriate import service based on customer code, order type, and filename
-            import_service = self._get_import_service(customer_code, order_type, file.name)
+            # Select appropriate import service based on customer code, order type, and factory
+            import_service = self._get_import_service(customer_code, order_type, file.name, factory)
             result = import_service.import_csv(file, customer_code, order_type, source_system)
 
             if result['success']:

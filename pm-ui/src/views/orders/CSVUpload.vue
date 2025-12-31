@@ -37,13 +37,39 @@
               v-for="type in orderTypes"
               :key="type.value"
               type="button"
-              class="select-tile"
+              class="select-tile compact-tile"
               :class="{ active: formData.order_type === type.value }"
               @click="selectOrderType(type.value)"
             >
-              <div class="icon-badge">{{ type.badge }}</div>
-              <div class="tile-main">{{ type.label }}</div>
-              <div class="tile-sub">{{ type.desc }}</div>
+              <div class="tile-content-row">
+                <div class="icon-badge">{{ type.badge }}</div>
+                <div class="tile-main">{{ type.label }}</div>
+                <div class="tile-sub">{{ type.desc }}</div>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Factory selection for Kubota (customer code 000196) -->
+        <div v-if="isKubotaCustomer" class="form-group">
+          <div class="group-header">
+            <label>Factory *</label>
+            <span class="hint">工場を選択してください</span>
+          </div>
+          <div class="tile-grid compact">
+            <button
+              v-for="factory in factories"
+              :key="factory.value"
+              type="button"
+              class="select-tile compact-tile"
+              :class="{ active: formData.factory === factory.value }"
+              @click="selectFactory(factory.value)"
+            >
+              <div class="tile-content-row">
+                <div class="icon-badge">{{ factory.badge }}</div>
+                <div class="tile-main">{{ factory.label }}</div>
+                <div class="tile-sub">{{ factory.desc }}</div>
+              </div>
             </button>
           </div>
         </div>
@@ -109,7 +135,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import api from '@/api/client'
 import axios from 'axios'
 
@@ -120,14 +146,24 @@ const result = ref(null)
 const fileWarning = ref(null)
 const isDuplicateFile = ref(false)
 const orderTypes = [
-  { value: 'FIRM', label: 'FIRM', desc: '確定受注', badge: 'F' },
+  { value: 'FIRM', label: 'ＦＩＲＭ', desc: '確定受注', badge: 'Ｆ' },
   { value: 'FORECAST', label: 'FORECAST', desc: '内示/予測', badge: 'Fc' },
+]
+const factories = [
+  { value: 'SAKAI', label: '堺工場', desc: 'Sakai', badge: '堺' },
+  { value: 'HIRAKATA', label: '枚方工場', desc: 'Hirakata', badge: '枚' },
 ]
 
 const formData = ref({
   customer_code: '',
   order_type: 'FIRM',
-  source_system: 'CSV'
+  source_system: 'CSV',
+  factory: 'SAKAI'  // Default to Sakai for Kubota
+})
+
+// Check if selected customer is Kubota (000196)
+const isKubotaCustomer = computed(() => {
+  return formData.value.customer_code === '000196'
 })
 
 const fetchCustomers = async () => {
@@ -173,15 +209,30 @@ const onFileChange = async (event) => {
 
 const selectCustomer = (customer) => {
   formData.value.customer_code = customer.customer_code
+  // Reset factory when customer changes
+  if (customer.customer_code === '000196') {
+    formData.value.factory = 'SAKAI'
+  } else {
+    formData.value.factory = null
+  }
 }
 
 const selectOrderType = (type) => {
   formData.value.order_type = type
 }
 
+const selectFactory = (factory) => {
+  formData.value.factory = factory
+}
+
 const uploadCSV = async () => {
   if (!formData.value.customer_code) {
     alert('得意先を選択してください')
+    return
+  }
+
+  if (isKubotaCustomer.value && !formData.value.factory) {
+    alert('工場を選択してください')
     return
   }
 
@@ -199,6 +250,11 @@ const uploadCSV = async () => {
     formDataToSend.append('customer_code', formData.value.customer_code)
     formDataToSend.append('order_type', formData.value.order_type)
     formDataToSend.append('source_system', formData.value.source_system)
+
+    // Add factory parameter for Kubota customer
+    if (isKubotaCustomer.value && formData.value.factory) {
+      formDataToSend.append('factory', formData.value.factory)
+    }
 
     const response = await axios.post(
       'http://localhost:8002/api/stg-order-raw/upload_csv/',
@@ -238,7 +294,7 @@ onMounted(() => {
 
 <style scoped>
 .upload-form {
-  max-width: 600px;
+  max-width: 800px;
   margin: 0 auto;
   padding: 2rem;
   background: white;
@@ -372,7 +428,30 @@ onMounted(() => {
 }
 
 .tile-grid.compact {
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.tile-content-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.compact-tile .icon-badge {
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.compact-tile .tile-main {
+  font-weight: 600;
+  color: #222;
+  white-space: nowrap;
+}
+
+.compact-tile .tile-sub {
+  font-size: 12px;
+  color: #555;
+  white-space: nowrap;
 }
 
 .tile-grid.customer-grid {

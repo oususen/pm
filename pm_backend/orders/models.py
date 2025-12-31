@@ -78,7 +78,7 @@ class OrderLine(models.Model):
 
 
 class StgOrderRaw(models.Model):
-    """受注取込ステージング（生データ）"""
+    """受注取込ステージング（生データ） - 旧モデル、互換性のため残す"""
     ORDER_TYPE_CHOICES = [
         ('FIRM', '確定'),
         ('FORECAST', '内示'),
@@ -122,21 +122,180 @@ class StgOrderRaw(models.Model):
         return f"{self.customer_code} - {self.source_file} (Row {self.source_row_no})"
 
 
+class StgOrderRawTiera(models.Model):
+    """ティエラ受注取込ステージング（生データ）"""
+    ORDER_TYPE_CHOICES = [
+        ('FIRM', '確定'),
+        ('FORECAST', '内示'),
+    ]
+
+    PARSE_STATUS_CHOICES = [
+        ('PENDING', '未処理'),
+        ('PARSED', '処理済'),
+        ('ERROR', 'エラー'),
+    ]
+
+    id = models.BigAutoField(primary_key=True)
+    customer_code = models.CharField(max_length=20, verbose_name='得意先コード')
+    order_type = models.CharField(max_length=20, choices=ORDER_TYPE_CHOICES, verbose_name='受注タイプ')
+    source_system = models.CharField(max_length=50, null=True, blank=True, verbose_name='ソースシステム')
+    source_file = models.CharField(max_length=200, null=True, blank=True, verbose_name='ソースファイル')
+    source_row_no = models.IntegerField(verbose_name='ソース行番号')
+
+    # ティエラ固有フィールド
+    data_type = models.CharField(max_length=10, null=True, blank=True, verbose_name='データ区分')  # B17/Y55
+    product_code = models.CharField(max_length=50, null=True, blank=True, verbose_name='製品コード(図番)')
+    due_date = models.DateField(null=True, blank=True, verbose_name='納期')
+    quantity = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True, verbose_name='数量')
+    product_name = models.CharField(max_length=200, null=True, blank=True, verbose_name='納品書用品名')
+    product_name_kana = models.CharField(max_length=200, null=True, blank=True, verbose_name='納品書用品名カナ')
+    c_table_no = models.CharField(max_length=50, null=True, blank=True, verbose_name='C表No/不良通知No')
+
+    raw_payload = models.JSONField(verbose_name='生データ（JSON）')
+    parse_status = models.CharField(max_length=20, choices=PARSE_STATUS_CHOICES, default='PENDING', verbose_name='解析ステータス')
+    error_message = models.TextField(null=True, blank=True, verbose_name='エラーメッセージ')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'stg_order_raw_tiera'
+        verbose_name = 'ティエラ受注取込ステージング（生データ）'
+        verbose_name_plural = 'ティエラ受注取込ステージング（生データ）'
+        indexes = [
+            models.Index(fields=['customer_code']),
+            models.Index(fields=['parse_status']),
+            models.Index(fields=['source_file']),
+        ]
+
+    def __str__(self):
+        return f"{self.customer_code} - {self.source_file} (Row {self.source_row_no})"
+
+
+class StgOrderRawRieden(models.Model):
+    """リーデン受注取込ステージング（生データ）"""
+    ORDER_TYPE_CHOICES = [
+        ('FIRM', '確定'),
+        ('FORECAST', '内示'),
+    ]
+
+    PARSE_STATUS_CHOICES = [
+        ('PENDING', '未処理'),
+        ('PARSED', '処理済'),
+        ('ERROR', 'エラー'),
+    ]
+
+    id = models.BigAutoField(primary_key=True)
+    customer_code = models.CharField(max_length=20, verbose_name='得意先コード')
+    order_type = models.CharField(max_length=20, choices=ORDER_TYPE_CHOICES, verbose_name='受注タイプ')
+    source_system = models.CharField(max_length=50, null=True, blank=True, verbose_name='ソースシステム')
+    source_file = models.CharField(max_length=200, null=True, blank=True, verbose_name='ソースファイル')
+    source_row_no = models.IntegerField(verbose_name='ソース行番号')
+
+    # リーデン固有フィールド
+    order_code = models.CharField(max_length=10, null=True, blank=True, verbose_name='発注コード')  # 509
+    product_code = models.CharField(max_length=50, null=True, blank=True, verbose_name='製品コード')
+    due_date = models.DateField(null=True, blank=True, verbose_name='納期')
+    quantity = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True, verbose_name='数量')
+
+    raw_payload = models.JSONField(verbose_name='生データ（JSON）')
+    parse_status = models.CharField(max_length=20, choices=PARSE_STATUS_CHOICES, default='PENDING', verbose_name='解析ステータス')
+    error_message = models.TextField(null=True, blank=True, verbose_name='エラーメッセージ')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'stg_order_raw_rieden'
+        verbose_name = 'リーデン受注取込ステージング（生データ）'
+        verbose_name_plural = 'リーデン受注取込ステージング（生データ）'
+        indexes = [
+            models.Index(fields=['customer_code']),
+            models.Index(fields=['parse_status']),
+            models.Index(fields=['source_file']),
+        ]
+
+    def __str__(self):
+        return f"{self.customer_code} - {self.source_file} (Row {self.source_row_no})"
+
+
+class StgOrderRawKubota(models.Model):
+    """クボタ受注取込ステージング（生データ）"""
+    ORDER_TYPE_CHOICES = [
+        ('FIRM', '確定'),
+        ('FORECAST', '内示'),
+    ]
+
+    PARSE_STATUS_CHOICES = [
+        ('PENDING', '未処理'),
+        ('PARSED', '処理済'),
+        ('ERROR', 'エラー'),
+    ]
+
+    id = models.BigAutoField(primary_key=True)
+    customer_code = models.CharField(max_length=20, verbose_name='得意先コード')
+    order_type = models.CharField(max_length=20, choices=ORDER_TYPE_CHOICES, verbose_name='受注タイプ')
+    source_system = models.CharField(max_length=50, null=True, blank=True, verbose_name='ソースシステム')
+    source_file = models.CharField(max_length=200, null=True, blank=True, verbose_name='ソースファイル')
+    source_row_no = models.IntegerField(verbose_name='ソース行番号')
+
+    # クボタ固有フィールド
+    data_no = models.CharField(max_length=10, null=True, blank=True, verbose_name='データNo')  # 36/45/47
+    record_type = models.CharField(max_length=10, null=True, blank=True, verbose_name='レコード識別')  # V2/V3
+    product_code = models.CharField(max_length=50, null=True, blank=True, verbose_name='品番')
+    inspection_type = models.CharField(max_length=10, null=True, blank=True, verbose_name='検査区分')  # N, NS, TS, $ など
+    product_name = models.CharField(max_length=200, null=True, blank=True, verbose_name='品名')
+
+    # 内示用（36番） - 横展開データ
+    start_month = models.CharField(max_length=10, null=True, blank=True, verbose_name='スタート月度')  # 例：2512
+    date_headers = models.JSONField(null=True, blank=True, verbose_name='日付ヘッダー配列')  # ["51201", "51202", ...]
+    quantities = models.JSONField(null=True, blank=True, verbose_name='数量配列')  # [72, 56, 64, ...]
+
+    # 確定用（45/47番）
+    delivery_date = models.DateField(null=True, blank=True, verbose_name='納入指示日')
+    quantity = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True, verbose_name='納入指示数')
+    order_no = models.CharField(max_length=50, null=True, blank=True, verbose_name='注番')
+
+    raw_payload = models.JSONField(verbose_name='生データ（JSON）')
+    parse_status = models.CharField(max_length=20, choices=PARSE_STATUS_CHOICES, default='PENDING', verbose_name='解析ステータス')
+    error_message = models.TextField(null=True, blank=True, verbose_name='エラーメッセージ')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'stg_order_raw_kubota'
+        verbose_name = 'クボタ受注取込ステージング（生データ）'
+        verbose_name_plural = 'クボタ受注取込ステージング（生データ）'
+        indexes = [
+            models.Index(fields=['customer_code']),
+            models.Index(fields=['parse_status']),
+            models.Index(fields=['source_file']),
+            models.Index(fields=['product_code', 'inspection_type']),
+        ]
+
+    def __str__(self):
+        return f"{self.customer_code} - {self.source_file} (Row {self.source_row_no})"
+
+
 class StgOrderDaily(models.Model):
-    """受注取込ステージング（日別正規化）"""
+    """受注取込ステージング（日別正規化） - 統一フォーマット"""
     ORDER_TYPE_CHOICES = [
         ('FIRM', '確定'),
         ('FORECAST', '内示'),
     ]
 
     id = models.BigAutoField(primary_key=True)
-    raw = models.ForeignKey(StgOrderRaw, on_delete=models.CASCADE, verbose_name='生データ')
+
+    # 元データへの参照（どれか一つのみNULLでない）
+    raw = models.ForeignKey(StgOrderRaw, on_delete=models.CASCADE, null=True, blank=True, verbose_name='生データ（旧・非推奨）')
+    raw_tiera = models.ForeignKey(StgOrderRawTiera, on_delete=models.CASCADE, null=True, blank=True, verbose_name='ティエラ生データ')
+    raw_rieden = models.ForeignKey(StgOrderRawRieden, on_delete=models.CASCADE, null=True, blank=True, verbose_name='リーデン生データ')
+    raw_kubota = models.ForeignKey(StgOrderRawKubota, on_delete=models.CASCADE, null=True, blank=True, verbose_name='クボタ生データ')
+
     customer = models.ForeignKey(Customer, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='得意先')
     order_type = models.CharField(max_length=20, choices=ORDER_TYPE_CHOICES, verbose_name='受注タイプ')
     version_no = models.CharField(max_length=20, default='v1', verbose_name='版番号')
     product_code = models.CharField(max_length=50, verbose_name='製品コード')
-    product_name = models.CharField(max_length=100, null=True, blank=True, verbose_name='品名')
-    product_name_halfwidth = models.CharField(max_length=100, null=True, blank=True, verbose_name='品名半角')
+    product_name = models.CharField(max_length=200, null=True, blank=True, verbose_name='品名')
+    product_name_halfwidth = models.CharField(max_length=200, null=True, blank=True, verbose_name='品名半角')
     due_date = models.DateField(verbose_name='納期')
     quantity = models.DecimalField(max_digits=14, decimal_places=3, verbose_name='数量')
     plant_code = models.CharField(max_length=20, null=True, blank=True, verbose_name='工場コード')
@@ -153,6 +312,7 @@ class StgOrderDaily(models.Model):
         indexes = [
             models.Index(fields=['due_date']),
             models.Index(fields=['customer', 'due_date']),
+            models.Index(fields=['product_code']),
         ]
 
     def __str__(self):
