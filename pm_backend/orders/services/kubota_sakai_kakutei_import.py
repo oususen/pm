@@ -134,6 +134,7 @@ class KubotaSakaiKakuteiImportService:
 
             raw_records = []
             row_no = 0
+            data_no_samples = set()  # デバッグ用：実際のデータNoを記録
 
             for row in csv_reader:
                 row_no += 1
@@ -143,6 +144,10 @@ class KubotaSakaiKakuteiImportService:
                                    self.COL_DELIVERY_DATE, self.COL_QUANTITY) + 1
                 if len(row) < required_cols:
                     continue
+
+                # デバッグ：実際のデータNoを記録（最初の10件）
+                if row_no <= 10 and len(row) > self.COL_DATA_NO:
+                    data_no_samples.add(row[self.COL_DATA_NO].strip())
 
                 # Filter by data_no
                 if row[self.COL_DATA_NO].strip() != self.DATA_NO:
@@ -193,10 +198,13 @@ class KubotaSakaiKakuteiImportService:
                     self.errors.append(f"Row {row_no}: {str(e)}")
 
             if not raw_records:
+                # デバッグ情報を含めたエラーメッセージ
+                debug_info = f"Found data_no values: {', '.join(sorted(data_no_samples)) if data_no_samples else 'none'}"
                 return {
                     'success': False,
-                    'message': f'No valid 47番 confirmed order records found in file',
-                    'errors': self.errors
+                    'message': f'No valid {self.DATA_NO}番 confirmed order records found in file. {debug_info}',
+                    'errors': self.errors,
+                    'warnings': self.warnings
                 }
 
             # Save to database
