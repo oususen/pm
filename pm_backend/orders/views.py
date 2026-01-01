@@ -60,7 +60,7 @@ class OrderViewSet(viewsets.ModelViewSet):
 
 class OrderLineViewSet(viewsets.ModelViewSet):
     """受注明細ViewSet"""
-    queryset = OrderLine.objects.all().select_related('order', 'product')
+    queryset = OrderLine.objects.filter(order__status='OPEN').select_related('order', 'product')
     serializer_class = OrderLineSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['order', 'product', 'due_date']
