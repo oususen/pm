@@ -166,9 +166,12 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Check for duplicate file name
-            from orders.models import StgOrderRaw
-            if StgOrderRaw.objects.filter(source_file=file.name).exists():
+            # Check for duplicate file name across all raw tables
+            from orders.models import StgOrderRaw, StgOrderRawKubota, StgOrderRawTiera, StgOrderRawRieden
+            if (StgOrderRaw.objects.filter(source_file=file.name).exists() or
+                StgOrderRawKubota.objects.filter(source_file=file.name).exists() or
+                StgOrderRawTiera.objects.filter(source_file=file.name).exists() or
+                StgOrderRawRieden.objects.filter(source_file=file.name).exists()):
                 return Response(
                     {
                         'success': False,
