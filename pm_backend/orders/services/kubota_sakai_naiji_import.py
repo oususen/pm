@@ -29,6 +29,7 @@ class KubotaSakaiNaijiImportService:
 
     DATA_NO = '36'
     COL_DATA_NO = 0
+    COL_CALC_DATE = 4  # 計算日 (Excel列5) - YYMMDD format, Order識別用
     COL_PRODUCT_CODE = 8
     COL_PRODUCT_NAME = 11  # 品名
     COL_INSPECTION_TYPE = 17
@@ -208,6 +209,9 @@ class KubotaSakaiNaijiImportService:
                 try:
                     product_code, inspection_type = key
 
+                    # Extract calculation date (for Order identification)
+                    calc_date = v2_row[self.COL_CALC_DATE].strip() if len(v2_row) > self.COL_CALC_DATE else ''
+
                     # Extract product name
                     product_name = v2_row[self.COL_PRODUCT_NAME].strip() if len(v2_row) > self.COL_PRODUCT_NAME else ''
 
@@ -246,6 +250,7 @@ class KubotaSakaiNaijiImportService:
                             'v3_row': v3_row,
                             'v2_row_no': v2_row_no,
                             'v3_row_no': v3_row_no,
+                            'calc_date': calc_date,  # 計算日（Order識別用）
                             'encoding': encoding
                         },
                         parse_status='PENDING'

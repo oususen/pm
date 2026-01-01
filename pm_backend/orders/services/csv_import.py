@@ -253,12 +253,39 @@ class CSVImportService:
                 # Track latest confirmed due date per product (for Tiera-specific cleanup)
                 product_cutoffs = {}
 
-                # Generate order_no based on order_type
+                # Generate order_no based on order_type and customer
                 if order_type == 'FORECAST':
-                    # Partial replacement: supersede overlapping forecasts per product
-                    order_no = f"FC-{customer.customer_code}-{timestamp}"
+                    # For Kubota, use calc_date from raw_payload if available
+                    if customer.customer_code == '000196':
+                        # Try to get calc_date from raw_kubota
+                        first_daily = dailies[0] if dailies else None
+                        if first_daily and hasattr(first_daily, 'raw_kubota') and first_daily.raw_kubota:
+                            calc_date = first_daily.raw_kubota.raw_payload.get('calc_date', '')
+                            if calc_date:
+                                order_no = f"FC-{customer.customer_code}-{calc_date}"
+                            else:
+                                order_no = f"FC-{customer.customer_code}-{timestamp}"
+                        else:
+                            order_no = f"FC-{customer.customer_code}-{timestamp}"
+                    else:
+                        # Other customers: use timestamp (partial replacement strategy)
+                        order_no = f"FC-{customer.customer_code}-{timestamp}"
                 else:  # FIRM
-                    order_no = f"FIRM-{customer.customer_code}-{timestamp}"
+                    # For Kubota, use issue_date from raw_payload if available
+                    if customer.customer_code == '000196':
+                        # Try to get issue_date from raw_kubota
+                        first_daily = dailies[0] if dailies else None
+                        if first_daily and hasattr(first_daily, 'raw_kubota') and first_daily.raw_kubota:
+                            issue_date = first_daily.raw_kubota.raw_payload.get('issue_date', '')
+                            if issue_date:
+                                order_no = f"FIRM-{customer.customer_code}-{issue_date}"
+                            else:
+                                order_no = f"FIRM-{customer.customer_code}-{timestamp}"
+                        else:
+                            order_no = f"FIRM-{customer.customer_code}-{timestamp}"
+                    else:
+                        # Other customers: use timestamp
+                        order_no = f"FIRM-{customer.customer_code}-{timestamp}"
 
                 # Create order header
                 order = Order.objects.create(
@@ -308,6 +335,7 @@ class CSVImportService:
                             line_no=line_no,
                             product=product,
                             product_code=daily.product_code,
+                            order_type=order_type,
                             quantity=daily.quantity,
                             due_date=daily.due_date,
                             plant_code=daily.plant_code,
@@ -336,6 +364,7 @@ class CSVImportService:
                             line_no=line_no,
                             product=product,
                             product_code=daily.product_code,
+                            order_type=order_type,
                             quantity=daily.quantity,
                             due_date=daily.due_date,
                             plant_code=daily.plant_code,
@@ -346,8 +375,8 @@ class CSVImportService:
 
                 # If this is a FIRM order, supersede overlapping FORECAST orders
                 if order_type == 'FIRM':
-                    if customer.customer_code in {'000001', '000196'}:
-                        # Tiera / Kubota: delete (supersede) forecasts up to the confirmed due date per product
+                    if customer.customer_code == '000001':
+                        # Tiera only: delete (supersede) forecasts up to the confirmed due date per product
                         for product_code, cutoff_date in product_cutoffs.items():
                             overlapping_forecast_orders = Order.objects.filter(
                                 customer_id=customer_id,
@@ -357,6 +386,11 @@ class CSVImportService:
                                 lines__due_date__lte=cutoff_date
                             ).distinct()
                             superseded_orders += overlapping_forecast_orders.update(status='SUPERSEDED')
+                    elif customer.customer_code == '000196':
+                        # Kubota: Do NOT supersede forecasts when importing confirmed orders
+                        # Confirmed (FIRM) and Forecast (FORECAST) are managed separately
+                        # Confirmed orders are for 1 day only, forecasts are for long-term planning
+                        pass
                     else:
                         # Default: supersede only exact matching product and due_date
                         firm_due_dates = [daily.due_date for daily in dailies]

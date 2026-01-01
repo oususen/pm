@@ -14,21 +14,26 @@ class KubotaSakaiKakuteiImportService:
     - Structure: Simple 1 row = 1 order line
     - Encoding: Shift-JIS (cp932)
 
-    Column mapping:
+    Column mapping (Python indices):
     - Column 0: data_no = "47"
     - Column 5: product_code (品番)
-    - Column 18: delivery_date (納入指示日) - YYMMDD format
-    - Column 19: quantity (納入指示数)
-    - Column 8: order_no (注番) - optional
+    - Column 10: product_name (品名)
+    - Column 14: inspection_type (検区)
+    - Column 23: delivery_date (納期) - MMDD format
+    - Column 24: quantity (指示数)
+    - Column 26: issue_date (発行日) - YYMMDD format (Order識別用)
+    - Column 33: order_no (発注番号) - 製品毎に異なる
     """
 
     DATA_NO = '47'
     COL_DATA_NO = 0
     COL_PRODUCT_CODE = 5
-    COL_ORDER_NO = 8  # 注番
-    COL_PRODUCT_NAME = 11  # 品名
-    COL_DELIVERY_DATE = 18  # 納入指示日
-    COL_QUANTITY = 19  # 納入指示数
+    COL_PRODUCT_NAME = 10  # 品名 (Excel列11)
+    COL_INSPECTION_TYPE = 14  # 検区 (Excel列15)
+    COL_DELIVERY_DATE = 23  # 納期 (Excel列24) - MMDD format
+    COL_QUANTITY = 24  # 指示数/数量 (Excel列25)
+    COL_ISSUE_DATE = 26  # 発行日 (Excel列27) - YYMMDD format
+    COL_ORDER_NO = 33  # 発注番号 (Excel列34) - 製品毎に異なる
 
     def __init__(self):
         self.errors = []
@@ -48,19 +53,53 @@ class KubotaSakaiKakuteiImportService:
 
         return None, None
 
-    def parse_date_from_yymmdd(self, date_str):
-        """Parse date string in YYMMDD format (6 digits)
+    def parse_date_from_mmdd(self, date_str):
+        """Parse date string in MMDD format (4 digits) with year inference
 
         Args:
-            date_str: Date string like "251225" (year=25, month=12, day=25)
+            date_str: Date string like "1209" (month=12, day=09)
 
         Returns:
             datetime.date or None
+
+        Note:
+            Since MMDD format doesn't include year, we infer it based on current date:
+            - If the month is in the past (e.g., current month is 01, date month is 12),
+              assume it's from the previous year
+            - Otherwise, use current year
         """
         if not date_str or date_str.strip() == '':
             return None
 
         date_str = str(date_str).strip()
+
+        # MMDD format (4 digits) - infer year based on current date
+        if len(date_str) == 4 and date_str.isdigit():
+            try:
+                mm = int(date_str[:2])
+                dd = int(date_str[2:4])
+
+                # Determine year based on month comparison
+                from datetime import date
+                today = date.today()
+                current_year = today.year
+                current_month = today.month
+
+                # If the month is significantly in the future (e.g., current month is 01, date month is 12),
+                # assume it's from the previous year
+                # Use a threshold of 6 months to handle year boundary
+                if mm > current_month + 6:
+                    # Month is too far in the future, likely from previous year
+                    year = current_year - 1
+                elif mm < current_month - 6:
+                    # Month is too far in the past, likely from next year (rare case)
+                    year = current_year + 1
+                else:
+                    year = current_year
+
+                return datetime(year, mm, dd).date()
+            except ValueError:
+                pass
 
         # YYMMDD format (6 digits)
         if len(date_str) == 6 and date_str.isdigit():
@@ -135,6 +174,7 @@ class KubotaSakaiKakuteiImportService:
             raw_records = []
             row_no = 0
             data_no_samples = set()  # デバッグ用：実際のデータNoを記録
+            sample_rows = []  # デバッグ用：最初の数行のデータ
 
             for row in csv_reader:
                 row_no += 1
@@ -149,6 +189,19 @@ class KubotaSakaiKakuteiImportService:
                 if row_no <= 10 and len(row) > self.COL_DATA_NO:
                     data_no_samples.add(row[self.COL_DATA_NO].strip())
 
+                # デバッグ：最初の3データ行を記録（47番のみ）
+                if len(sample_rows) < 3 and len(row) > self.COL_DATA_NO and row[self.COL_DATA_NO].strip() == self.DATA_NO:
+                    sample_rows.append({
+                        'row_no': row_no,
+                        'data_no': row[self.COL_DATA_NO].strip() if len(row) > self.COL_DATA_NO else '',
+                        'product_code': row[self.COL_PRODUCT_CODE].strip() if len(row) > self.COL_PRODUCT_CODE else '',
+                        'product_name': row[self.COL_PRODUCT_NAME].strip() if len(row) > self.COL_PRODUCT_NAME else '',
+                        'inspection': row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else '',
+                        'delivery_date': row[self.COL_DELIVERY_DATE].strip() if len(row) > self.COL_DELIVERY_DATE else '',
+                        'quantity': row[self.COL_QUANTITY].strip() if len(row) > self.COL_QUANTITY else '',
+                        'order_no': row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else '',
+                    })
+
                 # Filter by data_no
                 if row[self.COL_DATA_NO].strip() != self.DATA_NO:
                     continue
@@ -157,15 +210,17 @@ class KubotaSakaiKakuteiImportService:
                     # Extract data
                     product_code = row[self.COL_PRODUCT_CODE].strip() if len(row) > self.COL_PRODUCT_CODE else ''
                     product_name = row[self.COL_PRODUCT_NAME].strip() if len(row) > self.COL_PRODUCT_NAME else ''
+                    inspection_type = row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else ''
                     delivery_date_str = row[self.COL_DELIVERY_DATE].strip() if len(row) > self.COL_DELIVERY_DATE else ''
                     quantity_str = row[self.COL_QUANTITY].strip() if len(row) > self.COL_QUANTITY else ''
+                    issue_date_str = row[self.COL_ISSUE_DATE].strip() if len(row) > self.COL_ISSUE_DATE else ''
                     order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
 
                     if not product_code:
                         continue
 
                     # Parse date
-                    delivery_date = self.parse_date_from_yymmdd(delivery_date_str)
+                    delivery_date = self.parse_date_from_mmdd(delivery_date_str)
                     if not delivery_date:
                         self.warnings.append(f"Row {row_no}: Invalid date: {delivery_date_str}")
                         continue
@@ -189,7 +244,13 @@ class KubotaSakaiKakuteiImportService:
                         delivery_date=delivery_date,
                         quantity=quantity,
                         order_no=order_no,
-                        raw_payload={'row': row, 'encoding': encoding},
+                        inspection_type=inspection_type,
+                        raw_payload={
+                            'row': row,
+                            'encoding': encoding,
+                            'issue_date': issue_date_str,  # 発行日（Order識別用）
+                            'order_no': order_no  # 発注番号（製品毎）
+                        },
                         parse_status='PENDING'
                     )
                     raw_records.append(raw_record)
@@ -200,9 +261,18 @@ class KubotaSakaiKakuteiImportService:
             if not raw_records:
                 # デバッグ情報を含めたエラーメッセージ
                 debug_info = f"Found data_no values: {', '.join(sorted(data_no_samples)) if data_no_samples else 'none'}"
+                sample_info = ""
+                if sample_rows:
+                    sample_info = "\n\nSample data from 47番 rows:\n"
+                    for sample in sample_rows:
+                        sample_info += f"Row {sample['row_no']}: product_code={sample['product_code']}, delivery_date={sample['delivery_date']}, quantity={sample['quantity']}, order_no={sample['order_no']}\n"
+
+                error_msg = f'No valid {self.DATA_NO}番 confirmed order records found in file. {debug_info}{sample_info}'
+                print(f"DEBUG: {error_msg}")  # Console output for debugging
+
                 return {
                     'success': False,
-                    'message': f'No valid {self.DATA_NO}番 confirmed order records found in file. {debug_info}',
+                    'message': error_msg,
                     'errors': self.errors,
                     'warnings': self.warnings
                 }

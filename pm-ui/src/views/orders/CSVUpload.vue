@@ -277,10 +277,12 @@ const uploadCSV = async () => {
     }
   } catch (error) {
     console.error('Upload error:', error)
+    console.error('Error response data:', error.response?.data)
     result.value = {
       success: false,
-      message: error.response?.data?.error || error.message || 'Upload failed',
-      errors: [error.response?.data?.error || error.message]
+      message: error.response?.data?.message || error.response?.data?.error || error.message || 'Upload failed',
+      errors: error.response?.data?.errors || [error.response?.data?.error || error.message],
+      warnings: error.response?.data?.warnings || []
     }
   } finally {
     uploading.value = false

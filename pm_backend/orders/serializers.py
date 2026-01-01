@@ -15,8 +15,7 @@ from masters.models import Customer, Product
 class OrderLineSerializer(serializers.ModelSerializer):
     """Order line serializer"""
     product_name = serializers.SerializerMethodField()
-    order_type = serializers.CharField(source='order.order_type', read_only=True)
-    order_type_display = serializers.CharField(source='order.get_order_type_display', read_only=True)
+    order_type_display = serializers.CharField(source='get_order_type_display', read_only=True)
 
     class Meta:
         model = OrderLine

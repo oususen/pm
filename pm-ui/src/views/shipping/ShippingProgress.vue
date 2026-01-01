@@ -18,115 +18,122 @@
           <option :value="21">21日</option>
           <option :value="30">30日</option>
           <option :value="60">60日</option>
+          <option :value="90">90日</option>
+          <option :value="120">120日</option>
+          <option :value="180">180日</option>
         </select>
         <button @click="load" :disabled="loading">更新</button>
       </div>
     </div>
 
-    <div v-if="loading" class="loading">読込中...</div>
-    <div v-else-if="error" class="no-data">エラー: {{ error }}</div>
-    <div v-else>
-      <div v-if="groups.length" class="group-list">
-        <div v-for="g in groups" :key="g.key" class="group-card">
-          <div class="info-block">
-            <div class="info-row">
-              <span class="info-label">品番</span>
-              <span class="info-value">{{ g.product_code || "-" }}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">品名</span>
-              <span class="info-value">{{ g.product_name || "-" }}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">合計内示</span>
-              <span class="info-value">{{ g.summary.forecast }}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">合計確定</span>
-              <span class="info-value">{{ g.summary.firm }}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">合計実績</span>
-              <span class="info-value">{{ g.summary.actual }}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">合計調整</span>
-              <span class="info-value" :class="{ negative: g.summary.adjust < 0 }">
-                {{ g.summary.adjust }}
-              </span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">進度</span>
-              <span class="info-value">{{ g.summary.progressRate }}</span>
-            </div>
-          </div>
+    <div class="page-body">
+      <div class="list-area">
+        <div v-if="loading" class="loading">読込中...</div>
+        <div v-else-if="error" class="no-data">エラー: {{ error }}</div>
+        <div v-else>
+          <div v-if="groups.length" class="group-list">
+            <div v-for="g in groups" :key="g.key" class="group-card">
+              <div class="info-block">
+                <div class="info-row">
+                  <span class="info-label">品番</span>
+                  <span class="info-value">{{ g.product_code || "-" }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">品名</span>
+                  <span class="info-value">{{ g.product_name || "-" }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">合計内示</span>
+                  <span class="info-value">{{ g.summary.forecast }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">合計確定</span>
+                  <span class="info-value">{{ g.summary.firm }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">合計実績</span>
+                  <span class="info-value">{{ g.summary.actual }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">合計調整</span>
+                  <span class="info-value" :class="{ negative: g.summary.adjust < 0 }">
+                    {{ g.summary.adjust }}
+                  </span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">進度</span>
+                  <span class="info-value">{{ g.summary.progressRate }}</span>
+                </div>
+              </div>
 
-          <div class="matrix-block">
-            <table class="matrix-table">
-              <thead>
-                <tr>
-                  <th class="label-col">項目</th>
-                  <th v-for="d in columns" :key="d" class="day-col">{{ formatDateHeader(d) }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <th class="label-col">内示</th>
-                  <td
-                    v-for="d in columns"
-                    :key="`forecast-${d}`"
-                    class="cell"
-                  >
-                    {{ formatValue(getValue(g, d, "forecast")) }}
-                  </td>
-                </tr>
-                <tr>
-                  <th class="label-col">確定</th>
-                  <td
-                    v-for="d in columns"
-                    :key="`firm-${d}`"
-                    class="cell"
-                  >
-                    {{ formatValue(getValue(g, d, "firm")) }}
-                  </td>
-                </tr>
-                <tr>
-                  <th class="label-col">実績</th>
-                  <td
-                    v-for="d in columns"
-                    :key="`actual-${d}`"
-                    class="cell"
-                  >
-                    {{ formatValue(getValue(g, d, "actual")) }}
-                  </td>
-                </tr>
-                <tr>
-                  <th class="label-col">調整</th>
-                  <td
-                    v-for="d in columns"
-                    :key="`adjust-${d}`"
-                    class="cell"
-                    :class="{ negative: getValue(g, d, 'adjust') < 0 }"
-                  >
-                    {{ formatValue(getValue(g, d, "adjust")) }}
-                  </td>
-                </tr>
-                <tr>
-                  <th class="label-col">進度</th>
-                  <td
-                    v-for="d in columns"
-                    :key="`progress-${d}`"
-                    class="cell"
-                  >
-                    {{ getProgressRate(g, d) }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+              <div class="matrix-block">
+                <table class="matrix-table">
+                  <thead>
+                    <tr>
+                      <th class="label-col">項目</th>
+                      <th v-for="d in columns" :key="d" class="day-col">{{ formatDateHeader(d) }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th class="label-col">内示</th>
+                      <td
+                        v-for="d in columns"
+                        :key="`forecast-${d}`"
+                        class="cell"
+                      >
+                        {{ formatValue(getValue(g, d, "forecast")) }}
+                      </td>
+                    </tr>
+                    <tr>
+                      <th class="label-col">確定</th>
+                      <td
+                        v-for="d in columns"
+                        :key="`firm-${d}`"
+                        class="cell"
+                      >
+                        {{ formatValue(getValue(g, d, "firm")) }}
+                      </td>
+                    </tr>
+                    <tr>
+                      <th class="label-col">実績</th>
+                      <td
+                        v-for="d in columns"
+                        :key="`actual-${d}`"
+                        class="cell"
+                      >
+                        {{ formatValue(getValue(g, d, "actual")) }}
+                      </td>
+                    </tr>
+                    <tr>
+                      <th class="label-col">調整</th>
+                      <td
+                        v-for="d in columns"
+                        :key="`adjust-${d}`"
+                        class="cell"
+                        :class="{ negative: getValue(g, d, 'adjust') < 0 }"
+                      >
+                        {{ formatValue(getValue(g, d, "adjust")) }}
+                      </td>
+                    </tr>
+                    <tr>
+                      <th class="label-col">進度</th>
+                      <td
+                        v-for="d in columns"
+                        :key="`progress-${d}`"
+                        class="cell"
+                      >
+                        {{ getProgressRate(g, d) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
+          <div v-else class="no-data">データがありません</div>
         </div>
       </div>
-      <div v-else class="no-data">データがありません</div>
     </div>
   </div>
 </template>
@@ -137,7 +144,7 @@ import api from "@/api/client";
 
 const productFilter = ref("");
 const startDate = ref(formatDate(new Date()));
-const horizon = ref(30); // デフォルト30日
+const horizon = ref(90); // デフォルト90日
 const loading = ref(false);
 const error = ref("");
 const orderLines = ref([]);
@@ -197,11 +204,6 @@ const groups = computed(() => {
     // due_dateはAPIから文字列で返されるので、new Date()を通さない
     const dueDate = formatDate(order.due_date);
     const productCode = order.product_code;
-
-    // YD60009848のデバッグ
-    if (productCode.includes('9848')) {
-      console.log("[9848] due_date:", order.due_date, "→ dueDate:", dueDate, "qty:", order.quantity, "type:", order.order_type);
-    }
 
     // 製品フィルタ
     if (productFilter.value) {
@@ -264,17 +266,8 @@ const groups = computed(() => {
   console.log("[ShippingProgress] 処理件数:", processedCount, "スキップ:", skippedCount);
   console.log("[ShippingProgress] グループ数:", map.size);
 
-  // YD60009848のグループ詳細を確認
-  if (map.has('YD60009848')) {
-    const g = map.get('YD60009848');
-    console.log("[9848] グループ詳細:");
-    console.log("[9848] product_name:", g.product_name);
-    console.log("[9848] cells:", g.cells);
-    console.log("[9848] cells keys:", Object.keys(g.cells));
-  }
-
   // サマリー計算
-  return Array.from(map.values()).map((g) => {
+  const result = Array.from(map.values()).map((g) => {
     let totalForecast = 0;
     let totalFirm = 0;
     let totalActual = 0;
@@ -309,6 +302,10 @@ const groups = computed(() => {
 
     return g;
   });
+
+  console.log("[ShippingProgress] 返却グループ数:", result.length);
+
+  return result;
 });
 
 const getValue = (group, date, key) => {
@@ -363,16 +360,9 @@ const load = async () => {
     orderLines.value = normalizeList(orderLinesRes.data || []);
     backlogs.value = []; // LineBacklog APIは使用しない
 
-    // 開始日を受注データの最も古い納期に自動設定
-    if (orderLines.value.length > 0) {
-      const dates = orderLines.value
-        .map(o => o.due_date)
-        .filter(d => d)
-        .sort();
-      if (dates.length > 0) {
-        startDate.value = dates[0];
-      }
-    }
+    // 開始日は初期値（今日の日付）のまま
+    // 理由：過去のデータがある場合でも、現在から未来を表示したい
+    // ユーザーは手動で開始日を変更して過去のデータも確認できる
 
     console.log("[ShippingProgress] データロード完了");
     console.log("[ShippingProgress] 受注明細件数:", orderLines.value.length);
@@ -398,6 +388,8 @@ onMounted(load);
   flex-direction: column;
   gap: 12px;
   padding: 16px;
+  height: 100%;
+  min-height: 0;
 }
 .page-header {
   display: flex;
@@ -442,6 +434,18 @@ onMounted(load);
 .page-actions button:disabled {
   background: #9ca3af;
   cursor: not-allowed;
+}
+
+.page-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.list-area {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
 .group-list {
