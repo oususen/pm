@@ -31,9 +31,9 @@ class KubotaHirakataNaijiImportService:
     COL_PRODUCT_NAME = 12  # 品名
     COL_INSPECTION_TYPE = 17  # Different from Sakai (18)
     COL_RECORD_TYPE = 24
-    COL_START_MONTH = 25  # レコード=スタート月度
-    COL_DATA_START = 27
-    COL_DATA_END = 120
+    COL_START_MONTH = 25  # レコード=スタート月度 (Excel列26)
+    COL_DATA_START = 26   # 初月度開始 (Excel列27)
+    COL_DATA_END = 119    # データ終了 (Excel列120)
 
     def __init__(self):
         self.errors = []

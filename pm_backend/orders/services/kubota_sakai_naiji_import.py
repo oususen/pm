@@ -33,9 +33,9 @@ class KubotaSakaiNaijiImportService:
     COL_PRODUCT_NAME = 11  # 品名
     COL_INSPECTION_TYPE = 17
     COL_RECORD_TYPE = 24
-    COL_START_MONTH = 25  # レコード=スタート月度
-    COL_DATA_START = 27  # Start of 93 columns (date/quantity)
-    COL_DATA_END = 120   # End of 93 columns (27 + 93 - 1 = 119, but check actual file)
+    COL_START_MONTH = 25  # レコード=スタート月度 (Excel列26)
+    COL_DATA_START = 26   # 初月度開始 (Excel列27)
+    COL_DATA_END = 119    # データ終了 (Excel列120)
 
     def __init__(self):
         self.errors = []
