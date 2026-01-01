@@ -9,6 +9,8 @@ from masters.models import Customer, Product
 class KubotaHirakataNaijiImportService:
     """Kubota Hirakata Factory Forecast (36番内示) CSV Import Service
 
+    ⚠️ 注意: 枚方内示ファイルは規律が不明のため、現在使用しない
+
     Format: RCV_JVAN.csv (Hirakata factory)
     - Data No: 36 (forecast)
     - Structure: V1/V2/V3 triplet rows (header summary + date header + quantities)
@@ -23,6 +25,8 @@ class KubotaHirakataNaijiImportService:
     - Column 24: record_type (レコード識別) - "V1", "V2", or "V3"
     - Column 25: start_month (開始月度) - YYMM format
     - Columns 27-119: Date headers (V2) and quantities (V3)
+
+    ※ 列番号は推定値であり、実際のファイル構造とは異なる可能性があります
     """
 
     DATA_NO = '36'
