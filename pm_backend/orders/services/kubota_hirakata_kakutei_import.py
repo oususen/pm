@@ -20,10 +20,11 @@ class KubotaHirakataKakuteiImportService:
     COL_DATA_NO = 0
     COL_PRODUCT_CODE = 5
     COL_ORDER_NO = 3  # 注番
-    COL_PRODUCT_NAME = 9  # 品名
+    COL_PRODUCT_NAME = 8  # 品名
     COL_DELIVERY_DATE = 18  # 納入指示日 (YYMMDD format)
     COL_QUANTITY = 19  # 納入指示数
-
+    COL_INSPECTION_TYPE = 10
+    
     def __init__(self):
         self.errors = []
         self.warnings = []
