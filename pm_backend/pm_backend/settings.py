@@ -137,7 +137,7 @@ TIME_ZONE = 'Asia/Tokyo'
 
 USE_I18N = True
 
-USE_TZ = True
+USE_TZ = False  # 日本時間をそのままDBに保存
 
 
 # Static files (CSS, JavaScript, Images)
