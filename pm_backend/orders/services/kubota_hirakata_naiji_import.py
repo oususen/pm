@@ -31,7 +31,7 @@ class KubotaHirakataNaijiImportService:
     COL_PRODUCT_NAME = 12  # 品名
     COL_INSPECTION_TYPE = 17  # Different from Sakai (18)
     COL_RECORD_TYPE = 24
-    COL_START_MONTH = 25  # Different from Sakai (26)
+    COL_START_MONTH = 25  # レコード=スタート月度
     COL_DATA_START = 27
     COL_DATA_END = 120
 

@@ -30,10 +30,10 @@ class KubotaSakaiNaijiImportService:
     DATA_NO = '36'
     COL_DATA_NO = 0
     COL_PRODUCT_CODE = 8
-    COL_PRODUCT_NAME = 12  # 品名
-    COL_INSPECTION_TYPE = 18
+    COL_PRODUCT_NAME = 11  # 品名
+    COL_INSPECTION_TYPE = 17
     COL_RECORD_TYPE = 24
-    COL_START_MONTH = 26
+    COL_START_MONTH = 25  # レコード=スタート月度
     COL_DATA_START = 27  # Start of 93 columns (date/quantity)
     COL_DATA_END = 120   # End of 93 columns (27 + 93 - 1 = 119, but check actual file)
 
