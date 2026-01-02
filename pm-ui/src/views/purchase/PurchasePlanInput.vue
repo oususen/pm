@@ -38,7 +38,7 @@
       </div>
     </div>
 
-    <div class="grid-wrapper">
+    <div class="grid-wrapper" ref="gridWrapperRef">
       <table class="plan-grid" :style="{ minWidth: tableMinWidth + 'px' }">
         <thead>
           <tr class="head-level1">
@@ -46,7 +46,7 @@
             <th rowspan="2" class="sticky-col code-col">品番</th>
             <th rowspan="2" class="sticky-col name-col">品名</th>
             <th
-              v-for="c in dateColumns"
+              v-for="(c, colIdx) in dateColumns"
               :key="c.key"
               colspan="5"
               class="date-head day-end"
@@ -56,7 +56,7 @@
             </th>
           </tr>
           <tr class="head-level2">
-            <template v-for="c in dateColumns" :key="c.key">
+            <template v-for="(c, colIdx) in dateColumns" :key="c.key">
               <th class="mini" :class="c.dayClass">需要</th>
               <th class="mini" :class="c.dayClass">実績</th>
               <th class="mini" :class="c.dayClass">在庫</th>
@@ -76,7 +76,7 @@
             <td class="sticky-col name-col">
               <span class="product-info">{{ row.product_name || getProductName(row.product_id) }}</span>
             </td>
-            <template v-for="c in dateColumns" :key="c.key">
+            <template v-for="(c, colIdx) in dateColumns" :key="c.key">
               <td class="num" :class="c.dayClass">
                 <span class="readonly-value">{{ row.daily[c.key].demand || 0 }}</span>
               </td>
@@ -92,8 +92,9 @@
                   inputmode="decimal"
                   :value="row.daily[c.key].plan === 0 || row.daily[c.key].plan === '' || row.daily[c.key].plan == null ? '' : row.daily[c.key].plan"
                   @input="onPlanInput(row, c.key, $event.target.value)"
-                  @keydown.up.prevent
-                  @keydown.down.prevent
+                  :data-row="idx"
+                  :data-col="colIdx"
+                  @keydown="onCellKeydown($event, idx, colIdx)"
                 />
               </td>
               <td class="num stock-plan day-end" :class="c.dayClass">
@@ -128,6 +129,7 @@ const purchaseProcessId = ref('')
 const startDate = ref(new Date().toISOString().slice(0, 10))
 const horizonDays = ref(60)
 const keyword = ref('')
+const gridWrapperRef = ref(null)
 
 const suppliers = ref([])
 const products = ref([])
@@ -246,6 +248,51 @@ const filteredRows = computed(() => {
     return txt.includes(k)
   })
 })
+
+const focusCellInput = (rowIdx, colIdx) => {
+  const root = gridWrapperRef.value
+  if (!root) return
+  const selector = `input[data-row="${rowIdx}"][data-col="${colIdx}"]`
+  const target = root.querySelector(selector)
+  if (target) {
+    target.focus()
+    if (typeof target.select === 'function') {
+      target.select()
+    }
+  }
+}
+
+const onCellKeydown = (event, rowIdx, colIdx) => {
+  const key = event.key
+  const supportedKeys = ['Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']
+  if (!supportedKeys.includes(key)) return
+
+  event.preventDefault()
+
+  const maxRow = filteredRows.value.length - 1
+  const maxCol = dateColumns.value.length - 1
+  if (maxRow < 0 || maxCol < 0) return
+
+  let nextRow = rowIdx
+  let nextCol = colIdx
+
+  if (key === 'Enter') {
+    nextRow += event.shiftKey ? -1 : 1
+  } else if (key === 'ArrowUp') {
+    nextRow -= 1
+  } else if (key === 'ArrowDown') {
+    nextRow += 1
+  } else if (key === 'ArrowLeft') {
+    nextCol -= 1
+  } else if (key === 'ArrowRight') {
+    nextCol += 1
+  }
+
+  if (nextRow < 0 || nextRow > maxRow) return
+  if (nextCol < 0 || nextCol > maxCol) return
+
+  focusCellInput(nextRow, nextCol)
+}
 
 const refreshDates = () => {
   rows.value.forEach((r) => {
