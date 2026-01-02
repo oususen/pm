@@ -500,6 +500,7 @@ const doPickup = async () => {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
+  --header-row-height: 30px;
 }
 .plan-grid th,
 .plan-grid td {
@@ -512,6 +513,35 @@ const doPickup = async () => {
 }
 .plan-grid th {
   font-weight: 700;
+}
+.plan-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.plan-grid thead tr.head-level1 th {
+  top: 0;
+}
+.plan-grid thead tr.head-level2 th {
+  top: var(--header-row-height);
+}
+.plan-grid thead tr.head-level1 th {
+  background: #cfd8ec;
+}
+.plan-grid thead tr.head-level2 th {
+  background: #e7edf7;
+}
+.plan-grid thead th.sat {
+  background: #ffe8cc;
+}
+.plan-grid thead th.sun {
+  background: #ffd6d6;
+}
+thead tr.head-level1 th.sticky-col {
+  background: #cfd8ec;
+}
+thead tr.head-level2 th.sticky-col {
+  background: #e7edf7;
 }
 .sat {
   background: #ffe8cc;
@@ -547,7 +577,7 @@ const doPickup = async () => {
   z-index: 3;
 }
 thead .sticky-col {
-  z-index: 4;
+  z-index: 6;
 }
 .number-col {
   width: 60px;

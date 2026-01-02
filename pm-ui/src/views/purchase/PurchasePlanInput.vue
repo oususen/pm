@@ -419,6 +419,10 @@ const resolvePurchaseLineId = async () => {
   font-size: 12px;
   font-family: 'Segoe UI', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
   color: #1f2a44;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
 }
 .page-title {
   margin: 0 0 6px;
@@ -462,7 +466,9 @@ const resolvePurchaseLineId = async () => {
 }
 .grid-wrapper {
   margin-top: 10px;
-  overflow-x: auto;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   background: #fff;
   border: 1px solid #c5cfde;
   border-radius: 4px;
@@ -471,6 +477,7 @@ const resolvePurchaseLineId = async () => {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
+  --header-row-height: 30px;
 }
 .plan-grid th,
 .plan-grid td {
@@ -483,6 +490,35 @@ const resolvePurchaseLineId = async () => {
 }
 .plan-grid th {
   font-weight: 700;
+}
+.plan-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.plan-grid thead tr.head-level1 th {
+  top: 0;
+}
+.plan-grid thead tr.head-level2 th {
+  top: var(--header-row-height);
+}
+.plan-grid thead tr.head-level1 th {
+  background: #cfd8ec;
+}
+.plan-grid thead tr.head-level2 th {
+  background: #e7edf7;
+}
+.plan-grid thead th.sat {
+  background: #ffe8cc;
+}
+.plan-grid thead th.sun {
+  background: #ffd6d6;
+}
+thead tr.head-level1 th.sticky-col {
+  background: #cfd8ec;
+}
+thead tr.head-level2 th.sticky-col {
+  background: #e7edf7;
 }
 .sat {
   background: #ffe8cc;
@@ -518,7 +554,7 @@ const resolvePurchaseLineId = async () => {
   z-index: 3;
 }
 thead .sticky-col {
-  z-index: 4;
+  z-index: 6;
 }
 .number-col {
   width: 40px;
