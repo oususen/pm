@@ -78,13 +78,13 @@
             </td>
             <template v-for="(c, colIdx) in dateColumns" :key="c.key">
               <td class="num" :class="c.dayClass">
-                <span class="readonly-value">{{ row.daily[c.key].demand || 0 }}</span>
+                <span class="readonly-value">{{ displayValue(row.daily?.[c.key]?.demand) }}</span>
               </td>
               <td class="num" :class="c.dayClass">
-                <span class="readonly-value">{{ row.daily[c.key].actual || 0 }}</span>
+                <span class="readonly-value">{{ displayValue(row.daily?.[c.key]?.actual) }}</span>
               </td>
               <td class="num stock" :class="c.dayClass">
-                <span class="readonly-value">{{ row.daily[c.key].stock || 0 }}</span>
+                <span class="readonly-value">{{ displayValue(row.daily?.[c.key]?.stock) }}</span>
               </td>
               <td class="num plan" :class="c.dayClass">
                 <input
@@ -98,7 +98,7 @@
                 />
               </td>
               <td class="num stock-plan day-end" :class="c.dayClass">
-                <span class="readonly-value">{{ row.daily[c.key].plan_stock || 0 }}</span>
+                <span class="readonly-value">{{ displayValue(getPlanStockDisplay(row, colIdx)) }}</span>
               </td>
             </template>
           </tr>
@@ -167,7 +167,7 @@ const tableMinWidth = computed(() => {
 const initDaily = () => {
   const daily = {}
   dateColumns.value.forEach((c) => {
-    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0 }
+    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, has_row: false }
   })
   return daily
 }
@@ -248,6 +248,34 @@ const filteredRows = computed(() => {
     return txt.includes(k)
   })
 })
+
+const displayValue = (val) => {
+  if (val === null || val === undefined || val === '') return ''
+  const num = Number(val)
+  if (!Number.isNaN(num) && num === 0) return ''
+  return val
+}
+
+const getPlanStockDisplay = (row, colIdx) => {
+  if (!row || !row.daily) return ''
+  const cols = dateColumns.value
+  let carry = null
+  for (let i = 0; i <= colIdx; i += 1) {
+    const key = cols[i]?.key
+    if (!key) continue
+    const daily = row.daily[key] || {}
+    const raw = daily.plan_stock
+    const hasRow = daily.has_row === true
+    let value = raw
+    if (hasRow) {
+      carry = raw
+    } else if (carry !== null && carry !== undefined) {
+      value = carry
+    }
+    if (i === colIdx) return value
+  }
+  return ''
+}
 
 const focusCellInput = (rowIdx, colIdx) => {
   const root = gridWrapperRef.value
@@ -430,6 +458,7 @@ const doPickup = async () => {
         row.daily[dateKey].actual = Number(d.actual_qty || 0)
         row.daily[dateKey].stock = Number(d.stock_qty || 0)
         row.daily[dateKey].plan_stock = Number(d.planned_stock_qty || 0)
+        row.daily[dateKey].has_row = true
       }
     })
 

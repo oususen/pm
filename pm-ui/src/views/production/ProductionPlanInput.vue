@@ -93,13 +93,13 @@
             </td>
             <template v-for="(c, colIdx) in dateColumns" :key="c.key">
               <td class="num" :class="c.dayClass">
-                <span class="readonly-value">{{ (row.daily?.[c.key]?.demand) || 0 }}</span>
+                <span class="readonly-value">{{ displayValue(row.daily?.[c.key]?.demand) }}</span>
               </td>
               <td class="num" :class="c.dayClass">
-                <span class="readonly-value">{{ (row.daily?.[c.key]?.actual) || 0 }}</span>
+                <span class="readonly-value">{{ displayValue(row.daily?.[c.key]?.actual) }}</span>
               </td>
               <td class="num stock" :class="c.dayClass">
-                <span class="readonly-value">{{ (row.daily?.[c.key]?.stock) || 0 }}</span>
+                <span class="readonly-value">{{ displayValue(row.daily?.[c.key]?.stock) }}</span>
               </td>
               <td class="num plan" :class="c.dayClass">
                 <input
@@ -126,7 +126,7 @@
                 />
               </td>
               <td class="num stock-plan day-end" :class="c.dayClass">
-                <span class="readonly-value">{{ (row.daily?.[c.key]?.plan_stock) || 0 }}</span>
+                <span class="readonly-value">{{ displayValue(getPlanStockDisplay(row, colIdx)) }}</span>
               </td>
             </template>
           </tr>
@@ -346,6 +346,34 @@ const filteredRows = computed(() => {
   })
 })
 
+const displayValue = (val) => {
+  if (val === null || val === undefined || val === '') return ''
+  const num = Number(val)
+  if (!Number.isNaN(num) && num === 0) return ''
+  return val
+}
+
+const getPlanStockDisplay = (row, colIdx) => {
+  if (!row || !row.daily) return ''
+  const cols = dateColumns.value
+  let carry = null
+  for (let i = 0; i <= colIdx; i += 1) {
+    const key = cols[i]?.key
+    if (!key) continue
+    const daily = row.daily[key] || {}
+    const raw = daily.plan_stock
+    const hasRow = daily.has_row === true
+    let value = raw
+    if (hasRow) {
+      carry = raw
+    } else if (carry !== null && carry !== undefined) {
+      value = carry
+    }
+    if (i === colIdx) return value
+  }
+  return ''
+}
+
 const focusCellInput = (rowIdx, colIdx, field) => {
   const root = gridWrapperRef.value
   if (!root) return
@@ -460,12 +488,22 @@ onMounted(async () => {
 const doPickup = async () => {
   if (!selectedLine.value) return
   try {
-    const res = await api.lineBacklogs.pickup({
+    await api.lineBacklogs.pickup({
       line_id: selectedLine.value,
       start_date: startDate.value,
       end_date: endDate.value,
     })
-    const data = res.data || []
+    await api.lineBacklogs.recalculateInventory({
+      line_id: selectedLine.value,
+      start_date: startDate.value,
+      end_date: endDate.value,
+    })
+    const res = await api.lineBacklogs.getLineBacklogs({
+      line: selectedLine.value,
+      plan_date__gte: startDate.value,
+      plan_date__lte: endDate.value,
+    })
+    const data = res.data?.results || res.data || []
     // 生産計画画面ではライン最終品のみを表示
     const lineFinalData = data.filter(d => d.is_line_final_product === true)
     const grouped = new Map()
