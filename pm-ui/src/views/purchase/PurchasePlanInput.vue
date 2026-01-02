@@ -541,13 +541,16 @@ const resolvePurchaseLineId = async () => {
 .plan-grid thead th {
   position: sticky;
   top: 0;
-  z-index: 5;
+  z-index: 4;
 }
 .plan-grid thead tr.head-level1 th {
   top: 0;
 }
 .plan-grid thead tr.head-level2 th {
   top: var(--header-row-height);
+}
+.plan-grid thead th.sticky-col {
+  z-index: 8;
 }
 .plan-grid thead tr.head-level1 th {
   background: #cfd8ec;
@@ -601,7 +604,7 @@ thead tr.head-level2 th.sticky-col {
   z-index: 3;
 }
 thead .sticky-col {
-  z-index: 6;
+  z-index: 8;
 }
 .number-col {
   width: 40px;
