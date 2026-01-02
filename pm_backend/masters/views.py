@@ -210,6 +210,15 @@ class ProcessViewSet(viewsets.ModelViewSet):
 class LineViewSet(viewsets.ModelViewSet):
     queryset = Line.objects.all()
     serializer_class = LineSerializer
+    filterset_fields = ['is_active', 'line_type']
+    search_fields = ['line_code', 'line_name']
+    ordering_fields = ['line_code', 'created_at']
+    ordering = ['line_code']
+
+
+class ProductionLineViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Line.objects.filter(line_type='PROD')
+    serializer_class = LineSerializer
     filterset_fields = ['is_active']
     search_fields = ['line_code', 'line_name']
     ordering_fields = ['line_code', 'created_at']

@@ -32,7 +32,7 @@
         <div v-else-if="error" class="no-data">エラー: {{ error }}</div>
         <div v-else>
           <div v-if="groups.length" class="group-list">
-            <div v-for="g in groups" :key="g.key" class="group-card">
+            <div v-for="g in pagedGroups" :key="g.key" class="group-card">
               <div class="info-block">
                 <div class="info-row">
                   <span class="info-label">品番</span>
@@ -132,6 +132,43 @@
             </div>
           </div>
           <div v-else class="no-data">データがありません</div>
+          <div v-if="groups.length" class="pagination-area">
+            <div class="pagination" v-if="totalPages > 1">
+              <button class="pagination-btn" :disabled="currentPage === 1" @click="changePage(1)">
+                最初
+              </button>
+              <button class="pagination-btn" :disabled="currentPage === 1" @click="changePage(currentPage - 1)">
+                前へ
+              </button>
+              <button
+                v-for="page in visiblePages"
+                :key="page"
+                class="pagination-btn"
+                :class="{ 'is-active': page === currentPage }"
+                @click="changePage(page)"
+              >
+                {{ page }}
+              </button>
+              <button class="pagination-btn" :disabled="currentPage >= totalPages" @click="changePage(currentPage + 1)">
+                次へ
+              </button>
+              <button class="pagination-btn" :disabled="currentPage >= totalPages" @click="changePage(totalPages)">
+                最後
+              </button>
+            </div>
+            <div class="pagination-info">
+              <span>{{ pageRangeLabel }}</span>
+              <label class="page-size">
+                表示件数
+                <select v-model.number="pageSize" class="page-size-select">
+                  <option :value="10">10</option>
+                  <option :value="20">20</option>
+                  <option :value="50">50</option>
+                  <option :value="100">100</option>
+                </select>
+              </label>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -139,7 +176,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import api from "@/api/client";
 
 const productFilter = ref("");
@@ -149,6 +186,8 @@ const loading = ref(false);
 const error = ref("");
 const orderLines = ref([]);
 const backlogs = ref([]);
+const currentPage = ref(1);
+const pageSize = ref(20);
 
 function formatDate(date) {
   // 日付文字列の場合はそのまま返す（YYYY-MM-DD形式）
@@ -308,6 +347,37 @@ const groups = computed(() => {
   return result;
 });
 
+const totalPages = computed(() => {
+  if (groups.value.length === 0) return 1;
+  return Math.ceil(groups.value.length / pageSize.value);
+});
+
+const visiblePages = computed(() => {
+  const total = totalPages.value;
+  const current = currentPage.value;
+  const windowSize = 2;
+  const start = Math.max(1, current - windowSize);
+  const end = Math.min(total, current + windowSize);
+  const pages = [];
+  for (let i = start; i <= end; i += 1) {
+    pages.push(i);
+  }
+  return pages;
+});
+
+const pageRangeLabel = computed(() => {
+  const total = groups.value.length;
+  if (total === 0) return "0件";
+  const start = (currentPage.value - 1) * pageSize.value + 1;
+  const end = Math.min(currentPage.value * pageSize.value, total);
+  return `${total}件中 ${start}-${end}件`;
+});
+
+const pagedGroups = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value;
+  return groups.value.slice(start, start + pageSize.value);
+});
+
 const getValue = (group, date, key) => {
   return group.cells?.[date]?.[key] ?? 0;
 };
@@ -379,6 +449,26 @@ const load = async () => {
   }
 };
 
+const changePage = (page) => {
+  const target = Math.min(Math.max(page, 1), totalPages.value);
+  if (target === currentPage.value) return;
+  currentPage.value = target;
+};
+
+watch([productFilter, startDate, horizon], () => {
+  currentPage.value = 1;
+});
+
+watch(pageSize, () => {
+  currentPage.value = 1;
+});
+
+watch(groups, () => {
+  if (currentPage.value > totalPages.value) {
+    currentPage.value = totalPages.value;
+  }
+});
+
 onMounted(load);
 </script>
 
@@ -446,6 +536,61 @@ onMounted(load);
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+
+.pagination-area {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pagination-btn {
+  padding: 4px 10px;
+  border: 1px solid #d1d5db;
+  background-color: #fff;
+  color: #374151;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.pagination-btn.is-active {
+  background-color: #1f2937;
+  border-color: #1f2937;
+  color: #fff;
+}
+
+.pagination-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pagination-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.page-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.page-size-select {
+  padding: 2px 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 12px;
 }
 
 .group-list {

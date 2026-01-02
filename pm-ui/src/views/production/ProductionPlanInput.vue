@@ -375,7 +375,7 @@ const toggleProcessGantt = async () => {
 }
 
 const fetchLines = async () => {
-  const res = await api.lines.getLines()
+  const res = await api.lines.getProductionLines()
   lines.value = res.data.results || res.data || []
 }
 const fetchProducts = async () => {

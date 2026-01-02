@@ -773,13 +773,17 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
         if len(line_name) > 50:
             line_name = line_name[:50]
-        line_obj, _ = Line.objects.get_or_create(
+        line_obj, created = Line.objects.get_or_create(
             line_code=line_code,
             defaults={
                 'line_name': line_name,
+                'line_type': 'PURCHASE',
                 'is_active': False,
             }
         )
+        if not created and line_obj.line_type != 'PURCHASE':
+            line_obj.line_type = 'PURCHASE'
+            line_obj.save(update_fields=['line_type'])
         line_id = line_obj.id
         process_code = 'PURCHASE'
         process_name = '購買'

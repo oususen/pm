@@ -111,11 +111,24 @@ class Process(models.Model):
 
 class Line(models.Model):
     """ラインマスタ"""
+    LINE_TYPE_CHOICES = [
+        ('PROD', '生産'),
+        ('PURCHASE', '購買'),
+        ('OUTSOURCE', '外作'),
+        ('OTHER', 'その他'),
+    ]
+
     id = models.BigAutoField(primary_key=True)
     line_code = models.CharField(max_length=20, unique=True, verbose_name='ラインコード')
     line_name = models.CharField(max_length=50, verbose_name='ライン名')
     calendar = models.ForeignKey('Calendar', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='勤務カレンダ')
     lead_time_days = models.IntegerField(null=True, blank=True, default=0, verbose_name='リードタイム（日）')
+    line_type = models.CharField(
+        max_length=20,
+        choices=LINE_TYPE_CHOICES,
+        default='PROD',
+        verbose_name='ライン種別'
+    )
     is_active = models.BooleanField(default=True, verbose_name='有効')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')

@@ -2,6 +2,9 @@ export const createLinesAPI = (client) => ({
   getLines() {
     return client.get('/lines/')
   },
+  getProductionLines() {
+    return client.get('/production-lines/')
+  },
   getLine(id) {
     return client.get(`/lines/${id}/`)
   },

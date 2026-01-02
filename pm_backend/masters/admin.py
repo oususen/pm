@@ -28,8 +28,8 @@ class ProcessAdmin(admin.ModelAdmin):
 
 @admin.register(Line)
 class LineAdmin(admin.ModelAdmin):
-    list_display = ['line_code', 'line_name', 'is_active']
-    list_filter = ['is_active']
+    list_display = ['line_code', 'line_name', 'line_type', 'is_active']
+    list_filter = ['line_type', 'is_active']
     search_fields = ['line_code', 'line_name']
 
 
