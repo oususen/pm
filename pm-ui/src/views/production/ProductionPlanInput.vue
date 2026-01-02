@@ -447,6 +447,10 @@ const doPickup = async () => {
   font-size: 13px;
   font-family: "Noto Sans JP", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   color: #1f2a44;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
 }
 .toolbar {
   display: flex;
@@ -485,7 +489,9 @@ const doPickup = async () => {
 }
 .grid-wrapper {
   margin-top: 10px;
-  overflow-x: auto;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   background: #fff;
   border: 1px solid #c5cfde;
   border-radius: 4px;
