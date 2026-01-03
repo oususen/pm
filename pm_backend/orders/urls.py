@@ -6,6 +6,7 @@ from .views import (
     LineGanttPlanViewSet,
     OrderViewSet,
     OrderLineViewSet,
+    ShipmentActualViewSet,
     StgOrderRawViewSet,
     StgOrderDailyViewSet,
     StockAllocationViewSet,
@@ -19,6 +20,7 @@ from .views_process_realtime import ProcessRealtimeRecordViewSet
 router = DefaultRouter()
 router.register(r'orders', OrderViewSet, basename='order')
 router.register(r'order-lines', OrderLineViewSet, basename='orderline')
+router.register(r'shipment-actuals', ShipmentActualViewSet, basename='shipmentactual')
 router.register(r'stg-order-raw', StgOrderRawViewSet, basename='stgorderraw')
 router.register(r'stg-order-daily', StgOrderDailyViewSet, basename='stgorderdaily')
 router.register(r'line-demands', LineDemandViewSet, basename='linedemand')

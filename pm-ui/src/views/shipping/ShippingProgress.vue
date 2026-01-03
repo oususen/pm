@@ -11,6 +11,16 @@
           v-model="productFilter"
           placeholder="品番/品名で絞り込み"
         />
+        <input
+          type="text"
+          v-model="customerFilter"
+          placeholder="得意先で絞り込み"
+        />
+        <input
+          type="text"
+          v-model="shipToFilter"
+          placeholder="納入先で絞り込み"
+        />
         <input type="date" v-model="startDate" />
         <select v-model.number="horizon">
           <option :value="30">30日</option>
@@ -36,6 +46,14 @@
                 <div class="info-row">
                   <span class="info-label">品名</span>
                   <span class="info-value">{{ g.product_name || "-" }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">得意先</span>
+                  <span class="info-value">{{ formatCustomer(g) }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">納入先</span>
+                  <span class="info-value">{{ g.ship_to_code || "-" }}</span>
                 </div>
                 <div class="info-row">
                   <span class="info-label">合計内示</span>
@@ -175,6 +193,8 @@ import { computed, onMounted, ref, watch } from "vue";
 import api from "@/api/client";
 
 const productFilter = ref("");
+const customerFilter = ref("");
+const shipToFilter = ref("");
 const defaultStart = new Date();
 defaultStart.setDate(defaultStart.getDate() - 1);
 const startDate = ref(formatDate(defaultStart));
@@ -182,6 +202,7 @@ const horizon = ref(30);
 const loading = ref(false);
 const error = ref("");
 const orderLines = ref([]);
+const shipmentActuals = ref([]);
 const currentPage = ref(1);
 const pageSize = ref(20);
 
@@ -216,6 +237,11 @@ const columns = computed(() => {
   return cols;
 });
 
+const endDate = computed(() => {
+  if (!columns.value.length) return startDate.value;
+  return columns.value[columns.value.length - 1];
+});
+
 const groups = computed(() => {
   if (!orderLines.value.length) {
     console.log("[ShippingProgress] 受注明細データなし");
@@ -239,6 +265,9 @@ const groups = computed(() => {
     // due_dateはAPIから文字列で返されるので、new Date()を通さない
     const dueDate = formatDate(order.due_date);
     const productCode = order.product_code;
+    const customerCode = order.customer_code || "";
+    const customerName = order.customer_name || "";
+    const shipToCode = order.ship_to_code || "";
 
     // 製品フィルタ
     if (productFilter.value) {
@@ -250,20 +279,41 @@ const groups = computed(() => {
       }
     }
 
+    if (customerFilter.value) {
+      const filter = customerFilter.value.toLowerCase();
+      const text = `${customerCode}${customerName}`.toLowerCase();
+      if (!text.includes(filter)) {
+        skippedCount++;
+        continue;
+      }
+    }
+
+    if (shipToFilter.value) {
+      const filter = shipToFilter.value.toLowerCase();
+      if (!shipToCode.toLowerCase().includes(filter)) {
+        skippedCount++;
+        continue;
+      }
+    }
+
     processedCount++;
 
     // グループ作成
-    if (!map.has(productCode)) {
-      map.set(productCode, {
-        key: productCode,
+    const groupKey = `${productCode}__${customerCode}__${shipToCode}`;
+    if (!map.has(groupKey)) {
+      map.set(groupKey, {
+        key: groupKey,
         product_code: order.product_code,
         product_name: order.product_name,
+        customer_code: customerCode,
+        customer_name: customerName,
+        ship_to_code: shipToCode,
         cells: {},
         summary: { forecast: 0, firm: 0, actual: 0, adjust: 0, progressRate: "-" },
       });
     }
 
-    const group = map.get(productCode);
+    const group = map.get(groupKey);
 
     // セル初期化
     if (!group.cells[dueDate]) {
@@ -277,7 +327,6 @@ const groups = computed(() => {
 
     const cell = group.cells[dueDate];
     const qty = Number(order.quantity || 0);
-    const actualQty = Number(order.actual_shipment_qty || 0);
 
     // 受注タイプ別に集計
     if (order.order_type === "FORECAST") {
@@ -286,7 +335,32 @@ const groups = computed(() => {
       // FIRM または未設定の場合は確定として扱う
       cell.firm += qty;
     }
-    cell.actual += actualQty;
+  }
+
+  // shipmentActualsから実績を集計
+  const actualMap = new Map();
+  for (const actual of shipmentActuals.value) {
+    if (!actual.shipment_date || !actual.product_code) continue;
+    const aDate = formatDate(actual.shipment_date);
+    const aProduct = actual.product_code;
+    const aCustomer = actual.customer_code || "";
+    const aShipTo = actual.ship_to_code || "";
+    const aKey = `${aProduct}__${aCustomer}__${aShipTo}`;
+    const perDate = actualMap.get(aKey) || new Map();
+    const current = perDate.get(aDate) || 0;
+    perDate.set(aDate, current + Number(actual.quantity || 0));
+    actualMap.set(aKey, perDate);
+  }
+
+  for (const [key, group] of map.entries()) {
+    const perDate = actualMap.get(key);
+    if (!perDate) continue;
+    for (const [date, qty] of perDate.entries()) {
+      if (!group.cells[date]) {
+        group.cells[date] = { forecast: 0, firm: 0, actual: 0, adjust: 0 };
+      }
+      group.cells[date].actual += qty;
+    }
   }
 
   console.log("[ShippingProgress] 処理件数:", processedCount, "スキップ:", skippedCount);
@@ -368,6 +442,13 @@ const formatValue = (val) => {
   return val.toLocaleString();
 };
 
+const formatCustomer = (group) => {
+  if (group.customer_name) {
+    return `${group.customer_code || ""} ${group.customer_name}`.trim();
+  }
+  return group.customer_code || "-";
+};
+
 const getProgressRate = (group, date) => {
   // 累積進度を計算
   // 累積進度(本日) = 累積進度(前日) - 確定(ないときは内示) + 実績 + 調整
@@ -409,12 +490,22 @@ const load = async () => {
     };
 
     orderLines.value = normalizeList(orderLinesRes.data || []);
+    const shipmentActualsRes = await api.shipmentActuals.getShipmentActuals({
+      shipment_date__gte: startDate.value,
+      shipment_date__lte: endDate.value,
+      product_code: productFilter.value,
+      customer_code: customerFilter.value,
+      ship_to_code: shipToFilter.value,
+      page_size: 10000,
+    });
+    shipmentActuals.value = normalizeList(shipmentActualsRes.data || []);
     // 開始日は初期値（今日の日付）のまま
     // 理由：過去のデータがある場合でも、現在から未来を表示したい
     // ユーザーは手動で開始日を変更して過去のデータも確認できる
 
     console.log("[ShippingProgress] データロード完了");
     console.log("[ShippingProgress] 受注明細件数:", orderLines.value.length);
+    console.log("[ShippingProgress] 出荷実績件数:", shipmentActuals.value.length);
     console.log("[ShippingProgress] 受注明細サンプル:", orderLines.value.slice(0, 3));
     console.log("[ShippingProgress] 開始日:", startDate.value);
     console.log("[ShippingProgress] 期間:", horizon.value);
@@ -433,7 +524,7 @@ const changePage = (page) => {
   currentPage.value = target;
 };
 
-watch([productFilter, startDate, horizon], () => {
+watch([productFilter, customerFilter, shipToFilter, startDate, horizon], () => {
   currentPage.value = 1;
 });
 
