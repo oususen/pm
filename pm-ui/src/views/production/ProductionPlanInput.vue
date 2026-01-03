@@ -307,6 +307,7 @@ const savePlan = async () => {
         start_date: startDate.value,
         end_date: endDate.value,
         read_only: false,
+        include_coproduct_children: true,
       })
       await api.lineGanttPlans.generate({
         line_id: selectedLine.value,

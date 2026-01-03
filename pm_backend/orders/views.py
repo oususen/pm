@@ -986,6 +986,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         end_date = request.data.get('end_date')
         items = request.data.get('items', [])
         read_only = request.data.get('read_only', False)  # デフォルトはFalse（保存する）
+        include_coproduct_children = request.data.get('include_coproduct_children', False)
+        if isinstance(include_coproduct_children, str):
+            include_coproduct_children = include_coproduct_children.lower() in ['true', '1', 'yes']
+        else:
+            include_coproduct_children = bool(include_coproduct_children)
 
         if not line_id:
             return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1208,7 +1213,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         for plan in base_plans:
             product_id = plan['product_id']
             plan_date = plan['plan_date']
-            plan_qty = plan['plan_qty']
+            raw_plan_qty = plan['plan_qty']
+            plan_qty = raw_plan_qty
             order_qty = plan['order_qty']
             demand_qty_plan = plan['demand_qty_plan']
             sequence_no = plan.get('sequence_no')
@@ -1226,15 +1232,26 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 # 連産品の子製品の場合、親製品に置き換える
                 original_target_product_id = target_product_id
                 copro_info_target = copro_child_map.get(target_product_id)
+                child_target_product_id = None
+                child_plan_qty = raw_plan_qty
                 if copro_info_target:
+                    if include_coproduct_children:
+                        child_target_product_id = original_target_product_id
                     # 子製品を親製品に置き換え
                     target_product_id = copro_info_target['parent_id']
 
-                # 既に処理済みの(親製品, 工程, 日付)の組み合わせはスキップ
+                # 既に処理済みの(製品, 工程, 日付)の組み合わせはスキップ
                 combination_key = (target_product_id, step.process_id, target_date)
+                child_key = None
+                if child_target_product_id and child_target_product_id != target_product_id:
+                    child_key = (child_target_product_id, step.process_id, target_date)
+                skip_parent = False
                 if combination_key in processed_combinations:
-                    continue
-                processed_combinations.add(combination_key)
+                    if not (child_key and child_key not in processed_combinations):
+                        continue
+                    skip_parent = True
+                else:
+                    processed_combinations.add(combination_key)
 
                 # 連産品（コプロダクト）の場合、セット数ベースで工数を計算
                 time_qty = plan_qty
@@ -1276,71 +1293,67 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if not is_copro_driver:
                     computed_time_min = 0
 
-                # read_only=True の場合はDBに保存せず、計算結果のみを作成
-                if read_only:
-                    # 既存レコードを取得（あれば）、なければ新規作成（メモリ上のみ）
-                    obj = LineBacklog.objects.filter(
-                        plan_date=target_date,
-                        process_id=step.process_id,
-                        product_id=target_product_id,
-                        line_id=line_id,
-                    ).first()
-
-                    if not obj:
-                        obj = LineBacklog(
+                def upsert_backlog(target_id, qty_value, time_value):
+                    nonlocal created, updated
+                    if read_only:
+                        obj = LineBacklog.objects.filter(
                             plan_date=target_date,
                             process_id=step.process_id,
-                            product_id=target_product_id,
+                            product_id=target_id,
                             line_id=line_id,
-                            plan_qty=int(plan_qty),
-                            order_qty=int(order_qty),
-                            demand_qty_plan=int(demand_qty_plan),
-                            source_line_id=line_id,
-                            source_routing_step_id=step.id,
-                            sequence_no=sequence_no if sequence_no is not None else None,
+                        ).first()
+
+                        if not obj:
+                            obj = LineBacklog(
+                                plan_date=target_date,
+                                process_id=step.process_id,
+                                product_id=target_id,
+                                line_id=line_id,
+                                plan_qty=int(qty_value),
+                                order_qty=int(order_qty),
+                                demand_qty_plan=int(demand_qty_plan),
+                                source_line_id=line_id,
+                                source_routing_step_id=step.id,
+                                sequence_no=sequence_no if sequence_no is not None else None,
+                            )
+                    else:
+                        defaults_dict = {
+                            'order_qty': int(order_qty),
+                            'demand_qty_plan': int(demand_qty_plan),
+                            'source_line_id': line_id,
+                            'source_routing_step_id': step.id,
+                        }
+                        defaults_dict['plan_qty'] = int(qty_value)
+
+                        if sequence_no is not None:
+                            defaults_dict['sequence_no'] = sequence_no
+
+                        if parent_plan_id:
+                            defaults_dict['plan_id'] = parent_plan_id
+
+                        obj, is_created = LineBacklog.objects.update_or_create(
+                            plan_date=target_date,
+                            process_id=step.process_id,
+                            product_id=target_id,
+                            line_id=line_id,
+                            defaults=defaults_dict
                         )
-                else:
-                    # read_only=False の場合はDBに保存
-                    # 既存のレコードがあるか確認し、plan_qtyが手動入力されている場合は保持
-                    existing = LineBacklog.objects.filter(
-                        plan_date=target_date,
-                        process_id=step.process_id,
-                        product_id=target_product_id,
-                        line_id=line_id,
-                    ).first()
+                        created += 1 if is_created else 0
+                        updated += 0 if is_created else 1
 
-                    defaults_dict = {
-                        'order_qty': int(order_qty),
-                        'demand_qty_plan': int(demand_qty_plan),
-                        'source_line_id': line_id,
-                        'source_routing_step_id': step.id,
-                    }
-                    # 工程ガント表示時は計算値でplan_qtyを更新
-                    defaults_dict['plan_qty'] = int(plan_qty)
+                    obj.computed_time_min = time_value
+                    obj.work_minutes = calendar_work_map.get(target_date)
+                    obj.step_no = step.step_no
+                    obj.cycle_time_min = float(ct.cycle_time_min) if ct and ct.cycle_time_min else None
+                    obj.routing_product_id = step.routing.product_id if step.routing_id and step.routing else None
+                    upserted.append(obj)
 
-                    if sequence_no is not None:
-                        defaults_dict['sequence_no'] = sequence_no
+                if not skip_parent:
+                    upsert_backlog(target_product_id, plan_qty, computed_time_min)
 
-                    # 親（ライン最終品）のplan_idを引き継ぐ
-                    if parent_plan_id:
-                        defaults_dict['plan_id'] = parent_plan_id
-
-                    obj, is_created = LineBacklog.objects.update_or_create(
-                        plan_date=target_date,
-                        process_id=step.process_id,
-                        product_id=target_product_id,
-                        line_id=line_id,
-                        defaults=defaults_dict
-                    )
-                    created += 1 if is_created else 0
-                    updated += 0 if is_created else 1
-
-                obj.computed_time_min = computed_time_min
-                obj.work_minutes = calendar_work_map.get(target_date)
-                obj.step_no = step.step_no
-                obj.cycle_time_min = float(ct.cycle_time_min) if ct and ct.cycle_time_min else None
-                obj.routing_product_id = step.routing.product_id if step.routing_id and step.routing else None
-                upserted.append(obj)
+                if child_key and child_key not in processed_combinations:
+                    processed_combinations.add(child_key)
+                    upsert_backlog(child_target_product_id, child_plan_qty, 0)
 
         serializer = self.get_serializer(upserted, many=True)
         return Response({
