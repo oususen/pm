@@ -440,6 +440,12 @@ const doPickup = async () => {
       return
     }
 
+    await api.lineBacklogs.recalculateInventory({
+      line_id: purchaseLineId.value,
+      start_date: startDate.value,
+      end_date: endDate.value,
+    })
+
     // 既存のLineBacklogデータを取得（line_idは仕入先IDとして使用）
     // 注：購買需要はpickup_purchaseで更新済み
     const backlogRes = await api.lineBacklogs.getLineBacklogs({
