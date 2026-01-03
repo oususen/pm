@@ -87,7 +87,8 @@ class CustomerViewSet(viewsets.ModelViewSet):
 class ProcessViewSet(viewsets.ModelViewSet):
     queryset = Process.objects.all()
     serializer_class = ProcessSerializer
-    filterset_fields = ['is_active', 'is_outsource']
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_active', 'is_outsource', 'line']
     search_fields = ['process_code', 'process_name']
     ordering_fields = ['process_code', 'created_at']
     ordering = ['process_code']

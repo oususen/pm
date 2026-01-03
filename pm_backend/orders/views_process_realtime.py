@@ -5,6 +5,7 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.db import transaction
+from django.db.models import Sum
 from django.utils.dateparse import parse_date
 from django.utils import timezone
 from django.conf import settings
@@ -12,6 +13,7 @@ from decimal import Decimal, InvalidOperation
 from datetime import datetime, time
 
 from .models_process_realtime import ProcessRealtimeRecord
+from .models_line_backlog import LineBacklog
 from .serializers_process_realtime import (
     ProcessRealtimeRecordSerializer,
     ProcessRealtimeCreateSerializer,
@@ -75,6 +77,102 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         record = serializer.save()
         return Response(ProcessRealtimeRecordSerializer(record).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path='status')
+    def status(self, request):
+        line_id = request.query_params.get('line_id')
+        if not line_id:
+            return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        processes = Process.objects.filter(line_id=line_id, is_active=True).order_by('process_code')
+        process_ids = list(processes.values_list('id', flat=True))
+        if not process_ids:
+            return Response([])
+
+        today = timezone.now().date()
+        start_dt = datetime.combine(today, time.min)
+        end_dt = datetime.combine(today, time.max)
+        if settings.USE_TZ:
+            start_dt = timezone.make_aware(start_dt)
+            end_dt = timezone.make_aware(end_dt)
+
+        plan_qs = LineBacklog.objects.filter(
+            line_id=line_id,
+            plan_date=today,
+            process_id__in=process_ids,
+        ).values('process_id').annotate(total=Sum('plan_qty'))
+        plan_map = {row['process_id']: row['total'] or 0 for row in plan_qs}
+
+        output_qs = ProcessRealtimeRecord.objects.filter(
+            process_id__in=process_ids,
+            record_type='PRODUCTION',
+            timestamp__gte=start_dt,
+            timestamp__lte=end_dt,
+        ).values('process_id').annotate(total=Sum('qty'))
+        output_map = {row['process_id']: row['total'] or 0 for row in output_qs}
+
+        state_map = {}
+        latest_state_qs = ProcessRealtimeRecord.objects.filter(
+            process_id__in=process_ids,
+            equipment_state__isnull=False,
+        ).order_by('-timestamp')
+        for rec in latest_state_qs:
+            if rec.process_id in state_map:
+                continue
+            state_map[rec.process_id] = {
+                'state': rec.equipment_state,
+                'timestamp': rec.timestamp,
+            }
+
+        product_map = {}
+        latest_product_qs = ProcessRealtimeRecord.objects.filter(
+            process_id__in=process_ids,
+            record_type='PRODUCTION',
+        ).order_by('-timestamp')
+        for rec in latest_product_qs:
+            if rec.process_id in product_map:
+                continue
+            code = (rec.product_code or '').strip() or None
+            name = (rec.product_name or '').strip() or None
+            if not code and not name:
+                continue
+            product_map[rec.process_id] = {
+                'code': code,
+                'name': name,
+            }
+
+        state_labels = dict(ProcessRealtimeRecord.EQUIPMENT_STATE_CHOICES)
+        result = []
+        for process in processes:
+            today_plan = plan_map.get(process.id, 0) or 0
+            today_output = output_map.get(process.id, 0) or 0
+            if today_plan:
+                achievement_rate = round((float(today_output) / float(today_plan)) * 100, 1)
+            else:
+                achievement_rate = 0
+            progress = achievement_rate if today_plan else 0
+            state_info = state_map.get(process.id, {})
+            state = state_info.get('state') or 'STOPPED'
+            product_info = product_map.get(process.id, {})
+
+            result.append({
+                'id': process.id,
+                'process': process.id,
+                'process_code': process.process_code,
+                'process_name': process.process_name,
+                'current_state': state,
+                'state_display': state_labels.get(state, state),
+                'state_started_at': state_info.get('timestamp'),
+                'today_output': float(today_output),
+                'today_plan': float(today_plan),
+                'achievement_rate': achievement_rate,
+                'current_product_code': product_info.get('code'),
+                'current_product_name': product_info.get('name'),
+                'last_update': state_info.get('timestamp'),
+                'progress': progress,
+            })
+
+        return Response(result)
 
     @action(detail=True, methods=['get'], url_path='scrap-breakdown')
     def scrap_breakdown(self, request, pk=None):

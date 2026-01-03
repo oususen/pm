@@ -34,76 +34,112 @@
       </div>
     </div>
 
-    <!-- ライン状態一覧 -->
+    <!-- 工程状態一覧 -->
     <div class="lines-section">
       <div class="section-header">
-        <h3>ライン状態</h3>
+        <h3>工程状態</h3>
         <span class="update-time">最終更新: {{ lastUpdate }}</span>
       </div>
-
-      <div class="lines-grid">
-        <div
-          v-for="line in lines"
-          :key="line.line"
-          class="line-card"
-          :class="getLineCardClass(line.current_state)"
-        >
-          <!-- カードヘッダー -->
-          <div class="line-card__header">
-            <div class="line-name">{{ line.line_name }}</div>
+      <div class="line-selector">
+        <div class="line-selector__label">ライン選択</div>
+        <div v-if="!lines.length" class="no-data">
+          ライン情報がありません
+        </div>
+        <div v-else class="line-selector__grid">
+          <button
+            v-for="line in lines"
+            :key="line.line"
+            type="button"
+            class="line-select-card"
+            :class="[getStatusCardClass(line.current_state), { 'is-selected': isSelectedLine(line.line) }]"
+            :aria-pressed="isSelectedLine(line.line)"
+            @click="selectLine(line.line)"
+          >
+            <div class="line-select-name">{{ line.line_name }}</div>
             <span class="state-badge" :class="getStateBadgeClass(line.current_state)">
               {{ line.state_display }}
             </span>
-          </div>
-
-          <!-- メトリクス -->
-          <div class="line-card__metrics">
-            <div class="metric-row">
-              <span class="metric-label">本日計画</span>
-              <span class="metric-value">{{ formatNumber(line.today_plan) }}</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-label">本日実績</span>
-              <span class="metric-value highlight">{{ formatNumber(line.today_output) }}</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-label">達成率</span>
-              <span
-                class="metric-value"
-                :class="getAchievementClass(line.achievement_rate)"
-              >
-                {{ line.achievement_rate }}%
-              </span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-label">進捗</span>
-              <span class="metric-value">{{ line.progress }}%</span>
-            </div>
-          </div>
-
-          <!-- 現在生産中 -->
-          <div v-if="line.current_product_code" class="line-card__current">
-            <div class="current-label">現在生産中</div>
-            <div class="current-product">{{ line.current_product_code }}</div>
-            <div class="current-name">{{ line.current_product_name }}</div>
-          </div>
-          <div v-else class="line-card__current empty">
-            <div class="current-label">待機中</div>
-          </div>
-
-          <!-- 進捗バー -->
-          <div class="progress-bar-container">
-            <div
-              class="progress-bar-fill"
-              :style="{ width: Math.min(line.progress, 100) + '%' }"
-              :class="getProgressBarClass(line.progress)"
-            ></div>
-          </div>
+          </button>
         </div>
       </div>
 
-      <div v-if="!lines.length" class="no-data">
-        ライン情報がありません
+      <div v-if="!selectedLineId && lines.length" class="no-data">
+        ラインを選択してください
+      </div>
+      <div v-else>
+        <div v-if="processLoading" class="process-loading">
+          工程を読み込み中...
+        </div>
+        <div v-else-if="processError" class="process-error">
+          {{ processError }}
+        </div>
+        <div v-else-if="!processStatuses.length" class="no-data">
+          工程が登録されていません
+        </div>
+        <div v-else class="status-grid">
+          <div
+            v-for="process in processStatuses"
+            :key="process.id"
+            class="status-card"
+            :class="getStatusCardClass(process.current_state)"
+          >
+            <div class="status-card__header">
+              <div class="status-name">{{ process.process_name }}</div>
+              <div class="status-header-right">
+                <span class="state-badge" :class="getStateBadgeClass(process.current_state)">
+                  {{ process.state_display }}
+                </span>
+                <div
+                  v-if="shouldShowStateStart(process)"
+                  class="state-start-time"
+                >
+                  開始: {{ formatTime(process.state_started_at) }}
+                </div>
+              </div>
+            </div>
+
+            <div class="status-card__metrics">
+              <div class="metric-row">
+                <span class="metric-label">本日計画</span>
+                <span class="metric-value">{{ formatNumber(process.today_plan) }}</span>
+              </div>
+              <div class="metric-row">
+                <span class="metric-label">本日実績</span>
+                <span class="metric-value highlight">{{ formatNumber(process.today_output) }}</span>
+              </div>
+              <div class="metric-row">
+                <span class="metric-label">達成率</span>
+                <span
+                  class="metric-value"
+                  :class="getAchievementClass(process.achievement_rate)"
+                >
+                  {{ process.achievement_rate }}%
+                </span>
+              </div>
+              <div class="metric-row">
+                <span class="metric-label">進捗</span>
+                <span class="metric-value">{{ process.progress }}%</span>
+              </div>
+            </div>
+
+            <div v-if="process.current_product_code" class="status-card__current">
+              <div class="current-label">現在生産中</div>
+              <div class="current-product">{{ process.current_product_code }}</div>
+              <div class="current-name">{{ process.current_product_name }}</div>
+            </div>
+            <div v-else class="status-card__current empty">
+              <div class="current-label">待機中</div>
+            </div>
+
+            <div class="progress-bar-container">
+              <div
+                class="progress-bar-fill"
+                :style="{ width: Math.min(process.progress, 100) + '%' }"
+                :class="getProgressBarClass(process.progress)"
+              ></div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -115,13 +151,17 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import api from '@/api/client'
 
 const lines = ref([])
 const loading = ref(false)
 const autoRefresh = ref(true)
 const lastUpdate = ref('')
+const selectedLineId = ref('')
+const processStatuses = ref([])
+const processLoading = ref(false)
+const processError = ref('')
 let refreshInterval = null
 
 // KPI計算
@@ -149,6 +189,16 @@ const loadData = async () => {
   try {
     const res = await api.lineRealtime.getLineStatuses()
     lines.value = res.data || []
+    if (selectedLineId.value) {
+      const exists = lines.value.some(line => String(line.line) === String(selectedLineId.value))
+      if (!exists) {
+        selectedLineId.value = ''
+        processStatuses.value = []
+      }
+    }
+    if (selectedLineId.value) {
+      await fetchProcessStatuses(selectedLineId.value)
+    }
     lastUpdate.value = new Date().toLocaleTimeString('ja-JP')
   } catch (error) {
     console.error('ライン状態取得エラー:', error)
@@ -182,14 +232,44 @@ const stopAutoRefresh = () => {
   }
 }
 
+const fetchProcessStatuses = async (lineId) => {
+  processLoading.value = true
+  processError.value = ''
+  try {
+    const res = await api.processRealtime.getProcessStatuses({ line_id: lineId })
+    const data = res.data || []
+    processStatuses.value = Array.isArray(data) ? data : []
+  } catch (error) {
+    console.error('工程取得エラー:', error)
+    processError.value = '工程の読み込みに失敗しました'
+    processStatuses.value = []
+  } finally {
+    processLoading.value = false
+  }
+}
+
+const selectLine = (lineId) => {
+  if (!lineId) {
+    selectedLineId.value = ''
+    return
+  }
+  selectedLineId.value = String(lineId)
+}
+
+const isSelectedLine = (lineId) => {
+  if (!selectedLineId.value) return false
+  return String(lineId) === String(selectedLineId.value)
+}
+
 // ヘルパー関数
 const formatNumber = (value) => {
   if (value === null || value === undefined) return '0'
   return Number(value).toLocaleString()
 }
 
-const getLineCardClass = (state) => {
-  return `state-${state.toLowerCase()}`
+const getStatusCardClass = (state) => {
+  const label = state ? String(state).toLowerCase() : 'unknown'
+  return `state-${label}`
 }
 
 const getStateBadgeClass = (state) => {
@@ -202,6 +282,18 @@ const getStateBadgeClass = (state) => {
     'STOPPED': 'badge-stopped',
   }
   return classes[state] || ''
+}
+
+const shouldShowStateStart = (process) => {
+  if (!process) return false
+  return Boolean(process.state_started_at)
+}
+
+const formatTime = (value) => {
+  if (!value) return ''
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return String(value)
+  return d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
 }
 
 const getAchievementClass = (rate) => {
@@ -230,6 +322,14 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopAutoRefresh()
+})
+
+watch(selectedLineId, (lineId) => {
+  if (!lineId) {
+    processStatuses.value = []
+    return
+  }
+  fetchProcessStatuses(lineId)
 })
 </script>
 
@@ -357,14 +457,91 @@ onUnmounted(() => {
   color: #64748b;
 }
 
-.lines-grid {
+.no-data {
+  text-align: center;
+  color: #94a3b8;
+  padding: 40px 20px;
+  font-size: 14px;
+}
+
+.line-selector {
+  margin-bottom: 12px;
+}
+
+.line-selector__label {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+
+.line-selector__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.line-select-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #d7dfe8;
+  border-left: 4px solid #cbd5e1;
+  border-radius: 6px;
+  background: #f8fafc;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.line-select-card:hover {
+  background: #f1f5f9;
+}
+
+.line-select-card.is-selected {
+  border: 2px solid #000000;
+  border-left-width: 6px;
+  box-shadow: none;
+}
+
+.line-select-card:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+.line-select-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2a44;
+}
+
+.line-select-card.state-running {
+  border-left-color: #16a34a;
+  background: #f0fdf4;
+}
+
+.line-select-card.state-breakdown {
+  border-left-color: #ef4444;
+  background: #fef2f2;
+}
+
+.line-select-card.state-maintenance {
+  border-left-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.line-select-card.state-setup {
+  border-left-color: #0ea5e9;
+  background: #f0f9ff;
+}
+
+.status-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 12px;
 }
 
-/* ラインカード */
-.line-card {
+.status-card {
   border: 1px solid #d7dfe8;
   border-radius: 6px;
   border-left: 4px solid #cbd5e1;
@@ -373,23 +550,23 @@ onUnmounted(() => {
   transition: all 0.3s;
 }
 
-.line-card.state-running {
+.status-card.state-running {
   border-left-color: #16a34a;
   background: #f0fdf4;
 }
 
-.line-card.state-breakdown {
+.status-card.state-breakdown {
   border-left-color: #ef4444;
   background: #fef2f2;
   animation: pulse-red 2s infinite;
 }
 
-.line-card.state-maintenance {
+.status-card.state-maintenance {
   border-left-color: #f59e0b;
   background: #fffbeb;
 }
 
-.line-card.state-setup {
+.status-card.state-setup {
   border-left-color: #0ea5e9;
   background: #f0f9ff;
 }
@@ -399,17 +576,24 @@ onUnmounted(() => {
   50% { opacity: 0.8; }
 }
 
-.line-card__header {
+.status-card__header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
 }
 
-.line-name {
+.status-name {
   font-size: 15px;
   font-weight: 700;
   color: #1f2a44;
+}
+
+.status-header-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
 }
 
 .state-badge {
@@ -417,6 +601,11 @@ onUnmounted(() => {
   border-radius: 12px;
   font-size: 11px;
   font-weight: 600;
+}
+
+.state-start-time {
+  font-size: 11px;
+  color: #64748b;
 }
 
 .badge-running {
@@ -449,7 +638,7 @@ onUnmounted(() => {
   color: #334155;
 }
 
-.line-card__metrics {
+.status-card__metrics {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -476,7 +665,7 @@ onUnmounted(() => {
   color: #16a34a;
 }
 
-.line-card__current {
+.status-card__current {
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 4px;
@@ -484,7 +673,7 @@ onUnmounted(() => {
   margin-bottom: 8px;
 }
 
-.line-card__current.empty {
+.status-card__current.empty {
   text-align: center;
   color: #94a3b8;
 }
@@ -534,11 +723,18 @@ onUnmounted(() => {
   background: linear-gradient(90deg, #ef4444, #f87171);
 }
 
-.no-data {
+.process-loading {
   text-align: center;
-  color: #94a3b8;
-  padding: 40px 20px;
-  font-size: 14px;
+  padding: 20px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.process-error {
+  text-align: center;
+  padding: 20px;
+  color: #b91c1c;
+  font-size: 13px;
 }
 
 /* ローディング */

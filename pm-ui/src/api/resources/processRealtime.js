@@ -9,6 +9,9 @@ export function createProcessRealtimeAPI(client) {
     create(data) {
       return client.post('/process-realtime-records/', data)
     },
+    getProcessStatuses(params = {}) {
+      return client.get('/process-realtime-records/status/', { params })
+    },
     getScrapBreakdown(id) {
       return client.get(`/process-realtime-records/${id}/scrap-breakdown/`)
     },
