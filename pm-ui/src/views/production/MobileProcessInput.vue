@@ -996,7 +996,7 @@ const loadProcesses = async () => {
 
 const loadLines = async () => {
   try {
-    const res = await api.lines.getLines()
+    const res = await api.lines.getProductionLines()
     lines.value = res.data.results || res.data || []
   } catch (error) {
     console.error('ライン一覧取得エラー:', error)
