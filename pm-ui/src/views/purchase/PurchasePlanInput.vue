@@ -84,7 +84,7 @@
                 <span class="readonly-value">{{ displayValue(row.daily?.[c.key]?.actual) }}</span>
               </td>
               <td class="num stock" :class="c.dayClass">
-                <span class="readonly-value">{{ displayValue(row.daily?.[c.key]?.stock) }}</span>
+                <span class="readonly-value">{{ displayValue(getStockDisplay(row, colIdx)) }}</span>
               </td>
               <td class="num plan" :class="c.dayClass">
                 <input
@@ -265,6 +265,27 @@ const getPlanStockDisplay = (row, colIdx) => {
     if (!key) continue
     const daily = row.daily[key] || {}
     const raw = daily.plan_stock
+    const hasRow = daily.has_row === true
+    let value = raw
+    if (hasRow) {
+      carry = raw
+    } else if (carry !== null && carry !== undefined) {
+      value = carry
+    }
+    if (i === colIdx) return value
+  }
+  return ''
+}
+
+const getStockDisplay = (row, colIdx) => {
+  if (!row || !row.daily) return ''
+  const cols = dateColumns.value
+  let carry = null
+  for (let i = 0; i <= colIdx; i += 1) {
+    const key = cols[i]?.key
+    if (!key) continue
+    const daily = row.daily[key] || {}
+    const raw = daily.stock
     const hasRow = daily.has_row === true
     let value = raw
     if (hasRow) {
