@@ -169,6 +169,8 @@ class LineBacklogSerializer(serializers.ModelSerializer):
     line_name = serializers.CharField(source='line.line_name', read_only=True)
     is_final_product = serializers.BooleanField(source='product.is_final_product', read_only=True)
     is_line_final_product = serializers.BooleanField(source='product.is_line_final_product', read_only=True)
+    firm_order_qty = serializers.IntegerField(read_only=True)
+    forecast_order_qty = serializers.IntegerField(read_only=True)
     computed_time_min = serializers.SerializerMethodField()
     work_minutes = serializers.SerializerMethodField()
     step_no = serializers.SerializerMethodField()
@@ -181,7 +183,8 @@ class LineBacklogSerializer(serializers.ModelSerializer):
             'id', 'plan_date', 'process', 'process_code', 'process_name',
             'product', 'product_code', 'product_name', 'is_final_product', 'is_line_final_product',
             'line', 'line_code', 'line_name',
-            'demand_qty_plan', 'order_qty', 'plan_qty', 'actual_qty', 'stock_qty', 'planned_stock_qty',
+            'demand_qty_plan', 'order_qty', 'firm_order_qty', 'forecast_order_qty',
+            'plan_qty', 'actual_qty', 'stock_qty', 'planned_stock_qty',
             'adjust_qty', 'scrap_qty', 'actual_shipment_qty',
             'sequence_no', 'plan_id',
             'source_line', 'source_routing_step', 'updated_at',

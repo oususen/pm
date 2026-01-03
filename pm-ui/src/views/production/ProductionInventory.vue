@@ -23,10 +23,10 @@
         />
         <input type="date" v-model="startDate" @change="onStartChange" />
         <select v-model.number="horizon">
-          <option :value="7">7日</option>
-          <option :value="14">14日</option>
-          <option :value="21">21日</option>
           <option :value="30">30日</option>
+          <option :value="60">60日</option>
+          <option :value="90">90日</option>
+          <option :value="120">120日</option>
         </select>
         <button @click="load" :disabled="loading">更新</button>
         <button @click="recalculateInventory" :disabled="loading || recalculating">在庫再計算</button>
@@ -187,8 +187,10 @@ import { addDays, formatISODate, parseISODate } from "@/utils/dateUtil";
 const lineFilter = ref("");
 const processFilter = ref("");
 const productFilter = ref("");
-const startDate = ref(formatISODate(new Date()));
-const horizon = ref(14);
+const defaultStart = new Date();
+defaultStart.setDate(1);
+const startDate = ref(formatISODate(defaultStart));
+const horizon = ref(30);
 const loading = ref(false);
 const error = ref("");
 const recalculating = ref(false);
@@ -209,6 +211,16 @@ const columns = computed(() => {
   return cols;
 });
 
+const getBacklogParams = () => {
+  const start = columns.value[0];
+  const end = columns.value[columns.value.length - 1];
+  return {
+    plan_date__gte: start,
+    plan_date__lte: end,
+    include_order_split: true,
+  };
+};
+
 const rowDefs = [
   { key: "forecast", label: "内示" },
   { key: "firm", label: "確定" },
@@ -223,10 +235,8 @@ const rowDefs = [
 const applyDemands = (payload) => {
   const list = Array.isArray(payload) ? payload : payload.results || [];
   demands.value = list;
-  if (!userSetStart && demands.value.length) {
-    const minDate = demands.value
-      .map((d) => d.plan_date)
-      .sort()[0];
+  if (!userSetStart && !startDate.value && demands.value.length) {
+    const minDate = demands.value.map((d) => d.plan_date).sort()[0];
     if (minDate) {
       startDate.value = minDate;
     }
@@ -234,7 +244,7 @@ const applyDemands = (payload) => {
 };
 
 const reloadDemands = async () => {
-  const res = await api.lineBacklogs.getLineBacklogs();
+  const res = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
   const payload = res.data || [];
   applyDemands(payload);
 };
@@ -297,10 +307,12 @@ const groups = computed(() => {
     const c = g.cells[d.plan_date];
     // 内示: この製品を加工するラインの直後ラインの計画数の合計
     // → 在庫側では line_backlog.order_qty を利用
-    c.forecast += Number(d.order_qty || 0);
+    const hasForecastSplit = d.forecast_order_qty !== null && d.forecast_order_qty !== undefined;
+    c.forecast += Number((hasForecastSplit ? d.forecast_order_qty : d.order_qty) || 0);
     // 確定: 直後ラインの実績の合計に相当する値として
     // このラインの実績数量(actual_shipment_qty)を集計
-    c.firm += Number(d.actual_shipment_qty || 0);
+    const hasFirmSplit = d.firm_order_qty !== null && d.firm_order_qty !== undefined;
+    c.firm += Number((hasFirmSplit ? d.firm_order_qty : d.actual_shipment_qty) || 0);
     // 計画・在庫・計画在庫は line_backlog から取得
     c.plan += Number(d.plan_qty || 0);
     // 実績: このラインの生産実績
@@ -507,8 +519,10 @@ const loadBOMChildren = async (group) => {
             };
           }
           const c = childCells[d.plan_date];
-          c.forecast += Number(d.order_qty || 0);
-          c.firm += Number(d.actual_shipment_qty || 0);
+          const hasForecastSplit = d.forecast_order_qty !== null && d.forecast_order_qty !== undefined;
+          c.forecast += Number((hasForecastSplit ? d.forecast_order_qty : d.order_qty) || 0);
+          const hasFirmSplit = d.firm_order_qty !== null && d.firm_order_qty !== undefined;
+          c.firm += Number((hasFirmSplit ? d.firm_order_qty : d.actual_shipment_qty) || 0);
           c.plan += Number(d.plan_qty || 0);
           c.actual += Number(d.actual_qty || 0);
           c.adjust += Number(d.adjust_qty || 0);
@@ -577,12 +591,12 @@ const load = async () => {
   error.value = "";
   try {
     // 在庫/残量は line_backlog ベースで集計する
-    const res = await api.lineBacklogs.getLineBacklogs();
+    const res = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
     const payload = res.data || [];
     applyDemands(payload);
     const refreshed = await refreshOrderQty();
     if (refreshed) {
-      const refreshRes = await api.lineBacklogs.getLineBacklogs();
+      const refreshRes = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
       const refreshPayload = refreshRes.data || [];
       applyDemands(refreshPayload);
     }

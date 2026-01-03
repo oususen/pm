@@ -25,9 +25,9 @@
         <div class="field">
           <label>期間</label>
           <select v-model.number="horizonDays" @change="refreshDates">
-            <option :value="60">60日</option>
             <option :value="30">30日</option>
-            <option :value="14">14日</option>
+            <option :value="60">60日</option>
+            <option :value="90">90日</option>
           </select>
         </div>
         <div class="field">
@@ -168,8 +168,16 @@ import api from '@/api/client'
 import ProcessGanttView from './ProcessGanttView.vue'
 const mode = ref('plan')
 const selectedLine = ref('')
-const startDate = ref(new Date().toISOString().slice(0, 10))
-const horizonDays = ref(60) // 表示日から2か月（約60日）
+const toDateInput = (dateObj) => {
+  const y = dateObj.getFullYear()
+  const m = String(dateObj.getMonth() + 1).padStart(2, '0')
+  const d = String(dateObj.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+const defaultStart = new Date()
+defaultStart.setDate(defaultStart.getDate() - 1)
+const startDate = ref(toDateInput(defaultStart))
+const horizonDays = ref(30)
 const keyword = ref('')
 const gridWrapperRef = ref(null)
 

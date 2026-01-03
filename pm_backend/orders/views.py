@@ -337,6 +337,150 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
     ordering_fields = ['plan_date', 'line', 'product']
     ordering = ['plan_date', 'line']
 
+    def list(self, request, *args, **kwargs):
+        include_split = request.query_params.get('include_order_split')
+        include_split = str(include_split).lower() in ['true', '1', 'yes']
+
+        if not include_split:
+            return super().list(request, *args, **kwargs)
+
+        queryset = self.filter_queryset(self.get_queryset())
+        items = list(queryset)
+        self._attach_order_split(items)
+        serializer = self.get_serializer(items, many=True)
+        return Response(serializer.data)
+
+    def _attach_order_split(self, items):
+        from collections import defaultdict
+
+        if not items:
+            return
+
+        line_ids = {item.line_id for item in items if item.line_id}
+        if not line_ids:
+            return
+
+        line_map = {line.id: line for line in Line.objects.filter(id__in=line_ids)}
+        default_calendar_id = Calendar.objects.filter(calendar_code='tiera_muke').values_list('id', flat=True).first()
+
+        items_by_line = defaultdict(list)
+        for item in items:
+            items_by_line[item.line_id].append(item)
+
+        for line_id, line_items in items_by_line.items():
+            dates = [it.plan_date for it in line_items if it.plan_date]
+            if not dates:
+                continue
+
+            min_date = min(dates)
+            max_date = max(dates)
+
+            line_obj = line_map.get(line_id)
+            calendar_id = getattr(line_obj, 'calendar_id', None) or default_calendar_id
+
+            steps_on_line = RoutingStep.objects.filter(
+                line_id=line_id
+            ).select_related('output_product', 'routing__product', 'line')
+
+            product_step_map = {}
+            final_products = set()
+            max_lead_days = 0
+
+            for step in steps_on_line:
+                product = step.output_product or (step.routing.product if step.routing_id else None)
+                if not product:
+                    continue
+                if product.id not in product_step_map:
+                    product_step_map[product.id] = step
+                if product.is_final_product:
+                    final_products.add(product.id)
+                    lead_days = step.lead_time_days or 0
+                    if not lead_days and step.line_id and step.line.lead_time_days:
+                        lead_days = step.line.lead_time_days
+                    if lead_days > max_lead_days:
+                        max_lead_days = lead_days
+
+            if not final_products:
+                continue
+
+            due_end = max_date + timedelta(days=max_lead_days + 7)
+            order_lines = OrderLine.objects.filter(
+                order__status='OPEN',
+                product_id__in=final_products,
+                due_date__gte=min_date,
+                due_date__lte=due_end,
+            ).select_related('order')
+
+            firm_map = defaultdict(int)
+            forecast_map = defaultdict(int)
+            workday_cache = {}
+
+            def is_working_day(target_date):
+                if not calendar_id:
+                    return True
+                if target_date in workday_cache:
+                    return workday_cache[target_date]
+                cal = CalendarDay.objects.filter(
+                    calendar_id=calendar_id,
+                    target_date=target_date
+                ).first()
+                is_work = cal.is_working_day if cal is not None else True
+                workday_cache[target_date] = is_work
+                return is_work
+
+            def shift_business_days(target_date, days):
+                if not days:
+                    if not calendar_id:
+                        return target_date
+                    if is_working_day(target_date):
+                        return target_date
+                    current = target_date
+                    while True:
+                        current = current - timedelta(days=1)
+                        if is_working_day(current):
+                            return current
+                if not calendar_id:
+                    return target_date + timedelta(days=-days)
+
+                step = -1 if days > 0 else 1
+                remaining = abs(int(days))
+                current = target_date
+                while remaining > 0:
+                    current = current + timedelta(days=step)
+                    if is_working_day(current):
+                        remaining -= 1
+                return current
+
+            def resolve_lead_time_days(product_id):
+                step = product_step_map.get(product_id)
+                if step and step.lead_time_days:
+                    return step.lead_time_days
+                if step and step.line and step.line.lead_time_days:
+                    return step.line.lead_time_days
+                return 0
+
+            for ol in order_lines:
+                if not ol.product_id or not ol.due_date:
+                    continue
+                lead_days = resolve_lead_time_days(ol.product_id)
+                plan_date = shift_business_days(ol.due_date, lead_days)
+                if plan_date < min_date or plan_date > max_date:
+                    continue
+                qty = ol.quantity or 0
+                key = (ol.product_id, plan_date)
+                order_type = (ol.order.order_type or '').upper()
+                if order_type == 'FIRM':
+                    firm_map[key] += int(qty)
+                else:
+                    forecast_map[key] += int(qty)
+
+            for item in line_items:
+                if item.product_id not in final_products:
+                    continue
+                key = (item.product_id, item.plan_date)
+                item.firm_order_qty = firm_map.get(key, 0)
+                item.forecast_order_qty = forecast_map.get(key, 0)
+
     @action(detail=False, methods=['post'])
     def pickup(self, request):
         """
