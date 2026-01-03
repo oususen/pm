@@ -7,6 +7,7 @@ from rest_framework.decorators import action
 from django.db import transaction
 from django.utils.dateparse import parse_date
 from django.utils import timezone
+from django.conf import settings
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, time
 
@@ -40,14 +41,18 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         if start_date:
             d = parse_date(start_date)
             if d:
-                start_dt = timezone.make_aware(datetime.combine(d, time.min))
+                start_dt = datetime.combine(d, time.min)
+                if settings.USE_TZ:
+                    start_dt = timezone.make_aware(start_dt)
                 queryset = queryset.filter(timestamp__gte=start_dt)
             else:
                 queryset = queryset.filter(timestamp__gte=start_date)
         if end_date:
             d = parse_date(end_date)
             if d:
-                end_dt = timezone.make_aware(datetime.combine(d, time.max))
+                end_dt = datetime.combine(d, time.max)
+                if settings.USE_TZ:
+                    end_dt = timezone.make_aware(end_dt)
                 queryset = queryset.filter(timestamp__lte=end_dt)
             else:
                 queryset = queryset.filter(timestamp__lte=end_date)

@@ -12,4 +12,11 @@ const router = createRouter({
   routes: [...root, ...masters, ...orders, ...production, ...purchase, ...shipping],
 });
 
+const DEFAULT_TITLE = "pm-ui";
+
+router.afterEach((to) => {
+  const pageTitle = to.meta?.pageTitle;
+  document.title = pageTitle || DEFAULT_TITLE;
+});
+
 export default router;
