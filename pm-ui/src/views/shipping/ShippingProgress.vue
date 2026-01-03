@@ -13,14 +13,9 @@
         />
         <input type="date" v-model="startDate" />
         <select v-model.number="horizon">
-          <option :value="7">7日</option>
-          <option :value="14">14日</option>
-          <option :value="21">21日</option>
           <option :value="30">30日</option>
           <option :value="60">60日</option>
           <option :value="90">90日</option>
-          <option :value="120">120日</option>
-          <option :value="180">180日</option>
         </select>
         <button @click="load" :disabled="loading">更新</button>
       </div>
@@ -180,12 +175,13 @@ import { computed, onMounted, ref, watch } from "vue";
 import api from "@/api/client";
 
 const productFilter = ref("");
-const startDate = ref(formatDate(new Date()));
-const horizon = ref(90); // デフォルト90日
+const defaultStart = new Date();
+defaultStart.setDate(defaultStart.getDate() - 1);
+const startDate = ref(formatDate(defaultStart));
+const horizon = ref(30);
 const loading = ref(false);
 const error = ref("");
 const orderLines = ref([]);
-const backlogs = ref([]);
 const currentPage = ref(1);
 const pageSize = ref(20);
 
@@ -281,6 +277,7 @@ const groups = computed(() => {
 
     const cell = group.cells[dueDate];
     const qty = Number(order.quantity || 0);
+    const actualQty = Number(order.actual_shipment_qty || 0);
 
     // 受注タイプ別に集計
     if (order.order_type === "FORECAST") {
@@ -289,17 +286,7 @@ const groups = computed(() => {
       // FIRM または未設定の場合は確定として扱う
       cell.firm += qty;
     }
-  }
-
-  // backlogから実績と調整を取得
-  const backlogMap = new Map();
-  for (const b of backlogs.value) {
-    if (!b.product_code || !b.plan_date) continue;
-    const key = `${b.product_code}__${b.plan_date}`;
-    const current = backlogMap.get(key) || { actual: 0, adjust: 0 };
-    current.actual += Number(b.actual_shipment_qty || 0);
-    current.adjust += Number(b.adjust_qty || 0);
-    backlogMap.set(key, current);
+    cell.actual += actualQty;
   }
 
   console.log("[ShippingProgress] 処理件数:", processedCount, "スキップ:", skippedCount);
@@ -314,12 +301,6 @@ const groups = computed(() => {
 
     // 各日付のデータに実績・調整を追加
     for (const [date, cell] of Object.entries(g.cells)) {
-      const backlog = backlogMap.get(`${g.product_code}__${date}`);
-      if (backlog) {
-        cell.actual = backlog.actual;
-        cell.adjust = backlog.adjust;
-      }
-
       totalForecast += cell.forecast;
       totalFirm += cell.firm;
       totalActual += cell.actual;
@@ -428,15 +409,12 @@ const load = async () => {
     };
 
     orderLines.value = normalizeList(orderLinesRes.data || []);
-    backlogs.value = []; // LineBacklog APIは使用しない
-
     // 開始日は初期値（今日の日付）のまま
     // 理由：過去のデータがある場合でも、現在から未来を表示したい
     // ユーザーは手動で開始日を変更して過去のデータも確認できる
 
     console.log("[ShippingProgress] データロード完了");
     console.log("[ShippingProgress] 受注明細件数:", orderLines.value.length);
-    console.log("[ShippingProgress] バックログ件数:", backlogs.value.length);
     console.log("[ShippingProgress] 受注明細サンプル:", orderLines.value.slice(0, 3));
     console.log("[ShippingProgress] 開始日:", startDate.value);
     console.log("[ShippingProgress] 期間:", horizon.value);

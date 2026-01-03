@@ -22,7 +22,7 @@ class OrderLineSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'order', 'line_no', 'product', 'product_code', 'product_name',
             'order_type', 'order_type_display',
-            'quantity', 'due_date', 'plant_code', 'ship_to_code', 'remark',
+            'quantity', 'actual_shipment_qty', 'due_date', 'plant_code', 'ship_to_code', 'remark',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']

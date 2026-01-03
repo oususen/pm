@@ -62,6 +62,7 @@ class OrderLine(models.Model):
     product_code = models.CharField(max_length=50, verbose_name='製品コード')
     order_type = models.CharField(max_length=20, choices=ORDER_TYPE_CHOICES, null=True, blank=True, verbose_name='受注タイプ')
     quantity = models.DecimalField(max_digits=14, decimal_places=3, verbose_name='数量')
+    actual_shipment_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='出荷実績数')
     due_date = models.DateField(verbose_name='納期')
     plant_code = models.CharField(max_length=20, null=True, blank=True, verbose_name='工場コード')
     ship_to_code = models.CharField(max_length=40, null=True, blank=True, verbose_name='納入先コード')
