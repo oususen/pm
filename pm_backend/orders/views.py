@@ -351,7 +351,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         期待payload: { line_id, start_date?, end_date? }
         """
-        from orders.models import LineDemand
         from masters.models import BOMItem, RoutingStep
         from collections import defaultdict
 
@@ -430,8 +429,22 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             days > 0 なら過去方向へ、days < 0 なら未来方向へ。
             カレンダが無い場合は暦日でシフト。
             """
+            def is_working_day(check_date):
+                if not calendar_id:
+                    return True
+                cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=check_date).first()
+                return cal.is_working_day if cal is not None else True
+
             if not days:
-                return target_date
+                if not calendar_id:
+                    return target_date
+                if is_working_day(target_date):
+                    return target_date
+                current = target_date
+                while True:
+                    current = current - timedelta(days=1)
+                    if is_working_day(current):
+                        return current
             if not calendar_id:
                 return target_date + timedelta(days=-days)
 
@@ -440,9 +453,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             current = target_date
             while remaining > 0:
                 current = current + timedelta(days=step)
-                cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=current).first()
-                is_work = cal.is_working_day if cal is not None else True
-                if is_work:
+                if is_working_day(current):
                     remaining -= 1
             return current
 
@@ -511,36 +522,56 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         for existing in backlog_qs:
             demand_map[(existing.product_id, existing.plan_date)] = Decimal('0')
 
-        # 最終品はLineDemandから、中間品は後工程から需要を取得
+        # 最終品はOrderLineから、中間品は後工程から需要を取得
         print(f"\n[DEBUG] ========== 需要取得開始 ==========")
 
-        # A. 最終品（is_final_product=True）はLineDemandから取得
+        # A. 最終品（is_final_product=True）はOrderLineから取得
         if final_products:
-            print(f"\n[DEBUG] 最終品の需要取得開始（LineDemand使用）")
+            print(f"\n[DEBUG] 最終品の需要取得開始（OrderLine使用）")
             print(f"[DEBUG] final_products={final_products}")
 
-            demand_qs = LineDemand.objects.filter(
-                line_id=line_id,
+            order_lines = OrderLine.objects.filter(
+                order__status='OPEN',
                 product_id__in=final_products
-            )
+            ).select_related('order', 'product')
 
             if start_date:
-                demand_qs = demand_qs.filter(plan_date__gte=start_date)
+                order_lines = order_lines.filter(due_date__gte=start_date)
             if end_date:
-                demand_qs = demand_qs.filter(plan_date__lte=end_date)
+                order_lines = order_lines.filter(due_date__lte=end_date)
 
-            print(f"[DEBUG] LineDemand検索結果: {demand_qs.count()}件")
+            print(f"[DEBUG] OrderLine検索結果: {order_lines.count()}件")
 
-            for demand in demand_qs:
-                print(f"[DEBUG] LineDemand: product_id={demand.product_id}, product_code={demand.product_code}, plan_date={demand.plan_date}, firm_qty={demand.firm_qty}, forecast_qty={demand.forecast_qty}")
-                if demand.product_id:
-                    key = (demand.product_id, demand.plan_date)
-                    # 確定優先: firm_qty があればそれを使用、なければ forecast_qty
-                    firm_qty = demand.firm_qty or Decimal('0')
-                    forecast_qty = demand.forecast_qty or Decimal('0')
-                    demand_qty = firm_qty if firm_qty > 0 else forecast_qty
-                    demand_map[key] = demand_qty
-                    print(f"[DEBUG] demand_map[{key}] = {demand_qty} (firm={firm_qty}, forecast={forecast_qty})")
+            firm_map = defaultdict(Decimal)
+            forecast_map = defaultdict(Decimal)
+
+            for ol in order_lines:
+                if not ol.product_id:
+                    continue
+                step = product_step_map.get(ol.product_id)
+                if not step:
+                    continue
+
+                lead_days = resolve_lead_time_days(ol.product_id)
+                plan_date = shift_business_days(ol.due_date, lead_days)
+                key = (ol.product_id, plan_date)
+
+                qty = Decimal(str(ol.quantity or 0))
+                order_type = (ol.order.order_type or '').upper()
+                if order_type == 'FIRM':
+                    firm_map[key] += qty
+                else:
+                    forecast_map[key] += qty
+
+                if plan_date != ol.due_date:
+                    print(f"[DEBUG] OrderLine date shift: {ol.due_date} -> {plan_date}")
+
+            for key in set(firm_map) | set(forecast_map):
+                firm_qty = firm_map.get(key, Decimal('0'))
+                forecast_qty = forecast_map.get(key, Decimal('0'))
+                demand_qty = firm_qty if firm_qty > 0 else forecast_qty
+                demand_map[key] = demand_qty
+                print(f"[DEBUG] demand_map[{key}] = {demand_qty} (firm={firm_qty}, forecast={forecast_qty})")
 
         # B. 中間品は後工程から需要を取得
         if not intermediate_products:
@@ -847,9 +878,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         if end_dt:
             parent_qs = parent_qs.filter(plan_date__lte=end_dt)
 
-        parent_orders = parent_qs.values('product_id', 'line_id', 'plan_date').annotate(
-            plan_qty=Max('plan_qty'),
-            order_qty=Max('order_qty')
+        # 親製品の計画数量(plan_qty)を取得（order_qtyではなくplan_qtyを使用）
+        parent_orders = parent_qs.values('product_id', 'line_id', 'plan_date', 'plan_qty').filter(
+            plan_qty__gt=0  # 計画数量が0より大きいもののみ
         )
 
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
@@ -858,7 +889,19 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         def shift_business_days(target_date, days):
             if not days:
-                return target_date
+                if not calendar_id:
+                    return target_date
+                cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=target_date).first()
+                is_work = cal.is_working_day if cal is not None else True
+                if is_work:
+                    return target_date
+                current = target_date
+                while True:
+                    current = current - timedelta(days=1)
+                    cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=current).first()
+                    is_work = cal.is_working_day if cal is not None else True
+                    if is_work:
+                        return current
             if not calendar_id:
                 return target_date + timedelta(days=-days)
             step = -1 if days > 0 else 1
@@ -877,16 +920,13 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             parent_id = row['product_id']
             plan_date = row['plan_date']
             plan_qty = Decimal(str(row['plan_qty'] or 0))
-            order_qty = Decimal(str(row['order_qty'] or 0))
 
-            # plan_qtyを優先し、0の場合はorder_qtyを使用
-            qty_to_use = plan_qty if plan_qty > 0 else order_qty
-
-            if qty_to_use == 0:
+            # 計画数量(plan_qty)を使用（後ラインの計画から需要を取得）
+            if plan_qty == 0:
                 continue
             for child_id, qty, lead_time_days in parent_to_children.get(parent_id, []):
                 target_date = shift_business_days(plan_date, lead_time_days)
-                demand_map[(child_id, target_date)] += qty_to_use * qty
+                demand_map[(child_id, target_date)] += plan_qty * qty
 
         existing_qs = LineBacklog.objects.filter(
             line_id=line_id,
