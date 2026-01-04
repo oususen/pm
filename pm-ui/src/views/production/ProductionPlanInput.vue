@@ -158,7 +158,7 @@
 
     <div class="load-section" v-if="showProcessLoad">
       <div class="process-header">
-        <div class="process-title">工程別 日別負荷（分）</div>
+        <div class="process-title">工程別 日別負荷 分（H）</div>
         <div class="process-meta">ライン {{ selectedLine || '' }} ／ 期間 {{ startDate }} ? {{ endDate }}</div>
       </div>
       <div class="load-body">
@@ -641,7 +641,9 @@ const formatLoad = (val) => {
   if (val == null) return ''
   const num = Number(val)
   if (Number.isNaN(num) || num === 0) return ''
-  return Math.round(num * 10) / 10
+  const minutes = Math.round(num * 10) / 10
+  const hours = Math.round((minutes / 60) * 10) / 10
+  return `${minutes} (${hours})`
 }
 
 const doPickup = async () => {
@@ -1147,6 +1149,7 @@ thead .sticky-col {
   font-size: 12px;
   font-weight: 500;
   color: #000;
+  text-align: center;
 }
 .load-table thead th {
   position: sticky;
@@ -1159,5 +1162,6 @@ thead .sticky-col {
   min-width: 180px;
   max-width: 180px;
   border-right: 2px solid #b5c1d2 !important;
+  text-align: left;
 }
 </style>
