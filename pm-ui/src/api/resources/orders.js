@@ -5,6 +5,9 @@ export const createOrdersAPI = (client) => ({
   getProductionOrders(params = {}) {
     return client.get('/production-orders/', { params })
   },
+  syncProductionOrdersFromPlan(payload = {}) {
+    return client.post('/production-orders/sync-from-plan/', payload)
+  },
   getProductionOrder(id) {
     return client.get(`/production-orders/${id}/`)
   },

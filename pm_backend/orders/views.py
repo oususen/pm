@@ -1637,6 +1637,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         ).first()
 
                         if existing and existing.plan_id:
+                            ProductionOrder.objects.filter(order_no=existing.plan_id).delete()
                             # plan_idに紐づく全てのLineBacklogレコードを削除
                             deleted_count = LineBacklog.objects.filter(plan_id=existing.plan_id).delete()[0]
                             deleted += deleted_count
@@ -1684,6 +1685,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 ).first()
 
                 new_plan_id = None
+                plan_date_obj = None
                 if plan_qty_provided:
                     # plan_idを生成: 製品コード_YYYYMMDD_数量_順番
                     # gantt_planning.pyと同じフォーマットを使用
@@ -1705,6 +1707,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         # 古いplan_idに紐づく全てのLineBacklogレコードを削除
                         old_plan_id = existing.plan_id
                         LineBacklog.objects.filter(plan_id=old_plan_id).delete()
+                        ProductionOrder.objects.filter(order_no=old_plan_id).delete()
                         # existingは削除されたので、新規作成扱いになる
                         existing = None
 
@@ -1736,6 +1739,21 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     created += 1
                 else:
                     updated += 1
+
+                if plan_qty_provided and plan_qty_value is not None and plan_qty_value > 0 and new_plan_id:
+                    routing = Routing.objects.filter(product_id=product_id, is_active=True).order_by('-is_default', 'id').first()
+                    ProductionOrder.objects.update_or_create(
+                        order_no=new_plan_id,
+                        defaults={
+                            'product_id': product_id,
+                            'routing_id': routing.id if routing else None,
+                            'line_id': line_id,
+                            'order_qty': plan_qty_value,
+                            'scheduled_start_date': plan_date_obj,
+                            'scheduled_end_date': plan_date_obj,
+                            'priority': sequence_no or 0,
+                        }
+                    )
             except Exception as e:
                 return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2028,6 +2046,89 @@ class ProductionOrderViewSet(viewsets.ModelViewSet):
         if self.action == 'list':
             return ProductionOrderListSerializer
         return super().get_serializer_class()
+
+    @action(detail=False, methods=['post'], url_path='sync-from-plan')
+    def sync_from_plan(self, request):
+        """
+        LineBacklog の plan_id を製造指示番号として同期する。
+        payload: { line_id?, start_date?, end_date? }
+        """
+        line_id = request.data.get('line_id')
+        start_date = request.data.get('start_date')
+        end_date = request.data.get('end_date')
+
+        backlog_qs = LineBacklog.objects.exclude(plan_id__isnull=True).exclude(plan_id='').filter(plan_qty__gt=0)
+        if line_id:
+            backlog_qs = backlog_qs.filter(line_id=line_id)
+        if start_date:
+            backlog_qs = backlog_qs.filter(plan_date__gte=start_date)
+        if end_date:
+            backlog_qs = backlog_qs.filter(plan_date__lte=end_date)
+
+        from masters.models import Product
+        product_cache = {}
+        routing_cache = {}
+        created = 0
+        updated = 0
+        skipped = 0
+        seen = set()
+
+        for backlog in backlog_qs.select_related('product'):
+            plan_id = backlog.plan_id
+            if not plan_id or plan_id in seen:
+                continue
+            seen.add(plan_id)
+
+            plan_product_code = plan_id.split('_', 1)[0]
+            product = product_cache.get(plan_product_code)
+            if product is None:
+                product = Product.objects.filter(product_code=plan_product_code).first()
+                product_cache[plan_product_code] = product
+            if not product:
+                product = backlog.product
+            if not product or not backlog.plan_date:
+                skipped += 1
+                continue
+
+            routing = routing_cache.get(product.id)
+            if routing is None:
+                routing = Routing.objects.filter(product_id=product.id, is_active=True).order_by('-is_default', 'id').first()
+                routing_cache[product.id] = routing
+
+            defaults = {
+                'product_id': product.id,
+                'routing_id': routing.id if routing else None,
+                'line_id': backlog.line_id,
+                'order_qty': backlog.plan_qty,
+                'scheduled_start_date': backlog.plan_date,
+                'scheduled_end_date': backlog.plan_date,
+                'priority': backlog.sequence_no or 0,
+            }
+
+            order, is_created = ProductionOrder.objects.get_or_create(
+                order_no=plan_id,
+                defaults=defaults
+            )
+            if is_created:
+                created += 1
+                continue
+            if order.status != 'PLANNED':
+                continue
+
+            changed = False
+            for key, value in defaults.items():
+                if getattr(order, key) != value:
+                    setattr(order, key, value)
+                    changed = True
+            if changed:
+                order.save()
+                updated += 1
+
+        return Response({
+            'created': created,
+            'updated': updated,
+            'skipped': skipped,
+        })
 
     @action(detail=True, methods=['post'])
     def release(self, request, pk=None):

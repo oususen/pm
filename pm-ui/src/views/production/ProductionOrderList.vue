@@ -243,6 +243,15 @@ export default {
 
         const listRes = await api.orders.getProductionOrders(params)
         let items = listRes.data?.results || listRes.data || []
+        if (!items.length && (this.filters.search || this.filters.line || this.filters.scheduled_start_date_from || this.filters.scheduled_start_date_to)) {
+          await api.orders.syncProductionOrdersFromPlan({
+            line_id: this.filters.line || undefined,
+            start_date: this.filters.scheduled_start_date_from || undefined,
+            end_date: this.filters.scheduled_start_date_to || undefined
+          })
+          const retryRes = await api.orders.getProductionOrders(params)
+          items = retryRes.data?.results || retryRes.data || []
+        }
 
         // 詳細を取得して allocation などの付加情報を含める
         const detailed = await Promise.all(
