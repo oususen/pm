@@ -19,13 +19,19 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="calendar in calendars" :key="calendar.id">
+          <tr
+            v-for="calendar in calendars"
+            :key="calendar.id"
+            class="calendar-row"
+            :class="{ selected: detailCalendar && detailCalendar.id === calendar.id }"
+            @click="openDetail(calendar)"
+          >
             <td>{{ calendar.calendar_code }}</td>
             <td>{{ calendar.calendar_name }}</td>
             <td>{{ calendar.description }}</td>
             <td>
-              <button @click="editCalendar(calendar)" class="btn-sm">編集</button>
-              <button @click="deleteCalendar(calendar.id)" class="btn-sm btn-danger">削除</button>
+              <button @click.stop="editCalendar(calendar)" class="btn-sm">編集</button>
+              <button @click.stop="deleteCalendar(calendar.id)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
         </tbody>
@@ -34,6 +40,60 @@
       <div v-if="calendars.length === 0" class="no-data">
         データがありません
       </div>
+    </div>
+
+    <div v-if="detailCalendar" class="detail-panel">
+      <div class="detail-header">
+        <div>
+          <h2 class="detail-title">カレンダ詳細</h2>
+          <div class="detail-hint">
+            対象: {{ detailCalendar.calendar_code }} - {{ detailCalendar.calendar_name }}
+          </div>
+        </div>
+        <div class="detail-actions">
+          <button class="btn-sm" @click="fetchCalendarDays(detailCalendar.id)">再読込</button>
+          <button class="btn-sm btn-secondary" @click="closeDetail">閉じる</button>
+        </div>
+      </div>
+      <div class="detail-filters">
+        <label>開始</label>
+        <input type="date" v-model="detailStart" />
+        <label>終了</label>
+        <input type="date" v-model="detailEnd" />
+      </div>
+      <div v-if="detailLoading" class="detail-loading">読込中...</div>
+      <div v-else-if="visibleDetailDays.length" class="detail-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>日付</th>
+              <th>曜</th>
+              <th>稼働</th>
+              <th>稼働分</th>
+              <th>勤務パターン</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="day in visibleDetailDays" :key="day.id">
+              <td>{{ day.target_date }}</td>
+              <td>{{ formatWeekday(day.target_date) }}</td>
+              <td>{{ day.is_working_day ? '○' : '×' }}</td>
+              <td class="num">{{ day.work_minutes ?? '' }}</td>
+              <td>{{ day.work_pattern_name ?? '' }}</td>
+              <td class="actions-inline">
+                <button class="btn-sm" @click="setHoliday(day)" :disabled="updatingDayId === day.id">
+                  休日にする
+                </button>
+                <button class="btn-sm btn-secondary" @click="setWorkingDay(day)" :disabled="updatingDayId === day.id">
+                  稼働日にする
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-else class="no-data">カレンダ日データがありません</div>
     </div>
 
     <!-- 新規/編集ダイアログ -->
@@ -64,10 +124,16 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import api from '@/api/client'
 
 const calendars = ref([])
+const calendarDays = ref([])
+const detailCalendar = ref(null)
+const detailLoading = ref(false)
+const updatingDayId = ref(null)
+const detailStart = ref('')
+const detailEnd = ref('')
 const showDialog = ref(false)
 const isEdit = ref(false)
 const formData = ref({
@@ -75,6 +141,23 @@ const formData = ref({
   calendar_name: '',
   description: ''
 })
+
+const visibleDetailDays = computed(() => {
+  if (!detailStart.value && !detailEnd.value) return calendarDays.value
+  const start = detailStart.value ? new Date(detailStart.value) : null
+  const end = detailEnd.value ? new Date(detailEnd.value) : null
+  return calendarDays.value.filter((d) => {
+    const dt = new Date(d.target_date)
+    if (start && dt < start) return false
+    if (end && dt > end) return false
+    return true
+  })
+})
+
+const formatWeekday = (dateStr) => {
+  const w = new Date(dateStr).getDay()
+  return ['日', '月', '火', '水', '木', '金', '土'][w] || ''
+}
 
 const fetchCalendars = async () => {
   try {
@@ -94,6 +177,79 @@ const showNewDialog = () => {
     description: ''
   }
   showDialog.value = true
+}
+
+const openDetail = async (calendar) => {
+  detailCalendar.value = calendar
+  calendarDays.value = []
+  detailStart.value = ''
+  detailEnd.value = ''
+  await fetchCalendarDays(calendar.id)
+}
+
+const closeDetail = () => {
+  detailCalendar.value = null
+  calendarDays.value = []
+  detailStart.value = ''
+  detailEnd.value = ''
+}
+
+const fetchCalendarDays = async (calendarId) => {
+  if (!calendarId) {
+    calendarDays.value = []
+    return
+  }
+  detailLoading.value = true
+  try {
+    const response = await api.calendars.getCalendarDays(calendarId)
+    const rows = response.data.results || response.data || []
+    calendarDays.value = rows.sort((a, b) => a.target_date.localeCompare(b.target_date))
+  } catch (error) {
+    console.error('カレンダ日取得エラー:', error)
+    alert('カレンダ日データの取得に失敗しました')
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+const setHoliday = async (day) => {
+  if (!day?.id) return
+  updatingDayId.value = day.id
+  try {
+    await api.calendars.updateCalendarDay(day.id, {
+      calendar: day.calendar,
+      target_date: day.target_date,
+      is_working_day: false,
+      work_minutes: 0,
+      work_pattern: null,
+    })
+    await fetchCalendarDays(detailCalendar.value?.id)
+  } catch (error) {
+    console.error('休日設定エラー:', error)
+    alert('休日設定に失敗しました')
+  } finally {
+    updatingDayId.value = null
+  }
+}
+
+const setWorkingDay = async (day) => {
+  if (!day?.id) return
+  updatingDayId.value = day.id
+  try {
+    await api.calendars.updateCalendarDay(day.id, {
+      calendar: day.calendar,
+      target_date: day.target_date,
+      is_working_day: true,
+      work_minutes: (day.work_minutes ?? 480),
+      work_pattern: day.work_pattern ?? null,
+    })
+    await fetchCalendarDays(detailCalendar.value?.id)
+  } catch (error) {
+    console.error('稼働日設定エラー:', error)
+    alert('稼働日設定に失敗しました')
+  } finally {
+    updatingDayId.value = null
+  }
 }
 
 const editCalendar = (calendar) => {
@@ -170,6 +326,82 @@ onMounted(() => {
   margin-top: 0;
   margin-bottom: 1.5rem;
   color: #333;
+}
+
+.calendar-row {
+  cursor: pointer;
+}
+
+.calendar-row:hover {
+  background-color: #f5f7ff;
+}
+
+.calendar-row.selected {
+  background-color: #eef2ff;
+}
+
+.detail-panel {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.detail-title {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.detail-hint {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.detail-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.detail-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+
+.detail-filters input[type="date"] {
+  padding: 4px 6px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.detail-loading {
+  padding: 8px 0;
+  color: #6b7280;
+}
+
+.detail-table-wrap {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.num {
+  text-align: right;
+}
+
+.actions-inline {
+  display: flex;
+  gap: 6px;
 }
 
 .form-group {
