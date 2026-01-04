@@ -43,6 +43,9 @@
         <button class="btn accent" @click="toggleProcessGantt" :disabled="!selectedLine">
           {{ showProcessGantt ? '工程ガントを閉じる' : '工程ガント表示' }}
         </button>
+        <button class="btn accent" @click="toggleProcessLoad" :disabled="!selectedLine">
+          {{ showProcessLoad ? '工程負荷を閉じる' : '工程負荷表示' }}
+        </button>
       </div>
     </div>
 
@@ -152,6 +155,40 @@
       />
     </div>
 
+
+    <div class="load-section" v-if="showProcessLoad">
+      <div class="process-header">
+        <div class="process-title">工程別 日別負荷（分）</div>
+        <div class="process-meta">ライン {{ selectedLine || '' }} ／ 期間 {{ startDate }} ? {{ endDate }}</div>
+      </div>
+      <div class="load-body">
+        <div v-if="processLoadLoading" class="load-message">読込中...</div>
+        <div v-else-if="processLoadMessage" class="load-message">{{ processLoadMessage }}</div>
+        <div v-else class="load-table-wrap">
+          <table class="load-table" :style="{ minWidth: loadTableMinWidth + 'px' }">
+            <thead>
+              <tr>
+                <th class="sticky-col load-process-col">工程</th>
+                <th v-for="c in dateColumns" :key="c.key" class="mini" :class="c.dayClass">
+                  {{ c.label }}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="proc in processLoadRows" :key="proc.process_id">
+                <td class="sticky-col load-process-col">{{ proc.process_name || proc.process_id }}</td>
+                <td v-for="c in dateColumns" :key="c.key" class="num" :class="c.dayClass">
+                  <span class="readonly-value">{{ displayValue(formatLoad(proc.daily?.[c.key])) }}</span>
+                </td>
+              </tr>
+              <tr v-if="!processLoadRows.length">
+                <td :colspan="dateColumns.length + 1" class="no-data">表示する負荷データがありません</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
     <div class="footer-actions">
       <button class="btn-secondary">F1: 終了</button>
       <button class="btn-secondary">F3: クリア</button>
@@ -185,8 +222,12 @@ const lines = ref([])
 const products = ref([])
 const rows = ref([])
 const showProcessGantt = ref(false)
+const showProcessLoad = ref(false)
 const ganttReloadKey = ref(0)
 let tempId = 1
+const processLoadLoading = ref(false)
+const processLoadRows = ref([])
+const processLoadMessage = ref('')
 
 const endDate = computed(() => {
   const d = new Date(startDate.value)
@@ -214,6 +255,12 @@ const dateColumns = computed(() => {
 const tableMinWidth = computed(() => {
   const fixedColsWidth = 60 + 187 + 100 // No + 品番 + 品名
   const perDayWidth = 80 * 6 // 6列×80px (需要、実績、在庫、計画、順序、計画在庫)
+  return fixedColsWidth + dateColumns.value.length * perDayWidth
+})
+
+const loadTableMinWidth = computed(() => {
+  const fixedColsWidth = 180
+  const perDayWidth = 80
   return fixedColsWidth + dateColumns.value.length * perDayWidth
 })
 
@@ -325,6 +372,9 @@ const savePlan = async () => {
       })
       // 工程ガントを再読み込み
       ganttReloadKey.value += 1
+      if (showProcessLoad.value) {
+        await loadProcessLoad()
+      }
     } catch (expandError) {
       console.error('工程展開/ガント再計算エラー', expandError)
       alert('保存は完了しましたが、工程展開/ガント再計算に失敗しました。')
@@ -496,6 +546,43 @@ const toggleProcessGantt = async () => {
   }
 }
 
+const loadProcessLoad = async () => {
+  if (!selectedLine.value) return
+  processLoadLoading.value = true
+  processLoadMessage.value = ''
+  try {
+    const ganttRes = await api.lineGanttPlans.getLineGanttPlans({
+      line: selectedLine.value,
+      plan_date__gte: startDate.value,
+      plan_date__lte: endDate.value,
+    })
+    const rawPlans = ganttRes.data?.results || ganttRes.data || []
+    if (!rawPlans.length) {
+      processLoadRows.value = []
+      processLoadMessage.value = '工程ガントが未作成です。先に工程ガントを生成してください。'
+      return
+    }
+    processLoadRows.value = buildProcessLoad(rawPlans)
+  } catch (e) {
+    console.error('工程負荷取得エラー', e)
+    processLoadRows.value = []
+    processLoadMessage.value = '工程負荷の取得に失敗しました。'
+  } finally {
+    processLoadLoading.value = false
+  }
+}
+
+const toggleProcessLoad = async () => {
+  if (!selectedLine.value) {
+    alert('ラインを選択してください。')
+    return
+  }
+  showProcessLoad.value = !showProcessLoad.value
+  if (showProcessLoad.value) {
+    await loadProcessLoad()
+  }
+}
+
 const fetchLines = async () => {
   const res = await api.lines.getProductionLines()
   lines.value = res.data.results || res.data || []
@@ -514,6 +601,48 @@ onMounted(async () => {
     console.error('初期データ取得エラー', e)
   }
 })
+
+
+const buildProcessLoad = (plans) => {
+  const processMap = new Map()
+  plans.forEach((plan) => {
+    const planDate = plan.plan_date || plan.planDate
+    if (!planDate) return
+    const dateKey = String(planDate).slice(0, 10)
+    const processes = Array.isArray(plan.processes_plan) ? plan.processes_plan : []
+    processes.forEach((pp) => {
+      const pid = pp.process_id ?? 'unknown'
+      let entry = processMap.get(pid)
+      if (!entry) {
+        entry = {
+          process_id: pid,
+          process_name: pp.process_name || '',
+          process_number: pp.process_number ?? null,
+          daily: {},
+        }
+        processMap.set(pid, entry)
+      }
+      const minutes = Number(pp.effective_minutes ?? pp.total_minutes_required ?? 0)
+      if (!Number.isFinite(minutes) || minutes === 0) return
+      entry.daily[dateKey] = (entry.daily[dateKey] || 0) + minutes
+    })
+  })
+  const list = Array.from(processMap.values())
+  list.sort((a, b) => {
+    const aNum = a.process_number ?? 9999
+    const bNum = b.process_number ?? 9999
+    if (aNum != bNum) return aNum - bNum
+    return (a.process_name || '').localeCompare(b.process_name || '')
+  })
+  return list
+}
+
+const formatLoad = (val) => {
+  if (val == null) return ''
+  const num = Number(val)
+  if (Number.isNaN(num) || num === 0) return ''
+  return Math.round(num * 10) / 10
+}
 
 const doPickup = async () => {
   if (!selectedLine.value) return
@@ -985,5 +1114,50 @@ thead .sticky-col {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #fff;
+}
+
+.load-section {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+.load-body {
+  min-height: 40px;
+}
+.load-message {
+  color: #6b7280;
+  font-size: 12px;
+  padding: 6px 0;
+}
+.load-table-wrap {
+  overflow-x: auto;
+}
+.load-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.load-table th,
+.load-table td {
+  border: 1px solid #d7dfe8;
+  padding: 4px 6px;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+  color: #000;
+}
+.load-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: #e7edf7;
+}
+.load-process-col {
+  width: 180px;
+  min-width: 180px;
+  max-width: 180px;
+  border-right: 2px solid #b5c1d2 !important;
 }
 </style>
