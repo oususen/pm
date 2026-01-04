@@ -3,14 +3,34 @@
     <h2 class="page-title">生産管理メニュー</h2>
 
     <div class="master-grid">
-      <RouterLink to="/production/progress" class="master-tile">
-        <div class="icon-box" aria-label="進捗">📊</div>
-        <div class="label">進捗管理</div>
+      <RouterLink to="/production/mobile-process-input" class="master-tile">
+        <div class="icon-box">📱</div>
+        <div class="label">工程作業入力</div>
+      </RouterLink>
+
+      <RouterLink to="/production/scrap-record" class="master-tile">
+        <div class="icon-box">🛠️</div>
+        <div class="label">仕損品記録</div>
       </RouterLink>
 
       <RouterLink to="/production/plan-input" class="master-tile">
         <div class="icon-box" aria-label="計画">📝</div>
         <div class="label">生産計画入力</div>
+      </RouterLink>
+
+      <RouterLink to="/production/inventory" class="master-tile">
+        <div class="icon-box" aria-label="在庫">📦</div>
+        <div class="label">在庫/残量一覧</div>
+      </RouterLink>
+
+      <RouterLink to="/production/scrap-history" class="master-tile">
+        <div class="icon-box">📜</div>
+        <div class="label">仕損履歴</div>
+      </RouterLink>
+
+      <RouterLink to="/production/progress" class="master-tile">
+        <div class="icon-box" aria-label="進捗">📊</div>
+        <div class="label">進捗管理</div>
       </RouterLink>
 
       <RouterLink to="/production/line-demands" class="master-tile">
@@ -21,11 +41,6 @@
       <RouterLink to="/production/line-calendars" class="master-tile">
         <div class="icon-box" aria-label="勤">⏱</div>
         <div class="label">ライン勤務カレンダ</div>
-      </RouterLink>
-
-      <RouterLink to="/production/inventory" class="master-tile">
-        <div class="icon-box" aria-label="在庫">📦</div>
-        <div class="label">在庫/残量一覧</div>
       </RouterLink>
 
       <RouterLink to="/production/stock-allocations" class="master-tile">
@@ -51,19 +66,6 @@
       <RouterLink to="/production/mobile-input" class="master-tile">
         <div class="icon-box">📱</div>
         <div class="label">モバイル作業入力（ライン）</div>
-      </RouterLink>
-
-      <RouterLink to="/production/mobile-process-input" class="master-tile">
-        <div class="icon-box">📱</div>
-        <div class="label">モバイル作業入力（工程）</div>
-      </RouterLink>
-      <RouterLink to="/production/scrap-record" class="master-tile">
-        <div class="icon-box">🛠️</div>
-        <div class="label">仕損品記録</div>
-      </RouterLink>
-      <RouterLink to="/production/scrap-history" class="master-tile">
-        <div class="icon-box">📜</div>
-        <div class="label">仕損履歴</div>
       </RouterLink>
     </div>
 
