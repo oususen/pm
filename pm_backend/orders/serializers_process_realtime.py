@@ -389,6 +389,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                     product=product,
                     product_code=product_code,
                     product_name=product_name,
+                    event_type='SCRAP',
                     qty=qty_decimal,
                     plan_date=timezone.now().date(),  # 計画日を自動設定
                     reason=scrap_event.get('reason') or '',

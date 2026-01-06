@@ -24,4 +24,7 @@ export const createLineBacklogsAPI = (client) => ({
   recalculateInventory(payload) {
     return client.post('/line-backlogs/recalculate_inventory/', payload)
   },
+  recalculateScrap(payload) {
+    return client.post('/line-backlogs/recalculate_scrap/', payload)
+  },
 })

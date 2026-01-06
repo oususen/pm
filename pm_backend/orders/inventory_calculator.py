@@ -31,7 +31,8 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
 
     # 自工程仕損の集計
     scrap_filter = {
-        'disposition_status': 'REJECTED',  # 仕損確定のみ
+        'disposition_status__in': ['PENDING', 'PARTIAL', 'REJECTED', 'APPROVED'],
+        'event_type__in': ['SCRAP', 'RETURN'],
         'plan_date__isnull': False,
     }
     if line_id:
@@ -54,7 +55,8 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
 
     # 後工程仕損の展開分
     detail_filter = {
-        'scrap_record__disposition_status': 'REJECTED',
+        'scrap_record__disposition_status__in': ['PENDING', 'PARTIAL', 'REJECTED', 'APPROVED'],
+        'scrap_record__event_type__in': ['SCRAP', 'RETURN'],
         'scrap_record__plan_date__isnull': False,
     }
     if line_id:

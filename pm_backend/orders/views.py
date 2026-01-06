@@ -1794,6 +1794,41 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @action(detail=False, methods=['post'])
+    def recalculate_scrap(self, request):
+        """
+        仕損数（scrap_qty）を再集計するAPI
+
+        期待payload: {
+            line_id: int (required),
+            start_date: str (YYYY-MM-DD, required),
+            end_date: str (YYYY-MM-DD, required)
+        }
+        """
+        from .inventory_calculator import aggregate_scrap_to_backlog
+
+        line_id = request.data.get('line_id')
+        start_date = request.data.get('start_date')
+        end_date = request.data.get('end_date')
+
+        if not line_id:
+            return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not start_date or not end_date:
+            return Response({'detail': 'start_date and end_date are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            from datetime import datetime
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d').date()
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d').date()
+        except ValueError as e:
+            return Response({'detail': f'Invalid date format: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            aggregate_scrap_to_backlog(line_id, start_dt, end_dt)
+            return Response({'detail': 'Scrap recalculated successfully'})
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = LineGanttPlan.objects.all().select_related('line', 'product')

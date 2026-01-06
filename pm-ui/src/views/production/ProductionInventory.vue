@@ -586,6 +586,28 @@ const refreshOrderQty = async () => {
   return updated;
 };
 
+const refreshScrapQty = async () => {
+  const lineIds = [...new Set(demands.value.map((d) => d.line).filter(Boolean))];
+  if (!lineIds.length) return false;
+
+  const start = columns.value[0];
+  const end = columns.value[columns.value.length - 1];
+  let updated = false;
+  for (const lineId of lineIds) {
+    try {
+      await api.lineBacklogs.recalculateScrap({
+        line_id: lineId,
+        start_date: start,
+        end_date: end,
+      });
+      updated = true;
+    } catch (e) {
+      console.error('仕損再計算に失敗:', e);
+    }
+  }
+  return updated;
+};
+
 const load = async () => {
   loading.value = true;
   error.value = "";
@@ -596,6 +618,12 @@ const load = async () => {
     applyDemands(payload);
     const refreshed = await refreshOrderQty();
     if (refreshed) {
+      const refreshRes = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
+      const refreshPayload = refreshRes.data || [];
+      applyDemands(refreshPayload);
+    }
+    const refreshedScrap = await refreshScrapQty();
+    if (refreshedScrap) {
       const refreshRes = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
       const refreshPayload = refreshRes.data || [];
       applyDemands(refreshPayload);

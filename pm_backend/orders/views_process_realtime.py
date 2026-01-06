@@ -22,7 +22,7 @@ from .serializers_process_realtime import (
     apply_scrap_return_to_stock,
 )
 from masters.models import Product, Process, Supplier, BOM
-from .models_scrap import ScrapRecordDetail
+from .models_scrap import ScrapRecordDetail, ScrapRecord
 
 
 class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
@@ -398,6 +398,9 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 if not product_id and record.product_code:
                     prod = Product.objects.filter(product_code=record.product_code).first()
                     product_id = prod.id if prod else None
+                product_obj = sd.product
+                if not product_obj and product_id:
+                    product_obj = Product.objects.filter(id=product_id).first()
                 if not product_id:
                     return Response({'detail': '製品が未設定のため在庫戻しができません。'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -411,6 +414,52 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 if multipliers:
                     apply_scrap_return_to_stock(multipliers)
 
+                # 戻しは新規レコードとして登録（数量はマイナス）
+                return_date = timezone.now().date()
+                return_record = ScrapRecord.objects.create(
+                    process=sd.process,
+                    line=sd.line,
+                    product=product_obj,
+                    product_code=sd.product_code,
+                    product_name=sd.product_name,
+                    event_type='RETURN',
+                    qty=-qty,
+                    plan_date=return_date,
+                    reason=sd.reason or '',
+                    reason_detail=sd.reason_detail or '',
+                    batch_no=sd.batch_no or '',
+                    operator_name=sd.operator_name or '',
+                    remarks=sd.remarks or '',
+                    return_for=sd,
+                    disposition_status='APPROVED',
+                    decided_at=timezone.now(),
+                    decided_by=decided_by,
+                )
+
+                details = build_scrap_multiplier_details(product_id, -qty)
+                if details:
+                    products = {
+                        p.id: p for p in Product.objects.filter(
+                            id__in=[d['product_id'] for d in details if d.get('product_id')]
+                        )
+                    }
+                    objs = []
+                    for d in details:
+                        pid = d.get('product_id')
+                        prod = products.get(pid) if pid else None
+                        objs.append(ScrapRecordDetail(
+                            scrap_record=return_record,
+                            product=prod,
+                            product_code=prod.product_code if prod else None,
+                            product_name=prod.product_name if prod else None,
+                            process_id=d.get('process_id'),
+                            line_id=d.get('line_id'),
+                            supplier_id=d.get('supplier_id'),
+                            sourcing_type=d.get('sourcing_type'),
+                            deduct_qty=d.get('qty') or Decimal('0'),
+                        ))
+                    ScrapRecordDetail.objects.bulk_create(objs)
+
                 sd.return_qty = new_return
                 if new_return == scrap_qty:
                     sd.disposition_status = 'APPROVED'
@@ -420,6 +469,41 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 if decided_by:
                     sd.decided_by = decided_by
                 sd.save()
+
+                qty_int = int(qty)
+                if qty_int and sd.line_id and sd.process_id and sd.product_id:
+                    from django.db.models import F
+                    LineBacklog.objects.get_or_create(
+                        line_id=sd.line_id,
+                        process_id=sd.process_id,
+                        product_id=sd.product_id,
+                        plan_date=return_date,
+                        defaults={
+                            'order_qty': 0,
+                            'plan_qty': 0,
+                            'actual_qty': 0,
+                            'stock_qty': 0,
+                            'planned_stock_qty': 0,
+                            'adjust_qty': 0,
+                            'scrap_qty': 0,
+                            'actual_shipment_qty': 0,
+                        }
+                    )
+                    LineBacklog.objects.filter(
+                        line_id=sd.line_id,
+                        process_id=sd.process_id,
+                        product_id=sd.product_id,
+                        plan_date=return_date,
+                    ).update(scrap_qty=F('scrap_qty') - qty_int)
+                    LineBacklog.objects.filter(
+                        line_id=sd.line_id,
+                        process_id=sd.process_id,
+                        product_id=sd.product_id,
+                        plan_date__gte=return_date,
+                    ).update(
+                        stock_qty=F('stock_qty') + qty_int,
+                        planned_stock_qty=F('planned_stock_qty') + qty_int,
+                    )
             elif action == 'CONFIRM_SCRAP':
                 if (sd.return_qty or Decimal('0')) > 0:
                     sd.disposition_status = 'PARTIAL'

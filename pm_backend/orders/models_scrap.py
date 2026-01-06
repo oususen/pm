@@ -6,6 +6,11 @@ from .models_process_realtime import ProcessRealtimeRecord
 class ScrapRecord(models.Model):
     """仕損記録（当面の簡易テーブル。将来 backlog へ統合予定）"""
 
+    EVENT_TYPE_CHOICES = [
+        ('SCRAP', '仕損'),
+        ('RETURN', '戻し'),
+    ]
+
     DISPOSITION_STATUS_CHOICES = [
         ('PENDING', '判定待ち'),
         ('APPROVED', '使用可'),
@@ -38,9 +43,24 @@ class ScrapRecord(models.Model):
     product_code = models.CharField(max_length=50, null=True, blank=True, verbose_name='製品コード', db_index=True)
     product_name = models.CharField(max_length=100, null=True, blank=True, verbose_name='品名')
 
+    event_type = models.CharField(
+        max_length=20,
+        choices=EVENT_TYPE_CHOICES,
+        default='SCRAP',
+        verbose_name='イベント種別'
+    )
     qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='仕損数量')
     recorded_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name='記録時刻')
     plan_date = models.DateField(null=True, blank=True, db_index=True, verbose_name='計画日')
+
+    return_for = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='return_records',
+        verbose_name='戻し対象仕損'
+    )
 
     disposition_status = models.CharField(
         max_length=20,
