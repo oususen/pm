@@ -114,7 +114,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, defineProps } from 'vue'
+import { ref, computed, onMounted, watch, defineProps, defineExpose } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api/client'
 
@@ -273,6 +273,8 @@ const saveSchedule = async () => {
     alert('保存に失敗しました')
   }
 }
+
+defineExpose({ saveSchedule })
 
 let draggedBar = null
 let dragStartX = 0

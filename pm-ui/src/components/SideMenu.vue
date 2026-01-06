@@ -73,6 +73,7 @@ const sections = [
     items: [
       { label: "仕入れメニュー", link: "/purchase/menu" },
       { label: "仕入れ計画", link: "/purchase/plan-input" },
+      { label: "在庫/残量", link: "/purchase/inventory" },
     ],
   },
   {

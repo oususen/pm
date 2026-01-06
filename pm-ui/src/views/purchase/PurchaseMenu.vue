@@ -7,6 +7,10 @@
         <div class="icon-box">📦</div>
         <div class="label">仕入れ計画</div>
       </RouterLink>
+      <RouterLink to="/purchase/inventory" class="master-tile">
+        <div class="icon-box">📊</div>
+        <div class="label">在庫/残量</div>
+      </RouterLink>
     </div>
 
     <p class="helper-text">

@@ -142,11 +142,17 @@
 
     <div class="gantt-section" v-if="showProcessGantt">
       <div class="process-header">
-        <div class="process-title">工程ガント（勤務時間のみ表示）</div>
-        <div class="process-meta">ライン {{ selectedLine || '' }} ／ 期間 {{ startDate }} 〜 {{ endDate }}</div>
+        <div class="process-info">
+          <div class="process-title">工程ガント（勤務時間のみ表示）</div>
+          <div class="process-meta">ライン {{ selectedLine || '' }} ／ 期間 {{ startDate }} 〜 {{ endDate }}</div>
+        </div>
+        <div class="process-actions">
+          <button class="btn" @click="saveGanttSchedule" :disabled="!selectedLine">工程ガント保存</button>
+        </div>
       </div>
       <ProcessGanttView
         :key="ganttReloadKey"
+        ref="ganttRef"
         :embedded="true"
         :preset-line="selectedLine"
         :preset-base-date="startDate"
@@ -224,6 +230,7 @@ const rows = ref([])
 const showProcessGantt = ref(false)
 const showProcessLoad = ref(false)
 const ganttReloadKey = ref(0)
+const ganttRef = ref(null)
 let tempId = 1
 const processLoadLoading = ref(false)
 const processLoadRows = ref([])
@@ -545,6 +552,20 @@ const toggleProcessGantt = async () => {
     ganttReloadKey.value += 1
   }
 }
+
+const saveGanttSchedule = async () => {
+  if (!showProcessGantt.value) {
+    alert('工程ガントを表示してください。')
+    return
+  }
+  const gantt = ganttRef.value
+  if (!gantt || typeof gantt.saveSchedule !== 'function') {
+    alert('工程ガントが未読込です。')
+    return
+  }
+  await gantt.saveSchedule()
+}
+
 
 const loadProcessLoad = async () => {
   if (!selectedLine.value) return
@@ -997,6 +1018,11 @@ thead .sticky-col {
   align-items: center;
   gap: 8px;
   margin-bottom: 6px;
+}
+.process-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .process-title {
   font-weight: 700;

@@ -182,7 +182,7 @@ def _build_firm_order_map(line_id, start_date, end_date):
     return firm_map
 
 
-def _sum_parent_shipments(backlog, pick_qty):
+def _sum_parent_shipments(backlog, pick_qty, shift_fn=None):
     from masters.models import BOMItem
 
     parent_bom_items = BOMItem.objects.filter(
@@ -201,9 +201,13 @@ def _sum_parent_shipments(backlog, pick_qty):
         qty_per = bom_item.quantity or Decimal('0')
         if qty_per == 0:
             continue
+        lead_days = bom_item.lead_time_days or 0
+        parent_date = backlog.plan_date
+        if shift_fn:
+            parent_date = shift_fn(backlog.plan_date, lead_days)
         downstream_backlogs = LineBacklog.objects.filter(
             product=parent_product,
-            plan_date=backlog.plan_date,
+            plan_date=parent_date,
         )
         for downstream in downstream_backlogs:
             use_qty = pick_qty(downstream)
@@ -217,16 +221,16 @@ def _calculate_parent_actual_shipment(backlog):
     return _sum_parent_shipments(backlog, lambda d: d.actual_qty or 0)
 
 
-def _calculate_parent_planned_shipment(backlog, today):
+def _calculate_parent_planned_shipment(backlog, today, shift_fn):
     if backlog.plan_date < today:
-        return _calculate_parent_actual_shipment(backlog)
+        return _sum_parent_shipments(backlog, lambda d: d.actual_qty or 0, shift_fn)
     if backlog.plan_date == today:
         def pick(d):
             plan_qty = d.plan_qty or 0
             actual_qty = d.actual_qty or 0
             return actual_qty if actual_qty > plan_qty else plan_qty
-        return _sum_parent_shipments(backlog, pick)
-    return _sum_parent_shipments(backlog, lambda d: d.plan_qty or 0)
+        return _sum_parent_shipments(backlog, pick, shift_fn)
+    return _sum_parent_shipments(backlog, lambda d: d.plan_qty or 0, shift_fn)
 
 
 def calculate_actual_shipment(backlog):
@@ -347,6 +351,20 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
             prev_date = prev_date - timedelta(days=1)
         return prev_date
 
+    def shift_working_days(target_date, days):
+        if not days:
+            return target_date
+        if not calendar_id:
+            return target_date + timedelta(days=days)
+        step = 1 if days > 0 else -1
+        remaining = abs(int(days))
+        current = target_date
+        while remaining > 0:
+            current = current + timedelta(days=step)
+            if is_working_day(current):
+                remaining -= 1
+        return current
+
     today = datetime.now().date()
     prev_stock = 0
     firm_map = firm_map or {}
@@ -440,6 +458,20 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
             prev_date = prev_date - timedelta(days=1)
         return prev_date
 
+    def shift_working_days(target_date, days):
+        if not days:
+            return target_date
+        if not calendar_id:
+            return target_date + timedelta(days=days)
+        step = 1 if days > 0 else -1
+        remaining = abs(int(days))
+        current = target_date
+        while remaining > 0:
+            current = current + timedelta(days=step)
+            if is_working_day(current):
+                remaining -= 1
+        return current
+
     today = datetime.now().date()
     prev_planned = 0
     firm_map = firm_map or {}
@@ -458,9 +490,9 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
 
         is_final = bool(getattr(backlog.product, 'is_final_product', False))
         if is_final:
-            planned_shipment = firm_map.get((backlog.product_id, backlog.plan_date), Decimal('0'))
+            planned_shipment = backlog.order_qty or 0
         else:
-            planned_shipment = _calculate_parent_planned_shipment(backlog, today)
+            planned_shipment = _calculate_parent_planned_shipment(backlog, today, shift_working_days)
         planned_shipment = int(planned_shipment or 0)
 
         # 時制による計算分岐
