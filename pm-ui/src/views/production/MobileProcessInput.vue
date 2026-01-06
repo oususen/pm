@@ -660,6 +660,52 @@ const loadRecentRecords = async () => {
   }
 }
 
+
+const buildCurrentTimePlanItems = async (lineId, processId) => {
+  try {
+    const targetDate = currentDateYmd.value
+    const ganttRes = await api.lineGanttPlans.getLineGanttPlans({
+      line: lineId,
+      plan_date__gte: targetDate,
+      plan_date__lte: targetDate,
+    })
+    const rawPlans = ganttRes.data?.results || ganttRes.data || []
+    if (!Array.isArray(rawPlans) || !rawPlans.length) {
+      return { items: [], hasPlan: false }
+    }
+
+    const now = new Date()
+    const map = new Map()
+    rawPlans.forEach((plan) => {
+      const processes = Array.isArray(plan.processes_plan) ? plan.processes_plan : []
+      processes.forEach((pp) => {
+        if (String(pp.process_id) != String(processId)) return
+        const start = new Date(pp.start_time)
+        const end = new Date(pp.end_time)
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return
+        if (now < start || now > end) return
+
+        const productId = pp.output_product_id ?? plan.product
+        if (!productId) return
+        const key = `${productId}_${processId}`
+        if (map.has(key)) return
+        map.set(key, {
+          plan_date: targetDate,
+          product: productId,
+          product_code: pp.output_product_code || plan.product_code || '',
+          product_name: pp.output_product_name || plan.product_name || '',
+          process: processId,
+          plan_qty: pp.quantity ?? plan.plan_qty ?? 0,
+        })
+      })
+    })
+    return { items: Array.from(map.values()), hasPlan: true }
+  } catch (e) {
+    console.error('現在時間の計画取得エラー:', e)
+    return { items: [], hasPlan: false }
+  }
+}
+
 const loadPlannedProducts = async () => {
   if (!selectedProcessId.value) return
 
@@ -698,22 +744,10 @@ const loadPlannedProducts = async () => {
       }
     }
 
-    // 追加: この工程の加工物全体を候補に含める（当日以外のバックログも統合）
-    try {
-      const allRes = await api.lineBacklogs.getLineBacklogs({
-        line: lineId,
-        process: selectedProcessId.value,
-        page_size: 500,
-      })
-      const allItems = allRes.data.results || allRes.data || []
-      const merged = new Map()
-      ;[...(tempProducts || []), ...(allItems || [])].forEach((it) => {
-        const key = `${it.product}_${it.process}`
-        if (!merged.has(key)) merged.set(key, it)
-      })
-      tempProducts = Array.from(merged.values())
-    } catch (e) {
-      console.error('工程全体の候補取得エラー:', e)
+    // 可能なら現在時刻に該当する計画のみを表示する
+    const activeResult = await buildCurrentTimePlanItems(lineId, selectedProcessId.value)
+    if (activeResult.hasPlan) {
+      tempProducts = activeResult.items
     }
 
     // 連産品の子品番を除外（生産記録用）

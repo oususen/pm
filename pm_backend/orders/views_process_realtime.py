@@ -21,7 +21,7 @@ from .serializers_process_realtime import (
     build_scrap_multiplier_details,
     apply_scrap_return_to_stock,
 )
-from masters.models import Product, Process, Supplier
+from masters.models import Product, Process, Supplier, BOM
 from .models_scrap import ScrapRecordDetail
 
 
@@ -96,11 +96,21 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             start_dt = timezone.make_aware(start_dt)
             end_dt = timezone.make_aware(end_dt)
 
+        copro_child_ids = set()
+        copro_boms = BOM.objects.filter(is_coproduct=True, is_active=True).prefetch_related('items')
+        for bom in copro_boms:
+            for item in bom.items.all():
+                if item.child_product_id:
+                    copro_child_ids.add(item.child_product_id)
+
         plan_qs = LineBacklog.objects.filter(
             line_id=line_id,
             plan_date=today,
             process_id__in=process_ids,
-        ).values('process_id').annotate(total=Sum('plan_qty'))
+        )
+        if copro_child_ids:
+            plan_qs = plan_qs.exclude(product_id__in=copro_child_ids)
+        plan_qs = plan_qs.values('process_id').annotate(total=Sum('plan_qty'))
         plan_map = {row['process_id']: row['total'] or 0 for row in plan_qs}
 
         output_qs = ProcessRealtimeRecord.objects.filter(

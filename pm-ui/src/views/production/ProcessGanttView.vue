@@ -91,7 +91,11 @@
                       backgroundColor: bar.color,
                     }"
                   >
-                    <span class="gantt-bar-label">{{ bar.label }}</span>
+                    <span class="gantt-bar-label">
+                      <span class="start-time" @mousedown.stop @click.stop="openStartTimeEdit(bar)">{{ bar.startLabel }}</span>
+                      <span class="time-separator"> - </span>
+                      <span class="end-time">{{ bar.endLabel }}</span>
+                    </span>
                   </div>
                 </div>
               </div>
@@ -451,6 +455,64 @@ function formatTimeRange(start, end) {
   return `${formatDateTime(start)} - ${formatDateTime(end)}`
 }
 
+function formatDateTimeInput(date) {
+  const y = date.getFullYear()
+  const m = pad2(date.getMonth() + 1)
+  const d = pad2(date.getDate())
+  const hh = pad2(date.getHours())
+  const mm = pad2(date.getMinutes())
+  return `${y}-${m}-${d} ${hh}:${mm}`
+}
+
+function parseDateTimeInput(value) {
+  if (!value) return null
+  const trimmed = String(value).trim()
+  const match = trimmed.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})\s+(\d{1,2}):(\d{2})$/)
+  if (!match) return null
+  const y = Number(match[1])
+  const m = Number(match[2])
+  const d = Number(match[3])
+  const hh = Number(match[4])
+  const mm = Number(match[5])
+  if (m < 1 || m > 12 || d < 1 || d > 31 || hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
+  const date = new Date(y, m - 1, d, hh, mm, 0, 0)
+  if (Number.isNaN(date.getTime())) return null
+  return date
+}
+
+function roundToFiveMinutes(date) {
+  const ms = date.getTime()
+  const roundMs = 1000 * 60 * 5
+  return new Date(Math.round(ms / roundMs) * roundMs)
+}
+
+function updateBarDisplay(bar) {
+  if (!timelineStart.value) return
+  const msPerSlot = slotHours * 60 * 60 * 1000
+  bar.leftPx = ((bar.startTime.getTime() - timelineStart.value.getTime()) / msPerSlot) * pixelsPerSlot
+  bar.widthPx = Math.max((bar.durationMs / msPerSlot) * pixelsPerSlot, 20)
+  bar.startLabel = formatDateTime(bar.startTime)
+  bar.endLabel = formatDateTime(bar.endTime)
+  bar.label = `${bar.startLabel} - ${bar.endLabel}`
+}
+
+function openStartTimeEdit(bar) {
+  if (!bar || !bar.startTime || !bar.durationMs) return
+  const input = window.prompt('開始日時を入力してください (YYYY-MM-DD HH:mm)', formatDateTimeInput(bar.startTime))
+  if (!input) return
+  const parsed = parseDateTimeInput(input)
+  if (!parsed) {
+    alert('日時の形式が正しくありません。例: 2026-01-07 08:30')
+    return
+  }
+  const newStart = roundToFiveMinutes(parsed)
+  const newEnd = new Date(newStart.getTime() + bar.durationMs)
+  bar.startTime = newStart
+  bar.endTime = newEnd
+  updateBarDisplay(bar)
+  alert('開始時間を変更しました。保存ボタンで確定してください。')
+}
+
 function buildProcessGantt(plans) {
   const processMap = new Map()
   const allDates = []
@@ -522,6 +584,8 @@ function buildProcessGantt(plans) {
           planQty: qtyValue,
           color: getBarColor(outputProductId),
           label: '',
+          startLabel: '',
+          endLabel: '',
           leftPx: 0,
           widthPx: 0,
         }
@@ -560,11 +624,7 @@ function buildProcessGantt(plans) {
     procEntry.items.forEach((item) => {
       item.bars.sort((a, b) => a.startTime - b.startTime)
       item.bars.forEach((bar) => {
-        const left = ((bar.startTime.getTime() - startDate.getTime()) / msPerSlot) * pixelsPerSlot
-        const width = Math.max(((bar.endTime.getTime() - bar.startTime.getTime()) / msPerSlot) * pixelsPerSlot, 20)
-        bar.leftPx = left
-        bar.widthPx = width
-        bar.label = formatTimeRange(bar.startTime, bar.endTime)
+        updateBarDisplay(bar)
       })
     })
   })
@@ -843,6 +903,13 @@ onMounted(async () => {
   color: #111827;
   white-space: nowrap;
   padding: 0 6px;
+}
+.start-time {
+  cursor: pointer;
+  text-decoration: underline;
+}
+.start-time:hover {
+  color: #1d4ed8;
 }
 .lot-badge {
   position: absolute;
