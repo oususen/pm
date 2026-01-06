@@ -305,12 +305,10 @@ const groups = computed(() => {
       };
     }
     const c = g.cells[d.plan_date];
-    // 内示: この製品を加工するラインの直後ラインの計画数の合計
-    // → 在庫側では line_backlog.order_qty を利用
+    // 内示: 最終品の内示(forecast_order_qty)があればそれ、なければ需要(order_qty)
     const hasForecastSplit = d.forecast_order_qty !== null && d.forecast_order_qty !== undefined;
     c.forecast += Number((hasForecastSplit ? d.forecast_order_qty : d.order_qty) || 0);
-    // 確定: 直後ラインの実績の合計に相当する値として
-    // このラインの実績数量(actual_shipment_qty)を集計
+    // 確定: 最終品の確定(firm_order_qty)があればそれ、なければ出庫(actual_shipment_qty)
     const hasFirmSplit = d.firm_order_qty !== null && d.firm_order_qty !== undefined;
     c.firm += Number((hasFirmSplit ? d.firm_order_qty : d.actual_shipment_qty) || 0);
     // 計画・在庫・計画在庫は line_backlog から取得

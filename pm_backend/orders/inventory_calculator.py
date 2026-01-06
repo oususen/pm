@@ -480,6 +480,7 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
                 + (backlog.plan_qty or 0)
                 - planned_shipment
                 + (backlog.adjust_qty or 0)
+                - (backlog.scrap_qty or 0)
             )
         else:
             # ===== 明日以降：計画ベース =====
