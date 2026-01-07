@@ -373,39 +373,10 @@ class CSVImportService:
                         line_no += 1
                         created_lines += 1
 
-                # If this is a FIRM order, supersede overlapping FORECAST orders
-                if order_type == 'FIRM':
-                    if customer.customer_code == '000001':
-                        # Tiera only: delete (supersede) forecasts up to the confirmed due date per product
-                        for product_code, cutoff_date in product_cutoffs.items():
-                            overlapping_forecast_orders = Order.objects.filter(
-                                customer_id=customer_id,
-                                order_type='FORECAST',
-                                status='OPEN',
-                                lines__product_code=product_code,
-                                lines__due_date__lte=cutoff_date
-                            ).distinct()
-                            superseded_orders += overlapping_forecast_orders.update(status='SUPERSEDED')
-                    elif customer.customer_code == '000196':
-                        # Kubota: Do NOT supersede forecasts when importing confirmed orders
-                        # Confirmed (FIRM) and Forecast (FORECAST) are managed separately
-                        # Confirmed orders are for 1 day only, forecasts are for long-term planning
-                        pass
-                    else:
-                        # Default: supersede only exact matching product and due_date
-                        firm_due_dates = [daily.due_date for daily in dailies]
-                        firm_product_codes = [daily.product_code for daily in dailies]
-
-                        overlapping_forecast_orders = Order.objects.filter(
-                            customer_id=customer_id,
-                            order_type='FORECAST',
-                            status='OPEN',
-                            lines__product_code__in=firm_product_codes,
-                            lines__due_date__in=firm_due_dates
-                        ).distinct()
-
-                        superseded_count = overlapping_forecast_orders.update(status='SUPERSEDED')
-                        superseded_orders += superseded_count
+                # 確定インポート時は内示をSUPERSEDEDにしない
+                # 内示インポート時のみ、古い内示をSUPERSEDEDにする
+                # （確定と内示は別々に管理する）
+                pass
 
         return {
             'orders': created_orders,
