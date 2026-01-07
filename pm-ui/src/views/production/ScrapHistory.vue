@@ -101,6 +101,24 @@
         </div>
         <div v-if="breakdownLoading" class="panel-loading">読込中...</div>
       </div>
+      <div class="panel-filters">
+        <div class="filter-row">
+          <label>加工/購入先</label>
+          <select v-model="breakdownFilterType">
+            <option value="">-- すべて --</option>
+            <option value="purchase">購買</option>
+            <option value="process">工程</option>
+          </select>
+          <input type="text" v-model="breakdownFilterText" placeholder="コード/名称" />
+        </div>
+        <button
+          class="btn btn-clear"
+          :disabled="!breakdownFilterType && !breakdownFilterText"
+          @click="resetBreakdownFilters"
+        >
+          クリア
+        </button>
+      </div>
       <table class="detail-table">
         <thead>
           <tr>
@@ -112,7 +130,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in breakdown" :key="row.detail_id">
+          <tr v-for="row in filteredBreakdown" :key="row.detail_id">
             <td>{{ row.product_code || '-' }}</td>
             <td>{{ row.product_name || '' }}</td>
             <td>
@@ -137,8 +155,10 @@
               </button>
             </td>
           </tr>
-          <tr v-if="!breakdown.length">
-            <td colspan="5" class="no-data">明細がありません</td>
+          <tr v-if="!filteredBreakdown.length">
+            <td colspan="5" class="no-data">
+              {{ breakdown.length ? '該当する明細がありません' : '明細がありません' }}
+            </td>
           </tr>
         </tbody>
       </table>
@@ -215,6 +235,8 @@ const endDate = ref(toISODate(today))
 const processId = ref('')
 const productCode = ref('')
 const reason = ref('')
+const breakdownFilterType = ref('')
+const breakdownFilterText = ref('')
 
 const scrapReasons = [
   { value: 'RUST', label: 'サビ' },
@@ -240,11 +262,37 @@ const dispositionStatuses = [
 ]
 const dispositionMap = dispositionStatuses.reduce((acc, s) => ({ ...acc, [s.value]: s.label }), {})
 const dispositionLabel = (val) => dispositionMap[val] || ''
+const isPurchaseRow = (row) => Boolean(row?.supplier_code || row?.supplier_name)
+const isProcessRow = (row) => Boolean(!isPurchaseRow(row) && row?.process_code)
 
 const filteredRecords = computed(() => {
   let list = records.value
   if (reason.value) {
     list = list.filter((r) => (r.event_data?.reason || '') === reason.value)
+  }
+  return list
+})
+
+const filteredBreakdown = computed(() => {
+  let list = breakdown.value
+  if (breakdownFilterType.value === 'purchase') {
+    list = list.filter((row) => isPurchaseRow(row))
+  } else if (breakdownFilterType.value === 'process') {
+    list = list.filter((row) => isProcessRow(row))
+  }
+  const keyword = breakdownFilterText.value.trim().toLowerCase()
+  if (keyword) {
+    list = list.filter((row) => {
+      const supplierText = `${row.supplier_code || ''} ${row.supplier_name || ''}`.toLowerCase()
+      const processText = `${row.process_code || ''} ${row.process_name || ''}`.toLowerCase()
+      if (breakdownFilterType.value === 'purchase') {
+        return supplierText.includes(keyword)
+      }
+      if (breakdownFilterType.value === 'process') {
+        return processText.includes(keyword)
+      }
+      return supplierText.includes(keyword) || processText.includes(keyword)
+    })
   }
   return list
 })
@@ -276,6 +324,11 @@ const resetFilters = () => {
   startDate.value = toISODate(new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000))
   endDate.value = toISODate(today)
   load()
+}
+
+const resetBreakdownFilters = () => {
+  breakdownFilterType.value = ''
+  breakdownFilterText.value = ''
 }
 
 const loadBreakdown = async (rec) => {
@@ -534,6 +587,21 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
+}
+.panel-filters {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.panel-filters .filter-row {
+  flex: 1;
+}
+.btn-clear {
+  padding: 6px 10px;
+  font-size: 12px;
 }
 .panel-title {
   font-weight: 700;
