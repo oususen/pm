@@ -34,9 +34,21 @@
             </option>
           </select>
         </div>
+        <div class="filter-row">
+          <label>判定</label>
+          <select v-model="dispositionStatus">
+            <option value="">-- すべて --</option>
+            <option v-for="s in dispositionStatuses" :key="s.value" :value="s.value">
+              {{ s.label }}
+            </option>
+          </select>
+        </div>
         <div class="filter-actions">
           <button @click="load" :disabled="loading">検索</button>
           <button @click="resetFilters" :disabled="loading">リセット</button>
+          <button @click="exportExcel" :disabled="loading || !filteredRecords.length">
+            CSV出力
+          </button>
         </div>
       </div>
     </div>
@@ -56,15 +68,17 @@
             <th class="num">戻し数量</th>
             <th>理由</th>
             <th>理由詳細</th>
-            <th>ロット</th>
             <th>記入者</th>
-            <th>備考</th>
             <th>補充</th>
-            <th></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="rec in filteredRecords" :key="rec.id">
+          <tr
+            v-for="rec in filteredRecords"
+            :key="rec.id"
+            :class="{ selected: selectedRecord?.id === rec.id }"
+            @click="loadBreakdown(rec)"
+          >
             <td>{{ formatDateTime(rec.timestamp) }}</td>
             <td>{{ rec.process_code }} / {{ rec.process_name }}</td>
             <td>{{ rec.product_code || '-' }}</td>
@@ -74,18 +88,13 @@
             <td class="num">{{ formatNumber(rec.scrap_return_qty) }}</td>
             <td>{{ reasonLabel(rec.event_data?.reason) }}</td>
             <td>{{ rec.event_data?.reason_detail || '' }}</td>
-            <td>{{ rec.batch_no || '' }}</td>
             <td>{{ rec.operator_name || '' }}</td>
-            <td>{{ rec.remarks || '' }}</td>
             <td class="center">
               <span v-if="rec.scrap_is_replenished">✅</span>
             </td>
-            <td>
-              <button class="link-btn" @click="loadBreakdown(rec)">展開</button>
-            </td>
           </tr>
           <tr v-if="!filteredRecords.length">
-            <td colspan="14" class="no-data">データがありません</td>
+            <td colspan="11" class="no-data">データがありません</td>
           </tr>
         </tbody>
       </table>
@@ -235,6 +244,7 @@ const endDate = ref(toISODate(today))
 const processId = ref('')
 const productCode = ref('')
 const reason = ref('')
+const dispositionStatus = ref('')
 const breakdownFilterType = ref('')
 const breakdownFilterText = ref('')
 
@@ -269,6 +279,15 @@ const filteredRecords = computed(() => {
   let list = records.value
   if (reason.value) {
     list = list.filter((r) => (r.event_data?.reason || '') === reason.value)
+  }
+  if (dispositionStatus.value) {
+    list = list.filter((r) => {
+      const status = r.scrap_disposition_status
+      if (dispositionStatus.value === 'PENDING') {
+        return !status || status === 'PENDING'
+      }
+      return status === dispositionStatus.value
+    })
   }
   return list
 })
@@ -321,9 +340,55 @@ const resetFilters = () => {
   processId.value = ''
   productCode.value = ''
   reason.value = ''
+  dispositionStatus.value = ''
   startDate.value = toISODate(new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000))
   endDate.value = toISODate(today)
   load()
+}
+
+const exportExcel = () => {
+  const headers = [
+    '記録時刻',
+    '工程',
+    '品番',
+    '品名',
+    '仕損数',
+    '判定',
+    '戻し数量',
+    '理由',
+    '理由詳細',
+    '記入者',
+    '補充',
+  ]
+  const rows = filteredRecords.value.map((rec) => [
+    formatDateTime(rec.timestamp),
+    `${rec.process_code || ''} / ${rec.process_name || ''}`.trim(),
+    rec.product_code || '',
+    rec.product_name || '',
+    formatNumber(rec.qty),
+    dispositionLabel(rec.scrap_disposition_status),
+    formatNumber(rec.scrap_return_qty),
+    reasonLabel(rec.event_data?.reason),
+    rec.event_data?.reason_detail || '',
+    rec.operator_name || '',
+    rec.scrap_is_replenished ? '済' : '',
+  ])
+  const escapeCsv = (value) => {
+    const text = `${value ?? ''}`
+    const escaped = text.replace(/"/g, '""')
+    return `"${escaped}"`
+  }
+  const csvLines = [headers.map(escapeCsv).join(','), ...rows.map((r) => r.map(escapeCsv).join(','))]
+  const bom = '\ufeff'
+  const csvContent = `${bom}${csvLines.join('\r\n')}`
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  const filename = `scrap-history_${toISODate(new Date())}.csv`
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 const resetBreakdownFilters = () => {
@@ -548,6 +613,15 @@ onMounted(() => {
 }
 .history-table th {
   background: #f4f6fb;
+}
+.history-table tbody tr {
+  cursor: pointer;
+}
+.history-table tbody tr:hover {
+  background: #f8fafc;
+}
+.history-table tbody tr.selected {
+  background: #fbcfe8;
 }
 .center {
   text-align: center;
