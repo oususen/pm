@@ -61,6 +61,7 @@ class OrderLine(models.Model):
     product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='製品')
     product_code = models.CharField(max_length=50, verbose_name='製品コード')
     order_type = models.CharField(max_length=20, choices=ORDER_TYPE_CHOICES, null=True, blank=True, verbose_name='受注タイプ')
+    customer_order_no = models.CharField(max_length=50, null=True, blank=True, verbose_name='顧客発注番号')  # リーデンの発注番号 or ティエラの注文番号
     quantity = models.DecimalField(max_digits=14, decimal_places=3, verbose_name='数量')
     actual_shipment_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='出荷実績数')
     due_date = models.DateField(verbose_name='納期')
@@ -216,6 +217,8 @@ class StgOrderRawTiera(models.Model):
 
     # ティエラ固有フィールド
     data_type = models.CharField(max_length=10, null=True, blank=True, verbose_name='データ区分')  # B17/Y55
+    delivery_no = models.CharField(max_length=50, null=True, blank=True, verbose_name='送付No')
+    order_document_no = models.CharField(max_length=50, null=True, blank=True, verbose_name='注文番号')  # 製品ごとの顧客発注番号
     product_code = models.CharField(max_length=50, null=True, blank=True, verbose_name='製品コード(図番)')
     due_date = models.DateField(null=True, blank=True, verbose_name='納期')
     quantity = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True, verbose_name='数量')
@@ -264,7 +267,9 @@ class StgOrderRawRieden(models.Model):
     source_row_no = models.IntegerField(verbose_name='ソース行番号')
 
     # リーデン固有フィールド
-    order_code = models.CharField(max_length=10, null=True, blank=True, verbose_name='発注コード')  # 509
+    order_no = models.CharField(max_length=50, null=True, blank=True, verbose_name='発注番号')  # 顧客の発注番号
+    order_date = models.DateField(null=True, blank=True, verbose_name='発注日')
+    order_code = models.CharField(max_length=10, null=True, blank=True, verbose_name='発注先コード')  # 509
     product_code = models.CharField(max_length=50, null=True, blank=True, verbose_name='製品コード')
     due_date = models.DateField(null=True, blank=True, verbose_name='納期')
     quantity = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True, verbose_name='数量')

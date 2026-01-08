@@ -24,6 +24,8 @@ class TieraKakuteiImportService:
 
     IDENTIFIER_COL = 0  # データ区分
     IDENTIFIER_VALUE = 'Y55'
+    COL_DELIVERY_NO = 5    # 送付No
+    COL_ORDER_DOCUMENT_NO = 7  # 注文番号
     COL_PRODUCT_CODE = 11  # 図番
     COL_DELIVERY_DATE = 13  # 納期 (YYYYMMDD format)
     COL_PRODUCT_NAME = 47  # 納品書用品名
@@ -143,6 +145,18 @@ class TieraKakuteiImportService:
 
                 try:
                     # Extract data using column name mapping (prefer header names)
+                    # 送付No
+                    delivery_no_col = col_map.get('送付No', self.COL_DELIVERY_NO)
+                    delivery_no = ''
+                    if delivery_no_col is not None and len(row) > delivery_no_col:
+                        delivery_no = row[delivery_no_col].strip()
+
+                    # 注文番号（製品ごとの顧客発注番号）
+                    order_document_no_col = col_map.get('注文番号', self.COL_ORDER_DOCUMENT_NO)
+                    order_document_no = ''
+                    if order_document_no_col is not None and len(row) > order_document_no_col:
+                        order_document_no = row[order_document_no_col].strip()
+
                     # 図番列が製品コード
                     product_code_col = col_map.get('図番', self.COL_PRODUCT_CODE)
                     product_code = row[product_code_col].strip()
@@ -184,6 +198,8 @@ class TieraKakuteiImportService:
                         source_file=file.name,
                         source_row_no=row_no,
                         data_type=self.IDENTIFIER_VALUE,
+                        delivery_no=delivery_no,
+                        order_document_no=order_document_no,
                         product_code=product_code,
                         due_date=due_date,
                         quantity=quantity,

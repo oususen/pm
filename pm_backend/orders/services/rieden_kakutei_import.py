@@ -9,22 +9,32 @@ from masters.models import Customer, Product
 class RiedenKakuteiImportService:
     """Rieden Kakutei (Confirmed) CSV Import Service
 
-    Format: 発注コード=509 type
-    - Column 0: Order Code (発注コード) = "509"
+    Format: 発注先コード=509 type
+    - Column 0: Order No (発注番号) - Customer's order number
+    - Column 1: Order Code (発注先コード) = "509" - Identifier
     - Simple 1 row = 1 order line format
 
-    Column mapping (TODO: Verify with actual CSV file):
-    - Column 0: order_code (発注コード)
-    - Column 1: product_code (製品コード)
-    - Column 2: delivery_date (納期)
-    - Column 3: quantity (数量)
+    Column mapping:
+    - Column 0: order_no (発注番号)
+    - Column 1: order_code (発注先コード) = "509"
+    - Column 2+: Other fields (product_code, delivery_date, quantity, etc.)
     """
 
-    IDENTIFIER_COL = 0  # 発注コード
+    IDENTIFIER_COL = 1  # 発注先コード
     IDENTIFIER_VALUE = '509'
-    COL_PRODUCT_CODE = 1  # TODO: Verify
-    COL_DELIVERY_DATE = 2  # TODO: Verify
-    COL_QUANTITY = 3  # TODO: Verify
+    COL_ORDER_NO = 0  # 発注番号
+    COL_ORDER_DATE = 2  # 発注日
+    COL_PRODUCT_CODE = 5  # 製品コード
+    COL_DELIVERY_DATE = 9  # 納期
+    COL_QUANTITY = 10  # 数量
+    HEADER_ALIASES = {
+        'order_no': ['発注番号', '発注No', '注文番号', '注文No', '受注番号'],
+        'order_date': ['発注日', '発注年月日', '注文日', '受注日'],
+        'identifier': ['発注先コード', '発注先ｺｰﾄﾞ', '発注CD', '発注コード', '発注ｺｰﾄﾞ'],
+        'product_code': ['品目コード', '製品コード', '製品ｺｰﾄﾞ', '品番', '品目コード', '品目ｺｰﾄﾞ', '図番', '商品コード', '部品番号'],
+        'delivery_date': ['納期', '納入日', '納品日', '納入指示日', '納期日', '納入予定日'],
+        'quantity': ['数量', '注文数量', '発注数量', '発注数', '指示数', '納入指示数', '納品数量'],
+    }
 
     def __init__(self):
         self.errors = []
@@ -85,6 +95,117 @@ class RiedenKakuteiImportService:
         except:
             return None
 
+    def _normalize_header(self, name):
+        if name is None:
+            return ''
+        normalized = str(name).strip().replace(' ', '').replace('\u3000', '')
+        normalized = normalized.replace('_', '').replace('-', '').upper()
+        normalized = normalized.lstrip('\ufeff')
+        return normalized
+
+    def _build_col_map(self, header_row):
+        alias_map = {}
+        for key, aliases in self.HEADER_ALIASES.items():
+            for alias in aliases:
+                alias_map[self._normalize_header(alias)] = key
+
+        col_map = {}
+        for idx, name in enumerate(header_row or []):
+            key = alias_map.get(self._normalize_header(name))
+            if key and key not in col_map:
+                col_map[key] = idx
+        return col_map
+
+    def _looks_like_header(self, row):
+        return bool(self._build_col_map(row))
+
+    def _normalize_identifier(self, value):
+        if value is None:
+            return ''
+        text = str(value).strip().lstrip('\ufeff')
+        if text == '':
+            return ''
+        try:
+            normalized = text.replace(',', '')
+            dec = Decimal(normalized)
+            if dec == dec.to_integral():
+                return str(dec.to_integral())
+        except Exception:
+            pass
+        return text
+
+    def _infer_columns(self, sample_rows):
+        for row in sample_rows:
+            for idx, cell in enumerate(row):
+                if self._normalize_identifier(cell) != self.IDENTIFIER_VALUE:
+                    continue
+
+                # 発注先コード列（識別子）を見つけた
+                identifier_col = idx
+
+                # 発注番号は識別子の前にあるはず（通常は列0）
+                order_no_col = None
+                order_date_col = None
+                if identifier_col > 0:
+                    # 識別子の前の列をチェック
+                    for j in range(identifier_col - 1, -1, -1):
+                        cell_val = str(row[j]).strip() if j < len(row) else ''
+                        if not cell_val:
+                            continue
+                        # 日付形式なら発注日候補
+                        if self.parse_date(cell_val):
+                            if order_date_col is None:
+                                order_date_col = j
+                        else:
+                            # 日付でなければ発注番号候補
+                            if order_no_col is None:
+                                order_no_col = j
+
+                # 納期を探す（識別子の後）
+                date_idx = None
+                for j in range(identifier_col + 1, len(row)):
+                    if self.parse_date(row[j]):
+                        date_idx = j
+                        break
+                if date_idx is None:
+                    continue
+
+                # 数量を探す（納期の後）
+                qty_idx = None
+                for j in range(date_idx + 1, len(row)):
+                    if self.parse_quantity(row[j]):
+                        qty_idx = j
+                        break
+                if qty_idx is None:
+                    continue
+
+                # 製品コードを探す（識別子と納期の間）
+                product_idx = None
+                for j in range(identifier_col + 1, date_idx):
+                    cell_val = str(row[j]).strip() if j < len(row) else ''
+                    if not cell_val:
+                        continue
+                    if self.parse_date(cell_val):
+                        continue
+                    product_idx = j
+                    break
+
+                if product_idx is None:
+                    product_idx = identifier_col + 1 if identifier_col + 1 < len(row) else None
+
+                if product_idx is None:
+                    continue
+
+                return {
+                    'order_no_col': order_no_col,
+                    'order_date_col': order_date_col,
+                    'identifier_col': identifier_col,
+                    'product_code_col': product_idx,
+                    'delivery_date_col': date_idx,
+                    'quantity_col': qty_idx,
+                }
+        return None
+
     def import_csv(self, file, customer_code, order_type, source_system='CSV'):
         """Import Rieden confirmed order CSV (発注コード=509)
 
@@ -113,38 +234,84 @@ class RiedenKakuteiImportService:
             # Parse CSV
             lines = decoded_file.splitlines()
             csv_reader = csv.reader(lines)
+            rows = list(csv_reader)
 
             raw_records = []
-            row_no = 0
+            col_map = {}
 
-            for row in csv_reader:
-                row_no += 1
+            header_detected = bool(rows and self._looks_like_header(rows[0]))
+            if header_detected:
+                col_map = self._build_col_map(rows[0])
+                data_rows = rows[1:]
+            else:
+                data_rows = rows
 
-                # Skip header
-                if row_no == 1:
-                    continue
+            sample_rows = data_rows[:20]
+            inferred_cols = self._infer_columns(sample_rows)
+
+            order_no_col = col_map.get('order_no', self.COL_ORDER_NO)
+            order_date_col = col_map.get('order_date', self.COL_ORDER_DATE)
+            identifier_col = col_map.get('identifier', self.IDENTIFIER_COL)
+            product_code_col = col_map.get('product_code', self.COL_PRODUCT_CODE)
+            delivery_date_col = col_map.get('delivery_date', self.COL_DELIVERY_DATE)
+            quantity_col = col_map.get('quantity', self.COL_QUANTITY)
+
+            used_inferred = False
+            if inferred_cols:
+                if 'order_no' not in col_map and inferred_cols.get('order_no_col') is not None:
+                    order_no_col = inferred_cols['order_no_col']
+                    used_inferred = True
+                if 'order_date' not in col_map and inferred_cols.get('order_date_col') is not None:
+                    order_date_col = inferred_cols['order_date_col']
+                    used_inferred = True
+                if 'identifier' not in col_map:
+                    identifier_col = inferred_cols['identifier_col']
+                    used_inferred = True
+                if 'product_code' not in col_map:
+                    product_code_col = inferred_cols['product_code_col']
+                    used_inferred = True
+                if 'delivery_date' not in col_map:
+                    delivery_date_col = inferred_cols['delivery_date_col']
+                    used_inferred = True
+                if 'quantity' not in col_map:
+                    quantity_col = inferred_cols['quantity_col']
+                    used_inferred = True
+                if used_inferred:
+                    self.warnings.append(
+                        f"Auto-detected columns: 発注番号={order_no_col}, 発注日={order_date_col}, 発注先コード={identifier_col}, 製品コード={product_code_col}, 納期={delivery_date_col}, 数量={quantity_col}"
+                    )
+
+            row_offset = 1 if header_detected else 0
+            for row_no, row in enumerate(data_rows, start=1 + row_offset):
 
                 # Check minimum columns
-                required_cols = max(self.IDENTIFIER_COL, self.COL_PRODUCT_CODE,
-                                   self.COL_DELIVERY_DATE, self.COL_QUANTITY) + 1
+                required_cols = max(identifier_col, product_code_col,
+                                   delivery_date_col, quantity_col) + 1
                 if len(row) < required_cols:
                     continue
 
                 # Filter by identifier
-                identifier_value = row[self.IDENTIFIER_COL].strip() if len(row) > self.IDENTIFIER_COL else ''
+                identifier_value = self._normalize_identifier(
+                    row[identifier_col] if len(row) > identifier_col else ''
+                )
                 if identifier_value != self.IDENTIFIER_VALUE:
                     continue
 
                 try:
                     # Extract data
-                    product_code = row[self.COL_PRODUCT_CODE].strip() if len(row) > self.COL_PRODUCT_CODE else ''
-                    delivery_date_str = row[self.COL_DELIVERY_DATE].strip() if len(row) > self.COL_DELIVERY_DATE else ''
-                    quantity_str = row[self.COL_QUANTITY].strip() if len(row) > self.COL_QUANTITY else ''
+                    order_no = row[order_no_col].strip() if order_no_col is not None and len(row) > order_no_col else ''
+                    order_date_str = row[order_date_col].strip() if order_date_col is not None and len(row) > order_date_col else ''
+                    product_code = row[product_code_col].strip() if len(row) > product_code_col else ''
+                    delivery_date_str = row[delivery_date_col].strip() if len(row) > delivery_date_col else ''
+                    quantity_str = row[quantity_col].strip() if len(row) > quantity_col else ''
 
                     if not product_code:
                         continue
 
-                    # Parse date
+                    # Parse order date
+                    order_date = self.parse_date(order_date_str) if order_date_str else None
+
+                    # Parse due date
                     due_date = self.parse_date(delivery_date_str)
                     if not due_date:
                         self.warnings.append(f"Row {row_no}: Invalid date: {delivery_date_str}")
@@ -163,6 +330,8 @@ class RiedenKakuteiImportService:
                         source_system=source_system,
                         source_file=file.name,
                         source_row_no=row_no,
+                        order_no=order_no,
+                        order_date=order_date,
                         order_code=self.IDENTIFIER_VALUE,
                         product_code=product_code,
                         due_date=due_date,
@@ -176,11 +345,13 @@ class RiedenKakuteiImportService:
                     self.errors.append(f"Row {row_no}: {str(e)}")
 
             if not raw_records:
+                warnings = list(self.warnings)
+                warnings.append('Column positions may need adjustment. Check COL_* constants.')
                 return {
                     'success': False,
                     'message': f'No valid records found with 発注コード=509',
                     'errors': self.errors,
-                    'warnings': ['Column positions may need adjustment. Check COL_* constants.']
+                    'warnings': warnings
                 }
 
             # Save to database

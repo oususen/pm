@@ -284,8 +284,24 @@ class CSVImportService:
                         else:
                             order_no = f"FIRM-{customer.customer_code}-{timestamp}"
                     else:
-                        # Other customers: use timestamp
-                        order_no = f"FIRM-{customer.customer_code}-{timestamp}"
+                        # For Rieden, use order_date from raw_rieden
+                        first_daily = dailies[0] if dailies else None
+                        if first_daily and hasattr(first_daily, 'raw_rieden') and first_daily.raw_rieden:
+                            order_date = first_daily.raw_rieden.order_date
+                            if order_date:
+                                order_no = f"FIRM-{customer.customer_code}-{order_date.strftime('%Y%m%d')}"
+                            else:
+                                order_no = f"FIRM-{customer.customer_code}-{timestamp}"
+                        # For Tiera, use delivery_no from raw_tiera
+                        elif first_daily and hasattr(first_daily, 'raw_tiera') and first_daily.raw_tiera:
+                            delivery_no = first_daily.raw_tiera.delivery_no
+                            if delivery_no:
+                                order_no = f"FIRM-{customer.customer_code}-{delivery_no}"
+                            else:
+                                order_no = f"FIRM-{customer.customer_code}-{timestamp}"
+                        else:
+                            # Other customers: use timestamp
+                            order_no = f"FIRM-{customer.customer_code}-{timestamp}"
 
                 # Create order header
                 order = Order.objects.create(
@@ -359,12 +375,20 @@ class CSVImportService:
                         if cutoff is None or daily.due_date > cutoff:
                             product_cutoffs[daily.product_code] = daily.due_date
 
+                        # Get customer_order_no from raw record
+                        customer_order_no = None
+                        if hasattr(daily, 'raw_rieden') and daily.raw_rieden:
+                            customer_order_no = daily.raw_rieden.order_no
+                        elif hasattr(daily, 'raw_tiera') and daily.raw_tiera:
+                            customer_order_no = daily.raw_tiera.order_document_no
+
                         OrderLine.objects.create(
                             order=order,
                             line_no=line_no,
                             product=product,
                             product_code=daily.product_code,
                             order_type=order_type,
+                            customer_order_no=customer_order_no,
                             quantity=daily.quantity,
                             due_date=daily.due_date,
                             plant_code=daily.plant_code,
