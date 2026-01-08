@@ -11,13 +11,13 @@ import uuid
 from datetime import date
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
-    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial
+    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity
 )
 from .serializers import (
     ProductSerializer, CustomerSerializer, ProcessSerializer, LineSerializer,
     SupplierSerializer, CalendarSerializer, CalendarDaySerializer, WorkPatternSerializer, BreakTimeSerializer,
     BOMSerializer, BOMItemSerializer, RoutingSerializer, RoutingStepSerializer,
-    RoutingStepMaterialSerializer
+    RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer
 )
 
 
@@ -73,6 +73,25 @@ class ProductViewSet(viewsets.ModelViewSet):
         product.image_url = url
         product.save(update_fields=['image_url', 'updated_at'])
         return Response({'image_url': url}, status=status.HTTP_200_OK)
+
+
+class ProductGroupViewSet(viewsets.ModelViewSet):
+    queryset = ProductGroup.objects.all()
+    serializer_class = ProductGroupSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_active']
+    search_fields = ['group_code', 'group_name']
+    ordering_fields = ['group_code', 'created_at']
+    ordering = ['group_code']
+
+
+class ContainerCapacityViewSet(viewsets.ModelViewSet):
+    queryset = ContainerCapacity.objects.all()
+    serializer_class = ContainerCapacitySerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    search_fields = ['name', 'container_code']
+    ordering_fields = ['name', 'capacity']
+    ordering = ['name']
 
 
 class CustomerViewSet(viewsets.ModelViewSet):

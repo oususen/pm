@@ -12,6 +12,18 @@ const masters = [
     meta: { pageTitle: "製品マスタ" },
   },
   {
+    path: "/masters/product-group",
+    name: "ProductGroupMaster",
+    component: () => import("@/views/masters/ProductGroupMaster.vue"),
+    meta: { pageTitle: "製品グループマスタ" },
+  },
+  {
+    path: "/masters/container-capacity",
+    name: "ContainerCapacityMaster",
+    component: () => import("@/views/masters/ContainerCapacityMaster.vue"),
+    meta: { pageTitle: "容器マスタ" },
+  },
+  {
     path: "/masters/customer",
     name: "CustomerMaster",
     component: () => import("@/views/masters/CustomerMaster.vue"),

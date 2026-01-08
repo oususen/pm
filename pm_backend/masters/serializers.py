@@ -1,13 +1,25 @@
 from rest_framework import serializers
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
-    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial
+    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity
 )
 
 
 class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
+        fields = '__all__'
+
+
+class ProductGroupSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductGroup
+        fields = '__all__'
+
+
+class ContainerCapacitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ContainerCapacity
         fields = '__all__'
 
 

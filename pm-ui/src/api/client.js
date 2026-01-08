@@ -5,6 +5,8 @@ import { createShipmentActualsAPI } from './resources/shipmentActuals'
 import { createProcessesAPI } from './resources/processes'
 import { createLinesAPI } from './resources/lines'
 import { createSuppliersAPI } from './resources/suppliers'
+import { createProductGroupsAPI } from './resources/productGroups'
+import { createContainerCapacitiesAPI } from './resources/containerCapacities'
 import { createCalendarsAPI } from './resources/calendars'
 import { createWorkPatternsAPI } from './resources/workPatterns'
 import { createBomsAPI } from './resources/boms'
@@ -72,6 +74,8 @@ const bomsAPI = createBomsAPI(client)
 
 export default {
   products: createProductsAPI(client),
+  productGroups: createProductGroupsAPI(client),
+  containerCapacities: createContainerCapacitiesAPI(client),
   customers: createCustomersAPI(client),
   lines: createLinesAPI(client),
   suppliers: createSuppliersAPI(client),

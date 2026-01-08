@@ -82,6 +82,10 @@
               <th>カテゴリ</th>
               <th>単位</th>
               <th>標準LT(日)</th>
+              <th>機種名</th>
+              <th>グループ</th>
+              <th>容器</th>
+              <th>容器入り数</th>
               <th>最終品</th>
               <th>ライン最終品</th>
               <th>みなし組立</th>
@@ -97,6 +101,10 @@
               <td>{{ getCategoryLabel(product.category) }}</td>
               <td>{{ product.unit }}</td>
               <td>{{ product.standard_lt_days }}</td>
+              <td>{{ product.model_name || '-' }}</td>
+              <td>{{ getProductGroupLabel(product.product_group) }}</td>
+              <td>{{ getContainerLabel(product.used_container) }}</td>
+              <td>{{ product.capacity ?? '-' }}</td>
               <td>{{ product.is_final_product ? '最終' : '' }}</td>
               <td>{{ product.is_line_final_product ? 'はい' : '' }}</td>
               <td>{{ product.is_phantom ? 'はい' : 'いいえ' }}</td>
@@ -172,6 +180,32 @@
           <div class="form-group">
             <label>標準LT(日)</label>
             <input v-model.number="formData.standard_lt_days" type="number" min="0" />
+          </div>
+          <div class="form-group">
+            <label>機種名</label>
+            <input v-model="formData.model_name" placeholder="例: 17U" />
+          </div>
+          <div class="form-group">
+            <label>製品グループ</label>
+            <select v-model="formData.product_group">
+              <option :value="null">未設定</option>
+              <option v-for="group in productGroups" :key="group.id" :value="group.id">
+                {{ group.group_code }} - {{ group.group_name }}
+              </option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>使用容器</label>
+            <select v-model="formData.used_container">
+              <option :value="null">未設定</option>
+              <option v-for="container in containers" :key="container.id" :value="container.id">
+                {{ formatContainerOption(container) }}
+              </option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>容器入り数</label>
+            <input v-model.number="formData.capacity" type="number" min="0" />
           </div>
           <div class="form-group">
             <label>ライン情報</label>
@@ -266,6 +300,8 @@ const getCategoryLabel = (value) => categoryMap[value] || value
 const products = ref([])
 const lines = ref([])
 const processes = ref([])
+const productGroups = ref([])
+const containers = ref([])
 const showDialog = ref(false)
 const isEdit = ref(false)
 const currentPage = ref(1)
@@ -284,9 +320,13 @@ const filters = ref({
 const formData = ref({
   product_code: '',
   product_name: '',
+  model_name: '',
   category: '',
   unit: '個',
   standard_lt_days: 0,
+  product_group: null,
+  used_container: null,
+  capacity: null,
   line: null,
   process: null,
   management_unit: null,
@@ -322,6 +362,42 @@ const pageRangeLabel = computed(() => {
   const end = Math.min(currentPage.value * pageSize.value, totalCount.value)
   return `${totalCount.value}件中 ${start}-${end}件`
 })
+
+const productGroupMap = computed(() => {
+  const map = new Map()
+  for (const group of productGroups.value) {
+    map.set(group.id, group)
+  }
+  return map
+})
+
+const containerMap = computed(() => {
+  const map = new Map()
+  for (const container of containers.value) {
+    map.set(container.id, container)
+  }
+  return map
+})
+
+const getProductGroupLabel = (groupId) => {
+  if (!groupId) return '-'
+  const group = productGroupMap.value.get(groupId)
+  return group ? `${group.group_code} - ${group.group_name}` : '-'
+}
+
+const getContainerLabel = (containerId) => {
+  if (!containerId) return '-'
+  const container = containerMap.value.get(containerId)
+  return container ? formatContainerOption(container) : '-'
+}
+
+const formatContainerOption = (container) => {
+  if (!container) return ''
+  if (container.capacity) {
+    return `${container.name} (${container.capacity})`
+  }
+  return container.name
+}
 
 // クエリパラメータを組み立て
 const buildQueryParams = () => {
@@ -393,15 +469,37 @@ const fetchProcesses = async () => {
   }
 }
 
+const fetchProductGroups = async () => {
+  try {
+    const response = await api.productGroups.getProductGroups()
+    productGroups.value = response.data.results || response.data
+  } catch (error) {
+    console.error('製品グループ取得エラー:', error)
+  }
+}
+
+const fetchContainers = async () => {
+  try {
+    const response = await api.containerCapacities.getContainerCapacities()
+    containers.value = response.data.results || response.data
+  } catch (error) {
+    console.error('容器取得エラー:', error)
+  }
+}
+
 // 新規ダイアログ表示
 const showNewDialog = () => {
   isEdit.value = false
   formData.value = {
     product_code: '',
     product_name: '',
+    model_name: '',
     category: '',
     unit: '個',
     standard_lt_days: 0,
+    product_group: null,
+    used_container: null,
+    capacity: null,
     line: null,
     process: null,
     management_unit: null,
@@ -419,9 +517,13 @@ const editProduct = (product) => {
   isEdit.value = true
   formData.value = {
     ...product,
+    model_name: product.model_name ?? '',
     line: product.line ?? null,
     process: product.process ?? null,
     management_unit: product.management_unit ?? null,
+    product_group: product.product_group ?? null,
+    used_container: product.used_container ?? null,
+    capacity: product.capacity ?? null,
   }
   if (!formData.value.image_url) {
     formData.value.image_url = ''
@@ -450,14 +552,26 @@ const resetFilters = async () => {
   await fetchProducts(1)
 }
 
+const normalizeNumber = (value) => {
+  if (value === '' || value === null || Number.isNaN(value)) return null
+  return value
+}
+
 // 保存
 const saveProduct = async () => {
   try {
+    const payload = {
+      ...formData.value,
+      model_name: formData.value.model_name || null,
+      product_group: formData.value.product_group || null,
+      used_container: formData.value.used_container || null,
+      capacity: normalizeNumber(formData.value.capacity),
+    }
     if (isEdit.value) {
-      await api.products.updateProduct(formData.value.id, formData.value)
+      await api.products.updateProduct(payload.id, payload)
       alert('更新しました')
     } else {
-      await api.products.createProduct(formData.value)
+      await api.products.createProduct(payload)
       alert('作成しました')
     }
     await fetchProducts()
@@ -519,6 +633,8 @@ onMounted(() => {
   fetchProducts(1)
   fetchLines()
   fetchProcesses()
+  fetchProductGroups()
+  fetchContainers()
 })
 </script>
 
