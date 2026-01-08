@@ -220,11 +220,12 @@ class CSVImportService:
         # Filter by raw ID range if specified (takes priority over source_file)
         if raw_id_range and raw_id_range[0] is not None and raw_id_range[1] is not None:
             # Check which raw field is populated and filter accordingly
+            # Use isnull=False to ensure we only match records with the specific raw table populated
             query = query.filter(
-                Q(raw__id__gte=raw_id_range[0], raw__id__lte=raw_id_range[1]) |
-                Q(raw_kubota__id__gte=raw_id_range[0], raw_kubota__id__lte=raw_id_range[1]) |
-                Q(raw_tiera__id__gte=raw_id_range[0], raw_tiera__id__lte=raw_id_range[1]) |
-                Q(raw_rieden__id__gte=raw_id_range[0], raw_rieden__id__lte=raw_id_range[1])
+                Q(raw__isnull=False, raw__id__gte=raw_id_range[0], raw__id__lte=raw_id_range[1]) |
+                Q(raw_kubota__isnull=False, raw_kubota__id__gte=raw_id_range[0], raw_kubota__id__lte=raw_id_range[1]) |
+                Q(raw_tiera__isnull=False, raw_tiera__id__gte=raw_id_range[0], raw_tiera__id__lte=raw_id_range[1]) |
+                Q(raw_rieden__isnull=False, raw_rieden__id__gte=raw_id_range[0], raw_rieden__id__lte=raw_id_range[1])
             )
         # Otherwise filter by source file if specified
         elif source_file:
