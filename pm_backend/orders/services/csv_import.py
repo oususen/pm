@@ -382,6 +382,8 @@ class CSVImportService:
                             customer_order_no = daily.raw_rieden.order_no
                         elif hasattr(daily, 'raw_tiera') and daily.raw_tiera:
                             customer_order_no = daily.raw_tiera.order_document_no
+                        elif hasattr(daily, 'raw_kubota') and daily.raw_kubota:
+                            customer_order_no = daily.raw_kubota.order_no
 
                         OrderLine.objects.create(
                             order=order,
