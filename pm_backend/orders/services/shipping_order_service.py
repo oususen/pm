@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 出荷指示書サービス
-delivery_progressとproductsから出荷指示書用のデータを取得・振り分け
+t_order_line と products から出荷指示書用のデータを取得・振り分け
 """
 
 from datetime import date
@@ -10,13 +10,23 @@ import pandas as pd
 import re
 import math
 from fractions import Fraction
-from django.db.models import Q, Sum, F
-from orders.models import DeliveryProgress
+from django.db.models import Q, Sum
+from orders.models import OrderLine
 from masters.models import Product, ProductGroup, ContainerCapacity
 
 
 class ShippingOrderService:
     """出荷指示書データを取得・振り分けるサービス（Django版）"""
+
+    def _sanitize_records(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        pandas由来のNaN/NaTをJSON化できるようNoneに変換する。
+        """
+        for rec in records:
+            for key, value in rec.items():
+                if pd.isna(value):
+                    rec[key] = None
+        return records
 
     def get_shipping_data_by_date(self, target_date: date, customer: str = 'tiera') -> Dict[str, Any]:
         """
@@ -37,12 +47,17 @@ class ShippingOrderService:
         """
         # Tiera製品のみを対象とする
         # 出荷指示書の対象製品（容器4-5T、特定機種名、製品群SEATBASE/TANK/SUB_BLADE）
-        deliveries = DeliveryProgress.objects.filter(
-            order_date__date=target_date,
-            order_quantity__gt=0
+        firm_filter = Q(order_type='FIRM') | Q(order_type__isnull=True, order__order_type='FIRM')
+        order_lines = OrderLine.objects.filter(
+            order__status='OPEN',
+            due_date=target_date,
+            quantity__gt=0,
+        ).filter(
+            firm_filter
         ).exclude(
-            product__product_code='YD40003261'  # YD40003261は別途注意事項として表示
+            product_code='YD40003261'  # YD40003261は別途注意事項として表示
         ).select_related(
+            'order',
             'product',
             'product__product_group',
             'product__used_container'
@@ -53,14 +68,17 @@ class ShippingOrderService:
         ).order_by('product__product_code')
 
         # YD40003261（YD40003117に付ける製品）の受注数を取得
-        attachment_qty = DeliveryProgress.objects.filter(
-            order_date__date=target_date,
-            product__product_code='YD40003261',
-            order_quantity__gt=0
-        ).aggregate(total=Sum('order_quantity'))['total'] or 0
+        attachment_qty = OrderLine.objects.filter(
+            order__status='OPEN',
+            due_date=target_date,
+            product_code='YD40003261',
+            quantity__gt=0,
+        ).filter(
+            firm_filter
+        ).aggregate(total=Sum('quantity'))['total'] or 0
         attachment_qty = int(attachment_qty)
 
-        if not deliveries.exists():
+        if not order_lines.exists():
             return {
                 'date': target_date,
                 'trip1': [],
@@ -73,15 +91,15 @@ class ShippingOrderService:
 
         # DataFrameに変換
         df_data = []
-        for dp in deliveries:
-            product = dp.product
+        for line in order_lines:
+            product = line.product
             df_data.append({
-                'order_id': dp.id,
+                'order_id': line.id,
                 'product_id': product.id if product else None,
-                'product_code': product.product_code if product else '',
+                'product_code': product.product_code if product else line.product_code,
                 'product_name': product.product_name if product else '',
                 'model_name': product.model_name or '',
-                'order_quantity': dp.order_quantity,
+                'order_quantity': line.quantity,
                 'capacity': product.capacity or 0,
                 'container_id': product.used_container.id if product and product.used_container else None,
                 'container_name': product.used_container.name if product and product.used_container else '',
@@ -114,7 +132,7 @@ class ShippingOrderService:
         1便目: 容器名が「4-5T」の製品
         """
         filtered = df[df['container_name'].str.contains('4-5T', case=False, na=False)]
-        return filtered.to_dict('records')
+        return self._sanitize_records(filtered.to_dict('records'))
 
     def _filter_trip2(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """
@@ -135,7 +153,7 @@ class ShippingOrderService:
             df['group_code_normalized'].isin(special_groups)
         ]
 
-        return filtered.to_dict('records')
+        return self._sanitize_records(filtered.to_dict('records'))
 
     def _filter_trip3(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """
@@ -148,7 +166,7 @@ class ShippingOrderService:
 
         filtered = df[df['group_code_normalized'].isin([g.upper() for g in target_groups])]
 
-        return filtered.to_dict('records')
+        return self._sanitize_records(filtered.to_dict('records'))
 
     def _split_trip1_to_trip4(self, trip1_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -309,14 +327,18 @@ class ShippingOrderService:
 
     def get_available_dates(self) -> List[date]:
         """
-        delivery_progressに存在する日付一覧を取得
+        t_order_line の納期一覧を取得
         """
-        dates = DeliveryProgress.objects.filter(
-            order_quantity__gt=0
-        ).values('order_date__date').annotate(
-        ).distinct().order_by('-order_date__date')[:30]
+        firm_filter = Q(order_type='FIRM') | Q(order_type__isnull=True, order__order_type='FIRM')
+        dates = OrderLine.objects.filter(
+            order__status='OPEN',
+            quantity__gt=0,
+        ).filter(
+            firm_filter
+        ).values('due_date').annotate(
+        ).distinct().order_by('-due_date')[:30]
 
-        return [d['order_date__date'] for d in dates]
+        return [d['due_date'] for d in dates]
 
     def _extract_main_model_name(self, model_name: str) -> str:
         """
