@@ -383,7 +383,12 @@ class CSVImportService:
                         elif hasattr(daily, 'raw_tiera') and daily.raw_tiera:
                             customer_order_no = daily.raw_tiera.order_document_no
                         elif hasattr(daily, 'raw_kubota') and daily.raw_kubota:
-                            customer_order_no = daily.raw_kubota.order_no
+                            # For Kubota NO=47 format, use kubota_order_no from raw_payload
+                            # For Kubota NO=45 format (legacy), use order_no
+                            if daily.raw_kubota.raw_payload and daily.raw_kubota.raw_payload.get('kubota_order_no'):
+                                customer_order_no = daily.raw_kubota.raw_payload['kubota_order_no']
+                            else:
+                                customer_order_no = daily.raw_kubota.order_no
 
                         OrderLine.objects.create(
                             order=order,
