@@ -44,6 +44,13 @@ class Product(models.Model):
         verbose_name='仮想セット品番',
         help_text='連産品を表す仮想的なセット品番（この品番自体は在庫を持たない）'
     )
+
+    # 出荷指示書用フィールド
+    model_name = models.CharField(max_length=50, null=True, blank=True, verbose_name='機種名')
+    product_group = models.ForeignKey('ProductGroup', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='製品グループ')
+    used_container = models.ForeignKey('ContainerCapacity', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='使用容器')
+    capacity = models.IntegerField(null=True, blank=True, verbose_name='容器入り数')
+
     is_active = models.BooleanField(default=True, verbose_name='有効')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
@@ -489,3 +496,48 @@ class ProcessCycleTime(models.Model):
 
     def __str__(self):
         return f"{self.product.product_code} @ {self.process.process_code} ({self.cycle_time_min}分)"
+
+
+class ProductGroup(models.Model):
+    """製品グループマスタ"""
+    id = models.BigAutoField(primary_key=True)
+    group_code = models.CharField(max_length=50, unique=True, verbose_name='グループコード')
+    group_name = models.CharField(max_length=100, verbose_name='グループ名')
+    description = models.TextField(null=True, blank=True, verbose_name='説明')
+    is_active = models.BooleanField(default=True, verbose_name='有効')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'm_product_group'
+        verbose_name = '製品グループ'
+        verbose_name_plural = '製品グループ'
+
+    def __str__(self):
+        return f"{self.group_code} - {self.group_name}"
+
+
+class ContainerCapacity(models.Model):
+    """容器仕様マスタ"""
+    id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=50, verbose_name='容器名')
+    container_code = models.CharField(max_length=20, null=True, blank=True, verbose_name='容器コード')
+    width = models.IntegerField(null=True, blank=True, verbose_name='幅')
+    depth = models.IntegerField(null=True, blank=True, verbose_name='奥行')
+    height = models.IntegerField(null=True, blank=True, verbose_name='高さ')
+    max_weight = models.IntegerField(null=True, blank=True, default=0, verbose_name='最大重量')
+    can_mix = models.BooleanField(null=True, blank=True, default=True, verbose_name='混載可能')
+    stackable = models.BooleanField(null=True, blank=True, default=True, verbose_name='積み重ね可能')
+    max_stack = models.IntegerField(null=True, blank=True, default=1, verbose_name='最大積み重ね段数')
+    capacity = models.IntegerField(null=True, blank=True, verbose_name='入り数', help_text='容器に入る製品の個数')
+
+    class Meta:
+        db_table = 'm_container_capacity'
+        verbose_name = '容器仕様'
+        verbose_name_plural = '容器仕様'
+        ordering = ['name']
+
+    def __str__(self):
+        if self.capacity:
+            return f"{self.name} (入り数: {self.capacity})"
+        return f"{self.name}"

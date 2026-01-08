@@ -442,3 +442,29 @@ class LineDemand(models.Model):
 
     def __str__(self):
         return f"{self.line.line_code if self.line_id else ''} {self.product_code} {self.plan_date}"
+
+
+class DeliveryProgress(models.Model):
+    """出荷進捗（出荷指示書用）"""
+    id = models.BigAutoField(primary_key=True)
+    order = models.ForeignKey(Order, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='受注')
+    product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='製品')
+    order_date = models.DateTimeField(verbose_name='出荷日')
+    order_quantity = models.IntegerField(verbose_name='受注数量')
+    shipped_quantity = models.IntegerField(default=0, verbose_name='出荷済数量')
+    remark = models.CharField(max_length=200, null=True, blank=True, verbose_name='備考')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 't_delivery_progress'
+        verbose_name = '出荷進捗'
+        verbose_name_plural = '出荷進捗'
+        indexes = [
+            models.Index(fields=['order_date']),
+            models.Index(fields=['product']),
+        ]
+
+    def __str__(self):
+        product_code = self.product.product_code if self.product else '?'
+        return f"{product_code} {self.order_date.date()} {self.order_quantity}個"

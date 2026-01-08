@@ -17,6 +17,11 @@
         <div class="icon-box">📊</div>
         <div class="label">出荷進度照会</div>
       </RouterLink>
+
+      <RouterLink to="/shipping/order-document" class="master-tile">
+        <div class="icon-box">📄</div>
+        <div class="label">出荷指示書</div>
+      </RouterLink>
     </div>
 
     <p class="helper-text">

@@ -16,6 +16,11 @@ from .views import (
 from .views_services import CRPViewSet, BOMServiceViewSet
 from .views_line_realtime import LineRealtimeRecordViewSet, LineStatusViewSet
 from .views_process_realtime import ProcessRealtimeRecordViewSet
+from .views_shipping_order import (
+    get_available_dates,
+    get_shipping_order_data,
+    generate_shipping_order_pdf_api,
+)
 
 router = DefaultRouter()
 router.register(r'orders', OrderViewSet, basename='order')
@@ -45,4 +50,8 @@ router.register(r'process-realtime-records', ProcessRealtimeRecordViewSet, basen
 
 urlpatterns = [
     path('', include(router.urls)),
+    # 出荷指示書API
+    path('shipping/available-dates/', get_available_dates, name='shipping-available-dates'),
+    path('shipping/order-data/<str:target_date_str>/', get_shipping_order_data, name='shipping-order-data'),
+    path('shipping/generate-pdf/', generate_shipping_order_pdf_api, name='shipping-generate-pdf'),
 ]

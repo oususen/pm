@@ -23,6 +23,12 @@ const shipping = [
     component: () => import("@/views/shipping/ShippingProgress.vue"),
     meta: { pageTitle: "出荷進度照会" },
   },
+  {
+    path: "/shipping/order-document",
+    name: "ShippingOrderDocument",
+    component: () => import("@/views/shipping/ShippingOrderDocument.vue"),
+    meta: { pageTitle: "出荷指示書" },
+  },
 ];
 
 export default shipping;
