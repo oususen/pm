@@ -413,22 +413,25 @@ def _format_unit_label_single_line(prod: Dict[str, Any]) -> str:
     return model_name or product_name or product_code
 
 
-def _format_unit_label(prod: Dict[str, Any]) -> List[str]:
+def _format_unit_label(prod: Dict[str, Any], include_ship_to: bool = False) -> List[str]:
     """
     単体ボックス内に表示するラベルを3行形式で生成する（2便目・3便目用）。
 
     Args:
-        prod: 製品情報（model_name、product_name、product_code を含む）
+        prod: 製品情報（model_name、product_name、product_code、ship_to_code を含む）
+        include_ship_to: 納入先コードを含めるかどうか
 
     Returns:
         ラベル行のリスト：
             - 1行目: 機種名または製品名
             - 2行目: 製品コード
+            - （オプション）納入先コード（"納入先: XXXXXX"）
         （台数は別途 draw_product_box で追加される）
     """
     model_name = str(prod.get("model_name", "") or "")
     product_name = str(prod.get("product_name", "") or "")
     product_code = str(prod.get("product_code", "") or "")
+    ship_to_code = str(prod.get("ship_to_code", "") or "")
 
     lines: List[str] = []
     # 1行目：機種名または製品名
@@ -440,6 +443,10 @@ def _format_unit_label(prod: Dict[str, Any]) -> List[str]:
     # 2行目：製品コード
     if product_code:
         lines.append(product_code)
+
+    # 3行目（オプション）：納入先コード
+    if include_ship_to and ship_to_code:
+        lines.append(f"納入先:{ship_to_code}")
 
     return lines
 
@@ -589,7 +596,7 @@ def prepare_box_items(trip_no: str, products: List[Dict[str, Any]], service=None
                 remaining_main -= main_in_container
 
                 # 表示テキストを作成（通常の表示、「MAIN」接頭辞なし）
-                text_lines = _format_unit_label(main_prod)
+                text_lines = _format_unit_label(main_prod, include_ship_to=True)
                 text_lines.append(f"{main_in_container}個")
 
                 # 最後の容器の場合、SUB情報を追加
@@ -696,7 +703,7 @@ def prepare_box_items(trip_no: str, products: List[Dict[str, Any]], service=None
                                 container_qty = capacity
 
                             # text_linesに個数を追加
-                            text_lines = _format_unit_label(sub_prod)
+                            text_lines = _format_unit_label(sub_prod, include_ship_to=True)
                             text_lines.append(f"{container_qty}個")
 
                             containers.append(

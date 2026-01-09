@@ -4,7 +4,7 @@
 t_order_line と products から出荷指示書用のデータを取得・振り分け
 """
 
-from datetime import date
+from datetime import date, timedelta
 from typing import List, Dict, Any, Optional
 import pandas as pd
 import re
@@ -12,11 +12,19 @@ import math
 from fractions import Fraction
 from django.db.models import Q, Sum
 from orders.models import OrderLine
-from masters.models import Product, ProductGroup, ContainerCapacity
+from masters.models import Product, ProductGroup, ContainerCapacity, Customer
+from orders.utils import WorkingDayCalculator
 
 
 class ShippingOrderService:
     """出荷指示書データを取得・振り分けるサービス（Django版）"""
+
+    # 納入先コード別リードタイム（営業日）
+    SHIP_TO_LEAD_TIME_DAYS = {
+        '000010': 2,  # 2営業日前出荷
+        '000030': 2,  # 2営業日前出荷
+        '000050': 0,  # 当日出荷
+    }
 
     def _sanitize_records(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -32,8 +40,10 @@ class ShippingOrderService:
         """
         指定日の出荷指示書データを取得し、4便に振り分ける（Tiera製品のみ）
 
+        納入先コード別のリードタイムを考慮して、target_dateに出荷すべき受注を抽出する。
+
         Args:
-            target_date: 対象日付
+            target_date: 出荷日（この日に出荷する受注を取得）
             customer: 顧客名（デフォルト: 'tiera'）
 
         Returns:
@@ -45,15 +55,48 @@ class ShippingOrderService:
                 'trip4': [...]   # 13:00便
             }
         """
+        # 得意先のカレンダーを取得（営業日計算用）
+        try:
+            customer_obj = Customer.objects.get(customer_code='TIERA')
+            calendar = customer_obj.calendar
+        except Customer.DoesNotExist:
+            calendar = None
+
+        calculator = WorkingDayCalculator(calendar)
+
+        # 納入先コード別に、target_dateに出荷すべき納期を計算
+        # 例: target_date=1/13, 納入先000010(2営業日前出荷) → 納期=1/15
+        target_due_dates = []
+        for ship_to_code, lead_days in self.SHIP_TO_LEAD_TIME_DAYS.items():
+            if lead_days > 0:
+                # 営業日加算で納期を計算
+                due_date = calculator.add_working_days(target_date, lead_days)
+            else:
+                due_date = target_date
+            target_due_dates.append((ship_to_code, due_date))
+
+        # 納入先コード未設定（または000050等の当日出荷）も含める
+        target_due_dates.append(('', target_date))  # 納入先コード未設定
+        target_due_dates.append((None, target_date))  # NULL
+
+        # フィルタ条件を構築：(ship_to_code=XXX AND due_date=YYY) OR (ship_to_code=ZZZ AND due_date=WWW) ...
+        q_filter = Q()
+        for ship_to_code, due_date in target_due_dates:
+            if ship_to_code == '' or ship_to_code is None:
+                q_filter |= Q(ship_to_code__isnull=True, due_date=target_date) | Q(ship_to_code='', due_date=target_date)
+            else:
+                q_filter |= Q(ship_to_code=ship_to_code, due_date=due_date)
+
         # Tiera製品のみを対象とする
         # 出荷指示書の対象製品（容器4-5T、特定機種名、製品群SEATBASE/TANK/SUB_BLADE）
         firm_filter = Q(order_type='FIRM') | Q(order_type__isnull=True, order__order_type='FIRM')
         order_lines = OrderLine.objects.filter(
             order__status='OPEN',
-            due_date=target_date,
             quantity__gt=0,
         ).filter(
             firm_filter
+        ).filter(
+            q_filter  # 納入先コード別リードタイムを考慮したフィルタ
         ).exclude(
             product_code='YD40003261'  # YD40003261は別途注意事項として表示
         ).select_related(
@@ -105,7 +148,9 @@ class ShippingOrderService:
                 'container_name': product.used_container.name if product and product.used_container else '',
                 'product_group_id': product.product_group.id if product and product.product_group else None,
                 'group_code': product.product_group.group_code if product and product.product_group else '',
-                'group_name': product.product_group.group_name if product and product.product_group else ''
+                'group_name': product.product_group.group_name if product and product.product_group else '',
+                'ship_to_code': line.ship_to_code or '',  # 納入先コード
+                'customer_order_no': line.customer_order_no or ''  # 顧客発注番号
             })
 
         df = pd.DataFrame(df_data)

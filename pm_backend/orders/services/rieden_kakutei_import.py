@@ -1,4 +1,5 @@
 import csv
+import unicodedata
 from datetime import datetime
 from decimal import Decimal
 from django.db import transaction
@@ -27,6 +28,16 @@ class RiedenKakuteiImportService:
     COL_PRODUCT_CODE = 5  # 製品コード
     COL_DELIVERY_DATE = 9  # 納期
     COL_QUANTITY = 10  # 数量
+
+    # 納入先コード関連
+    SHIP_TO_KEYWORDS = ('納入', '納入先', 'delivery')
+    SHIP_TO_CODE_KEYWORDS = ('コード', 'ｺｰﾄﾞ', 'code', 'cd')
+    SHIP_TO_LEAD_TIME_DAYS = {
+        '000010': 2,  # 納入先コード 000010 → 2営業日前出荷
+        '000030': 2,  # 納入先コード 000030 → 2営業日前出荷
+        '000050': 0,  # 納入先コード 000050 → 当日出荷
+    }
+
     HEADER_ALIASES = {
         'order_no': ['発注番号', '発注No', '注文番号', '注文No', '受注番号'],
         'order_date': ['発注日', '発注年月日', '注文日', '受注日'],
@@ -34,6 +45,7 @@ class RiedenKakuteiImportService:
         'product_code': ['品目コード', '製品コード', '製品ｺｰﾄﾞ', '品番', '品目コード', '品目ｺｰﾄﾞ', '図番', '商品コード', '部品番号'],
         'delivery_date': ['納期', '納入日', '納品日', '納入指示日', '納期日', '納入予定日'],
         'quantity': ['数量', '注文数量', '発注数量', '発注数', '指示数', '納入指示数', '納品数量'],
+        'ship_to_code': ['納入先コード', '納入先ｺｰﾄﾞ', '納入コード', '納入ｺｰﾄﾞ', '配送先コード', 'delivery code', 'ship to code'],
     }
 
     def __init__(self):
@@ -133,6 +145,58 @@ class RiedenKakuteiImportService:
         except Exception:
             pass
         return text
+
+    def _normalize_ship_to_code(self, value):
+        """納入先コードの正規化
+
+        処理内容：
+        1. Unicode正規化（NFKC）- 全角→半角変換
+        2. ハイフン・スペース除去
+        3. 数字のみの場合、6桁ゼロパディング
+
+        Args:
+            value: 納入先コード文字列
+
+        Returns:
+            正規化された納入先コード
+        """
+        if not value or str(value).strip() == '' or str(value) == 'nan':
+            return ''
+
+        normalized = unicodedata.normalize('NFKC', str(value).strip())
+        normalized = normalized.replace('-', '').replace(' ', '').replace('　', '')
+
+        if normalized.isdigit():
+            normalized = normalized.zfill(6)
+
+        return normalized
+
+    def _find_ship_to_code_column(self, columns):
+        """納入先コード列を検出
+
+        Args:
+            columns: CSV列名リスト
+
+        Returns:
+            納入先コード列名（見つからない場合はNone）
+        """
+        for col in columns:
+            normalized = unicodedata.normalize('NFKC', str(col)).lower()
+
+            # キーワードマッチング
+            has_ship_to = any(keyword in normalized for keyword in self.SHIP_TO_KEYWORDS)
+            has_code = any(keyword in normalized for keyword in self.SHIP_TO_CODE_KEYWORDS)
+
+            if has_ship_to and has_code:
+                return col
+
+            # 英語パターン
+            if 'delivery' in normalized and 'code' in normalized:
+                return col
+            if 'ship' in normalized and 'to' in normalized and 'code' in normalized:
+                return col
+
+        return None
 
     def _infer_columns(self, sample_rows):
         for row in sample_rows:
@@ -255,6 +319,13 @@ class RiedenKakuteiImportService:
             product_code_col = col_map.get('product_code', self.COL_PRODUCT_CODE)
             delivery_date_col = col_map.get('delivery_date', self.COL_DELIVERY_DATE)
             quantity_col = col_map.get('quantity', self.COL_QUANTITY)
+            ship_to_code_col = col_map.get('ship_to_code')
+
+            # 納入先コード列を自動検出
+            if not ship_to_code_col and header_detected:
+                ship_to_code_col = self._find_ship_to_code_column(rows[0])
+                if ship_to_code_col:
+                    self.warnings.append(f"Auto-detected ship_to_code column: {ship_to_code_col}")
 
             used_inferred = False
             if inferred_cols:
@@ -305,6 +376,22 @@ class RiedenKakuteiImportService:
                     delivery_date_str = row[delivery_date_col].strip() if len(row) > delivery_date_col else ''
                     quantity_str = row[quantity_col].strip() if len(row) > quantity_col else ''
 
+                    # 納入先コードを抽出
+                    ship_to_code = ''
+                    if ship_to_code_col:
+                        # ヘッダーから列位置を取得
+                        if isinstance(ship_to_code_col, str):
+                            # 列名の場合、インデックスを検索
+                            try:
+                                col_idx = rows[0].index(ship_to_code_col) if header_detected else None
+                                if col_idx is not None and len(row) > col_idx:
+                                    ship_to_code = self._normalize_ship_to_code(row[col_idx])
+                            except (ValueError, IndexError):
+                                pass
+                        elif isinstance(ship_to_code_col, int) and len(row) > ship_to_code_col:
+                            # 列インデックスの場合
+                            ship_to_code = self._normalize_ship_to_code(row[ship_to_code_col])
+
                     if not product_code:
                         continue
 
@@ -336,7 +423,11 @@ class RiedenKakuteiImportService:
                         product_code=product_code,
                         due_date=due_date,
                         quantity=quantity,
-                        raw_payload={'row': row, 'encoding': encoding},
+                        raw_payload={
+                            'row': row,
+                            'encoding': encoding,
+                            'ship_to_code': ship_to_code
+                        },
                         parse_status='PENDING'
                     )
                     raw_records.append(raw_record)
@@ -432,6 +523,9 @@ class RiedenKakuteiImportService:
                     if created:
                         self.warnings.append(f'Auto-registered new product: {raw.product_code}')
 
+                    # 納入先コードを取得
+                    ship_to_code = raw.raw_payload.get('ship_to_code', '') if raw.raw_payload else ''
+
                     # Create daily record
                     daily = StgOrderDaily(
                         raw_rieden=raw,
@@ -441,6 +535,7 @@ class RiedenKakuteiImportService:
                         product_code=raw.product_code,
                         due_date=raw.due_date,
                         quantity=raw.quantity,
+                        ship_to_code=ship_to_code,
                         source_system=raw.source_system,
                         source_file=raw.source_file
                     )
