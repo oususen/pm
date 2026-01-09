@@ -217,17 +217,18 @@ class CSVImportService:
             Q(raw_rieden__parse_status='PARSED')
         )
 
-        # Filter by raw ID range if specified (takes priority over source_file)
-        if raw_id_range and raw_id_range[0] is not None and raw_id_range[1] is not None:
-            # Check which raw field is populated and filter accordingly
-            # Use isnull=False to ensure we only match records with the specific raw table populated
-            query = query.filter(
+        # Filter by raw ID range and source file
+        # IMPORTANT: Must use BOTH raw_id_range AND source_file together to avoid cross-customer data mixing
+        # Different raw tables (raw_tiera, raw_rieden, raw_kubota) can have overlapping ID ranges
+        if raw_id_range and raw_id_range[0] is not None and raw_id_range[1] is not None and source_file:
+            # Filter by raw ID range AND source file to ensure only records from this import are processed
+            query = query.filter(source_file=source_file).filter(
                 Q(raw__isnull=False, raw__id__gte=raw_id_range[0], raw__id__lte=raw_id_range[1]) |
                 Q(raw_kubota__isnull=False, raw_kubota__id__gte=raw_id_range[0], raw_kubota__id__lte=raw_id_range[1]) |
                 Q(raw_tiera__isnull=False, raw_tiera__id__gte=raw_id_range[0], raw_tiera__id__lte=raw_id_range[1]) |
                 Q(raw_rieden__isnull=False, raw_rieden__id__gte=raw_id_range[0], raw_rieden__id__lte=raw_id_range[1])
             )
-        # Otherwise filter by source file if specified
+        # Fallback: filter by source file only if raw_id_range is not available
         elif source_file:
             query = query.filter(source_file=source_file)
 

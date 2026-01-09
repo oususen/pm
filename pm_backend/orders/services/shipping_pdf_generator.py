@@ -521,7 +521,17 @@ def prepare_box_items(trip_no: str, products: List[Dict[str, Any]], service=None
             try:
                 for sub_prod in sub_products:
                     model_name = str(sub_prod.get("model_name", "") or "").strip()
-                    if model_name:
+
+                    # model_nameがない場合、container_nameをMAIN機種名として使用
+                    if not model_name:
+                        container_name = str(sub_prod.get("container_name", "") or "").strip()
+                        if container_name:
+                            # 容器名をそのままMAIN機種名として使用（390, 17U, 19-6など）
+                            main_model_key = container_name.replace(" ", "").replace("　", "").upper()
+                            if main_model_key not in sub_by_main_model:
+                                sub_by_main_model[main_model_key] = []
+                            sub_by_main_model[main_model_key].append(sub_prod)
+                    elif model_name:
                         main_model = service._extract_main_model_name(model_name)
                         if main_model:
                             # 空白を完全に除去して正規化
@@ -588,6 +598,11 @@ def prepare_box_items(trip_no: str, products: List[Dict[str, Any]], service=None
                     for sub_prod in sub_prods_for_this_main:
                         sub_qty = int(_normalize_quantity_value(sub_prod.get("order_quantity")) or 0)
                         sub_model = str(sub_prod.get("model_name", "") or "").strip()
+
+                        # model_nameがない場合、製品コードまたは製品名を使用
+                        if not sub_model:
+                            sub_model = str(sub_prod.get("product_code", "") or str(sub_prod.get("product_name", "")) or "").strip()
+
                         if sub_qty > 0:
                             text_lines.append(f"{sub_model} {sub_qty}個")
                             print(f"DEBUG:   Added SUB line: '{sub_model} {sub_qty}個'")
@@ -630,9 +645,14 @@ def prepare_box_items(trip_no: str, products: List[Dict[str, Any]], service=None
                         order_qty = int(_normalize_quantity_value(sub_prod.get("order_quantity")) or 0)
                         if order_qty > 0:
                             model_name = str(sub_prod.get("model_name", "") or "").strip()
+
+                            # model_nameがない場合、製品コードまたは製品名を使用
+                            if not model_name:
+                                model_name = str(sub_prod.get("product_code", "") or str(sub_prod.get("product_name", "")) or "").strip()
+
                             product_code = str(sub_prod.get("product_code", "") or "")
                             text_lines.append(model_name)
-                            if product_code:
+                            if product_code and product_code != model_name:
                                 text_lines.append(product_code)
                             text_lines.append(f"{order_qty}個")
 
@@ -647,10 +667,12 @@ def prepare_box_items(trip_no: str, products: List[Dict[str, Any]], service=None
                     print(f"DEBUG: Creating separate containers for main_model '{main_model}' (has_L={has_L}, has_R={has_R})")
                     for sub_prod in sub_prods:
                         order_qty = int(_normalize_quantity_value(sub_prod.get("order_quantity")) or 0)
-                        capacity = 1  # デフォルト
 
-                        # MAIN容器情報を取得
-                        if service:
+                        # SUB製品の容器情報を直接取得（capacityフィールドから）
+                        capacity = int(_normalize_quantity_value(sub_prod.get("capacity")) or 1)
+
+                        # capacityがない場合、MAIN容器情報を取得
+                        if capacity <= 0 and service:
                             try:
                                 product_id = sub_prod.get("product_id")
                                 if product_id:
@@ -662,6 +684,8 @@ def prepare_box_items(trip_no: str, products: List[Dict[str, Any]], service=None
 
                         if capacity <= 0:
                             capacity = 1
+
+                        print(f"DEBUG:   SUB product {sub_prod.get('product_code')}: qty={order_qty}, capacity={capacity}")
 
                         num_containers = (order_qty + capacity - 1) // capacity
 

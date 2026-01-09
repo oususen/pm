@@ -136,20 +136,22 @@ class ShippingOrderService:
 
     def _filter_trip2(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """
-        2便目: 機種名が特定の7種、または製品群がSIGA/KANTATSU/SUB_BLADE
+        2便目: 機種名または容器名が特定の7種、または製品群がSIGA/KANTATSU/SUB_BLADE
         ['391', '17U', '20U', '26U', '19-6', '390', 'KOTEIKYAKU']
         SUB_BLADE製品群: 専用容器なし、MAIN機種名の容器を使用
         """
         target_models = ['391', '17U', '20U', '26U', '19-6', '390', 'KOTEIKYAKU']
         special_groups = ['SIGA', 'KANTATSU', 'SUB_BLADE']
 
-        # 機種名を正規化（大文字・小文字、空白を統一）
+        # 機種名と容器名を正規化（大文字・小文字、空白を統一）
         df['model_name_normalized'] = df['model_name'].str.strip().str.upper()
+        df['container_name_normalized'] = df['container_name'].str.strip().str.upper()
         df['group_code_normalized'] = df['group_code'].str.strip().str.upper()
 
-        # 完全一致または部分一致で検索
+        # 完全一致または部分一致で検索（機種名または容器名）
         filtered = df[
             df['model_name_normalized'].isin([m.upper() for m in target_models]) |
+            df['container_name_normalized'].isin([m.upper() for m in target_models]) |
             df['group_code_normalized'].isin(special_groups)
         ]
 

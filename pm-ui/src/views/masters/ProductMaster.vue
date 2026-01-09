@@ -35,6 +35,15 @@
             <option value="false">いいえ</option>
           </select>
         </div>
+        <div class="filter-field" v-if="showCustomerFilter">
+          <label>客先</label>
+          <select v-model="filters.customer_code">
+            <option value="">すべて</option>
+            <option v-for="customer in customers" :key="customer.id" :value="customer.customer_code">
+              {{ customer.customer_code }} - {{ customer.customer_name }}
+            </option>
+          </select>
+        </div>
         <div class="filter-field">
           <label>ライン最終品</label>
           <select v-model="filters.is_line_final_product">
@@ -276,7 +285,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import api from '@/api/client'
 
 // カテゴリマッピング (DB英語 ⇔ UI日本語)
@@ -302,6 +311,7 @@ const lines = ref([])
 const processes = ref([])
 const productGroups = ref([])
 const containers = ref([])
+const customers = ref([])
 const showDialog = ref(false)
 const isEdit = ref(false)
 const currentPage = ref(1)
@@ -313,6 +323,7 @@ const filters = ref({
   is_final_product: '',
   is_line_final_product: '',
   has_bom: '',
+  customer_code: '',
   is_active: '',
   created_from: '',
   created_to: ''
@@ -363,6 +374,8 @@ const pageRangeLabel = computed(() => {
   return `${totalCount.value}件中 ${start}-${end}件`
 })
 
+const showCustomerFilter = computed(() => filters.value.is_final_product === 'true')
+
 const productGroupMap = computed(() => {
   const map = new Map()
   for (const group of productGroups.value) {
@@ -410,6 +423,9 @@ const buildQueryParams = () => {
   }
   if (filters.value.is_final_product !== '') {
     params.is_final_product = filters.value.is_final_product === 'true'
+  }
+  if (filters.value.is_final_product === 'true' && filters.value.customer_code) {
+    params.customer_code = filters.value.customer_code
   }
   if (filters.value.is_line_final_product !== '') {
     params.is_line_final_product = filters.value.is_line_final_product === 'true'
@@ -487,6 +503,15 @@ const fetchContainers = async () => {
   }
 }
 
+const fetchCustomers = async () => {
+  try {
+    const response = await api.customers.getCustomers()
+    customers.value = response.data.results || response.data
+  } catch (error) {
+    console.error('得意先取得エラー:', error)
+  }
+}
+
 // 新規ダイアログ表示
 const showNewDialog = () => {
   isEdit.value = false
@@ -545,6 +570,7 @@ const resetFilters = async () => {
     is_final_product: '',
     is_line_final_product: '',
     has_bom: '',
+    customer_code: '',
     is_active: '',
     created_from: '',
     created_to: ''
@@ -635,7 +661,17 @@ onMounted(() => {
   fetchProcesses()
   fetchProductGroups()
   fetchContainers()
+  fetchCustomers()
 })
+
+watch(
+  () => filters.value.is_final_product,
+  (value) => {
+    if (value !== 'true') {
+      filters.value.customer_code = ''
+    }
+  }
+)
 </script>
 
 <style scoped>

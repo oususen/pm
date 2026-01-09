@@ -9,12 +9,12 @@
       </RouterLink>
 
       <RouterLink to="/masters/product-group" class="master-tile">
-        <div class="icon-box">??</div>
+        <div class="icon-box">📋</div>
         <div class="label">製品グループ</div>
       </RouterLink>
 
       <RouterLink to="/masters/container-capacity" class="master-tile">
-        <div class="icon-box">??</div>
+        <div class="icon-box">🗃️</div>
         <div class="label">容器マスタ</div>
       </RouterLink>
 

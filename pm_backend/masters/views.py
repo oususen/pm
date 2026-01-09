@@ -27,6 +27,7 @@ class ProductFilter(django_filters.FilterSet):
     is_final_product = django_filters.BooleanFilter(field_name='is_final_product')
     is_line_final_product = django_filters.BooleanFilter(field_name='is_line_final_product')
     has_bom = django_filters.BooleanFilter(method='filter_has_bom')
+    customer_code = django_filters.CharFilter(method='filter_customer_code')
 
     class Meta:
         model = Product
@@ -36,6 +37,7 @@ class ProductFilter(django_filters.FilterSet):
             'is_final_product',
             'is_line_final_product',
             'has_bom',
+            'customer_code',
             'created_from',
             'created_to',
         ]
@@ -48,6 +50,16 @@ class ProductFilter(django_filters.FilterSet):
         if value:
             return queryset.filter(_has_bom=True)
         return queryset.filter(_has_bom=False)
+
+    def filter_customer_code(self, queryset, name, value):
+        if not value:
+            return queryset
+        from orders.models import OrderLine
+
+        order_lines = OrderLine.objects.filter(order__customer__customer_code=value)
+        product_ids = order_lines.values_list('product_id', flat=True)
+        product_codes = order_lines.values_list('product_code', flat=True)
+        return queryset.filter(Q(id__in=product_ids) | Q(product_code__in=product_codes))
 
 
 class ProductViewSet(viewsets.ModelViewSet):
