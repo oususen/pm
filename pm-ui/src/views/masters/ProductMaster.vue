@@ -28,6 +28,15 @@
           </select>
         </div>
         <div class="filter-field">
+          <label>製品群</label>
+          <select v-model="filters.product_group">
+            <option value="">すべて</option>
+            <option v-for="group in productGroups" :key="group.id" :value="group.id">
+              {{ group.group_code }} - {{ group.group_name }}
+            </option>
+          </select>
+        </div>
+        <div class="filter-field">
           <label>最終品</label>
           <select v-model="filters.is_final_product">
             <option value="">すべて</option>
@@ -320,6 +329,7 @@ const totalCount = ref(0)
 const filters = ref({
   search: '',
   category: '',
+  product_group: '',
   is_final_product: '',
   is_line_final_product: '',
   has_bom: '',
@@ -420,6 +430,9 @@ const buildQueryParams = () => {
   }
   if (filters.value.category) {
     params.category = filters.value.category
+  }
+  if (filters.value.product_group) {
+    params.product_group = filters.value.product_group
   }
   if (filters.value.is_final_product !== '') {
     params.is_final_product = filters.value.is_final_product === 'true'
@@ -567,6 +580,7 @@ const resetFilters = async () => {
   filters.value = {
     search: '',
     category: '',
+    product_group: '',
     is_final_product: '',
     is_line_final_product: '',
     has_bom: '',
@@ -591,6 +605,8 @@ const saveProduct = async () => {
       model_name: formData.value.model_name || null,
       product_group: formData.value.product_group || null,
       used_container: formData.value.used_container || null,
+      standard_lt_days: normalizeNumber(formData.value.standard_lt_days),
+      self_lt_days: normalizeNumber(formData.value.self_lt_days),
       capacity: normalizeNumber(formData.value.capacity),
     }
     if (isEdit.value) {

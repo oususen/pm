@@ -107,6 +107,7 @@ class ShippingOrderService:
         ).filter(
             Q(product__used_container__name__icontains='4-5T') |
             Q(product__model_name__iregex=r'^(391|17U|20U|26U|19-6|390|KOTEIKYAKU)$') |
+            Q(product__used_container__name__iregex=r'^(391|17U|20U|26U|19-6|390|KOTEIKYAKU)$') |
             Q(product__product_group__group_code__iregex=r'^(SEATBASE|TANK|SIGA|KANTATSU|SUB_BLADE)$')
         ).order_by('product__product_code')
 

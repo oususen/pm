@@ -34,6 +34,7 @@ class ProductFilter(django_filters.FilterSet):
         fields = [
             'category',
             'is_active',
+            'product_group',
             'is_final_product',
             'is_line_final_product',
             'has_bom',

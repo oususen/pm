@@ -429,6 +429,7 @@ def _format_unit_label(prod: Dict[str, Any], include_ship_to: bool = False) -> L
         （台数は別途 draw_product_box で追加される）
     """
     model_name = str(prod.get("model_name", "") or "")
+    container_name = str(prod.get("container_name", "") or "")
     product_name = str(prod.get("product_name", "") or "")
     product_code = str(prod.get("product_code", "") or "")
     ship_to_code = str(prod.get("ship_to_code", "") or "")
@@ -437,6 +438,8 @@ def _format_unit_label(prod: Dict[str, Any], include_ship_to: bool = False) -> L
     # 1行目：機種名または製品名
     if model_name:
         lines.append(model_name)
+    elif container_name:
+        lines.append(container_name)
     elif product_name:
         lines.append(product_name)
 
@@ -449,6 +452,16 @@ def _format_unit_label(prod: Dict[str, Any], include_ship_to: bool = False) -> L
         lines.append(f"納入先:{ship_to_code}")
 
     return lines
+
+
+def _resolve_main_model_name(prod: Dict[str, Any]) -> str:
+    """
+    MAIN製品の機種名を取得する（model_nameが無い場合はcontainer_nameを使う）。
+    """
+    model_name = str(prod.get("model_name", "") or "").strip()
+    if model_name:
+        return model_name
+    return str(prod.get("container_name", "") or "").strip()
 
 
 def chunked(items: Sequence[Any], size: int) -> List[List[Any]]:
@@ -568,7 +581,7 @@ def prepare_box_items(trip_no: str, products: List[Dict[str, Any]], service=None
                 capacity = 1
 
             # MAIN製品の機種名を取得（空白を完全に除去して正規化）
-            main_model_name = str(main_prod.get("model_name", "") or "").strip().upper()
+            main_model_name = _resolve_main_model_name(main_prod).strip().upper()
             main_model_name_key = main_model_name.replace(" ", "").replace("　", "")
 
             # デバッグ：MAIN製品情報
@@ -625,7 +638,7 @@ def prepare_box_items(trip_no: str, products: List[Dict[str, Any]], service=None
         for main_model, sub_prods in sub_by_main_model.items():
             # このMAINモデルが既に処理されているかチェック
             main_exists = any(
-                str(p.get("model_name", "") or "").strip().upper().replace(" ", "").replace("　", "") == main_model
+                _resolve_main_model_name(p).strip().upper().replace(" ", "").replace("　", "") == main_model
                 for p in main_products
             )
 
