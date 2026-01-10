@@ -38,13 +38,13 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th style="min-width: 220px;">ライン / 工程 / 品目</th>
+                <th class="sticky-col" style="min-width: 220px;">ライン / 工程 / 品目</th>
                 <th v-for="d in columns" :key="d">{{ d }}</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="r in rows" :key="r.key">
-                <td>{{ r.label }}</td>
+                <td class="sticky-col">{{ r.label }}</td>
                 <td v-for="d in columns" :key="d" :class="['num', getCellClass(r, d)]">
                   <template v-if="r.cells[d]">
                     <div v-if="showPlan(r.cells[d])">P: {{ fmt(r.cells[d].plan) }}</div>
@@ -247,6 +247,18 @@ onMounted(load);
   top: 0;
   background: #f3f4f6;
   z-index: 3;
+}
+
+.sticky-col {
+  position: sticky;
+  left: 0;
+  background: #fff;
+  z-index: 2;
+}
+
+.data-table thead .sticky-col {
+  background: #f3f4f6;
+  z-index: 4;
 }
 
 .cell-over {
