@@ -1,0 +1,275 @@
+# CSV Import Services
+
+This directory contains CSV import services for different customers and formats.
+
+## Architecture
+
+The system uses a factory pattern where the appropriate import service is selected based on the customer code.
+
+### File Structure
+
+```
+orders/domains/orders/services/
+├── __init__.py
+├── README.md (this file)
+├── csv_import.py          # Default/Generic CSV import service
+└── [customer]_import.py   # Customer-specific import services
+```
+
+## Default CSV Format (csv_import.py)
+
+The default service expects CSV files with the following headers:
+
+| Column Name            | Required | Description                    | Format            |
+|------------------------|----------|--------------------------------|-------------------|
+| product_code           | Yes      | Product/Part code              | String            |
+| product_name           | No       | Product name (full-width)      | String            |
+| product_name_halfwidth | No       | Product name (half-width)      | String            |
+| due_date               | Yes      | Delivery date                  | YYYY-MM-DD or YYYY/MM/DD |
+| quantity               | Yes      | Order quantity                 | Number            |
+| plant_code             | No       | Plant/Factory code             | String            |
+| ship_to_code           | No       | Ship-to location code          | String            |
+| record_token           | No       | Unique record identifier       | String            |
+
+**Note**: If a product_code does not exist in M_PRODUCT table, it will be automatically registered with both product_name and product_name_halfwidth from CSV (or product_code as default name if not provided).
+
+### Example CSV:
+
+```csv
+product_code,product_name,product_name_halfwidth,due_date,quantity,plant_code,ship_to_code
+PROD001,製品名１,Product Name 1,2025-01-15,100,PLANT01,SHIP01
+PROD002,製品名２,Product Name 2,2025-01-20,200,PLANT01,SHIP02
+PROD003,製品名３,Product Name 3,2025-02-10,150,PLANT02,SHIP01
+```
+
+Sample file: `d:\pm\sample_order.csv`
+
+## Creating Customer-Specific Import Services
+
+### Step 1: Create a new service file
+
+Create a new file: `orders/domains/orders/services/[customer_name]_import.py`
+
+Example: `tiera_import.py`, `honda_import.py`, etc.
+
+### Step 2: Define the import service class
+
+```python
+# orders/domains/orders/services/tiera_import.py
+import csv
+from datetime import datetime
+from decimal import Decimal
+from django.db import transaction
+from orders.domains.orders.models import StgOrderRaw
+from masters.models import Customer
+
+class TieraNaijiImportService:
+    """Tiera Naiji (Forecast) CSV import service"""
+
+    # Column index definitions (0-based)
+    IDENTIFIER_COL = 0      # データ区分 = "B17"
+    COL_PRODUCT_CODE = 6    # 図番
+    COL_DELIVERY_DATE = 8   # 納期 (YYYYMMDD)
+    COL_QUANTITY = 11       # 数量
+    COL_PRODUCT_NAME_FULL = 12  # 品名（全角）列13
+    COL_PRODUCT_NAME_HALF = 13  # 品名半角 列14
+
+    def __init__(self):
+        self.errors = []
+        self.warnings = []
+
+    def import_csv(self, file, customer_code, order_type, source_system='CSV'):
+        """Import Tiera-specific CSV format"""
+        self.errors = []
+        self.warnings = []
+
+        try:
+            # Read CSV with CP932 encoding (Shift-JIS variant)
+            file.seek(0)
+            raw_data = file.read()
+
+            # Try decoding
+            encodings = ['cp932', 'shift-jis', 'utf-8-sig', 'utf-8']
+            decoded_file = None
+            for encoding in encodings:
+                try:
+                    decoded_file = raw_data.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+
+            if decoded_file is None:
+                return {
+                    'success': False,
+                    'message': 'Failed to decode CSV file',
+                    'errors': ['Unsupported encoding']
+                }
+
+            # Parse CSV (no header, using column indexes)
+            lines = decoded_file.splitlines()
+            csv_reader = csv.reader(lines)
+
+            raw_records = []
+            row_no = 0
+
+            for row in csv_reader:
+                row_no += 1
+
+                # Skip header or empty rows
+                if row_no == 1 or len(row) < max(self.COL_PRODUCT_CODE, self.COL_DELIVERY_DATE, self.COL_QUANTITY):
+                    continue
+
+                try:
+                    # Extract data by column index
+                    product_code = row[self.COL_PRODUCT_CODE].strip()
+                    product_name_full = row[self.COL_PRODUCT_NAME_FULL].strip() if len(row) > self.COL_PRODUCT_NAME_FULL else ''
+                    product_name_half = row[self.COL_PRODUCT_NAME_HALF].strip() if len(row) > self.COL_PRODUCT_NAME_HALF else ''
+                    delivery_date_str = row[self.COL_DELIVERY_DATE].strip()
+                    quantity_str = row[self.COL_QUANTITY].strip()
+
+                    # Parse date (YYYYMMDD format)
+                    due_date = None
+                    if delivery_date_str and len(delivery_date_str) == 8:
+                        try:
+                            due_date = datetime.strptime(delivery_date_str, '%Y%m%d').date()
+                        except ValueError:
+                            self.warnings.append(f"Row {row_no}: Invalid date format: {delivery_date_str}")
+
+                    # Parse quantity
+                    quantity = None
+                    if quantity_str:
+                        try:
+                            quantity = Decimal(quantity_str)
+                        except:
+                            self.warnings.append(f"Row {row_no}: Invalid quantity: {quantity_str}")
+
+                    # Create raw record
+                    raw_record = StgOrderRaw(
+                        customer_code=customer_code,
+                        order_type=order_type,
+                        source_system=source_system,
+                        source_file=file.name,
+                        source_row_no=row_no,
+                        record_token='',
+                        due_date=due_date,
+                        product_code=product_code,
+                        product_name=product_name_full,
+                        product_name_halfwidth=product_name_half,
+                        quantity=quantity,
+                        raw_payload={'row': row},  # Store entire row for reference
+                        parse_status='PENDING'
+                    )
+                    raw_records.append(raw_record)
+
+                except Exception as e:
+                    self.errors.append(f"Row {row_no}: {str(e)}")
+
+            if not raw_records:
+                return {
+                    'success': False,
+                    'message': 'No valid records found',
+                    'errors': self.errors
+                }
+
+            # Save to database (continue with standard process...)
+            # ... (same as default service)
+
+            return {
+                'success': True,
+                'message': f'Imported {len(raw_records)} records',
+                'raw_count': len(raw_records),
+                'errors': self.errors,
+                'warnings': self.warnings
+            }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'Import failed: {str(e)}',
+                'errors': self.errors + [str(e)]
+            }
+```
+
+### Step 3: Register the service in views.py
+
+Edit `orders/views.py` and add your customer code mapping:
+
+```python
+def _get_import_service(self, customer_code):
+    """Select appropriate import service based on customer code"""
+    from orders.domains.orders.services.csv_import import CSVImportService
+
+    # Add customer-specific services
+    if customer_code == 'TIERA':
+        from orders.domains.orders.services.tiera_import import TieraImportService
+        return TieraImportService()
+    elif customer_code == 'HONDA':
+        from orders.domains.orders.services.honda_import import HondaImportService
+        return HondaImportService()
+    # Add more customers here...
+
+    # Default service
+    return CSVImportService()
+```
+
+## Testing
+
+1. Use the sample CSV file to test the default service:
+   - File: `d:\pm\sample_order.csv`
+   - Customer: Any customer code
+   - Expected: 3 records imported successfully
+
+2. For customer-specific formats:
+   - Create the appropriate customer-specific import service
+   - Register it in views.py
+   - Upload the customer's CSV file
+   - Verify the data is correctly parsed
+
+## Column Index vs Column Name
+
+- **Column Index** (recommended for fixed-format files):
+  - Use when CSV has no header or fixed column positions
+  - Example: Tiera's format with data in columns 11, 13, 15
+  - More reliable for Excel-exported CSVs
+
+- **Column Name** (recommended for flexible formats):
+  - Use when CSV has a header row with named columns
+  - Example: Default service expecting 'product_code', 'due_date', 'quantity'
+  - More flexible but requires consistent header names
+
+## Troubleshooting
+
+### Problem: All records show ERROR status
+
+**Cause**: CSV format doesn't match the expected format
+
+**Solution**:
+1. Check the CSV file format
+2. Create a customer-specific import service if needed
+3. Verify column names/indexes match the data
+
+### Problem: Encoding errors
+
+**Cause**: CSV file uses unsupported encoding
+
+**Solution**:
+Add the encoding to the `encodings` list in the import service:
+```python
+encodings = ['cp932', 'shift-jis', 'utf-8-sig', 'utf-8', 'iso-2022-jp']
+```
+
+### Problem: Date parsing errors
+
+**Cause**: Date format doesn't match expected format
+
+**Solution**:
+Add date format handling in the import service:
+```python
+# Try multiple date formats
+for fmt in ['%Y%m%d', '%Y-%m-%d', '%Y/%m/%d']:
+    try:
+        due_date = datetime.strptime(date_str, fmt).date()
+        break
+    except ValueError:
+        continue
+```

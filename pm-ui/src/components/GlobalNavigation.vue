@@ -90,7 +90,7 @@ const mainTabs = [
   { id: 'production', label: '生産', link: '/production/menu' },
   { id: 'purchase', label: '仕入', link: '/purchase/menu' },
   { id: 'shipping', label: '出荷', link: '/shipping/menu' },
-  { id: 'inventory', label: '在庫', link: '/production/inventory' },
+  { id: 'inventory', label: '在庫', link: '/inventory' },
   { id: 'quality', label: '品質', link: '/quality' },
   { id: 'masters', label: 'マスタ', link: '/masters' },
 ]
@@ -109,6 +109,8 @@ const isActiveTab = (tabId) => {
   if (tabId === 'production' && path.startsWith('/production')) return true
   if (tabId === 'purchase' && path.startsWith('/purchase')) return true
   if (tabId === 'shipping' && path.startsWith('/shipping')) return true
+  if (tabId === 'inventory' && path.startsWith('/inventory')) return true
+  if (tabId === 'quality' && path.startsWith('/quality')) return true
   if (tabId === 'masters' && path.startsWith('/masters')) return true
   return false
 }

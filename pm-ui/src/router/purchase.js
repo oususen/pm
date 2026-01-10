@@ -14,7 +14,7 @@ const purchase = [
   {
     path: "/purchase/inventory",
     name: "PurchaseInventory",
-    component: () => import("@/views/purchase/PurchaseInventory.vue"),
+    component: () => import("@/views/inventory/PurchaseInventory.vue"),
     meta: { pageTitle: "仕入れ在庫/残量" },
   },
 ];

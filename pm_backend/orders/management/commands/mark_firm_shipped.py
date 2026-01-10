@@ -4,7 +4,8 @@ from decimal import Decimal
 
 from django.core.management.base import BaseCommand
 
-from orders.models import OrderLine, ShipmentActual, ShipmentActualHistory
+from orders.domains.orders.models import OrderLine
+from orders.domains.shipping.models import ShipmentActual, ShipmentActualHistory
 
 
 class Command(BaseCommand):

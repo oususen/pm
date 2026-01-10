@@ -5,7 +5,8 @@ from django.core.management.base import BaseCommand
 from django.db.models import Q
 
 from masters.models import Product
-from orders.models import DeliveryProgress, OrderLine
+from orders.domains.orders.models import OrderLine
+from orders.domains.shipping.models import DeliveryProgress
 
 
 class Command(BaseCommand):

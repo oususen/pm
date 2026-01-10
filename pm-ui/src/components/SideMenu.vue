@@ -77,9 +77,14 @@ const sections = [
     ],
   },
   {
+    id: "inventory",
+    title: "在庫管理",
+    items: [{ label: "在庫メニュー", link: "/inventory" }],
+  },
+  {
     id: "quality",
     title: "品質管理",
-    items: [{ label: "検査実績" }],
+    items: [{ label: "品質メニュー", link: "/quality" }],
   },
   {
     id: "masters",

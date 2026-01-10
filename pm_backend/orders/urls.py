@@ -12,11 +12,11 @@ from .views import (
     StockAllocationViewSet,
     ProductionOrderViewSet,
     ProcessActualViewSet,
-)
-from .views_services import CRPViewSet, BOMServiceViewSet
-from .views_line_realtime import LineRealtimeRecordViewSet, LineStatusViewSet
-from .views_process_realtime import ProcessRealtimeRecordViewSet
-from .views_shipping_order import (
+    CRPViewSet,
+    BOMServiceViewSet,
+    LineRealtimeRecordViewSet,
+    LineStatusViewSet,
+    ProcessRealtimeRecordViewSet,
     get_available_dates,
     get_shipping_order_data,
     generate_shipping_order_pdf_api,

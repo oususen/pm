@@ -4,10 +4,10 @@ from pathlib import Path
 
 from django.core.management.base import BaseCommand
 
-from orders.models import StgOrderRawTiera
-from orders.services.csv_import import CSVImportService
-from orders.services.tiera_kakutei_import import TieraKakuteiImportService
-from orders.services.tiera_naiji_import import TieraNaijiImportService
+from orders.domains.orders.models import StgOrderRawTiera
+from orders.domains.orders.services.csv_import import CSVImportService
+from orders.domains.orders.services.tiera_kakutei_import import TieraKakuteiImportService
+from orders.domains.orders.services.tiera_naiji_import import TieraNaijiImportService
 
 
 ENCODINGS = ['cp932', 'shift-jis', 'utf-8-sig', 'utf-8', 'iso-2022-jp']

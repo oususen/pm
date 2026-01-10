@@ -23,9 +23,13 @@
             <div class="menu-icon">🚚</div>
             <div class="menu-label">出荷管理</div>
           </RouterLink>
-          <RouterLink to="/production/inventory" class="menu-card">
-            <div class="menu-icon">📦</div>
+          <RouterLink to="/inventory" class="menu-card">
+            <div class="menu-icon">??</div>
             <div class="menu-label">在庫管理</div>
+          </RouterLink>
+          <RouterLink to="/quality" class="menu-card">
+            <div class="menu-icon">??</div>
+            <div class="menu-label">品質管理</div>
           </RouterLink>
           <RouterLink to="/masters" class="menu-card">
             <div class="menu-icon">⚙️</div>

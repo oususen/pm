@@ -32,7 +32,7 @@ const production = [
   {
     path: "/production/inventory",
     name: "ProductionInventory",
-    component: () => import("@/views/production/ProductionInventory.vue"),
+    component: () => import("@/views/inventory/ProductionInventory.vue"),
     meta: { pageTitle: "在庫 / 残量一覧" },
   },
   {

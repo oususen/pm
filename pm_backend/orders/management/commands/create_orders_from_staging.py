@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from orders.services.csv_import import CSVImportService
+from orders.domains.orders.services.csv_import import CSVImportService
 
 
 class Command(BaseCommand):
