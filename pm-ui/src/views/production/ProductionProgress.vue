@@ -39,21 +39,52 @@
             <thead>
               <tr>
                 <th class="sticky-col" style="min-width: 220px;">ライン / 工程 / 品目</th>
-                <th v-for="d in columns" :key="d">{{ d }}</th>
+                <th v-for="d in columns" :key="d.date" class="date-head">
+                  <div>{{ d.label }}</div>
+                  <div class="weekday">{{ d.weekday }}</div>
+                </th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="r in rows" :key="r.key">
+              <tr v-for="r in pagedRows" :key="r.key">
                 <td class="sticky-col">{{ r.label }}</td>
-                <td v-for="d in columns" :key="d" :class="['num', getCellClass(r, d)]">
-                  <template v-if="r.cells[d]">
-                    <div v-if="showPlan(r.cells[d])">P: {{ fmt(r.cells[d].plan) }}</div>
-                    <div v-if="showActual(r.cells[d])">A: {{ fmt(r.cells[d].actual) }}</div>
+                <td v-for="d in columns" :key="d.date" :class="['num', getCellClass(r, d.date)]">
+                  <template v-if="r.cells[d.date]">
+                    <div v-if="showPlan(r.cells[d.date])">P: {{ fmt(r.cells[d.date].plan) }}</div>
+                    <div v-if="showActual(r.cells[d.date])">A: {{ fmt(r.cells[d.date].actual) }}</div>
                   </template>
                 </td>
               </tr>
             </tbody>
           </table>
+        </div>
+        <div v-if="rows.length" class="pagination-area">
+          <div class="pagination" v-if="totalPages > 1">
+            <button class="pagination-btn" :disabled="currentPage === 1" @click="changePage(1)">
+              最初
+            </button>
+            <button class="pagination-btn" :disabled="currentPage === 1" @click="changePage(currentPage - 1)">
+              前へ
+            </button>
+            <button
+              v-for="page in visiblePages"
+              :key="page"
+              class="pagination-btn"
+              :class="{ 'is-active': page === currentPage }"
+              @click="changePage(page)"
+            >
+              {{ page }}
+            </button>
+            <button class="pagination-btn" :disabled="currentPage >= totalPages" @click="changePage(currentPage + 1)">
+              次へ
+            </button>
+            <button class="pagination-btn" :disabled="currentPage >= totalPages" @click="changePage(totalPages)">
+              最後
+            </button>
+          </div>
+          <div class="pagination-info">
+            <span>{{ pageRangeLabel }}</span>
+          </div>
         </div>
         <div v-else class="no-data">データがありません</div>
       </div>
@@ -62,7 +93,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import api from "@/api/client";
 import { addDays, formatISODate, parseISODate } from "@/utils/dateUtil";
 
@@ -75,6 +106,8 @@ const loading = ref(false);
 const error = ref("");
 const backlogs = ref([]);
 const productionLines = ref([]);
+const currentPage = ref(1);
+const pageSize = 20;
 let userSetStart = false;
 const onStartChange = () => {
   userSetStart = true;
@@ -87,16 +120,20 @@ const productionLineIds = computed(() => new Set(
 const columns = computed(() => {
   const start = parseISODate(startDate.value);
   const cols = [];
+  const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
   for (let i = 0; i < horizon.value; i++) {
-    cols.push(formatISODate(addDays(start, i)));
+    const date = addDays(start, i);
+    const dateStr = formatISODate(date);
+    const dayLabel = weekdays[date.getDay()];
+    cols.push({ date: dateStr, label: `${dateStr}`, weekday: dayLabel });
   }
   return cols;
 });
 
 const rows = computed(() => {
   if (!backlogs.value.length) return [];
-  const start = columns.value[0];
-  const end = columns.value[columns.value.length - 1];
+  const start = columns.value[0]?.date;
+  const end = columns.value[columns.value.length - 1]?.date;
   const lineKeyword = lineFilter.value.trim().toLowerCase();
   const processKeyword = processFilter.value.trim().toLowerCase();
   const productKeyword = productFilter.value.trim().toLowerCase();
@@ -144,6 +181,37 @@ const rows = computed(() => {
   return Array.from(map.values());
 });
 
+const totalPages = computed(() => {
+  if (!rows.value.length) return 1;
+  return Math.ceil(rows.value.length / pageSize);
+});
+
+const visiblePages = computed(() => {
+  const total = totalPages.value;
+  const current = currentPage.value;
+  const windowSize = 2;
+  const start = Math.max(1, current - windowSize);
+  const end = Math.min(total, current + windowSize);
+  const pages = [];
+  for (let i = start; i <= end; i += 1) {
+    pages.push(i);
+  }
+  return pages;
+});
+
+const pageRangeLabel = computed(() => {
+  const total = rows.value.length;
+  if (total === 0) return "0件";
+  const start = (currentPage.value - 1) * pageSize + 1;
+  const end = Math.min(currentPage.value * pageSize, total);
+  return `${total}件中 ${start}-${end}件`;
+});
+
+const pagedRows = computed(() => {
+  const start = (currentPage.value - 1) * pageSize;
+  return rows.value.slice(start, start + pageSize);
+});
+
 const fmt = (n) => (n === null || n === undefined ? "" : n.toLocaleString());
 
 const showPlan = (cell) => {
@@ -171,12 +239,18 @@ const getCellClass = (row, date) => {
   return "cell-under";
 };
 
+const changePage = (page) => {
+  const target = Math.min(Math.max(page, 1), totalPages.value);
+  if (target === currentPage.value) return;
+  currentPage.value = target;
+};
+
 const load = async () => {
   loading.value = true;
   error.value = "";
   try {
-    const start = columns.value[0];
-    const end = columns.value[columns.value.length - 1];
+    const start = columns.value[0]?.date;
+    const end = columns.value[columns.value.length - 1]?.date;
     const [backlogsRes, productionLinesRes] = await Promise.all([
       api.lineBacklogs.getLineBacklogs({
         plan_date__gte: start,
@@ -200,6 +274,16 @@ const load = async () => {
 };
 
 onMounted(load);
+
+watch([lineFilter, processFilter, productFilter, startDate, horizon], () => {
+  currentPage.value = 1;
+});
+
+watch(rows, () => {
+  if (currentPage.value > totalPages.value) {
+    currentPage.value = totalPages.value;
+  }
+});
 </script>
 
 <style scoped>
@@ -220,7 +304,7 @@ onMounted(load);
 
 .num {
   text-align: right;
-  min-width: 120px;
+  min-width: 80px;
 }
 
 .table-wrap {
@@ -238,7 +322,7 @@ onMounted(load);
 
 .data-table th,
 .data-table td {
-  border: 1px solid #e5e7eb;
+  border: 1px solid #94a3b8;
   padding: 6px 8px;
 }
 
@@ -247,6 +331,58 @@ onMounted(load);
   top: 0;
   background: #f3f4f6;
   z-index: 3;
+}
+
+.data-table thead th:not(.sticky-col) {
+  min-width: 80px;
+}
+
+.date-head {
+  text-align: center;
+}
+
+.weekday {
+  font-size: 11px;
+  color: #475569;
+  margin-top: 2px;
+}
+
+.pagination-area {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pagination-btn {
+  padding: 4px 10px;
+  border: 1px solid #94a3b8;
+  background-color: #fff;
+  color: #334155;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.pagination-btn.is-active {
+  background-color: #334155;
+  border-color: #334155;
+  color: #fff;
+}
+
+.pagination-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pagination-info {
+  font-size: 12px;
+  color: #64748b;
 }
 
 .sticky-col {
@@ -270,7 +406,7 @@ onMounted(load);
 }
 
 .cell-under {
-  background: #fee2e2;
+  background: #fecaca;
 }
 
 input,
