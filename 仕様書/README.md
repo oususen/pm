@@ -156,7 +156,7 @@ DB_HOST=localhost
 DB_PORT=3306
 ```
 
-バックエンドが http://localhost:8001 で起動します。
+バックエンドが http://localhost:8002 で起動します。
 
 ### 3. Vue.js フロントエンドセットアップ
 
