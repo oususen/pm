@@ -2,6 +2,7 @@
 工程実時間記録用のSerializer
 """
 from decimal import Decimal
+from datetime import timedelta
 
 from rest_framework import serializers
 from django.db import transaction
@@ -191,6 +192,30 @@ def update_line_backlog_production(process, product, qty, plan_date):
         backlog.save(update_fields=['actual_qty'])
 
 
+def resolve_workday_date_for_process(process, dt):
+    """
+    勤務カレンダに基づいて計画日を決定する。
+    夜勤で日付を跨ぐ場合は前日扱いにする。
+    """
+    if not process:
+        return dt.date()
+    line = getattr(process, 'line', None)
+    if not line:
+        return dt.date()
+    try:
+        from .services.gantt_planning import LineWorkCalendar
+        calendar = LineWorkCalendar(line)
+        segments = calendar.get_segments(dt.date())
+        if not segments or dt < segments[0][0]:
+            prev_date = dt.date() - timedelta(days=1)
+            prev_segments = calendar.get_segments(prev_date)
+            if prev_segments and prev_segments[-1][1] >= dt:
+                return prev_date
+        return dt.date()
+    except Exception:
+        return dt.date()
+
+
 class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
     """工程実時間記録Serializer"""
 
@@ -306,6 +331,11 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
         except Process.DoesNotExist as exc:
             raise serializers.ValidationError({'process_id': '指定された工程が存在しません。'}) from exc
 
+        now = timezone.now()
+        if timezone.is_aware(now):
+            now = timezone.localtime(now).replace(tzinfo=None)
+        plan_date = resolve_workday_date_for_process(process, now)
+
         product = None
         product_id = validated_data.pop('product_id', None)
         product_code = (validated_data.pop('product_code', None) or '').strip() or None
@@ -336,7 +366,6 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
             # 生産実績の場合、LineBacklogに反映
             if validated_data.get('record_type') == 'PRODUCTION':
                 qty_decimal = validated_data.get('qty', Decimal('0')) or Decimal('0')
-                plan_date = timezone.now().date()
                 update_line_backlog_production(process, product, qty_decimal, plan_date)
 
             # 連産品（仮想セット品番）の場合、子製品にも実績を保存する
@@ -348,7 +377,6 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                 bom = BOM.objects.filter(parent_product=product, is_active=True).order_by('-valid_from').first()
                 if bom and bom.is_coproduct:
                     parent_qty = validated_data.get('qty', Decimal('0')) or Decimal('0')
-                    plan_date = timezone.now().date()
                     child_common = {
                         'record_type': 'PRODUCTION',
                         'equipment_state': None,
@@ -391,7 +419,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                     product_name=product_name,
                     event_type='SCRAP',
                     qty=qty_decimal,
-                    plan_date=timezone.now().date(),  # 計画日を自動設定
+                    plan_date=plan_date,  # 勤務カレンダに合わせた計画日
                     reason=scrap_event.get('reason') or '',
                     reason_detail=scrap_event.get('reason_detail') or '',
                     batch_no=validated_data.get('batch_no', ''),
