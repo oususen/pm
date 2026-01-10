@@ -44,6 +44,25 @@
             </div>
           </div>
           <div class="gantt-chart">
+            <div
+              v-if="workBands.length || workMarkers.length"
+              class="gantt-guides"
+              :style="{ width: timelineWidthPx + 'px' }"
+            >
+              <div
+                v-for="band in workBands"
+                :key="band.key"
+                class="gantt-guide-band"
+                :style="{ left: band.leftPx + 'px', width: band.widthPx + 'px' }"
+              ></div>
+              <div
+                v-for="marker in workMarkers"
+                :key="marker.key"
+                class="gantt-guide-line"
+                :class="marker.type"
+                :style="{ left: marker.leftPx + 'px' }"
+              ></div>
+            </div>
             <!-- タイムライン ヘッダー -->
             <div class="timeline-header">
               <div class="timeline-label">品番</div>
@@ -133,10 +152,14 @@ const lines = ref([])
 const processGanttData = ref([])
 const slotHours = 4
 const pixelsPerSlot = 80
+const workStartFallback = { hour: 8, minute: 0 }
+const workMinutesFallback = 480
 const timelineStart = ref(null)
 const timelineEnd = ref(null)
 const timelineSlots = ref([])
 const debugEnabled = true
+const calendarDayMap = ref({})
+const workPatternMap = ref({})
 
 const logDebug = (...args) => {
   if (debugEnabled) console.info('[ProcessGanttView]', ...args)
@@ -157,6 +180,95 @@ const displayDays = computed(() => {
 })
 
 const timelineWidthPx = computed(() => timelineSlots.value.length * pixelsPerSlot)
+const workMarkers = computed(() => {
+  if (!timelineStart.value || !timelineEnd.value) return []
+  const markers = []
+  const start = new Date(timelineStart.value)
+  const end = new Date(timelineEnd.value)
+  const cursor = new Date(start)
+  cursor.setHours(0, 0, 0, 0)
+  const msPerSlot = slotHours * 60 * 60 * 1000
+  while (cursor <= end) {
+    const dateKey = formatDateKey(cursor)
+    const workStart = getWorkStartForDate(dateKey)
+    if (!workStart) {
+      cursor.setDate(cursor.getDate() + 1)
+      continue
+    }
+    const startMarkerTime = new Date(cursor)
+    startMarkerTime.setHours(workStart.hour, workStart.minute, 0, 0)
+    const startLeftPx = ((startMarkerTime.getTime() - start.getTime()) / msPerSlot) * pixelsPerSlot
+    if (startLeftPx >= 0 && startLeftPx <= timelineWidthPx.value) {
+      markers.push({
+        key: `${dateKey}-start-${workStart.hour}-${workStart.minute}`,
+        leftPx: startLeftPx,
+        type: 'start',
+      })
+    }
+
+    const workEnd = getWorkEndForDate(dateKey, workStart)
+    if (workEnd) {
+      const endMarkerTime = new Date(cursor)
+      endMarkerTime.setDate(endMarkerTime.getDate() + workEnd.dayOffset)
+      endMarkerTime.setHours(workEnd.hour, workEnd.minute, 0, 0)
+      const endLeftPx = ((endMarkerTime.getTime() - start.getTime()) / msPerSlot) * pixelsPerSlot
+      if (endLeftPx >= 0 && endLeftPx <= timelineWidthPx.value) {
+        markers.push({
+          key: `${dateKey}-end-${workEnd.hour}-${workEnd.minute}-${workEnd.dayOffset}`,
+          leftPx: endLeftPx,
+          type: 'end',
+        })
+      }
+    }
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return markers
+})
+
+const workBands = computed(() => {
+  if (!timelineStart.value || !timelineEnd.value) return []
+  const bands = []
+  const start = new Date(timelineStart.value)
+  const end = new Date(timelineEnd.value)
+  const cursor = new Date(start)
+  cursor.setHours(0, 0, 0, 0)
+  const msPerSlot = slotHours * 60 * 60 * 1000
+  while (cursor <= end) {
+    const dateKey = formatDateKey(cursor)
+    const workStart = getWorkStartForDate(dateKey)
+    if (!workStart) {
+      cursor.setDate(cursor.getDate() + 1)
+      continue
+    }
+    const workEnd = getWorkEndForDate(dateKey, workStart)
+    if (!workEnd) {
+      cursor.setDate(cursor.getDate() + 1)
+      continue
+    }
+    const startTime = new Date(cursor)
+    startTime.setHours(workStart.hour, workStart.minute, 0, 0)
+    const endTime = new Date(cursor)
+    endTime.setDate(endTime.getDate() + workEnd.dayOffset)
+    endTime.setHours(workEnd.hour, workEnd.minute, 0, 0)
+    const startMs = startTime.getTime()
+    const endMs = endTime.getTime()
+    if (endMs > startMs) {
+      const clampedStart = Math.max(startMs, start.getTime())
+      const clampedEnd = Math.min(endMs, end.getTime())
+      if (clampedEnd > clampedStart) {
+        const leftPx = ((clampedStart - start.getTime()) / msPerSlot) * pixelsPerSlot
+        const widthPx = ((clampedEnd - clampedStart) / msPerSlot) * pixelsPerSlot
+        bands.push({
+          key: `${dateKey}-${clampedStart}`,
+          leftPx,
+          widthPx,
+        })
+      }
+    }
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return bands
+})
 
 function getDayClass(dateStr) {
   const d = new Date(dateStr)
@@ -171,6 +283,115 @@ const fetchLines = async () => {
   lines.value = res.data.results || res.data || []
 }
 
+const formatDateKey = (dateObj) => {
+  return `${dateObj.getFullYear()}-${pad2(dateObj.getMonth() + 1)}-${pad2(dateObj.getDate())}`
+}
+
+const parseTimeParts = (value) => {
+  if (!value) return null
+  const parts = String(value).split(':')
+  if (parts.length < 2) return null
+  const hour = Number(parts[0])
+  const minute = Number(parts[1])
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return null
+  return { hour, minute }
+}
+
+const getWorkStartForDate = (dateKey) => {
+  const day = calendarDayMap.value[dateKey]
+  if (day && day.is_working_day === false) return null
+  if (day && day.work_pattern) {
+    const pattern = workPatternMap.value[String(day.work_pattern)]
+    const parsed = parseTimeParts(pattern?.start_time)
+    if (parsed) return parsed
+  }
+  return workStartFallback
+}
+
+const getWorkEndForDate = (dateKey, startParts) => {
+  const day = calendarDayMap.value[dateKey]
+  if (day && day.is_working_day === false) return null
+  const start = startParts || workStartFallback
+  let endParts = null
+  let dayOffset = 0
+
+  if (day && day.work_pattern) {
+    const pattern = workPatternMap.value[String(day.work_pattern)]
+    const parsed = parseTimeParts(pattern?.end_time)
+    if (parsed) {
+      endParts = parsed
+      if (parsed.hour < start.hour || (parsed.hour === start.hour && parsed.minute <= start.minute)) {
+        dayOffset = 1
+      }
+    }
+  }
+
+  if (!endParts) {
+    const workMinutes = day && day.work_minutes != null ? Number(day.work_minutes) : workMinutesFallback
+    if (!Number.isFinite(workMinutes)) return null
+    const startMinutes = start.hour * 60 + start.minute
+    const endMinutesTotal = Math.max(0, startMinutes + workMinutes)
+    dayOffset = Math.floor(endMinutesTotal / (24 * 60))
+    const endMinutesInDay = endMinutesTotal % (24 * 60)
+    endParts = {
+      hour: Math.floor(endMinutesInDay / 60),
+      minute: endMinutesInDay % 60,
+    }
+  }
+
+  return { ...endParts, dayOffset }
+}
+
+const loadWorkPatternData = async (lineId, startDate, endDate) => {
+  calendarDayMap.value = {}
+  workPatternMap.value = {}
+  if (!lineId) return
+
+  let calendarId = null
+  const line = lines.value.find((item) => String(item.id) === String(lineId))
+  if (line && line.calendar) {
+    calendarId = line.calendar
+  } else {
+    try {
+      const lineRes = await api.lines.getLine(lineId)
+      calendarId = lineRes.data?.calendar ?? null
+    } catch (e) {
+      console.error('ライン勤務カレンダ取得エラー', e)
+      calendarId = null
+    }
+  }
+  if (!calendarId) return
+
+  try {
+    const daysRes = await api.calendars.getCalendarDays(calendarId)
+    const days = daysRes.data?.results || daysRes.data || []
+    const filtered = days.filter((day) => {
+      if (!day.target_date) return false
+      if (startDate && day.target_date < startDate) return false
+      if (endDate && day.target_date > endDate) return false
+      return true
+    })
+    const dayMap = {}
+    const patternIds = new Set()
+    filtered.forEach((day) => {
+      dayMap[day.target_date] = day
+      if (day.work_pattern) patternIds.add(String(day.work_pattern))
+    })
+    calendarDayMap.value = dayMap
+    if (patternIds.size) {
+      const patternsRes = await api.workPatterns.getWorkPatterns()
+      const patterns = patternsRes.data?.results || patternsRes.data || []
+      const patternMap = {}
+      patterns.forEach((pattern) => {
+        patternMap[String(pattern.id)] = pattern
+      })
+      workPatternMap.value = patternMap
+    }
+  } catch (e) {
+    console.error('勤務パターン取得エラー', e)
+  }
+}
+
 const loadData = async () => {
   if (!selectedLine.value) return
   processGanttData.value = []
@@ -180,6 +401,7 @@ const loadData = async () => {
     const endDate = displayDays.value[displayDays.value.length - 1].date
 
     logDebug('loadData', { line: selectedLine.value, startDate, endDate })
+    await loadWorkPatternData(selectedLine.value, startDate, endDate)
     const ganttRes = await api.lineGanttPlans.getLineGanttPlans({
       line: selectedLine.value,
       plan_date__gte: startDate,
@@ -207,6 +429,7 @@ const generateSchedule = async (clearExisting = true) => {
     const startDate = displayDays.value[0].date
     const endDate = displayDays.value[displayDays.value.length - 1].date
     logDebug('generateSchedule', { line: selectedLine.value, startDate, endDate, clearExisting })
+    await loadWorkPatternData(selectedLine.value, startDate, endDate)
     const ganttRes = await api.lineGanttPlans.generate({
       line_id: selectedLine.value,
       start_date: startDate,
@@ -794,6 +1017,30 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   position: relative;
+}
+.gantt-guides {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 120px;
+  pointer-events: none;
+  z-index: 1;
+}
+.gantt-guide-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(34, 197, 94, 0.6);
+}
+.gantt-guide-line.end {
+  background: rgba(239, 68, 68, 0.6);
+}
+.gantt-guide-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(239, 68, 68, 0.12);
 }
 .timeline-header {
   display: flex;
