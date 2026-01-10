@@ -262,7 +262,7 @@ Django Admin: http://localhost:8000/admin/
 - 客先・受注タイプ・ファイル名による自動サービス選択
 - 複数エンコーディング対応（CP932, Shift-JIS, UTF-8）
 - カラム位置指定による柔軟なフォーマット対応
-- 詳細は `pm_backend/apps/orders/core/services/README.md` 参照
+- 詳細は `仕様書/受注管理仕様書.md` を参照
 
 ### 在庫管理機能
 
