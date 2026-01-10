@@ -10,6 +10,7 @@ from django.db.models import Q, Max
 import logging
 
 from .models import LineDemand
+from ..orders.models import OrderLine
 from .models_line_backlog import LineBacklog
 from .models_production import StockAllocation, ProductionOrder, ProcessActual
 from .models_line_gantt_plan import LineGanttPlan

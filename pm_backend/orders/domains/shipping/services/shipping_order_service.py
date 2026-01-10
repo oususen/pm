@@ -11,7 +11,7 @@ import re
 import math
 from fractions import Fraction
 from django.db.models import Q, Sum
-from orders.domains.orders.models import OrderLine
+from orders.domains.orders.models import OrderLine, StgOrderRawTiera
 from masters.models import Product, ProductGroup, ContainerCapacity, Customer
 from orders.utils import WorkingDayCalculator
 
@@ -101,6 +101,7 @@ class ShippingOrderService:
             product_code='YD40003261'  # YD40003261は別途注意事項として表示
         ).select_related(
             'order',
+            'order__customer',
             'product',
             'product__product_group',
             'product__used_container'
@@ -133,10 +134,46 @@ class ShippingOrderService:
                 'attachment_note': f'YD40003261 {attachment_qty}個あり' if attachment_qty > 0 else None
             }
 
+        order_lines_list = list(order_lines)
+        c_table_map = {}
+        fallback_c_table_map = {}
+        order_document_nos = {line.customer_order_no for line in order_lines_list if line.customer_order_no}
+        product_codes = {line.product_code for line in order_lines_list if line.product_code}
+        due_dates = {line.due_date for line in order_lines_list if line.due_date}
+        customer_codes = {
+            line.order.customer.customer_code
+            for line in order_lines_list
+            if line.order and line.order.customer
+        }
+        if product_codes and due_dates:
+            raw_tiera_qs = StgOrderRawTiera.objects.filter(
+                order_type='FIRM',
+                parse_status='PARSED',
+                product_code__in=product_codes,
+                due_date__in=due_dates,
+            )
+            if customer_codes:
+                raw_tiera_qs = raw_tiera_qs.filter(customer_code__in=customer_codes)
+            raw_tiera_qs = raw_tiera_qs.only('order_document_no', 'product_code', 'due_date', 'c_table_no')
+
+            for raw in raw_tiera_qs:
+                if raw.order_document_no:
+                    key = (raw.order_document_no, raw.product_code, raw.due_date)
+                    if key not in c_table_map or (not c_table_map[key] and raw.c_table_no):
+                        c_table_map[key] = raw.c_table_no
+                else:
+                    key = (raw.product_code, raw.due_date)
+                    if key not in fallback_c_table_map or (not fallback_c_table_map[key] and raw.c_table_no):
+                        fallback_c_table_map[key] = raw.c_table_no
+
         # DataFrameに変換
         df_data = []
-        for line in order_lines:
+        for line in order_lines_list:
             product = line.product
+            c_table_key = (line.customer_order_no, line.product_code, line.due_date)
+            c_table_no = c_table_map.get(c_table_key)
+            if not c_table_no and not line.customer_order_no:
+                c_table_no = fallback_c_table_map.get((line.product_code, line.due_date))
             df_data.append({
                 'order_id': line.id,
                 'product_id': product.id if product else None,
@@ -144,6 +181,7 @@ class ShippingOrderService:
                 'product_name': product.product_name if product else '',
                 'model_name': product.model_name or '',
                 'order_quantity': line.quantity,
+                'c_table_no': c_table_no or '',
                 'capacity': product.capacity or 0,
                 'container_id': product.used_container.id if product and product.used_container else None,
                 'container_name': product.used_container.name if product and product.used_container else '',

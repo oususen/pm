@@ -16,7 +16,7 @@
               v-model="targetDate"
               type="date"
               class="form-control"
-              :max="maxDate"
+              :min="minDate"
             />
             <button @click="loadAvailableDates" class="btn btn-secondary" :disabled="loading">
               📅 利用可能な日付を表示
@@ -26,7 +26,7 @@
 
         <!-- 利用可能な日付リスト -->
         <div v-if="availableDates.length > 0" class="available-dates">
-          <h4>利用可能な日付（最近30日）</h4>
+          <h4>利用可能な日付（本日以降）</h4>
           <div class="date-chips">
             <button
               v-for="date in availableDates"
@@ -103,19 +103,19 @@
         <div class="stats-grid">
           <div class="stat-card">
             <div class="stat-label">1便目 (06:00)</div>
-            <div class="stat-value">{{ shippingData.trip1?.length || 0 }}品目</div>
+            <div class="stat-value">{{ formatTripCount(shippingData.trip1) }}</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">2便目 (06:30)</div>
-            <div class="stat-value">{{ shippingData.trip2?.length || 0 }}品目</div>
+            <div class="stat-value">{{ formatTripCount(shippingData.trip2) }}</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">3便目 (10:00)</div>
-            <div class="stat-value">{{ shippingData.trip3?.length || 0 }}品目</div>
+            <div class="stat-value">{{ formatTripCount(shippingData.trip3) }}</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">4便目 (13:00)</div>
-            <div class="stat-value">{{ shippingData.trip4?.length || 0 }}品目</div>
+            <div class="stat-value">{{ formatTripCount(shippingData.trip4) }}</div>
           </div>
         </div>
 
@@ -124,23 +124,25 @@
           <!-- 1便目 -->
           <div class="trip-section">
             <h4>1便目 (AM 06:00) - 4t／5tブレード(1)</h4>
-            <div v-if="shippingData.trip1 && shippingData.trip1.length > 0" class="table-responsive">
+            <div v-if="trip1Items.length > 0" class="table-responsive">
               <table class="table table-sm">
                 <thead>
                   <tr>
                     <th>製品コード</th>
                     <th>製品名</th>
                     <th>機種名</th>
+                    <th>Cテーブル</th>
                     <th>数量</th>
                     <th>容器入り数</th>
                     <th>グループ</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(item, index) in shippingData.trip1" :key="index">
+                  <tr v-for="(item, index) in trip1Items" :key="index">
                     <td>{{ item.product_code }}</td>
                     <td>{{ item.product_name }}</td>
                     <td>{{ item.model_name || '-' }}</td>
+                    <td>{{ item.c_table_no || '-' }}</td>
                     <td class="text-right">{{ item.order_quantity }}</td>
                     <td class="text-right">{{ item.capacity || '-' }}</td>
                     <td>{{ item.group_name || '-' }}</td>
@@ -224,23 +226,25 @@
           <!-- 4便目 -->
           <div class="trip-section">
             <h4>4便目 (PM 13:00) - 4t／5tブレード(2)</h4>
-            <div v-if="shippingData.trip4 && shippingData.trip4.length > 0" class="table-responsive">
+            <div v-if="trip4Items.length > 0" class="table-responsive">
               <table class="table table-sm">
                 <thead>
                   <tr>
                     <th>製品コード</th>
                     <th>製品名</th>
                     <th>機種名</th>
+                    <th>Cテーブル</th>
                     <th>数量</th>
                     <th>容器入り数</th>
                     <th>グループ</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(item, index) in shippingData.trip4" :key="index">
+                  <tr v-for="(item, index) in trip4Items" :key="index">
                     <td>{{ item.product_code }}</td>
                     <td>{{ item.product_name }}</td>
                     <td>{{ item.model_name || '-' }}</td>
+                    <td>{{ item.c_table_no || '-' }}</td>
                     <td class="text-right">{{ item.order_quantity }}</td>
                     <td class="text-right">{{ item.capacity || '-' }}</td>
                     <td>{{ item.group_name || '-' }}</td>
@@ -280,10 +284,37 @@ const shippingData = ref({
 const showPreview = ref(false);
 
 // 計算プロパティ
-const maxDate = computed(() => {
+const minDate = computed(() => {
   const today = new Date();
   return today.toISOString().split('T')[0];
 });
+
+const countUniqueItems = (items) => {
+  if (!Array.isArray(items)) return 0;
+  const seen = new Set();
+  items.forEach((item, index) => {
+    const key = item?.product_code || item?.order_id || item?.product_name || `idx:${index}`;
+    seen.add(key);
+  });
+  return seen.size;
+};
+
+const nonZeroItems = (items) => {
+  if (!Array.isArray(items)) return [];
+  return items.filter((item) => Number(item?.order_quantity || 0) > 0);
+};
+
+const trip1Items = computed(() => nonZeroItems(shippingData.value.trip1));
+const trip4Items = computed(() => nonZeroItems(shippingData.value.trip4));
+
+const formatTripCount = (items) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    return '0/0品目';
+  }
+  const targetCount = countUniqueItems(items);
+  const loadedCount = countUniqueItems(nonZeroItems(items));
+  return `${loadedCount}/${targetCount}品目`;
+};
 
 // メソッド
 const formatDate = (dateStr) => {
@@ -303,7 +334,9 @@ const loadAvailableDates = async () => {
 
   try {
     const response = await axios.get('/api/shipping/available-dates/');
-    availableDates.value = response.data.dates || [];
+    const rawDates = response.data.dates || [];
+    const today = minDate.value;
+    availableDates.value = rawDates.filter((date) => date >= today);
 
     if (availableDates.value.length === 0) {
       errorMessage.value = '出荷データが存在しません';
