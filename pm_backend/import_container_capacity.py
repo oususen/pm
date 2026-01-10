@@ -6,11 +6,16 @@ container_capacityデータをm_container_capacityテーブルにインポート
 
 import os
 import sys
+from pathlib import Path
 import django
 
 # Djangoの設定を読み込む
-sys.path.insert(0, os.path.dirname(__file__))
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'pm_backend.settings')
+base_dir = Path(__file__).resolve().parent
+apps_dir = base_dir / "apps"
+for path in (base_dir, apps_dir):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'project.settings')
 django.setup()
 
 from masters.models import ContainerCapacity
