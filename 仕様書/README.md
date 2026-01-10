@@ -16,31 +16,37 @@ d:\pm\
 │
 ├── pm_backend/                 # Djangoバックエンド
 │   ├── manage.py
-│   ├── pm_backend/            # プロジェクト設定
+│   ├── project/               # プロジェクト設定
 │   │   ├── settings.py        # DB設定、CORS設定
 │   │   └── urls.py            # APIルーティング
-│   ├── masters/               # マスタ管理アプリ
-│   │   ├── models.py          # Djangoモデル
-│   │   ├── serializers.py     # RESTシリアライザ
-│   │   ├── views.py           # ViewSet
-│   │   ├── admin.py           # Django Admin設定
-│   │   └── urls.py            # APIエンドポイント
-│   └── orders/                # 受注管理アプリ
-│       ├── models.py          # Order, OrderLine, StgOrderRaw, StgOrderDaily
-│       ├── serializers.py     # RESTシリアライザ
-│       ├── views.py           # ViewSet + CSV upload/create_orders
-│       ├── admin.py           # Django Admin設定
-│       ├── urls.py            # APIエンドポイント
-│       └── services/          # CSV Import Services
-│           ├── README.md      # インポートサービス仕様書
-│           ├── base_import.py # 基本クラス
-│           ├── csv_import.py  # デフォルトサービス
-│           ├── tiera_naiji_import.py    # ティエラ内示
-│           ├── tiera_kakutei_import.py  # ティエラ確定
-│           ├── kubota_sakai_naiji_import.py
-│           ├── kubota_sakai_kakutei_import.py
-│           ├── kubota_hirakata_kakutei_import.py
-│           └── rieden_kakutei_import.py
+│   └── apps/
+│       ├── masters/           # マスタ管理アプリ
+│       │   ├── models.py      # Djangoモデル
+│       │   ├── serializers.py # RESTシリアライザ
+│       │   ├── views.py       # ViewSet
+│       │   ├── admin.py       # Django Admin設定
+│       │   └── urls.py        # APIエンドポイント
+│       ├── orders/            # 受注管理アプリ
+│       │   ├── models.py      # Order, OrderLine, StgOrderRaw, StgOrderDaily
+│       │   ├── serializers.py # RESTシリアライザ
+│       │   ├── views.py       # ViewSet + CSV upload/create_orders
+│       │   ├── admin.py       # Django Admin設定
+│       │   ├── urls.py        # APIエンドポイント
+│       │   └── core/services/ # CSV Import Services
+│       │       ├── README.md  # インポートサービス仕様書
+│       │       ├── base_import.py # 基本クラス
+│       │       ├── csv_import.py  # デフォルトサービス
+│       │       ├── tiera_naiji_import.py    # ティエラ内示
+│       │       ├── tiera_kakutei_import.py  # ティエラ確定
+│       │       ├── kubota_sakai_naiji_import.py
+│       │       ├── kubota_sakai_kakutei_import.py
+│       │       ├── kubota_hirakata_kakutei_import.py
+│       │       └── rieden_kakutei_import.py
+│       ├── production/        # 生産管理アプリ
+│       │   └── inventory/     # 在庫計算ロジック
+│       ├── shipping/          # 出荷管理アプリ
+│       ├── purchase/          # 仕入れ管理アプリ
+│       └── quality/           # 品質管理アプリ
 │
 ├── pm-ui/                      # Vue.js フロントエンド (Vite)
 │   ├── src/
@@ -150,7 +156,7 @@ DB_HOST=localhost
 DB_PORT=3306
 ```
 
-バックエンドが http://localhost:8000 で起動します。
+バックエンドが http://localhost:8001 で起動します。
 
 ### 3. Vue.js フロントエンドセットアップ
 
@@ -249,18 +255,18 @@ Django Admin: http://localhost:8000/admin/
 - **数量集約機能**
   - 同一製品・納期の複数注文明細（10行以上）を集約
   - 個別注文情報を保持しながらスケジューリング用に合計数量を提供
-  - 使用例は `pm_backend/orders/services/scheduling_example.py` 参照
+  - 使用例は `pm_backend/apps/production/services/scheduling_example.py` 参照
 
 ### CSV Import Service アーキテクチャ
 
 - 客先・受注タイプ・ファイル名による自動サービス選択
 - 複数エンコーディング対応（CP932, Shift-JIS, UTF-8）
 - カラム位置指定による柔軟なフォーマット対応
-- 詳細は `pm_backend/orders/services/README.md` 参照
+- 詳細は `pm_backend/apps/orders/core/services/README.md` 参照
 
 ### 在庫管理機能
 
-- **在庫計算エンジン** (`pm_backend/orders/inventory_calculator.py`)
+- **在庫計算エンジン** (`pm_backend/apps/production/inventory/inventory_calculator.py`)
   - 仕損数の自動集計（自工程＋後工程展開分）
   - 実績出庫数の自動計算（後工程実績からBOM展開）
   - 実在庫の日次計算
