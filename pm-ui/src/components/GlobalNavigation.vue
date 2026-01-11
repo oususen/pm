@@ -55,7 +55,12 @@
           <span>⚙️</span>
           <span class="btn-label">設定</span>
         </button>
-      </div>
+      
+
+        <button class="nav-action-btn help-btn" title="ヘルプ" @click="openHelp">
+          <span>?</span>
+          <span class="btn-label">ヘルプ</span>
+        </button></div>
     </div>
   </nav>
 </template>
@@ -93,12 +98,13 @@ const mainTabs = [
   { id: 'inventory', label: '在庫', link: '/inventory' },
   { id: 'quality', label: '品質', link: '/quality' },
   { id: 'masters', label: 'マスタ', link: '/masters' },
+  { id: 'manual', label: 'マニュアル', link: '/manual' },
 ]
 
-// スマホでは生産タブのみ表示
+// スマホでは生産・マニュアルのみ表示
 const displayTabs = computed(() => {
   if (props.isMobile) {
-    return mainTabs.filter(tab => tab.id === 'production')
+    return mainTabs.filter(tab => ['production', 'manual'].includes(tab.id))
   }
   return mainTabs
 })
@@ -112,7 +118,29 @@ const isActiveTab = (tabId) => {
   if (tabId === 'inventory' && path.startsWith('/inventory')) return true
   if (tabId === 'quality' && path.startsWith('/quality')) return true
   if (tabId === 'masters' && path.startsWith('/masters')) return true
+  if (tabId === 'manual' && path.startsWith('/manual')) return true
   return false
+}
+
+const manualPath = computed(() => {
+  const path = route.meta?.manualPath
+  if (typeof path !== 'string') return ''
+  return path.trim()
+})
+
+const helpUrl = computed(() => {
+  const base = '/manual'
+  if (!manualPath.value) return base
+  const encoded = manualPath.value
+    .split('/')
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join('/')
+  return `${base}?path=${encoded}`
+})
+
+const openHelp = () => {
+  window.open(helpUrl.value, '_blank', 'noopener')
 }
 </script>
 
@@ -344,6 +372,10 @@ const isActiveTab = (tabId) => {
 
 .btn-label {
   font-size: 12px;
+}
+
+.help-btn .btn-label {
+  display: none;
 }
 
 /* Mobile styles */

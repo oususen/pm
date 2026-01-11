@@ -7,6 +7,7 @@ import purchase from "./purchase";
 import shipping from "./shipping";
 import inventory from "./inventory";
 import quality from "./quality";
+import manual from "./manual";
 
 const root = [
   {
@@ -18,7 +19,7 @@ const root = [
 
 const router = createRouter({
   history: createWebHistory(),
-  routes: [...root, ...masters, ...orders, ...production, ...purchase, ...shipping, ...inventory, ...quality],
+  routes: [...root, ...masters, ...orders, ...production, ...purchase, ...shipping, ...inventory, ...quality, ...manual],
 });
 
 const DEFAULT_TITLE = "pm-ui";
