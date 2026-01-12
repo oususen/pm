@@ -53,7 +53,7 @@ class LineBacklog(models.Model):
 
     class Meta:
         db_table = 'line_backlog'
-        unique_together = [('plan_date', 'process', 'product', 'line')]
+        unique_together = [('plan_date', 'process', 'product', 'line', 'sequence_no')]
         indexes = [
             models.Index(fields=['plan_date', 'line']),
         ]

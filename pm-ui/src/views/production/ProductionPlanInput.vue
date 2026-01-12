@@ -105,28 +105,58 @@
                 <span class="readonly-value">{{ displayValue(getStockDisplay(row, colIdx)) }}</span>
               </td>
               <td class="num plan" :class="c.dayClass">
-                <input
-                  type="text"
-                  inputmode="decimal"
-                  :value="row.daily?.[c.key]?.plan === 0 || row.daily?.[c.key]?.plan === '' || row.daily?.[c.key]?.plan == null ? '' : row.daily?.[c.key]?.plan"
-                  @input="onPlanInput(row, c.key, $event.target.value)"
-                  :data-row="idx"
-                  :data-col="colIdx"
-                  data-field="plan"
-                  @keydown="onCellKeydown($event, idx, colIdx, 'plan')"
-                />
+                <div class="lot-stack">
+                  <input
+                    type="text"
+                    inputmode="decimal"
+                    :value="row.daily?.[c.key]?.plan === 0 || row.daily?.[c.key]?.plan === '' || row.daily?.[c.key]?.plan == null ? '' : row.daily?.[c.key]?.plan"
+                    @input="onPlanInput(row, c.key, $event.target.value)"
+                    :data-row="idx"
+                    :data-col="colIdx"
+                    data-field="plan"
+                    @keydown="onCellKeydown($event, idx, colIdx, 'plan')"
+                  />
+                  <div
+                    v-for="(lot, lotIdx) in row.daily?.[c.key]?.extraLots"
+                    :key="lot.id || lotIdx"
+                    class="lot-item"
+                  >
+                    <input
+                      type="text"
+                      inputmode="decimal"
+                      :value="lot.plan_qty === 0 || lot.plan_qty === '' || lot.plan_qty == null ? '' : lot.plan_qty"
+                      @input="onExtraPlanInput(row, c.key, lot, $event.target.value)"
+                    />
+                  </div>
+                  <button class="mini-btn lot-add" type="button" @click="addExtraLot(row, c.key)">+</button>
+                </div>
               </td>
               <td class="num sequence" :class="c.dayClass">
-                <input
-                  type="text"
-                  inputmode="numeric"
-                  :value="row.daily?.[c.key]?.sequence_no === 0 || row.daily?.[c.key]?.sequence_no === '' || row.daily?.[c.key]?.sequence_no == null ? '' : row.daily?.[c.key]?.sequence_no"
-                  @input="onSequenceInput(row, c.key, $event.target.value)"
-                  :data-row="idx"
-                  :data-col="colIdx"
-                  data-field="sequence"
-                  @keydown="onCellKeydown($event, idx, colIdx, 'sequence')"
-                />
+                <div class="lot-stack">
+                  <input
+                    type="text"
+                    inputmode="numeric"
+                    :value="row.daily?.[c.key]?.sequence_no === 0 || row.daily?.[c.key]?.sequence_no === '' || row.daily?.[c.key]?.sequence_no == null ? '' : row.daily?.[c.key]?.sequence_no"
+                    @input="onSequenceInput(row, c.key, $event.target.value)"
+                    :data-row="idx"
+                    :data-col="colIdx"
+                    data-field="sequence"
+                    @keydown="onCellKeydown($event, idx, colIdx, 'sequence')"
+                  />
+                  <div
+                    v-for="(lot, lotIdx) in row.daily?.[c.key]?.extraLots"
+                    :key="lot.id || lotIdx"
+                    class="lot-item"
+                  >
+                    <input
+                      type="text"
+                      inputmode="numeric"
+                      :value="lot.sequence_no === 0 || lot.sequence_no === '' || lot.sequence_no == null ? '' : lot.sequence_no"
+                      @input="onExtraSequenceInput(row, c.key, lot, $event.target.value)"
+                    />
+                    <button class="mini-btn lot-remove" type="button" @click="removeExtraLot(row, c.key, lot.id)">x</button>
+                  </div>
+                </div>
               </td>
               <td class="num stock-plan day-end" :class="c.dayClass">
                 <span class="readonly-value">{{ displayValue(getPlanStockDisplay(row, colIdx)) }}</span>
@@ -232,6 +262,7 @@ const showProcessLoad = ref(false)
 const ganttReloadKey = ref(0)
 const ganttRef = ref(null)
 let tempId = 1
+let lotTempId = 1
 const processLoadLoading = ref(false)
 const processLoadRows = ref([])
 const processLoadMessage = ref('')
@@ -274,7 +305,16 @@ const loadTableMinWidth = computed(() => {
 const initDaily = () => {
   const daily = {}
   dateColumns.value.forEach((c) => {
-    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, sequence_no: '', has_row: false }
+    daily[c.key] = {
+      demand: 0,
+      actual: 0,
+      stock: 0,
+      plan: '',
+      plan_stock: 0,
+      sequence_no: '',
+      extraLots: [],
+      has_row: false,
+    }
   })
   return daily
 }
@@ -282,7 +322,19 @@ const initDaily = () => {
 const ensureDailyCell = (row, dateKey) => {
   if (!row.daily) row.daily = initDaily()
   if (!row.daily[dateKey]) {
-    row.daily[dateKey] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, sequence_no: '', has_row: false }
+    row.daily[dateKey] = {
+      demand: 0,
+      actual: 0,
+      stock: 0,
+      plan: '',
+      plan_stock: 0,
+      sequence_no: '',
+      extraLots: [],
+      has_row: false,
+    }
+  }
+  if (!row.daily[dateKey].extraLots) {
+    row.daily[dateKey].extraLots = []
   }
   return row.daily[dateKey]
 }
@@ -329,24 +381,28 @@ const savePlan = async () => {
     }
     dateColumns.value.forEach((c) => {
       const daily = ensureDailyCell(r, c.key)
-      const planQty = daily.plan === '' || daily.plan === null || daily.plan === undefined ? null : Number(daily.plan)
-      const seqNo = daily.sequence_no === '' || daily.sequence_no === null || daily.sequence_no === undefined ? null : Number(daily.sequence_no)
-      const hasExistingRow = !!daily.has_row
-
-      // 既存行がある場合は0クリアも反映する
-      if (planQty !== null || seqNo !== null || hasExistingRow) {
-        daily.has_row = true
+      const mainPlanQty = daily.plan === '' || daily.plan === null || daily.plan === undefined ? null : Number(daily.plan)
+      const mainSeqNo = daily.sequence_no === '' || daily.sequence_no === null || daily.sequence_no === undefined ? null : Number(daily.sequence_no)
+      const lots = []
+      if (!(mainPlanQty === null && mainSeqNo === null)) {
+        lots.push({ plan_qty: mainPlanQty, sequence_no: mainSeqNo })
+      }
+      const extraLots = Array.isArray(daily.extraLots) ? daily.extraLots : []
+      extraLots.forEach((lot) => {
+        const lotPlanQty = lot.plan_qty === '' || lot.plan_qty === null || lot.plan_qty === undefined ? null : Number(lot.plan_qty)
+        const lotSeqNo = lot.sequence_no === '' || lot.sequence_no === null || lot.sequence_no === undefined ? null : Number(lot.sequence_no)
+        if (lotPlanQty === null && lotSeqNo === null) return
+        lots.push({ plan_qty: lotPlanQty, sequence_no: lotSeqNo })
+      })
+      lots.forEach((lot) => {
         items.push({
           product_id: r.product_id,
           process_id: r.process_id,
           plan_date: c.key,
-          plan_qty: planQty === null ? 0 : planQty,
-          actual_qty: Number(daily.actual || 0),
-          stock_qty: Number(daily.stock || 0),
-          planned_stock_qty: Number(daily.plan_stock || 0),
-          sequence_no: seqNo,  // 日付ごとの順序番号
+          plan_qty: lot.plan_qty === null ? 0 : lot.plan_qty,
+          sequence_no: lot.sequence_no,
         })
-      }
+      })
     })
   })
   console.log('保存アイテム数:', items.length)
@@ -358,7 +414,7 @@ const savePlan = async () => {
     return
   }
   try {
-    const res = await api.lineBacklogs.save({
+    const res = await api.linePlans.save({
       line_id: selectedLine.value,
       items,
     })
@@ -370,6 +426,11 @@ const savePlan = async () => {
         end_date: endDate.value,
         read_only: false,
         include_coproduct_children: true,
+      })
+      await api.lineBacklogs.recalculateInventory({
+        line_id: selectedLine.value,
+        start_date: startDate.value,
+        end_date: endDate.value,
       })
       await api.lineGanttPlans.generate({
         line_id: selectedLine.value,
@@ -542,6 +603,36 @@ const onSequenceInput = (row, dateKey, value) => {
   daily.sequence_no = value === '' ? '' : value
 }
 
+const addExtraLot = (row, dateKey) => {
+  const daily = ensureDailyCell(row, dateKey)
+  daily.extraLots.push({
+    id: `lot-${lotTempId++}`,
+    plan_qty: '',
+    sequence_no: '',
+  })
+}
+
+const removeExtraLot = (row, dateKey, lotId) => {
+  const daily = ensureDailyCell(row, dateKey)
+  daily.extraLots = daily.extraLots.filter((lot) => lot.id !== lotId)
+}
+
+const onExtraPlanInput = (row, dateKey, lot, value) => {
+  const daily = ensureDailyCell(row, dateKey)
+  const target = daily.extraLots.find((item) => item.id === lot.id)
+  if (target) {
+    target.plan_qty = value === '' ? '' : value
+  }
+}
+
+const onExtraSequenceInput = (row, dateKey, lot, value) => {
+  const daily = ensureDailyCell(row, dateKey)
+  const target = daily.extraLots.find((item) => item.id === lot.id)
+  if (target) {
+    target.sequence_no = value === '' ? '' : value
+  }
+}
+
 const toggleProcessGantt = async () => {
   if (!selectedLine.value) {
     alert('ラインを選択してください。')
@@ -680,39 +771,159 @@ const doPickup = async () => {
       start_date: startDate.value,
       end_date: endDate.value,
     })
-    const res = await api.lineBacklogs.getLineBacklogs({
-      line: selectedLine.value,
-      plan_date__gte: startDate.value,
-      plan_date__lte: endDate.value,
-    })
-    const data = res.data?.results || res.data || []
-    // 生産計画画面ではライン最終品のみを表示
-    const lineFinalData = data.filter(d => d.is_line_final_product === true)
+    const [backlogRes, planRes] = await Promise.all([
+      api.lineBacklogs.getLineBacklogs({
+        line: selectedLine.value,
+        plan_date__gte: startDate.value,
+        plan_date__lte: endDate.value,
+      }),
+      api.linePlans.getLinePlans({
+        line: selectedLine.value,
+        plan_date__gte: startDate.value,
+        plan_date__lte: endDate.value,
+      }),
+    ])
+    const backlogData = backlogRes.data?.results || backlogRes.data || []
+    const planData = planRes.data?.results || planRes.data || []
+
+    const lineFinalBacklogs = backlogData.filter(d => d.is_line_final_product === true)
+    const lineFinalPlans = planData.filter(d => d.is_line_final_product !== false)
+
     const grouped = new Map()
-    lineFinalData.forEach((d) => {
+    const demandMap = new Map()
+    const actualMap = new Map()
+    const stockSourceMap = new Map()
+    const prodKeyByDateKey = new Map()
+    const productInfoByProdKey = new Map()
+    const planLotsByDate = new Map()
+
+    const normalizeSeq = (seq) => {
+      if (seq === null || seq === undefined || seq === '' || seq === 0) return null
+      const num = Number(seq)
+      return Number.isFinite(num) ? num : null
+    }
+    const ensureRow = (prodKey) => {
+      if (!grouped.has(prodKey)) {
+        const info = productInfoByProdKey.get(prodKey) || {}
+        grouped.set(prodKey, {
+          id: `pl-${prodKey}`,
+          product_id: info.product_id || '',
+          product_code: info.product_code || '',
+          product_name: info.product_name || '',
+          process_id: info.process_id || '',
+          daily: initDaily(),
+        })
+      }
+      return grouped.get(prodKey)
+    }
+
+    lineFinalPlans.forEach((d) => {
       if (!d.product) return
-      const key = d.product
-      if (!grouped.has(key)) {
-        grouped.set(key, {
-          id: `bk-${key}`,
+      const prodKey = `${d.product}`
+      const dateKey = `${prodKey}__${d.plan_date}`
+      const seqNo = normalizeSeq(d.sequence_no) ?? 1
+      productInfoByProdKey.set(prodKey, {
+        product_id: d.product,
+        product_code: d.product_code || '',
+        product_name: d.product_name || '',
+        process_id: d.process,
+      })
+      if (!planLotsByDate.has(dateKey)) {
+        planLotsByDate.set(dateKey, [])
+      }
+      planLotsByDate.get(dateKey).push({
+        plan_qty: d.plan_qty,
+        sequence_no: seqNo,
+      })
+    })
+
+    lineFinalBacklogs.forEach((d) => {
+      if (!d.product) return
+      const prodKey = `${d.product}`
+      const dateKey = `${prodKey}__${d.plan_date}`
+      const seqNo = normalizeSeq(d.sequence_no) ?? 0
+      prodKeyByDateKey.set(dateKey, prodKey)
+      if (!productInfoByProdKey.has(prodKey)) {
+        productInfoByProdKey.set(prodKey, {
           product_id: d.product,
           product_code: d.product_code || '',
           product_name: d.product_name || '',
           process_id: d.process,
-          daily: initDaily(),
         })
       }
-      const row = grouped.get(key)
-      const dateKey = d.plan_date
-      const daily = ensureDailyCell(row, dateKey)
-      daily.demand = Number(d.order_qty || 0)  // 需要=order_qty（取り込み時に計算された受注数/発注数）
-      daily.plan = d.plan_qty === null || d.plan_qty === undefined ? '' : d.plan_qty === 0 ? '' : d.plan_qty
-      daily.actual = Number(d.actual_qty || 0)
-      daily.stock = Number(d.stock_qty || 0)
-      daily.plan_stock = Number(d.planned_stock_qty || 0)
-      daily.sequence_no = d.sequence_no === null || d.sequence_no === undefined ? '' : d.sequence_no
+      const planQtyVal = Number(d.plan_qty || 0)
+      const planIdVal = d.plan_id || ''
+      const isDemandRow = seqNo === 0 && planQtyVal <= 0 && planIdVal === ''
+      if (isDemandRow) {
+        const current = Number(d.order_qty || 0)
+        const prev = demandMap.get(dateKey)
+        demandMap.set(dateKey, prev == null ? current : Math.max(prev, current))
+      }
+      const actualVal = Number(d.actual_qty || 0)
+      const prevActual = actualMap.get(dateKey)
+      actualMap.set(dateKey, prevActual == null ? actualVal : Math.max(prevActual, actualVal))
+      const stockEntry = stockSourceMap.get(dateKey)
+      const priority = planQtyVal > 0 ? 0 : 1
+      if (
+        !stockEntry ||
+        priority < stockEntry.priority ||
+        (priority === stockEntry.priority && seqNo < stockEntry.seq)
+      ) {
+        stockSourceMap.set(dateKey, {
+          priority,
+          seq: seqNo,
+          stock: Number(d.stock_qty || 0),
+          plan_stock: Number(d.planned_stock_qty || 0),
+        })
+      }
+    })
+
+    planLotsByDate.forEach((lots, dateKey) => {
+      const parts = dateKey.split('__')
+      const date = parts.pop()
+      const prodKey = parts.join('__')
+      if (!prodKey || !date) return
+      const sorted = [...lots].sort((a, b) => (a.sequence_no || 0) - (b.sequence_no || 0))
+      const row = ensureRow(prodKey)
+      const daily = ensureDailyCell(row, date)
+      const main = sorted[0]
+      if (main) {
+        const planQty = Number(main.plan_qty || 0)
+        daily.plan = Number.isFinite(planQty) && planQty > 0 ? main.plan_qty : ''
+        daily.sequence_no = main.sequence_no
+      }
+      daily.extraLots = sorted.slice(1).map((lot) => ({
+        id: `lot-${lotTempId++}`,
+        plan_qty: lot.plan_qty,
+        sequence_no: lot.sequence_no,
+      }))
       daily.has_row = true
     })
+
+    demandMap.forEach((qty, dateKey) => {
+      const parts = dateKey.split('__')
+      const date = parts.pop()
+      const prodKey = parts.join('__')
+      if (!prodKey || !date) return
+      const row = ensureRow(prodKey)
+      const daily = ensureDailyCell(row, date)
+      daily.demand = Number(qty || 0)
+      daily.actual = Number(actualMap.get(dateKey) || 0)
+    })
+
+    stockSourceMap.forEach((entry, dateKey) => {
+      const parts = dateKey.split('__')
+      const date = parts.pop()
+      const prodKey = parts.join('__')
+      if (!prodKey || !date) return
+      const row = ensureRow(prodKey)
+      const daily = ensureDailyCell(row, date)
+      daily.stock = Number(entry.stock || 0)
+      daily.plan_stock = Number(entry.plan_stock || 0)
+      daily.actual = Number(actualMap.get(dateKey) || 0)
+      daily.has_row = true
+    })
+
     rows.value = Array.from(grouped.values())
 
     if (!rows.value.length) addRow()
@@ -794,6 +1005,22 @@ const doPickup = async () => {
   font-size: 13px;
   font-weight: 500;
   color: #000;
+}
+.lot-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lot-item {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.lot-add,
+.lot-remove {
+  padding: 2px 6px;
+  font-size: 11px;
+  line-height: 1;
 }
 .plan-grid th {
   font-weight: 700;

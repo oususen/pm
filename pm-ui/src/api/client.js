@@ -14,6 +14,7 @@ import { createRoutingsAPI } from './resources/routings'
 import { createOrdersAPI } from './resources/orders'
 import { createStagingAPI } from './resources/staging'
 import { createLineDemandsAPI } from './resources/lineDemands'
+import { createLinePlansAPI } from './resources/linePlans'
 import { createLineBacklogsAPI } from './resources/lineBacklogs'
 import { createLineGanttPlansAPI } from './resources/lineGanttPlans'
 import { createLineRealtimeAPI } from './resources/lineRealtime'
@@ -88,6 +89,7 @@ export default {
   staging: createStagingAPI(client),
   processes: createProcessesAPI(client),
   lineDemands: createLineDemandsAPI(client),
+  linePlans: createLinePlansAPI(client),
   lineBacklogs: createLineBacklogsAPI(client),
   shipmentActuals: createShipmentActualsAPI(client),
   lineGanttPlans: createLineGanttPlansAPI(client),

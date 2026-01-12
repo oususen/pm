@@ -6,6 +6,7 @@ from rest_framework import serializers
 
 from .models import LineDemand
 from .models_line_backlog import LineBacklog
+from .models_line_plan import LinePlan
 from .models_line_gantt_plan import LineGanttPlan
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_production import ProcessActual, ProductionOrder, StockAllocation
@@ -109,6 +110,28 @@ class LineBacklogSerializer(serializers.ModelSerializer):
 
     def get_work_minutes(self, obj):
         return getattr(obj, 'work_minutes', None)
+
+
+class LinePlanSerializer(serializers.ModelSerializer):
+    product_code = serializers.CharField(source='product.product_code', read_only=True)
+    product_name = serializers.CharField(source='product.product_name', read_only=True)
+    process_code = serializers.CharField(source='process.process_code', read_only=True)
+    process_name = serializers.CharField(source='process.process_name', read_only=True)
+    line_code = serializers.CharField(source='line.line_code', read_only=True)
+    line_name = serializers.CharField(source='line.line_name', read_only=True)
+    is_final_product = serializers.BooleanField(source='product.is_final_product', read_only=True)
+    is_line_final_product = serializers.BooleanField(source='product.is_line_final_product', read_only=True)
+
+    class Meta:
+        model = LinePlan
+        fields = [
+            'id', 'plan_date', 'process', 'process_code', 'process_name',
+            'product', 'product_code', 'product_name', 'is_final_product', 'is_line_final_product',
+            'line', 'line_code', 'line_name',
+            'plan_qty', 'sequence_no', 'plan_id',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
 
 class LineGanttPlanSerializer(serializers.ModelSerializer):

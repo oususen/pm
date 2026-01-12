@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from production.views import (
     LineBacklogViewSet,
     LineDemandViewSet,
+    LinePlanViewSet,
     LineGanttPlanViewSet,
     ProcessActualViewSet,
     ProductionOrderViewSet,
@@ -15,6 +16,7 @@ from production.views_services import BOMServiceViewSet, CRPViewSet
 
 router = DefaultRouter()
 router.register(r'line-demands', LineDemandViewSet, basename='linedemand')
+router.register(r'line-plans', LinePlanViewSet, basename='lineplan')
 router.register(r'line-backlogs', LineBacklogViewSet, basename='linebacklog')
 router.register(r'line-gantt-plans', LineGanttPlanViewSet, basename='lineganttplan')
 
