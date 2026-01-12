@@ -22,6 +22,11 @@
         <div class="icon-box">📄</div>
         <div class="label">出荷指示書</div>
       </RouterLink>
+
+      <RouterLink to="/shipping/hirakata-pickup" class="master-tile">
+        <div class="icon-box">📦</div>
+        <div class="label">枚方集荷依頼書</div>
+      </RouterLink>
     </div>
 
     <p class="helper-text">

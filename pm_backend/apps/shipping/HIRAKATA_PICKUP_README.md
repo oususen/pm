@@ -1,0 +1,350 @@
+# 枚方集荷依頼書API
+
+枚方製造所向けの集荷依頼書PDF生成および関連データ取得のためのAPIエンドポイント群です。
+
+## 概要
+
+このAPIは、指定期間の枚方製品出荷予定をもとに、集荷依頼書PDFの生成や製品明細Excelの生成、日別製品リストの取得を提供します。
+
+## エンドポイント一覧
+
+### 1. 集荷依頼書PDF生成
+
+**エンドポイント:** `POST /api/shipping/hirakata-pickup/generate-pdf/`
+
+**説明:** 指定期間の枚方集荷依頼書PDFを生成してダウンロードします。
+
+**リクエストボディ:**
+```json
+{
+  "start_date": "2024-01-01",
+  "end_date": "2024-01-31"
+}
+```
+
+**レスポンス:**
+- 成功時: PDF ファイル（`Content-Type: application/pdf`）
+- エラー時: JSON形式のエラーメッセージ
+
+**ファイル名形式:**
+```
+枚方集荷依頼書_YYYYMMDD_YYYYMMDD.pdf
+```
+
+**使用例（cURL）:**
+```bash
+curl -X POST http://localhost:8000/api/shipping/hirakata-pickup/generate-pdf/ \
+  -H "Content-Type: application/json" \
+  -d '{"start_date": "2024-01-01", "end_date": "2024-01-31"}' \
+  --output hirakata_pickup.pdf
+```
+
+---
+
+### 2. 集荷製品詳細Excel生成
+
+**エンドポイント:** `POST /api/shipping/hirakata-pickup/generate-excel/`
+
+**説明:** 指定期間の枚方集荷製品詳細をExcel形式で生成してダウンロードします。
+
+**リクエストボディ:**
+```json
+{
+  "start_date": "2024-01-01",
+  "end_date": "2024-01-31"
+}
+```
+
+**レスポンス:**
+- 成功時: Excel ファイル（`Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`）
+- エラー時: JSON形式のエラーメッセージ
+
+**Excelシート構成:**
+1. **集荷製品明細**: 日付別の製品詳細リスト
+   - 列: 納品日, 製品コード, 製品名, 数量, 必要容器数, 容器コード, 容器名
+2. **日別サマリ**: 日付ごとの集計情報
+   - 列: 納品日, 製品種類数, 合計数量, 合計容器数
+
+**ファイル名形式:**
+```
+枚方集荷製品詳細_YYYYMMDD_YYYYMMDD.xlsx
+```
+
+**使用例（cURL）:**
+```bash
+curl -X POST http://localhost:8000/api/shipping/hirakata-pickup/generate-excel/ \
+  -H "Content-Type: application/json" \
+  -d '{"start_date": "2024-01-01", "end_date": "2024-01-31"}' \
+  --output hirakata_products.xlsx
+```
+
+---
+
+### 3. 集荷日期間取得
+
+**エンドポイント:** `GET /api/shipping/hirakata-pickup/date-range/`
+
+**説明:** 指定期間の集荷日レンジ（最小集荷日と最大集荷日）を取得します。
+
+**クエリパラメータ:**
+- `start_date`: 開始日（YYYY-MM-DD形式）
+- `end_date`: 終了日（YYYY-MM-DD形式）
+
+**レスポンス（JSON）:**
+```json
+{
+  "pickup_start_date": "2024-01-01",
+  "pickup_end_date": "2024-01-31",
+  "delivery_start_date": "2024-01-01",
+  "delivery_end_date": "2024-01-31"
+}
+```
+
+**使用例（cURL）:**
+```bash
+curl "http://localhost:8000/api/shipping/hirakata-pickup/date-range/?start_date=2024-01-01&end_date=2024-01-31"
+```
+
+**使用例（JavaScript/Fetch）:**
+```javascript
+const startDate = '2024-01-01';
+const endDate = '2024-01-31';
+
+fetch(`/api/shipping/hirakata-pickup/date-range/?start_date=${startDate}&end_date=${endDate}`)
+  .then(response => response.json())
+  .then(data => {
+    console.log('集荷期間:', data.pickup_start_date, '~', data.pickup_end_date);
+  });
+```
+
+---
+
+### 4. 日別製品リスト取得
+
+**エンドポイント:** `GET /api/shipping/hirakata-pickup/daily-products/`
+
+**説明:** 指定期間の日別製品リストを取得します。
+
+**クエリパラメータ:**
+- `start_date`: 開始日（YYYY-MM-DD形式）
+- `end_date`: 終了日（YYYY-MM-DD形式）
+
+**レスポンス（JSON）:**
+```json
+{
+  "2024-01-15": [
+    {
+      "product_code": "PROD001",
+      "product_name": "製品名サンプル",
+      "quantity": 100,
+      "container_code": "AMI",
+      "container_name": "アミ容器",
+      "containers_needed": 5
+    },
+    {
+      "product_code": "PROD002",
+      "product_name": "製品名サンプル2",
+      "quantity": 200,
+      "container_code": "GRAY_S",
+      "container_name": "グレー小容器",
+      "containers_needed": 10
+    }
+  ],
+  "2024-01-16": [
+    ...
+  ]
+}
+```
+
+**使用例（cURL）:**
+```bash
+curl "http://localhost:8000/api/shipping/hirakata-pickup/daily-products/?start_date=2024-01-01&end_date=2024-01-31"
+```
+
+**使用例（JavaScript/Fetch）:**
+```javascript
+const startDate = '2024-01-01';
+const endDate = '2024-01-31';
+
+fetch(`/api/shipping/hirakata-pickup/daily-products/?start_date=${startDate}&end_date=${endDate}`)
+  .then(response => response.json())
+  .then(data => {
+    Object.entries(data).forEach(([date, products]) => {
+      console.log(`${date}: ${products.length}製品`);
+      products.forEach(p => {
+        console.log(`  - ${p.product_name} (${p.quantity}個, 容器${p.containers_needed})`);
+      });
+    });
+  });
+```
+
+---
+
+## エラーレスポンス
+
+全エンドポイント共通のエラーレスポンス形式：
+
+```json
+{
+  "error": "エラーメッセージ"
+}
+```
+
+**HTTPステータスコード:**
+- `400 Bad Request`: リクエストパラメータが不正
+- `404 Not Found`: 対象データが見つからない
+- `500 Internal Server Error`: サーバー内部エラー
+
+---
+
+## データ取得ロジック
+
+### 対象製品の抽出条件
+
+以下の条件を満たす製品が集荷対象となります：
+
+1. **製品グループによる絞り込み:**
+   - 製品グループ名に「枚方」が含まれる
+   - または、製品グループコードに「HIRAKATA」が含まれる
+
+2. **出荷数量の優先順位:**
+   - `planned_quantity` > `manual_planning_quantity` > `order_quantity` の順で採用
+   - 0より大きい値のみが対象
+
+3. **納品日範囲:**
+   - 指定された `start_date` から `end_date` の間
+
+### 集荷日の算出
+
+各納品日に対して、以下のロジックで集荷日を算出します：
+
+1. 製品のリードタイム（`lead_time_days`）を取得（デフォルト: 1日）
+2. 納品日から稼働日ベースでリードタイム日数分さかのぼる
+3. 稼働日は `company_calendar` テーブルの `is_working_day=1` の日付を使用
+
+### 容器数の算出
+
+必要容器数は以下の式で算出されます：
+
+```
+必要容器数 = CEIL(出荷数量 / 容器あたり収容数)
+```
+
+---
+
+## 実装ファイル
+
+- **サービス層:** [apps/shipping/services/hirakata_pickup_pdf_service.py](apps/shipping/services/hirakata_pickup_pdf_service.py)
+- **ビュー層:** [apps/shipping/views_hirakata_pickup.py](apps/shipping/views_hirakata_pickup.py)
+- **URL設定:** [apps/shipping/urls.py](apps/shipping/urls.py)
+
+---
+
+## 依存ライブラリ
+
+- `reportlab`: PDF生成
+- `pandas`: Excel生成
+- `openpyxl`: Excel書き込み
+- `django`: Webフレームワーク
+- `djangorestframework`: REST API
+
+---
+
+## テスト方法
+
+### 1. PDF生成のテスト
+
+```bash
+# PDFを生成してダウンロード
+curl -X POST http://localhost:8000/api/shipping/hirakata-pickup/generate-pdf/ \
+  -H "Content-Type: application/json" \
+  -d '{"start_date": "2024-01-01", "end_date": "2024-01-31"}' \
+  --output test_pickup.pdf
+
+# PDFが正しく生成されたか確認
+file test_pickup.pdf
+```
+
+### 2. Excel生成のテスト
+
+```bash
+# Excelを生成してダウンロード
+curl -X POST http://localhost:8000/api/shipping/hirakata-pickup/generate-excel/ \
+  -H "Content-Type: application/json" \
+  -d '{"start_date": "2024-01-01", "end_date": "2024-01-31"}' \
+  --output test_products.xlsx
+
+# Excelが正しく生成されたか確認
+file test_products.xlsx
+```
+
+### 3. 日別製品リストのテスト
+
+```bash
+# 日別製品リストを取得
+curl "http://localhost:8000/api/shipping/hirakata-pickup/daily-products/?start_date=2024-01-01&end_date=2024-01-31" | jq
+```
+
+### 4. 集荷日期間のテスト
+
+```bash
+# 集荷日期間を取得
+curl "http://localhost:8000/api/shipping/hirakata-pickup/date-range/?start_date=2024-01-01&end_date=2024-01-31" | jq
+```
+
+---
+
+## 注意事項
+
+1. **フォント要件:**
+   - PDF生成には日本語フォントが必要です
+   - Windows環境では MS Gothic が自動的に使用されます
+   - Linux環境では IPAex Gothic のインストールが必要です
+
+2. **データベーステーブル:**
+   - `delivery_progress`: 出荷進捗データ
+   - `products`: 製品マスタ
+   - `product_groups`: 製品グループマスタ
+   - `container_capacity`: 容器マスタ
+   - `company_calendar`: 会社カレンダー
+
+3. **パフォーマンス:**
+   - 大量データの場合、PDF/Excel生成に時間がかかる可能性があります
+   - 必要に応じてタイムアウト設定を調整してください
+
+---
+
+## トラブルシューティング
+
+### PDF生成時のフォントエラー
+
+**エラー:** `FileNotFoundError: 日本語フォントが見つかりません`
+
+**解決方法:**
+1. Windows の場合: MS Gothic が C:\Windows\Fonts にインストールされているか確認
+2. Linux の場合: IPAex Gothic をインストール
+   ```bash
+   sudo apt-get install fonts-ipaexfont-gothic
+   ```
+
+### データが取得できない
+
+**原因:** 製品グループの設定が正しくない
+
+**解決方法:**
+1. 製品グループ名に「枚方」が含まれているか確認
+2. または、製品グループコードに「HIRAKATA」が含まれているか確認
+
+### 集荷日が正しく計算されない
+
+**原因:** `company_calendar` テーブルに稼働日データが登録されていない
+
+**解決方法:**
+1. `company_calendar` テーブルに稼働日（`is_working_day=1`）を登録
+2. 対象期間 + リードタイム分の稼働日データが必要
+
+---
+
+## ライセンス
+
+このコードは社内システムの一部です。

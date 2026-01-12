@@ -29,6 +29,12 @@ const shipping = [
     component: () => import("@/views/shipping/ShippingOrderDocument.vue"),
     meta: { pageTitle: "出荷指示書", manualPath: "出荷/出荷指示書.md" },
   },
+  {
+    path: "/shipping/hirakata-pickup",
+    name: "HirakataPickup",
+    component: () => import("@/views/shipping/HirakataPickup.vue"),
+    meta: { pageTitle: "枚方集荷依頼書", manualPath: "出荷/枚方集荷依頼書.md" },
+  },
 ];
 
 export default shipping;
