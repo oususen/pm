@@ -9,10 +9,6 @@ from masters.models import Customer, Product
 class KubotaHirakataKakuteiImportService:
     """Kubota Hirakata Kakutei (Confirmed) CSV Import Service
 
-    Support two formats:
-    - NO=45 (Primary format)
-    - NO=47 (Legacy support)
-
     Format NO=45 (RCV_NVAN.csv):
     - Column 0: NO (データNo) = "45"
     - Column 3: Order No (注番)
@@ -22,30 +18,16 @@ class KubotaHirakataKakuteiImportService:
     - Column 21: issue_date (発行日) - YYMMDD format (Order識別用)
     - Column 19: Quantity (納入指示数)
 
-    Format NO=47 (Legacy):
-    - Column 0: NO (データNo) = "47"
-    - Column 3: Order No (注番)
-    - Column 5: Kubota Order No (品番/クボタ発注番号)
-    - Column 10: Product Name (品名)
-    - Column 24: Quantity (数量)
-    - Column 26: Delivery Date (納期) - YYMMDD format
-    - Column 31: Product Code (製品コード)
+    Note: NO=47 rows are ignored (legacy format no longer used)
     """
 
-    # Primary format: NO=45
+    # Format: NO=45 (primary and only supported format)
     DATA_NO = '45'
-    DATA_NO_LEGACY = '47'
+    DATA_NO_LEGACY = '47'  # Ignored
 
-    # NO=47 columns
+    # Column positions
     COL_DATA_NO = 0
     COL_ORDER_NO = 3
-    COL_KUBOTA_ORDER_NO = 5  # クボタ発注番号
-    COL_PRODUCT_NAME_47 = 10
-    COL_QUANTITY_47 = 24
-    COL_DELIVERY_DATE_47 = 26
-    COL_PRODUCT_CODE_47 = 31
-
-    # NO=45 columns
     COL_PRODUCT_CODE_45 = 5
     COL_PRODUCT_NAME_45 = 8
     COL_DELIVERY_DATE_45 = 18
@@ -106,7 +88,7 @@ class KubotaHirakataKakuteiImportService:
             return None
 
     def import_csv(self, file, customer_code, order_type, source_system='CSV'):
-        """Import Kubota Hirakata confirmed order CSV (NO=47 or NO=45)
+        """Import Kubota Hirakata confirmed order CSV (NO=45 format only)
 
         Args:
             file: Uploaded file object
@@ -116,6 +98,9 @@ class KubotaHirakataKakuteiImportService:
 
         Returns:
             dict: Import result with statistics
+
+        Note:
+            NO=47 rows are skipped (legacy format no longer used)
         """
         self.errors = []
         self.warnings = []
@@ -152,40 +137,26 @@ class KubotaHirakataKakuteiImportService:
                 # Detect format by data_no
                 data_no = row[self.COL_DATA_NO].strip() if len(row) > self.COL_DATA_NO else ''
 
-                # Support both NO=45 (primary) and NO=47 (legacy)
+                # Only support NO=45 format (primary)
+                # NO=47 is ignored (legacy format no longer used)
                 if data_no == self.DATA_NO:
                     # NO=45 format (primary)
-                    is_format_45 = True
                     if format_detected is None:
                         format_detected = '45'
                 elif data_no == self.DATA_NO_LEGACY:
-                    # NO=47 format (legacy)
-                    is_format_45 = False
-                    if format_detected is None:
-                        format_detected = '47'
+                    # Skip NO=47 rows (legacy format - ignored)
+                    continue
                 else:
                     # Skip other row types
                     continue
 
                 try:
-                    # Extract data based on format
-                    if is_format_45:
-                        # NO=45 format (primary)
-                        product_code = row[self.COL_PRODUCT_CODE_45].strip() if len(row) > self.COL_PRODUCT_CODE_45 else ''
-                        product_name = row[self.COL_PRODUCT_NAME_45].strip() if len(row) > self.COL_PRODUCT_NAME_45 else ''
-                        delivery_date_str = row[self.COL_DELIVERY_DATE_45].strip() if len(row) > self.COL_DELIVERY_DATE_45 else ''
-                        quantity_str = row[self.COL_QUANTITY_45].strip() if len(row) > self.COL_QUANTITY_45 else ''
-                        issue_date_str = row[self.COL_ISSUE_DATE_45].strip() if len(row) > self.COL_ISSUE_DATE_45 else ''
-                        kubota_order_no = ''  # Not available in NO=45
-                    else:
-                        # NO=47 format (legacy)
-                        product_code = row[self.COL_PRODUCT_CODE_47].strip() if len(row) > self.COL_PRODUCT_CODE_47 else ''
-                        product_name = row[self.COL_PRODUCT_NAME_47].strip() if len(row) > self.COL_PRODUCT_NAME_47 else ''
-                        delivery_date_str = row[self.COL_DELIVERY_DATE_47].strip() if len(row) > self.COL_DELIVERY_DATE_47 else ''
-                        quantity_str = row[self.COL_QUANTITY_47].strip() if len(row) > self.COL_QUANTITY_47 else ''
-                        issue_date_str = ''  # Not available in NO=47
-                        kubota_order_no = row[self.COL_KUBOTA_ORDER_NO].strip() if len(row) > self.COL_KUBOTA_ORDER_NO else ''
-
+                    # Extract data (NO=45 format only)
+                    product_code = row[self.COL_PRODUCT_CODE_45].strip() if len(row) > self.COL_PRODUCT_CODE_45 else ''
+                    product_name = row[self.COL_PRODUCT_NAME_45].strip() if len(row) > self.COL_PRODUCT_NAME_45 else ''
+                    delivery_date_str = row[self.COL_DELIVERY_DATE_45].strip() if len(row) > self.COL_DELIVERY_DATE_45 else ''
+                    quantity_str = row[self.COL_QUANTITY_45].strip() if len(row) > self.COL_QUANTITY_45 else ''
+                    issue_date_str = row[self.COL_ISSUE_DATE_45].strip() if len(row) > self.COL_ISSUE_DATE_45 else ''
                     order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
 
                     if not product_code:
@@ -207,10 +178,8 @@ class KubotaHirakataKakuteiImportService:
                     raw_payload = {
                         'row': row,
                         'encoding': encoding,
-                        'format': '45' if is_format_45 else '47'
+                        'format': '45'
                     }
-                    if kubota_order_no:
-                        raw_payload['kubota_order_no'] = kubota_order_no
                     if issue_date_str:
                         raw_payload['issue_date'] = issue_date_str
 
@@ -238,7 +207,7 @@ class KubotaHirakataKakuteiImportService:
             if not raw_records:
                 return {
                     'success': False,
-                    'message': f'No valid records found with NO=47 or NO=45',
+                    'message': f'No valid records found with NO=45',
                     'errors': self.errors,
                     'warnings': self.warnings + ['Column positions may need adjustment if file format changed.']
                 }
