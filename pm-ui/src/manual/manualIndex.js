@@ -24,6 +24,7 @@ export const manualSections = [
       { title: "出荷進度照会", path: "出荷/出荷進度照会.md" },
       { title: "出荷指示", path: "出荷/出荷指示.md" },
       { title: "出荷指示書", path: "出荷/出荷指示書.md" },
+      { title: "枚方集荷依頼書", path: "出荷/枚方集荷依頼書.md" },
       { title: "出荷実績", path: "出荷/出荷実績.md" },
     ],
   },

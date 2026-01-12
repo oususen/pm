@@ -2,16 +2,6 @@
   <div class="hirakata-pickup">
     <h2 class="page-title">📦 枚方集荷依頼書</h2>
 
-    <div class="info-box">
-      <h4>📋 機能説明</h4>
-      <ul>
-        <li>指定期間の枚方製品の出荷予定をもとに集荷依頼書PDFを生成します</li>
-        <li>各日ごとの容器種類と数量が自動集計されます</li>
-        <li>集荷日は製品のリードタイムを考慮して自動計算されます</li>
-        <li>集荷依頼は<strong>集荷前日の17時まで</strong>にメールで送信してください</li>
-      </ul>
-    </div>
-
     <div class="card">
       <div class="card-header">
         <h3>期間選択</h3>
@@ -453,23 +443,6 @@ const getTotalContainers = (products) => {
   font-weight: bold;
   margin-bottom: 20px;
   color: #333;
-}
-
-.info-box {
-  background-color: #e3f2fd;
-  border-left: 4px solid #2196f3;
-  padding: 15px;
-  margin-bottom: 20px;
-  border-radius: 4px;
-}
-
-.info-box h4 {
-  margin-top: 0;
-  color: #1976d2;
-}
-
-.info-box ul {
-  margin-bottom: 0;
 }
 
 .card {
