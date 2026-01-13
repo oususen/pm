@@ -11,13 +11,13 @@ import uuid
 from datetime import date
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
-    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity
+    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Contact
 )
 from .serializers import (
     ProductSerializer, CustomerSerializer, ProcessSerializer, LineSerializer,
     SupplierSerializer, CalendarSerializer, CalendarDaySerializer, WorkPatternSerializer, BreakTimeSerializer,
     BOMSerializer, BOMItemSerializer, RoutingSerializer, RoutingStepSerializer,
-    RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer
+    RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer, ContactSerializer
 )
 
 
@@ -666,3 +666,30 @@ class RoutingStepMaterialViewSet(viewsets.ModelViewSet):
     search_fields = ['component__product_code', 'component__product_name']
     ordering_fields = ['routing_step', 'component']
     ordering = ['routing_step', 'component']
+
+
+class ContactFilter(django_filters.FilterSet):
+    search = django_filters.CharFilter(method='filter_search')
+
+    class Meta:
+        model = Contact
+        fields = ['contact_type', 'is_active']
+
+    def filter_search(self, queryset, name, value):
+        if value:
+            return queryset.filter(
+                Q(company_name__icontains=value) |
+                Q(contact_person__icontains=value) |
+                Q(department__icontains=value)
+            )
+        return queryset
+
+
+class ContactViewSet(viewsets.ModelViewSet):
+    queryset = Contact.objects.all()
+    serializer_class = ContactSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = ContactFilter
+    search_fields = ['company_name', 'contact_person', 'email']
+    ordering_fields = ['display_order', 'created_at']
+    ordering = ['display_order', 'id']

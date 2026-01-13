@@ -8,7 +8,6 @@ from email.mime.text import MIMEText
 from io import BytesIO
 from typing import Dict, List, Optional
 
-from django.contrib.auth import get_user_model
 from django.db import connection
 
 try:
@@ -25,7 +24,7 @@ class EmailService:
         SMTP設定を取得
 
         Args:
-            user_id: ユーザーID（Noneの場合は管理者の設定を取得）
+            user_id: ユーザーID（Noneの場合はデフォルト設定を取得）
 
         Returns:
             Dict: SMTP設定（host, port, user, password）
@@ -33,41 +32,6 @@ class EmailService:
         config = self._get_smtp_config_from_profile(user_id)
         if config:
             return config
-
-        config = self._get_legacy_config_for_auth_user(user_id)
-        if config:
-            return config
-
-        with connection.cursor() as cursor:
-            if user_id:
-                cursor.execute(
-                    """
-                    SELECT smtp_host, smtp_port, smtp_user, smtp_password
-                    FROM users
-                    WHERE id = %s AND is_active = 1
-                    """,
-                    [user_id],
-                )
-            else:
-                cursor.execute(
-                    """
-                    SELECT smtp_host, smtp_port, smtp_user, smtp_password
-                    FROM users
-                    WHERE is_admin = 1 AND is_active = 1
-                    ORDER BY id
-                    LIMIT 1
-                    """
-                )
-
-            result = cursor.fetchone()
-
-        if result and result[0]:
-            return {
-                'host': result[0],
-                'port': result[1] or 587,
-                'user': result[2],
-                'password': result[3],
-            }
 
         return None
 
@@ -77,11 +41,18 @@ class EmailService:
 
         try:
             queryset = UserSmtpConfig.objects.filter(is_active=True)
+            profile = None
+
+            # まず、指定されたユーザーの設定を探す
             if user_id:
                 profile = queryset.filter(user_id=user_id).first()
-            else:
+
+            # ユーザー個別の設定がない場合、デフォルト設定を探す
+            if not profile:
                 profile = queryset.filter(is_admin=True).order_by('id').first()
-        except Exception:
+
+        except Exception as e:
+            print(f"SMTP設定取得エラー: {e}")
             return None
 
         if not profile or not profile.smtp_host:
@@ -94,41 +65,6 @@ class EmailService:
             'password': profile.smtp_password,
         }
 
-    def _get_legacy_config_for_auth_user(self, user_id: Optional[int]) -> Optional[Dict]:
-        if not user_id:
-            return None
-
-        try:
-            user = get_user_model().objects.filter(id=user_id).first()
-        except Exception:
-            return None
-
-        if not user:
-            return None
-
-        identifiers = [user.email, user.username]
-        for identifier in identifiers:
-            if not identifier:
-                continue
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT smtp_host, smtp_port, smtp_user, smtp_password
-                    FROM users
-                    WHERE smtp_user = %s AND is_active = 1
-                    """,
-                    [identifier],
-                )
-                result = cursor.fetchone()
-            if result and result[0]:
-                return {
-                    'host': result[0],
-                    'port': result[1] or 587,
-                    'user': result[2],
-                    'password': result[3],
-                }
-
-        return None
 
     def get_contacts(self, contact_type: Optional[str] = None) -> List[Dict]:
         """
@@ -153,7 +89,7 @@ class EmailService:
                         email,
                         phone,
                         notes
-                    FROM contacts
+                    FROM m_contacts
                     WHERE contact_type = %s
                       AND is_active = 1
                     ORDER BY display_order, company_name
@@ -172,7 +108,7 @@ class EmailService:
                         email,
                         phone,
                         notes
-                    FROM contacts
+                    FROM m_contacts
                     WHERE is_active = 1
                     ORDER BY contact_type, display_order, company_name
                     """

@@ -91,6 +91,7 @@ const sections = [
     title: "マスタメンテ",
     items: [
       { label: "マスタメニュー", link: "/masters" },
+      { label: "連絡先マスタ", link: "/masters/contact" },
     ],
   },
 ];

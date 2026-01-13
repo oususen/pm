@@ -541,3 +541,28 @@ class ContainerCapacity(models.Model):
         if self.capacity:
             return f"{self.name} (入り数: {self.capacity})"
         return f"{self.name}"
+
+
+class Contact(models.Model):
+    """連絡先マスタ"""
+    id = models.BigAutoField(primary_key=True)
+    contact_type = models.CharField(max_length=50, verbose_name='連絡先種別')
+    company_name = models.CharField(max_length=255, verbose_name='会社名')
+    department = models.CharField(max_length=255, null=True, blank=True, verbose_name='部署名')
+    contact_person = models.CharField(max_length=255, null=True, blank=True, verbose_name='担当者名')
+    email = models.EmailField(verbose_name='メールアドレス')
+    phone = models.CharField(max_length=50, null=True, blank=True, verbose_name='電話番号')
+    is_active = models.BooleanField(default=True, verbose_name='有効フラグ')
+    display_order = models.IntegerField(default=0, verbose_name='表示順')
+    notes = models.TextField(null=True, blank=True, verbose_name='備考')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'm_contacts'
+        verbose_name = '連絡先'
+        verbose_name_plural = '連絡先'
+        ordering = ['display_order', 'id']
+
+    def __str__(self):
+        return f"{self.company_name} - {self.contact_person or '担当者未設定'}"

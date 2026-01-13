@@ -17,6 +17,12 @@ const settings = [
     component: () => import("@/views/settings/PermissionTemplates.vue"),
     meta: { pageTitle: "権限テンプレート" },
   },
+  {
+    path: "/settings/smtp",
+    name: "SmtpConfigSettings",
+    component: () => import("@/views/settings/SmtpConfigSettings.vue"),
+    meta: { pageTitle: "SMTP設定" },
+  },
 ];
 
 export default settings;

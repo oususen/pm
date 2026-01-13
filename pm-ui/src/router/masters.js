@@ -65,6 +65,12 @@ const masters = [
     component: () => import("@/views/masters/BOMMaster.vue"),
     meta: { pageTitle: "構成マスタ（BOM）" },
   },
+  {
+    path: "/masters/contact",
+    name: "ContactMaster",
+    component: () => import("@/views/masters/ContactMaster.vue"),
+    meta: { pageTitle: "連絡先マスタ" },
+  },
 ];
 
 export default masters;

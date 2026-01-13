@@ -52,6 +52,11 @@
         <div class="icon-box">⏰</div>
         <div class="label">勤務パターン</div>
       </RouterLink>
+
+      <RouterLink to="/masters/contact" class="master-tile">
+        <div class="icon-box">📞</div>
+        <div class="label">連絡先マスタ</div>
+      </RouterLink>
     </div>
 
     <p class="helper-text">

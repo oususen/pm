@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
-    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity
+    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Contact
 )
 
 
@@ -188,4 +188,10 @@ class RoutingStepMaterialSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = RoutingStepMaterial
+        fields = '__all__'
+
+
+class ContactSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Contact
         fields = '__all__'

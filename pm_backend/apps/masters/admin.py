@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay,
-    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProcessCycleTime
+    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProcessCycleTime, Contact
 )
 
 
@@ -313,3 +313,11 @@ class ProcessCycleTimeAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+
+@admin.register(Contact)
+class ContactAdmin(admin.ModelAdmin):
+    list_display = ['company_name', 'contact_type', 'contact_person', 'email', 'phone', 'display_order', 'is_active']
+    list_filter = ['contact_type', 'is_active']
+    search_fields = ['company_name', 'contact_person', 'email']
+    ordering = ['display_order', 'id']

@@ -11,6 +11,10 @@
         <div class="icon-box">👤</div>
         <div class="label">権限テンプレート</div>
       </RouterLink>
+      <RouterLink to="/settings/smtp" class="master-tile">
+        <div class="icon-box">📧</div>
+        <div class="label">SMTP設定</div>
+      </RouterLink>
     </div>
 
     <p class="helper-text">

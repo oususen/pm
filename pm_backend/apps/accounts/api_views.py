@@ -12,6 +12,7 @@ from .models import (
     DepartmentPermission,
     PositionPermission,
     DepartmentPositionPermission,
+    UserSmtpConfig,
 )
 from .serializers import (
     DepartmentSerializer,
@@ -19,6 +20,7 @@ from .serializers import (
     DepartmentPermissionSerializer,
     PositionPermissionSerializer,
     DepartmentPositionPermissionSerializer,
+    UserSmtpConfigSerializer,
 )
 
 
@@ -263,3 +265,23 @@ class TeamListView(viewsets.ViewSet):
         queryset = queryset.order_by('display_id', 'name')
         serializer = DepartmentSerializer(queryset, many=True)
         return Response(serializer.data)
+
+
+class UserSmtpConfigViewSet(viewsets.ModelViewSet):
+    queryset = UserSmtpConfig.objects.select_related('user')
+    serializer_class = UserSmtpConfigSerializer
+    permission_classes = [IsAdminUser]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_active', 'is_admin']
+    search_fields = ['user__username', 'smtp_user', 'smtp_host']
+    ordering = ['user__username']
+    
+    @action(detail=False, methods=['get'])
+    def current_user(self, request):
+        """現在のユーザーのSMTP設定を取得"""
+        try:
+            config = UserSmtpConfig.objects.get(user=request.user)
+            serializer = self.get_serializer(config)
+            return Response(serializer.data)
+        except UserSmtpConfig.DoesNotExist:
+            return Response({'detail': 'SMTP設定が見つかりません'}, status=404)

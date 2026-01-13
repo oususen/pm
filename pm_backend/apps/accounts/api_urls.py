@@ -11,6 +11,7 @@ from .api_views import (
     DivisionListView,
     GroupListView,
     TeamListView,
+    UserSmtpConfigViewSet,
 )
 
 router = DefaultRouter()
@@ -24,5 +25,6 @@ router.register(r'department-positions', DepartmentPositionListView, basename='d
 router.register(r'divisions', DivisionListView, basename='division-list')
 router.register(r'groups', GroupListView, basename='group-list')
 router.register(r'teams', TeamListView, basename='team-list')
+router.register(r'smtp-configs', UserSmtpConfigViewSet)
 
 urlpatterns = router.urls

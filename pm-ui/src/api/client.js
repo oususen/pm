@@ -22,6 +22,8 @@ import { createProcessRealtimeAPI } from './resources/processRealtime'
 import { createBomServiceAPI } from './resources/bomService'
 import { createAuthAPI } from './resources/auth'
 import { createAccountsAPI } from './resources/accounts'
+import { createContactsAPI } from './resources/contacts'
+import { createSmtpConfigsAPI } from './resources/smtpConfigs'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
@@ -100,4 +102,6 @@ export default {
   bomService: createBomServiceAPI(client),
   auth: createAuthAPI(client),
   accounts: createAccountsAPI(client),
+  contacts: createContactsAPI(client),
+  smtpConfigs: createSmtpConfigsAPI(client),
 }
