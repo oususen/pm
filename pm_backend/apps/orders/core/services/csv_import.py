@@ -251,6 +251,8 @@ class CSVImportService:
                 # Get customer code for order_no generation
                 customer = Customer.objects.get(id=customer_id)
                 timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+                first_daily = dailies[0] if dailies else None
+                is_kubota_special = False
 
                 # Track latest confirmed due date per product (for Tiera-specific cleanup)
                 product_cutoffs = {}
@@ -276,16 +278,28 @@ class CSVImportService:
                     # For Kubota, use issue_date from raw_payload if available
                     if customer.customer_code == '000196':
                         # Try to get issue_date from raw_kubota
-                        first_daily = dailies[0] if dailies else None
                         factory_label = None
                         if first_daily and hasattr(first_daily, 'raw_kubota') and first_daily.raw_kubota:
-                            data_no = (first_daily.raw_kubota.data_no or '').strip()
-                            if data_no == '47':
-                                factory_label = 'SAKAI'
-                            elif data_no == '45':
-                                factory_label = 'HIRAKATA'
-                        if first_daily and hasattr(first_daily, 'raw_kubota') and first_daily.raw_kubota:
-                            issue_date = first_daily.raw_kubota.raw_payload.get('issue_date', '')
+                            raw_payload = first_daily.raw_kubota.raw_payload or {}
+                            factory_label = raw_payload.get('factory')
+                            if factory_label:
+                                factory_label = str(factory_label).strip()
+                            is_kubota_special = (
+                                raw_payload.get('special') is True
+                                or raw_payload.get('format') == 'NVAN-2'
+                                or (first_daily.raw_kubota.record_type or '').strip().upper() == 'SPECIAL'
+                            )
+                            if not factory_label:
+                                data_no = (first_daily.raw_kubota.data_no or '').strip()
+                                if data_no == '47':
+                                    factory_label = 'SAKAI'
+                                elif data_no == '45':
+                                    factory_label = 'HIRAKATA'
+                            if factory_label:
+                                factory_label = factory_label.upper()
+                                if is_kubota_special:
+                                    factory_label = f"{factory_label}-sp"
+                            issue_date = raw_payload.get('issue_date', '')
                             if issue_date:
                                 if factory_label:
                                     order_no = f"FIRM-{customer.customer_code}-{factory_label}-{issue_date}"
@@ -303,7 +317,6 @@ class CSVImportService:
                                 order_no = f"FIRM-{customer.customer_code}-{timestamp}"
                     else:
                         # For Rieden, use order_date from raw_rieden
-                        first_daily = dailies[0] if dailies else None
                         if first_daily and hasattr(first_daily, 'raw_rieden') and first_daily.raw_rieden:
                             order_date = first_daily.raw_rieden.order_date
                             if order_date:
@@ -322,16 +335,34 @@ class CSVImportService:
                             order_no = f"FIRM-{customer.customer_code}-{timestamp}"
 
                 # Create order header
-                order = Order.objects.create(
-                    customer_id=customer_id,
-                    order_no=order_no,
-                    order_type=order_type,
-                    version_no=version_no,
-                    source_system=dailies[0].source_system,
-                    source_file=source_file,
-                    order_date=datetime.now().date(),
-                    status='OPEN'
-                )
+                order_defaults = {
+                    'customer_id': customer_id,
+                    'order_no': order_no,
+                    'order_type': order_type,
+                    'version_no': version_no,
+                    'source_system': dailies[0].source_system,
+                    'source_file': source_file,
+                    'order_date': datetime.now().date(),
+                    'status': 'OPEN'
+                }
+                if is_kubota_special:
+                    order, created = Order.objects.get_or_create(
+                        customer_id=customer_id,
+                        order_no=order_no,
+                        order_type=order_type,
+                        version_no=version_no,
+                        defaults=order_defaults
+                    )
+                    if not created:
+                        # Special confirmed orders are re-imported; replace existing lines.
+                        order.source_system = order_defaults['source_system']
+                        order.source_file = order_defaults['source_file']
+                        order.order_date = order_defaults['order_date']
+                        order.status = 'OPEN'
+                        order.save()
+                        order.lines.all().delete()
+                else:
+                    order = Order.objects.create(**order_defaults)
                 created_orders += 1
 
                 # Process order lines

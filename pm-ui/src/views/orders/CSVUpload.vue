@@ -74,6 +74,20 @@
           </div>
         </div>
 
+        <div v-if="showHirakataSpecialOption" class="form-group">
+          <div class="group-header">
+            <label>枚方特殊確定</label>
+            <span class="hint">特殊CSV（NVAN-2）はこちら</span>
+          </div>
+          <label class="toggle-row">
+            <input
+              type="checkbox"
+              v-model="formData.is_hirakata_special"
+            />
+            <span>枚方特殊確定CSVとして取り込む</span>
+          </label>
+        </div>
+
         <div class="form-group">
           <label for="source_system">Source System</label>
           <input v-model="formData.source_system" type="text" id="source_system" placeholder="CSV" />
@@ -160,12 +174,21 @@ const formData = ref({
   customer_code: '',
   order_type: 'FIRM',
   source_system: 'CSV',
-  factory: 'SAKAI'  // Default to Sakai for Kubota
+  factory: 'SAKAI',  // Default to Sakai for Kubota
+  is_hirakata_special: false
 })
 
 // Check if selected customer is Kubota (000196)
 const isKubotaCustomer = computed(() => {
   return formData.value.customer_code === '000196'
+})
+
+const showHirakataSpecialOption = computed(() => {
+  return (
+    isKubotaCustomer.value &&
+    formData.value.order_type === 'FIRM' &&
+    formData.value.factory === 'HIRAKATA'
+  )
 })
 
 const fetchCustomers = async () => {
@@ -217,14 +240,21 @@ const selectCustomer = (customer) => {
   } else {
     formData.value.factory = null
   }
+  formData.value.is_hirakata_special = false
 }
 
 const selectOrderType = (type) => {
   formData.value.order_type = type
+  if (type !== 'FIRM') {
+    formData.value.is_hirakata_special = false
+  }
 }
 
 const selectFactory = (factory) => {
   formData.value.factory = factory
+  if (factory !== 'HIRAKATA') {
+    formData.value.is_hirakata_special = false
+  }
 }
 
 const uploadCSV = async () => {
@@ -258,8 +288,17 @@ const uploadCSV = async () => {
       formDataToSend.append('factory', formData.value.factory)
     }
 
+    const uploadPath = (
+      isKubotaCustomer.value &&
+      formData.value.order_type === 'FIRM' &&
+      formData.value.factory === 'HIRAKATA' &&
+      formData.value.is_hirakata_special
+    )
+      ? '/stg-order-raw/upload_hirakata_special/'
+      : '/stg-order-raw/upload_csv/'
+
     const response = await axios.post(
-      `${API_BASE_URL}/stg-order-raw/upload_csv/`,
+      `${API_BASE_URL}${uploadPath}`,
       formDataToSend,
       {
         headers: {
@@ -511,5 +550,18 @@ onMounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.95rem;
+  color: #333;
+}
+
+.toggle-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
 }
 </style>
