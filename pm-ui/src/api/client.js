@@ -21,10 +21,10 @@ import { createLineRealtimeAPI } from './resources/lineRealtime'
 import { createProcessRealtimeAPI } from './resources/processRealtime'
 import { createBomServiceAPI } from './resources/bomService'
 
-// ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8002 → localhost。
+// ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ||
-  (typeof window !== 'undefined' ? `${window.location.origin}/api` : 'http://localhost:8002/api')
+  (typeof window !== 'undefined' ? `${window.location.origin}/api` : 'http://localhost:8081/api')
 
 // CSRFトークンをクッキーから取得する関数
 function getCookie(name) {

@@ -139,6 +139,8 @@ import { ref, onMounted, computed } from 'vue'
 import api from '@/api/client'
 import axios from 'axios'
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
+
 const customers = ref([])
 const selectedFile = ref(null)
 const uploading = ref(false)
@@ -190,7 +192,7 @@ const onFileChange = async (event) => {
   // Check if filename already exists
   try {
     const response = await axios.get(
-      `http://localhost:8002/api/stg-order-raw/check_filename/?filename=${encodeURIComponent(file.name)}`
+      `${API_BASE_URL}/stg-order-raw/check_filename/?filename=${encodeURIComponent(file.name)}`
     )
 
     if (response.data.exists) {
@@ -257,7 +259,7 @@ const uploadCSV = async () => {
     }
 
     const response = await axios.post(
-      'http://localhost:8002/api/stg-order-raw/upload_csv/',
+      `${API_BASE_URL}/stg-order-raw/upload_csv/`,
       formDataToSend,
       {
         headers: {

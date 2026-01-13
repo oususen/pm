@@ -140,7 +140,7 @@ python manage.py migrate
 python manage.py createsuperuser
 
 # 開発サーバー起動（必要なら ALLOWED_HOSTS にクライアントIPを追加）
-python manage.py runserver 0.0.0.0:8001
+python manage.py runserver 0.0.0.0:8081
 ```
 
 #### .envファイルの設定例
@@ -160,7 +160,7 @@ DB_HOST=localhost
 DB_PORT=3306
 ```
 
-バックエンドが http://localhost:8002 で起動します。
+バックエンドが http://localhost:8081 で起動します。
 
 ### 3. Vue.js フロントエンドセットアップ
 
@@ -170,15 +170,15 @@ cd pm-ui
 # 依存インストール
 npm install
 
-# 開発サーバー起動（デフォルト: http://localhost:8081）
+# 開発サーバー起動（デフォルト: http://localhost:8501）
 npm run dev
 ```
 
-API の接続先は `src/api/client.js` の `API_BASE_URL` をバックエンドの URL/ポートに合わせて調整してください（デフォルトは `http://localhost:8002/api`）。
+API の接続先は `src/api/client.js` の `API_BASE_URL` をバックエンドの URL/ポートに合わせて調整してください（デフォルトは `http://localhost:8081/api`）。
 
 ### 開発ポート例
-- バックエンド: http://localhost:8001
-- フロントエンド (Vite dev): http://localhost:8081
+- バックエンド: http://localhost:8081
+- フロントエンド (Vite dev): http://localhost:8501
 
 ## APIエンドポイント
 

@@ -1,5 +1,6 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
@@ -133,7 +134,13 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         # Default service
         return CSVImportService()
 
-    @action(detail=False, methods=['post'], parser_classes=[MultiPartParser, FormParser])
+    @action(
+        detail=False,
+        methods=['post'],
+        parser_classes=[MultiPartParser, FormParser],
+        authentication_classes=[],
+        permission_classes=[AllowAny],
+    )
     def upload_csv(self, request):
         """Upload CSV file and import to staging"""
         try:

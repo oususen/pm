@@ -121,8 +121,8 @@ const buildBases = () => {
   const bases = [
     import.meta.env.VITE_API_BASE_URL,
     `http://${hostBase}:8000/api`,
-    `http://${hostBase}:8002/api`,
-    'http://localhost:8002/api',
+    `http://${hostBase}:8081/api`,
+    'http://localhost:8081/api',
     'http://localhost:8000/api',
   ].filter(Boolean)
   return Array.from(new Set(bases))

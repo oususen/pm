@@ -326,9 +326,9 @@ if (mediaEnvBase) {
     mediaBaseUrl = browserOrigin
   }
   if (mediaBaseUrl.endsWith(':8501')) {
-    mediaBaseUrl = mediaBaseUrl.replace(':8501', ':8002')
+    mediaBaseUrl = mediaBaseUrl.replace(':8501', ':8081')
   } else if (mediaBaseUrl.endsWith(':5173')) {
-    mediaBaseUrl = mediaBaseUrl.replace(':5173', ':8002')
+    mediaBaseUrl = mediaBaseUrl.replace(':5173', ':8081')
   }
 }
 
