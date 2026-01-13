@@ -7,6 +7,10 @@
         <div class="icon-box">👤</div>
         <div class="label">ユーザー管理</div>
       </RouterLink>
+      <RouterLink to="/settings/permission-templates" class="master-tile">
+        <div class="icon-box">👤</div>
+        <div class="label">権限テンプレート</div>
+      </RouterLink>
     </div>
 
     <p class="helper-text">

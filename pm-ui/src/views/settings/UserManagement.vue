@@ -104,7 +104,12 @@
             </div>
             <div class="form-row">
               <label>役職</label>
-              <input v-model="form.profile.position" type="text" />
+              <select v-model="form.profile.position">
+                <option value="">未設定</option>
+                <option v-for="pos in positionOptions" :key="pos" :value="pos">
+                  {{ pos }}
+                </option>
+              </select>
             </div>
             <div class="form-row">
               <label>役割</label>
@@ -133,15 +138,30 @@
             </div>
             <div class="form-row">
               <label>事業部</label>
-              <input v-model="form.profile.division" type="text" />
+              <select v-model="form.profile.division" @change="onDivisionChange">
+                <option :value="null">未設定</option>
+                <option v-for="div in divisionOptions" :key="div.value" :value="div.value">
+                  {{ div.label }}
+                </option>
+              </select>
             </div>
             <div class="form-row">
               <label>係</label>
-              <input v-model="form.profile.group" type="text" />
+              <select v-model="form.profile.group" @change="onGroupChange" :disabled="!form.profile.division">
+                <option :value="null">未設定</option>
+                <option v-for="grp in groupOptions" :key="grp.value" :value="grp.value">
+                  {{ grp.label }}
+                </option>
+              </select>
             </div>
             <div class="form-row">
               <label>班</label>
-              <input v-model="form.profile.team" type="text" />
+              <select v-model="form.profile.team" :disabled="!form.profile.group">
+                <option :value="null">未設定</option>
+                <option v-for="tm in teamOptions" :key="tm.value" :value="tm.value">
+                  {{ tm.label }}
+                </option>
+              </select>
             </div>
             <div class="form-row">
               <label>入社日</label>
@@ -170,6 +190,46 @@
               <input v-model="form.is_superuser" type="checkbox" />
             </div>
 
+            <div class="form-row full permission-section">
+              <div class="permission-header">
+                <label>ユーザー個別 権限設定</label>
+                <label class="permission-toggle">
+                  <input v-model="useUserPermissions" type="checkbox" />
+                  個別権限を使う
+                </label>
+              </div>
+              <table class="permission-table" :class="{ disabled: !useUserPermissions }">
+                <thead>
+                  <tr>
+                    <th>機能</th>
+                    <th>閲覧</th>
+                    <th>編集</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="perm in form.permissions" :key="perm.resource">
+                    <td>{{ getPermissionLabel(perm.resource) }}</td>
+                    <td>
+                      <input
+                        type="checkbox"
+                        v-model="perm.can_view"
+                        @change="onPermissionChange(perm, 'can_view')"
+                        :disabled="!useUserPermissions"
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="checkbox"
+                        v-model="perm.can_edit"
+                        @change="onPermissionChange(perm, 'can_edit')"
+                        :disabled="!useUserPermissions"
+                      />
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
             <div class="form-actions">
               <button type="submit" class="btn primary" :disabled="saving">
                 {{ saving ? '保存中...' : '保存' }}
@@ -181,6 +241,7 @@
           </form>
         </section>
       </div>
+
     </div>
   </div>
 </template>
@@ -192,6 +253,10 @@ import { authState } from '@/auth'
 
 const users = ref([])
 const departments = ref([])
+const positions = ref([])
+const divisions = ref([])
+const allGroups = ref([])
+const allTeams = ref([])
 const loading = ref(false)
 const saving = ref(false)
 const errorMessage = ref('')
@@ -200,6 +265,7 @@ const searchKeyword = ref('')
 const selectedUserId = ref(null)
 const isCreating = ref(false)
 const passwordConfirm = ref('')
+const useUserPermissions = ref(false)
 
 const roleOptions = [
   { value: 'staff', label: '一般' },
@@ -213,6 +279,20 @@ const employmentOptions = [
   { value: 'skilled', label: '特定技能実習生' },
   { value: 'intern', label: '実習生' },
   { value: 'temporary', label: '人材派遣' },
+]
+
+const permissionResources = [
+  { value: 'dashboard', label: 'ダッシュボード' },
+  { value: 'orders', label: '受注' },
+  { value: 'production', label: '生産' },
+  { value: 'purchase', label: '仕入' },
+  { value: 'shipping', label: '出荷' },
+  { value: 'inventory', label: '在庫' },
+  { value: 'quality', label: '品質' },
+  { value: 'masters', label: 'マスタ' },
+  { value: 'settings', label: '設定' },
+  { value: 'users', label: 'ユーザー管理' },
+  { value: 'manual', label: 'マニュアル' },
 ]
 
 const roleLabels = roleOptions.reduce((acc, option) => {
@@ -232,11 +312,18 @@ const emptyProfile = () => ({
   role: 'staff',
   employment_type: 'regular',
   department: null,
-  division: '',
-  group: '',
-  team: '',
+  division: null,
+  group: null,
+  team: null,
   joined_on: '',
 })
+
+const emptyPermissions = () =>
+  permissionResources.map((resource) => ({
+    resource: resource.value,
+    can_view: false,
+    can_edit: false,
+  }))
 
 const form = reactive({
   id: null,
@@ -249,6 +336,7 @@ const form = reactive({
   is_superuser: false,
   password: '',
   profile: emptyProfile(),
+  permissions: emptyPermissions(),
 })
 
 const passwordHint = computed(() => (isCreating.value ? '必須' : '変更時のみ入力'))
@@ -264,9 +352,79 @@ const departmentOptions = computed(() =>
   }))
 )
 
+const positionOptions = computed(() => positions.value)
+
+const divisionOptions = computed(() =>
+  divisions.value.map((div) => ({
+    value: div.id,
+    label: div.name,
+  }))
+)
+
+const groupOptions = computed(() => {
+  if (!form.profile.division) {
+    return []
+  }
+  return allGroups.value
+    .filter((grp) => grp.parent === form.profile.division)
+    .map((grp) => ({
+      value: grp.id,
+      label: grp.name,
+    }))
+})
+
+const teamOptions = computed(() => {
+  if (!form.profile.group) {
+    return []
+  }
+  return allTeams.value
+    .filter((tm) => tm.parent === form.profile.group)
+    .map((tm) => ({
+      value: tm.id,
+      label: tm.name,
+    }))
+})
+
 const getUserDisplayName = (user) => {
   const fullName = `${user.last_name || ''} ${user.first_name || ''}`.trim()
   return fullName || user.username || user.email || '-'
+}
+
+const getPermissionLabel = (resource) => {
+  const found = permissionResources.find((item) => item.value === resource)
+  return found ? found.label : resource
+}
+
+const buildPermissions = (permissions) => {
+  const list = Array.isArray(permissions) ? permissions : []
+  return permissionResources.map((resource) => {
+    const existing = list.find((perm) => perm.resource === resource.value)
+    return {
+      resource: resource.value,
+      can_view: Boolean(existing?.can_view),
+      can_edit: Boolean(existing?.can_edit),
+    }
+  })
+}
+
+const onPermissionChange = (perm, field) => {
+  if (field === 'can_edit' && perm.can_edit) {
+    perm.can_view = true
+  }
+  if (field === 'can_view' && !perm.can_view) {
+    perm.can_edit = false
+  }
+}
+
+const onDivisionChange = () => {
+  // 事業部が変更されたら、係と班をクリア
+  form.profile.group = null
+  form.profile.team = null
+}
+
+const onGroupChange = () => {
+  // 係が変更されたら、班をクリア
+  form.profile.team = null
 }
 
 const loadDepartments = async () => {
@@ -274,6 +432,46 @@ const loadDepartments = async () => {
   const response = await api.accounts.getDepartments({ page_size: 500 })
   const data = response.data
   departments.value = Array.isArray(data) ? data : data.results || []
+}
+
+const loadPositions = async () => {
+  if (!isAdminUser.value) return
+  try {
+    const response = await api.accounts.getPositions()
+    positions.value = Array.isArray(response.data) ? response.data : []
+  } catch (error) {
+    positions.value = []
+  }
+}
+
+const loadDivisions = async () => {
+  if (!isAdminUser.value) return
+  try {
+    const response = await api.accounts.getDivisions()
+    divisions.value = Array.isArray(response.data) ? response.data : []
+  } catch (error) {
+    divisions.value = []
+  }
+}
+
+const loadGroups = async () => {
+  if (!isAdminUser.value) return
+  try {
+    const response = await api.accounts.getGroups()
+    allGroups.value = Array.isArray(response.data) ? response.data : []
+  } catch (error) {
+    allGroups.value = []
+  }
+}
+
+const loadTeams = async () => {
+  if (!isAdminUser.value) return
+  try {
+    const response = await api.accounts.getTeams()
+    allTeams.value = Array.isArray(response.data) ? response.data : []
+  } catch (error) {
+    allTeams.value = []
+  }
 }
 
 const loadUsers = async () => {
@@ -315,6 +513,8 @@ const selectUser = (user) => {
     ...emptyProfile(),
     ...(user.profile || {}),
   }
+  form.permissions = buildPermissions(user.permissions)
+  useUserPermissions.value = Array.isArray(user.permissions) && user.permissions.length > 0
   if (form.profile.department === undefined) {
     form.profile.department = user.profile?.department_id || null
   }
@@ -333,6 +533,8 @@ const resetForm = () => {
     form.password = ''
     passwordConfirm.value = ''
     form.profile = emptyProfile()
+    form.permissions = emptyPermissions()
+    useUserPermissions.value = false
     return
   }
 
@@ -352,6 +554,9 @@ const buildPayload = () => {
   const profile = {
     ...form.profile,
     department: form.profile.department || null,
+    division: form.profile.division || null,
+    group: form.profile.group || null,
+    team: form.profile.team || null,
     joined_on: form.profile.joined_on || null,
   }
 
@@ -364,6 +569,13 @@ const buildPayload = () => {
     is_staff: form.is_staff,
     is_superuser: form.is_superuser,
     profile,
+    permissions: useUserPermissions.value
+      ? form.permissions.map((perm) => ({
+          resource: perm.resource,
+          can_view: Boolean(perm.can_view),
+          can_edit: Boolean(perm.can_edit),
+        }))
+      : [],
   }
 
   if (form.password) {
@@ -435,7 +647,14 @@ onMounted(async () => {
     errorMessage.value = 'この画面を開く権限がありません。'
     return
   }
-  await Promise.all([loadDepartments(), loadUsers()])
+  await Promise.all([
+    loadDepartments(),
+    loadPositions(),
+    loadDivisions(),
+    loadGroups(),
+    loadTeams(),
+    loadUsers(),
+  ])
 })
 </script>
 
@@ -559,6 +778,28 @@ onMounted(async () => {
   flex-direction: row;
   align-items: center;
   gap: 6px;
+}
+
+.permission-section {
+  margin-top: 6px;
+}
+
+.permission-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.permission-table th,
+.permission-table td {
+  border: 1px solid #d6d6d6;
+  padding: 4px 6px;
+  text-align: center;
+}
+
+.permission-table th {
+  background: #f4f6ff;
+  font-weight: 600;
 }
 
 .form-row label {

@@ -11,6 +11,12 @@ const settings = [
     component: () => import("@/views/settings/UserManagement.vue"),
     meta: { pageTitle: "ユーザー管理" },
   },
+  {
+    path: "/settings/permission-templates",
+    name: "PermissionTemplates",
+    component: () => import("@/views/settings/PermissionTemplates.vue"),
+    meta: { pageTitle: "権限テンプレート" },
+  },
 ];
 
 export default settings;
