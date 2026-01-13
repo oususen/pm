@@ -2,7 +2,15 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import User
 
-from .models import Department, UserProfile, UserSmtpConfig
+from .models import (
+    Department,
+    UserProfile,
+    UserSmtpConfig,
+    UserPermission,
+    DepartmentPermission,
+    PositionPermission,
+    DepartmentPositionPermission,
+)
 
 
 @admin.register(Department)
@@ -51,3 +59,31 @@ class UserSmtpConfigAdmin(admin.ModelAdmin):
     list_display = ('user', 'smtp_host', 'smtp_user', 'is_active', 'is_admin')
     list_filter = ('is_active', 'is_admin')
     search_fields = ('user__username', 'user__email', 'smtp_user')
+
+
+@admin.register(UserPermission)
+class UserPermissionAdmin(admin.ModelAdmin):
+    list_display = ('user', 'resource', 'can_view', 'can_edit')
+    list_filter = ('resource', 'can_view', 'can_edit')
+    search_fields = ('user__username', 'user__email')
+
+
+@admin.register(DepartmentPermission)
+class DepartmentPermissionAdmin(admin.ModelAdmin):
+    list_display = ('department', 'resource', 'can_view', 'can_edit')
+    list_filter = ('resource', 'can_view', 'can_edit')
+    search_fields = ('department__name',)
+
+
+@admin.register(PositionPermission)
+class PositionPermissionAdmin(admin.ModelAdmin):
+    list_display = ('position_name', 'resource', 'can_view', 'can_edit')
+    list_filter = ('resource', 'can_view', 'can_edit')
+    search_fields = ('position_name',)
+
+
+@admin.register(DepartmentPositionPermission)
+class DepartmentPositionPermissionAdmin(admin.ModelAdmin):
+    list_display = ('department', 'position_name', 'resource', 'can_view', 'can_edit')
+    list_filter = ('resource', 'can_view', 'can_edit', 'department')
+    search_fields = ('department__name', 'position_name')

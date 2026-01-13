@@ -1,7 +1,14 @@
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
-from .models import Department, UserProfile
+from .models import (
+    Department,
+    UserProfile,
+    UserPermission,
+    DepartmentPermission,
+    PositionPermission,
+    DepartmentPositionPermission,
+)
 
 
 class DepartmentSerializer(serializers.ModelSerializer):
@@ -14,6 +21,9 @@ class DepartmentSerializer(serializers.ModelSerializer):
 
 class UserProfileSerializer(serializers.ModelSerializer):
     department_name = serializers.CharField(source='department.name', read_only=True)
+    division_name = serializers.CharField(source='division.name', read_only=True)
+    group_name = serializers.CharField(source='group.name', read_only=True)
+    team_name = serializers.CharField(source='team.name', read_only=True)
 
     class Meta:
         model = UserProfile
@@ -25,8 +35,11 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'department',
             'department_name',
             'division',
+            'division_name',
             'group',
+            'group_name',
             'team',
+            'team_name',
             'joined_on',
         ]
         extra_kwargs = {
@@ -34,8 +47,45 @@ class UserProfileSerializer(serializers.ModelSerializer):
         }
 
 
+class UserPermissionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserPermission
+        fields = ['resource', 'can_view', 'can_edit']
+
+
+class DepartmentPermissionSerializer(serializers.ModelSerializer):
+    department_name = serializers.CharField(source='department.name', read_only=True)
+
+    class Meta:
+        model = DepartmentPermission
+        fields = ['id', 'department', 'department_name', 'resource', 'can_view', 'can_edit']
+
+
+class PositionPermissionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PositionPermission
+        fields = ['id', 'position_name', 'resource', 'can_view', 'can_edit']
+
+
+class DepartmentPositionPermissionSerializer(serializers.ModelSerializer):
+    department_name = serializers.CharField(source='department.name', read_only=True)
+
+    class Meta:
+        model = DepartmentPositionPermission
+        fields = [
+            'id',
+            'department',
+            'department_name',
+            'position_name',
+            'resource',
+            'can_view',
+            'can_edit',
+        ]
+
+
 class UserSerializer(serializers.ModelSerializer):
     profile = UserProfileSerializer(required=False, allow_null=True)
+    permissions = UserPermissionSerializer(many=True, required=False)
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
@@ -51,10 +101,12 @@ class UserSerializer(serializers.ModelSerializer):
             'is_superuser',
             'password',
             'profile',
+            'permissions',
         ]
 
     def create(self, validated_data):
         profile_data = validated_data.pop('profile', None)
+        permissions_data = validated_data.pop('permissions', None)
         password = validated_data.pop('password', None)
 
         user = User(**validated_data)
@@ -80,10 +132,14 @@ class UserSerializer(serializers.ModelSerializer):
 
             UserProfile.objects.update_or_create(user=user, defaults=profile_data)
 
+        if permissions_data is not None:
+            self._replace_permissions(user, permissions_data)
+
         return user
 
     def update(self, instance, validated_data):
         profile_data = validated_data.pop('profile', None)
+        permissions_data = validated_data.pop('permissions', None)
         password = validated_data.pop('password', None)
 
         for attr, value in validated_data.items():
@@ -114,4 +170,31 @@ class UserSerializer(serializers.ModelSerializer):
                 setattr(profile, attr, value)
             profile.save()
 
+        if permissions_data is not None:
+            self._replace_permissions(instance, permissions_data)
+
         return instance
+
+    def _replace_permissions(self, user, permissions_data):
+        UserPermission.objects.filter(user=user).delete()
+        if not permissions_data:
+            return
+        seen = set()
+        records = []
+        for perm in permissions_data:
+            resource = perm.get('resource')
+            if not resource or resource in seen:
+                continue
+            seen.add(resource)
+            can_edit = bool(perm.get('can_edit'))
+            can_view = bool(perm.get('can_view')) or can_edit
+            records.append(
+                UserPermission(
+                    user=user,
+                    resource=resource,
+                    can_view=can_view,
+                    can_edit=can_edit,
+                )
+            )
+        if records:
+            UserPermission.objects.bulk_create(records)

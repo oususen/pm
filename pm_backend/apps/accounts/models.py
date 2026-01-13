@@ -75,9 +75,33 @@ class UserProfile(models.Model):
         related_name='users',
         verbose_name='所属部署'
     )
-    division = models.CharField(max_length=100, blank=True, verbose_name='事業部')
-    group = models.CharField(max_length=100, blank=True, verbose_name='係')
-    team = models.CharField(max_length=100, blank=True, verbose_name='班')
+    division = models.ForeignKey(
+        Department,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='division_users',
+        verbose_name='事業部',
+        limit_choices_to={'level': 'division'}
+    )
+    group = models.ForeignKey(
+        Department,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='group_users',
+        verbose_name='係',
+        limit_choices_to={'level': 'group'}
+    )
+    team = models.ForeignKey(
+        Department,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='team_users',
+        verbose_name='班',
+        limit_choices_to={'level': 'team'}
+    )
 
     joined_on = models.DateField(null=True, blank=True, verbose_name='入社日')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
@@ -107,3 +131,74 @@ class UserSmtpConfig(models.Model):
 
     class Meta:
         db_table = 'accounts_user_smtp_configs'
+
+
+class UserPermission(models.Model):
+    RESOURCE_CHOICES = [
+        ('dashboard', 'ダッシュボード'),
+        ('orders', '受注'),
+        ('production', '生産'),
+        ('purchase', '仕入'),
+        ('shipping', '出荷'),
+        ('inventory', '在庫'),
+        ('quality', '品質'),
+        ('masters', 'マスタ'),
+        ('settings', '設定'),
+        ('users', 'ユーザー管理'),
+        ('manual', 'マニュアル'),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='permissions',
+    )
+    resource = models.CharField(max_length=50, choices=RESOURCE_CHOICES)
+    can_view = models.BooleanField(default=False)
+    can_edit = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'accounts_userpermission'
+        unique_together = [['user', 'resource']]
+
+
+class DepartmentPermission(models.Model):
+    department = models.ForeignKey(
+        Department,
+        on_delete=models.CASCADE,
+        related_name='permissions',
+    )
+    resource = models.CharField(max_length=50, choices=UserPermission.RESOURCE_CHOICES)
+    can_view = models.BooleanField(default=False)
+    can_edit = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'accounts_departmentpermission'
+        unique_together = [['department', 'resource']]
+
+
+class PositionPermission(models.Model):
+    position_name = models.CharField(max_length=100)
+    resource = models.CharField(max_length=50, choices=UserPermission.RESOURCE_CHOICES)
+    can_view = models.BooleanField(default=False)
+    can_edit = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'accounts_positionpermission'
+        unique_together = [['position_name', 'resource']]
+
+
+class DepartmentPositionPermission(models.Model):
+    department = models.ForeignKey(
+        Department,
+        on_delete=models.CASCADE,
+        related_name='position_permissions',
+    )
+    position_name = models.CharField(max_length=100)
+    resource = models.CharField(max_length=50, choices=UserPermission.RESOURCE_CHOICES)
+    can_view = models.BooleanField(default=False)
+    can_edit = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'accounts_department_position_permission'
+        unique_together = [['department', 'position_name', 'resource']]
