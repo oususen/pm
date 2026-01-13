@@ -12,6 +12,8 @@ from shipping.views_hirakata_pickup import (
     generate_hirakata_pickup_excel,
     get_hirakata_pickup_date_range,
     get_hirakata_daily_products,
+    get_hirakata_pickup_contacts,
+    send_hirakata_pickup_email,
 )
 
 router = DefaultRouter()
@@ -28,4 +30,6 @@ urlpatterns = [
     path('hirakata-pickup/generate-excel/', generate_hirakata_pickup_excel, name='hirakata-pickup-generate-excel'),
     path('hirakata-pickup/date-range/', get_hirakata_pickup_date_range, name='hirakata-pickup-date-range'),
     path('hirakata-pickup/daily-products/', get_hirakata_daily_products, name='hirakata-daily-products'),
+    path('hirakata-pickup/contacts/', get_hirakata_pickup_contacts, name='hirakata-pickup-contacts'),
+    path('hirakata-pickup/send-email/', send_hirakata_pickup_email, name='hirakata-pickup-send-email'),
 ]

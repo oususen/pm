@@ -38,7 +38,7 @@
         </button>
         <div class="user-info">
           <span class="user-icon">👤</span>
-          <span class="user-name">王 崇栓</span>
+          <span class="user-name">{{ userDisplayName }}</span>
           <span class="dropdown-arrow">▼</span>
         </div>
       </div>
@@ -47,14 +47,14 @@
           <span>🔔</span>
           <span class="btn-label">お知らせ</span>
         </button>
-        <button class="nav-action-btn" title="ログアウト">
+        <button class="nav-action-btn" title="ログアウト" @click="handleLogout">
           <span>🚪</span>
           <span class="btn-label">ログアウト</span>
         </button>
-        <button class="nav-action-btn" title="設定" v-if="!isMobile">
+        <RouterLink to="/settings" class="nav-action-btn" title="設定" v-if="!isMobile">
           <span>⚙️</span>
           <span class="btn-label">設定</span>
-        </button>
+        </RouterLink>
       
 
         <button class="nav-action-btn help-btn" title="ヘルプ" @click="openHelp">
@@ -67,7 +67,8 @@
 
 <script setup>
 import { computed } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { authState, logout } from '../auth'
 
 const props = defineProps({
   isMobile: {
@@ -81,6 +82,7 @@ const props = defineProps({
 })
 
 const route = useRoute()
+const router = useRouter()
 
 const isHomePage = computed(() => {
   return route.path === '/'
@@ -98,7 +100,7 @@ const mainTabs = [
   { id: 'inventory', label: '在庫', link: '/inventory' },
   { id: 'quality', label: '品質', link: '/quality' },
   { id: 'masters', label: 'マスタ', link: '/masters' },
-  { id: 'manual', label: 'マニュアル', link: '/manual' },
+  { id: 'settings', label: '設定', link: '/settings' },
 ]
 
 // スマホでは生産・マニュアルのみ表示
@@ -118,7 +120,7 @@ const isActiveTab = (tabId) => {
   if (tabId === 'inventory' && path.startsWith('/inventory')) return true
   if (tabId === 'quality' && path.startsWith('/quality')) return true
   if (tabId === 'masters' && path.startsWith('/masters')) return true
-  if (tabId === 'manual' && path.startsWith('/manual')) return true
+  if (tabId === 'settings' && path.startsWith('/settings')) return true
   return false
 }
 
@@ -141,6 +143,19 @@ const helpUrl = computed(() => {
 
 const openHelp = () => {
   window.open(helpUrl.value, '_blank', 'noopener')
+}
+
+const userDisplayName = computed(() => {
+  const user = authState.user
+  if (!user) return 'ゲスト'
+  if (user.employee?.name) return user.employee.name
+  const fullName = `${user.last_name || ''} ${user.first_name || ''}`.trim()
+  return fullName || user.username || user.email || 'ユーザー'
+})
+
+const handleLogout = async () => {
+  await logout()
+  router.replace('/login')
 }
 </script>
 
@@ -359,7 +374,7 @@ const openHelp = () => {
   background: rgba(255, 255, 255, 0.15);
   border: none;
   color: white;
-  padding: 4px 10px;
+  padding: 4px 6px;
   border-radius: 4px;
   font-size: 12px;
   cursor: pointer;
@@ -458,7 +473,7 @@ const openHelp = () => {
   }
 
   .nav-action-btn {
-    padding: 6px 12px;
+    padding: 6px 6px;
     background: rgba(255, 255, 255, 0.2);
   }
 

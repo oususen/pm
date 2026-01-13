@@ -6,11 +6,32 @@ from django.http import HttpResponse, JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 
 from .services.hirakata_pickup_pdf_service import HirakataPickupPDFService
+from .services.email_service import EmailService
+
+
+def _normalize_email_list(raw_value):
+    if not raw_value:
+        return []
+    if isinstance(raw_value, str):
+        candidates = [item.strip() for item in raw_value.split(',')]
+    elif isinstance(raw_value, list):
+        candidates = [str(item).strip() for item in raw_value]
+    else:
+        return []
+
+    unique = []
+    seen = set()
+    for item in candidates:
+        if not item or item in seen:
+            continue
+        unique.append(item)
+        seen.add(item)
+    return unique
 
 
 @csrf_exempt
@@ -72,6 +93,20 @@ def generate_hirakata_pickup_pdf(request):
             pickup_start_date, pickup_end_date = start_date, end_date
 
         filename = f"枚方集荷依頼書_{pickup_start_date.strftime('%Y%m%d')}_{pickup_end_date.strftime('%Y%m%d')}.pdf"
+
+        # 転送用ディレクトリに保存（レスポンス送信と別に保管）
+        try:
+            from pathlib import Path
+            from django.conf import settings
+            base_dir = Path(settings.BASE_DIR).parent
+            transfer_dir = base_dir / "output" / "transfer_queue"
+            transfer_dir.mkdir(parents=True, exist_ok=True)
+            transfer_path = transfer_dir / filename
+            pdf_buffer.seek(0)
+            transfer_path.write_bytes(pdf_buffer.read())
+            pdf_buffer.seek(0)
+        except Exception as e:
+            print(f"転送用保存エラー: {e}")
 
         # HTTPレスポンス作成
         response = HttpResponse(pdf_buffer.read(), content_type='application/pdf')
@@ -329,5 +364,136 @@ def get_hirakata_daily_products(request):
         print(f"日別製品リスト取得エラー: {error_detail}")
         return Response(
             {'error': f'日別製品リスト取得中にエラーが発生しました: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_hirakata_pickup_contacts(request):
+    """
+    枚方集荷依頼用の連絡先取得API
+
+    Query Parameters:
+        contact_type: 連絡先種別（任意）
+    """
+    try:
+        contact_type = request.query_params.get('contact_type')
+        service = EmailService()
+        contacts = service.get_contacts(contact_type)
+        return Response(contacts)
+
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"連絡先取得エラー: {error_detail}")
+        return Response(
+            {'error': f'連絡先取得中にエラーが発生しました: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def send_hirakata_pickup_email(request):
+    """
+    枚方集荷依頼書メール送信API
+
+    Request Body:
+        {
+            "start_date": "2024-01-01",
+            "end_date": "2024-01-31",
+            "to_emails": ["a@example.com"],
+            "cc_emails": ["b@example.com"],
+            "subject": "件名",
+            "body": "本文"
+        }
+    """
+    try:
+        start_date_str = request.data.get('start_date')
+        end_date_str = request.data.get('end_date')
+        subject = (request.data.get('subject') or '').strip()
+        body = (request.data.get('body') or '').strip()
+        user_id = request.user.id if request.user.is_authenticated else None
+
+        if not start_date_str or not end_date_str:
+            return Response(
+                {'error': '開始日と終了日を指定してください'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return Response(
+                {'error': '日付形式が正しくありません（YYYY-MM-DD形式で指定してください）'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if start_date > end_date:
+            return Response(
+                {'error': '開始日は終了日より前である必要があります'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        to_emails = _normalize_email_list(request.data.get('to_emails'))
+        cc_emails = _normalize_email_list(request.data.get('cc_emails'))
+
+        if not to_emails:
+            return Response(
+                {'error': '送信先メールアドレスを指定してください'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        pdf_service = HirakataPickupPDFService()
+        pickup_range = pdf_service.get_pickup_date_range(start_date, end_date)
+        if pickup_range:
+            pickup_start_date, pickup_end_date = pickup_range
+        else:
+            pickup_start_date, pickup_end_date = start_date, end_date
+
+        if not subject:
+            subject = f"【枚方集荷依頼】{pickup_start_date.strftime('%Y/%m/%d')}～{pickup_end_date.strftime('%Y/%m/%d')}"
+
+        if not body:
+            body = (
+                "お世話になっております。\n"
+                "ダイソウ工業株式会社の辻岡です。\n\n"
+                f"{pickup_start_date.strftime('%Y年%m月%d日')}～{pickup_end_date.strftime('%Y年%m月%d日')}の期間における枚方製造所向けの集荷依頼書を送付いたします。\n\n"
+                "添付のPDFをご確認の上、集荷手配をお願いいたします。\n\n"
+                "よろしくお願いいたします。\n\n"
+                "---\n"
+                "ダイソウ工業株式会社\n"
+                "辻岡(ツジオカ)\n\n"
+                "ご不明な点がございましたら下記までご連絡ください。\n"
+                "Email:gyomu4@daiso-ind.co.jp\n"
+            )
+
+        pdf_buffer = pdf_service.generate_pickup_request_pdf(start_date, end_date)
+        filename = f"枚方集荷依頼書_{pickup_start_date.strftime('%Y%m%d')}_{pickup_end_date.strftime('%Y%m%d')}.pdf"
+
+        email_service = EmailService()
+        result = email_service.send_email_with_attachment(
+            to_emails=to_emails,
+            subject=subject,
+            body=body,
+            attachment_data=pdf_buffer,
+            attachment_filename=filename,
+            cc_emails=cc_emails if cc_emails else None,
+            user_id=user_id,
+        )
+
+        if result.get('success'):
+            return Response(result, status=status.HTTP_200_OK)
+
+        return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"メール送信エラー: {error_detail}")
+        return Response(
+            {'error': f'メール送信中にエラーが発生しました: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
