@@ -30,11 +30,11 @@ export default defineConfig(({ mode }) => {
       https: httpsConfig,
       proxy: {
         '/api': {
-          target: 'http://localhost:8002',
+          target: 'http://localhost:8081',
           changeOrigin: true,
         },
         '/media': {
-          target: 'http://localhost:8002',
+          target: 'http://localhost:8081',
           changeOrigin: true,
         },
       },
