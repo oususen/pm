@@ -277,14 +277,30 @@ class CSVImportService:
                     if customer.customer_code == '000196':
                         # Try to get issue_date from raw_kubota
                         first_daily = dailies[0] if dailies else None
+                        factory_label = None
+                        if first_daily and hasattr(first_daily, 'raw_kubota') and first_daily.raw_kubota:
+                            data_no = (first_daily.raw_kubota.data_no or '').strip()
+                            if data_no == '47':
+                                factory_label = 'SAKAI'
+                            elif data_no == '45':
+                                factory_label = 'HIRAKATA'
                         if first_daily and hasattr(first_daily, 'raw_kubota') and first_daily.raw_kubota:
                             issue_date = first_daily.raw_kubota.raw_payload.get('issue_date', '')
                             if issue_date:
-                                order_no = f"FIRM-{customer.customer_code}-{issue_date}"
+                                if factory_label:
+                                    order_no = f"FIRM-{customer.customer_code}-{factory_label}-{issue_date}"
+                                else:
+                                    order_no = f"FIRM-{customer.customer_code}-{issue_date}"
+                            else:
+                                if factory_label:
+                                    order_no = f"FIRM-{customer.customer_code}-{factory_label}-{timestamp}"
+                                else:
+                                    order_no = f"FIRM-{customer.customer_code}-{timestamp}"
+                        else:
+                            if factory_label:
+                                order_no = f"FIRM-{customer.customer_code}-{factory_label}-{timestamp}"
                             else:
                                 order_no = f"FIRM-{customer.customer_code}-{timestamp}"
-                        else:
-                            order_no = f"FIRM-{customer.customer_code}-{timestamp}"
                     else:
                         # For Rieden, use order_date from raw_rieden
                         first_daily = dailies[0] if dailies else None
