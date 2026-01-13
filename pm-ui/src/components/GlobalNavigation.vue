@@ -148,7 +148,6 @@ const openHelp = () => {
 const userDisplayName = computed(() => {
   const user = authState.user
   if (!user) return 'ゲスト'
-  if (user.employee?.name) return user.employee.name
   const fullName = `${user.last_name || ''} ${user.first_name || ''}`.trim()
   return fullName || user.username || user.email || 'ユーザー'
 })

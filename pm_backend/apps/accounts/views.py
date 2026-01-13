@@ -6,55 +6,33 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-try:
-    from proposals.models import Employee, EmployeePermission
-except Exception:
-    Employee = None
-    EmployeePermission = None
+from .models import UserProfile
 
 
-def _employee_payload(user):
-    if not Employee:
-        return None
-
+def _profile_payload(user):
     try:
-        employee = (
-            Employee.objects.select_related('department')
-            .filter(user_id=user.id, is_active=True)
+        profile = (
+            UserProfile.objects.select_related('department')
+            .filter(user_id=user.id)
             .first()
         )
     except Exception:
         return None
 
-    if not employee:
+    if not profile:
         return None
 
-    permissions = []
-    if EmployeePermission:
-        try:
-            permissions = list(
-                EmployeePermission.objects.filter(employee_id=employee.id).values(
-                    'resource',
-                    'can_view',
-                    'can_edit',
-                )
-            )
-        except Exception:
-            permissions = []
-
     return {
-        'id': employee.id,
-        'code': employee.code,
-        'name': employee.name,
-        'email': employee.email,
-        'position': employee.position,
-        'role': employee.role,
-        'department': employee.department.name if employee.department_id else None,
-        'division': employee.division,
-        'group': employee.group_name,
-        'team': employee.team_name,
-        'employment_type': employee.employment_type,
-        'permissions': permissions,
+        'employee_code': profile.employee_code,
+        'position': profile.position,
+        'role': profile.role,
+        'employment_type': profile.employment_type,
+        'department_id': profile.department_id,
+        'department_name': profile.department.name if profile.department_id else None,
+        'division': profile.division,
+        'group': profile.group,
+        'team': profile.team,
+        'joined_on': profile.joined_on.isoformat() if profile.joined_on else None,
     }
 
 
@@ -67,7 +45,7 @@ def _user_payload(user):
         'last_name': user.last_name,
         'is_staff': user.is_staff,
         'is_superuser': user.is_superuser,
-        'employee': _employee_payload(user),
+        'profile': _profile_payload(user),
     }
 
 

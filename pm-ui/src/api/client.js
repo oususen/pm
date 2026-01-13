@@ -21,6 +21,7 @@ import { createLineRealtimeAPI } from './resources/lineRealtime'
 import { createProcessRealtimeAPI } from './resources/processRealtime'
 import { createBomServiceAPI } from './resources/bomService'
 import { createAuthAPI } from './resources/auth'
+import { createAccountsAPI } from './resources/accounts'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
@@ -98,4 +99,5 @@ export default {
   processRealtime: createProcessRealtimeAPI(client),
   bomService: createBomServiceAPI(client),
   auth: createAuthAPI(client),
+  accounts: createAccountsAPI(client),
 }
