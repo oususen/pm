@@ -70,3 +70,5 @@ create_userprofile_table.sql
 *.csv   
 
 *nul*
+*-cwd*
+.gitignore
