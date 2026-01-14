@@ -176,18 +176,20 @@ def update_line_backlog_production(process, product, qty, plan_date):
         return
 
     # 該当するLineBacklogレコードを取得または作成
+    # 実績は sequence_no=0 の基礎データレコードに保存
     backlog, created = LineBacklog.objects.get_or_create(
         line=line,
         process=process,
         product=product,
         plan_date=plan_date,
+        sequence_no=0,  # 実績は sequence_no=0 に保存
         defaults={
             'actual_qty': int(qty),
         }
     )
 
     if not created:
-        # 既存レコードの場合は加算
+        # 既存レコードに実績を加算
         backlog.actual_qty = (backlog.actual_qty or 0) + int(qty)
         backlog.save(update_fields=['actual_qty'])
 

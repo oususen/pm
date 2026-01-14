@@ -126,6 +126,8 @@ class LinePlanViewSet(viewsets.ModelViewSet):
         """
         ユーザーが入力した計画データをLinePlanに保存する
         期待payload: { line_id, items: [{product_id, process_id, plan_date, plan_qty?, sequence_no?}] }
+
+        保存前に、該当ライン・日付・製品のすべてのLinePlanとLineGanttPlanを削除してから新規作成する
         """
         line_id = request.data.get('line_id')
         items = request.data.get('items', [])
@@ -134,118 +136,127 @@ class LinePlanViewSet(viewsets.ModelViewSet):
         if not isinstance(items, list) or not items:
             return Response({'detail': 'items is required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        created = 0
-        updated = 0
-        deleted = 0
-        skipped = []
-
         from masters.models import Product
-        product_cache = {}
-
-        next_seq_cache = {}
+        from django.db import transaction
 
         def parse_plan_date(raw_date):
             if isinstance(raw_date, str):
                 return datetime.strptime(raw_date, '%Y-%m-%d').date()
             return raw_date
 
-        def get_next_sequence(plan_date_obj):
-            cache_key = (line_id, plan_date_obj)
-            if cache_key not in next_seq_cache:
-                max_seq = LinePlan.objects.filter(
-                    line_id=line_id,
-                    plan_date=plan_date_obj,
-                ).aggregate(Max('sequence_no'))['sequence_no__max'] or 0
-                next_seq_cache[cache_key] = int(max_seq) + 1
-            next_seq = next_seq_cache[cache_key]
-            next_seq_cache[cache_key] = next_seq + 1
-            return next_seq
-
+        # 対象となる日付と製品を抽出
+        affected_dates = set()
+        affected_products = set()
         for it in items:
-            try:
-                product_id = it.get('product_id')
-                process_id = it.get('process_id')
-                plan_date = it.get('plan_date')
-                if not product_id or not process_id or not plan_date:
-                    skipped.append({'item': it, 'reason': 'product_id/process_id/plan_date required'})
-                    continue
+            plan_date = it.get('plan_date')
+            product_id = it.get('product_id')
+            if plan_date and product_id:
+                affected_dates.add(parse_plan_date(plan_date))
+                affected_products.add(product_id)
 
-                plan_qty_value = Decimal(str(it.get('plan_qty') or 0))
-                plan_date_obj = parse_plan_date(plan_date)
+        created = 0
+        deleted_plan = 0
+        deleted_gantt = 0
+        deleted_backlog = 0
+        skipped = []
+        product_cache = {}
 
-                seq_in = it.get('sequence_no')
-                if seq_in in (None, '', 0):
-                    if plan_qty_value > 0:
-                        sequence_no = get_next_sequence(plan_date_obj)
-                    else:
+        # トランザクション内で削除→作成を実行
+        with transaction.atomic():
+            # 1. 該当ライン・日付・製品のLinePlanを削除
+            if affected_dates and affected_products:
+                deleted_plan_result = LinePlan.objects.filter(
+                    line_id=line_id,
+                    plan_date__in=affected_dates,
+                    product_id__in=affected_products
+                ).delete()
+                deleted_plan = deleted_plan_result[0] if deleted_plan_result else 0
+
+                # 2. 該当ライン・日付・製品のLineGanttPlanを削除
+                deleted_gantt_result = LineGanttPlan.objects.filter(
+                    line_id=line_id,
+                    plan_date__in=affected_dates,
+                    product_id__in=affected_products
+                ).delete()
+                deleted_gantt = deleted_gantt_result[0] if deleted_gantt_result else 0
+
+                # 3. 該当ライン・日付・製品のLineBacklogを削除（計画レコードのみ）
+                # ルール: sequence_no > 0 のレコードは計画レコードとして削除
+                #        sequence_no = 0 は在庫・需要・仕損などの基礎データとして保持
+                #        sequence_no = NULL は実績レコードとして保持
+                deleted_backlog_result = LineBacklog.objects.filter(
+                    line_id=line_id,
+                    plan_date__in=affected_dates,
+                    product_id__in=affected_products,
+                    sequence_no__gt=0  # sequence_no > 0 のみ削除（計画レコード）
+                ).delete()
+                deleted_backlog = deleted_backlog_result[0] if deleted_backlog_result else 0
+
+            # 4. 新規作成
+            for it in items:
+                try:
+                    product_id = it.get('product_id')
+                    process_id = it.get('process_id')
+                    plan_date = it.get('plan_date')
+                    if not product_id or not process_id or not plan_date:
+                        skipped.append({'item': it, 'reason': 'product_id/process_id/plan_date required'})
+                        continue
+
+                    plan_qty_value = Decimal(str(it.get('plan_qty') or 0))
+                    plan_date_obj = parse_plan_date(plan_date)
+
+                    # plan_qty <= 0 の場合はスキップ（既に削除済み）
+                    if plan_qty_value <= 0:
+                        continue
+
+                    seq_in = it.get('sequence_no')
+                    if seq_in in (None, '', 0):
                         skipped.append({'item': it, 'reason': 'sequence_no required'})
                         continue
-                else:
                     try:
                         sequence_no = int(seq_in)
                     except (TypeError, ValueError):
                         skipped.append({'item': it, 'reason': 'invalid sequence_no'})
                         continue
-                if plan_qty_value <= 0:
-                    deleted_count, _ = LinePlan.objects.filter(
+
+                    if product_id not in product_cache:
+                        try:
+                            product = Product.objects.get(id=product_id)
+                            product_cache[product_id] = product
+                        except Product.DoesNotExist:
+                            skipped.append({'item': it, 'reason': 'product not found'})
+                            continue
+                    product = product_cache[product_id]
+                    product_code = product.product_code
+
+                    qty_label = str(plan_qty_value).rstrip('0').rstrip('.')
+                    if '.' in qty_label:
+                        qty_label = qty_label.replace('.', 'p')
+
+                    plan_id = f"{product_code}_{plan_date_obj.strftime('%Y%m%d')}_{qty_label}_{sequence_no}"
+
+                    # 新規作成
+                    LinePlan.objects.create(
                         plan_date=plan_date_obj,
                         process_id=process_id,
                         product_id=product_id,
                         line_id=line_id,
+                        plan_qty=int(plan_qty_value),
+                        plan_id=plan_id,
                         sequence_no=sequence_no,
-                    ).delete()
-                    deleted += deleted_count
-                    continue
-
-                conflict = LinePlan.objects.filter(
-                    line_id=line_id,
-                    plan_date=plan_date_obj,
-                    sequence_no=sequence_no,
-                ).exclude(product_id=product_id, process_id=process_id).first()
-                if conflict:
-                    skipped.append({
-                        'item': it,
-                        'reason': 'sequence_no already used on this date',
-                        'conflict_product_id': conflict.product_id,
-                        'conflict_process_id': conflict.process_id,
-                    })
-                    continue
-
-                if product_id not in product_cache:
-                    try:
-                        product = Product.objects.get(id=product_id)
-                        product_cache[product_id] = product
-                    except Product.DoesNotExist:
-                        skipped.append({'item': it, 'reason': 'product not found'})
-                        continue
-                product = product_cache[product_id]
-                product_code = product.product_code
-
-                qty_label = str(plan_qty_value).rstrip('0').rstrip('.')
-                if '.' in qty_label:
-                    qty_label = qty_label.replace('.', 'p')
-
-                plan_id = f"{product_code}_{plan_date_obj.strftime('%Y%m%d')}_{qty_label}_{sequence_no}"
-
-                obj, is_created = LinePlan.objects.update_or_create(
-                    plan_date=plan_date_obj,
-                    process_id=process_id,
-                    product_id=product_id,
-                    line_id=line_id,
-                    sequence_no=sequence_no,
-                    defaults={
-                        'plan_qty': int(plan_qty_value),
-                        'plan_id': plan_id,
-                    }
-                )
-                if is_created:
+                    )
                     created += 1
-                else:
-                    updated += 1
-            except Exception as e:
-                return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({'created': created, 'updated': updated, 'deleted': deleted, 'skipped': skipped})
+                except Exception as e:
+                    return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'created': created,
+            'deleted_plan': deleted_plan,
+            'deleted_gantt': deleted_gantt,
+            'deleted_backlog': deleted_backlog,
+            'skipped': skipped
+        })
 
 
 class LineBacklogViewSet(viewsets.ModelViewSet):
