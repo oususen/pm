@@ -72,6 +72,14 @@
 - **作成タイミング**: 生産計画保存時（`LinePlan.save`）
   - ユーザーが入力した計画データから生成
   - 順序番号（1, 2, 3...）で複数ロットを管理
+  - **自動採番機能**: sequence_noが未指定の場合、日付ごとに自動的に連番を採番
+
+- **自動採番ルール**:
+  - `sequence_no` が `None`、空文字、または `0` の場合:
+    - `plan_qty > 0` の場合: 日付ごとに自動的に 1, 2, 3... と採番
+    - `plan_qty = 0` の場合: エラーとしてスキップ（削除扱い）
+  - `sequence_no` が指定されている場合: 指定された値をそのまま使用
+  - 自動採番は `get_next_sequence()` 関数で実装（日付×ラインごとにキャッシュ管理）
 
 - **削除タイミング**: 計画変更時に削除・再作成が可能
   - 計画保存時に `sequence_no > 0` のレコードを削除
@@ -115,13 +123,41 @@ LineBacklog.objects.filter(
 ).delete()
 
 # 4. 新規作成
-LinePlan.objects.create(...)
+# 自動採番機能付き
+def get_next_sequence(plan_date_obj):
+    """自動採番: 日付ごとに連番を生成"""
+    cache_key = (line_id, plan_date_obj)
+    if cache_key not in next_seq_cache:
+        next_seq_cache[cache_key] = 1
+    next_seq = next_seq_cache[cache_key]
+    next_seq_cache[cache_key] = next_seq + 1
+    return next_seq
+
+# sequence_no未指定時の処理
+seq_in = it.get('sequence_no')
+if seq_in in (None, '', 0):
+    # sequence_noが指定されていない場合は自動採番
+    if plan_qty_value > 0:
+        sequence_no = get_next_sequence(plan_date_obj)
+    else:
+        # plan_qty = 0 の場合はスキップ（削除扱い）
+        continue
+else:
+    # sequence_noが指定されている場合はそのまま使用
+    sequence_no = int(seq_in)
+
+LinePlan.objects.create(..., sequence_no=sequence_no)
 ```
 
 **重要**:
 - `sequence_no__gt=0` により、基礎データレコード（sequence_no=0）を保護
 - 計画レコード（sequence_no > 0）のみ削除・再作成
 - sequence_no=0 のレコードには需要・実績・在庫データが保存されているため削除禁止
+
+**自動採番の利点**:
+- ユーザーがsequence_noを指定し忘れても保存可能
+- 日付ごとに自動的に1から連番を採番
+- 手動で順序を指定したい場合は明示的に指定可能
 
 ### 2. 工程作業実績記録時（ProcessRealtime）
 
@@ -224,6 +260,7 @@ WHERE line_id = 11
 | 日付 | 版 | 変更内容 | 変更者 |
 |------|-----|----------|--------|
 | 2026-01-14 | 1.0 | 初版作成 | Claude Sonnet 4.5 |
+| 2026-01-14 | 1.1 | 自動採番機能の説明を追加 | Claude Sonnet 4.5 |
 
 ## 関連ドキュメント
 
