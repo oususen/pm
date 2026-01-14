@@ -516,7 +516,11 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
 
         is_final = bool(getattr(sample.product, 'is_final_product', False))
         if is_final:
-            planned_shipment = order_total
+            firm_qty = firm_map.get((sample.product_id, plan_date), Decimal('0'))
+            if plan_date <= today:
+                planned_shipment = firm_qty
+            else:
+                planned_shipment = firm_qty if firm_qty > 0 else Decimal(str(order_total))
         else:
             planned_shipment = _calculate_parent_planned_shipment(sample, today, shift_working_days)
         planned_shipment = int(planned_shipment or 0)
