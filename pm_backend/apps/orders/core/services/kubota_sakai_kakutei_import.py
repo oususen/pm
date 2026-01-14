@@ -54,10 +54,10 @@ class KubotaSakaiKakuteiImportService:
         return None, None
 
     def parse_date_from_mmdd(self, date_str):
-        """Parse date string in MMDD format (4 digits) with year inference
+        """Parse date string in MMDD format (3-4 digits) with year inference
 
         Args:
-            date_str: Date string like "1209" (month=12, day=09)
+            date_str: Date string like "1209" (month=12, day=09) or "121" (month=01, day=21)
 
         Returns:
             datetime.date or None
@@ -72,6 +72,10 @@ class KubotaSakaiKakuteiImportService:
             return None
 
         date_str = str(date_str).strip()
+
+        # Handle 3-digit format (MDD) by padding with leading zero to make it MMDD
+        if len(date_str) == 3 and date_str.isdigit():
+            date_str = '0' + date_str
 
         # MMDD format (4 digits) - infer year based on current date
         if len(date_str) == 4 and date_str.isdigit():
