@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, date
 from decimal import Decimal
 from typing import Dict, List, Optional, Tuple
 
@@ -506,7 +506,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
         if obj_step_no >= current_step_no:
             grouped[key] = (obj, obj_step_no)
     base_plans = [item[0] for item in grouped.values()]
-    base_plans.sort(key=lambda o: (o.plan_date, -(o.sequence_no or 0), o.product_id))
+    base_plans.sort(key=lambda o: (o.plan_date, (o.sequence_no or 0), o.product_id))
     logger.info('gantt_plans: base_plans grouped=%s', len(base_plans))
 
     if clear_existing:
@@ -536,6 +536,11 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
             break
     if not line_earliest_start:
         line_earliest_start = datetime.combine(start_date, time(8, 0))
+
+    # Track the end time of the previous sequence_no for each plan_date
+    # Key: plan_date, Value: end_datetime of the last processed sequence
+    previous_sequence_end_by_date: Dict[date, datetime] = {}
+
     plans = []
     for obj in base_plans:
         product = obj.product
@@ -631,8 +636,16 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
             day_target_time_obj = target_time_obj
             day_adjust_to_break_end = adjust_to_break_end
 
+        current_sequence_no = obj.sequence_no or 0
+
+        # For sequence_no > 1, start after the previous sequence's end time
+        if current_sequence_no > 1 and obj.plan_date in previous_sequence_end_by_date:
+            prev_end = previous_sequence_end_by_date[obj.plan_date]
+            # Start from the previous sequence's end time (resource scheduling will handle conflicts)
+            current_start_time = prev_end
+
         # If sequence_no=1 and a target time is specified, anchor the final process start time
-        if (obj.sequence_no or 0) == 1 and day_target_time_obj:
+        if current_sequence_no == 1 and day_target_time_obj:
             anchor_dt = datetime.combine(obj.plan_date, day_target_time_obj)
 
             # Validate if anchor_dt is within working hours
@@ -742,6 +755,9 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
 
         start_dt = processes_plan[0]['start_time'] if processes_plan else current_start_time
         end_dt = processes_plan[-1]['end_time'] if processes_plan else current_start_time
+
+        # Track the end time for this plan_date so next sequence_no starts after this
+        previous_sequence_end_by_date[obj.plan_date] = end_dt
 
         serialized_plan = []
         for pp in processes_plan:
