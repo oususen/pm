@@ -29,7 +29,7 @@ class Migration(migrations.Migration):
             },
         ),
         migrations.AddIndex(
-            model_name='linedailyschedule setting',
+            model_name='linedailyschedulesetting',
             index=models.Index(fields=['line', 'plan_date'], name='line_daily_line_id_plan_date_idx'),
         ),
         migrations.AlterUniqueTogether(
