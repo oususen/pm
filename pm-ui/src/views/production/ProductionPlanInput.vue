@@ -36,6 +36,25 @@
         </div>
       </div>
       <div class="toolbar-right">
+        <div class="field">
+          <label>デフォルト開始時刻</label>
+          <input
+            type="text"
+            inputmode="numeric"
+            :value="finalProcessStartTime"
+            @input="onDefaultTimeInput($event.target.value)"
+            @blur="onDefaultTimeInput($event.target.value, true)"
+            placeholder="00:00"
+            maxlength="5"
+            title="日別設定がない場合に使用される開始時刻"
+          />
+        </div>
+        <div class="field checkbox-field">
+          <label>
+            <input type="checkbox" v-model="adjustToBreakEnd" />
+            休憩明けに補正
+          </label>
+        </div>
         <button class="btn" @click="addRow">新規行追加</button>
         <button class="btn" @click="resetRows" :disabled="!rows.length">クリア</button>
         <button class="btn" @click="savePlan" :disabled="!rows.length || !selectedLine">保存</button>
@@ -63,7 +82,20 @@
               class="date-head day-end"
               :class="c.dayClass"
             >
-              {{ c.label }}
+              <div class="date-header-content-horizontal">
+                <span class="date-label">{{ c.label }}</span>
+                <input
+                  type="text"
+                  inputmode="numeric"
+                  :value="dailySettings[c.key]?.final_process_start_time || ''"
+                  @input="onDailySettingTimeChange(c.key, $event.target.value)"
+                  @blur="onDailySettingTimeBlur(c.key)"
+                  class="time-input-inline"
+                  placeholder="00:00"
+                  maxlength="5"
+                  title="最終工程開始時刻（未設定時はデフォルト値を使用）"
+                />
+              </div>
             </th>
           </tr>
           <tr class="head-level2">
@@ -261,11 +293,14 @@ const showProcessGantt = ref(false)
 const showProcessLoad = ref(false)
 const ganttReloadKey = ref(0)
 const ganttRef = ref(null)
+const finalProcessStartTime = ref('08:00')
+const adjustToBreakEnd = ref(true)
 let tempId = 1
 let lotTempId = 1
 const processLoadLoading = ref(false)
 const processLoadRows = ref([])
 const processLoadMessage = ref('')
+const dailySettings = ref({})
 
 const endDate = computed(() => {
   const d = new Date(startDate.value)
@@ -371,6 +406,15 @@ const savePlan = async () => {
     alert('ラインを選択してください。')
     return
   }
+
+  // 日別設定を先に保存
+  try {
+    await saveDailySettings()
+  } catch (e) {
+    console.error('日別設定の保存に失敗しました', e)
+    // 日別設定の保存失敗は警告のみで続行
+  }
+
   const items = []
   console.log('保存対象の行数:', rows.value.length)
   rows.value.forEach((r) => {
@@ -437,6 +481,8 @@ const savePlan = async () => {
         start_date: startDate.value,
         end_date: endDate.value,
         clear_existing: true,
+        final_process_start_time: finalProcessStartTime.value,
+        adjust_to_break_end: adjustToBreakEnd.value,
       })
       // 工程ガントを再読み込み
       ganttReloadKey.value += 1
@@ -445,7 +491,12 @@ const savePlan = async () => {
       }
     } catch (expandError) {
       console.error('工程展開/ガント再計算エラー', expandError)
-      alert('保存は完了しましたが、工程展開/ガント再計算に失敗しました。')
+      let msg = '工程展開/ガント再計算に失敗しました。'
+      if (expandError.response && expandError.response.data) {
+        // DRFのValidationErrorなどは配列やオブジェクトで返ることがあるため文字列化
+        msg += '\n' + (Array.isArray(expandError.response.data) ? expandError.response.data.join('\n') : JSON.stringify(expandError.response.data, null, 2))
+      }
+      alert(`保存は完了しましたが、エラーが発生しました。\n${msg}`)
       return
     }
     alert(`保存しました。\n作成: ${res.data.created}件, 更新: ${res.data.updated}件`)
@@ -927,10 +978,111 @@ const doPickup = async () => {
     rows.value = Array.from(grouped.values())
 
     if (!rows.value.length) addRow()
+
+    // 日別設定を読み込み
+    await loadDailySettings()
   } catch (e) {
     console.error('バックログ取り込みエラー', e)
     alert('取り込みに失敗しました。')
   }
+}
+
+const loadDailySettings = async () => {
+  if (!selectedLine.value) return
+  try {
+    const res = await api.lineDailyScheduleSettings.getLineDailyScheduleSettings({
+      line: selectedLine.value,
+      plan_date__gte: startDate.value,
+      plan_date__lte: endDate.value,
+    })
+    const settings = res.data?.results || res.data || []
+    const settingsMap = {}
+    settings.forEach((s) => {
+      settingsMap[s.plan_date] = {
+        id: s.id,
+        final_process_start_time: s.final_process_start_time,
+        adjust_to_break_end: s.adjust_to_break_end,
+      }
+    })
+    dailySettings.value = settingsMap
+  } catch (e) {
+    console.error('日別設定読み込みエラー', e)
+  }
+}
+
+const onDailySettingTimeChange = (dateKey, timeValue) => {
+  if (!dailySettings.value[dateKey]) {
+    dailySettings.value[dateKey] = {}
+  }
+  const normalized = normalizeTimeInput(timeValue)
+  dailySettings.value[dateKey].final_process_start_time = normalized || null
+}
+
+const onDailySettingTimeBlur = async (dateKey) => {
+  // 時刻入力欄から離れた時に自動保存
+  if (!selectedLine.value) return
+  const setting = dailySettings.value[dateKey]
+  if (!setting || !setting.final_process_start_time) return
+  const normalized = normalizeTimeInput(setting.final_process_start_time, true)
+  if (!normalized) return
+  setting.final_process_start_time = normalized
+
+  try {
+    await api.lineDailyScheduleSettings.bulkSaveLineDailyScheduleSettings([{
+      line: selectedLine.value,
+      plan_date: dateKey,
+      final_process_start_time: normalized,
+      adjust_to_break_end: adjustToBreakEnd.value,
+    }])
+    console.log(`日別設定を保存しました: ${dateKey} - ${setting.final_process_start_time}`)
+  } catch (e) {
+    console.error('日別設定の保存に失敗しました', e)
+  }
+}
+
+const saveDailySettings = async () => {
+  if (!selectedLine.value) return
+  const settings = []
+  Object.keys(dailySettings.value).forEach((dateKey) => {
+    const setting = dailySettings.value[dateKey]
+    if (setting.final_process_start_time) {
+      settings.push({
+        line: selectedLine.value,
+        plan_date: dateKey,
+        final_process_start_time: setting.final_process_start_time,
+        adjust_to_break_end: adjustToBreakEnd.value,
+      })
+    }
+  })
+  if (settings.length === 0) return
+  try {
+    await api.lineDailyScheduleSettings.bulkSaveLineDailyScheduleSettings(settings)
+  } catch (e) {
+    console.error('日別設定保存エラー', e)
+    throw e
+  }
+}
+
+const normalizeTimeInput = (value, padOnBlur = false) => {
+  const raw = String(value || '').replace(/[^0-9]/g, '')
+  if (!raw) return ''
+  const digits = raw.slice(0, 4)
+  if (digits.length <= 2) {
+    const hours = digits
+    return padOnBlur ? `${hours.padStart(2, '0')}:00` : hours
+  }
+  if (digits.length === 3) {
+    const hours = digits.slice(0, 1)
+    const mins = digits.slice(1, 3)
+    return padOnBlur ? `${hours.padStart(2, '0')}:${mins}` : `${hours}:${mins}`
+  }
+  const hours = digits.slice(0, 2)
+  const mins = digits.slice(2, 4)
+  return `${hours}:${mins}`
+}
+
+const onDefaultTimeInput = (value, padOnBlur = false) => {
+  finalProcessStartTime.value = normalizeTimeInput(value, padOnBlur)
 }
 
 </script>
@@ -970,6 +1122,16 @@ const doPickup = async () => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+.field.checkbox-field {
+  justify-content: flex-end;
+  padding-bottom: 6px;
+}
+.field.checkbox-field label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
 }
 .field label {
   font-size: 12px;
@@ -1074,12 +1236,35 @@ thead tr.head-level2 th.sticky-col {
 .date-head {
   text-align: center;
   font-weight: 700;
-  min-width: 400px; /* 5列ぶんの幅をさらに広げて文字潰れを防ぐ */
+  /* min-widthを削除して自然な幅に */
+}
+.date-header-content-horizontal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.date-label {
+  font-weight: 700;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.time-input-inline {
+  padding: 1px 2px;
+  font-size: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 2px;
+  width: 68px;
+  min-width: 68px;
+  max-width: 68px;
+  text-align: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
 }
 .mini {
   text-align: center;
   font-size: 12px;
-  min-width: 80px; /* サブ列の最小幅を広げて視認性を上げる */
+  min-width: 60px; /* サブ列の幅を縮小 */
 }
 .day-end {
   border-right: 4px solid #a2b0c5 !important;

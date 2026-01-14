@@ -17,6 +17,7 @@ import { createLineDemandsAPI } from './resources/lineDemands'
 import { createLinePlansAPI } from './resources/linePlans'
 import { createLineBacklogsAPI } from './resources/lineBacklogs'
 import { createLineGanttPlansAPI } from './resources/lineGanttPlans'
+import { createLineDailyScheduleSettingsAPI } from './resources/lineDailyScheduleSettings'
 import { createLineRealtimeAPI } from './resources/lineRealtime'
 import { createProcessRealtimeAPI } from './resources/processRealtime'
 import { createBomServiceAPI } from './resources/bomService'
@@ -97,6 +98,7 @@ export default {
   lineBacklogs: createLineBacklogsAPI(client),
   shipmentActuals: createShipmentActualsAPI(client),
   lineGanttPlans: createLineGanttPlansAPI(client),
+  lineDailyScheduleSettings: createLineDailyScheduleSettingsAPI(client),
   lineRealtime: createLineRealtimeAPI(client),
   processRealtime: createProcessRealtimeAPI(client),
   bomService: createBomServiceAPI(client),
