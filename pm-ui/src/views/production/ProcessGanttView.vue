@@ -87,7 +87,6 @@
             >
               <div class="gantt-row-label">
                 <div class="product-code">{{ item.product_code }}</div>
-                <div class="product-qty">計画: {{ item.plan_qty }}</div>
               </div>
               <div class="gantt-row-bars" :style="{ width: timelineWidthPx + 'px' }">
                 <div
@@ -1110,7 +1109,7 @@ onMounted(async () => {
 .gantt-row {
   display: flex;
   border-bottom: 1px solid #e5e7eb;
-  min-height: 42px;
+  min-height: 23px;
   position: relative;
 }
 .gantt-row-label {
@@ -1131,19 +1130,15 @@ onMounted(async () => {
   font-weight: 700;
   color: #111827;
 }
-.product-qty {
-  font-size: 11px;
-  color: #374151;
-}
 .gantt-row-bars {
   position: relative;
   flex: 1;
-  min-height: 36px;
+  min-height: 20px;
 }
 .gantt-bar-wrapper {
   position: absolute;
-  top: 6px;
-  height: 28px;
+  top: 3px;
+  height: 15px;
   display: flex;
   align-items: center;
   cursor: grab;

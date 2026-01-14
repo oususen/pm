@@ -208,8 +208,11 @@
     <div class="gantt-section" v-if="showProcessGantt">
       <div class="process-header">
         <div class="process-info">
-          <div class="process-title">工程ガント（勤務時間のみ表示）</div>
-          <div class="process-meta">ライン {{ selectedLine || '' }} ／ 期間 {{ startDate }} 〜 {{ endDate }}</div>
+          <div class="process-title">
+            工程ガント（勤務時間のみ表示）
+            <span class="process-title-inline">ライン {{ selectedLine || '' }}</span>
+            <span class="process-title-inline">期間 {{ startDate }} ～ {{ endDate }}</span>
+          </div>
         </div>
         <div class="process-actions">
           <button class="btn" @click="saveGanttSchedule" :disabled="!selectedLine">工程ガント保存</button>
@@ -1224,7 +1227,7 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
 
 <style scoped>
 .plan-container {
-  padding: 8px 10px 14px;
+  padding: 6px 8px 10px;
   background: #eef2f6;
   font-size: 13px;
   font-family: "Noto Sans JP", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
@@ -1240,7 +1243,7 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
   gap: 8px;
   background: #e1e8f4;
   border: 1px solid #c5cfde;
-  padding: 8px;
+  padding: 6px;
   border-radius: 4px;
 }
 .toolbar-left {
@@ -1256,11 +1259,11 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
 .field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 .field.checkbox-field {
   justify-content: flex-end;
-  padding-bottom: 6px;
+  padding-bottom: 4px;
 }
 .field.checkbox-field label {
   display: flex;
@@ -1280,9 +1283,9 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
   border-radius: 3px;
 }
 .grid-wrapper {
-  margin-top: 10px;
+  margin-top: 6px;
   flex: 1;
-  min-height: 0;
+  min-height: 200px;
   overflow: auto;
   background: #fff;
   border: 1px solid #c5cfde;
@@ -1297,7 +1300,7 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
 .plan-grid th,
 .plan-grid td {
   border: 1px solid #d7dfe8;
-  padding: 4px 6px;
+  padding: 3px 6px;
   white-space: nowrap;
   font-size: 13px;
   font-weight: 500;
@@ -1306,7 +1309,7 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
 .lot-stack {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 .lot-item {
   display: flex;
@@ -1535,7 +1538,7 @@ thead .sticky-col {
 .footer-actions {
   display: flex;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 6px;
 }
 .btn,
 .btn-secondary {
@@ -1575,7 +1578,7 @@ thead .sticky-col {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 .process-info {
   display: flex;
@@ -1585,6 +1588,11 @@ thead .sticky-col {
 .process-title {
   font-weight: 700;
   font-size: 14px;
+}
+.process-title-inline {
+  margin-left: 8px;
+  font-weight: 600;
+  color: #111827;
 }
 .process-actions {
   display: flex;
@@ -1695,16 +1703,16 @@ thead .sticky-col {
   white-space: nowrap;
 }
 .gantt-section {
-  margin-top: 8px;
-  padding: 10px;
+  margin-top: 6px;
+  padding: 8px;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #fff;
 }
 
 .load-section {
-  margin-top: 8px;
-  padding: 10px;
+  margin-top: 6px;
+  padding: 8px;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #fff;
