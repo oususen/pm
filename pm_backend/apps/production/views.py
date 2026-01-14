@@ -15,11 +15,13 @@ from .models_line_backlog import LineBacklog
 from .models_line_plan import LinePlan
 from .models_production import StockAllocation, ProductionOrder, ProcessActual
 from .models_line_gantt_plan import LineGanttPlan
+from .models_line_daily_schedule_setting import LineDailyScheduleSetting
 from .serializers import (
     LineDemandSerializer,
     LineBacklogSerializer,
     LinePlanSerializer,
     LineGanttPlanSerializer,
+    LineDailyScheduleSettingSerializer,
     StockAllocationSerializer,
     ProductionOrderSerializer,
     ProductionOrderListSerializer,
@@ -1732,16 +1734,18 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
     def generate(self, request):
         """
         ガント用ライン計画を生成して保存する。
-        期待payload: { line_id, start_date, end_date, clear_existing?: bool }
+        期待payload: { line_id, start_date, end_date, clear_existing?: bool, final_process_start_time?: str, adjust_to_break_end?: bool }
         """
         line_id = request.data.get('line_id')
         start_date = request.data.get('start_date')
         end_date = request.data.get('end_date')
         clear_existing = bool(request.data.get('clear_existing'))
+        final_process_start_time = request.data.get('final_process_start_time')
+        adjust_to_break_end = request.data.get('adjust_to_break_end', False)
 
         logger.info(
-            'line_gantt_plans.generate: line_id=%s start=%s end=%s clear=%s',
-            line_id, start_date, end_date, clear_existing
+            'line_gantt_plans.generate: line_id=%s start=%s end=%s clear=%s final_time=%s adjust=%s',
+            line_id, start_date, end_date, clear_existing, final_process_start_time, adjust_to_break_end
         )
 
         if not line_id:
@@ -1754,7 +1758,14 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
         except (TypeError, ValueError):
             return Response({'detail': 'line_id must be numeric'}, status=status.HTTP_400_BAD_REQUEST)
 
-        plans = generate_line_gantt_plans(line_id, start_date, end_date, clear_existing=clear_existing)
+        plans = generate_line_gantt_plans(
+            line_id,
+            start_date,
+            end_date,
+            clear_existing=clear_existing,
+            final_process_start_time=final_process_start_time,
+            adjust_to_break_end=adjust_to_break_end
+        )
         logger.info('line_gantt_plans.generate: plans=%s', len(plans))
 
         upserted = []
@@ -2153,3 +2164,55 @@ class ProcessActualViewSet(viewsets.ModelViewSet):
     search_fields = ['production_order__order_no', 'process__process_code', 'operator']
     ordering_fields = ['completed_at', 'actual_duration_min', 'created_at']
     ordering = ['-completed_at']
+
+
+class LineDailyScheduleSettingViewSet(viewsets.ModelViewSet):
+    """ライン別日次スケジュール設定ViewSet"""
+    queryset = LineDailyScheduleSetting.objects.all().select_related('line')
+    serializer_class = LineDailyScheduleSettingSerializer
+    pagination_class = None
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['line', 'plan_date']
+    ordering_fields = ['plan_date', 'line']
+    ordering = ['plan_date', 'line']
+
+    @action(detail=False, methods=['post'])
+    def bulk_save(self, request):
+        """複数日の設定を一括保存"""
+        settings_data = request.data.get('settings', [])
+        if not settings_data:
+            return Response({'error': 'settings is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        created_count = 0
+        updated_count = 0
+        errors = []
+
+        for setting_data in settings_data:
+            line_id = setting_data.get('line')
+            plan_date = setting_data.get('plan_date')
+
+            if not line_id or not plan_date:
+                errors.append({'error': 'line and plan_date are required', 'data': setting_data})
+                continue
+
+            try:
+                obj, created = LineDailyScheduleSetting.objects.update_or_create(
+                    line_id=line_id,
+                    plan_date=plan_date,
+                    defaults={
+                        'final_process_start_time': setting_data.get('final_process_start_time'),
+                        'adjust_to_break_end': setting_data.get('adjust_to_break_end', True),
+                    }
+                )
+                if created:
+                    created_count += 1
+                else:
+                    updated_count += 1
+            except Exception as e:
+                errors.append({'error': str(e), 'data': setting_data})
+
+        return Response({
+            'created': created_count,
+            'updated': updated_count,
+            'errors': errors
+        }, status=status.HTTP_200_OK if not errors else status.HTTP_207_MULTI_STATUS)

@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Tuple
 
 from django.db.models import Q
 import logging
+from rest_framework.exceptions import ValidationError
 
 from masters.models import RoutingStep, ProcessCycleTime, Line, Calendar, CalendarDay, WorkPattern, BreakTime, BOM, BOMItem, Product
 from ..models_line_backlog import LineBacklog
@@ -267,6 +268,7 @@ def _build_process_specs(steps: List[RoutingStep], plan_qty: Decimal, plan_date,
             output_product_id=output_product.id if output_product else None,
             output_product_code=output_product.product_code if output_product else '',
             output_product_name=output_product.product_name if output_product else '',
+            transfer_time_minutes=float(getattr(step, 'transfer_time_minutes', 0.0)),
         ))
     return specs
 
@@ -364,8 +366,41 @@ def _latest_conflict_start(lanes: List[List[Dict]], start: datetime, end: dateti
     return latest
 
 
-def _reserve_process_slot(calendar: LineWorkCalendar, target_end_time: datetime, minutes: float,
-                          lanes: List[List[Dict]]):
+def _latest_conflict_end(lanes: List[List[Dict]], start: datetime, end: datetime) -> Optional[datetime]:
+    latest = None
+    for lane in lanes:
+        for item in lane:
+            if _overlaps(start, end, item):
+                if latest is None or item['end'] > latest:
+                    latest = item['end']
+    return latest
+
+
+def _reserve_process_slot_forward(calendar: LineWorkCalendar, target_start_time: datetime, minutes: float,
+                                  lanes: List[List[Dict]]):
+    start_time = target_start_time
+    attempts = 0
+    while True:
+        end_time = calendar.add_working_minutes(start_time, minutes)
+        lane_idx = _find_available_lane(lanes, start_time, end_time)
+        if lane_idx is not None:
+            return start_time, end_time, lane_idx
+
+        conflict_end = _latest_conflict_end(lanes, start_time, end_time)
+        if conflict_end and conflict_end > start_time:
+            start_time = conflict_end
+        else:
+            start_time = calendar.add_working_minutes(start_time, 1)
+
+        attempts += 1
+        if attempts > 10000:
+            logger.warning('gantt_plans: no available slot found after %s attempts for %s minutes from %s', attempts, minutes, target_start_time)
+            # Fallback: return the slot on the first lane, creating an overlap
+            return start_time, calendar.add_working_minutes(start_time, minutes), 0
+
+
+def _reserve_process_slot_backward(calendar: LineWorkCalendar, target_end_time: datetime, minutes: float,
+                                   lanes: List[List[Dict]]):
     end_time = target_end_time
     attempts = 0
     while True:
@@ -384,10 +419,36 @@ def _reserve_process_slot(calendar: LineWorkCalendar, target_end_time: datetime,
             return start_time, end_time, 0
 
 
-def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing: bool = False):
+def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing: bool = False, final_process_start_time: str = None, adjust_to_break_end: bool = False):
+    if isinstance(start_date, str):
+        start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+    if isinstance(end_date, str):
+        end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+
+    target_time_obj = None
+    if final_process_start_time:
+        try:
+            target_time_obj = datetime.strptime(final_process_start_time, '%H:%M').time()
+        except ValueError:
+            logger.warning('Invalid time format for final_process_start_time: %s', final_process_start_time)
+
     line = Line.objects.filter(id=line_id).first()
     if not line:
         raise ValueError('line_id not found')
+
+    # 日別設定を読み込み
+    from ..models_line_daily_schedule_setting import LineDailyScheduleSetting
+    daily_settings_qs = LineDailyScheduleSetting.objects.filter(
+        line_id=line_id,
+        plan_date__gte=start_date,
+        plan_date__lte=end_date,
+    )
+    daily_settings_map = {}
+    for setting in daily_settings_qs:
+        daily_settings_map[setting.plan_date] = {
+            'final_process_start_time': setting.final_process_start_time,
+            'adjust_to_break_end': setting.adjust_to_break_end,
+        }
 
     calendar = LineWorkCalendar(line)
     qs_all = LineBacklog.objects.filter(
@@ -461,6 +522,20 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
             LineGanttPlan.objects.filter(plan_id__in=plan_ids).delete()
 
     resource_schedules: Dict[int, List[List[Dict]]] = {}
+
+    # Find the earliest start time for the entire planning horizon
+    line_earliest_start = None
+    check_date = start_date
+    while not line_earliest_start:
+        segments = calendar.get_segments(check_date)
+        if segments:
+            line_earliest_start = segments[0][0]
+            break
+        check_date += timedelta(days=1)
+        if check_date > end_date + timedelta(days=30):  # Safety break
+            break
+    if not line_earliest_start:
+        line_earliest_start = datetime.combine(start_date, time(8, 0))
     plans = []
     for obj in base_plans:
         product = obj.product
@@ -545,18 +620,62 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 'coproduct_child_id': None,
             })
 
-        current_end_time = calendar.get_day_end(obj.plan_date)
+        current_start_time = line_earliest_start
+
+        # 日別設定があればそれを優先、なければグローバル設定を使用
+        daily_setting = daily_settings_map.get(obj.plan_date)
+        if daily_setting and daily_setting['final_process_start_time']:
+            day_target_time_obj = daily_setting['final_process_start_time']
+            day_adjust_to_break_end = daily_setting['adjust_to_break_end']
+        else:
+            day_target_time_obj = target_time_obj
+            day_adjust_to_break_end = adjust_to_break_end
+
+        # If sequence_no=1 and a target time is specified, anchor the final process start time
+        if (obj.sequence_no or 0) == 1 and day_target_time_obj:
+            anchor_dt = datetime.combine(obj.plan_date, day_target_time_obj)
+
+            # Validate if anchor_dt is within working hours
+            segments = calendar.get_segments(obj.plan_date) or []
+            found_valid_slot = False
+            for i, (seg_start, seg_end) in enumerate(segments):
+                if seg_start <= anchor_dt <= seg_end:
+                    found_valid_slot = True
+                    break
+                if day_adjust_to_break_end and i + 1 < len(segments):
+                    next_seg_start = segments[i+1][0]
+                    if seg_end < anchor_dt < next_seg_start:
+                        logger.info('Adjusting anchor time from %s to break end %s', anchor_dt, next_seg_start)
+                        anchor_dt = next_seg_start
+                        found_valid_slot = True
+                        break
+
+            if not found_valid_slot:
+                error_msg = f"指定された最終工程開始時刻 ({day_target_time_obj}) はラインの稼働時間外です。"
+                raise ValidationError(error_msg)
+
+            # Back-calculate from the last process start time to the first process start time
+            # Start(k+1) >= Start(k) + Cycle(k) + Gap(k)  =>  Start(k) = Start(k+1) - (Cycle(k) + Gap(k))
+            temp_dt = anchor_dt
+            for k in range(len(scheduled_specs) - 2, -1, -1):
+                spec_entry = scheduled_specs[k]
+                cycle = spec_entry['cycle_time_minutes']
+                gap = spec_entry['spec'].transfer_time_minutes
+                temp_dt = calendar.subtract_working_minutes(temp_dt, cycle + gap)
+            current_start_time = temp_dt
+
         processes_plan = []
 
-        reversed_specs = list(reversed(scheduled_specs))
-        for i, entry in enumerate(reversed_specs):
+        for i, entry in enumerate(scheduled_specs):
             spec = entry['spec']
             process_qty = entry['process_qty']
             total_minutes = entry['total_minutes']
             effective_minutes = entry['effective_minutes']
-            end_time = current_end_time
-            lanes = _ensure_resource_lanes(resource_schedules, spec.process_id, 1)
-            start_time, end_time, lane_idx = _reserve_process_slot(calendar, end_time, effective_minutes, lanes)
+
+            lanes = _ensure_resource_lanes(resource_schedules, spec.process_id, spec.parallel_count)
+            start_time, end_time, lane_idx = _reserve_process_slot_forward(
+                calendar, current_start_time, effective_minutes, lanes
+            )
             lanes[lane_idx].append({
                 'start': start_time,
                 'end': end_time,
@@ -596,29 +715,33 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 'transfer_time_minutes': spec.transfer_time_minutes,
                 'is_continuous': True,
             }
-            processes_plan.insert(0, process_plan)
+            processes_plan.append(process_plan)
 
-            if i + 1 < len(reversed_specs):
-                prev_entry = reversed_specs[i + 1]
-                prev_spec = prev_entry['spec']
-                prev_effective = prev_entry['effective_minutes']
-                gap_minutes = prev_spec.transfer_time_minutes
-                limit_e2e = calendar.subtract_working_minutes(
-                    process_plan['end_time'],
-                    entry['cycle_time_minutes'] + gap_minutes
-                )
-                limit_s2s_start = calendar.subtract_working_minutes(
-                    process_plan['start_time'],
-                    prev_entry['cycle_time_minutes'] + gap_minutes
-                )
-                limit_s2s_end = calendar.add_working_minutes(
-                    limit_s2s_start,
-                    prev_effective
-                )
-                current_end_time = min(limit_e2e, limit_s2s_end)
+            # Calculate start time for the next process, allowing for pipelining
+            if i + 1 < len(scheduled_specs):
+                next_entry = scheduled_specs[i+1]
+                next_cycle_time = next_entry['cycle_time_minutes']
+                next_effective_minutes = next_entry['effective_minutes']
 
-        start_dt = processes_plan[0]['start_time'] if processes_plan else current_end_time
-        end_dt = processes_plan[-1]['end_time'] if processes_plan else current_end_time
+                gap_minutes = spec.transfer_time_minutes
+
+                # Start-to-Start constraint: Next process can start after the first unit of the current
+                # process is finished and transferred.
+                s2s_limit = calendar.add_working_minutes(start_time, spec.cycle_time_minutes + gap_minutes)
+
+                # End-to-End constraint: The end of the next process must be after the end of the current
+                # process (plus transfer and processing time for the last unit). This ensures the last
+                # piece from the current process can be processed by the next process before it finishes.
+                # Formula: end_time(i+1) >= end_time(i) + cycle_time(i+1) + gap
+                # Rearranged for start_time(i+1):
+                # start_time(i+1) >= (end_time(i) + cycle_time(i+1) + gap) - duration(i+1)
+                target_end_for_e2e = calendar.add_working_minutes(end_time, next_cycle_time + gap_minutes)
+                e2e_start_limit = calendar.subtract_working_minutes(target_end_for_e2e, next_effective_minutes)
+
+                current_start_time = max(s2s_limit, e2e_start_limit)
+
+        start_dt = processes_plan[0]['start_time'] if processes_plan else current_start_time
+        end_dt = processes_plan[-1]['end_time'] if processes_plan else current_start_time
 
         serialized_plan = []
         for pp in processes_plan:

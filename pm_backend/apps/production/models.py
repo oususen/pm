@@ -1,6 +1,9 @@
 from django.db import models
 from masters.models import Line, Product, RoutingStep
 
+# Import all models to ensure they're registered with Django
+from .models_line_daily_schedule_setting import LineDailyScheduleSetting
+
 
 class LineDemand(models.Model):
     """ライン別の需要展開（内示/確定 + 計画/実績）。"""
