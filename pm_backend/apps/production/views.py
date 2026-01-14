@@ -160,6 +160,16 @@ class LinePlanViewSet(viewsets.ModelViewSet):
         deleted_backlog = 0
         skipped = []
         product_cache = {}
+        next_seq_cache = {}
+
+        def get_next_sequence(plan_date_obj):
+            """自動採番: 日付ごとに連番を生成"""
+            cache_key = (line_id, plan_date_obj)
+            if cache_key not in next_seq_cache:
+                next_seq_cache[cache_key] = 1
+            next_seq = next_seq_cache[cache_key]
+            next_seq_cache[cache_key] = next_seq + 1
+            return next_seq
 
         # トランザクション内で削除→作成を実行
         with transaction.atomic():
@@ -211,13 +221,18 @@ class LinePlanViewSet(viewsets.ModelViewSet):
 
                     seq_in = it.get('sequence_no')
                     if seq_in in (None, '', 0):
-                        skipped.append({'item': it, 'reason': 'sequence_no required'})
-                        continue
-                    try:
-                        sequence_no = int(seq_in)
-                    except (TypeError, ValueError):
-                        skipped.append({'item': it, 'reason': 'invalid sequence_no'})
-                        continue
+                        # sequence_noが指定されていない場合は自動採番
+                        if plan_qty_value > 0:
+                            sequence_no = get_next_sequence(plan_date_obj)
+                        else:
+                            skipped.append({'item': it, 'reason': 'sequence_no required for zero quantity'})
+                            continue
+                    else:
+                        try:
+                            sequence_no = int(seq_in)
+                        except (TypeError, ValueError):
+                            skipped.append({'item': it, 'reason': 'invalid sequence_no'})
+                            continue
 
                     if product_id not in product_cache:
                         try:
