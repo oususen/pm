@@ -95,6 +95,9 @@
                   maxlength="5"
                   title="最終工程開始時刻（未設定時はデフォルト値を使用）"
                 />
+                <span v-if="getWorkTimeLabel(c.key)" class="work-time-label">
+                  {{ getWorkTimeLabel(c.key) }}
+                </span>
               </div>
             </th>
           </tr>
@@ -301,6 +304,10 @@ const processLoadLoading = ref(false)
 const processLoadRows = ref([])
 const processLoadMessage = ref('')
 const dailySettings = ref({})
+const calendarDayMap = ref({})
+const workPatternMap = ref({})
+const workStartFallback = { hour: 8, minute: 0 }
+const workMinutesFallback = 480
 
 const endDate = computed(() => {
   const d = new Date(startDate.value)
@@ -637,11 +644,20 @@ const refreshDates = () => {
   rows.value.forEach((r) => {
     r.daily = initDaily()
   })
+  if (selectedLine.value) {
+    loadWorkPatternData(selectedLine.value, startDate.value, endDate.value)
+  }
 }
 
 const loadData = async () => {
   // 取り込み前は空表示（手動で「取り込み」を押す運用）
   rows.value = []
+  if (selectedLine.value) {
+    await loadWorkPatternData(selectedLine.value, startDate.value, endDate.value)
+  } else {
+    calendarDayMap.value = {}
+    workPatternMap.value = {}
+  }
 }
 
 const onPlanInput = (row, dateKey, value) => {
@@ -764,6 +780,125 @@ onMounted(async () => {
     console.error('初期データ取得エラー', e)
   }
 })
+
+const parseTimeParts = (value) => {
+  if (!value) return null
+  const parts = String(value).split(':')
+  if (parts.length < 2) return null
+  const hour = Number(parts[0])
+  const minute = Number(parts[1])
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return null
+  return { hour, minute }
+}
+
+const getWorkStartForDate = (dateKey) => {
+  const day = calendarDayMap.value[dateKey]
+  if (day && day.is_working_day === false) return null
+  if (day && day.work_pattern) {
+    const pattern = workPatternMap.value[String(day.work_pattern)]
+    const parsed = parseTimeParts(pattern?.start_time)
+    if (parsed) return parsed
+  }
+  return workStartFallback
+}
+
+const getWorkEndForDate = (dateKey, startParts) => {
+  const day = calendarDayMap.value[dateKey]
+  if (day && day.is_working_day === false) return null
+  const start = startParts || workStartFallback
+  let endParts = null
+  let dayOffset = 0
+
+  if (day && day.work_pattern) {
+    const pattern = workPatternMap.value[String(day.work_pattern)]
+    const parsed = parseTimeParts(pattern?.end_time)
+    if (parsed) {
+      endParts = parsed
+      if (parsed.hour < start.hour || (parsed.hour === start.hour && parsed.minute <= start.minute)) {
+        dayOffset = 1
+      }
+    }
+  }
+
+  if (!endParts) {
+    const workMinutes = day && day.work_minutes != null ? Number(day.work_minutes) : workMinutesFallback
+    if (!Number.isFinite(workMinutes)) return null
+    const startMinutes = start.hour * 60 + start.minute
+    const endMinutesTotal = Math.max(0, startMinutes + workMinutes)
+    dayOffset = Math.floor(endMinutesTotal / (24 * 60))
+    const endMinutesInDay = endMinutesTotal % (24 * 60)
+    endParts = {
+      hour: Math.floor(endMinutesInDay / 60),
+      minute: endMinutesInDay % 60,
+    }
+  }
+
+  return { ...endParts, dayOffset }
+}
+
+const formatWorkTimeLabel = (dateKey) => {
+  if (!dateKey) return ''
+  const workStart = getWorkStartForDate(dateKey)
+  if (!workStart) return ''
+  const workEnd = getWorkEndForDate(dateKey, workStart)
+  if (!workEnd) return ''
+  const startLabel = `${String(workStart.hour).padStart(2, '0')}:${String(workStart.minute).padStart(2, '0')}`
+  const endLabel = `${String(workEnd.hour).padStart(2, '0')}:${String(workEnd.minute).padStart(2, '0')}`
+  const endPrefix = workEnd.dayOffset > 0 ? '翌' : ''
+  return `(${startLabel}〜${endPrefix}${endLabel})`
+}
+
+const getWorkTimeLabel = (dateKey) => formatWorkTimeLabel(dateKey)
+
+const loadWorkPatternData = async (lineId, start, end) => {
+  calendarDayMap.value = {}
+  workPatternMap.value = {}
+  if (!lineId) return
+
+  let calendarId = null
+  const line = lines.value.find((item) => String(item.id) === String(lineId))
+  if (line && line.calendar) {
+    calendarId = line.calendar
+  } else {
+    try {
+      const lineRes = await api.lines.getLine(lineId)
+      calendarId = lineRes.data?.calendar ?? null
+    } catch (e) {
+      console.error('ライン勤務カレンダ取得エラー', e)
+      calendarId = null
+    }
+  }
+  if (!calendarId) return
+
+  try {
+    const daysRes = await api.calendars.getCalendarDays(calendarId)
+    const days = daysRes.data?.results || daysRes.data || []
+    const filtered = days.filter((day) => {
+      if (!day.target_date) return false
+      if (start && day.target_date < start) return false
+      if (end && day.target_date > end) return false
+      return true
+    })
+    const dayMap = {}
+    const patternIds = new Set()
+    filtered.forEach((day) => {
+      dayMap[day.target_date] = day
+      if (day.work_pattern) patternIds.add(String(day.work_pattern))
+    })
+    calendarDayMap.value = dayMap
+    if (patternIds.size) {
+      const patternsRes = await api.workPatterns.getWorkPatterns()
+      const patterns = patternsRes.data?.results || patternsRes.data || []
+      const patternMap = {}
+      patterns.forEach((pattern) => {
+        patternMap[String(pattern.id)] = pattern
+      })
+      workPatternMap.value = patternMap
+    }
+  } catch (e) {
+    console.error('勤務パターン取得エラー', e)
+  }
+}
 
 
 const buildProcessLoad = (plans) => {
@@ -1249,21 +1384,32 @@ thead tr.head-level2 th.sticky-col {
   font-size: 11px;
   white-space: nowrap;
 }
+.work-time-label {
+  font-size: 16px;
+  color: #dc2626;
+  white-space: nowrap;
+}
 .time-input-inline {
   padding: 1px 2px;
-  font-size: 10px;
+  font-size: 14px;
   border: 1px solid #cbd5e1;
   border-radius: 2px;
   width: 68px;
   min-width: 68px;
   max-width: 68px;
   text-align: center;
+  color: #15803d;
+  -webkit-text-fill-color: #15803d;
   flex-shrink: 0;
   box-sizing: border-box;
 }
+.time-input-inline::placeholder {
+  color: #15803d;
+  opacity: 1;
+}
 .mini {
   text-align: center;
-  font-size: 12px;
+  font-size: 14px;
   min-width: 60px; /* サブ列の幅を縮小 */
 }
 .day-end {

@@ -112,6 +112,7 @@
                   >
                     <span class="gantt-bar-label">
                       <span class="start-time" @mousedown.stop @click.stop="openStartTimeEdit(bar)">{{ bar.startLabel }}</span>
+                      <span v-if="bar.workTimeLabel" class="work-time">{{ bar.workTimeLabel }}</span>
                       <span class="time-separator"> - </span>
                       <span class="end-time">{{ bar.endLabel }}</span>
                     </span>
@@ -676,6 +677,18 @@ function formatDateTime(date) {
   return `${date.getDate()} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
 }
 
+function formatWorkRange(dateObj) {
+  const dateKey = formatDateKey(dateObj)
+  const workStart = getWorkStartForDate(dateKey)
+  if (!workStart) return ''
+  const workEnd = getWorkEndForDate(dateKey, workStart)
+  if (!workEnd) return ''
+  const startLabel = `${pad2(workStart.hour)}:${pad2(workStart.minute)}`
+  const endLabel = `${pad2(workEnd.hour)}:${pad2(workEnd.minute)}`
+  const endPrefix = workEnd.dayOffset > 0 ? '翌' : ''
+  return `（${startLabel}〜${endPrefix}${endLabel}）`
+}
+
 function formatTimeRange(start, end) {
   return `${formatDateTime(start)} - ${formatDateTime(end)}`
 }
@@ -718,6 +731,7 @@ function updateBarDisplay(bar) {
   bar.widthPx = Math.max((bar.durationMs / msPerSlot) * pixelsPerSlot, 20)
   bar.startLabel = formatDateTime(bar.startTime)
   bar.endLabel = formatDateTime(bar.endTime)
+  bar.workTimeLabel = formatWorkRange(bar.startTime)
   bar.label = `${bar.startLabel} - ${bar.endLabel}`
 }
 
@@ -811,6 +825,7 @@ function buildProcessGantt(plans) {
           label: '',
           startLabel: '',
           endLabel: '',
+          workTimeLabel: '',
           leftPx: 0,
           widthPx: 0,
         }
@@ -1159,6 +1174,11 @@ onMounted(async () => {
 }
 .start-time:hover {
   color: #1d4ed8;
+}
+.work-time {
+  margin-left: 4px;
+  font-size: 11px;
+  color: #374151;
 }
 .lot-badge {
   position: absolute;
