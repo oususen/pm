@@ -70,7 +70,21 @@ class HasResourcePermission(BasePermission):
         if not user or not user.is_authenticated:
             return False
 
+        # クラスベースビューの場合
         resource = getattr(view, 'permission_resource', None)
+
+        # DRFの@api_viewデコレーターで作られたWrappedAPIViewの場合、
+        # 元の関数の属性を取得
+        if not resource:
+            # view.cls は元の関数を指す
+            original_func = getattr(view, 'cls', None)
+            if original_func:
+                resource = getattr(original_func, 'permission_resource', None)
+            # initkwargs にも格納されている場合がある
+            if not resource:
+                initkwargs = getattr(view, 'initkwargs', {})
+                resource = initkwargs.get('permission_resource')
+
         if not resource:
             return False
 
@@ -81,7 +95,8 @@ class HasResourcePermission(BasePermission):
 
         if request.method in SAFE_METHODS:
             return bool(perm.get('can_view') or perm.get('can_edit'))
-        return bool(perm.get('can_edit'))
+        else:
+            return bool(perm.get('can_edit'))
 
 
 class HasResourcePermissionOrReadOnly(BasePermission):

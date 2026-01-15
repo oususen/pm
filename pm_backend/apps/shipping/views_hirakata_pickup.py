@@ -498,9 +498,10 @@ def send_hirakata_pickup_email(request):
         )
 
 
-generate_hirakata_pickup_pdf.permission_resource = 'shipping'
-generate_hirakata_pickup_excel.permission_resource = 'shipping'
-get_hirakata_pickup_date_range.permission_resource = 'shipping'
-get_hirakata_daily_products.permission_resource = 'shipping'
-get_hirakata_pickup_contacts.permission_resource = 'shipping'
-send_hirakata_pickup_email.permission_resource = 'shipping'
+# DRFの@api_viewで生成されたWrappedAPIViewクラスにpermission_resourceを設定
+generate_hirakata_pickup_pdf.cls.permission_resource = 'shipping'
+generate_hirakata_pickup_excel.cls.permission_resource = 'shipping'
+get_hirakata_pickup_date_range.cls.permission_resource = 'shipping'
+get_hirakata_daily_products.cls.permission_resource = 'shipping'
+get_hirakata_pickup_contacts.cls.permission_resource = 'shipping'
+send_hirakata_pickup_email.cls.permission_resource = 'shipping'
