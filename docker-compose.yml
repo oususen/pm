@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # Django Backend
+  pm-backend:
+    build:
+      context: ./pm_backend
+      dockerfile: Dockerfile
+    container_name: pm_backend_prod
+    restart: always
+    environment:
+      - DB_HOST=${DB_HOST:-mysql}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${DB_USER:-root}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME:-pm_db}
+      - DEBUG=False
+      - SECRET_KEY=${SECRET_KEY}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./pm_backend/media:/app/media
+      - pm_static_volume:/app/staticfiles
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             gunicorn project.wsgi:application --bind 0.0.0.0:8081 --workers 3 --timeout 120"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - ts_pm_network_v2
+
+  # Frontend (Nginx)
+  pm-frontend:
+    build:
+      context: ./pm-ui
+      dockerfile: Dockerfile
+    container_name: pm_frontend_prod
+    restart: always
+    ports:
+      - "8501:8501"
+    depends_on:
+      - pm-backend
+    networks:
+      - ts_pm_network_v2
+
+volumes:
+  pm_static_volume:
+
+networks:
+  ts_pm_network_v2:
+    external: true

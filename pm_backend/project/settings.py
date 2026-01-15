@@ -150,6 +150,7 @@ USE_TZ = False  # 日本時間をそのままDBに保存
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # Media (uploads)
 MEDIA_URL = '/media/'
