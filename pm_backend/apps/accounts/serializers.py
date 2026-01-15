@@ -1,3 +1,4 @@
+from collections import defaultdict
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
@@ -103,6 +104,7 @@ class UserSerializer(serializers.ModelSerializer):
             'password',
             'profile',
             'permissions',
+            'effective_permissions',
         ]
         extra_kwargs = {
             'username': {'validators': []},  # Handle uniqueness in validate_username
@@ -211,6 +213,48 @@ class UserSerializer(serializers.ModelSerializer):
             )
         if records:
             UserPermission.objects.bulk_create(records)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+
+        # effective_permissions を計算
+        permissions = defaultdict(lambda: {'can_view': False, 'can_edit': False})
+
+        # User permissions
+        for perm in instance.permissions.all():
+            permissions[perm.resource]['can_view'] = perm.can_view
+            permissions[perm.resource]['can_edit'] = perm.can_edit
+
+        # Department permissions
+        if instance.profile and instance.profile.department:
+            dept_perms = DepartmentPermission.objects.filter(department=instance.profile.department)
+            for perm in dept_perms:
+                permissions[perm.resource]['can_view'] = permissions[perm.resource]['can_view'] or perm.can_view
+                permissions[perm.resource]['can_edit'] = permissions[perm.resource]['can_edit'] or perm.can_edit
+
+        # Position permissions
+        if instance.profile and instance.profile.position:
+            pos_perms = PositionPermission.objects.filter(position_name=instance.profile.position)
+            for perm in pos_perms:
+                permissions[perm.resource]['can_view'] = permissions[perm.resource]['can_view'] or perm.can_view
+                permissions[perm.resource]['can_edit'] = permissions[perm.resource]['can_edit'] or perm.can_edit
+
+        # DepartmentPosition permissions
+        if instance.profile and instance.profile.department and instance.profile.position:
+            dept_pos_perms = DepartmentPositionPermission.objects.filter(
+                department=instance.profile.department,
+                position_name=instance.profile.position
+            )
+            for perm in dept_pos_perms:
+                permissions[perm.resource]['can_view'] = permissions[perm.resource]['can_view'] or perm.can_view
+                permissions[perm.resource]['can_edit'] = permissions[perm.resource]['can_edit'] or perm.can_edit
+
+        data['effective_permissions'] = [
+            {'resource': resource, 'can_view': vals['can_view'], 'can_edit': vals['can_edit']}
+            for resource, vals in permissions.items()
+        ]
+
+        return data
 
 
 class UserSmtpConfigSerializer(serializers.ModelSerializer):

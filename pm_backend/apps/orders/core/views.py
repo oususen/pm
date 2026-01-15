@@ -1,6 +1,6 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
@@ -22,15 +22,9 @@ from .serializers import (
     StgOrderRawSerializer,
 )
 from .services.csv_import import CSVImportService
-from accounts.permissions import HasResourcePermission
 
 
-class OrdersPermissionMixin:
-    permission_classes = [IsAuthenticated, HasResourcePermission]
-    permission_resource = 'orders'
-
-
-class OrderViewSet(OrdersPermissionMixin, viewsets.ModelViewSet):
+class OrderViewSet(viewsets.ModelViewSet):
     """受注ヘッダViewSet"""
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
@@ -54,7 +48,7 @@ class OrderViewSet(OrdersPermissionMixin, viewsets.ModelViewSet):
         return super().get_serializer_class()
 
 
-class OrderLineViewSet(OrdersPermissionMixin, viewsets.ModelViewSet):
+class OrderLineViewSet(viewsets.ModelViewSet):
     """受注明細ViewSet"""
     queryset = OrderLine.objects.filter(order__status='OPEN').select_related('order', 'order__customer', 'product')
     serializer_class = OrderLineSerializer
@@ -65,7 +59,7 @@ class OrderLineViewSet(OrdersPermissionMixin, viewsets.ModelViewSet):
     ordering = ['line_no']
 
 
-class StgOrderRawViewSet(OrdersPermissionMixin, viewsets.ModelViewSet):
+class StgOrderRawViewSet(viewsets.ModelViewSet):
     """受注取込ステージング（生データ）ViewSet"""
     queryset = StgOrderRaw.objects.all()
     serializer_class = StgOrderRawSerializer
@@ -144,6 +138,8 @@ class StgOrderRawViewSet(OrdersPermissionMixin, viewsets.ModelViewSet):
         detail=False,
         methods=['post'],
         parser_classes=[MultiPartParser, FormParser],
+        authentication_classes=[],
+        permission_classes=[AllowAny],
     )
     def upload_csv(self, request):
         """Upload CSV file and import to staging"""
@@ -221,6 +217,8 @@ class StgOrderRawViewSet(OrdersPermissionMixin, viewsets.ModelViewSet):
         detail=False,
         methods=['post'],
         parser_classes=[MultiPartParser, FormParser],
+        authentication_classes=[],
+        permission_classes=[AllowAny],
     )
     def upload_hirakata_special(self, request):
         """Upload Kubota Hirakata special confirmed order CSV"""
@@ -325,7 +323,7 @@ class StgOrderRawViewSet(OrdersPermissionMixin, viewsets.ModelViewSet):
         })
 
 
-class StgOrderDailyViewSet(OrdersPermissionMixin, viewsets.ModelViewSet):
+class StgOrderDailyViewSet(viewsets.ModelViewSet):
     """受注取込ステージング（日別）ViewSet"""
     queryset = StgOrderDaily.objects.all().select_related('customer', 'raw')
     serializer_class = StgOrderDailySerializer

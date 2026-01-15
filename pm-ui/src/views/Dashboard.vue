@@ -7,31 +7,31 @@
       <section class="dashboard-section">
         <h2 class="section-title">主要機能</h2>
         <div class="menu-grid">
-          <RouterLink to="/orders/menu" class="menu-card">
+          <RouterLink v-if="hasPermission(user, 'orders')" to="/orders/menu" class="menu-card">
             <div class="menu-icon">📋</div>
             <div class="menu-label">受注管理</div>
           </RouterLink>
-          <RouterLink to="/production/menu" class="menu-card">
+          <RouterLink v-if="hasPermission(user, 'production')" to="/production/menu" class="menu-card">
             <div class="menu-icon">🏭</div>
             <div class="menu-label">生産管理</div>
           </RouterLink>
-          <RouterLink to="/purchase/menu" class="menu-card">
+          <RouterLink v-if="hasPermission(user, 'purchase')" to="/purchase/menu" class="menu-card">
             <div class="menu-icon">🛒</div>
             <div class="menu-label">仕入管理</div>
           </RouterLink>
-          <RouterLink to="/shipping/menu" class="menu-card">
+          <RouterLink v-if="hasPermission(user, 'shipping')" to="/shipping/menu" class="menu-card">
             <div class="menu-icon">🚚</div>
             <div class="menu-label">出荷管理</div>
           </RouterLink>
-          <RouterLink to="/inventory" class="menu-card">
+          <RouterLink v-if="hasPermission(user, 'inventory')" to="/inventory" class="menu-card">
             <div class="menu-icon">📦</div>
             <div class="menu-label">在庫管理</div>
           </RouterLink>
-          <RouterLink to="/quality" class="menu-card">
+          <RouterLink v-if="hasPermission(user, 'quality')" to="/quality" class="menu-card">
             <div class="menu-icon">✅</div>
             <div class="menu-label">品質管理</div>
           </RouterLink>
-          <RouterLink to="/masters" class="menu-card">
+          <RouterLink v-if="hasPermission(user, 'masters')" to="/masters" class="menu-card">
             <div class="menu-icon">⚙️</div>
             <div class="menu-label">マスタ管理</div>
           </RouterLink>
@@ -43,6 +43,10 @@
 
 <script setup>
 import { RouterLink } from 'vue-router'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
+
+const user = authState.user
 </script>
 
 <style scoped>

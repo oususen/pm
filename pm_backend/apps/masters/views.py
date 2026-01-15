@@ -24,9 +24,9 @@ from accounts.permissions import HasResourcePermissionOrReadOnly
 
 
 class MastersPermissionMixin:
-    """マスターデータ: 読み取りは認証のみ、書き込みはmasters権限が必要"""
+    """マスターデータ: 認証のみ（権限チェックはフロントエンドで行う）"""
     permission_classes = [IsAuthenticated, HasResourcePermissionOrReadOnly]
-    permission_resource = 'masters'
+    # permission_resource = 'masters'  # フロントエンドで権限管理を行うため、バックエンドでは設定しない
 
 
 class ProductFilter(django_filters.FilterSet):

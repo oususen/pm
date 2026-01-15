@@ -47,7 +47,7 @@ const router = createRouter({
 
 const DEFAULT_TITLE = "pm-ui";
 
-const hasPermission = (user, resource, level = "view") => {
+export const hasPermission = (user, resource, level = "view") => {
   if (!resource) return true;
   if (!user) return false;
   if (user.is_superuser) return true;
@@ -73,11 +73,12 @@ router.beforeEach(async (to) => {
     return { path: "/login", query: { next: to.fullPath } };
   }
 
-  const resource = to.meta?.resource;
-  const level = to.meta?.permission || "view";
-  if (!hasPermission(user, resource, level)) {
-    return { path: "/" };
-  }
+  // 権限チェックはフロントエンドUIレベルで行うため、routerでは行わない
+  // const resource = to.meta?.resource;
+  // const level = to.meta?.permission || "view";
+  // if (!hasPermission(user, resource, level)) {
+  //   return { path: "/" };
+  // }
 
   return true;
 });

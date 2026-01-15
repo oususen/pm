@@ -75,6 +75,7 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { authState, logout } from '../auth'
+import { hasPermission } from '../router'
 
 const props = defineProps({
   isMobile: {
@@ -99,22 +100,26 @@ const goBack = () => {
 }
 
 const mainTabs = [
-  { id: 'orders', label: '受注', link: '/orders/menu' },
-  { id: 'production', label: '生産', link: '/production/menu' },
-  { id: 'purchase', label: '仕入', link: '/purchase/menu' },
-  { id: 'shipping', label: '出荷', link: '/shipping/menu' },
-  { id: 'inventory', label: '在庫', link: '/inventory' },
-  { id: 'quality', label: '品質', link: '/quality' },
-  { id: 'masters', label: 'マスタ', link: '/masters' },
-  { id: 'settings', label: '設定', link: '/settings' },
+  { id: 'orders', label: '受注', link: '/orders/menu', resource: 'orders' },
+  { id: 'production', label: '生産', link: '/production/menu', resource: 'production' },
+  { id: 'purchase', label: '仕入', link: '/purchase/menu', resource: 'purchase' },
+  { id: 'shipping', label: '出荷', link: '/shipping/menu', resource: 'shipping' },
+  { id: 'inventory', label: '在庫', link: '/inventory', resource: 'inventory' },
+  { id: 'quality', label: '品質', link: '/quality', resource: 'quality' },
+  { id: 'masters', label: 'マスタ', link: '/masters', resource: 'masters' },
+  { id: 'settings', label: '設定', link: '/settings', resource: 'settings' },
 ]
 
-// スマホでは生産・マニュアルのみ表示
+// ユーザーの権限に基づいてタブをフィルタリング
 const displayTabs = computed(() => {
+  const user = authState.user
+  // 権限がないタブを非表示
+  let tabs = mainTabs.filter(tab => hasPermission(user, tab.resource, 'view'))
+  // スマホでは生産・マニュアルのみ表示（権限がある場合）
   if (props.isMobile) {
-    return mainTabs.filter(tab => ['production', 'manual'].includes(tab.id))
+    tabs = tabs.filter(tab => ['production', 'manual'].includes(tab.id))
   }
-  return mainTabs
+  return tabs
 })
 
 const isActiveTab = (tabId) => {
