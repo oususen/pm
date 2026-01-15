@@ -104,6 +104,18 @@ class UserSerializer(serializers.ModelSerializer):
             'profile',
             'permissions',
         ]
+        extra_kwargs = {
+            'username': {'validators': []},  # Handle uniqueness in validate_username
+        }
+
+    def validate_username(self, value):
+        # Check uniqueness excluding current instance
+        qs = User.objects.filter(username=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError('このユーザー名は既に使用されています。')
+        return value
 
     def create(self, validated_data):
         profile_data = validated_data.pop('profile', None)
