@@ -43,6 +43,8 @@ services:
       - "8501:8501"
     volumes:
       - ./pm-ui/certs:/etc/nginx/ssl:ro
+      - pm_static_volume:/app/staticfiles:ro
+      - ./pm_backend/media:/app/media:ro
     depends_on:
       - pm-backend
     networks:
