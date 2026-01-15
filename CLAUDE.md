@@ -81,7 +81,8 @@ python manage.py migrate         # マイグレーション実行
 - **ネットワーク**: `pm_internal`（内部通信）+ `ts_pm_network_v2`（外部MySQL接続）
 - **データベース**: 共通MySQLコンテナ（ホスト名: `mysql`）
 - **フロントエンド**: nginx + Vue.js ビルド済みファイル（ポート 8501）
-- **バックエンド**: gunicorn + Django（ポート 8081）
+- **バックエンド**: gunicorn + Django + WhiteNoise（ポート 8081）
+- **静的ファイル**: nginx が `/static/`, `/media/` を直接配信
 - **日本語フォント**: IPA Gothic, Takao Gothic（PDF生成用）
 - **本番IP**: `10.0.1.232`
 - **プロトコル**: HTTPS（PWA対応）
