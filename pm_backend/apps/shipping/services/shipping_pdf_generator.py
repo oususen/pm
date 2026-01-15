@@ -56,13 +56,14 @@ def register_japanese_fonts() -> None:
     # Linuxフォント候補（Docker/Ubuntu用）
     # ReportLabはTrueTypeフォントのみサポート（PostScript outlinesは非サポート）
     linux_fonts = [
-        # IPA ゴシック（TrueType - 推奨）
-        Path("/usr/share/fonts/truetype/fonts-japanese-gothic.ttf"),
-        Path("/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf"),
-        Path("/usr/share/fonts/truetype/ipafont/ipag.ttf"),
-        Path("/usr/share/fonts/truetype/ipafont-gothic/ipag.ttf"),
-        # Takao ゴシック（TrueType）
+        # Takao ゴシック（TrueType）- 実際のパス
         Path("/usr/share/fonts/truetype/takao-gothic/TakaoPGothic.ttf"),
+        Path("/usr/share/fonts/truetype/takao-gothic/TakaoGothic.ttf"),
+        # IPA ゴシック（TrueType）
+        Path("/usr/share/fonts/truetype/fonts-ipafont-gothic/ipag.ttf"),
+        Path("/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf"),
+        Path("/usr/share/fonts/truetype/ipafont/ipag.ttf"),
+        Path("/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf"),
         # Noto Sans CJK JP（TrueType版があれば）
         Path("/usr/share/fonts/truetype/noto-cjk/NotoSansCJK-Regular.ttf"),
         Path("/usr/share/fonts/truetype/noto/NotoSansCJK-jp-Regular.otf"),

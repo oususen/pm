@@ -29,6 +29,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
+      - pm_internal
       - ts_pm_network_v2
 
   # Frontend (Nginx)
@@ -43,11 +44,14 @@ services:
     depends_on:
       - pm-backend
     networks:
+      - pm_internal
       - ts_pm_network_v2
 
 volumes:
   pm_static_volume:
 
 networks:
+  pm_internal:
+    driver: bridge
   ts_pm_network_v2:
     external: true

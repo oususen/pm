@@ -7,11 +7,13 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# システム依存パッケージのインストール（mysqlclient用）
+# システム依存パッケージのインストール（mysqlclient用、日本語フォント）
 RUN apt-get update && apt-get install -y \
     default-libmysqlclient-dev \
     build-essential \
     pkg-config \
+    fonts-ipafont-gothic \
+    fonts-takao-gothic \
     && rm -rf /var/lib/apt/lists/*
 
 # Python依存パッケージのインストール

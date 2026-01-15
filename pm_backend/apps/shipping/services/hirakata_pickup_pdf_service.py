@@ -42,13 +42,16 @@ class HirakataPickupPDFService:
 
         # 日本語フォントパス（優先順位順）
         font_paths = [
-            # Windows標準フォント
+            # Linux（Docker）用フォント
+            ('/usr/share/fonts/truetype/takao-gothic/TakaoPGothic.ttf', 'Takao Gothic'),
+            ('/usr/share/fonts/truetype/fonts-takao-gothic/TakaoPGothic.ttf', 'Takao Gothic (alt)'),
+            ('/usr/share/fonts/truetype/fonts-ipafont-gothic/ipag.ttf', 'IPA Gothic'),
+            ('/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf', 'IPAex Gothic'),
+            ('/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc', 'Noto Sans CJK'),
+            # Windows標準フォント（開発環境用）
             ('C:/Windows/Fonts/msgothic.ttc', 'MS Gothic'),
             ('C:/Windows/Fonts/GOTHIC.TTF', 'MS Gothic'),
             ('C:/Windows/Fonts/BIZ-UDGothicR.ttc', 'BIZ UD Gothic'),
-            # IPAフォント
-            ('C:/Windows/Fonts/ipaexg.ttf', 'IPAex Gothic'),
-            ('/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf', 'IPAex Gothic'),
             # プロジェクト内のフォント
             (os.path.join(os.path.dirname(__file__), '..', '..', '..', 'fonts', 'ipaexg.ttf'), 'IPAex Gothic')
         ]
