@@ -170,6 +170,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:8501",
     "http://10.0.1.194:8501",  # IP address
     "http://10.0.1.232:8501",  # Production IP address
+    "https://10.0.1.232:8501",  # Production HTTPS
+    "https://localhost:8501",
     "http://192.168.0.10",
     "http://192.168.0.11",
     "http://192.168.0.15",

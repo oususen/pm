@@ -84,6 +84,8 @@ python manage.py migrate         # マイグレーション実行
 - **バックエンド**: gunicorn + Django（ポート 8081）
 - **日本語フォント**: IPA Gothic, Takao Gothic（PDF生成用）
 - **本番IP**: `10.0.1.232`
+- **プロトコル**: HTTPS（PWA対応）
+- **SSL証明書**: `pm-ui/certs/pm-prod.crt`
 
 ### Dockerコマンド
 

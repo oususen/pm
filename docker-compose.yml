@@ -32,7 +32,7 @@ services:
       - pm_internal
       - ts_pm_network_v2
 
-  # Frontend (Nginx)
+  # Frontend (Nginx + HTTPS)
   pm-frontend:
     build:
       context: ./pm-ui
@@ -41,6 +41,8 @@ services:
     restart: always
     ports:
       - "8501:8501"
+    volumes:
+      - ./pm-ui/certs:/etc/nginx/ssl:ro
     depends_on:
       - pm-backend
     networks:
