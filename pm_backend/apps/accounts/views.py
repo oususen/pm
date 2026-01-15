@@ -6,11 +6,8 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import (
-    UserProfile,
-    UserPermission,
-    DepartmentPositionPermission,
-)
+from .models import UserProfile
+from .permissions import build_effective_permissions
 
 
 def _profile_payload(user):
@@ -40,63 +37,6 @@ def _profile_payload(user):
     }
 
 
-def _permissions_to_map(permissions):
-    return {
-        perm.resource: {
-            'resource': perm.resource,
-            'can_view': perm.can_view,
-            'can_edit': perm.can_edit,
-        }
-        for perm in permissions
-    }
-
-
-def _merge_permissions(base, overrides):
-    for resource, perm in overrides.items():
-        base[resource] = perm
-    return base
-
-
-def _build_effective_permissions(user):
-    resources = [choice[0] for choice in UserPermission.RESOURCE_CHOICES]
-    permission_map = {}
-
-    profile = getattr(user, 'profile', None)
-    department_id = profile.department_id if profile else None
-    position_name = profile.position.strip() if profile and profile.position else ''
-
-    if department_id and position_name:
-        combined_permissions = DepartmentPositionPermission.objects.filter(
-            department_id=department_id,
-            position_name=position_name,
-        )
-        permission_map = _merge_permissions(permission_map, _permissions_to_map(combined_permissions))
-
-    user_permissions = []
-    if hasattr(user, 'permissions'):
-        user_permissions = list(user.permissions.all())
-    if user_permissions:
-        permission_map = _merge_permissions(permission_map, _permissions_to_map(user_permissions))
-
-    if user.is_superuser:
-        return [
-            {'resource': resource, 'can_view': True, 'can_edit': True}
-            for resource in resources
-        ]
-
-    if not permission_map:
-        return []
-
-    result = []
-    for resource in resources:
-        perm = permission_map.get(resource)
-        if perm:
-            result.append(perm)
-        else:
-            result.append({'resource': resource, 'can_view': False, 'can_edit': False})
-    return result
-
-
 def _user_payload(user):
     return {
         'id': user.id,
@@ -107,7 +47,7 @@ def _user_payload(user):
         'is_staff': user.is_staff,
         'is_superuser': user.is_superuser,
         'profile': _profile_payload(user),
-        'effective_permissions': _build_effective_permissions(user),
+        'effective_permissions': build_effective_permissions(user),
     }
 
 

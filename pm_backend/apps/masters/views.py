@@ -1,4 +1,5 @@
 from rest_framework import viewsets, status, parsers
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -19,6 +20,12 @@ from .serializers import (
     BOMSerializer, BOMItemSerializer, RoutingSerializer, RoutingStepSerializer,
     RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer, ContactSerializer
 )
+from accounts.permissions import HasResourcePermission
+
+
+class MastersPermissionMixin:
+    permission_classes = [IsAuthenticated, HasResourcePermission]
+    permission_resource = 'masters'
 
 
 class ProductFilter(django_filters.FilterSet):
@@ -63,7 +70,7 @@ class ProductFilter(django_filters.FilterSet):
         return queryset.filter(Q(id__in=product_ids) | Q(product_code__in=product_codes))
 
 
-class ProductViewSet(viewsets.ModelViewSet):
+class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -88,7 +95,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return Response({'image_url': url}, status=status.HTTP_200_OK)
 
 
-class ProductGroupViewSet(viewsets.ModelViewSet):
+class ProductGroupViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = ProductGroup.objects.all()
     serializer_class = ProductGroupSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -98,7 +105,7 @@ class ProductGroupViewSet(viewsets.ModelViewSet):
     ordering = ['group_code']
 
 
-class ContainerCapacityViewSet(viewsets.ModelViewSet):
+class ContainerCapacityViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = ContainerCapacity.objects.all()
     serializer_class = ContainerCapacitySerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -107,7 +114,7 @@ class ContainerCapacityViewSet(viewsets.ModelViewSet):
     ordering = ['name']
 
 
-class CustomerViewSet(viewsets.ModelViewSet):
+class CustomerViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Customer.objects.all()
     serializer_class = CustomerSerializer
     filterset_fields = ['is_active']
@@ -116,7 +123,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
     ordering = ['customer_code']
 
 
-class ProcessViewSet(viewsets.ModelViewSet):
+class ProcessViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Process.objects.all()
     serializer_class = ProcessSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -240,7 +247,7 @@ class ProcessViewSet(viewsets.ModelViewSet):
         return Response(result)
 
 
-class LineViewSet(viewsets.ModelViewSet):
+class LineViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Line.objects.all()
     serializer_class = LineSerializer
     filterset_fields = ['is_active', 'line_type']
@@ -249,7 +256,7 @@ class LineViewSet(viewsets.ModelViewSet):
     ordering = ['line_code']
 
 
-class ProductionLineViewSet(viewsets.ReadOnlyModelViewSet):
+class ProductionLineViewSet(MastersPermissionMixin, viewsets.ReadOnlyModelViewSet):
     queryset = Line.objects.filter(line_type='PROD')
     serializer_class = LineSerializer
     filterset_fields = ['is_active']
@@ -258,7 +265,7 @@ class ProductionLineViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['line_code']
 
 
-class SupplierViewSet(viewsets.ModelViewSet):
+class SupplierViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Supplier.objects.all()
     serializer_class = SupplierSerializer
     search_fields = ['supplier_code', 'supplier_name']
@@ -266,7 +273,7 @@ class SupplierViewSet(viewsets.ModelViewSet):
     ordering = ['supplier_code']
 
 
-class CalendarViewSet(viewsets.ModelViewSet):
+class CalendarViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Calendar.objects.all()
     serializer_class = CalendarSerializer
     search_fields = ['calendar_code', 'calendar_name']
@@ -274,7 +281,7 @@ class CalendarViewSet(viewsets.ModelViewSet):
     ordering = ['calendar_code']
 
 
-class WorkPatternViewSet(viewsets.ModelViewSet):
+class WorkPatternViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = WorkPattern.objects.all()
     serializer_class = WorkPatternSerializer
     search_fields = ['pattern_code', 'pattern_name']
@@ -282,7 +289,7 @@ class WorkPatternViewSet(viewsets.ModelViewSet):
     ordering = ['pattern_code']
 
 
-class BreakTimeViewSet(viewsets.ModelViewSet):
+class BreakTimeViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = BreakTime.objects.all()
     serializer_class = BreakTimeSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
@@ -291,7 +298,7 @@ class BreakTimeViewSet(viewsets.ModelViewSet):
     ordering = ['work_pattern', 'order']
 
 
-class CalendarDayViewSet(viewsets.ModelViewSet):
+class CalendarDayViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = CalendarDay.objects.all()
     serializer_class = CalendarDaySerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
@@ -323,7 +330,7 @@ class CalendarDayViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status_code, headers=headers)
 
 
-class BOMViewSet(viewsets.ModelViewSet):
+class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = BOM.objects.all()
     serializer_class = BOMSerializer
     filterset_fields = ['parent_product', 'is_active']
@@ -633,7 +640,7 @@ class BOMViewSet(viewsets.ModelViewSet):
         )
 
 
-class BOMItemViewSet(viewsets.ModelViewSet):
+class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = BOMItem.objects.all()
     serializer_class = BOMItemSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -642,7 +649,7 @@ class BOMItemViewSet(viewsets.ModelViewSet):
     ordering = ['id']
 
 
-class RoutingViewSet(viewsets.ModelViewSet):
+class RoutingViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Routing.objects.all()
     serializer_class = RoutingSerializer
     filterset_fields = ['product', 'is_active', 'is_default']
@@ -650,7 +657,7 @@ class RoutingViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
 
-class RoutingStepViewSet(viewsets.ModelViewSet):
+class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = RoutingStep.objects.all()
     serializer_class = RoutingStepSerializer
     filterset_fields = ['routing', 'process', 'line', 'time_unit']
@@ -658,7 +665,7 @@ class RoutingStepViewSet(viewsets.ModelViewSet):
     ordering = ['routing', 'step_no']
 
 
-class RoutingStepMaterialViewSet(viewsets.ModelViewSet):
+class RoutingStepMaterialViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = RoutingStepMaterial.objects.all().select_related('routing_step', 'component')
     serializer_class = RoutingStepMaterialSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -685,7 +692,7 @@ class ContactFilter(django_filters.FilterSet):
         return queryset
 
 
-class ContactViewSet(viewsets.ModelViewSet):
+class ContactViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Contact.objects.all()
     serializer_class = ContactSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]

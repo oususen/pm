@@ -5,13 +5,14 @@ from datetime import date, datetime
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 
 from .services.hirakata_pickup_pdf_service import HirakataPickupPDFService
 from .services.email_service import EmailService
+from accounts.permissions import HasResourcePermission
 
 
 def _normalize_email_list(raw_value):
@@ -36,8 +37,7 @@ def _normalize_email_list(raw_value):
 
 @csrf_exempt
 @api_view(['POST'])
-@permission_classes([AllowAny])
-@authentication_classes([])
+@permission_classes([IsAuthenticated, HasResourcePermission])
 def generate_hirakata_pickup_pdf(request):
     """
     枚方集荷依頼書PDF生成API
@@ -126,8 +126,7 @@ def generate_hirakata_pickup_pdf(request):
 
 @csrf_exempt
 @api_view(['POST'])
-@permission_classes([AllowAny])
-@authentication_classes([])
+@permission_classes([IsAuthenticated, HasResourcePermission])
 def generate_hirakata_pickup_excel(request):
     """
     枚方集荷製品詳細Excel生成API
@@ -211,7 +210,7 @@ def generate_hirakata_pickup_excel(request):
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated, HasResourcePermission])
 def get_hirakata_pickup_date_range(request):
     """
     枚方集荷日期間取得API
@@ -294,7 +293,7 @@ def get_hirakata_pickup_date_range(request):
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated, HasResourcePermission])
 def get_hirakata_daily_products(request):
     """
     枚方日別製品リスト取得API
@@ -369,7 +368,7 @@ def get_hirakata_daily_products(request):
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated, HasResourcePermission])
 def get_hirakata_pickup_contacts(request):
     """
     枚方集荷依頼用の連絡先取得API
@@ -394,7 +393,7 @@ def get_hirakata_pickup_contacts(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, HasResourcePermission])
 def send_hirakata_pickup_email(request):
     """
     枚方集荷依頼書メール送信API
@@ -497,3 +496,11 @@ def send_hirakata_pickup_email(request):
             {'error': f'メール送信中にエラーが発生しました: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+generate_hirakata_pickup_pdf.permission_resource = 'shipping'
+generate_hirakata_pickup_excel.permission_resource = 'shipping'
+get_hirakata_pickup_date_range.permission_resource = 'shipping'
+get_hirakata_daily_products.permission_resource = 'shipping'
+get_hirakata_pickup_contacts.permission_resource = 'shipping'
+send_hirakata_pickup_email.permission_resource = 'shipping'

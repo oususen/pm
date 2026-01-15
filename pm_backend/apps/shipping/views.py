@@ -1,5 +1,6 @@
 import django_filters
 from rest_framework import viewsets
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
@@ -7,6 +8,12 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 
 from .models import ShipmentActual, ShipmentActualHistory
 from .serializers import ShipmentActualHistorySerializer, ShipmentActualSerializer
+from accounts.permissions import HasResourcePermission
+
+
+class ShippingPermissionMixin:
+    permission_classes = [IsAuthenticated, HasResourcePermission]
+    permission_resource = 'shipping'
 
 
 class ShipmentActualFilter(django_filters.FilterSet):
@@ -23,7 +30,7 @@ class ShipmentActualFilter(django_filters.FilterSet):
         fields = []
 
 
-class ShipmentActualViewSet(viewsets.ModelViewSet):
+class ShipmentActualViewSet(ShippingPermissionMixin, viewsets.ModelViewSet):
     """出荷実績ViewSet"""
     queryset = ShipmentActual.objects.all().select_related('product', 'customer')
     serializer_class = ShipmentActualSerializer
