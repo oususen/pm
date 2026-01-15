@@ -29,6 +29,9 @@ export const createAccountsAPI = (client) => ({
   updateUser(id, data) {
     return client.put(`/accounts/users/${id}/`, data)
   },
+  updateUserPartial(id, data) {
+    return client.patch(`/accounts/users/${id}/`, data)
+  },
   getPositions() {
     return client.get('/accounts/positions/')
   },

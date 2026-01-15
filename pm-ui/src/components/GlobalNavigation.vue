@@ -36,10 +36,16 @@
           <span>日本語</span>
           <span class="dropdown-arrow">▼</span>
         </button>
-        <div class="user-info">
+        <div class="user-info" @click="toggleUserMenu" :class="{ active: showUserMenu }">
           <span class="user-icon">👤</span>
           <span class="user-name">{{ userDisplayName }}</span>
-          <span class="dropdown-arrow">▼</span>
+          <span class="dropdown-arrow" :class="{ rotated: showUserMenu }">▼</span>
+        </div>
+        <div v-if="showUserMenu" class="user-menu">
+          <RouterLink to="/settings/profile" class="user-menu-item" @click="closeUserMenu">
+            <span>👤</span>
+            プロフィール編集
+          </RouterLink>
         </div>
       </div>
       <div class="nav-actions">
@@ -66,7 +72,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { authState, logout } from '../auth'
 
@@ -150,6 +156,32 @@ const userDisplayName = computed(() => {
   if (!user) return 'ゲスト'
   const fullName = `${user.last_name || ''} ${user.first_name || ''}`.trim()
   return fullName || user.username || user.email || 'ユーザー'
+})
+
+const showUserMenu = ref(false)
+
+const toggleUserMenu = () => {
+  showUserMenu.value = !showUserMenu.value
+}
+
+const closeUserMenu = () => {
+  showUserMenu.value = false
+}
+
+const handleClickOutside = (event) => {
+  const userInfo = event.target.closest('.user-info')
+  const userMenu = event.target.closest('.user-menu')
+  if (!userInfo && !userMenu) {
+    closeUserMenu()
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', handleClickOutside)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
 })
 
 const handleLogout = async () => {
@@ -347,10 +379,43 @@ const handleLogout = async () => {
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.2s;
+  position: relative;
 }
 
-.user-info:hover {
+.user-info:hover,
+.user-info.active {
   background: rgba(255, 255, 255, 0.25);
+}
+
+.user-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: white;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 160px;
+  z-index: 1000;
+  margin-top: 4px;
+}
+
+.user-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  color: #333;
+  text-decoration: none;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.user-menu-item:hover {
+  background: #f5f5f5;
+}
+
+.dropdown-arrow.rotated {
+  transform: rotate(180deg);
 }
 
 .user-icon {

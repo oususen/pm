@@ -3,6 +3,10 @@
     <h2 class="page-title">設定</h2>
 
     <div class="master-grid">
+      <RouterLink to="/settings/profile" class="master-tile">
+        <div class="icon-box">👤</div>
+        <div class="label">プロフィール編集</div>
+      </RouterLink>
       <RouterLink to="/settings/users" class="master-tile">
         <div class="icon-box">👤</div>
         <div class="label">ユーザー管理</div>

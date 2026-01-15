@@ -15,7 +15,7 @@
             v-model="username"
             type="text"
             autocomplete="username"
-            placeholder="例: daisou"
+            placeholder="社員番号を入力（６桁全部入力してください）"
             :disabled="loading"
             required
           />
@@ -45,7 +45,7 @@
 
       <div class="login-footer">
         <span class="hint-label">ヒント:</span>
-        初回は管理者にユーザー作成を依頼してください。
+        初期パスワード：123456。
       </div>
     </div>
   </div>

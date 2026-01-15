@@ -6,6 +6,12 @@ const settings = [
     meta: { pageTitle: "設定", resource: "settings" },
   },
   {
+    path: "/settings/profile",
+    name: "Profile",
+    component: () => import("@/views/settings/Profile.vue"),
+    meta: { pageTitle: "プロフィール編集" },
+  },
+  {
     path: "/settings/users",
     name: "UserManagement",
     component: () => import("@/views/settings/UserManagement.vue"),
