@@ -20,11 +20,12 @@ from .serializers import (
     BOMSerializer, BOMItemSerializer, RoutingSerializer, RoutingStepSerializer,
     RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer, ContactSerializer
 )
-from accounts.permissions import HasResourcePermission
+from accounts.permissions import HasResourcePermissionOrReadOnly
 
 
 class MastersPermissionMixin:
-    permission_classes = [IsAuthenticated, HasResourcePermission]
+    """マスターデータ: 読み取りは認証のみ、書き込みはmasters権限が必要"""
+    permission_classes = [IsAuthenticated, HasResourcePermissionOrReadOnly]
     permission_resource = 'masters'
 
 

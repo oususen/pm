@@ -82,3 +82,29 @@ class HasResourcePermission(BasePermission):
         if request.method in SAFE_METHODS:
             return bool(perm.get('can_view') or perm.get('can_edit'))
         return bool(perm.get('can_edit'))
+
+
+class HasResourcePermissionOrReadOnly(BasePermission):
+    """読み取りは認証のみ、書き込みはリソース権限が必要"""
+    message = 'You do not have permission to modify this resource.'
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+
+        # 読み取りは認証済みなら許可
+        if request.method in SAFE_METHODS:
+            return True
+
+        # 書き込みはリソース権限をチェック
+        resource = getattr(view, 'permission_resource', None)
+        if not resource:
+            return False
+
+        permission_map = _effective_permissions_map(request)
+        perm = permission_map.get(resource)
+        if not perm:
+            return False
+
+        return bool(perm.get('can_edit'))
