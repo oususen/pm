@@ -256,9 +256,11 @@ class LineViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     ordering = ['line_code']
 
 
-class ProductionLineViewSet(MastersPermissionMixin, viewsets.ReadOnlyModelViewSet):
+class ProductionLineViewSet(viewsets.ReadOnlyModelViewSet):
+    """生産ライン一覧（読み取り専用）。生産計画など他機能からも参照されるため認証のみで許可"""
     queryset = Line.objects.filter(line_type='PROD')
     serializer_class = LineSerializer
+    permission_classes = [IsAuthenticated]
     filterset_fields = ['is_active']
     search_fields = ['line_code', 'line_name']
     ordering_fields = ['line_code', 'created_at']
