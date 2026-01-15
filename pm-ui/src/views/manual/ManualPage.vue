@@ -4,18 +4,42 @@
       <div class="manual-nav-header">マニュアル</div>
       <div class="manual-nav-body">
         <div v-for="section in manualSections" :key="section.id" class="manual-section">
-          <div v-if="section.id !== 'top'" class="section-title">{{ section.title }}</div>
-          <ul class="section-list">
-            <li v-for="item in section.items" :key="item.path">
-              <RouterLink
-                class="section-link"
-                :class="{ active: item.path === currentPath }"
-                :to="{ path: '/manual', query: { path: item.path } }"
-              >
-                {{ item.title }}
-              </RouterLink>
-            </li>
-          </ul>
+          <!-- トップセクションは常に表示 -->
+          <template v-if="section.id === 'top'">
+            <ul class="section-list">
+              <li v-for="item in section.items" :key="item.path">
+                <RouterLink
+                  class="section-link"
+                  :class="{ active: item.path === currentPath }"
+                  :to="{ path: '/manual', query: { path: item.path } }"
+                >
+                  {{ item.title }}
+                </RouterLink>
+              </li>
+            </ul>
+          </template>
+          <!-- 他のセクションは折りたたみ可能 -->
+          <template v-else>
+            <div
+              class="section-title"
+              :class="{ expanded: expandedSections[section.id] }"
+              @click="toggleSection(section.id)"
+            >
+              <span class="section-toggle">{{ expandedSections[section.id] ? '▼' : '▶' }}</span>
+              {{ section.title }}
+            </div>
+            <ul v-show="expandedSections[section.id]" class="section-list">
+              <li v-for="item in section.items" :key="item.path">
+                <RouterLink
+                  class="section-link"
+                  :class="{ active: item.path === currentPath }"
+                  :to="{ path: '/manual', query: { path: item.path } }"
+                >
+                  {{ item.title }}
+                </RouterLink>
+              </li>
+            </ul>
+          </template>
         </div>
       </div>
     </aside>
@@ -57,6 +81,21 @@ const router = useRouter()
 const markdown = ref('')
 const loading = ref(false)
 const error = ref('')
+
+// セクションの折りたたみ状態（デフォルトは全て閉じる）
+const expandedSections = ref({})
+
+const toggleSection = (sectionId) => {
+  expandedSections.value[sectionId] = !expandedSections.value[sectionId]
+}
+
+// 現在のパスに応じてセクションを自動展開
+const expandCurrentSection = () => {
+  const lookup = manualLookup[currentPath.value]
+  if (lookup?.sectionId) {
+    expandedSections.value[lookup.sectionId] = true
+  }
+}
 
 const normalizeQueryPath = (value) => {
   const raw = Array.isArray(value) ? value[0] : value
@@ -182,7 +221,10 @@ const openInNewTab = () => {
   window.open(`/manual?path=${encoded}`, '_blank', 'noopener')
 }
 
-watch(currentPath, loadMarkdown, { immediate: true })
+watch(currentPath, () => {
+  loadMarkdown()
+  expandCurrentSection()
+}, { immediate: true })
 </script>
 
 <style scoped>
@@ -226,6 +268,22 @@ watch(currentPath, loadMarkdown, { immediate: true })
   font-weight: 700;
   color: #475569;
   margin-bottom: 6px;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+
+.section-title:hover {
+  background: #f1f5f9;
+}
+
+.section-toggle {
+  font-size: 10px;
+  color: #94a3b8;
 }
 
 .section-list {
