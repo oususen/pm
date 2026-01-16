@@ -187,6 +187,9 @@ if not created:
 
 ### 3. 在庫計算時
 
+- **在庫・計画在庫・進度の格納先**: 同日内に `sequence_no=0` の基礎データレコードが存在する場合は、そこに格納する
+- 基礎データレコードが存在しない場合は、従来通り「計画レコード優先 → 最小 sequence_no」を代表レコードとして使用
+
 ```python
 # 日付とsequence_noでソート
 backlogs = LineBacklog.objects.filter(

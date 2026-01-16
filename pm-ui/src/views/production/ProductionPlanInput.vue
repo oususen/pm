@@ -1052,7 +1052,7 @@ const doPickup = async () => {
       const prevActual = actualMap.get(dateKey)
       actualMap.set(dateKey, prevActual == null ? actualVal : Math.max(prevActual, actualVal))
       const stockEntry = stockSourceMap.get(dateKey)
-      const priority = planQtyVal > 0 ? 0 : 1
+      const priority = seqNo === 0 ? 0 : 1
       if (
         !stockEntry ||
         priority < stockEntry.priority ||

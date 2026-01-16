@@ -381,6 +381,9 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
         return current
 
     def pick_representative(rows):
+        base_rows = [r for r in rows if r.sequence_no == 0]
+        if base_rows:
+            return min(base_rows, key=lambda r: r.id)
         plan_rows = [r for r in rows if (r.plan_qty or 0) > 0]
         candidates = plan_rows if plan_rows else rows
         return min(candidates, key=lambda r: (r.sequence_no if r.sequence_no is not None else 0, r.id))
@@ -503,6 +506,9 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
         return current
 
     def pick_representative(rows):
+        base_rows = [r for r in rows if r.sequence_no == 0]
+        if base_rows:
+            return min(base_rows, key=lambda r: r.id)
         plan_rows = [r for r in rows if (r.plan_qty or 0) > 0]
         candidates = plan_rows if plan_rows else rows
         return min(candidates, key=lambda r: (r.sequence_no if r.sequence_no is not None else 0, r.id))
@@ -645,6 +651,9 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date, firm_map
         return current
 
     def pick_representative(rows):
+        base_rows = [r for r in rows if r.sequence_no == 0]
+        if base_rows:
+            return min(base_rows, key=lambda r: r.id)
         plan_rows = [r for r in rows if (r.plan_qty or 0) > 0]
         candidates = plan_rows if plan_rows else rows
         return min(candidates, key=lambda r: (r.sequence_no if r.sequence_no is not None else 0, r.id))
