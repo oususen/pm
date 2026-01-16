@@ -356,6 +356,7 @@ const initDaily = () => {
       stock: 0,
       plan: '',
       plan_stock: 0,
+      plan_base: 0,
       sequence_no: '',
       extraLots: [],
       has_row: false,
@@ -373,6 +374,7 @@ const ensureDailyCell = (row, dateKey) => {
       stock: 0,
       plan: '',
       plan_stock: 0,
+      plan_base: 0,
       sequence_no: '',
       extraLots: [],
       has_row: false,
@@ -541,10 +543,27 @@ const displayValue = (val) => {
   return val
 }
 
+const toNumber = (value) => {
+  const num = Number(value)
+  return Number.isFinite(num) ? num : 0
+}
+
+const getPlanQtyTotal = (daily) => {
+  if (!daily) return 0
+  const main = toNumber(daily.plan)
+  const extras = Array.isArray(daily.extraLots)
+    ? daily.extraLots.reduce((sum, lot) => sum + toNumber(lot.plan_qty), 0)
+    : 0
+  return main + extras
+}
+
+const getPlanDelta = (daily) => getPlanQtyTotal(daily) - toNumber(daily?.plan_base)
+
 const getPlanStockDisplay = (row, colIdx) => {
   if (!row || !row.daily) return ''
   const cols = dateColumns.value
   let carry = null
+  let delta = 0
   for (let i = 0; i <= colIdx; i += 1) {
     const key = cols[i]?.key
     if (!key) continue
@@ -557,7 +576,11 @@ const getPlanStockDisplay = (row, colIdx) => {
     } else if (carry !== null && carry !== undefined) {
       value = carry
     }
-    if (i === colIdx) return value
+    delta += getPlanDelta(daily)
+    if (i === colIdx) {
+      const baseValue = value === null || value === undefined ? 0 : Number(value)
+      return baseValue + delta
+    }
   }
   return ''
 }
@@ -1086,6 +1109,7 @@ const doPickup = async () => {
         plan_qty: lot.plan_qty,
         sequence_no: lot.sequence_no,
       }))
+      daily.plan_base = sorted.reduce((sum, lot) => sum + Number(lot.plan_qty || 0), 0)
       daily.has_row = true
     })
 
