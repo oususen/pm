@@ -33,6 +33,7 @@
       <div class="toolbar-right">
         <button class="btn" @click="addRow">新規行追加</button>
         <button class="btn" @click="resetRows" :disabled="!rows.length">クリア</button>
+        <button class="btn" @click="openChangeReasonDialog">計画変更</button>
         <button class="btn" @click="savePlan" :disabled="!rows.length || !selectedSupplier">保存</button>
         <button class="btn primary" @click="doPickup" :disabled="!selectedSupplier">取り込み</button>
       </div>
@@ -95,6 +96,8 @@
                   :data-row="idx"
                   :data-col="colIdx"
                   @keydown="onCellKeydown($event, idx, colIdx)"
+                  :disabled="isPlanCellLocked(c.key)"
+                  :class="{ locked: isPlanCellLocked(c.key) }"
                 />
               </td>
               <td class="num stock-plan day-end" :class="c.dayClass">
@@ -116,6 +119,21 @@
       <button class="btn-secondary">F10: 印刷</button>
       <button class="btn-secondary">F12: 更新</button>
     </div>
+
+    <div v-if="showChangeReasonDialog" class="modal-overlay" @click.self="closeChangeReasonDialog">
+      <div class="modal-content">
+        <h2>変更理由入力</h2>
+        <textarea
+          v-model="changeReasonDraft"
+          rows="4"
+          placeholder="変更理由を入力してください"
+        ></textarea>
+        <div class="modal-actions">
+          <button class="btn" @click="closeChangeReasonDialog">キャンセル</button>
+          <button class="btn primary" @click="confirmChangeReason">確定</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -130,28 +148,40 @@ const startDate = ref(new Date().toISOString().slice(0, 10))
 const horizonDays = ref(60)
 const keyword = ref('')
 const gridWrapperRef = ref(null)
+const lockDays = ref(0)
+const isEditUnlocked = ref(false)
+const changeReason = ref('')
+const changeReasonDraft = ref('')
+const showChangeReasonDialog = ref(false)
 
 const suppliers = ref([])
 const products = ref([])
 const rows = ref([])
 let tempId = 1
 
+const buildLocalDate = (dateText) => {
+  if (!dateText) return new Date()
+  const [y, m, d] = dateText.split('-').map((v) => Number(v))
+  if (!y || !m || !d) return new Date()
+  return new Date(y, m - 1, d)
+}
+
 const endDate = computed(() => {
-  const d = new Date(startDate.value)
+  const d = buildLocalDate(startDate.value)
   d.setDate(d.getDate() + horizonDays.value - 1)
-  return d.toISOString().slice(0, 10)
+  return formatDateKey(d)
 })
 
 const dateColumns = computed(() => {
   const cols = []
-  const base = new Date(startDate.value)
+  const base = buildLocalDate(startDate.value)
   const weekday = ['日', '月', '火', '水', '木', '金', '土']
   for (let i = 0; i < horizonDays.value; i++) {
     const d = new Date(base)
     d.setDate(d.getDate() + i)
     const day = d.getDay()
     const label = `${d.getMonth() + 1}/${d.getDate()}(${weekday[day]})`
-    const key = d.toISOString().slice(0, 10)
+    const key = formatDateKey(d)
     const dayClass = day === 0 ? 'sun' : day === 6 ? 'sat' : ''
     cols.push({ key, label, dayClass })
   }
@@ -163,6 +193,26 @@ const tableMinWidth = computed(() => {
   const perDayWidth = 80 * 5
   return fixedColsWidth + dateColumns.value.length * perDayWidth
 })
+
+const formatDateKey = (dateObj) => {
+  const year = dateObj.getFullYear()
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0')
+  const day = String(dateObj.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const lockUntilDate = computed(() => {
+  const base = new Date()
+  base.setHours(0, 0, 0, 0)
+  base.setDate(base.getDate() + Number(lockDays.value || 0))
+  return base
+})
+
+const isPlanCellLocked = (dateKey) => {
+  if (!dateKey) return false
+  const target = buildLocalDate(dateKey)
+  return target <= lockUntilDate.value && !isEditUnlocked.value
+}
 
 const initDaily = () => {
   const daily = {}
@@ -189,6 +239,10 @@ const resetRows = () => {
 const savePlan = async () => {
   if (!selectedSupplier.value) {
     alert('仕入先を選択してください。')
+    return
+  }
+  if (isEditUnlocked.value && !changeReason.value) {
+    alert('変更理由を入力してください。')
     return
   }
   const lineId = await resolvePurchaseLineId()
@@ -219,10 +273,14 @@ const savePlan = async () => {
     return
   }
   try {
-    const res = await api.lineBacklogs.save({
+    const payload = {
       line_id: lineId,
       items,
-    })
+    }
+    if (isEditUnlocked.value && changeReason.value) {
+      payload.change_reason = changeReason.value
+    }
+    const res = await api.lineBacklogs.save(payload)
     console.info('保存結果', res.data)
     await api.lineBacklogs.recalculateInventory({
       line_id: lineId,
@@ -230,6 +288,8 @@ const savePlan = async () => {
       end_date: endDate.value,
     })
     alert('保存しました。')
+    isEditUnlocked.value = false
+    changeReason.value = ''
   } catch (e) {
     console.error('保存エラー', e)
     alert('保存に失敗しました。')
@@ -379,12 +439,23 @@ const loadData = async () => {
 }
 
 const onPlanInput = (row, dateKey, value) => {
+  if (isPlanCellLocked(dateKey)) return
   row.daily[dateKey].plan = value === '' ? '' : value
 }
 
 const fetchSuppliers = async () => {
   const res = await api.suppliers.getSuppliers()
   suppliers.value = res.data.results || res.data || []
+}
+
+const fetchLockSetting = async () => {
+  try {
+    const res = await api.purchasePlanLockSetting.getSetting()
+    lockDays.value = Number(res.data?.lock_days ?? 0)
+  } catch (e) {
+    console.error('仕入計画ロック設定の取得エラー', e)
+    lockDays.value = 0
+  }
 }
 
 const fetchProducts = async (supplierId = null) => {
@@ -424,7 +495,7 @@ const fetchProducts = async (supplierId = null) => {
 
 onMounted(async () => {
   try {
-    await Promise.all([fetchSuppliers(), fetchProducts()])
+    await Promise.all([fetchSuppliers(), fetchProducts(), fetchLockSetting()])
     await loadData()
   } catch (e) {
     console.error('初期データ取得エラー', e)
@@ -535,6 +606,26 @@ const resolvePurchaseLineId = async () => {
     console.error('仕入れライン解決エラー', e)
     return ''
   }
+}
+
+const openChangeReasonDialog = () => {
+  changeReasonDraft.value = changeReason.value
+  showChangeReasonDialog.value = true
+}
+
+const closeChangeReasonDialog = () => {
+  showChangeReasonDialog.value = false
+}
+
+const confirmChangeReason = () => {
+  const reason = (changeReasonDraft.value || '').trim()
+  if (!reason) {
+    alert('変更理由を入力してください。')
+    return
+  }
+  changeReason.value = reason
+  isEditUnlocked.value = true
+  showChangeReasonDialog.value = false
 }
 </script>
 
@@ -725,6 +816,11 @@ thead .sticky-col {
   font-weight: 500;
   color: #000;
 }
+.plan-grid input.locked {
+  background: #f1f5f9;
+  color: #666;
+  cursor: not-allowed;
+}
 .num {
   text-align: right;
   min-width: 80px;
@@ -787,5 +883,43 @@ thead .sticky-col {
   background: #4a7ae5;
   color: #fff;
   border-color: #3865c7;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+.modal-content {
+  background: #fff;
+  border-radius: 6px;
+  width: 420px;
+  padding: 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+.modal-content h2 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.modal-content textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 90px;
+  padding: 8px;
+  border: 1px solid #cfd6e1;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.modal-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 </style>

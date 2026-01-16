@@ -56,6 +56,7 @@
           </label>
         </div>
         <button class="btn" @click="resetRows" :disabled="!rows.length">クリア</button>
+        <button class="btn" @click="openChangeReasonDialog">計画変更</button>
         <button class="btn" @click="savePlan" :disabled="!rows.length || !selectedLine">保存</button>
         <button class="btn primary" @click="doPickup" :disabled="!selectedLine">取り込み</button>
         <button class="btn accent" @click="toggleProcessGantt" :disabled="!selectedLine">
@@ -149,6 +150,8 @@
                     :data-col="colIdx"
                     data-field="plan"
                     @keydown="onCellKeydown($event, idx, colIdx, 'plan')"
+                    :disabled="isPlanCellLocked(c.key)"
+                    :class="{ locked: isPlanCellLocked(c.key) }"
                   />
                   <div
                     v-for="(lot, lotIdx) in row.daily?.[c.key]?.extraLots"
@@ -160,9 +163,11 @@
                       inputmode="decimal"
                       :value="lot.plan_qty === 0 || lot.plan_qty === '' || lot.plan_qty == null ? '' : lot.plan_qty"
                       @input="onExtraPlanInput(row, c.key, lot, $event.target.value)"
+                      :disabled="isPlanCellLocked(c.key)"
+                      :class="{ locked: isPlanCellLocked(c.key) }"
                     />
                   </div>
-                  <button class="mini-btn lot-add" type="button" @click="addExtraLot(row, c.key)">+</button>
+                  <button class="mini-btn lot-add" type="button" @click="addExtraLot(row, c.key)" :disabled="isPlanCellLocked(c.key)">+</button>
                 </div>
               </td>
               <td class="num sequence" :class="c.dayClass">
@@ -176,6 +181,8 @@
                     :data-col="colIdx"
                     data-field="sequence"
                     @keydown="onCellKeydown($event, idx, colIdx, 'sequence')"
+                    :disabled="isPlanCellLocked(c.key)"
+                    :class="{ locked: isPlanCellLocked(c.key) }"
                   />
                   <div
                     v-for="(lot, lotIdx) in row.daily?.[c.key]?.extraLots"
@@ -187,8 +194,10 @@
                       inputmode="numeric"
                       :value="lot.sequence_no === 0 || lot.sequence_no === '' || lot.sequence_no == null ? '' : lot.sequence_no"
                       @input="onExtraSequenceInput(row, c.key, lot, $event.target.value)"
+                      :disabled="isPlanCellLocked(c.key)"
+                      :class="{ locked: isPlanCellLocked(c.key) }"
                     />
-                    <button class="mini-btn lot-remove" type="button" @click="removeExtraLot(row, c.key, lot.id)">x</button>
+                    <button class="mini-btn lot-remove" type="button" @click="removeExtraLot(row, c.key, lot.id)" :disabled="isPlanCellLocked(c.key)">x</button>
                   </div>
                 </div>
               </td>
@@ -269,6 +278,20 @@
       <button class="btn-secondary">F10: 印刷</button>
       <button class="btn-secondary">F12: 更新</button>
     </div>
+    <div v-if="showChangeReasonDialog" class="modal-overlay" @click.self="closeChangeReasonDialog">
+      <div class="modal-content">
+        <h2>変更理由入力</h2>
+        <textarea
+          v-model="changeReasonDraft"
+          rows="4"
+          placeholder="変更理由を入力してください"
+        ></textarea>
+        <div class="modal-actions">
+          <button class="btn" @click="closeChangeReasonDialog">キャンセル</button>
+          <button class="btn primary" @click="confirmChangeReason">確定</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -290,6 +313,11 @@ const startDate = ref(toDateInput(defaultStart))
 const horizonDays = ref(30)
 const keyword = ref('')
 const gridWrapperRef = ref(null)
+const lockDays = ref(0)
+const isEditUnlocked = ref(false)
+const changeReason = ref('')
+const changeReasonDraft = ref('')
+const showChangeReasonDialog = ref(false)
 
 const lines = ref([])
 const products = ref([])
@@ -310,22 +338,49 @@ const workPatternMap = ref({})
 const workStartFallback = { hour: 8, minute: 0 }
 const workMinutesFallback = 480
 
+const formatDateKey = (dateObj) => {
+  const y = dateObj.getFullYear()
+  const m = String(dateObj.getMonth() + 1).padStart(2, '0')
+  const d = String(dateObj.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+const buildLocalDate = (dateText) => {
+  if (!dateText) return new Date()
+  const [y, m, d] = dateText.split('-').map((v) => Number(v))
+  if (!y || !m || !d) return new Date()
+  return new Date(y, m - 1, d)
+}
+
+const lockUntilDate = computed(() => {
+  const base = new Date()
+  base.setHours(0, 0, 0, 0)
+  base.setDate(base.getDate() + Number(lockDays.value || 0))
+  return base
+})
+
+const isPlanCellLocked = (dateKey) => {
+  if (!dateKey) return false
+  const target = buildLocalDate(dateKey)
+  return target <= lockUntilDate.value && !isEditUnlocked.value
+}
+
 const endDate = computed(() => {
-  const d = new Date(startDate.value)
+  const d = buildLocalDate(startDate.value)
   d.setDate(d.getDate() + horizonDays.value - 1)
-  return d.toISOString().slice(0, 10)
+  return formatDateKey(d)
 })
 
 const dateColumns = computed(() => {
   const cols = []
-  const base = new Date(startDate.value)
+  const base = buildLocalDate(startDate.value)
   const weekday = ['日', '月', '火', '水', '木', '金', '土']
   for (let i = 0; i < horizonDays.value; i++) {
     const d = new Date(base)
     d.setDate(d.getDate() + i)
     const day = d.getDay()
     const label = `${d.getMonth() + 1}/${d.getDate()}(${weekday[day]})`
-    const key = d.toISOString().slice(0, 10)
+    const key = formatDateKey(d)
     const dayClass = day === 0 ? 'sun' : day === 6 ? 'sat' : ''
     cols.push({ key, label, dayClass })
   }
@@ -406,6 +461,10 @@ const savePlan = async () => {
     alert('ラインを選択してください。')
     return
   }
+  if (isEditUnlocked.value && !changeReason.value) {
+    alert('変更理由を入力してください。')
+    return
+  }
 
   // 日別設定を先に保存
   try {
@@ -458,10 +517,14 @@ const savePlan = async () => {
     return
   }
   try {
-    const res = await api.linePlans.save({
+    const payload = {
       line_id: selectedLine.value,
       items,
-    })
+    }
+    if (isEditUnlocked.value && changeReason.value) {
+      payload.change_reason = changeReason.value
+    }
+    const res = await api.linePlans.save(payload)
     console.info('保存結果', res.data)
     try {
       await api.lineBacklogs.expandProcesses({
@@ -522,6 +585,8 @@ const savePlan = async () => {
       return
     }
     alert(`保存しました。\n作成: ${res.data.created}件, 更新: ${res.data.updated}件`)
+    isEditUnlocked.value = false
+    changeReason.value = ''
   } catch (e) {
     console.error('保存エラー', e)
     alert('保存に失敗しました。')
@@ -697,16 +762,19 @@ const loadData = async () => {
 }
 
 const onPlanInput = (row, dateKey, value) => {
+  if (isPlanCellLocked(dateKey)) return
   const daily = ensureDailyCell(row, dateKey)
   daily.plan = value === '' ? '' : value
 }
 
 const onSequenceInput = (row, dateKey, value) => {
+  if (isPlanCellLocked(dateKey)) return
   const daily = ensureDailyCell(row, dateKey)
   daily.sequence_no = value === '' ? '' : value
 }
 
 const addExtraLot = (row, dateKey) => {
+  if (isPlanCellLocked(dateKey)) return
   const daily = ensureDailyCell(row, dateKey)
   daily.extraLots.push({
     id: `lot-${lotTempId++}`,
@@ -716,11 +784,13 @@ const addExtraLot = (row, dateKey) => {
 }
 
 const removeExtraLot = (row, dateKey, lotId) => {
+  if (isPlanCellLocked(dateKey)) return
   const daily = ensureDailyCell(row, dateKey)
   daily.extraLots = daily.extraLots.filter((lot) => lot.id !== lotId)
 }
 
 const onExtraPlanInput = (row, dateKey, lot, value) => {
+  if (isPlanCellLocked(dateKey)) return
   const daily = ensureDailyCell(row, dateKey)
   const target = daily.extraLots.find((item) => item.id === lot.id)
   if (target) {
@@ -729,6 +799,7 @@ const onExtraPlanInput = (row, dateKey, lot, value) => {
 }
 
 const onExtraSequenceInput = (row, dateKey, lot, value) => {
+  if (isPlanCellLocked(dateKey)) return
   const daily = ensureDailyCell(row, dateKey)
   const target = daily.extraLots.find((item) => item.id === lot.id)
   if (target) {
@@ -810,12 +881,42 @@ const fetchProducts = async () => {
 
 onMounted(async () => {
   try {
-    await Promise.all([fetchLines(), fetchProducts()])
+    await Promise.all([fetchLines(), fetchProducts(), fetchLockSetting()])
     loadData()
   } catch (e) {
     console.error('初期データ取得エラー', e)
   }
 })
+
+const fetchLockSetting = async () => {
+  try {
+    const res = await api.productionPlanLockSetting.getSetting()
+    lockDays.value = Number(res.data?.lock_days ?? 0)
+  } catch (e) {
+    console.error('生産計画ロック設定の取得エラー', e)
+    lockDays.value = 0
+  }
+}
+
+const openChangeReasonDialog = () => {
+  changeReasonDraft.value = changeReason.value
+  showChangeReasonDialog.value = true
+}
+
+const closeChangeReasonDialog = () => {
+  showChangeReasonDialog.value = false
+}
+
+const confirmChangeReason = () => {
+  const reason = (changeReasonDraft.value || '').trim()
+  if (!reason) {
+    alert('変更理由を入力してください。')
+    return
+  }
+  changeReason.value = reason
+  isEditUnlocked.value = true
+  showChangeReasonDialog.value = false
+}
 
 const parseTimeParts = (value) => {
   if (!value) return null
@@ -1523,6 +1624,11 @@ thead .sticky-col {
   font-weight: 500;
   color: #000;
 }
+.plan-grid input.locked {
+  background: #f1f5f9;
+  color: #666;
+  cursor: not-allowed;
+}
 .num {
   text-align: right;
   min-width: 80px; /* セル幅を広げて日付列が潰れないようにする */
@@ -1597,6 +1703,45 @@ thead .sticky-col {
 .btn.accent:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+}
+
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+.modal-content {
+  background: #fff;
+  border-radius: 6px;
+  width: 420px;
+  padding: 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+.modal-content h2 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.modal-content textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 90px;
+  padding: 8px;
+  border: 1px solid #cfd6e1;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.modal-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .process-section {
   margin-top: 8px;

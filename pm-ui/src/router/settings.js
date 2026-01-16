@@ -29,6 +29,18 @@ const settings = [
     component: () => import("@/views/settings/SmtpConfigSettings.vue"),
     meta: { pageTitle: "SMTP設定", resource: "settings" },
   },
+  {
+    path: "/settings/purchase-plan-lock",
+    name: "PurchasePlanLockSetting",
+    component: () => import("@/views/settings/PurchasePlanLockSetting.vue"),
+    meta: { pageTitle: "仕入計画ロック設定", resource: "settings" },
+  },
+  {
+    path: "/settings/production-plan-lock",
+    name: "ProductionPlanLockSetting",
+    component: () => import("@/views/settings/ProductionPlanLockSetting.vue"),
+    meta: { pageTitle: "生産計画ロック設定", resource: "settings" },
+  },
 ];
 
 export default settings;

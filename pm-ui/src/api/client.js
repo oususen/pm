@@ -25,6 +25,8 @@ import { createAuthAPI } from './resources/auth'
 import { createAccountsAPI } from './resources/accounts'
 import { createContactsAPI } from './resources/contacts'
 import { createSmtpConfigsAPI } from './resources/smtpConfigs'
+import { createPurchasePlanLockSettingAPI } from './resources/purchasePlanLockSetting'
+import { createProductionPlanLockSettingAPI } from './resources/productionPlanLockSetting'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
@@ -106,4 +108,6 @@ export default {
   accounts: createAccountsAPI(client),
   contacts: createContactsAPI(client),
   smtpConfigs: createSmtpConfigsAPI(client),
+  purchasePlanLockSetting: createPurchasePlanLockSettingAPI(client),
+  productionPlanLockSetting: createProductionPlanLockSettingAPI(client),
 }

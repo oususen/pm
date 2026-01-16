@@ -9,6 +9,7 @@ from .models_line_backlog import LineBacklog
 from .models_line_plan import LinePlan
 from .models_line_gantt_plan import LineGanttPlan
 from .models_line_daily_schedule_setting import LineDailyScheduleSetting
+from .models_plan_lock_setting import ProductionPlanLockSetting
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_production import ProcessActual, ProductionOrder, StockAllocation
 
@@ -267,3 +268,10 @@ class LineDailyScheduleSettingSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ProductionPlanLockSettingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductionPlanLockSetting
+        fields = ['id', 'lock_days', 'updated_at', 'updated_by']
+        read_only_fields = ['id', 'updated_at', 'updated_by']

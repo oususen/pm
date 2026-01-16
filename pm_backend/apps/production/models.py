@@ -3,6 +3,8 @@ from masters.models import Line, Product, RoutingStep
 
 # Import all models to ensure they're registered with Django
 from .models_line_daily_schedule_setting import LineDailyScheduleSetting
+from .models_plan_change_log import ProductionPlanChangeLog
+from .models_plan_lock_setting import ProductionPlanLockSetting
 
 
 class LineDemand(models.Model):

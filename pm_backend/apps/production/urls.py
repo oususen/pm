@@ -7,6 +7,7 @@ from production.views import (
     LinePlanViewSet,
     LineGanttPlanViewSet,
     LineDailyScheduleSettingViewSet,
+    ProductionPlanLockSettingView,
     ProcessActualViewSet,
     ProductionOrderViewSet,
     StockAllocationViewSet,
@@ -40,4 +41,5 @@ router.register(r'process-realtime-records', ProcessRealtimeRecordViewSet, basen
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('production-plan-lock-setting/', ProductionPlanLockSettingView.as_view(), name='production-plan-lock-setting'),
 ]
