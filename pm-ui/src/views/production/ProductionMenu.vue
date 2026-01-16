@@ -30,7 +30,7 @@ import { RouterLink } from "vue-router";
 import { authState } from "@/auth";
 import { hasPermission } from "@/router";
 
-const PERMISSION_MODE = "disable"; // "disable" or "hide"
+const PERMISSION_MODE = "hide"; // "disable" or "hide"
 
 const findPermission = (user, resource) => {
   if (!user) return null;
