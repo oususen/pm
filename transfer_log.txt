@@ -1,0 +1,17 @@
+[2026-01-16 22:41:35] === PDF Transfer Scheduler Started ===
+[2026-01-16 22:41:35] Source: c:\PST\pm\output\transfer_queue
+[2026-01-16 22:41:35] Target: Z:\D-業務\業務\B-各担当別\横井\06_Kubota\05_集荷予定表\集荷依頼書_(枚方)
+[2026-01-16 22:41:35] Transferring: 枚方集荷依頼書_20260112_20260119.pdf -> Z: Drive
+[2026-01-16 22:41:35] Success: 枚方集荷依頼書_20260112_20260119.pdf
+[2026-01-16 22:41:35] Transferring: 枚方集荷依頼書_20260113_20260120.pdf -> Z: Drive
+[2026-01-16 22:41:35] Success: 枚方集荷依頼書_20260113_20260120.pdf
+[2026-01-16 22:41:35] Transferring: 枚方集荷依頼書_20260115_20260122.pdf -> Z: Drive
+[2026-01-16 22:41:35] Success: 枚方集荷依頼書_20260115_20260122.pdf
+[2026-01-16 22:41:51] === PDF Transfer Scheduler Started ===
+[2026-01-16 22:41:51] Source: c:\PST\pm\output\transfer_queue
+[2026-01-16 22:41:51] Target: Z:\D-業務\業務\B-各担当別\横井\06_Kubota\05_集荷予定表\集荷依頼書_(枚方)
+[2026-01-16 22:47:00] === PDF Transfer Scheduler Started ===
+[2026-01-16 22:47:00] Source: c:\PST\pm\output\transfer_queue
+[2026-01-16 22:47:00] Target: Z:\D-業務\業務\B-各担当別\横井\06_Kubota\05_集荷予定表\集荷依頼書_(枚方)
+[2026-01-16 22:56:01] Transferring: 枚方集荷依頼書_20260116_20260122.pdf -> Z: Drive
+[2026-01-16 22:56:01] Success: 枚方集荷依頼書_20260116_20260122.pdf

@@ -50,6 +50,7 @@ pm_backend/pm_backend/__pycache__/
 参照ファイル/
 create_table.py
 create_userprofile_table.sql
+output/
 
 # Image files
 *.png

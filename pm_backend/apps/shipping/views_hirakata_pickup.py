@@ -463,7 +463,8 @@ def send_hirakata_pickup_email(request):
         try:
             from pathlib import Path
             from django.conf import settings
-            base_dir = Path(settings.BASE_DIR).parent
+            # Docker環境では/app/output、ローカルではBASE_DIR.parent/output
+            base_dir = Path(settings.BASE_DIR)
             transfer_dir = base_dir / "output" / "transfer_queue"
             transfer_dir.mkdir(parents=True, exist_ok=True)
             transfer_path = transfer_dir / filename
