@@ -94,20 +94,6 @@ def generate_hirakata_pickup_pdf(request):
 
         filename = f"枚方集荷依頼書_{pickup_start_date.strftime('%Y%m%d')}_{pickup_end_date.strftime('%Y%m%d')}.pdf"
 
-        # 転送用ディレクトリに保存（レスポンス送信と別に保管）
-        try:
-            from pathlib import Path
-            from django.conf import settings
-            base_dir = Path(settings.BASE_DIR).parent
-            transfer_dir = base_dir / "output" / "transfer_queue"
-            transfer_dir.mkdir(parents=True, exist_ok=True)
-            transfer_path = transfer_dir / filename
-            pdf_buffer.seek(0)
-            transfer_path.write_bytes(pdf_buffer.read())
-            pdf_buffer.seek(0)
-        except Exception as e:
-            print(f"転送用保存エラー: {e}")
-
         # HTTPレスポンス作成
         response = HttpResponse(pdf_buffer.read(), content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
@@ -472,6 +458,20 @@ def send_hirakata_pickup_email(request):
 
         pdf_buffer = pdf_service.generate_pickup_request_pdf(start_date, end_date)
         filename = f"枚方集荷依頼書_{pickup_start_date.strftime('%Y%m%d')}_{pickup_end_date.strftime('%Y%m%d')}.pdf"
+
+        # 転送用ディレクトリに保存（送信と別に保管）
+        try:
+            from pathlib import Path
+            from django.conf import settings
+            base_dir = Path(settings.BASE_DIR).parent
+            transfer_dir = base_dir / "output" / "transfer_queue"
+            transfer_dir.mkdir(parents=True, exist_ok=True)
+            transfer_path = transfer_dir / filename
+            pdf_buffer.seek(0)
+            transfer_path.write_bytes(pdf_buffer.read())
+            pdf_buffer.seek(0)
+        except Exception as e:
+            print(f"転送用保存エラー: {e}")
 
         email_service = EmailService()
         result = email_service.send_email_with_attachment(
