@@ -3,69 +3,18 @@
     <h2 class="page-title">生産管理メニュー</h2>
 
     <div class="master-grid">
-      <RouterLink v-if="hasPermission(user, 'production')" to="/production/mobile-process-input" class="master-tile">
-        <div class="icon-box">📱</div>
-        <div class="label">工程作業入力</div>
-      </RouterLink>
-
-      <RouterLink v-if="hasPermission(user, 'production')" to="/production/scrap-record" class="master-tile">
-        <div class="icon-box">🛠️</div>
-        <div class="label">仕損品記録</div>
-      </RouterLink>
-
-      <RouterLink v-if="hasPermission(user, 'production')" to="/production/plan-input" class="master-tile">
-        <div class="icon-box" aria-label="計画">📝</div>
-        <div class="label">生産計画入力</div>
-      </RouterLink>
-
-      <RouterLink v-if="hasPermission(user, 'production')" to="/production/inventory" class="master-tile">
-        <div class="icon-box" aria-label="在庫">📦</div>
-        <div class="label">在庫/残量一覧</div>
-      </RouterLink>
-
-      <RouterLink v-if="hasPermission(user, 'production')" to="/production/scrap-history" class="master-tile">
-        <div class="icon-box">📜</div>
-        <div class="label">仕損履歴</div>
-      </RouterLink>
-
-      <RouterLink v-if="hasPermission(user, 'production')" to="/production/progress" class="master-tile">
-        <div class="icon-box" aria-label="進捗">📊</div>
-        <div class="label">進捗管理</div>
-      </RouterLink>
-
-      <RouterLink v-if="hasPermission(user, 'production')" to="/production/line-demands" class="master-tile">
-        <div class="icon-box" aria-label="需要">📈</div>
-        <div class="label">ライン需要一覧</div>
-      </RouterLink>
-
-      <RouterLink v-if="hasPermission(user, 'production')" to="/production/line-calendars" class="master-tile">
-        <div class="icon-box" aria-label="勤">⏱</div>
-        <div class="label">ライン勤務カレンダ</div>
-      </RouterLink>
-
-      <RouterLink v-if="hasPermission(user, 'production')" to="/production/stock-allocations" class="master-tile">
-        <div class="icon-box" aria-label="引当">🎯</div>
-        <div class="label">在庫引当</div>
-      </RouterLink>
-
-      <RouterLink v-if="hasPermission(user, 'production')" to="/production/orders" class="master-tile">
-        <div class="icon-box" aria-label="指示">🛠️</div>
-        <div class="label">製造指示</div>
-      </RouterLink>
-
-      <RouterLink v-if="hasPermission(user, 'production')" to="/production/sequence-board" class="master-tile accent">
-        <div class="icon-box">🎛</div>
-        <div class="label">ミックス順序ボード</div>
-      </RouterLink>
-
-      <RouterLink v-if="hasPermission(user, 'production')" to="/production/line-monitor" class="master-tile accent">
-        <div class="icon-box">📺</div>
-        <div class="label">ライン稼働監視</div>
-      </RouterLink>
-
-      <RouterLink v-if="hasPermission(user, 'production')" to="/production/mobile-input" class="master-tile">
-        <div class="icon-box">📱</div>
-        <div class="label">モバイル作業入力（ライン）</div>
+      <RouterLink
+        v-for="tile in visibleTiles"
+        :key="tile.to"
+        :to="tile.to"
+        class="master-tile"
+        :class="{ accent: tile.accent, 'is-disabled': tile.disabled }"
+        :aria-disabled="tile.disabled ? 'true' : 'false'"
+        :tabindex="tile.disabled ? -1 : 0"
+        @click="(event) => onTileClick(event, tile)"
+      >
+        <div class="icon-box" :aria-label="tile.iconLabel || null">{{ tile.icon }}</div>
+        <div class="label">{{ tile.label }}</div>
       </RouterLink>
     </div>
 
@@ -76,11 +25,158 @@
 </template>
 
 <script setup>
+import { computed } from "vue";
 import { RouterLink } from "vue-router";
 import { authState } from "@/auth";
 import { hasPermission } from "@/router";
 
-const user = authState.user;
+const PERMISSION_MODE = "disable"; // "disable" or "hide"
+
+const findPermission = (user, resource) => {
+  if (!user) return null;
+  const permissions = Array.isArray(user.effective_permissions)
+    ? user.effective_permissions
+    : [];
+  return permissions.find((item) => item.resource === resource) || null;
+};
+
+const hasMenuPermission = (resource, level) => {
+  const user = authState.user;
+  if (!user) return false;
+  if (user.is_superuser) return true;
+
+  const entry = findPermission(user, resource);
+  if (entry) {
+    return level === "edit"
+      ? Boolean(entry.can_edit)
+      : Boolean(entry.can_view || entry.can_edit);
+  }
+
+  return hasPermission(user, "production", level);
+};
+
+const tiles = computed(() => {
+  const list = [
+    {
+      to: "/production/mobile-process-input",
+      label: "工程作業入力",
+      icon: "📱",
+      required: "view",
+      resource: "production.process_input",
+    },
+    {
+      to: "/production/scrap-record",
+      label: "仕損品記録",
+      icon: "🛠️",
+      required: "edit",
+      resource: "production.scrap_record",
+    },
+    {
+      to: "/production/plan-input",
+      label: "生産計画入力",
+      icon: "📝",
+      iconLabel: "計画",
+      required: "edit",
+      resource: "production.plan_input",
+    },
+    {
+      to: "/production/inventory",
+      label: "在庫/残量一覧",
+      icon: "📦",
+      iconLabel: "在庫",
+      required: "view",
+      resource: "production.inventory",
+    },
+    {
+      to: "/production/scrap-history",
+      label: "仕損履歴",
+      icon: "📜",
+      required: "view",
+      resource: "production.scrap_history",
+    },
+    {
+      to: "/production/progress",
+      label: "進捗管理",
+      icon: "📊",
+      iconLabel: "進捗",
+      required: "view",
+      resource: "production.progress",
+    },
+    {
+      to: "/production/line-demands",
+      label: "ライン需要一覧",
+      icon: "📈",
+      iconLabel: "需要",
+      required: "view",
+      resource: "production.line_demands",
+    },
+    {
+      to: "/production/line-calendars",
+      label: "ライン勤務カレンダ",
+      icon: "⏱",
+      iconLabel: "勤",
+      required: "edit",
+      resource: "production.line_calendars",
+    },
+    {
+      to: "/production/stock-allocations",
+      label: "在庫引当",
+      icon: "🎯",
+      iconLabel: "引当",
+      required: "edit",
+      resource: "production.stock_allocations",
+    },
+    {
+      to: "/production/orders",
+      label: "製造指示",
+      icon: "🛠️",
+      iconLabel: "指示",
+      required: "edit",
+      resource: "production.orders",
+    },
+    {
+      to: "/production/sequence-board",
+      label: "ミックス順序ボード",
+      icon: "🎛",
+      required: "view",
+      accent: true,
+      resource: "production.sequence_board",
+    },
+    {
+      to: "/production/line-monitor",
+      label: "ライン稼働監視",
+      icon: "📺",
+      required: "view",
+      accent: true,
+      resource: "production.line_monitor",
+    },
+    {
+      to: "/production/mobile-input",
+      label: "モバイル作業入力（ライン）",
+      icon: "📱",
+      required: "edit",
+      resource: "production.mobile_input",
+    },
+  ];
+
+  return list.map((tile) => ({
+    ...tile,
+    disabled: !hasMenuPermission(tile.resource, tile.required),
+  }));
+});
+
+const visibleTiles = computed(() => {
+  if (PERMISSION_MODE === "hide") {
+    return tiles.value.filter((tile) => !tile.disabled);
+  }
+  return tiles.value;
+});
+
+const onTileClick = (event, tile) => {
+  if (tile.disabled) {
+    event.preventDefault();
+  }
+};
 </script>
 
 <style scoped>
@@ -112,6 +208,11 @@ const user = authState.user;
 .master-tile.accent {
   border: 1px solid #4f46e5;
   box-shadow: 0 6px 16px rgba(79, 70, 229, 0.18);
+}
+.master-tile.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 .helper-text {
   margin-top: 10px;
