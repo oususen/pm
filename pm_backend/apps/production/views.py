@@ -1,4 +1,5 @@
 from rest_framework import viewsets, status
+from rest_framework.views import APIView
 from decimal import Decimal
 from datetime import timedelta, datetime
 from rest_framework.decorators import action
@@ -16,12 +17,15 @@ from .models_line_plan import LinePlan
 from .models_production import StockAllocation, ProductionOrder, ProcessActual
 from .models_line_gantt_plan import LineGanttPlan
 from .models_line_daily_schedule_setting import LineDailyScheduleSetting
+from .models_plan_change_log import ProductionPlanChangeLog
+from .models_plan_lock_setting import ProductionPlanLockSetting
 from .serializers import (
     LineDemandSerializer,
     LineBacklogSerializer,
     LinePlanSerializer,
     LineGanttPlanSerializer,
     LineDailyScheduleSettingSerializer,
+    ProductionPlanLockSettingSerializer,
     StockAllocationSerializer,
     ProductionOrderSerializer,
     ProductionOrderListSerializer,
@@ -137,6 +141,12 @@ class LinePlanViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
         if not isinstance(items, list) or not items:
             return Response({'detail': 'items is required'}, status=status.HTTP_400_BAD_REQUEST)
+        raw_reason = request.data.get('change_reason')
+        change_reason = None
+        if raw_reason is not None:
+            change_reason = str(raw_reason).strip()
+            if not change_reason:
+                return Response({'detail': 'change_reason is required'}, status=status.HTTP_400_BAD_REQUEST)
 
         from masters.models import Product
         from django.db import transaction
@@ -163,6 +173,8 @@ class LinePlanViewSet(viewsets.ModelViewSet):
         skipped = []
         product_cache = {}
         next_seq_cache = {}
+        existing_plan_map = {}
+        change_user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
 
         def get_next_sequence(plan_date_obj):
             """自動採番: 日付ごとに連番を生成"""
@@ -173,8 +185,35 @@ class LinePlanViewSet(viewsets.ModelViewSet):
             next_seq_cache[cache_key] = next_seq + 1
             return next_seq
 
+        def record_change(before_qty, after_qty, plan_date_obj, product_id, process_id, line_id_val, sequence_no_val, plan_id_val):
+            if not change_reason:
+                return
+            if before_qty == after_qty:
+                return
+            ProductionPlanChangeLog.objects.create(
+                plan_date=plan_date_obj,
+                product_id=product_id,
+                process_id=process_id,
+                line_id=line_id_val,
+                sequence_no=sequence_no_val,
+                plan_id=plan_id_val,
+                before_qty=before_qty,
+                after_qty=after_qty,
+                reason=change_reason,
+                changed_by=change_user,
+            )
+
         # トランザクション内で削除→作成を実行
         with transaction.atomic():
+            if change_reason and affected_dates and affected_products:
+                existing_plans = LinePlan.objects.filter(
+                    line_id=line_id,
+                    plan_date__in=affected_dates,
+                    product_id__in=affected_products
+                )
+                for plan in existing_plans:
+                    key = (plan.product_id, plan.process_id, plan.plan_date, plan.sequence_no)
+                    existing_plan_map[key] = plan
             # 1. 該当ライン・日付・製品のLinePlanを削除
             if affected_dates and affected_products:
                 deleted_plan_result = LinePlan.objects.filter(
@@ -217,10 +256,6 @@ class LinePlanViewSet(viewsets.ModelViewSet):
                     plan_qty_value = Decimal(str(it.get('plan_qty') or 0))
                     plan_date_obj = parse_plan_date(plan_date)
 
-                    # plan_qty <= 0 の場合はスキップ（既に削除済み）
-                    if plan_qty_value <= 0:
-                        continue
-
                     seq_in = it.get('sequence_no')
                     if seq_in in (None, '', 0):
                         # sequence_noが指定されていない場合は自動採番
@@ -235,6 +270,25 @@ class LinePlanViewSet(viewsets.ModelViewSet):
                         except (TypeError, ValueError):
                             skipped.append({'item': it, 'reason': 'invalid sequence_no'})
                             continue
+
+                    existing_key = (product_id, process_id, plan_date_obj, sequence_no)
+                    existing_plan = existing_plan_map.pop(existing_key, None)
+                    before_qty = int(existing_plan.plan_qty or 0) if existing_plan else 0
+                    before_plan_id = existing_plan.plan_id if existing_plan else None
+
+                    # plan_qty <= 0 の場合はスキップ（既に削除済み）
+                    if plan_qty_value <= 0:
+                        record_change(
+                            before_qty,
+                            0,
+                            plan_date_obj,
+                            product_id,
+                            process_id,
+                            line_id,
+                            sequence_no,
+                            before_plan_id,
+                        )
+                        continue
 
                     if product_id not in product_cache:
                         try:
@@ -263,9 +317,32 @@ class LinePlanViewSet(viewsets.ModelViewSet):
                         sequence_no=sequence_no,
                     )
                     created += 1
+                    record_change(
+                        before_qty,
+                        int(plan_qty_value),
+                        plan_date_obj,
+                        product_id,
+                        process_id,
+                        line_id,
+                        sequence_no,
+                        plan_id,
+                    )
 
                 except Exception as e:
                     return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+            if change_reason:
+                for plan in existing_plan_map.values():
+                    record_change(
+                        int(plan.plan_qty or 0),
+                        0,
+                        plan.plan_date,
+                        plan.product_id,
+                        plan.process_id,
+                        line_id,
+                        plan.sequence_no,
+                        plan.plan_id,
+                    )
 
         return Response({
             'created': created,
@@ -550,6 +627,20 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         line_obj = Line.objects.filter(id=line_id).first()
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(calendar_code='tiera_muke').values_list('id', flat=True).first()
 
+        # CalendarDayを一括取得してキャッシュ化（N+1問題を解消）
+        calendar_day_cache = {}
+        if calendar_id:
+            # 期間を広めに取得（リードタイム分を考慮して前後60日）
+            cache_start = (start_dt - timedelta(days=60)) if start_dt else None
+            cache_end = (end_dt + timedelta(days=60)) if end_dt else None
+            cal_qs = CalendarDay.objects.filter(calendar_id=calendar_id)
+            if cache_start:
+                cal_qs = cal_qs.filter(target_date__gte=cache_start)
+            if cache_end:
+                cal_qs = cal_qs.filter(target_date__lte=cache_end)
+            for cal in cal_qs:
+                calendar_day_cache[cal.target_date] = cal.is_working_day
+
         def shift_business_days(target_date, days):
             """
             稼働日で日付をシフトする。
@@ -559,8 +650,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             def is_working_day(check_date):
                 if not calendar_id:
                     return True
-                cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=check_date).first()
-                return cal.is_working_day if cal is not None else True
+                # キャッシュから取得（キャッシュにない場合はTrue扱い）
+                return calendar_day_cache.get(check_date, True)
 
             if not days:
                 if not calendar_id:
@@ -700,15 +791,40 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         #   ステップ4: そのライン（例：溶接ライン）のLineBacklogから計画数を取得
         #   ステップ5: BOM個数を掛けて現在ラインの必要数を計算
         downstream_found = False
+
+        # 中間品がある場合、関連データを一括取得（N+1問題を解消）
+        bom_items_by_child = {}
+        parent_product_ids = set()
+        if intermediate_products:
+            all_bom_items = BOMItem.objects.filter(
+                child_product_id__in=intermediate_products
+            ).select_related('bom', 'bom__parent_product')
+            for bom_item in all_bom_items:
+                child_id = bom_item.child_product_id
+                if child_id not in bom_items_by_child:
+                    bom_items_by_child[child_id] = []
+                bom_items_by_child[child_id].append(bom_item)
+                if bom_item.bom and bom_item.bom.parent_product_id:
+                    parent_product_ids.add(bom_item.bom.parent_product_id)
+
+        # 親製品を出力するRoutingStepを一括取得
+        downstream_steps_by_product = {}
+        if parent_product_ids:
+            all_downstream_steps = RoutingStep.objects.filter(
+                output_product_id__in=parent_product_ids
+            ).select_related('routing', 'routing__product', 'line')
+            for d_step in all_downstream_steps:
+                prod_id = d_step.output_product_id
+                if prod_id not in downstream_steps_by_product:
+                    downstream_steps_by_product[prod_id] = []
+                downstream_steps_by_product[prod_id].append(d_step)
+
         for product_id in intermediate_products:
             # 現在ラインのoutput_product（例：ブレーキラインなら中間品C）
             current_output_product = product_id
 
-            # ステップ2: この製品を子部品として使うBOMを取得
-            # （parent ← current_output_product の関係）
-            bom_items = BOMItem.objects.filter(
-                child_product_id=current_output_product
-            ).select_related('bom__parent_product')
+            # ステップ2: この製品を子部品として使うBOMを取得（キャッシュから）
+            bom_items = bom_items_by_child.get(current_output_product, [])
 
             for bom_item in bom_items:
                 parent_product = bom_item.bom.parent_product
@@ -719,10 +835,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if qty_per == 0:
                     continue
 
-                # ステップ3: 親製品を出力するライン（後工程）をRoutingStepから特定
-                downstream_steps = RoutingStep.objects.filter(
-                    output_product_id=parent_product.id
-                ).select_related('routing', 'routing__product', 'line')
+                # ステップ3: 親製品を出力するライン（後工程）をRoutingStepから特定（キャッシュから）
+                downstream_steps = downstream_steps_by_product.get(parent_product.id, [])
 
                 for d_step in downstream_steps:
                     downstream_line_id = d_step.line_id
@@ -801,15 +915,40 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         # 2. RoutingStepベースの展開が失敗した場合、BOMベースの展開を試みる（中間品のみ）
         if not downstream_found and intermediate_products:
-            # BOMItemのline_idを使って需要展開
+            # BOMItemを一括取得（line_idが現在ラインと一致するもの）
+            bom_items_for_line = BOMItem.objects.filter(
+                child_product_id__in=intermediate_products,
+                line_id=line_id
+            ).select_related('bom', 'bom__parent_product')
+
+            # 親製品IDを収集
+            parent_ids_for_backlog = set()
+            bom_items_by_child_line = {}
+            for bom_item in bom_items_for_line:
+                child_id = bom_item.child_product_id
+                if child_id not in bom_items_by_child_line:
+                    bom_items_by_child_line[child_id] = []
+                bom_items_by_child_line[child_id].append(bom_item)
+                if bom_item.bom and bom_item.bom.parent_product_id:
+                    parent_ids_for_backlog.add(bom_item.bom.parent_product_id)
+
+            # 親製品のLineBacklogを一括取得
+            backlog_by_product = {}
+            if parent_ids_for_backlog:
+                backlog_qs_parent = LineBacklog.objects.filter(product_id__in=parent_ids_for_backlog)
+                if start_date:
+                    backlog_qs_parent = backlog_qs_parent.filter(plan_date__gte=start_date)
+                if end_date:
+                    backlog_qs_parent = backlog_qs_parent.filter(plan_date__lte=end_date)
+                for backlog in backlog_qs_parent:
+                    prod_id = backlog.product_id
+                    if prod_id not in backlog_by_product:
+                        backlog_by_product[prod_id] = []
+                    backlog_by_product[prod_id].append(backlog)
+
             for product_id in intermediate_products:
                 current_output_product = product_id
-
-                # この製品を子部品として使うBOMItem（line_idが現在ラインと一致するもの）を取得
-                bom_items = BOMItem.objects.filter(
-                    child_product_id=current_output_product,
-                    line_id=line_id
-                ).select_related('bom__parent_product')
+                bom_items = bom_items_by_child_line.get(current_output_product, [])
 
                 for bom_item in bom_items:
                     parent_product = bom_item.bom.parent_product
@@ -820,14 +959,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     if qty_per == 0:
                         continue
 
-                    # 親製品のLineBacklogから計画数を取得
-                    backlog_items = LineBacklog.objects.filter(
-                        product_id=parent_product.id
-                    )
-                    if start_date:
-                        backlog_items = backlog_items.filter(plan_date__gte=start_date)
-                    if end_date:
-                        backlog_items = backlog_items.filter(plan_date__lte=end_date)
+                    # 親製品のLineBacklogを取得（キャッシュから）
+                    backlog_items = backlog_by_product.get(parent_product.id, [])
 
                     # リードタイムを考慮
                     lt_days = resolve_lead_time_days(current_output_product, bom_item)
@@ -2309,3 +2442,34 @@ class LineDailyScheduleSettingViewSet(viewsets.ModelViewSet):
             'updated': updated_count,
             'errors': errors
         }, status=status.HTTP_200_OK if not errors else status.HTTP_207_MULTI_STATUS)
+
+
+class ProductionPlanLockSettingView(APIView):
+    def get(self, request):
+        setting = ProductionPlanLockSetting.objects.first()
+        if not setting:
+            user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+            setting = ProductionPlanLockSetting.objects.create(lock_days=0, updated_by=user)
+        serializer = ProductionPlanLockSettingSerializer(setting)
+        return Response(serializer.data)
+
+    def post(self, request):
+        raw_days = request.data.get('lock_days')
+        try:
+            lock_days = int(raw_days)
+        except (TypeError, ValueError):
+            return Response({'detail': 'lock_days must be integer'}, status=status.HTTP_400_BAD_REQUEST)
+        if lock_days < 0:
+            return Response({'detail': 'lock_days must be >= 0'}, status=status.HTTP_400_BAD_REQUEST)
+
+        setting = ProductionPlanLockSetting.objects.first()
+        user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+        if not setting:
+            setting = ProductionPlanLockSetting.objects.create(lock_days=lock_days, updated_by=user)
+        else:
+            setting.lock_days = lock_days
+            setting.updated_by = user
+            setting.save(update_fields=['lock_days', 'updated_at', 'updated_by'])
+
+        serializer = ProductionPlanLockSettingSerializer(setting)
+        return Response(serializer.data)
