@@ -429,6 +429,53 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 item.firm_order_qty = firm_map.get(key, 0)
                 item.forecast_order_qty = forecast_map.get(key, 0)
 
+    @action(detail=False, methods=['post'], url_path='resolve_upstream_lines')
+    def resolve_upstream_lines(self, request):
+        """
+        BOM/ルーティングから前ライン候補を抽出する。
+
+        期待payload: { line_id?, product_ids: [int] }
+        """
+        line_id = request.data.get('line_id')
+        product_ids = request.data.get('product_ids', [])
+
+        if isinstance(product_ids, str):
+            product_ids = [p for p in product_ids.split(',') if p.strip()]
+        if not isinstance(product_ids, (list, tuple)) or not product_ids:
+            return Response({'line_ids': []})
+
+        try:
+            parent_ids = {int(p) for p in product_ids}
+        except (TypeError, ValueError):
+            return Response({'detail': 'product_ids must be numeric'}, status=status.HTTP_400_BAD_REQUEST)
+
+        bom_items = BOMItem.objects.filter(
+            bom__is_active=True,
+            bom__parent_product_id__in=parent_ids,
+        )
+        child_ids = set(bom_items.values_list('child_product_id', flat=True))
+        if not child_ids:
+            return Response({'line_ids': []})
+
+        routing_steps = RoutingStep.objects.filter(
+            Q(output_product_id__in=child_ids) | Q(routing__product_id__in=child_ids),
+            line_id__isnull=False,
+            routing__is_active=True,
+        )
+        line_ids = sorted(set(routing_steps.values_list('line_id', flat=True)))
+
+        if line_id:
+            try:
+                line_id = int(line_id)
+                line_ids = [lid for lid in line_ids if lid != line_id]
+            except (TypeError, ValueError):
+                pass
+
+        return Response({
+            'line_ids': line_ids,
+            'child_product_ids': sorted(child_ids),
+        })
+
     @action(detail=False, methods=['post'])
     def pickup(self, request):
         """

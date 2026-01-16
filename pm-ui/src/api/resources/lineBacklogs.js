@@ -18,6 +18,9 @@ export const createLineBacklogsAPI = (client) => ({
   expandProcesses(payload) {
     return client.post('/line-backlogs/expand_processes/', payload)
   },
+  resolveUpstreamLines(payload) {
+    return client.post('/line-backlogs/resolve_upstream_lines/', payload)
+  },
   save(payload) {
     return client.post('/line-backlogs/save/', payload)
   },

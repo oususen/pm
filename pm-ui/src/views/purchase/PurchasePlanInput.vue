@@ -167,7 +167,7 @@ const tableMinWidth = computed(() => {
 const initDaily = () => {
   const daily = {}
   dateColumns.value.forEach((c) => {
-    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, has_row: false }
+    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, plan_base: 0, has_row: false }
   })
   return daily
 }
@@ -224,6 +224,11 @@ const savePlan = async () => {
       items,
     })
     console.info('保存結果', res.data)
+    await api.lineBacklogs.recalculateInventory({
+      line_id: lineId,
+      start_date: startDate.value,
+      end_date: endDate.value,
+    })
     alert('保存しました。')
   } catch (e) {
     console.error('保存エラー', e)
@@ -256,10 +261,23 @@ const displayValue = (val) => {
   return val
 }
 
+const toNumber = (value) => {
+  const num = Number(value)
+  return Number.isFinite(num) ? num : 0
+}
+
+const getPlanQtyTotal = (daily) => {
+  if (!daily) return 0
+  return toNumber(daily.plan)
+}
+
+const getPlanDelta = (daily) => getPlanQtyTotal(daily) - toNumber(daily?.plan_base)
+
 const getPlanStockDisplay = (row, colIdx) => {
   if (!row || !row.daily) return ''
   const cols = dateColumns.value
   let carry = null
+  let delta = 0
   for (let i = 0; i <= colIdx; i += 1) {
     const key = cols[i]?.key
     if (!key) continue
@@ -272,7 +290,11 @@ const getPlanStockDisplay = (row, colIdx) => {
     } else if (carry !== null && carry !== undefined) {
       value = carry
     }
-    if (i === colIdx) return value
+    delta += getPlanDelta(daily)
+    if (i === colIdx) {
+      const baseValue = value === null || value === undefined ? 0 : Number(value)
+      return baseValue + delta
+    }
   }
   return ''
 }
@@ -485,6 +507,7 @@ const doPickup = async () => {
         row.daily[dateKey].actual = Number(d.actual_qty || 0)
         row.daily[dateKey].stock = Number(d.stock_qty || 0)
         row.daily[dateKey].plan_stock = Number(d.planned_stock_qty || 0)
+        row.daily[dateKey].plan_base = Number(d.plan_qty || 0)
         row.daily[dateKey].has_row = true
       }
     })
