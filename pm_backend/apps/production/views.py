@@ -567,8 +567,13 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         期待payload: { line_id, start_date?, end_date? }
         """
+        import logging
+        import time
         from masters.models import BOMItem, RoutingStep
         from collections import defaultdict
+
+        logger = logging.getLogger(__name__)
+        pickup_start = time.perf_counter()
 
         line_id = request.data.get('line_id')
         if not line_id:
@@ -602,7 +607,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             line_id=line_id
         ).select_related('output_product', 'routing__product', 'process')
 
+        steps_on_line_count = 0
         for step in steps_on_line:
+            steps_on_line_count += 1
             product = step.output_product or step.routing.product
             if product:
                 target_products.add(product.id)
@@ -616,6 +623,15 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     final_products.add(product.id)
                 else:
                     intermediate_products.add(product.id)
+
+        logger.info(
+            "pickup: line_id=%s steps_on_line=%s target_products=%s final_products=%s intermediate_products=%s",
+            line_id,
+            steps_on_line_count,
+            len(target_products),
+            len(final_products),
+            len(intermediate_products),
+        )
 
         if not target_products:
             return Response([])
@@ -687,13 +703,16 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             if key in gantt_usage_cache:
                 return gantt_usage_cache[key]
 
+            gantt_start = time.perf_counter()
             qs = LineGanttPlan.objects.filter(
                 line_id=line_id,
                 product_id__in=product_ids,
             )
 
             usage_map = {}
+            gantt_rows = 0
             for plan in qs:
+                gantt_rows += 1
                 start_dt_value = plan.start_datetime
                 if not start_dt_value:
                     continue
@@ -718,6 +737,13 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 usage_map[plan_day] = usage_map.get(plan_day, Decimal('0')) + qty
 
             gantt_usage_cache[key] = usage_map
+            logger.info(
+                "pickup: gantt_plans line_id=%s products=%s rows=%s time=%.3fs",
+                line_id,
+                len(product_ids),
+                gantt_rows,
+                time.perf_counter() - gantt_start,
+            )
             return usage_map
 
         def resolve_lead_time_days(current_product_id, bom_item=None):
@@ -739,6 +765,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             backlog_qs = backlog_qs.filter(plan_date__lte=end_date)
         for existing in backlog_qs:
             demand_map[(existing.product_id, existing.plan_date)] = Decimal('0')
+        logger.info("pickup: existing_backlogs=%s", backlog_qs.count())
 
         # 最終品はOrderLineから、中間品は後工程から需要を取得
 
@@ -753,6 +780,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 order_lines = order_lines.filter(due_date__gte=start_date)
             if end_date:
                 order_lines = order_lines.filter(due_date__lte=end_date)
+
+            logger.info("pickup: order_lines=%s", order_lines.count())
 
             firm_map = defaultdict(Decimal)
             forecast_map = defaultdict(Decimal)
@@ -799,6 +828,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             all_bom_items = BOMItem.objects.filter(
                 child_product_id__in=intermediate_products
             ).select_related('bom', 'bom__parent_product')
+            logger.info("pickup: bom_items_for_intermediate=%s", all_bom_items.count())
             for bom_item in all_bom_items:
                 child_id = bom_item.child_product_id
                 if child_id not in bom_items_by_child:
@@ -813,6 +843,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             all_downstream_steps = RoutingStep.objects.filter(
                 output_product_id__in=parent_product_ids
             ).select_related('routing', 'routing__product', 'line')
+            logger.info("pickup: downstream_steps=%s", all_downstream_steps.count())
             for d_step in all_downstream_steps:
                 prod_id = d_step.output_product_id
                 if prod_id not in downstream_steps_by_product:
@@ -975,6 +1006,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         # 4. LineBacklogに保存（order_qtyのみ更新、他の数量は維持）
         upserted_items = []
+        upsert_start = time.perf_counter()
         for (product_id, plan_date), order_qty in demand_map.items():
             process_id = product_process_map.get(product_id)
             if not process_id:
@@ -994,6 +1026,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 }
             )
             upserted_items.append(obj)
+        logger.info(
+            "pickup: upserted_items=%s time=%.3fs",
+            len(upserted_items),
+            time.perf_counter() - upsert_start,
+        )
 
         # 5. 最新状態を返す
         items_to_serialize = upserted_items
@@ -1023,6 +1060,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     ))
                 items_to_serialize = placeholders
         serializer = self.get_serializer(items_to_serialize, many=True)
+        logger.info("pickup: total_time=%.3fs", time.perf_counter() - pickup_start)
         return Response(serializer.data)
 
     @action(detail=False, methods=['post'], url_path='pickup_purchase')

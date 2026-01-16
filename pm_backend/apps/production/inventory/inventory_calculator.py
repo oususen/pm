@@ -715,33 +715,77 @@ def recalculate_inventory_for_line(line_id, start_date, end_date):
         end_date: 終了日
     """
     import logging
+    import time
     logger = logging.getLogger(__name__)
 
+    overall_start = time.perf_counter()
     logger.info(f"在庫再計算開始: line_id={line_id}, {start_date} ~ {end_date}")
 
     # まず仕損数を集計
+    scrap_start = time.perf_counter()
     aggregate_scrap_to_backlog(line_id, start_date, end_date)
+    logger.info("仕損集計時間: %.3fs", time.perf_counter() - scrap_start)
 
+    firm_start = time.perf_counter()
     firm_map = _build_firm_order_map(line_id, start_date, end_date)
+    logger.info("確定受注マップ作成時間: %.3fs", time.perf_counter() - firm_start)
 
     # 製品ごとに在庫計算
-    product_ids = LineBacklog.objects.filter(
+    product_ids = list(LineBacklog.objects.filter(
         line_id=line_id,
         plan_date__range=[start_date, end_date]
-    ).values_list('product_id', flat=True).distinct()
+    ).values_list('product_id', flat=True).distinct())
 
     logger.info(f"対象製品数: {len(product_ids)}")
+
+    stock_total = 0.0
+    planned_total = 0.0
+    progress_total = 0.0
+    stock_max = (0.0, None)
+    planned_max = (0.0, None)
+    progress_max = (0.0, None)
 
     for product_id in product_ids:
         logger.info(f"製品ID {product_id} の在庫計算中...")
 
         # 実在庫を計算
+        t0 = time.perf_counter()
         recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=firm_map)
+        stock_elapsed = time.perf_counter() - t0
+        stock_total += stock_elapsed
+        if stock_elapsed > stock_max[0]:
+            stock_max = (stock_elapsed, product_id)
 
         # 計画在庫を計算
+        t1 = time.perf_counter()
         recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, firm_map=firm_map)
+        planned_elapsed = time.perf_counter() - t1
+        planned_total += planned_elapsed
+        if planned_elapsed > planned_max[0]:
+            planned_max = (planned_elapsed, product_id)
 
         # 進度を計算
+        t2 = time.perf_counter()
         recalculate_progress_qty(line_id, product_id, start_date, end_date, firm_map=firm_map)
+        progress_elapsed = time.perf_counter() - t2
+        progress_total += progress_elapsed
+        if progress_elapsed > progress_max[0]:
+            progress_max = (progress_elapsed, product_id)
 
-    logger.info("在庫再計算完了")
+    product_count = max(len(product_ids), 1)
+    logger.info(
+        "在庫再計算合計: stock=%.3fs (avg=%.3fs, max=%.3fs id=%s) planned=%.3fs (avg=%.3fs, max=%.3fs id=%s) progress=%.3fs (avg=%.3fs, max=%.3fs id=%s)",
+        stock_total,
+        stock_total / product_count,
+        stock_max[0],
+        stock_max[1],
+        planned_total,
+        planned_total / product_count,
+        planned_max[0],
+        planned_max[1],
+        progress_total,
+        progress_total / product_count,
+        progress_max[0],
+        progress_max[1],
+    )
+    logger.info("在庫再計算完了: total_time=%.3fs", time.perf_counter() - overall_start)
