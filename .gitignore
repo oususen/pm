@@ -48,7 +48,6 @@ pm_backend/masters/__pycache__/
 pm_backend/masters/migrations/__pycache__/
 pm_backend/pm_backend/__pycache__/
 参照ファイル/
-output/
 create_table.py
 create_userprofile_table.sql
 
