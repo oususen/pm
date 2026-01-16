@@ -9,6 +9,8 @@ from rest_framework.response import Response
 from .models import (
     UserProfile,
     UserPermission,
+    DepartmentPermission,
+    PositionPermission,
     DepartmentPositionPermission,
 )
 
@@ -57,13 +59,38 @@ def _merge_permissions(base, overrides):
 
 
 def _build_effective_permissions(user):
+    """
+    ユーザーの有効権限を計算する。
+    優先順位（低→高）:
+    1. 部署のみの権限（DepartmentPermission）
+    2. 役職のみの権限（PositionPermission）
+    3. 部署×役職の権限（DepartmentPositionPermission）
+    4. ユーザー個別権限（UserPermission）でオーバーライド
+    """
     resources = [choice[0] for choice in UserPermission.RESOURCE_CHOICES]
     permission_map = {}
+
+    if user.is_superuser:
+        return [
+            {'resource': resource, 'can_view': True, 'can_edit': True}
+            for resource in resources
+        ]
 
     profile = getattr(user, 'profile', None)
     department_id = profile.department_id if profile else None
     position_name = profile.position.strip() if profile and profile.position else ''
 
+    # 1. 部署のみの権限
+    if department_id:
+        dept_permissions = DepartmentPermission.objects.filter(department_id=department_id)
+        permission_map = _merge_permissions(permission_map, _permissions_to_map(dept_permissions))
+
+    # 2. 役職のみの権限
+    if position_name:
+        position_permissions = PositionPermission.objects.filter(position_name=position_name)
+        permission_map = _merge_permissions(permission_map, _permissions_to_map(position_permissions))
+
+    # 3. 部署×役職の権限
     if department_id and position_name:
         combined_permissions = DepartmentPositionPermission.objects.filter(
             department_id=department_id,
@@ -71,17 +98,12 @@ def _build_effective_permissions(user):
         )
         permission_map = _merge_permissions(permission_map, _permissions_to_map(combined_permissions))
 
+    # 4. ユーザー個別権限
     user_permissions = []
     if hasattr(user, 'permissions'):
         user_permissions = list(user.permissions.all())
     if user_permissions:
         permission_map = _merge_permissions(permission_map, _permissions_to_map(user_permissions))
-
-    if user.is_superuser:
-        return [
-            {'resource': resource, 'can_view': True, 'can_edit': True}
-            for resource in resources
-        ]
 
     if not permission_map:
         return []

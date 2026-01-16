@@ -100,6 +100,144 @@
           </button>
         </div>
       </div>
+
+      <div class="template-card">
+        <div class="template-header">
+          <h3 class="section-title">部署 権限テンプレート</h3>
+        </div>
+
+        <div class="template-controls">
+          <div class="template-select">
+            <label>部署選択</label>
+            <select v-model="selectedDepartmentOnlyId" @change="loadDepartmentTemplate">
+              <option :value="null">選択してください</option>
+              <option v-for="dept in departmentOptions" :key="dept.value" :value="dept.value">
+                {{ dept.label }}
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <div v-if="departmentTemplateError" class="alert alert-danger">
+          {{ departmentTemplateError }}
+        </div>
+        <div v-if="departmentTemplateSuccess" class="alert alert-success">
+          {{ departmentTemplateSuccess }}
+        </div>
+
+        <div v-if="departmentTemplateLoading" class="helper-text">読み込み中...</div>
+
+        <table v-else class="permission-table">
+          <thead>
+            <tr>
+              <th>機能</th>
+              <th>閲覧</th>
+              <th>編集</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="perm in departmentTemplatePermissions" :key="perm.resource">
+              <td>{{ getPermissionLabel(perm.resource) }}</td>
+              <td>
+                <input
+                  type="checkbox"
+                  v-model="perm.can_view"
+                  @change="onDepartmentPermissionChange(perm, 'can_view')"
+                  :disabled="!selectedDepartmentOnlyId"
+                />
+              </td>
+              <td>
+                <input
+                  type="checkbox"
+                  v-model="perm.can_edit"
+                  @change="onDepartmentPermissionChange(perm, 'can_edit')"
+                  :disabled="!selectedDepartmentOnlyId"
+                />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="form-actions">
+          <button type="button" class="btn primary" @click="saveDepartmentTemplate" :disabled="departmentTemplateSaving">
+            {{ departmentTemplateSaving ? '保存中...' : '保存' }}
+          </button>
+        </div>
+      </div>
+
+      <div class="template-card">
+        <div class="template-header">
+          <h3 class="section-title">役職 権限テンプレート</h3>
+        </div>
+
+        <div class="template-controls">
+          <div class="template-select">
+            <label>役職選択</label>
+            <div class="position-row">
+              <select v-model="selectedPositionOnlyName" @change="loadPositionTemplate">
+                <option value="">選択してください</option>
+                <option v-for="name in allPositions" :key="name" :value="name">
+                  {{ name }}
+                </option>
+              </select>
+              <input
+                v-model="newPositionOnlyName"
+                type="text"
+                placeholder="新しい役職名"
+              />
+              <button type="button" class="btn" @click="addPositionOnly">
+                追加
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="positionTemplateError" class="alert alert-danger">
+          {{ positionTemplateError }}
+        </div>
+        <div v-if="positionTemplateSuccess" class="alert alert-success">
+          {{ positionTemplateSuccess }}
+        </div>
+
+        <div v-if="positionTemplateLoading" class="helper-text">読み込み中...</div>
+
+        <table v-else class="permission-table">
+          <thead>
+            <tr>
+              <th>機能</th>
+              <th>閲覧</th>
+              <th>編集</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="perm in positionTemplatePermissions" :key="perm.resource">
+              <td>{{ getPermissionLabel(perm.resource) }}</td>
+              <td>
+                <input
+                  type="checkbox"
+                  v-model="perm.can_view"
+                  @change="onPositionPermissionChange(perm, 'can_view')"
+                  :disabled="!selectedPositionOnlyName"
+                />
+              </td>
+              <td>
+                <input
+                  type="checkbox"
+                  v-model="perm.can_edit"
+                  @change="onPositionPermissionChange(perm, 'can_edit')"
+                  :disabled="!selectedPositionOnlyName"
+                />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="form-actions">
+          <button type="button" class="btn primary" @click="savePositionTemplate" :disabled="positionTemplateSaving">
+            {{ positionTemplateSaving ? '保存中...' : '保存' }}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -108,6 +246,7 @@
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
+import { hasPermission } from '@/router'
 
 const loading = ref(false)
 const templateLoading = ref(false)
@@ -121,6 +260,22 @@ const selectedDepartmentId = ref(null)
 const selectedPositionName = ref('')
 const newPositionName = ref('')
 const templatePermissions = ref([])
+
+const positionTemplateLoading = ref(false)
+const positionTemplateSaving = ref(false)
+const positionTemplateError = ref('')
+const positionTemplateSuccess = ref('')
+const allPositions = ref([])
+const selectedPositionOnlyName = ref('')
+const newPositionOnlyName = ref('')
+const positionTemplatePermissions = ref([])
+
+const departmentTemplateLoading = ref(false)
+const departmentTemplateSaving = ref(false)
+const departmentTemplateError = ref('')
+const departmentTemplateSuccess = ref('')
+const selectedDepartmentOnlyId = ref(null)
+const departmentTemplatePermissions = ref([])
 
 const permissionResources = [
   { value: 'dashboard', label: 'ダッシュボード' },
@@ -143,7 +298,11 @@ const levelLabels = {
 }
 
 const isAdminUser = computed(() => {
-  return Boolean(authState.user?.is_staff || authState.user?.is_superuser)
+  // is_staff/is_superuser または settings リソースの編集権限があるユーザー
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
+  return hasPermission(user, 'settings', 'edit')
 })
 
 const departmentOptions = computed(() =>
@@ -197,6 +356,15 @@ const onPermissionChange = (perm, field) => {
   }
 }
 
+const onPositionPermissionChange = (perm, field) => {
+  if (field === 'can_edit' && perm.can_edit) {
+    perm.can_view = true
+  }
+  if (field === 'can_view' && !perm.can_view) {
+    perm.can_edit = false
+  }
+}
+
 const loadDepartments = async () => {
   if (!isAdminUser.value) return
   const response = await api.accounts.getDepartments({ page_size: 500 })
@@ -220,6 +388,160 @@ const loadPositions = async () => {
     templateError.value =
       error?.response?.data?.detail || '役職一覧の取得に失敗しました。'
   }
+}
+
+const loadAllPositions = async () => {
+  if (!isAdminUser.value) {
+    allPositions.value = []
+    return
+  }
+  try {
+    const response = await api.accounts.getPositions()
+    const data = response.data
+    allPositions.value = Array.isArray(data) ? data : []
+  } catch (error) {
+    allPositions.value = []
+  }
+}
+const loadDepartmentTemplate = async () => {
+  departmentTemplateError.value = ''
+  departmentTemplateSuccess.value = ''
+  if (!selectedDepartmentOnlyId.value) {
+    departmentTemplatePermissions.value = emptyPermissions()
+    return
+  }
+
+  departmentTemplateLoading.value = true
+  try {
+    const response = await api.accounts.getDepartmentPermissions({
+      department: selectedDepartmentOnlyId.value,
+    })
+    const data = response.data
+    const list = Array.isArray(data) ? data : data.results || []
+    departmentTemplatePermissions.value = buildPermissions(list)
+  } catch (error) {
+    departmentTemplateError.value =
+      error?.response?.data?.detail || '権限テンプレートの取得に失敗しました。'
+  } finally {
+    departmentTemplateLoading.value = false
+  }
+}
+
+const saveDepartmentTemplate = async () => {
+  departmentTemplateError.value = ''
+  departmentTemplateSuccess.value = ''
+  if (!selectedDepartmentOnlyId.value) {
+    departmentTemplateError.value = '部署を選択してください。'
+    return
+  }
+
+  departmentTemplateSaving.value = true
+  try {
+    const permissions = departmentTemplatePermissions.value
+      .filter((perm) => perm.can_view || perm.can_edit)
+      .map((perm) => ({
+        resource: perm.resource,
+        can_view: Boolean(perm.can_view),
+        can_edit: Boolean(perm.can_edit),
+      }))
+
+    const response = await api.accounts.setDepartmentPermissions({
+      department: selectedDepartmentOnlyId.value,
+      permissions: permissions,
+    })
+
+    const data = response.data
+    const list = Array.isArray(data) ? data : data.results || []
+    departmentTemplatePermissions.value = buildPermissions(list)
+    departmentTemplateSuccess.value = '権限テンプレートを保存しました。'
+  } catch (error) {
+    departmentTemplateError.value = extractErrorMessage(error?.response?.data) || '保存に失敗しました。'
+  } finally {
+    departmentTemplateSaving.value = false
+  }
+}
+
+const onDepartmentPermissionChange = (perm, field) => {
+  // 編集権限がある場合、閲覧権限も自動で付与
+  if (field === 'can_edit' && perm.can_edit) {
+    perm.can_view = true
+  }
+  // 閲覧権限を外す場合、編集権限も自動で外す
+  if (field === 'can_view' && !perm.can_view) {
+    perm.can_edit = false
+  }
+}
+const loadPositionTemplate = async () => {
+  positionTemplateError.value = ''
+  positionTemplateSuccess.value = ''
+  if (!selectedPositionOnlyName.value) {
+    positionTemplatePermissions.value = emptyPermissions()
+    return
+  }
+
+  positionTemplateLoading.value = true
+  try {
+    const response = await api.accounts.getPositionPermissions({
+      position_name: selectedPositionOnlyName.value,
+    })
+    const data = response.data
+    const list = Array.isArray(data) ? data : data.results || []
+    positionTemplatePermissions.value = buildPermissions(list)
+  } catch (error) {
+    positionTemplateError.value =
+      error?.response?.data?.detail || '権限テンプレートの取得に失敗しました。'
+  } finally {
+    positionTemplateLoading.value = false
+  }
+}
+
+const savePositionTemplate = async () => {
+  positionTemplateError.value = ''
+  positionTemplateSuccess.value = ''
+  if (!selectedPositionOnlyName.value) {
+    positionTemplateError.value = '役職を選択してください。'
+    return
+  }
+
+  positionTemplateSaving.value = true
+  try {
+    const permissions = positionTemplatePermissions.value
+      .filter((perm) => perm.can_view || perm.can_edit)
+      .map((perm) => ({
+        resource: perm.resource,
+        can_view: Boolean(perm.can_view),
+        can_edit: Boolean(perm.can_edit),
+      }))
+
+    const response = await api.accounts.setPositionPermissions({
+      position_name: selectedPositionOnlyName.value,
+      permissions: permissions,
+    })
+
+    const data = response.data
+    const list = Array.isArray(data) ? data : data.results || []
+    positionTemplatePermissions.value = buildPermissions(list)
+    positionTemplateSuccess.value = '権限テンプレートを保存しました。'
+  } catch (error) {
+    positionTemplateError.value = extractErrorMessage(error?.response?.data) || '保存に失敗しました。'
+  } finally {
+    positionTemplateSaving.value = false
+  }
+}
+
+const addPositionOnly = async () => {
+  const name = newPositionOnlyName.value.trim()
+  if (!name) {
+    positionTemplateError.value = '役職名を入力してください。'
+    return
+  }
+  positionTemplateError.value = ''
+  if (!allPositions.value.includes(name)) {
+    allPositions.value = [...allPositions.value, name].sort()
+  }
+  selectedPositionOnlyName.value = name
+  newPositionOnlyName.value = ''
+  await loadPositionTemplate()
 }
 
 const loadTemplate = async () => {
@@ -300,10 +622,14 @@ const refreshAll = async () => {
   loading.value = true
   templateError.value = ''
   templateSuccess.value = ''
+  positionTemplateError.value = ''
+  positionTemplateSuccess.value = ''
   try {
     await loadDepartments()
+    await loadAllPositions()
     await loadPositions()
     await loadTemplate()
+    await loadPositionTemplate()
   } finally {
     loading.value = false
   }
@@ -337,6 +663,7 @@ const extractErrorMessage = (detail) => {
 onMounted(async () => {
   if (!isAdminUser.value) return
   templatePermissions.value = emptyPermissions()
+  positionTemplatePermissions.value = emptyPermissions()
   await refreshAll()
 })
 </script>

@@ -64,7 +64,7 @@ class UserViewSet(viewsets.ModelViewSet):
 class DepartmentPermissionViewSet(viewsets.ModelViewSet):
     queryset = DepartmentPermission.objects.select_related('department')
     serializer_class = DepartmentPermissionSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         queryset = self.queryset
@@ -108,7 +108,7 @@ class DepartmentPermissionViewSet(viewsets.ModelViewSet):
 class PositionPermissionViewSet(viewsets.ModelViewSet):
     queryset = PositionPermission.objects.all()
     serializer_class = PositionPermissionSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         queryset = self.queryset
@@ -150,7 +150,7 @@ class PositionPermissionViewSet(viewsets.ModelViewSet):
 
 
 class PositionListView(viewsets.ViewSet):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def list(self, request):
         names = set(
@@ -167,7 +167,7 @@ class PositionListView(viewsets.ViewSet):
 class DepartmentPositionPermissionViewSet(viewsets.ModelViewSet):
     queryset = DepartmentPositionPermission.objects.select_related('department')
     serializer_class = DepartmentPositionPermissionSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         queryset = self.queryset
@@ -222,7 +222,7 @@ class DepartmentPositionPermissionViewSet(viewsets.ModelViewSet):
 
 
 class DepartmentPositionListView(viewsets.ViewSet):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def list(self, request):
         department_id = request.query_params.get('department')
@@ -243,7 +243,7 @@ class DepartmentPositionListView(viewsets.ViewSet):
 
 
 class DivisionListView(viewsets.ViewSet):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def list(self, request):
         # 事業部レベルの部署のみを取得
@@ -253,7 +253,7 @@ class DivisionListView(viewsets.ViewSet):
 
 
 class GroupListView(viewsets.ViewSet):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def list(self, request):
         # parent_idが指定されている場合は、その事業部の子（係）のみを取得
@@ -267,7 +267,7 @@ class GroupListView(viewsets.ViewSet):
 
 
 class TeamListView(viewsets.ViewSet):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def list(self, request):
         # parent_idが指定されている場合は、その係の子（班）のみを取得

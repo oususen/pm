@@ -3,67 +3,67 @@
     <h2 class="page-title">生産管理メニュー</h2>
 
     <div class="master-grid">
-      <RouterLink v-if="hasPermission(user, 'production_process_input')" to="/production/mobile-process-input" class="master-tile">
+      <RouterLink v-if="hasPermission(user, 'production')" to="/production/mobile-process-input" class="master-tile">
         <div class="icon-box">📱</div>
         <div class="label">工程作業入力</div>
       </RouterLink>
 
-      <RouterLink v-if="hasPermission(user, 'production_scrap_record')" to="/production/scrap-record" class="master-tile">
+      <RouterLink v-if="hasPermission(user, 'production')" to="/production/scrap-record" class="master-tile">
         <div class="icon-box">🛠️</div>
         <div class="label">仕損品記録</div>
       </RouterLink>
 
-      <RouterLink v-if="hasPermission(user, 'production_plan_input')" to="/production/plan-input" class="master-tile">
+      <RouterLink v-if="hasPermission(user, 'production')" to="/production/plan-input" class="master-tile">
         <div class="icon-box" aria-label="計画">📝</div>
         <div class="label">生産計画入力</div>
       </RouterLink>
 
-      <RouterLink v-if="hasPermission(user, 'production_inventory')" to="/production/inventory" class="master-tile">
+      <RouterLink v-if="hasPermission(user, 'production')" to="/production/inventory" class="master-tile">
         <div class="icon-box" aria-label="在庫">📦</div>
         <div class="label">在庫/残量一覧</div>
       </RouterLink>
 
-      <RouterLink v-if="hasPermission(user, 'production_scrap_history')" to="/production/scrap-history" class="master-tile">
+      <RouterLink v-if="hasPermission(user, 'production')" to="/production/scrap-history" class="master-tile">
         <div class="icon-box">📜</div>
         <div class="label">仕損履歴</div>
       </RouterLink>
 
-      <RouterLink v-if="hasPermission(user, 'production_progress')" to="/production/progress" class="master-tile">
+      <RouterLink v-if="hasPermission(user, 'production')" to="/production/progress" class="master-tile">
         <div class="icon-box" aria-label="進捗">📊</div>
         <div class="label">進捗管理</div>
       </RouterLink>
 
-      <RouterLink v-if="hasPermission(user, 'production_line_demands')" to="/production/line-demands" class="master-tile">
+      <RouterLink v-if="hasPermission(user, 'production')" to="/production/line-demands" class="master-tile">
         <div class="icon-box" aria-label="需要">📈</div>
         <div class="label">ライン需要一覧</div>
       </RouterLink>
 
-      <RouterLink v-if="hasPermission(user, 'production_line_calendars')" to="/production/line-calendars" class="master-tile">
+      <RouterLink v-if="hasPermission(user, 'production')" to="/production/line-calendars" class="master-tile">
         <div class="icon-box" aria-label="勤">⏱</div>
         <div class="label">ライン勤務カレンダ</div>
       </RouterLink>
 
-      <RouterLink v-if="hasPermission(user, 'production_stock_allocations')" to="/production/stock-allocations" class="master-tile">
+      <RouterLink v-if="hasPermission(user, 'production')" to="/production/stock-allocations" class="master-tile">
         <div class="icon-box" aria-label="引当">🎯</div>
         <div class="label">在庫引当</div>
       </RouterLink>
 
-      <RouterLink v-if="hasPermission(user, 'production_orders')" to="/production/orders" class="master-tile">
+      <RouterLink v-if="hasPermission(user, 'production')" to="/production/orders" class="master-tile">
         <div class="icon-box" aria-label="指示">🛠️</div>
         <div class="label">製造指示</div>
       </RouterLink>
 
-      <RouterLink v-if="hasPermission(user, 'production_sequence_board')" to="/production/sequence-board" class="master-tile accent">
+      <RouterLink v-if="hasPermission(user, 'production')" to="/production/sequence-board" class="master-tile accent">
         <div class="icon-box">🎛</div>
         <div class="label">ミックス順序ボード</div>
       </RouterLink>
 
-      <RouterLink v-if="hasPermission(user, 'production_line_monitor')" to="/production/line-monitor" class="master-tile accent">
+      <RouterLink v-if="hasPermission(user, 'production')" to="/production/line-monitor" class="master-tile accent">
         <div class="icon-box">📺</div>
         <div class="label">ライン稼働監視</div>
       </RouterLink>
 
-      <RouterLink v-if="hasPermission(user, 'production_mobile_input')" to="/production/mobile-input" class="master-tile">
+      <RouterLink v-if="hasPermission(user, 'production')" to="/production/mobile-input" class="master-tile">
         <div class="icon-box">📱</div>
         <div class="label">モバイル作業入力（ライン）</div>
       </RouterLink>
