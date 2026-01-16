@@ -514,8 +514,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         end_dt = parse_date(end_date)
 
         # このラインで生産される全製品を特定（中間品、単品完成品、ライン最終品、工程最終品を含む）
-        print(f"\n[DEBUG] ========== pickup API開始 ==========")
-        print(f"[DEBUG] line_id={line_id}, start_date={start_date}, end_date={end_date}")
         target_products = set()
         final_products = set()  # ライン最終品
         intermediate_products = set()  # 中間品
@@ -526,8 +524,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         steps_on_line = RoutingStep.objects.filter(
             line_id=line_id
         ).select_related('output_product', 'routing__product', 'process')
-
-        print(f"[DEBUG] steps_on_line件数: {steps_on_line.count()}")
 
         for step in steps_on_line:
             product = step.output_product or step.routing.product
@@ -541,18 +537,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 # is_final_product がTrueなら最終品扱い
                 if product.is_final_product:
                     final_products.add(product.id)
-                    print(f"[DEBUG] 最終品: product_code={product.product_code}, product_id={product.id}, is_final={product.is_final_product}, process_id={step.process_id}")
                 else:
                     intermediate_products.add(product.id)
-                    print(f"[DEBUG] 中間品: product_code={product.product_code}, product_id={product.id}, is_final={product.is_final_product}, process_id={step.process_id}")
-
-        print(f"[DEBUG] target_products件数: {len(target_products)}")
-        print(f"[DEBUG] final_products件数: {len(final_products)}")
-        print(f"[DEBUG] intermediate_products件数: {len(intermediate_products)}")
 
         if not target_products:
-            # このラインが生産する製品がない
-            print(f"[DEBUG] target_productsが空のため、空リストを返します")
             return Response([])
 
         # 需要を計算：(product_id, plan_date) -> order_qty
@@ -662,13 +650,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             demand_map[(existing.product_id, existing.plan_date)] = Decimal('0')
 
         # 最終品はOrderLineから、中間品は後工程から需要を取得
-        print(f"\n[DEBUG] ========== 需要取得開始 ==========")
 
         # A. 最終品（is_final_product=True）はOrderLineから取得
         if final_products:
-            print(f"\n[DEBUG] 最終品の需要取得開始（OrderLine使用）")
-            print(f"[DEBUG] final_products={final_products}")
-
             order_lines = OrderLine.objects.filter(
                 order__status='OPEN',
                 product_id__in=final_products
@@ -678,8 +662,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 order_lines = order_lines.filter(due_date__gte=start_date)
             if end_date:
                 order_lines = order_lines.filter(due_date__lte=end_date)
-
-            print(f"[DEBUG] OrderLine検索結果: {order_lines.count()}件")
 
             firm_map = defaultdict(Decimal)
             forecast_map = defaultdict(Decimal)
@@ -702,19 +684,13 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 else:
                     forecast_map[key] += qty
 
-                if plan_date != ol.due_date:
-                    print(f"[DEBUG] OrderLine date shift: {ol.due_date} -> {plan_date}")
-
             for key in set(firm_map) | set(forecast_map):
                 firm_qty = firm_map.get(key, Decimal('0'))
                 forecast_qty = forecast_map.get(key, Decimal('0'))
                 demand_qty = firm_qty if firm_qty > 0 else forecast_qty
                 demand_map[key] = demand_qty
-                print(f"[DEBUG] demand_map[{key}] = {demand_qty} (firm={firm_qty}, forecast={forecast_qty})")
 
         # B. 中間品は後工程から需要を取得
-        if not intermediate_products:
-            print(f"\n[DEBUG] 中間品がないため後工程展開をスキップ")
 
         # 1. 後ライン（次工程）から需要を取得（RoutingStepベース）
         # ロジック：
@@ -825,7 +801,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         # 2. RoutingStepベースの展開が失敗した場合、BOMベースの展開を試みる（中間品のみ）
         if not downstream_found and intermediate_products:
-            print(f"\n[DEBUG] BOMベースの展開開始（中間品のみ）")
             # BOMItemのline_idを使って需要展開
             for product_id in intermediate_products:
                 current_output_product = product_id
@@ -866,14 +841,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         downstream_found = True
 
         # 4. LineBacklogに保存（order_qtyのみ更新、他の数量は維持）
-        print(f"\n[DEBUG] LineBacklogへの保存開始")
-        print(f"[DEBUG] demand_map件数: {len(demand_map)}")
         upserted_items = []
         for (product_id, plan_date), order_qty in demand_map.items():
             process_id = product_process_map.get(product_id)
-            print(f"[DEBUG] product_id={product_id}, plan_date={plan_date}, order_qty={order_qty}, process_id={process_id}")
             if not process_id:
-                print(f"[DEBUG] process_id not found for product_id={product_id}, skipping")
                 continue
 
             obj, created = LineBacklog.objects.update_or_create(
@@ -889,10 +860,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     'sequence_no': 0,
                 }
             )
-            print(f"[DEBUG] LineBacklog {'created' if created else 'updated'}: id={obj.id}, product_code={obj.product.product_code}, order_qty={obj.order_qty}")
             upserted_items.append(obj)
-
-        print(f"[DEBUG] upserted_items件数: {len(upserted_items)}")
 
         # 5. 最新状態を返す
         items_to_serialize = upserted_items
@@ -922,7 +890,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     ))
                 items_to_serialize = placeholders
         serializer = self.get_serializer(items_to_serialize, many=True)
-        print(f"[DEBUG] serializer.data件数: {len(serializer.data)}")
         return Response(serializer.data)
 
     @action(detail=False, methods=['post'], url_path='pickup_purchase')
@@ -1535,10 +1502,46 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         updated = 0
         deleted = 0
         skipped = []
+        change_reason = request.data.get('change_reason')
+        if isinstance(change_reason, str):
+            change_reason = change_reason.strip()
+        if not change_reason:
+            change_reason = None
 
         # まず、製品コードを取得するために製品IDから製品情報を取得
         from masters.models import Product
         product_cache = {}
+        plan_date_cache = {}
+        change_user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+
+        def parse_plan_date(raw_date):
+            if raw_date in plan_date_cache:
+                return plan_date_cache[raw_date]
+            if isinstance(raw_date, str):
+                parsed = datetime.strptime(raw_date, '%Y-%m-%d').date()
+            else:
+                parsed = raw_date
+            plan_date_cache[raw_date] = parsed
+            return parsed
+
+        def record_change(plan_date_value, product_id, process_id, line_id, before_qty, after_qty, plan_id_value, sequence_no_value):
+            if not change_reason:
+                return
+            if before_qty == after_qty:
+                return
+            from purchase.models import PurchasePlanChangeLog
+            PurchasePlanChangeLog.objects.create(
+                plan_date=plan_date_value,
+                product_id=product_id,
+                process_id=process_id,
+                line_id=line_id,
+                sequence_no=sequence_no_value,
+                plan_id=plan_id_value,
+                before_qty=before_qty,
+                after_qty=after_qty,
+                reason=change_reason,
+                changed_by=change_user,
+            )
 
         for it in items:
             try:
@@ -1563,6 +1566,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 # plan_qty=0 の場合、plan_idに紐づくレコードを削除
                 plan_qty_provided = 'plan_qty' in it
                 plan_qty_value = None
+                existing_plan_qty = 0
+                existing_plan_id = None
+                existing_sequence_no = None
                 if plan_qty_provided:
                     plan_qty_value = Decimal(str(it['plan_qty'] or 0))
                     if plan_qty_value == 0:
@@ -1575,12 +1581,28 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         ).first()
 
                         if existing and existing.plan_id:
+                            existing_plan_qty = int(existing.plan_qty or 0)
+                            existing_plan_id = existing.plan_id
+                            existing_sequence_no = existing.sequence_no
                             ProductionOrder.objects.filter(order_no=existing.plan_id).delete()
                             # plan_idに紐づく全てのLineBacklogレコードを削除
                             deleted_count = LineBacklog.objects.filter(plan_id=existing.plan_id).delete()[0]
                             deleted += deleted_count
+                            record_change(
+                                parse_plan_date(plan_date),
+                                product_id,
+                                process_id,
+                                line_id,
+                                existing_plan_qty,
+                                0,
+                                existing_plan_id,
+                                existing_sequence_no,
+                            )
                             continue
                         elif existing:
+                            existing_plan_qty = int(existing.plan_qty or 0)
+                            existing_plan_id = existing.plan_id
+                            existing_sequence_no = existing.sequence_no
                             # plan_idが無い場合は従来のロジック
                             def resolve_qty(field_name):
                                 if field_name in it:
@@ -1607,6 +1629,16 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             ):
                                 existing.delete()
                                 deleted += 1
+                                record_change(
+                                    parse_plan_date(plan_date),
+                                    product_id,
+                                    process_id,
+                                    line_id,
+                                    existing_plan_qty,
+                                    0,
+                                    existing_plan_id,
+                                    existing_sequence_no,
+                                )
                                 continue
 
                 # sequence_noを取得（デフォルトは1）
@@ -1621,6 +1653,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     product_id=product_id,
                     line_id=line_id,
                 ).first()
+                if existing:
+                    existing_plan_qty = int(existing.plan_qty or 0)
+                    existing_plan_id = existing.plan_id
+                    existing_sequence_no = existing.sequence_no
 
                 new_plan_id = None
                 plan_date_obj = None
@@ -1628,10 +1664,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     # plan_idを生成: 製品コード_YYYYMMDD_数量_順番
                     # gantt_planning.pyと同じフォーマットを使用
                     from datetime import datetime
-                    if isinstance(plan_date, str):
-                        plan_date_obj = datetime.strptime(plan_date, '%Y-%m-%d').date()
-                    else:
-                        plan_date_obj = plan_date
+                    plan_date_obj = parse_plan_date(plan_date)
 
                     # 数量ラベルを生成（小数点以下の0を除去、小数点を'p'に変換）
                     qty_label = str(plan_qty_value).rstrip('0').rstrip('.')
@@ -1677,6 +1710,19 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     created += 1
                 else:
                     updated += 1
+
+                if plan_qty_provided and plan_qty_value is not None:
+                    after_qty = int(plan_qty_value)
+                    record_change(
+                        plan_date_obj or parse_plan_date(plan_date),
+                        product_id,
+                        process_id,
+                        line_id,
+                        existing_plan_qty,
+                        after_qty,
+                        new_plan_id or existing_plan_id,
+                        sequence_no if 'sequence_no' in it or sequence_no is not None else existing_sequence_no,
+                    )
 
                 if plan_qty_provided and plan_qty_value is not None and plan_qty_value > 0 and new_plan_id:
                     routing = Routing.objects.filter(product_id=product_id, is_active=True).order_by('-is_default', 'id').first()

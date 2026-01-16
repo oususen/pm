@@ -55,7 +55,6 @@
             休憩明けに補正
           </label>
         </div>
-        <button class="btn" @click="addRow">新規行追加</button>
         <button class="btn" @click="resetRows" :disabled="!rows.length">クリア</button>
         <button class="btn" @click="savePlan" :disabled="!rows.length || !selectedLine">保存</button>
         <button class="btn primary" @click="doPickup" :disabled="!selectedLine">取り込み</button>
@@ -199,7 +198,7 @@
             </template>
           </tr>
           <tr v-if="!filteredRows.length">
-            <td :colspan="3 + dateColumns.length * 6" class="no-data">行を追加してください</td>
+            <td :colspan="3 + dateColumns.length * 6" class="no-data">データがありません</td>
           </tr>
         </tbody>
       </table>
@@ -301,7 +300,6 @@ const ganttReloadKey = ref(0)
 const ganttRef = ref(null)
 const finalProcessStartTime = ref('08:00')
 const adjustToBreakEnd = ref(true)
-let tempId = 1
 let lotTempId = 1
 const processLoadLoading = ref(false)
 const processLoadRows = ref([])
@@ -384,16 +382,6 @@ const ensureDailyCell = (row, dateKey) => {
     row.daily[dateKey].extraLots = []
   }
   return row.daily[dateKey]
-}
-
-const addRow = () => {
-  rows.value.push({
-    id: `tmp-${tempId++}`,
-    product_id: '',
-    product_code: '',
-    product_name: '',
-    daily: initDaily(),
-  })
 }
 
 const rowIndex = (rowId) => rows.value.findIndex((r) => r.id === rowId)
@@ -1160,8 +1148,6 @@ const doPickup = async () => {
     })
 
     rows.value = Array.from(grouped.values())
-
-    if (!rows.value.length) addRow()
 
     // 日別設定を読み込み
     await loadDailySettings()
