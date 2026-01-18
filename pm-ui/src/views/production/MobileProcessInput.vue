@@ -153,18 +153,29 @@
       :class="formModeClass"
     >
       <div class="section inline-row qty-row">
-        <label class="label-required inline-label">
-          {{ record.record_type === 'SCRAP' ? '仕損数量' : '生産数量' }}
-        </label>
-        <input
-          type="number"
-          v-model.number="record.qty"
-          min="1"
-          step="1"
-          inputmode="numeric"
-          class="input-large input-qty flex-input"
-          placeholder="数量を入力"
-        />
+        <div class="inline-group qty-group">
+          <label class="label-required inline-label">
+            {{ record.record_type === 'SCRAP' ? '仕損数量' : '生産数量' }}
+          </label>
+          <input
+            type="number"
+            v-model.number="record.qty"
+            min="1"
+            step="1"
+            inputmode="numeric"
+            class="input-large input-qty flex-input"
+            placeholder="数量を入力"
+          />
+        </div>
+        <div class="inline-group">
+          <label class="inline-label">ロット番号</label>
+          <input
+            type="text"
+            v-model="record.batch_no"
+            placeholder="ロット番号（任意）"
+            class="input-normal flex-input"
+          />
+        </div>
       </div>
 
       <div class="quick-btns" v-if="quickQtyPresets.length">
@@ -210,23 +221,13 @@
         />
       </div>
 
-      <div class="section">
-        <label>ロット番号</label>
-        <input
-          type="text"
-          v-model="record.batch_no"
-          placeholder="ロット番号（任意）"
-          class="input-normal"
-        />
-      </div>
-
-      <div class="section">
-        <label class="label-required">記入者</label>
+      <div class="section inline-row row-label-input">
+        <label class="label-required inline-label label-side">記入者</label>
         <input
           type="text"
           v-model="record.operator_name"
           placeholder="記入者名を入力"
-          class="input-normal"
+          class="input-normal flex-input"
         />
       </div>
 
@@ -273,7 +274,7 @@
       </div>
     </div>
 
-    <div v-if="record.record_type" class="action-section">
+    <div v-if="record.record_type" class="action-section action-sticky">
       <button
         @click="submitRecord"
         :disabled="!canSubmit || submitting"
@@ -306,6 +307,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api/client'
+import { authState, ensureAuth } from '@/auth'
 
 const route = useRoute()
 
@@ -446,6 +448,13 @@ const ensureDefaultRecordType = () => {
 }
 
 const resolveDefaultOperator = () => {
+  const user = authState.user
+  if (user) {
+    const fullName = `${user.last_name || ''} ${user.first_name || ''}`.trim()
+    if (fullName) return fullName
+    if (user.username) return user.username
+    if (user.email) return user.email
+  }
   if (typeof window === 'undefined') return ''
   const candidates = [
     'currentUserName',
@@ -462,6 +471,19 @@ const resolveDefaultOperator = () => {
 }
 
 const defaultOperatorName = ref(resolveDefaultOperator())
+
+watch(
+  () => authState.user,
+  () => {
+    const resolved = resolveDefaultOperator()
+    if (resolved && resolved !== defaultOperatorName.value) {
+      defaultOperatorName.value = resolved
+    }
+    if (!(record.value.operator_name || '').trim()) {
+      record.value.operator_name = resolved
+    }
+  }
+)
 
 watch(
   availableRecordTypes,
@@ -1024,6 +1046,9 @@ watch(
       record.value.reason_detail = ''
       record.value.reason = ''
       record.value.disposition_status = ''
+      if (!(record.value.operator_name || '').trim()) {
+        record.value.operator_name = defaultOperatorName.value || ''
+      }
     }
     if (!record.value.product_id && defaultProductId.value) {
       record.value.product_id = defaultProductId.value
@@ -1106,6 +1131,7 @@ const loadLines = async () => {
 onMounted(() => {
   loadLines()
   loadProcesses()
+  ensureAuth()
 })
 </script>
 
@@ -1113,7 +1139,7 @@ onMounted(() => {
 .mobile-input {
   max-width: 600px;
   margin: 0 auto;
-  padding: 16px;
+  padding: 10px;
   background: #eef2f6;
   min-height: 100vh;
   font-family: "Noto Sans JP", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
@@ -1139,9 +1165,9 @@ onMounted(() => {
 
 .mobile-header {
   background: #fff;
-  padding: 16px;
+  padding: 10px 12px;
   border-radius: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   display: flex;
   align-items: center;
@@ -1169,11 +1195,11 @@ onMounted(() => {
 }
 
 .section {
-  margin-bottom: 20px;
+  margin-bottom: 10px;
 }
 
 .section-title {
-  margin: 20px 0 12px 0;
+  margin: 12px 0 8px 0;
   font-size: 16px;
   font-weight: 700;
   color: #1f2a44;
@@ -1196,12 +1222,15 @@ label {
 .input-normal,
 .textarea-normal {
   width: 100%;
-  padding: 12px;
+  padding: 12px 12px 12px 0;
   font-size: 14px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   box-sizing: border-box;
   font-family: inherit;
+}
+.input-large {
+  text-align: left;
 }
 
 .input-large {
@@ -1211,16 +1240,23 @@ label {
 
 .input-qty {
   font-size: 24px !important;
+  height: 40px;
+  line-height: 40px;
+  padding: 0 8px;
   text-align: center;
   font-weight: 700;
 }
 .qty-row .input-qty {
-  max-width: 220px;
+  max-width: 140px;
+}
+.qty-group {
+  flex: 0 0 33%;
+  max-width: 33%;
 }
 
 .type-buttons {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex: 1;
 }
 .single-type {
@@ -1234,7 +1270,7 @@ label {
 .state-buttons {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
+  gap: 8px;
 }
 
 .type-btn,
@@ -1277,8 +1313,8 @@ label {
 .quick-btns {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin-bottom: 20px;
+  gap: 6px;
+  margin-bottom: 12px;
 }
 
 .btn-quick {
@@ -1297,9 +1333,9 @@ label {
 
 .form-section {
   background: #fff;
-  padding: 16px;
+  padding: 12px;
   border-radius: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
   border: 1px solid transparent;
 }
 .form-section.mode-production {
@@ -1313,7 +1349,14 @@ label {
 }
 
 .action-section {
-  margin: 24px 0;
+  margin: 12px 0;
+}
+.action-section.action-sticky {
+  position: sticky;
+  bottom: 0;
+  background: #eef2f6;
+  padding: 8px 0;
+  margin: 0;
 }
 
 .btn-submit {
@@ -1339,7 +1382,7 @@ label {
 
 .recent-section {
   background: #fff;
-  padding: 16px;
+  padding: 12px;
   border-radius: 8px;
 }
 
@@ -1397,7 +1440,7 @@ label {
 .planned-buttons {
   margin-top: -2px;
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 .planned-label {
   font-size: 12px;
@@ -1406,12 +1449,12 @@ label {
 .planned-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 .planned-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 12px;
+  gap: 8px;
 }
 .planned-card {
   border: 1px solid #e2e8f0;
@@ -1497,7 +1540,10 @@ label {
 .inline-row {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 8px;
+}
+.row-label-input {
+  align-items: center;
 }
 .label-stack {
   display: flex;
@@ -1520,6 +1566,10 @@ label {
 .inline-label {
   margin: 0;
   min-width: 0;
+}
+.label-side {
+  white-space: nowrap;
+  min-width: 4.5em;
 }
 
 .flex-input {
