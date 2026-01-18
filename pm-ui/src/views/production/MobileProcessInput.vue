@@ -100,7 +100,10 @@
     <div v-if="record.record_type" class="section inline-row product-row">
       <div class="label-stack">
         <label :class="record.record_type === 'PRODUCTION' ? 'label-required inline-label' : 'inline-label'">製品</label>
-        <div v-if="record.record_type === 'SCRAP'" class="product-toggle">
+        <div
+          v-if="record.record_type === 'PRODUCTION' || record.record_type === 'SCRAP'"
+          class="product-toggle"
+        >
           <button type="button" class="btn-link toggle-link" @click="toggleManualProduct">
             {{ manualProduct ? '検索に戻る' : '手入力する' }}
           </button>
@@ -125,15 +128,20 @@
 
         <template v-if="manualProduct || !currentProductList.length">
           <div class="product-select-row">
-            <input
-              type="text"
-              v-model="record.product_code"
-              placeholder="品番を入力（例: YD60000000）"
-              class="input-normal flex-input"
-            />
+            <select v-model="record.product_id" class="input-large flex-input">
+              <option value="">-- 品番を選択 --</option>
+              <option
+                v-for="p in manualProductOptions"
+                :key="p.id"
+                :value="p.id"
+              >
+                {{ p.product_code }} - {{ p.product_name || '' }}
+              </option>
+            </select>
           </div>
+          <div v-if="manualProductsLoading" class="hint">品番一覧を読み込み中です。</div>
           <div v-if="!currentProductList.length" class="hint">
-            本日の計画が未取得のため手入力になります（工程の所属ラインが未設定、または需要展開が未実行の可能性があります）。
+            本日の計画が未取得のため手動選択になります（工程の所属ラインが未設定、または需要展開が未実行の可能性があります）。
           </div>
         </template>
       </div>
@@ -333,6 +341,10 @@ if (mediaEnvBase) {
 }
 
 const manualProduct = ref(false)
+const manualProducts = ref([])
+const manualProductsLoading = ref(false)
+const manualProductsLoaded = ref(false)
+const manualProductsProcessId = ref(null)
 const productionProducts = ref([])
 const scrapProducts = ref([])
 const defaultProductId = ref(null)
@@ -494,6 +506,24 @@ const currentProductList = computed(() => {
   return []
 })
 
+const manualProductOptions = computed(() => {
+  const list = Array.isArray(manualProducts.value) ? manualProducts.value : []
+  const materialTypes = ['intermediate', 'purchased']
+  const coproductTypes = ['coproduct_parent', 'coproduct_child']
+  return [...list]
+    .filter((p) => {
+      if (!p || !(p.product_code || p.product_name)) return false
+      if (record.value.record_type !== 'PRODUCTION') return true
+      return !materialTypes.includes(p.relation_type)
+    })
+    .sort((a, b) => {
+      const aCoproduct = coproductTypes.includes(a.relation_type)
+      const bCoproduct = coproductTypes.includes(b.relation_type)
+      if (aCoproduct !== bCoproduct) return aCoproduct ? -1 : 1
+      return (a.product_code || '').localeCompare(b.product_code || '')
+    })
+})
+
 const normalizeImageUrl = (rawUrl) => {
   if (!rawUrl) return ''
   const base = mediaBaseUrl || browserOrigin
@@ -569,6 +599,9 @@ const onProcessChange = () => {
   }
 
   resetForm()
+  manualProducts.value = []
+  manualProductsLoaded.value = false
+  manualProductsProcessId.value = null
   loadPlannedProducts()
   loadRecentRecords()
 }
@@ -580,16 +613,22 @@ const onLineChange = () => {
   scrapProducts.value = []
   defaultProductId.value = null
   productImageMap.value = {}
+  manualProducts.value = []
+  manualProductsLoaded.value = false
+  manualProductsProcessId.value = null
   resetForm()
 }
 
 const toggleManualProduct = () => {
   manualProduct.value = !manualProduct.value
-  if (manualProduct.value) {
-    record.value.product_id = ''
-  } else {
-    record.value.product_code = ''
-  }
+    if (manualProduct.value) {
+      record.value.product_id = ''
+      record.value.product_code = ''
+      loadManualProducts(selectedProcessId.value)
+    } else {
+      record.value.product_id = ''
+      record.value.product_code = ''
+    }
 }
 
 const submitRecord = async () => {
@@ -762,6 +801,10 @@ const loadPlannedProducts = async () => {
     if (productionProducts.value.length === 1 && productionProducts.value[0].product) {
       defaultProductId.value = productionProducts.value[0].product
     }
+
+    if (!productionProducts.value.length && !scrapProducts.value.length) {
+      loadManualProducts(selectedProcessId.value)
+    }
   } catch (error) {
     console.error('本日の計画取得エラー:', error)
   }
@@ -901,6 +944,28 @@ const loadProductImages = async (idSet) => {
     productImageMap.value = map
   } catch (error) {
     console.error('製品画像取得エラー:', error)
+  }
+}
+
+const loadManualProducts = async (processId) => {
+  if (!processId) return
+  if (
+    manualProductsLoading.value ||
+    (manualProductsLoaded.value && String(manualProductsProcessId.value) === String(processId))
+  ) {
+    return
+  }
+  manualProductsLoading.value = true
+  try {
+    const res = await api.processes.getRelatedProducts(processId)
+    const items = res?.data || res || []
+    manualProducts.value = Array.isArray(items) ? items : []
+    manualProductsProcessId.value = processId
+    manualProductsLoaded.value = true
+  } catch (error) {
+    console.error('手入力用製品一覧取得エラー:', error)
+  } finally {
+    manualProductsLoading.value = false
   }
 }
 
