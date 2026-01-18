@@ -37,7 +37,7 @@
           </RouterLink>
           <RouterLink v-if="hasPermission(user, 'notifications')" to="/notifications/sources" class="menu-card">
             <div class="menu-icon">🔔</div>
-            <div class="menu-label">通知</div>
+            <div class="menu-label">通知作成</div>
           </RouterLink>
         </div>
       </section>

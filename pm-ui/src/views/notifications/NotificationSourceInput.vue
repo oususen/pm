@@ -40,6 +40,53 @@
             </select>
           </div>
           <div class="form-field">
+            <label>対象事業部</label>
+            <select v-model="form.target_divisions" multiple :disabled="!canEdit" class="input">
+              <option v-for="dept in divisionOptions" :key="dept.id" :value="dept.id">
+                {{ dept.name }}
+              </option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label>対象係</label>
+            <select
+              v-model="form.target_groups"
+              multiple
+              :disabled="!canEdit || !form.target_divisions.length"
+              class="input"
+            >
+              <option v-for="dept in filteredGroupOptions" :key="dept.id" :value="dept.id">
+                {{ dept.name }}
+              </option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label>対象班</label>
+            <select
+              v-model="form.target_teams"
+              multiple
+              :disabled="!canEdit || !form.target_groups.length"
+              class="input"
+            >
+              <option v-for="dept in filteredTeamOptions" :key="dept.id" :value="dept.id">
+                {{ dept.name }}
+              </option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label>対象役職</label>
+            <select
+              v-model="form.target_positions"
+              multiple
+              :disabled="!canEdit"
+              class="input"
+            >
+              <option v-for="pos in positions" :key="pos" :value="pos">
+                {{ pos }}
+              </option>
+            </select>
+          </div>
+          <div class="form-field">
             <label>有効開始日</label>
             <input
               v-model="form.valid_from"
@@ -121,6 +168,7 @@
               <th>種別</th>
               <th>有効開始日</th>
               <th>有効終了日</th>
+              <th>対象者</th>
               <th>入力者</th>
               <th>説明</th>
               <th>操作</th>
@@ -134,6 +182,7 @@
               <td>{{ getDomainLabel(item.domain) }}</td>
               <td>{{ item.valid_from || '-' }}</td>
               <td>{{ item.valid_to || '-' }}</td>
+              <td>{{ getTargetLabel(item) }}</td>
               <td>{{ item.operator_name || '-' }}</td>
               <td class="description">{{ item.description || '-' }}</td>
               <td class="actions">
@@ -188,6 +237,9 @@ const categoryOptions = [
 
 const sources = ref([]);
 const errorMessage = ref("");
+const departments = ref([]);
+const positions = ref([]);
+const keepPositionOnDeptChange = ref(false);
 const defaultOperatorName = computed(() => {
   const user = authState.user;
   if (!user) return "";
@@ -199,11 +251,73 @@ const form = ref({
   title: "",
   category: "progress",
   domain: "production",
+  target_divisions: [],
+  target_groups: [],
+  target_teams: [],
+  target_positions: [],
   valid_from: "",
   valid_to: "",
   display_order: 0,
   description: "",
   operator_name: defaultOperatorName.value,
+});
+
+const toId = (value) => (value === null || value === undefined ? "" : String(value));
+
+const parentMap = computed(() => {
+  const map = new Map();
+  departments.value.forEach((dept) => {
+    map.set(toId(dept.id), toId(dept.parent));
+  });
+  return map;
+});
+
+const isDescendantOf = (childId, ancestorId) => {
+  let cursor = toId(childId);
+  const target = toId(ancestorId);
+  if (!cursor || !target) return false;
+  const seen = new Set();
+  while (cursor && !seen.has(cursor)) {
+    seen.add(cursor);
+    const parent = parentMap.value.get(cursor);
+    if (!parent) return false;
+    if (parent === target) return true;
+    cursor = parent;
+  }
+  return false;
+};
+
+const isDescendantOfAny = (childId, ancestorIds) => {
+  return ancestorIds.some((ancestorId) => isDescendantOf(childId, ancestorId));
+};
+
+const filterIdsByOptions = (ids, options) => {
+  const allowed = new Set(options.map((opt) => String(opt.id)));
+  return ids.filter((id) => allowed.has(String(id)));
+};
+
+const divisionOptions = computed(() =>
+  departments.value.filter((dept) => dept.level === "division")
+);
+const groupOptions = computed(() =>
+  departments.value.filter((dept) => dept.level === "group")
+);
+const teamOptions = computed(() =>
+  departments.value.filter((dept) => dept.level === "team")
+);
+const filteredGroupOptions = computed(() =>
+  groupOptions.value.filter((dept) => isDescendantOfAny(dept.id, form.value.target_divisions))
+);
+const filteredTeamOptions = computed(() =>
+  teamOptions.value.filter((dept) => isDescendantOfAny(dept.id, form.value.target_groups))
+);
+
+const selectedDepartmentIds = computed(() => {
+  const merged = new Set();
+  form.value.target_divisions.forEach((id) => merged.add(id));
+  form.value.target_groups.forEach((id) => merged.add(id));
+  form.value.target_teams.forEach((id) => merged.add(id));
+  return Array.from(merged);
 });
 
 const isEditing = computed(() => form.value.id !== null);
@@ -227,6 +341,56 @@ const getCategoryLabel = (category) => {
   return found ? found.label : category;
 };
 
+const getTargetLabel = (item) => {
+  const deptNames = Array.isArray(item.target_department_names) ? item.target_department_names : [];
+  const posList = Array.isArray(item.target_positions) ? item.target_positions : [];
+  const deptText = deptNames.length ? deptNames.join(' / ') : '';
+  const posText = posList.length ? posList.join(' / ') : '';
+  if (deptText && posText) return `${deptText} / ${posText}`;
+  if (deptText) return deptText;
+  if (posText) return posText;
+  return "-";
+};
+
+const loadDepartments = async () => {
+  try {
+    const res = await api.accounts.getDepartments({ ordering: "display_id,name" });
+    const data = res.data?.results || res.data || [];
+    departments.value = Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error("部署一覧の取得に失敗しました:", error);
+    departments.value = [];
+  }
+};
+
+const loadPositions = async (departmentIds) => {
+  if (!departmentIds || !departmentIds.length) {
+    positions.value = [];
+    return;
+  }
+  try {
+    const requests = departmentIds.map((id) =>
+      api.accounts.getDepartmentPositions({ department: id })
+    );
+    const responses = await Promise.all(requests);
+    const merged = new Set();
+    responses.forEach((res) => {
+      const list = Array.isArray(res.data) ? res.data : [];
+      list.forEach((pos) => merged.add(pos));
+    });
+    const mergedList = Array.from(merged);
+    if (mergedList.length) {
+      positions.value = mergedList;
+      return;
+    }
+    const fallback = await api.accounts.getPositions();
+    positions.value = Array.isArray(fallback.data) ? fallback.data : [];
+  } catch (error) {
+    console.error("役職一覧の取得に失敗しました:", error);
+    positions.value = [];
+  }
+};
+
 const loadSources = async () => {
   try {
     const res = await api.notifications.list({ ordering: "display_order,id" });
@@ -244,12 +408,17 @@ const resetForm = () => {
     title: "",
     category: "progress",
     domain: "production",
+    target_divisions: [],
+    target_groups: [],
+    target_teams: [],
+    target_positions: [],
     valid_from: "",
     valid_to: "",
     display_order: 0,
     description: "",
     operator_name: defaultOperatorName.value,
   };
+  keepPositionOnDeptChange.value = false;
   errorMessage.value = "";
 };
 
@@ -258,6 +427,8 @@ const submitForm = async () => {
   const name = (form.value.title || "").trim();
   const category = (form.value.category || "").trim();
   const domain = form.value.domain;
+  const targetDepartments = selectedDepartmentIds.value;
+  const targetPositions = form.value.target_positions;
   if (!name || !category || !domain) {
     errorMessage.value = "必須項目を入力してください。";
     return;
@@ -268,8 +439,10 @@ const submitForm = async () => {
     title: name,
     category,
     domain,
-    valid_from: form.value.valid_from || "",
-    valid_to: form.value.valid_to || "",
+    target_departments: targetDepartments,
+    target_positions: targetPositions,
+    valid_from: form.value.valid_from || null,
+    valid_to: form.value.valid_to || null,
     display_order: Number(form.value.display_order || 0),
     description: (form.value.description || "").trim(),
     operator_name: (form.value.operator_name || "").trim() || defaultOperatorName.value,
@@ -288,13 +461,32 @@ const submitForm = async () => {
   }
 };
 
-const editSource = (item) => {
+const editSource = async (item) => {
   if (!canEdit.value) return;
+  if (!departments.value.length) {
+    await loadDepartments();
+  }
+  keepPositionOnDeptChange.value = true;
+  const targetDepartments = Array.isArray(item.target_departments) ? item.target_departments : [];
+  const divisions = [];
+  const groups = [];
+  const teams = [];
+  targetDepartments.forEach((id) => {
+    const dept = departments.value.find((d) => String(d.id) === String(id));
+    if (!dept) return;
+    if (dept.level === "division") divisions.push(dept.id);
+    if (dept.level === "group") groups.push(dept.id);
+    if (dept.level === "team") teams.push(dept.id);
+  });
   form.value = {
     id: item.id,
     title: item.title,
     category: item.category || "progress",
     domain: item.domain,
+    target_divisions: divisions,
+    target_groups: groups,
+    target_teams: teams,
+    target_positions: Array.isArray(item.target_positions) ? item.target_positions : [],
     valid_from: item.valid_from || "",
     valid_to: item.valid_to || "",
     display_order: item.display_order,
@@ -320,6 +512,7 @@ const removeSource = async (item) => {
 
 onMounted(() => {
   loadSources();
+  loadDepartments();
   if (!(form.value.operator_name || "").trim()) {
     form.value.operator_name = defaultOperatorName.value;
   }
@@ -330,6 +523,43 @@ watch(
   () => {
     if (!(form.value.operator_name || "").trim()) {
       form.value.operator_name = defaultOperatorName.value;
+    }
+  }
+);
+
+watch(
+  () => form.value.target_divisions,
+  (val) => {
+    const filteredGroups = filterIdsByOptions(form.value.target_groups, filteredGroupOptions.value);
+    if (filteredGroups.length !== form.value.target_groups.length) {
+      form.value.target_groups = filteredGroups;
+    }
+    const filteredTeams = filterIdsByOptions(form.value.target_teams, filteredTeamOptions.value);
+    if (filteredTeams.length !== form.value.target_teams.length) {
+      form.value.target_teams = filteredTeams;
+    }
+  }
+);
+
+watch(
+  () => form.value.target_groups,
+  () => {
+    const filteredTeams = filterIdsByOptions(form.value.target_teams, filteredTeamOptions.value);
+    if (filteredTeams.length !== form.value.target_teams.length) {
+      form.value.target_teams = filteredTeams;
+    }
+  }
+);
+
+watch(
+  () => selectedDepartmentIds.value,
+  async (val) => {
+    if (!keepPositionOnDeptChange.value) {
+      form.value.target_positions = [];
+    }
+    await loadPositions(val);
+    if (keepPositionOnDeptChange.value) {
+      keepPositionOnDeptChange.value = false;
     }
   }
 );
@@ -415,6 +645,9 @@ label {
   font-size: 14px;
   box-sizing: border-box;
   font-family: inherit;
+}
+.input[multiple] {
+  min-height: 120px;
 }
 
 .textarea {

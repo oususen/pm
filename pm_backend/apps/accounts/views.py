@@ -18,7 +18,7 @@ from .models import (
 def _profile_payload(user):
     try:
         profile = (
-            UserProfile.objects.select_related('department')
+            UserProfile.objects.select_related('department', 'division', 'group', 'team')
             .filter(user_id=user.id)
             .first()
         )
@@ -33,11 +33,18 @@ def _profile_payload(user):
         'position': profile.position,
         'role': profile.role,
         'employment_type': profile.employment_type,
+        'department': profile.department_id,
         'department_id': profile.department_id,
         'department_name': profile.department.name if profile.department_id else None,
-        'division': profile.division,
-        'group': profile.group,
-        'team': profile.team,
+        'division': profile.division_id,
+        'division_id': profile.division_id,
+        'division_name': profile.division.name if profile.division_id else None,
+        'group': profile.group_id,
+        'group_id': profile.group_id,
+        'group_name': profile.group.name if profile.group_id else None,
+        'team': profile.team_id,
+        'team_id': profile.team_id,
+        'team_name': profile.team.name if profile.team_id else None,
         'joined_on': profile.joined_on.isoformat() if profile.joined_on else None,
     }
 

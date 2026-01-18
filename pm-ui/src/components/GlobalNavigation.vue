@@ -57,13 +57,20 @@
         </div>
       </div>
       <div class="nav-actions">
-        <div v-if="canViewNotifications" class="notification-wrapper">
-          <button class="nav-action-btn notification-btn" title="通知" @click="toggleNotificationMenu">
+        <div v-if="showNotificationBell" class="notification-wrapper" @click.stop>
+          <button
+            class="nav-action-btn notification-btn"
+            title="通知"
+            type="button"
+            @mousedown.stop
+            @mouseup.stop
+            @click.stop.prevent="toggleNotificationMenu"
+          >
             <span>🔔</span>
             <span class="btn-label">通知</span>
             <span v-if="notificationCount" class="notification-badge">{{ notificationCount }}</span>
           </button>
-          <div v-if="showNotificationMenu" class="notification-menu">
+          <div v-if="showNotificationMenu" class="notification-menu" @click.stop @mousedown.stop>
             <div class="notification-menu-header">通知</div>
             <div v-if="activeNotifications.length" class="notification-list">
               <div v-for="item in activeNotifications" :key="item.id" class="notification-item">
@@ -79,7 +86,7 @@
             </div>
             <div v-else class="notification-empty">通知はありません。</div>
             <RouterLink
-              to="/notifications/sources"
+              to="/notifications"
               class="notification-link"
               @click="closeNotificationMenu"
             >
@@ -91,12 +98,11 @@
           <span>⚙️</span>
           <span class="btn-label">設定</span>
         </RouterLink>
-      
-
         <button class="nav-action-btn help-btn" title="ヘルプ" @click="openHelp">
           <span>?</span>
           <span class="btn-label">ヘルプ</span>
-        </button></div>
+        </button>
+      </div>
     </div>
   </nav>
 </template>
@@ -137,7 +143,7 @@ const mainTabs = [
   { id: 'shipping', label: '出荷', link: '/shipping/menu', resource: 'shipping' },
   { id: 'inventory', label: '在庫', link: '/inventory', resource: 'inventory' },
   { id: 'quality', label: '品質', link: '/quality', resource: 'quality' },
-  { id: 'notifications', label: '通知', link: '/notifications/sources', resource: 'notifications' },
+  { id: 'notifications', label: '通知作成', link: '/notifications/sources', resource: 'notifications' },
   { id: 'masters', label: 'マスタ', link: '/masters', resource: 'masters' },
   { id: 'settings', label: '設定', link: '/settings', resource: 'settings' },
 ]
@@ -162,6 +168,7 @@ const isActiveTab = (tabId) => {
   if (tabId === 'shipping' && path.startsWith('/shipping')) return true
   if (tabId === 'inventory' && path.startsWith('/inventory')) return true
   if (tabId === 'quality' && path.startsWith('/quality')) return true
+  if (tabId === 'notifications' && path.startsWith('/notifications')) return true
   if (tabId === 'masters' && path.startsWith('/masters')) return true
   if (tabId === 'settings' && path.startsWith('/settings')) return true
   return false
@@ -205,7 +212,48 @@ const showUserMenu = ref(false)
 const showNotificationMenu = ref(false)
 const notifications = ref([])
 
-const canViewNotifications = computed(() => hasPermission(authState.user, 'notifications', 'view'))
+const userDepartmentId = computed(() => authState.user?.profile?.department || null)
+const userPosition = computed(() => authState.user?.profile?.position || '')
+const showNotificationBell = computed(() => Boolean(authState.user))
+const departments = ref([])
+
+const toId = (value) => (value === null || value === undefined ? '' : String(value))
+
+const parentMap = computed(() => {
+  const map = new Map()
+  departments.value.forEach((dept) => {
+    map.set(toId(dept.id), toId(dept.parent))
+  })
+  return map
+})
+
+const isDescendantOrSelf = (childId, ancestorId) => {
+  const child = toId(childId)
+  const ancestor = toId(ancestorId)
+  if (!child || !ancestor) return false
+  let cursor = child
+  const seen = new Set()
+  while (cursor && !seen.has(cursor)) {
+    if (cursor === ancestor) return true
+    seen.add(cursor)
+    const parent = parentMap.value.get(cursor)
+    if (!parent) return false
+    cursor = parent
+  }
+  return false
+}
+
+const matchesDepartmentTarget = (targetDepartments, deptId) => {
+  if (!targetDepartments.length) return true
+  if (!deptId) return false
+  return targetDepartments.some((targetId) => isDescendantOrSelf(deptId, targetId))
+}
+
+const matchesPositionTarget = (targetPositions, position) => {
+  if (!targetPositions.length) return true
+  if (!position) return false
+  return targetPositions.some((pos) => String(pos) === String(position))
+}
 
 const activeNotifications = computed(() => {
   const today = new Date()
@@ -216,6 +264,10 @@ const activeNotifications = computed(() => {
     const to = item.valid_to ? new Date(item.valid_to) : null
     if (from && todayYmd < from) return false
     if (to && todayYmd > to) return false
+    const targetDepartments = Array.isArray(item.target_departments) ? item.target_departments : []
+    const targetPositions = Array.isArray(item.target_positions) ? item.target_positions : []
+    if (!matchesDepartmentTarget(targetDepartments, userDepartmentId.value)) return false
+    if (!matchesPositionTarget(targetPositions, userPosition.value)) return false
     return true
   })
 })
@@ -223,13 +275,24 @@ const activeNotifications = computed(() => {
 const notificationCount = computed(() => activeNotifications.value.length)
 
 const loadNotifications = async () => {
-  if (!canViewNotifications.value) return
   try {
     const res = await api.notifications.list({ ordering: 'display_order,id' })
     const data = res.data?.results || res.data || []
     notifications.value = Array.isArray(data) ? data : []
   } catch (error) {
     console.error('通知取得エラー:', error)
+  }
+}
+
+const loadDepartments = async () => {
+  if (!userDepartmentId.value) return
+  try {
+    const res = await api.accounts.getDepartments({ ordering: 'display_id,name' })
+    const data = res.data?.results || res.data || []
+    departments.value = Array.isArray(data) ? data : []
+  } catch (error) {
+    console.error('部署一覧の取得に失敗しました:', error)
+    departments.value = []
   }
 }
 
@@ -248,6 +311,7 @@ const toggleNotificationMenu = async () => {
   showNotificationMenu.value = !showNotificationMenu.value
   if (showNotificationMenu.value) {
     showUserMenu.value = false
+    await loadDepartments()
     await loadNotifications()
   }
 }

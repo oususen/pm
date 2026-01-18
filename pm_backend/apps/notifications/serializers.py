@@ -3,7 +3,7 @@ from .models import Notification
 
 
 class NotificationSerializer(serializers.ModelSerializer):
-    target_department_name = serializers.CharField(source='target_department.name', read_only=True)
+    target_department_names = serializers.SerializerMethodField()
 
     class Meta:
         model = Notification
@@ -12,9 +12,9 @@ class NotificationSerializer(serializers.ModelSerializer):
             'title',
             'category',
             'domain',
-            'target_department',
-            'target_department_name',
-            'target_position',
+            'target_departments',
+            'target_department_names',
+            'target_positions',
             'valid_from',
             'valid_to',
             'display_order',
@@ -23,3 +23,6 @@ class NotificationSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
+
+    def get_target_department_names(self, obj):
+        return [dept.name for dept in obj.target_departments.all()]
