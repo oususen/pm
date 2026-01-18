@@ -14,4 +14,10 @@ export const createNotificationsAPI = (client) => ({
   delete(id) {
     return client.delete(`/notifications/${id}/`)
   },
+  markRead(id) {
+    return client.post(`/notifications/${id}/mark_read/`)
+  },
+  markAllRead(notificationIds = []) {
+    return client.post('/notifications/mark_all_read/', { notification_ids: notificationIds })
+  },
 })

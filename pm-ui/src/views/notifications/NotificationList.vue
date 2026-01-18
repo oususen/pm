@@ -67,6 +67,16 @@
                     <span class="detail-label">説明</span>
                     <span class="detail-value">{{ item.description || '-' }}</span>
                   </div>
+                  <div class="detail-item full detail-actions">
+                    <button
+                      v-if="!item.is_read"
+                      class="btn confirm-btn"
+                      @click.stop="handleMarkRead(item.id)"
+                    >
+                      ✓ 確認した
+                    </button>
+                    <span v-else class="confirmed-label">✓ 確認済み</span>
+                  </div>
                 </div>
               </td>
             </tr>
@@ -252,6 +262,16 @@ const formatDateRange = (from, to) => {
   return "-";
 };
 
+const handleMarkRead = async (id) => {
+  try {
+    await api.notifications.markRead(id);
+    // 通知リストを再読み込み
+    await loadNotifications();
+  } catch (error) {
+    console.error("確認処理に失敗しました:", error);
+  }
+};
+
 onMounted(() => {
   loadNotifications();
   loadDepartments();
@@ -372,6 +392,27 @@ onMounted(() => {
 .detail-value {
   font-size: 13px;
   color: #1f2a44;
+}
+
+.detail-actions {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.confirm-btn {
+  background: #10b981;
+  color: #fff;
+}
+
+.confirm-btn:hover {
+  background: #059669;
+}
+
+.confirmed-label {
+  color: #10b981;
+  font-size: 13px;
+  font-weight: 500;
 }
 
 @media (max-width: 768px) {

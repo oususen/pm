@@ -71,20 +71,13 @@
             <span v-if="notificationCount" class="notification-badge">{{ notificationCount }}</span>
           </button>
           <div v-if="showNotificationMenu" class="notification-menu" @click.stop @mousedown.stop>
-            <div class="notification-menu-header">通知</div>
-            <div v-if="activeNotifications.length" class="notification-list">
-              <div v-for="item in activeNotifications" :key="item.id" class="notification-item">
+            <div class="notification-menu-header">未読通知</div>
+            <div v-if="unreadNotifications.length" class="notification-list">
+              <div v-for="item in unreadNotifications" :key="item.id" class="notification-item">
                 <div class="notification-title">{{ item.title }}</div>
-                <div class="notification-meta">
-                  <span>{{ getDomainLabel(item.domain) }}</span>
-                  <span>{{ getCategoryLabel(item.category) }}</span>
-                </div>
-                <div class="notification-range" v-if="item.valid_from || item.valid_to">
-                  {{ formatDateRange(item.valid_from, item.valid_to) }}
-                </div>
               </div>
             </div>
-            <div v-else class="notification-empty">通知はありません。</div>
+            <div v-else class="notification-empty">未読の通知はありません。</div>
             <RouterLink
               to="/notifications"
               class="notification-link"
@@ -286,7 +279,12 @@ const activeNotifications = computed(() => {
   })
 })
 
-const notificationCount = computed(() => activeNotifications.value.length)
+// 未読の通知のみ
+const unreadNotifications = computed(() => {
+  return activeNotifications.value.filter((item) => !item.is_read)
+})
+
+const notificationCount = computed(() => unreadNotifications.value.length)
 
 const loadNotifications = async () => {
   try {
@@ -331,41 +329,6 @@ const toggleNotificationMenu = async () => {
 
 const closeNotificationMenu = () => {
   showNotificationMenu.value = false
-}
-
-const getDomainLabel = (domain) => {
-  const map = {
-    production: '生産',
-    quality: '品質',
-    inventory: '在庫',
-    purchase: '購買',
-    shipping: '出荷',
-    equipment: '設備',
-    common: '共通',
-  }
-  return map[domain] || domain || '-'
-}
-
-const getCategoryLabel = (category) => {
-  const map = {
-    progress: '進捗',
-    delay: '遅延',
-    abnormal: '異常',
-    quality_issue: '品質不良',
-    inventory_shortage: '在庫不足',
-    process_change: '工程変更',
-    maintenance: '保全',
-    shipping_issue: '出荷トラブル',
-    other: 'その他',
-  }
-  return map[category] || category || '-'
-}
-
-const formatDateRange = (from, to) => {
-  if (from && to) return `${from} 〜 ${to}`
-  if (from) return `${from} 〜`
-  if (to) return `〜 ${to}`
-  return ''
 }
 
 // チャイム音を鳴らす（Web Audio API使用）
@@ -430,8 +393,8 @@ const pollNotifications = async () => {
     await loadDepartments()
     await loadNotifications()
 
-    // アクティブな通知のIDセットを作成
-    const currentIds = new Set(activeNotifications.value.map((n) => n.id))
+    // 未読通知のIDセットを作成（未読ベースで新着検出）
+    const currentIds = new Set(unreadNotifications.value.map((n) => n.id))
     checkForNewNotifications(currentIds)
   } catch (error) {
     console.error('通知ポーリングエラー:', error)

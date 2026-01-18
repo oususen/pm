@@ -1,4 +1,5 @@
 from django.db import models
+from django.conf import settings
 from accounts.models import Department
 
 
@@ -27,3 +28,26 @@ class Notification(models.Model):
         ordering = ['display_order', 'id']
         verbose_name = '通知'
         verbose_name_plural = '通知'
+
+
+class NotificationRead(models.Model):
+    """通知既読状態（ユーザーごと）"""
+    notification = models.ForeignKey(
+        Notification,
+        on_delete=models.CASCADE,
+        related_name='reads',
+        verbose_name='通知'
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='notification_reads',
+        verbose_name='ユーザー'
+    )
+    read_at = models.DateTimeField(auto_now_add=True, verbose_name='既読日時')
+
+    class Meta:
+        db_table = 'notification_reads'
+        unique_together = ['notification', 'user']
+        verbose_name = '通知既読'
+        verbose_name_plural = '通知既読'
