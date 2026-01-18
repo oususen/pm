@@ -24,7 +24,7 @@
             />
           </div>
           <div class="form-field">
-            <label class="label-required">カテゴリ</label>
+            <label class="label-required">種別</label>
             <select v-model="form.category" :disabled="!canEdit" class="input">
               <option v-for="opt in categoryOptions" :key="opt.value" :value="opt.value">
                 {{ opt.label }}
@@ -32,7 +32,7 @@
             </select>
           </div>
           <div class="form-field">
-            <label class="label-required">種別</label>
+            <label class="label-required">カテゴリ</label>
             <select v-model="form.domain" :disabled="!canEdit" class="input">
               <option v-for="opt in domainOptions" :key="opt.value" :value="opt.value">
                 {{ opt.label }}
@@ -193,8 +193,8 @@
             <tr v-for="item in sortedSources" :key="item.id">
               <td>{{ item.display_order }}</td>
               <td>{{ item.title }}</td>
-              <td>{{ getCategoryLabel(item.category) }}</td>
               <td>{{ getDomainLabel(item.domain) }}</td>
+              <td>{{ getCategoryLabel(item.category) }}</td>
               <td>{{ formatDateTime(item.created_at) }}</td>
               <td>{{ item.valid_from || '-' }}</td>
               <td>{{ item.valid_to || '-' }}</td>

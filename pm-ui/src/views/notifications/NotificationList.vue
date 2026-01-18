@@ -26,8 +26,8 @@
             <tr class="row-main" :class="{ 'unread': !item.is_read }" @click="toggleRow(item.id)">
               <td>{{ item.display_order }}</td>
               <td>{{ item.title }}</td>
-              <td>{{ getCategoryLabel(item.category) }}</td>
               <td>{{ getDomainLabel(item.domain) }}</td>
+              <td>{{ getCategoryLabel(item.category) }}</td>
               <td>{{ item.valid_from || '-' }}</td>
               <td>{{ item.valid_to || '-' }}</td>
               <td>{{ getTargetLabel(item) }}</td>
@@ -43,11 +43,11 @@
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">カテゴリ</span>
-                    <span class="detail-value">{{ getCategoryLabel(item.category) }}</span>
+                    <span class="detail-value">{{ getDomainLabel(item.domain) }}</span>
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">種別</span>
-                    <span class="detail-value">{{ getDomainLabel(item.domain) }}</span>
+                    <span class="detail-value">{{ getCategoryLabel(item.category) }}</span>
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">対象者</span>
