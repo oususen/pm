@@ -258,9 +258,15 @@ const matchesPositionTarget = (targetPositions, position) => {
   return targetPositions.some((pos) => String(pos) === String(position))
 }
 
+const matchesUserTarget = (targetUsers, userId) => {
+  if (!targetUsers.length) return false
+  return targetUsers.some((id) => String(id) === String(userId))
+}
+
 const activeNotifications = computed(() => {
   const today = new Date()
   const todayYmd = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const userId = authState.user?.id
   return notifications.value.filter((item) => {
     if (!item) return false
     const from = item.valid_from ? new Date(item.valid_from) : null
@@ -269,6 +275,15 @@ const activeNotifications = computed(() => {
     if (to && todayYmd > to) return false
     const targetDepartments = Array.isArray(item.target_departments) ? item.target_departments : []
     const targetPositions = Array.isArray(item.target_positions) ? item.target_positions : []
+    const targetUsers = Array.isArray(item.target_users) ? item.target_users : []
+
+    const hasTargetUsers = targetUsers.length > 0
+    if (hasTargetUsers && !matchesUserTarget(targetUsers, userId)) return false
+
+    // 部署・役職・ユーザーが未指定の場合は全員対象
+    if (!targetDepartments.length && !targetPositions.length && !targetUsers.length) return true
+
+    // 部署・役職でのマッチ判定
     if (!matchesDepartmentTarget(targetDepartments, {
       division: userDivisionId.value,
       group: userGroupId.value,

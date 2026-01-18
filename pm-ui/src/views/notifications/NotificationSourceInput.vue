@@ -87,6 +87,19 @@
             </select>
           </div>
           <div class="form-field">
+            <label>対象ユーザー（個別指定）</label>
+            <select
+              v-model="form.target_users"
+              multiple
+              :disabled="!canEdit"
+              class="input"
+            >
+              <option v-for="user in userOptions" :key="user.id" :value="user.id">
+                {{ user.name }}
+              </option>
+            </select>
+          </div>
+          <div class="form-field">
             <label>有効開始日</label>
             <input
               v-model="form.valid_from"
@@ -241,6 +254,7 @@ const sources = ref([]);
 const errorMessage = ref("");
 const departments = ref([]);
 const positions = ref([]);
+const users = ref([]);
 const keepPositionOnDeptChange = ref(false);
 const defaultOperatorName = computed(() => {
   const user = authState.user;
@@ -257,6 +271,7 @@ const form = ref({
   target_groups: [],
   target_teams: [],
   target_positions: [],
+  target_users: [],
   valid_from: "",
   valid_to: "",
   display_order: 0,
@@ -270,6 +285,14 @@ const parentMap = computed(() => {
   const map = new Map();
   departments.value.forEach((dept) => {
     map.set(toId(dept.id), toId(dept.parent));
+  });
+  return map;
+});
+
+const departmentLevelMap = computed(() => {
+  const map = new Map();
+  departments.value.forEach((dept) => {
+    map.set(toId(dept.id), dept.level);
   });
   return map;
 });
@@ -314,6 +337,69 @@ const filteredTeamOptions = computed(() =>
   teamOptions.value.filter((dept) => isDescendantOfAny(dept.id, form.value.target_groups))
 );
 
+const getUserLevelIds = (user) => {
+  const profile = user?.profile || {};
+  const division = profile.division_id ?? profile.division ?? null;
+  const group = profile.group_id ?? profile.group ?? null;
+  const team = profile.team_id ?? profile.team ?? null;
+  if (division || group || team) {
+    return { division, group, team };
+  }
+  const department = profile.department_id ?? profile.department ?? null;
+  if (!department) {
+    return { division, group, team };
+  }
+  const level = departmentLevelMap.value.get(toId(department));
+  return {
+    division: level === "division" ? department : division,
+    group: level === "group" ? department : group,
+    team: level === "team" ? department : team,
+  };
+};
+
+const matchesUserDepartmentSelection = (user) => {
+  const { division, group, team } = getUserLevelIds(user);
+  if (form.value.target_teams.length) {
+    return form.value.target_teams.some((id) => toId(id) === toId(team));
+  }
+  if (form.value.target_groups.length) {
+    return form.value.target_groups.some((id) => toId(id) === toId(group));
+  }
+  if (form.value.target_divisions.length) {
+    return form.value.target_divisions.some((id) => toId(id) === toId(division));
+  }
+  return true;
+};
+
+const matchesUserPositionSelection = (user) => {
+  const targetPositions = form.value.target_positions;
+  if (!targetPositions.length) return true;
+  const userPosition = user?.profile?.position || "";
+  if (!userPosition) return false;
+  return targetPositions.some((pos) => String(pos) === String(userPosition));
+};
+
+const userOptions = computed(() => {
+  const filteredUsers = users.value.filter((u) => {
+    if (!u) return false;
+    if (!matchesUserDepartmentSelection(u)) return false;
+    if (!matchesUserPositionSelection(u)) return false;
+    return true;
+  });
+  const selectedIds = new Set(form.value.target_users.map((id) => toId(id)));
+  const selectedUsers = users.value.filter((u) => selectedIds.has(toId(u.id)));
+  const merged = [...filteredUsers, ...selectedUsers].filter(
+    (u, index, list) => list.findIndex((item) => toId(item.id) === toId(u.id)) === index
+  );
+  return merged.map((u) => {
+    const fullName = `${u.last_name || ""}${u.first_name || ""}`.trim();
+    return {
+      id: u.id,
+      name: fullName || u.username || u.email || `ID: ${u.id}`,
+    };
+  });
+});
+
 const selectedDepartmentIds = computed(() => {
   const merged = new Set();
   form.value.target_divisions.forEach((id) => merged.add(id));
@@ -346,12 +432,12 @@ const getCategoryLabel = (category) => {
 const getTargetLabel = (item) => {
   const deptNames = Array.isArray(item.target_department_names) ? item.target_department_names : [];
   const posList = Array.isArray(item.target_positions) ? item.target_positions : [];
-  const deptText = deptNames.length ? deptNames.join(' / ') : '';
-  const posText = posList.length ? posList.join(' / ') : '';
-  if (deptText && posText) return `${deptText} / ${posText}`;
-  if (deptText) return deptText;
-  if (posText) return posText;
-  return "-";
+  const userNames = Array.isArray(item.target_user_names) ? item.target_user_names : [];
+  const parts = [];
+  if (deptNames.length) parts.push(deptNames.join(' / '));
+  if (posList.length) parts.push(posList.join(' / '));
+  if (userNames.length) parts.push(userNames.join(' / '));
+  return parts.length ? parts.join(' / ') : '-';
 };
 
 const getUnreadUsersLabel = (item) => {
@@ -368,6 +454,37 @@ const loadDepartments = async () => {
   } catch (error) {
     console.error("部署一覧の取得に失敗しました:", error);
     departments.value = [];
+  }
+};
+
+const loadUsers = async () => {
+  try {
+    const collected = [];
+    let page = 1;
+    let hasNext = true;
+    while (hasNext) {
+      const res = await api.accounts.getUsers({
+        is_active: true,
+        ordering: "last_name,first_name",
+        page_size: 500,
+        page,
+      });
+      const data = res.data;
+      if (Array.isArray(data)) {
+        collected.push(...data);
+        hasNext = false;
+        break;
+      }
+      const list = Array.isArray(data?.results) ? data.results : [];
+      collected.push(...list);
+      hasNext = Boolean(data?.next);
+      page += 1;
+      if (!data?.next) break;
+    }
+    users.value = collected;
+  } catch (error) {
+    console.error("ユーザー一覧の取得に失敗しました:", error);
+    users.value = [];
   }
 };
 
@@ -420,6 +537,7 @@ const resetForm = () => {
     target_groups: [],
     target_teams: [],
     target_positions: [],
+    target_users: [],
     valid_from: "",
     valid_to: "",
     display_order: 0,
@@ -449,6 +567,7 @@ const submitForm = async () => {
     domain,
     target_departments: targetDepartments,
     target_positions: targetPositions,
+    target_users: form.value.target_users,
     valid_from: form.value.valid_from || null,
     valid_to: form.value.valid_to || null,
     display_order: Number(form.value.display_order || 0),
@@ -495,6 +614,7 @@ const editSource = async (item) => {
     target_groups: groups,
     target_teams: teams,
     target_positions: Array.isArray(item.target_positions) ? item.target_positions : [],
+    target_users: Array.isArray(item.target_users) ? item.target_users : [],
     valid_from: item.valid_from || "",
     valid_to: item.valid_to || "",
     display_order: item.display_order,
@@ -521,6 +641,7 @@ const removeSource = async (item) => {
 onMounted(() => {
   loadSources();
   loadDepartments();
+  loadUsers();
   if (!(form.value.operator_name || "").trim()) {
     form.value.operator_name = defaultOperatorName.value;
   }

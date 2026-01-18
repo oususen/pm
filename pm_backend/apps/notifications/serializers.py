@@ -8,6 +8,7 @@ User = get_user_model()
 
 class NotificationSerializer(serializers.ModelSerializer):
     target_department_names = serializers.SerializerMethodField()
+    target_user_names = serializers.SerializerMethodField()
     is_read = serializers.SerializerMethodField()
     unread_users = serializers.SerializerMethodField()
 
@@ -21,6 +22,8 @@ class NotificationSerializer(serializers.ModelSerializer):
             'target_departments',
             'target_department_names',
             'target_positions',
+            'target_users',
+            'target_user_names',
             'valid_from',
             'valid_to',
             'display_order',
@@ -35,6 +38,13 @@ class NotificationSerializer(serializers.ModelSerializer):
     def get_target_department_names(self, obj):
         return [dept.name for dept in obj.target_departments.all()]
 
+    def get_target_user_names(self, obj):
+        names = []
+        for user in obj.target_users.all():
+            full_name = f"{user.last_name or ''}{user.first_name or ''}".strip()
+            names.append(full_name or user.username)
+        return names
+
     def get_is_read(self, obj):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
@@ -48,9 +58,10 @@ class NotificationSerializer(serializers.ModelSerializer):
         """対象者のうち未閲覧のユーザー名リストを返す"""
         target_departments = list(obj.target_departments.all())
         target_positions = obj.target_positions or []
+        direct_target_users = list(obj.target_users.all())
 
         # 対象ユーザーを取得
-        target_users = self._get_target_users(target_departments, target_positions)
+        target_users = self._get_target_users(target_departments, target_positions, direct_target_users)
 
         # 既読ユーザーIDを取得
         read_user_ids = set(
@@ -68,11 +79,30 @@ class NotificationSerializer(serializers.ModelSerializer):
 
         return unread_names
 
-    def _get_target_users(self, target_departments, target_positions):
-        """対象部署・役職に該当するユーザーを取得"""
-        if not target_departments and not target_positions:
+    def _get_target_users(self, target_departments, target_positions, direct_target_users=None):
+        """対象部署・役職・個別指定に該当するユーザーを取得"""
+        direct_target_users = direct_target_users or []
+
+        if not target_departments and not target_positions and not direct_target_users:
             # 対象指定なし = 全ユーザーが対象
             return list(User.objects.filter(is_active=True))
+
+        def get_user_levels(profile):
+            division_id = getattr(profile, 'division_id', None)
+            group_id = getattr(profile, 'group_id', None)
+            team_id = getattr(profile, 'team_id', None)
+            if division_id or group_id or team_id:
+                return division_id, group_id, team_id
+            department = getattr(profile, 'department', None)
+            if not department:
+                return division_id, group_id, team_id
+            if department.level == 'division':
+                return department.id, group_id, team_id
+            if department.level == 'group':
+                return division_id, department.id, team_id
+            if department.level == 'team':
+                return division_id, group_id, department.id
+            return division_id, group_id, team_id
 
         # 部署をレベル別に分類
         team_ids = []
@@ -87,10 +117,14 @@ class NotificationSerializer(serializers.ModelSerializer):
                 division_ids.append(dept.id)
 
         # ユーザーをフィルタ
-        users = User.objects.filter(is_active=True).select_related('profile')
-        result = []
+        if direct_target_users:
+            users = [user for user in direct_target_users if user.is_active]
+        else:
+            users = User.objects.filter(is_active=True).select_related('profile')
 
+        result = []
         for user in users:
+
             profile = getattr(user, 'profile', None)
             if not profile:
                 continue
@@ -98,17 +132,18 @@ class NotificationSerializer(serializers.ModelSerializer):
             # 部署チェック
             if target_departments:
                 dept_match = False
+                division_id, group_id, team_id = get_user_levels(profile)
                 if team_ids:
                     # 班指定がある場合は班でマッチ
-                    if profile.team_id and profile.team_id in team_ids:
+                    if team_id and team_id in team_ids:
                         dept_match = True
                 elif group_ids:
                     # 係指定がある場合は係でマッチ
-                    if profile.group_id and profile.group_id in group_ids:
+                    if group_id and group_id in group_ids:
                         dept_match = True
                 elif division_ids:
                     # 事業部指定がある場合は事業部でマッチ
-                    if profile.division_id and profile.division_id in division_ids:
+                    if division_id and division_id in division_ids:
                         dept_match = True
 
                 if not dept_match:

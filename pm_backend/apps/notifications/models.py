@@ -15,6 +15,12 @@ class Notification(models.Model):
         verbose_name='対象部署'
     )
     target_positions = models.JSONField(default=list, blank=True, verbose_name='対象役職')
+    target_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='targeted_notifications',
+        verbose_name='対象ユーザー'
+    )
     valid_from = models.DateField(null=True, blank=True, verbose_name='有効開始日')
     valid_to = models.DateField(null=True, blank=True, verbose_name='有効終了日')
     display_order = models.IntegerField(default=0, verbose_name='表示順')

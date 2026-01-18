@@ -52,11 +52,17 @@ const matchesPositionTarget = (targetPositions, position) => {
   return targetPositions.some((pos) => String(pos) === String(position))
 }
 
+const matchesUserTarget = (targetUsers, userId) => {
+  if (!targetUsers.length) return false
+  return targetUsers.some((id) => String(id) === String(userId))
+}
+
 // アクティブな通知（有効期間内 & 対象者）
 const activeNotifications = computed(() => {
   const user = authState.user
   if (!user) return []
 
+  const userId = user.id
   const userDivisionId = user?.profile?.division_id ?? user?.profile?.division ?? null
   const userGroupId = user?.profile?.group_id ?? user?.profile?.group ?? null
   const userTeamId = user?.profile?.team_id ?? user?.profile?.team ?? null
@@ -73,6 +79,15 @@ const activeNotifications = computed(() => {
     if (to && todayYmd > to) return false
     const targetDepartments = Array.isArray(item.target_departments) ? item.target_departments : []
     const targetPositions = Array.isArray(item.target_positions) ? item.target_positions : []
+    const targetUsers = Array.isArray(item.target_users) ? item.target_users : []
+
+    const hasTargetUsers = targetUsers.length > 0
+    if (hasTargetUsers && !matchesUserTarget(targetUsers, userId)) return false
+
+    // 部署・役職・ユーザーが未指定の場合は全員対象
+    if (!targetDepartments.length && !targetPositions.length && !targetUsers.length) return true
+
+    // 部署・役職でのマッチ判定
     if (!matchesDepartmentTarget(targetDepartments, {
       division: userDivisionId,
       group: userGroupId,
