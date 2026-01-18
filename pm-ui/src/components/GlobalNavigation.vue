@@ -30,32 +30,36 @@
     </div>
 
     <div class="global-nav-right">
-      <div class="nav-info" v-if="!isMobile">
-        <button class="lang-selector">
-          <span class="globe-icon">🌐</span>
-          <span>日本語</span>
-          <span class="dropdown-arrow">▼</span>
-        </button>
+      <div class="nav-info">
         <div class="user-info" @click="toggleUserMenu" :class="{ active: showUserMenu }">
-          <span class="user-icon">👤</span>
           <span class="user-name">{{ userDisplayName }}</span>
           <span class="dropdown-arrow" :class="{ rotated: showUserMenu }">▼</span>
         </div>
         <div v-if="showUserMenu" class="user-menu">
+          <div class="user-menu-header">
+            <div class="user-menu-name">{{ userDisplayName }}</div>
+            <div class="user-menu-account">{{ userAccountName }}</div>
+          </div>
+          <div class="user-menu-divider"></div>
           <RouterLink to="/settings/profile" class="user-menu-item" @click="closeUserMenu">
             <span>👤</span>
             プロフィール編集
           </RouterLink>
+          <button class="user-menu-item" type="button" @click="closeUserMenu">
+            <span>🌐</span>
+            言語選択
+          </button>
+          <div class="user-menu-divider"></div>
+          <button class="user-menu-item logout-item" type="button" @click="handleLogout">
+            <span>🚪</span>
+            ログアウト
+          </button>
         </div>
       </div>
       <div class="nav-actions">
         <button class="nav-action-btn" title="お知らせ">
           <span>🔔</span>
           <span class="btn-label">お知らせ</span>
-        </button>
-        <button class="nav-action-btn" title="ログアウト" @click="handleLogout">
-          <span>🚪</span>
-          <span class="btn-label">ログアウト</span>
         </button>
         <RouterLink to="/settings" class="nav-action-btn" title="設定" v-if="!isMobile">
           <span>⚙️</span>
@@ -161,6 +165,12 @@ const userDisplayName = computed(() => {
   if (!user) return 'ゲスト'
   const fullName = `${user.last_name || ''} ${user.first_name || ''}`.trim()
   return fullName || user.username || user.email || 'ユーザー'
+})
+
+const userAccountName = computed(() => {
+  const user = authState.user
+  if (!user) return ''
+  return user.username || user.email || ''
 })
 
 const showUserMenu = ref(false)
@@ -310,7 +320,7 @@ const handleLogout = async () => {
 }
 
 .nav-tab {
-  padding: 6px 16px;
+  padding: 6px 10px;
   color: rgba(255, 255, 255, 0.85);
   text-decoration: none;
   font-size: 13px;
@@ -346,28 +356,6 @@ const handleLogout = async () => {
   gap: 12px;
 }
 
-.lang-selector {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: rgba(255, 255, 255, 0.15);
-  border: none;
-  color: white;
-  padding: 4px 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.lang-selector:hover {
-  background: rgba(255, 255, 255, 0.25);
-}
-
-.globe-icon {
-  font-size: 14px;
-}
-
 .dropdown-arrow {
   font-size: 10px;
   opacity: 0.7;
@@ -379,7 +367,7 @@ const handleLogout = async () => {
   gap: 6px;
   color: white;
   font-size: 13px;
-  padding: 4px 10px;
+  padding: 4px 6px;
   background: rgba(255, 255, 255, 0.15);
   border-radius: 4px;
   cursor: pointer;
@@ -402,6 +390,28 @@ const handleLogout = async () => {
   min-width: 160px;
   z-index: 1000;
   margin-top: 4px;
+  padding: 6px 0;
+}
+
+.user-menu-header {
+  padding: 10px 12px 6px 12px;
+}
+
+.user-menu-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1f2a44;
+}
+
+.user-menu-account {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.user-menu-divider {
+  height: 1px;
+  background: #e5e7eb;
+  margin: 6px 0;
 }
 
 .user-menu-item {
@@ -413,6 +423,11 @@ const handleLogout = async () => {
   text-decoration: none;
   font-size: 14px;
   transition: background 0.2s;
+  width: 100%;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
 }
 
 .user-menu-item:hover {
@@ -421,10 +436,6 @@ const handleLogout = async () => {
 
 .dropdown-arrow.rotated {
   transform: rotate(180deg);
-}
-
-.user-icon {
-  font-size: 16px;
 }
 
 .user-name {
@@ -443,11 +454,14 @@ const handleLogout = async () => {
   background: rgba(255, 255, 255, 0.15);
   border: none;
   color: white;
-  padding: 4px 6px;
+  padding: 4px 4px;
   border-radius: 4px;
   font-size: 12px;
   cursor: pointer;
   transition: background 0.2s;
+}
+.help-btn {
+  padding: 4px 6px;
 }
 
 .nav-action-btn:hover {
@@ -469,7 +483,7 @@ const handleLogout = async () => {
   }
 
   .nav-tab {
-    padding: 6px 12px;
+    padding: 6px 8px;
     font-size: 12px;
   }
 
@@ -477,9 +491,6 @@ const handleLogout = async () => {
     display: none;
   }
 
-  .lang-selector span:not(.globe-icon) {
-    display: none;
-  }
 }
 
 @media (max-width: 768px) {
@@ -526,7 +537,7 @@ const handleLogout = async () => {
   }
 
   .nav-tab {
-    padding: 6px 20px;
+    padding: 6px 12px;
     font-size: 14px;
     font-weight: 600;
   }
@@ -542,8 +553,12 @@ const handleLogout = async () => {
   }
 
   .nav-action-btn {
-    padding: 6px 6px;
+    padding: 6px 4px;
     background: rgba(255, 255, 255, 0.2);
+  }
+
+  .help-btn {
+    padding: 6px 6px;
   }
 
   .nav-action-btn .btn-label {
@@ -552,6 +567,10 @@ const handleLogout = async () => {
 
   .nav-action-btn span {
     font-size: 20px;
+  }
+
+  .user-name {
+    max-width: 120px;
   }
 }
 </style>
