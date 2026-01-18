@@ -1,0 +1,31 @@
+from django.db import models
+from accounts.models import Department
+
+
+class Notification(models.Model):
+    """通知マスタ"""
+    title = models.CharField(max_length=200, verbose_name='タイトル')
+    category = models.CharField(max_length=50, verbose_name='カテゴリ')
+    domain = models.CharField(max_length=50, verbose_name='種別')
+    target_department = models.ForeignKey(
+        Department,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='notifications',
+        verbose_name='対象部署'
+    )
+    target_position = models.CharField(max_length=100, blank=True, verbose_name='対象役職')
+    valid_from = models.DateField(null=True, blank=True, verbose_name='有効開始日')
+    valid_to = models.DateField(null=True, blank=True, verbose_name='有効終了日')
+    display_order = models.IntegerField(default=0, verbose_name='表示順')
+    description = models.TextField(blank=True, verbose_name='説明')
+    operator_name = models.CharField(max_length=100, blank=True, verbose_name='入力者')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'notifications'
+        ordering = ['display_order', 'id']
+        verbose_name = '通知'
+        verbose_name_plural = '通知'

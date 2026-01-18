@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     'shipping',
     'accounts',
     'proposals',
+    'notifications',
 ]
 
 MIDDLEWARE = [

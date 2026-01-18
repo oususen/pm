@@ -57,10 +57,36 @@
         </div>
       </div>
       <div class="nav-actions">
-        <button class="nav-action-btn" title="お知らせ">
-          <span>🔔</span>
-          <span class="btn-label">お知らせ</span>
-        </button>
+        <div v-if="canViewNotifications" class="notification-wrapper">
+          <button class="nav-action-btn notification-btn" title="通知" @click="toggleNotificationMenu">
+            <span>🔔</span>
+            <span class="btn-label">通知</span>
+            <span v-if="notificationCount" class="notification-badge">{{ notificationCount }}</span>
+          </button>
+          <div v-if="showNotificationMenu" class="notification-menu">
+            <div class="notification-menu-header">通知</div>
+            <div v-if="activeNotifications.length" class="notification-list">
+              <div v-for="item in activeNotifications" :key="item.id" class="notification-item">
+                <div class="notification-title">{{ item.title }}</div>
+                <div class="notification-meta">
+                  <span>{{ getDomainLabel(item.domain) }}</span>
+                  <span>{{ getCategoryLabel(item.category) }}</span>
+                </div>
+                <div class="notification-range" v-if="item.valid_from || item.valid_to">
+                  {{ formatDateRange(item.valid_from, item.valid_to) }}
+                </div>
+              </div>
+            </div>
+            <div v-else class="notification-empty">通知はありません。</div>
+            <RouterLink
+              to="/notifications/sources"
+              class="notification-link"
+              @click="closeNotificationMenu"
+            >
+              一覧へ
+            </RouterLink>
+          </div>
+        </div>
         <RouterLink to="/settings" class="nav-action-btn" title="設定" v-if="!isMobile">
           <span>⚙️</span>
           <span class="btn-label">設定</span>
@@ -80,6 +106,7 @@ import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { authState, logout } from '../auth'
 import { hasPermission } from '../router'
+import api from '@/api/client'
 
 const props = defineProps({
   isMobile: {
@@ -110,6 +137,7 @@ const mainTabs = [
   { id: 'shipping', label: '出荷', link: '/shipping/menu', resource: 'shipping' },
   { id: 'inventory', label: '在庫', link: '/inventory', resource: 'inventory' },
   { id: 'quality', label: '品質', link: '/quality', resource: 'quality' },
+  { id: 'notifications', label: '通知', link: '/notifications/sources', resource: 'notifications' },
   { id: 'masters', label: 'マスタ', link: '/masters', resource: 'masters' },
   { id: 'settings', label: '設定', link: '/settings', resource: 'settings' },
 ]
@@ -174,20 +202,105 @@ const userAccountName = computed(() => {
 })
 
 const showUserMenu = ref(false)
+const showNotificationMenu = ref(false)
+const notifications = ref([])
+
+const canViewNotifications = computed(() => hasPermission(authState.user, 'notifications', 'view'))
+
+const activeNotifications = computed(() => {
+  const today = new Date()
+  const todayYmd = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  return notifications.value.filter((item) => {
+    if (!item) return false
+    const from = item.valid_from ? new Date(item.valid_from) : null
+    const to = item.valid_to ? new Date(item.valid_to) : null
+    if (from && todayYmd < from) return false
+    if (to && todayYmd > to) return false
+    return true
+  })
+})
+
+const notificationCount = computed(() => activeNotifications.value.length)
+
+const loadNotifications = async () => {
+  if (!canViewNotifications.value) return
+  try {
+    const res = await api.notifications.list({ ordering: 'display_order,id' })
+    const data = res.data?.results || res.data || []
+    notifications.value = Array.isArray(data) ? data : []
+  } catch (error) {
+    console.error('通知取得エラー:', error)
+  }
+}
 
 const toggleUserMenu = () => {
   showUserMenu.value = !showUserMenu.value
+  if (showUserMenu.value) {
+    showNotificationMenu.value = false
+  }
 }
 
 const closeUserMenu = () => {
   showUserMenu.value = false
 }
 
+const toggleNotificationMenu = async () => {
+  showNotificationMenu.value = !showNotificationMenu.value
+  if (showNotificationMenu.value) {
+    showUserMenu.value = false
+    await loadNotifications()
+  }
+}
+
+const closeNotificationMenu = () => {
+  showNotificationMenu.value = false
+}
+
+const getDomainLabel = (domain) => {
+  const map = {
+    production: '生産',
+    quality: '品質',
+    inventory: '在庫',
+    purchase: '購買',
+    shipping: '出荷',
+    equipment: '設備',
+    common: '共通',
+  }
+  return map[domain] || domain || '-'
+}
+
+const getCategoryLabel = (category) => {
+  const map = {
+    progress: '進捗',
+    delay: '遅延',
+    abnormal: '異常',
+    quality_issue: '品質不良',
+    inventory_shortage: '在庫不足',
+    process_change: '工程変更',
+    maintenance: '保全',
+    shipping_issue: '出荷トラブル',
+    other: 'その他',
+  }
+  return map[category] || category || '-'
+}
+
+const formatDateRange = (from, to) => {
+  if (from && to) return `${from} 〜 ${to}`
+  if (from) return `${from} 〜`
+  if (to) return `〜 ${to}`
+  return ''
+}
+
 const handleClickOutside = (event) => {
   const userInfo = event.target.closest('.user-info')
   const userMenu = event.target.closest('.user-menu')
+  const notificationWrapper = event.target.closest('.notification-wrapper')
+  const notificationMenu = event.target.closest('.notification-menu')
   if (!userInfo && !userMenu) {
     closeUserMenu()
+  }
+  if (!notificationWrapper && !notificationMenu) {
+    closeNotificationMenu()
   }
 }
 
@@ -462,6 +575,83 @@ const handleLogout = async () => {
 }
 .help-btn {
   padding: 4px 6px;
+}
+
+.notification-wrapper {
+  position: relative;
+}
+
+.notification-badge {
+  background: #ef4444;
+  color: #fff;
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 10px;
+  line-height: 16px;
+  font-weight: 700;
+}
+
+.notification-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+  min-width: 260px;
+  z-index: 1000;
+  padding: 8px 0;
+}
+
+.notification-menu-header {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1f2a44;
+  padding: 6px 12px;
+}
+
+.notification-list {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.notification-item {
+  padding: 8px 12px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.notification-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2a44;
+}
+
+.notification-meta {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.notification-range {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+.notification-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.notification-link {
+  display: block;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #2563eb;
+  text-decoration: none;
 }
 
 .nav-action-btn:hover {
