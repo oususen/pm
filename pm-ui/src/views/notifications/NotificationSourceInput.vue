@@ -169,6 +169,7 @@
               <th>有効開始日</th>
               <th>有効終了日</th>
               <th>対象者</th>
+              <th>未閲覧者</th>
               <th>入力者</th>
               <th>説明</th>
               <th>操作</th>
@@ -183,6 +184,7 @@
               <td>{{ item.valid_from || '-' }}</td>
               <td>{{ item.valid_to || '-' }}</td>
               <td>{{ getTargetLabel(item) }}</td>
+              <td class="unread-users">{{ getUnreadUsersLabel(item) }}</td>
               <td>{{ item.operator_name || '-' }}</td>
               <td class="description">{{ item.description || '-' }}</td>
               <td class="actions">
@@ -195,7 +197,7 @@
               </td>
             </tr>
             <tr v-if="!sortedSources.length">
-              <td colspan="6" class="empty">登録済みの知らせ源はありません。</td>
+              <td colspan="11" class="empty">登録済みの知らせ源はありません。</td>
             </tr>
           </tbody>
         </table>
@@ -350,6 +352,12 @@ const getTargetLabel = (item) => {
   if (deptText) return deptText;
   if (posText) return posText;
   return "-";
+};
+
+const getUnreadUsersLabel = (item) => {
+  const users = Array.isArray(item.unread_users) ? item.unread_users : [];
+  if (!users.length) return "-";
+  return users.join(", ");
 };
 
 const loadDepartments = async () => {
@@ -717,6 +725,12 @@ label {
 .description {
   max-width: 200px;
   color: #475569;
+}
+
+.unread-users {
+  max-width: 180px;
+  color: #b91c1c;
+  font-size: 12px;
 }
 
 .actions {
