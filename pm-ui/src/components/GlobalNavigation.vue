@@ -212,41 +212,48 @@ const showUserMenu = ref(false)
 const showNotificationMenu = ref(false)
 const notifications = ref([])
 
-const userDepartmentId = computed(() => authState.user?.profile?.department || null)
+const userDepartmentId = computed(() => authState.user?.profile?.department_id ?? authState.user?.profile?.department ?? null)
+const userDivisionId = computed(() => authState.user?.profile?.division_id ?? authState.user?.profile?.division ?? null)
+const userGroupId = computed(() => authState.user?.profile?.group_id ?? authState.user?.profile?.group ?? null)
+const userTeamId = computed(() => authState.user?.profile?.team_id ?? authState.user?.profile?.team ?? null)
 const userPosition = computed(() => authState.user?.profile?.position || '')
 const showNotificationBell = computed(() => Boolean(authState.user))
 const departments = ref([])
 
 const toId = (value) => (value === null || value === undefined ? '' : String(value))
 
-const parentMap = computed(() => {
+const departmentLevelMap = computed(() => {
   const map = new Map()
   departments.value.forEach((dept) => {
-    map.set(toId(dept.id), toId(dept.parent))
+    map.set(toId(dept.id), dept.level)
   })
   return map
 })
 
-const isDescendantOrSelf = (childId, ancestorId) => {
-  const child = toId(childId)
-  const ancestor = toId(ancestorId)
-  if (!child || !ancestor) return false
-  let cursor = child
-  const seen = new Set()
-  while (cursor && !seen.has(cursor)) {
-    if (cursor === ancestor) return true
-    seen.add(cursor)
-    const parent = parentMap.value.get(cursor)
-    if (!parent) return false
-    cursor = parent
-  }
-  return false
+const getTargetLevelSets = (targetDepartments) => {
+  const team = new Set()
+  const group = new Set()
+  const division = new Set()
+  targetDepartments.forEach((deptId) => {
+    const id = toId(deptId)
+    const level = departmentLevelMap.value.get(id)
+    if (level === 'team') team.add(id)
+    if (level === 'group') group.add(id)
+    if (level === 'division') division.add(id)
+  })
+  return { team, group, division }
 }
 
-const matchesDepartmentTarget = (targetDepartments, deptId) => {
+const matchesDepartmentTarget = (targetDepartments, userLevels) => {
   if (!targetDepartments.length) return true
-  if (!deptId) return false
-  return targetDepartments.some((targetId) => isDescendantOrSelf(deptId, targetId))
+  const { team, group, division } = getTargetLevelSets(targetDepartments)
+  const userTeam = toId(userLevels.team)
+  const userGroup = toId(userLevels.group)
+  const userDivision = toId(userLevels.division)
+  if (team.size) return team.has(userTeam)
+  if (group.size) return group.has(userGroup)
+  if (division.size) return division.has(userDivision)
+  return false
 }
 
 const matchesPositionTarget = (targetPositions, position) => {
@@ -266,7 +273,11 @@ const activeNotifications = computed(() => {
     if (to && todayYmd > to) return false
     const targetDepartments = Array.isArray(item.target_departments) ? item.target_departments : []
     const targetPositions = Array.isArray(item.target_positions) ? item.target_positions : []
-    if (!matchesDepartmentTarget(targetDepartments, userDepartmentId.value)) return false
+    if (!matchesDepartmentTarget(targetDepartments, {
+      division: userDivisionId.value,
+      group: userGroupId.value,
+      team: userTeamId.value,
+    })) return false
     if (!matchesPositionTarget(targetPositions, userPosition.value)) return false
     return true
   })
@@ -285,7 +296,6 @@ const loadNotifications = async () => {
 }
 
 const loadDepartments = async () => {
-  if (!userDepartmentId.value) return
   try {
     const res = await api.accounts.getDepartments({ ordering: 'display_id,name' })
     const data = res.data?.results || res.data || []

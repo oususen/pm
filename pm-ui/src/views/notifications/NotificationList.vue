@@ -113,34 +113,38 @@ const categoryOptions = [
 
 const toId = (value) => (value === null || value === undefined ? "" : String(value));
 
-const parentMap = computed(() => {
+const departmentLevelMap = computed(() => {
   const map = new Map();
   departments.value.forEach((dept) => {
-    map.set(toId(dept.id), toId(dept.parent));
+    map.set(toId(dept.id), dept.level);
   });
   return map;
 });
 
-const isDescendantOrSelf = (childId, ancestorId) => {
-  const child = toId(childId);
-  const ancestor = toId(ancestorId);
-  if (!child || !ancestor) return false;
-  let cursor = child;
-  const seen = new Set();
-  while (cursor && !seen.has(cursor)) {
-    if (cursor === ancestor) return true;
-    seen.add(cursor);
-    const parent = parentMap.value.get(cursor);
-    if (!parent) return false;
-    cursor = parent;
-  }
-  return false;
+const getTargetLevelSets = (targetDepartments) => {
+  const team = new Set();
+  const group = new Set();
+  const division = new Set();
+  targetDepartments.forEach((deptId) => {
+    const id = toId(deptId);
+    const level = departmentLevelMap.value.get(id);
+    if (level === "team") team.add(id);
+    if (level === "group") group.add(id);
+    if (level === "division") division.add(id);
+  });
+  return { team, group, division };
 };
 
-const matchesDepartmentTarget = (targetDepartments, userDepartmentId) => {
+const matchesDepartmentTarget = (targetDepartments, userLevels) => {
   if (!targetDepartments.length) return true;
-  if (!userDepartmentId) return false;
-  return targetDepartments.some((deptId) => isDescendantOrSelf(userDepartmentId, deptId));
+  const { team, group, division } = getTargetLevelSets(targetDepartments);
+  const userTeam = toId(userLevels.team);
+  const userGroup = toId(userLevels.group);
+  const userDivision = toId(userLevels.division);
+  if (team.size) return team.has(userTeam);
+  if (group.size) return group.has(userGroup);
+  if (division.size) return division.has(userDivision);
+  return false;
 };
 
 const matchesPositionTarget = (targetPositions, userPosition) => {
@@ -160,14 +164,20 @@ const isWithinRange = (item) => {
 };
 
 const filteredNotifications = computed(() => {
-  const userDeptId = authState.user?.profile?.department || null;
+  const userDivisionId = authState.user?.profile?.division_id ?? authState.user?.profile?.division ?? null;
+  const userGroupId = authState.user?.profile?.group_id ?? authState.user?.profile?.group ?? null;
+  const userTeamId = authState.user?.profile?.team_id ?? authState.user?.profile?.team ?? null;
   const userPosition = authState.user?.profile?.position || "";
   return notifications.value.filter((item) => {
     if (!item) return false;
     if (!isWithinRange(item)) return false;
     const targetDepartments = Array.isArray(item.target_departments) ? item.target_departments : [];
     const targetPositions = Array.isArray(item.target_positions) ? item.target_positions : [];
-    if (!matchesDepartmentTarget(targetDepartments, userDeptId)) return false;
+    if (!matchesDepartmentTarget(targetDepartments, {
+      division: userDivisionId,
+      group: userGroupId,
+      team: userTeamId,
+    })) return false;
     if (!matchesPositionTarget(targetPositions, userPosition)) return false;
     return true;
   });
