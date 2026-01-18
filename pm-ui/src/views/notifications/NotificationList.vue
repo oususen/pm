@@ -23,7 +23,7 @@
         </thead>
         <tbody>
           <template v-for="item in sortedNotifications" :key="item.id">
-            <tr class="row-main" @click="toggleRow(item.id)">
+            <tr class="row-main" :class="{ 'unread': !item.is_read }" @click="toggleRow(item.id)">
               <td>{{ item.display_order }}</td>
               <td>{{ item.title }}</td>
               <td>{{ getCategoryLabel(item.category) }}</td>
@@ -195,10 +195,8 @@ const filteredNotifications = computed(() => {
 
 const sortedNotifications = computed(() => {
   return [...filteredNotifications.value].sort((a, b) => {
-    const aOrder = Number(a.display_order || 0);
-    const bOrder = Number(b.display_order || 0);
-    if (aOrder !== bOrder) return aOrder - bOrder;
-    return (a.title || "").localeCompare(b.title || "");
+    // 最新（ID降順）で並べる
+    return (b.id || 0) - (a.id || 0);
   });
 });
 
@@ -361,6 +359,11 @@ onMounted(() => {
 
 .row-main:hover {
   background: #f8fafc;
+}
+
+.row-main.unread td {
+  color: #2563eb;
+  font-weight: 500;
 }
 
 .row-detail td {
