@@ -108,7 +108,7 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { authState, logout } from '../auth'
 import { hasPermission } from '../router'
@@ -211,6 +211,9 @@ const userAccountName = computed(() => {
 const showUserMenu = ref(false)
 const showNotificationMenu = ref(false)
 const notifications = ref([])
+const previousNotificationIds = ref(new Set())
+const pollingInterval = ref(null)
+const POLLING_INTERVAL_MS = 30000 // 30秒ごとにポーリング
 
 const userDepartmentId = computed(() => authState.user?.profile?.department_id ?? authState.user?.profile?.department ?? null)
 const userDivisionId = computed(() => authState.user?.profile?.division_id ?? authState.user?.profile?.division ?? null)
@@ -365,6 +368,95 @@ const formatDateRange = (from, to) => {
   return ''
 }
 
+// チャイム音を鳴らす（Web Audio API使用）
+const playChimeSound = () => {
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)()
+    const frequencies = [523.25, 659.25, 783.99] // ド・ミ・ソ
+
+    frequencies.forEach((freq, index) => {
+      const oscillator = audioContext.createOscillator()
+      const gainNode = audioContext.createGain()
+
+      oscillator.connect(gainNode)
+      gainNode.connect(audioContext.destination)
+
+      oscillator.frequency.value = freq
+      oscillator.type = 'sine'
+
+      const startTime = audioContext.currentTime + index * 0.15
+      const duration = 0.3
+
+      gainNode.gain.setValueAtTime(0, startTime)
+      gainNode.gain.linearRampToValueAtTime(0.3, startTime + 0.05)
+      gainNode.gain.linearRampToValueAtTime(0, startTime + duration)
+
+      oscillator.start(startTime)
+      oscillator.stop(startTime + duration)
+    })
+  } catch (error) {
+    console.error('チャイム音の再生に失敗しました:', error)
+  }
+}
+
+// 新着通知をチェックしてチャイム音を鳴らす
+const checkForNewNotifications = (currentIds) => {
+  if (previousNotificationIds.value.size === 0) {
+    // 初回読み込み時は音を鳴らさない
+    previousNotificationIds.value = currentIds
+    return
+  }
+
+  // 新しい通知があるかチェック
+  let hasNew = false
+  currentIds.forEach((id) => {
+    if (!previousNotificationIds.value.has(id)) {
+      hasNew = true
+    }
+  })
+
+  if (hasNew) {
+    playChimeSound()
+  }
+
+  previousNotificationIds.value = currentIds
+}
+
+// ポーリングで通知を取得
+const pollNotifications = async () => {
+  if (!authState.user) return
+
+  try {
+    await loadDepartments()
+    await loadNotifications()
+
+    // アクティブな通知のIDセットを作成
+    const currentIds = new Set(activeNotifications.value.map((n) => n.id))
+    checkForNewNotifications(currentIds)
+  } catch (error) {
+    console.error('通知ポーリングエラー:', error)
+  }
+}
+
+// ポーリング開始
+const startPolling = () => {
+  if (pollingInterval.value) return
+
+  // 初回実行
+  pollNotifications()
+
+  // 定期実行
+  pollingInterval.value = setInterval(pollNotifications, POLLING_INTERVAL_MS)
+}
+
+// ポーリング停止
+const stopPolling = () => {
+  if (pollingInterval.value) {
+    clearInterval(pollingInterval.value)
+    pollingInterval.value = null
+  }
+}
+
 const handleClickOutside = (event) => {
   const userInfo = event.target.closest('.user-info')
   const userMenu = event.target.closest('.user-menu')
@@ -380,11 +472,30 @@ const handleClickOutside = (event) => {
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
+  // ログイン済みならポーリング開始
+  if (authState.user) {
+    startPolling()
+  }
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  stopPolling()
 })
+
+// ユーザーのログイン状態を監視してポーリングを制御
+watch(
+  () => authState.user,
+  (newUser) => {
+    if (newUser) {
+      startPolling()
+    } else {
+      stopPolling()
+      notifications.value = []
+      previousNotificationIds.value = new Set()
+    }
+  }
+)
 
 const handleLogout = async () => {
   await logout()
