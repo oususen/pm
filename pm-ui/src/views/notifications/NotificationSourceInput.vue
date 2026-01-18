@@ -118,7 +118,7 @@
             />
           </div>
           <div class="form-field">
-            <label>表示順</label>
+            <label>表示順（通常は10。上に固定したい場合は9以下に設定）</label>
             <input
               v-model.number="form.display_order"
               type="number"
@@ -179,6 +179,7 @@
               <th>タイトル</th>
               <th>カテゴリ</th>
               <th>種別</th>
+              <th>作成日</th>
               <th>有効開始日</th>
               <th>有効終了日</th>
               <th>対象者</th>
@@ -194,6 +195,7 @@
               <td>{{ item.title }}</td>
               <td>{{ getCategoryLabel(item.category) }}</td>
               <td>{{ getDomainLabel(item.domain) }}</td>
+              <td>{{ formatDateTime(item.created_at) }}</td>
               <td>{{ item.valid_from || '-' }}</td>
               <td>{{ item.valid_to || '-' }}</td>
               <td>{{ getTargetLabel(item) }}</td>
@@ -210,7 +212,7 @@
               </td>
             </tr>
             <tr v-if="!sortedSources.length">
-              <td colspan="11" class="empty">登録済みの知らせ源はありません。</td>
+              <td colspan="12" class="empty">登録済みの知らせ源はありません。</td>
             </tr>
           </tbody>
         </table>
@@ -274,7 +276,7 @@ const form = ref({
   target_users: [],
   valid_from: "",
   valid_to: "",
-  display_order: 0,
+  display_order: 10,
   description: "",
   operator_name: defaultOperatorName.value,
 });
@@ -412,10 +414,10 @@ const isEditing = computed(() => form.value.id !== null);
 
 const sortedSources = computed(() => {
   return [...sources.value].sort((a, b) => {
-    const aOrder = Number(a.display_order || 0);
-    const bOrder = Number(b.display_order || 0);
-    if (aOrder !== bOrder) return aOrder - bOrder;
-    return (a.title || "").localeCompare(b.title || "");
+    const aDate = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const bDate = b.created_at ? new Date(b.created_at).getTime() : 0;
+    if (aDate !== bDate) return bDate - aDate;
+    return (b.id || 0) - (a.id || 0);
   });
 });
 
@@ -444,6 +446,19 @@ const getUnreadUsersLabel = (item) => {
   const users = Array.isArray(item.unread_users) ? item.unread_users : [];
   if (!users.length) return "-";
   return users.join(", ");
+};
+
+const formatDateTime = (value) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 };
 
 const loadDepartments = async () => {
@@ -540,7 +555,7 @@ const resetForm = () => {
     target_users: [],
     valid_from: "",
     valid_to: "",
-    display_order: 0,
+    display_order: 10,
     description: "",
     operator_name: defaultOperatorName.value,
   };

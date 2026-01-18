@@ -210,7 +210,12 @@ const filteredNotifications = computed(() => {
 
 const sortedNotifications = computed(() => {
   return [...filteredNotifications.value].sort((a, b) => {
-    // 最新（ID降順）で並べる
+    const aOrder = Number(a.display_order ?? 10);
+    const bOrder = Number(b.display_order ?? 10);
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    const aDate = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const bDate = b.created_at ? new Date(b.created_at).getTime() : 0;
+    if (aDate !== bDate) return bDate - aDate;
     return (b.id || 0) - (a.id || 0);
   });
 });
