@@ -72,3 +72,4 @@ create_userprofile_table.sql
 *nul*
 *-cwd*
 .gitignore
+transfer_log.txt
