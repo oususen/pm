@@ -82,3 +82,7 @@ docker-compose restart pm-frontend
 `settings.py` の以下に本番URLを追加済み:
 - `CORS_ALLOWED_ORIGINS`: `https://10.0.1.232:8501`
 - `CSRF_TRUSTED_ORIGINS`: `https://10.0.1.232:8501`
+
+### PWAが出ない場合の確認
+- `manifest.webmanifest` のレスポンスヘッダ `Content-Type` が `application/manifest+json` になっていること
+- `pm-ui/nginx.conf` に `.webmanifest` のMIME設定があること（追加後はnginx/Docker再起動）
