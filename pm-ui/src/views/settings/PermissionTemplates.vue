@@ -277,10 +277,10 @@ const departmentTemplateSuccess = ref('')
 const selectedDepartmentOnlyId = ref(null)
 const departmentTemplatePermissions = ref([])
 
-const permissionResources = [
-  { value: 'dashboard', label: 'ダッシュボード' },
-  { value: 'orders', label: '受注' },
-  { value: 'production', label: '生産' },
+  const permissionResources = [
+    { value: 'dashboard', label: 'ダッシュボード' },
+    { value: 'orders', label: '受注' },
+    { value: 'production', label: '生産' },
   { value: 'production.process_input', label: '生産: 工程作業入力' },
   { value: 'production.scrap_record', label: '生産: 仕損品記録' },
   { value: 'production.plan_input', label: '生産: 生産計画入力' },
@@ -296,10 +296,11 @@ const permissionResources = [
   { value: 'production.mobile_input', label: '生産: モバイル作業入力（ライン）' },
   { value: 'purchase', label: '仕入' },
   { value: 'shipping', label: '出荷' },
-  { value: 'inventory', label: '在庫' },
-  { value: 'quality', label: '品質' },
-  { value: 'masters', label: 'マスタ' },
-  { value: 'settings', label: '設定' },
+    { value: 'inventory', label: '在庫' },
+    { value: 'quality', label: '品質' },
+    { value: 'notifications', label: '通知' },
+    { value: 'masters', label: 'マスタ' },
+    { value: 'settings', label: '設定' },
   { value: 'users', label: 'ユーザー管理' },
   { value: 'manual', label: 'マニュアル' },
 ]

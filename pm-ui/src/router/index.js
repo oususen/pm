@@ -9,6 +9,7 @@ import inventory from "./inventory";
 import quality from "./quality";
 import manual from "./manual";
 import settings from "./settings";
+import notifications from "./notifications";
 import Login from "../views/auth/Login.vue";
 import { ensureAuth } from "../auth";
 
@@ -41,6 +42,7 @@ const router = createRouter({
     ...inventory,
     ...quality,
     ...settings,
+    ...notifications,
     ...manual,
   ],
 });

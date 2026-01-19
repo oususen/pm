@@ -155,6 +155,7 @@ class UserPermission(models.Model):
         ('shipping', '出荷'),
         ('inventory', '在庫'),
         ('quality', '品質'),
+        ('notifications', '通知'),
         ('masters', 'マスタ'),
         ('settings', '設定'),
         ('users', 'ユーザー管理'),

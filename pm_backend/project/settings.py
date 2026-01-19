@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     'shipping',
     'accounts',
     'proposals',
+    'notifications',
 ]
 
 MIDDLEWARE = [
@@ -178,12 +179,16 @@ CORS_ALLOWED_ORIGINS = [
     "http://192.168.0.11",
     "http://192.168.0.15",
     "http://192.168.0.7",
+    "http://192.168.0.19",
     "http://192.168.0.15:5173",
     "http://192.168.0.15:5174",
     "http://192.168.0.7:8501",
     "http://192.168.0.10:8501",
     "http://192.168.0.11:8501",
     "http://192.168.0.15:8501",
+    "http://192.168.0.19:8501",
+    "http://192.168.0.19:5173",
+    "http://192.168.0.19:5174",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -213,6 +218,10 @@ CSRF_TRUSTED_ORIGINS = [
     "http://192.168.0.15:8501",
     "http://192.168.0.15:5173",
     "http://192.168.0.15:5174",
+    "http://192.168.0.19",
+    "http://192.168.0.19:8501",
+    "http://192.168.0.19:5173",
+    "http://192.168.0.19:5174",
 ]
 
 # REST Framework設定
@@ -226,7 +235,7 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.JSONParser',
     ],
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.SessionAuthentication',
+        'project.authentication.CsrfExemptSessionAuthentication',
         'rest_framework.authentication.BasicAuthentication',
     ],
 }
