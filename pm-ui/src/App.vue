@@ -14,7 +14,7 @@
     <footer v-if="showLayout" class="app-footer">
       <span>ダイウン工業株式会社 / 王 崇栓</span>
       <span>データベース: mysql</span>
-      <button class="logout-btn" @click="handleLogout">F12: ログアウト</button>
+      <button class="logout-btn" @click="handleLogout">未定</button>
     </footer>
   </div>
 </template>
