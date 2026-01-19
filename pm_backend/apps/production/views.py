@@ -1004,31 +1004,69 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         demand_map[key] += backlog.plan_qty * qty_per
                         downstream_found = True
 
-        # 4. LineBacklogに保存（order_qtyのみ更新、他の数量は維持）
+        # 4. LineBacklogに保存（order_qtyのみ更新、他の数量は維持）- bulk操作で高速化
         upserted_items = []
         upsert_start = time.perf_counter()
+
+        # 対象キーを収集
+        target_keys = []
         for (product_id, plan_date), order_qty in demand_map.items():
             process_id = product_process_map.get(product_id)
             if not process_id:
                 continue
+            target_keys.append((product_id, plan_date, process_id, order_qty))
 
-            obj, created = LineBacklog.objects.update_or_create(
-                plan_date=plan_date,
-                process_id=process_id,
-                product_id=product_id,
-                line_id=line_id,
-                sequence_no=0,
-                defaults={
-                    'order_qty': order_qty,
-                    'demand_qty_plan': order_qty,
-                    'plan_qty': 0,
-                    'sequence_no': 0,
-                }
-            )
-            upserted_items.append(obj)
+        if target_keys:
+            # 既存レコードを一括取得
+            from django.db.models import Q
+            q_filter = Q()
+            for product_id, plan_date, process_id, _ in target_keys:
+                q_filter |= Q(
+                    plan_date=plan_date,
+                    process_id=process_id,
+                    product_id=product_id,
+                    line_id=line_id,
+                    sequence_no=0,
+                )
+            existing_records = {
+                (r.product_id, r.plan_date, r.process_id): r
+                for r in LineBacklog.objects.filter(q_filter)
+            }
+
+            to_create = []
+            to_update = []
+            for product_id, plan_date, process_id, order_qty in target_keys:
+                key = (product_id, plan_date, process_id)
+                if key in existing_records:
+                    obj = existing_records[key]
+                    obj.order_qty = order_qty
+                    obj.demand_qty_plan = order_qty
+                    to_update.append(obj)
+                else:
+                    to_create.append(LineBacklog(
+                        plan_date=plan_date,
+                        process_id=process_id,
+                        product_id=product_id,
+                        line_id=line_id,
+                        sequence_no=0,
+                        order_qty=order_qty,
+                        demand_qty_plan=order_qty,
+                        plan_qty=0,
+                    ))
+
+            # bulk_create と bulk_update を実行
+            if to_create:
+                LineBacklog.objects.bulk_create(to_create)
+            if to_update:
+                LineBacklog.objects.bulk_update(to_update, ['order_qty', 'demand_qty_plan'])
+
+            upserted_items = to_create + to_update
+
         logger.info(
-            "pickup: upserted_items=%s time=%.3fs",
+            "pickup: upserted_items=%s (create=%s, update=%s) time=%.3fs",
             len(upserted_items),
+            len(to_create) if target_keys else 0,
+            len(to_update) if target_keys else 0,
             time.perf_counter() - upsert_start,
         )
 
