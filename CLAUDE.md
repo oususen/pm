@@ -117,3 +117,7 @@ docker-compose restart pm-backend
 - `DB_NAME`: データベース名（デフォルト: pm_db）
 - `SECRET_KEY`: Django秘密鍵
 - `ALLOWED_HOSTS`: 許可するホスト
+
+### 本番データベース管理
+- **管理ツール**: Adminer（開発PCからアクセス可能）
+- **本番MySQL**: 開発PCから直接接続可能
