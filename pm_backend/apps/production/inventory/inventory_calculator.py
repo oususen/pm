@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from django.db.models import F
 from orders.models import OrderLine
+from orders.utils.calendar_utils import get_business_today
 from ..models_line_backlog import LineBacklog
 from quality.models_scrap import ScrapRecord, ScrapRecordDetail
 
@@ -388,15 +389,49 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
         candidates = plan_rows if plan_rows else rows
         return min(candidates, key=lambda r: (r.sequence_no if r.sequence_no is not None else 0, r.id))
 
-    today = datetime.now().date()
+    today = get_business_today()
+    day_before_yesterday = today - timedelta(days=2)  # 前々日
     stock_by_date = {}
-    last_stock = 0
     firm_map = firm_map or {}
+
+    # システム日付（8時区切り）の前々日の実在庫を初期値として取得
+    # 前日ではなく前々日を使う理由：
+    # - 7:59に実績入力（昨日の実績）→ 8:01に在庫計算の場合
+    # - 前日の在庫はまだ7:59の実績が反映されていない可能性がある
+    # - 前々日の在庫は確定しているので、そこから昨日・今日を再計算すれば正しい値になる
+    initial_backlog = LineBacklog.objects.filter(
+        line_id=line_id,
+        product_id=product_id,
+        plan_date__lte=day_before_yesterday,
+        stock_qty__isnull=False
+    ).order_by('-plan_date', 'sequence_no', 'id').first()
+
+    if initial_backlog:
+        last_stock = initial_backlog.stock_qty or 0
+        stock_by_date[initial_backlog.plan_date] = last_stock
+    else:
+        last_stock = 0
+
+    # 更新対象のbacklogを追跡（前々日以前は更新しない）
+    yesterday = today - timedelta(days=1)
+    backlogs_to_update = []
 
     for plan_date in sorted(by_date.keys()):
         rows = by_date[plan_date]
         sample = rows[0]
         is_final = bool(getattr(sample.product, 'is_final_product', False))
+
+        # 前々日以前は既存の在庫値を使用し、更新しない
+        if plan_date <= day_before_yesterday:
+            # 既存の在庫値を取得してstock_by_dateに保持（後続の計算用）
+            existing_stock = 0
+            for row in rows:
+                if row.stock_qty:
+                    existing_stock = row.stock_qty
+                    break
+            stock_by_date[plan_date] = existing_stock
+            last_stock = existing_stock
+            continue
 
         actual_total = sum(r.actual_qty or 0 for r in rows)
         adjust_total = sum(r.adjust_qty or 0 for r in rows)
@@ -431,7 +466,11 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
         stock_by_date[plan_date] = stock_qty
         last_stock = stock_qty
 
-    LineBacklog.objects.bulk_update(backlogs, ['stock_qty', 'actual_shipment_qty'])
+        # 更新対象に追加
+        backlogs_to_update.extend(rows)
+
+    if backlogs_to_update:
+        LineBacklog.objects.bulk_update(backlogs_to_update, ['stock_qty', 'actual_shipment_qty'])
 
 
 def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, firm_map=None):
@@ -513,7 +552,7 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
         candidates = plan_rows if plan_rows else rows
         return min(candidates, key=lambda r: (r.sequence_no if r.sequence_no is not None else 0, r.id))
 
-    today = datetime.now().date()
+    today = get_business_today()
     planned_by_date = {}
     last_planned = 0
     firm_map = firm_map or {}
@@ -658,7 +697,7 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date, firm_map
         candidates = plan_rows if plan_rows else rows
         return min(candidates, key=lambda r: (r.sequence_no if r.sequence_no is not None else 0, r.id))
 
-    today = datetime.now().date()
+    today = get_business_today()
     progress_by_date = {}
     last_progress = 0
     firm_map = firm_map or {}

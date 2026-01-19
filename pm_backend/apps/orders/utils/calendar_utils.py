@@ -3,10 +3,40 @@
 
 得意先のカレンダーに基づいて営業日を計算する共通関数を提供します。
 """
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 from django.db.models import Q
 from masters.models import Calendar, CalendarDay
+
+
+# 日替わり時刻（8時）
+DAY_BOUNDARY_HOUR = 8
+
+
+def get_business_today() -> date:
+    """日替わり時刻（8時）を考慮した「今日」を取得
+
+    弊社では日替わり時刻を8:00としています。
+    - 1月19日 7:59 → 1月18日として扱う
+    - 1月19日 8:00 → 1月19日として扱う
+
+    Returns:
+        業務上の「今日」の日付
+    """
+    now = datetime.now()
+    if now.hour < DAY_BOUNDARY_HOUR:
+        # 8時より前なら前日扱い
+        return (now - timedelta(days=1)).date()
+    return now.date()
+
+
+def get_business_yesterday() -> date:
+    """8時区切りの「昨日」を取得
+
+    Returns:
+        業務上の「昨日」の日付
+    """
+    return get_business_today() - timedelta(days=1)
 
 
 class WorkingDayCalculator:
