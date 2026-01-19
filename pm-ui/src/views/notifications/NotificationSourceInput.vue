@@ -359,6 +359,60 @@ const getUserLevelIds = (user) => {
   };
 };
 
+const normalizeName = (value) => (value || "").replace(/\s+/g, "").trim();
+
+const operatorCandidates = computed(() => {
+  const user = authState.user;
+  if (!user) return [];
+  const fullWithSpace = `${user.last_name || ""} ${user.first_name || ""}`.trim();
+  const fullNoSpace = `${user.last_name || ""}${user.first_name || ""}`.trim();
+  return [fullWithSpace, fullNoSpace, user.username, user.email].filter(Boolean);
+});
+
+const isOperator = (item) => {
+  const operator = (item?.operator_name || "").trim();
+  if (!operator) return false;
+  const normalized = normalizeName(operator);
+  return operatorCandidates.value.some((candidate) => normalizeName(candidate) === normalized);
+};
+
+const getTargetLevelSets = (targetDepartments) => {
+  const team = new Set();
+  const group = new Set();
+  const division = new Set();
+  targetDepartments.forEach((deptId) => {
+    const id = toId(deptId);
+    const level = departmentLevelMap.value.get(id);
+    if (level === "team") team.add(id);
+    if (level === "group") group.add(id);
+    if (level === "division") division.add(id);
+  });
+  return { team, group, division };
+};
+
+const matchesDepartmentTarget = (targetDepartments, userLevels) => {
+  if (!targetDepartments.length) return true;
+  const { team, group, division } = getTargetLevelSets(targetDepartments);
+  const userTeam = toId(userLevels.team);
+  const userGroup = toId(userLevels.group);
+  const userDivision = toId(userLevels.division);
+  if (team.size) return team.has(userTeam);
+  if (group.size) return group.has(userGroup);
+  if (division.size) return division.has(userDivision);
+  return false;
+};
+
+const matchesPositionTarget = (targetPositions, userPosition) => {
+  if (!targetPositions.length) return true;
+  if (!userPosition) return false;
+  return targetPositions.some((pos) => String(pos) === String(userPosition));
+};
+
+const matchesUserTarget = (targetUsers, userId) => {
+  if (!targetUsers.length) return false;
+  return targetUsers.some((id) => String(id) === String(userId));
+};
+
 const matchesUserDepartmentSelection = (user) => {
   const { division, group, team } = getUserLevelIds(user);
   if (form.value.target_teams.length) {
@@ -412,8 +466,40 @@ const selectedDepartmentIds = computed(() => {
 
 const isEditing = computed(() => form.value.id !== null);
 
+const isWithinRange = (item) => {
+  const today = new Date();
+  const todayYmd = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const from = item.valid_from ? new Date(item.valid_from) : null;
+  const to = item.valid_to ? new Date(item.valid_to) : null;
+  if (from && todayYmd < from) return false;
+  if (to && todayYmd > to) return false;
+  return true;
+};
+
+const filteredSources = computed(() => {
+  const user = authState.user;
+  if (!user) return [];
+  const userId = user.id;
+  const { division, group, team } = getUserLevelIds(user);
+  const userPosition = user?.profile?.position || "";
+  return sources.value.filter((item) => {
+    if (!item) return false;
+    if (isOperator(item)) return true;
+    if (!isWithinRange(item)) return false;
+    const targetDepartments = Array.isArray(item.target_departments) ? item.target_departments : [];
+    const targetPositions = Array.isArray(item.target_positions) ? item.target_positions : [];
+    const targetUsers = Array.isArray(item.target_users) ? item.target_users : [];
+    const hasTargetUsers = targetUsers.length > 0;
+    if (hasTargetUsers && !matchesUserTarget(targetUsers, userId)) return false;
+    if (!targetDepartments.length && !targetPositions.length && !targetUsers.length) return true;
+    if (!matchesDepartmentTarget(targetDepartments, { division, group, team })) return false;
+    if (!matchesPositionTarget(targetPositions, userPosition)) return false;
+    return true;
+  });
+});
+
 const sortedSources = computed(() => {
-  return [...sources.value].sort((a, b) => {
+  return [...filteredSources.value].sort((a, b) => {
     const aDate = a.created_at ? new Date(a.created_at).getTime() : 0;
     const bDate = b.created_at ? new Date(b.created_at).getTime() : 0;
     if (aDate !== bDate) return bDate - aDate;
