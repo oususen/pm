@@ -302,6 +302,7 @@ const permissionResources = [
   { value: 'shipping', label: '出荷' },
   { value: 'inventory', label: '在庫' },
   { value: 'quality', label: '品質' },
+  { value: 'notifications', label: '通知作成' },
   { value: 'masters', label: 'マスタ' },
   { value: 'settings', label: '設定' },
   { value: 'users', label: 'ユーザー管理' },
