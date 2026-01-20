@@ -6,9 +6,9 @@
           <div class="logo-top">
             <span class="logo-text">DAISO</span>
             <button v-if="!isHomePage" @click.prevent="goBack" class="back-btn">
-              ◀ 戻る
+              ◀ {{ t('nav.back') }}
             </button>
-            <span v-else class="logo-subtitle">管理システム</span>
+            <span v-else class="logo-subtitle">{{ t('nav.subtitle') }}</span>
           </div>
           <div class="logo-date">{{ todayText }}</div>
         </div>
@@ -43,16 +43,23 @@
           <div class="user-menu-divider"></div>
           <RouterLink to="/settings/profile" class="user-menu-item" @click="closeUserMenu">
             <span>👤</span>
-            プロフィール編集
+            {{ t('nav.profile') }}
           </RouterLink>
-          <button class="user-menu-item" type="button" @click="closeUserMenu">
+          <div class="user-menu-item language-item">
             <span>🌐</span>
-            言語選択
-          </button>
+            <div class="language-select">
+              <div class="language-label">{{ t('nav.language') }}</div>
+              <select v-model="selectedLocale" class="language-dropdown">
+                <option v-for="opt in localeOptions" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </option>
+              </select>
+            </div>
+          </div>
           <div class="user-menu-divider"></div>
           <button class="user-menu-item logout-item" type="button" @click="handleLogout">
             <span>🚪</span>
-            ログアウト
+            {{ t('nav.logout') }}
           </button>
         </div>
       </div>
@@ -60,40 +67,40 @@
         <div v-if="showNotificationBell" class="notification-wrapper" @click.stop>
           <button
             class="nav-action-btn notification-btn"
-            title="通知"
+            :title="t('nav.notifications')"
             type="button"
             @mousedown.stop
             @mouseup.stop
             @click.stop.prevent="toggleNotificationMenu"
           >
             <span>🔔</span>
-            <span class="btn-label">通知</span>
+            <span class="btn-label">{{ t('nav.notifications') }}</span>
             <span v-if="notificationCount" class="notification-badge">{{ notificationCount }}</span>
           </button>
           <div v-if="showNotificationMenu" class="notification-menu" @click.stop @mousedown.stop>
-            <div class="notification-menu-header">未読通知</div>
+            <div class="notification-menu-header">{{ t('nav.unreadTitle') }}</div>
             <div v-if="unreadNotifications.length" class="notification-list">
               <div v-for="item in unreadNotifications" :key="item.id" class="notification-item">
                 <div class="notification-title">{{ item.title }}</div>
               </div>
             </div>
-            <div v-else class="notification-empty">未読の通知はありません。</div>
+            <div v-else class="notification-empty">{{ t('nav.unreadEmpty') }}</div>
             <RouterLink
               to="/notifications"
               class="notification-link"
               @click="closeNotificationMenu"
             >
-              一覧へ
+              {{ t('nav.list') }}
             </RouterLink>
           </div>
         </div>
-        <RouterLink to="/settings" class="nav-action-btn" title="設定" v-if="!isMobile">
+        <RouterLink to="/settings" class="nav-action-btn" :title="t('nav.settings')" v-if="!isMobile">
           <span>⚙️</span>
-          <span class="btn-label">設定</span>
+          <span class="btn-label">{{ t('nav.settings') }}</span>
         </RouterLink>
-        <button class="nav-action-btn help-btn" title="ヘルプ" @click="openHelp">
+        <button class="nav-action-btn help-btn" :title="t('nav.help')" @click="openHelp">
           <span>?</span>
-          <span class="btn-label">ヘルプ</span>
+          <span class="btn-label">{{ t('nav.help') }}</span>
         </button>
       </div>
     </div>
@@ -106,6 +113,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { authState, logout } from '../auth'
 import { hasPermission } from '../router'
 import api from '@/api/client'
+import { locale, t, setLocale, getLocaleOptions } from '@/i18n'
 
 const props = defineProps({
   isMobile: {
@@ -129,23 +137,23 @@ const goBack = () => {
   window.history.back()
 }
 
-const mainTabs = [
-  { id: 'orders', label: '受注', link: '/orders/menu', resource: 'orders' },
-  { id: 'production', label: '生産', link: '/production/menu', resource: 'production' },
-  { id: 'purchase', label: '仕入', link: '/purchase/menu', resource: 'purchase' },
-  { id: 'shipping', label: '出荷', link: '/shipping/menu', resource: 'shipping' },
-  { id: 'inventory', label: '在庫', link: '/inventory', resource: 'inventory' },
-  { id: 'quality', label: '品質', link: '/quality', resource: 'quality' },
-  { id: 'notifications', label: '通知作成', link: '/notifications/sources', resource: 'notifications' },
-  { id: 'masters', label: 'マスタ', link: '/masters', resource: 'masters' },
-  { id: 'settings', label: '設定', link: '/settings', resource: 'settings' },
-]
+const mainTabs = computed(() => [
+  { id: 'orders', label: t('nav.tabs.orders'), link: '/orders/menu', resource: 'orders' },
+  { id: 'production', label: t('nav.tabs.production'), link: '/production/menu', resource: 'production' },
+  { id: 'purchase', label: t('nav.tabs.purchase'), link: '/purchase/menu', resource: 'purchase' },
+  { id: 'shipping', label: t('nav.tabs.shipping'), link: '/shipping/menu', resource: 'shipping' },
+  { id: 'inventory', label: t('nav.tabs.inventory'), link: '/inventory', resource: 'inventory' },
+  { id: 'quality', label: t('nav.tabs.quality'), link: '/quality', resource: 'quality' },
+  { id: 'notifications', label: t('nav.tabs.notifications'), link: '/notifications/sources', resource: 'notifications' },
+  { id: 'masters', label: t('nav.tabs.masters'), link: '/masters', resource: 'masters' },
+  { id: 'settings', label: t('nav.tabs.settings'), link: '/settings', resource: 'settings' },
+])
 
 // ユーザーの権限に基づいてタブをフィルタリング
 const displayTabs = computed(() => {
   const user = authState.user
   // 権限がないタブを非表示
-  let tabs = mainTabs.filter(tab => hasPermission(user, tab.resource, 'view'))
+  let tabs = mainTabs.value.filter(tab => hasPermission(user, tab.resource, 'view'))
   // スマホでは生産・マニュアルのみ表示（権限がある場合）
   if (props.isMobile) {
     tabs = tabs.filter(tab => ['production', 'manual'].includes(tab.id))
@@ -190,9 +198,9 @@ const openHelp = () => {
 
 const userDisplayName = computed(() => {
   const user = authState.user
-  if (!user) return 'ゲスト'
+  if (!user) return t('nav.guest')
   const fullName = `${user.last_name || ''} ${user.first_name || ''}`.trim()
-  return fullName || user.username || user.email || 'ユーザー'
+  return fullName || user.username || user.email || t('nav.user')
 })
 
 const userAccountName = computed(() => {
@@ -207,6 +215,11 @@ const notifications = ref([])
 const previousNotificationIds = ref(new Set())
 const pollingInterval = ref(null)
 const POLLING_INTERVAL_MS = 30000 // 30秒ごとにポーリング
+const localeOptions = getLocaleOptions()
+const selectedLocale = computed({
+  get: () => locale.value,
+  set: (value) => setLocale(value),
+})
 
 const userDepartmentId = computed(() => authState.user?.profile?.department_id ?? authState.user?.profile?.department ?? null)
 const userDivisionId = computed(() => authState.user?.profile?.division_id ?? authState.user?.profile?.division ?? null)
@@ -706,6 +719,31 @@ const handleLogout = async () => {
   text-align: left;
 }
 
+.language-item {
+  align-items: flex-start;
+}
+
+.language-select {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.language-label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.language-dropdown {
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  background: #fff;
+  width: 100%;
+}
+
 .user-menu-item:hover {
   background: #f5f5f5;
 }
@@ -927,3 +965,4 @@ const handleLogout = async () => {
   }
 }
 </style>
+

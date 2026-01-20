@@ -9,9 +9,9 @@
 
     <div class="section inline-row dual-row">
       <div class="inline-group">
-        <label class="label-required inline-label">ライン</label>
+        <label class="label-required inline-label">{{ t('processInput.line') }}</label>
         <select v-model="selectedLineId" @change="onLineChange" class="input-large flex-input">
-          <option value="">-- ラインを選択 --</option>
+          <option value="">{{ t('processInput.selectLine') }}</option>
           <option v-for="line in lines" :key="line.id" :value="String(line.id)">
             {{ line.line_code }} - {{ line.line_name }}
           </option>
@@ -19,14 +19,14 @@
       </div>
 
       <div class="inline-group">
-        <label class="label-required inline-label">工程</label>
+        <label class="label-required inline-label">{{ t('processInput.process') }}</label>
         <select
           v-model="selectedProcessId"
           @change="onProcessChange"
           class="input-large flex-input"
           :disabled="!selectedLineId"
         >
-          <option value="">-- 工程を選択 --</option>
+          <option value="">{{ t('processInput.selectProcess') }}</option>
           <option v-for="p in filteredProcesses" :key="p.id" :value="p.id">
             {{ p.process_code }} - {{ p.process_name }}
           </option>
@@ -36,7 +36,7 @@
 
     <div class="section inline-row dual-row">
       <div v-if="selectedProcessId && showRecordTypeSelection" class="inline-group">
-        <label class="label-required inline-label">記録タイプ</label>
+        <label class="label-required inline-label">{{ t('processInput.recordType') }}</label>
         <div class="type-buttons inline-buttons">
           <button
             v-for="type in availableRecordTypes"
@@ -53,7 +53,7 @@
         v-else-if="selectedProcessId && availableRecordTypes.length === 1"
         class="inline-group"
       >
-        <label class="inline-label">記録タイプ</label>
+        <label class="inline-label">{{ t('processInput.recordType') }}</label>
         <div class="single-type">{{ availableRecordTypes[0].label }}</div>
       </div>
     </div>
@@ -62,7 +62,7 @@
       v-if="(record.record_type === 'PRODUCTION' || record.record_type === 'SCRAP') && currentProductList.length"
       class="planned-buttons"
     >
-      <span class="planned-label">本日の計画対象:</span>
+      <span class="planned-label">{{ t('processInput.plannedToday') }}</span>
       <div v-if="record.record_type === 'SCRAP'" class="planned-cards">
         <div
           v-for="p in currentProductList"
@@ -73,12 +73,14 @@
         >
           <div class="card-image">
             <img v-if="getImageUrl(p)" :src="getImageUrl(p)" alt="product image" />
-            <div v-else class="no-image">No Image</div>
+            <div v-else class="no-image">{{ t('processInput.noImage') }}</div>
           </div>
           <div class="card-body">
-            <div class="card-code">{{ p.product_code || '品番未設定' }}</div>
+            <div class="card-code">{{ p.product_code || t('processInput.unsetProductCode') }}</div>
             <div class="card-name">{{ p.product_name || '' }}</div>
-            <div class="card-plan" v-if="p.plan_qty != null">計画: {{ p.plan_qty }}</div>
+            <div class="card-plan" v-if="p.plan_qty != null">
+              {{ t('processInput.planLabel', { qty: formatNumber(p.plan_qty) }) }}
+            </div>
           </div>
         </div>
       </div>
@@ -91,21 +93,25 @@
           type="button"
           @click="selectPlannedProduct(p)"
         >
-          {{ p.product_code || '品番未設定' }}
-          <span v-if="p.plan_qty != null" class="plan-qty">({{ p.plan_qty }})</span>
+          {{ p.product_code || t('processInput.unsetProductCode') }}
+          <span v-if="p.plan_qty != null" class="plan-qty">
+            {{ t('processInput.planQtyBadge', { qty: formatNumber(p.plan_qty) }) }}
+          </span>
         </button>
       </div>
     </div>
 
     <div v-if="record.record_type" class="section inline-row product-row">
       <div class="label-stack">
-        <label :class="record.record_type === 'PRODUCTION' ? 'label-required inline-label' : 'inline-label'">製品</label>
+        <label :class="record.record_type === 'PRODUCTION' ? 'label-required inline-label' : 'inline-label'">
+          {{ t('processInput.product') }}
+        </label>
         <div
           v-if="record.record_type === 'PRODUCTION' || record.record_type === 'SCRAP'"
           class="product-toggle"
         >
           <button type="button" class="btn-link toggle-link" @click="toggleManualProduct">
-            {{ manualProduct ? '検索に戻る' : '手入力する' }}
+            {{ manualProduct ? t('processInput.backToSearch') : t('processInput.manualInput') }}
           </button>
         </div>
       </div>
@@ -114,13 +120,14 @@
         <template v-if="currentProductList.length && !manualProduct">
           <div class="product-select-row">
             <select v-model="record.product_id" class="input-large flex-input">
-              <option value="">-- 製品を選択 --</option>
+              <option value="">{{ t('processInput.selectProduct') }}</option>
               <option
                 v-for="p in currentProductList"
                 :key="`${p.plan_date}-${p.product_code}`"
                 :value="p.product"
               >
-                {{ p.product_code }} - {{ p.product_name || '' }}（計画: {{ formatNumber(p.plan_qty || 0) }}）
+                {{ p.product_code }} - {{ p.product_name || '' }}
+                {{ t('processInput.planQtyParen', { qty: formatNumber(p.plan_qty || 0) }) }}
               </option>
             </select>
           </div>
@@ -129,7 +136,7 @@
         <template v-if="manualProduct || !currentProductList.length">
           <div class="product-select-row">
             <select v-model="record.product_id" class="input-large flex-input">
-              <option value="">-- 品番を選択 --</option>
+              <option value="">{{ t('processInput.selectProductCode') }}</option>
               <option
                 v-for="p in manualProductOptions"
                 :key="p.id"
@@ -139,9 +146,9 @@
               </option>
             </select>
           </div>
-          <div v-if="manualProductsLoading" class="hint">品番一覧を読み込み中です。</div>
+          <div v-if="manualProductsLoading" class="hint">{{ t('processInput.loadingProductList') }}</div>
           <div v-if="!currentProductList.length" class="hint">
-            本日の計画が未取得のため手動選択になります（工程の所属ラインが未設定、または需要展開が未実行の可能性があります）。
+            {{ t('processInput.noPlanHint') }}
           </div>
         </template>
       </div>
@@ -155,7 +162,11 @@
       <div class="section inline-row qty-row">
         <div class="inline-group qty-group">
           <label class="label-required inline-label">
-            {{ record.record_type === 'SCRAP' ? '仕損数量' : '生産数量' }}
+            {{
+              record.record_type === 'SCRAP'
+                ? t('processInput.scrapQty')
+                : t('processInput.productionQty')
+            }}
           </label>
           <input
             type="number"
@@ -164,15 +175,15 @@
             step="1"
             inputmode="numeric"
             class="input-large input-qty flex-input"
-            placeholder="数量を入力"
+            :placeholder="t('processInput.qtyPlaceholder')"
           />
         </div>
         <div class="inline-group">
-          <label class="inline-label">ロット番号</label>
+          <label class="inline-label">{{ t('processInput.batchNo') }}</label>
           <input
             type="text"
             v-model="record.batch_no"
-            placeholder="ロット番号（任意）"
+            :placeholder="t('processInput.batchNoPlaceholder')"
             class="input-normal flex-input"
           />
         </div>
@@ -190,63 +201,63 @@
       </div>
 
       <div v-if="isScrapRecord" class="section">
-        <label class="label-required">判定</label>
+        <label class="label-required">{{ t('processInput.disposition') }}</label>
         <select v-model="record.disposition_status" class="input-large">
-          <option value="">-- 判定を選択 --</option>
+          <option value="">{{ t('processInput.selectDisposition') }}</option>
           <option v-for="opt in scrapDispositionOptions" :key="opt.value" :value="opt.value">
             {{ opt.label }}
           </option>
         </select>
-        <div class="hint">※ 判定待ちは後で仕損履歴から戻し/確定できます。</div>
+        <div class="hint">{{ t('processInput.dispositionHint') }}</div>
       </div>
 
       <div v-if="isScrapRecord" class="section">
-        <label class="label-required">理由</label>
+        <label class="label-required">{{ t('processInput.reason') }}</label>
         <select v-model="record.reason" class="input-large">
-          <option value="">-- 理由を選択 --</option>
+          <option value="">{{ t('processInput.selectReason') }}</option>
           <option v-for="reason in scrapReasons" :key="reason.value" :value="reason.value">
             {{ reason.label }}
           </option>
         </select>
-        <div v-if="record.reason === 'OTHER'" class="hint">※ その他を選んだ場合は理由詳細の入力が必須です。</div>
+        <div v-if="record.reason === 'OTHER'" class="hint">{{ t('processInput.reasonOtherHint') }}</div>
       </div>
 
       <div v-if="record.reason === 'OTHER'" class="section">
-        <label class="label-required">理由詳細</label>
+        <label class="label-required">{{ t('processInput.reasonDetail') }}</label>
         <input
           type="text"
           v-model="record.reason_detail"
-          placeholder="その他の内容を入力"
+          :placeholder="t('processInput.reasonDetailPlaceholder')"
           class="input-normal"
         />
       </div>
 
       <div class="section inline-row row-label-input">
-        <label class="label-required inline-label label-side">記入者</label>
+        <label class="label-required inline-label label-side">{{ t('processInput.operator') }}</label>
         <input
           type="text"
           v-model="record.operator_name"
-          placeholder="記入者名を入力"
+          :placeholder="t('processInput.operatorPlaceholder')"
           class="input-normal flex-input"
         />
       </div>
 
       <div class="section">
-        <label>備考</label>
+        <label>{{ t('processInput.remarks') }}</label>
         <textarea
           v-model="record.remarks"
           rows="3"
-          placeholder="その他の内容や特記事項を入力"
+          :placeholder="t('processInput.remarksPlaceholder')"
           class="textarea-normal"
         ></textarea>
       </div>
     </div>
 
     <div v-if="record.record_type === 'EQUIPMENT_STATE'" class="form-section">
-      <h3 class="section-title">設備状態変更</h3>
+      <h3 class="section-title">{{ t('processInput.equipmentStateTitle') }}</h3>
 
       <div class="section">
-        <label class="label-required">状態</label>
+        <label class="label-required">{{ t('processInput.state') }}</label>
         <div class="state-buttons">
           <button
             v-for="state in equipmentStates"
@@ -264,11 +275,11 @@
       </div>
 
       <div class="section">
-        <label>備考</label>
+        <label>{{ t('processInput.remarks') }}</label>
         <textarea
           v-model="record.remarks"
           rows="3"
-          placeholder="状態変更の理由など"
+          :placeholder="t('processInput.stateRemarksPlaceholder')"
           class="textarea-normal"
         ></textarea>
       </div>
@@ -280,12 +291,12 @@
         :disabled="!canSubmit || submitting"
         class="btn-submit"
       >
-        {{ submitting ? '送信中...' : '記録を登録' }}
+        {{ submitting ? t('processInput.submitting') : t('processInput.submit') }}
       </button>
     </div>
 
     <div v-if="selectedProcessId && recentRecords.length" class="recent-section">
-      <h3 class="section-title">最近の記録</h3>
+      <h3 class="section-title">{{ t('processInput.recentRecords') }}</h3>
       <div class="record-list">
         <div v-for="rec in recentRecords" :key="rec.id" class="record-item">
           <div class="record-time">{{ formatTime(rec.timestamp) }}</div>
@@ -308,8 +319,10 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
+import { t, getLocaleCode } from '@/i18n'
 
 const route = useRoute()
+const localeCode = computed(() => getLocaleCode())
 
 const processes = ref([])
 const lines = ref([])
@@ -366,40 +379,49 @@ const record = ref({
   remarks: '',
 })
 
-const recordTypeOptions = [
-  { value: 'PRODUCTION', label: '生産記録' },
-  { value: 'EQUIPMENT_STATE', label: '設備状態変更' },
-  { value: 'SCRAP', label: '仕損品記録' },
-]
+const recordTypeOptions = computed(() => [
+  { value: 'PRODUCTION', label: t('processInput.recordType.production') },
+  { value: 'EQUIPMENT_STATE', label: t('processInput.recordType.equipment') },
+  { value: 'SCRAP', label: t('processInput.recordType.scrap') },
+])
 
-const scrapReasons = [
-  { value: 'RUST', label: 'サビ' },
-  { value: 'DEFORMATION', label: '変形/キズ' },
-  { value: 'BEAD_MISALIGN', label: 'ビードずれ' },
-  { value: 'BLOW_HOLE', label: 'ブローホール' },
-  { value: 'WELD_PINHOLE', label: '溶接穴あき' },
-  { value: 'UNDERCUT', label: 'アンダーカット' },
-  { value: 'PRECISION_NG', label: '精度不良' },
-  { value: 'MISSING_OR_WRONG_ASSEMBLY', label: '欠品/誤組' },
-  { value: 'MATERIAL_WIP_DEFECT', label: '素材/仕掛不良' },
-  { value: 'OTHER', label: 'その他' },
-]
+const scrapReasons = computed(() => [
+  { value: 'RUST', label: t('processInput.scrapReason.rust') },
+  { value: 'DEFORMATION', label: t('processInput.scrapReason.deformation') },
+  { value: 'BEAD_MISALIGN', label: t('processInput.scrapReason.beadMisalign') },
+  { value: 'BLOW_HOLE', label: t('processInput.scrapReason.blowHole') },
+  { value: 'WELD_PINHOLE', label: t('processInput.scrapReason.weldPinhole') },
+  { value: 'UNDERCUT', label: t('processInput.scrapReason.undercut') },
+  { value: 'PRECISION_NG', label: t('processInput.scrapReason.precisionNg') },
+  { value: 'MISSING_OR_WRONG_ASSEMBLY', label: t('processInput.scrapReason.missingAssembly') },
+  { value: 'MATERIAL_WIP_DEFECT', label: t('processInput.scrapReason.materialWip') },
+  { value: 'OTHER', label: t('processInput.scrapReason.other') },
+])
 
-const scrapDispositionOptions = [
-  { value: 'REJECTED', label: '仕損確定' },
-  { value: 'PENDING', label: '判定待ち' },
-]
+const scrapDispositionOptions = computed(() => [
+  { value: 'REJECTED', label: t('processInput.scrapDisposition.rejected') },
+  { value: 'PENDING', label: t('processInput.scrapDisposition.pending') },
+])
 
 const availableRecordTypes = computed(() => {
   const allowed = route.meta?.allowedRecordTypes
   if (Array.isArray(allowed) && allowed.length) {
-    return recordTypeOptions.filter((type) => allowed.includes(type.value))
+    return recordTypeOptions.value.filter((type) => allowed.includes(type.value))
   }
-  return recordTypeOptions
+  return recordTypeOptions.value
 })
 
 const showRecordTypeSelection = computed(() => availableRecordTypes.value.length > 1)
-const pageTitle = computed(() => route.meta?.pageTitle || '工程作業記録')
+const pageTitleKeyMap = {
+  MobileProcessInput: 'processInput.pageTitleWork',
+  ScrapRecordInput: 'processInput.pageTitleScrap',
+}
+
+const pageTitle = computed(() => {
+  const key = pageTitleKeyMap[route.name]
+  if (key) return t(key)
+  return route.meta?.pageTitle || t('processInput.pageTitleWork')
+})
 
 const filteredProcesses = computed(() => {
   if (!selectedLineId.value) return processes.value
@@ -408,14 +430,14 @@ const filteredProcesses = computed(() => {
 
 const isScrapRecord = computed(() => record.value.record_type === 'SCRAP')
 
-const equipmentStates = [
-  { value: 'RUNNING', label: '運転中' },
-  { value: 'IDLE', label: '待機' },
-  { value: 'SETUP', label: '段取り中' },
-  { value: 'MAINTENANCE', label: '保全中' },
-  { value: 'BREAKDOWN', label: '故障' },
-  { value: 'STOPPED', label: '停止' },
-]
+const equipmentStates = computed(() => [
+  { value: 'RUNNING', label: t('processInput.equipmentState.running') },
+  { value: 'IDLE', label: t('processInput.equipmentState.idle') },
+  { value: 'SETUP', label: t('processInput.equipmentState.setup') },
+  { value: 'MAINTENANCE', label: t('processInput.equipmentState.maintenance') },
+  { value: 'BREAKDOWN', label: t('processInput.equipmentState.breakdown') },
+  { value: 'STOPPED', label: t('processInput.equipmentState.stopped') },
+])
 
 const quickQtyPresets = ref([])
 
@@ -503,7 +525,7 @@ const getWorkDate = () => {
 
 const currentDate = computed(() => {
   const logical = getWorkDate()
-  return logical.toLocaleDateString('ja-JP', {
+  return logical.toLocaleDateString(localeCode.value, {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
@@ -693,12 +715,12 @@ const submitRecord = async () => {
 
     await api.processRealtime.create(data)
 
-    alert('記録を登録しました')
+    alert(t('processInput.alert.saved'))
     resetForm()
     loadRecentRecords()
   } catch (error) {
     console.error('記録登録エラー:', error)
-    alert('記録の登録に失敗しました')
+    alert(t('processInput.alert.saveFailed'))
   } finally {
     submitting.value = false
   }
@@ -1072,7 +1094,7 @@ watch(
 
 const formatTime = (timestamp) => {
   const date = new Date(timestamp)
-  return date.toLocaleTimeString('ja-JP', {
+  return date.toLocaleTimeString(localeCode.value, {
     hour: '2-digit',
     minute: '2-digit'
   })
@@ -1080,7 +1102,7 @@ const formatTime = (timestamp) => {
 
 const formatNumber = (value) => {
   if (value === null || value === undefined) return '0'
-  return Number(value).toLocaleString()
+  return Number(value).toLocaleString(localeCode.value)
 }
 
 const pageModeClass = computed(() => {
@@ -1114,7 +1136,7 @@ const loadProcesses = async () => {
     processes.value = res.data.results || res.data || []
   } catch (error) {
     console.error('工程一覧取得エラー:', error)
-    alert('工程情報の取得に失敗しました')
+    alert(t('processInput.alert.loadProcessFailed'))
   }
 }
 
@@ -1124,7 +1146,7 @@ const loadLines = async () => {
     lines.value = res.data.results || res.data || []
   } catch (error) {
     console.error('ライン一覧取得エラー:', error)
-    alert('ライン情報の取得に失敗しました')
+    alert(t('processInput.alert.loadLineFailed'))
   }
 }
 
