@@ -46,9 +46,9 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import { authState } from '@/auth'
+import { authState, ensureAuth } from '@/auth'
 import { hasPermission } from '@/router'
 import { t } from '@/i18n'
 
@@ -58,6 +58,10 @@ const userName = computed(() => {
   if (!current) return t('nav.guest')
   const fullName = `${current.last_name || ''} ${current.first_name || ''}`.trim()
   return fullName || current.username || current.email || t('nav.user')
+})
+
+onMounted(() => {
+  ensureAuth()
 })
 </script>
 
