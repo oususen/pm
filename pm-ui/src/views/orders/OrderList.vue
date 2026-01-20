@@ -8,6 +8,54 @@
     </div>
 
     <div class="page-content">
+      <div class="filter-panel">
+        <div class="filter-row">
+          <label class="filter-item">
+            <span>受注番号</span>
+            <input v-model="filters.orderNo" class="filter-input" type="text" />
+          </label>
+          <label class="filter-item">
+            <span>取込ファイル</span>
+            <input v-model="filters.sourceFile" class="filter-input" type="text" />
+          </label>
+          <label class="filter-item">
+            <span>得意先</span>
+            <select v-model="filters.customer" class="filter-input">
+              <option value="">すべて</option>
+              <option v-for="option in customerOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+        </div>
+        <div class="filter-row">
+          <label class="filter-item">
+            <span>受注タイプ</span>
+            <select v-model="filters.orderType" class="filter-input">
+              <option value="">すべて</option>
+              <option v-for="option in orderTypeOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+          <label class="filter-item">
+            <span>受注日</span>
+            <input v-model="filters.orderDate" class="filter-input" type="date" />
+          </label>
+          <label class="filter-item">
+            <span>ステータス</span>
+            <select v-model="filters.status" class="filter-input">
+              <option value="">すべて</option>
+              <option v-for="option in statusOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+        </div>
+        <div class="filter-actions">
+          <button type="button" class="btn-secondary" @click="resetFilters">クリア</button>
+        </div>
+      </div>
       <div v-if="loading" class="info-banner">読み込み中...</div>
       <div v-else-if="errorMessage" class="error-banner">{{ errorMessage }}</div>
       <table class="data-table">
@@ -24,7 +72,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="order in orders" :key="order.id">
+          <tr v-for="order in filteredOrders" :key="order.id">
             <td>{{ order.order_no }}</td>
             <td>{{ order.source_file || '-' }}</td>
             <td>{{ order.customer_name }}</td>
@@ -39,7 +87,7 @@
         </tbody>
       </table>
 
-      <div v-if="!loading && !errorMessage && orders.length === 0" class="no-data">
+      <div v-if="!loading && !errorMessage && filteredOrders.length === 0" class="no-data">
         データがありません
       </div>
     </div>
@@ -90,7 +138,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import api from '@/api/client'
 
 const orders = ref([])
@@ -99,6 +147,86 @@ const selectedOrder = ref({})
 const orderLines = ref([])
 const loading = ref(false)
 const errorMessage = ref('')
+const filters = ref({
+  orderNo: '',
+  sourceFile: '',
+  customer: '',
+  orderType: '',
+  orderDate: '',
+  status: '',
+})
+
+const normalizeText = (value) => (value ?? '').toString().toLowerCase()
+
+const resolveOrderType = (order) => order.order_type || order.order_type_display || ''
+const resolveStatus = (order) => order.status || order.status_display || ''
+const resolveCustomer = (order) => order.customer_name || ''
+
+const orderTypeOptions = computed(() => {
+  const options = new Map()
+  orders.value.forEach((order) => {
+    const value = resolveOrderType(order)
+    if (!value) return
+    const label = order.order_type_display || value
+    if (!options.has(value)) {
+      options.set(value, { value, label })
+    }
+  })
+  return Array.from(options.values())
+})
+
+const statusOptions = computed(() => {
+  const options = new Map()
+  orders.value.forEach((order) => {
+    const value = resolveStatus(order)
+    if (!value) return
+    const label = order.status_display || value
+    if (!options.has(value)) {
+      options.set(value, { value, label })
+    }
+  })
+  return Array.from(options.values())
+})
+
+const customerOptions = computed(() => {
+  const options = new Map()
+  orders.value.forEach((order) => {
+    const value = resolveCustomer(order)
+    if (!value) return
+    if (!options.has(value)) {
+      options.set(value, { value, label: value })
+    }
+  })
+  return Array.from(options.values())
+})
+
+const filteredOrders = computed(() => {
+  const currentFilters = filters.value
+  return orders.value.filter((order) => {
+    if (currentFilters.orderNo && !normalizeText(order.order_no).includes(normalizeText(currentFilters.orderNo))) {
+      return false
+    }
+    if (
+      currentFilters.sourceFile &&
+      !normalizeText(order.source_file).includes(normalizeText(currentFilters.sourceFile))
+    ) {
+      return false
+    }
+    if (currentFilters.customer && resolveCustomer(order) !== currentFilters.customer) {
+      return false
+    }
+    if (currentFilters.orderType && resolveOrderType(order) !== currentFilters.orderType) {
+      return false
+    }
+    if (currentFilters.orderDate && (order.order_date || '') !== currentFilters.orderDate) {
+      return false
+    }
+    if (currentFilters.status && resolveStatus(order) !== currentFilters.status) {
+      return false
+    }
+    return true
+  })
+})
 
 const fetchOrders = async (retry = 2) => {
   loading.value = true
@@ -115,6 +243,17 @@ const fetchOrders = async (retry = 2) => {
     errorMessage.value = '受注データの取得に失敗しました'
   } finally {
     loading.value = false
+  }
+}
+
+const resetFilters = () => {
+  filters.value = {
+    orderNo: '',
+    sourceFile: '',
+    customer: '',
+    orderType: '',
+    orderDate: '',
+    status: '',
   }
 }
 
@@ -216,6 +355,44 @@ onMounted(() => {
   margin-top: 8px;
   font-size: 13px;
   color: #666;
+}
+
+.filter-panel {
+  padding: 12px;
+  border: 1px solid #e2e6ef;
+  border-radius: 6px;
+  background: #fafbff;
+  margin-bottom: 12px;
+}
+
+.filter-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.filter-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 200px;
+  flex: 1 1 200px;
+  font-size: 13px;
+  color: #555;
+}
+
+.filter-input {
+  padding: 6px 8px;
+  border: 1px solid #d6dbe7;
+  border-radius: 4px;
+  font-size: 13px;
+  background: #fff;
+}
+
+.filter-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .info-banner {
