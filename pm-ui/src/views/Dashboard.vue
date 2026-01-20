@@ -1,43 +1,43 @@
 <template>
   <div class="dashboard-container">
-    <h1 class="dashboard-title">DAISO 管理システム</h1>
-    <p class="dashboard-subtitle">ようこそ、{{ userName }}さん</p>
+    <h1 class="dashboard-title">{{ t('dashboard.title') }}</h1>
+    <p class="dashboard-subtitle">{{ t('dashboard.welcome', { name: userName }) }}</p>
 
     <div class="dashboard-sections">
       <section class="dashboard-section">
-        <h2 class="section-title">主要機能</h2>
+        <h2 class="section-title">{{ t('dashboard.section.main') }}</h2>
         <div class="menu-grid">
           <RouterLink v-if="hasPermission(user, 'orders')" to="/orders/menu" class="menu-card">
             <div class="menu-icon">📋</div>
-            <div class="menu-label">受注管理</div>
+            <div class="menu-label">{{ t('dashboard.menu.orders') }}</div>
           </RouterLink>
           <RouterLink v-if="hasPermission(user, 'production')" to="/production/menu" class="menu-card">
             <div class="menu-icon">🏭</div>
-            <div class="menu-label">生産管理</div>
+            <div class="menu-label">{{ t('dashboard.menu.production') }}</div>
           </RouterLink>
           <RouterLink v-if="hasPermission(user, 'purchase')" to="/purchase/menu" class="menu-card">
             <div class="menu-icon">🛒</div>
-            <div class="menu-label">仕入管理</div>
+            <div class="menu-label">{{ t('dashboard.menu.purchase') }}</div>
           </RouterLink>
           <RouterLink v-if="hasPermission(user, 'shipping')" to="/shipping/menu" class="menu-card">
             <div class="menu-icon">🚚</div>
-            <div class="menu-label">出荷管理</div>
+            <div class="menu-label">{{ t('dashboard.menu.shipping') }}</div>
           </RouterLink>
           <RouterLink v-if="hasPermission(user, 'inventory')" to="/inventory" class="menu-card">
             <div class="menu-icon">📦</div>
-            <div class="menu-label">在庫管理</div>
+            <div class="menu-label">{{ t('dashboard.menu.inventory') }}</div>
           </RouterLink>
           <RouterLink v-if="hasPermission(user, 'quality')" to="/quality" class="menu-card">
             <div class="menu-icon">✅</div>
-            <div class="menu-label">品質管理</div>
+            <div class="menu-label">{{ t('dashboard.menu.quality') }}</div>
           </RouterLink>
           <RouterLink v-if="hasPermission(user, 'masters')" to="/masters" class="menu-card">
             <div class="menu-icon">⚙️</div>
-            <div class="menu-label">マスタ管理</div>
+            <div class="menu-label">{{ t('dashboard.menu.masters') }}</div>
           </RouterLink>
           <RouterLink v-if="hasPermission(user, 'notifications')" to="/notifications/sources" class="menu-card">
             <div class="menu-icon">🔔</div>
-            <div class="menu-label">通知作成</div>
+            <div class="menu-label">{{ t('dashboard.menu.notifications') }}</div>
           </RouterLink>
         </div>
       </section>
@@ -46,11 +46,19 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import { t } from '@/i18n'
 
 const user = authState.user
+const userName = computed(() => {
+  const current = authState.user
+  if (!current) return t('nav.guest')
+  const fullName = `${current.last_name || ''} ${current.first_name || ''}`.trim()
+  return fullName || current.username || current.email || t('nav.user')
+})
 </script>
 
 <style scoped>
