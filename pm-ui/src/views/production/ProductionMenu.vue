@@ -1,6 +1,6 @@
 <template>
   <div class="master-menu">
-    <h2 class="page-title">生産管理メニュー</h2>
+    <h2 class="page-title">{{ t('productionMenu.title') }}</h2>
 
     <div class="master-grid">
       <RouterLink
@@ -14,12 +14,12 @@
         @click="(event) => onTileClick(event, tile)"
       >
         <div class="icon-box" :aria-label="tile.iconLabel || null">{{ tile.icon }}</div>
-        <div class="label">{{ tile.label }}</div>
+      <div class="label">{{ tile.label }}</div>
       </RouterLink>
     </div>
 
     <p class="helper-text">
-      生産管理メニューから各機能に遷移します。
+      {{ t('productionMenu.helper') }}
     </p>
   </div>
 </template>
@@ -29,6 +29,7 @@ import { computed } from "vue";
 import { RouterLink } from "vue-router";
 import { authState } from "@/auth";
 import { hasPermission } from "@/router";
+import { t } from "@/i18n";
 
 const PERMISSION_MODE = "hide"; // "disable" or "hide"
 
@@ -59,21 +60,21 @@ const tiles = computed(() => {
   const list = [
     {
       to: "/production/mobile-process-input",
-      label: "工程作業入力",
+      label: t("productionMenu.tiles.processInput"),
       icon: "📱",
       required: "view",
       resource: "production.process_input",
     },
     {
       to: "/production/scrap-record",
-      label: "仕損品記録",
+      label: t("productionMenu.tiles.scrapRecord"),
       icon: "🛠️",
       required: "edit",
       resource: "production.scrap_record",
     },
     {
       to: "/production/plan-input",
-      label: "生産計画入力",
+      label: t("productionMenu.tiles.planInput"),
       icon: "📝",
       iconLabel: "計画",
       required: "edit",
@@ -81,7 +82,7 @@ const tiles = computed(() => {
     },
     {
       to: "/production/inventory",
-      label: "在庫/残量一覧",
+      label: t("productionMenu.tiles.inventory"),
       icon: "📦",
       iconLabel: "在庫",
       required: "view",
@@ -89,14 +90,14 @@ const tiles = computed(() => {
     },
     {
       to: "/production/scrap-history",
-      label: "仕損履歴",
+      label: t("productionMenu.tiles.scrapHistory"),
       icon: "📜",
       required: "view",
       resource: "production.scrap_history",
     },
     {
       to: "/production/progress",
-      label: "進捗管理",
+      label: t("productionMenu.tiles.progress"),
       icon: "📊",
       iconLabel: "進捗",
       required: "view",
@@ -104,7 +105,7 @@ const tiles = computed(() => {
     },
     {
       to: "/production/line-demands",
-      label: "ライン需要一覧",
+      label: t("productionMenu.tiles.lineDemands"),
       icon: "📈",
       iconLabel: "需要",
       required: "view",
@@ -112,7 +113,7 @@ const tiles = computed(() => {
     },
     {
       to: "/production/line-calendars",
-      label: "ライン勤務カレンダ",
+      label: t("productionMenu.tiles.lineCalendars"),
       icon: "⏱",
       iconLabel: "勤",
       required: "edit",
@@ -120,7 +121,7 @@ const tiles = computed(() => {
     },
     {
       to: "/production/stock-allocations",
-      label: "在庫引当",
+      label: t("productionMenu.tiles.stockAllocations"),
       icon: "🎯",
       iconLabel: "引当",
       required: "edit",
@@ -128,7 +129,7 @@ const tiles = computed(() => {
     },
     {
       to: "/production/orders",
-      label: "製造指示",
+      label: t("productionMenu.tiles.orders"),
       icon: "🛠️",
       iconLabel: "指示",
       required: "edit",
@@ -136,7 +137,7 @@ const tiles = computed(() => {
     },
     {
       to: "/production/sequence-board",
-      label: "ミックス順序ボード",
+      label: t("productionMenu.tiles.sequenceBoard"),
       icon: "🎛",
       required: "view",
       accent: true,
@@ -144,7 +145,7 @@ const tiles = computed(() => {
     },
     {
       to: "/production/line-monitor",
-      label: "ライン稼働監視",
+      label: t("productionMenu.tiles.lineMonitor"),
       icon: "📺",
       required: "view",
       accent: true,
@@ -152,7 +153,7 @@ const tiles = computed(() => {
     },
     {
       to: "/production/mobile-input",
-      label: "モバイル作業入力（ライン）",
+      label: t("productionMenu.tiles.mobileInput"),
       icon: "📱",
       required: "edit",
       resource: "production.mobile_input",
