@@ -294,8 +294,21 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class UserSmtpConfigSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source='user.username', read_only=True)
+
+    class Meta:
         model = UserSmtpConfig
-        fields = ['id', 'user', 'username', 'smtp_host', 'smtp_port', 'smtp_user', 'smtp_password', 'is_active', 'is_admin']
+        fields = [
+            'id',
+            'user',
+            'username',
+            'smtp_host',
+            'smtp_port',
+            'smtp_user',
+            'smtp_password',
+            'is_active',
+            'is_admin',
+        ]
         extra_kwargs = {
             'smtp_password': {'write_only': True}
         }
