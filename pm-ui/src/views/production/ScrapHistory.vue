@@ -240,7 +240,7 @@ const returnQty = ref(null)
 const today = new Date()
 const toISODate = (d) => d.toISOString().slice(0, 10)
 const startDate = ref(toISODate(new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000)))
-const endDate = ref(toISODate(today))
+const endDate = ref(toISODate(new Date(today.getTime() + 24 * 60 * 60 * 1000)))
 const processId = ref('')
 const productCode = ref('')
 const reason = ref('')
@@ -342,7 +342,7 @@ const resetFilters = () => {
   reason.value = ''
   dispositionStatus.value = ''
   startDate.value = toISODate(new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000))
-  endDate.value = toISODate(today)
+  endDate.value = toISODate(new Date(today.getTime() + 24 * 60 * 60 * 1000))
   load()
 }
 

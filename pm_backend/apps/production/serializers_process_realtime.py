@@ -7,7 +7,7 @@ from datetime import timedelta
 from rest_framework import serializers
 from django.db import transaction
 from django.utils import timezone
-from masters.models import Process, Product, BOM
+from masters.models import Process, Product, BOM, Line, Supplier
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_line_backlog import LineBacklog
 from .models_production import StockAllocation
@@ -58,11 +58,41 @@ def build_scrap_multiplier_details(root_product_id: int, root_qty: Decimal):
 
     stack = [(root_product_id, Decimal(root_qty), None, None, None, None)]
     detail_map = {}
+    purchase_process = Process.objects.filter(process_code='PURCHASE').first()
+    purchase_line_id = purchase_process.line_id if purchase_process else None
+
+    def resolve_purchase_line_id(supplier_id):
+        if not supplier_id:
+            return purchase_line_id
+        supplier = Supplier.objects.filter(id=supplier_id).first()
+        if not supplier:
+            return purchase_line_id
+        line_code = f"SUP-{supplier.id:06d}"
+        line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
+        if len(line_name) > 50:
+            line_name = line_name[:50]
+        line_obj, created = Line.objects.get_or_create(
+            line_code=line_code,
+            defaults={
+                'line_name': line_name,
+                'line_type': 'PURCHASE',
+                'is_active': False,
+            }
+        )
+        if not created and line_obj.line_type != 'PURCHASE':
+            line_obj.line_type = 'PURCHASE'
+            line_obj.save(update_fields=['line_type'])
+        return line_obj.id
 
     while stack:
         pid, qty, proc_id, line_id, supplier_id, sourcing_type = stack.pop()
         if qty == 0:
             continue
+
+        st = (sourcing_type or '').upper()
+        if st in ('BUY', 'SUBCON') and purchase_process:
+            proc_id = purchase_process.id
+            line_id = resolve_purchase_line_id(supplier_id)
 
         # 同じ製品でも工程/サプライヤが異なれば別明細とする
         key = (pid, proc_id, supplier_id)
@@ -80,7 +110,6 @@ def build_scrap_multiplier_details(root_product_id: int, root_qty: Decimal):
         if detail_map[key]['sourcing_type'] is None and sourcing_type is not None:
             detail_map[key]['sourcing_type'] = sourcing_type
 
-        st = (sourcing_type or '').upper()
         if st == 'BUY':
             continue
 

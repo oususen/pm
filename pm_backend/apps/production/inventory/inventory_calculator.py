@@ -47,11 +47,19 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
         if not scrap.product or not scrap.line or not scrap.process:
             continue
 
+        LineBacklog.objects.get_or_create(
+            plan_date=scrap.plan_date,
+            product=scrap.product,
+            line=scrap.line,
+            process=scrap.process,
+            sequence_no=0,
+        )
         LineBacklog.objects.filter(
             plan_date=scrap.plan_date,
             product=scrap.product,
             line=scrap.line,
             process=scrap.process,
+            sequence_no=0,
         ).update(scrap_qty=F('scrap_qty') + int(scrap.qty))
 
     # 後工程仕損の展開分
@@ -71,11 +79,19 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
         if not detail.product or not detail.line_id or not detail.process_id:
             continue
 
+        LineBacklog.objects.get_or_create(
+            plan_date=detail.scrap_record.plan_date,
+            product=detail.product,
+            line_id=detail.line_id,
+            process_id=detail.process_id,
+            sequence_no=0,
+        )
         LineBacklog.objects.filter(
             plan_date=detail.scrap_record.plan_date,
             product=detail.product,
             line_id=detail.line_id,
             process_id=detail.process_id,
+            sequence_no=0,
         ).update(scrap_qty=F('scrap_qty') + int(detail.deduct_qty))
 
 

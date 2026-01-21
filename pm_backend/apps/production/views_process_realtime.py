@@ -478,6 +478,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                         process_id=sd.process_id,
                         product_id=sd.product_id,
                         plan_date=return_date,
+                        sequence_no=0,
                         defaults={
                             'order_qty': 0,
                             'plan_qty': 0,
