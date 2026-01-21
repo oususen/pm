@@ -583,16 +583,11 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         routing.steps.all().delete()
         created_steps = []
+        max_depth = max((depth for depth, _, _ in routing_items_info), default=0)
         for idx, (depth, path, item) in enumerate(routing_items_info, start=1):
             path_str = ".".join(str(p) for p in path) if path else "1"
-            step_no = idx
-            parallel_group = 1
-            if path_str == "1.1.1.1":
-                step_no = 400
-                parallel_group = 10
-            elif path_str == "1.1.1.2":
-                step_no = 400
-                parallel_group = 20
+            step_no = (max_depth - len(path) + 1) * 1000
+            parallel_group = int("".join(str(p) for p in path)) if path else 1
             step = RoutingStep.objects.create(
                 routing=routing,
                 step_no=step_no,
