@@ -1147,7 +1147,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         if not supplier:
             return Response({'detail': 'supplier not found'}, status=status.HTTP_400_BAD_REQUEST)
 
-        line_code = f"SUP{supplier.id}"
+        line_code = f"SUP-{supplier.id:06d}"
         line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
         if len(line_name) > 50:
             line_name = line_name[:50]

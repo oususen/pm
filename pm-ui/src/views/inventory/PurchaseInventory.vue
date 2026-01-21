@@ -211,6 +211,7 @@ const rowDefs = [
   { key: "scrap", label: "仕損" },
   { key: "stock", label: "在庫" },
   { key: "planned_stock", label: "計画在庫" },
+  { key: "progress", label: "進度" },
 ];
 
 const applyDemands = (payload) => {
@@ -269,6 +270,7 @@ const groups = computed(() => {
         scrap: 0,
         stock: 0,
         planned_stock: 0,
+        progress: 0,
       };
     }
     const c = g.cells[d.plan_date];
@@ -282,6 +284,8 @@ const groups = computed(() => {
     c.scrap += Number(d.scrap_qty || 0);
     c.stock += Number(d.stock_qty || 0);
     c.planned_stock += Number(d.planned_stock_qty || 0);
+    // 進度はバックエンドで計算された値を使用
+    c.progress += Number(d.progress_qty || 0);
   }
   return Array.from(map.values());
 });
@@ -299,7 +303,7 @@ const getValue = (group, date, key) => {
 };
 
 const getCellClass = (group, date, rowKey) => {
-  if (rowKey === "stock" || rowKey === "planned_stock") {
+  if (rowKey === "stock" || rowKey === "planned_stock" || rowKey === "progress") {
     const value = getValue(group, date, rowKey);
     if (value !== null && value !== undefined && Number(value) < 0) {
       return "negative";
@@ -364,6 +368,7 @@ const updateAdjustDemand = (group, date, adjustQty) => {
     scrap_qty: 0,
     stock_qty: 0,
     planned_stock_qty: 0,
+    progress_qty: 0,
   });
 };
 
@@ -470,6 +475,7 @@ const loadBOMChildren = async (group) => {
               scrap: 0,
               stock: 0,
               planned_stock: 0,
+              progress: 0,
             };
           }
           const c = childCells[d.plan_date];
@@ -483,6 +489,8 @@ const loadBOMChildren = async (group) => {
           c.scrap += Number(d.scrap_qty || 0);
           c.stock += Number(d.stock_qty || 0);
           c.planned_stock += Number(d.planned_stock_qty || 0);
+          // 進度はバックエンドで計算された値を使用
+          c.progress += Number(d.progress_qty || 0);
         }
 
         const childDemand = childDemands[0];
@@ -631,6 +639,14 @@ const load = async () => {
       throw new Error("仕入れラインの解決に失敗しました");
     }
     await refreshScrapQty();
+    // 在庫・計画在庫・進度を再計算
+    const start = columns.value[0];
+    const end = columns.value[columns.value.length - 1];
+    await api.lineBacklogs.recalculateInventory({
+      line_id: purchaseLineId.value,
+      start_date: start,
+      end_date: end,
+    });
     const res = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
     const payload = res.data || [];
     applyDemands(payload);

@@ -477,19 +477,20 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         tree = self._build_bom_tree(bom, visited_bom_ids=set())
         return Response(tree)
 
-    def _collect_routing_items_recursive(self, bom: BOM, visited_bom_ids: set, collector: list, depth: int = 0, path_prefix: tuple = ()):
+    def _collect_routing_items_recursive(self, bom: BOM, visited_bom_ids: set, collector: list, depth: int = 0, path_prefix: tuple = (), include_buy: bool = False):
         """
-        Depth-first collect routing items (MAKE/SUBCON) from bom and its descendants.
+        Depth-first collect routing items (MAKE/SUBCON/BUY) from bom and its descendants.
 
         - Child BOMs are traversed before appending the parent item (post-order) so
           downstream工程が先に生成される（前後関係を表す工程順に近づける）。
         - collector に (depth, path, item) を詰める。path は階層内の通し。
+        - include_buy=True の場合、BUY品も収集対象に含める
         """
         if bom.id in visited_bom_ids:
             return
         visited_bom_ids.add(bom.id)
 
-        items_qs = BOMItem.objects.filter(bom=bom).select_related('child_product', 'process', 'line').order_by('id')
+        items_qs = BOMItem.objects.filter(bom=bom).select_related('child_product', 'process', 'line', 'supplier').order_by('id')
         for idx, item in enumerate(items_qs, start=1):
             child_bom = self._pick_child_bom(item.child_product)
             if child_bom:
@@ -498,20 +499,54 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                     visited_bom_ids,
                     collector,
                     depth=depth + 1,
-                    path_prefix=path_prefix + (idx,)
+                    path_prefix=path_prefix + (idx,),
+                    include_buy=include_buy,
                 )
-            if item.sourcing_type in ['MAKE', 'SUBCON']:
+            target_types = ['MAKE', 'SUBCON', 'BUY'] if include_buy else ['MAKE', 'SUBCON']
+            if item.sourcing_type in target_types:
                 collector.append((depth, path_prefix + (idx,), item))
+
+    def _get_or_create_purchase_line_and_process(self, supplier):
+        """
+        仕入先に対応する仮想ライン（SUP-{id}）とPURCHASE工程を取得または作成する。
+        """
+        line_code = f"SUP-{supplier.id:06d}"
+        line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
+        if len(line_name) > 50:
+            line_name = line_name[:50]
+        line_obj, _ = Line.objects.get_or_create(
+            line_code=line_code,
+            defaults={
+                'line_name': line_name,
+                'line_type': 'PURCHASE',
+                'is_active': False,
+            }
+        )
+
+        process_code = 'PURCHASE'
+        process_name = '購買'
+        process_obj, _ = Process.objects.get_or_create(
+            process_code=process_code,
+            defaults={
+                'process_name': process_name,
+                'line': line_obj,
+                'management_unit': 'DAY',
+                'is_active': False,
+            }
+        )
+        return line_obj, process_obj
 
     @action(detail=True, methods=['post'])
     def generate_routing(self, request, pk=None):
-        """Generate or replace routing steps from BOM MAKE/SUBCON items (recursive)."""
+        """Generate or replace routing steps from BOM MAKE/SUBCON/BUY items (recursive)."""
         bom = self.get_object()
+        include_buy = request.data.get('include_buy', True)
         routing_items_info = []
-        self._collect_routing_items_recursive(bom, visited_bom_ids=set(), collector=routing_items_info)
+        self._collect_routing_items_recursive(bom, visited_bom_ids=set(), collector=routing_items_info, include_buy=include_buy)
 
+        item_types = 'MAKE/SUBCON/BUY' if include_buy else 'MAKE/SUBCON'
         if not routing_items_info:
-            return Response({'detail': 'No MAKE/SUBCON items found in this BOM tree. Nothing to generate.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': f'No {item_types} items found in this BOM tree. Nothing to generate.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Optional final step (manual input)
         final_process_id = request.data.get('final_process_id')
@@ -548,17 +583,27 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 final_duration_min = None
 
         # Validate each item has process/time info
+        # BUY品の場合は仕入先が必須（工程・ラインは自動設定される）
         for _, _, it in routing_items_info:
-            if not it.process_id:
-                return Response({'detail': f'Process is required on BOM item {it.child_product.product_code} ({it.sourcing_type})'}, status=status.HTTP_400_BAD_REQUEST)
-            if it.time_unit not in ['MINUTE', 'DAY']:
-                return Response({'detail': f'Invalid time_unit on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
-            if it.time_unit == 'MINUTE':
-                if it.duration_min is None or it.duration_min <= 0:
-                    return Response({'detail': f'duration_min must be >0 (MINUTE) on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
+            if it.sourcing_type == 'BUY':
+                # BUY品は仕入先が必須
+                if not it.supplier_id:
+                    return Response({'detail': f'Supplier is required on BUY item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
+                # BUY品はDAY単位でリードタイムを使用（time_unitが未設定ならDAYとみなす）
+                if it.time_unit not in ['MINUTE', 'DAY', None, '']:
+                    return Response({'detail': f'Invalid time_unit on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
             else:
-                if it.lead_time_days <= 0:
-                    return Response({'detail': f'lead_time_days must be >0 (DAY) on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
+                # MAKE/SUBCONは工程が必須
+                if not it.process_id:
+                    return Response({'detail': f'Process is required on BOM item {it.child_product.product_code} ({it.sourcing_type})'}, status=status.HTTP_400_BAD_REQUEST)
+                if it.time_unit not in ['MINUTE', 'DAY']:
+                    return Response({'detail': f'Invalid time_unit on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
+                if it.time_unit == 'MINUTE':
+                    if it.duration_min is None or it.duration_min <= 0:
+                        return Response({'detail': f'duration_min must be >0 (MINUTE) on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    if it.lead_time_days <= 0:
+                        return Response({'detail': f'lead_time_days must be >0 (DAY) on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
 
         routing_code = request.data.get('routing_code') or f"AUTO-{bom.parent_product.product_code}-{bom.version}"
         description = request.data.get('description') or f"Auto-generated from BOM {bom.id}"
@@ -588,19 +633,37 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             path_str = ".".join(str(p) for p in path) if path else "1"
             step_no = (max_depth - len(path) + 1) * 1000
             parallel_group = int("".join(str(p) for p in path)) if path else 1
+
+            # BUY品の場合は仕入先ラインとPURCHASE工程を使用
+            if item.sourcing_type == 'BUY' and item.supplier_id:
+                purchase_line, purchase_process = self._get_or_create_purchase_line_and_process(item.supplier)
+                step_process = purchase_process
+                step_line = purchase_line
+                step_time_unit = 'DAY'
+                step_lead_time_days = item.lead_time_days or 1
+                step_duration_min = None
+                step_remark = f"Auto from BUY item {item.child_product.product_code} (supplier: {item.supplier.supplier_code})"
+            else:
+                step_process = item.process
+                step_line = item.line
+                step_time_unit = item.time_unit
+                step_lead_time_days = item.lead_time_days if item.time_unit == 'DAY' else 0
+                step_duration_min = item.duration_min if item.time_unit == 'MINUTE' else None
+                step_remark = f"Auto from BOM item {item.child_product.product_code} (path {path_str}, depth {depth})"
+
             step = RoutingStep.objects.create(
                 routing=routing,
                 step_no=step_no,
                 parallel_group=parallel_group,
-                process=item.process,
-                line=item.line,
+                process=step_process,
+                line=step_line,
                 output_product=item.child_product,
                 hierarchy_depth=depth,
                 hierarchy_path=path_str,
-                time_unit=item.time_unit,
-                lead_time_days=item.lead_time_days if item.time_unit == 'DAY' else 0,
-                duration_min=item.duration_min if item.time_unit == 'MINUTE' else None,
-                remark=f"Auto from BOM item {item.child_product.product_code} (path {path_str}, depth {depth})"
+                time_unit=step_time_unit,
+                lead_time_days=step_lead_time_days,
+                duration_min=step_duration_min,
+                remark=step_remark
             )
             created_steps.append((item, step))
 
