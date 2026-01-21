@@ -1093,6 +1093,7 @@ const doPickup = async () => {
       line_id: selectedLine.value,
       start_date: startDate.value,
       end_date: endDate.value,
+      include_progress: false,
     })
     const [backlogRes, planRes] = await Promise.all([
       api.lineBacklogs.getLineBacklogs({

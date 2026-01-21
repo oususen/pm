@@ -1010,11 +1010,36 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         # 対象キーを収集
         target_keys = []
+        target_key_set = set()
         for (product_id, plan_date), order_qty in demand_map.items():
             process_id = product_process_map.get(product_id)
             if not process_id:
                 continue
+            key = (product_id, plan_date, process_id)
             target_keys.append((product_id, plan_date, process_id, order_qty))
+            target_key_set.add(key)
+
+        # 期間内の全日付に対して、存在しない場合はsequence_no=0の行を用意する
+        if start_dt and end_dt:
+            existing_any = set(
+                LineBacklog.objects.filter(
+                    line_id=line_id,
+                    product_id__in=target_products,
+                    plan_date__range=[start_dt, end_dt],
+                ).values_list('product_id', 'plan_date', 'process_id')
+            )
+            total_days = (end_dt - start_dt).days + 1
+            for product_id in target_products:
+                process_id = product_process_map.get(product_id)
+                if not process_id:
+                    continue
+                for offset in range(total_days):
+                    plan_date = start_dt + timedelta(days=offset)
+                    key = (product_id, plan_date, process_id)
+                    if key in existing_any or key in target_key_set:
+                        continue
+                    target_keys.append((product_id, plan_date, process_id, Decimal('0')))
+                    target_key_set.add(key)
 
         if target_keys:
             # 既存レコードを一括取得
@@ -1960,7 +1985,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         期待payload: {
             line_id: int (required),
             start_date: str (YYYY-MM-DD, required),
-            end_date: str (YYYY-MM-DD, required)
+            end_date: str (YYYY-MM-DD, required),
+            include_progress: bool (optional)
         }
         """
         from .inventory.inventory_calculator import recalculate_inventory_for_line
@@ -1968,6 +1994,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         line_id = request.data.get('line_id')
         start_date = request.data.get('start_date')
         end_date = request.data.get('end_date')
+        include_progress_raw = request.data.get('include_progress', True)
+        if isinstance(include_progress_raw, str):
+            include_progress = include_progress_raw.lower() not in ['false', '0', 'no']
+        else:
+            include_progress = bool(include_progress_raw)
 
         if not line_id:
             return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1982,7 +2013,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             return Response({'detail': f'Invalid date format: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            recalculate_inventory_for_line(line_id, start_dt, end_dt)
+            recalculate_inventory_for_line(line_id, start_dt, end_dt, include_progress=include_progress)
             return Response({'detail': 'Inventory recalculated successfully'})
         except Exception as e:
             return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

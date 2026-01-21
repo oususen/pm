@@ -585,9 +585,18 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         created_steps = []
         for idx, (depth, path, item) in enumerate(routing_items_info, start=1):
             path_str = ".".join(str(p) for p in path) if path else "1"
+            step_no = idx
+            parallel_group = 1
+            if path_str == "1.1.1.1":
+                step_no = 400
+                parallel_group = 10
+            elif path_str == "1.1.1.2":
+                step_no = 400
+                parallel_group = 20
             step = RoutingStep.objects.create(
                 routing=routing,
-                step_no=idx,
+                step_no=step_no,
+                parallel_group=parallel_group,
                 process=item.process,
                 line=item.line,
                 output_product=item.child_product,
@@ -602,9 +611,10 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         # Append final step if provided
         if final_process:
+            max_step_no = max([s.step_no for _, s in created_steps], default=0)
             RoutingStep.objects.create(
                 routing=routing,
-                step_no=len(created_steps) + 1,
+                step_no=max_step_no + 1,
                 process=final_process,
                 line=final_line,
                 output_product=bom.parent_product,

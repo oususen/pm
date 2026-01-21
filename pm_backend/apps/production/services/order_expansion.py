@@ -28,10 +28,64 @@ class OrderExpansionService:
         OPEN受注明細をライン需要に展開し、t_line_demand を再生成する。
         """
         aggregated: Dict[Tuple[int, str, object], Dict[str, object]] = {}
+        workday_cache: Dict[int, Dict[object, bool]] = {}
+        calendar_cache: Dict[int, object] = {}
+        default_calendar_id = None
 
         order_lines = OrderLine.objects.filter(
             order__status='OPEN'
         ).select_related('order', 'product')
+
+        from masters.models import Calendar, CalendarDay
+
+        default_calendar_id = Calendar.objects.filter(
+            calendar_code='tiera_muke'
+        ).values_list('id', flat=True).first()
+
+        def is_working_day(calendar_id, target_date):
+            if not calendar_id:
+                return True
+            cache = workday_cache.setdefault(calendar_id, {})
+            if target_date in cache:
+                return cache[target_date]
+            cal = CalendarDay.objects.filter(
+                calendar_id=calendar_id,
+                target_date=target_date
+            ).first()
+            is_work = cal.is_working_day if cal is not None else True
+            cache[target_date] = is_work
+            return is_work
+
+        def shift_business_days(calendar_id, target_date, days):
+            if not days:
+                if not calendar_id:
+                    return target_date
+                if is_working_day(calendar_id, target_date):
+                    return target_date
+                current = target_date
+                while True:
+                    current = current - timedelta(days=1)
+                    if is_working_day(calendar_id, current):
+                        return current
+            if not calendar_id:
+                return target_date + timedelta(days=-days)
+            step = -1 if days > 0 else 1
+            remaining = abs(int(days))
+            current = target_date
+            while remaining > 0:
+                current = current + timedelta(days=step)
+                if is_working_day(calendar_id, current):
+                    remaining -= 1
+            return current
+
+        def resolve_calendar_id(line_id):
+            if line_id in calendar_cache:
+                return calendar_cache[line_id]
+            from masters.models import Line
+            line_obj = Line.objects.filter(id=line_id).first()
+            cal_id = getattr(line_obj, 'calendar_id', None) or default_calendar_id
+            calendar_cache[line_id] = cal_id
+            return cal_id
 
         for ol in order_lines:
             product = ol.product
@@ -51,7 +105,8 @@ class OrderExpansionService:
                     continue
 
                 lead_days = self._resolve_lead_time_days(step)
-                target_date = required_date - timedelta(days=lead_days)
+                calendar_id = resolve_calendar_id(step.line_id)
+                target_date = shift_business_days(calendar_id, required_date, lead_days)
                 step_product = step.output_product if step.output_product_id else product
                 product_code = step_product.product_code if step_product else ol.product_code
                 product_id = step_product.id if step_product else (product.id if product else None)
@@ -150,11 +205,11 @@ class OrderExpansionService:
 
     def _resolve_lead_time_days(self, step) -> int:
         """工程のLT（日）を決定する。"""
-        if step.time_unit == 'DAY':
-            if step.lead_time_days and step.lead_time_days > 0:
-                return step.lead_time_days
-            if step.line and step.line.lead_time_days:
-                return max(step.line.lead_time_days, 0)
+        # 仕様書の優先順位に合わせる（RoutingStep > Line > 0）
+        if step.lead_time_days and step.lead_time_days > 0:
+            return step.lead_time_days
+        if step.line and step.line.lead_time_days:
+            return max(step.line.lead_time_days, 0)
         return 0
 
     def _calc_progress(self, numerator: Decimal, denominator: Decimal) -> Decimal:

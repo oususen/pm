@@ -63,11 +63,11 @@
             </div>
             <div class="info-row">
               <span class="info-label">予定</span>
-              <span class="info-value"></span>
+              <span class="info-value">{{ fmt(getMonthTotal(g, 'forecast')) }}</span>
             </div>
             <div class="info-row">
               <span class="info-label">確定</span>
-              <span class="info-value"></span>
+              <span class="info-value">{{ fmt(getMonthTotal(g, 'firm')) }}</span>
             </div>
             <div class="info-row">
               <span class="info-label">翌月</span>
@@ -346,6 +346,20 @@ const fmt = (n) => {
   if (Number.isNaN(num)) return "";
   if (num === 0) return "";
   return num.toLocaleString();
+};
+
+const monthKey = (dateStr) => String(dateStr || "").slice(0, 7);
+const startMonthKey = computed(() => monthKey(startDate.value));
+
+const getMonthTotal = (group, key) => {
+  const targetMonth = startMonthKey.value;
+  if (!targetMonth || !group?.cells) return 0;
+  let total = 0;
+  Object.keys(group.cells).forEach((date) => {
+    if (monthKey(date) !== targetMonth) return;
+    total += Number(group.cells?.[date]?.[key] || 0);
+  });
+  return total;
 };
 
 const getValue = (group, date, key) => {

@@ -57,10 +57,29 @@ class BOMItemInline(admin.TabularInline):
     extra = 1
 
 
+class ParentIsFinalFilter(admin.SimpleListFilter):
+    title = '最終品'
+    parameter_name = 'parent_is_final'
+
+    def lookups(self, request, model_admin):
+        return (
+            ('yes', 'はい'),
+            ('no', 'いいえ'),
+        )
+
+    def queryset(self, request, queryset):
+        value = self.value()
+        if value == 'yes':
+            return queryset.filter(parent_product__is_final_product=True)
+        if value == 'no':
+            return queryset.filter(parent_product__is_final_product=False)
+        return queryset
+
+
 @admin.register(BOM)
 class BOMAdmin(admin.ModelAdmin):
     list_display = ['parent_product', 'version', 'valid_from', 'valid_to', 'is_coproduct', 'is_active']
-    list_filter = ['is_active', 'is_coproduct']
+    list_filter = ['is_active', 'is_coproduct', ParentIsFinalFilter]
     inlines = [BOMItemInline]
     actions = ['export_bom_tree_excel']
 

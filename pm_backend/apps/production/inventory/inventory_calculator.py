@@ -222,14 +222,6 @@ def _calculate_parent_actual_shipment(backlog):
     return _sum_parent_shipments(backlog, lambda d: d.actual_qty or 0)
 
 
-def _calculate_parent_actual_shipment_with_lt(backlog, shift_fn):
-    """
-    後工程実績をLT遡りで計算（進度用）
-    後工程で実績が入った日からLT分遡った日に出庫として計上
-    """
-    return _sum_parent_shipments(backlog, lambda d: d.actual_qty or 0, shift_fn)
-
-
 def _calculate_parent_planned_shipment(backlog, today, shift_fn):
     """
     計画在庫用の出庫計算（後工程の計画値＝内示を使用）
@@ -645,143 +637,7 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
         LineBacklog.objects.bulk_update(backlogs_to_update, ['planned_stock_qty'])
 
 
-def recalculate_progress_qty(line_id, product_id, start_date, end_date, firm_map=None):
-    """
-    進度を日次で再計算
-
-    進度と在庫の違い：
-    - 在庫: 後工程実績発生日に出庫計上（物理的な在庫を反映）
-    - 進度: 後工程実績をLT遡りで計算（計画に対する進み/遅れを反映）
-
-    計算式:
-    進度 = 前日進度 + 実績 - 出庫（LT遡り） + 調整 - 仕損
-
-    Args:
-        line_id: ラインID
-        product_id: 製品ID
-        start_date: 開始日
-        end_date: 終了日
-        firm_map: 最終品の確定数量マップ
-    """
-    backlogs = list(LineBacklog.objects.filter(
-        line_id=line_id,
-        product_id=product_id,
-        plan_date__range=[start_date, end_date]
-    ).select_related('product').order_by('plan_date', 'sequence_no', 'id'))
-
-    if not backlogs:
-        return
-
-    by_date = {}
-    for backlog in backlogs:
-        by_date.setdefault(backlog.plan_date, []).append(backlog)
-
-    calendar_id = None
-    workday_cache = {}
-    if line_id:
-        from masters.models import Line, Calendar, CalendarDay
-        line_obj = Line.objects.filter(id=line_id).first()
-        calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
-            calendar_code='tiera_muke'
-        ).values_list('id', flat=True).first()
-
-    def is_working_day(target_date):
-        if not calendar_id:
-            return True
-        if target_date in workday_cache:
-            return workday_cache[target_date]
-        cal = CalendarDay.objects.filter(
-            calendar_id=calendar_id,
-            target_date=target_date
-        ).first()
-        is_work = cal.is_working_day if cal is not None else True
-        workday_cache[target_date] = is_work
-        return is_work
-
-    def get_prev_working_day(target_date):
-        prev_date = target_date - timedelta(days=1)
-        if not calendar_id:
-            return prev_date
-        while not is_working_day(prev_date):
-            prev_date = prev_date - timedelta(days=1)
-        return prev_date
-
-    def shift_working_days(target_date, days):
-        """
-        稼働日でシフト。days > 0 なら未来へ、days < 0 なら過去へ。
-        進度計算では後工程実績日からLT分「未来へ」シフトして
-        前工程の出庫日を求める（= 前工程の日付からLT分「過去へ」遡った日に
-        後工程実績があるか確認）
-        """
-        if not days:
-            return target_date
-        if not calendar_id:
-            return target_date + timedelta(days=days)
-        step = 1 if days > 0 else -1
-        remaining = abs(int(days))
-        current = target_date
-        while remaining > 0:
-            current = current + timedelta(days=step)
-            if is_working_day(current):
-                remaining -= 1
-        return current
-
-    def pick_representative(rows):
-        base_rows = [r for r in rows if r.sequence_no == 0]
-        if base_rows:
-            return min(base_rows, key=lambda r: r.id)
-        plan_rows = [r for r in rows if (r.plan_qty or 0) > 0]
-        candidates = plan_rows if plan_rows else rows
-        return min(candidates, key=lambda r: (r.sequence_no if r.sequence_no is not None else 0, r.id))
-
-    today = get_business_today()
-    progress_by_date = {}
-    last_progress = 0
-    firm_map = firm_map or {}
-
-    for plan_date in sorted(by_date.keys()):
-        rows = by_date[plan_date]
-        sample = rows[0]
-
-        actual_total = sum(r.actual_qty or 0 for r in rows)
-        adjust_total = sum(r.adjust_qty or 0 for r in rows)
-        scrap_total = sum(r.scrap_qty or 0 for r in rows)
-
-        is_final = bool(getattr(sample.product, 'is_final_product', False))
-
-        if plan_date <= today:
-            if is_final:
-                # 最終品の進度出庫もLT遡りで確定を参照
-                progress_shipment = firm_map.get((sample.product_id, plan_date), Decimal('0'))
-            else:
-                # 中間品: 後工程実績をLT遡りで計算
-                progress_shipment = _calculate_parent_actual_shipment_with_lt(sample, shift_working_days)
-        else:
-            progress_shipment = Decimal('0')
-        progress_shipment = int(progress_shipment or 0)
-
-        prev_day = get_prev_working_day(plan_date)
-        prev_progress = progress_by_date.get(prev_day, last_progress)
-
-        progress_qty = (
-            prev_progress
-            + actual_total
-            - progress_shipment
-            + adjust_total
-            - scrap_total
-        )
-
-        rep = pick_representative(rows)
-        for row in rows:
-            row.progress_qty = 0
-        rep.progress_qty = progress_qty
-        progress_by_date[plan_date] = progress_qty
-        last_progress = progress_qty
-
-    LineBacklog.objects.bulk_update(backlogs, ['progress_qty'])
-
-
-def recalculate_inventory_for_line(line_id, start_date, end_date):
+def recalculate_inventory_for_line(line_id, start_date, end_date, include_progress=True):
     """
     指定ラインの全製品について在庫を再計算
 
@@ -840,13 +696,16 @@ def recalculate_inventory_for_line(line_id, start_date, end_date):
         if planned_elapsed > planned_max[0]:
             planned_max = (planned_elapsed, product_id)
 
-        # 進度を計算
-        t2 = time.perf_counter()
-        recalculate_progress_qty(line_id, product_id, start_date, end_date, firm_map=firm_map)
-        progress_elapsed = time.perf_counter() - t2
-        progress_total += progress_elapsed
-        if progress_elapsed > progress_max[0]:
-            progress_max = (progress_elapsed, product_id)
+        if include_progress:
+            from .progress_calculator import recalculate_progress_qty
+
+            # 進度を計算
+            t2 = time.perf_counter()
+            recalculate_progress_qty(line_id, product_id, start_date, end_date)
+            progress_elapsed = time.perf_counter() - t2
+            progress_total += progress_elapsed
+            if progress_elapsed > progress_max[0]:
+                progress_max = (progress_elapsed, product_id)
 
     product_count = max(len(product_ids), 1)
     logger.info(
@@ -860,7 +719,7 @@ def recalculate_inventory_for_line(line_id, start_date, end_date):
         planned_max[0],
         planned_max[1],
         progress_total,
-        progress_total / product_count,
+        progress_total / product_count if include_progress else 0.0,
         progress_max[0],
         progress_max[1],
     )
