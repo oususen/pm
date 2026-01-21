@@ -1,4 +1,5 @@
 from datetime import timedelta
+import math
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, List, Tuple
 
@@ -87,6 +88,20 @@ class OrderExpansionService:
             calendar_cache[line_id] = cal_id
             return cal_id
 
+        def path_key(path):
+            try:
+                return tuple(int(p) for p in str(path).split('.'))
+            except Exception:
+                return (str(path),)
+
+        minutes_per_day = 480
+
+        def calc_shift_days(prev_minutes, add_minutes):
+            prev_days = math.ceil(prev_minutes / minutes_per_day) if prev_minutes > 0 else 0
+            total_minutes = prev_minutes + add_minutes
+            total_days = math.ceil(total_minutes / minutes_per_day) if total_minutes > 0 else 0
+            return total_days - prev_days, total_minutes
+
         for ol in order_lines:
             product = ol.product
             if not product:
@@ -99,14 +114,67 @@ class OrderExpansionService:
                 continue
 
             required_date = ol.due_date
+            final_required_date = required_date
+            final_minutes = 0
+
+            # hierarchy_pathに基づき、工程系統ごとにrequired_dateを計算
+            path_step_map = {
+                step.hierarchy_path: step
+                for step in steps
+                if step.hierarchy_path and step.hierarchy_path != 'final'
+            }
+            children_map = {}
+            for path in path_step_map.keys():
+                parent_path = path.rsplit('.', 1)[0] if '.' in path else None
+                children_map.setdefault(parent_path, []).append(path)
+
+            final_step = next((s for s in steps if s.hierarchy_path == 'final'), None)
+            if final_step:
+                final_calendar_id = resolve_calendar_id(final_step.line_id)
+                lead_days = self._resolve_lead_time_days(final_step) if final_step.time_unit == 'DAY' else 0
+                step_minutes = final_step.duration_min or 0 if final_step.time_unit == 'MINUTE' else 0
+                minute_shift, final_minutes = calc_shift_days(0, step_minutes)
+                final_required_date = shift_business_days(
+                    final_calendar_id,
+                    required_date,
+                    lead_days + minute_shift
+                )
+
+            required_by_path = {}
+
+            def compute_required_date(path, parent_date, parent_minutes):
+                step = path_step_map.get(path)
+                if not step:
+                    return
+                calendar_id = resolve_calendar_id(step.line_id)
+                lead_days = self._resolve_lead_time_days(step) if step.time_unit == 'DAY' else 0
+                step_minutes = step.duration_min or 0 if step.time_unit == 'MINUTE' else 0
+                minute_shift, total_minutes = calc_shift_days(parent_minutes, step_minutes)
+                required_for_step = shift_business_days(
+                    calendar_id,
+                    parent_date,
+                    lead_days + minute_shift
+                )
+                required_by_path[path] = (required_for_step, total_minutes)
+                for child_path in sorted(children_map.get(path, []), key=path_key):
+                    compute_required_date(child_path, required_for_step, total_minutes)
+
+            for root_path in sorted(children_map.get(None, []), key=path_key):
+                compute_required_date(root_path, final_required_date, final_minutes)
+
             for step in reversed(steps):
                 if not step.line_id:
                     self.warnings.append(f"ライン未設定の工程をスキップ: routing_step_id={step.id}")
                     continue
 
-                lead_days = self._resolve_lead_time_days(step)
                 calendar_id = resolve_calendar_id(step.line_id)
-                target_date = shift_business_days(calendar_id, required_date, lead_days)
+                lead_days = self._resolve_lead_time_days(step) if step.time_unit == 'DAY' else 0
+                if step.hierarchy_path == 'final':
+                    target_date = final_required_date
+                elif step.hierarchy_path in required_by_path:
+                    target_date = required_by_path[step.hierarchy_path][0]
+                else:
+                    target_date = shift_business_days(calendar_id, required_date, lead_days)
                 step_product = step.output_product if step.output_product_id else product
                 product_code = step_product.product_code if step_product else ol.product_code
                 product_id = step_product.id if step_product else (product.id if product else None)
@@ -134,7 +202,8 @@ class OrderExpansionService:
                     entry['forecast_qty'] += qty
                 entry['order_numbers'].add(ol.order.order_no)
 
-                required_date = target_date
+                if step.hierarchy_path == 'final':
+                    required_date = target_date
 
         objects_to_create: List[LineDemand] = []
         for data in aggregated.values():
