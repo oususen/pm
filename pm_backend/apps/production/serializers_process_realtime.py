@@ -6,6 +6,7 @@ from datetime import timedelta, time
 
 from rest_framework import serializers
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 from masters.models import Process, Product, BOM, Line, Supplier
 from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR
@@ -224,6 +225,65 @@ def update_line_backlog_production(process, product, qty, plan_date):
         backlog.save(update_fields=['actual_qty'])
 
 
+def update_line_backlog_actual_shipment(process, product, qty, plan_date):
+    """
+    後工程の実績を前工程の実績出庫（actual_shipment_qty）に即時反映する。
+    """
+    if not product or not qty or qty <= 0:
+        return
+
+    bom = BOM.objects.filter(parent_product=product, is_active=True).order_by('-valid_from', '-id').first()
+    if not bom:
+        return
+
+    qty_decimal = Decimal(qty)
+    for item in bom.items.select_related('child_product').all():
+        if item.quantity is None:
+            continue
+        shipment_qty = qty_decimal * Decimal(item.quantity)
+        shipment_int = int(shipment_qty or 0)
+        if shipment_int == 0:
+            continue
+
+        target_qs = LineBacklog.objects.filter(
+            product_id=item.child_product_id,
+            plan_date=plan_date,
+        )
+        if item.line_id:
+            target_qs = target_qs.filter(line_id=item.line_id)
+        if item.process_id:
+            target_qs = target_qs.filter(process_id=item.process_id)
+
+        targets = list(target_qs.values('line_id', 'process_id').distinct())
+        if not targets:
+            if item.line_id and item.process_id:
+                targets = [{'line_id': item.line_id, 'process_id': item.process_id}]
+            else:
+                continue
+
+        for target in targets:
+            backlog, _ = LineBacklog.objects.get_or_create(
+                line_id=target['line_id'],
+                process_id=target['process_id'],
+                product_id=item.child_product_id,
+                plan_date=plan_date,
+                sequence_no=0,
+                defaults={
+                    'order_qty': 0,
+                    'plan_qty': 0,
+                    'actual_qty': 0,
+                    'stock_qty': 0,
+                    'planned_stock_qty': 0,
+                    'adjust_qty': 0,
+                    'scrap_qty': 0,
+                    'actual_shipment_qty': 0,
+                }
+            )
+            LineBacklog.objects.filter(id=backlog.id).update(
+                actual_shipment_qty=F('actual_shipment_qty') + shipment_int
+            )
+
+
 def resolve_workday_date_for_process(process, dt):
     """
     勤務カレンダに基づいて計画日を決定する。
@@ -402,6 +462,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
             if validated_data.get('record_type') == 'PRODUCTION':
                 qty_decimal = validated_data.get('qty', Decimal('0')) or Decimal('0')
                 update_line_backlog_production(process, product, qty_decimal, plan_date)
+                update_line_backlog_actual_shipment(process, product, qty_decimal, plan_date)
 
             # 連産品（仮想セット品番）の場合、子製品にも実績を保存する
             if (
