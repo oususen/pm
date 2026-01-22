@@ -245,12 +245,11 @@ def _calculate_parent_planned_shipment(backlog, today, shift_fn):
     計画在庫は「計画ベース」の値なので、出庫も計画値（内示）を使用する。
     これは実在庫（後工程の実績を使用）とは異なる点。
 
-    - 過去・今日: 後工程の計画値で計算
-    - 将来: 後工程の計画値で計算
+    - 今日以降: 後工程の計画値で計算
 
     ※ 実在庫の出庫は _calculate_parent_actual_shipment で actual_qty を使用
     """
-    # 計画在庫は常に計画値（内示）で出庫計算
+    # 計画在庫の今日以降は計画値（内示）で出庫計算
     return _sum_parent_shipments(backlog, lambda d: d.plan_qty or 0, shift_fn)
 
 
@@ -402,15 +401,15 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
         return min(candidates, key=lambda r: (r.sequence_no if r.sequence_no is not None else 0, r.id))
 
     today = get_business_today()
-    day_before_yesterday = today - timedelta(days=2)  # 前々日
+    day_before_yesterday = get_prev_working_day(get_prev_working_day(today))  # 前々営業日
     stock_by_date = {}
     firm_map = firm_map or {}
 
-    # システム日付（8時区切り）の前々日の実在庫を初期値として取得
-    # 前日ではなく前々日を使う理由：
+    # システム日付（8時区切り）の前々営業日の実在庫を初期値として取得
+    # 前日ではなく前々営業日を使う理由：
     # - 7:59に実績入力（昨日の実績）→ 8:01に在庫計算の場合
     # - 前日の在庫はまだ7:59の実績が反映されていない可能性がある
-    # - 前々日の在庫は確定しているので、そこから昨日・今日を再計算すれば正しい値になる
+    # - 前々営業日の在庫は確定しているので、そこから昨日・今日を再計算すれば正しい値になる
     initial_backlog = LineBacklog.objects.filter(
         line_id=line_id,
         product_id=product_id,
@@ -424,7 +423,7 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
     else:
         last_stock = 0
 
-    # 更新対象のbacklogを追跡（前々日以前は更新しない）
+    # 更新対象のbacklogを追跡（前々営業日以前は更新しない）
     yesterday = today - timedelta(days=1)
     backlogs_to_update = []
 
@@ -433,7 +432,7 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
         sample = rows[0]
         is_final = bool(getattr(sample.product, 'is_final_product', False))
 
-        # 前々日以前は既存の在庫値を使用し、更新しない
+        # 前々営業日以前は既存の在庫値を使用し、更新しない
         if plan_date <= day_before_yesterday:
             # 既存の在庫値を取得してstock_by_dateに保持（後続の計算用）
             existing_stock = 0
@@ -565,11 +564,11 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
         return min(candidates, key=lambda r: (r.sequence_no if r.sequence_no is not None else 0, r.id))
 
     today = get_business_today()
-    day_before_yesterday = today - timedelta(days=2)  # 前々日
+    day_before_yesterday = get_prev_working_day(get_prev_working_day(today))  # 前々営業日
     planned_by_date = {}
     firm_map = firm_map or {}
 
-    # 前々日の実在庫を初期値として取得（計画在庫も前々日以前は実在庫を使用）
+    # 前々営業日の実在庫を初期値として取得（計画在庫も前々営業日以前は実在庫を使用）
     initial_backlog = LineBacklog.objects.filter(
         line_id=line_id,
         product_id=product_id,
@@ -583,14 +582,14 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
     else:
         last_planned = 0
 
-    # 更新対象のbacklogを追跡（前々日以前は更新しない）
+    # 更新対象のbacklogを追跡（前々営業日以前は更新しない）
     backlogs_to_update = []
 
     for plan_date in sorted(by_date.keys()):
         rows = by_date[plan_date]
         sample = rows[0]
 
-        # 前々日以前は実在庫の値を使用し、更新しない
+        # 前々営業日以前は実在庫の値を使用し、更新しない
         if plan_date <= day_before_yesterday:
             # 既存の実在庫値を取得してplanned_by_dateに保持（後続の計算用）
             existing_stock = 0
@@ -616,7 +615,10 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
             else:
                 planned_shipment = firm_qty if firm_qty > 0 else Decimal(str(order_total))
         else:
-            planned_shipment = _calculate_parent_planned_shipment(sample, today, shift_working_days)
+            if plan_date < today:
+                planned_shipment = _calculate_parent_actual_shipment(sample)
+            else:
+                planned_shipment = _calculate_parent_planned_shipment(sample, today, shift_working_days)
         planned_shipment = int(planned_shipment or 0)
 
         prev_day = get_prev_working_day(plan_date)

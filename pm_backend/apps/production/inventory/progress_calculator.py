@@ -87,11 +87,11 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
         return min(candidates, key=lambda r: (r.sequence_no if r.sequence_no is not None else 0, r.id))
 
     today = get_business_today()
-    day_before_yesterday = today - timedelta(days=2)  # 前々日
+    day_before_yesterday = get_prev_working_day(get_prev_working_day(today))  # 前々営業日
     progress_by_date = {}
     last_progress = 0
 
-    # 前々日の進度を初期値として取得
+    # 前々営業日の進度を初期値として取得
     initial_backlog = LineBacklog.objects.filter(
         line_id=line_id,
         product_id=product_id,
@@ -146,13 +146,13 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
                 key = (demand.plan_date, demand.product_id)
                 demand_by_product[key] = demand_by_product.get(key, Decimal('0')) + qty
 
-    # 更新対象のbacklogを追跡（前々日以前は更新しない）
+    # 更新対象のbacklogを追跡（前々営業日以前は更新しない）
     backlogs_to_update = []
 
     for plan_date in sorted(by_date.keys()):
         rows = by_date[plan_date]
 
-        # 前々日以前は既存の進度値を使用し、更新しない
+        # 前々営業日以前は既存の進度値を使用し、更新しない
         if plan_date <= day_before_yesterday:
             existing_progress = 0
             for row in rows:
