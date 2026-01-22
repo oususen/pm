@@ -2,12 +2,13 @@
 工程実時間記録用のSerializer
 """
 from decimal import Decimal
-from datetime import timedelta
+from datetime import timedelta, time
 
 from rest_framework import serializers
 from django.db import transaction
 from django.utils import timezone
 from masters.models import Process, Product, BOM, Line, Supplier
+from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_line_backlog import LineBacklog
 from .models_production import StockAllocation
@@ -227,7 +228,10 @@ def resolve_workday_date_for_process(process, dt):
     """
     勤務カレンダに基づいて計画日を決定する。
     夜勤で日付を跨ぐ場合は前日扱いにする。
+    日替わり時刻（8時）より前は前日扱いにする。
     """
+    if dt.time() < time(DAY_BOUNDARY_HOUR, 0):
+        return (dt - timedelta(days=1)).date()
     if not process:
         return dt.date()
     line = getattr(process, 'line', None)

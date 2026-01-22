@@ -14,6 +14,7 @@ from .serializers_line_realtime import (
     LineRealtimeCreateSerializer,
 )
 from masters.models import Line
+from orders.utils.calendar_utils import get_business_today
 
 
 class LineRealtimeRecordViewSet(viewsets.ModelViewSet):
@@ -89,7 +90,7 @@ class LineStatusViewSet(viewsets.ReadOnlyModelViewSet):
             )
 
             # 本日の計画数を取得（LineDemandから）
-            today = timezone.now().date()
+            today = get_business_today()
             from .models import LineDemand
             today_demand = LineDemand.objects.filter(
                 line=line,

@@ -10,7 +10,7 @@ from django.utils.dateparse import parse_date
 from django.utils import timezone
 from django.conf import settings
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_line_backlog import LineBacklog
@@ -23,6 +23,7 @@ from .serializers_process_realtime import (
 )
 from masters.models import Product, Process, Supplier, BOM
 from quality.models_scrap import ScrapRecordDetail, ScrapRecord
+from orders.utils.calendar_utils import get_business_today, DAY_BOUNDARY_HOUR
 
 
 class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
@@ -89,9 +90,9 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         if not process_ids:
             return Response([])
 
-        today = timezone.now().date()
-        start_dt = datetime.combine(today, time.min)
-        end_dt = datetime.combine(today, time.max)
+        business_today = get_business_today()
+        start_dt = datetime.combine(business_today, time(DAY_BOUNDARY_HOUR, 0))
+        end_dt = start_dt + timedelta(days=1) - timedelta(microseconds=1)
         if settings.USE_TZ:
             start_dt = timezone.make_aware(start_dt)
             end_dt = timezone.make_aware(end_dt)
@@ -105,7 +106,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
 
         plan_qs = LineBacklog.objects.filter(
             line_id=line_id,
-            plan_date=today,
+            plan_date=business_today,
             process_id__in=process_ids,
         )
         if copro_child_ids:
