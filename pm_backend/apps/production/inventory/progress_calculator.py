@@ -8,6 +8,7 @@ from decimal import Decimal
 from django.db.models import Q
 
 from masters.models import Calendar, CalendarDay, Line, RoutingStep
+from orders.utils.calendar_utils import get_business_today
 from ..models import LineDemand
 from ..models_line_backlog import LineBacklog
 
@@ -85,8 +86,22 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
         candidates = plan_rows if plan_rows else rows
         return min(candidates, key=lambda r: (r.sequence_no if r.sequence_no is not None else 0, r.id))
 
+    today = get_business_today()
+    day_before_yesterday = today - timedelta(days=2)  # 前々日
     progress_by_date = {}
     last_progress = 0
+
+    # 前々日の進度を初期値として取得
+    initial_backlog = LineBacklog.objects.filter(
+        line_id=line_id,
+        product_id=product_id,
+        plan_date__lte=day_before_yesterday,
+        progress_qty__isnull=False
+    ).order_by('-plan_date', 'sequence_no', 'id').first()
+
+    if initial_backlog:
+        last_progress = initial_backlog.progress_qty or 0
+        progress_by_date[initial_backlog.plan_date] = last_progress
 
     process_ids = {r.process_id for r in backlogs if r.process_id}
     step_map = {}
@@ -131,8 +146,22 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
                 key = (demand.plan_date, demand.product_id)
                 demand_by_product[key] = demand_by_product.get(key, Decimal('0')) + qty
 
+    # 更新対象のbacklogを追跡（前々日以前は更新しない）
+    backlogs_to_update = []
+
     for plan_date in sorted(by_date.keys()):
         rows = by_date[plan_date]
+
+        # 前々日以前は既存の進度値を使用し、更新しない
+        if plan_date <= day_before_yesterday:
+            existing_progress = 0
+            for row in rows:
+                if row.progress_qty:
+                    existing_progress = row.progress_qty
+                    break
+            progress_by_date[plan_date] = existing_progress
+            last_progress = existing_progress
+            continue
 
         actual_total = sum(r.actual_qty or 0 for r in rows)
         adjust_total = sum(r.adjust_qty or 0 for r in rows)
@@ -166,5 +195,7 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
         rep.progress_qty = progress_qty
         progress_by_date[plan_date] = progress_qty
         last_progress = progress_qty
+        backlogs_to_update.extend(rows)
 
-    LineBacklog.objects.bulk_update(backlogs, ['progress_qty'])
+    if backlogs_to_update:
+        LineBacklog.objects.bulk_update(backlogs_to_update, ['progress_qty'])
