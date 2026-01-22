@@ -710,6 +710,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             )
 
             usage_map = {}
+            plan_id_set = set()
             gantt_rows = 0
             for plan in qs:
                 gantt_rows += 1
@@ -734,9 +735,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     qty = Decimal('0')
                 if qty == 0:
                     continue
+                if plan.plan_id:
+                    plan_id_set.add(plan.plan_id)
                 usage_map[plan_day] = usage_map.get(plan_day, Decimal('0')) + qty
 
-            gantt_usage_cache[key] = usage_map
+            gantt_usage_cache[key] = (usage_map, plan_id_set)
             logger.info(
                 "pickup: gantt_plans line_id=%s products=%s rows=%s time=%.3fs",
                 line_id,
@@ -744,7 +747,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 gantt_rows,
                 time.perf_counter() - gantt_start,
             )
-            return usage_map
+            return usage_map, plan_id_set
 
         def resolve_lead_time_days(current_product_id, bom_item=None):
             """現ラインのLTを優先して解決する。"""
@@ -890,7 +893,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         target_ids.append(routing_final_product.id)
 
                     # LineBacklog取得：ガントのstart_datetimeを優先し、無ければ親製品/ライン最終品の計画を使用
-                    line_start_map = build_line_start_map(downstream_line_id, target_ids)
+                    line_start_map, gantt_plan_ids = build_line_start_map(downstream_line_id, target_ids)
                     backlog_items = LineBacklog.objects.filter(
                         line_id=downstream_line_id,
                         product_id__in=target_ids
@@ -915,6 +918,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             qty = Decimal(str(backlog.plan_qty or 0))
                             if qty == 0:
                                 continue
+                            if backlog.plan_id and backlog.plan_id in gantt_plan_ids:
+                                continue
                             if backlog.product_id == parent_product.id:
                                 parent_map[plan_date] = parent_map.get(plan_date, Decimal('0')) + qty
                             else:
@@ -930,6 +935,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             plan_date = backlog.plan_date
                             qty = Decimal(str(backlog.plan_qty or 0))
                             if qty == 0:
+                                continue
+                            if backlog.plan_id and backlog.plan_id in gantt_plan_ids:
                                 continue
                             fallback_map[plan_date] = fallback_map.get(plan_date, Decimal('0')) + qty
 
