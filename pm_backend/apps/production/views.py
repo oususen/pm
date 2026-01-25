@@ -725,12 +725,20 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 start_dt_value = plan.start_datetime
                 if not start_dt_value:
                     continue
+                # 日替わり8時ルール: 8時より前は前日扱い
+                def apply_day_boundary(dt_val):
+                    """日替わり時刻（8時）を考慮した日付を取得"""
+                    if hasattr(dt_val, 'hour') and dt_val.hour < 8:
+                        return (dt_val - timedelta(days=1)).date()
+                    return dt_val.date() if hasattr(dt_val, 'date') else dt_val
+
                 try:
-                    plan_day = start_dt_value.date()
+                    plan_day = apply_day_boundary(start_dt_value)
                 except Exception:
                     try:
                         ts = str(start_dt_value).replace('Z', '+00:00')
-                        plan_day = datetime.fromisoformat(ts).date()
+                        parsed_dt = datetime.fromisoformat(ts)
+                        plan_day = apply_day_boundary(parsed_dt)
                     except Exception:
                         continue
                 if start_dt and plan_day < start_dt:
