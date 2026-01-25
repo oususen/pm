@@ -214,8 +214,15 @@ class LinePlanViewSet(viewsets.ModelViewSet):
                 for plan in existing_plans:
                     key = (plan.product_id, plan.process_id, plan.plan_date, plan.sequence_no)
                     existing_plan_map[key] = plan
-            # 1. 該当ライン・日付・製品のLinePlanを削除
+            # 1. 該当LinePlanのplan_idを先に取得
             if affected_dates and affected_products:
+                existing_plan_ids = list(LinePlan.objects.filter(
+                    line_id=line_id,
+                    plan_date__in=affected_dates,
+                    product_id__in=affected_products
+                ).values_list('plan_id', flat=True))
+
+                # 2. 該当ライン・日付・製品のLinePlanを削除
                 deleted_plan_result = LinePlan.objects.filter(
                     line_id=line_id,
                     plan_date__in=affected_dates,
@@ -223,7 +230,7 @@ class LinePlanViewSet(viewsets.ModelViewSet):
                 ).delete()
                 deleted_plan = deleted_plan_result[0] if deleted_plan_result else 0
 
-                # 2. 該当ライン・日付・製品のLineGanttPlanを削除
+                # 3. 該当ライン・日付・製品のLineGanttPlanを削除
                 deleted_gantt_result = LineGanttPlan.objects.filter(
                     line_id=line_id,
                     plan_date__in=affected_dates,
@@ -231,17 +238,17 @@ class LinePlanViewSet(viewsets.ModelViewSet):
                 ).delete()
                 deleted_gantt = deleted_gantt_result[0] if deleted_gantt_result else 0
 
-                # 3. 該当ライン・日付・製品のLineBacklogを削除（計画レコードのみ）
+                # 4. 該当LinePlanのplan_idに紐づくLineBacklogを削除（計画レコードのみ）
                 # ルール: sequence_no > 0 のレコードは計画レコードとして削除
                 #        sequence_no = 0 は在庫・需要・仕損などの基礎データとして保持
                 #        sequence_no = NULL は実績レコードとして保持
-                deleted_backlog_result = LineBacklog.objects.filter(
-                    line_id=line_id,
-                    plan_date__in=affected_dates,
-                    product_id__in=affected_products,
-                    sequence_no__gt=0  # sequence_no > 0 のみ削除（計画レコード）
-                ).delete()
-                deleted_backlog = deleted_backlog_result[0] if deleted_backlog_result else 0
+                deleted_backlog = 0
+                if existing_plan_ids:
+                    deleted_backlog_result = LineBacklog.objects.filter(
+                        plan_id__in=existing_plan_ids,
+                        sequence_no__gt=0
+                    ).delete()
+                    deleted_backlog = deleted_backlog_result[0] if deleted_backlog_result else 0
 
             # 4. 新規作成
             for it in items:
@@ -377,6 +384,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
     def _attach_order_split(self, items):
         from collections import defaultdict
+        from django.db.models import Q
 
         if not items:
             return
@@ -1564,7 +1572,47 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         updated = 0
         skipped = []
         upserted = []
-        processed_combinations = set()  # (親製品ID, 工程ID, 日付)の重複を防ぐ
+
+        # 影響範囲（変更された計画に対応するライン内工程）を削除してから再作成する
+        if isinstance(items, list) and items and not read_only:
+            affected_keys = set()
+            for plan in base_plans:
+                product_id = plan['product_id']
+                plan_date = plan['plan_date']
+                sequence_no = plan.get('sequence_no')
+                seq_key = sequence_no if sequence_no is not None else 1
+                steps = steps_map.get(product_id, [])
+                if not steps:
+                    continue
+                for step in sorted(steps, key=lambda s: s.step_no or 0):
+                    target_date = shift_business_days(plan_date, step.lead_time_days or 0)
+                    target_product_id = step.output_product_id or product_id
+
+                    copro_info_target = copro_child_map.get(target_product_id)
+                    child_target_product_id = None
+                    if copro_info_target:
+                        if include_coproduct_children:
+                            child_target_product_id = target_product_id
+                        target_product_id = copro_info_target['parent_id']
+
+                    affected_keys.add((target_product_id, step.process_id, target_date, seq_key))
+                    if child_target_product_id and child_target_product_id != target_product_id:
+                        affected_keys.add((child_target_product_id, step.process_id, target_date, seq_key))
+
+            if affected_keys:
+                q_filter = Q()
+                for product_id, process_id, plan_date, seq_key in affected_keys:
+                    q_filter |= Q(
+                        plan_date=plan_date,
+                        process_id=process_id,
+                        product_id=product_id,
+                        line_id=line_id,
+                        sequence_no=seq_key,
+                    )
+                LineBacklog.objects.filter(q_filter).delete()
+
+        # 集計結果を保持（共用部品の加算に対応）
+        aggregated = {}
 
         for plan in base_plans:
             product_id = plan['product_id']
@@ -1596,19 +1644,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         child_target_product_id = original_target_product_id
                     # 子製品を親製品に置き換え
                     target_product_id = copro_info_target['parent_id']
-
-                # 既に処理済みの(製品, 工程, 日付)の組み合わせはスキップ
-                combination_key = (target_product_id, step.process_id, target_date, seq_key)
-                child_key = None
-                if child_target_product_id and child_target_product_id != target_product_id:
-                    child_key = (child_target_product_id, step.process_id, target_date, seq_key)
-                skip_parent = False
-                if combination_key in processed_combinations:
-                    if not (child_key and child_key not in processed_combinations):
-                        continue
-                    skip_parent = True
-                else:
-                    processed_combinations.add(combination_key)
 
                 # 連産品（コプロダクト）の場合、セット数ベースで工数を計算
                 time_qty = plan_qty
@@ -1650,68 +1685,96 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if not is_copro_driver:
                     computed_time_min = 0
 
-                def upsert_backlog(target_id, qty_value, time_value):
-                    nonlocal created, updated
-                    if read_only:
-                        obj = LineBacklog.objects.filter(
-                            plan_date=target_date,
-                            process_id=step.process_id,
-                            product_id=target_id,
-                            line_id=line_id,
-                            sequence_no=seq_key,
-                        ).first()
-
-                        if not obj:
-                            obj = LineBacklog(
-                                plan_date=target_date,
-                                process_id=step.process_id,
-                                product_id=target_id,
-                                line_id=line_id,
-                                plan_qty=int(qty_value),
-                                order_qty=int(order_qty),
-                                demand_qty_plan=int(demand_qty_plan),
-                                source_line_id=line_id,
-                                source_routing_step_id=step.id,
-                                sequence_no=seq_key,
-                            )
-                    else:
-                        defaults_dict = {
-                            'order_qty': int(order_qty),
-                            'demand_qty_plan': int(demand_qty_plan),
-                            'source_line_id': line_id,
-                            'source_routing_step_id': step.id,
+                def add_aggregate(target_id, qty_value, time_value):
+                    key = (target_id, step.process_id, target_date, seq_key)
+                    entry = aggregated.get(key)
+                    if not entry:
+                        entry = {
+                            'plan_qty': Decimal('0'),
+                            'order_qty': Decimal('0'),
+                            'demand_qty_plan': Decimal('0'),
+                            'time_min': Decimal('0'),
+                            'plan_ids': set(),
+                            'step': step,
+                            'cycle_time': ct,
+                            'routing_product_id': step.routing.product_id if step.routing_id and step.routing else None,
                         }
-                        defaults_dict['plan_qty'] = int(qty_value)
+                        aggregated[key] = entry
+                    entry['plan_qty'] += Decimal(qty_value or 0)
+                    entry['order_qty'] += Decimal(order_qty or 0)
+                    entry['demand_qty_plan'] += Decimal(demand_qty_plan or 0)
+                    if time_value is not None:
+                        entry['time_min'] += Decimal(str(time_value))
+                    if parent_plan_id:
+                        entry['plan_ids'].add(parent_plan_id)
 
-                        defaults_dict['sequence_no'] = seq_key
+                add_aggregate(target_product_id, plan_qty, computed_time_min)
 
-                        if parent_plan_id:
-                            defaults_dict['plan_id'] = parent_plan_id
+                if child_target_product_id and child_target_product_id != target_product_id:
+                    add_aggregate(child_target_product_id, child_plan_qty, 0)
 
-                        obj, is_created = LineBacklog.objects.update_or_create(
-                            plan_date=target_date,
-                            process_id=step.process_id,
-                            product_id=target_id,
-                            line_id=line_id,
-                            sequence_no=seq_key,
-                            defaults=defaults_dict
-                        )
-                        created += 1 if is_created else 0
-                        updated += 0 if is_created else 1
+        for (target_id, process_id, target_date, seq_key), entry in aggregated.items():
+            plan_qty_value = int(entry['plan_qty'])
+            order_qty_value = int(entry['order_qty'])
+            demand_qty_value = int(entry['demand_qty_plan'])
+            plan_ids = entry['plan_ids']
+            plan_id_value = None
+            if len(plan_ids) == 1:
+                plan_id_value = next(iter(plan_ids))
 
-                    obj.computed_time_min = time_value
-                    obj.work_minutes = calendar_work_map.get(target_date)
-                    obj.step_no = step.step_no
-                    obj.cycle_time_min = float(ct.cycle_time_min) if ct and ct.cycle_time_min else None
-                    obj.routing_product_id = step.routing.product_id if step.routing_id and step.routing else None
-                    upserted.append(obj)
+            if read_only:
+                obj = LineBacklog.objects.filter(
+                    plan_date=target_date,
+                    process_id=process_id,
+                    product_id=target_id,
+                    line_id=line_id,
+                    sequence_no=seq_key,
+                ).first()
 
-                if not skip_parent:
-                    upsert_backlog(target_product_id, plan_qty, computed_time_min)
+                if not obj:
+                    obj = LineBacklog(
+                        plan_date=target_date,
+                        process_id=process_id,
+                        product_id=target_id,
+                        line_id=line_id,
+                        plan_qty=plan_qty_value,
+                        order_qty=order_qty_value,
+                        demand_qty_plan=demand_qty_value,
+                        source_line_id=line_id,
+                        source_routing_step_id=entry['step'].id,
+                        sequence_no=seq_key,
+                    )
+            else:
+                defaults_dict = {
+                    'order_qty': order_qty_value,
+                    'demand_qty_plan': demand_qty_value,
+                    'source_line_id': line_id,
+                    'source_routing_step_id': entry['step'].id,
+                    'plan_qty': plan_qty_value,
+                    'sequence_no': seq_key,
+                }
+                if plan_id_value:
+                    defaults_dict['plan_id'] = plan_id_value
+                else:
+                    defaults_dict['plan_id'] = None
 
-                if child_key and child_key not in processed_combinations:
-                    processed_combinations.add(child_key)
-                    upsert_backlog(child_target_product_id, child_plan_qty, 0)
+                obj, is_created = LineBacklog.objects.update_or_create(
+                    plan_date=target_date,
+                    process_id=process_id,
+                    product_id=target_id,
+                    line_id=line_id,
+                    sequence_no=seq_key,
+                    defaults=defaults_dict
+                )
+                created += 1 if is_created else 0
+                updated += 0 if is_created else 1
+
+            obj.computed_time_min = float(entry['time_min']) if entry['time_min'] is not None else None
+            obj.work_minutes = calendar_work_map.get(target_date)
+            obj.step_no = entry['step'].step_no
+            obj.cycle_time_min = float(entry['cycle_time'].cycle_time_min) if entry['cycle_time'] and entry['cycle_time'].cycle_time_min else None
+            obj.routing_product_id = entry['routing_product_id']
+            upserted.append(obj)
 
         serializer = self.get_serializer(upserted, many=True)
         return Response({
