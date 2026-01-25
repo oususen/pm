@@ -1249,13 +1249,48 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             parent_qs = parent_qs.filter(plan_date__lte=end_dt)
 
         # 親製品の計画数量(plan_qty)を取得（order_qtyではなくplan_qtyを使用）
-        parent_orders = parent_qs.values('product_id', 'line_id', 'plan_date', 'plan_qty').filter(
+        parent_orders = parent_qs.values('product_id', 'line_id', 'plan_date', 'plan_qty', 'plan_id').filter(
             plan_qty__gt=0  # 計画数量が0より大きいもののみ
         )
 
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
             calendar_code='tiera_muke'
         ).values_list('id', flat=True).first()
+
+        # 日替わり8時ルール: 8時より前は前日扱い
+        def apply_day_boundary(dt_val):
+            """日替わり時刻（8時）を考慮した日付を取得"""
+            if hasattr(dt_val, 'hour') and dt_val.hour < 8:
+                return (dt_val - timedelta(days=1)).date()
+            return dt_val.date() if hasattr(dt_val, 'date') else dt_val
+
+        # ガントからstart_datetimeを取得して日替わり8時ルールを適用
+        # (line_id, product_id) -> {plan_date -> gantt_date} のマップを構築
+        gantt_date_map = {}
+        line_ids_in_parents = set(row['line_id'] for row in parent_orders if row.get('line_id'))
+        if line_ids_in_parents and parent_ids:
+            gantt_qs = LineGanttPlan.objects.filter(
+                line_id__in=line_ids_in_parents,
+                product_id__in=parent_ids,
+            )
+            if start_dt:
+                gantt_qs = gantt_qs.filter(plan_date__gte=start_dt)
+            if end_dt:
+                gantt_qs = gantt_qs.filter(plan_date__lte=end_dt)
+            for gantt in gantt_qs:
+                if not gantt.start_datetime:
+                    continue
+                try:
+                    gantt_day = apply_day_boundary(gantt.start_datetime)
+                except Exception:
+                    try:
+                        ts = str(gantt.start_datetime).replace('Z', '+00:00')
+                        parsed_dt = datetime.fromisoformat(ts)
+                        gantt_day = apply_day_boundary(parsed_dt)
+                    except Exception:
+                        continue
+                key = (gantt.line_id, gantt.product_id, gantt.plan_date)
+                gantt_date_map[key] = gantt_day
 
         def shift_business_days(target_date, days):
             if not days:
@@ -1288,14 +1323,23 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         demand_map = defaultdict(Decimal)
         for row in parent_orders:
             parent_id = row['product_id']
+            line_id_parent = row.get('line_id')
             plan_date = row['plan_date']
             plan_qty = Decimal(str(row['plan_qty'] or 0))
+
+            # ガントの日付を優先（日替わり8時ルール適用済み）、なければplan_dateを使用
+            effective_date = plan_date
+            if line_id_parent:
+                gantt_key = (line_id_parent, parent_id, plan_date)
+                gantt_day = gantt_date_map.get(gantt_key)
+                if gantt_day:
+                    effective_date = gantt_day
 
             # 計画数量(plan_qty)を使用（後ラインの計画から需要を取得）
             if plan_qty == 0:
                 continue
             for child_id, qty, lead_time_days in parent_to_children.get(parent_id, []):
-                target_date = shift_business_days(plan_date, lead_time_days)
+                target_date = shift_business_days(effective_date, lead_time_days)
                 demand_map[(child_id, target_date)] += plan_qty * qty
 
         existing_qs = LineBacklog.objects.filter(
