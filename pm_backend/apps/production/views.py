@@ -1264,14 +1264,38 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 return (dt_val - timedelta(days=1)).date()
             return dt_val.date() if hasattr(dt_val, 'date') else dt_val
 
+        # 親製品（中間品）から最終品を特定するマップを構築
+        # parent_id -> [(line_id, final_product_id)]
+        from masters.models import RoutingStep
+        parent_to_final = {}
+        if parent_ids:
+            steps_qs = RoutingStep.objects.filter(
+                output_product_id__in=parent_ids
+            ).select_related('routing', 'routing__product')
+            for step in steps_qs:
+                if step.routing and step.routing.product:
+                    if step.routing.product.is_line_final_product:
+                        parent_id = step.output_product_id
+                        final_id = step.routing.product_id
+                        line_id_step = step.line_id
+                        if parent_id not in parent_to_final:
+                            parent_to_final[parent_id] = []
+                        parent_to_final[parent_id].append((line_id_step, final_id))
+
+        # ガント検索用の製品ID（親製品＋最終品）
+        gantt_product_ids = set(parent_ids)
+        for finals in parent_to_final.values():
+            for _, final_id in finals:
+                gantt_product_ids.add(final_id)
+
         # ガントからstart_datetimeを取得して日替わり8時ルールを適用
-        # (line_id, product_id) -> {plan_date -> gantt_date} のマップを構築
+        # (line_id, product_id, plan_date) -> gantt_date のマップを構築
         gantt_date_map = {}
         line_ids_in_parents = set(row['line_id'] for row in parent_orders if row.get('line_id'))
-        if line_ids_in_parents and parent_ids:
+        if line_ids_in_parents and gantt_product_ids:
             gantt_qs = LineGanttPlan.objects.filter(
                 line_id__in=line_ids_in_parents,
-                product_id__in=parent_ids,
+                product_id__in=gantt_product_ids,
             )
             if start_dt:
                 gantt_qs = gantt_qs.filter(plan_date__gte=start_dt)
@@ -1328,10 +1352,20 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             plan_qty = Decimal(str(row['plan_qty'] or 0))
 
             # ガントの日付を優先（日替わり8時ルール適用済み）、なければplan_dateを使用
+            # 親製品（中間品）でマッチしなければ最終品で検索
             effective_date = plan_date
             if line_id_parent:
                 gantt_key = (line_id_parent, parent_id, plan_date)
                 gantt_day = gantt_date_map.get(gantt_key)
+                if not gantt_day:
+                    # 最終品のガントを検索
+                    finals = parent_to_final.get(parent_id, [])
+                    for final_line_id, final_id in finals:
+                        if final_line_id == line_id_parent:
+                            gantt_key_final = (line_id_parent, final_id, plan_date)
+                            gantt_day = gantt_date_map.get(gantt_key_final)
+                            if gantt_day:
+                                break
                 if gantt_day:
                     effective_date = gantt_day
 
