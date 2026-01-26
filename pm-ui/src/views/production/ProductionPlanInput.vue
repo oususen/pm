@@ -560,6 +560,7 @@ const savePlan = async () => {
         line_id: selectedLine.value,
         start_date: startDate.value,
         end_date: endDate.value,
+        include_progress: false,
       })
       await api.lineGanttPlans.generate({
         line_id: selectedLine.value,

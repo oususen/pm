@@ -31,7 +31,7 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-_4wufh_x8tvr3%_0d%!r4b_&uv
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
 # Allow local access plus any comma-separated hosts from ALLOWED_HOSTS env
-_default_hosts = {"localhost", "127.0.0.1", "10.0.1.194", "10.0.1.232", "192.168.0.11", "192.168.0.9"}
+_default_hosts = {"localhost", "127.0.0.1", "10.0.1.194", "10.0.1.232", "192.168.0.11", "192.168.0.9", "192.168.0.22"}
 _env_hosts = {
     host.strip()
     for host in os.getenv("ALLOWED_HOSTS", "").split(",")
@@ -180,6 +180,9 @@ CORS_ALLOWED_ORIGINS = [
     "http://192.168.0.15",
     "http://192.168.0.7",
     "http://192.168.0.19",
+    "http://192.168.0.9",
+    "http://192.168.0.9:8501",
+    "http://192.168.0.10:8501",
     "http://192.168.0.15:5173",
     "http://192.168.0.15:5174",
     "http://192.168.0.7:8501",
@@ -189,6 +192,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://192.168.0.19:8501",
     "http://192.168.0.19:5173",
     "http://192.168.0.19:5174",
+    "http://192.168.0.22",
+    "http://192.168.0.22:8501",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -222,6 +227,8 @@ CSRF_TRUSTED_ORIGINS = [
     "http://192.168.0.19:8501",
     "http://192.168.0.19:5173",
     "http://192.168.0.19:5174",
+    "http://192.168.0.22",
+    "http://192.168.0.22:8501",
 ]
 
 # REST Framework設定
