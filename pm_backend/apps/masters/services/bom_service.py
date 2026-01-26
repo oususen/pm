@@ -1,7 +1,7 @@
 """BOM関連のビジネスロジックサービス"""
 import math
 from typing import Dict, Any, List, Optional
-from masters.models import Product, BOM, Routing
+from masters.models import Product, BOM, BOMItem, Routing
 
 
 class BOMService:
@@ -202,3 +202,58 @@ class BOMService:
                 result['children'].append(child_tree)
 
         return result
+
+    def get_where_used(
+        self,
+        product_id: int,
+        recursive: bool = False,
+        visited: Optional[set] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        逆展開：指定した製品がどの親製品で使われているかを取得
+
+        Args:
+            product_id: 子製品ID
+            recursive: 再帰的に上位階層まで辿るか
+            visited: 訪問済み製品IDのセット（循環参照防止）
+
+        Returns:
+            List: この製品を使用している親製品のリスト
+        """
+        if visited is None:
+            visited = set()
+
+        if product_id in visited:
+            return []
+
+        visited.add(product_id)
+
+        items = BOMItem.objects.filter(
+            child_product_id=product_id,
+            bom__is_active=True
+        ).select_related('bom__parent_product')
+
+        results = []
+        for item in items:
+            parent = item.bom.parent_product
+            entry = {
+                'parent_product_id': parent.id,
+                'parent_product_code': parent.product_code,
+                'parent_product_name': parent.product_name,
+                'category': parent.category,
+                'quantity': float(item.quantity),
+                'sourcing_type': item.sourcing_type,
+                'is_final_product': parent.is_final_product,
+            }
+
+            if recursive:
+                # 再帰的に上位階層を取得
+                entry['parents'] = self.get_where_used(
+                    parent.id,
+                    recursive=True,
+                    visited=visited.copy()
+                )
+
+            results.append(entry)
+
+        return results

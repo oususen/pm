@@ -95,6 +95,31 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         product.save(update_fields=['image_url', 'updated_at'])
         return Response({'image_url': url}, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=['get'], url_path='where-used')
+    def where_used(self, request, pk=None):
+        """
+        逆展開：この製品がどの親製品で使われているかを取得
+
+        Query Parameters:
+            recursive: true/false - 再帰的に上位階層まで辿るか（デフォルト: false）
+        """
+        from masters.services.bom_service import BOMService
+
+        product = self.get_object()
+        recursive = request.query_params.get('recursive', 'false').lower() == 'true'
+
+        service = BOMService()
+        results = service.get_where_used(product.id, recursive=recursive)
+
+        return Response({
+            'product_id': product.id,
+            'product_code': product.product_code,
+            'product_name': product.product_name,
+            'recursive': recursive,
+            'parents': results,
+            'count': len(results),
+        })
+
 
 class ProductGroupViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = ProductGroup.objects.all()

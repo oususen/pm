@@ -5,6 +5,7 @@
       <div class="page-actions">
         <button @click="fetchBOMs" class="btn-primary">更新</button>
         <button @click="showNewDialog" class="btn-success">新規</button>
+        <button @click="openWhereUsedDialog" class="btn-info">逆展開</button>
       </div>
     </div>
 
@@ -489,6 +490,85 @@
         </div>
       </div>
     </div>
+
+    <!-- 逆展開ダイアログ -->
+    <div v-if="showWhereUsedDialog" class="modal-overlay" @click.self="closeWhereUsedDialog">
+      <div class="modal-content modal-large">
+        <h2>逆展開（Where Used）</h2>
+        <p class="hint-text">指定した製品がどの親製品で使われているかを確認します。</p>
+
+        <div class="form-group">
+          <label>製品を選択</label>
+          <input
+            class="filter-input"
+            type="text"
+            v-model="whereUsedProductFilter"
+            placeholder="品番/品名で絞り込み"
+          />
+          <select v-model="whereUsedProductId" @change="fetchWhereUsed">
+            <option value="">選択してください</option>
+            <option v-for="product in filteredWhereUsedProducts" :key="product.id" :value="product.id">
+              {{ product.product_code }} - {{ product.product_name }}
+            </option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>
+            <input type="checkbox" v-model="whereUsedRecursive" @change="fetchWhereUsed" />
+            再帰的に最終製品まで辿る
+          </label>
+        </div>
+
+        <div v-if="whereUsedLoading" class="loading-text">読み込み中...</div>
+
+        <div v-else-if="whereUsedResults && whereUsedResults.length > 0" class="where-used-results">
+          <h3>この製品を使用している親製品（{{ whereUsedResults.length }}件）</h3>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>親製品</th>
+                <th>カテゴリ</th>
+                <th>数量</th>
+                <th>調達区分</th>
+                <th>最終品</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="item in whereUsedResults" :key="item.parent_product_id">
+                <tr>
+                  <td>{{ item.parent_product_code }} - {{ item.parent_product_name }}</td>
+                  <td>{{ getCategoryLabel(item.category) }}</td>
+                  <td>{{ item.quantity }}</td>
+                  <td>{{ getSourcingTypeLabel(item.sourcing_type) }}</td>
+                  <td>{{ item.is_final_product ? '最終品' : '' }}</td>
+                </tr>
+                <!-- 再帰結果の子要素（インデント表示） -->
+                <template v-if="whereUsedRecursive && item.parents && item.parents.length > 0">
+                  <tr v-for="(child, idx) in flattenParents(item.parents, 1)" :key="`${item.parent_product_id}-${idx}`" class="nested-row">
+                    <td :style="{ paddingLeft: (child.level * 20 + 8) + 'px' }">
+                      └ {{ child.parent_product_code }} - {{ child.parent_product_name }}
+                    </td>
+                    <td>{{ getCategoryLabel(child.category) }}</td>
+                    <td>{{ child.quantity }}</td>
+                    <td>{{ getSourcingTypeLabel(child.sourcing_type) }}</td>
+                    <td>{{ child.is_final_product ? '最終品' : '' }}</td>
+                  </tr>
+                </template>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <div v-else-if="whereUsedProductId && !whereUsedLoading" class="no-data">
+          この製品を使用している親製品はありません
+        </div>
+
+        <div class="form-actions">
+          <button type="button" @click="closeWhereUsedDialog" class="btn-secondary">閉じる</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -533,6 +613,15 @@ const bomTree = ref(null)
 const showTreeDialog = ref(false)
 const treeLoading = ref(false)
 const expandedNodes = ref(new Set())
+
+// 逆展開用
+const showWhereUsedDialog = ref(false)
+const whereUsedProductId = ref('')
+const whereUsedProductFilter = ref('')
+const whereUsedRecursive = ref(false)
+const whereUsedResults = ref([])
+const whereUsedLoading = ref(false)
+
 const routingGenForm = ref({
   routing_code: '',
   description: '',
@@ -887,6 +976,23 @@ const filteredParentProducts = computed(() => {
   )
 })
 
+const filteredWhereUsedProducts = computed(() => {
+  const keyword = whereUsedProductFilter.value.trim().toLowerCase()
+  if (!keyword) return products.value
+  return products.value.filter((p) =>
+    `${p.product_code} ${p.product_name}`.toLowerCase().includes(keyword)
+  )
+})
+
+const categoryMap = {
+  'ASSEMBLY': '組立品',
+  'SINGLE': '単品',
+  'MATERIAL': '材料',
+  'PURCHASED': '購入品',
+}
+
+const getCategoryLabel = (value) => categoryMap[value] || value || '-'
+
 const getSupplierName = (supplierId) => {
   if (!supplierId) return '-'
   const supplier = suppliers.value.find(s => s.id === supplierId)
@@ -1137,6 +1243,55 @@ const closeTreeDialog = () => {
   showTreeDialog.value = false
   bomTree.value = null
   expandedNodes.value = new Set()
+}
+
+// 逆展開関連
+const openWhereUsedDialog = () => {
+  showWhereUsedDialog.value = true
+  whereUsedProductId.value = ''
+  whereUsedProductFilter.value = ''
+  whereUsedRecursive.value = false
+  whereUsedResults.value = []
+}
+
+const closeWhereUsedDialog = () => {
+  showWhereUsedDialog.value = false
+  whereUsedProductId.value = ''
+  whereUsedProductFilter.value = ''
+  whereUsedRecursive.value = false
+  whereUsedResults.value = []
+}
+
+const fetchWhereUsed = async () => {
+  if (!whereUsedProductId.value) {
+    whereUsedResults.value = []
+    return
+  }
+  whereUsedLoading.value = true
+  try {
+    const response = await api.products.getWhereUsed(
+      whereUsedProductId.value,
+      whereUsedRecursive.value
+    )
+    whereUsedResults.value = response.data.parents || []
+  } catch (error) {
+    console.error('逆展開取得エラー:', error)
+    alert('逆展開データの取得に失敗しました')
+    whereUsedResults.value = []
+  } finally {
+    whereUsedLoading.value = false
+  }
+}
+
+const flattenParents = (parents, level) => {
+  const result = []
+  for (const p of parents) {
+    result.push({ ...p, level })
+    if (p.parents && p.parents.length > 0) {
+      result.push(...flattenParents(p.parents, level + 1))
+    }
+  }
+  return result
 }
 
 const exportToExcel = () => {
@@ -1663,6 +1818,41 @@ const TreeBranch = defineComponent({
 .hint-text {
   margin-top: 8px;
   font-size: 12px;
+  color: #666;
+}
+
+.btn-info {
+  padding: 0.5rem 1rem;
+  background-color: #17a2b8;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-info:hover {
+  background-color: #138496;
+}
+
+.where-used-results {
+  margin-top: 1rem;
+}
+
+.where-used-results h3 {
+  margin-bottom: 0.5rem;
+}
+
+.nested-row {
+  background-color: #f9f9f9;
+}
+
+.nested-row td:first-child {
+  color: #666;
+}
+
+.loading-text {
+  padding: 1rem;
+  text-align: center;
   color: #666;
 }
 </style>

@@ -37,4 +37,9 @@ export const createProductsAPI = (client) => ({
   deleteProduct(id) {
     return client.delete(`/products/${id}/`)
   },
+  getWhereUsed(id, recursive = false) {
+    return client.get(`/products/${id}/where-used/`, {
+      params: { recursive: recursive ? 'true' : 'false' },
+    })
+  },
 })
