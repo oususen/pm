@@ -343,16 +343,8 @@ if (mediaEnvBase) {
   // In dev (Vite) we keep the current origin so the dev server can proxy /media for remote devices.
   mediaBaseUrl = browserOrigin
 } else {
-  try {
-    mediaBaseUrl = new URL(apiBaseUrl, browserOrigin || undefined).origin
-  } catch (e) {
-    mediaBaseUrl = browserOrigin
-  }
-  if (mediaBaseUrl.endsWith(':8501')) {
-    mediaBaseUrl = mediaBaseUrl.replace(':8501', ':8081')
-  } else if (mediaBaseUrl.endsWith(':5173')) {
-    mediaBaseUrl = mediaBaseUrl.replace(':5173', ':8081')
-  }
+  // 本番環境では nginx が /media/ を直接配信するため、ブラウザのオリジンをそのまま使用
+  mediaBaseUrl = browserOrigin
 }
 
 const manualProduct = ref(false)
