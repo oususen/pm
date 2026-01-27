@@ -653,6 +653,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         routing.steps.all().delete()
         created_steps = []
+        parent_product_code = bom.parent_product.product_code if bom.parent_product_id else ''
         max_depth = max((depth for depth, _, _ in routing_items_info), default=0)
         for idx, (depth, path, item) in enumerate(routing_items_info, start=1):
             path_str = ".".join(str(p) for p in path) if path else "1"
@@ -667,14 +668,14 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 step_time_unit = 'DAY'
                 step_lead_time_days = item.lead_time_days or 1
                 step_duration_min = None
-                step_remark = f"Auto from BUY item {item.child_product.product_code} (supplier: {item.supplier.supplier_code})"
+                step_remark = parent_product_code
             else:
                 step_process = item.process
                 step_line = item.line
                 step_time_unit = item.time_unit
                 step_lead_time_days = item.lead_time_days if item.time_unit == 'DAY' else 0
                 step_duration_min = item.duration_min if item.time_unit == 'MINUTE' else None
-                step_remark = f"Auto from BOM item {item.child_product.product_code} (path {path_str}, depth {depth})"
+                step_remark = parent_product_code
 
             step = RoutingStep.objects.create(
                 routing=routing,
@@ -706,7 +707,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 time_unit=final_time_unit,
                 lead_time_days=int(final_lead_time_days) if final_time_unit == 'DAY' else 0,
                 duration_min=int(final_duration_min) if final_time_unit == 'MINUTE' else None,
-                remark='Final step (manual input)'
+                remark=parent_product_code
             )
 
         # 自動で工程別部品を付与（対象ステップの商品に紐づく子BOMの明細を消費部品とする）
