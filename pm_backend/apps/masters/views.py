@@ -508,7 +508,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         - Child BOMs are traversed before appending the parent item (post-order) so
           downstream工程が先に生成される（前後関係を表す工程順に近づける）。
-        - collector に (depth, path, item) を詰める。path は階層内の通し。
+        - collector に (depth, path, item, parent_product) を詰める。path は階層内の通し。
         - include_buy=True の場合、BUY品も収集対象に含める
         """
         if bom.id in visited_bom_ids:
@@ -529,7 +529,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 )
             target_types = ['MAKE', 'SUBCON', 'BUY'] if include_buy else ['MAKE', 'SUBCON']
             if item.sourcing_type in target_types:
-                collector.append((depth, path_prefix + (idx,), item))
+                collector.append((depth, path_prefix + (idx,), item, bom.parent_product))
 
     def _get_or_create_purchase_line_and_process(self, supplier):
         """
@@ -609,7 +609,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         # Validate each item has process/time info
         # BUY品の場合は仕入先が必須（工程・ラインは自動設定される）
-        for _, _, it in routing_items_info:
+        for _, _, it, _ in routing_items_info:
             if it.sourcing_type == 'BUY':
                 # BUY品は仕入先が必須
                 if not it.supplier_id:
@@ -653,12 +653,12 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         routing.steps.all().delete()
         created_steps = []
-        parent_product_code = bom.parent_product.product_code if bom.parent_product_id else ''
-        max_depth = max((depth for depth, _, _ in routing_items_info), default=0)
-        for idx, (depth, path, item) in enumerate(routing_items_info, start=1):
+        max_depth = max((depth for depth, _, _, _ in routing_items_info), default=0)
+        for idx, (depth, path, item, parent_product) in enumerate(routing_items_info, start=1):
             path_str = ".".join(str(p) for p in path) if path else "1"
             step_no = (max_depth - len(path) + 1) * 1000
             parallel_group = int("".join(str(p) for p in path)) if path else 1
+            parent_product_code = parent_product.product_code if parent_product else ''
 
             # BUY品の場合は仕入先ラインとPURCHASE工程を使用
             if item.sourcing_type == 'BUY' and item.supplier_id:
@@ -695,6 +695,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         # Append final step if provided
         if final_process:
+            final_parent_product_code = bom.parent_product.product_code if bom.parent_product_id else ''
             max_step_no = max([s.step_no for _, s in created_steps], default=0)
             RoutingStep.objects.create(
                 routing=routing,
@@ -707,7 +708,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 time_unit=final_time_unit,
                 lead_time_days=int(final_lead_time_days) if final_time_unit == 'DAY' else 0,
                 duration_min=int(final_duration_min) if final_time_unit == 'MINUTE' else None,
-                remark=parent_product_code
+                remark=final_parent_product_code
             )
 
         # 自動で工程別部品を付与（対象ステップの商品に紐づく子BOMの明細を消費部品とする）
