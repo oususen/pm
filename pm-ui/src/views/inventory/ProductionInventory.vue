@@ -77,6 +77,14 @@
               <span class="info-label">翌々月</span>
               <span class="info-value"></span>
             </div>
+            <div class="info-row">
+              <span class="info-label">完成品向けLT</span>
+              <span class="info-value">{{ fmt(g.total_lt_days) }}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">自LT</span>
+              <span class="info-value">{{ fmt(g.self_lt_days) }}</span>
+            </div>
           </div>
 
           <div class="matrix-block">
@@ -274,25 +282,33 @@ const groups = computed(() => {
   const map = new Map();
   for (const d of filtered) {
     const key = `${d.line || d.line_name || ""}__${d.process_code || d.process || ""}__${d.product_code || ""}`;
-    if (!map.has(key)) {
-      map.set(key, {
-        key,
-        line_code: d.line_code,
-        line_name: d.line_name,
-        product_code: d.product_code,
-        product_name: d.product_name,
-        product_id: d.product,
-        line_id: d.line,
-        process_id: d.process,
-        process_code: d.process_code || d.process || "",
-        process_name: d.process_name || "",
-        cells: {},
-        children: [],
-        showChildren: false,
-        isChild: false,
-      });
-    }
-    const g = map.get(key);
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          line_code: d.line_code,
+          line_name: d.line_name,
+          product_code: d.product_code,
+          product_name: d.product_name,
+          product_id: d.product,
+          line_id: d.line,
+          process_id: d.process,
+          process_code: d.process_code || d.process || "",
+          process_name: d.process_name || "",
+          total_lt_days: null,
+          self_lt_days: null,
+          cells: {},
+          children: [],
+          showChildren: false,
+          isChild: false,
+        });
+      }
+      const g = map.get(key);
+      if (g.total_lt_days === null && d.total_lt_days !== null && d.total_lt_days !== undefined) {
+        g.total_lt_days = Number(d.total_lt_days);
+      }
+      if (g.self_lt_days === null && d.self_lt_days !== null && d.self_lt_days !== undefined) {
+        g.self_lt_days = Number(d.self_lt_days);
+      }
     if (!g.cells[d.plan_date]) {
       g.cells[d.plan_date] = {
         forecast: 0,
@@ -592,6 +608,8 @@ const loadBOMChildren = async (group) => {
           line_name: childDemand.line_name,
           line_id: childDemand.line,
           bom_quantity: item.quantity,
+          total_lt_days: childDemand.total_lt_days ?? null,
+          self_lt_days: childDemand.self_lt_days ?? null,
           cells: childCells,
           isChild: true,
         });

@@ -1,4 +1,5 @@
 from decimal import Decimal
+import math
 
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
@@ -82,6 +83,8 @@ class LineBacklogSerializer(serializers.ModelSerializer):
     step_no = serializers.SerializerMethodField()
     cycle_time_min = serializers.SerializerMethodField()
     routing_product_id = serializers.SerializerMethodField()
+    total_lt_days = serializers.SerializerMethodField()
+    self_lt_days = serializers.SerializerMethodField()
 
     class Meta:
         model = LineBacklog
@@ -95,6 +98,7 @@ class LineBacklogSerializer(serializers.ModelSerializer):
             'sequence_no', 'plan_id',
             'source_line', 'source_routing_step', 'updated_at',
             'computed_time_min', 'work_minutes', 'step_no', 'cycle_time_min', 'routing_product_id',
+            'total_lt_days', 'self_lt_days',
         ]
         read_only_fields = ['id', 'updated_at']
 
@@ -112,6 +116,128 @@ class LineBacklogSerializer(serializers.ModelSerializer):
 
     def get_work_minutes(self, obj):
         return getattr(obj, 'work_minutes', None)
+
+    def _build_lt_cache(self):
+        if hasattr(self, '_lt_cache'):
+            return
+        self._lt_cache = {'step_lookup': {}, 'lt_by_step': {}}
+
+        items = []
+        if isinstance(self.instance, (list, tuple)):
+            items = [obj for obj in self.instance if obj is not None]
+        elif self.instance is not None:
+            items = [self.instance]
+
+        product_ids = {it.product_id for it in items if getattr(it, 'product_id', None)}
+        if not product_ids:
+            return
+
+        from masters.models import RoutingStep
+
+        step_qs = RoutingStep.objects.filter(output_product_id__in=product_ids).select_related('line')
+        routing_ids = set(step_qs.values_list('routing_id', flat=True))
+        if not routing_ids:
+            return
+
+        steps = list(RoutingStep.objects.filter(
+            routing_id__in=routing_ids
+        ).select_related('line', 'output_product'))
+
+        minutes_per_day = 480
+
+        def resolve_lead_time_days(step):
+            if step.lead_time_days and step.lead_time_days > 0:
+                return step.lead_time_days
+            if step.line and step.line.lead_time_days:
+                return max(step.line.lead_time_days, 0)
+            return 0
+
+        def calc_shift_days(prev_minutes, add_minutes):
+            prev_days = math.ceil(prev_minutes / minutes_per_day) if prev_minutes > 0 else 0
+            total_minutes = prev_minutes + add_minutes
+            total_days = math.ceil(total_minutes / minutes_per_day) if total_minutes > 0 else 0
+            return total_days - prev_days, total_minutes
+
+        def path_key(path):
+            try:
+                return tuple(int(p) for p in str(path).split('.'))
+            except Exception:
+                return (str(path),)
+
+        lt_by_step = {}
+        for routing_id in routing_ids:
+            routing_steps = [s for s in steps if s.routing_id == routing_id]
+            if not routing_steps:
+                continue
+            step_map = {
+                s.hierarchy_path: s
+                for s in routing_steps
+                if s.hierarchy_path and s.hierarchy_path != 'final'
+            }
+            children_map = {}
+            for path in step_map.keys():
+                parent_path = path.rsplit('.', 1)[0] if '.' in path else None
+                children_map.setdefault(parent_path, []).append(path)
+
+            final_step = next((s for s in routing_steps if s.hierarchy_path == 'final'), None)
+            base_days = 0
+            base_minutes = 0
+            if final_step:
+                lead_days = resolve_lead_time_days(final_step) if final_step.time_unit == 'DAY' else 0
+                step_minutes = final_step.duration_min or 0 if final_step.time_unit == 'MINUTE' else 0
+                minute_shift, base_minutes = calc_shift_days(0, step_minutes)
+                base_days = lead_days + minute_shift
+                lt_by_step[final_step.id] = {
+                    'total': base_days,
+                    'self': base_days,
+                }
+
+            def compute(path, parent_days, parent_minutes):
+                step = step_map.get(path)
+                if not step:
+                    return
+                lead_days = resolve_lead_time_days(step) if step.time_unit == 'DAY' else 0
+                step_minutes = step.duration_min or 0 if step.time_unit == 'MINUTE' else 0
+                minute_shift, total_minutes = calc_shift_days(parent_minutes, step_minutes)
+                self_days = lead_days + minute_shift
+                total_days = parent_days + self_days
+                lt_by_step[step.id] = {
+                    'total': total_days,
+                    'self': self_days,
+                }
+                for child_path in sorted(children_map.get(path, []), key=path_key):
+                    compute(child_path, total_days, total_minutes)
+
+            for root_path in sorted(children_map.get(None, []), key=path_key):
+                compute(root_path, base_days, base_minutes)
+
+        step_lookup = {}
+        for step in steps:
+            key = (step.output_product_id, step.line_id, step.process_id)
+            if key not in step_lookup:
+                step_lookup[key] = step.id
+            if step.output_product_id not in step_lookup:
+                step_lookup[step.output_product_id] = step.id
+
+        self._lt_cache = {'step_lookup': step_lookup, 'lt_by_step': lt_by_step}
+
+    def _get_lt_for_obj(self, obj):
+        self._build_lt_cache()
+        cache = getattr(self, '_lt_cache', None) or {}
+        step_lookup = cache.get('step_lookup', {})
+        lt_by_step = cache.get('lt_by_step', {})
+        step_id = step_lookup.get((obj.product_id, obj.line_id, obj.process_id))
+        if not step_id:
+            step_id = step_lookup.get(obj.product_id)
+        if not step_id:
+            return {'total': None, 'self': None}
+        return lt_by_step.get(step_id, {'total': None, 'self': None})
+
+    def get_total_lt_days(self, obj):
+        return self._get_lt_for_obj(obj).get('total')
+
+    def get_self_lt_days(self, obj):
+        return self._get_lt_for_obj(obj).get('self')
 
 
 class LinePlanSerializer(serializers.ModelSerializer):

@@ -199,12 +199,33 @@ def _build_firm_order_map(line_id, start_date, end_date):
     return firm_map
 
 
+def _get_max_parent_bom_lead_time(product_id):
+    """
+    製品を子製品として持つBOMの最大リードタイムを取得
+
+    Args:
+        product_id: 製品ID
+
+    Returns:
+        int: 最大リードタイム（日）。BOMがない場合は0
+    """
+    from masters.models import BOMItem
+    max_lt = BOMItem.objects.filter(
+        child_product_id=product_id,
+        bom__is_active=True
+    ).values_list('lead_time_days', flat=True)
+    return max(max_lt, default=0) or 0
+
+
 def _sum_parent_shipments(backlog, pick_qty, shift_fn=None):
     from masters.models import BOMItem
 
+    # 連産品（is_coproduct=True）のBOMは除外
+    # 連産品の実績は通常の親製品とは別扱いのため、出庫計算に含めない
     parent_bom_items = BOMItem.objects.filter(
         child_product=backlog.product,
-        bom__is_active=True
+        bom__is_active=True,
+        bom__is_coproduct=False
     ).select_related('bom__parent_product')
 
     if not parent_bom_items.exists():
@@ -234,8 +255,37 @@ def _sum_parent_shipments(backlog, pick_qty, shift_fn=None):
     return total_shipment
 
 
-def _calculate_parent_actual_shipment(backlog):
-    return _sum_parent_shipments(backlog, lambda d: d.actual_qty or 0)
+def _calculate_parent_actual_shipment(backlog, shift_fn=None):
+    """
+    実在庫・計画在庫用の実績出庫計算（後工程の実績を使用）
+
+    Args:
+        backlog: LineBacklogインスタンス
+        shift_fn: LTシフト関数（営業日ベースで日付をシフト）
+    """
+    return _sum_parent_shipments(backlog, lambda d: d.actual_qty or 0, shift_fn)
+
+
+def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None):
+    """
+    計画在庫用の出庫計算（実績優先、なければ計画を使用）
+
+    LTシフト後の親製品の日付で：
+    - 実績がある場合 → 実績を使用
+    - 実績がない場合 → 計画数を使用
+    - どちらもない場合 → 0
+
+    Args:
+        backlog: LineBacklogインスタンス
+        shift_fn: LTシフト関数（営業日ベースで日付をシフト）
+    """
+    def pick_qty(downstream):
+        actual = downstream.actual_qty or 0
+        if actual > 0:
+            return actual
+        return downstream.plan_qty or 0
+
+    return _sum_parent_shipments(backlog, pick_qty, shift_fn)
 
 
 def _calculate_parent_planned_shipment(backlog, today, shift_fn):
@@ -564,15 +614,18 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
         return min(candidates, key=lambda r: (r.sequence_no if r.sequence_no is not None else 0, r.id))
 
     today = get_business_today()
-    day_before_yesterday = get_prev_working_day(get_prev_working_day(today))  # 前々営業日
+    # 製品のBOMの最大LTを取得し、LT+1日前から再計算
+    # これにより、親製品の実績変更が子製品の過去の出庫に正しく反映される
+    max_lt = _get_max_parent_bom_lead_time(product_id)
+    calc_start_date = shift_working_days(today, -(max_lt + 1))
     planned_by_date = {}
     firm_map = firm_map or {}
 
-    # 前々営業日の実在庫を初期値として取得（計画在庫も前々営業日以前は実在庫を使用）
+    # 計算開始日以前の実在庫を初期値として取得
     initial_backlog = LineBacklog.objects.filter(
         line_id=line_id,
         product_id=product_id,
-        plan_date__lte=day_before_yesterday,
+        plan_date__lte=calc_start_date,
         stock_qty__isnull=False
     ).order_by('-plan_date', 'sequence_no', 'id').first()
 
@@ -582,15 +635,15 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
     else:
         last_planned = 0
 
-    # 更新対象のbacklogを追跡（前々営業日以前は更新しない）
+    # 更新対象のbacklogを追跡（計算開始日以前は更新しない）
     backlogs_to_update = []
 
     for plan_date in sorted(by_date.keys()):
         rows = by_date[plan_date]
         sample = rows[0]
 
-        # 前々営業日以前は実在庫の値を使用し、更新しない
-        if plan_date <= day_before_yesterday:
+        # 計算開始日以前は実在庫の値を使用し、更新しない
+        if plan_date <= calc_start_date:
             # 既存の実在庫値を取得してplanned_by_dateに保持（後続の計算用）
             existing_stock = 0
             for row in rows:
@@ -616,7 +669,7 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
                 planned_shipment = firm_qty if firm_qty > 0 else Decimal(str(order_total))
         else:
             if plan_date < today:
-                planned_shipment = _calculate_parent_actual_shipment(sample)
+                planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days)
             else:
                 planned_shipment = _calculate_parent_planned_shipment(sample, today, shift_working_days)
         planned_shipment = int(planned_shipment or 0)
