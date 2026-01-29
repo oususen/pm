@@ -89,6 +89,14 @@ const tiles = computed(() => {
       resource: "production.inventory",
     },
     {
+      to: "/production/component-inventory",
+      label: t("productionMenu.tiles.componentInventory"),
+      icon: "🧩",
+      iconLabel: "部品",
+      required: "view",
+      resource: "production.component_inventory",
+    },
+    {
       to: "/production/scrap-history",
       label: t("productionMenu.tiles.scrapHistory"),
       icon: "📜",

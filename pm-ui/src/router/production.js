@@ -36,6 +36,12 @@ const production = [
     meta: { pageTitle: "在庫 / 残量一覧", manualPath: "生産/在庫残量一覧.md" },
   },
   {
+    path: "/production/component-inventory",
+    name: "ComponentInventory",
+    component: () => import("@/views/inventory/ComponentInventory.vue"),
+    meta: { pageTitle: "構成部品在庫一覧", manualPath: "生産/構成部品在庫一覧.md" },
+  },
+  {
     path: "/production/stock-allocations",
     name: "StockAllocationList",
     component: () => import("@/views/production/StockAllocationList.vue"),
