@@ -45,9 +45,6 @@
             <div class="info-row">
               <span class="info-label">品番</span>
               <span class="info-value">{{ g.product_code || '-' }}</span>
-              <button @click="toggleChildren(g)" class="expand-btn">
-                {{ g.showChildren ? '▼' : '▶' }} BOM展開
-              </button>
             </div>
             <div class="info-row">
               <span class="info-label">品名</span>
@@ -122,64 +119,6 @@
             </table>
           </div>
 
-          <!-- BOM子製品表示 -->
-          <div v-if="g.showChildren" class="children-list">
-            <div v-if="g.children.length === 0" class="no-children">BOM子製品がありません</div>
-            <div v-for="(child, idx) in g.children" :key="idx" class="child-card">
-              <div class="child-info">
-                <div class="child-row">
-                  <span class="child-label">品番</span>
-                  <span class="child-value">{{ child.product_code }}</span>
-                </div>
-                <div class="child-row">
-                  <span class="child-label">品名</span>
-                  <span class="child-value">{{ child.product_name }}</span>
-                </div>
-                <div class="child-row">
-                  <span class="child-label">工程</span>
-                  <span class="child-value">{{ child.process_code }}</span>
-                </div>
-                <div class="child-row">
-                  <span class="child-label">BOM数量</span>
-                  <span class="child-value">{{ child.bom_quantity }}</span>
-                </div>
-              </div>
-              <div class="child-matrix">
-                <table class="matrix-table">
-                  <thead>
-                    <tr>
-                      <th class="label-col">項目</th>
-                      <th v-for="d in columns" :key="d" class="day-col">{{ d }}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="row in rowDefs" :key="row.key">
-                      <th class="label-col">{{ row.label }}</th>
-                      <td v-for="d in columns"
-                        :key="`${row.key}-${d}`"
-                        class="cell" :class="getCellClass(child, d, row.key)"
-                      >
-                        <template v-if="row.key === 'adjust' && !child.isChild">
-                          <input
-                            class="cell-input"
-                            type="number"
-                            :value="getAdjustInputValue(child, d)"
-                            :disabled="isAdjustSaving(child, d)"
-                            @input="onAdjustInput(child, d, $event)"
-                            @blur="saveAdjust(child, d)"
-                            @keydown.enter.prevent="onAdjustEnter($event)"
-                          />
-                        </template>
-                        <template v-else>
-                          {{ fmt(getValue(child, d, row.key)) }}
-                        </template>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
       <div v-else class="no-data">データがありません</div>
@@ -296,9 +235,6 @@ const groups = computed(() => {
           total_lt_days: null,
           self_lt_days: null,
           cells: {},
-          children: [],
-          showChildren: false,
-          isChild: false,
         });
       }
       const g = map.get(key);
@@ -508,124 +444,6 @@ const saveAdjust = async (group, date) => {
     alert('調整の保存に失敗しました。');
   } finally {
     delete adjustSaving.value[key];
-  }
-};
-
-const loadBOMChildren = async (group) => {
-  if (!group.product_id) return;
-
-  try {
-    // この製品を親とするBOMを取得
-    const bomRes = await api.boms.getBOMs({ parent_product: group.product_id });
-    const boms = bomRes.data || [];
-
-    if (!boms.length) {
-      group.children = [];
-      return;
-    }
-
-    // 最新のアクティブなBOMを使用
-    const activeBoms = boms.filter(b => b.is_active);
-    if (!activeBoms.length) {
-      group.children = [];
-      return;
-    }
-
-    const bom = activeBoms[0];
-
-    // BOM明細を取得
-    const itemsRes = await api.bomItems.getBOMItems({ bom: bom.id });
-    const items = itemsRes.data || [];
-
-    // 各子製品の在庫データを取得
-    const children = [];
-    for (const item of items) {
-      // この子製品の在庫データを取得（日付範囲は親と同じ）
-      const childDemands = demands.value.filter(d =>
-        d.product === item.child_product &&
-        d.plan_date >= columns.value[0] &&
-        d.plan_date <= columns.value[columns.value.length - 1]
-      );
-
-      if (childDemands.length > 0) {
-        // 子製品のセルデータを作成
-        const childCells = {};
-        for (const d of childDemands) {
-          if (!childCells[d.plan_date]) {
-            childCells[d.plan_date] = {
-              forecast: 0,
-              firm: 0,
-              plan: 0,
-              actual: 0,
-              adjust: 0,
-              scrap: 0,
-              stock: 0,
-              planned_stock: 0,
-              progress: 0,
-            };
-          }
-          const c = childCells[d.plan_date];
-          const seqVal = Number.isFinite(Number(d.sequence_no)) ? Number(d.sequence_no) : 0;
-          const orderQty = Number(d.order_qty || 0);
-          const demandQty = Number(d.demand_qty_plan || 0);
-          const planQty = Number(d.plan_qty || 0);
-          const isDemandRow = (orderQty > 0 || demandQty > 0) && planQty === 0;
-          // 内示/確定は需要行のみ採用（計画行は除外）
-          if (isDemandRow) {
-            const hasForecastSplit = d.forecast_order_qty !== null && d.forecast_order_qty !== undefined;
-            const forecastVal = Number((hasForecastSplit ? d.forecast_order_qty : d.order_qty) || 0);
-            const hasFirmSplit = d.firm_order_qty !== null && d.firm_order_qty !== undefined;
-            const firmVal = Number((hasFirmSplit ? d.firm_order_qty : d.actual_shipment_qty) || 0);
-            if (c.demand_seq === undefined || seqVal < c.demand_seq) {
-              c.demand_seq = seqVal;
-              c.forecast = forecastVal;
-              c.firm = firmVal;
-            } else if (seqVal === c.demand_seq) {
-              c.forecast = Math.max(c.forecast, forecastVal);
-              c.firm = Math.max(c.firm, firmVal);
-            }
-          }
-          c.plan += Number(d.plan_qty || 0);
-          c.actual += Number(d.actual_qty || 0);
-          c.adjust += Number(d.adjust_qty || 0);
-          c.scrap += Number(d.scrap_qty || 0);
-          c.stock += Number(d.stock_qty || 0);
-          c.planned_stock += Number(d.planned_stock_qty || 0);
-          c.progress += Number(d.progress_qty || 0);
-        }
-
-        // 子製品情報を追加
-        const childDemand = childDemands[0];
-        children.push({
-          product_code: childDemand.product_code,
-          product_name: childDemand.product_name,
-          product_id: childDemand.product,
-          process_code: childDemand.process_code,
-          process_name: childDemand.process_name,
-          process_id: childDemand.process,
-          line_code: childDemand.line_code,
-          line_name: childDemand.line_name,
-          line_id: childDemand.line,
-          bom_quantity: item.quantity,
-          total_lt_days: childDemand.total_lt_days ?? null,
-          self_lt_days: childDemand.self_lt_days ?? null,
-          cells: childCells,
-          isChild: true,
-        });
-      }
-    }
-
-    group.children = children;
-  } catch (e) {
-    console.error('BOM子製品の読み込みに失敗:', e);
-    group.children = [];
-  }
-};
-
-const toggleChildren = async (group) => {
-  group.showChildren = !group.showChildren;
-  if (group.showChildren && group.children.length === 0) {
-    await loadBOMChildren(group);
   }
 };
 
@@ -850,78 +668,5 @@ const recalculate = async () => {
   padding: 24px;
   text-align: center;
   color: #6b7280;
-}
-
-.expand-btn {
-  margin-left: 8px;
-  padding: 4px 8px;
-  font-size: 12px;
-  background: #3b82f6;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.expand-btn:hover {
-  background: #2563eb;
-}
-
-.children-list {
-  padding: 12px;
-  background: #f1f5f9;
-  border-top: 2px solid #cbd5e1;
-}
-
-.no-children {
-  padding: 12px;
-  text-align: center;
-  color: #64748b;
-  font-size: 13px;
-}
-
-.child-card {
-  display: grid;
-  grid-template-columns: 200px 1fr;
-  margin-bottom: 12px;
-  background: #fff;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.child-card:last-child {
-  margin-bottom: 0;
-}
-
-.child-info {
-  padding: 8px;
-  background: #fefce8;
-  border-right: 1px solid #e5e7eb;
-}
-
-.child-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 4px;
-  font-size: 12px;
-  border-bottom: 1px solid #fde68a;
-}
-
-.child-row:last-child {
-  border-bottom: none;
-}
-
-.child-label {
-  font-weight: 600;
-  color: #92400e;
-}
-
-.child-value {
-  color: #451a03;
-}
-
-.child-matrix {
-  overflow: auto;
 }
 </style>
