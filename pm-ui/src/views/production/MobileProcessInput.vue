@@ -34,7 +34,7 @@
       </div>
     </div>
 
-    <div class="section inline-row dual-row">
+    <div v-if="!isScrapOnlyPage" class="section inline-row dual-row">
       <div v-if="selectedProcessId && showRecordTypeSelection" class="inline-group">
         <label class="label-required inline-label">{{ t('processInput.recordType') }}</label>
         <div class="type-buttons inline-buttons">
@@ -58,6 +58,27 @@
       </div>
     </div>
 
+    <div v-if="selectedProcessId && isScrapRecord" class="section inline-row dual-row">
+      <div class="inline-group">
+        <label class="inline-label">{{ t('processInput.scrapFilter.label') }}</label>
+        <select v-model="scrapRelationFilter" class="input-large flex-input scrap-filter-select">
+          <option value="">{{ t('processInput.scrapFilter.all') }}</option>
+          <option v-for="opt in scrapRelationOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
+      </div>
+      <div class="inline-group">
+        <label class="inline-label">{{ t('processInput.scrapSearch.label') }}</label>
+        <input
+          v-model="scrapSearchText"
+          type="text"
+          class="input-large flex-input scrap-filter-input"
+          :placeholder="t('processInput.scrapSearch.placeholder')"
+        />
+      </div>
+    </div>
+
     <div
       v-if="(record.record_type === 'PRODUCTION' || record.record_type === 'SCRAP') && currentProductList.length"
       class="planned-buttons"
@@ -65,7 +86,7 @@
       <span class="planned-label">{{ t('processInput.plannedToday') }}</span>
       <div v-if="record.record_type === 'SCRAP'" class="planned-cards">
         <div
-          v-for="p in currentProductList"
+          v-for="p in displayProductList"
           :key="`${p.plan_date}-${p.product}-${p.process}`"
           class="planned-card"
           :class="{ active: record.product_id === p.product }"
@@ -83,10 +104,16 @@
             </div>
           </div>
         </div>
+        <div
+          v-if="record.record_type === 'SCRAP' && currentProductList.length && !displayProductList.length && isScrapFilterActive"
+          class="hint"
+        >
+          {{ t('processInput.scrapFilter.noMatch') }}
+        </div>
       </div>
       <div v-else class="planned-list">
         <button
-          v-for="p in currentProductList"
+          v-for="p in displayProductList"
           :key="`${p.plan_date}-${p.product}-${p.process}`"
           class="btn-planned"
           :class="{ active: record.product_id === p.product }"
@@ -122,7 +149,7 @@
             <select v-model="record.product_id" class="input-large flex-input">
               <option value="">{{ t('processInput.selectProduct') }}</option>
               <option
-                v-for="p in currentProductList"
+                v-for="p in displayProductList"
                 :key="`${p.plan_date}-${p.product_code}`"
                 :value="p.product"
               >
@@ -354,6 +381,8 @@ const manualProductsLoaded = ref(false)
 const manualProductsProcessId = ref(null)
 const productionProducts = ref([])
 const scrapProducts = ref([])
+const scrapRelationFilter = ref('')
+const scrapSearchText = ref('')
 const defaultProductId = ref(null)
 const productImageMap = ref({})
 
@@ -395,6 +424,14 @@ const scrapDispositionOptions = computed(() => [
   { value: 'PENDING', label: t('processInput.scrapDisposition.pending') },
 ])
 
+const scrapRelationOptions = computed(() => [
+  { value: 'coproduct_parent', label: t('processInput.scrapFilter.coproductParent') },
+  { value: 'coproduct_child', label: t('processInput.scrapFilter.coproductChild') },
+  { value: 'intermediate', label: t('processInput.scrapFilter.intermediate') },
+  { value: 'purchased', label: t('processInput.scrapFilter.purchased') },
+  { value: 'output_product', label: t('processInput.scrapFilter.outputProduct') },
+])
+
 const availableRecordTypes = computed(() => {
   const allowed = route.meta?.allowedRecordTypes
   if (Array.isArray(allowed) && allowed.length) {
@@ -420,6 +457,7 @@ const filteredProcesses = computed(() => {
   return processes.value.filter((p) => String(p.line) === String(selectedLineId.value))
 })
 
+const isScrapOnlyPage = computed(() => route.name === 'ScrapRecordInput')
 const isScrapRecord = computed(() => record.value.record_type === 'SCRAP')
 
 const equipmentStates = computed(() => [
@@ -542,22 +580,56 @@ const currentProductList = computed(() => {
   return []
 })
 
+const isScrapFilterActive = computed(() => {
+  return !!scrapRelationFilter.value || !!(scrapSearchText.value || '').trim()
+})
+
+const filterScrapCandidates = (list) => {
+  const items = Array.isArray(list) ? list : []
+  const relation = scrapRelationFilter.value
+  const query = (scrapSearchText.value || '').trim().toLowerCase()
+  if (!relation && !query) return items
+  return items.filter((p) => {
+    if (!p) return false
+    if (relation) {
+      const type = p.relation_type || ''
+      if (type !== relation) return false
+    }
+    if (query) {
+      const code = (p.product_code || '').toLowerCase()
+      const name = (p.product_name || '').toLowerCase()
+      if (!code.includes(query) && !name.includes(query)) return false
+    }
+    return true
+  })
+}
+
+const displayProductList = computed(() => {
+  if (record.value.record_type === 'SCRAP') {
+    return filterScrapCandidates(scrapProducts.value)
+  }
+  return currentProductList.value
+})
+
 const manualProductOptions = computed(() => {
   const list = Array.isArray(manualProducts.value) ? manualProducts.value : []
   const materialTypes = ['intermediate', 'purchased']
   const coproductTypes = ['coproduct_parent', 'coproduct_child']
-  return [...list]
+  let filtered = [...list]
     .filter((p) => {
       if (!p || !(p.product_code || p.product_name)) return false
       if (record.value.record_type !== 'PRODUCTION') return true
       return !materialTypes.includes(p.relation_type)
     })
-    .sort((a, b) => {
-      const aCoproduct = coproductTypes.includes(a.relation_type)
-      const bCoproduct = coproductTypes.includes(b.relation_type)
-      if (aCoproduct !== bCoproduct) return aCoproduct ? -1 : 1
-      return (a.product_code || '').localeCompare(b.product_code || '')
-    })
+  if (record.value.record_type === 'SCRAP') {
+    filtered = filterScrapCandidates(filtered)
+  }
+  return filtered.sort((a, b) => {
+    const aCoproduct = coproductTypes.includes(a.relation_type)
+    const bCoproduct = coproductTypes.includes(b.relation_type)
+    if (aCoproduct !== bCoproduct) return aCoproduct ? -1 : 1
+    return (a.product_code || '').localeCompare(b.product_code || '')
+  })
 })
 
 const normalizeImageUrl = (rawUrl) => {
@@ -625,6 +697,8 @@ const resetForm = () => {
     remarks: '',
   }
   manualProduct.value = false
+  scrapRelationFilter.value = ''
+  scrapSearchText.value = ''
   ensureDefaultRecordType()
 }
 
@@ -881,7 +955,9 @@ const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null)
     const relatedRes = await api.processes.getRelatedProducts(processId)
     const relatedProducts = relatedRes.data || []
 
+    const relationTypeMap = new Map()
     relatedProducts.forEach((prod) => {
+      relationTypeMap.set(String(prod.id), prod.relation_type)
       const key = `${prod.id}_${processId}`
       if (!scrapMap.has(key)) {
         // line-backlog形式に変換して追加
@@ -894,6 +970,14 @@ const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null)
           plan_date: null,
           relation_type: prod.relation_type, // 'coproduct_parent', 'coproduct_child', 'intermediate', 'purchased'
         })
+      }
+    })
+
+    scrapMap.forEach((item) => {
+      if (!item || item.relation_type || item.product == null) return
+      const rt = relationTypeMap.get(String(item.product))
+      if (rt) {
+        item.relation_type = rt
       }
     })
 
@@ -1279,6 +1363,14 @@ label {
   border-radius: 8px;
   background: #fff;
   font-weight: 700;
+}
+
+.scrap-filter-select {
+  min-width: 160px;
+}
+.scrap-filter-input {
+  min-width: 160px;
+  flex: 1 1 180px;
 }
 
 .state-buttons {
