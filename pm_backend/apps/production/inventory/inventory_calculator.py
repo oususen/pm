@@ -717,7 +717,7 @@ def recalculate_inventory_for_line(line_id, start_date, end_date, include_progre
         start_date: 開始日
         end_date: 終了日
         include_progress: 進度も再計算するか（デフォルト: True）
-        final_only: 最終品のみ計算するか（デフォルト: False）
+        final_only: ライン最終品のみ計算するか（デフォルト: False）
     """
     import logging
     import time
@@ -741,7 +741,7 @@ def recalculate_inventory_for_line(line_id, start_date, end_date, include_progre
         plan_date__range=[start_date, end_date]
     )
     if final_only:
-        product_qs = product_qs.filter(product__is_final_product=True)
+        product_qs = product_qs.filter(product__is_line_final_product=True)
     product_ids = list(product_qs.values_list('product_id', flat=True).distinct())
 
     logger.info(f"対象製品数: {len(product_ids)}")

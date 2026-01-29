@@ -534,28 +534,6 @@ const savePlan = async () => {
         read_only: false,
         include_coproduct_children: true,
       })
-      const upstreamProductIds = Array.from(new Set(
-        items
-          .filter((it) => Number(it.plan_qty || 0) > 0)
-          .map((it) => it.product_id)
-          .filter((id) => id)
-      ))
-      if (upstreamProductIds.length) {
-        try {
-          const upstreamRes = await api.lineBacklogs.resolveUpstreamLines({
-            line_id: selectedLine.value,
-            product_ids: upstreamProductIds,
-          })
-          const upstreamLineIds = upstreamRes.data?.line_ids || []
-          await Promise.all(upstreamLineIds.map((lineId) => api.lineBacklogs.pickup({
-            line_id: lineId,
-            start_date: startDate.value,
-            end_date: endDate.value,
-          })))
-        } catch (e) {
-          console.error('前ライン取り込みエラー', e)
-        }
-      }
       await api.lineBacklogs.recalculateInventory({
         line_id: selectedLine.value,
         start_date: startDate.value,

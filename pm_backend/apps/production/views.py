@@ -2143,7 +2143,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             start_date: str (YYYY-MM-DD, required),
             end_date: str (YYYY-MM-DD, required),
             include_progress: bool (optional, default: True),
-            final_only: bool (optional, default: False) - Trueの場合は最終品のみ計算
+            final_only: bool (optional, default: False) - Trueの場合はライン最終品のみ計算
         }
         """
         from .inventory.inventory_calculator import recalculate_inventory_for_line
