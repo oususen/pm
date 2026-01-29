@@ -13,14 +13,47 @@
           @keydown.enter="searchProducts"
         />
         <button @click="searchProducts" :disabled="loading">検索</button>
+      </div>
+    </div>
+
+    <!-- フィルター行 -->
+    <div class="filter-row">
+      <div class="filter-item">
+        <label>開始日</label>
+        <input type="date" v-model="startDate" />
+      </div>
+      <div class="filter-item">
+        <label>期間</label>
         <select v-model.number="horizon">
           <option :value="7">7日</option>
           <option :value="15">15日</option>
           <option :value="30">30日</option>
           <option :value="60">60日</option>
         </select>
-        <button @click="loadComponentInventory" :disabled="loading || !selectedProduct">更新</button>
       </div>
+      <div class="filter-item">
+        <label>区分</label>
+        <select v-model="sourcingFilter">
+          <option value="">すべて</option>
+          <option value="MAKE">製造</option>
+          <option value="BUY">購買</option>
+          <option value="SUBCON">外注</option>
+        </select>
+      </div>
+      <div class="filter-item filter-negative">
+        <label>
+          <input type="checkbox" v-model="negativeOnly" />
+          マイナスのみ
+        </label>
+        <input
+          v-if="negativeOnly"
+          type="date"
+          v-model="negativeFromDate"
+          placeholder="いつから"
+          class="negative-date"
+        />
+      </div>
+      <button @click="loadComponentInventory" :disabled="loading || !selectedProduct">更新</button>
     </div>
 
     <!-- 製品選択ドロップダウン -->
@@ -52,34 +85,38 @@
     <div v-else-if="bomTree.length === 0 && dataLoaded" class="no-data">
       BOMが登録されていません
     </div>
-    <div v-else-if="bomTree.length > 0">
-      <div class="inventory-table-wrapper">
-        <table class="inventory-table">
+    <div v-else-if="filteredBomTree.length === 0 && bomTree.length > 0" class="no-data">
+      条件に一致する部品がありません
+    </div>
+    <div v-else-if="filteredBomTree.length > 0" class="table-section">
+      <div class="result-count">{{ filteredBomTree.length }}件 / {{ bomTree.length }}件</div>
+      <div class="grid-wrapper">
+        <table class="inventory-grid" :style="{ minWidth: tableMinWidth + 'px' }">
           <thead>
             <tr>
-              <th class="col-tree">階層</th>
-              <th class="col-code">品番</th>
-              <th class="col-name">品名</th>
-              <th class="col-type">区分</th>
-              <th class="col-qty">BOM数量</th>
-              <th class="col-row-type">項目</th>
-              <th v-for="d in columns" :key="d" class="col-date">{{ formatDateShort(d) }}</th>
+              <th class="tree-col">階層</th>
+              <th class="code-col">品番</th>
+              <th class="name-col">品名</th>
+              <th class="type-col">区分</th>
+              <th class="qty-col">BOM数量</th>
+              <th class="rowtype-col">項目</th>
+              <th v-for="d in columns" :key="d" class="date-col">{{ formatDateShort(d) }}</th>
             </tr>
           </thead>
           <tbody>
-            <template v-for="(item, idx) in bomTree" :key="idx">
+            <template v-for="(item, idx) in filteredBomTree" :key="idx">
               <!-- 在庫行 -->
               <tr class="row-stock">
-                <td class="col-tree">{{ item.treePrefix }}</td>
-                <td class="col-code">{{ item.product_code }}</td>
-                <td class="col-name">{{ item.product_name }}</td>
-                <td class="col-type">{{ formatSourcingType(item.sourcing_type) }}</td>
-                <td class="col-qty">{{ item.quantity }}</td>
-                <td class="col-row-type">在庫</td>
+                <td class="tree-col">{{ item.treePrefix }}</td>
+                <td class="code-col">{{ item.product_code }}</td>
+                <td class="name-col">{{ item.product_name }}</td>
+                <td class="type-col">{{ formatSourcingType(item.sourcing_type) }}</td>
+                <td class="qty-col">{{ item.quantity }}</td>
+                <td class="rowtype-col">在庫</td>
                 <td
                   v-for="d in columns"
                   :key="`stock-${d}`"
-                  class="col-date"
+                  class="date-col"
                   :class="{ negative: getStockValue(item, d, 'stock') < 0 }"
                 >
                   {{ fmt(getStockValue(item, d, 'stock')) }}
@@ -87,16 +124,16 @@
               </tr>
               <!-- 計画在庫行 -->
               <tr class="row-planned">
-                <td class="col-tree"></td>
-                <td class="col-code"></td>
-                <td class="col-name"></td>
-                <td class="col-type"></td>
-                <td class="col-qty"></td>
-                <td class="col-row-type">計画在庫</td>
+                <td class="tree-col"></td>
+                <td class="code-col"></td>
+                <td class="name-col"></td>
+                <td class="type-col"></td>
+                <td class="qty-col"></td>
+                <td class="rowtype-col">計画在庫</td>
                 <td
                   v-for="d in columns"
                   :key="`planned-${d}`"
-                  class="col-date"
+                  class="date-col"
                   :class="{ negative: getStockValue(item, d, 'planned') < 0 }"
                 >
                   {{ fmt(getStockValue(item, d, 'planned')) }}
@@ -119,23 +156,63 @@ const productSearch = ref("");
 const searchResults = ref([]);
 const selectedProduct = ref(null);
 const horizon = ref(15);
+const startDate = ref(formatISODate(new Date()));
+const sourcingFilter = ref("");
+const negativeOnly = ref(false);
+const negativeFromDate = ref("");
 const loading = ref(false);
 const error = ref("");
 const bomTree = ref([]);
 const inventoryData = ref({});
 const dataLoaded = ref(false);
 
-// 今日から始まる日付列
+// 列幅定義
+const W_TREE = 80;
+const W_CODE = 120;
+const W_NAME = 150;
+const W_TYPE = 60;
+const W_QTY = 60;
+const W_ROWTYPE = 70;
+const W_DATE = 70;
+
 const columns = computed(() => {
-  const today = new Date();
+  const start = startDate.value ? new Date(startDate.value) : new Date();
   const cols = [];
   for (let i = 0; i < horizon.value; i++) {
-    cols.push(formatISODate(addDays(today, i)));
+    cols.push(formatISODate(addDays(start, i)));
   }
   return cols;
 });
 
-// 製品検索
+const tableMinWidth = computed(() => {
+  const fixedColsWidth = W_TREE + W_CODE + W_NAME + W_TYPE + W_QTY + W_ROWTYPE;
+  return fixedColsWidth + columns.value.length * W_DATE;
+});
+
+const hasNegativeStock = (item) => {
+  const checkFromDate = negativeFromDate.value || columns.value[0];
+  for (const d of columns.value) {
+    if (d < checkFromDate) continue;
+    const key = `${item.product_id}_${d}`;
+    const data = inventoryData.value[key];
+    if (data) {
+      if (data.stock < 0 || data.planned < 0) return true;
+    }
+  }
+  return false;
+};
+
+const filteredBomTree = computed(() => {
+  let items = bomTree.value;
+  if (sourcingFilter.value) {
+    items = items.filter((item) => item.sourcing_type === sourcingFilter.value);
+  }
+  if (negativeOnly.value) {
+    items = items.filter((item) => hasNegativeStock(item));
+  }
+  return items;
+});
+
 const searchProducts = async () => {
   if (!productSearch.value.trim()) {
     searchResults.value = [];
@@ -150,16 +227,16 @@ const searchProducts = async () => {
   }
 };
 
-// 製品選択
-const selectProduct = (product) => {
+const selectProduct = async (product) => {
   selectedProduct.value = product;
   searchResults.value = [];
+  productSearch.value = "";
   bomTree.value = [];
   inventoryData.value = {};
   dataLoaded.value = false;
+  await loadComponentInventory();
 };
 
-// BOMツリー展開 + 在庫取得
 const loadComponentInventory = async () => {
   if (!selectedProduct.value) return;
 
@@ -170,7 +247,6 @@ const loadComponentInventory = async () => {
   dataLoaded.value = false;
 
   try {
-    // 1. BOMツリーを取得
     const treeRes = await api.bomService.getBomTree(selectedProduct.value.id);
     const tree = treeRes.data;
 
@@ -179,25 +255,19 @@ const loadComponentInventory = async () => {
       return;
     }
 
-    // 2. ツリーをフラット化
     const flatItems = flattenBomTree(tree.children, 0, "");
-
-    // 3. 子部品のproduct_idリストを取得
     const productIds = [...new Set(flatItems.map((item) => item.product_id))];
 
-    // 4. 在庫データを取得
-    const startDate = columns.value[0];
-    const endDate = columns.value[columns.value.length - 1];
+    const startDateVal = columns.value[0];
+    const endDateVal = columns.value[columns.value.length - 1];
 
-    // 複数製品の在庫をまとめて取得
     const invRes = await api.lineBacklogs.getLineBacklogs({
       product__in: productIds.join(","),
-      plan_date__gte: startDate,
-      plan_date__lte: endDate,
+      plan_date__gte: startDateVal,
+      plan_date__lte: endDateVal,
     });
     const invData = invRes.data || [];
 
-    // 5. 製品ID・日付ごとに在庫を集計
     const invMap = {};
     for (const d of invData) {
       const key = `${d.product}_${d.plan_date}`;
@@ -209,7 +279,6 @@ const loadComponentInventory = async () => {
     }
     inventoryData.value = invMap;
 
-    // 6. BOMツリーに在庫情報をマージ
     bomTree.value = flatItems;
     dataLoaded.value = true;
   } catch (e) {
@@ -220,7 +289,6 @@ const loadComponentInventory = async () => {
   }
 };
 
-// BOMツリーをフラット化（再帰）
 const flattenBomTree = (children, level, parentPrefix) => {
   const result = [];
   children.forEach((child, idx) => {
@@ -249,7 +317,6 @@ const flattenBomTree = (children, level, parentPrefix) => {
   return result;
 };
 
-// 在庫値取得
 const getStockValue = (item, date, type) => {
   const key = `${item.product_id}_${date}`;
   const data = inventoryData.value[key];
@@ -257,7 +324,6 @@ const getStockValue = (item, date, type) => {
   return type === "stock" ? data.stock : data.planned;
 };
 
-// フォーマット
 const fmt = (n) => {
   if (n === null || n === undefined) return "";
   const num = Number(n);
@@ -285,9 +351,13 @@ const formatSourcingType = (type) => {
 
 <style scoped>
 .page-container {
+  padding: 6px 8px 10px;
+  background: #eef2f6;
+  font-size: 13px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  height: 100%;
+  min-height: 0;
 }
 .page-header {
   display: flex;
@@ -306,10 +376,75 @@ const formatSourcingType = (type) => {
 .page-actions select {
   padding: 6px 8px;
 }
+.page-actions button {
+  padding: 6px 12px;
+  border: 1px solid #b5c1d2;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
 .subtitle {
   margin: 0;
   color: #64748b;
   font-size: 13px;
+}
+
+.filter-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: #e1e8f4;
+  border: 1px solid #c5cfde;
+  border-radius: 4px;
+  margin-top: 6px;
+}
+.filter-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.filter-item label {
+  font-size: 12px;
+  color: #444;
+}
+.filter-item input[type="date"],
+.filter-item select {
+  padding: 6px 8px;
+  border: 1px solid #cfd6e1;
+  border-radius: 3px;
+}
+.filter-negative {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.filter-negative label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.filter-negative input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+.negative-date {
+  width: 130px;
+}
+.filter-row button {
+  padding: 6px 12px;
+  border: 1px solid #b5c1d2;
+  border-radius: 4px;
+  background: #4a7ae5;
+  color: #fff;
+  cursor: pointer;
+}
+.filter-row button:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
 }
 
 .search-results {
@@ -318,6 +453,7 @@ const formatSourcingType = (type) => {
   max-height: 200px;
   overflow-y: auto;
   background: #fff;
+  margin-top: 6px;
 }
 .search-result-header {
   padding: 8px 12px;
@@ -353,65 +489,171 @@ const formatSourcingType = (type) => {
   border: 1px solid #86efac;
   border-radius: 6px;
   font-size: 14px;
+  margin-top: 6px;
 }
 
-.inventory-table-wrapper {
-  overflow-x: auto;
+.table-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  margin-top: 6px;
 }
-.inventory-table {
+.result-count {
+  font-size: 13px;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+/* グリッドラッパー（plan-inputと同じパターン） */
+.grid-wrapper {
+  flex: 1;
+  min-height: 200px;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #c5cfde;
+  border-radius: 4px;
+}
+
+/* テーブル本体 */
+.inventory-grid {
+  width: 100%;
   border-collapse: collapse;
-  min-width: 100%;
+  table-layout: fixed;
+}
+.inventory-grid th,
+.inventory-grid td {
+  border: 1px solid #d7dfe8;
+  padding: 4px 6px;
+  white-space: nowrap;
   font-size: 13px;
 }
-.inventory-table th,
-.inventory-table td {
-  border: 1px solid #e5e7eb;
-  padding: 6px 8px;
-  text-align: left;
-  white-space: nowrap;
-}
-.inventory-table thead th {
-  background: #f4f6fb;
-  font-weight: 600;
+
+/* ヘッダー行: 上に固定 */
+.inventory-grid thead th {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 4;
+  background: #cfd8ec;
+  font-weight: 700;
 }
-.col-tree {
+
+/* 各列の幅とleft位置 - 個別にstickyを設定 */
+.tree-col {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  width: 80px;
+  min-width: 80px;
+  max-width: 80px;
   font-family: monospace;
   color: #6b7280;
-  min-width: 80px;
+  background: #f8fafc;
 }
-.col-code {
+.code-col {
+  position: sticky;
+  left: 80px;
+  z-index: 3;
+  width: 120px;
   min-width: 120px;
+  max-width: 120px;
   font-weight: 600;
+  background: #f8fafc;
 }
-.col-name {
+.name-col {
+  position: sticky;
+  left: 200px;
+  z-index: 3;
+  width: 150px;
   min-width: 150px;
+  max-width: 150px;
+  background: #f8fafc;
 }
-.col-type {
+.type-col {
+  position: sticky;
+  left: 350px;
+  z-index: 3;
+  width: 60px;
   min-width: 60px;
+  max-width: 60px;
   text-align: center;
+  background: #f8fafc;
 }
-.col-qty {
+.qty-col {
+  position: sticky;
+  left: 410px;
+  z-index: 3;
+  width: 60px;
   min-width: 60px;
+  max-width: 60px;
   text-align: right;
+  background: #f8fafc;
 }
-.col-row-type {
+.rowtype-col {
+  position: sticky;
+  left: 470px;
+  z-index: 3;
+  width: 70px;
   min-width: 70px;
-  background: #f9fafb;
+  max-width: 70px;
   font-weight: 500;
+  background: #f8fafc;
+  border-right: 2px solid #b5c1d2 !important;
 }
-.col-date {
-  min-width: 60px;
+
+/* ヘッダーの左固定列は最優先 */
+.inventory-grid thead .tree-col,
+.inventory-grid thead .code-col,
+.inventory-grid thead .name-col,
+.inventory-grid thead .type-col,
+.inventory-grid thead .qty-col,
+.inventory-grid thead .rowtype-col {
+  z-index: 8;
+  background: #cfd8ec;
+}
+
+/* 日付列 */
+.date-col {
+  width: 70px;
+  min-width: 70px;
   text-align: right;
+  z-index: 1;
+  background: #fff;
 }
+thead .date-col {
+  background: #cfd8ec;
+}
+
+/* 在庫行 */
 .row-stock {
   background: #fff;
 }
+.row-stock .tree-col,
+.row-stock .code-col,
+.row-stock .name-col,
+.row-stock .type-col,
+.row-stock .qty-col {
+  background: #fff;
+}
+.row-stock .rowtype-col {
+  background: #f9fafb;
+}
+
+/* 計画在庫行 */
 .row-planned {
   background: #fefce8;
 }
+.row-planned .tree-col,
+.row-planned .code-col,
+.row-planned .name-col,
+.row-planned .type-col,
+.row-planned .qty-col,
+.row-planned .rowtype-col,
+.row-planned .date-col {
+  background: #fefce8;
+}
+
+/* マイナス値 */
 .negative {
   background: #fee2e2 !important;
   color: #dc2626;
@@ -423,5 +665,6 @@ const formatSourcingType = (type) => {
   padding: 24px;
   text-align: center;
   color: #6b7280;
+  margin-top: 6px;
 }
 </style>
