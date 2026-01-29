@@ -326,7 +326,10 @@
       <h3 class="section-title">{{ t('processInput.recentRecords') }}</h3>
       <div class="record-list">
         <div v-for="rec in recentRecords" :key="rec.id" class="record-item">
-          <div class="record-time">{{ formatTime(rec.timestamp) }}</div>
+          <div class="record-time">
+            <div class="record-date">{{ formatDate(rec.timestamp) }}</div>
+            <div class="record-clock">{{ formatTime(rec.timestamp) }}</div>
+          </div>
           <div class="record-type">
             <div class="record-type__label">{{ rec.record_type_display }}</div>
             <div v-if="rec.product_code" class="record-type__product">{{ rec.product_code }}</div>
@@ -584,16 +587,38 @@ const isScrapFilterActive = computed(() => {
   return !!scrapRelationFilter.value || !!(scrapSearchText.value || '').trim()
 })
 
+const normalizeRelationType = (type) => {
+  if (!type) return ''
+  return String(type)
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2') // camelCase -> snake_case
+    .replace(/[\s\-.]/g, '_')
+    .toLowerCase()
+}
+
 const filterScrapCandidates = (list) => {
   const items = Array.isArray(list) ? list : []
   const relation = scrapRelationFilter.value
   const query = (scrapSearchText.value || '').trim().toLowerCase()
   if (!relation && !query) return items
-  return items.filter((p) => {
+  const relationAliases = {
+    coproduct_child: ['coproduct_child', 'bom_process_item', 'coproductchild'],
+    coproduct_parent: ['coproduct_parent', 'coproductparent'],
+    intermediate: ['intermediate', 'output_product', 'outputproduct'],
+    purchased: ['purchased'],
+    output_product: ['output_product', 'intermediate', 'outputproduct'],
+  }
+  const allowedTypes = relation ? relationAliases[relation] || [relation] : []
+  // 連産子が返ってこない環境向けフォールバック: coproduct_parent はあるが coproduct_child が無い場合、output_product を子扱いで含める
+  if (relation === 'coproduct_child' && !items.some((p) => normalizeRelationType(p.relation_type) === 'coproduct_child')) {
+    allowedTypes.push('output_product')
+  }
+  const filtered = items.filter((p) => {
     if (!p) return false
     if (relation) {
-      const type = p.relation_type || ''
-      if (type !== relation) return false
+      const type = normalizeRelationType(p.relation_type || '')
+      if (!allowedTypes.some((t) => type === t || type === normalizeRelationType(t) || type.includes(t))) {
+        return false
+      }
     }
     if (query) {
       const code = (p.product_code || '').toLowerCase()
@@ -602,6 +627,19 @@ const filterScrapCandidates = (list) => {
     }
     return true
   })
+  // もし選択した区分で0件になった場合は、区分条件を外して検索条件のみで返す（使える製品が全く出ないのを防ぐ）
+  if (relation && filtered.length === 0) {
+    return items.filter((p) => {
+      if (!p) return false
+      if (query) {
+        const code = (p.product_code || '').toLowerCase()
+        const name = (p.product_name || '').toLowerCase()
+        if (!code.includes(query) && !name.includes(query)) return false
+      }
+      return true
+    })
+  }
+  return filtered
 }
 
 const displayProductList = computed(() => {
@@ -954,6 +992,17 @@ const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null)
     // related-products APIから工程関連製品を取得して追加
     const relatedRes = await api.processes.getRelatedProducts(processId)
     const relatedProducts = relatedRes.data || []
+    console.debug('ScrapRecord relatedProducts', {
+      processId,
+      count: Array.isArray(relatedProducts) ? relatedProducts.length : 0,
+    })
+    console.table(
+      (relatedProducts || []).map((p) => ({
+        product: p.product_code || p.id,
+        relation_type: p.relation_type,
+        normalized: normalizeRelationType(p.relation_type),
+      }))
+    )
 
     const relationTypeMap = new Map()
     relatedProducts.forEach((prod) => {
@@ -973,6 +1022,119 @@ const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null)
       }
     })
 
+    // relation_type 未設定の候補を related-products で補完
+    scrapMap.forEach((item) => {
+      if (!item || item.product == null) return
+      if (item.relation_type) return
+      const rt = relationTypeMap.get(String(item.product))
+      if (rt) {
+        item.relation_type = rt
+      }
+    })
+
+    // 最終工程向け: output_product の直子部品をBOM階層1から補完（子はカテゴリで purchased / intermediate 判定）
+    const bomCache = new Map()
+    const addBomChildren = async (parentProductId) => {
+      if (!parentProductId) return
+      const cacheKey = String(parentProductId)
+      if (!bomCache.has(cacheKey)) {
+        try {
+          const treeRes = await api.bomService.getBomTree(parentProductId)
+          bomCache.set(cacheKey, treeRes.data || null)
+        } catch (err) {
+          console.error('BOMツリー取得エラー (output_product children):', parentProductId, err)
+          bomCache.set(cacheKey, null)
+        }
+      }
+      const tree = bomCache.get(cacheKey)
+      if (!tree || !Array.isArray(tree.children)) return
+      console.debug('BOM直子', {
+        parentProductId,
+        parentCode: tree.product_code,
+        children: tree.children.map((ch) => ({
+          product_id: ch.product_id,
+          product_code: ch.product_code,
+          category: ch.category,
+          sourcing_type: ch.sourcing_type,
+        })),
+      })
+      let added = 0
+      tree.children.forEach((ch) => {
+        if (!ch?.product_id) return
+        const childKey = `${ch.product_id}_${processId}`
+        const childRelation =
+          ch.category === 'PURCHASED' || ch.category === 'MATERIAL' ? 'purchased' : 'intermediate'
+        if (scrapMap.has(childKey)) {
+          const existing = scrapMap.get(childKey) || {}
+          if (!existing.relation_type) existing.relation_type = childRelation
+          scrapMap.set(childKey, { ...existing, relation_type: childRelation })
+          return
+        }
+        scrapMap.set(childKey, {
+          product: ch.product_id,
+          product_code: ch.product_code || ch.product_id,
+          product_name: ch.product_name || '',
+          process: processId,
+          plan_qty: 0,
+          plan_date: null,
+          relation_type: childRelation,
+        })
+        added += 1
+      })
+      console.debug('BOM子部品補完', {
+        parentProductId,
+        parentCode: tree.product_code,
+        childrenCount: tree.children.length,
+        added,
+      })
+    }
+
+    const outputProducts = Array.from(scrapMap.values()).filter(
+      (it) => normalizeRelationType(it.relation_type) === 'output_product'
+    )
+    console.debug('BOM直子対象 output_products', outputProducts.map((p) => ({
+      product: p.product,
+      code: p.product_code,
+      relation_type: p.relation_type,
+    })))
+    for (const op of outputProducts) {
+      await addBomChildren(op.product)
+    }
+
+    // 連産親がある場合は、BOMツリーから子品番を取得して連産子として補完
+    const coproductParentIds = (relatedProducts || [])
+      .filter((p) => normalizeRelationType(p.relation_type) === 'coproduct_parent')
+      .map((p) => p.id)
+    for (const parentId of coproductParentIds) {
+      try {
+        const treeRes = await api.bomService.getBomTree(parentId)
+        const tree = treeRes.data
+        if (!tree || !Array.isArray(tree.children)) continue
+        tree.children.forEach((ch) => {
+          if (!ch?.product_id) return
+          const key = `${ch.product_id}_${processId}`
+          const existing = scrapMap.get(key)
+          if (existing) {
+            // 既存エントリも連産子として扱えるよう relation_type を上書き
+            existing.relation_type = 'coproduct_child'
+            scrapMap.set(key, existing)
+            return
+          }
+          scrapMap.set(key, {
+            product: ch.product_id,
+            product_code: ch.product_code || ch.product_id,
+            product_name: ch.product_name || '',
+            process: processId,
+            plan_qty: 0,
+            plan_date: null,
+            relation_type: 'coproduct_child',
+          })
+        })
+      } catch (err) {
+        console.error('連産品BOM子取得エラー:', parentId, err)
+      }
+    }
+
     scrapMap.forEach((item) => {
       if (!item || item.relation_type || item.product == null) return
       const rt = relationTypeMap.get(String(item.product))
@@ -982,6 +1144,23 @@ const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null)
     })
 
     scrapProducts.value = Array.from(scrapMap.values())
+    const relationSummary = {}
+    scrapProducts.value.forEach((p) => {
+      const key = normalizeRelationType(p.relation_type) || '(empty)'
+      relationSummary[key] = (relationSummary[key] || 0) + 1
+    })
+    console.debug('ScrapRecord scrapProducts (normalized)', {
+      processId,
+      count: scrapProducts.value.length,
+      relationSummary,
+    })
+    console.table(
+      scrapProducts.value.map((p) => ({
+        product: p.product_code || p.product,
+        relation_type: p.relation_type,
+        normalized: normalizeRelationType(p.relation_type),
+      }))
+    )
 
     // 画像マップを構築
     const idSet = new Set([
@@ -1167,6 +1346,15 @@ watch(
     ensureScrapDefaults()
   }
 )
+
+const formatDate = (timestamp) => {
+  const date = new Date(timestamp)
+  return date.toLocaleDateString(localeCode.value, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  })
+}
 
 const formatTime = (timestamp) => {
   const date = new Date(timestamp)
@@ -1512,6 +1700,16 @@ label {
 .record-time {
   font-weight: 600;
   color: #64748b;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.record-date {
+  font-size: 12px;
+  color: #94a3b8;
+}
+.record-clock {
+  font-size: 13px;
 }
 
 .record-type {
