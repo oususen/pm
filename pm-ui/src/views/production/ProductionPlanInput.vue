@@ -561,6 +561,7 @@ const savePlan = async () => {
         start_date: startDate.value,
         end_date: endDate.value,
         include_progress: false,
+        final_only: true,
       })
       await api.lineGanttPlans.generate({
         line_id: selectedLine.value,
@@ -1095,6 +1096,7 @@ const doPickup = async () => {
       start_date: startDate.value,
       end_date: endDate.value,
       include_progress: false,
+      final_only: true,
     })
     const [backlogRes, planRes] = await Promise.all([
       api.lineBacklogs.getLineBacklogs({

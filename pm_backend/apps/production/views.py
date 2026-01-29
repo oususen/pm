@@ -2142,7 +2142,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             line_id: int (required),
             start_date: str (YYYY-MM-DD, required),
             end_date: str (YYYY-MM-DD, required),
-            include_progress: bool (optional)
+            include_progress: bool (optional, default: True),
+            final_only: bool (optional, default: False) - Trueの場合は最終品のみ計算
         }
         """
         from .inventory.inventory_calculator import recalculate_inventory_for_line
@@ -2155,6 +2156,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             include_progress = include_progress_raw.lower() not in ['false', '0', 'no']
         else:
             include_progress = bool(include_progress_raw)
+
+        final_only_raw = request.data.get('final_only', False)
+        if isinstance(final_only_raw, str):
+            final_only = final_only_raw.lower() in ['true', '1', 'yes']
+        else:
+            final_only = bool(final_only_raw)
 
         if not line_id:
             return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2169,7 +2176,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             return Response({'detail': f'Invalid date format: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            recalculate_inventory_for_line(line_id, start_dt, end_dt, include_progress=include_progress)
+            recalculate_inventory_for_line(line_id, start_dt, end_dt, include_progress=include_progress, final_only=final_only)
             return Response({'detail': 'Inventory recalculated successfully'})
         except Exception as e:
             return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
