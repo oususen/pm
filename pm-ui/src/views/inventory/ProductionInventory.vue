@@ -29,14 +29,14 @@
           <option :value="120">120日</option>
         </select>
         <button @click="load" :disabled="loading">更新</button>
-        <button @click="recalculateInventory" :disabled="loading || recalculating">在庫再計算</button>
+        <button @click="recalculate" :disabled="loading || recalculating">再計算</button>
       </div>
     </div>
 
     <div v-if="loading" class="loading">読込中...</div>
     <div v-else-if="error" class="no-data">エラー: {{ error }}</div>
-    <div v-else-if="!lineFilter && !processFilter" class="no-data">
-      ラインまたは工程を選択してください
+    <div v-else-if="!lineFilter && !processFilter && !productFilter" class="no-data">
+      ライン、工程、または品番を入力してください
     </div>
     <div v-else>
       <div v-if="groups.length" class="group-list">
@@ -188,7 +188,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, ref } from "vue";
 import api from "@/api/client";
 import { addDays, formatISODate, parseISODate } from "@/utils/dateUtil";
 
@@ -201,7 +201,6 @@ const startDate = ref(formatISODate(defaultStart));
 const horizon = ref(30);
 const loading = ref(false);
 const error = ref("");
-const recalculating = ref(false);
 const demands = ref([]);
 const adjustInputs = ref({});
 const adjustSaving = ref({});
@@ -630,70 +629,56 @@ const toggleChildren = async (group) => {
   }
 };
 
-const refreshOrderQty = async () => {
-  const lineIds = [...new Set(demands.value.map((d) => d.line).filter(Boolean))];
-  if (!lineIds.length) return false;
-
-  const start = columns.value[0];
-  const end = columns.value[columns.value.length - 1];
-  let updated = false;
-  for (const lineId of lineIds) {
-    try {
-      await api.lineBacklogs.pickup({
-        line_id: lineId,
-        start_date: start,
-        end_date: end,
-      });
-      updated = true;
-    } catch (e) {
-      console.error('内示再計算に失敗:', e);
-    }
-  }
-  return updated;
+// 表示中のグループからラインIDを取得
+const getDisplayedLineIds = () => {
+  return [...new Set(groups.value.map((g) => g.line_id).filter(Boolean))];
 };
 
-const refreshScrapQty = async () => {
-  const lineIds = [...new Set(demands.value.map((d) => d.line).filter(Boolean))];
+const refreshOrderQty = async (lineIds) => {
   if (!lineIds.length) return false;
 
   const start = columns.value[0];
   const end = columns.value[columns.value.length - 1];
-  let updated = false;
-  for (const lineId of lineIds) {
-    try {
-      await api.lineBacklogs.recalculateScrap({
+
+  // 並列実行
+  await Promise.all(
+    lineIds.map((lineId) =>
+      api.lineBacklogs.pickup({
         line_id: lineId,
         start_date: start,
         end_date: end,
-      });
-      updated = true;
-    } catch (e) {
-      console.error('仕損再計算に失敗:', e);
-    }
-  }
-  return updated;
+      }).catch((e) => console.error('需要再計算に失敗:', e))
+    )
+  );
+  return true;
+};
+
+const refreshScrapQty = async (lineIds) => {
+  if (!lineIds.length) return false;
+
+  const start = columns.value[0];
+  const end = columns.value[columns.value.length - 1];
+
+  // 並列実行
+  await Promise.all(
+    lineIds.map((lineId) =>
+      api.lineBacklogs.recalculateScrap({
+        line_id: lineId,
+        start_date: start,
+        end_date: end,
+      }).catch((e) => console.error('仕損再計算に失敗:', e))
+    )
+  );
+  return true;
 };
 
 const load = async () => {
   loading.value = true;
   error.value = "";
   try {
-    // 在庫/残量は line_backlog ベースで集計する
     const res = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
     const payload = res.data || [];
     applyDemands(payload);
-    const refreshed = await refreshOrderQty();
-    if (refreshed) {
-      const refreshRes = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
-      const refreshPayload = refreshRes.data || [];
-      applyDemands(refreshPayload);
-    }
-    const refreshedScrap = await refreshScrapQty();
-    if (refreshedScrap) {
-      const refreshRes = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
-      const refreshPayload = refreshRes.data || [];
-      applyDemands(refreshPayload);
-    }
   } catch (e) {
     error.value = e?.message || "読み込みに失敗しました";
   } finally {
@@ -701,48 +686,49 @@ const load = async () => {
   }
 };
 
-const recalculateInventory = async () => {
-  if (!confirm('在庫と計画在庫を再計算しますか？\n※全ラインの在庫データが更新されます。')) {
+const recalculating = ref(false);
+
+const recalculate = async () => {
+  const lineIds = getDisplayedLineIds();
+  if (lineIds.length === 0) {
+    alert("再計算対象のラインがありません。先にデータを取得してください。");
     return;
   }
-  
+
   recalculating.value = true;
   error.value = "";
   try {
-    // 現在表示中の期間で再計算
     const start = columns.value[0];
     const end = columns.value[columns.value.length - 1];
-    
-    // 表示中の全ラインを取得
-    const lines = [...new Set(demands.value.map(d => d.line).filter(Boolean))];
-    
-    if (lines.length === 0) {
-      alert('再計算対象のラインがありません');
-      return;
-    }
-    
-    // 各ラインごとに再計算
-    for (const lineId of lines) {
-      await api.lineBacklogs.recalculateInventory({
-        line_id: lineId,
-        start_date: start,
-        end_date: end
-      });
-    }
-    
-    alert('在庫再計算が完了しました');
-    
-    // データを再読み込み
-    await load();
+
+    // 1. 需要再計算（pickup）- 並列実行
+    await refreshOrderQty(lineIds);
+
+    // 2. 仕損再計算 - 並列実行
+    await refreshScrapQty(lineIds);
+
+    // 3. 在庫再計算 - 並列実行
+    await Promise.all(
+      lineIds.map((lineId) =>
+        api.lineBacklogs.recalculateInventory({
+          line_id: lineId,
+          start_date: start,
+          end_date: end,
+        }).catch((e) => console.error('在庫再計算に失敗:', e))
+      )
+    );
+
+    // 4. 最新データを再取得
+    const finalRes = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
+    applyDemands(finalRes.data || []);
   } catch (e) {
-    error.value = e?.response?.data?.detail || e?.message || "在庫再計算に失敗しました";
-    alert('エラー: ' + error.value);
+    error.value = e?.message || "再計算に失敗しました";
   } finally {
     recalculating.value = false;
   }
 };
 
-onMounted(load);
+// 画面を開いた時点ではデータを取得せず、フィルター入力後に更新ボタンで取得
 </script>
 
 <style scoped>
