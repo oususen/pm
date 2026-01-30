@@ -330,7 +330,8 @@ def _build_coproduct_parent_map(plan_date) -> Dict[int, Product]:
 
 
 def _is_coproduct_sub_process(spec: ProcessSpec, coproduct_parent_map: Dict[int, Product]) -> bool:
-    return bool(spec.process_name and 'サブ' in spec.process_name and spec.output_product_id in coproduct_parent_map)
+    """連産品BOMの子品目を出力する工程かどうかを判定（名前依存なし）"""
+    return bool(spec.output_product_id and spec.output_product_id in coproduct_parent_map)
 
 
 def _overlaps(start: datetime, end: datetime, item: Dict) -> bool:
@@ -395,7 +396,7 @@ def _reserve_process_slot_forward(calendar: LineWorkCalendar, target_start_time:
         attempts += 1
         if attempts > 10000:
             logger.warning('gantt_plans: no available slot found after %s attempts for %s minutes from %s', attempts, minutes, target_start_time)
-            # Fallback: return the slot on the first lane, creating an overlap
+            # フォールバック: 最初のレーンにスロットを割り当て（重複が発生する可能性あり）
             return start_time, calendar.add_working_minutes(start_time, minutes), 0
 
 
@@ -523,7 +524,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
 
     resource_schedules: Dict[int, List[List[Dict]]] = {}
 
-    # Find the earliest start time for the entire planning horizon
+    # 計画期間全体で最も早い稼働開始時刻を取得
     line_earliest_start = None
     check_date = start_date
     while not line_earliest_start:
@@ -532,14 +533,14 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
             line_earliest_start = segments[0][0]
             break
         check_date += timedelta(days=1)
-        if check_date > end_date + timedelta(days=30):  # Safety break
+        if check_date > end_date + timedelta(days=30):  # 安全のための上限
             break
     if not line_earliest_start:
         line_earliest_start = datetime.combine(start_date, time(8, 0))
 
-    # Track the end time of the previous sequence_no for each plan_date
-    # Key: plan_date, Value: end_datetime of the last processed sequence
-    previous_sequence_end_by_date: Dict[date, datetime] = {}
+    # 各工程の終了時刻を追跡（plan_dateとprocess_idごと）
+    # キー: (plan_date, process_id), 値: 前のsequenceの終了時刻
+    previous_process_end_by_date: Dict[Tuple[date, int], datetime] = {}
 
     plans = []
     for obj in base_plans:
@@ -638,17 +639,14 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
 
         current_sequence_no = obj.sequence_no or 0
 
-        # For sequence_no > 1, start after the previous sequence's end time
-        if current_sequence_no > 1 and obj.plan_date in previous_sequence_end_by_date:
-            prev_end = previous_sequence_end_by_date[obj.plan_date]
-            # Start from the previous sequence's end time (resource scheduling will handle conflicts)
-            current_start_time = prev_end
+        # sequence_no=1かつ目標時刻が指定されている場合、後方スケジューリングを使用
+        use_backward_scheduling = current_sequence_no == 1 and day_target_time_obj
+        anchor_dt = None
 
-        # If sequence_no=1 and a target time is specified, anchor the final process start time
-        if current_sequence_no == 1 and day_target_time_obj:
+        if use_backward_scheduling:
             anchor_dt = datetime.combine(obj.plan_date, day_target_time_obj)
 
-            # Validate if anchor_dt is within working hours
+            # アンカー時刻が稼働時間内かどうかを検証
             segments = calendar.get_segments(obj.plan_date) or []
             found_valid_slot = False
             for i, (seg_start, seg_end) in enumerate(segments):
@@ -667,97 +665,242 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 error_msg = f"指定された最終工程開始時刻 ({day_target_time_obj}) はラインの稼働時間外です。"
                 raise ValidationError(error_msg)
 
-            # Back-calculate from the last process start time to the first process start time
-            # Start(k+1) >= Start(k) + Cycle(k) + Gap(k)  =>  Start(k) = Start(k+1) - (Cycle(k) + Gap(k))
-            temp_dt = anchor_dt
-            for k in range(len(scheduled_specs) - 2, -1, -1):
-                spec_entry = scheduled_specs[k]
-                cycle = spec_entry['cycle_time_minutes']
-                gap = spec_entry['spec'].transfer_time_minutes
-                temp_dt = calendar.subtract_working_minutes(temp_dt, cycle + gap)
-            current_start_time = temp_dt
-
         processes_plan = []
 
-        for i, entry in enumerate(scheduled_specs):
-            spec = entry['spec']
-            process_qty = entry['process_qty']
-            total_minutes = entry['total_minutes']
-            effective_minutes = entry['effective_minutes']
+        if use_backward_scheduling:
+            # 後方スケジューリング: 最終工程の開始時刻を固定し、前の工程を後ろから順にスケジュール
+            logger.info('gantt_plans: plan_id=%s using backward scheduling, anchor=%s', plan_id, anchor_dt)
 
-            lanes = _ensure_resource_lanes(resource_schedules, spec.process_id, spec.parallel_count)
-            start_time, end_time, lane_idx = _reserve_process_slot_forward(
-                calendar, current_start_time, effective_minutes, lanes
-            )
-            lanes[lane_idx].append({
-                'start': start_time,
-                'end': end_time,
-                'plan_id': plan_id,
-            })
-            output_product_id = spec.output_product_id
-            output_product_code = spec.output_product_code
-            output_product_name = spec.output_product_name
-            coproduct_group_key = entry['coproduct_group_key']
-            coproduct_child_id = entry['coproduct_child_id']
-            if spec.process_name and 'サブ' in spec.process_name and output_product_id in coproduct_parent_map:
-                parent = coproduct_parent_map[output_product_id]
-                coproduct_child_id = coproduct_child_id or output_product_id
-                output_product_id = parent.id
-                output_product_code = parent.product_code
-                output_product_name = parent.product_name
-                coproduct_group_key = coproduct_group_key or f"{plan_id}_{spec.process_id}_{parent.id}"
+            # 各工程の開始・終了時刻を格納するリスト（後で逆順にする）
+            scheduled_times: List[Dict] = [None] * len(scheduled_specs)
 
-            process_plan = {
-                'process_id': spec.process_id,
-                'process_name': spec.process_name,
-                'process_number': spec.process_number,
-                'parallel_group': spec.parallel_group,
-                'output_product_id': output_product_id,
-                'output_product_code': output_product_code,
-                'output_product_name': output_product_name,
-                'coproduct_group_key': coproduct_group_key,
-                'coproduct_child_id': coproduct_child_id,
-                'quantity': float(process_qty),
-                'cycle_time_minutes': entry['cycle_time_minutes'],
-                'setup_time_minutes': entry['setup_time_minutes'],
-                'total_minutes_required': total_minutes,
-                'effective_minutes': effective_minutes,
-                'parallel_count': spec.parallel_count,
-                'start_time': start_time,
-                'end_time': end_time,
-                'transfer_time_minutes': spec.transfer_time_minutes,
-                'is_continuous': True,
-            }
-            processes_plan.append(process_plan)
+            # 最終工程の終了時刻を計算
+            last_entry = scheduled_specs[-1]
+            last_spec = last_entry['spec']
+            last_effective_minutes = last_entry['effective_minutes']
+            last_end_time = calendar.add_working_minutes(anchor_dt, last_effective_minutes)
 
-            # Calculate start time for the next process, allowing for pipelining
-            if i + 1 < len(scheduled_specs):
-                next_entry = scheduled_specs[i+1]
-                next_cycle_time = next_entry['cycle_time_minutes']
-                next_effective_minutes = next_entry['effective_minutes']
+            # 最終工程から後方にスケジュール
+            current_end_time = last_end_time
+            for i in range(len(scheduled_specs) - 1, -1, -1):
+                entry = scheduled_specs[i]
+                spec = entry['spec']
+                effective_minutes = entry['effective_minutes']
+                current_cycle_time = entry['cycle_time_minutes']
 
-                gap_minutes = spec.transfer_time_minutes
+                # 前のsequenceの同じ工程の終了時刻を考慮
+                process_key = (obj.plan_date, spec.process_id)
 
-                # Start-to-Start constraint: Next process can start after the first unit of the current
-                # process is finished and transferred.
-                s2s_limit = calendar.add_working_minutes(start_time, spec.cycle_time_minutes + gap_minutes)
+                if i == len(scheduled_specs) - 1:
+                    # 最終工程: アンカー時刻に固定
+                    start_time = anchor_dt
+                    end_time = current_end_time
+                else:
+                    # 後方パイプライン制約を適用
+                    next_entry = scheduled_specs[i + 1]
+                    next_start_time = scheduled_times[i + 1]['start']
+                    next_cycle_time = next_entry['cycle_time_minutes']
+                    gap_minutes = spec.transfer_time_minutes
 
-                # End-to-End constraint: The end of the next process must be after the end of the current
-                # process (plus transfer and processing time for the last unit). This ensures the last
-                # piece from the current process can be processed by the next process before it finishes.
-                # Formula: end_time(i+1) >= end_time(i) + cycle_time(i+1) + gap
-                # Rearranged for start_time(i+1):
-                # start_time(i+1) >= (end_time(i) + cycle_time(i+1) + gap) - duration(i+1)
-                target_end_for_e2e = calendar.add_working_minutes(end_time, next_cycle_time + gap_minutes)
-                e2e_start_limit = calendar.subtract_working_minutes(target_end_for_e2e, next_effective_minutes)
+                    # 終了-終了制約（後方）: 現工程の終了 <= 次工程の終了 - next_cycle_time - gap
+                    e2e_end_limit = calendar.subtract_working_minutes(
+                        scheduled_times[i + 1]['end'], next_cycle_time + gap_minutes
+                    )
 
-                current_start_time = max(s2s_limit, e2e_start_limit)
+                    # 開始-開始制約（後方）: 現工程の開始 <= 次工程の開始 - cycle_time - gap
+                    s2s_end_limit = calendar.subtract_working_minutes(
+                        next_start_time, current_cycle_time + gap_minutes
+                    )
+                    # 開始時刻から終了時刻を逆算
+                    s2s_end_from_start = calendar.add_working_minutes(s2s_end_limit, effective_minutes)
+
+                    # より早い終了時刻を採用（後方スケジューリングなので）
+                    end_time = min(e2e_end_limit, s2s_end_from_start)
+                    start_time = calendar.subtract_working_minutes(end_time, effective_minutes)
+
+                # 前のsequenceの終了時刻があれば、それ以降から開始する必要がある
+                if process_key in previous_process_end_by_date:
+                    prev_process_end = previous_process_end_by_date[process_key]
+                    if start_time < prev_process_end:
+                        start_time = prev_process_end
+                        end_time = calendar.add_working_minutes(start_time, effective_minutes)
+                        logger.info(
+                            'gantt_plans: plan_id=%s i=%s adjusted by prev_process_end=%s new_start=%s',
+                            plan_id, i, prev_process_end, start_time
+                        )
+
+                # リソースレーンに登録
+                lanes = _ensure_resource_lanes(resource_schedules, spec.process_id, spec.parallel_count)
+                lane_idx = _find_available_lane(lanes, start_time, end_time)
+                if lane_idx is None:
+                    lane_idx = 0  # フォールバック
+                lanes[lane_idx].append({
+                    'start': start_time,
+                    'end': end_time,
+                    'plan_id': plan_id,
+                })
+
+                scheduled_times[i] = {'start': start_time, 'end': end_time, 'lane': lane_idx}
+
+                logger.info(
+                    'gantt_plans: plan_id=%s i=%s process=%s backward scheduled: start=%s end=%s lane=%s',
+                    plan_id, i, spec.process_name, start_time, end_time, lane_idx
+                )
+
+            # processes_planを構築（順方向に）
+            for i, entry in enumerate(scheduled_specs):
+                spec = entry['spec']
+                process_qty = entry['process_qty']
+                total_minutes = entry['total_minutes']
+                effective_minutes = entry['effective_minutes']
+                start_time = scheduled_times[i]['start']
+                end_time = scheduled_times[i]['end']
+
+                output_product_id = spec.output_product_id
+                output_product_code = spec.output_product_code
+                output_product_name = spec.output_product_name
+                coproduct_group_key = entry['coproduct_group_key']
+                coproduct_child_id = entry['coproduct_child_id']
+                if output_product_id and output_product_id in coproduct_parent_map:
+                    parent = coproduct_parent_map[output_product_id]
+                    coproduct_child_id = coproduct_child_id or output_product_id
+                    output_product_id = parent.id
+                    output_product_code = parent.product_code
+                    output_product_name = parent.product_name
+                    coproduct_group_key = coproduct_group_key or f"{plan_id}_{spec.process_id}_{parent.id}"
+
+                process_plan = {
+                    'process_id': spec.process_id,
+                    'process_name': spec.process_name,
+                    'process_number': spec.process_number,
+                    'parallel_group': spec.parallel_group,
+                    'output_product_id': output_product_id,
+                    'output_product_code': output_product_code,
+                    'output_product_name': output_product_name,
+                    'coproduct_group_key': coproduct_group_key,
+                    'coproduct_child_id': coproduct_child_id,
+                    'quantity': float(process_qty),
+                    'cycle_time_minutes': entry['cycle_time_minutes'],
+                    'setup_time_minutes': entry['setup_time_minutes'],
+                    'total_minutes_required': total_minutes,
+                    'effective_minutes': effective_minutes,
+                    'parallel_count': spec.parallel_count,
+                    'start_time': start_time,
+                    'end_time': end_time,
+                    'transfer_time_minutes': spec.transfer_time_minutes,
+                    'is_continuous': True,
+                }
+                processes_plan.append(process_plan)
+
+                # この工程の終了時刻を記録（次のsequenceが同じ工程の直後から開始できるように）
+                process_key = (obj.plan_date, spec.process_id)
+                previous_process_end_by_date[process_key] = end_time
+
+        else:
+            # 前方スケジューリング（従来のロジック）
+            for i, entry in enumerate(scheduled_specs):
+                spec = entry['spec']
+                process_qty = entry['process_qty']
+                total_minutes = entry['total_minutes']
+                effective_minutes = entry['effective_minutes']
+
+                logger.info(
+                    'gantt_plans: plan_id=%s i=%s process=%s current_start_time_before=%s',
+                    plan_id, i, spec.process_name, current_start_time
+                )
+
+                # 前のsequenceの同じ工程の終了時刻があれば、それ以降から開始
+                process_key = (obj.plan_date, spec.process_id)
+                if process_key in previous_process_end_by_date:
+                    prev_process_end = previous_process_end_by_date[process_key]
+                    current_start_time = max(current_start_time, prev_process_end)
+                    logger.info(
+                        'gantt_plans: plan_id=%s adjusted by prev_process_end=%s new_current_start_time=%s',
+                        plan_id, prev_process_end, current_start_time
+                    )
+
+                lanes = _ensure_resource_lanes(resource_schedules, spec.process_id, spec.parallel_count)
+                start_time, end_time, lane_idx = _reserve_process_slot_forward(
+                    calendar, current_start_time, effective_minutes, lanes
+                )
+                logger.info(
+                    'gantt_plans: plan_id=%s i=%s process=%s scheduled: start=%s end=%s lane=%s',
+                    plan_id, i, spec.process_name, start_time, end_time, lane_idx
+                )
+                lanes[lane_idx].append({
+                    'start': start_time,
+                    'end': end_time,
+                    'plan_id': plan_id,
+                })
+                output_product_id = spec.output_product_id
+                output_product_code = spec.output_product_code
+                output_product_name = spec.output_product_name
+                coproduct_group_key = entry['coproduct_group_key']
+                coproduct_child_id = entry['coproduct_child_id']
+                if output_product_id and output_product_id in coproduct_parent_map:
+                    parent = coproduct_parent_map[output_product_id]
+                    coproduct_child_id = coproduct_child_id or output_product_id
+                    output_product_id = parent.id
+                    output_product_code = parent.product_code
+                    output_product_name = parent.product_name
+                    coproduct_group_key = coproduct_group_key or f"{plan_id}_{spec.process_id}_{parent.id}"
+
+                process_plan = {
+                    'process_id': spec.process_id,
+                    'process_name': spec.process_name,
+                    'process_number': spec.process_number,
+                    'parallel_group': spec.parallel_group,
+                    'output_product_id': output_product_id,
+                    'output_product_code': output_product_code,
+                    'output_product_name': output_product_name,
+                    'coproduct_group_key': coproduct_group_key,
+                    'coproduct_child_id': coproduct_child_id,
+                    'quantity': float(process_qty),
+                    'cycle_time_minutes': entry['cycle_time_minutes'],
+                    'setup_time_minutes': entry['setup_time_minutes'],
+                    'total_minutes_required': total_minutes,
+                    'effective_minutes': effective_minutes,
+                    'parallel_count': spec.parallel_count,
+                    'start_time': start_time,
+                    'end_time': end_time,
+                    'transfer_time_minutes': spec.transfer_time_minutes,
+                    'is_continuous': True,
+                }
+                processes_plan.append(process_plan)
+
+                # この工程の終了時刻を記録（次のsequenceが同じ工程の直後から開始できるように）
+                previous_process_end_by_date[process_key] = end_time
+
+                # 次工程の開始時刻を計算（パイプライン処理を考慮）
+                if i + 1 < len(scheduled_specs):
+                    next_entry = scheduled_specs[i+1]
+                    next_cycle_time = next_entry['cycle_time_minutes']
+                    next_effective_minutes = next_entry['effective_minutes']
+
+                    gap_minutes = spec.transfer_time_minutes
+
+                    # 開始-開始制約: 次工程は現工程の最初の1個が完了・搬送された後に開始可能
+                    current_cycle_time = entry['cycle_time_minutes']
+                    s2s_limit = calendar.add_working_minutes(start_time, current_cycle_time + gap_minutes)
+
+                    # 終了-終了制約: 次工程の終了は現工程の終了後でなければならない
+                    # （最後の1個が現工程から搬送されて次工程で処理される時間を確保）
+                    # 計算式: end_time(i+1) >= end_time(i) + cycle_time(i+1) + gap
+                    # start_time(i+1)に変換: start_time(i+1) >= (end_time(i) + cycle_time(i+1) + gap) - duration(i+1)
+                    target_end_for_e2e = calendar.add_working_minutes(end_time, next_cycle_time + gap_minutes)
+                    e2e_start_limit = calendar.subtract_working_minutes(target_end_for_e2e, next_effective_minutes)
+
+                    current_start_time = max(s2s_limit, e2e_start_limit)
+
+                    logger.info(
+                        'gantt_plans: plan_id=%s i=%s pipeline: start=%s end=%s cycle=%.1f gap=%.1f '
+                        's2s_limit=%s e2e_limit=%s next_start_time=%s',
+                        plan_id, i, start_time, end_time, current_cycle_time, gap_minutes,
+                        s2s_limit, e2e_start_limit, current_start_time
+                    )
 
         start_dt = processes_plan[0]['start_time'] if processes_plan else current_start_time
         end_dt = processes_plan[-1]['end_time'] if processes_plan else current_start_time
-
-        # Track the end time for this plan_date so next sequence_no starts after this
-        previous_sequence_end_by_date[obj.plan_date] = end_dt
 
         serialized_plan = []
         for pp in processes_plan:
