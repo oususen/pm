@@ -1047,16 +1047,16 @@ onMounted(async () => {
   top: 0;
   bottom: 0;
   width: 2px;
-  background: rgba(34, 197, 94, 0.6);
+  background: rgba(34, 197, 94, 0.35);
 }
 .gantt-guide-line.end {
-  background: rgba(239, 68, 68, 0.6);
+  background: rgba(239, 68, 68, 0.35);
 }
 .gantt-guide-band {
   position: absolute;
   top: 0;
   bottom: 0;
-  background: rgba(239, 68, 68, 0.12);
+  background: rgba(239, 68, 68, 0.06);
 }
 .timeline-header {
   display: flex;
@@ -1154,8 +1154,9 @@ onMounted(async () => {
   align-items: center;
   justify-content: flex-start;
   color: #fff;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   padding-left: 4px;
   box-sizing: border-box;
@@ -1171,7 +1172,8 @@ onMounted(async () => {
   width: 100%;
   text-align: left;
   box-sizing: border-box;
-  font-weight: 600;
+  font-weight: 500;
+  letter-spacing: 0.3px;
 }
 .plan-qty {
   font-weight: 700;
