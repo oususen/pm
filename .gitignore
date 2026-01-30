@@ -73,3 +73,4 @@ create_userprofile_table.sql
 *-cwd*
 .gitignore
 transfer_log.txt
+仕様書/ガンチャート仕様書.md

@@ -98,6 +98,7 @@
               <th class="code-col">品番</th>
               <th class="name-col">品名</th>
               <th class="type-col">区分</th>
+              <th class="dest-col">加工先</th>
               <th class="qty-col">BOM数量</th>
               <th class="rowtype-col">項目</th>
               <th v-for="d in columns" :key="d" class="date-col">{{ formatDateShort(d) }}</th>
@@ -111,6 +112,7 @@
                 <td class="code-col">{{ item.product_code }}</td>
                 <td class="name-col">{{ item.product_name }}</td>
                 <td class="type-col">{{ formatSourcingType(item.sourcing_type) }}</td>
+                <td class="dest-col">{{ formatDestination(item) }}</td>
                 <td class="qty-col">{{ item.quantity }}</td>
                 <td class="rowtype-col">在庫</td>
                 <td
@@ -128,6 +130,7 @@
                 <td class="code-col"></td>
                 <td class="name-col"></td>
                 <td class="type-col"></td>
+                <td class="dest-col"></td>
                 <td class="qty-col"></td>
                 <td class="rowtype-col">計画在庫</td>
                 <td
@@ -171,6 +174,7 @@ const W_TREE = 80;
 const W_CODE = 120;
 const W_NAME = 150;
 const W_TYPE = 60;
+const W_DEST = 150;
 const W_QTY = 60;
 const W_ROWTYPE = 70;
 const W_DATE = 70;
@@ -185,7 +189,7 @@ const columns = computed(() => {
 });
 
 const tableMinWidth = computed(() => {
-  const fixedColsWidth = W_TREE + W_CODE + W_NAME + W_TYPE + W_QTY + W_ROWTYPE;
+  const fixedColsWidth = W_TREE + W_CODE + W_NAME + W_TYPE + W_DEST + W_QTY + W_ROWTYPE;
   return fixedColsWidth + columns.value.length * W_DATE;
 });
 
@@ -308,6 +312,15 @@ const flattenBomTree = (children, level, parentPrefix) => {
       quantity: child.quantity,
       level: level,
       treePrefix: prefix,
+      line_id: child.line_id,
+      line_code: child.line_code,
+      line_name: child.line_name,
+      process_id: child.process_id,
+      process_code: child.process_code,
+      process_name: child.process_name,
+      supplier_id: child.supplier_id,
+      supplier_code: child.supplier_code,
+      supplier_name: child.supplier_name,
     });
 
     if (child.children && child.children.length > 0) {
@@ -346,6 +359,28 @@ const formatSourcingType = (type) => {
     SUBCON: "外注",
   };
   return map[type] || type || "-";
+};
+
+const formatDestination = (item) => {
+  if (!item) return "";
+  const lineLabel = item.line_name || item.line_code
+    ? `${item.line_code || ""}${item.line_code && item.line_name ? " " : ""}${item.line_name || ""}`.trim()
+    : "";
+  const supplierLabel = item.supplier_name || item.supplier_code
+    ? `${item.supplier_code || ""}${item.supplier_code && item.supplier_name ? " " : ""}${item.supplier_name || ""}`.trim()
+    : "";
+  const processLabel = item.process_name || item.process_code
+    ? `${item.process_code || ""}${item.process_code && item.process_name ? " " : ""}${item.process_name || ""}`.trim()
+    : "";
+
+  switch (item.sourcing_type) {
+    case "BUY":
+      return supplierLabel || lineLabel || processLabel;
+    case "SUBCON":
+      return lineLabel || supplierLabel || processLabel;
+    default:
+      return lineLabel || processLabel || supplierLabel;
+  }
 };
 </script>
 
@@ -579,9 +614,18 @@ const formatSourcingType = (type) => {
   text-align: center;
   background: #f8fafc;
 }
-.qty-col {
+.dest-col {
   position: sticky;
   left: 410px;
+  z-index: 3;
+  width: 150px;
+  min-width: 150px;
+  max-width: 150px;
+  background: #f8fafc;
+}
+.qty-col {
+  position: sticky;
+  left: 560px;
   z-index: 3;
   width: 60px;
   min-width: 60px;
@@ -591,7 +635,7 @@ const formatSourcingType = (type) => {
 }
 .rowtype-col {
   position: sticky;
-  left: 470px;
+  left: 620px;
   z-index: 3;
   width: 70px;
   min-width: 70px;
@@ -606,6 +650,7 @@ const formatSourcingType = (type) => {
 .inventory-grid thead .code-col,
 .inventory-grid thead .name-col,
 .inventory-grid thead .type-col,
+.inventory-grid thead .dest-col,
 .inventory-grid thead .qty-col,
 .inventory-grid thead .rowtype-col {
   z-index: 8;
@@ -632,6 +677,7 @@ thead .date-col {
 .row-stock .code-col,
 .row-stock .name-col,
 .row-stock .type-col,
+.row-stock .dest-col,
 .row-stock .qty-col {
   background: #fff;
 }
@@ -647,6 +693,7 @@ thead .date-col {
 .row-planned .code-col,
 .row-planned .name-col,
 .row-planned .type-col,
+.row-planned .dest-col,
 .row-planned .qty-col,
 .row-planned .rowtype-col,
 .row-planned .date-col {

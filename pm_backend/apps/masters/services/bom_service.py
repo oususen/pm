@@ -191,7 +191,12 @@ class BOMService:
             result['bom_version'] = bom.version
             result['is_coproduct'] = bom.is_coproduct
 
-            for item in bom.items.select_related('child_product').all():
+            for item in bom.items.select_related(
+                'child_product',
+                'line',
+                'process',
+                'supplier'
+            ).all():
                 child_tree = self.get_bom_tree(
                     item.child_product_id,
                     level + 1,
@@ -199,6 +204,15 @@ class BOMService:
                 )
                 child_tree['quantity'] = float(item.quantity)
                 child_tree['sourcing_type'] = item.sourcing_type
+                child_tree['line_id'] = item.line_id
+                child_tree['line_code'] = item.line.line_code if item.line else None
+                child_tree['line_name'] = item.line.line_name if item.line else None
+                child_tree['process_id'] = item.process_id
+                child_tree['process_code'] = item.process.process_code if item.process else None
+                child_tree['process_name'] = item.process.process_name if item.process else None
+                child_tree['supplier_id'] = item.supplier_id
+                child_tree['supplier_code'] = item.supplier.supplier_code if item.supplier else None
+                child_tree['supplier_name'] = item.supplier.supplier_name if item.supplier else None
                 result['children'].append(child_tree)
 
         return result
