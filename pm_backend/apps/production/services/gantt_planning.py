@@ -873,30 +873,20 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
 
                 # 次工程の開始時刻を計算（パイプライン処理を考慮）
                 if i + 1 < len(scheduled_specs):
-                    next_entry = scheduled_specs[i+1]
-                    next_cycle_time = next_entry['cycle_time_minutes']
-                    next_effective_minutes = next_entry['effective_minutes']
-
                     gap_minutes = spec.transfer_time_minutes
 
                     # 開始-開始制約: 次工程は現工程の最初の1個が完了・搬送された後に開始可能
                     current_cycle_time = entry['cycle_time_minutes']
                     s2s_limit = calendar.add_working_minutes(start_time, current_cycle_time + gap_minutes)
 
-                    # 終了-終了制約: 次工程の終了は現工程の終了後でなければならない
-                    # （最後の1個が現工程から搬送されて次工程で処理される時間を確保）
-                    # 計算式: end_time(i+1) >= end_time(i) + cycle_time(i+1) + gap
-                    # start_time(i+1)に変換: start_time(i+1) >= (end_time(i) + cycle_time(i+1) + gap) - duration(i+1)
-                    target_end_for_e2e = calendar.add_working_minutes(end_time, next_cycle_time + gap_minutes)
-                    e2e_start_limit = calendar.subtract_working_minutes(target_end_for_e2e, next_effective_minutes)
-
-                    current_start_time = max(s2s_limit, e2e_start_limit)
+                    # 次工程開始時刻は S2S 制約のみで決定
+                    current_start_time = s2s_limit
 
                     logger.info(
                         'gantt_plans: plan_id=%s i=%s pipeline: start=%s end=%s cycle=%.1f gap=%.1f '
-                        's2s_limit=%s e2e_limit=%s next_start_time=%s',
+                        's2s_limit=%s next_start_time=%s',
                         plan_id, i, start_time, end_time, current_cycle_time, gap_minutes,
-                        s2s_limit, e2e_start_limit, current_start_time
+                        s2s_limit, current_start_time
                     )
 
         start_dt = processes_plan[0]['start_time'] if processes_plan else current_start_time

@@ -102,7 +102,6 @@
                   :data-duration-ms="bar.durationMs"
                   @mousedown="handleDragStart"
                 >
-                  <span class="lot-badge">{{ bar.planQty }}</span>
                   <div
                     class="gantt-bar"
                     :style="{
@@ -110,10 +109,12 @@
                     }"
                   >
                     <span class="gantt-bar-label">
+                      <span class="plan-qty">{{ bar.planQty }}</span>
+                      <span class="qty-separator">|</span>
                       <span class="start-time" @mousedown.stop @click.stop="openStartTimeEdit(bar)">{{ bar.startLabel }}</span>
-                      <span v-if="bar.workTimeLabel" class="work-time">{{ bar.workTimeLabel }}</span>
-                      <span class="time-separator"> - </span>
+                      <span class="time-separator">-</span>
                       <span class="end-time">{{ bar.endLabel }}</span>
+                      <span v-if="bar.durationLabel" class="duration">({{ bar.durationLabel }})</span>
                     </span>
                   </div>
                 </div>
@@ -676,16 +677,10 @@ function formatDateTime(date) {
   return `${date.getDate()} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
 }
 
-function formatWorkRange(dateObj) {
-  const dateKey = formatDateKey(dateObj)
-  const workStart = getWorkStartForDate(dateKey)
-  if (!workStart) return ''
-  const workEnd = getWorkEndForDate(dateKey, workStart)
-  if (!workEnd) return ''
-  const startLabel = `${pad2(workStart.hour)}:${pad2(workStart.minute)}`
-  const endLabel = `${pad2(workEnd.hour)}:${pad2(workEnd.minute)}`
-  const endPrefix = workEnd.dayOffset > 0 ? '翌' : ''
-  return `（${startLabel}〜${endPrefix}${endLabel}）`
+function formatMinutesLabel(minutes) {
+  if (!Number.isFinite(minutes) || minutes <= 0) return ''
+  const rounded = Math.round(minutes * 10) / 10
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toString()
 }
 
 function formatTimeRange(start, end) {
@@ -730,8 +725,8 @@ function updateBarDisplay(bar) {
   bar.widthPx = Math.max((bar.durationMs / msPerSlot) * pixelsPerSlot, 20)
   bar.startLabel = formatDateTime(bar.startTime)
   bar.endLabel = formatDateTime(bar.endTime)
-  bar.workTimeLabel = formatWorkRange(bar.startTime)
-  bar.label = `${bar.startLabel} - ${bar.endLabel}`
+  bar.durationLabel = formatMinutesLabel(bar.totalMinutesRequired ?? bar.durationMs / 60000)
+  bar.label = `${bar.planQty}|${bar.startLabel}-${bar.endLabel}${bar.durationLabel ? `(${bar.durationLabel})` : ''}`
 }
 
 function openStartTimeEdit(bar) {
@@ -811,7 +806,12 @@ function buildProcessGantt(plans) {
         existingBar.endTime = new Date(Math.max(existingBar.endTime.getTime(), endTime.getTime()))
         existingBar.durationMs = existingBar.endTime.getTime() - existingBar.startTime.getTime()
         existingBar.planQty = Math.max(existingBar.planQty, qtyValue)
+        existingBar.totalMinutesRequired = Math.max(
+          existingBar.totalMinutesRequired || 0,
+          Number(proc.total_minutes_required ?? 0)
+        )
       } else {
+        const colorKey = plan.product || outputProductId
         const newBar = {
           key: barKey,
           planId: plan.plan_id,
@@ -820,11 +820,12 @@ function buildProcessGantt(plans) {
           endTime,
           durationMs: endTime.getTime() - startTime.getTime(),
           planQty: qtyValue,
-          color: getBarColor(outputProductId),
+          totalMinutesRequired: Number(proc.total_minutes_required ?? 0),
+          color: getBarColor(colorKey),
           label: '',
           startLabel: '',
           endLabel: '',
-          workTimeLabel: '',
+          durationLabel: '',
           leftPx: 0,
           widthPx: 0,
         }
@@ -876,7 +877,8 @@ function buildProcessGantt(plans) {
 }
 
 function getBarColor(productId) {
-  const colors = ['#60a5fa', '#34d399', '#fbbf24', '#f87171', '#a78bfa', '#fb923c']
+  // 冷色系パレット（ブルー/シアン/グリーン寄り）で統一
+  const colors = ['#1d4ed8', '#0ea5e9', '#14b8a6', '#22c55e', '#6366f1', '#0891b2']
   const hash = (productId || 0) % colors.length
   return colors[hash]
 }
@@ -1133,12 +1135,12 @@ onMounted(async () => {
 .gantt-row-bars {
   position: relative;
   flex: 1;
-  min-height: 20px;
+  min-height: 30px;
 }
 .gantt-bar-wrapper {
   position: absolute;
   top: 3px;
-  height: 15px;
+  height: 24px;
   display: flex;
   align-items: center;
   cursor: grab;
@@ -1153,15 +1155,39 @@ onMounted(async () => {
   justify-content: flex-start;
   color: #fff;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  padding-left: 48px;
+  padding-left: 4px;
   box-sizing: border-box;
+  overflow: visible;
 }
 .gantt-bar-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   color: #111827;
   white-space: nowrap;
-  padding: 0 6px;
+  padding: 0 4px;
+  width: 100%;
+  text-align: left;
+  box-sizing: border-box;
+  font-weight: 600;
+}
+.plan-qty {
+  font-weight: 700;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.65);
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.qty-separator {
+  margin: 0 4px 0 2px;
+  font-weight: 700;
+}
+.duration {
+  margin-left: 4px;
+  font-size: 12px;
+  color: #b91c1c;
 }
 .start-time {
   cursor: pointer;
@@ -1169,22 +1195,6 @@ onMounted(async () => {
 }
 .start-time:hover {
   color: #1d4ed8;
-}
-.work-time {
-  margin-left: 4px;
-  font-size: 11px;
-  color: #374151;
-}
-.lot-badge {
-  position: absolute;
-  left: 8px;
-  background: #111827;
-  color: #fff;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
 }
 .no-data {
   padding: 20px;
