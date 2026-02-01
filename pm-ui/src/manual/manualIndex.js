@@ -10,6 +10,14 @@ export const manualSections = [
     items: [{ title: "基本操作", path: "共通/基本操作.md" }],
   },
   {
+    id: "masters",
+    title: "マスタ",
+    items: [
+      { title: "カレンダ一覧", path: "マスタ/カレンダ一覧.md" },
+      { title: "BOM作成マニュアル", path: "マスタ/BOM作成マニュアル.md" },
+    ],
+  },
+  {
     id: "orders",
     title: "受注管理",
     items: [
