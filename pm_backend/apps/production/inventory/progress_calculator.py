@@ -166,7 +166,7 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
 
         actual_total = sum(r.actual_qty or 0 for r in rows)
         adjust_total = sum(r.adjust_qty or 0 for r in rows)
-        scrap_total = sum(r.scrap_qty or 0 for r in rows)
+        # 進度計算では scrap_qty を引かない（自製品の仕損は actual_qty 減算で対応済み）
 
         # LineDemandから需要を取得（LT遡り済み）
         # 確定優先、なければ内示、どちらもなければ0
@@ -194,12 +194,13 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
             backlogs_to_update.extend(rows)
             continue
 
+        # 進度 = 前日進度 + 実績 - 需要 + 調整
+        # 注: 仕損は引かない（自製品は actual_qty 減算で対応、子部品は adjust_qty で反映済み）
         progress_qty = (
             prev_progress
             + actual_total
             - progress_shipment
             + adjust_total
-            - scrap_total
         )
 
         rep = pick_representative(rows)

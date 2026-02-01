@@ -227,16 +227,26 @@
         </button>
       </div>
 
-      <div v-if="isScrapRecord" class="section">
-        <label class="label-required">{{ t('processInput.disposition') }}</label>
-        <select v-model="record.disposition_status" class="input-large">
-          <option value="">{{ t('processInput.selectDisposition') }}</option>
-          <option v-for="opt in scrapDispositionOptions" :key="opt.value" :value="opt.value">
-            {{ opt.label }}
-          </option>
-        </select>
-        <div class="hint">{{ t('processInput.dispositionHint') }}</div>
+      <div v-if="isScrapRecord" class="section inline-row dual-row">
+        <div class="inline-group">
+          <label class="label-required inline-label">{{ t('processInput.disposition') }}</label>
+          <select v-model="record.disposition_status" class="input-large flex-input">
+            <option value="">{{ t('processInput.selectDisposition') }}</option>
+            <option v-for="opt in scrapDispositionOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+        </div>
+        <div class="inline-group">
+          <label class="label-required inline-label">{{ t('processInput.productionRecorded') }}</label>
+          <select v-model="record.is_production_recorded" class="input-large flex-input">
+            <option v-for="opt in productionRecordedOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+        </div>
       </div>
+      <div v-if="isScrapRecord" class="hint">{{ t('processInput.dispositionHint') }}</div>
 
       <div v-if="isScrapRecord" class="section">
         <label class="label-required">{{ t('processInput.reason') }}</label>
@@ -397,6 +407,7 @@ const record = ref({
   reason: '',
   reason_detail: '',
   disposition_status: '',
+  is_production_recorded: false,
   equipment_state: '',
   batch_no: '',
   operator_name: '',
@@ -425,6 +436,11 @@ const scrapReasons = computed(() => [
 const scrapDispositionOptions = computed(() => [
   { value: 'REJECTED', label: t('processInput.scrapDisposition.rejected') },
   { value: 'PENDING', label: t('processInput.scrapDisposition.pending') },
+])
+
+const productionRecordedOptions = computed(() => [
+  { value: false, label: t('processInput.productionRecordedOptions.no') },
+  { value: true, label: t('processInput.productionRecordedOptions.yes') },
 ])
 
 const scrapRelationOptions = computed(() => [
@@ -729,6 +745,7 @@ const resetForm = () => {
     reason: '',
     reason_detail: '',
     disposition_status: '',
+    is_production_recorded: false,
     equipment_state: '',
     batch_no: '',
     operator_name: defaultOperatorName.value || '',
@@ -810,6 +827,7 @@ const submitRecord = async () => {
       const eventData = {
         reason: record.value.reason,
         disposition_status: record.value.disposition_status || 'REJECTED',
+        is_production_recorded: record.value.is_production_recorded || false,
       }
       if (record.value.reason === 'OTHER' && (record.value.reason_detail || '').trim()) {
         eventData.reason_detail = record.value.reason_detail.trim()

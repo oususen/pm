@@ -225,6 +225,119 @@ def update_line_backlog_production(process, product, qty, plan_date):
         backlog.save(update_fields=['actual_qty'])
 
 
+def adjust_production_for_scrap(process, product, scrap_qty, plan_date):
+    """
+    仕損登録時に生産実績を減算する（実績入力済みの場合のみ使用）
+
+    Args:
+        process: Process オブジェクト
+        product: Product オブジェクト
+        scrap_qty: 仕損数量 (Decimal)
+        plan_date: 計画日 (date)
+    """
+    if not product or not scrap_qty or scrap_qty <= 0:
+        return
+
+    line = getattr(process, 'line', None)
+    if not line:
+        return
+
+    # 該当するLineBacklogレコードを取得
+    backlog = LineBacklog.objects.filter(
+        line=line,
+        process=process,
+        product=product,
+        plan_date=plan_date,
+        sequence_no=0,
+    ).first()
+
+    if backlog:
+        # 実績から仕損数量を減算（負にならないよう0以上を保証）
+        new_actual = max(0, (backlog.actual_qty or 0) - int(scrap_qty))
+        backlog.actual_qty = new_actual
+        backlog.save(update_fields=['actual_qty'])
+
+
+def update_scrap_to_backlog(process, product, scrap_qty, plan_date, details=None):
+    """
+    仕損登録時にLineBacklogに即時反映する
+
+    Args:
+        process: Process オブジェクト
+        product: Product オブジェクト（自製品）
+        scrap_qty: 仕損数量 (Decimal)
+        plan_date: 計画日 (date)
+        details: ScrapRecordDetailのリスト（子部品の情報）
+    """
+    if not scrap_qty or scrap_qty <= 0:
+        return
+
+    line = getattr(process, 'line', None)
+    if not line:
+        return
+
+    # 自製品の scrap_qty に保存（常に）
+    if product:
+        backlog, _ = LineBacklog.objects.get_or_create(
+            line=line,
+            process=process,
+            product=product,
+            plan_date=plan_date,
+            sequence_no=0,
+            defaults={
+                'order_qty': 0,
+                'plan_qty': 0,
+                'actual_qty': 0,
+                'stock_qty': 0,
+                'planned_stock_qty': 0,
+                'adjust_qty': 0,
+                'scrap_qty': 0,
+                'actual_shipment_qty': 0,
+            }
+        )
+        LineBacklog.objects.filter(id=backlog.id).update(
+            scrap_qty=F('scrap_qty') + int(scrap_qty)
+        )
+
+    # 子部品（BOM展開明細）は adjust_qty に保存
+    if details:
+        for detail in details:
+            detail_line_id = detail.get('line_id')
+            detail_process_id = detail.get('process_id')
+            detail_product_id = detail.get('product_id')
+            detail_qty = detail.get('qty') or Decimal('0')
+
+            if not detail_line_id or not detail_process_id or not detail_product_id:
+                continue
+            if detail_qty <= 0:
+                continue
+            # 自製品はスキップ（既に上で処理済み）
+            if product and detail_product_id == product.id:
+                continue
+
+            child_backlog, _ = LineBacklog.objects.get_or_create(
+                line_id=detail_line_id,
+                process_id=detail_process_id,
+                product_id=detail_product_id,
+                plan_date=plan_date,
+                sequence_no=0,
+                defaults={
+                    'order_qty': 0,
+                    'plan_qty': 0,
+                    'actual_qty': 0,
+                    'stock_qty': 0,
+                    'planned_stock_qty': 0,
+                    'adjust_qty': 0,
+                    'scrap_qty': 0,
+                    'actual_shipment_qty': 0,
+                }
+            )
+            # 子部品は adjust_qty に負の値として保存（在庫減算のため）
+            LineBacklog.objects.filter(id=child_backlog.id).update(
+                adjust_qty=F('adjust_qty') - int(detail_qty)
+            )
+
+
 def update_line_backlog_actual_shipment(process, product, qty, plan_date):
     """
     後工程の実績を前工程の実績出庫（actual_shipment_qty）に即時反映する。
@@ -506,6 +619,10 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                 disposition_status = status_raw if status_raw in valid_statuses else 'REJECTED'
                 decided_at = timezone.now() if disposition_status != 'PENDING' else None
                 decided_by = validated_data.get('operator_name') if decided_at else None
+                # 実績入力済みフラグ（True: 生産実績入力済み、False: 実績未入力）
+                is_production_recorded = scrap_event.get('is_production_recorded', False)
+                if isinstance(is_production_recorded, str):
+                    is_production_recorded = is_production_recorded.lower() in ('true', '1', 'yes')
 
                 sr = ScrapRecord.objects.create(
                     process=process,
@@ -525,6 +642,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                     disposition_status=disposition_status,
                     decided_at=decided_at,
                     decided_by=decided_by,
+                    is_production_recorded=is_production_recorded,
                 )
 
                 # 明細を保存（BOM展開結果）
@@ -552,9 +670,19 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                         ))
                     ScrapRecordDetail.objects.bulk_create(objs)
 
-                # 在庫への転嫁：BOMを最下層まで展開し、在庫引当テーブルに反映
-                multipliers = build_scrap_multiplier_map(product.id if product else None, qty_decimal)
-                if multipliers:
-                    apply_scrap_to_stock(multipliers)
+                # LineBacklogへの即時反映（自製品のscrap_qty + 子部品のadjust_qty）
+                update_scrap_to_backlog(process, product, qty_decimal, plan_date, details)
+
+                # 在庫・実績への転嫁
+                if is_production_recorded:
+                    # 実績入力済みの場合：生産実績を減算
+                    # 子部品は出庫済みなのでStockAllocation減算は行わない（adjust_qtyで既に反映済み）
+                    adjust_production_for_scrap(process, product, qty_decimal, plan_date)
+                else:
+                    # 実績未入力の場合：BOMを最下層まで展開し、在庫引当テーブルに反映
+                    # （即時在庫への反映用。LineBacklogのadjust_qtyは上で反映済み）
+                    multipliers = build_scrap_multiplier_map(product.id if product else None, qty_decimal)
+                    if multipliers:
+                        apply_scrap_to_stock(multipliers)
 
             return parent_record
