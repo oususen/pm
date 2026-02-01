@@ -58,22 +58,22 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
         ).values_list('id', flat=True).first()
 
     def is_working_day(target_date):
+        # カレンダー未設定時は土日を非稼働日として扱う
         if not calendar_id:
-            return True
+            return target_date.weekday() < 5
         if target_date in workday_cache:
             return workday_cache[target_date]
         cal = CalendarDay.objects.filter(
             calendar_id=calendar_id,
             target_date=target_date
         ).first()
-        is_work = cal.is_working_day if cal is not None else True
+        # カレンダに定義が無い日も週末は非稼働とする
+        is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
         workday_cache[target_date] = is_work
         return is_work
 
     def get_prev_working_day(target_date):
         prev_date = target_date - timedelta(days=1)
-        if not calendar_id:
-            return prev_date
         while not is_working_day(prev_date):
             prev_date = prev_date - timedelta(days=1)
         return prev_date
@@ -151,6 +151,7 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
 
     for plan_date in sorted(by_date.keys()):
         rows = by_date[plan_date]
+        working_day = is_working_day(plan_date)
 
         # 前々営業日以前は既存の進度値を使用し、更新しない
         if plan_date <= day_before_yesterday:
@@ -180,6 +181,18 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
 
         prev_day = get_prev_working_day(plan_date)
         prev_progress = progress_by_date.get(prev_day, last_progress)
+
+        # 非稼働日は前営業日の進度をそのまま保持する
+        if not working_day:
+            progress_qty = prev_progress
+            rep = pick_representative(rows)
+            for row in rows:
+                row.progress_qty = 0
+            rep.progress_qty = progress_qty
+            progress_by_date[plan_date] = progress_qty
+            last_progress = progress_qty
+            backlogs_to_update.extend(rows)
+            continue
 
         progress_qty = (
             prev_progress
