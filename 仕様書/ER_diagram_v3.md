@@ -1,6 +1,25 @@
 # ER 図（Mermaid, v3.1 / ENUM値明記）
+
+## ⚠️ 購買ラインの is_active について
+
+`m_line` で `line_type='PURCHASE'` のラインは **意図的に `is_active=0`** で作成されます。
+UIのライン選択に表示させないためであり、**使用中でも is_active=0 が正常**です。
+削除前は必ず `m_routing_step` や `m_product` からの参照を確認してください。
+
 ```mermaid
 erDiagram
+    m_line {
+      BIGINT id PK
+      VARCHAR(20) line_code UNIQUE
+      VARCHAR(50) line_name
+      BIGINT calendar_id FK
+      INT lead_time_days
+      ENUM line_type "PROD,PURCHASE,OUTSOURCE,OTHER"
+      TINYINT is_active "購買ラインは意図的に0"
+      DATETIME created_at
+      DATETIME updated_at
+    }
+
     m_product {
       BIGINT id PK
       VARCHAR(30) product_code UNIQUE
