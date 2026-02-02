@@ -667,6 +667,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                             supplier_id=d.get('supplier_id'),
                             sourcing_type=d.get('sourcing_type'),
                             deduct_qty=d.get('qty') or Decimal('0'),
+                            is_backlog_processed=True,  # 登録時にLineBacklogに反映済み
                         ))
                     ScrapRecordDetail.objects.bulk_create(objs)
 

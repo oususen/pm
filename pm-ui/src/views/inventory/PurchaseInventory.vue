@@ -193,8 +193,8 @@ const columns = computed(() => {
 });
 
 const rowDefs = [
-  { key: "forecast", label: "内示" },
-  { key: "firm", label: "確定" },
+  { key: "forecast", label: "計需" },
+  { key: "firm", label: "実需" },
   { key: "plan", label: "計画" },
   { key: "actual", label: "実績" },
   { key: "adjust", label: "調整" },

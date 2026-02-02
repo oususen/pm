@@ -63,7 +63,7 @@
               <span class="info-value">{{ fmt(getMonthTotal(g, 'forecast')) }}</span>
             </div>
             <div class="info-row">
-              <span class="info-label">確定</span>
+              <span class="info-label">実需</span>
               <span class="info-value">{{ fmt(getMonthTotal(g, 'firm')) }}</span>
             </div>
             <div class="info-row">
@@ -155,8 +155,8 @@ const getBacklogParams = () => {
 };
 
 const rowDefs = [
-  { key: "forecast", label: "内示" },
-  { key: "firm", label: "確定" },
+  { key: "forecast", label: "計需" },
+  { key: "firm", label: "実需" },
   { key: "plan", label: "計画" },
   { key: "actual", label: "実績" },
   { key: "adjust", label: "調整" },
@@ -250,7 +250,7 @@ const groups = computed(() => {
     const demandQty = Number(d.demand_qty_plan || 0);
     const planQty = Number(d.plan_qty || 0);
     const isDemandRow = (orderQty > 0 || demandQty > 0) && planQty === 0;
-    // 内示/確定は需要行のみ採用（計画行は除外）
+    // 計需/実需は需要行のみ採用（計画行は除外）
     if (isDemandRow) {
       const hasForecastSplit = d.forecast_order_qty !== null && d.forecast_order_qty !== undefined;
       const forecastVal = Number((hasForecastSplit ? d.forecast_order_qty : d.order_qty) || 0);

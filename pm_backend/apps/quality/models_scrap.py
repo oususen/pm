@@ -120,6 +120,7 @@ class ScrapRecordDetail(models.Model):
     is_replenished = models.BooleanField(default=False, verbose_name='補充完了')
     replenished_at = models.DateTimeField(null=True, blank=True, verbose_name='補充完了日時')
     replenished_by = models.CharField(max_length=50, null=True, blank=True, verbose_name='補充完了者')
+    is_backlog_processed = models.BooleanField(default=False, verbose_name='Backlog反映済み')
 
     class Meta:
         db_table = 't_scrap_record_detail'

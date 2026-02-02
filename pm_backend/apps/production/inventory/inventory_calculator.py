@@ -69,11 +69,12 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
         ).update(scrap_qty=F('scrap_qty') + int(scrap.qty))
 
     # 後工程仕損の展開分（子部品）は adjust_qty に保存（負の値として）
-    # 全ての仕損が対象（is_production_recorded に関係なく）
+    # 未処理のレコードのみ対象（is_backlog_processed=False）
     detail_filter = {
         'scrap_record__disposition_status__in': ['PENDING', 'PARTIAL', 'REJECTED', 'APPROVED'],
         'scrap_record__event_type__in': ['SCRAP', 'RETURN'],
         'scrap_record__plan_date__isnull': False,
+        'is_backlog_processed': False,  # 未処理のみ
     }
     if line_id:
         detail_filter['line_id'] = line_id
@@ -81,6 +82,7 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
         detail_filter['scrap_record__plan_date__range'] = [start_date, end_date]
 
     details = ScrapRecordDetail.objects.filter(**detail_filter).select_related('scrap_record', 'product')
+    processed_detail_ids = []
 
     for detail in details:
         if not detail.product or not detail.line_id or not detail.process_id:
@@ -89,6 +91,8 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
         if (detail.product_id == detail.scrap_record.product_id
             and detail.line_id == detail.scrap_record.line_id
             and detail.process_id == detail.scrap_record.process_id):
+            # 自製品でも処理済みフラグは立てる
+            processed_detail_ids.append(detail.id)
             continue
 
         LineBacklog.objects.get_or_create(
@@ -106,6 +110,11 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
             process_id=detail.process_id,
             sequence_no=0,
         ).update(adjust_qty=F('adjust_qty') - int(detail.deduct_qty))
+        processed_detail_ids.append(detail.id)
+
+    # 処理済みフラグを更新
+    if processed_detail_ids:
+        ScrapRecordDetail.objects.filter(id__in=processed_detail_ids).update(is_backlog_processed=True)
 
 
 def _build_firm_order_map(line_id, start_date, end_date):
@@ -270,23 +279,77 @@ def _sum_parent_shipments(backlog, pick_qty, shift_fn=None):
     return total_shipment
 
 
+def _get_shipment_scrap_qty(product_id, line_id, process_id, plan_date):
+    """
+    出庫計算用の仕損数量を取得（全ての仕損）
+
+    仕損が発生した場合、子部品も消費されているため、出庫として計上する。
+    is_production_recorded に関係なく全ての仕損を含める。
+    """
+    from django.db.models import Sum
+    result = ScrapRecord.objects.filter(
+        product_id=product_id,
+        line_id=line_id,
+        process_id=process_id,
+        plan_date=plan_date,
+        disposition_status__in=['PENDING', 'PARTIAL', 'REJECTED', 'APPROVED'],
+        event_type__in=['SCRAP', 'RETURN'],
+    ).aggregate(total=Sum('qty'))
+    return result['total'] or Decimal('0')
+
+
 def _calculate_parent_actual_shipment(backlog, shift_fn=None):
     """
     実在庫・計画在庫用の実績出庫計算（後工程の実績 + 仕損を使用）
 
     親製品の仕損も出庫として計上する。
-    これにより、親製品が仕損になった場合、子部品の在庫が減算される。
+    仕損が発生した場合、子部品も消費されているため、全ての仕損を出庫に含める。
 
     Args:
         backlog: LineBacklogインスタンス
         shift_fn: LTシフト関数（営業日ベースで日付をシフト）
     """
-    # 親の actual_qty + scrap_qty を出庫として計算
-    return _sum_parent_shipments(
-        backlog,
-        lambda d: (d.actual_qty or 0) + (d.scrap_qty or 0),
-        shift_fn
-    )
+    from masters.models import BOMItem
+
+    parent_bom_items = BOMItem.objects.filter(
+        child_product=backlog.product,
+        bom__is_active=True,
+        bom__is_coproduct=False
+    ).select_related('bom__parent_product')
+
+    if not parent_bom_items.exists():
+        return Decimal('0')
+
+    total_shipment = Decimal('0')
+    for bom_item in parent_bom_items:
+        parent_product = bom_item.bom.parent_product
+        if not parent_product:
+            continue
+        qty_per = bom_item.quantity or Decimal('0')
+        if qty_per == 0:
+            continue
+        lead_days = bom_item.lead_time_days or 0
+        parent_date = backlog.plan_date
+        if shift_fn:
+            parent_date = shift_fn(backlog.plan_date, lead_days)
+        downstream_backlogs = LineBacklog.objects.filter(
+            product=parent_product,
+            plan_date=parent_date,
+        )
+        for downstream in downstream_backlogs:
+            actual = downstream.actual_qty or 0
+            # 全ての仕損を出庫に含める
+            scrap = _get_shipment_scrap_qty(
+                downstream.product_id,
+                downstream.line_id,
+                downstream.process_id,
+                downstream.plan_date
+            )
+            use_qty = actual + scrap
+            if use_qty:
+                total_shipment += Decimal(str(use_qty)) * Decimal(str(qty_per))
+
+    return total_shipment
 
 
 def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None):
@@ -294,7 +357,7 @@ def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None):
     計画在庫用の出庫計算（実績優先、なければ計画を使用）+ 仕損
 
     LTシフト後の親製品の日付で：
-    - 実績がある場合 → 実績 + 仕損を使用
+    - 実績がある場合 → 実績 + 仕損（全て）を使用
     - 実績がない場合 → 計画数を使用
     - どちらもない場合 → 0
 
@@ -302,14 +365,50 @@ def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None):
         backlog: LineBacklogインスタンス
         shift_fn: LTシフト関数（営業日ベースで日付をシフト）
     """
-    def pick_qty(downstream):
-        actual = downstream.actual_qty or 0
-        scrap = downstream.scrap_qty or 0
-        if actual > 0 or scrap > 0:
-            return actual + scrap
-        return downstream.plan_qty or 0
+    from masters.models import BOMItem
 
-    return _sum_parent_shipments(backlog, pick_qty, shift_fn)
+    parent_bom_items = BOMItem.objects.filter(
+        child_product=backlog.product,
+        bom__is_active=True,
+        bom__is_coproduct=False
+    ).select_related('bom__parent_product')
+
+    if not parent_bom_items.exists():
+        return Decimal('0')
+
+    total_shipment = Decimal('0')
+    for bom_item in parent_bom_items:
+        parent_product = bom_item.bom.parent_product
+        if not parent_product:
+            continue
+        qty_per = bom_item.quantity or Decimal('0')
+        if qty_per == 0:
+            continue
+        lead_days = bom_item.lead_time_days or 0
+        parent_date = backlog.plan_date
+        if shift_fn:
+            parent_date = shift_fn(backlog.plan_date, lead_days)
+        downstream_backlogs = LineBacklog.objects.filter(
+            product=parent_product,
+            plan_date=parent_date,
+        )
+        for downstream in downstream_backlogs:
+            actual = downstream.actual_qty or 0
+            # 全ての仕損を出庫に含める
+            scrap = _get_shipment_scrap_qty(
+                downstream.product_id,
+                downstream.line_id,
+                downstream.process_id,
+                downstream.plan_date
+            )
+            if actual > 0 or scrap > 0:
+                use_qty = actual + scrap
+            else:
+                use_qty = downstream.plan_qty or 0
+            if use_qty:
+                total_shipment += Decimal(str(use_qty)) * Decimal(str(qty_per))
+
+    return total_shipment
 
 
 def _calculate_parent_planned_shipment(backlog, today, shift_fn):
@@ -320,17 +419,51 @@ def _calculate_parent_planned_shipment(backlog, today, shift_fn):
     これは実在庫（後工程の実績を使用）とは異なる点。
     ただし、仕損は実績なので計画値に加算する。
 
-    - 今日以降: 後工程の計画値 + 仕損で計算
+    - 今日以降: 後工程の計画値 + 仕損（全て）で計算
 
     ※ 実在庫の出庫は _calculate_parent_actual_shipment で actual_qty + scrap_qty を使用
     """
-    # 計画在庫の今日以降は計画値（内示）+ 仕損で出庫計算
-    def pick_qty(downstream):
-        plan = downstream.plan_qty or 0
-        scrap = downstream.scrap_qty or 0
-        return plan + scrap
+    from masters.models import BOMItem
 
-    return _sum_parent_shipments(backlog, pick_qty, shift_fn)
+    parent_bom_items = BOMItem.objects.filter(
+        child_product=backlog.product,
+        bom__is_active=True,
+        bom__is_coproduct=False
+    ).select_related('bom__parent_product')
+
+    if not parent_bom_items.exists():
+        return Decimal('0')
+
+    total_shipment = Decimal('0')
+    for bom_item in parent_bom_items:
+        parent_product = bom_item.bom.parent_product
+        if not parent_product:
+            continue
+        qty_per = bom_item.quantity or Decimal('0')
+        if qty_per == 0:
+            continue
+        lead_days = bom_item.lead_time_days or 0
+        parent_date = backlog.plan_date
+        if shift_fn:
+            parent_date = shift_fn(backlog.plan_date, lead_days)
+        downstream_backlogs = LineBacklog.objects.filter(
+            product=parent_product,
+            plan_date=parent_date,
+        )
+        for downstream in downstream_backlogs:
+            plan = downstream.plan_qty or 0
+            # 全ての仕損を出庫に含める
+            scrap = _get_shipment_scrap_qty(
+                downstream.product_id,
+                downstream.line_id,
+                downstream.process_id,
+                downstream.plan_date
+            )
+            use_qty = plan + scrap
+            if use_qty:
+                total_shipment += Decimal(str(use_qty)) * Decimal(str(qty_per))
+
+    return total_shipment
 
 
 def calculate_actual_shipment(backlog):
@@ -523,10 +656,8 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
             continue
 
         actual_total = sum(r.actual_qty or 0 for r in rows)
-        adjust_total = sum(r.adjust_qty or 0 for r in rows)
-        # 在庫計算では scrap_qty を直接引かない
-        # 子部品の在庫減算は親の scrap_qty を出庫として計算することで対応
-        # 子部品の adjust_qty にも反映されているため二重減算を防ぐ
+        # 在庫計算では adjust_qty を使用しない
+        # 仕損による子部品の消費は、出庫計算（親の実績+仕損）で反映される
 
         if plan_date <= today:
             if is_final:
@@ -541,13 +672,12 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
         prev_day = get_prev_working_day(plan_date)
         prev_stock = stock_by_date.get(prev_day, last_stock)
 
-        # 在庫 = 前日在庫 + 実績 - 出庫(親の実績+仕損) + 調整
-        # 注: scrap_qty は直接引かない（親の仕損は出庫として計算済み、子部品は adjust_qty で反映済み）
+        # 在庫 = 前日在庫 + 実績 - 出庫(親の実績+仕損)
+        # 仕損による子部品消費は出庫計算で反映済み（adjust_qty は使用しない）
         stock_qty = (
             prev_stock
             + actual_total
             - actual_shipment
-            + adjust_total
         )
 
         rep = pick_representative(rows)
@@ -686,8 +816,8 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
 
         plan_total = sum(r.plan_qty or 0 for r in rows)
         actual_total = sum(r.actual_qty or 0 for r in rows)
-        adjust_total = sum(r.adjust_qty or 0 for r in rows)
-        # 計画在庫計算でも scrap_qty を直接引かない
+        # 計画在庫計算でも adjust_qty を使用しない
+        # 仕損による子部品の消費は、出庫計算（親の実績/計画+仕損）で反映される
         order_total = sum(r.order_qty or 0 for r in rows)
 
         is_final = bool(getattr(sample.product, 'is_final_product', False))
@@ -710,21 +840,19 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
         prev_day = get_prev_working_day(plan_date)
         prev_planned = planned_by_date.get(prev_day, last_planned)
 
-        # 計画在庫 = 前日計画在庫 + 実績/計画 - 出庫 + 調整
-        # 注: scrap_qty は直接引かない
+        # 計画在庫 = 前日計画在庫 + 実績/計画 - 出庫
+        # 仕損による子部品消費は出庫計算で反映済み（adjust_qty は使用しない）
         if plan_date < today:
             planned_stock = (
                 prev_planned
                 + actual_total
                 - planned_shipment
-                + adjust_total
             )
         else:
             planned_stock = (
                 prev_planned
                 + plan_total
                 - planned_shipment
-                + adjust_total
             )
 
         rep = pick_representative(rows)
