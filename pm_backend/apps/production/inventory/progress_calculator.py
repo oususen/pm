@@ -11,6 +11,7 @@ from masters.models import Calendar, CalendarDay, Line, RoutingStep
 from orders.utils.calendar_utils import get_business_today
 from ..models import LineDemand
 from ..models_line_backlog import LineBacklog
+from .inventory_calculator import _get_max_parent_bom_lead_time
 
 
 def recalculate_progress_qty(line_id, product_id, start_date, end_date):
@@ -78,6 +79,21 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
             prev_date = prev_date - timedelta(days=1)
         return prev_date
 
+    def shift_working_days(target_date, days):
+        """営業日ベースで日付をシフト"""
+        if not days:
+            return target_date
+        if not calendar_id:
+            return target_date + timedelta(days=days)
+        step = 1 if days > 0 else -1
+        remaining = abs(int(days))
+        current = target_date
+        while remaining > 0:
+            current = current + timedelta(days=step)
+            if is_working_day(current):
+                remaining -= 1
+        return current
+
     def pick_representative(rows):
         base_rows = [r for r in rows if r.sequence_no == 0]
         if base_rows:
@@ -87,15 +103,18 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
         return min(candidates, key=lambda r: (r.sequence_no if r.sequence_no is not None else 0, r.id))
 
     today = get_business_today()
-    day_before_yesterday = get_prev_working_day(get_prev_working_day(today))  # 前々営業日
+    # 製品のBOMの最大LTを取得し、LT+1日前から再計算
+    # これにより、親製品の実績変更が子製品の過去の需要（LineDemand）に正しく反映される
+    max_lt = _get_max_parent_bom_lead_time(product_id)
+    calc_start_date = shift_working_days(today, -(max_lt + 1))
     progress_by_date = {}
     last_progress = 0
 
-    # 前々営業日の進度を初期値として取得
+    # 計算開始日以前の進度を初期値として取得
     initial_backlog = LineBacklog.objects.filter(
         line_id=line_id,
         product_id=product_id,
-        plan_date__lte=day_before_yesterday,
+        plan_date__lte=calc_start_date,
         progress_qty__isnull=False
     ).order_by('-plan_date', 'sequence_no', 'id').first()
 
@@ -146,15 +165,15 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
                 key = (demand.plan_date, demand.product_id)
                 demand_by_product[key] = demand_by_product.get(key, Decimal('0')) + qty
 
-    # 更新対象のbacklogを追跡（前々営業日以前は更新しない）
+    # 更新対象のbacklogを追跡（計算開始日以前は更新しない）
     backlogs_to_update = []
 
     for plan_date in sorted(by_date.keys()):
         rows = by_date[plan_date]
         working_day = is_working_day(plan_date)
 
-        # 前々営業日以前は既存の進度値を使用し、更新しない
-        if plan_date <= day_before_yesterday:
+        # 計算開始日以前は既存の進度値を使用し、更新しない
+        if plan_date <= calc_start_date:
             existing_progress = 0
             for row in rows:
                 if row.progress_qty:
