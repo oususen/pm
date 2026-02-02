@@ -702,21 +702,12 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                     next_cycle_time = next_entry['cycle_time_minutes']
                     gap_minutes = spec.transfer_time_minutes
 
-                    # 終了-終了制約（後方）: 現工程の終了 <= 次工程の終了 - next_cycle_time - gap
-                    e2e_end_limit = calendar.subtract_working_minutes(
-                        scheduled_times[i + 1]['end'], next_cycle_time + gap_minutes
-                    )
-
                     # 開始-開始制約（後方）: 現工程の開始 <= 次工程の開始 - cycle_time - gap
-                    s2s_end_limit = calendar.subtract_working_minutes(
+                    # E2E制約を使うと前工程が不必要に早く開始されるため、S2S制約のみを使用
+                    start_time = calendar.subtract_working_minutes(
                         next_start_time, current_cycle_time + gap_minutes
                     )
-                    # 開始時刻から終了時刻を逆算
-                    s2s_end_from_start = calendar.add_working_minutes(s2s_end_limit, effective_minutes)
-
-                    # より早い終了時刻を採用（後方スケジューリングなので）
-                    end_time = min(e2e_end_limit, s2s_end_from_start)
-                    start_time = calendar.subtract_working_minutes(end_time, effective_minutes)
+                    end_time = calendar.add_working_minutes(start_time, effective_minutes)
 
                 # 前のsequenceの終了時刻があれば、それ以降から開始する必要がある
                 if process_key in previous_process_end_by_date:

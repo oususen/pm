@@ -1717,7 +1717,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 continue
 
             for step in sorted(steps, key=lambda s: s.step_no or 0):
-                target_date = shift_business_days(plan_date, step.lead_time_days or 0)
+                # ライン最終品の場合はLTシフトしない（計画日＝完成日）
+                lt_days = step.lead_time_days or 0
+                if step.output_product and step.output_product.is_line_final_product:
+                    lt_days = 0
+                target_date = shift_business_days(plan_date, lt_days)
                 target_product_id = step.output_product_id or product_id
 
                 # 連産品の子製品の場合、親製品に置き換える

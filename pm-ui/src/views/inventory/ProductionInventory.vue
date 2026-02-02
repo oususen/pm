@@ -99,20 +99,7 @@
                     :key="`${row.key}-${d}`"
                     class="cell" :class="getCellClass(g, d, row.key)"
                   >
-                    <template v-if="row.key === 'adjust' && !g.isChild">
-                      <input
-                        class="cell-input"
-                        type="number"
-                        :value="getAdjustInputValue(g, d)"
-                        :disabled="isAdjustSaving(g, d)"
-                        @input="onAdjustInput(g, d, $event)"
-                        @blur="saveAdjust(g, d)"
-                        @keydown.enter.prevent="onAdjustEnter($event)"
-                      />
-                    </template>
-                    <template v-else>
-                      {{ fmt(getValue(g, d, row.key)) }}
-                    </template>
+                    {{ fmt(getValue(g, d, row.key)) }}
                   </td>
                 </tr>
               </tbody>
