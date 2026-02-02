@@ -43,6 +43,42 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
         plan_date__range=[start_date, end_date]
     ).select_related('product').order_by('plan_date', 'sequence_no', 'id'))
 
+    # 行が存在しない日も進度を保持するため、ダミー行（sequence_no=0）を補完する
+    if backlogs:
+        sample_process_id = next((r.process_id for r in backlogs if r.process_id), None)
+        if start_date and end_date and sample_process_id:
+            existing_dates = {b.plan_date for b in backlogs}
+            to_create = []
+            current = start_date
+            while current <= end_date:
+                if current not in existing_dates:
+                    to_create.append(LineBacklog(
+                        plan_date=current,
+                        process_id=sample_process_id,
+                        product_id=product_id,
+                        line_id=line_id,
+                        sequence_no=0,
+                        order_qty=0,
+                        demand_qty_plan=0,
+                        plan_qty=0,
+                        actual_qty=0,
+                        stock_qty=0,
+                        planned_stock_qty=0,
+                        adjust_qty=0,
+                        scrap_qty=0,
+                        actual_shipment_qty=0,
+                    ))
+                    existing_dates.add(current)
+                current += timedelta(days=1)
+            if to_create:
+                LineBacklog.objects.bulk_create(to_create)
+                # PK が無いオブジェクトを bulk_update に渡さないため、再取得して置き換える
+                backlogs = list(LineBacklog.objects.filter(
+                    line_id=line_id,
+                    product_id=product_id,
+                    plan_date__range=[start_date, end_date]
+                ).select_related('product').order_by('plan_date', 'sequence_no', 'id'))
+
     if not backlogs:
         return
 

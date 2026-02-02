@@ -285,7 +285,28 @@ const groups = computed(() => {
     // 進度はバックエンドで計算された値を使用
     c.progress += Number(d.progress_qty || 0);
   }
-  return Array.from(map.values());
+
+  // 進度が日付抜けで途切れないよう、日付順に直近値をキャリーする
+  const carryForwardProgress = (group) => {
+    let last = null;
+    columns.value.forEach((date) => {
+      const cell = group.cells[date];
+      const val = cell ? cell.progress : undefined;
+      if (val !== null && val !== undefined) {
+        last = val;
+      } else if (last !== null && last !== undefined) {
+        if (!group.cells[date]) group.cells[date] = {};
+        group.cells[date].progress = last;
+      }
+    });
+    if (group.children && group.children.length) {
+      group.children.forEach(carryForwardProgress);
+    }
+  };
+
+  const result = Array.from(map.values());
+  result.forEach(carryForwardProgress);
+  return result;
 });
 
 const fmt = (n) => {
