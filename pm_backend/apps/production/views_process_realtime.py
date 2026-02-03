@@ -17,9 +17,7 @@ from .models_line_backlog import LineBacklog
 from .serializers_process_realtime import (
     ProcessRealtimeRecordSerializer,
     ProcessRealtimeCreateSerializer,
-    build_scrap_multiplier_map,
     build_scrap_multiplier_details,
-    apply_scrap_return_to_stock,
 )
 from masters.models import Product, Process, Supplier, BOM
 from quality.models_scrap import ScrapRecordDetail, ScrapRecord
@@ -411,10 +409,6 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 if new_return > scrap_qty:
                     return Response({'detail': '戻し数量が仕損数量を超えています。'}, status=status.HTTP_400_BAD_REQUEST)
 
-                multipliers = build_scrap_multiplier_map(product_id, qty)
-                if multipliers:
-                    apply_scrap_return_to_stock(multipliers)
-
                 # 戻しは新規レコードとして登録（数量はマイナス）
                 return_date = timezone.now().date()
                 return_record = ScrapRecord.objects.create(
@@ -474,6 +468,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 qty_int = int(qty)
                 if qty_int and sd.line_id and sd.process_id and sd.product_id:
                     from django.db.models import F
+                    # 基礎データレコードを確保
                     LineBacklog.objects.get_or_create(
                         line_id=sd.line_id,
                         process_id=sd.process_id,
@@ -491,21 +486,63 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                             'actual_shipment_qty': 0,
                         }
                     )
+                    # 仕損数を戻し分だけ減算（当日扱い）
                     LineBacklog.objects.filter(
                         line_id=sd.line_id,
                         process_id=sd.process_id,
                         product_id=sd.product_id,
                         plan_date=return_date,
                     ).update(scrap_qty=F('scrap_qty') - qty_int)
+
+                    # 自製品の実績を戻す（仕損登録時に減算した分を補正）
                     LineBacklog.objects.filter(
                         line_id=sd.line_id,
                         process_id=sd.process_id,
                         product_id=sd.product_id,
-                        plan_date__gte=return_date,
-                    ).update(
-                        stock_qty=F('stock_qty') + qty_int,
-                        planned_stock_qty=F('planned_stock_qty') + qty_int,
-                    )
+                        plan_date=return_date,
+                    ).update(actual_qty=F('actual_qty') + qty_int)
+
+                # 子部品・前工程品のadjust_qtyを戻す（BOM展開分をプラス補正）
+                details_for_adjust = build_scrap_multiplier_details(product_id, qty)
+                if details_for_adjust:
+                    from django.db.models import F
+                    for d in details_for_adjust:
+                        detail_line_id = d.get('line_id')
+                        detail_process_id = d.get('process_id')
+                        detail_product_id = d.get('product_id')
+                        detail_qty = d.get('qty') or Decimal('0')
+                        if not detail_line_id or not detail_process_id or not detail_product_id:
+                            continue
+                        if product_id and detail_product_id == product_id:
+                            continue  # 自製品は上で処理済み
+                        qty_child = int(detail_qty or 0)
+                        if qty_child == 0:
+                            continue
+                        LineBacklog.objects.get_or_create(
+                            line_id=detail_line_id,
+                            process_id=detail_process_id,
+                            product_id=detail_product_id,
+                            plan_date=return_date,
+                            sequence_no=0,
+                            defaults={
+                                'order_qty': 0,
+                                'plan_qty': 0,
+                                'actual_qty': 0,
+                                'stock_qty': 0,
+                                'planned_stock_qty': 0,
+                                'adjust_qty': 0,
+                                'scrap_qty': 0,
+                                'actual_shipment_qty': 0,
+                            }
+                        )
+                        LineBacklog.objects.filter(
+                            line_id=detail_line_id,
+                            process_id=detail_process_id,
+                            product_id=detail_product_id,
+                            plan_date=return_date,
+                        ).update(
+                            adjust_qty=F('adjust_qty') + qty_child
+                        )
             elif action == 'CONFIRM_SCRAP':
                 if (sd.return_qty or Decimal('0')) > 0:
                     sd.disposition_status = 'PARTIAL'
