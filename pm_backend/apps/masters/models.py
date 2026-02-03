@@ -8,6 +8,7 @@ class Product(models.Model):
         ('SINGLE', '単品'),
         ('MATERIAL', '材料'),
         ('PURCHASED', '購入品'),
+        ('UNKNOWN', '未定'),
     ]
     MANAGEMENT_UNIT_CHOICES = [
         ('DAY', '日単位管理'),

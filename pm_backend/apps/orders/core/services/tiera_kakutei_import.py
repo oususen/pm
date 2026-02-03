@@ -297,7 +297,7 @@ class TieraKakuteiImportService:
                         defaults={
                             'product_name': product_name_for_master,
                             'product_name_halfwidth': product_name_kana_for_master,
-                            'category': 'PURCHASED',
+                            'category': 'UNKNOWN',  # 新規は未定で登録
                             'unit': '個',
                             'is_active': True,
                             'is_final_product': True

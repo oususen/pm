@@ -989,6 +989,7 @@ const categoryMap = {
   'SINGLE': '単品',
   'MATERIAL': '材料',
   'PURCHASED': '購入品',
+  'UNKNOWN': '未定',
 }
 
 const getCategoryLabel = (value) => categoryMap[value] || value || '-'

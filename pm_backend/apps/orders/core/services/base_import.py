@@ -120,7 +120,7 @@ class BaseImportService:
                     defaults={
                         'product_name': product_name_for_master,
                         'product_name_halfwidth': product_name_half_for_master,
-                        'category': 'PURCHASED',  # Default to purchased item
+                        'category': 'UNKNOWN',  # 新規自動登録はカテゴリ未定で保持
                         'unit': '個',
                         'is_active': True,
                         'is_final_product': True

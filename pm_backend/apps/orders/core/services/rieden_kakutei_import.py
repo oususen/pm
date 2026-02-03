@@ -514,7 +514,7 @@ class RiedenKakuteiImportService:
                         product_code=raw.product_code,
                         defaults={
                             'product_name': raw.product_code,  # Use code as name initially
-                            'category': 'PURCHASED',
+                            'category': 'UNKNOWN',  # 新規は未定で登録
                             'unit': '個',
                             'is_active': True,
                             'is_final_product': True

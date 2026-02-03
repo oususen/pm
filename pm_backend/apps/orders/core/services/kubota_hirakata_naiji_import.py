@@ -323,7 +323,7 @@ class KubotaHirakataNaijiImportService:
                         product_code=raw.product_code,
                         defaults={
                             'product_name': raw.product_name if raw.product_name else raw.product_code,
-                            'category': 'PURCHASED',
+                            'category': 'UNKNOWN',  # 新規は未定で登録
                             'unit': '個',
                             'is_active': True,
                             'is_final_product': True
