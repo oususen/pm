@@ -66,6 +66,36 @@ python manage.py migrate         # マイグレーション実行
 - **バックエンド**: Django の規約に従う
 - **API**: RESTful な設計を維持
 
+## デプロイとデータベース管理
+
+### Git コミット時の注意事項
+
+コミット作成時は、以下を確認すること：
+
+1. **マイグレーションの確認**: モデル変更があった場合、`python manage.py makemigrations --dry-run` で新規マイグレーションの有無を確認
+2. **本番データベースへの影響**: マイグレーションやデータ変更がある場合、本番環境で必要なSQL文の実行を明示
+3. **デプロイ手順**: 本番環境へはGit PUSHでデプロイ。データベース変更が必要な場合はユーザーに通知すること
+
+### 本番デプロイフロー
+
+```bash
+# 1. 開発環境でコミット
+git add .
+git commit -m "変更内容"
+
+# 2. マイグレーション確認（必要に応じて）
+cd pm_backend
+python manage.py makemigrations
+python manage.py migrate
+
+# 3. 本番環境へPUSH
+git push origin main
+
+# 4. 本番環境でマイグレーション実行（必要な場合）
+# Docker環境で実行
+docker exec -it pm-backend python manage.py migrate
+```
+
 ## ドキュメント保存ルール
 
 - **仕様書**: `仕様書/` フォルダに保存
