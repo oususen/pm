@@ -869,7 +869,7 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
         LineBacklog.objects.bulk_update(backlogs_to_update, ['planned_stock_qty'])
 
 
-def recalculate_inventory_for_line(line_id, start_date, end_date, include_progress=True, final_only=False):
+def recalculate_inventory_for_line(line_id, start_date, end_date, include_progress=True, line_final_only=False):
     """
     指定ラインの全製品について在庫を再計算
 
@@ -878,14 +878,14 @@ def recalculate_inventory_for_line(line_id, start_date, end_date, include_progre
         start_date: 開始日
         end_date: 終了日
         include_progress: 進度も再計算するか（デフォルト: True）
-        final_only: ライン最終品のみ計算するか（デフォルト: False）
+        line_final_only: ライン最終品のみ計算するか（デフォルト: False）
     """
     import logging
     import time
     logger = logging.getLogger(__name__)
 
     overall_start = time.perf_counter()
-    logger.info(f"在庫再計算開始: line_id={line_id}, {start_date} ~ {end_date}, final_only={final_only}")
+    logger.info(f"在庫再計算開始: line_id={line_id}, {start_date} ~ {end_date}, line_final_only={line_final_only}")
 
     # まず仕損数を集計
     scrap_start = time.perf_counter()
@@ -901,7 +901,7 @@ def recalculate_inventory_for_line(line_id, start_date, end_date, include_progre
         line_id=line_id,
         plan_date__range=[start_date, end_date]
     )
-    if final_only:
+    if line_final_only:
         product_qs = product_qs.filter(product__is_line_final_product=True)
     product_ids = list(product_qs.values_list('product_id', flat=True).distinct())
 
