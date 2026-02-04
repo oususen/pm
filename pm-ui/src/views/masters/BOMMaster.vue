@@ -100,10 +100,10 @@
             <td>{{ bom.valid_to || '-' }}</td>
             <td>{{ bom.is_active ? '有効' : '無効' }}</td>
             <td>
-              <button @click="viewDetails(bom)" class="btn-sm">詳細</button>
+              <button @click="goToDetailPage(bom)" class="btn-sm">詳細</button>
               <button @click="openDetailsInNewTab(bom)" class="btn-sm">別タブ</button>
               <button @click="viewTreeOnly(bom)" class="btn-sm">階層図</button>
-              <button @click="editBOM(bom)" class="btn-sm">編集</button>
+              <button @click="goToDetailPage(bom)" class="btn-sm">編集</button>
               <button @click="deleteBOM(bom.id)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
@@ -259,23 +259,36 @@
             </div>
             <div class="form-group">
               <label>数量 *</label>
-              <input type="number" step="1" min="1" v-model.number="itemForm.quantity" required />
+              <input
+                type="number"
+                step="1"
+                min="1"
+                v-model.number="itemForm.quantity"
+                required
+                class="tall-number-input narrow-field"
+              />
             </div>
             <div class="form-group">
               <label>ロス率</label>
-              <input type="number" step="0.001" min="0" v-model="itemForm.loss_rate" />
+              <input
+                type="number"
+                step="0.001"
+                min="0"
+                v-model="itemForm.loss_rate"
+                class="narrow-field"
+              />
             </div>
             <div class="form-group">
-              <label>調達区分</label>
-              <select v-model="itemForm.sourcing_type">
+              <label>調達区分 *</label>
+              <select v-model="itemForm.sourcing_type" required>
                 <option v-for="option in sourcingTypeOptions" :key="option.value" :value="option.value">
                   {{ option.label }}
                 </option>
               </select>
             </div>
             <div class="form-group">
-              <label>仕入先</label>
-              <select v-model="itemForm.supplier" :disabled="itemForm.sourcing_type === 'MAKE'">
+              <label>仕入先{{ itemForm.sourcing_type === 'BUY' ? ' *' : '' }}</label>
+              <select v-model="itemForm.supplier" :disabled="itemForm.sourcing_type === 'MAKE'" :required="itemForm.sourcing_type === 'BUY'">
                 <option value="">選択しない</option>
                 <option v-for="supplier in suppliers" :key="supplier.id" :value="supplier.id">
                   {{ supplier.supplier_name }}
@@ -283,7 +296,7 @@
               </select>
             </div>
             <div class="form-group">
-              <label>工程 *</label>
+              <label>工程{{ itemForm.sourcing_type === 'MAKE' || itemForm.sourcing_type === 'SUBCON' ? ' *' : '' }}</label>
               <select v-model="itemForm.process" :required="itemForm.sourcing_type === 'MAKE' || itemForm.sourcing_type === 'SUBCON'" :disabled="itemForm.sourcing_type === 'BUY'">
                 <option value="">選択してください</option>
                 <option v-for="proc in processes" :key="proc.id" :value="proc.id">
@@ -292,8 +305,8 @@
               </select>
             </div>
             <div class="form-group">
-              <label>ライン</label>
-              <select v-model="itemForm.line" :disabled="itemForm.sourcing_type === 'BUY'">
+              <label>ライン{{ itemForm.sourcing_type === 'MAKE' ? ' *' : '' }}</label>
+              <select v-model="itemForm.line" :disabled="itemForm.sourcing_type === 'BUY'" :required="itemForm.sourcing_type === 'MAKE'">
                 <option value="">選択しない</option>
                 <option v-for="line in lines" :key="line.id" :value="line.id">
                   {{ line.line_code }} - {{ line.line_name }}
@@ -301,23 +314,37 @@
               </select>
             </div>
             <div class="form-group">
-              <label>時間単位</label>
-              <select v-model="itemForm.time_unit" :disabled="itemForm.sourcing_type === 'BUY'">
+              <label>時間単位{{ itemForm.sourcing_type === 'MAKE' ? ' *' : '' }}</label>
+              <select
+                v-model="itemForm.time_unit"
+                :disabled="itemForm.sourcing_type === 'BUY'"
+                :required="itemForm.sourcing_type === 'MAKE'"
+                class="narrow-field"
+              >
                 <option value="MINUTE">分</option>
                 <option value="DAY">日</option>
               </select>
             </div>
             <div class="form-group">
-              <label>リードタイム(日)</label>
+              <label>リードタイム(日){{ itemForm.sourcing_type === 'BUY' ? ' *' : '' }}</label>
               <input
                 type="number"
                 min="0"
                 v-model.number="itemForm.lead_time_days"
+                :required="itemForm.sourcing_type === 'BUY'"
+                class="tall-number-input narrow-field"
               />
             </div>
             <div class="form-group">
-              <label>所要時間(分)</label>
-              <input type="number" min="1" v-model.number="itemForm.duration_min" :disabled="itemForm.time_unit === 'DAY' || itemForm.sourcing_type === 'BUY'" />
+              <label>所要時間(分){{ itemForm.time_unit === 'MINUTE' && itemForm.sourcing_type !== 'BUY' ? ' *' : '' }}</label>
+              <input
+                type="number"
+                min="1"
+                v-model.number="itemForm.duration_min"
+                :disabled="itemForm.time_unit === 'DAY' || itemForm.sourcing_type === 'BUY'"
+                :required="itemForm.time_unit === 'MINUTE' && itemForm.sourcing_type !== 'BUY'"
+                class="tall-number-input narrow-field"
+              />
             </div>
           </div>
           <div class="form-row">
@@ -405,6 +432,7 @@
                 min="0"
                 v-model.number="routingGenForm.final_lead_time_days"
                 :disabled="routingGenForm.final_time_unit === 'MINUTE'"
+                class="tall-number-input"
               />
             </div>
             <div class="form-group">
@@ -414,6 +442,7 @@
                 min="1"
                 v-model.number="routingGenForm.final_duration_min"
                 :disabled="routingGenForm.final_time_unit === 'DAY'"
+                class="tall-number-input"
               />
             </div>
           </div>
@@ -592,7 +621,8 @@ const formData = ref({
   version: 'v1',
   valid_from: '',
   valid_to: '',
-  is_active: true
+  is_active: true,
+  is_coproduct: false,
 })
 
 const filters = ref({
@@ -850,6 +880,7 @@ const resetItemForm = () => {
     remark: ''
   }
   editingItemId.value = null
+  childProductFilter.value = ''
 }
 
 const applySourcingSideEffects = () => {
@@ -887,8 +918,8 @@ const fetchBOMItems = async (bomId, token = bomItemsRequestToken.value) => {
   const response = await api.boms.getBOMItems({ bom: bomId })
   if (token !== bomItemsRequestToken.value) return
   const items = response.data.results || response.data || []
-  // API側で絞られている前提でそのまま表示（過剰フィルタで消えないようにする）
-  bomItems.value = items
+  // 追加した最新の明細が上に来るように逆順表示（APIデフォルトは昇順）
+  bomItems.value = items.slice().reverse()
 }
 
 const fetchBOMTree = async (bomId) => {
@@ -1014,6 +1045,11 @@ const getLineName = (lineId) => {
 
 const getSourcingTypeLabel = (value) => sourcingTypeMap[value] || value
 
+const goToDetailPage = (bom) => {
+  if (!bom?.id) return
+  router.push({ name: 'BOMMaster', query: { bomId: bom.id, detail: 'full' } })
+}
+
 const showNewDialog = () => {
   isEdit.value = false
   parentProductFilter.value = ''
@@ -1034,7 +1070,9 @@ const editBOM = (bom) => {
   parentProductFilter.value = ''
   formData.value = {
     ...bom,
-    parent_product: bom.parent_product
+    parent_product: bom.parent_product,
+    valid_to: bom.valid_to || '',
+    is_coproduct: bom.is_coproduct ?? false,
   }
   showDialog.value = true
 }
@@ -1382,6 +1420,10 @@ const saveBOMItem = async () => {
       alert('工程は必須です（自社製造/外注）')
       return
     }
+    if (itemForm.value.sourcing_type === 'MAKE' && !itemForm.value.line) {
+      alert('自社製造の場合、ラインは必須です')
+      return
+    }
     if (itemForm.value.time_unit === 'MINUTE' && (!itemForm.value.duration_min || itemForm.value.duration_min <= 0)) {
       alert('時間単位=分のときは所要時間(分)を1以上で入力してください')
       return
@@ -1391,6 +1433,10 @@ const saveBOMItem = async () => {
       return
     }
   } else if (itemForm.value.sourcing_type === 'BUY') {
+    if (!itemForm.value.supplier) {
+      alert('購買の場合、仕入先は必須です')
+      return
+    }
     if (!itemForm.value.lead_time_days || itemForm.value.lead_time_days <= 0) {
       alert('購買の場合、リードタイム(日)を1以上で入力してください')
       return
@@ -1423,6 +1469,8 @@ const saveBOMItem = async () => {
       alert('明細を追加しました')
     }
     await fetchBOMItems(selectedBOM.value.id)
+    await fetchBOMTree(selectedBOM.value.id)
+    expandAllNodes()
     resetItemForm()
   } catch (error) {
     console.error('明細保存エラー:', error)
@@ -1741,8 +1789,24 @@ const TreeBranch = defineComponent({
 
 .form-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.5rem 0.75rem;
+}
+
+/* 構成品目フォームをぎゅっと詰める */
+.item-form .form-row {
+  grid-template-columns: repeat(auto-fit, minmax(120px, auto));
+  gap: 0.25rem 0.5rem;
+  justify-content: flex-start;
+}
+
+.item-form .form-group {
+  width: auto;
+}
+
+.item-form .form-group .narrow-field {
+  width: 110px;
+  min-width: 90px;
 }
 
 .form-group.full-width {
@@ -1768,6 +1832,22 @@ const TreeBranch = defineComponent({
 
 .form-group input[type="checkbox"] {
   margin-right: 0.5rem;
+}
+
+.tall-number-input {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  min-height: 38px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+
+.narrow-field {
+  width: 25%;
+  min-width: 80px;
+  box-sizing: border-box;
 }
 
 .form-actions {
