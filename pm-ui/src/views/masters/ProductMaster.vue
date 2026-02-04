@@ -267,6 +267,12 @@
           </div>
           <div class="form-group">
             <label>
+              <input type="checkbox" v-model="formData.is_final_product" />
+              最終品（完成品として出荷される品目）
+            </label>
+          </div>
+          <div class="form-group">
+            <label>
               <input type="checkbox" v-model="formData.is_line_final_product" />
               ライン最終品（ラインで最後に出力される品目）
             </label>
