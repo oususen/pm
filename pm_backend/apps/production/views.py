@@ -1490,6 +1490,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 plan_qty_map[(plan['product_id'], plan['plan_date'])] = Decimal('0')
 
         # is_coproduct=True のBOMから子→親の対応を構築（最新valid_from優先）
+        # is_coproduct_driver=True の子製品のみを copro_child_map に登録（共用部品問題を回避）
         copro_boms = BOM.objects.filter(is_coproduct=True, is_active=True).order_by('-valid_from', '-id').prefetch_related('items')
         for bom in copro_boms:
             for item in bom.items.all():
@@ -1499,11 +1500,13 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     continue
                 if qty_decimal == 0:
                     continue
-                if item.child_product_id not in copro_child_map:
-                    copro_child_map[item.child_product_id] = {
-                        'parent_id': bom.parent_product_id,
-                        'qty_per': qty_decimal,
-                    }
+                # is_coproduct_driver=True の子製品のみを連産品展開の対象とする
+                if item.is_coproduct_driver:
+                    if item.child_product_id not in copro_child_map:
+                        copro_child_map[item.child_product_id] = {
+                            'parent_id': bom.parent_product_id,
+                            'qty_per': qty_decimal,
+                        }
                 parent_children.setdefault(bom.parent_product_id, []).append((item.child_product_id, qty_decimal))
 
         # 親セットごとに日付別セット数と代表子を決定

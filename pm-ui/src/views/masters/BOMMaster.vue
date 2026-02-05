@@ -346,6 +346,14 @@
                 class="tall-number-input narrow-field"
               />
             </div>
+            <div class="form-group" v-if="selectedBOM.is_coproduct">
+              <label>連産品代表品</label>
+              <input
+                type="checkbox"
+                v-model="itemForm.is_coproduct_driver"
+                class="checkbox-input"
+              />
+            </div>
           </div>
           <div class="form-row">
             <div class="form-group full-width">
@@ -373,6 +381,7 @@
               <th>工程</th>
               <th>ライン</th>
               <th>時間</th>
+              <th v-if="selectedBOM.is_coproduct">代表</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -389,6 +398,7 @@
                 <span v-if="item.time_unit === 'MINUTE'">分 {{ item.duration_min || '-' }}</span>
                 <span v-else>日 {{ item.lead_time_days }}</span>
               </td>
+              <td v-if="selectedBOM.is_coproduct">{{ item.is_coproduct_driver ? '✓' : '' }}</td>
               <td>
                 <button type="button" class="btn-sm" @click="startEditItem(item)">編集</button>
                 <button type="button" class="btn-sm btn-danger" @click="deleteBOMItem(item.id)">削除</button>
@@ -740,6 +750,7 @@ const itemForm = ref({
   time_unit: 'MINUTE',
   lead_time_days: 0,
   duration_min: 60,
+  is_coproduct_driver: false,
   remark: ''
 })
 const editingItemId = ref(null)
@@ -877,6 +888,7 @@ const resetItemForm = () => {
     time_unit: 'MINUTE',
     lead_time_days: 0,
     duration_min: 60,
+    is_coproduct_driver: false,
     remark: ''
   }
   editingItemId.value = null
@@ -1397,6 +1409,7 @@ const startEditItem = (item) => {
     time_unit: item.time_unit || 'MINUTE',
     lead_time_days: item.lead_time_days ?? 0,
     duration_min: item.duration_min ?? 60,
+    is_coproduct_driver: item.is_coproduct_driver ?? false,
     remark: item.remark ?? ''
   }
   applySourcingSideEffects()
@@ -1457,6 +1470,7 @@ const saveBOMItem = async () => {
     duration_min: requiresRoutingDetails(itemForm.value.sourcing_type) && itemForm.value.time_unit === 'MINUTE'
       ? itemForm.value.duration_min
       : null,
+    is_coproduct_driver: selectedBOM.value.is_coproduct ? itemForm.value.is_coproduct_driver : false,
     remark: itemForm.value.remark || ''
   }
 

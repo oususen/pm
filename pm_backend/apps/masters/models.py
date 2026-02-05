@@ -295,6 +295,7 @@ class BOMItem(models.Model):
     time_unit = models.CharField(max_length=10, choices=TIME_UNIT_CHOICES, default='MINUTE', verbose_name='時間単位')
     lead_time_days = models.IntegerField(default=0, verbose_name='リードタイム(日)')
     duration_min = models.IntegerField(null=True, blank=True, verbose_name='所要時間(分)')
+    is_coproduct_driver = models.BooleanField(default=False, verbose_name='連産品代表品')
     remark = models.CharField(max_length=200, null=True, blank=True, verbose_name='備考')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
