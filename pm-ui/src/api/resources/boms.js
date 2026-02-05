@@ -38,6 +38,9 @@ export const createBomsAPI = (client) => ({
   generateRouting(bomId, data) {
     return client.post(`/boms/${bomId}/generate_routing/`, data)
   },
+  copyBOM(bomId, newParentProductId) {
+    return client.post(`/boms/${bomId}/copy/`, { new_parent_product_id: newParentProductId })
+  },
 
   // BOM Items
   getBOMItems(params = {}) {

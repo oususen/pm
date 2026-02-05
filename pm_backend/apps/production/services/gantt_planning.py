@@ -315,23 +315,50 @@ def _build_bom_multiplier_map(final_product_id: int, plan_date) -> Dict[int, Dec
     return multipliers
 
 
-def _build_coproduct_parent_map(plan_date) -> Dict[int, Product]:
+def _build_coproduct_maps(plan_date) -> tuple:
+    """
+    連産品関連のマップを構築
+    Returns:
+        parent_map: 代表品(is_coproduct_driver=True)から親への対応（連産品展開用）
+        all_children_set: 連産品の全ての子製品のセット（ガントチャートから除外用）
+        driver_cycle_time_map: 連産品の親ID -> 代表品のサイクルタイム(分)
+    """
     coproduct_boms = BOM.objects.filter(
         is_coproduct=True,
         is_active=True,
         valid_from__lte=plan_date,
     ).filter(Q(valid_to__gte=plan_date) | Q(valid_to__isnull=True)).select_related('parent_product')
     parent_map: Dict[int, Product] = {}
+    all_children_set: set = set()
+    driver_cycle_time_map: Dict[int, float] = {}  # 親製品ID -> 代表品のサイクルタイム
     for bom in coproduct_boms:
         for item in bom.items.select_related('child_product'):
             if item.child_product_id:
-                parent_map[item.child_product_id] = bom.parent_product
+                # 全ての子製品をセットに追加（ガントチャートから除外用）
+                all_children_set.add(item.child_product_id)
+                # is_coproduct_driver=True の子製品のみを連産品展開の対象とする
+                if item.is_coproduct_driver:
+                    parent_map[item.child_product_id] = bom.parent_product
+                    # 代表品のサイクルタイム（duration_min）を保存
+                    if item.duration_min and item.duration_min > 0:
+                        driver_cycle_time_map[bom.parent_product_id] = float(item.duration_min)
+    return parent_map, all_children_set, driver_cycle_time_map
+
+
+def _build_coproduct_parent_map(plan_date) -> Dict[int, Product]:
+    """後方互換性のためのラッパー"""
+    parent_map, _, _ = _build_coproduct_maps(plan_date)
     return parent_map
 
 
 def _is_coproduct_sub_process(spec: ProcessSpec, coproduct_parent_map: Dict[int, Product]) -> bool:
     """連産品BOMの子品目を出力する工程かどうかを判定（名前依存なし）"""
     return bool(spec.output_product_id and spec.output_product_id in coproduct_parent_map)
+
+
+def _is_coproduct_child(spec: ProcessSpec, coproduct_children_set: set) -> bool:
+    """連産品の子品目を出力する工程かどうかを判定（除外用）"""
+    return bool(spec.output_product_id and spec.output_product_id in coproduct_children_set)
 
 
 def _overlaps(start: datetime, end: datetime, item: Dict) -> bool:
@@ -546,7 +573,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
     for obj in base_plans:
         product = obj.product
         multiplier_map = _build_bom_multiplier_map(product.id, obj.plan_date)
-        coproduct_parent_map = _build_coproduct_parent_map(obj.plan_date)
+        coproduct_parent_map, coproduct_children_set, driver_cycle_time_map = _build_coproduct_maps(obj.plan_date)
         steps = sorted(steps_by_product.get(product.id, []), key=lambda s: (s.step_no or 0, getattr(s, 'parallel_group', 1) or 1))
         if not steps:
             steps = default_steps
@@ -569,7 +596,9 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
             group_key = f"{plan_id}_{spec.process_id}_{parent.id}"
             qty_product_id = spec.output_product_id or obj.product_id
             process_qty = multiplier_map.get(qty_product_id, Decimal('1')) * obj.plan_qty
-            total_minutes = _calculate_total_minutes(spec, process_qty)
+            # 代表品のサイクルタイムを使用（driver_cycle_time_mapから取得）
+            driver_cycle_time = driver_cycle_time_map.get(parent.id, spec.cycle_time_minutes)
+            total_minutes = float(process_qty) * driver_cycle_time + (spec.setup_time_minutes or 0)
             effective_minutes = total_minutes / max(spec.parallel_count, 1)
             group = coproduct_groups.get(group_key)
             if not group:
@@ -577,7 +606,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                     'max_total_minutes': total_minutes,
                     'max_effective_minutes': effective_minutes,
                     'max_qty': process_qty,
-                    'cycle_time_minutes': spec.cycle_time_minutes,
+                    'cycle_time_minutes': driver_cycle_time,
                     'setup_time_minutes': spec.setup_time_minutes,
                     'order_spec': spec,
                 }
@@ -585,7 +614,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
             group['order_spec'] = spec
             if total_minutes > group['max_total_minutes']:
                 group['max_total_minutes'] = total_minutes
-                group['cycle_time_minutes'] = spec.cycle_time_minutes
+                group['cycle_time_minutes'] = driver_cycle_time
                 group['setup_time_minutes'] = spec.setup_time_minutes
             if effective_minutes > group['max_effective_minutes']:
                 group['max_effective_minutes'] = effective_minutes
@@ -610,6 +639,9 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                     'coproduct_group_key': group_key,
                     'coproduct_child_id': None,
                 })
+                continue
+            # 連産品の子（代表品でない）はスキップ（親の工程として一緒に処理される）
+            if _is_coproduct_child(spec, coproduct_children_set):
                 continue
             qty_product_id = spec.output_product_id or obj.product_id
             process_qty = multiplier_map.get(qty_product_id, Decimal('1')) * obj.plan_qty
@@ -864,21 +896,43 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
 
                 # 次工程の開始時刻を計算（パイプライン処理を考慮）
                 if i + 1 < len(scheduled_specs):
-                    gap_minutes = spec.transfer_time_minutes
+                    next_entry = scheduled_specs[i + 1]
+                    next_spec = next_entry['spec']
 
-                    # 開始-開始制約: 次工程は現工程の最初の1個が完了・搬送された後に開始可能
-                    current_cycle_time = entry['cycle_time_minutes']
-                    s2s_limit = calendar.add_working_minutes(start_time, current_cycle_time + gap_minutes)
+                    if spec.process_number == next_spec.process_number:
+                        # 同じprocess_number内の次の品番は、現在の品番の終了後から開始
+                        current_start_time = end_time
+                        logger.info(
+                            'gantt_plans: plan_id=%s i=%s same_process: end=%s next_start_time=%s',
+                            plan_id, i, end_time, current_start_time
+                        )
+                    else:
+                        # 異なるprocess_numberへの移行
+                        # 同じprocess_numberの最初の工程からS2S制約を計算
+                        first_same_process_start = start_time
+                        first_same_process_cycle = entry['cycle_time_minutes']
+                        first_same_process_gap = spec.transfer_time_minutes
+                        for j in range(i - 1, -1, -1):
+                            prev_entry = scheduled_specs[j]
+                            if prev_entry['spec'].process_number == spec.process_number:
+                                first_same_process_start = processes_plan[j]['start_time']
+                                first_same_process_cycle = prev_entry['cycle_time_minutes']
+                                first_same_process_gap = prev_entry['spec'].transfer_time_minutes
+                            else:
+                                break
 
-                    # 次工程開始時刻は S2S 制約のみで決定
-                    current_start_time = s2s_limit
+                        s2s_limit = calendar.add_working_minutes(
+                            first_same_process_start,
+                            first_same_process_cycle + first_same_process_gap
+                        )
+                        current_start_time = s2s_limit
 
-                    logger.info(
-                        'gantt_plans: plan_id=%s i=%s pipeline: start=%s end=%s cycle=%.1f gap=%.1f '
-                        's2s_limit=%s next_start_time=%s',
-                        plan_id, i, start_time, end_time, current_cycle_time, gap_minutes,
-                        s2s_limit, current_start_time
-                    )
+                        logger.info(
+                            'gantt_plans: plan_id=%s i=%s pipeline: first_start=%s cycle=%.1f gap=%.1f '
+                            's2s_limit=%s next_start_time=%s',
+                            plan_id, i, first_same_process_start, first_same_process_cycle,
+                            first_same_process_gap, s2s_limit, current_start_time
+                        )
 
         start_dt = processes_plan[0]['start_time'] if processes_plan else current_start_time
         end_dt = processes_plan[-1]['end_time'] if processes_plan else current_start_time

@@ -196,6 +196,9 @@
             <span class="summary-label">有効期間</span>
             <span class="summary-value">{{ selectedBOM.valid_from }} ～ {{ selectedBOM.valid_to || '無期限' }}</span>
           </div>
+          <div class="summary-item">
+            <button type="button" class="btn-primary" @click="openCopyDialog">BOMをコピー</button>
+          </div>
         </div>
         <p v-if="isPhantom(selectedBOM.parent_product)" class="phantom-info">
           この親製品は見なし組立です。リードタイム計算や展開ロジックの扱いに注意してください。
@@ -608,6 +611,33 @@
         </div>
       </div>
     </div>
+
+    <!-- BOMコピーダイアログ -->
+    <div v-if="showCopyDialog" class="modal-overlay" @click.self="closeCopyDialog">
+      <div class="modal-content">
+        <h2>BOMをコピー</h2>
+        <p>コピー元: {{ getProductName(selectedBOM.parent_product) }}</p>
+        <div class="form-group">
+          <label>新しい親製品 *</label>
+          <input
+            type="text"
+            v-model="copyProductFilter"
+            placeholder="品番/品名で絞り込み"
+            class="filter-input"
+          />
+          <select v-model="copyNewParentProductId" required>
+            <option value="">選択してください</option>
+            <option v-for="product in filteredCopyProducts" :key="product.id" :value="product.id">
+              {{ product.product_code }} - {{ product.product_name }}
+            </option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn-primary" @click="doCopyBOM" :disabled="!copyNewParentProductId">コピー実行</button>
+          <button type="button" class="btn-secondary" @click="closeCopyDialog">キャンセル</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -661,6 +691,11 @@ const whereUsedProductFilter = ref('')
 const whereUsedRecursive = ref(false)
 const whereUsedResults = ref([])
 const whereUsedLoading = ref(false)
+
+// BOMコピー用
+const showCopyDialog = ref(false)
+const copyNewParentProductId = ref('')
+const copyProductFilter = ref('')
 
 const routingGenForm = ref({
   routing_code: '',
@@ -1027,6 +1062,19 @@ const filteredWhereUsedProducts = computed(() => {
   )
 })
 
+const filteredCopyProducts = computed(() => {
+  const keyword = copyProductFilter.value.trim().toLowerCase()
+  let pool = products.value
+  // 連産品BOMの場合は仮想セット品番のみ
+  if (selectedBOM.value.is_coproduct) {
+    pool = pool.filter(p => p.is_virtual_set)
+  }
+  if (!keyword) return pool
+  return pool.filter((p) =>
+    `${p.product_code} ${p.product_name}`.toLowerCase().includes(keyword)
+  )
+})
+
 const categoryMap = {
   'ASSEMBLY': '組立品',
   'SINGLE': '単品',
@@ -1311,6 +1359,47 @@ const closeWhereUsedDialog = () => {
   whereUsedProductFilter.value = ''
   whereUsedRecursive.value = false
   whereUsedResults.value = []
+}
+
+// BOMコピー
+const openCopyDialog = () => {
+  copyNewParentProductId.value = ''
+  copyProductFilter.value = ''
+  showCopyDialog.value = true
+}
+
+const closeCopyDialog = () => {
+  showCopyDialog.value = false
+  copyNewParentProductId.value = ''
+  copyProductFilter.value = ''
+}
+
+const doCopyBOM = async () => {
+  if (!selectedBOM.value?.id || !copyNewParentProductId.value) return
+  let newBomId = null
+  try {
+    const response = await api.boms.copyBOM(selectedBOM.value.id, copyNewParentProductId.value)
+    newBomId = response.data.new_bom_id
+  } catch (error) {
+    console.error('BOMコピーAPIエラー:', error)
+    alert('BOMのコピーに失敗しました')
+    return
+  }
+
+  alert(`BOMをコピーしました（新しいBOM ID: ${newBomId}）`)
+  closeCopyDialog()
+  closeDetailsDialog()
+
+  try {
+    await fetchBOMs()
+    // 新しいBOMを開く
+    const newBom = boms.value.find(b => b.id === newBomId)
+    if (newBom) {
+      await viewDetails(newBom)
+    }
+  } catch (error) {
+    console.error('BOMコピー後の画面更新エラー:', error)
+  }
 }
 
 const fetchWhereUsed = async () => {

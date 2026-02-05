@@ -737,6 +737,58 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
         )
 
+    @action(detail=True, methods=['post'])
+    def copy(self, request, pk=None):
+        """
+        BOMを別の親製品にコピーする
+        payload: { new_parent_product_id: int }
+        """
+        bom = self.get_object()
+        new_parent_product_id = request.data.get('new_parent_product_id')
+
+        if not new_parent_product_id:
+            return Response({'detail': 'new_parent_product_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            new_parent_product = Product.objects.get(id=new_parent_product_id)
+        except Product.DoesNotExist:
+            return Response({'detail': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # 新しいBOMを作成
+        new_bom = BOM.objects.create(
+            parent_product=new_parent_product,
+            version=bom.version,
+            valid_from=bom.valid_from,
+            valid_to=bom.valid_to,
+            is_active=bom.is_active,
+            is_coproduct=bom.is_coproduct,
+        )
+
+        # BOMItemをコピー
+        items = BOMItem.objects.filter(bom=bom)
+        for item in items:
+            BOMItem.objects.create(
+                bom=new_bom,
+                child_product=item.child_product,
+                quantity=item.quantity,
+                loss_rate=item.loss_rate,
+                sourcing_type=item.sourcing_type,
+                supplier=item.supplier,
+                process=item.process,
+                line=item.line,
+                time_unit=item.time_unit,
+                lead_time_days=item.lead_time_days,
+                duration_min=item.duration_min,
+                is_coproduct_driver=item.is_coproduct_driver,
+                remark=item.remark,
+            )
+
+        return Response({
+            'message': 'BOM copied successfully',
+            'new_bom_id': new_bom.id,
+            'items_copied': items.count(),
+        }, status=status.HTTP_201_CREATED)
+
 
 class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = BOMItem.objects.all()
