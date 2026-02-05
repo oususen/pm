@@ -110,6 +110,13 @@
       </div>
       <div v-else class="no-data">データがありません</div>
     </div>
+
+    <div v-if="loading || recalculating" class="processing-overlay">
+      <div class="processing-box">
+        <p class="processing-title">データ更新中</p>
+        <p class="processing-sub">少々お待ちください</p>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -655,5 +662,36 @@ const recalculate = async () => {
   padding: 24px;
   text-align: center;
   color: #6b7280;
+}
+.processing-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  pointer-events: all;
+}
+.processing-box {
+  background: #1f2a44;
+  color: #fff;
+  padding: 18px 28px;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  text-align: center;
+  min-width: 240px;
+}
+.processing-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.processing-sub {
+  margin: 6px 0 0;
+  font-size: 13px;
+  opacity: 0.9;
 }
 </style>

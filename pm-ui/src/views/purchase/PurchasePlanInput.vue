@@ -31,11 +31,11 @@
         </div>
       </div>
       <div class="toolbar-right">
-        <button class="btn" @click="addRow">新規行追加</button>
-        <button class="btn" @click="resetRows" :disabled="!rows.length">クリア</button>
-        <button class="btn" @click="openChangeReasonDialog">計画変更</button>
-        <button class="btn" @click="savePlan" :disabled="!rows.length || !selectedSupplier">保存</button>
-        <button class="btn primary" @click="doPickup" :disabled="!selectedSupplier">取り込み</button>
+        <button class="btn" @click="addRow" :disabled="processing">新規行追加</button>
+        <button class="btn" @click="resetRows" :disabled="processing || !rows.length">クリア</button>
+        <button class="btn" @click="openChangeReasonDialog" :disabled="processing">計画変更</button>
+        <button class="btn" @click="savePlan" :disabled="processing || !rows.length || !selectedSupplier">保存</button>
+        <button class="btn primary" @click="doPickup" :disabled="processing || !selectedSupplier">取り込み</button>
       </div>
     </div>
 
@@ -134,6 +134,13 @@
         </div>
       </div>
     </div>
+
+    <div v-if="processing" class="processing-overlay">
+      <div class="processing-box">
+        <p class="processing-title">データ更新中</p>
+        <p class="processing-sub">少々お待ちください</p>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -158,6 +165,7 @@ const suppliers = ref([])
 const products = ref([])
 const rows = ref([])
 let tempId = 1
+const processing = ref(false)
 
 const buildLocalDate = (dateText) => {
   if (!dateText) return new Date()
@@ -272,6 +280,7 @@ const savePlan = async () => {
     alert('保存するデータがありません。')
     return
   }
+  processing.value = true
   try {
     const payload = {
       line_id: lineId,
@@ -293,6 +302,8 @@ const savePlan = async () => {
   } catch (e) {
     console.error('保存エラー', e)
     alert('保存に失敗しました。')
+  } finally {
+    processing.value = false
   }
 }
 
@@ -507,6 +518,7 @@ const doPickup = async () => {
     alert('仕入先を選択してください。')
     return
   }
+  processing.value = true
   try {
     // 選択仕入先の製品リストを最新取得
     await fetchProducts(selectedSupplier.value)
@@ -587,6 +599,8 @@ const doPickup = async () => {
   } catch (e) {
     console.error('仕入れ計画 取り込みエラー', e)
     alert('取り込みに失敗しました。')
+  } finally {
+    processing.value = false
   }
 }
 
@@ -921,5 +935,36 @@ thead .sticky-col {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+.processing-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  pointer-events: all;
+}
+.processing-box {
+  background: #1f2a44;
+  color: #fff;
+  padding: 18px 28px;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  text-align: center;
+  min-width: 240px;
+}
+.processing-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.processing-sub {
+  margin: 6px 0 0;
+  font-size: 13px;
+  opacity: 0.9;
 }
 </style>

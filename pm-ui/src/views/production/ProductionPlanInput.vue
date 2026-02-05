@@ -55,14 +55,14 @@
             休憩明けに補正
           </label>
         </div>
-        <button class="btn" @click="resetRows" :disabled="!rows.length">クリア</button>
-        <button class="btn" @click="openChangeReasonDialog">計画変更</button>
-        <button class="btn" @click="savePlan" :disabled="!rows.length || !selectedLine">保存</button>
-        <button class="btn primary" @click="doPickup" :disabled="!selectedLine">取り込み</button>
-        <button class="btn accent" @click="toggleProcessGantt" :disabled="!selectedLine">
+        <button class="btn" @click="resetRows" :disabled="processing || !rows.length">クリア</button>
+        <button class="btn" @click="openChangeReasonDialog" :disabled="processing">計画変更</button>
+        <button class="btn" @click="savePlan" :disabled="processing || !rows.length || !selectedLine">保存</button>
+        <button class="btn primary" @click="doPickup" :disabled="processing || !selectedLine">取り込み</button>
+        <button class="btn accent" @click="toggleProcessGantt" :disabled="processing || !selectedLine">
           {{ showProcessGantt ? '工程ガントを閉じる' : '工程ガント表示' }}
         </button>
-        <button class="btn accent" @click="toggleProcessLoad" :disabled="!selectedLine">
+        <button class="btn accent" @click="toggleProcessLoad" :disabled="processing || !selectedLine">
           {{ showProcessLoad ? '工程負荷を閉じる' : '工程負荷表示' }}
         </button>
       </div>
@@ -292,6 +292,13 @@
         </div>
       </div>
     </div>
+
+    <div v-if="processing" class="processing-overlay">
+      <div class="processing-box">
+        <p class="processing-title">データ更新中</p>
+        <p class="processing-sub">少々お待ちください</p>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -337,6 +344,7 @@ const calendarDayMap = ref({})
 const workPatternMap = ref({})
 const workStartFallback = { hour: 8, minute: 0 }
 const workMinutesFallback = 480
+const processing = ref(false)
 
 const formatDateKey = (dateObj) => {
   const y = dateObj.getFullYear()
@@ -516,6 +524,7 @@ const savePlan = async () => {
     alert('保存するデータがありません。product_idとprocess_idを確認してください。')
     return
   }
+  processing.value = true
   try {
     const payload = {
       line_id: selectedLine.value,
@@ -570,6 +579,8 @@ const savePlan = async () => {
   } catch (e) {
     console.error('保存エラー', e)
     alert('保存に失敗しました。')
+  } finally {
+    processing.value = false
   }
 }
 
@@ -1063,6 +1074,7 @@ const formatLoad = (val) => {
 
 const doPickup = async () => {
   if (!selectedLine.value) return
+  processing.value = true
   try {
     await api.lineBacklogs.pickup({
       line_id: selectedLine.value,
@@ -1237,6 +1249,8 @@ const doPickup = async () => {
   } catch (e) {
     console.error('バックログ取り込みエラー', e)
     alert('取り込みに失敗しました。')
+  } finally {
+    processing.value = false
   }
 }
 
@@ -1914,5 +1928,36 @@ thead .sticky-col {
   max-width: 180px;
   border-right: 2px solid #b5c1d2 !important;
   text-align: left;
+}
+.processing-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  pointer-events: all;
+}
+.processing-box {
+  background: #1f2a44;
+  color: #fff;
+  padding: 18px 28px;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  text-align: center;
+  min-width: 240px;
+}
+.processing-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.processing-sub {
+  margin: 6px 0 0;
+  font-size: 13px;
+  opacity: 0.9;
 }
 </style>
