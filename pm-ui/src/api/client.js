@@ -27,6 +27,7 @@ import { createContactsAPI } from './resources/contacts'
 import { createSmtpConfigsAPI } from './resources/smtpConfigs'
 import { createPurchasePlanLockSettingAPI } from './resources/purchasePlanLockSetting'
 import { createProductionPlanLockSettingAPI } from './resources/productionPlanLockSetting'
+import { createScheduleConfigAPI } from './resources/scheduleConfig'
 import { createNotificationsAPI } from './resources/notifications'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
@@ -111,5 +112,6 @@ export default {
   smtpConfigs: createSmtpConfigsAPI(client),
   purchasePlanLockSetting: createPurchasePlanLockSettingAPI(client),
   productionPlanLockSetting: createProductionPlanLockSettingAPI(client),
+  scheduleConfig: createScheduleConfigAPI(client),
   notifications: createNotificationsAPI(client),
 }

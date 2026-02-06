@@ -5,6 +5,7 @@ from masters.models import Line, Product, RoutingStep
 from .models_line_daily_schedule_setting import LineDailyScheduleSetting
 from .models_plan_change_log import ProductionPlanChangeLog
 from .models_plan_lock_setting import ProductionPlanLockSetting
+from .models_schedule_config import ScheduleConfig
 
 
 class LineDemand(models.Model):

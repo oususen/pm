@@ -11,6 +11,7 @@ from .models_line_plan import LinePlan
 from .models_line_gantt_plan import LineGanttPlan
 from .models_line_daily_schedule_setting import LineDailyScheduleSetting
 from .models_plan_lock_setting import ProductionPlanLockSetting
+from .models_schedule_config import ScheduleConfig
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_production import ProcessActual, ProductionOrder, StockAllocation
 
@@ -401,3 +402,29 @@ class ProductionPlanLockSettingSerializer(serializers.ModelSerializer):
         model = ProductionPlanLockSetting
         fields = ['id', 'lock_days', 'updated_at', 'updated_by']
         read_only_fields = ['id', 'updated_at', 'updated_by']
+
+
+class ScheduleConfigSerializer(serializers.ModelSerializer):
+    task_name_display = serializers.CharField(
+        source='get_task_name_display', read_only=True
+    )
+    last_run_status_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ScheduleConfig
+        fields = [
+            'id', 'task_name', 'task_name_display', 'is_enabled',
+            'scheduled_hour', 'scheduled_minute',
+            'last_run_at', 'last_run_status', 'last_run_status_display',
+            'last_run_message', 'last_run_duration_seconds',
+            'updated_at', 'updated_by',
+        ]
+        read_only_fields = [
+            'id', 'last_run_at', 'last_run_status',
+            'last_run_message', 'last_run_duration_seconds',
+            'updated_at', 'updated_by',
+        ]
+
+    def get_last_run_status_display(self, obj):
+        mapping = {'SUCCESS': '成功', 'FAILED': '失敗', 'RUNNING': '実行中'}
+        return mapping.get(obj.last_run_status, '')

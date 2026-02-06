@@ -8,6 +8,8 @@ from production.views import (
     LineGanttPlanViewSet,
     LineDailyScheduleSettingViewSet,
     ProductionPlanLockSettingView,
+    ScheduleConfigView,
+    ScheduleRunNowView,
     ProcessActualViewSet,
     ProductionOrderViewSet,
     StockAllocationViewSet,
@@ -42,4 +44,6 @@ router.register(r'process-realtime-records', ProcessRealtimeRecordViewSet, basen
 urlpatterns = [
     path('', include(router.urls)),
     path('production-plan-lock-setting/', ProductionPlanLockSettingView.as_view(), name='production-plan-lock-setting'),
+    path('schedule-config/', ScheduleConfigView.as_view(), name='schedule-config'),
+    path('schedule-config/run-now/', ScheduleRunNowView.as_view(), name='schedule-run-now'),
 ]

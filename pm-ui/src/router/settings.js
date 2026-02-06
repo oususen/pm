@@ -41,6 +41,12 @@ const settings = [
     component: () => import("@/views/settings/ProductionPlanLockSetting.vue"),
     meta: { pageTitle: "生産計画ロック設定", resource: "settings" },
   },
+  {
+    path: "/settings/scheduled-tasks",
+    name: "ScheduledTasks",
+    component: () => import("@/views/settings/ScheduledTasks.vue"),
+    meta: { pageTitle: "定時タスク設定", resource: "settings" },
+  },
 ];
 
 export default settings;

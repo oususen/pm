@@ -33,6 +33,30 @@ services:
       - pm_internal
       - ts_pm_network_v2
 
+  # Scheduler (APScheduler - 定時タスク実行)
+  pm-scheduler:
+    build:
+      context: ./pm_backend
+      dockerfile: Dockerfile
+    container_name: pm_scheduler_prod
+    restart: always
+    environment:
+      - DB_HOST=${DB_HOST:-mysql}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${DB_USER:-root}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME:-pm_db}
+      - DEBUG=False
+      - SECRET_KEY=${SECRET_KEY}
+    command: python manage.py run_scheduler
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - pm-backend
+    networks:
+      - pm_internal
+      - ts_pm_network_v2
+
   # Frontend (Nginx + HTTPS)
   pm-frontend:
     build:

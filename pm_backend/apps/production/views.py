@@ -19,6 +19,7 @@ from .models_line_gantt_plan import LineGanttPlan
 from .models_line_daily_schedule_setting import LineDailyScheduleSetting
 from .models_plan_change_log import ProductionPlanChangeLog
 from .models_plan_lock_setting import ProductionPlanLockSetting
+from .models_schedule_config import ScheduleConfig
 from .serializers import (
     LineDemandSerializer,
     LineBacklogSerializer,
@@ -26,6 +27,7 @@ from .serializers import (
     LineGanttPlanSerializer,
     LineDailyScheduleSettingSerializer,
     ProductionPlanLockSettingSerializer,
+    ScheduleConfigSerializer,
     StockAllocationSerializer,
     ProductionOrderSerializer,
     ProductionOrderListSerializer,
@@ -2715,3 +2717,77 @@ class ProductionPlanLockSettingView(APIView):
 
         serializer = ProductionPlanLockSettingSerializer(setting)
         return Response(serializer.data)
+
+
+class ScheduleConfigView(APIView):
+    """定時タスクスケジュール設定API"""
+
+    def get(self, request):
+        ScheduleConfig.objects.get_or_create(
+            task_name='INVENTORY_RECALC',
+            defaults={'scheduled_hour': 7, 'scheduled_minute': 0, 'is_enabled': True},
+        )
+        configs = ScheduleConfig.objects.all()
+        serializer = ScheduleConfigSerializer(configs, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        task_name = request.data.get('task_name', 'INVENTORY_RECALC')
+        scheduled_hour = request.data.get('scheduled_hour')
+        scheduled_minute = request.data.get('scheduled_minute', 0)
+        is_enabled = request.data.get('is_enabled', True)
+
+        try:
+            scheduled_hour = int(scheduled_hour)
+            scheduled_minute = int(scheduled_minute)
+        except (TypeError, ValueError):
+            return Response(
+                {'detail': '時刻は整数で指定してください'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not (0 <= scheduled_hour <= 23) or not (0 <= scheduled_minute <= 59):
+            return Response(
+                {'detail': '時刻の範囲が不正です'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if isinstance(is_enabled, str):
+            is_enabled = is_enabled.lower() in ('true', '1', 'yes')
+
+        config, created = ScheduleConfig.objects.get_or_create(
+            task_name=task_name,
+            defaults={
+                'scheduled_hour': scheduled_hour,
+                'scheduled_minute': scheduled_minute,
+                'is_enabled': is_enabled,
+            },
+        )
+        if not created:
+            user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+            config.scheduled_hour = scheduled_hour
+            config.scheduled_minute = scheduled_minute
+            config.is_enabled = is_enabled
+            config.updated_by = user
+            config.save(update_fields=[
+                'scheduled_hour', 'scheduled_minute',
+                'is_enabled', 'updated_at', 'updated_by',
+            ])
+
+        serializer = ScheduleConfigSerializer(config)
+        return Response(serializer.data)
+
+
+class ScheduleRunNowView(APIView):
+    """手動で在庫再計算を実行"""
+
+    def post(self, request):
+        from .scheduler.tasks import run_inventory_recalculation
+        try:
+            result = run_inventory_recalculation()
+            return Response({'detail': '在庫再計算が完了しました', **result})
+        except Exception as e:
+            logger.exception('手動在庫再計算に失敗')
+            return Response(
+                {'detail': f'在庫再計算に失敗しました: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
