@@ -275,7 +275,7 @@
       <button class="btn-secondary">F1: 終了</button>
       <button class="btn-secondary">F3: クリア</button>
       <button class="btn-secondary">F5: 備考</button>
-      <button class="btn-secondary">F10: 印刷</button>
+      <button class="btn-secondary" @click="openExportDialog" :disabled="processing || !filteredRows.length">F10: 印刷</button>
       <button class="btn-secondary">F12: 更新</button>
     </div>
     <div v-if="showChangeReasonDialog" class="modal-overlay" @click.self="closeChangeReasonDialog">
@@ -293,6 +293,20 @@
       </div>
     </div>
 
+    <div v-if="showExportDialog" class="modal-overlay" @click.self="closeExportDialog">
+      <div class="modal-content export-modal">
+        <h2>出力形式を選択してください</h2>
+        <p class="export-note">
+          対象: 現在の絞り込み結果（ライン: {{ selectedLineLabel || '未選択' }} ／ 期間: {{ startDate }} ～ {{ endDate }} ／ 日替わり時刻 08:00）
+        </p>
+        <div class="export-actions">
+          <button class="btn" @click="exportToExcel" :disabled="!filteredRows.length">Excel出力</button>
+          <button class="btn primary" @click="exportToPdf" :disabled="!filteredRows.length">PDF出力</button>
+          <button class="btn" @click="closeExportDialog">キャンセル</button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="processing" class="processing-overlay">
       <div class="processing-box">
         <p class="processing-title">データ更新中</p>
@@ -303,7 +317,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import api from '@/api/client'
 import ProcessGanttView from './ProcessGanttView.vue'
 const mode = ref('plan')
@@ -345,6 +359,8 @@ const workPatternMap = ref({})
 const workStartFallback = { hour: 8, minute: 0 }
 const workMinutesFallback = 480
 const processing = ref(false)
+const showExportDialog = ref(false)
+const PRINT_CHUNK_DAYS = 14
 
 const formatDateKey = (dateObj) => {
   const y = dateObj.getFullYear()
@@ -879,6 +895,14 @@ onMounted(async () => {
   }
 })
 
+onMounted(() => {
+  window.addEventListener('keydown', onGlobalKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onGlobalKeydown)
+})
+
 const fetchLockSetting = async () => {
   try {
     const res = await api.productionPlanLockSetting.getSetting()
@@ -1070,6 +1094,272 @@ const formatLoad = (val) => {
   const minutes = Math.round(num * 10) / 10
   const hours = Math.round((minutes / 60) * 10) / 10
   return `${minutes} (${hours})`
+}
+
+const selectedLineLabel = computed(() => {
+  const line = lines.value.find((item) => String(item.id) === String(selectedLine.value))
+  if (!line) return ''
+  const code = line.line_code || ''
+  const name = line.line_name || ''
+  return `${code} ${name}`.trim()
+})
+
+const openExportDialog = () => {
+  if (!filteredRows.value.length) {
+    alert('出力対象のデータがありません。')
+    return
+  }
+  if (!selectedLine.value) {
+    alert('ラインを選択してください。')
+    return
+  }
+  showExportDialog.value = true
+}
+
+const closeExportDialog = () => {
+  showExportDialog.value = false
+}
+
+const escapeCsv = (value) => {
+  const text = `${value ?? ''}`
+  const escaped = text.replace(/"/g, '""')
+  return `"${escaped}"`
+}
+
+const escapeHtml = (value) => {
+  const text = `${value ?? ''}`
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+const formatLotValues = (daily, field) => {
+  if (!daily) return ''
+  const values = []
+  const mainVal = daily[field]
+  if (mainVal !== '' && mainVal !== null && mainVal !== undefined) {
+    const disp = displayValue(mainVal)
+    if (disp !== '') values.push(disp)
+  }
+  if (Array.isArray(daily.extraLots)) {
+    daily.extraLots.forEach((lot) => {
+      const val = field === 'plan' ? lot.plan_qty : lot.sequence_no
+      if (val !== '' && val !== null && val !== undefined) {
+        const disp = displayValue(val)
+        if (disp !== '') values.push(disp)
+      }
+    })
+  }
+  return values.join('/')
+}
+
+const buildExportRow = (row) => {
+  const data = []
+  dateColumns.value.forEach((c, colIdx) => {
+    const daily = row.daily?.[c.key] || {}
+    data.push(displayValue(daily.demand))
+    data.push(displayValue(daily.actual))
+    data.push(displayValue(getStockDisplay(row, colIdx)))
+    data.push(formatLotValues(daily, 'plan'))
+    data.push(formatLotValues(daily, 'sequence_no'))
+    data.push(displayValue(getPlanStockDisplay(row, colIdx)))
+  })
+  return data
+}
+
+const exportToExcel = () => {
+  if (!filteredRows.value.length) {
+    alert('出力対象のデータがありません。')
+    return
+  }
+  const bom = '\ufeff'
+  const linesOut = []
+  linesOut.push([escapeCsv('ライン'), escapeCsv(selectedLineLabel.value || '')].join(','))
+  linesOut.push([escapeCsv('期間'), escapeCsv(`${startDate.value} ～ ${endDate.value}`)].join(','))
+  linesOut.push([escapeCsv('日替わり時刻'), escapeCsv('08:00')].join(','))
+  linesOut.push([escapeCsv('デフォルト開始時刻'), escapeCsv(finalProcessStartTime.value || '00:00')].join(','))
+  linesOut.push('')
+
+  const header1 = ['No', '品番']
+  dateColumns.value.forEach((c) => {
+    for (let i = 0; i < 6; i += 1) {
+      header1.push(c.label)
+    }
+  })
+  const header2 = ['No', '品番']
+  dateColumns.value.forEach(() => {
+    header2.push('需要', '実績', '在庫', '計画', '順序', '計画在庫')
+  })
+  linesOut.push(header1.map(escapeCsv).join(','))
+  linesOut.push(header2.map(escapeCsv).join(','))
+
+  filteredRows.value.forEach((row, idx) => {
+    const rowData = buildExportRow(row)
+    rowData.unshift(row.product_code || getProductCode(row.product_id) || '')
+    rowData.unshift(idx + 1)
+    linesOut.push(rowData.map(escapeCsv).join(','))
+  })
+
+  const csvContent = bom + linesOut.join('\r\n')
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  const lineLabel = selectedLineLabel.value ? `_${selectedLineLabel.value.replace(/\\s+/g, '_')}` : ''
+  link.href = url
+  link.download = `production_plan${lineLabel}_${startDate.value}_${endDate.value}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+  closeExportDialog()
+}
+
+const buildPrintTableHtml = () => {
+  const headerInfo = `
+    <div class="meta">
+      <div><strong>ライン:</strong> ${escapeHtml(selectedLineLabel.value || '')}</div>
+      <div><strong>期間:</strong> ${escapeHtml(startDate.value)} ～ ${escapeHtml(endDate.value)}</div>
+      <div><strong>日替わり時刻:</strong> 08:00</div>
+    </div>
+  `
+
+  const metrics = [
+    { key: 'demand', label: '計需', getValue: (row, daily, colIdx) => displayValue(daily.demand) },
+    { key: 'actual', label: '実需', getValue: (row, daily, colIdx) => displayValue(daily.actual) },
+    { key: 'plan', label: '計画', getValue: (row, daily, colIdx) => formatLotValues(daily, 'plan') },
+    { key: 'sequence', label: '順序', getValue: (row, daily, colIdx) => formatLotValues(daily, 'sequence_no') },
+    { key: 'stock', label: '在庫', getValue: (row, daily, colIdx) => displayValue(getStockDisplay(row, colIdx)) },
+    { key: 'plan_stock', label: '計画在庫', getValue: (row, daily, colIdx) => displayValue(getPlanStockDisplay(row, colIdx)) },
+  ]
+
+  const chunkDateColumns = () => {
+    const chunks = []
+    const SIZE = 30
+    for (let i = 0; i < dateColumns.value.length; i += SIZE) {
+      chunks.push({ cols: dateColumns.value.slice(i, i + SIZE), offset: i })
+    }
+    return chunks
+  }
+
+  const buildProductTable = (row, idx, chunkCols, offset) => {
+    const thead = (() => {
+      const headers = ['<tr class="head1"><th class="metric-col">項目</th>']
+      chunkCols.forEach((c) => {
+        headers.push(`<th class="date">${escapeHtml(c.label)}</th>`)
+      })
+      headers.push('</tr>')
+      return headers.join('')
+    })()
+
+    const tbody = (() => {
+      const rowsHtml = metrics.map((m) => {
+        const cells = [`<td class="metric-name">${escapeHtml(m.label)}</td>`]
+        chunkCols.forEach((c, localIdx) => {
+          const globalIdx = offset + localIdx
+          const daily = row.daily?.[c.key] || {}
+          cells.push(`<td class="num">${escapeHtml(m.getValue(row, daily, globalIdx))}</td>`)
+        })
+        return `<tr>${cells.join('')}</tr>`
+      })
+      if (!rowsHtml.length) {
+        rowsHtml.push(`<tr><td colspan="${1 + chunkCols.length}" class="no-data">データがありません</td></tr>`)
+      }
+      return rowsHtml.join('')
+    })()
+
+    return `
+      <div class="product-block">
+        <div class="product-header">
+          <div><strong>No:</strong> ${idx + 1}</div>
+          <div><strong>品番:</strong> ${escapeHtml(row.product_code || getProductCode(row.product_id) || '')}</div>
+          <div><strong>品名:</strong> ${escapeHtml(row.product_name || getProductName(row.product_id) || '')}</div>
+        </div>
+        <table class="vertical-table">
+          <thead>${thead}</thead>
+          <tbody>${tbody}</tbody>
+        </table>
+      </div>
+    `
+  }
+
+  const tablesHtml = filteredRows.value
+    .map((row, idx) =>
+      chunkDateColumns()
+        .map((chunk, cidx) => {
+          const range = `${escapeHtml(chunk.cols[0]?.label || '')} ～ ${escapeHtml(chunk.cols[chunk.cols.length - 1]?.label || '')}`
+          return `
+            <div class="chunk-header">No.${idx + 1} 品番:${escapeHtml(row.product_code || getProductCode(row.product_id) || '')} ／ 期間: ${range}</div>
+            ${buildProductTable(row, idx, chunk.cols, chunk.offset)}
+          `
+        })
+        .join('')
+    )
+    .join('')
+
+  const style = `
+    <style>
+      @page { size: A3 landscape; margin: 10mm; }
+      body { font-family: "Noto Sans JP", "Segoe UI", sans-serif; color: #111; }
+      h1 { margin: 0 0 8px; font-size: 18px; }
+      .meta { display: flex; gap: 18px; margin-bottom: 8px; font-size: 12px; }
+      .product-block { margin-bottom: 14px; page-break-inside: avoid; }
+      .product-header { display: flex; gap: 14px; font-size: 12px; margin: 6px 0; }
+      .chunk-header { margin: 6px 0 2px; font-size: 11px; color: #374151; }
+      table.vertical-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 11px; }
+      th, td { border: 1px solid #cbd5e1; padding: 6px 8px; }
+      th.date { background: #e7edf7; }
+      th.metric-col { width: 90px; background: #cfd8ec; }
+      td.metric-name { background: #f4f6fb; font-weight: 700; }
+      td.num { text-align: right; }
+      .no-data { text-align: center; }
+    </style>
+  `
+
+  const html = `
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        ${style}
+        <title>生産計画印刷</title>
+      </head>
+      <body>
+        <h1>生産計画一覧</h1>
+        ${headerInfo}
+        ${tablesHtml}
+      </body>
+    </html>
+  `
+  return html
+}
+
+const exportToPdf = () => {
+  if (!filteredRows.value.length) {
+    alert('出力対象のデータがありません。')
+    return
+  }
+  const html = buildPrintTableHtml()
+  const win = window.open('', '_blank')
+  if (!win) {
+    alert('ポップアップがブロックされました。許可して再実行してください。')
+    return
+  }
+  win.document.write(html)
+  win.document.close()
+  win.focus()
+  setTimeout(() => {
+    win.print()
+    win.onafterprint = () => win.close()
+  }, 150)
+  closeExportDialog()
+}
+
+const onGlobalKeydown = (event) => {
+  if (event.key === 'F10') {
+    event.preventDefault()
+    openExportDialog()
+  }
 }
 
 const doPickup = async () => {
@@ -1738,6 +2028,20 @@ thead .sticky-col {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+.export-modal h2 {
+  margin-bottom: 6px;
+}
+.export-note {
+  font-size: 12px;
+  color: #4b5563;
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+.export-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 .process-section {
   margin-top: 8px;
