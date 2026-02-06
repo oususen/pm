@@ -200,6 +200,7 @@
 - 段階BOM
 - `m_bom.is_coproduct` は連産品BOMフラグ（親は仮想セット品番）
 - `m_bom_item` に `process_id`, `line_id`, `time_unit`, `lead_time_days`, `duration_min` を保持（BOM→ルーティング自動生成に使用）
+- `m_bom_item.is_coproduct_driver` は連産品代表品フラグ。連産品BOMの子製品のうち1つに指定し、計画展開のトリガーとする。代表品の`duration_min`が連産品のサイクルタイムとして使用される。
 - `m_bom_item.sourcing_type`（MAKE/BUY/SUBCON）と `supplier_id` 整合の **CHECK制約** を追加。
 
 ---
