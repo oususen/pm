@@ -1262,6 +1262,30 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             calendar_code='tiera_muke'
         ).values_list('id', flat=True).first()
 
+        # カレンダ日をキャッシュし、無い場合は週末判定にフォールバックする
+        calendar_day_cache = {}
+        if calendar_id:
+            cache_start = (start_dt - timedelta(days=60)) if start_dt else None
+            cache_end = (end_dt + timedelta(days=60)) if end_dt else None
+            cal_qs = CalendarDay.objects.filter(calendar_id=calendar_id)
+            if cache_start:
+                cal_qs = cal_qs.filter(target_date__gte=cache_start)
+            if cache_end:
+                cal_qs = cal_qs.filter(target_date__lte=cache_end)
+            for cal in cal_qs:
+                calendar_day_cache[cal.target_date] = cal.is_working_day
+
+        def is_working_day(check_date):
+            if calendar_id:
+                if check_date in calendar_day_cache:
+                    return calendar_day_cache[check_date]
+                cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=check_date).first()
+                is_work = cal.is_working_day if cal is not None else check_date.weekday() < 5
+                calendar_day_cache[check_date] = is_work
+                return is_work
+            # カレンダ未設定時は週末判定（月〜金を稼働日）を使う
+            return check_date.weekday() < 5
+
         # 日替わり8時ルール: 8時より前は前日扱い
         def apply_day_boundary(dt_val):
             """日替わり時刻（8時）を考慮した日付を取得"""
@@ -1294,30 +1318,25 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 gantt_product_ids.add(final_id)
 
         def shift_business_days(target_date, days):
+            """
+            稼働日ベースで日付をシフトする（カレンダが無い場合は週末判定）。
+            days > 0 なら過去方向、days < 0 なら未来方向。
+            """
             if not days:
-                if not calendar_id:
-                    return target_date
-                cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=target_date).first()
-                is_work = cal.is_working_day if cal is not None else True
-                if is_work:
+                if is_working_day(target_date):
                     return target_date
                 current = target_date
                 while True:
                     current = current - timedelta(days=1)
-                    cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=current).first()
-                    is_work = cal.is_working_day if cal is not None else True
-                    if is_work:
+                    if is_working_day(current):
                         return current
-            if not calendar_id:
-                return target_date + timedelta(days=-days)
+
             step = -1 if days > 0 else 1
             remaining = abs(int(days))
             current = target_date
             while remaining > 0:
                 current = current + timedelta(days=step)
-                cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=current).first()
-                is_work = cal.is_working_day if cal is not None else True
-                if is_work:
+                if is_working_day(current):
                     remaining -= 1
             return current
 
