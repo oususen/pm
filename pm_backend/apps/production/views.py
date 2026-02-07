@@ -1172,7 +1172,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         if not supplier:
             return Response({'detail': 'supplier not found'}, status=status.HTTP_400_BAD_REQUEST)
 
-        line_code = f"SUP-{supplier.id:06d}"
+        line_code = supplier.supplier_code
         line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
         if len(line_name) > 50:
             line_name = line_name[:50]
@@ -1181,7 +1181,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             defaults={
                 'line_name': line_name,
                 'line_type': 'PURCHASE',
-                'is_active': False,
+                'is_active': True,
             }
         )
         if not created and line_obj.line_type != 'PURCHASE':
@@ -2778,16 +2778,16 @@ class ScheduleConfigView(APIView):
 
 
 class ScheduleRunNowView(APIView):
-    """手動で在庫再計算を実行"""
+    """手動で取り込み＋在庫再計算を実行"""
 
     def post(self, request):
         from .scheduler.tasks import run_inventory_recalculation
         try:
             result = run_inventory_recalculation()
-            return Response({'detail': '在庫再計算が完了しました', **result})
+            return Response({'detail': '取り込み＋在庫再計算が完了しました', **result})
         except Exception as e:
-            logger.exception('手動在庫再計算に失敗')
+            logger.exception('手動実行に失敗')
             return Response(
-                {'detail': f'在庫再計算に失敗しました: {str(e)}'},
+                {'detail': f'実行に失敗しました: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )

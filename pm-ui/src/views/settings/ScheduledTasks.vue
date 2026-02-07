@@ -3,7 +3,7 @@
     <h2 class="page-title">定時タスク設定</h2>
     <div class="card">
       <div class="field">
-        <label>在庫再計算 - 実行時刻</label>
+        <label>取り込み＋在庫再計算 - 実行時刻</label>
         <div class="input-row">
           <input
             type="number"
@@ -24,7 +24,7 @@
           />
           <span class="suffix">分</span>
         </div>
-        <p class="helper">毎日指定した時刻に全ラインの在庫・計画在庫・進度を自動再計算します。</p>
+        <p class="helper">毎日指定した時刻に需要取り込み（pickup）→ 在庫・計画在庫・進度の自動再計算を実行します。</p>
       </div>
 
       <div class="field" style="margin-top: 12px">
@@ -138,7 +138,7 @@ const saveConfig = async () => {
 
 const runNow = async () => {
   if (!canEdit.value) return
-  if (!confirm('在庫再計算を今すぐ実行しますか？\n処理に数分かかる場合があります。')) return
+  if (!confirm('取り込み＋在庫再計算を今すぐ実行しますか？\n処理に数分かかる場合があります。')) return
   running.value = true
   try {
     const res = await api.scheduleConfig.runNow()

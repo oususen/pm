@@ -69,7 +69,7 @@ def build_scrap_multiplier_details(root_product_id: int, root_qty: Decimal):
         supplier = Supplier.objects.filter(id=supplier_id).first()
         if not supplier:
             return purchase_line_id
-        line_code = f"SUP-{supplier.id:06d}"
+        line_code = supplier.supplier_code
         line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
         if len(line_name) > 50:
             line_name = line_name[:50]
@@ -78,7 +78,7 @@ def build_scrap_multiplier_details(root_product_id: int, root_qty: Decimal):
             defaults={
                 'line_name': line_name,
                 'line_type': 'PURCHASE',
-                'is_active': False,
+                'is_active': True,
             }
         )
         if not created and line_obj.line_type != 'PURCHASE':

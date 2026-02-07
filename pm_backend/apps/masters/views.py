@@ -533,9 +533,9 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
     def _get_or_create_purchase_line_and_process(self, supplier):
         """
-        仕入先に対応する仮想ライン（SUP-{id}）とPURCHASE工程を取得または作成する。
+        仕入先に対応する仮想ライン（仕入先コード）とPURCHASE工程を取得または作成する。
         """
-        line_code = f"SUP-{supplier.id:06d}"
+        line_code = supplier.supplier_code
         line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
         if len(line_name) > 50:
             line_name = line_name[:50]
@@ -544,7 +544,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             defaults={
                 'line_name': line_name,
                 'line_type': 'PURCHASE',
-                'is_active': False,
+                'is_active': True,
             }
         )
 
