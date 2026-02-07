@@ -112,6 +112,14 @@ const tiles = computed(() => {
       resource: "production.progress",
     },
     {
+      to: "/production/progress-only",
+      label: t("productionMenu.tiles.progressOnly"),
+      icon: "📈",
+      iconLabel: "進度",
+      required: "view",
+      resource: "production.progress",
+    },
+    {
       to: "/production/line-demands",
       label: t("productionMenu.tiles.lineDemands"),
       icon: "📈",

@@ -24,6 +24,12 @@ const production = [
     meta: { pageTitle: "進捗管理", manualPath: "生産/進捗管理.md" },
   },
   {
+    path: "/production/progress-only",
+    name: "ProductionProgressOnly",
+    component: () => import("@/views/production/ProductionProgressOnly.vue"),
+    meta: { pageTitle: "進度のみ", manualPath: "生産/進捗管理.md" },
+  },
+  {
     path: "/production/plan-input",
     name: "ProductionPlanInput",
     component: () => import("@/views/production/ProductionPlanInput.vue"),

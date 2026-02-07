@@ -59,6 +59,7 @@ const sections = [
     items: [
       { label: "生産メニュー", link: "/production/menu" },
       { label: "進捗管理", link: "/production/progress" },
+      { label: "進度のみ", link: "/production/progress-only" },
       { label: "在庫/残量", link: "/production/inventory" },
       { label: "ライン需要", link: "/production/line-demands" },
       { label: "在庫引当", link: "/production/stock-allocations" },

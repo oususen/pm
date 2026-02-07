@@ -95,6 +95,7 @@ class LineBacklogSerializer(serializers.ModelSerializer):
             'line', 'line_code', 'line_name',
             'demand_qty_plan', 'order_qty', 'firm_order_qty', 'forecast_order_qty',
             'plan_qty', 'actual_qty', 'stock_qty', 'planned_stock_qty', 'progress_qty',
+            'planned_progress_qty',
             'adjust_qty', 'scrap_qty', 'actual_shipment_qty',
             'sequence_no', 'plan_id',
             'source_line', 'source_routing_step', 'updated_at',

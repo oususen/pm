@@ -44,6 +44,9 @@ class LineBacklog(models.Model):
     # 進度（後工程実績をLT遡りで計算、計画に対する進み/遅れを表す）
     progress_qty = models.IntegerField(default=0, verbose_name="進度")
 
+    # 計画進度（計画を基準にした進度）
+    planned_progress_qty = models.IntegerField(default=0, verbose_name="計画進度")
+
     # 生産順序番号（日をまたいだ通し番号）
     sequence_no = models.IntegerField(null=True, blank=True)
 

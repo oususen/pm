@@ -145,6 +145,8 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
     calc_start_date = shift_working_days(today, -(max_lt + 1))
     progress_by_date = {}
     last_progress = 0
+    planned_progress_by_date = {}
+    last_planned_progress = 0
 
     # 計算開始日以前の進度を初期値として取得
     initial_backlog = LineBacklog.objects.filter(
@@ -157,6 +159,8 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
     if initial_backlog:
         last_progress = initial_backlog.progress_qty or 0
         progress_by_date[initial_backlog.plan_date] = last_progress
+        last_planned_progress = getattr(initial_backlog, 'planned_progress_qty', 0) or 0
+        planned_progress_by_date[initial_backlog.plan_date] = last_planned_progress
 
     process_ids = {r.process_id for r in backlogs if r.process_id}
     step_map = {}
@@ -211,15 +215,20 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
         # 計算開始日以前は既存の進度値を使用し、更新しない
         if plan_date <= calc_start_date:
             existing_progress = 0
+            existing_planned_progress = 0
             for row in rows:
                 if row.progress_qty:
                     existing_progress = row.progress_qty
-                    break
+                if getattr(row, 'planned_progress_qty', None):
+                    existing_planned_progress = row.planned_progress_qty
             progress_by_date[plan_date] = existing_progress
+            planned_progress_by_date[plan_date] = existing_planned_progress
             last_progress = existing_progress
+            last_planned_progress = existing_planned_progress
             continue
 
         actual_total = sum(r.actual_qty or 0 for r in rows)
+        plan_total = sum(r.plan_qty or 0 for r in rows)
         adjust_total = sum(r.adjust_qty or 0 for r in rows)
         # 進度計算では scrap_qty を引かない（自製品の仕損は actual_qty 減算で対応済み）
 
@@ -232,20 +241,52 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
             demand_qty = demand_by_step.get((plan_date, step_id), Decimal('0'))
         if demand_qty == 0:
             demand_qty = demand_by_product.get((plan_date, product_id), Decimal('0'))
+
+        # LineDemandが無い場合は backlog から需要を補完（計画行は除外）
+        if demand_qty == 0:
+            demand_rows = [
+                r for r in rows
+                if (r.order_qty or r.demand_qty_plan)
+                and not (r.plan_qty and r.plan_qty > 0)
+            ]
+            if not demand_rows:
+                demand_rows = rows
+
+            firm_total = sum(
+                (r.firm_order_qty if r.firm_order_qty is not None else 0)
+                for r in demand_rows
+            )
+            forecast_total = sum(
+                (
+                    r.forecast_order_qty
+                    if r.forecast_order_qty is not None
+                    else (r.order_qty if r.order_qty is not None else r.demand_qty_plan or 0)
+                )
+                for r in demand_rows
+            )
+            fallback_demand = firm_total if firm_total > 0 else forecast_total
+            demand_qty = Decimal(str(fallback_demand or 0))
+
         progress_shipment = int(demand_qty or 0)
 
         prev_day = get_prev_working_day(plan_date)
         prev_progress = progress_by_date.get(prev_day, last_progress)
+        prev_planned_progress = planned_progress_by_date.get(prev_day, last_planned_progress)
 
         # 非稼働日は前営業日の進度をそのまま保持する
         if not working_day:
             progress_qty = prev_progress
+            planned_progress_qty = prev_planned_progress
             rep = pick_representative(rows)
             for row in rows:
                 row.progress_qty = 0
+                row.planned_progress_qty = 0
             rep.progress_qty = progress_qty
+            rep.planned_progress_qty = planned_progress_qty
             progress_by_date[plan_date] = progress_qty
+            planned_progress_by_date[plan_date] = planned_progress_qty
             last_progress = progress_qty
+            last_planned_progress = planned_progress_qty
             backlogs_to_update.extend(rows)
             continue
 
@@ -257,14 +298,24 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
             - progress_shipment
             + adjust_total
         )
+        planned_progress_qty = (
+            prev_planned_progress
+            + plan_total
+            - progress_shipment
+            + adjust_total
+        )
 
         rep = pick_representative(rows)
         for row in rows:
             row.progress_qty = 0
+            row.planned_progress_qty = 0
         rep.progress_qty = progress_qty
+        rep.planned_progress_qty = planned_progress_qty
         progress_by_date[plan_date] = progress_qty
+        planned_progress_by_date[plan_date] = planned_progress_qty
         last_progress = progress_qty
+        last_planned_progress = planned_progress_qty
         backlogs_to_update.extend(rows)
 
     if backlogs_to_update:
-        LineBacklog.objects.bulk_update(backlogs_to_update, ['progress_qty'])
+        LineBacklog.objects.bulk_update(backlogs_to_update, ['progress_qty', 'planned_progress_qty'])
