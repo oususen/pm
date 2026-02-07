@@ -30,7 +30,7 @@ class ProcessSpec:
 class LineWorkCalendar:
     def __init__(self, line: Line):
         self.line = line
-        self.calendar_id = line.calendar_id or Calendar.objects.filter(calendar_code='tiera_muke').values_list('id', flat=True).first()
+        self.calendar_id = line.calendar_id or Calendar.objects.filter(calendar_code='daiso').values_list('id', flat=True).first()
         self._calendar_cache: Dict = {}
         self._pattern_cache: Dict = {}
         self._break_cache: Dict = {}

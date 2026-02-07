@@ -240,6 +240,7 @@
         <div class="inline-group">
           <label class="label-required inline-label">{{ t('processInput.productionRecorded') }}</label>
           <select v-model="record.is_production_recorded" class="input-large flex-input">
+            <option value="">-- 選択 --</option>
             <option v-for="opt in productionRecordedOptions" :key="opt.value" :value="opt.value">
               {{ opt.label }}
             </option>
@@ -398,6 +399,7 @@ const scrapRelationFilter = ref('')
 const scrapSearchText = ref('')
 const defaultProductId = ref(null)
 const productImageMap = ref({})
+const productMetaMap = ref({})
 
 const record = ref({
   record_type: '',
@@ -407,7 +409,7 @@ const record = ref({
   reason: '',
   reason_detail: '',
   disposition_status: '',
-  is_production_recorded: false,
+  is_production_recorded: '',
   equipment_state: '',
   batch_no: '',
   operator_name: '',
@@ -449,6 +451,7 @@ const scrapRelationOptions = computed(() => [
   { value: 'intermediate', label: t('processInput.scrapFilter.intermediate') },
   { value: 'purchased', label: t('processInput.scrapFilter.purchased') },
   { value: 'output_product', label: t('processInput.scrapFilter.outputProduct') },
+  { value: 'final_product', label: t('processInput.scrapFilter.finalProduct') },
 ])
 
 const availableRecordTypes = computed(() => {
@@ -611,6 +614,30 @@ const normalizeRelationType = (type) => {
     .toLowerCase()
 }
 
+const getProductMeta = (productId) => {
+  if (productId === null || productId === undefined) return {}
+  const idStr = String(productId)
+  return productMetaMap.value[idStr] || productMetaMap.value[productId] || {}
+}
+
+const isFinalProductCandidate = (item) => {
+  if (!item) return false
+  const productId = item.product ?? item.id
+  const meta = getProductMeta(productId)
+  if (item.is_final_product || item.is_line_final_product) return true
+  if (meta.is_final_product || meta.is_line_final_product) return true
+  return normalizeRelationType(item.relation_type) === 'final_product'
+}
+
+const getRelationTypesForItem = (item) => {
+  if (!item) return []
+  const types = []
+  const normalized = normalizeRelationType(item.relation_type || '')
+  if (normalized) types.push(normalized)
+  if (isFinalProductCandidate(item)) types.push('final_product')
+  return Array.from(new Set(types))
+}
+
 const filterScrapCandidates = (list) => {
   const items = Array.isArray(list) ? list : []
   const relation = scrapRelationFilter.value
@@ -622,36 +649,42 @@ const filterScrapCandidates = (list) => {
     intermediate: ['intermediate', 'output_product', 'outputproduct'],
     purchased: ['purchased'],
     output_product: ['output_product', 'intermediate', 'outputproduct'],
+    final_product: ['final_product', 'line_final_product', 'finalproduct'],
   }
-  const allowedTypes = relation ? relationAliases[relation] || [relation] : []
+  let allowedTypes = relation
+    ? [...new Set((relationAliases[relation] || [relation]).map((t) => normalizeRelationType(t)))]
+    : []
   // 連産子が返ってこない環境向けフォールバック: coproduct_parent はあるが coproduct_child が無い場合、output_product を子扱いで含める
-  if (relation === 'coproduct_child' && !items.some((p) => normalizeRelationType(p.relation_type) === 'coproduct_child')) {
-    allowedTypes.push('output_product')
+  if (relation === 'coproduct_child' && !items.some((p) => normalizeRelationType(p?.relation_type) === 'coproduct_child')) {
+    allowedTypes = [...allowedTypes, 'output_product']
   }
+
+  const matchesQuery = (p) => {
+    const code = (p.product_code || '').toLowerCase()
+    const name = (p.product_name || '').toLowerCase()
+    return code.includes(query) || name.includes(query)
+  }
+
+  const matchesRelation = (p) => {
+    if (!relation) return true
+    const types = getRelationTypesForItem(p)
+    if (!types.length) return false
+    return types.some((type) =>
+      allowedTypes.some((allowed) => type === allowed || type.includes(allowed))
+    )
+  }
+
   const filtered = items.filter((p) => {
     if (!p) return false
-    if (relation) {
-      const type = normalizeRelationType(p.relation_type || '')
-      if (!allowedTypes.some((t) => type === t || type === normalizeRelationType(t) || type.includes(t))) {
-        return false
-      }
-    }
-    if (query) {
-      const code = (p.product_code || '').toLowerCase()
-      const name = (p.product_name || '').toLowerCase()
-      if (!code.includes(query) && !name.includes(query)) return false
-    }
+    if (!matchesRelation(p)) return false
+    if (query && !matchesQuery(p)) return false
     return true
   })
   // もし選択した区分で0件になった場合は、区分条件を外して検索条件のみで返す（使える製品が全く出ないのを防ぐ）
   if (relation && filtered.length === 0) {
     return items.filter((p) => {
       if (!p) return false
-      if (query) {
-        const code = (p.product_code || '').toLowerCase()
-        const name = (p.product_name || '').toLowerCase()
-        if (!code.includes(query) && !name.includes(query)) return false
-      }
+      if (query && !matchesQuery(p)) return false
       return true
     })
   }
@@ -725,6 +758,7 @@ const canSubmit = computed(() => {
       if (record.value.reason === 'OTHER' && !detailText) return false
       if (!(record.value.operator_name || '').trim()) return false
       if (!(record.value.disposition_status || '').trim()) return false
+      if (record.value.is_production_recorded === '') return false
     }
     return true
   }
@@ -745,7 +779,7 @@ const resetForm = () => {
     reason: '',
     reason_detail: '',
     disposition_status: '',
-    is_production_recorded: false,
+    is_production_recorded: '',
     equipment_state: '',
     batch_no: '',
     operator_name: defaultOperatorName.value || '',
@@ -778,6 +812,7 @@ const onLineChange = () => {
   scrapProducts.value = []
   defaultProductId.value = null
   productImageMap.value = {}
+  productMetaMap.value = {}
   manualProducts.value = []
   manualProductsLoaded.value = false
   manualProductsProcessId.value = null
@@ -1223,11 +1258,13 @@ const loadProductImages = async (idSet) => {
   try {
     if (!idSet || idSet.size === 0) {
       productImageMap.value = {}
+      productMetaMap.value = {}
       return
     }
     // 1) まとめて取得
     const all = await api.products.getAllProducts({ page_size: 5000 })
     const map = {}
+    const meta = {}
     all.forEach((p) => {
       const pidNum = p.id
       const pidStr = String(p.id)
@@ -1235,6 +1272,13 @@ const loadProductImages = async (idSet) => {
         const val = p.image_url || ''
         map[pidNum] = val
         map[pidStr] = val
+        const metaEntry = {
+          is_final_product: !!p.is_final_product,
+          is_line_final_product: !!p.is_line_final_product,
+          category: p.category || '',
+        }
+        meta[pidNum] = metaEntry
+        meta[pidStr] = metaEntry
       }
     })
 
@@ -1251,6 +1295,13 @@ const loadProductImages = async (idSet) => {
             const val = p.image_url || ''
             map[pidNum] = val
             map[pidStr] = val
+            const metaEntry = {
+              is_final_product: !!p.is_final_product,
+              is_line_final_product: !!p.is_line_final_product,
+              category: p.category || '',
+            }
+            meta[pidNum] = metaEntry
+            meta[pidStr] = metaEntry
           }
         } catch (err) {
           console.warn('製品詳細取得失敗 (画像用):', mid, err)
@@ -1259,6 +1310,7 @@ const loadProductImages = async (idSet) => {
     }
 
     productImageMap.value = map
+    productMetaMap.value = meta
   } catch (error) {
     console.error('製品画像取得エラー:', error)
   }
@@ -1308,6 +1360,7 @@ watch(
     scrapProducts.value = []
     defaultProductId.value = null
     productImageMap.value = {}
+    productMetaMap.value = {}
     record.value.operator_name = defaultOperatorName.value || ''
     resetForm()
   }

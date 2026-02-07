@@ -396,7 +396,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             return
 
         line_map = {line.id: line for line in Line.objects.filter(id__in=line_ids)}
-        default_calendar_id = Calendar.objects.filter(calendar_code='tiera_muke').values_list('id', flat=True).first()
+        default_calendar_id = Calendar.objects.filter(calendar_code='daiso').values_list('id', flat=True).first()
 
         items_by_line = defaultdict(list)
         for item in items:
@@ -649,9 +649,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         # 需要を計算：(product_id, plan_date) -> order_qty
         demand_map = defaultdict(Decimal)
 
-        # 使用するカレンダ（ライン紐付があれば優先、無ければtiera_muke）
+        # 使用するカレンダ（ライン紐付があれば優先、無ければdaiso）
         line_obj = Line.objects.filter(id=line_id).first()
-        calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(calendar_code='tiera_muke').values_list('id', flat=True).first()
+        calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(calendar_code='daiso').values_list('id', flat=True).first()
 
         # CalendarDayを一括取得してキャッシュ化（N+1問題を解消）
         calendar_day_cache = {}
@@ -671,13 +671,18 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             """
             稼働日で日付をシフトする。
             days > 0 なら過去方向へ、days < 0 なら未来方向へ。
-            カレンダが無い場合は暦日でシフト。
+            カレンダが無い場合は週末判定（土日非稼働）、さらに無ければ暦日でシフト。
             """
             def is_working_day(check_date):
+                # カレンダ未設定 → 週末判定（月〜金を稼働日）
                 if not calendar_id:
-                    return True
-                # キャッシュから取得（キャッシュにない場合はTrue扱い）
-                return calendar_day_cache.get(check_date, True)
+                    return check_date.weekday() < 5
+                if check_date in calendar_day_cache:
+                    return calendar_day_cache[check_date]
+                cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=check_date).first()
+                is_work = cal.is_working_day if cal is not None else check_date.weekday() < 5
+                calendar_day_cache[check_date] = is_work
+                return is_work
 
             if not days:
                 if not calendar_id:
@@ -689,9 +694,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     current = current - timedelta(days=1)
                     if is_working_day(current):
                         return current
-            if not calendar_id:
-                return target_date + timedelta(days=-days)
-
             step = -1 if days > 0 else 1  # 正:過去へ、負:未来へ
             remaining = abs(int(days))
             current = target_date
@@ -1281,7 +1283,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         )
 
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
-            calendar_code='tiera_muke'
+            calendar_code='daiso'
         ).values_list('id', flat=True).first()
 
         # カレンダ日をキャッシュし、無い場合は週末判定にフォールバックする
@@ -1586,9 +1588,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if driver_id is not None:
                     copro_driver[(parent_id, plan_date)] = driver_id
 
-        # ラインに紐づくカレンダがあれば使用、無ければtiera_mukeを使用
+        # ラインに紐づくカレンダがあれば使用、無ければdaisoを使用
         line_obj = Line.objects.filter(id=line_id).first()
-        calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(calendar_code='tiera_muke').values_list('id', flat=True).first()
+        calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(calendar_code='daiso').values_list('id', flat=True).first()
         calendar_work_map = {}
         if calendar_id:
             cal_qs = CalendarDay.objects.filter(

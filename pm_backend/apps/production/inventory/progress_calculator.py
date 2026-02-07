@@ -91,7 +91,7 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
     if line_id:
         line_obj = Line.objects.filter(id=line_id).first()
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
-            calendar_code='tiera_muke'
+            calendar_code='daiso'
         ).values_list('id', flat=True).first()
 
     def is_working_day(target_date):

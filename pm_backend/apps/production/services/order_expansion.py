@@ -40,12 +40,12 @@ class OrderExpansionService:
         from masters.models import Calendar, CalendarDay
 
         default_calendar_id = Calendar.objects.filter(
-            calendar_code='tiera_muke'
+            calendar_code='daiso'
         ).values_list('id', flat=True).first()
 
         def is_working_day(calendar_id, target_date):
             if not calendar_id:
-                return True
+                return target_date.weekday() < 5
             cache = workday_cache.setdefault(calendar_id, {})
             if target_date in cache:
                 return cache[target_date]
@@ -53,7 +53,7 @@ class OrderExpansionService:
                 calendar_id=calendar_id,
                 target_date=target_date
             ).first()
-            is_work = cal.is_working_day if cal is not None else True
+            is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
             cache[target_date] = is_work
             return is_work
 
@@ -68,8 +68,6 @@ class OrderExpansionService:
                     current = current - timedelta(days=1)
                     if is_working_day(calendar_id, current):
                         return current
-            if not calendar_id:
-                return target_date + timedelta(days=-days)
             step = -1 if days > 0 else 1
             remaining = abs(int(days))
             current = target_date

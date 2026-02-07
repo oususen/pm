@@ -150,7 +150,7 @@ def _build_firm_order_map(line_id, start_date, end_date):
 
     line_obj = Line.objects.filter(id=line_id).first()
     calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
-        calendar_code='tiera_muke'
+        calendar_code='daiso'
     ).values_list('id', flat=True).first()
     workday_cache = {}
 
@@ -567,7 +567,7 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
         from masters.models import Line, Calendar, CalendarDay
         line_obj = Line.objects.filter(id=line_id).first()
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
-            calendar_code='tiera_muke'
+            calendar_code='daiso'
         ).values_list('id', flat=True).first()
 
     def is_working_day(target_date):
@@ -729,7 +729,7 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
         from masters.models import Line, Calendar, CalendarDay
         line_obj = Line.objects.filter(id=line_id).first()
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
-            calendar_code='tiera_muke'
+            calendar_code='daiso'
         ).values_list('id', flat=True).first()
 
     def is_working_day(target_date):

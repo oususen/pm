@@ -164,7 +164,7 @@ VALUES (...)
     - **ステップ4**: 後工程ラインの LineBacklog.plan_qty を取得し、total_qty_per を掛け算  
        - リードタイム考慮：稼働日ベースで lt_days 日前倒し  
          - 優先順: RoutingStep.lead_time_days > Line.lead_time_days > BOMItem.lead_time_days  
-         - 使用カレンダ: `calendar_code='tiera_muke'` を参照（未設定時は暦日）
+         - 使用カレンダ: `calendar_code='daiso'` を参照（未設定時は暦日）
      - 複数ライン・複数親製品があればすべて合計
   3. 後ラインからの需要が 0 件の場合（最終ライン）は LineDemand から取得
 
@@ -292,7 +292,7 @@ VALUES (...)
 
 ### リードタイムによる日付調整
 
-- **稼働日カレンダーを考慮**: `calendar_code='tiera_muke'` を使用
+- **稼働日カレンダーを考慮**: `calendar_code='daiso'` を使用
 - **調整方向**: リードタイム日数分、親製品の計画日から過去に遡る
 - **ロジック**:
   ```python
