@@ -23,17 +23,37 @@
         <button class="btn primary" @click="generateSchedule" :disabled="!selectedLine">
           実行
         </button>
-        <button class="btn" @click="saveSchedule" :disabled="!processGanttData.length">
+        <button class="btn" @click="saveSchedule" :disabled="mergeConsecutive || !processGanttData.length">
           保存
         </button>
       </div>
     </div>
 
     <div v-if="processGanttData.length" class="gantt-wrapper">
+      <div class="view-mode-bar">
+        <span class="view-mode-label">表示モード</span>
+        <button
+          type="button"
+          class="mode-btn"
+          :class="{ active: !mergeConsecutive }"
+          @click="mergeConsecutive = false"
+        >
+          分解
+        </button>
+        <button
+          type="button"
+          class="mode-btn"
+          :class="{ active: mergeConsecutive }"
+          @click="mergeConsecutive = true"
+        >
+          連結（同一製品の連続をまとめる）
+        </button>
+        <span class="view-mode-hint">連結中は編集・保存を無効化</span>
+      </div>
       <div class="gantt-scroll">
         <!-- 各工程のガントチャート -->
         <div
-          v-for="proc in processGanttData"
+          v-for="proc in renderedProcessGantt"
           :key="proc.process_id"
           class="process-gantt-card"
         >
@@ -90,7 +110,7 @@
               </div>
               <div class="gantt-row-bars" :style="{ width: timelineWidthPx + 'px' }">
                 <div
-                  v-for="bar in item.bars"
+                  v-for="bar in item.displayBars || item.bars"
                   :key="bar.key"
                   class="gantt-bar-wrapper"
                   :style="{
@@ -100,7 +120,7 @@
                   :data-plan-id="bar.planId"
                   :data-process-id="bar.processId"
                   :data-duration-ms="bar.durationMs"
-                  @mousedown="handleDragStart"
+                  @mousedown="onBarMouseDown"
                 >
                   <div
                     class="gantt-bar"
@@ -151,8 +171,10 @@ const selectedLine = ref('')
 const baseDate = ref(new Date().toISOString().slice(0, 10))
 const lines = ref([])
 const processGanttData = ref([])
+const mergeConsecutive = ref(false)
 const slotHours = 4
 const pixelsPerSlot = 80
+const mergeGapToleranceMs = 60 * 1000 // 連続とみなす隙間（1分）
 const workStartFallback = { hour: 8, minute: 0 }
 const workMinutesFallback = 480
 const timelineStart = ref(null)
@@ -270,6 +292,16 @@ const workBands = computed(() => {
   }
   return bands
 })
+
+const renderedProcessGantt = computed(() =>
+  processGanttData.value.map((proc) => ({
+    ...proc,
+    items: proc.items.map((item) => ({
+      ...item,
+      displayBars: mergeConsecutive.value ? mergeBars(item.bars) : item.bars,
+    })),
+  }))
+)
 
 function getDayClass(dateStr) {
   const d = new Date(dateStr)
@@ -448,6 +480,10 @@ const generateSchedule = async (clearExisting = true) => {
 }
 
 const saveSchedule = async () => {
+  if (mergeConsecutive.value) {
+    alert('連結表示では保存できません。分解表示に切り替えてください。')
+    return
+  }
   if (!timelineStart.value) {
     alert('保存するスケジュールがありません')
     return
@@ -522,6 +558,14 @@ function getDragTooltip() {
     document.body.appendChild(tooltip)
   }
   return tooltip
+}
+
+function onBarMouseDown(e) {
+  if (mergeConsecutive.value) {
+    alert('連結表示中はバー編集できません。分解表示に切り替えてください。')
+    return
+  }
+  handleDragStart(e)
 }
 
 function handleDragStart(e) {
@@ -729,8 +773,68 @@ function updateBarDisplay(bar) {
   bar.label = `${bar.planQty}|${bar.startLabel}-${bar.endLabel}${bar.durationLabel ? `(${bar.durationLabel})` : ''}`
 }
 
+function cloneBarForMerge(bar) {
+  return {
+    ...bar,
+    startTime: new Date(bar.startTime),
+    endTime: new Date(bar.endTime),
+    durationMs: bar.durationMs,
+    planQty: Number(bar.planQty || 0),
+    totalMinutesRequired:
+      Number.isFinite(Number(bar.totalMinutesRequired))
+        ? Number(bar.totalMinutesRequired)
+        : bar.durationMs / 60000,
+    mergedPlanIds: [bar.planId || bar.key],
+    key: `m-${bar.key}`,
+  }
+}
+
+// 連結表示用に同一製品の連続バーをまとめる
+function mergeBars(bars) {
+  if (!mergeConsecutive.value) return bars
+  if (!Array.isArray(bars) || bars.length <= 1 || !timelineStart.value) return bars
+
+  const merged = []
+  const sorted = [...bars].sort((a, b) => a.startTime - b.startTime)
+  let current = null
+
+  sorted.forEach((bar) => {
+    const cloned = cloneBarForMerge(bar)
+    if (!current) {
+      current = cloned
+      return
+    }
+    const gap = cloned.startTime.getTime() - current.endTime.getTime()
+    if (gap >= -mergeGapToleranceMs && gap <= mergeGapToleranceMs) {
+      current.endTime = new Date(cloned.endTime)
+      current.durationMs = current.endTime.getTime() - current.startTime.getTime()
+      current.planQty = Number(current.planQty || 0) + Number(cloned.planQty || 0)
+      const baseMinutes = Number(current.totalMinutesRequired || current.durationMs / 60000)
+      const addMinutes = Number(cloned.totalMinutesRequired || cloned.durationMs / 60000)
+      current.totalMinutesRequired = baseMinutes + addMinutes
+      current.mergedPlanIds.push(cloned.planId || cloned.key)
+      current.key = `m-${current.mergedPlanIds.join('_')}`
+    } else {
+      updateBarDisplay(current)
+      merged.push(current)
+      current = cloned
+    }
+  })
+
+  if (current) {
+    updateBarDisplay(current)
+    merged.push(current)
+  }
+
+  return merged
+}
+
 function openStartTimeEdit(bar) {
   if (!bar || !bar.startTime || !bar.durationMs) return
+  if (mergeConsecutive.value) {
+    alert('連結表示中は開始時刻を編集できません。分解表示に切り替えてください。')
+    return
+  }
   const input = window.prompt('開始日時を入力してください (YYYY-MM-DD HH:mm)', formatDateTimeInput(bar.startTime))
   if (!input) return
   const parsed = parseDateTimeInput(input)
@@ -1001,6 +1105,39 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.view-mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #374151;
+}
+.view-mode-label {
+  font-weight: 700;
+}
+.mode-btn {
+  padding: 4px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  background: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+.mode-btn.active {
+  background: #2563eb;
+  color: #fff;
+  border-color: #1d4ed8;
+}
+.mode-btn:hover {
+  background: #f1f5f9;
+}
+.mode-btn.active:hover {
+  background: #1d4ed8;
+}
+.view-mode-hint {
+  color: #6b7280;
 }
 .gantt-scroll {
   overflow-x: auto;
