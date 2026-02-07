@@ -889,8 +889,26 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
                 # ステップ3: 親製品を出力するライン（後工程）をRoutingStepから特定（キャッシュから）
                 downstream_steps = downstream_steps_by_product.get(parent_product.id, [])
+                # 連産などで1つの親に複数のライン最終品が紐づく場合は、
+                # 別最終品由来の親計画をfallbackで混在させないようにする
+                final_targets_for_parent = {
+                    s.routing.product_id
+                    for s in downstream_steps
+                    if s.routing
+                    and s.routing.product
+                    and s.routing.product.is_line_final_product
+                    and s.routing.product_id
+                    and s.routing.product_id != parent_product.id
+                }
+                has_multiple_final_targets = len(final_targets_for_parent) > 1
 
+                # 同一(line, process, output_product, routing)が完全に重複している場合だけスキップ
+                seen_steps = set()
                 for d_step in downstream_steps:
+                    step_key = (d_step.line_id, d_step.process_id, d_step.output_product_id, d_step.routing_id)
+                    if step_key in seen_steps:
+                        continue
+                    seen_steps.add(step_key)
                     downstream_line_id = d_step.line_id
                     if not downstream_line_id:
                         continue
@@ -943,9 +961,13 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             else:
                                 final_map[plan_date] = final_map.get(plan_date, Decimal('0')) + qty
                         for plan_date in set(parent_map) | set(final_map):
-                            qty = parent_map.get(plan_date)
-                            if qty is None or qty <= 0:
+                            if has_multiple_final_targets:
+                                # 複数最終品を持つ親では、当該最終品の数量のみを採用する
                                 qty = final_map.get(plan_date, Decimal('0'))
+                            else:
+                                qty = parent_map.get(plan_date)
+                                if qty is None or qty <= 0:
+                                    qty = final_map.get(plan_date, Decimal('0'))
                             if qty:
                                 fallback_map[plan_date] = qty
                     else:
