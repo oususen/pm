@@ -159,7 +159,7 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
     if initial_backlog:
         last_progress = initial_backlog.progress_qty or 0
         progress_by_date[initial_backlog.plan_date] = last_progress
-        last_planned_progress = getattr(initial_backlog, 'planned_progress_qty', 0) or 0
+        last_planned_progress = initial_backlog.planned_progress_qty or 0
         planned_progress_by_date[initial_backlog.plan_date] = last_planned_progress
 
     process_ids = {r.process_id for r in backlogs if r.process_id}
@@ -217,10 +217,10 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
             existing_progress = 0
             existing_planned_progress = 0
             for row in rows:
-                if row.progress_qty:
-                    existing_progress = row.progress_qty
-                if getattr(row, 'planned_progress_qty', None):
-                    existing_planned_progress = row.planned_progress_qty
+                if row.progress_qty or row.planned_progress_qty:
+                    existing_progress = row.progress_qty or 0
+                    existing_planned_progress = row.planned_progress_qty or 0
+                    break
             progress_by_date[plan_date] = existing_progress
             planned_progress_by_date[plan_date] = existing_planned_progress
             last_progress = existing_progress
@@ -241,31 +241,6 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
             demand_qty = demand_by_step.get((plan_date, step_id), Decimal('0'))
         if demand_qty == 0:
             demand_qty = demand_by_product.get((plan_date, product_id), Decimal('0'))
-
-        # LineDemandが無い場合は backlog から需要を補完（計画行は除外）
-        if demand_qty == 0:
-            demand_rows = [
-                r for r in rows
-                if (r.order_qty or r.demand_qty_plan)
-                and not (r.plan_qty and r.plan_qty > 0)
-            ]
-            if not demand_rows:
-                demand_rows = rows
-
-            firm_total = sum(
-                (r.firm_order_qty if r.firm_order_qty is not None else 0)
-                for r in demand_rows
-            )
-            forecast_total = sum(
-                (
-                    r.forecast_order_qty
-                    if r.forecast_order_qty is not None
-                    else (r.order_qty if r.order_qty is not None else r.demand_qty_plan or 0)
-                )
-                for r in demand_rows
-            )
-            fallback_demand = firm_total if firm_total > 0 else forecast_total
-            demand_qty = Decimal(str(fallback_demand or 0))
 
         progress_shipment = int(demand_qty or 0)
 

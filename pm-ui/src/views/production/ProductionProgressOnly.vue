@@ -105,6 +105,7 @@ const loading = ref(false);
 const recalculating = ref(false);
 const error = ref("");
 const backlogs = ref([]);
+const lineDemands = ref([]);
 let userSetStart = false;
 const onStartChange = () => {
   userSetStart = true;
@@ -158,9 +159,17 @@ const load = async () => {
   loading.value = true;
   error.value = "";
   try {
-    const res = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
-    const payload = res.data || [];
-    applyBacklogs(payload);
+    const [backlogRes, demandRes] = await Promise.all([
+      api.lineBacklogs.getLineBacklogs(getBacklogParams()),
+      api.lineDemands.list({
+        plan_date__gte: columns.value[0],
+        plan_date__lte: columns.value[columns.value.length - 1],
+        page_size: 5000,
+      }),
+    ]);
+    applyBacklogs(backlogRes.data || []);
+    const demandPayload = demandRes?.data || [];
+    lineDemands.value = Array.isArray(demandPayload) ? demandPayload : demandPayload.results || [];
   } catch (e) {
     error.value = e?.message || "読み込みに失敗しました";
   } finally {
@@ -237,6 +246,41 @@ const groups = computed(() => {
     return within && okLine && okProcess && okProd;
   });
 
+  // 顧客の内示/確定 (LineDemand) を日付・ライン・工程・品番でマップ化
+  const filteredDemands = lineDemands.value.filter((d) => {
+    const within = d.plan_date >= start && d.plan_date <= end;
+    const lineText = `${d.line_code || ""}${d.line_name || ""}${d.line || ""}`.toLowerCase();
+    const processText = `${d.process_code || ""}${d.process_name || ""}`.toLowerCase();
+    const prodText = `${d.product_code || ""}${d.product_name || ""}`.toLowerCase();
+    const okLine = !lineKeyword || lineText.includes(lineKeyword);
+    const okProcess = !processKeyword || processText.includes(processKeyword);
+    const okProd = !productKeyword || prodText.includes(productKeyword);
+    return within && okLine && okProcess && okProd;
+  });
+
+  const demandMap = new Map();
+  filteredDemands.forEach((d) => {
+    const keyWithProcess = `${d.line || ""}__${d.process || ""}__${d.product || ""}__${d.plan_date}`;
+    const keyNoProcess = `${d.line || ""}____${d.product || ""}__${d.plan_date}`;
+    const forecast = Number(d.forecast_qty || 0);
+    const firm = Number(d.firm_qty || 0);
+    for (const k of [keyWithProcess, keyNoProcess]) {
+      const existing = demandMap.get(k);
+      if (existing) {
+        existing.forecast += forecast;
+        existing.firm += firm;
+      } else {
+        demandMap.set(k, { forecast, firm });
+      }
+    }
+  });
+
+  const pickDemand = (lineId, processId, productId, date) => {
+    const k1 = `${lineId || ""}__${processId || ""}__${productId || ""}__${date}`;
+    const k2 = `${lineId || ""}____${productId || ""}__${date}`;
+    return demandMap.get(k1) || demandMap.get(k2) || null;
+  };
+
   const map = new Map();
   for (const d of filtered) {
     const key = `${d.line || d.line_name || ""}__${d.process_code || d.process || ""}__${d.product_code || ""}`;
@@ -261,33 +305,18 @@ const groups = computed(() => {
     }
     const cell = g.cells[d.plan_date];
 
-    const seqVal = Number.isFinite(Number(d.sequence_no)) ? Number(d.sequence_no) : 0;
-    const orderQty = Number(d.order_qty || 0);
-    const demandQty = Number(d.demand_qty_plan || 0);
-    const planQty = Number(d.plan_qty || 0);
-    const isDemandRow = (orderQty > 0 || demandQty > 0) && planQty === 0;
-
-    // 内示/確定は受注展開結果を優先（sequence_noが小さい行を代表値に採用）
-    if (isDemandRow) {
-      const hasForecastSplit = d.forecast_order_qty !== null && d.forecast_order_qty !== undefined;
-      const forecastVal = Number((hasForecastSplit ? d.forecast_order_qty : d.order_qty) || 0);
-      const hasFirmSplit = d.firm_order_qty !== null && d.firm_order_qty !== undefined;
-      const firmVal = Number((hasFirmSplit ? d.firm_order_qty : d.actual_shipment_qty) || 0);
-      if (cell.demand_seq === undefined || seqVal < cell.demand_seq) {
-        cell.demand_seq = seqVal;
-        cell.forecast = forecastVal;
-        cell.firm = firmVal;
-      } else if (seqVal === cell.demand_seq) {
-        cell.forecast = Math.max(cell.forecast, forecastVal);
-        cell.firm = Math.max(cell.firm, firmVal);
-      }
+    // 顧客の内示/確定はLineDemandから取得
+    const demandVal = pickDemand(d.line, d.process, d.product, d.plan_date);
+    if (demandVal) {
+      cell.forecast = demandVal.forecast;
+      cell.firm = demandVal.firm;
     }
 
     cell.plan += Number(d.plan_qty || 0);
     cell.actual += Number(d.actual_qty || 0);
     cell.adjust += Number(d.adjust_qty || 0);
     cell.progress += Number(d.progress_qty || 0);
-    cell.plannedProgress = Number(d.planned_progress_qty || cell.plannedProgress || 0);
+    cell.plannedProgress += Number(d.planned_progress_qty || 0);
   }
 
   return Array.from(map.values());
