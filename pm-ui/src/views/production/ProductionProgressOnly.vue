@@ -43,7 +43,7 @@
           <div class="info-block">
             <div class="info-row">
               <span class="info-label">ライン</span>
-              <span class="info-value">{{ g.line_code || g.line_name || "-" }}</span>
+              <span class="info-value">{{ formatLine(g) }}</span>
             </div>
             <div class="info-row">
               <span class="info-label">工程</span>
@@ -321,6 +321,13 @@ const groups = computed(() => {
 
   return Array.from(map.values());
 });
+
+const formatLine = (group) => {
+  const code = group.line_code || "";
+  const name = group.line_name || "";
+  if (code && name) return `${code} ${name}`;
+  return code || name || "-";
+};
 
 const fmt = (n, showZero = false) => {
   if (n === null || n === undefined) return "";

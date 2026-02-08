@@ -245,6 +245,7 @@
               {{ opt.label }}
             </option>
           </select>
+          <div class="hint">{{ t('processInput.productionRecordedHint') }}</div>
         </div>
       </div>
       <div v-if="isScrapRecord" class="hint">{{ t('processInput.dispositionHint') }}</div>
