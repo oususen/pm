@@ -10,6 +10,7 @@ from .models_line_backlog import LineBacklog
 from .models_line_plan import LinePlan
 from .models_line_gantt_plan import LineGanttPlan
 from .models_line_daily_schedule_setting import LineDailyScheduleSetting
+from .models_line_default_schedule_setting import LineDefaultScheduleSetting
 from .models_plan_lock_setting import ProductionPlanLockSetting
 from .models_schedule_config import ScheduleConfig
 from .models_process_realtime import ProcessRealtimeRecord
@@ -396,6 +397,21 @@ class LineDailyScheduleSettingSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class LineDefaultScheduleSettingSerializer(serializers.ModelSerializer):
+    """ライン別デフォルトスケジュール設定のシリアライザー"""
+    line_code = serializers.CharField(source='line.line_code', read_only=True)
+    line_name = serializers.CharField(source='line.line_name', read_only=True)
+
+    class Meta:
+        model = LineDefaultScheduleSetting
+        fields = [
+            'id', 'line', 'line_code', 'line_name',
+            'final_process_start_time', 'adjust_to_break_end',
+            'created_at', 'updated_at', 'updated_by',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'updated_by']
 
 
 class ProductionPlanLockSettingSerializer(serializers.ModelSerializer):

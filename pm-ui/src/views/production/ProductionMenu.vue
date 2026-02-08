@@ -81,6 +81,14 @@ const tiles = computed(() => {
       resource: "production.plan_input",
     },
     {
+      to: "/production/default-start-time",
+      label: t("productionMenu.tiles.defaultStart"),
+      icon: "⏲",
+      iconLabel: "時刻",
+      required: "edit",
+      resource: "production.plan_input",
+    },
+    {
       to: "/production/inventory",
       label: t("productionMenu.tiles.inventory"),
       icon: "📦",

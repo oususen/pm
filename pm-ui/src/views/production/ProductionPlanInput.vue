@@ -3,16 +3,8 @@
     <div class="toolbar">
       <div class="toolbar-left">
         <div class="field">
-          <label>処理区分</label>
-          <select v-model="mode">
-            <option value="plan">1:生産計画</option>
-            <option value="result">2:実績</option>
-          </select>
-        </div>
-        <div class="field">
           <label>ライン</label>
           <select v-model="selectedLine" @change="loadData">
-            <option value="">すべて</option>
             <option v-for="line in lines" :key="line.id" :value="line.id">
               {{ line.line_code }} - {{ line.line_name }}
             </option>
@@ -320,7 +312,6 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import api from '@/api/client'
 import ProcessGanttView from './ProcessGanttView.vue'
-const mode = ref('plan')
 const selectedLine = ref('')
 const toDateInput = (dateObj) => {
   const y = dateObj.getFullYear()
@@ -761,10 +752,14 @@ const loadData = async () => {
   // 取り込み前は空表示（手動で「取り込み」を押す運用）
   rows.value = []
   if (selectedLine.value) {
+    await fetchLineDefaultSetting(selectedLine.value)
     await loadWorkPatternData(selectedLine.value, startDate.value, endDate.value)
   } else {
     calendarDayMap.value = {}
     workPatternMap.value = {}
+    // ライン未選択時はデフォルト値に戻す
+    finalProcessStartTime.value = '08:00'
+    adjustToBreakEnd.value = true
   }
 }
 
@@ -910,6 +905,29 @@ const fetchLockSetting = async () => {
   } catch (e) {
     console.error('生産計画ロック設定の取得エラー', e)
     lockDays.value = 0
+  }
+}
+
+const fetchLineDefaultSetting = async (lineId) => {
+  if (!lineId) {
+    finalProcessStartTime.value = '08:00'
+    adjustToBreakEnd.value = true
+    return
+  }
+  try {
+    const res = await api.lineDefaultScheduleSettings.getLineDefaultScheduleSettings({ line: lineId })
+    const data = res.data?.results || res.data || []
+    const setting = Array.isArray(data) ? data[0] : data
+    finalProcessStartTime.value = setting?.final_process_start_time || '08:00'
+    if (setting && Object.prototype.hasOwnProperty.call(setting, 'adjust_to_break_end')) {
+      adjustToBreakEnd.value = !!setting.adjust_to_break_end
+    } else {
+      adjustToBreakEnd.value = true
+    }
+  } catch (e) {
+    console.error('ラインデフォルト開始時刻の取得エラー', e)
+    finalProcessStartTime.value = '08:00'
+    adjustToBreakEnd.value = true
   }
 }
 

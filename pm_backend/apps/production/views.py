@@ -17,6 +17,7 @@ from .models_line_plan import LinePlan
 from .models_production import StockAllocation, ProductionOrder, ProcessActual
 from .models_line_gantt_plan import LineGanttPlan
 from .models_line_daily_schedule_setting import LineDailyScheduleSetting
+from .models_line_default_schedule_setting import LineDefaultScheduleSetting
 from .models_plan_change_log import ProductionPlanChangeLog
 from .models_plan_lock_setting import ProductionPlanLockSetting
 from .models_schedule_config import ScheduleConfig
@@ -26,6 +27,7 @@ from .serializers import (
     LinePlanSerializer,
     LineGanttPlanSerializer,
     LineDailyScheduleSettingSerializer,
+    LineDefaultScheduleSettingSerializer,
     ProductionPlanLockSettingSerializer,
     ScheduleConfigSerializer,
     StockAllocationSerializer,
@@ -2729,6 +2731,86 @@ class LineDailyScheduleSettingViewSet(viewsets.ModelViewSet):
             'updated': updated_count,
             'errors': errors
         }, status=status.HTTP_200_OK if not errors else status.HTTP_207_MULTI_STATUS)
+
+
+class LineDefaultScheduleSettingViewSet(viewsets.ModelViewSet):
+    """ライン別デフォルトスケジュール設定ViewSet"""
+
+    queryset = LineDefaultScheduleSetting.objects.all().select_related('line')
+    serializer_class = LineDefaultScheduleSettingSerializer
+    pagination_class = None
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['line']
+    ordering_fields = ['line']
+    ordering = ['line']
+
+    def create(self, request, *args, **kwargs):
+        """ライン単位でupsert（既存があれば更新）"""
+        line_id = request.data.get('line')
+        if not line_id:
+            return Response({'detail': 'line is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        final_process_start_time = request.data.get('final_process_start_time')
+        adjust_to_break_end = request.data.get('adjust_to_break_end', True)
+        if isinstance(adjust_to_break_end, str):
+            adjust_to_break_end = adjust_to_break_end.lower() in ('true', '1', 'yes')
+
+        obj, created = LineDefaultScheduleSetting.objects.update_or_create(
+            line_id=line_id,
+            defaults={
+                'final_process_start_time': final_process_start_time or None,
+                'adjust_to_break_end': adjust_to_break_end,
+                'updated_by': request.user if getattr(request, 'user', None) and request.user.is_authenticated else None,
+            }
+        )
+        serializer = self.get_serializer(obj)
+        return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'])
+    def bulk_save(self, request):
+        """複数ラインのデフォルト設定を一括保存"""
+        settings_data = request.data.get('settings', [])
+        if not settings_data:
+            return Response({'error': 'settings is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        created_count = 0
+        updated_count = 0
+        errors = []
+        user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+
+        for setting_data in settings_data:
+            line_id = setting_data.get('line')
+            if not line_id:
+                errors.append({'error': 'line is required', 'data': setting_data})
+                continue
+            final_time = setting_data.get('final_process_start_time') or None
+            adjust = setting_data.get('adjust_to_break_end', True)
+            if isinstance(adjust, str):
+                adjust = adjust.lower() in ('true', '1', 'yes')
+            try:
+                obj, created = LineDefaultScheduleSetting.objects.update_or_create(
+                    line_id=line_id,
+                    defaults={
+                        'final_process_start_time': final_time,
+                        'adjust_to_break_end': adjust,
+                        'updated_by': user,
+                    }
+                )
+                if created:
+                    created_count += 1
+                else:
+                    updated_count += 1
+            except Exception as e:
+                errors.append({'error': str(e), 'data': setting_data})
+
+        return Response(
+            {
+                'created': created_count,
+                'updated': updated_count,
+                'errors': errors,
+            },
+            status=status.HTTP_200_OK if not errors else status.HTTP_207_MULTI_STATUS,
+        )
 
 
 class ProductionPlanLockSettingView(APIView):

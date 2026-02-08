@@ -7,6 +7,7 @@ from production.views import (
     LinePlanViewSet,
     LineGanttPlanViewSet,
     LineDailyScheduleSettingViewSet,
+    LineDefaultScheduleSettingViewSet,
     ProductionPlanLockSettingView,
     ScheduleConfigView,
     ScheduleRunNowView,
@@ -24,6 +25,7 @@ router.register(r'line-plans', LinePlanViewSet, basename='lineplan')
 router.register(r'line-backlogs', LineBacklogViewSet, basename='linebacklog')
 router.register(r'line-gantt-plans', LineGanttPlanViewSet, basename='lineganttplan')
 router.register(r'line-daily-schedule-settings', LineDailyScheduleSettingViewSet, basename='linedailyschedulesetting')
+router.register(r'line-default-schedule-settings', LineDefaultScheduleSettingViewSet, basename='linedefaultschedulesetting')
 
 # Execution endpoints
 router.register(r'stock-allocations', StockAllocationViewSet, basename='stockallocation')

@@ -36,6 +36,12 @@ const production = [
     meta: { pageTitle: "生産計画入力", manualPath: "生産/生産計画入力.md" },
   },
   {
+    path: "/production/default-start-time",
+    name: "DefaultStartTimeSetting",
+    component: () => import("@/views/production/DefaultStartTimeSetting.vue"),
+    meta: { pageTitle: "デフォルト開始時刻設定", manualPath: "生産/デフォルト開始時刻設定.md" },
+  },
+  {
     path: "/production/inventory",
     name: "ProductionInventory",
     component: () => import("@/views/inventory/ProductionInventory.vue"),
