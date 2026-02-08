@@ -33,6 +33,14 @@ class ScrapRecord(models.Model):
         blank=True,
         verbose_name='工程'
     )
+    occurrence_process = models.ForeignKey(
+        Process,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='scrap_occurrences',
+        verbose_name='発生工程',
+    )
     product = models.ForeignKey(
         Product,
         on_delete=models.SET_NULL,

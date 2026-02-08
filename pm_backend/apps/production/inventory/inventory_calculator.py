@@ -8,6 +8,7 @@ from django.db.models import F
 from orders.models import OrderLine
 from orders.utils.calendar_utils import get_business_today
 from ..models_line_backlog import LineBacklog
+from ..serializers_process_realtime import _resolve_product_process_line
 from quality.models_scrap import ScrapRecord, ScrapRecordDetail
 
 
@@ -53,18 +54,25 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
         if not scrap.product or not scrap.line or not scrap.process:
             continue
 
+        # 製品のRoutingStepから正しい工程/ラインを取得（発生工程と異なる場合に対応）
+        actual_process, actual_line = _resolve_product_process_line(scrap.product, scrap.process)
+        if not actual_line:
+            actual_line = getattr(actual_process, 'line', None)
+        if not actual_line:
+            continue
+
         LineBacklog.objects.get_or_create(
             plan_date=scrap.plan_date,
             product=scrap.product,
-            line=scrap.line,
-            process=scrap.process,
+            line=actual_line,
+            process=actual_process,
             sequence_no=0,
         )
         LineBacklog.objects.filter(
             plan_date=scrap.plan_date,
             product=scrap.product,
-            line=scrap.line,
-            process=scrap.process,
+            line=actual_line,
+            process=actual_process,
             sequence_no=0,
         ).update(scrap_qty=F('scrap_qty') + int(scrap.qty))
 

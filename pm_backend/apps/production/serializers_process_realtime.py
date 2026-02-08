@@ -8,12 +8,39 @@ from rest_framework import serializers
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
-from masters.models import Process, Product, BOM, Line, Supplier
+from masters.models import Process, Product, BOM, Line, Supplier, Routing, RoutingStep
 from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_line_backlog import LineBacklog
 from .models_production import StockAllocation
 from quality.models_scrap import ScrapRecord, ScrapRecordDetail
+
+
+def _resolve_product_process_line(product, fallback_process):
+    """製品のRoutingStepから正しい工程/ラインを取得する。見つからない場合はフォールバックを返す。"""
+    if not product:
+        return fallback_process, getattr(fallback_process, 'line', None)
+
+    # output_productから直接検索
+    step = RoutingStep.objects.filter(
+        output_product=product,
+        routing__is_active=True,
+    ).select_related('process', 'process__line', 'line').first()
+
+    if not step:
+        # Routingのproductとしてのルーティングの最終工程を検索
+        routing = Routing.objects.filter(
+            product=product, is_active=True, is_default=True,
+        ).first()
+        if routing:
+            step = routing.steps.select_related(
+                'process', 'process__line', 'line',
+            ).order_by('-step_no').first()
+
+    if step:
+        return step.process, step.line or getattr(step.process, 'line', None)
+
+    return fallback_process, getattr(fallback_process, 'line', None)
 
 
 def build_scrap_multiplier_map(root_product_id: int, root_qty: Decimal) -> dict:
@@ -238,24 +265,36 @@ def adjust_production_for_scrap(process, product, scrap_qty, plan_date):
     if not product or not scrap_qty or scrap_qty <= 0:
         return
 
-    line = getattr(process, 'line', None)
-    if not line:
+    # 製品のRoutingStepから正しい工程/ラインを取得
+    actual_process, actual_line = _resolve_product_process_line(product, process)
+    if not actual_line:
+        actual_line = getattr(actual_process, 'line', None)
+    if not actual_line:
         return
 
-    # 該当するLineBacklogレコードを取得
-    backlog = LineBacklog.objects.filter(
-        line=line,
-        process=process,
+    # 該当するLineBacklogレコードを取得（無ければ基礎行を作成）
+    backlog, _created = LineBacklog.objects.get_or_create(
+        line=actual_line,
+        process=actual_process,
         product=product,
         plan_date=plan_date,
         sequence_no=0,
-    ).first()
+        defaults={
+          'order_qty': 0,
+          'plan_qty': 0,
+          'actual_qty': 0,
+          'stock_qty': 0,
+          'planned_stock_qty': 0,
+          'adjust_qty': 0,
+          'scrap_qty': 0,
+          'actual_shipment_qty': 0,
+        },
+    )
 
-    if backlog:
-        # 実績から仕損数量を減算（負にならないよう0以上を保証）
-        new_actual = max(0, (backlog.actual_qty or 0) - int(scrap_qty))
-        backlog.actual_qty = new_actual
-        backlog.save(update_fields=['actual_qty'])
+    # 実績から仕損数量を減算（実績超過の仕損もそのままマイナスで保持する）
+    new_actual = (backlog.actual_qty or 0) - int(scrap_qty)
+    backlog.actual_qty = new_actual
+    backlog.save(update_fields=['actual_qty'])
 
 
 def update_scrap_to_backlog(process, product, scrap_qty, plan_date, details=None):
@@ -272,15 +311,18 @@ def update_scrap_to_backlog(process, product, scrap_qty, plan_date, details=None
     if not scrap_qty or scrap_qty <= 0:
         return
 
-    line = getattr(process, 'line', None)
-    if not line:
+    # 製品のRoutingStepから正しい工程/ラインを取得（登録工程と異なる場合に対応）
+    actual_process, actual_line = _resolve_product_process_line(product, process)
+    if not actual_line:
+        actual_line = getattr(actual_process, 'line', None)
+    if not actual_line:
         return
 
     # 自製品の scrap_qty に保存（常に）
     if product:
         backlog, _ = LineBacklog.objects.get_or_create(
-            line=line,
-            process=process,
+            line=actual_line,
+            process=actual_process,
             product=product,
             plan_date=plan_date,
             sequence_no=0,
@@ -624,26 +666,35 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                 if isinstance(is_production_recorded, str):
                     is_production_recorded = is_production_recorded.lower() in ('true', '1', 'yes')
 
-                sr = ScrapRecord.objects.create(
-                    process=process,
-                    line=getattr(process, 'line', None),
-                    product=product,
-                    product_code=product_code,
-                    product_name=product_name,
-                    event_type='SCRAP',
-                    qty=qty_decimal,
-                    plan_date=plan_date,  # 勤務カレンダに合わせた計画日
-                    reason=scrap_event.get('reason') or '',
-                    reason_detail=scrap_event.get('reason_detail') or '',
-                    batch_no=validated_data.get('batch_no', ''),
-                    operator_name=validated_data.get('operator_name', ''),
-                    remarks=validated_data.get('remarks', ''),
-                    process_record=parent_record,
-                    disposition_status=disposition_status,
-                    decided_at=decided_at,
-                    decided_by=decided_by,
-                    is_production_recorded=is_production_recorded,
-                )
+                try:
+                    sr = ScrapRecord.objects.create(
+                        process=process,
+                        occurrence_process=process,  # 発生工程（実際に仕損を登録した工程）
+                        line=getattr(process, 'line', None),
+                        product=product,
+                        product_code=product_code,
+                        product_name=product_name,
+                        event_type='SCRAP',
+                        qty=qty_decimal,
+                        plan_date=plan_date,  # 勤務カレンダに合わせた計画日
+                        reason=scrap_event.get('reason') or '',
+                        reason_detail=scrap_event.get('reason_detail') or '',
+                        batch_no=validated_data.get('batch_no', ''),
+                        operator_name=validated_data.get('operator_name', ''),
+                        remarks=validated_data.get('remarks', ''),
+                        process_record=parent_record,
+                        disposition_status=disposition_status,
+                        decided_at=decided_at,
+                        decided_by=decided_by,
+                        is_production_recorded=is_production_recorded,
+                    )
+                except Exception as exc:
+                    from django.db import IntegrityError
+                    if isinstance(exc, IntegrityError):
+                        raise serializers.ValidationError(
+                            {'detail': '同一実績に対する仕損が既に登録されています。画面を更新して最新の記録を確認してください。'}
+                        ) from exc
+                    raise
 
                 # 明細を保存（BOM展開結果）
                 details = build_scrap_multiplier_details(product.id if product else None, qty_decimal)

@@ -169,10 +169,25 @@ class ProcessViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         - BOM明細で工程が一致する子品番（中間品/連産品の子品番を補完）
         """
         process = self.get_object()
-        products_map = {}  # key: product_id, value: {product, relation_type}
+        products_map = {}  # key: product_id, value: {product, relation_type, process_id, sourcing_type}
 
         # 1. この工程を含むルーティングステップを取得
         routing_steps = RoutingStep.objects.filter(process=process).select_related('routing')
+
+        # BOM由来の工程ID・調達区分マップを構築（ルーティング親製品のBOM明細から）
+        bom_detail_map = {}  # child_product_id → {process_id, sourcing_type}
+        routing_parent_ids = set()
+        for step in routing_steps:
+            if step.routing and step.routing.product_id:
+                routing_parent_ids.add(step.routing.product_id)
+        if routing_parent_ids:
+            for bi in BOMItem.objects.filter(
+                bom__parent_product_id__in=routing_parent_ids,
+                bom__is_active=True,
+            ).values('child_product_id', 'process_id', 'sourcing_type'):
+                pid = bi['child_product_id']
+                if pid not in bom_detail_map:
+                    bom_detail_map[pid] = bi
 
         for step in routing_steps:
             routing = step.routing
@@ -184,7 +199,9 @@ class ProcessViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             if output_product and output_product.id not in products_map:
                 products_map[output_product.id] = {
                     'product': output_product,
-                    'relation_type': 'output_product'
+                    'relation_type': 'output_product',
+                    'process_id': process.id,
+                    'sourcing_type': 'MAKE',
                 }
 
             # 2. ルーティングの親製品を取得
@@ -197,7 +214,9 @@ class ProcessViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 if parent_product.id not in products_map:
                     products_map[parent_product.id] = {
                         'product': parent_product,
-                        'relation_type': 'coproduct_parent'
+                        'relation_type': 'coproduct_parent',
+                        'process_id': process.id,
+                        'sourcing_type': 'MAKE',
                     }
 
                 # 連産品の子品番を追加
@@ -205,7 +224,9 @@ class ProcessViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                     if child.child_product and child.child_product.id not in products_map:
                         products_map[child.child_product.id] = {
                             'product': child.child_product,
-                            'relation_type': 'coproduct_child'
+                            'relation_type': 'coproduct_child',
+                            'process_id': process.id,
+                            'sourcing_type': 'MAKE',
                         }
             except BOM.DoesNotExist:
                 pass
@@ -228,9 +249,12 @@ class ProcessViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 else:
                     relation_type = 'other'
 
+                bom_info = bom_detail_map.get(component.id, {})
                 products_map[component.id] = {
                     'product': component,
-                    'relation_type': relation_type
+                    'relation_type': relation_type,
+                    'process_id': bom_info.get('process_id'),
+                    'sourcing_type': bom_info.get('sourcing_type', ''),
                 }
 
         # 4. BOM明細で工程が一致する子品番を追加（中間品/連産品の子品番補完）
@@ -246,7 +270,9 @@ class ProcessViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 relation_type = 'coproduct_child' if item.bom and item.bom.is_coproduct else 'bom_process_item'
                 products_map[child.id] = {
                     'product': child,
-                    'relation_type': relation_type
+                    'relation_type': relation_type,
+                    'process_id': item.process_id,
+                    'sourcing_type': item.sourcing_type or '',
                 }
 
             # 連産品BOMの場合は親（仮想セット）も追加
@@ -255,7 +281,9 @@ class ProcessViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 if parent.id not in products_map:
                     products_map[parent.id] = {
                         'product': parent,
-                        'relation_type': 'coproduct_parent'
+                        'relation_type': 'coproduct_parent',
+                        'process_id': process.id,
+                        'sourcing_type': 'MAKE',
                     }
 
         # 結果をシリアライズ
@@ -267,7 +295,9 @@ class ProcessViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 'product_code': product.product_code,
                 'product_name': product.product_name,
                 'category': product.category,
-                'relation_type': item['relation_type']
+                'relation_type': item['relation_type'],
+                'process_id': item.get('process_id'),
+                'sourcing_type': item.get('sourcing_type', ''),
             })
 
         return Response(result)

@@ -413,6 +413,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 return_date = timezone.now().date()
                 return_record = ScrapRecord.objects.create(
                     process=sd.process,
+                    occurrence_process=sd.occurrence_process or sd.process,
                     line=sd.line,
                     product=product_obj,
                     product_code=sd.product_code,

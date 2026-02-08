@@ -446,12 +446,9 @@ const productionRecordedOptions = computed(() => [
 ])
 
 const scrapRelationOptions = computed(() => [
-  { value: 'coproduct_parent', label: t('processInput.scrapFilter.coproductParent') },
-  { value: 'coproduct_child', label: t('processInput.scrapFilter.coproductChild') },
-  { value: 'intermediate', label: t('processInput.scrapFilter.intermediate') },
+  { value: 'own_process', label: t('processInput.scrapFilter.ownProcess') },
   { value: 'purchased', label: t('processInput.scrapFilter.purchased') },
-  { value: 'output_product', label: t('processInput.scrapFilter.outputProduct') },
-  { value: 'final_product', label: t('processInput.scrapFilter.finalProduct') },
+  { value: 'in_house', label: t('processInput.scrapFilter.inHouse') },
 ])
 
 const availableRecordTypes = computed(() => {
@@ -620,6 +617,38 @@ const getProductMeta = (productId) => {
   return productMetaMap.value[idStr] || productMetaMap.value[productId] || {}
 }
 
+const getOriginProcessId = (item) => {
+  if (!item) return null
+  return (
+    item.origin_process_id ??
+    item.source_process_id ??
+    item.process ??
+    null
+  )
+}
+
+const isUpstreamProductCandidate = (item) => {
+  if (!item) return false
+  const relation = normalizeRelationType(item.relation_type)
+  if (relation === 'purchased') return false
+
+  const sourcing = String(item.sourcing_type || item.sourcingType || '')
+    .toUpperCase()
+  const originProcess = getOriginProcessId(item)
+  const currentProcess = selectedProcessId.value
+  const hasDifferentProcess =
+    originProcess &&
+    currentProcess &&
+    String(originProcess) !== String(currentProcess)
+
+  // 購買品は除外。工程が異なり調達区分が自社/外注なら前工程品扱い。
+  if (hasDifferentProcess && sourcing === 'BUY') return false
+  if (hasDifferentProcess) return true
+  // 調達区分だけで自工程品と分かる場合（工程未設定のMAKE/SUBCONも対象）
+  if (!originProcess && sourcing && sourcing !== 'BUY') return true
+  return false
+}
+
 const isFinalProductCandidate = (item) => {
   if (!item) return false
   const productId = item.product ?? item.id
@@ -634,8 +663,31 @@ const getRelationTypesForItem = (item) => {
   const types = []
   const normalized = normalizeRelationType(item.relation_type || '')
   if (normalized) types.push(normalized)
+  if (isUpstreamProductCandidate(item)) types.push('upstream_product')
   if (isFinalProductCandidate(item)) types.push('final_product')
   return Array.from(new Set(types))
+}
+
+// 排他的なカテゴリ判定: 購入品 > 社内製作品(前工程品) > 自工程製品
+// BOM由来の process_id（related-products APIから取得）で判定
+const getScrapCategory = (item) => {
+  if (!item) return null
+  // 1. 購入品判定: relation_type または sourcing_type
+  const relation = normalizeRelationType(item.relation_type || '')
+  if (relation === 'purchased') return 'purchased'
+  const sourcing = String(item.sourcing_type || item.sourcingType || '').toUpperCase()
+  if (sourcing === 'BUY') return 'purchased'
+  // 2. BOM由来の工程IDで自工程 vs 社内製作品を判定
+  //    ※ getOriginProcessId は item.process(常に選択中の工程)にフォールバックするため使わない
+  const bomProcessId = item.origin_process_id ?? null
+  const currentProcess = selectedProcessId.value
+  if (bomProcessId && currentProcess && String(bomProcessId) !== String(currentProcess)) {
+    return 'in_house'
+  }
+  // 3. intermediate で工程不明の場合も社内製作品（前工程からの投入材料）
+  if (relation === 'intermediate' && !bomProcessId) return 'in_house'
+  // 4. デフォルトは自工程製品
+  return 'own_process'
 }
 
 const filterScrapCandidates = (list) => {
@@ -643,21 +695,6 @@ const filterScrapCandidates = (list) => {
   const relation = scrapRelationFilter.value
   const query = (scrapSearchText.value || '').trim().toLowerCase()
   if (!relation && !query) return items
-  const relationAliases = {
-    coproduct_child: ['coproduct_child', 'bom_process_item', 'coproductchild'],
-    coproduct_parent: ['coproduct_parent', 'coproductparent'],
-    intermediate: ['intermediate', 'output_product', 'outputproduct'],
-    purchased: ['purchased'],
-    output_product: ['output_product', 'intermediate', 'outputproduct'],
-    final_product: ['final_product', 'line_final_product', 'finalproduct'],
-  }
-  let allowedTypes = relation
-    ? [...new Set((relationAliases[relation] || [relation]).map((t) => normalizeRelationType(t)))]
-    : []
-  // 連産子が返ってこない環境向けフォールバック: coproduct_parent はあるが coproduct_child が無い場合、output_product を子扱いで含める
-  if (relation === 'coproduct_child' && !items.some((p) => normalizeRelationType(p?.relation_type) === 'coproduct_child')) {
-    allowedTypes = [...allowedTypes, 'output_product']
-  }
 
   const matchesQuery = (p) => {
     const code = (p.product_code || '').toLowerCase()
@@ -667,11 +704,7 @@ const filterScrapCandidates = (list) => {
 
   const matchesRelation = (p) => {
     if (!relation) return true
-    const types = getRelationTypesForItem(p)
-    if (!types.length) return false
-    return types.some((type) =>
-      allowedTypes.some((allowed) => type === allowed || type.includes(allowed))
-    )
+    return getScrapCategory(p) === relation
   }
 
   const filtered = items.filter((p) => {
@@ -1017,7 +1050,14 @@ const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null)
     const scrapMap = new Map()
     baseProducts.forEach((it) => {
       const key = `${it.product}_${it.process}`
-      if (!scrapMap.has(key)) scrapMap.set(key, it)
+      if (!scrapMap.has(key)) {
+        scrapMap.set(key, {
+          ...it,
+          origin_process_id: it.process ?? processId,
+          origin_line_id: it.line ?? fallbackLineId,
+          sourcing_type: it.sourcing_type || it.sourcingType || '',
+        })
+      }
     })
 
     // 工程計画が無い場合はラインの当日計画を候補に加える
@@ -1033,6 +1073,9 @@ const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null)
           const normalized = {
             ...it,
             process: processId,
+            origin_process_id: it.process ?? processId,
+            origin_line_id: it.line ?? fallbackLineId,
+            sourcing_type: it.sourcing_type || it.sourcingType || '',
           }
           const key = `${normalized.product}_${normalized.process}`
           if (!scrapMap.has(key)) scrapMap.set(key, normalized)
@@ -1057,9 +1100,14 @@ const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null)
       }))
     )
 
-    const relationTypeMap = new Map()
+    // related-products から relation_type と BOM由来の工程ID を保持
+    const relatedInfoMap = new Map()
     relatedProducts.forEach((prod) => {
-      relationTypeMap.set(String(prod.id), prod.relation_type)
+      relatedInfoMap.set(String(prod.id), {
+        relation_type: prod.relation_type,
+        process_id: prod.process_id,
+        sourcing_type: prod.sourcing_type || '',
+      })
       const key = `${prod.id}_${processId}`
       if (!scrapMap.has(key)) {
         // line-backlog形式に変換して追加
@@ -1068,21 +1116,31 @@ const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null)
           product_code: prod.product_code,
           product_name: prod.product_name,
           process: processId,
+          origin_process_id: prod.process_id || processId,
+          origin_line_id: prod.line_id || fallbackLineId,
+          sourcing_type: prod.sourcing_type || '',
           plan_qty: 0,
           plan_date: null,
-          relation_type: prod.relation_type, // 'coproduct_parent', 'coproduct_child', 'intermediate', 'purchased'
+          relation_type: prod.relation_type,
         })
       }
     })
 
-    // relation_type 未設定の候補を related-products で補完
+    // line-backlog由来のアイテムを related-products の情報で補完
+    // (relation_type + BOM由来の正しい origin_process_id)
     scrapMap.forEach((item) => {
       if (!item || item.product == null) return
-      if (item.relation_type) return
-      const rt = relationTypeMap.get(String(item.product))
-      if (rt) {
-        item.relation_type = rt
+      const info = relatedInfoMap.get(String(item.product))
+      if (!info) return
+      if (!item.relation_type && info.relation_type) {
+        item.relation_type = info.relation_type
       }
+      if (!item.sourcing_type && info.sourcing_type) {
+        item.sourcing_type = info.sourcing_type
+      }
+      // BOM由来の工程IDで上書き（line-backlogは使用工程を返すため不正確）
+      // APIの値を優先: process_id があればそれを、なければnullに（line-backlog値を除去）
+      item.origin_process_id = info.process_id || null
     })
 
     // 最終工程向け: output_product の直子部品をBOM階層1から補完（子はカテゴリで purchased / intermediate 判定）
@@ -1117,10 +1175,18 @@ const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null)
         const childKey = `${ch.product_id}_${processId}`
         const childRelation =
           ch.category === 'PURCHASED' || ch.category === 'MATERIAL' ? 'purchased' : 'intermediate'
+        const childOriginProcess = ch.process_id || ch.processId || null
+        const childOriginLine = ch.line_id || ch.lineId || fallbackLineId
         if (scrapMap.has(childKey)) {
           const existing = scrapMap.get(childKey) || {}
-          if (!existing.relation_type) existing.relation_type = childRelation
-          scrapMap.set(childKey, { ...existing, relation_type: childRelation })
+          const merged = {
+            ...existing,
+          }
+          if (!merged.relation_type) merged.relation_type = childRelation
+          if (!merged.origin_process_id && childOriginProcess) merged.origin_process_id = childOriginProcess
+          if (!merged.origin_line_id && childOriginLine) merged.origin_line_id = childOriginLine
+          if (!merged.sourcing_type && ch.sourcing_type) merged.sourcing_type = ch.sourcing_type
+          scrapMap.set(childKey, merged)
           return
         }
         scrapMap.set(childKey, {
@@ -1128,6 +1194,9 @@ const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null)
           product_code: ch.product_code || ch.product_id,
           product_name: ch.product_name || '',
           process: processId,
+          origin_process_id: childOriginProcess || processId,
+          origin_line_id: childOriginLine,
+          sourcing_type: ch.sourcing_type || '',
           plan_qty: 0,
           plan_date: null,
           relation_type: childRelation,
@@ -1189,10 +1258,14 @@ const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null)
     }
 
     scrapMap.forEach((item) => {
-      if (!item || item.relation_type || item.product == null) return
-      const rt = relationTypeMap.get(String(item.product))
-      if (rt) {
-        item.relation_type = rt
+      if (!item || item.product == null) return
+      const info = relatedInfoMap.get(String(item.product))
+      if (!info) return
+      if (!item.relation_type && info.relation_type) {
+        item.relation_type = info.relation_type
+      }
+      if (info.process_id) {
+        item.origin_process_id = info.process_id
       }
     })
 
@@ -1211,7 +1284,9 @@ const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null)
       scrapProducts.value.map((p) => ({
         product: p.product_code || p.product,
         relation_type: p.relation_type,
-        normalized: normalizeRelationType(p.relation_type),
+        origin_process_id: p.origin_process_id,
+        sourcing_type: p.sourcing_type,
+        category: getScrapCategory(p),
       }))
     )
 
