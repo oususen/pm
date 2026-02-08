@@ -297,6 +297,43 @@ def adjust_production_for_scrap(process, product, scrap_qty, plan_date):
     backlog.save(update_fields=['actual_qty'])
 
 
+def apply_nonself_scrap_adjust(process, product, scrap_qty, plan_date):
+    """
+    自工程生産品以外の仕損を調整カラムに積む（実績は減算しない）。
+    scrap_adjust_qty をマイナスして在庫・進度に反映させる。
+    """
+    if not product or not scrap_qty or scrap_qty <= 0:
+        return
+
+    actual_process, actual_line = _resolve_product_process_line(product, process)
+    if not actual_line:
+        actual_line = getattr(actual_process, 'line', None)
+    if not actual_line:
+        return
+
+    backlog, _ = LineBacklog.objects.get_or_create(
+        line=actual_line,
+        process=actual_process,
+        product=product,
+        plan_date=plan_date,
+        sequence_no=0,
+        defaults={
+            'order_qty': 0,
+            'plan_qty': 0,
+            'actual_qty': 0,
+            'stock_qty': 0,
+            'planned_stock_qty': 0,
+            'adjust_qty': 0,
+            'scrap_qty': 0,
+            'actual_shipment_qty': 0,
+            'scrap_adjust_qty': 0,
+        }
+    )
+
+    backlog.scrap_adjust_qty = (backlog.scrap_adjust_qty or 0) - int(scrap_qty)
+    backlog.save(update_fields=['scrap_adjust_qty'])
+
+
 def update_scrap_to_backlog(process, product, scrap_qty, plan_date, details=None):
     """
     仕損登録時にLineBacklogに即時反映する
@@ -665,6 +702,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                 is_production_recorded = scrap_event.get('is_production_recorded', False)
                 if isinstance(is_production_recorded, str):
                     is_production_recorded = is_production_recorded.lower() in ('true', '1', 'yes')
+                relation_type = (scrap_event.get('relation_type') or '').strip().upper()
 
                 try:
                     sr = ScrapRecord.objects.create(
@@ -727,9 +765,15 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
 
                 # 在庫・実績への転嫁
                 if is_production_recorded:
-                    # 実績入力済みの場合：生産実績を減算
-                    # 子部品は出庫済みなのでStockAllocation減算は行わない（adjust_qtyで既に反映済み）
-                    adjust_production_for_scrap(process, product, qty_decimal, plan_date)
+                    # 実績入力済みの場合：自工程生産品のみ actual 減算、その他は scrap_adjust_qty に積む
+                    self_relation = relation_type in ('OUTPUT_PRODUCT', 'COPRODUCT_PARENT')
+                    if not self_relation and product:
+                        resolved_process, _resolved_line = _resolve_product_process_line(product, process)
+                        self_relation = resolved_process and resolved_process.id == process.id
+                    if self_relation:
+                        adjust_production_for_scrap(process, product, qty_decimal, plan_date)
+                    else:
+                        apply_nonself_scrap_adjust(process, product, qty_decimal, plan_date)
                 else:
                     # 実績未入力の場合：BOMを最下層まで展開し、在庫引当テーブルに反映
                     # （即時在庫への反映用。LineBacklogのadjust_qtyは上で反映済み）

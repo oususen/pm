@@ -25,14 +25,14 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
         start_date: 開始日
         end_date: 終了日
     """
-    # まず既存のscrap_qtyをゼロリセット
+    # まず既存のscrap_qty / scrap_adjust_qty をゼロリセット
     reset_filter = {}
     if line_id:
         reset_filter['line_id'] = line_id
     if start_date and end_date:
         reset_filter['plan_date__range'] = [start_date, end_date]
 
-    LineBacklog.objects.filter(**reset_filter).update(scrap_qty=0)
+    LineBacklog.objects.filter(**reset_filter).update(scrap_qty=0, scrap_adjust_qty=0)
     # 仕損由来の adjust_qty もリセット（他の調整との区別が難しいため注意）
     # ※ 現状は adjust_qty を使っている他の機能がないためリセット可能
     # LineBacklog.objects.filter(**reset_filter).update(adjust_qty=0)
@@ -68,13 +68,24 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
             process=actual_process,
             sequence_no=0,
         )
-        LineBacklog.objects.filter(
-            plan_date=scrap.plan_date,
-            product=scrap.product,
-            line=actual_line,
-            process=actual_process,
-            sequence_no=0,
-        ).update(scrap_qty=F('scrap_qty') + int(scrap.qty))
+        # 自工程生産品か判定（製品の工程=発生工程）→ scrap_qty、異なれば scrap_adjust_qty にマイナス
+        is_self = actual_process.id == scrap.process_id
+        if is_self:
+            LineBacklog.objects.filter(
+                plan_date=scrap.plan_date,
+                product=scrap.product,
+                line=actual_line,
+                process=actual_process,
+                sequence_no=0,
+            ).update(scrap_qty=F('scrap_qty') + int(scrap.qty))
+        else:
+            LineBacklog.objects.filter(
+                plan_date=scrap.plan_date,
+                product=scrap.product,
+                line=actual_line,
+                process=actual_process,
+                sequence_no=0,
+            ).update(scrap_adjust_qty=F('scrap_adjust_qty') - int(scrap.qty))
 
     # 後工程仕損の展開分（子部品）は adjust_qty に保存（負の値として）
     # 未処理のレコードのみ対象（is_backlog_processed=False）
@@ -664,8 +675,8 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
             continue
 
         actual_total = sum(r.actual_qty or 0 for r in rows)
-        # 在庫計算では adjust_qty を使用しない
-        # 仕損による子部品の消費は、出庫計算（親の実績+仕損）で反映される
+        scrap_adjust_total = sum(r.scrap_adjust_qty or 0 for r in rows)
+        # adjust_qty は在庫計算に使わない（既存仕様）
 
         if plan_date <= today:
             if is_final:
@@ -680,12 +691,12 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
         prev_day = get_prev_working_day(plan_date)
         prev_stock = stock_by_date.get(prev_day, last_stock)
 
-        # 在庫 = 前日在庫 + 実績 - 出庫(親の実績+仕損)
-        # 仕損による子部品消費は出庫計算で反映済み（adjust_qty は使用しない）
+        # 在庫 = 前日在庫 + 実績 - 出庫 + scrap_adjust_qty(非自工程仕損は負値で蓄積)
         stock_qty = (
             prev_stock
             + actual_total
             - actual_shipment
+            + scrap_adjust_total
         )
 
         rep = pick_representative(rows)

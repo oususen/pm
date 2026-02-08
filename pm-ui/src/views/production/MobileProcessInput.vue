@@ -892,10 +892,14 @@ const submitRecord = async () => {
     data.remarks = record.value.remarks
 
     if (record.value.record_type === 'SCRAP' && record.value.reason) {
+      const currentProduct =
+        scrapProducts.value.find((p) => String(p.product) === String(record.value.product_id)) ||
+        manualProducts.value.find((p) => String(p.id) === String(record.value.product_id))
       const eventData = {
         reason: record.value.reason,
         disposition_status: record.value.disposition_status || 'REJECTED',
         is_production_recorded: record.value.is_production_recorded || false,
+        relation_type: currentProduct?.relation_type || '',
       }
       if (record.value.reason === 'OTHER' && (record.value.reason_detail || '').trim()) {
         eventData.reason_detail = record.value.reason_detail.trim()

@@ -35,6 +35,9 @@ class LineBacklog(models.Model):
     # 調整数（手動調整、棚卸差異など）
     adjust_qty = models.IntegerField(default=0, verbose_name="調整数")
 
+    # 非自工程仕損などの調整用（在庫/進度計算で使用）
+    scrap_adjust_qty = models.IntegerField(default=0, verbose_name="仕損調整数")
+
     # 仕損数（自工程仕損 + 後工程仕損の展開分）
     scrap_qty = models.IntegerField(default=0, verbose_name="仕損数")
 
