@@ -580,6 +580,62 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
     for backlog in backlogs:
         by_date.setdefault(backlog.plan_date, []).append(backlog)
 
+    # 基礎行（sequence_no=0）が無い日付には新規作成してから計算する
+    to_create = []
+    for plan_date, rows in by_date.items():
+        has_base = any((r.sequence_no or 0) == 0 for r in rows)
+        if not has_base:
+            sample = rows[0]
+            to_create.append(LineBacklog(
+                plan_date=plan_date,
+                process_id=sample.process_id,
+                product_id=sample.product_id,
+                line_id=sample.line_id,
+                sequence_no=0,
+                order_qty=0,
+                demand_qty_plan=0,
+                plan_qty=0,
+                actual_qty=0,
+                stock_qty=0,
+                planned_stock_qty=0,
+                adjust_qty=0,
+                scrap_adjust_qty=0,
+                scrap_qty=0,
+                actual_shipment_qty=0,
+            ))
+    if to_create:
+        created = LineBacklog.objects.bulk_create(to_create)
+        for obj in created:
+            by_date.setdefault(obj.plan_date, []).append(obj)
+
+    # 基礎行（sequence_no=0）が無い日付には新規作成してから計算する
+    to_create = []
+    for plan_date, rows in by_date.items():
+        has_base = any((r.sequence_no or 0) == 0 for r in rows)
+        if not has_base:
+            sample = rows[0]
+            to_create.append(LineBacklog(
+                plan_date=plan_date,
+                process_id=sample.process_id,
+                product_id=sample.product_id,
+                line_id=sample.line_id,
+                sequence_no=0,
+                order_qty=0,
+                demand_qty_plan=0,
+                plan_qty=0,
+                actual_qty=0,
+                stock_qty=0,
+                planned_stock_qty=0,
+                adjust_qty=0,
+                scrap_adjust_qty=0,
+                scrap_qty=0,
+                actual_shipment_qty=0,
+            ))
+    if to_create:
+        created = LineBacklog.objects.bulk_create(to_create)
+        for obj in created:
+            by_date.setdefault(obj.plan_date, []).append(obj)
+
     calendar_id = None
     workday_cache = {}
     if line_id:
@@ -624,11 +680,7 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
 
     def pick_representative(rows):
         base_rows = [r for r in rows if r.sequence_no == 0]
-        if base_rows:
-            return min(base_rows, key=lambda r: r.id)
-        plan_rows = [r for r in rows if (r.plan_qty or 0) > 0]
-        candidates = plan_rows if plan_rows else rows
-        return min(candidates, key=lambda r: (r.sequence_no if r.sequence_no is not None else 0, r.id))
+        return min(base_rows, key=lambda r: r.id)
 
     today = get_business_today()
     day_before_yesterday = get_prev_working_day(get_prev_working_day(today))  # 前々営業日
@@ -786,11 +838,7 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
 
     def pick_representative(rows):
         base_rows = [r for r in rows if r.sequence_no == 0]
-        if base_rows:
-            return min(base_rows, key=lambda r: r.id)
-        plan_rows = [r for r in rows if (r.plan_qty or 0) > 0]
-        candidates = plan_rows if plan_rows else rows
-        return min(candidates, key=lambda r: (r.sequence_no if r.sequence_no is not None else 0, r.id))
+        return min(base_rows, key=lambda r: r.id)
 
     today = get_business_today()
     # 製品のBOMの最大LTを取得し、LT+1日前から再計算

@@ -51,7 +51,7 @@ class LineBacklog(models.Model):
     planned_progress_qty = models.IntegerField(default=0, verbose_name="計画進度")
 
     # 生産順序番号（日をまたいだ通し番号）
-    sequence_no = models.IntegerField(null=True, blank=True)
+    sequence_no = models.IntegerField(default=0)
 
     # ライン計画との紐付けID（ライン_製品_日付_順番で一意）
     plan_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)

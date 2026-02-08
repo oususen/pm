@@ -4,6 +4,7 @@
 - 営業日テーブル：`m_calendar_day (is_working_day, work_minutes)` を使用。
 - DAY工程は“その日末に完了”とみなす（スナップ規則）。
 - 計算結果は `t_schedule_detail` に書き出す。
+- ※ 現時点（2026-02-08）は本ロジックおよび `t_schedule_detail` モデル/エンドポイントは未実装。将来実装予定であり、運用は既存の簡易ガント（LineGanttPlan）に依存する。
 
 ---
 
@@ -90,6 +91,7 @@ VALUES (...)
 ```
 - MINUTE工程：バッチごとに分割（`batch_no` 連番）。
 - DAY工程：`batch_no=1, quantity=lot_size or order_qty`。
+- **実装ステータス**: テーブル定義のみ。Djangoモデル・API・保存処理は未実装。将来スケジューラ実装時に合わせて作成する。
 
 ---
 
@@ -98,6 +100,7 @@ VALUES (...)
 - `time_unit='MINUTE' AND COALESCE(duration_min, calc_duration)<=0` → NG
 - `BUY AND supplier_id IS NULL` → NG
 - 連続性：`step_no` の欠番禁止（アプリ/マイグレーションで保証）
+- **実装ステータス補足**: 現在は整合チェックも実行されていない。スケジューラ導入時に合わせて実装する。
 
 ---
 
