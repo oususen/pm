@@ -40,6 +40,11 @@ class Command(BaseCommand):
             action="store_true",
             help="登録せず件数のみ確認します",
         )
+        parser.add_argument(
+            "--skip-existing",
+            action="store_true",
+            help="既存の製品コードがある場合は更新せずスキップします",
+        )
 
     def handle(self, *args, **options):
         path = Path(options["csv_path"])
@@ -51,6 +56,7 @@ class Command(BaseCommand):
         name_idx = options["name_col"] - 1
         cat_idx = options["category_col"] - 1
         dry_run = options["dry_run"]
+        skip_existing = options["skip_existing"]
 
         # 区分→CATEGORY_CHOICES への簡易マッピング
         category_map = {
@@ -79,6 +85,10 @@ class Command(BaseCommand):
                     continue
 
                 if not code:
+                    skipped += 1
+                    continue
+
+                if skip_existing and Product.objects.filter(product_code=code).exists():
                     skipped += 1
                     continue
 
