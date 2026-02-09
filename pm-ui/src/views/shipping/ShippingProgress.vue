@@ -366,7 +366,9 @@ const groups = computed(() => {
   console.log("[ShippingProgress] 処理件数:", processedCount, "スキップ:", skippedCount);
   console.log("[ShippingProgress] グループ数:", map.size);
 
-  // サマリー計算
+  // サマリー計算（表示期間内の日付のみ集計）
+  const displayedDateSet = new Set(columns.value);
+
   const result = Array.from(map.values()).map((g) => {
     let totalForecast = 0;
     let totalFirm = 0;
@@ -375,6 +377,7 @@ const groups = computed(() => {
 
     // 各日付のデータに実績・調整を追加
     for (const [date, cell] of Object.entries(g.cells)) {
+      if (!displayedDateSet.has(date)) continue;
       totalForecast += cell.forecast;
       totalFirm += cell.firm;
       totalActual += cell.actual;

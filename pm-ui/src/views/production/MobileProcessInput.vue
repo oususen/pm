@@ -83,7 +83,36 @@
       v-if="(record.record_type === 'PRODUCTION' || record.record_type === 'SCRAP') && currentProductList.length"
       class="planned-buttons"
     >
-      <span class="planned-label">{{ t('processInput.plannedToday') }}</span>
+      <div class="planned-header">
+        <div class="planned-nav">
+          <button
+            type="button"
+            class="slot-btn"
+            :disabled="!canPrevSlot"
+            @click="goPrevSlot"
+          >
+            «
+          </button>
+          <span class="planned-label">{{ t('processInput.plannedToday') }}</span>
+          <span v-if="slotLabel" class="slot-label">{{ slotLabel }}</span>
+          <button
+            type="button"
+            class="slot-btn"
+            :disabled="!canNextSlot"
+            @click="goNextSlot"
+          >
+            »
+          </button>
+        </div>
+        <label class="current-time-toggle">
+          <input
+            type="checkbox"
+            v-model="filterCurrentTime"
+            @change="onCurrentTimeToggle"
+          />
+          <span>{{ t('processInput.currentTimeOnly') }}</span>
+        </label>
+      </div>
       <div v-if="record.record_type === 'SCRAP'" class="planned-cards">
         <div
           v-for="p in displayProductList"
@@ -225,6 +254,26 @@
         >
           {{ preset }}
         </button>
+      </div>
+
+      <div v-if="planStatus" class="plan-status">
+        <div class="plan-status__title">{{ t('processInput.planSummaryTitle') }}</div>
+        <div class="plan-status__row">
+          <span class="plan-status__label">{{ t('processInput.planQtyShort') }}</span>
+          <span class="plan-status__value">{{ formatNumber(planStatus.planQty) }}</span>
+        </div>
+        <div class="plan-status__row">
+          <span class="plan-status__label">{{ t('processInput.recordedQty') }}</span>
+          <span class="plan-status__value">{{ formatNumber(planStatus.actualQty) }}</span>
+        </div>
+        <div class="plan-status__row">
+          <span class="plan-status__label">{{ t('processInput.remainingQty') }}</span>
+          <span class="plan-status__value">{{ formatNumber(planStatus.remaining) }}</span>
+        </div>
+        <div class="plan-status__row plan-status__row--muted" v-if="record.qty">
+          <span class="plan-status__label">{{ t('processInput.remainingAfterEntry') }}</span>
+          <span class="plan-status__value">{{ formatNumber(planStatus.remainingAfterInput) }}</span>
+        </div>
       </div>
 
       <div v-if="isScrapRecord" class="section inline-row dual-row">
@@ -394,13 +443,18 @@ const manualProducts = ref([])
 const manualProductsLoading = ref(false)
 const manualProductsLoaded = ref(false)
 const manualProductsProcessId = ref(null)
+const allPlanProducts = ref([])
 const productionProducts = ref([])
 const scrapProducts = ref([])
+const allScrapProducts = ref([])
 const scrapRelationFilter = ref('')
 const scrapSearchText = ref('')
 const defaultProductId = ref(null)
 const productImageMap = ref({})
 const productMetaMap = ref({})
+const filterCurrentTime = ref(true)
+const timeSlots = ref([])
+const activeSlotIndex = ref(null)
 
 const record = ref({
   record_type: '',
@@ -732,6 +786,34 @@ const displayProductList = computed(() => {
   return currentProductList.value
 })
 
+const toSafeNumber = (value) => {
+  const num = Number(value)
+  return Number.isFinite(num) ? num : 0
+}
+
+const planStatus = computed(() => {
+  if (record.value.record_type !== 'PRODUCTION') return null
+  const productId = record.value.product_id
+  if (!productId) return null
+  const target = productionProducts.value.find(
+    (p) => String(p.product) === String(productId)
+  )
+  if (!target) return null
+
+  const planQty = toSafeNumber(target.plan_qty)
+  const actualQty = toSafeNumber(target.actual_qty)
+  const currentInput = Math.max(toSafeNumber(record.value.qty), 0)
+  const remaining = Math.max(planQty - actualQty, 0)
+  const remainingAfterInput = Math.max(planQty - actualQty - currentInput, 0)
+
+  return {
+    planQty,
+    actualQty,
+    remaining,
+    remainingAfterInput,
+  }
+})
+
 const manualProductOptions = computed(() => {
   const list = Array.isArray(manualProducts.value) ? manualProducts.value : []
   const materialTypes = ['intermediate', 'purchased']
@@ -844,6 +926,10 @@ const onLineChange = () => {
   recentRecords.value = []
   productionProducts.value = []
   scrapProducts.value = []
+  allPlanProducts.value = []
+  allScrapProducts.value = []
+  timeSlots.value = []
+  activeSlotIndex.value = null
   defaultProductId.value = null
   productImageMap.value = {}
   productMetaMap.value = {}
@@ -855,14 +941,26 @@ const onLineChange = () => {
 
 const toggleManualProduct = () => {
   manualProduct.value = !manualProduct.value
-    if (manualProduct.value) {
-      record.value.product_id = ''
-      record.value.product_code = ''
-      loadManualProducts(selectedProcessId.value)
-    } else {
-      record.value.product_id = ''
-      record.value.product_code = ''
-    }
+  if (manualProduct.value) {
+    record.value.product_id = ''
+    record.value.product_code = ''
+    loadManualProducts(selectedProcessId.value)
+  } else {
+    record.value.product_id = ''
+    record.value.product_code = ''
+  }
+}
+
+const onCurrentTimeToggle = () => {
+  // 取得済みデータで切替。スロット未取得時のみ再取得。
+  if (!timeSlots.value.length && filterCurrentTime.value) {
+    loadPlannedProducts()
+    return
+  }
+  if (filterCurrentTime.value && activeSlotIndex.value === null && timeSlots.value.length) {
+    activeSlotIndex.value = 0
+  }
+  applyTimeSlotFilter()
 }
 
 const submitRecord = async () => {
@@ -912,7 +1010,8 @@ const submitRecord = async () => {
 
     alert(t('processInput.alert.saved'))
     resetForm()
-    loadRecentRecords()
+    await loadPlannedProducts()
+    await loadRecentRecords()
   } catch (error) {
     console.error('記録登録エラー:', error)
     alert(t('processInput.alert.saveFailed'))
@@ -939,7 +1038,7 @@ const loadRecentRecords = async () => {
 }
 
 
-const buildCurrentTimePlanItems = async (lineId, processId) => {
+const buildCurrentTimePlanItems = async (lineId, processId, existingItems = []) => {
   try {
     const targetDate = currentDateYmd.value
     const ganttRes = await api.lineGanttPlans.getLineGanttPlans({
@@ -951,6 +1050,15 @@ const buildCurrentTimePlanItems = async (lineId, processId) => {
     if (!Array.isArray(rawPlans) || !rawPlans.length) {
       return { items: [], hasPlan: false }
     }
+
+    const actualLookup = new Map()
+    ;(Array.isArray(existingItems) ? existingItems : []).forEach((item) => {
+      if (!item || item.product == null) return
+      const key = `${item.product}_${processId}`
+      if (!actualLookup.has(key)) {
+        actualLookup.set(key, toSafeNumber(item.actual_qty))
+      }
+    })
 
     const now = new Date()
     const map = new Map()
@@ -967,6 +1075,7 @@ const buildCurrentTimePlanItems = async (lineId, processId) => {
         if (!productId) return
         const key = `${productId}_${processId}`
         if (map.has(key)) return
+        const actualQty = actualLookup.has(key) ? actualLookup.get(key) : 0
         map.set(key, {
           plan_date: targetDate,
           product: productId,
@@ -974,6 +1083,7 @@ const buildCurrentTimePlanItems = async (lineId, processId) => {
           product_name: pp.output_product_name || plan.product_name || '',
           process: processId,
           plan_qty: pp.quantity ?? plan.plan_qty ?? 0,
+          actual_qty: actualQty,
         })
       })
     })
@@ -984,11 +1094,153 @@ const buildCurrentTimePlanItems = async (lineId, processId) => {
   }
 }
 
+const buildPlanTimeSlots = async (lineId, processId, existingItems = []) => {
+  try {
+    const targetDate = currentDateYmd.value
+    const ganttRes = await api.lineGanttPlans.getLineGanttPlans({
+      line: lineId,
+      plan_date__gte: targetDate,
+      plan_date__lte: targetDate,
+    })
+    const rawPlans = ganttRes.data?.results || ganttRes.data || []
+    if (!Array.isArray(rawPlans) || !rawPlans.length) {
+      return { slots: [], activeIndex: null }
+    }
+
+    const actualLookup = new Map()
+    ;(Array.isArray(existingItems) ? existingItems : []).forEach((item) => {
+      if (!item || item.product == null) return
+      const key = `${item.product}_${processId}`
+      if (!actualLookup.has(key)) {
+        actualLookup.set(key, toSafeNumber(item.actual_qty))
+      }
+    })
+
+    const slotMap = new Map()
+    rawPlans.forEach((plan) => {
+      const processes = Array.isArray(plan.processes_plan) ? plan.processes_plan : []
+      processes.forEach((pp) => {
+        if (String(pp.process_id) != String(processId)) return
+        const start = new Date(pp.start_time)
+        const end = new Date(pp.end_time)
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return
+
+        const productId = pp.output_product_id ?? plan.product
+        if (!productId) return
+        const key = `${productId}_${processId}`
+        const actualQty = actualLookup.has(key) ? actualLookup.get(key) : 0
+        const item = {
+          plan_date: targetDate,
+          product: productId,
+          product_code: pp.output_product_code || plan.product_code || '',
+          product_name: pp.output_product_name || plan.product_name || '',
+          process: processId,
+          plan_qty: pp.quantity ?? plan.plan_qty ?? 0,
+          actual_qty: actualQty,
+          start,
+          end,
+        }
+
+        const slotKey = `${start.toISOString()}_${end.toISOString()}`
+        if (!slotMap.has(slotKey)) {
+          slotMap.set(slotKey, { start, end, items: [] })
+        }
+        slotMap.get(slotKey).items.push(item)
+      })
+    })
+
+    const slots = Array.from(slotMap.values()).sort((a, b) => a.start - b.start)
+    const now = new Date()
+    let activeIndex = null
+    slots.forEach((slot, idx) => {
+      if (now >= slot.start && now <= slot.end && activeIndex === null) {
+        activeIndex = idx
+      }
+    })
+    if (activeIndex === null && slots.length > 0) {
+      activeIndex = 0
+    }
+
+    return { slots, activeIndex }
+  } catch (e) {
+    console.error('時間帯スロット構築エラー:', e)
+    return { slots: [], activeIndex: null }
+  }
+}
+
+const formatSlotTime = (dt) => {
+  if (!(dt instanceof Date)) return ''
+  const hh = String(dt.getHours()).padStart(2, '0')
+  const mm = String(dt.getMinutes()).padStart(2, '0')
+  return `${hh}:${mm}`
+}
+
+const applyTimeSlotFilter = () => {
+  const slots = timeSlots.value || []
+  let index = activeSlotIndex.value
+  if (slots.length === 0 || !filterCurrentTime.value) {
+    productionProducts.value = [...allPlanProducts.value]
+    scrapProducts.value = [...allScrapProducts.value]
+    return
+  }
+  if (index === null || index < 0) index = 0
+  if (index > slots.length - 1) index = slots.length - 1
+  activeSlotIndex.value = index
+
+  const slotItems = slots[index]?.items || []
+  productionProducts.value = [...slotItems]
+
+  const slotProductIds = new Set(slotItems.map((p) => String(p.product)))
+  let filteredScrap = allScrapProducts.value.filter((p) =>
+    slotProductIds.has(String(p.product))
+  )
+  if (!filteredScrap.length) {
+    filteredScrap = [...allScrapProducts.value]
+  }
+  scrapProducts.value = filteredScrap
+}
+
+const canPrevSlot = computed(() => {
+  return filterCurrentTime.value && timeSlots.value.length > 0 && (activeSlotIndex.value ?? 0) > 0
+})
+
+const canNextSlot = computed(() => {
+  return (
+    filterCurrentTime.value &&
+    timeSlots.value.length > 0 &&
+    (activeSlotIndex.value ?? 0) < timeSlots.value.length - 1
+  )
+})
+
+const slotLabel = computed(() => {
+  if (!filterCurrentTime.value || !timeSlots.value.length) return ''
+  const idx = activeSlotIndex.value ?? 0
+  const slot = timeSlots.value[idx]
+  if (!slot) return ''
+  return `${formatSlotTime(slot.start)} - ${formatSlotTime(slot.end)}`
+})
+
+const goPrevSlot = () => {
+  if (!canPrevSlot.value) return
+  activeSlotIndex.value = Math.max(0, (activeSlotIndex.value ?? 0) - 1)
+  applyTimeSlotFilter()
+}
+
+const goNextSlot = () => {
+  if (!canNextSlot.value) return
+  activeSlotIndex.value = Math.min(timeSlots.value.length - 1, (activeSlotIndex.value ?? 0) + 1)
+  applyTimeSlotFilter()
+}
+
 const loadPlannedProducts = async () => {
   if (!selectedProcessId.value) return
 
   productionProducts.value = []
   scrapProducts.value = []
+  allPlanProducts.value = []
+  allScrapProducts.value = []
+  timeSlots.value = []
+  activeSlotIndex.value = null
   try {
     const process = processes.value.find(p => String(p.id) === String(selectedProcessId.value))
     const lineId = process?.line
@@ -1022,20 +1274,28 @@ const loadPlannedProducts = async () => {
       }
     }
 
-    // 可能なら現在時刻に該当する計画のみを表示する
-    const activeResult = await buildCurrentTimePlanItems(lineId, selectedProcessId.value)
-    if (activeResult.hasPlan) {
-      tempProducts = activeResult.items
-    }
+    // 時間帯スロットを構築し、デフォルトで現在時刻スロットを選択
+    const slotResult = await buildPlanTimeSlots(lineId, selectedProcessId.value, tempProducts)
+    timeSlots.value = slotResult.slots
+    activeSlotIndex.value = slotResult.activeIndex
+
+    tempProducts = (Array.isArray(tempProducts) ? tempProducts : []).map((it) => ({
+      ...it,
+      actual_qty: toSafeNumber(it?.actual_qty),
+    }))
 
     // 連産品の子品番を除外（生産記録用）
     const filteredForProduction = await filterCoproductChildrenFromList(tempProducts)
 
-    // 生産記録用リストを作成
-    productionProducts.value = [...filteredForProduction]
+    // 生産記録用リスト（全時間帯）を保持
+    allPlanProducts.value = [...filteredForProduction]
 
     // 仕損品記録用リストを作成: related-products APIから工程関連製品を追加
     await loadScrapProducts(selectedProcessId.value, filteredForProduction, lineId)
+    allScrapProducts.value = [...scrapProducts.value]
+
+    // スロット/全体切替を反映した表示リストを適用
+    applyTimeSlotFilter()
 
     if (productionProducts.value.length === 1 && productionProducts.value[0].product) {
       defaultProductId.value = productionProducts.value[0].product
@@ -1423,10 +1683,7 @@ const selectPlannedProduct = (p) => {
   record.value.product_code = p.product_code || ''
   manualProduct.value = false
   if (record.value.record_type === 'PRODUCTION') {
-    const qtyNum = Number(p.plan_qty)
-    if (!Number.isNaN(qtyNum)) {
-      record.value.qty = qtyNum
-    }
+    record.value.qty = 1
   }
 }
 
@@ -1483,8 +1740,8 @@ watch(
       const plan = currentProductList.value.find(
         (p) => String(p.product) === String(defaultProductId.value)
       )
-      if (plan && plan.plan_qty != null && !Number.isNaN(Number(plan.plan_qty))) {
-        record.value.qty = Number(plan.plan_qty)
+      if (plan) {
+        record.value.qty = 1
       }
     }
   },
@@ -1793,6 +2050,41 @@ label {
   border-color: #ffb3b3;
 }
 
+.plan-status {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  padding: 10px;
+  margin-top: 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+.plan-status__title {
+  grid-column: 1 / -1;
+  font-weight: 700;
+  font-size: 13px;
+  opacity: 0.92;
+}
+.plan-status__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 13px;
+}
+.plan-status__label {
+  opacity: 0.9;
+}
+.plan-status__value {
+  font-weight: 700;
+  font-size: 16px;
+}
+.plan-status__row--muted {
+  color: #e0f2fe;
+}
+
 .action-section {
   margin: 12px 0;
 }
@@ -1897,9 +2189,61 @@ label {
   display: grid;
   gap: 4px;
 }
+.planned-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.planned-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .planned-label {
   font-size: 12px;
   color: #475569;
+}
+.slot-label {
+  font-size: 12px;
+  color: #0f172a;
+  font-weight: 600;
+}
+.slot-btn {
+  width: 44px;
+  height: 32px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  border-radius: 6px;
+  color: #0f172a;
+  font-weight: 800;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, transform 0.08s ease;
+}
+.slot-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.slot-btn:not(:disabled):hover {
+  background: #e2e8f0;
+  border-color: #94a3b8;
+}
+.slot-btn:not(:disabled):active {
+  transform: scale(0.96);
+}
+.current-time-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #475569;
+}
+.current-time-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #0ea5e9;
 }
 .planned-list {
   display: flex;

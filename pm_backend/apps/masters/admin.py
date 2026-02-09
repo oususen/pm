@@ -94,7 +94,7 @@ class BOMAdmin(admin.ModelAdmin):
         wb = Workbook()
         ws = wb.active
         ws.title = 'BOM Tree'
-        ws.append(['BOM ID', '親製品', '部番表示', '階層', '数量', '工程', 'ライン', '仕入先'])
+        ws.append(['BOM ID', '親製品', '部番表示', '製品名', '階層', '数量', '工程', 'ライン', '仕入先'])
 
         today = date.today()
 
@@ -139,6 +139,7 @@ class BOMAdmin(admin.ModelAdmin):
                     bom.id,
                     bom.parent_product.product_code if bom.parent_product else '',
                     display_name,
+                    bom.parent_product.product_name if bom.parent_product else '',
                     level,
                     '',
                     process_display,
@@ -157,6 +158,7 @@ class BOMAdmin(admin.ModelAdmin):
                     bom.id,
                     bom.parent_product.product_code if bom.parent_product else '',
                     display_name,
+                    item.child_product.product_name if item.child_product else '',
                     level + 1,
                     item.quantity,
                     f"{item.process.process_code} - {item.process.process_name}" if item.process else '',
