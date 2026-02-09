@@ -165,6 +165,15 @@ const props = defineProps({
   presetStartDate: { type: String, default: '' },
   presetEndDate: { type: String, default: '' },
 })
+const TANK_LINE_CODE = 'L2200'
+const TANK_PRODUCT_ORDER = [
+  'YD60003386',
+  'YD60011305',
+  'YD60000441',
+  'YD60008491',
+  'YD60009848',
+  'YD60014764',
+]
 
 const route = useRoute()
 const selectedLine = ref('')
@@ -183,6 +192,11 @@ const timelineSlots = ref([])
 const debugEnabled = true
 const calendarDayMap = ref({})
 const workPatternMap = ref({})
+const selectedLineObj = computed(() =>
+  lines.value.find((l) => String(l.id) === String(selectedLine.value))
+)
+const tankOrderMap = computed(() => new Map(TANK_PRODUCT_ORDER.map((code, idx) => [code, idx])))
+const isTankLine = computed(() => selectedLineObj.value?.line_code === TANK_LINE_CODE)
 
 const logDebug = (...args) => {
   if (debugEnabled) console.info('[ProcessGanttView]', ...args)
@@ -884,6 +898,7 @@ function buildProcessGantt(plans) {
           product_id: outputProductId,
           product_code: outputProductCode,
           product_name: outputProductName,
+          parent_product_code: plan.product_code || '',
           plan_qty: 0,
           sequence_no: plan.sequence_no != null ? Number(plan.sequence_no) : null,
           bars: [],
@@ -960,10 +975,17 @@ function buildProcessGantt(plans) {
   const msPerSlot = slotHours * 60 * 60 * 1000
   processMap.forEach((procEntry) => {
     procEntry.items.sort((a, b) => {
+      const codeA = isTankLine.value ? (a.parent_product_code || a.product_code || '') : (a.product_code || '')
+      const codeB = isTankLine.value ? (b.parent_product_code || b.product_code || '') : (b.product_code || '')
+      if (isTankLine.value) {
+        const priA = tankOrderMap.value.get(codeA) ?? Number.POSITIVE_INFINITY
+        const priB = tankOrderMap.value.get(codeB) ?? Number.POSITIVE_INFINITY
+        if (priA !== priB) return priA - priB
+      }
       const aSeq = a.sequence_no != null ? a.sequence_no : Number.POSITIVE_INFINITY
       const bSeq = b.sequence_no != null ? b.sequence_no : Number.POSITIVE_INFINITY
       if (aSeq !== bSeq) return aSeq - bSeq
-      return (a.product_code || '').localeCompare(b.product_code || '')
+      return codeA.localeCompare(codeB)
     })
     procEntry.items.forEach((item) => {
       item.bars.sort((a, b) => a.startTime - b.startTime)

@@ -83,9 +83,9 @@
                   @input="onDailySettingTimeChange(c.key, $event.target.value)"
                   @blur="onDailySettingTimeBlur(c.key)"
                   class="time-input-inline"
-                  placeholder="00:00"
+                  :placeholder="finalProcessStartTime || '08:00'"
                   maxlength="5"
-                  title="最終工程開始時刻（未設定時はデフォルト値を使用）"
+                  :title="`最終工程開始時刻（未設定時はデフォルト ${finalProcessStartTime || '08:00'} を使用）`"
                 />
                 <span v-if="getWorkTimeLabel(c.key)" class="work-time-label">
                   {{ getWorkTimeLabel(c.key) }}
@@ -324,6 +324,15 @@ defaultStart.setDate(defaultStart.getDate() - 1)
 const startDate = ref(toDateInput(defaultStart))
 const horizonDays = ref(30)
 const keyword = ref('')
+const TANK_LINE_CODE = 'L2200'
+const TANK_PRODUCT_ORDER = [
+  'YD60003386',
+  'YD60011305',
+  'YD60000441',
+  'YD60008491',
+  'YD60009848',
+  'YD60014764',
+]
 const gridWrapperRef = ref(null)
 const lockDays = ref(0)
 const isEditUnlocked = ref(false)
@@ -350,6 +359,9 @@ const workPatternMap = ref({})
 const workStartFallback = { hour: 8, minute: 0 }
 const workMinutesFallback = 480
 const processing = ref(false)
+const selectedLineObj = computed(() =>
+  lines.value.find((l) => `${l.id}` === `${selectedLine.value}`)
+)
 const showExportDialog = ref(false)
 const PRINT_CHUNK_DAYS = 14
 
@@ -599,6 +611,22 @@ const getProductCode = (id) => {
   const p = products.value.find((x) => x.id === id)
   return p ? p.product_code : ''
 }
+const getRowProductCode = (row) => row.product_code || getProductCode(row.product_id) || ''
+
+const sortRowsForLine = (inputRows) => {
+  const line = selectedLineObj.value
+  if (!line || line.line_code !== TANK_LINE_CODE) return inputRows
+  const orderMap = new Map(TANK_PRODUCT_ORDER.map((code, idx) => [code, idx]))
+  const fallback = TANK_PRODUCT_ORDER.length + 1
+  return [...inputRows].sort((a, b) => {
+    const codeA = getRowProductCode(a)
+    const codeB = getRowProductCode(b)
+    const priA = orderMap.has(codeA) ? orderMap.get(codeA) : fallback
+    const priB = orderMap.has(codeB) ? orderMap.get(codeB) : fallback
+    if (priA !== priB) return priA - priB
+    return codeA.localeCompare(codeB)
+  })
+}
 
 const filteredRows = computed(() => {
   if (!keyword.value) return rows.value
@@ -754,6 +782,9 @@ const loadData = async () => {
   if (selectedLine.value) {
     await fetchLineDefaultSetting(selectedLine.value)
     await loadWorkPatternData(selectedLine.value, startDate.value, endDate.value)
+    // 日別設定を読み込み、未設定の日にデフォルト値をセット
+    await loadDailySettings()
+    applyDefaultToDailySettings()
   } else {
     calendarDayMap.value = {}
     workPatternMap.value = {}
@@ -1550,10 +1581,11 @@ const doPickup = async () => {
       daily.has_row = true
     })
 
-    rows.value = Array.from(grouped.values())
+    rows.value = sortRowsForLine(Array.from(grouped.values()))
 
-    // 日別設定を読み込み
+    // 日別設定を読み込み、未設定の日にデフォルト値をセット
     await loadDailySettings()
+    applyDefaultToDailySettings()
   } catch (e) {
     console.error('バックログ取り込みエラー', e)
     alert('取り込みに失敗しました。')
@@ -1585,6 +1617,19 @@ const loadDailySettings = async () => {
   }
 }
 
+// 日別設定が未設定の日にデフォルト開始時刻を表示用にセット
+const applyDefaultToDailySettings = () => {
+  const defaultTime = finalProcessStartTime.value || '08:00'
+  dateColumns.value.forEach((c) => {
+    if (!dailySettings.value[c.key] || !dailySettings.value[c.key].final_process_start_time) {
+      dailySettings.value[c.key] = {
+        ...dailySettings.value[c.key],
+        final_process_start_time: defaultTime,
+      }
+    }
+  })
+}
+
 const onDailySettingTimeChange = (dateKey, timeValue) => {
   if (!dailySettings.value[dateKey]) {
     dailySettings.value[dateKey] = {}
@@ -1600,6 +1645,12 @@ const onDailySettingTimeBlur = async (dateKey) => {
   if (!setting || !setting.final_process_start_time) return
   const normalized = normalizeTimeInput(setting.final_process_start_time, true)
   if (!normalized) return
+  // デフォルト値と同じ場合は日別設定として保存しない（不要な上書きを防止）
+  const defaultTime = finalProcessStartTime.value || '08:00'
+  if (normalized === defaultTime) {
+    setting.final_process_start_time = null
+    return
+  }
   setting.final_process_start_time = normalized
 
   try {
