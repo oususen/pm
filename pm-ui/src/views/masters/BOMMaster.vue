@@ -309,9 +309,13 @@
             </div>
             <div class="form-group">
               <label>ライン{{ itemForm.sourcing_type === 'MAKE' ? ' *' : '' }}</label>
-              <select v-model="itemForm.line" :disabled="itemForm.sourcing_type === 'BUY'" :required="itemForm.sourcing_type === 'MAKE'">
+              <select
+                v-model="itemForm.line"
+                :disabled="itemForm.sourcing_type === 'BUY'"
+                :required="itemForm.sourcing_type === 'MAKE'"
+              >
                 <option value="">選択しない</option>
-                <option v-for="line in lines" :key="line.id" :value="line.id">
+                <option v-for="line in filteredLines" :key="line.id" :value="line.id">
                   {{ line.line_code }} - {{ line.line_name }}
                 </option>
               </select>
@@ -792,6 +796,17 @@ const editingItemId = ref(null)
 const bomItemsRequestToken = ref(0)
 const childProductFilter = ref('')
 const parentProductFilter = ref('')
+
+const selectedProcess = computed(() =>
+  processes.value.find((p) => `${p.id}` === `${itemForm.value.process}`)
+)
+const filteredLines = computed(() => {
+  const proc = selectedProcess.value
+  if (proc?.line) {
+    return lines.value.filter((l) => `${l.id}` === `${proc.line}`)
+  }
+  return lines.value
+})
 
 const sourcingTypeMap = {
   'MAKE': '自社製造',
@@ -1617,6 +1632,18 @@ watch(
       openDetailFromRoute()
     } else if (showDetailsDialog.value) {
       closeDetailsDialog()
+    }
+  }
+)
+
+watch(
+  () => itemForm.value.process,
+  (newProcess) => {
+    const proc = processes.value.find((p) => `${p.id}` === `${newProcess}`)
+    if (proc?.line) {
+      itemForm.value.line = proc.line
+    } else if (itemForm.value.line && !lines.value.find((l) => l.id === itemForm.value.line)) {
+      itemForm.value.line = ''
     }
   }
 )
