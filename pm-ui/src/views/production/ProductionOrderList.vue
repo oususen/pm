@@ -16,11 +16,11 @@
         <div class="filter-row">
           <div class="filter-field">
             <label>指示番号/品番</label>
-            <input v-model="filters.search" @keyup.enter="fetchOrders" placeholder="指示番号・品番で検索" />
+            <input v-model="filters.search" @keyup.enter="onEnterFilter" placeholder="指示番号・品番で検索" />
           </div>
           <div class="filter-field">
             <label>ライン</label>
-            <select v-model="filters.line">
+            <select v-model="filters.line" @keyup.enter="onEnterFilter">
               <option value="">すべて</option>
               <option v-for="line in lines" :key="line.id" :value="line.id">
                 {{ line.line_code }} - {{ line.line_name }}
@@ -29,15 +29,15 @@
           </div>
           <div class="filter-field">
             <label>開始予定日(From)</label>
-            <input v-model="filters.scheduled_start_date_from" type="date" />
+            <input v-model="filters.scheduled_start_date_from" type="date" @keyup.enter="onEnterFilter" />
           </div>
           <div class="filter-field">
             <label>開始予定日(To)</label>
-            <input v-model="filters.scheduled_start_date_to" type="date" />
+            <input v-model="filters.scheduled_start_date_to" type="date" @keyup.enter="onEnterFilter" />
           </div>
           <div class="filter-field">
             <label>優先度≧</label>
-            <input v-model.number="filters.priority_min" type="number" min="0" />
+            <input v-model.number="filters.priority_min" type="number" min="0" @keyup.enter="onEnterFilter" />
           </div>
         </div>
         <div class="filter-row">
@@ -223,6 +223,11 @@ export default {
     this.fetchOrders()
   },
   methods: {
+    // フィルタ入力でEnter押下時に検索を実行（検索ボタンと同等）
+    onEnterFilter() {
+      if (this.loading) return
+      this.fetchOrders()
+    },
     async fetchLines() {
       try {
         const res = await api.lines.getLines()

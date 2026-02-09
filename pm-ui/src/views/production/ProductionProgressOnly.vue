@@ -10,19 +10,29 @@
           type="text"
           v-model="lineFilter"
           placeholder="ラインコード/名称で絞り込み"
+          @keyup.enter="handleEnter"
+          @dblclick="openCodeLookup"
         />
         <input
           type="text"
           v-model="processFilter"
           placeholder="工程コード/名称で絞り込み"
+          @keyup.enter="handleEnter"
+          @dblclick="openCodeLookup"
         />
         <input
           type="text"
           v-model="productFilter"
           placeholder="品番/品名で絞り込み"
+          @keyup.enter="handleEnter"
         />
-        <input type="date" v-model="startDate" @change="onStartChange" />
-        <select v-model.number="horizon">
+        <input
+          type="date"
+          v-model="startDate"
+          @change="onStartChange"
+          @keyup.enter="handleEnter"
+        />
+        <select v-model.number="horizon" @keyup.enter="handleEnter">
           <option :value="30">30日</option>
           <option :value="60">60日</option>
           <option :value="90">90日</option>
@@ -86,11 +96,62 @@
       </div>
       <div v-else class="status">データがありません</div>
     </div>
+
+    <!-- ライン/工程コード確認モーダル（F4で開く） -->
+    <div v-if="showCodeLookup" class="code-modal-overlay" @click.self="closeCodeLookup">
+      <div class="code-modal">
+        <div class="code-modal-header">
+          <h3>ライン・工程コード一覧</h3>
+          <button class="close-btn" type="button" @click="closeCodeLookup">×</button>
+        </div>
+        <div class="code-modal-body">
+          <input
+            type="text"
+            v-model="codeSearch"
+            placeholder="コード/名称で絞り込み"
+            class="code-search"
+          />
+          <div class="code-columns">
+            <div class="code-column">
+              <div class="column-title">ライン</div>
+              <div class="code-list">
+                <button
+                  v-for="line in filteredLines"
+                  :key="line.id"
+                  type="button"
+                  class="code-item"
+                  @click="applyLine(line)"
+                >
+                  <strong>{{ line.line_code || '-' }}</strong>
+                  <span>{{ line.line_name || '名称未設定' }}</span>
+                </button>
+              </div>
+            </div>
+            <div class="code-column">
+              <div class="column-title">工程</div>
+              <div class="code-list">
+                <button
+                  v-for="p in filteredProcesses"
+                  :key="p.id"
+                  type="button"
+                  class="code-item"
+                  @click="applyProcess(p)"
+                >
+                  <strong>{{ p.process_code || '-' }}</strong>
+                  <span>{{ p.process_name || '名称未設定' }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <p class="code-hint">行をクリックするとフィルタ欄にセットします。</p>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, onMounted, onBeforeUnmount } from "vue";
 import api from "@/api/client";
 import { addDays, formatISODate, parseISODate } from "@/utils/dateUtil";
 
@@ -109,6 +170,12 @@ const lineDemands = ref([]);
 let userSetStart = false;
 const onStartChange = () => {
   userSetStart = true;
+};
+
+// フィルタ入力でEnter押下時に更新を実行
+const handleEnter = () => {
+  if (loading.value) return;
+  load();
 };
 
 const hasFilter = computed(() =>
@@ -216,6 +283,84 @@ const recalculate = async () => {
     recalculating.value = false;
   }
 };
+
+// ライン・工程コード参照 (F4で開く)
+const showCodeLookup = ref(false);
+const lineList = ref([]);
+const processList = ref([]);
+const codeSearch = ref("");
+const lookupLoading = ref(false);
+
+const fetchCodeLookupData = async () => {
+  if (lineList.value.length && processList.value.length) return;
+  lookupLoading.value = true;
+  try {
+    const [lineRes, processRes] = await Promise.all([
+      api.lines.getLines(),
+      api.processes.getProcesses({ is_active: true }),
+    ]);
+    lineList.value = lineRes.data?.results || lineRes.data || [];
+    processList.value = processRes.data?.results || processRes.data || [];
+  } catch (e) {
+    console.error("コード一覧の取得に失敗:", e);
+    alert("ライン・工程コードの取得に失敗しました。");
+  } finally {
+    lookupLoading.value = false;
+  }
+};
+
+const filteredLines = computed(() => {
+  const kw = codeSearch.value.trim().toLowerCase();
+  if (!kw) return lineList.value;
+  return lineList.value.filter((l) =>
+    `${l.line_code || ""}${l.line_name || ""}`.toLowerCase().includes(kw)
+  );
+});
+
+const filteredProcesses = computed(() => {
+  const kw = codeSearch.value.trim().toLowerCase();
+  if (!kw) return processList.value;
+  return processList.value.filter((p) =>
+    `${p.process_code || ""}${p.process_name || ""}`.toLowerCase().includes(kw)
+  );
+});
+
+const openCodeLookup = async () => {
+  if (showCodeLookup.value) return;
+  await fetchCodeLookupData();
+  showCodeLookup.value = true;
+};
+
+const closeCodeLookup = () => {
+  showCodeLookup.value = false;
+  codeSearch.value = "";
+};
+
+const applyLine = (line) => {
+  lineFilter.value = line.line_code || "";
+  closeCodeLookup();
+};
+
+const applyProcess = (process) => {
+  processFilter.value = process.process_code || "";
+  closeCodeLookup();
+};
+
+// 修飾キーなしのF4でコード一覧を開く
+const handleKeyDown = (e) => {
+  if (e.key === "F4" && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+    e.preventDefault();
+    openCodeLookup();
+  }
+};
+
+onMounted(() => {
+  window.addEventListener("keydown", handleKeyDown);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleKeyDown);
+});
 
 const createEmptyCell = () => ({
   forecast: 0,
@@ -462,5 +607,104 @@ const getCellClass = (group, date, rowKey) => {
   background: #ffe4e6;
   color: #b91c1c;
   font-weight: 700;
+}
+
+.code-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3000;
+}
+.code-modal {
+  background: #fff;
+  border-radius: 10px;
+  width: min(900px, 92vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+.code-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #2f9e63; /* 薄い緑系 */
+  color: #fff;
+}
+.close-btn {
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+}
+.code-modal-body {
+  padding: 12px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.code-search {
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+}
+.code-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.code-column {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.column-title {
+  background: #f3f4f6;
+  padding: 8px 10px;
+  font-weight: 700;
+  border-bottom: 1px solid #e5e7eb;
+}
+.code-list {
+  max-height: 300px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.code-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-bottom: 1px solid #f1f5f9;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+}
+.code-item:hover {
+  background: #e6f7ec; /* 薄い緑系のハイライト */
+}
+.code-item strong {
+  min-width: 80px;
+}
+.code-hint {
+  margin: 0;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .code-columns {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

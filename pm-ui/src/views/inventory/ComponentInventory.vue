@@ -10,7 +10,7 @@
           type="text"
           v-model="productSearch"
           placeholder="品番/品名で検索"
-          @keydown.enter="searchProducts"
+          @keyup.enter="onSearchEnter"
         />
         <button @click="searchProducts" :disabled="loading">検索</button>
       </div>
@@ -229,6 +229,12 @@ const searchProducts = async () => {
     console.error("製品検索エラー:", e);
     searchResults.value = [];
   }
+};
+
+// 品番入力でEnter押下時に検索を実行（検索ボタンと同等）
+const onSearchEnter = () => {
+  if (loading.value) return;
+  searchProducts();
 };
 
 const selectProduct = async (product) => {
