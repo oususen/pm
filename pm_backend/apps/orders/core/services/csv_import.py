@@ -92,25 +92,6 @@ class CSVImportService:
 
                 # Track min and max IDs for this import
                 raw_ids = [r.id for r in raw_records_with_ids]
-                return {
-                    'success': False,
-                    'message': 'No valid records found',
-                    'errors': self.errors
-                }
-
-            # Save to database
-            with transaction.atomic():
-                # Save raw records
-                created_raws = StgOrderRaw.objects.bulk_create(raw_records)
-
-                # Re-fetch to ensure we have primary keys
-                raw_records_with_ids = StgOrderRaw.objects.filter(
-                    source_file=file.name,
-                    customer_code=customer_code
-                ).order_by('-id')[:len(raw_records)]
-
-                # Track min and max IDs for this import
-                raw_ids = [r.id for r in raw_records_with_ids]
                 min_raw_id = min(raw_ids) if raw_ids else None
                 max_raw_id = max(raw_ids) if raw_ids else None
 
@@ -234,10 +215,21 @@ class CSVImportService:
         """
         # Extract fields from CSV row
         if isinstance(row, dict):
-            # DictReader case - use aliases or direct keys
-            product_code = row.get('product_code', row.get('品目コード', row.get('品番', ''))).strip()
-            due_date_str = row.get('due_date', row.get('納期', '')).strip()
-            quantity_str = row.get('quantity', row.get('発注数量', row.get('数量', '0'))).strip()
+            # DictReader case - use col_map if available, otherwise try aliases/direct keys
+            if col_map:
+                # col_map contains indices, but row is dict - try key-based approach
+                # This is a fallback for dict, prefer direct key matching
+                product_code = row.get('product_code', row.get('品目コード', row.get('品番', row.get('製品コード', row.get('図番', '')))))
+                due_date_str = row.get('due_date', row.get('納期', row.get('納入日', row.get('納品日', row.get('納入指示日', '')))))
+                quantity_str = row.get('quantity', row.get('発注数量', row.get('数量', row.get('注文数量', row.get('発注数', '0')))))
+            else:
+                product_code = row.get('product_code', row.get('品目コード', row.get('品番', '')))
+                due_date_str = row.get('due_date', row.get('納期', ''))
+                quantity_str = row.get('quantity', row.get('発注数量', row.get('数量', '0')))
+            
+            product_code = str(product_code).strip() if product_code else ''
+            due_date_str = str(due_date_str).strip() if due_date_str else ''
+            quantity_str = str(quantity_str).strip() if quantity_str else '0'
         else:
             # List case with column map
             if col_map:
@@ -245,9 +237,9 @@ class CSVImportService:
                 due_date_str = self._extract_field(row, 'due_date', col_map)
                 quantity_str = self._extract_field(row, 'quantity', col_map)
             else:
-                product_code = row.get('product_code', '').strip() if isinstance(row, dict) else ''
-                due_date_str = row.get('due_date', '').strip() if isinstance(row, dict) else ''
-                quantity_str = row.get('quantity', '0').strip() if isinstance(row, dict) else '0'
+                product_code = ''
+                due_date_str = ''
+                quantity_str = '0'
 
         # Parse date
         due_date = None
