@@ -53,6 +53,10 @@ class CSVImportService:
                 }
 
             csv_data = csv.DictReader(decoded_file.splitlines())
+            
+            # Get header row to build column map
+            header_row = csv_data.fieldnames
+            col_map = self._build_header_map(header_row) if header_row else {}
 
             raw_records = []
             row_no = 1
@@ -62,13 +66,32 @@ class CSVImportService:
                 try:
                     raw_record = self._create_raw_record(
                         row, row_no, customer_code, order_type,
-                        source_system, file.name
+                        source_system, file.name, col_map
                     )
                     raw_records.append(raw_record)
                 except Exception as e:
                     self.errors.append(f"Row {row_no}: {str(e)}")
 
             if not raw_records:
+                return {
+                    'success': False,
+                    'message': 'No valid records found',
+                    'errors': self.errors
+                }
+
+            # Save to database
+            with transaction.atomic():
+                # Save raw records
+                created_raws = StgOrderRaw.objects.bulk_create(raw_records)
+
+                # Re-fetch to ensure we have primary keys
+                raw_records_with_ids = StgOrderRaw.objects.filter(
+                    source_file=file.name,
+                    customer_code=customer_code
+                ).order_by('-id')[:len(raw_records)]
+
+                # Track min and max IDs for this import
+                raw_ids = [r.id for r in raw_records_with_ids]
                 return {
                     'success': False,
                     'message': 'No valid records found',
@@ -157,12 +180,74 @@ class CSVImportService:
                 'errors': self.errors + [str(e)]
             }
 
-    def _create_raw_record(self, row, row_no, customer_code, order_type, source_system, source_file):
-        """Create a raw staging record from CSV row"""
+    def _normalize_header(self, name):
+        """Normalize header name for comparison"""
+        if name is None:
+            return ''
+        normalized = str(name).strip().replace(' ', '').replace('\u3000', '')
+        normalized = normalized.replace('_', '').replace('-', '').upper()
+        normalized = normalized.lstrip('\ufeff')
+        return normalized
+
+    def _build_header_map(self, header_row):
+        """Build mapping from Japanese/English headers to standard keys"""
+        header_aliases = {
+            'product_code': ['品目コード', '製品コード', '製品ｺｰﾄﾞ', '品番', '品目ｺｰﾄﾞ', '図番', '商品コード', '部品番号'],
+            'due_date': ['納期', '納入日', '納品日', '納入指示日', '納期日', '納入予定日'],
+            'quantity': ['数量', '注文数量', '発注数量', '発注数', '指示数', '納入指示数', '納品数量'],
+        }
+        
+        # Create alias map
+        alias_map = {}
+        for key, aliases in header_aliases.items():
+            for alias in aliases:
+                alias_map[self._normalize_header(alias)] = key
+        
+        # Build column map
+        col_map = {}
+        for idx, name in enumerate(header_row or []):
+            key = alias_map.get(self._normalize_header(name))
+            if key and key not in col_map:
+                col_map[key] = idx
+        
+        return col_map
+
+    def _extract_field(self, row, key, col_map, default=''):
+        """Extract field value from row using column map"""
+        col_idx = col_map.get(key)
+        if col_idx is not None and col_idx < len(row):
+            val = row[col_idx]
+            return str(val).strip() if val is not None else default
+        return default
+
+    def _create_raw_record(self, row, row_no, customer_code, order_type, source_system, source_file, col_map=None):
+        """Create a raw staging record from CSV row
+        
+        Args:
+            row: CSV row as dict (from DictReader) or list
+            row_no: Row number
+            customer_code: Customer code
+            order_type: Order type
+            source_system: Source system name
+            source_file: Source file name
+            col_map: Column index map for list-based rows
+        """
         # Extract fields from CSV row
-        product_code = row.get('product_code', '').strip()
-        due_date_str = row.get('due_date', '').strip()
-        quantity_str = row.get('quantity', '0').strip()
+        if isinstance(row, dict):
+            # DictReader case - use aliases or direct keys
+            product_code = row.get('product_code', row.get('品目コード', row.get('品番', ''))).strip()
+            due_date_str = row.get('due_date', row.get('納期', '')).strip()
+            quantity_str = row.get('quantity', row.get('発注数量', row.get('数量', '0'))).strip()
+        else:
+            # List case with column map
+            if col_map:
+                product_code = self._extract_field(row, 'product_code', col_map)
+                due_date_str = self._extract_field(row, 'due_date', col_map)
+                quantity_str = self._extract_field(row, 'quantity', col_map)
+            else:
+                product_code = row.get('product_code', '').strip() if isinstance(row, dict) else ''
+                due_date_str = row.get('due_date', '').strip() if isinstance(row, dict) else ''
+                quantity_str = row.get('quantity', '0').strip() if isinstance(row, dict) else '0'
 
         # Parse date
         due_date = None
