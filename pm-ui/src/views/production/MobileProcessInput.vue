@@ -745,6 +745,20 @@ const getScrapCategory = (item) => {
   return 'own_process'
 }
 
+const applyScrapTypeDefaults = (item) => {
+  if (!item || record.value.record_type !== 'SCRAP') return
+  const category = getScrapCategory(item)
+  if (category) {
+    scrapRelationFilter.value = category
+    if (category === 'purchased' || category === 'in_house') {
+      record.value.is_production_recorded = true
+    } else if (category === 'own_process') {
+      // 自工程製品は利用者が明示選択できるよう未選択状態に戻す
+      record.value.is_production_recorded = ''
+    }
+  }
+}
+
 const filterScrapCandidates = (list) => {
   const items = Array.isArray(list) ? list : []
   const relation = scrapRelationFilter.value
@@ -875,6 +889,7 @@ const canSubmit = computed(() => {
       if (!(record.value.operator_name || '').trim()) return false
       if (!(record.value.disposition_status || '').trim()) return false
       if (record.value.is_production_recorded === '') return false
+      if (!scrapRelationFilter.value) return false
     }
     return true
   }
@@ -1685,6 +1700,7 @@ const selectPlannedProduct = (p) => {
   if (record.value.record_type === 'PRODUCTION') {
     record.value.qty = 1
   }
+  applyScrapTypeDefaults(p)
 }
 
 watch(
@@ -1708,6 +1724,32 @@ watch(
   (val) => {
     if (val !== 'OTHER') {
       record.value.reason_detail = ''
+    }
+  }
+)
+
+watch(
+  () => record.value.product_id,
+  (pid) => {
+    if (!pid || record.value.record_type !== 'SCRAP') return
+    const candidate =
+      scrapProducts.value.find((p) => String(p.product) === String(pid)) ||
+      manualProducts.value.find((p) => String(p.id) === String(pid)) ||
+      manualProducts.value.find((p) => String(p.product) === String(pid))
+    if (candidate) {
+      applyScrapTypeDefaults(candidate)
+    }
+  }
+)
+
+watch(
+  () => scrapRelationFilter.value,
+  (val) => {
+    if (record.value.record_type !== 'SCRAP') return
+    if (val === 'purchased' || val === 'in_house') {
+      record.value.is_production_recorded = true
+    } else if (val === 'own_process') {
+      record.value.is_production_recorded = ''
     }
   }
 )

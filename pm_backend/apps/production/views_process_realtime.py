@@ -19,6 +19,7 @@ from .serializers_process_realtime import (
     ProcessRealtimeCreateSerializer,
     build_scrap_multiplier_details,
     _resolve_product_process_line,
+    resolve_workday_date_for_process,
 )
 from masters.models import Product, Process, Supplier, BOM
 from quality.models_scrap import ScrapRecordDetail, ScrapRecord
@@ -411,7 +412,11 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                     return Response({'detail': '戻し数量が仕損数量を超えています。'}, status=status.HTTP_400_BAD_REQUEST)
 
                 # 戻しは新規レコードとして登録（数量はマイナス）
-                return_date = timezone.now().date()
+                now = timezone.now()
+                if timezone.is_aware(now):
+                    now = timezone.localtime(now).replace(tzinfo=None)
+                ref_process = sd.process or sd.occurrence_process
+                return_date = resolve_workday_date_for_process(ref_process, now)
                 return_record = ScrapRecord.objects.create(
                     process=sd.process,
                     occurrence_process=sd.occurrence_process or sd.process,
