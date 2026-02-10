@@ -101,7 +101,7 @@ class CSVImportService:
                 success_count = 0
 
                 for raw in raw_records_with_ids:
-                    if not raw.product_code or not raw.due_date or not raw.quantity:
+                    if not raw.product_code or not raw.due_date or raw.quantity is None:
                         raw.parse_status = 'ERROR'
                         raw.error_message = 'Missing required fields'
                         raw.save()
