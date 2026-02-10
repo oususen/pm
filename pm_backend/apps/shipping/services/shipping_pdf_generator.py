@@ -883,44 +883,38 @@ def draw_trip2_special_box(
     has_main_row: bool,
 ) -> float:
     """
-    2便目特記事項（SIGA/KANTATSU）を所定位置に描画
+    2便目特記事項（納入先コード別リーデン枠）を所定位置に描画
     """
     if not annotations:
-        return
+        return 0
 
     gap = BOX_GAP
     row_height = BOX_ROW_HEIGHT
     box_width = (width - gap * (columns - 1)) / columns
 
-    display_locations = {
-        "SIGA": "滋賀",
-        "KANTATSU": "神立",
-    }
-
-    order = {"SIGA": 0, "KANTATSU": 1}
+    sort_order = {"000010": 0, "000030": 1, "000050": 2}
     sorted_annotations = sorted(
         annotations,
-        key=lambda ann: order.get((ann.get("group_code") or "").upper(), 99),
+        key=lambda ann: sort_order.get(str(ann.get("ship_to_code") or "").strip(), 99),
     )
 
     col_idx = columns - 1
     row_idx = 1 if has_main_row else 0
     rows_used = 0
     for ann in sorted_annotations:
-        group_code = ann.get("group_code", "")
-        containers = ann.get("containers") or 0
-        try:
-            containers = int(containers)
-        except Exception:
-            containers = 1
-        containers = max(1, containers)
-
-        location = display_locations.get(group_code, group_code or "")
+        location = ann.get("display_name") or ""
         text_lines = ["リーデン"]
-        second_line = location or group_code or ""
-        if second_line:
-            text_lines.append(second_line)
-        text_lines.append(f"{containers}容器")
+        if location:
+            text_lines.append(f"納入先:{location}")
+
+        # 製品番号と数量を表示（ボックスに収まるよう最大2製品）
+        products = ann.get("products") or []
+        for prod in products[:2]:
+            code = prod.get("product_code") or ""
+            qty = prod.get("quantity") or 0
+            text_lines.append(f"{code} {qty}個")
+        if len(products) > 2:
+            text_lines.append(f"他{len(products) - 2}品目")
 
         if col_idx < 0:
             col_idx = columns - 1
@@ -991,18 +985,12 @@ def draw_trip_section(
     columns = 5 if trip_no in ("1", "4") else 7
     filtered = _filter_positive_products(products)
     special_annotations = special_annotations or []
-    special_groups = set()
     if trip_no == "2" and special_annotations:
-        for ann in special_annotations:
-            code = str(ann.get("group_code", "") or "").strip().upper()
-            if code:
-                special_groups.add(code)
-        if special_groups:
-            filtered = [
-                prod
-                for prod in filtered
-                if str(prod.get("group_code", "") or "").strip().upper() not in special_groups
-            ]
+        # リーデン受注はメイングリッドから除外（リーデン枠に表示）
+        filtered = [
+            prod for prod in filtered
+            if not prod.get("is_rieden", False)
+        ]
 
     products_sorted = sorted(filtered, key=lambda p: str(p.get("product_code", "")))
     box_items = prepare_box_items(trip_no, products_sorted, service) if products_sorted else []

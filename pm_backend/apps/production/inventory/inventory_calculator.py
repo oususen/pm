@@ -25,9 +25,53 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
         start_date: 開始日
         end_date: 終了日
     """
-    # まず既存のscrap_qty / scrap_adjust_qty をゼロリセット
-    reset_filter = {}
+    # まず対象期間・対象ラインを決めるために ScrapRecord を取得し、影響する line_id を集計する
+    scrap_filter = {
+        'disposition_status__in': ['PENDING', 'PARTIAL', 'REJECTED', 'APPROVED'],
+        'event_type__in': ['SCRAP', 'RETURN'],
+        'plan_date__isnull': False,
+    }
+    if start_date and end_date:
+        scrap_filter['plan_date__range'] = [start_date, end_date]
+
+    # 発生ラインで絞り込むと、前工程品が別ラインに計上されるケースを取りこぼすため、
+    # line_id 指定時もフィルタしないで取得し、後段で actual_line で判定する。
+    scrap_records = ScrapRecord.objects.filter(**scrap_filter).select_related('product', 'line', 'process')
+
+    # 影響するラインID（集計先の actual_line_id と、明細に含まれる line_id）を集める
+    # line_id 指定時はそのラインのみリセット対象にする。未指定の場合は影響ラインを集計する。
     if line_id:
+        affected_line_ids = {line_id}
+    else:
+        affected_line_ids = set()
+        for scrap in scrap_records:
+            actual_process, actual_line = _resolve_product_process_line(scrap.product, scrap.process)
+            if not actual_line:
+                actual_line = getattr(actual_process, 'line', None)
+            if actual_line:
+                affected_line_ids.add(actual_line.id if hasattr(actual_line, 'id') else actual_line)
+
+    # 明細（子部品）の line_id も影響ラインに含める
+    detail_filter = {
+        'scrap_record__disposition_status__in': ['PENDING', 'PARTIAL', 'REJECTED', 'APPROVED'],
+        'scrap_record__event_type__in': ['SCRAP', 'RETURN'],
+        'scrap_record__plan_date__isnull': False,
+        'is_backlog_processed': False,  # 未処理のみ
+    }
+    if start_date and end_date:
+        detail_filter['scrap_record__plan_date__range'] = [start_date, end_date]
+
+    details = ScrapRecordDetail.objects.filter(**detail_filter).select_related('scrap_record', 'product')
+    if not line_id:
+        for detail in details:
+            if detail.line_id:
+                affected_line_ids.add(detail.line_id)
+
+    # リセット対象を限定（影響ライン × 対象期間）
+    reset_filter = {}
+    if affected_line_ids:
+        reset_filter['line_id__in'] = list(affected_line_ids)
+    elif line_id:
         reset_filter['line_id'] = line_id
     if start_date and end_date:
         reset_filter['plan_date__range'] = [start_date, end_date]
@@ -38,17 +82,7 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
     # LineBacklog.objects.filter(**reset_filter).update(adjust_qty=0)
 
     # 自工程仕損の集計（全ての仕損を scrap_qty に保存）
-    scrap_filter = {
-        'disposition_status__in': ['PENDING', 'PARTIAL', 'REJECTED', 'APPROVED'],
-        'event_type__in': ['SCRAP', 'RETURN'],
-        'plan_date__isnull': False,
-    }
-    if line_id:
-        scrap_filter['line_id'] = line_id
-    if start_date and end_date:
-        scrap_filter['plan_date__range'] = [start_date, end_date]
-
-    scrap_records = ScrapRecord.objects.filter(**scrap_filter).select_related('product', 'line', 'process')
+    # ※ scrap_records は前段で取得済み
 
     for scrap in scrap_records:
         if not scrap.product or not scrap.line or not scrap.process:
@@ -59,6 +93,10 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
         if not actual_line:
             actual_line = getattr(actual_process, 'line', None)
         if not actual_line:
+            continue
+
+        if line_id and getattr(actual_line, 'id', actual_line) != line_id:
+            # 指定ラインの再計算時は、そのラインに計上されるものだけ処理
             continue
 
         LineBacklog.objects.get_or_create(
@@ -89,22 +127,13 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
 
     # 後工程仕損の展開分（子部品）は adjust_qty に保存（負の値として）
     # 未処理のレコードのみ対象（is_backlog_processed=False）
-    detail_filter = {
-        'scrap_record__disposition_status__in': ['PENDING', 'PARTIAL', 'REJECTED', 'APPROVED'],
-        'scrap_record__event_type__in': ['SCRAP', 'RETURN'],
-        'scrap_record__plan_date__isnull': False,
-        'is_backlog_processed': False,  # 未処理のみ
-    }
-    if line_id:
-        detail_filter['line_id'] = line_id
-    if start_date and end_date:
-        detail_filter['scrap_record__plan_date__range'] = [start_date, end_date]
-
-    details = ScrapRecordDetail.objects.filter(**detail_filter).select_related('scrap_record', 'product')
     processed_detail_ids = []
 
     for detail in details:
         if not detail.product or not detail.line_id or not detail.process_id:
+            continue
+        if line_id and detail.line_id != line_id:
+            # 対象ライン以外の子部品はスキップ（line_id 未指定時は全件）
             continue
         # 自製品（親と同じ製品）はスキップ（scrap_qty で既に処理済み）
         if (detail.product_id == detail.scrap_record.product_id

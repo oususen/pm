@@ -334,7 +334,7 @@ def apply_nonself_scrap_adjust(process, product, scrap_qty, plan_date):
     backlog.save(update_fields=['scrap_adjust_qty'])
 
 
-def update_scrap_to_backlog(process, product, scrap_qty, plan_date, details=None):
+def update_scrap_to_backlog(process, product, scrap_qty, plan_date, details=None, relation_type=None):
     """
     仕損登録時にLineBacklogに即時反映する
 
@@ -344,6 +344,7 @@ def update_scrap_to_backlog(process, product, scrap_qty, plan_date, details=None
         scrap_qty: 仕損数量 (Decimal)
         plan_date: 計画日 (date)
         details: ScrapRecordDetailのリスト（子部品の情報）
+        relation_type: related-products 起点の区分（OUTPUT_PRODUCT 等）
     """
     if not scrap_qty or scrap_qty <= 0:
         return
@@ -355,7 +356,12 @@ def update_scrap_to_backlog(process, product, scrap_qty, plan_date, details=None
     if not actual_line:
         return
 
-    # 自製品の scrap_qty に保存（常に）
+    rel = (relation_type or '').strip().upper()
+    is_self_relation = rel in ('OUTPUT_PRODUCT', 'COPRODUCT_PARENT')
+    if not is_self_relation and product:
+        is_self_relation = actual_process and actual_process.id == getattr(process, 'id', None)
+
+    # 自工程生産品 → scrap_qty / それ以外 → scrap_adjust_qty(負値)
     if product:
         backlog, _ = LineBacklog.objects.get_or_create(
             line=actual_line,
@@ -372,11 +378,17 @@ def update_scrap_to_backlog(process, product, scrap_qty, plan_date, details=None
                 'adjust_qty': 0,
                 'scrap_qty': 0,
                 'actual_shipment_qty': 0,
+                'scrap_adjust_qty': 0,
             }
         )
-        LineBacklog.objects.filter(id=backlog.id).update(
-            scrap_qty=F('scrap_qty') + int(scrap_qty)
-        )
+        if is_self_relation:
+            LineBacklog.objects.filter(id=backlog.id).update(
+                scrap_qty=F('scrap_qty') + int(scrap_qty)
+            )
+        else:
+            LineBacklog.objects.filter(id=backlog.id).update(
+                scrap_adjust_qty=F('scrap_adjust_qty') - int(scrap_qty)
+            )
 
     # 子部品（BOM展開明細）は adjust_qty に保存
     if details:
@@ -760,8 +772,15 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                         ))
                     ScrapRecordDetail.objects.bulk_create(objs)
 
-                # LineBacklogへの即時反映（自製品のscrap_qty + 子部品のadjust_qty）
-                update_scrap_to_backlog(process, product, qty_decimal, plan_date, details)
+                # LineBacklogへの即時反映（自製品 or 前工程/購買品 → scrap_qty / scrap_adjust_qty、子部品 → adjust_qty）
+                update_scrap_to_backlog(
+                    process,
+                    product,
+                    qty_decimal,
+                    plan_date,
+                    details,
+                    relation_type=relation_type,
+                )
 
                 # 在庫・実績への転嫁
                 if is_production_recorded:

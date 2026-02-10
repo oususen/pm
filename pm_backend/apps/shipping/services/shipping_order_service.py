@@ -11,7 +11,7 @@ import re
 import math
 from fractions import Fraction
 from django.db.models import Q, Sum
-from orders.core.models import OrderLine, StgOrderRawTiera
+from orders.core.models import OrderLine, StgOrderRawTiera, StgOrderDaily
 from masters.models import Product, ProductGroup, ContainerCapacity, Customer
 from orders.utils import WorkingDayCalculator
 
@@ -87,8 +87,15 @@ class ShippingOrderService:
             else:
                 q_filter |= Q(ship_to_code=ship_to_code, due_date=due_date)
 
-        # Tiera製品のみを対象とする
-        # 出荷指示書の対象製品（容器4-5T、特定機種名、製品群SEATBASE/TANK/SUB_BLADE）
+        # リーデン顧客のIDをStgOrderDailyから動的に特定
+        # (raw_rieden が存在する = リーデンインポートで取込まれた注文)
+        rieden_customer_ids = set(
+            StgOrderDaily.objects.filter(
+                raw_rieden__isnull=False
+            ).values_list('customer_id', flat=True).distinct()[:5]
+        )
+
+        # 出荷指示書の対象製品（容器4-5T、特定機種名、製品群SEATBASE/TANK/SUB_BLADE、またはリーデン受注）
         firm_filter = Q(order_type='FIRM') | Q(order_type__isnull=True, order__order_type='FIRM')
         order_lines = OrderLine.objects.filter(
             order__status='OPEN',
@@ -109,7 +116,8 @@ class ShippingOrderService:
             Q(product__used_container__name__icontains='4-5T') |
             Q(product__model_name__iregex=r'^(391|17U|20U|26U|19-6|390|KOTEIKYAKU)$') |
             Q(product__used_container__name__iregex=r'^(391|17U|20U|26U|19-6|390|KOTEIKYAKU)$') |
-            Q(product__product_group__group_code__iregex=r'^(SEATBASE|TANK|SIGA|KANTATSU|SUB_BLADE)$')
+            Q(product__product_group__group_code__iregex=r'^(SEATBASE|TANK|SUB_BLADE)$') |
+            Q(order__customer_id__in=rieden_customer_ids)  # リーデン受注
         ).order_by('product__product_code')
 
         # YD40003261（YD40003117に付ける製品）の受注数を取得
@@ -145,6 +153,7 @@ class ShippingOrderService:
             for line in order_lines_list
             if line.order and line.order.customer
         }
+
         if product_codes and due_dates:
             raw_tiera_qs = StgOrderRawTiera.objects.filter(
                 order_type='FIRM',
@@ -189,7 +198,9 @@ class ShippingOrderService:
                 'group_code': product.product_group.group_code if product and product.product_group else '',
                 'group_name': product.product_group.group_name if product and product.product_group else '',
                 'ship_to_code': line.ship_to_code or '',  # 納入先コード
-                'customer_order_no': line.customer_order_no or ''  # 顧客発注番号
+                'customer_order_no': line.customer_order_no or '',  # 顧客発注番号
+                'customer_code': line.order.customer.customer_code if line.order and line.order.customer else '',
+                'is_rieden': (line.order.customer_id in rieden_customer_ids) if line.order else False,
             })
 
         df = pd.DataFrame(df_data)
@@ -220,23 +231,24 @@ class ShippingOrderService:
 
     def _filter_trip2(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """
-        2便目: 機種名または容器名が特定の7種、または製品群がSIGA/KANTATSU/SUB_BLADE
+        2便目: 機種名または容器名が特定の7種、製品群SUB_BLADE、またはリーデン受注
         ['391', '17U', '20U', '26U', '19-6', '390', 'KOTEIKYAKU']
         SUB_BLADE製品群: 専用容器なし、MAIN機種名の容器を使用
         """
         target_models = ['391', '17U', '20U', '26U', '19-6', '390', 'KOTEIKYAKU']
-        special_groups = ['SIGA', 'KANTATSU', 'SUB_BLADE']
+        special_groups = ['SUB_BLADE']
 
         # 機種名と容器名を正規化（大文字・小文字、空白を統一）
         df['model_name_normalized'] = df['model_name'].str.strip().str.upper()
         df['container_name_normalized'] = df['container_name'].str.strip().str.upper()
         df['group_code_normalized'] = df['group_code'].str.strip().str.upper()
 
-        # 完全一致または部分一致で検索（機種名または容器名）
+        # 完全一致または部分一致で検索（機種名または容器名、またはリーデン受注）
         filtered = df[
             df['model_name_normalized'].isin([m.upper() for m in target_models]) |
             df['container_name_normalized'].isin([m.upper() for m in target_models]) |
-            df['group_code_normalized'].isin(special_groups)
+            df['group_code_normalized'].isin(special_groups) |
+            df['is_rieden']  # リーデン受注はすべて2便目
         ]
 
         return self._sanitize_records(filtered.to_dict('records'))
@@ -378,37 +390,60 @@ class ShippingOrderService:
 
     def _build_trip2_special_annotations(self, trip2_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        2便目用の特記事項（SIGA/KANTATSU）を作成
+        2便目用の特記事項を作成。
+        対象: リーデン受注のみ（is_rieden=True）。
+        表示ラベルは ship_to_code で決定（000010=神立, 000030=つくば, 000050=滋賀）。
         """
         if not trip2_data:
             return []
 
-        special_groups = ['SIGA', 'KANTATSU']
+        ship_to_display = {
+            '000010': '神立',
+            '000030': 'つくば',
+            '000050': '滋賀',
+        }
+
+        # リーデン受注の製品を納入先コード別に集計
+        products_by_ship: Dict[str, Dict[str, int]] = {}
+
+        for item in trip2_data:
+            if not item.get('is_rieden', False):
+                continue
+
+            # 納入先コードを取得
+            raw_code = str(item.get('ship_to_code', '') or '').strip()
+            if not raw_code:
+                continue
+
+            normalized_code = raw_code.zfill(6) if raw_code.isdigit() else raw_code
+            if normalized_code not in ship_to_display:
+                continue
+
+            qty = int(item.get('order_quantity') or 0)
+            product_code = str(item.get('product_code', '') or '').strip()
+
+            if product_code and qty > 0:
+                prod_map = products_by_ship.setdefault(normalized_code, {})
+                prod_map[product_code] = prod_map.get(product_code, 0) + qty
+
         annotations: List[Dict[str, Any]] = []
+        sort_order = {'000010': 0, '000030': 1, '000050': 2}
 
-        for group_code in special_groups:
-            total_containers = 0
-            for item in trip2_data:
-                item_group = str(item.get('group_code', '') or '').strip().upper()
-                if item_group != group_code:
-                    continue
+        for code, prod_map in products_by_ship.items():
+            if not prod_map:
+                continue
+            products = [
+                {'product_code': pc, 'quantity': qty}
+                for pc, qty in prod_map.items()
+            ]
+            products.sort(key=lambda x: (-x['quantity'], x['product_code']))
+            annotations.append({
+                'ship_to_code': code,
+                'display_name': ship_to_display[code],
+                'products': products,
+            })
 
-                qty = int(item.get('order_quantity') or 0)
-                capacity = int(item.get('capacity') or 1)
-                if capacity <= 0:
-                    capacity = 1
-
-                containers = (qty + capacity - 1) // capacity
-                total_containers += max(1, containers)
-
-            if total_containers > 0:
-                annotations.append({
-                    'group_code': group_code,
-                    'containers': total_containers
-                })
-
-        order = {'SIGA': 0, 'KANTATSU': 1}
-        annotations.sort(key=lambda ann: order.get(ann.get('group_code', '').upper(), 99))
+        annotations.sort(key=lambda ann: sort_order.get(ann.get('ship_to_code', ''), 99))
         return annotations
 
     def get_available_dates(self) -> List[date]:
@@ -421,8 +456,7 @@ class ShippingOrderService:
             quantity__gt=0,
         ).filter(
             firm_filter
-        ).values('due_date').annotate(
-        ).distinct().order_by('-due_date')[:30]
+        ).values('due_date').distinct().order_by('-due_date')[:30]
 
         return [d['due_date'] for d in dates]
 

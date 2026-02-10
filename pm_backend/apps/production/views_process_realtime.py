@@ -18,6 +18,7 @@ from .serializers_process_realtime import (
     ProcessRealtimeRecordSerializer,
     ProcessRealtimeCreateSerializer,
     build_scrap_multiplier_details,
+    _resolve_product_process_line,
 )
 from masters.models import Product, Process, Supplier, BOM
 from quality.models_scrap import ScrapRecordDetail, ScrapRecord
@@ -453,6 +454,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                             supplier_id=d.get('supplier_id'),
                             sourcing_type=d.get('sourcing_type'),
                             deduct_qty=d.get('qty') or Decimal('0'),
+                            is_backlog_processed=True,  # 即時反映済み（再集計での二重計上を防止）
                         ))
                     ScrapRecordDetail.objects.bulk_create(objs)
 
@@ -469,10 +471,22 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 qty_int = int(qty)
                 if qty_int and sd.line_id and sd.process_id and sd.product_id:
                     from django.db.models import F
+
+                    # 自工程/他工程を判定（仕損登録時と同じロジック）
+                    actual_process, actual_line = _resolve_product_process_line(
+                        product_obj, sd.process
+                    )
+                    is_self = actual_process and actual_process.id == (
+                        sd.process_id if sd.process_id else None
+                    )
+
+                    target_line_id = getattr(actual_line, 'id', sd.line_id)
+                    target_process_id = getattr(actual_process, 'id', sd.process_id)
+
                     # 基礎データレコードを確保
                     LineBacklog.objects.get_or_create(
-                        line_id=sd.line_id,
-                        process_id=sd.process_id,
+                        line_id=target_line_id,
+                        process_id=target_process_id,
                         product_id=sd.product_id,
                         plan_date=return_date,
                         sequence_no=0,
@@ -484,24 +498,32 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                             'planned_stock_qty': 0,
                             'adjust_qty': 0,
                             'scrap_qty': 0,
+                            'scrap_adjust_qty': 0,
                             'actual_shipment_qty': 0,
                         }
                     )
-                    # 仕損数を戻し分だけ減算（当日扱い）
-                    LineBacklog.objects.filter(
-                        line_id=sd.line_id,
-                        process_id=sd.process_id,
-                        product_id=sd.product_id,
-                        plan_date=return_date,
-                    ).update(scrap_qty=F('scrap_qty') - qty_int)
 
-                    # 自製品の実績を戻す（仕損登録時に減算した分を補正）
-                    LineBacklog.objects.filter(
-                        line_id=sd.line_id,
-                        process_id=sd.process_id,
+                    backlog_filter = dict(
+                        line_id=target_line_id,
+                        process_id=target_process_id,
                         product_id=sd.product_id,
                         plan_date=return_date,
-                    ).update(actual_qty=F('actual_qty') + qty_int)
+                    )
+
+                    if is_self:
+                        # 自工程仕損の戻し: scrap_qty 減算 + actual_qty 加算
+                        LineBacklog.objects.filter(**backlog_filter).update(
+                            scrap_qty=F('scrap_qty') - qty_int
+                        )
+                        if sd.is_production_recorded:
+                            LineBacklog.objects.filter(**backlog_filter).update(
+                                actual_qty=F('actual_qty') + qty_int
+                            )
+                    else:
+                        # 他工程仕損の戻し: scrap_adjust_qty をプラスに戻す
+                        LineBacklog.objects.filter(**backlog_filter).update(
+                            scrap_adjust_qty=F('scrap_adjust_qty') + qty_int
+                        )
 
                 # 子部品・前工程品のadjust_qtyを戻す（BOM展開分をプラス補正）
                 details_for_adjust = build_scrap_multiplier_details(product_id, qty)
