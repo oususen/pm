@@ -632,8 +632,11 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
                 scrap_qty=0,
                 actual_shipment_qty=0,
             ))
+    created_any = False
     if to_create:
         created = LineBacklog.objects.bulk_create(to_create)
+        # MySQL などでは bulk_create 直後の PK が埋まらないことがあるため、再取得して差し替える
+        created_any = True
         for obj in created:
             by_date.setdefault(obj.plan_date, []).append(obj)
 
@@ -662,8 +665,20 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
             ))
     if to_create:
         created = LineBacklog.objects.bulk_create(to_create)
+        created_any = True
         for obj in created:
             by_date.setdefault(obj.plan_date, []).append(obj)
+
+    if created_any:
+        # PK が欠落している可能性があるため、対象期間を再取得して by_date を作り直す
+        backlogs = list(LineBacklog.objects.filter(
+            line_id=line_id,
+            product_id=product_id,
+            plan_date__range=[start_date, end_date]
+        ).select_related('product').order_by('plan_date', 'sequence_no', 'id'))
+        by_date = {}
+        for backlog in backlogs:
+            by_date.setdefault(backlog.plan_date, []).append(backlog)
 
     calendar_id = None
     workday_cache = {}

@@ -5,7 +5,7 @@ export const createScheduleConfigAPI = (client) => ({
   saveConfig(payload) {
     return client.post('/schedule-config/', payload)
   },
-  runNow() {
-    return client.post('/schedule-config/run-now/')
+  runNow(payload = {}) {
+    return client.post('/schedule-config/run-now/', payload)
   },
 })

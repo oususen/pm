@@ -20,9 +20,10 @@
         <div class="field">
           <label>期間</label>
           <select v-model.number="horizonDays" @change="refreshDates">
-            <option :value="60">60日</option>
             <option :value="30">30日</option>
-            <option :value="14">14日</option>
+            <option :value="60">60日</option>
+            <option :value="90">90日</option>
+            <option :value="120">120日</option>
           </select>
         </div>
         <div class="field">
@@ -152,7 +153,7 @@ const selectedSupplier = ref('')
 const purchaseLineId = ref('')
 const purchaseProcessId = ref('')
 const startDate = ref(new Date().toISOString().slice(0, 10))
-const horizonDays = ref(60)
+const horizonDays = ref(30)
 const keyword = ref('')
 const gridWrapperRef = ref(null)
 const lockDays = ref(0)

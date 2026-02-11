@@ -25,7 +25,6 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS('スケジューラを起動しています...'))
 
         scheduler = BackgroundScheduler(timezone='Asia/Tokyo')
-        self._last_config = None
 
         # DBから設定を読み込んでジョブを登録
         self._register_jobs(scheduler)
@@ -64,8 +63,18 @@ class Command(BaseCommand):
         from apscheduler.triggers.cron import CronTrigger
         from production.models_schedule_config import ScheduleConfig
         from production.scheduler.tasks import run_inventory_recalculation
+        from production.scheduler.tasks_auto_plan import run_auto_plan
 
-        config, created = ScheduleConfig.objects.get_or_create(
+        # 既存ジョブ（設定チェックを除く）をクリア
+        for job in scheduler.get_jobs():
+            if job.id == 'config_checker':
+                continue
+            try:
+                scheduler.remove_job(job.id)
+            except Exception:
+                pass
+
+        inv_cfg, _ = ScheduleConfig.objects.get_or_create(
             task_name='INVENTORY_RECALC',
             defaults={
                 'scheduled_hour': 7,
@@ -73,63 +82,50 @@ class Command(BaseCommand):
                 'is_enabled': True,
             },
         )
-
-        job_id = 'inventory_recalc'
-
-        if config.is_enabled:
+        if inv_cfg.is_enabled:
             trigger = CronTrigger(
-                hour=config.scheduled_hour,
-                minute=config.scheduled_minute,
+                hour=inv_cfg.scheduled_hour,
+                minute=inv_cfg.scheduled_minute,
                 timezone='Asia/Tokyo',
             )
             scheduler.add_job(
                 run_inventory_recalculation,
                 trigger,
-                id=job_id,
+                id='inventory_recalc',
                 replace_existing=True,
                 misfire_grace_time=3600,
             )
-            self.stdout.write(
-                f'ジョブ登録: {job_id} - '
-                f'{config.scheduled_hour:02d}:{config.scheduled_minute:02d}'
+            logger.info(f'ジョブ登録: inventory_recalc - {inv_cfg.scheduled_hour:02d}:{inv_cfg.scheduled_minute:02d}')
+        else:
+            logger.info('ジョブ無効: inventory_recalc')
+
+        auto_configs = ScheduleConfig.objects.filter(task_name='AUTO_PLAN', line__isnull=False)
+        for cfg in auto_configs:
+            if not cfg.is_enabled:
+                continue
+            trigger = CronTrigger(
+                day=cfg.scheduled_dom if cfg.scheduled_dom is not None else '*',
+                hour=cfg.scheduled_hour,
+                minute=cfg.scheduled_minute,
+                timezone='Asia/Tokyo',
+            )
+            job_id = f'auto_plan_{cfg.id}'
+            scheduler.add_job(
+                run_auto_plan,
+                trigger,
+                id=job_id,
+                replace_existing=True,
+                misfire_grace_time=3600,
+                kwargs={'config_id': cfg.id},
             )
             logger.info(
-                f'ジョブ登録: {job_id} - '
-                f'{config.scheduled_hour:02d}:{config.scheduled_minute:02d}'
+                f'ジョブ登録: {job_id} - {cfg.scheduled_hour:02d}:{cfg.scheduled_minute:02d} '
+                f'(line={cfg.line.line_code if cfg.line_id else \"-\"})'
             )
-        else:
-            try:
-                scheduler.remove_job(job_id)
-            except Exception:
-                pass
-            self.stdout.write(f'ジョブ無効: {job_id}')
-            logger.info(f'ジョブ無効: {job_id}')
-
-        self._last_config = {
-            'hour': config.scheduled_hour,
-            'minute': config.scheduled_minute,
-            'enabled': config.is_enabled,
-        }
 
     def _check_config_changes(self, scheduler):
         """DB設定の変更を検知してジョブを再登録"""
-        from production.models_schedule_config import ScheduleConfig
-
         try:
-            config = ScheduleConfig.objects.filter(
-                task_name='INVENTORY_RECALC'
-            ).first()
-            if not config:
-                return
-
-            current = {
-                'hour': config.scheduled_hour,
-                'minute': config.scheduled_minute,
-                'enabled': config.is_enabled,
-            }
-
-            if current != self._last_config:
-                logger.info(f'設定変更を検知: {self._last_config} -> {current}')
-                self._register_jobs(scheduler)
+            self._register_jobs(scheduler)
         except Exception as e:
-            logger.error(f'設定チェックエラー: {e}')
+            logger.error(f'設定チェックエラー: {e}', exc_info=True)

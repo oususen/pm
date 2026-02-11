@@ -615,8 +615,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         product_step_map = {}
 
         # このラインに属する全工程を取得し、全ての製品を対象とする
+        from django.db.models import Q  # 安全側でローカルインポート（UnboundLocalError対策）
         steps_on_line = RoutingStep.objects.filter(
-            line_id=line_id
+            Q(line_id=line_id) | Q(process__line_id=line_id)
         ).select_related('output_product', 'routing__product', 'process')
 
         steps_on_line_count = 0
@@ -2847,20 +2848,59 @@ class ProductionPlanLockSettingView(APIView):
 class ScheduleConfigView(APIView):
     """定時タスクスケジュール設定API"""
 
-    def get(self, request):
+    def _ensure_defaults(self):
+        """既定設定を補完（全社内ライン分を作成）"""
         ScheduleConfig.objects.get_or_create(
             task_name='INVENTORY_RECALC',
+            line=None,
             defaults={'scheduled_hour': 7, 'scheduled_minute': 0, 'is_enabled': True},
         )
-        configs = ScheduleConfig.objects.all()
+        base_plan = ScheduleConfig.objects.filter(task_name='AUTO_PLAN', line__isnull=False).first()
+        if not base_plan:
+            base_plan = ScheduleConfig.objects.filter(task_name='AUTO_PLAN', line__isnull=True).first()
+        template = {
+            'scheduled_hour': getattr(base_plan, 'scheduled_hour', 3) or 3,
+            'scheduled_minute': getattr(base_plan, 'scheduled_minute', 0) or 0,
+            'scheduled_dom': getattr(base_plan, 'scheduled_dom', 1),
+            'is_enabled': getattr(base_plan, 'is_enabled', True),
+            'include_next_month': getattr(base_plan, 'include_next_month', True),
+            'include_second_month': getattr(base_plan, 'include_second_month', False),
+            'include_third_month': getattr(base_plan, 'include_third_month', False),
+        }
+        for line in Line.objects.filter(is_active=True, line_type='PROD'):
+            ScheduleConfig.objects.get_or_create(
+                task_name='AUTO_PLAN',
+                line=line,
+                defaults=template,
+            )
+
+    def get(self, request):
+        self._ensure_defaults()
+        configs = ScheduleConfig.objects.select_related('line').order_by('task_name', 'line__line_code')
         serializer = ScheduleConfigSerializer(configs, many=True)
         return Response(serializer.data)
 
     def post(self, request):
-        task_name = request.data.get('task_name', 'INVENTORY_RECALC')
+        config_id = request.data.get('id') or request.data.get('config_id')
+        task_name = str(request.data.get('task_name', 'INVENTORY_RECALC')).upper()
+        line_id = request.data.get('line')
+
+        def to_bool(val, default=False):
+            if val in (None, ''):
+                return default
+            if isinstance(val, bool):
+                return val
+            if isinstance(val, str):
+                return val.lower() in ('true', '1', 'yes', 'on')
+            return bool(val)
+
         scheduled_hour = request.data.get('scheduled_hour')
         scheduled_minute = request.data.get('scheduled_minute', 0)
+        scheduled_dom = request.data.get('scheduled_dom')
         is_enabled = request.data.get('is_enabled', True)
+        include_next_month = to_bool(request.data.get('include_next_month', True), True)
+        include_second_month = to_bool(request.data.get('include_second_month', False), False)
+        include_third_month = to_bool(request.data.get('include_third_month', False), False)
 
         try:
             scheduled_hour = int(scheduled_hour)
@@ -2876,27 +2916,64 @@ class ScheduleConfigView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        if scheduled_dom not in (None, '',):
+            try:
+                scheduled_dom = int(scheduled_dom)
+            except (TypeError, ValueError):
+                return Response({'detail': '実行日は1-31の整数で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+            if not (1 <= scheduled_dom <= 31):
+                return Response({'detail': '実行日は1-31の範囲で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            scheduled_dom = None
+
         if isinstance(is_enabled, str):
             is_enabled = is_enabled.lower() in ('true', '1', 'yes')
 
-        config, created = ScheduleConfig.objects.get_or_create(
-            task_name=task_name,
-            defaults={
-                'scheduled_hour': scheduled_hour,
-                'scheduled_minute': scheduled_minute,
-                'is_enabled': is_enabled,
-            },
-        )
-        if not created:
-            user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
-            config.scheduled_hour = scheduled_hour
-            config.scheduled_minute = scheduled_minute
-            config.is_enabled = is_enabled
-            config.updated_by = user
-            config.save(update_fields=[
-                'scheduled_hour', 'scheduled_minute',
-                'is_enabled', 'updated_at', 'updated_by',
-            ])
+        line_obj = None
+        if task_name == 'AUTO_PLAN':
+            if not line_id:
+                return Response({'detail': 'ラインを指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+            line_obj = Line.objects.filter(id=line_id, line_type='PROD').first()
+            if not line_obj:
+                return Response({'detail': '指定されたラインが見つかりません（生産ラインのみ設定可能）'}, status=status.HTTP_400_BAD_REQUEST)
+            if not (include_next_month or include_second_month or include_third_month):
+                return Response({'detail': '実行期間を1つ以上選択してください'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if config_id:
+            config = ScheduleConfig.objects.filter(id=config_id).first()
+            if not config:
+                return Response({'detail': '設定が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            config, _ = ScheduleConfig.objects.get_or_create(
+                task_name=task_name,
+                line=line_obj,
+                defaults={
+                    'scheduled_hour': scheduled_hour,
+                    'scheduled_minute': scheduled_minute,
+                    'scheduled_dom': scheduled_dom,
+                    'is_enabled': is_enabled,
+                    'include_next_month': include_next_month,
+                    'include_second_month': include_second_month,
+                    'include_third_month': include_third_month,
+                },
+            )
+
+        user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+        config.scheduled_hour = scheduled_hour
+        config.scheduled_minute = scheduled_minute
+        config.scheduled_dom = scheduled_dom
+        config.is_enabled = is_enabled
+        config.include_next_month = include_next_month
+        config.include_second_month = include_second_month
+        config.include_third_month = include_third_month
+        if line_obj:
+            config.line = line_obj
+        config.updated_by = user
+        config.save(update_fields=[
+            'scheduled_hour', 'scheduled_minute', 'scheduled_dom',
+            'is_enabled', 'include_next_month', 'include_second_month', 'include_third_month',
+            'line', 'updated_at', 'updated_by',
+        ])
 
         serializer = ScheduleConfigSerializer(config)
         return Response(serializer.data)
@@ -2907,9 +2984,24 @@ class ScheduleRunNowView(APIView):
 
     def post(self, request):
         from .scheduler.tasks import run_inventory_recalculation
+        from .scheduler.tasks_auto_plan import run_auto_plan
+        task = (request.data.get('task_name') or 'INVENTORY_RECALC').upper()
+        config_id = request.data.get('config_id') or request.data.get('id')
+        line_id = request.data.get('line')
         try:
-            result = run_inventory_recalculation()
-            return Response({'detail': '取り込み＋在庫再計算が完了しました', **result})
+            if task == 'AUTO_PLAN':
+                config = None
+                if config_id:
+                    config = ScheduleConfig.objects.filter(id=config_id).first()
+                elif line_id:
+                    config = ScheduleConfig.objects.filter(task_name='AUTO_PLAN', line_id=line_id).first()
+                if not config:
+                    return Response({'detail': '対象設定が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+                result = run_auto_plan(force=True, config_id=config.id)
+                return Response({'detail': '生産計画自動生成を実行しました', **(result or {})})
+            else:
+                result = run_inventory_recalculation()
+                return Response({'detail': '取り込み＋在庫再計算が完了しました', **result})
         except Exception as e:
             logger.exception('手動実行に失敗')
             return Response(
