@@ -429,6 +429,7 @@ class ScheduleConfigSerializer(serializers.ModelSerializer):
     line_code = serializers.CharField(source='line.line_code', read_only=True)
     line_name = serializers.CharField(source='line.line_name', read_only=True)
     notify_user_names = serializers.SerializerMethodField()
+    notify_user_codes = serializers.SerializerMethodField()
 
     class Meta:
         model = ScheduleConfig
@@ -438,7 +439,7 @@ class ScheduleConfigSerializer(serializers.ModelSerializer):
             'scheduled_hour', 'scheduled_minute',
             'scheduled_dom',
             'include_next_month', 'include_second_month', 'include_third_month',
-            'notify_users', 'notify_user_names',
+            'notify_users', 'notify_user_names', 'notify_user_codes',
             'last_run_at', 'last_run_status', 'last_run_status_display',
             'last_run_message', 'last_run_duration_seconds',
             'updated_at', 'updated_by',
@@ -448,6 +449,10 @@ class ScheduleConfigSerializer(serializers.ModelSerializer):
             'last_run_message', 'last_run_duration_seconds',
             'updated_at', 'updated_by',
         ]
+        extra_kwargs = {
+            'notify_user_codes': {'required': False},
+            'notify_users': {'required': False},
+        }
 
     def get_last_run_status_display(self, obj):
         mapping = {'SUCCESS': '成功', 'FAILED': '失敗', 'RUNNING': '実行中'}
@@ -466,3 +471,17 @@ class ScheduleConfigSerializer(serializers.ModelSerializer):
             elif user.email:
                 names.append(user.email)
         return names
+
+    def get_notify_user_codes(self, obj):
+        if not obj.pk:
+            return []
+        codes = []
+        for user in obj.notify_users.select_related('profile'):
+            code = getattr(getattr(user, 'profile', None), 'employee_code', None)
+            if code:
+                codes.append(code)
+            elif user.username:
+                codes.append(user.username)
+            elif user.email:
+                codes.append(user.email)
+        return codes

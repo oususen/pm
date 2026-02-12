@@ -68,13 +68,24 @@ const activeNotifications = computed(() => {
   const userTeamId = user?.profile?.team_id ?? user?.profile?.team ?? null
   const userPosition = user?.profile?.position || ''
 
+  const parseLocalDate = (val) => {
+    if (!val) return null
+    // 'YYYY-MM-DD' をローカル日付として解釈（UTC扱いによる9時間ズレを防ぐ）
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(val))
+    if (m) {
+      return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+    }
+    const d = new Date(val)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+
   const today = new Date()
   const todayYmd = new Date(today.getFullYear(), today.getMonth(), today.getDate())
 
   return notifications.value.filter((item) => {
     if (!item) return false
-    const from = item.valid_from ? new Date(item.valid_from) : null
-    const to = item.valid_to ? new Date(item.valid_to) : null
+    const from = parseLocalDate(item.valid_from)
+    const to = parseLocalDate(item.valid_to)
     if (from && todayYmd < from) return false
     if (to && todayYmd > to) return false
     const targetDepartments = Array.isArray(item.target_departments) ? item.target_departments : []

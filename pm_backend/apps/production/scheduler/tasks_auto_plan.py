@@ -98,24 +98,29 @@ def run_auto_plan(force=False, config_id=None):
             ]
             config.last_run_message = '\n'.join(msg)
         else:
-            config.last_run_message = '対象ラインなし'
+            config.last_run_message = '対象ライン需要無し（後ラインの計画入力漏れの可能性があります）'
     else:
         config.last_run_message = '\n'.join(errors) if errors else '失敗'
     config.save(update_fields=[
         'last_run_status', 'last_run_message', 'last_run_duration_seconds'
     ])
 
-    if not success and config.notify_users.exists():
+    # 通知条件: 失敗時 または 対象ライン需要無しのとき
+    if config.notify_users.exists() and (not success or not line_stats):
         today = datetime.now().date()
-        line_label = config.line.line_code if config.line else '未設定'
+        line_label = ''
+        if config.line:
+            line_label = f"{config.line.line_code} {config.line.line_name or ''}".strip()
+        else:
+            line_label = '未設定'
         notification = Notification.objects.create(
-            title=f'[自動タスク失敗] 生産計画自動生成（{line_label}）',
+            title=f"[自動タスク{'失敗' if not success else '結果なし'}] 生産計画自動生成（{line_label}）",
             category='システム',
             domain='生産',
-            description=config.last_run_message or '詳細なし',
-            valid_from=today,
+            description=(config.last_run_message or '詳細なし'),
+            valid_from=None,  # 下限なしにして表示漏れを防ぐ
             valid_to=today + timedelta(days=7),
-            operator_name='システム',
+            operator_name='admin',
         )
         notification.target_users.set(config.notify_users.all())
 

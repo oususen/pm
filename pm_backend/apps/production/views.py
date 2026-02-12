@@ -38,6 +38,8 @@ from .serializers import (
 from .services.order_expansion import OrderExpansionService
 from .services.gantt_planning import generate_line_gantt_plans
 from masters.models import Routing, RoutingStep, ProcessCycleTime, Line, Supplier, Process, Calendar, CalendarDay, BOM, BOMItem
+from django.contrib.auth import get_user_model
+from django.db.models import Q
 
 logger = logging.getLogger(__name__)
 
@@ -3043,8 +3045,24 @@ class ScheduleConfigView(APIView):
         ])
 
         notify_user_ids = request.data.get('notify_users', None)
+        notify_user_codes = request.data.get('notify_user_codes', None)
+
         if notify_user_ids is not None:
             config.notify_users.set(notify_user_ids)
+        elif notify_user_codes is not None:
+            codes = notify_user_codes
+            if isinstance(codes, str):
+                import re
+                codes = [c for c in re.split(r'[,\s]+', codes) if c]
+            try:
+                iter(codes)
+            except TypeError:
+                codes = []
+            User = get_user_model()
+            users = User.objects.filter(
+                Q(profile__employee_code__in=codes) | Q(username__in=codes) | Q(email__in=codes)
+            ).distinct()
+            config.notify_users.set(users)
 
         serializer = ScheduleConfigSerializer(config)
         return Response(serializer.data)

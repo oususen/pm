@@ -20,6 +20,7 @@
               <th style="width: 170px">実行タイミング</th>
               <th style="width: 180px">対象期間</th>
               <th style="width: 80px">有効</th>
+              <th style="width: 200px">失敗時通知先</th>
               <th style="width: 180px">操作</th>
               <th>最終実行情報</th>
             </tr>
@@ -82,6 +83,49 @@
                   <input type="checkbox" v-model="cfg.is_enabled" :disabled="!canEdit" />
                   有効
                 </label>
+              </td>
+              <td class="notify-cell">
+                <div class="notify-search">
+                  <input
+                    v-model="cfg.searchCode"
+                    :disabled="!canEdit"
+                    class="notify-search-input"
+                    placeholder="社員コード/氏名/ユーザー名で検索して追加"
+                    @keyup.enter.prevent="addFirstCandidate(cfg)"
+                  />
+                </div>
+                <div
+                  v-if="candidateList(cfg).length"
+                  class="candidate-list"
+                >
+                  <div
+                    v-for="u in candidateList(cfg)"
+                    :key="u.id"
+                    class="candidate-item"
+                    @click="addUser(cfg, u)"
+                  >
+                    <span class="candidate-code">{{ codeLabel(u) }}</span>
+                    <span class="candidate-name">{{ nameLabel(u) }}</span>
+                  </div>
+                </div>
+                <div class="selected-list" v-if="cfg.notify_user_codes.length">
+                  <span
+                    class="chip"
+                    v-for="code in cfg.notify_user_codes"
+                    :key="code"
+                  >
+                    <span class="chip-code">{{ code }}</span>
+                    <span class="chip-name">{{ chipName(cfg, code) }}</span>
+                    <button
+                      type="button"
+                      class="chip-remove"
+                      :disabled="!canEdit"
+                      @click="removeCode(cfg, code)"
+                    >
+                      ×
+                    </button>
+                  </span>
+                </div>
               </td>
               <td class="actions-cell">
                 <button
@@ -209,6 +253,7 @@ const configs = ref([])
 const saving = reactive(new Set())
 const running = reactive(new Set())
 const canEdit = computed(() => hasPermission(authState.user, 'settings', 'edit'))
+const userList = ref([])
 
 const autoPlanConfigs = computed(() =>
   configs.value
@@ -229,9 +274,24 @@ const loadConfig = async () => {
   try {
     const res = await api.scheduleConfig.getConfigs()
     const data = Array.isArray(res.data) ? res.data : [res.data]
-    configs.value = data
+    configs.value = data.map((cfg) => ({
+      ...cfg,
+      notify_users: cfg.notify_users || [],
+      notify_user_codes: cfg.notify_user_codes || [],
+      notify_user_names: cfg.notify_user_names || {},
+      searchCode: '',
+    }))
   } catch (e) {
     console.error('スケジュール設定の取得に失敗', e)
+  }
+}
+
+const loadUsers = async () => {
+  try {
+    const res = await api.accounts.getUsers({ is_active: true })
+    userList.value = res.data?.results || res.data || []
+  } catch (e) {
+    console.error('ユーザー一覧の取得に失敗', e)
   }
 }
 
@@ -251,6 +311,7 @@ const saveConfig = async (cfg) => {
       include_next_month: cfg.include_next_month,
       include_second_month: cfg.include_second_month,
       include_third_month: cfg.include_third_month,
+      notify_user_codes: cfg.notify_user_codes,
     })
     alert('保存しました。設定は5分以内にスケジューラに反映されます。')
     await loadConfig()
@@ -292,7 +353,61 @@ const formatDateTime = (dt) => {
   return d.toLocaleString('ja-JP')
 }
 
-onMounted(loadConfig)
+const codeLabel = (u) => u?.profile?.employee_code || u.username || u.email || `ID:${u.id}`
+
+const nameLabel = (u) => {
+  const name = `${u.last_name || ''}${u.first_name || ''}`.trim()
+  return name || u.username || u.email || `ID:${u.id}`
+}
+
+const candidateList = (cfg) => {
+  const kw = (cfg.searchCode || '').trim().toLowerCase()
+  if (!kw) return []
+  return userList.value
+    .filter((u) => {
+      const code = codeLabel(u).toLowerCase()
+      const name = nameLabel(u).toLowerCase()
+      return code.includes(kw) || name.includes(kw)
+    })
+    .slice(0, 10)
+}
+
+const chipName = (cfg, code) => {
+  if (cfg.notify_user_names && cfg.notify_user_names[code]) return cfg.notify_user_names[code]
+  const user = userList.value.find((u) => codeLabel(u) === code)
+  return user ? nameLabel(user) : ''
+}
+
+const addUser = (cfg, user) => {
+  const code = codeLabel(user)
+  if (!cfg.notify_user_codes.includes(code)) {
+    cfg.notify_user_codes = [...cfg.notify_user_codes, code]
+    cfg.notify_user_names = {
+      ...(cfg.notify_user_names || {}),
+      [code]: nameLabel(user),
+    }
+  }
+  cfg.searchCode = ''
+}
+
+const addFirstCandidate = (cfg) => {
+  const first = candidateList(cfg)[0]
+  if (first) addUser(cfg, first)
+}
+
+const removeCode = (cfg, code) => {
+  cfg.notify_user_codes = cfg.notify_user_codes.filter((c) => c !== code)
+  if (cfg.notify_user_names) {
+    const names = { ...cfg.notify_user_names }
+    delete names[code]
+    cfg.notify_user_names = names
+  }
+}
+
+onMounted(() => {
+  loadConfig()
+  loadUsers()
+})
 </script>
 
 <style scoped>
@@ -406,6 +521,93 @@ onMounted(loadConfig)
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.notify-select {
+  width: 100%;
+  min-height: 60px;
+  font-size: 12px;
+  border: 1px solid #cfd6e1;
+  border-radius: 3px;
+}
+.notify-cell {
+  min-width: 200px;
+}
+.notify-search-input {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12px;
+  border: 1px solid #cfd6e1;
+  border-radius: 3px;
+}
+.candidate-list {
+  border: 1px solid #e5e9ef;
+  border-radius: 4px;
+  margin-top: 6px;
+  max-height: 160px;
+  overflow: auto;
+  background: #fff;
+}
+.candidate-item {
+  padding: 6px 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+}
+.candidate-item:hover {
+  background: #f3f6fb;
+}
+.candidate-code {
+  font-weight: 700;
+  color: #1f2a44;
+  min-width: 80px;
+}
+.candidate-name {
+  color: #444;
+  font-size: 12px;
+}
+.selected-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.chip {
+  background: #eef2f6;
+  border: 1px solid #cfd6e1;
+  border-radius: 14px;
+  padding: 4px 8px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chip-code {
+  font-weight: 700;
+}
+.chip-name {
+  color: #4b5563;
+}
+.chip-remove {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+  color: #6b7280;
+}
+.chip-remove:disabled {
+  cursor: not-allowed;
+  color: #9ca3af;
+}
+.notify-input {
+  width: 100%;
+  min-height: 60px;
+  font-size: 12px;
+  border: 1px solid #cfd6e1;
+  border-radius: 3px;
+  padding: 6px 8px;
+  resize: vertical;
 }
 .last-cell {
   font-size: 12px;
