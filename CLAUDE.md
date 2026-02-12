@@ -70,6 +70,9 @@ cd pm_backend
 python manage.py runserver 8081  # 開発サーバー起動
 python manage.py migrate         # マイグレーション実行
 ```
+## チャート規約
+
+- 私のことをBOSSって呼ぶ
 
 ## コーディング規約
 
@@ -78,6 +81,7 @@ python manage.py migrate         # マイグレーション実行
 - **フロントエンド**: Vue 3 Composition API を使用
 - **バックエンド**: Django の規約に従う
 - **API**: RESTful な設計を維持
+
 
 ## デプロイとデータベース管理
 

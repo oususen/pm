@@ -99,7 +99,14 @@
               <thead>
                 <tr>
                   <th class="label-col">項目</th>
-                  <th v-for="d in columns" :key="d" class="day-col">{{ d }}</th>
+                  <th
+                    v-for="d in columns"
+                    :key="d"
+                    class="day-col"
+                    :class="{ holiday: isHoliday(d) }"
+                  >
+                    {{ formatDayHeader(d) }}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -107,7 +114,8 @@
                   <th class="label-col">{{ row.label }}</th>
                   <td v-for="d in columns"
                     :key="`${row.key}-${d}`"
-                    class="cell" :class="getCellClass(g, d, row.key)"
+                    class="cell"
+                    :class="[getCellClass(g, d, row.key), { holiday: isHoliday(d) }]"
                   >
                     {{ fmt(getValue(g, d, row.key)) }}
                   </td>
@@ -218,6 +226,15 @@ const columns = computed(() => {
   return cols;
 });
 
+const formatDayHeader = (dateStr) => {
+  if (!dateStr) return "";
+  const d = parseISODate(dateStr);
+  if (!d || Number.isNaN(d.getTime())) return dateStr;
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${m}-${day}`;
+};
+
 const getBacklogParams = () => {
   const start = columns.value[0];
   const end = columns.value[columns.value.length - 1];
@@ -240,6 +257,122 @@ const rowDefs = [
   { key: "progress", label: "進度" },
 ];
 
+// 休日判定用のキャッシュ
+const holidays = ref(new Set());
+const lineCalendarMap = ref({});
+const calendarDayCache = ref({});
+
+const buildWeekendSet = () => {
+  const set = new Set();
+  columns.value.forEach((date) => {
+    const d = parseISODate(date);
+    if (!d || Number.isNaN(d.getTime())) return;
+    const dow = d.getDay();
+    if (dow === 0 || dow === 6) {
+      set.add(formatISODate(d));
+    }
+  });
+  return set;
+};
+
+const ensureLineList = async () => {
+  if (lineList?.value?.length) return;
+  try {
+    const res = await api.lines.getLines();
+    lineList.value = res.data?.results || res.data || [];
+  } catch (e) {
+    console.error("ライン一覧の取得に失敗:", e);
+  }
+};
+
+const ensureLineCalendars = async (lineIds) => {
+  if (!Array.isArray(lineIds) || !lineIds.length) return lineCalendarMap.value;
+  await ensureLineList();
+  const map = { ...lineCalendarMap.value };
+  (lineList.value || []).forEach((line) => {
+    if (line?.id !== undefined && map[line.id] === undefined) {
+      map[line.id] = line.calendar || null;
+    }
+  });
+  const missing = lineIds.filter((id) => map[id] === undefined);
+  if (missing.length) {
+    await Promise.all(
+      missing.map(async (id) => {
+        try {
+          const res = await api.lines.getLine(id);
+          map[id] = res.data?.calendar ?? null;
+        } catch (err) {
+          console.error("ライン詳細の取得に失敗:", err);
+          map[id] = null;
+        }
+      })
+    );
+  }
+  lineCalendarMap.value = map;
+  return map;
+};
+
+const loadCalendarDays = async (calendarId) => {
+  if (!calendarId) return [];
+  if (calendarDayCache.value[calendarId]) {
+    return calendarDayCache.value[calendarId];
+  }
+  try {
+    const res = await api.calendars.getCalendarDays(calendarId);
+    const rows = res.data?.results || res.data || [];
+    calendarDayCache.value[calendarId] = rows;
+    return rows;
+  } catch (e) {
+    console.error("カレンダ日の取得に失敗:", e);
+    return [];
+  }
+};
+
+const updateHolidays = async () => {
+  if (!columns.value.length) {
+    holidays.value = new Set();
+    return;
+  }
+  const start = columns.value[0];
+  const end = columns.value[columns.value.length - 1];
+  const fallback = buildWeekendSet();
+
+  try {
+    const lineIds = getDisplayedLineIds();
+    const calendarMap = await ensureLineCalendars(lineIds);
+    const calendarIds = Array.from(
+      new Set(
+        lineIds
+          .map((id) => calendarMap?.[id])
+          .filter((id) => id !== null && id !== undefined)
+      )
+    );
+    if (!calendarIds.length) {
+      holidays.value = fallback;
+      return;
+    }
+
+    const holidaySet = new Set();
+    for (const calendarId of calendarIds) {
+      const days = await loadCalendarDays(calendarId);
+      days.forEach((day) => {
+        const dateStr = day.target_date;
+        if (!dateStr) return;
+        if (dateStr < start || dateStr > end) return;
+        if (day.is_working_day === false || Number(day.work_minutes) === 0) {
+          holidaySet.add(dateStr);
+        }
+      });
+    }
+    holidays.value = holidaySet.size ? holidaySet : fallback;
+  } catch (e) {
+    console.error("休日判定の更新に失敗:", e);
+    holidays.value = fallback;
+  }
+};
+
+const isHoliday = (dateStr) => holidays.value.has(dateStr);
+
 const applyDemands = (payload) => {
   const list = Array.isArray(payload) ? payload : payload.results || [];
   demands.value = list;
@@ -255,6 +388,7 @@ const reloadDemands = async () => {
   const res = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
   const payload = res.data || [];
   applyDemands(payload);
+  await updateHolidays();
 };
 
 const groups = computed(() => {
@@ -561,6 +695,7 @@ const load = async () => {
     const res = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
     const payload = res.data || [];
     applyDemands(payload);
+    await updateHolidays();
   } catch (e) {
     error.value = e?.message || "読み込みに失敗しました";
   } finally {
@@ -603,6 +738,7 @@ const recalculate = async () => {
     // 4. 最新データを再取得
     const finalRes = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
     applyDemands(finalRes.data || []);
+    await updateHolidays();
   } catch (e) {
     error.value = e?.message || "再計算に失敗しました";
   } finally {
@@ -775,6 +911,10 @@ onBeforeUnmount(() => {
   z-index: 1;
   text-align: center;
 }
+.matrix-table thead th.holiday {
+  background: #ffe5ef;
+  color: #b03060;
+}
 .label-col {
   position: sticky;
   left: 0;
@@ -790,6 +930,9 @@ onBeforeUnmount(() => {
     font-weight: bold;
   }
   background: #fff;
+}
+.cell.holiday:not(.negative) {
+  background: #fff0f6;
 }
 .cell-input {
   width: 100%;
