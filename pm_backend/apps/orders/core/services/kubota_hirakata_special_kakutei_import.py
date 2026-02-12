@@ -115,6 +115,13 @@ class KubotaHirakataSpecialKakuteiImportService:
         """Import Kubota Hirakata special confirmed order CSV (NO=47)."""
         self.errors = []
         self.warnings = []
+        existing_order_nos = set(
+            StgOrderRawKubota.objects.filter(
+                customer_code=customer_code,
+                order_no__isnull=False
+            ).values_list('order_no', flat=True)
+        )
+        file_order_nos = set()
 
         try:
             decoded_file, encoding = self.decode_file(file)
@@ -155,6 +162,12 @@ class KubotaHirakataSpecialKakuteiImportService:
                     quantity_str = row[self.COL_QUANTITY].strip() if len(row) > self.COL_QUANTITY else ''
                     issue_date_str = row[self.COL_ISSUE_DATE].strip() if len(row) > self.COL_ISSUE_DATE else ''
                     order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
+
+                    if order_no:
+                        if order_no in existing_order_nos or order_no in file_order_nos:
+                            self.warnings.append(f"Row {row_no}: Duplicate order_no {order_no} skipped")
+                            continue
+                        file_order_nos.add(order_no)
 
                     delivery_date = self.parse_date_from_mmdd(delivery_date_str)
                     if not delivery_date:

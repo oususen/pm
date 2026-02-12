@@ -104,6 +104,13 @@ class KubotaHirakataKakuteiImportService:
         """
         self.errors = []
         self.warnings = []
+        existing_order_nos = set(
+            StgOrderRawKubota.objects.filter(
+                customer_code=customer_code,
+                order_no__isnull=False
+            ).values_list('order_no', flat=True)
+        )
+        file_order_nos = set()
 
         try:
             # Decode file
@@ -161,6 +168,12 @@ class KubotaHirakataKakuteiImportService:
 
                     if not product_code:
                         continue
+
+                    if order_no:
+                        if order_no in existing_order_nos or order_no in file_order_nos:
+                            self.warnings.append(f"Row {row_no}: Duplicate order_no {order_no} skipped")
+                            continue
+                        file_order_nos.add(order_no)
 
                     # Parse date (YYMMDD format)
                     due_date = self.parse_date_from_yymmdd(delivery_date_str)
