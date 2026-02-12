@@ -1591,6 +1591,56 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if driver_id is not None:
                     copro_driver[(parent_id, plan_date)] = driver_id
 
+        # 標準BOMの数量マップ（親→子の使用数量／有効期間）を構築
+        # 全BOM（非連産品）から数量マップを構築（多段BOMに対応）
+        bom_qty_map = defaultdict(list)
+        normal_boms = BOM.objects.filter(
+            is_active=True,
+            is_coproduct=False,
+        ).order_by('-valid_from', '-id').prefetch_related('items')
+        for bom in normal_boms:
+            for item in bom.items.all():
+                try:
+                    qty_decimal = Decimal(item.quantity)
+                except Exception:
+                    continue
+                if qty_decimal == 0:
+                    continue
+                bom_qty_map[bom.parent_product_id].append({
+                    'child_id': item.child_product_id,
+                    'qty': qty_decimal,
+                    'valid_from': bom.valid_from,
+                    'valid_to': bom.valid_to,
+                })
+
+        def find_bom_multiplier(parent_id, target_id, plan_date, visited=None):
+            """
+            多段BOMを辿って parent_id -> ... -> target_id の数量倍率を返す。
+            見つからない場合はNone。
+            """
+            if parent_id == target_id:
+                return Decimal('1')
+            if visited is None:
+                visited = set()
+            key = (parent_id, target_id)
+            if key in visited:
+                return None
+            visited.add(key)
+            for ent in bom_qty_map.get(parent_id, []):
+                if plan_date < ent['valid_from']:
+                    continue
+                if ent['valid_to'] and plan_date > ent['valid_to']:
+                    continue
+                if ent['child_id'] == target_id:
+                    return ent['qty']
+                sub = find_bom_multiplier(ent['child_id'], target_id, plan_date, visited)
+                if sub is not None:
+                    try:
+                        return ent['qty'] * sub
+                    except Exception:
+                        return None
+            return None
+
         # ラインに紐づくカレンダがあれば使用、無ければdaisoを使用
         line_obj = Line.objects.filter(id=line_id).first()
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(calendar_code='daiso').values_list('id', flat=True).first()
@@ -1735,6 +1785,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     lt_days = 0
                 target_date = shift_business_days(plan_date, lt_days)
                 target_product_id = step.output_product_id or product_id
+                plan_qty_step = plan_qty
+                order_qty_step = order_qty
+                demand_qty_step = demand_qty_plan
 
                 # 連産品の子製品の場合、親製品に置き換える
                 original_target_product_id = target_product_id
@@ -1748,7 +1801,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     target_product_id = copro_info_target['parent_id']
 
                 # 連産品（コプロダクト）の場合、セット数ベースで工数を計算
-                time_qty = plan_qty
+                time_qty = plan_qty_step
                 is_copro_driver = True
 
                 if copro_info_target:
@@ -1756,10 +1809,24 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     set_qty = copro_set_qty.get(copro_key)
                     if set_qty is not None:
                         time_qty = set_qty
-                        plan_qty = set_qty
+                        plan_qty_step = set_qty
                     driver_id = copro_driver.get(copro_key)
                     # 代表child以外は工数0として扱い、重複計上を防ぐ
                     is_copro_driver = driver_id in (None, original_target_product_id, product_id)
+
+                # 標準BOMの数量を掛けて「二個使い」などを反映
+                # 連産品置き換え時（copro）は別ロジックで処理するため除外
+                qty_multiplier = Decimal('1')
+                if not copro_info_target and target_product_id != product_id:
+                    # 多段BOMを遡って数量を算出（親=ライン最終品）
+                    multiplier = find_bom_multiplier(product_id, target_product_id, plan_date)
+                    if multiplier is not None:
+                        qty_multiplier = multiplier
+                plan_qty_step = plan_qty_step * qty_multiplier
+                time_qty = time_qty * qty_multiplier
+                order_qty_step = order_qty_step * qty_multiplier
+                demand_qty_step = demand_qty_step * qty_multiplier
+                child_plan_qty = child_plan_qty * qty_multiplier
 
                 computed_time_min = None
                 # サイクルタイム取得は元の製品IDで行う
@@ -1787,7 +1854,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if not is_copro_driver:
                     computed_time_min = 0
 
-                def add_aggregate(target_id, qty_value, time_value):
+                def add_aggregate(target_id, qty_value, time_value, ord_qty_value, dem_qty_value):
                     key = (target_id, step.process_id, target_date, seq_key)
                     entry = aggregated.get(key)
                     if not entry:
@@ -1803,17 +1870,17 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         }
                         aggregated[key] = entry
                     entry['plan_qty'] += Decimal(qty_value or 0)
-                    entry['order_qty'] += Decimal(order_qty or 0)
-                    entry['demand_qty_plan'] += Decimal(demand_qty_plan or 0)
+                    entry['order_qty'] += Decimal(ord_qty_value or 0)
+                    entry['demand_qty_plan'] += Decimal(dem_qty_value or 0)
                     if time_value is not None:
                         entry['time_min'] += Decimal(str(time_value))
                     if parent_plan_id:
                         entry['plan_ids'].add(parent_plan_id)
 
-                add_aggregate(target_product_id, plan_qty, computed_time_min)
+                add_aggregate(target_product_id, plan_qty_step, computed_time_min, order_qty_step, demand_qty_step)
 
                 if child_target_product_id and child_target_product_id != target_product_id:
-                    add_aggregate(child_target_product_id, child_plan_qty, 0)
+                    add_aggregate(child_target_product_id, child_plan_qty, 0, order_qty_step, demand_qty_step)
 
         for (target_id, process_id, target_date, seq_key), entry in aggregated.items():
             plan_qty_value = int(entry['plan_qty'])
@@ -2974,6 +3041,10 @@ class ScheduleConfigView(APIView):
             'is_enabled', 'include_next_month', 'include_second_month', 'include_third_month',
             'line', 'updated_at', 'updated_by',
         ])
+
+        notify_user_ids = request.data.get('notify_users', None)
+        if notify_user_ids is not None:
+            config.notify_users.set(notify_user_ids)
 
         serializer = ScheduleConfigSerializer(config)
         return Response(serializer.data)

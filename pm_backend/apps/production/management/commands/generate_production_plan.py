@@ -1,18 +1,30 @@
 import json
 import logging
+from collections import defaultdict
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.db.models import Max
 
-from masters.models import Line, RoutingStep, BOM, BOMItem, Product
+from masters.models import Line, Product
 from production.models_line_backlog import LineBacklog
 from production.models_line_plan import LinePlan
+from production.models_line_gantt_plan import LineGanttPlan
+from production.models_line_default_schedule_setting import LineDefaultScheduleSetting
 from production.views import LineBacklogViewSet
+from production.services.gantt_planning import generate_line_gantt_plans
 
 logger = logging.getLogger('production')
+
+
+class DummyRequest:
+    """簡易リクエスト（ViewSet呼び出し用）"""
+    def __init__(self, data):
+        self.data = data
+        self.user = None
 
 
 def parse_date_safe(val):
@@ -42,7 +54,7 @@ def load_config(path_str):
 
 
 def month_range(run_date: date):
-    # 翌月1日〜翌月末
+    # 翌月1日〜翌月末（既存互換）
     first = run_date.replace(day=1)
     next_month = (first + timedelta(days=32)).replace(day=1)
     start = next_month
@@ -57,108 +69,11 @@ def iter_lines(line_ids):
     return list(qs)
 
 
-def ensure_base_row(line_id, process_id, product_id, plan_date):
-    obj, _ = LineBacklog.objects.get_or_create(
-        line_id=line_id,
-        process_id=process_id,
-        product_id=product_id,
-        plan_date=plan_date,
-        sequence_no=0,
-        defaults={
-            'order_qty': 0,
-            'plan_qty': 0,
-            'demand_qty_plan': 0,
-            'actual_qty': 0,
-            'stock_qty': 0,
-            'planned_stock_qty': 0,
-            'adjust_qty': 0,
-            'scrap_adjust_qty': 0,
-            'scrap_qty': 0,
-            'actual_shipment_qty': 0,
-        },
-    )
-    return obj
-
-
-def upsert_plan(line_id, process_id, product_id, plan_date, plan_qty, sequence_no=1):
-    obj, created = LineBacklog.objects.update_or_create(
-        line_id=line_id,
-        process_id=process_id,
-        product_id=product_id,
-        plan_date=plan_date,
-        sequence_no=sequence_no,
-        defaults={
-            'plan_qty': plan_qty,
-            'order_qty': 0,
-            'demand_qty_plan': 0,
-        }
-    )
-    return obj, created
-
-
-def collect_targets(line: Line):
-    """
-    ライン配下の工程×製品を収集。
-    - RoutingStep.line が対象ライン
-    - または RoutingStep.process.line が対象ライン（工程側にライン紐付けがあるケース）
-    - BOMItem.line が対象ライン
-    - 連産品代表品（is_coproduct_driver）も対象に含める
-    """
-    from django.db.models import Q
-
-    steps = RoutingStep.objects.filter(
-        Q(line=line) | Q(process__line=line),
-        routing__is_active=True,
-    ).select_related('output_product', 'routing__product', 'process')
-
-    target_keys = set()
-    for st in steps:
-        # pickup() と同じく output_product → routing.product のフォールバック
-        product_id = st.output_product_id or (st.routing.product_id if st.routing else None)
-        if product_id and st.process_id:
-            target_keys.add((st.process_id, product_id))
-
-    bom_items = BOMItem.objects.filter(line=line, bom__is_active=True)
-    for bi in bom_items:
-        proc_id = bi.process_id or getattr(bi.bom, 'process_id', None)
-        if proc_id and bi.child_product_id:
-            target_keys.add((proc_id, bi.child_product_id))
-
-    # 連産品代表品（is_coproduct_driver）: pickup()が需要を作成する製品を漏れなく含める
-    copro_boms = BOM.objects.filter(
-        is_coproduct=True, is_active=True,
-    ).prefetch_related('items')
-    for bom in copro_boms:
-        for item in bom.items.all():
-            if not item.is_coproduct_driver:
-                continue
-            # この代表品がラインの工程に紐づいているか確認
-            driver_steps = RoutingStep.objects.filter(
-                Q(line=line) | Q(process__line=line),
-                routing__is_active=True,
-            ).filter(
-                Q(output_product_id=item.child_product_id) |
-                Q(routing__product_id=item.child_product_id)
-            ).select_related('process')
-            for ds in driver_steps:
-                if ds.process_id:
-                    target_keys.add((ds.process_id, item.child_product_id))
-
-    return target_keys
-
-
-def get_demand_only(line_id, start_date, end_date):
-    """需要取り込みだけ実行し、LineBacklogから需要列を取得する"""
+def run_pickup(line_id, start_date, end_date):
+    """pickupを実行して需要を最新化"""
     viewset = LineBacklogViewSet()
     viewset.format_kwarg = None
     viewset.kwargs = {}
-
-    # パーサ依存を避けるため、data属性だけ持つダミーリクエストを渡す
-    class DummyRequest:
-        def __init__(self, data):
-            self.data = data
-            self.user = None
-
     req = DummyRequest({
         'line_id': line_id,
         'start_date': str(start_date),
@@ -167,14 +82,181 @@ def get_demand_only(line_id, start_date, end_date):
     viewset.request = req
     viewset.pickup(req)
 
+
+def fetch_final_demands(line_id, start_date, end_date):
+    """ライン最終品のみの需要行を取得"""
     return LineBacklog.objects.filter(
         line_id=line_id,
-        plan_date__range=[start_date, end_date]
+        plan_date__range=[start_date, end_date],
+        sequence_no=0,
+        product__is_line_final_product=True,
+        demand_qty_plan__gt=0,
     ).values('plan_date', 'process_id', 'product_id', 'demand_qty_plan')
 
 
+def delete_existing(line_id, start_date, end_date):
+    """
+    指定期間の計画系を一括クリア（需要有無に関わらずライン最終品計画を再生成する方針）
+    - LinePlan: 期間内すべて削除
+    - LineGanttPlan: 期間内すべて削除
+    - LineBacklog: plan_idひも付き計画行（sequence_no>0）のみ削除
+    """
+    plan_ids = list(LinePlan.objects.filter(
+        line_id=line_id,
+        plan_date__range=[start_date, end_date],
+    ).values_list('plan_id', flat=True))
+
+    LinePlan.objects.filter(
+        line_id=line_id,
+        plan_date__range=[start_date, end_date],
+    ).delete()
+
+    LineGanttPlan.objects.filter(
+        line_id=line_id,
+        plan_date__range=[start_date, end_date],
+    ).delete()
+
+    if plan_ids:
+        LineBacklog.objects.filter(
+            plan_id__in=plan_ids,
+            sequence_no__gt=0,
+        ).delete()
+    return plan_ids
+
+
+def build_product_code_cache(product_ids):
+    cache = {}
+    if not product_ids:
+        return cache
+    for pid, code in Product.objects.filter(id__in=product_ids).values_list('id', 'product_code'):
+        cache[pid] = code
+    return cache
+
+
+def generate_line_plans(line_id, demand_rows):
+    """ライン最終品需要からLinePlanを作成（手動save互換）"""
+    items_by_date = defaultdict(list)
+    product_ids = set()
+    for row in demand_rows:
+        items_by_date[row['plan_date']].append(row)
+        product_ids.add(row['product_id'])
+
+    product_code_cache = build_product_code_cache(product_ids)
+
+    created = 0
+    created_plan_ids = []
+
+    # 既存の自動対象外計画を考慮したmax sequence取得
+    existing_max = {
+        rec['plan_date']: rec['max_seq']
+        for rec in LinePlan.objects.filter(
+            line_id=line_id,
+            plan_date__in=items_by_date.keys(),
+        ).exclude(product_id__in=product_ids).values('plan_date').annotate(max_seq=Max('sequence_no'))
+    }
+
+    for plan_date, items in items_by_date.items():
+        # product_code -> process_id で安定ソート
+        for it in items:
+            if it['product_id'] not in product_code_cache:
+                product_code_cache[it['product_id']] = Product.objects.filter(
+                    id=it['product_id']
+                ).values_list('product_code', flat=True).first() or str(it['product_id'])
+        items.sort(key=lambda x: (product_code_cache.get(x['product_id'], ''), x['process_id'] or 0))
+
+        next_seq = (existing_max.get(plan_date) or 0) + 1
+
+        for it in items:
+            plan_qty = int(Decimal(it['demand_qty_plan'] or 0))
+            if plan_qty <= 0:
+                continue
+            product_code = product_code_cache.get(it['product_id'], str(it['product_id']))
+
+            qty_label = str(plan_qty).rstrip('0').rstrip('.')
+            if '.' in qty_label:
+                qty_label = qty_label.replace('.', 'p')
+            plan_id = f"{product_code}_{plan_date.strftime('%Y%m%d')}_{qty_label}_{next_seq}"
+
+            LinePlan.objects.create(
+                plan_date=plan_date,
+                process_id=it['process_id'],
+                product_id=it['product_id'],
+                line_id=line_id,
+                plan_qty=plan_qty,
+                plan_id=plan_id,
+                sequence_no=next_seq,
+            )
+            created += 1
+            created_plan_ids.append(plan_id)
+            next_seq += 1
+
+    return created, created_plan_ids
+
+
+def expand_processes(line_id, start_date, end_date):
+    """LinePlan→LineBacklog工程展開"""
+    viewset = LineBacklogViewSet()
+    viewset.format_kwarg = None
+    viewset.kwargs = {}
+    req = DummyRequest({
+        'line_id': line_id,
+        'start_date': str(start_date),
+        'end_date': str(end_date),
+        'items': [],
+        'read_only': False,
+        'include_coproduct_children': True,
+    })
+    viewset.request = req
+    viewset.expand_processes(req)
+
+
+def generate_gantt(line_id, start_date, end_date):
+    """LineGanttPlan再生成（手動generate互換）"""
+    default_setting = LineDefaultScheduleSetting.objects.filter(line_id=line_id).first()
+    if default_setting and default_setting.final_process_start_time:
+        start_time_str = default_setting.final_process_start_time.strftime('%H:%M')
+        adjust_break = default_setting.adjust_to_break_end
+    else:
+        start_time_str = '08:00'
+        adjust_break = True
+
+    plans = generate_line_gantt_plans(
+        line_id=line_id,
+        start_date=str(start_date),
+        end_date=str(end_date),
+        clear_existing=False,
+        final_process_start_time=start_time_str,
+        adjust_to_break_end=adjust_break,
+    )
+
+    new_plan_ids = []
+    for plan in plans:
+        LineGanttPlan.objects.update_or_create(
+            plan_id=plan['plan_id'],
+            defaults={
+                'line_id': plan['line_id'],
+                'product_id': plan['product_id'],
+                'plan_date': plan['plan_date'],
+                'plan_qty': plan['plan_qty'],
+                'sequence_no': plan['sequence_no'],
+                'start_datetime': plan['start_datetime'],
+                'end_datetime': plan['end_datetime'],
+                'processes_plan': plan['processes_plan'],
+            }
+        )
+        new_plan_ids.append(plan['plan_id'])
+
+    old_qs = LineGanttPlan.objects.filter(
+        line_id=line_id,
+        plan_date__range=[start_date, end_date],
+    )
+    if new_plan_ids:
+        old_qs = old_qs.exclude(plan_id__in=new_plan_ids)
+    old_qs.delete()
+
+
 class Command(BaseCommand):
-    help = 'LineDemandを元に生産計画を自動生成する（在庫再計算なし）'
+    help = 'LineDemandを元に生産計画を自動生成する（手動計画と同等の後処理込み）'
 
     def add_arguments(self, parser):
         parser.add_argument('--line', dest='lines', nargs='+', type=int, help='対象ラインID（複数可）')
@@ -217,115 +299,30 @@ class Command(BaseCommand):
 
             self.stdout.write(f'ライン {line.line_code} ({line.id}) 期間 {line_start}〜{line_end}')
 
-            target_keys = collect_targets(line)
-            if not target_keys:
-                self.stdout.write(self.style.WARNING('  対象工程×製品なし'))
-                continue
-
             with transaction.atomic():
-                demand_rows = get_demand_only(line.id, line_start, line_end)
+                # Step1: pickup
+                run_pickup(line.id, line_start, line_end)
 
-                # 需要から計画アイテムを収集
-                plan_items = []
-                for row in demand_rows:
-                    proc_id = row['process_id']
-                    prod_id = row['product_id']
-                    if not proc_id or not prod_id:
-                        continue
-                    if (proc_id, prod_id) not in target_keys:
-                        continue
-                    demand_qty = row.get('demand_qty_plan') or 0
-                    plan_qty = int(Decimal(demand_qty)) if demand_qty is not None else 0
-                    if plan_qty > 0:
-                        plan_items.append({
-                            'product_id': prod_id,
-                            'process_id': proc_id,
-                            'plan_date': row['plan_date'],
-                            'plan_qty': plan_qty,
-                        })
+                # Step2: ライン最終品需要抽出
+                demand_rows = list(fetch_final_demands(line.id, line_start, line_end))
+                if not demand_rows:
+                    self.stdout.write(self.style.WARNING('  需要なし（ライン最終品）'))
+                    if dry_run:
+                        raise transaction.TransactionManagementError('dry-run rollback')
+                    continue
 
-                if plan_items:
-                    affected_products = set(item['product_id'] for item in plan_items)
+                # Step3: カスケード削除（期間一括クリア）
+                delete_existing(line.id, line_start, line_end)
 
-                    # 既存LinePlan・関連LineBacklog(計画行)を削除
-                    old_plan_ids = list(LinePlan.objects.filter(
-                        line_id=line.id,
-                        plan_date__range=[line_start, line_end],
-                        product_id__in=affected_products,
-                    ).values_list('plan_id', flat=True))
-                    LinePlan.objects.filter(
-                        line_id=line.id,
-                        plan_date__range=[line_start, line_end],
-                        product_id__in=affected_products,
-                    ).delete()
-                    if old_plan_ids:
-                        LineBacklog.objects.filter(
-                            plan_id__in=old_plan_ids,
-                            sequence_no__gt=0,
-                        ).delete()
+                # Step4: LinePlan作成
+                created_count, _ = generate_line_plans(line.id, demand_rows)
+                summary['created'] += created_count
 
-                    # LinePlan レコード作成（手動保存と同じテーブル）
-                    seq_by_date = {}
-                    product_code_cache = {}
-                    items_for_expand = []
-                    for item in plan_items:
-                        pd = item['plan_date']
-                        if pd not in seq_by_date:
-                            max_seq = LinePlan.objects.filter(
-                                line_id=line.id, plan_date=pd,
-                            ).order_by('-sequence_no').values_list('sequence_no', flat=True).first()
-                            seq_by_date[pd] = (max_seq or 0) + 1
-                        seq = seq_by_date[pd]
-                        seq_by_date[pd] = seq + 1
+                # Step5a: 工程展開
+                expand_processes(line.id, line_start, line_end)
 
-                        prod_id = item['product_id']
-                        if prod_id not in product_code_cache:
-                            product_code_cache[prod_id] = (
-                                Product.objects.filter(id=prod_id)
-                                .values_list('product_code', flat=True).first() or str(prod_id)
-                            )
-                        product_code = product_code_cache[prod_id]
-                        plan_id = f"{product_code}_{pd.strftime('%Y%m%d')}_{item['plan_qty']}_{seq}"
-
-                        LinePlan.objects.create(
-                            plan_date=pd,
-                            process_id=item['process_id'],
-                            product_id=prod_id,
-                            line_id=line.id,
-                            plan_qty=item['plan_qty'],
-                            plan_id=plan_id,
-                            sequence_no=seq,
-                        )
-                        summary['created'] += 1
-                        items_for_expand.append({
-                            'product_id': prod_id,
-                            'plan_date': str(pd),
-                            'plan_qty': item['plan_qty'],
-                            'sequence_no': seq,
-                        })
-
-                    # 計画を工程レベルに展開（手動操作の「expand_processes」に相当）
-                    class DummyRequest:
-                        def __init__(self, data):
-                            self.data = data
-                            self.user = None
-
-                    viewset = LineBacklogViewSet()
-                    viewset.format_kwarg = None
-                    viewset.kwargs = {}
-                    req = DummyRequest({
-                        'line_id': line.id,
-                        'start_date': str(line_start),
-                        'end_date': str(line_end),
-                        'items': items_for_expand,
-                        'read_only': False,
-                        'include_coproduct_children': True,
-                    })
-                    viewset.request = req
-                    try:
-                        viewset.expand_processes(req)
-                    except Exception as e:
-                        logger.error(f'expand_processes failed line={line.id}: {e}', exc_info=True)
+                # Step5b: ガント生成（在庫計算は日次バッチに任せる）
+                generate_gantt(line.id, line_start, line_end)
 
                 if dry_run:
                     raise transaction.TransactionManagementError('dry-run rollback')
@@ -336,8 +333,8 @@ class Command(BaseCommand):
                     'line_code': line.line_code,
                     'start': str(line_start),
                     'end': str(line_end),
-                    'created': summary['created'],
-                    'updated': summary['updated'],
+                    'created': created_count,
+                    'updated': 0,  # 自動生成では更新は0（互換用フィールド）
                 })
 
         self.stdout.write(self.style.SUCCESS(

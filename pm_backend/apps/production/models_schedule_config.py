@@ -70,6 +70,12 @@ class ScheduleConfig(models.Model):
         default=False,
         verbose_name='翌々翌月を対象'
     )
+    notify_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='schedule_config_notifications',
+        verbose_name='通知先ユーザー'
+    )
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

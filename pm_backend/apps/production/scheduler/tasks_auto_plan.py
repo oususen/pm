@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 from production.models_schedule_config import ScheduleConfig
 from production.management.commands.generate_production_plan import Command as GeneratePlanCommand
+from notifications.models import Notification
 
 logger = logging.getLogger('production')
 
@@ -103,6 +104,20 @@ def run_auto_plan(force=False, config_id=None):
     config.save(update_fields=[
         'last_run_status', 'last_run_message', 'last_run_duration_seconds'
     ])
+
+    if not success and config.notify_users.exists():
+        today = datetime.now().date()
+        line_label = config.line.line_code if config.line else '未設定'
+        notification = Notification.objects.create(
+            title=f'[自動タスク失敗] 生産計画自動生成（{line_label}）',
+            category='システム',
+            domain='生産',
+            description=config.last_run_message or '詳細なし',
+            valid_from=today,
+            valid_to=today + timedelta(days=7),
+            operator_name='システム',
+        )
+        notification.target_users.set(config.notify_users.all())
 
     return {
         'success': success,

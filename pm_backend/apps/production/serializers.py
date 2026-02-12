@@ -428,6 +428,7 @@ class ScheduleConfigSerializer(serializers.ModelSerializer):
     last_run_status_display = serializers.SerializerMethodField()
     line_code = serializers.CharField(source='line.line_code', read_only=True)
     line_name = serializers.CharField(source='line.line_name', read_only=True)
+    notify_user_names = serializers.SerializerMethodField()
 
     class Meta:
         model = ScheduleConfig
@@ -437,6 +438,7 @@ class ScheduleConfigSerializer(serializers.ModelSerializer):
             'scheduled_hour', 'scheduled_minute',
             'scheduled_dom',
             'include_next_month', 'include_second_month', 'include_third_month',
+            'notify_users', 'notify_user_names',
             'last_run_at', 'last_run_status', 'last_run_status_display',
             'last_run_message', 'last_run_duration_seconds',
             'updated_at', 'updated_by',
@@ -450,3 +452,17 @@ class ScheduleConfigSerializer(serializers.ModelSerializer):
     def get_last_run_status_display(self, obj):
         mapping = {'SUCCESS': '成功', 'FAILED': '失敗', 'RUNNING': '実行中'}
         return mapping.get(obj.last_run_status, '')
+
+    def get_notify_user_names(self, obj):
+        if not obj.pk:
+            return []
+        names = []
+        for user in obj.notify_users.all():
+            full_name = user.get_full_name() or ''
+            if full_name.strip():
+                names.append(full_name)
+            elif user.username:
+                names.append(user.username)
+            elif user.email:
+                names.append(user.email)
+        return names
