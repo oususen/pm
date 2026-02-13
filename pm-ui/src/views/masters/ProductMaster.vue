@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1 class="page-title">製品マスタ</h1>
       <div class="page-actions">
+        <button @click="openLineFinalDialog" class="btn-secondary">ライン最終品 一括設定</button>
         <button @click="fetchProducts(1)" class="btn-primary">更新</button>
         <button @click="showNewDialog" class="btn-success">新規</button>
       </div>
@@ -296,6 +297,65 @@
         </form>
       </div>
     </div>
+    <!-- ライン最終品 一括設定ダイアログ -->
+    <div v-if="showLineFinalDialog" class="modal-overlay" @click.self="showLineFinalDialog = false">
+      <div class="modal-content line-final-modal">
+        <h2>ライン最終品 一括設定</h2>
+
+        <div class="lf-filter-bar">
+          <div class="filter-field">
+            <label>ライン</label>
+            <select v-model="lfSelectedLine" @change="fetchLineFinalCandidates">
+              <option value="">すべて</option>
+              <option v-for="line in lines" :key="line.id" :value="line.id">
+                {{ line.line_code }} - {{ line.line_name }}
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <div class="lf-lines-area">
+          <div v-for="lineGroup in lfLineGroups" :key="lineGroup.line_id" class="lf-line-group">
+            <h3 class="lf-line-header">{{ lineGroup.line_code }} - {{ lineGroup.line_name }}</h3>
+            <table class="data-table lf-table">
+              <thead>
+                <tr>
+                  <th style="width: 60px;">ライン最終品</th>
+                  <th>品番コード</th>
+                  <th>品名</th>
+                  <th>カテゴリ</th>
+                  <th>最終品</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="product in lineGroup.products" :key="product.id">
+                  <td style="text-align: center;">
+                    <input
+                      type="checkbox"
+                      v-model="lfChanges[product.id]"
+                    />
+                  </td>
+                  <td>{{ product.product_code }}</td>
+                  <td>{{ product.product_name }}</td>
+                  <td>{{ getCategoryLabel(product.category) }}</td>
+                  <td>{{ product.is_final_product ? '最終' : '' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-if="lfLineGroups.length === 0" class="no-data">
+            ルーティングに紐づく製品がありません
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button @click="saveLineFinal" class="btn-primary" :disabled="lfSaving">
+            {{ lfSaving ? '保存中...' : '保存' }}
+          </button>
+          <button @click="showLineFinalDialog = false" class="btn-secondary">キャンセル</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -367,6 +427,13 @@ const formData = ref({
   image_url: '',
 })
 const fileInput = ref(null)
+
+// ライン最終品一括設定
+const showLineFinalDialog = ref(false)
+const lfSelectedLine = ref('')
+const lfLineGroups = ref([])
+const lfChanges = ref({})  // product_id -> boolean
+const lfSaving = ref(false)
 
 const totalPages = computed(() => {
   if (totalCount.value === 0) return 1
@@ -680,6 +747,51 @@ const changePage = async (page) => {
   await fetchProducts(target)
 }
 
+// ライン最終品一括設定
+const openLineFinalDialog = async () => {
+  lfSelectedLine.value = ''
+  showLineFinalDialog.value = true
+  await fetchLineFinalCandidates()
+}
+
+const fetchLineFinalCandidates = async () => {
+  try {
+    const lineId = lfSelectedLine.value || null
+    const response = await api.products.getLineFinalCandidates(lineId)
+    lfLineGroups.value = response.data
+    // 現在の値でチェックボックス初期化
+    const changes = {}
+    for (const group of response.data) {
+      for (const product of group.products) {
+        changes[product.id] = product.is_line_final_product
+      }
+    }
+    lfChanges.value = changes
+  } catch (error) {
+    console.error('ライン最終品候補取得エラー:', error)
+    alert('データの取得に失敗しました')
+  }
+}
+
+const saveLineFinal = async () => {
+  lfSaving.value = true
+  try {
+    const updates = Object.entries(lfChanges.value).map(([id, val]) => ({
+      id: Number(id),
+      is_line_final_product: val,
+    }))
+    const response = await api.products.bulkUpdateLineFinal(updates)
+    alert(`${response.data.updated}件 更新しました`)
+    showLineFinalDialog.value = false
+    await fetchProducts(currentPage.value)
+  } catch (error) {
+    console.error('一括更新エラー:', error)
+    alert('保存に失敗しました')
+  } finally {
+    lfSaving.value = false
+  }
+}
+
 onMounted(() => {
   fetchProducts(1)
   fetchLines()
@@ -876,5 +988,43 @@ watch(
 
 .btn-secondary:hover {
   background-color: #f5f5f5;
+}
+
+/* ライン最終品一括設定モーダル */
+.line-final-modal {
+  min-width: 700px;
+  max-width: 900px;
+}
+
+.lf-filter-bar {
+  margin-bottom: 16px;
+}
+
+.lf-lines-area {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.lf-line-group {
+  margin-bottom: 20px;
+}
+
+.lf-line-header {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+  background-color: #f3f4f6;
+  padding: 6px 10px;
+  border-radius: 4px;
+  margin: 0 0 4px 0;
+}
+
+.lf-table {
+  font-size: 13px;
+}
+
+.lf-table td,
+.lf-table th {
+  padding: 4px 8px;
 }
 </style>

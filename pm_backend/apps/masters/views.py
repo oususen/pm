@@ -95,6 +95,71 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         product.save(update_fields=['image_url', 'updated_at'])
         return Response({'image_url': url}, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=['get'], url_path='line-final-candidates')
+    def line_final_candidates(self, request):
+        """ライン別にルーティングステップの出力品目を返す（ライン最終品の一括設定用）"""
+        line_id = request.query_params.get('line_id')
+        steps_qs = RoutingStep.objects.filter(
+            routing__is_active=True,
+            line__isnull=False,
+        ).select_related('output_product', 'routing__product', 'line', 'process')
+
+        if line_id:
+            steps_qs = steps_qs.filter(line_id=line_id)
+
+        # ライン別に出力品目を収集（重複排除）
+        from collections import OrderedDict
+        lines_map = OrderedDict()  # line_id -> {line_info, products: {product_id -> info}}
+
+        for step in steps_qs.order_by('line__line_code', 'routing__product__product_code', 'step_no'):
+            product = step.output_product or step.routing.product
+            if not product:
+                continue
+            lid = step.line_id
+            if lid not in lines_map:
+                lines_map[lid] = {
+                    'line_id': step.line.id,
+                    'line_code': step.line.line_code,
+                    'line_name': step.line.line_name,
+                    'products': OrderedDict(),
+                }
+            if product.id not in lines_map[lid]['products']:
+                lines_map[lid]['products'][product.id] = {
+                    'id': product.id,
+                    'product_code': product.product_code,
+                    'product_name': product.product_name,
+                    'is_line_final_product': product.is_line_final_product,
+                    'is_final_product': product.is_final_product,
+                    'category': product.category,
+                }
+
+        result = []
+        for line_data in lines_map.values():
+            result.append({
+                'line_id': line_data['line_id'],
+                'line_code': line_data['line_code'],
+                'line_name': line_data['line_name'],
+                'products': list(line_data['products'].values()),
+            })
+        return Response(result)
+
+    @action(detail=False, methods=['post'], url_path='bulk-update-line-final')
+    def bulk_update_line_final(self, request):
+        """ライン最終品フラグを一括更新"""
+        updates = request.data.get('updates', [])
+        if not updates:
+            return Response({'detail': '更新データがありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        updated_count = 0
+        for item in updates:
+            product_id = item.get('id')
+            is_line_final = item.get('is_line_final_product')
+            if product_id is not None and is_line_final is not None:
+                cnt = Product.objects.filter(id=product_id).update(is_line_final_product=is_line_final)
+                updated_count += cnt
+
+        return Response({'updated': updated_count})
+
     @action(detail=True, methods=['get'], url_path='where-used')
     def where_used(self, request, pk=None):
         """

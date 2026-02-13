@@ -42,4 +42,12 @@ export const createProductsAPI = (client) => ({
       params: { recursive: recursive ? 'true' : 'false' },
     })
   },
+  getLineFinalCandidates(lineId = null) {
+    const params = {}
+    if (lineId) params.line_id = lineId
+    return client.get('/products/line-final-candidates/', { params })
+  },
+  bulkUpdateLineFinal(updates) {
+    return client.post('/products/bulk-update-line-final/', { updates })
+  },
 })
