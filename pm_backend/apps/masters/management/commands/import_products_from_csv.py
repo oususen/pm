@@ -95,6 +95,7 @@ class Command(BaseCommand):
                 category = category_map.get(category_label) if category_label else None
                 defaults = {
                     "product_name": name or code,
+                    "product_name_halfwidth": name or code,
                 }
                 if category:
                     defaults["category"] = category
