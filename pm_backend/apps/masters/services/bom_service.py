@@ -245,7 +245,7 @@ class BOMService:
         items = BOMItem.objects.filter(
             child_product_id=product_id,
             bom__is_active=True
-        ).select_related('bom__parent_product')
+        ).select_related('bom__parent_product', 'line', 'process', 'supplier')
 
         results = []
         for item in items:
@@ -258,6 +258,15 @@ class BOMService:
                 'quantity': float(item.quantity),
                 'sourcing_type': item.sourcing_type,
                 'is_final_product': parent.is_final_product,
+                'line_id': item.line_id,
+                'line_code': item.line.line_code if item.line else None,
+                'line_name': item.line.line_name if item.line else None,
+                'process_id': item.process_id,
+                'process_code': item.process.process_code if item.process else None,
+                'process_name': item.process.process_name if item.process else None,
+                'supplier_id': item.supplier_id,
+                'supplier_code': item.supplier.supplier_code if item.supplier else None,
+                'supplier_name': item.supplier.supplier_name if item.supplier else None,
             }
 
             if recursive:

@@ -577,6 +577,7 @@
                 <th>カテゴリ</th>
                 <th>数量</th>
                 <th>調達区分</th>
+                <th>加工先</th>
                 <th>最終品</th>
               </tr>
             </thead>
@@ -587,6 +588,7 @@
                   <td>{{ getCategoryLabel(item.category) }}</td>
                   <td>{{ item.quantity }}</td>
                   <td>{{ getSourcingTypeLabel(item.sourcing_type) }}</td>
+                  <td>{{ formatWhereUsedDestination(item) }}</td>
                   <td>{{ item.is_final_product ? '最終品' : '' }}</td>
                 </tr>
                 <!-- 再帰結果の子要素（インデント表示） -->
@@ -598,6 +600,7 @@
                     <td>{{ getCategoryLabel(child.category) }}</td>
                     <td>{{ child.quantity }}</td>
                     <td>{{ getSourcingTypeLabel(child.sourcing_type) }}</td>
+                    <td>{{ formatWhereUsedDestination(child) }}</td>
                     <td>{{ child.is_final_product ? '最終品' : '' }}</td>
                   </tr>
                 </template>
@@ -1118,7 +1121,38 @@ const getLineName = (lineId) => {
   return line ? `${line.line_code} - ${line.line_name}` : lineId
 }
 
+const getLineType = (lineId) => {
+  if (!lineId) return ''
+  const line = lines.value.find(l => `${l.id}` === `${lineId}`)
+  return line?.line_type || ''
+}
+
 const getSourcingTypeLabel = (value) => sourcingTypeMap[value] || value
+
+const formatWhereUsedDestination = (item) => {
+  if (!item) return ''
+  const formatCodeName = (code, name) => {
+    if (code && name) return `${code} ${name}`
+    return code || name || ''
+  }
+  const lineLabel = formatCodeName(item.line_code, item.line_name)
+  const supplierLabel = formatCodeName(item.supplier_code, item.supplier_name)
+  const processLabel = formatCodeName(item.process_code, item.process_name)
+  const lineType = item.line_type || getLineType(item.line_id)
+
+  if (lineType === 'OUTSOURCE') {
+    return supplierLabel || lineLabel || processLabel
+  }
+
+  switch (item.sourcing_type) {
+    case 'BUY':
+      return supplierLabel || lineLabel || processLabel
+    case 'SUBCON':
+      return lineLabel || supplierLabel || processLabel
+    default:
+      return lineLabel || processLabel || supplierLabel
+  }
+}
 
 const goToDetailPage = (bom) => {
   if (!bom?.id) return
