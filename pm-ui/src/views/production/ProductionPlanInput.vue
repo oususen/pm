@@ -332,6 +332,8 @@ const TANK_PRODUCT_ORDER = [
   'YD60008491',
   'YD60009848',
   'YD60014764',
+  'YD60009783',
+  'YD60009874'
 ]
 const gridWrapperRef = ref(null)
 const lockDays = ref(0)
