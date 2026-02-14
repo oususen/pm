@@ -95,12 +95,12 @@
           </tr>
           <tr class="head-level2">
             <template v-for="(c, colIdx) in dateColumns" :key="c.key">
-              <th class="mini" :class="c.dayClass">需要</th>
-              <th class="mini" :class="c.dayClass">実績</th>
-              <th class="mini" :class="c.dayClass">在庫</th>
-              <th class="mini" :class="c.dayClass">計画</th>
-              <th class="mini" :class="c.dayClass">順序</th>
-              <th class="mini day-end" :class="c.dayClass">計画在庫</th>
+              <th class="mini demand-col" :class="c.dayClass">需要</th>
+              <th class="mini actual-col" :class="c.dayClass">実績</th>
+              <th class="mini stock-col" :class="c.dayClass">在庫</th>
+              <th class="mini plan-col" :class="c.dayClass">計画</th>
+              <th class="mini sequence-col" :class="c.dayClass">順序</th>
+              <th class="mini stock-plan-col day-end" :class="c.dayClass">計画在庫</th>
             </template>
           </tr>
         </thead>
@@ -122,10 +122,10 @@
               <span class="product-info">{{ row.product_name || getProductName(row.product_id) }}</span>
             </td>
             <template v-for="(c, colIdx) in dateColumns" :key="c.key">
-              <td class="num" :class="c.dayClass">
+              <td class="num demand" :class="c.dayClass">
                 <span class="readonly-value">{{ displayValue(row.daily?.[c.key]?.demand) }}</span>
               </td>
-              <td class="num" :class="c.dayClass">
+              <td class="num actual" :class="c.dayClass">
                 <span class="readonly-value">{{ displayValue(row.daily?.[c.key]?.actual) }}</span>
               </td>
               <td class="num stock" :class="c.dayClass">
@@ -419,7 +419,7 @@ const dateColumns = computed(() => {
 // テーブルの最小幅を計算して、縮みすぎを防ぐ
 const tableMinWidth = computed(() => {
   const fixedColsWidth = 60 + 187 + 100 // No + 品番 + 品名
-  const perDayWidth = 80 * 6 // 6列×80px (需要、実績、在庫、計画、順序、計画在庫)
+  const perDayWidth = (60 * 5) + 40 // 需要/実績/在庫/計画/計画在庫=64px、順序=80px
   return fixedColsWidth + dateColumns.value.length * perDayWidth
 })
 
@@ -1905,6 +1905,16 @@ thead tr.head-level2 th.sticky-col {
   font-size: 14px;
   min-width: 60px; /* サブ列の幅を縮小 */
 }
+.plan-grid .mini.demand-col,
+.plan-grid .mini.actual-col,
+.plan-grid .mini.stock-col,
+.plan-grid .mini.plan-col,
+.plan-grid .mini.stock-plan-col {
+  min-width: 54px;
+}
+.plan-grid .mini.sequence-col {
+  min-width: 60px;
+}
 .day-end {
   border-right: 4px solid #a2b0c5 !important;
 }
@@ -1989,6 +1999,16 @@ thead .sticky-col {
 .num {
   text-align: right;
   min-width: 80px; /* セル幅を広げて日付列が潰れないようにする */
+}
+.num.demand,
+.num.actual,
+.num.stock,
+.num.plan,
+.num.stock-plan {
+  min-width: 40px;
+}
+.num.sequence {
+  min-width: 40px;
 }
 .num input {
   width: 100%;
