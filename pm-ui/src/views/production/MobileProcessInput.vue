@@ -80,11 +80,11 @@
     </div>
 
     <div
-      v-if="(record.record_type === 'PRODUCTION' || record.record_type === 'SCRAP') && currentProductList.length"
+      v-if="record.record_type === 'PRODUCTION' || (record.record_type === 'SCRAP' && currentProductList.length)"
       class="planned-buttons"
     >
       <div class="planned-header">
-        <div class="planned-nav">
+        <div v-if="currentProductList.length" class="planned-nav">
           <button
             type="button"
             class="slot-btn"
@@ -104,7 +104,22 @@
             »
           </button>
         </div>
-        <label class="current-time-toggle">
+        <div v-if="record.record_type === 'PRODUCTION'" class="operator-action-row">
+          <span class="operator-action-title">{{ t('processInput.operatorAction') }}</span>
+          <div class="operator-action-buttons">
+            <button
+              v-for="action in operatorActionOptions"
+              :key="action.value"
+              type="button"
+              class="operator-action-btn"
+              :class="{ active: selectedOperatorAction === action.value }"
+              @click="selectOperatorAction(action.value)"
+            >
+              {{ action.label }}
+            </button>
+          </div>
+        </div>
+        <label v-if="currentProductList.length" class="current-time-toggle">
           <input
             type="checkbox"
             v-model="filterCurrentTime"
@@ -140,7 +155,7 @@
           {{ t('processInput.scrapFilter.noMatch') }}
         </div>
       </div>
-      <div v-else class="planned-list">
+      <div v-else-if="currentProductList.length" class="planned-list">
         <button
           v-for="p in displayProductList"
           :key="`${p.plan_date}-${p.product}-${p.process}`"
@@ -157,7 +172,7 @@
       </div>
     </div>
 
-    <div v-if="record.record_type" class="section inline-row product-row">
+    <div v-if="record.record_type && !isOperatorActionMode" class="section inline-row product-row">
       <div class="label-stack">
         <label :class="record.record_type === 'PRODUCTION' ? 'label-required inline-label' : 'inline-label'">
           {{ t('processInput.product') }}
@@ -211,7 +226,7 @@
     </div>
 
     <div
-      v-if="record.record_type === 'PRODUCTION' || record.record_type === 'SCRAP'"
+      v-if="(record.record_type === 'PRODUCTION' || record.record_type === 'SCRAP') && !isOperatorActionMode"
       class="form-section"
       :class="formModeClass"
     >
@@ -392,7 +407,7 @@
             <div class="record-clock">{{ formatTime(rec.timestamp) }}</div>
           </div>
           <div class="record-type">
-            <div class="record-type__label">{{ rec.record_type_display }}</div>
+            <div class="record-type__label">{{ getRecentRecordTypeLabel(rec) }}</div>
             <div v-if="rec.product_code" class="record-type__product">{{ rec.product_code }}</div>
           </div>
           <div class="record-qty" v-if="rec.qty > 0">{{ rec.qty }}</div>
@@ -455,6 +470,7 @@ const productMetaMap = ref({})
 const filterCurrentTime = ref(true)
 const timeSlots = ref([])
 const activeSlotIndex = ref(null)
+const selectedOperatorAction = ref('')
 
 const record = ref({
   record_type: '',
@@ -533,6 +549,23 @@ const filteredProcesses = computed(() => {
 
 const isScrapOnlyPage = computed(() => route.name === 'ScrapRecordInput')
 const isScrapRecord = computed(() => record.value.record_type === 'SCRAP')
+const isOperatorActionMode = computed(
+  () => record.value.record_type === 'PRODUCTION' && !!selectedOperatorAction.value
+)
+
+const OPERATOR_ACTION_LABEL_KEYS = {
+  START: 'processInput.operatorAction.start',
+  END: 'processInput.operatorAction.end',
+  PAUSE: 'processInput.operatorAction.pause',
+  RESUME: 'processInput.operatorAction.resume',
+}
+
+const operatorActionOptions = computed(() => [
+  { value: 'START', label: t(OPERATOR_ACTION_LABEL_KEYS.START) },
+  { value: 'END', label: t(OPERATOR_ACTION_LABEL_KEYS.END) },
+  { value: 'PAUSE', label: t(OPERATOR_ACTION_LABEL_KEYS.PAUSE) },
+  { value: 'RESUME', label: t(OPERATOR_ACTION_LABEL_KEYS.RESUME) },
+])
 
 const equipmentStates = computed(() => [
   { value: 'RUNNING', label: t('processInput.equipmentState.running') },
@@ -876,8 +909,35 @@ const getImageUrl = (p) => {
   return url
 }
 
+const selectOperatorAction = (action) => {
+  selectedOperatorAction.value = selectedOperatorAction.value === action ? '' : action
+}
+
+const getOperatorActionLabel = (action) => {
+  const actionKey = String(action || '').toUpperCase()
+  const labelKey = OPERATOR_ACTION_LABEL_KEYS[actionKey]
+  return labelKey ? t(labelKey) : ''
+}
+
+const getRecentRecordTypeLabel = (rec) => {
+  if (!rec) return ''
+  if (rec.record_type === 'OPERATOR_ACTION') {
+    const action =
+      rec.event_data?.action ||
+      rec.event_data?.operator_action ||
+      rec.event_data?.action_type ||
+      ''
+    return getOperatorActionLabel(action) || t('processInput.recordType.operatorAction')
+  }
+  return rec.record_type_display
+}
+
 const canSubmit = computed(() => {
   if (!selectedProcessId.value || !record.value.record_type) return false
+
+  if (isOperatorActionMode.value) {
+    return true
+  }
 
   if (record.value.record_type === 'PRODUCTION' || record.value.record_type === 'SCRAP') {
     const hasProduct = !!record.value.product_id || !!(record.value.product_code || '').trim()
@@ -917,6 +977,7 @@ const resetForm = () => {
     remarks: '',
   }
   manualProduct.value = false
+  selectedOperatorAction.value = ''
   scrapRelationFilter.value = ''
   scrapSearchText.value = ''
   ensureDefaultRecordType()
@@ -988,38 +1049,50 @@ const submitRecord = async () => {
       record_type: record.value.record_type,
     }
 
-    if (record.value.product_id) {
-      data.product_id = record.value.product_id
-    } else if ((record.value.product_code || '').trim()) {
-      data.product_code = record.value.product_code.trim()
-    }
-
-    if (record.value.record_type === 'PRODUCTION' || record.value.record_type === 'SCRAP') {
-      data.qty = record.value.qty
-      data.batch_no = record.value.batch_no
-      data.operator_name = record.value.operator_name
-    } else if (record.value.record_type === 'EQUIPMENT_STATE') {
-      data.equipment_state = record.value.equipment_state
+    if (isOperatorActionMode.value) {
+      data.record_type = 'OPERATOR_ACTION'
       data.qty = 0
+      const operatorName = (record.value.operator_name || defaultOperatorName.value || '').trim()
+      if (operatorName) {
+        data.operator_name = operatorName
+      }
+      data.event_data = {
+        action: selectedOperatorAction.value,
+      }
+    } else {
+      if (record.value.product_id) {
+        data.product_id = record.value.product_id
+      } else if ((record.value.product_code || '').trim()) {
+        data.product_code = record.value.product_code.trim()
+      }
+
+      if (record.value.record_type === 'PRODUCTION' || record.value.record_type === 'SCRAP') {
+        data.qty = record.value.qty
+        data.batch_no = record.value.batch_no
+        data.operator_name = record.value.operator_name
+      } else if (record.value.record_type === 'EQUIPMENT_STATE') {
+        data.equipment_state = record.value.equipment_state
+        data.qty = 0
+      }
+
+      if (record.value.record_type === 'SCRAP' && record.value.reason) {
+        const currentProduct =
+          scrapProducts.value.find((p) => String(p.product) === String(record.value.product_id)) ||
+          manualProducts.value.find((p) => String(p.id) === String(record.value.product_id))
+        const eventData = {
+          reason: record.value.reason,
+          disposition_status: record.value.disposition_status || 'REJECTED',
+          is_production_recorded: record.value.is_production_recorded || false,
+          relation_type: currentProduct?.relation_type || '',
+        }
+        if (record.value.reason === 'OTHER' && (record.value.reason_detail || '').trim()) {
+          eventData.reason_detail = record.value.reason_detail.trim()
+        }
+        data.event_data = eventData
+      }
     }
 
     data.remarks = record.value.remarks
-
-    if (record.value.record_type === 'SCRAP' && record.value.reason) {
-      const currentProduct =
-        scrapProducts.value.find((p) => String(p.product) === String(record.value.product_id)) ||
-        manualProducts.value.find((p) => String(p.id) === String(record.value.product_id))
-      const eventData = {
-        reason: record.value.reason,
-        disposition_status: record.value.disposition_status || 'REJECTED',
-        is_production_recorded: record.value.is_production_recorded || false,
-        relation_type: currentProduct?.relation_type || '',
-      }
-      if (record.value.reason === 'OTHER' && (record.value.reason_detail || '').trim()) {
-        eventData.reason_detail = record.value.reason_detail.trim()
-      }
-      data.event_data = eventData
-    }
 
     await api.processRealtime.create(data)
 
@@ -1758,6 +1831,9 @@ watch(
   () => record.value.record_type,
   (type) => {
     if (!type) return
+    if (type !== 'PRODUCTION') {
+      selectedOperatorAction.value = ''
+    }
     if (type === 'EQUIPMENT_STATE') {
       record.value.qty = null
       record.value.batch_no = ''
@@ -2232,15 +2308,14 @@ label {
   gap: 4px;
 }
 .planned-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
   gap: 8px;
 }
 .planned-nav {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
 }
 .planned-label {
   font-size: 12px;
@@ -2275,12 +2350,42 @@ label {
 .slot-btn:not(:disabled):active {
   transform: scale(0.96);
 }
+.operator-action-row {
+  display: grid;
+  gap: 4px;
+}
+.operator-action-title {
+  font-size: 12px;
+  color: #475569;
+}
+.operator-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.operator-action-btn {
+  min-width: 68px;
+  padding: 6px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  color: #334155;
+  cursor: pointer;
+}
+.operator-action-btn.active {
+  border-color: #0ea5e9;
+  background: #e0f2fe;
+  color: #0c4a6e;
+  font-weight: 700;
+}
 .current-time-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
   color: #475569;
+  justify-self: flex-start;
 }
 .current-time-toggle input {
   width: 16px;
