@@ -120,7 +120,7 @@ class Command(BaseCommand):
             )
             logger.info(
                 f'ジョブ登録: {job_id} - {cfg.scheduled_hour:02d}:{cfg.scheduled_minute:02d} '
-                f'(line={cfg.line.line_code if cfg.line_id else \"-\"})'
+                f'(line={cfg.line.line_code if cfg.line_id else "-"})'
             )
 
     def _check_config_changes(self, scheduler):
