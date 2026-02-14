@@ -619,7 +619,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         # このラインに属する全工程を取得し、全ての製品を対象とする
         from django.db.models import Q  # 安全側でローカルインポート（UnboundLocalError対策）
         steps_on_line = RoutingStep.objects.filter(
-            Q(line_id=line_id) | Q(process__line_id=line_id)
+            Q(line_id=line_id) | Q(line__isnull=True, process__line_id=line_id)
         ).select_related('output_product', 'routing__product', 'process')
 
         steps_on_line_count = 0
