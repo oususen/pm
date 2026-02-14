@@ -31,7 +31,7 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-_4wufh_x8tvr3%_0d%!r4b_&uv
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
 # Allow local access plus any comma-separated hosts from ALLOWED_HOSTS env
-_default_hosts = {"localhost", "127.0.0.1", "10.0.1.194", "10.0.1.232", "192.168.0.11", "192.168.0.9", "192.168.0.16", "192.168.0.22", "192.168.0.39"}
+_default_hosts = {"localhost", "127.0.0.1", "10.0.1.194", "10.0.1.232", "192.168.0.11", "192.168.0.9", "192.168.0.16", "192.168.0.22", "192.168.0.39", "192.168.0.15", "192.168.0.18", "192.168.0.19"}
 _env_hosts = {
     host.strip()
     for host in os.getenv("ALLOWED_HOSTS", "").split(",")
@@ -175,7 +175,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://10.0.1.232:8501",  # Production IP address
     "https://10.0.1.232:8501",  # Production HTTPS
     "https://localhost:8501",
-    "http://192.168.0.10",
+    "http://192.168.0.18",
     "http://192.168.0.11",
     "http://192.168.0.15",
     "http://192.168.0.7",
@@ -183,7 +183,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://192.168.0.9",
     "http://192.168.0.39",
     "http://192.168.0.9:8501",
-    "http://192.168.0.10:8501",
+    "http://192.168.0.18:8501",
     "http://192.168.0.39:8501",
     "http://192.168.0.15:5173",
     "http://192.168.0.39:5173",
@@ -214,10 +214,10 @@ CSRF_TRUSTED_ORIGINS = [
     "https://10.0.1.194:8501",
     "http://10.0.1.232:8501",  # Production IP address
     "https://10.0.1.232:8501",
-    "http://192.168.0.10",
+    "http://192.168.0.18",
     "http://192.168.0.9",
     "http://192.168.0.9:8501",
-    "http://192.168.0.10:8501",
+    "http://192.168.0.18:8501",
     "http://192.168.0.7",
     "http://192.168.0.7:8501",
     "http://192.168.0.11",
