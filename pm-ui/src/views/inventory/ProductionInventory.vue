@@ -193,6 +193,10 @@
 import { computed, ref, onMounted, onBeforeUnmount } from "vue";
 import api from "@/api/client";
 import { addDays, formatISODate, parseISODate } from "@/utils/dateUtil";
+import {
+  compareBySpecialOrderThenProductCode,
+  resolveSpecialDisplayOrder,
+} from "@/utils/groupSort";
 
 const lineFilter = ref("");
 const processFilter = ref("");
@@ -415,6 +419,7 @@ const groups = computed(() => {
   const map = new Map();
   for (const d of filtered) {
     const key = `${d.line || d.line_name || ""}__${d.process_code || d.process || ""}__${d.product_code || ""}`;
+      const specialDisplayOrder = resolveSpecialDisplayOrder(d);
       if (!map.has(key)) {
         map.set(key, {
           key,
@@ -427,12 +432,19 @@ const groups = computed(() => {
           process_id: d.process,
           process_code: d.process_code || d.process || "",
           process_name: d.process_name || "",
+          special_display_order: specialDisplayOrder,
           total_lt_days: null,
           self_lt_days: null,
           cells: {},
         });
       }
       const g = map.get(key);
+      if (specialDisplayOrder !== null) {
+        const currentOrder = resolveSpecialDisplayOrder(g);
+        if (currentOrder === null || specialDisplayOrder < currentOrder) {
+          g.special_display_order = specialDisplayOrder;
+        }
+      }
       if (g.total_lt_days === null && d.total_lt_days !== null && d.total_lt_days !== undefined) {
         g.total_lt_days = Number(d.total_lt_days);
       }
@@ -484,8 +496,11 @@ const groups = computed(() => {
     c.progress += Number(d.progress_qty || 0);
   }
   const result = Array.from(map.values());
-  // 製品番号でソート（昇順）
-  result.sort((a, b) => (a.product_code || "").localeCompare(b.product_code || ""));
+  result.sort((a, b) =>
+    compareBySpecialOrderThenProductCode(a, b, {
+      codeGetter: (item) => item.product_code || "",
+    })
+  );
   return result;
 });
 

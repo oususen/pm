@@ -96,6 +96,10 @@
 import { computed, onMounted, ref, watch } from "vue";
 import api from "@/api/client";
 import { addDays, formatISODate, parseISODate } from "@/utils/dateUtil";
+import {
+  compareBySpecialOrderThenProductCode,
+  resolveSpecialDisplayOrder,
+} from "@/utils/groupSort";
 
 const lineFilter = ref("");
 const processFilter = ref("");
@@ -162,23 +166,38 @@ const rows = computed(() => {
   for (const d of filteredBacklogs) {
     if (!d.plan_date) continue;
     const key = `${d.line_code || d.line_name || d.line || ""}__${d.process_code || d.process_name || d.process || ""}__${d.product_code}`;
+    const specialDisplayOrder = resolveSpecialDisplayOrder(d);
     if (!map.has(key)) {
       const lineLabel = d.line_code || d.line_name || d.line || "-";
       const processLabel = d.process_code || d.process_name || d.process || "-";
       map.set(key, {
         key,
         label: `${lineLabel} / ${processLabel} / ${d.product_code}`,
+        product_code: d.product_code || "",
+        special_display_order: specialDisplayOrder,
         cells: {},
       });
     }
     const row = map.get(key);
+    if (specialDisplayOrder !== null) {
+      const currentOrder = resolveSpecialDisplayOrder(row);
+      if (currentOrder === null || specialDisplayOrder < currentOrder) {
+        row.special_display_order = specialDisplayOrder;
+      }
+    }
     if (!row.cells[d.plan_date]) {
       row.cells[d.plan_date] = { plan: 0, actual: 0 };
     }
     row.cells[d.plan_date].plan += Number(d.plan_qty || 0);
     row.cells[d.plan_date].actual += Number(d.actual_qty || 0);
   }
-  return Array.from(map.values());
+  const result = Array.from(map.values());
+  result.sort((a, b) =>
+    compareBySpecialOrderThenProductCode(a, b, {
+      codeGetter: (item) => item.product_code || "",
+    })
+  );
+  return result;
 });
 
 const totalPages = computed(() => {

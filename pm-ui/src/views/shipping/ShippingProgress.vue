@@ -191,6 +191,10 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue";
 import api from "@/api/client";
+import {
+  compareBySpecialOrderThenProductCode,
+  resolveSpecialDisplayOrder,
+} from "@/utils/groupSort";
 
 const productFilter = ref("");
 const customerFilter = ref("");
@@ -300,6 +304,7 @@ const groups = computed(() => {
 
     // グループ作成
     const groupKey = `${productCode}__${customerCode}__${shipToCode}`;
+    const specialDisplayOrder = resolveSpecialDisplayOrder(order);
     if (!map.has(groupKey)) {
       map.set(groupKey, {
         key: groupKey,
@@ -308,12 +313,19 @@ const groups = computed(() => {
         customer_code: customerCode,
         customer_name: customerName,
         ship_to_code: shipToCode,
+        special_display_order: specialDisplayOrder,
         cells: {},
         summary: { forecast: 0, firm: 0, actual: 0, adjust: 0, progressRate: "-" },
       });
     }
 
     const group = map.get(groupKey);
+    if (specialDisplayOrder !== null) {
+      const currentOrder = resolveSpecialDisplayOrder(group);
+      if (currentOrder === null || specialDisplayOrder < currentOrder) {
+        group.special_display_order = specialDisplayOrder;
+      }
+    }
 
     // セル初期化
     if (!group.cells[dueDate]) {
@@ -399,6 +411,12 @@ const groups = computed(() => {
 
     return g;
   });
+
+  result.sort((a, b) =>
+    compareBySpecialOrderThenProductCode(a, b, {
+      codeGetter: (item) => item.product_code || "",
+    })
+  );
 
   console.log("[ShippingProgress] 返却グループ数:", result.length);
 
