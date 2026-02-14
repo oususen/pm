@@ -680,11 +680,14 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         if final_process_id:
             try:
-                final_process = Process.objects.get(id=final_process_id)
+                final_process = Process.objects.select_related('line').get(id=final_process_id)
             except Process.DoesNotExist:
                 return Response({'detail': f'Final process not found: id={final_process_id}'}, status=status.HTTP_400_BAD_REQUEST)
 
-            if final_line_id:
+            # 工程にラインが紐づいている場合は、そのラインを常に優先する
+            if final_process.line_id:
+                final_line = final_process.line
+            elif final_line_id:
                 try:
                     final_line = Line.objects.get(id=final_line_id)
                 except Line.DoesNotExist:

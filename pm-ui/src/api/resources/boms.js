@@ -1,6 +1,12 @@
 export const createBomsAPI = (client) => ({
   getBOMs(params = {}) {
     const queryParams = new URLSearchParams()
+    if (params.page !== undefined && params.page !== null && params.page !== '') {
+      queryParams.append('page', params.page)
+    }
+    if (params.page_size !== undefined && params.page_size !== null && params.page_size !== '') {
+      queryParams.append('page_size', params.page_size)
+    }
     if (params.search) queryParams.append('search', params.search)
     if (params.parent_is_final !== undefined && params.parent_is_final !== '') {
       queryParams.append('parent_is_final', params.parent_is_final)

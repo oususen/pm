@@ -68,47 +68,67 @@
           </select>
         </div>
         <div class="filter-actions">
-          <button @click="fetchBOMs" class="btn-primary">検索</button>
+          <button @click="fetchBOMs(1)" class="btn-primary">検索</button>
           <button @click="resetFilters" class="btn-secondary">リセット</button>
         </div>
       </div>
 
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>親製品</th>
-            <th>最終品</th>
-            <th>ライン最終品</th>
-            <th>版</th>
-            <th>連産品</th>
-            <th>有効開始日</th>
-            <th>有効終了日</th>
-            <th>有効</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="bom in boms" :key="bom.id">
-            <td>{{ bom.id }}</td>
-            <td>{{ getParentProductCode(bom) }}</td>
-            <td>{{ bom.parent_is_final ? '最終' : '' }}</td>
-            <td>{{ bom.parent_is_line_final ? 'はい' : '' }}</td>
-            <td>{{ bom.version }}</td>
-            <td>{{ bom.is_coproduct ? 'はい' : '' }}</td>
-            <td>{{ bom.valid_from }}</td>
-            <td>{{ bom.valid_to || '-' }}</td>
-            <td>{{ bom.is_active ? '有効' : '無効' }}</td>
-            <td>
-              <button @click="goToDetailPage(bom)" class="btn-sm">詳細</button>
-              <button @click="openDetailsInNewTab(bom)" class="btn-sm">別タブ</button>
-              <button @click="viewTreeOnly(bom)" class="btn-sm">階層図</button>
-              <button @click="goToDetailPage(bom)" class="btn-sm">編集</button>
-              <button @click="deleteBOM(bom.id)" class="btn-sm btn-danger">削除</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="bom-list-area">
+        <table class="data-table bom-list-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>親製品</th>
+              <th>最終品</th>
+              <th>ライン最終品</th>
+              <th>版</th>
+              <th>連産品</th>
+              <th>有効開始日</th>
+              <th>有効終了日</th>
+              <th>有効</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="bom in boms" :key="bom.id">
+              <td>{{ bom.id }}</td>
+              <td>{{ getParentProductCode(bom) }}</td>
+              <td>{{ bom.parent_is_final ? '最終' : '' }}</td>
+              <td>{{ bom.parent_is_line_final ? 'はい' : '' }}</td>
+              <td>{{ bom.version }}</td>
+              <td>{{ bom.is_coproduct ? 'はい' : '' }}</td>
+              <td>{{ bom.valid_from }}</td>
+              <td>{{ bom.valid_to || '-' }}</td>
+              <td>{{ bom.is_active ? '有効' : '無効' }}</td>
+              <td>
+                <button @click="goToDetailPage(bom)" class="btn-sm">詳細</button>
+                <button @click="openDetailsInNewTab(bom)" class="btn-sm">別タブ</button>
+                <button @click="viewTreeOnly(bom)" class="btn-sm">階層図</button>
+                <button @click="goToDetailPage(bom)" class="btn-sm">編集</button>
+                <button @click="deleteBOM(bom.id)" class="btn-sm btn-danger">削除</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="pagination-controls" v-if="totalPages > 0">
+        <button
+          class="btn-secondary"
+          :disabled="currentPage === 1"
+          @click="changePage(currentPage - 1)"
+        >
+          前へ
+        </button>
+        <span class="page-info">{{ currentPage }} / {{ totalPages }} ページ (全 {{ totalCount }} 件)</span>
+        <button
+          class="btn-secondary"
+          :disabled="currentPage === totalPages"
+          @click="changePage(currentPage + 1)"
+        >
+          次へ
+        </button>
+      </div>
 
       <div v-if="boms.length === 0" class="no-data">
         データがありません
@@ -428,9 +448,12 @@
             </div>
             <div class="form-group">
               <label>ライン</label>
-              <select v-model="routingGenForm.final_line_id">
+              <select
+                v-model="routingGenForm.final_line_id"
+                :disabled="isFinalLineFixedByProcess"
+              >
                 <option value="">指定しない</option>
-                <option v-for="line in lines" :key="line.id" :value="line.id">
+                <option v-for="line in filteredFinalLines" :key="line.id" :value="line.id">
                   {{ line.line_code }} - {{ line.line_name }}
                 </option>
               </select>
@@ -683,6 +706,11 @@ const filters = ref({
   is_active: ''
 })
 
+const currentPage = ref(1)
+const totalCount = ref(0)
+const totalPages = ref(0)
+const pageSize = ref(20)
+
 const showDetailsDialog = ref(false)
 const selectedBOM = ref({})
 const bomItems = ref([])
@@ -811,6 +839,18 @@ const filteredLines = computed(() => {
   return lines.value
 })
 
+const selectedFinalProcess = computed(() =>
+  processes.value.find((p) => `${p.id}` === `${routingGenForm.value.final_process_id}`)
+)
+const isFinalLineFixedByProcess = computed(() => Boolean(selectedFinalProcess.value?.line))
+const filteredFinalLines = computed(() => {
+  const proc = selectedFinalProcess.value
+  if (proc?.line) {
+    return lines.value.filter((l) => `${l.id}` === `${proc.line}`)
+  }
+  return lines.value
+})
+
 const sourcingTypeMap = {
   'MAKE': '自社製造',
   'BUY': '購買',
@@ -833,12 +873,16 @@ const resetFilters = () => {
     created_to: '',
     is_active: ''
   }
-  fetchBOMs()
+  fetchBOMs(1)
 }
 
-const fetchBOMs = async () => {
+const fetchBOMs = async (page = 1) => {
+  const targetPage = typeof page === 'number' ? page : 1
   try {
-    const params = {}
+    const params = {
+      page: targetPage,
+      page_size: pageSize.value
+    }
 
     if (filters.value.search) {
       params.search = filters.value.search
@@ -866,17 +910,32 @@ const fetchBOMs = async () => {
     }
 
     const response = await api.boms.getBOMs(params)
-    boms.value = response.data.results || response.data
+    if (response.data.results) {
+      boms.value = response.data.results
+      totalCount.value = response.data.count
+      totalPages.value = Math.ceil(response.data.count / pageSize.value)
+    } else {
+      boms.value = response.data
+      totalCount.value = response.data.length || 0
+      totalPages.value = 1
+    }
+    currentPage.value = targetPage
   } catch (error) {
     console.error('BOM取得エラー:', error)
     alert('BOMデータの取得に失敗しました')
   }
 }
 
+const changePage = (newPage) => {
+  if (newPage >= 1 && newPage <= totalPages.value) {
+    fetchBOMs(newPage)
+  }
+}
+
 const fetchProducts = async () => {
   try {
     // 全ページ取得（現状フィルタなし）
-    products.value = (await api.products.getAllProducts()).sort((a, b) =>
+    products.value = (await api.products.getAllProducts({ page_size: 10000 })).sort((a, b) =>
       (b.product_code || '').localeCompare(a.product_code || '')
     )
   } catch (error) {
@@ -886,7 +945,7 @@ const fetchProducts = async () => {
 
 const fetchSuppliers = async () => {
   try {
-    const response = await api.suppliers.getSuppliers()
+    const response = await api.suppliers.getSuppliers({ page_size: 1000 })
     suppliers.value = response.data.results || response.data
   } catch (error) {
     console.error('仕入先取得エラー:', error)
@@ -895,7 +954,7 @@ const fetchSuppliers = async () => {
 
 const fetchProcesses = async () => {
   try {
-    const response = await api.processes.getProcesses()
+    const response = await api.processes.getProcesses({ page_size: 1000 })
     processes.value = response.data.results || response.data
   } catch (error) {
     console.error('工程取得エラー:', error)
@@ -904,7 +963,7 @@ const fetchProcesses = async () => {
 
 const fetchLines = async () => {
   try {
-    const response = await api.lines.getLines()
+    const response = await api.lines.getLines({ page_size: 1000 })
     lines.value = response.data.results || response.data
   } catch (error) {
     console.error('ライン取得エラー:', error)
@@ -980,7 +1039,7 @@ const resetRoutingGenForm = () => {
 }
 
 const fetchBOMItems = async (bomId, token = bomItemsRequestToken.value) => {
-  const response = await api.boms.getBOMItems({ bom: bomId })
+  const response = await api.boms.getBOMItems({ bom: bomId, page_size: 1000 })
   if (token !== bomItemsRequestToken.value) return
   const items = response.data.results || response.data || []
   // 追加した最新の明細が上に来るように逆順表示（APIデフォルトは昇順）
@@ -1209,7 +1268,7 @@ const saveBOM = async () => {
       await api.boms.createBOM(dataToSend)
       alert('作成しました')
     }
-    await fetchBOMs()
+    await fetchBOMs(currentPage.value)
     closeDialog()
   } catch (error) {
     console.error('保存エラー:', error)
@@ -1227,7 +1286,7 @@ const deleteBOM = async (id) => {
 
   try {
     await api.boms.deleteBOM(id)
-    await fetchBOMs()
+    await fetchBOMs(currentPage.value)
     alert('削除しました')
   } catch (error) {
     console.error('削除エラー:', error)
@@ -1250,8 +1309,9 @@ const generateRoutingFromBom = async () => {
   // 最終工程のオプション指定がある場合だけ付与
   if (routingGenForm.value.final_process_id) {
     payload.final_process_id = routingGenForm.value.final_process_id
-    if (routingGenForm.value.final_line_id) {
-      payload.final_line_id = routingGenForm.value.final_line_id
+    const finalLineId = selectedFinalProcess.value?.line || routingGenForm.value.final_line_id
+    if (finalLineId) {
+      payload.final_line_id = finalLineId
     }
     payload.final_time_unit = routingGenForm.value.final_time_unit
     if (routingGenForm.value.final_time_unit === 'MINUTE') {
@@ -1440,7 +1500,7 @@ const doCopyBOM = async () => {
   closeDetailsDialog()
 
   try {
-    await fetchBOMs()
+    await fetchBOMs(currentPage.value)
     // 新しいBOMを開く
     const newBom = boms.value.find(b => b.id === newBomId)
     if (newBom) {
@@ -1653,7 +1713,7 @@ onMounted(async () => {
     fetchProcesses(),
     fetchLines(),
   ])
-  await fetchBOMs()
+  await fetchBOMs(1)
   if (isStandaloneDetail.value && routeBomId.value) {
     await openDetailFromRoute()
   }
@@ -1678,6 +1738,21 @@ watch(
       itemForm.value.line = proc.line
     } else if (itemForm.value.line && !lines.value.find((l) => l.id === itemForm.value.line)) {
       itemForm.value.line = ''
+    }
+  }
+)
+
+watch(
+  () => routingGenForm.value.final_process_id,
+  (newProcess) => {
+    const proc = processes.value.find((p) => `${p.id}` === `${newProcess}`)
+    if (proc?.line) {
+      routingGenForm.value.final_line_id = proc.line
+    } else if (
+      routingGenForm.value.final_line_id &&
+      !lines.value.find((l) => `${l.id}` === `${routingGenForm.value.final_line_id}`)
+    ) {
+      routingGenForm.value.final_line_id = ''
     }
   }
 )
@@ -1747,6 +1822,18 @@ const TreeBranch = defineComponent({
 .filter-actions {
   display: flex;
   gap: 8px;
+}
+
+.bom-list-area {
+  max-height: min(65vh, 640px);
+  overflow: auto;
+}
+
+.bom-list-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #eef1ff;
 }
 
 .modal-overlay {
@@ -2099,5 +2186,18 @@ const TreeBranch = defineComponent({
   padding: 1rem;
   text-align: center;
   color: #666;
+}
+
+.pagination-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.page-info {
+  font-size: 14px;
+  color: #555;
 }
 </style>
