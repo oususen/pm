@@ -81,6 +81,14 @@ const tiles = computed(() => {
       resource: "production.plan_input",
     },
     {
+      to: "/production/plan-change-history",
+      label: t("productionMenu.tiles.planChangeHistory"),
+      icon: "🧾",
+      iconLabel: "履歴",
+      required: "view",
+      resource: "production.plan_input",
+    },
+    {
       to: "/production/default-start-time",
       label: t("productionMenu.tiles.defaultStart"),
       icon: "⏲",

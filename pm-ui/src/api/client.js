@@ -30,6 +30,7 @@ import { createPurchasePlanLockSettingAPI } from './resources/purchasePlanLockSe
 import { createProductionPlanLockSettingAPI } from './resources/productionPlanLockSetting'
 import { createScheduleConfigAPI } from './resources/scheduleConfig'
 import { createNotificationsAPI } from './resources/notifications'
+import { createProductionPlanChangeLogsAPI } from './resources/productionPlanChangeLogs'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
@@ -116,4 +117,5 @@ export default {
   productionPlanLockSetting: createProductionPlanLockSettingAPI(client),
   scheduleConfig: createScheduleConfigAPI(client),
   notifications: createNotificationsAPI(client),
+  productionPlanChangeLogs: createProductionPlanChangeLogsAPI(client),
 }

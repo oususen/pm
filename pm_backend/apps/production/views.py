@@ -25,6 +25,7 @@ from .serializers import (
     LineDemandSerializer,
     LineBacklogSerializer,
     LinePlanSerializer,
+    ProductionPlanChangeLogSerializer,
     LineGanttPlanSerializer,
     LineDailyScheduleSettingSerializer,
     LineDefaultScheduleSettingSerializer,
@@ -111,6 +112,23 @@ class LinePlanFilter(django_filters.FilterSet):
         fields = []
 
 
+class ProductionPlanChangeLogFilter(django_filters.FilterSet):
+    """ProductionPlanChangeLogのカスタムフィルタ"""
+    line = django_filters.NumberFilter(field_name='line_id')
+    process = django_filters.NumberFilter(field_name='process_id')
+    product = django_filters.NumberFilter(field_name='product_id')
+    changed_by = django_filters.NumberFilter(field_name='changed_by_id')
+    plan_date = django_filters.DateFilter(field_name='plan_date')
+    plan_date__gte = django_filters.DateFilter(field_name='plan_date', lookup_expr='gte')
+    plan_date__lte = django_filters.DateFilter(field_name='plan_date', lookup_expr='lte')
+    changed_at__gte = django_filters.DateTimeFilter(field_name='changed_at', lookup_expr='gte')
+    changed_at__lte = django_filters.DateTimeFilter(field_name='changed_at', lookup_expr='lte')
+
+    class Meta:
+        model = ProductionPlanChangeLog
+        fields = []
+
+
 class LineGanttPlanFilter(django_filters.FilterSet):
     """LineGanttPlanのカスタムフィルタ"""
     line = django_filters.NumberFilter(field_name='line_id')
@@ -122,6 +140,27 @@ class LineGanttPlanFilter(django_filters.FilterSet):
     class Meta:
         model = LineGanttPlan
         fields = []
+
+
+class ProductionPlanChangeLogViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = ProductionPlanChangeLog.objects.all().select_related('line', 'process', 'product', 'changed_by')
+    serializer_class = ProductionPlanChangeLogSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = ProductionPlanChangeLogFilter
+    search_fields = [
+        'product__product_code',
+        'product__product_name',
+        'process__process_code',
+        'process__process_name',
+        'line__line_code',
+        'line__line_name',
+        'reason',
+        'changed_by__username',
+        'changed_by__first_name',
+        'changed_by__last_name',
+    ]
+    ordering_fields = ['changed_at', 'plan_date', 'line', 'process', 'product', 'before_qty', 'after_qty']
+    ordering = ['-changed_at', '-id']
 
 
 class LinePlanViewSet(viewsets.ModelViewSet):

@@ -5,6 +5,7 @@ from production.views import (
     LineBacklogViewSet,
     LineDemandViewSet,
     LinePlanViewSet,
+    ProductionPlanChangeLogViewSet,
     LineGanttPlanViewSet,
     LineDailyScheduleSettingViewSet,
     LineDefaultScheduleSettingViewSet,
@@ -22,6 +23,7 @@ from production.views_services import BOMServiceViewSet, CRPViewSet
 router = DefaultRouter()
 router.register(r'line-demands', LineDemandViewSet, basename='linedemand')
 router.register(r'line-plans', LinePlanViewSet, basename='lineplan')
+router.register(r'production-plan-change-logs', ProductionPlanChangeLogViewSet, basename='productionplanchangelog')
 router.register(r'line-backlogs', LineBacklogViewSet, basename='linebacklog')
 router.register(r'line-gantt-plans', LineGanttPlanViewSet, basename='lineganttplan')
 router.register(r'line-daily-schedule-settings', LineDailyScheduleSettingViewSet, basename='linedailyschedulesetting')

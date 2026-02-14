@@ -11,6 +11,7 @@ from .models_line_plan import LinePlan
 from .models_line_gantt_plan import LineGanttPlan
 from .models_line_daily_schedule_setting import LineDailyScheduleSetting
 from .models_line_default_schedule_setting import LineDefaultScheduleSetting
+from .models_plan_change_log import ProductionPlanChangeLog
 from .models_plan_lock_setting import ProductionPlanLockSetting
 from .models_schedule_config import ScheduleConfig
 from .models_process_realtime import ProcessRealtimeRecord
@@ -263,6 +264,30 @@ class LinePlanSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ProductionPlanChangeLogSerializer(serializers.ModelSerializer):
+    product_code = serializers.CharField(source='product.product_code', read_only=True)
+    product_name = serializers.CharField(source='product.product_name', read_only=True)
+    process_code = serializers.CharField(source='process.process_code', read_only=True)
+    process_name = serializers.CharField(source='process.process_name', read_only=True)
+    line_code = serializers.CharField(source='line.line_code', read_only=True)
+    line_name = serializers.CharField(source='line.line_name', read_only=True)
+    changed_by_username = serializers.CharField(source='changed_by.username', read_only=True)
+
+    class Meta:
+        model = ProductionPlanChangeLog
+        fields = [
+            'id', 'changed_at', 'plan_date',
+            'product', 'product_code', 'product_name',
+            'process', 'process_code', 'process_name',
+            'line', 'line_code', 'line_name',
+            'sequence_no', 'plan_id',
+            'before_qty', 'after_qty',
+            'reason',
+            'changed_by', 'changed_by_username',
+        ]
+        read_only_fields = fields
 
 
 class LineGanttPlanSerializer(serializers.ModelSerializer):
