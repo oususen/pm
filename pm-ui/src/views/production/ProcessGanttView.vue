@@ -119,7 +119,10 @@
                   }"
                   :data-plan-id="bar.planId"
                   :data-process-id="bar.processId"
+                  :data-output-product-id="bar.outputProductId"
                   :data-duration-ms="bar.durationMs"
+                  :data-quantity="bar.planQty"
+                  :data-quantity-edited="bar.quantityEdited ? '1' : ''"
                   @mousedown="onBarMouseDown"
                 >
                   <div
@@ -129,7 +132,7 @@
                     }"
                   >
                     <span class="gantt-bar-label">
-                      <span class="plan-qty">{{ bar.planQty }}</span>
+                      <span class="plan-qty" @mousedown.stop @click.stop="openQuantityEdit(bar)">{{ formatQuantity(bar.planQty) }}</span>
                       <span class="qty-separator">|</span>
                       <span class="start-time" @mousedown.stop @click.stop="openStartTimeEdit(bar)">{{ bar.startLabel }}</span>
                       <span class="time-separator">-</span>
@@ -525,12 +528,31 @@ const saveSchedule = async () => {
     const finalStart = new Date(roundedStartMs)
     const finalEnd = new Date(roundedStartMs + durationMs)
 
-    updates.push({
+    const payload = {
       plan_id: planId,
       process_id: processId,
       start_time: toLocalISO(finalStart),
       end_time: toLocalISO(finalEnd),
-    })
+    }
+    const outputProductId = Number(bar.dataset.outputProductId)
+    if (Number.isFinite(outputProductId) && outputProductId > 0) {
+      payload.output_product_id = outputProductId
+    }
+    const quantityEdited = bar.dataset.quantityEdited === '1'
+    const quantityRaw = bar.dataset.quantity
+    const quantityValue = Number(quantityRaw)
+    if (
+      quantityEdited &&
+      quantityRaw !== undefined &&
+      quantityRaw !== null &&
+      quantityRaw !== '' &&
+      Number.isFinite(quantityValue) &&
+      quantityValue > 0
+    ) {
+      payload.quantity = Math.round(quantityValue * 1000) / 1000
+    }
+
+    updates.push(payload)
   })
 
   if (!updates.length) {
@@ -541,11 +563,24 @@ const saveSchedule = async () => {
   try {
     logDebug('saveSchedule', { updates: updates.length })
     await api.lineGanttPlans.bulkUpdate(updates)
+    clearQuantityEditedFlags()
     alert('保存しました')
   } catch (e) {
     console.error('保存エラー', e)
     alert('保存に失敗しました')
   }
+}
+
+const clearQuantityEditedFlags = () => {
+  processGanttData.value.forEach((proc) => {
+    if (!proc.items) return
+    proc.items.forEach((item) => {
+      if (!item.bars) return
+      item.bars.forEach((bar) => {
+        bar.quantityEdited = false
+      })
+    })
+  })
 }
 
 defineExpose({ saveSchedule })
@@ -741,6 +776,24 @@ function formatMinutesLabel(minutes) {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toString()
 }
 
+function formatQuantity(value) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '0'
+  const rounded = Math.round(num * 1000) / 1000
+  if (Number.isInteger(rounded)) return String(rounded)
+  return rounded.toString().replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '')
+}
+
+function parseQuantityInput(value) {
+  if (value === null || value === undefined) return null
+  const normalized = String(value).trim()
+  if (!normalized) return null
+  if (!/^\d+(\.\d+)?$/.test(normalized)) return null
+  const parsed = Number(normalized)
+  if (!Number.isFinite(parsed) || parsed <= 0) return null
+  return Math.round(parsed * 1000) / 1000
+}
+
 function formatTimeRange(start, end) {
   return `${formatDateTime(start)} - ${formatDateTime(end)}`
 }
@@ -784,7 +837,7 @@ function updateBarDisplay(bar) {
   bar.startLabel = formatDateTime(bar.startTime)
   bar.endLabel = formatDateTime(bar.endTime)
   bar.durationLabel = formatMinutesLabel(bar.totalMinutesRequired ?? bar.durationMs / 60000)
-  bar.label = `${bar.planQty}|${bar.startLabel}-${bar.endLabel}${bar.durationLabel ? `(${bar.durationLabel})` : ''}`
+  bar.label = `${formatQuantity(bar.planQty)}|${bar.startLabel}-${bar.endLabel}${bar.durationLabel ? `(${bar.durationLabel})` : ''}`
 }
 
 function cloneBarForMerge(bar) {
@@ -864,6 +917,25 @@ function openStartTimeEdit(bar) {
   alert('開始時間を変更しました。保存ボタンで確定してください。')
 }
 
+function openQuantityEdit(bar) {
+  if (!bar) return
+  if (mergeConsecutive.value) {
+    alert('連結表示中は数量を編集できません。分解表示に切り替えてください。')
+    return
+  }
+  const input = window.prompt('数量を入力してください（0より大きい数値）', formatQuantity(bar.planQty))
+  if (input === null) return
+  const parsed = parseQuantityInput(input)
+  if (parsed === null) {
+    alert('数量の形式が正しくありません。例: 18 または 18.5')
+    return
+  }
+  bar.planQty = parsed
+  bar.quantityEdited = true
+  updateBarDisplay(bar)
+  alert('数量を変更しました。保存ボタンで確定してください。')
+}
+
 function buildProcessGantt(plans) {
   const processMap = new Map()
   const allDates = []
@@ -935,10 +1007,12 @@ function buildProcessGantt(plans) {
           key: barKey,
           planId: plan.plan_id,
           processId: proc.process_id,
+          outputProductId: outputProductId,
           startTime,
           endTime,
           durationMs: endTime.getTime() - startTime.getTime(),
           planQty: qtyValue,
+          quantityEdited: false,
           totalMinutesRequired: Number(proc.total_minutes_required ?? 0),
           color: getBarColor(colorKey),
           label: '',
@@ -1340,6 +1414,11 @@ onMounted(async () => {
   background: rgba(0, 0, 0, 0.65);
   padding: 2px 4px;
   border-radius: 4px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.plan-qty:hover {
+  background: rgba(0, 0, 0, 0.8);
 }
 .qty-separator {
   margin: 0 4px 0 2px;

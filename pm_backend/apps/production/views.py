@@ -1,6 +1,6 @@
 from rest_framework import viewsets, status
 from rest_framework.views import APIView
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta, datetime
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -2436,18 +2436,47 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
     def bulk_update(self, request):
         """
         ガントのドラッグ調整結果を一括保存する。
-        期待payload: [{ plan_id, process_id, start_time, end_time }, ...]
+        期待payload: [{ plan_id, process_id, output_product_id?, start_time?, end_time?, quantity? }, ...]
         """
         updates = request.data
         if not isinstance(updates, list) or not updates:
             return Response({'detail': 'updates must be a non-empty list'}, status=status.HTTP_400_BAD_REQUEST)
 
         updated_count = 0
+        change_log_count = 0
+        change_user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+        change_reason = '工程ガント数量編集'
         for update in updates:
             plan_id = update.get('plan_id')
             process_id = update.get('process_id')
             if not plan_id or not process_id:
                 continue
+            try:
+                process_id = int(process_id)
+            except Exception:
+                continue
+            output_product_id = update.get('output_product_id')
+            if output_product_id in [None, '']:
+                output_product_id = None
+            else:
+                try:
+                    output_product_id = int(output_product_id)
+                except Exception:
+                    output_product_id = None
+            start_time = update.get('start_time')
+            end_time = update.get('end_time')
+            has_quantity = 'quantity' in update
+            quantity_value = None
+            quantity_int_value = None
+            if has_quantity:
+                try:
+                    quantity_value = Decimal(str(update.get('quantity')))
+                    if quantity_value <= 0:
+                        has_quantity = False
+                    else:
+                        quantity_int_value = int(quantity_value.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+                except Exception:
+                    has_quantity = False
 
             plan = LineGanttPlan.objects.filter(plan_id=plan_id).first()
             if not plan or not plan.processes_plan:
@@ -2455,12 +2484,33 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
 
             processes_plan = list(plan.processes_plan)
             changed = False
+            matched_output_product_id = None
+            quantity_changed = False
+            before_quantity_value = None
             for proc in processes_plan:
                 if str(proc.get('process_id')) == str(process_id):
-                    proc['start_time'] = update.get('start_time')
-                    proc['end_time'] = update.get('end_time')
-                    changed = True
-                    updated_count += 1
+                    proc_output_product_id = proc.get('output_product_id')
+                    if output_product_id is not None and str(proc_output_product_id) != str(output_product_id):
+                        continue
+                    matched_output_product_id = proc_output_product_id
+                    if start_time:
+                        proc['start_time'] = start_time
+                        changed = True
+                    if end_time:
+                        proc['end_time'] = end_time
+                        changed = True
+                    if has_quantity and quantity_int_value is not None:
+                        try:
+                            before_qty = int(Decimal(str(proc.get('quantity') or 0)).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+                        except Exception:
+                            before_qty = 0
+                        if before_qty != quantity_int_value:
+                            proc['quantity'] = quantity_int_value
+                            changed = True
+                            quantity_changed = True
+                            before_quantity_value = before_qty
+                    if changed:
+                        updated_count += 1
                     break
 
             if changed:
@@ -2478,8 +2528,54 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
                     plan.end_datetime = max(ends)
                 plan.processes_plan = processes_plan
                 plan.save()
+                if quantity_changed and quantity_int_value is not None and matched_output_product_id:
+                    try:
+                        matched_output_product_id = int(matched_output_product_id)
+                    except Exception:
+                        matched_output_product_id = None
+                if quantity_changed and quantity_int_value is not None and matched_output_product_id:
+                    backlog_qs = LineBacklog.objects.filter(
+                        line_id=plan.line_id,
+                        process_id=process_id,
+                        product_id=matched_output_product_id,
+                        plan_id=plan_id,
+                    )
+                    backlog_rows = list(backlog_qs)
+                    if backlog_rows:
+                        backlog_qs.update(plan_qty=quantity_int_value)
+                        for row in backlog_rows:
+                            before_qty = int(row.plan_qty or 0)
+                            if before_qty == quantity_int_value:
+                                continue
+                            ProductionPlanChangeLog.objects.create(
+                                plan_date=row.plan_date,
+                                product_id=row.product_id,
+                                process_id=row.process_id,
+                                line_id=row.line_id,
+                                sequence_no=row.sequence_no,
+                                plan_id=row.plan_id,
+                                before_qty=before_qty,
+                                after_qty=quantity_int_value,
+                                reason=change_reason,
+                                changed_by=change_user,
+                            )
+                            change_log_count += 1
+                    elif before_quantity_value is not None:
+                        ProductionPlanChangeLog.objects.create(
+                            plan_date=plan.plan_date,
+                            product_id=matched_output_product_id,
+                            process_id=process_id,
+                            line_id=plan.line_id,
+                            sequence_no=plan.sequence_no,
+                            plan_id=plan_id,
+                            before_qty=before_quantity_value,
+                            after_qty=quantity_int_value,
+                            reason=change_reason,
+                            changed_by=change_user,
+                        )
+                        change_log_count += 1
 
-        return Response({'updated': updated_count})
+        return Response({'updated': updated_count, 'change_logs': change_log_count})
 
 
 # ========================================
