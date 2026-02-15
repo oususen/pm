@@ -215,7 +215,14 @@
           </div>
         </div>
         <div class="process-actions">
-          <button class="btn" @click="saveGanttSchedule" :disabled="!selectedLine">工程ガント保存</button>
+          <button
+            class="btn gantt-save-btn"
+            :class="{ 'gantt-save-dirty': ganttDirty }"
+            @click="saveGanttSchedule"
+            :disabled="!selectedLine"
+          >
+            工程ガント保存
+          </button>
         </div>
       </div>
       <ProcessGanttView
@@ -226,6 +233,7 @@
         :preset-base-date="startDate"
         :preset-start-date="startDate"
         :preset-end-date="endDate"
+        @dirty-change="onGanttDirtyChange"
       />
     </div>
 
@@ -349,6 +357,7 @@ const showProcessGantt = ref(false)
 const showProcessLoad = ref(false)
 const ganttReloadKey = ref(0)
 const ganttRef = ref(null)
+const ganttDirty = ref(false)
 const finalProcessStartTime = ref('08:00')
 const adjustToBreakEnd = ref(true)
 let lotTempId = 1
@@ -849,8 +858,15 @@ const toggleProcessGantt = async () => {
   }
   showProcessGantt.value = !showProcessGantt.value
   if (showProcessGantt.value) {
+    ganttDirty.value = false
     ganttReloadKey.value += 1
+  } else {
+    ganttDirty.value = false
   }
+}
+
+const onGanttDirtyChange = (isDirty) => {
+  ganttDirty.value = !!isDirty
 }
 
 const saveGanttSchedule = async () => {
@@ -2183,6 +2199,18 @@ thead .sticky-col {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.gantt-save-btn {
+  min-height: 64px;
+  font-weight: 700;
+}
+.gantt-save-btn.gantt-save-dirty {
+  background: #dc2626;
+  color: #fff;
+  border-color: #b91c1c;
+}
+.gantt-save-btn.gantt-save-dirty:hover {
+  background: #b91c1c;
 }
 .process-status {
   font-size: 12px;

@@ -157,7 +157,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, defineProps, defineExpose } from 'vue'
+import { ref, computed, onMounted, watch, defineProps, defineExpose, defineEmits } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api/client'
 
@@ -168,6 +168,7 @@ const props = defineProps({
   presetStartDate: { type: String, default: '' },
   presetEndDate: { type: String, default: '' },
 })
+const emit = defineEmits(['dirty-change'])
 const TANK_LINE_CODE = 'L2200'
 const TANK_PRODUCT_ORDER = [
   'YD60003386',
@@ -192,6 +193,7 @@ const workMinutesFallback = 480
 const timelineStart = ref(null)
 const timelineEnd = ref(null)
 const timelineSlots = ref([])
+const hasUnsavedChanges = ref(false)
 const debugEnabled = true
 const calendarDayMap = ref({})
 const workPatternMap = ref({})
@@ -203,6 +205,13 @@ const isTankLine = computed(() => selectedLineObj.value?.line_code === TANK_LINE
 
 const logDebug = (...args) => {
   if (debugEnabled) console.info('[ProcessGanttView]', ...args)
+}
+
+const setUnsavedChanges = (isDirty) => {
+  const next = !!isDirty
+  if (hasUnsavedChanges.value === next) return
+  hasUnsavedChanges.value = next
+  emit('dirty-change', next)
 }
 
 const displayDays = computed(() => {
@@ -444,6 +453,7 @@ const loadWorkPatternData = async (lineId, startDate, endDate) => {
 
 const loadData = async () => {
   if (!selectedLine.value) return
+  setUnsavedChanges(false)
   processGanttData.value = []
 
   try {
@@ -473,6 +483,7 @@ const loadData = async () => {
 
 const generateSchedule = async (clearExisting = true) => {
   if (!selectedLine.value) return
+  setUnsavedChanges(false)
   processGanttData.value = []
 
   try {
@@ -564,6 +575,7 @@ const saveSchedule = async () => {
     logDebug('saveSchedule', { updates: updates.length })
     await api.lineGanttPlans.bulkUpdate(updates)
     clearQuantityEditedFlags()
+    setUnsavedChanges(false)
     alert('保存しました')
   } catch (e) {
     console.error('保存エラー', e)
@@ -682,6 +694,7 @@ function handleDragEnd() {
   tooltip.style.display = 'none'
 
   if (isDragging) {
+    setUnsavedChanges(true)
     alert('位置を調整しました。保存ボタンで確定してください。')
   }
 
@@ -914,6 +927,7 @@ function openStartTimeEdit(bar) {
   bar.startTime = newStart
   bar.endTime = newEnd
   updateBarDisplay(bar)
+  setUnsavedChanges(true)
   alert('開始時間を変更しました。保存ボタンで確定してください。')
 }
 
@@ -933,6 +947,7 @@ function openQuantityEdit(bar) {
   bar.planQty = parsed
   bar.quantityEdited = true
   updateBarDisplay(bar)
+  setUnsavedChanges(true)
   alert('数量を変更しました。保存ボタンで確定してください。')
 }
 

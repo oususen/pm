@@ -748,6 +748,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             return current
 
         gantt_usage_cache = {}
+        downstream_backlog_cache = {}
 
         def build_line_start_map(line_id, product_ids):
             key = (
@@ -763,7 +764,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             qs = LineGanttPlan.objects.filter(
                 line_id=line_id,
                 product_id__in=product_ids,
-            )
+            ).only('plan_id', 'start_datetime', 'plan_qty')
 
             usage_map = {}
             plan_id_set = set()
@@ -813,6 +814,28 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             )
             return usage_map, plan_id_set
 
+        def get_downstream_backlog_rows(target_line_id, target_ids):
+            cache_key = (
+                target_line_id,
+                tuple(sorted(target_ids)),
+                start_dt,
+                end_dt,
+            )
+            if cache_key in downstream_backlog_cache:
+                return downstream_backlog_cache[cache_key]
+
+            qs = LineBacklog.objects.filter(
+                line_id=target_line_id,
+                product_id__in=target_ids,
+            )
+            if start_dt:
+                qs = qs.filter(plan_date__gte=start_dt)
+            if end_dt:
+                qs = qs.filter(plan_date__lte=end_dt)
+            rows = list(qs.values_list('product_id', 'plan_date', 'plan_qty', 'plan_id'))
+            downstream_backlog_cache[cache_key] = rows
+            return rows
+
         def resolve_lead_time_days(current_product_id, bom_item=None):
             """現ラインのLTを優先して解決する。"""
             step = product_step_map.get(current_product_id)
@@ -830,25 +853,28 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             backlog_qs = backlog_qs.filter(plan_date__gte=start_date)
         if end_date:
             backlog_qs = backlog_qs.filter(plan_date__lte=end_date)
-        for existing in backlog_qs:
+        existing_backlogs = list(backlog_qs)
+        for existing in existing_backlogs:
             demand_map[(existing.product_id, existing.plan_date)] = Decimal('0')
-        logger.info("pickup: existing_backlogs=%s", backlog_qs.count())
+        logger.info("pickup: existing_backlogs=%s", len(existing_backlogs))
 
         # 最終品はOrderLineから、中間品は後工程から需要を取得
 
         # A. 最終品（is_final_product=True）はOrderLineから取得
         if final_products:
-            order_lines = OrderLine.objects.filter(
+            order_lines_qs = OrderLine.objects.filter(
                 order__status='OPEN',
                 product_id__in=final_products
             ).select_related('order', 'product')
 
             if start_date:
-                order_lines = order_lines.filter(due_date__gte=start_date)
+                order_lines_qs = order_lines_qs.filter(due_date__gte=start_date)
             if end_date:
-                order_lines = order_lines.filter(due_date__lte=end_date)
+                order_lines_qs = order_lines_qs.filter(due_date__lte=end_date)
 
-            logger.info("pickup: order_lines=%s", order_lines.count())
+            order_lines = list(order_lines_qs)
+
+            logger.info("pickup: order_lines=%s", len(order_lines))
 
             firm_map = defaultdict(Decimal)
             forecast_map = defaultdict(Decimal)
@@ -892,10 +918,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         bom_items_by_child = {}
         parent_product_ids = set()
         if intermediate_products:
-            all_bom_items = BOMItem.objects.filter(
+            all_bom_items = list(BOMItem.objects.filter(
                 child_product_id__in=intermediate_products
-            ).select_related('bom', 'bom__parent_product')
-            logger.info("pickup: bom_items_for_intermediate=%s", all_bom_items.count())
+            ).select_related('bom', 'bom__parent_product'))
+            logger.info("pickup: bom_items_for_intermediate=%s", len(all_bom_items))
             for bom_item in all_bom_items:
                 child_id = bom_item.child_product_id
                 if child_id not in bom_items_by_child:
@@ -907,10 +933,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         # 親製品を出力するRoutingStepを一括取得
         downstream_steps_by_product = {}
         if parent_product_ids:
-            all_downstream_steps = RoutingStep.objects.filter(
+            all_downstream_steps = list(RoutingStep.objects.filter(
                 output_product_id__in=parent_product_ids
-            ).select_related('routing', 'routing__product', 'line')
-            logger.info("pickup: downstream_steps=%s", all_downstream_steps.count())
+            ).select_related('routing', 'routing__product', 'line'))
+            logger.info("pickup: downstream_steps=%s", len(all_downstream_steps))
             for d_step in all_downstream_steps:
                 prod_id = d_step.output_product_id
                 if prod_id not in downstream_steps_by_product:
@@ -976,14 +1002,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
                     # LineBacklog取得：ガントのstart_datetimeを優先し、無ければ親製品/ライン最終品の計画を使用
                     line_start_map, gantt_plan_ids = build_line_start_map(downstream_line_id, target_ids)
-                    backlog_items = LineBacklog.objects.filter(
-                        line_id=downstream_line_id,
-                        product_id__in=target_ids
-                    )
-                    if start_date:
-                        backlog_items = backlog_items.filter(plan_date__gte=start_date)
-                    if end_date:
-                        backlog_items = backlog_items.filter(plan_date__lte=end_date)
+                    backlog_rows = get_downstream_backlog_rows(downstream_line_id, target_ids)
 
                     # ステップ5: 後工程の計画数 × BOM個数 = 現在ラインの必要数
                     if routing_final_product and routing_final_product != parent_product:
@@ -995,14 +1014,13 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     if len(target_ids) > 1:
                         parent_map = {}
                         final_map = {}
-                        for backlog in backlog_items:
-                            plan_date = backlog.plan_date
-                            qty = Decimal(str(backlog.plan_qty or 0))
+                        for backlog_product_id, plan_date, plan_qty, backlog_plan_id in backlog_rows:
+                            qty = Decimal(str(plan_qty or 0))
                             if qty == 0:
                                 continue
-                            if backlog.plan_id and backlog.plan_id in gantt_plan_ids:
+                            if backlog_plan_id and backlog_plan_id in gantt_plan_ids:
                                 continue
-                            if backlog.product_id == parent_product.id:
+                            if backlog_product_id == parent_product.id:
                                 parent_map[plan_date] = parent_map.get(plan_date, Decimal('0')) + qty
                             else:
                                 final_map[plan_date] = final_map.get(plan_date, Decimal('0')) + qty
@@ -1017,12 +1035,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             if qty:
                                 fallback_map[plan_date] = qty
                     else:
-                        for backlog in backlog_items:
-                            plan_date = backlog.plan_date
-                            qty = Decimal(str(backlog.plan_qty or 0))
+                        for _, plan_date, plan_qty, backlog_plan_id in backlog_rows:
+                            qty = Decimal(str(plan_qty or 0))
                             if qty == 0:
                                 continue
-                            if backlog.plan_id and backlog.plan_id in gantt_plan_ids:
+                            if backlog_plan_id and backlog_plan_id in gantt_plan_ids:
                                 continue
                             fallback_map[plan_date] = fallback_map.get(plan_date, Decimal('0')) + qty
 
@@ -1059,16 +1076,18 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             # 親製品のLineBacklogを一括取得
             backlog_by_product = {}
             if parent_ids_for_backlog:
-                backlog_qs_parent = LineBacklog.objects.filter(product_id__in=parent_ids_for_backlog)
+                backlog_qs_parent = LineBacklog.objects.filter(
+                    product_id__in=parent_ids_for_backlog,
+                    plan_qty__gt=0,
+                )
                 if start_date:
                     backlog_qs_parent = backlog_qs_parent.filter(plan_date__gte=start_date)
                 if end_date:
                     backlog_qs_parent = backlog_qs_parent.filter(plan_date__lte=end_date)
-                for backlog in backlog_qs_parent:
-                    prod_id = backlog.product_id
+                for prod_id, plan_date, plan_qty in backlog_qs_parent.values_list('product_id', 'plan_date', 'plan_qty'):
                     if prod_id not in backlog_by_product:
                         backlog_by_product[prod_id] = []
-                    backlog_by_product[prod_id].append(backlog)
+                    backlog_by_product[prod_id].append((plan_date, plan_qty))
 
             for product_id in intermediate_products:
                 current_output_product = product_id
@@ -1089,12 +1108,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     # リードタイムを考慮
                     lt_days = resolve_lead_time_days(current_output_product, bom_item)
 
-                    for backlog in backlog_items:
-                        plan_date = backlog.plan_date
+                    for plan_date, plan_qty in backlog_items:
                         if lt_days:
                             plan_date = shift_business_days(plan_date, lt_days)
                         key = (current_output_product, plan_date)
-                        demand_map[key] += backlog.plan_qty * qty_per
+                        demand_map[key] += Decimal(str(plan_qty or 0)) * qty_per
                         downstream_found = True
 
         # 4. LineBacklogに保存（order_qtyのみ更新、他の数量は維持）- bulk操作で高速化
@@ -1135,20 +1153,23 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     target_key_set.add(key)
 
         if target_keys:
-            # 既存レコードを一括取得
-            from django.db.models import Q
-            q_filter = Q()
-            for product_id, plan_date, process_id, _ in target_keys:
-                q_filter |= Q(
-                    plan_date=plan_date,
-                    process_id=process_id,
-                    product_id=product_id,
-                    line_id=line_id,
-                    sequence_no=0,
-                )
+            # 既存レコードを一括取得（巨大ORを避ける）
+            target_product_ids = sorted({product_id for product_id, _, _, _ in target_keys})
+            target_process_ids = sorted({process_id for _, _, process_id, _ in target_keys})
+            target_plan_dates = [plan_date for _, plan_date, _, _ in target_keys]
+            existing_qs = LineBacklog.objects.filter(
+                line_id=line_id,
+                sequence_no=0,
+                product_id__in=target_product_ids,
+                process_id__in=target_process_ids,
+            )
+            if target_plan_dates:
+                min_plan_date = min(target_plan_dates)
+                max_plan_date = max(target_plan_dates)
+                existing_qs = existing_qs.filter(plan_date__gte=min_plan_date, plan_date__lte=max_plan_date)
             existing_records = {
                 (r.product_id, r.plan_date, r.process_id): r
-                for r in LineBacklog.objects.filter(q_filter)
+                for r in existing_qs
             }
 
             to_create = []
@@ -1191,7 +1212,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         # 5. 最新状態を返す
         items_to_serialize = upserted_items
         if not items_to_serialize:
-            existing_items = list(backlog_qs)
+            existing_items = existing_backlogs
             if existing_items:
                 items_to_serialize = existing_items
             else:
