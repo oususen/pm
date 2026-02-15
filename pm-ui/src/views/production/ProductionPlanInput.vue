@@ -418,7 +418,7 @@ const dateColumns = computed(() => {
 
 // テーブルの最小幅を計算して、縮みすぎを防ぐ
 const tableMinWidth = computed(() => {
-  const fixedColsWidth = 60 + 187 + 100 // No + 品番 + 品名
+  const fixedColsWidth = 60 + 135 + 100 // No + 品番 + 品名
   const perDayWidth = (60 * 5) + 40 // 需要/実績/在庫/計画/計画在庫=64px、順序=80px
   return fixedColsWidth + dateColumns.value.length * perDayWidth
 })
@@ -1826,6 +1826,9 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
 .plan-grid thead tr.head-level2 th {
   top: var(--header-row-height);
 }
+.plan-grid thead tr.head-level2 th.mini {
+  padding: 0 !important;
+}
 .plan-grid thead th.sticky-col {
   z-index: 8;
 }
@@ -1935,16 +1938,30 @@ thead .sticky-col {
 }
 .code-col {
   left: 60px;
-  width: 187px; /* 156px の1.2倍 */
-  min-width: 187px;
-  max-width: 187px;
+  width: 135px;
+  min-width: 135px;
+  max-width: 135px;
 }
 .name-col {
-  left: 247px;
+  left: 195px;
   width: 100px;
   min-width: 100px;
   max-width: 100px;
   border-right: 2px solid #b5c1d2 !important;
+}
+.plan-grid tbody td.code-col {
+  padding: 0 !important;
+  text-align: left;
+}
+.plan-grid tbody td.code-col .product-info {
+  padding: 0;
+  text-align: left;
+}
+.plan-grid tbody td.name-col {
+  padding: 0 !important;
+}
+.plan-grid tbody td.name-col .product-info {
+  padding: 0;
 }
 .row-controls {
   display: flex;
