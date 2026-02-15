@@ -113,6 +113,7 @@
                   v-for="bar in item.displayBars || item.bars"
                   :key="bar.key"
                   class="gantt-bar-wrapper"
+                  :title="buildBarTooltip(bar, item, proc)"
                   :style="{
                     left: bar.leftPx + 'px',
                     width: bar.widthPx + 'px',
@@ -809,6 +810,20 @@ function parseQuantityInput(value) {
 
 function formatTimeRange(start, end) {
   return `${formatDateTime(start)} - ${formatDateTime(end)}`
+}
+
+function buildBarTooltip(bar, item, proc) {
+  if (!bar) return ''
+  const detailLines = []
+  if (proc?.process_name) detailLines.push(`工程: ${proc.process_name}`)
+  if (item?.product_code) detailLines.push(`品番: ${item.product_code}`)
+  detailLines.push(`数量: ${formatQuantity(bar.planQty)}`)
+  if (bar.startLabel && bar.endLabel) {
+    detailLines.push(`時間: ${bar.startLabel} - ${bar.endLabel}`)
+  }
+  if (bar.durationLabel) detailLines.push(`所要分: ${bar.durationLabel}`)
+  if (bar.quantityEdited) detailLines.push('数量変更: 未保存')
+  return detailLines.join('\n')
 }
 
 function formatDateTimeInput(date) {
