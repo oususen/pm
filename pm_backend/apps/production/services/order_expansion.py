@@ -95,9 +95,10 @@ class OrderExpansionService:
         minutes_per_day = 480
 
         def calc_shift_days(prev_minutes, add_minutes):
-            prev_days = math.ceil(prev_minutes / minutes_per_day) if prev_minutes > 0 else 0
+            # 480分未満は0日扱い（切り捨て）
+            prev_days = math.floor(prev_minutes / minutes_per_day) if prev_minutes > 0 else 0
             total_minutes = prev_minutes + add_minutes
-            total_days = math.ceil(total_minutes / minutes_per_day) if total_minutes > 0 else 0
+            total_days = math.floor(total_minutes / minutes_per_day) if total_minutes > 0 else 0
             return total_days - prev_days, total_minutes
 
         for ol in order_lines:
