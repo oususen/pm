@@ -31,6 +31,10 @@
         <div class="icon-box">⏰</div>
         <div class="label">定時タスク設定</div>
       </RouterLink>
+      <RouterLink v-if="canEditSettings" to="/settings/stocktake-init" class="master-tile">
+        <div class="icon-box">📦</div>
+        <div class="label">棚卸初期化</div>
+      </RouterLink>
     </div>
 
     <p class="helper-text">

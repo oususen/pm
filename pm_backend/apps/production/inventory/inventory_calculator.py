@@ -904,7 +904,10 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
         last_planned = initial_backlog.stock_qty or 0
         planned_by_date[initial_backlog.plan_date] = last_planned
     else:
-        last_planned = 0
+        # calc_start_date以前にデータがない場合（初回投入時など）、
+        # 対象範囲の最古のstock_qtyを初期値としてフォールバック
+        fallback = backlogs[0] if backlogs else None
+        last_planned = (fallback.stock_qty or 0) if fallback else 0
 
     # 更新対象のbacklogを追跡（計算開始日以前は更新しない）
     backlogs_to_update = []
@@ -1072,3 +1075,212 @@ def recalculate_inventory_for_line(line_id, start_date, end_date, include_progre
         progress_max[1],
     )
     logger.info("在庫再計算完了: total_time=%.3fs", time.perf_counter() - overall_start)
+
+
+def get_progress_upper_bound_date():
+    """
+    進度初期化における上限日（実行業務日の前々営業日）を返す。
+    """
+    from masters.models import Calendar, CalendarDay
+
+    today = get_business_today()
+    calendar_id = Calendar.objects.filter(
+        calendar_code='daiso'
+    ).values_list('id', flat=True).first()
+
+    def is_working_day(target_date):
+        if not calendar_id:
+            return target_date.weekday() < 5
+        cal = CalendarDay.objects.filter(
+            calendar_id=calendar_id,
+            target_date=target_date,
+        ).first()
+        return cal.is_working_day if cal is not None else target_date.weekday() < 5
+
+    def get_prev_working_day(target_date):
+        prev_date = target_date - timedelta(days=1)
+        while not is_working_day(prev_date):
+            prev_date = prev_date - timedelta(days=1)
+        return prev_date
+
+    return get_prev_working_day(get_prev_working_day(today))
+
+
+def resolve_progress_baseline_date(stocktake_date):
+    """
+    棚卸日から進度初期化に使う基準日を解決する
+
+    ルール:
+    - 上限日: 実行日の業務日付(8時区切り)に対する前々営業日
+    - 候補: line_backlog(plan_date, sequence_no=0) のうち、
+      plan_date <= min(stocktake_date, 上限日)
+    - 基準日: 候補のうち最も新しい日付
+
+    Args:
+        stocktake_date: 棚卸日(date)
+
+    Returns:
+        tuple[date, date]: (resolved_baseline_date, upper_bound_date)
+    """
+    upper_bound = get_progress_upper_bound_date()
+    cutoff_date = min(stocktake_date, upper_bound)
+
+    resolved = (LineBacklog.objects.filter(
+        sequence_no=0,
+        plan_date__lte=cutoff_date,
+    ).values_list('plan_date', flat=True).distinct().order_by('-plan_date').first())
+
+    if not resolved:
+        raise ValueError(
+            f'line_backlog row not found on or before {cutoff_date.isoformat()}'
+        )
+
+    return resolved, upper_bound
+
+
+def initialize_progress_from_stocktake(baseline_date):
+    """
+    棚卸在庫から進度(progress_qty, planned_progress_qty)を初期化する
+
+    計算順序:
+    1. 最終品(is_final_product): 進度 = stock_qty（在庫がそのまま需要に対する先行分）
+    2. 子部品: 進度 = stock_qty - Σ(親製品の進度 × BOM数量)
+       - 親が複数ラインにまたがる場合は全ライン合算
+    BOM階層の上位→下位の順（トポロジカルソート）で処理する
+
+    Args:
+        baseline_date: 棚卸基準日 (date)
+
+    Returns:
+        dict: { updated_count, final_count, child_count }
+    """
+    import logging
+    from collections import defaultdict, deque
+
+    from masters.models import BOMItem, Product
+
+    logger = logging.getLogger(__name__)
+
+    # 1. baseline_date の代表行（sequence_no=0）を取得
+    backlogs = list(LineBacklog.objects.filter(
+        plan_date=baseline_date,
+        sequence_no=0,
+    ).select_related('product'))
+
+    if not backlogs:
+        logger.warning("initialize_progress: baseline_date=%s にline_backlog行が見つかりません", baseline_date)
+        return {'updated_count': 0, 'final_count': 0, 'child_count': 0}
+
+    # product_id → [backlog, ...] のマップ（複数ラインにまたがる場合があるため）
+    product_backlogs = defaultdict(list)
+    for bl in backlogs:
+        product_backlogs[bl.product_id].append(bl)
+
+    target_product_ids = set(product_backlogs.keys())
+    logger.info("initialize_progress: 対象製品数=%d, baseline_date=%s", len(target_product_ids), baseline_date)
+
+    # 2. 対象製品間のBOM関係を取得（parent → child）
+    bom_items = list(BOMItem.objects.filter(
+        bom__is_active=True,
+        bom__is_coproduct=False,
+        bom__parent_product_id__in=target_product_ids,
+        child_product_id__in=target_product_ids,
+    ).select_related('bom'))
+
+    # parent → [(child_id, qty), ...] と child → [parent_id, ...] のマップ
+    parent_to_children = defaultdict(list)
+    child_to_parents = defaultdict(list)
+    for item in bom_items:
+        parent_id = item.bom.parent_product_id
+        child_id = item.child_product_id
+        qty = item.quantity or Decimal('0')
+        parent_to_children[parent_id].append((child_id, qty))
+        child_to_parents[child_id].append((parent_id, qty))
+
+    # 3. トポロジカルソート（BOM上位 → 下位）
+    # in_degree = 親の数（対象製品内での）
+    in_degree = defaultdict(int)
+    for pid in target_product_ids:
+        in_degree[pid] = 0
+    for item in bom_items:
+        child_id = item.child_product_id
+        in_degree[child_id] += 1
+
+    # ルート = in_degree が 0 の製品（最終品、または対象内に親がない製品）
+    queue = deque()
+    for pid in target_product_ids:
+        if in_degree[pid] == 0:
+            queue.append(pid)
+
+    sorted_products = []
+    while queue:
+        pid = queue.popleft()
+        sorted_products.append(pid)
+        for child_id, _qty in parent_to_children.get(pid, []):
+            in_degree[child_id] -= 1
+            if in_degree[child_id] == 0:
+                queue.append(child_id)
+
+    # 循環チェック
+    if len(sorted_products) < len(target_product_ids):
+        missing = target_product_ids - set(sorted_products)
+        logger.warning("initialize_progress: BOM循環の可能性あり。未処理製品: %s", missing)
+        # 未処理製品も追加（循環は無視して処理を続行）
+        sorted_products.extend(missing)
+
+    # 4. 最終品フラグを取得
+    final_flags = dict(
+        Product.objects.filter(id__in=target_product_ids)
+        .values_list('id', 'is_final_product')
+    )
+
+    # 5. 上位→下位の順で進度を計算
+    # product_id → 全ライン合算の progress_qty
+    progress_map = {}
+    final_count = 0
+    child_count = 0
+
+    for pid in sorted_products:
+        bl_list = product_backlogs.get(pid, [])
+        if not bl_list:
+            continue
+
+        # 全ラインの stock_qty を合算
+        total_stock = sum(bl.stock_qty or 0 for bl in bl_list)
+        is_final = final_flags.get(pid, False)
+
+        if is_final or pid not in child_to_parents:
+            # 最終品、またはBOM上の親がない製品: 進度 = 在庫
+            progress = total_stock
+            final_count += 1
+        else:
+            # 子部品: 進度 = 在庫 - Σ(親の進度 × BOM数量)
+            consumed = Decimal('0')
+            for parent_id, bom_qty in child_to_parents[pid]:
+                parent_progress = progress_map.get(parent_id, 0)
+                consumed += Decimal(str(parent_progress)) * bom_qty
+            progress = total_stock - int(consumed)
+            child_count += 1
+
+        progress_map[pid] = progress
+
+        # 各ラインの代表行に進度を按分ではなく同値でセット
+        # （ライン別の在庫に応じた按分は通常運用の再計算が行う）
+        for bl in bl_list:
+            bl.progress_qty = progress
+            bl.planned_progress_qty = progress
+
+    # 6. 一括更新
+    if backlogs:
+        LineBacklog.objects.bulk_update(backlogs, ['progress_qty', 'planned_progress_qty'])
+
+    updated_count = final_count + child_count
+    logger.info(
+        "initialize_progress: 完了 updated=%d (最終品=%d, 子部品=%d)",
+        updated_count, final_count, child_count
+    )
+    return {
+        'updated_count': updated_count,
+        'final_count': final_count,
+        'child_count': child_count,
+    }

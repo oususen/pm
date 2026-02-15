@@ -27,6 +27,17 @@ export const createLineBacklogsAPI = (client) => ({
   recalculateInventory(payload) {
     return client.post('/line-backlogs/recalculate_inventory/', payload)
   },
+  importStocktakeExcel(formData) {
+    return client.post('/line-backlogs/import_stocktake_excel/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  initializeStocktake(payload) {
+    return client.post('/line-backlogs/initialize_stocktake/', payload)
+  },
+  initializeProgress(payload) {
+    return client.post('/line-backlogs/initialize_progress/', payload)
+  },
   recalculateScrap(payload) {
     return client.post('/line-backlogs/recalculate_scrap/', payload)
   },

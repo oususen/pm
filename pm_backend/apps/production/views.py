@@ -1,14 +1,19 @@
 from rest_framework import viewsets, status
 from rest_framework.views import APIView
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from datetime import timedelta, datetime
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 import django_filters
 from django.db.models import Q, Max
+from django.db import transaction
 import logging
+import csv
+import io
+from django.http import HttpResponse
 
 from .models import LineDemand
 from orders.models import OrderLine
@@ -38,7 +43,7 @@ from .serializers import (
 )
 from .services.order_expansion import OrderExpansionService
 from .services.gantt_planning import generate_line_gantt_plans
-from masters.models import Routing, RoutingStep, ProcessCycleTime, Line, Supplier, Process, Calendar, CalendarDay, BOM, BOMItem
+from masters.models import Routing, RoutingStep, ProcessCycleTime, Line, Supplier, Process, Calendar, CalendarDay, BOM, BOMItem, Product
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 
@@ -2282,6 +2287,333 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         return Response({'created': created, 'updated': updated, 'deleted': deleted, 'skipped': skipped})
 
+    def _parse_stocktake_file(self, upload_file):
+        """
+        棚卸ファイル（xlsx/csv）を読み込み、品番ごとの数量に集約する。
+        期待列: product_code, physical_qty
+        """
+        filename = (upload_file.name or '').lower()
+        aggregated = {}
+        row_count = 0
+
+        def parse_qty(raw_value, row_no):
+            text = '' if raw_value is None else str(raw_value).strip()
+            if text == '':
+                raise ValueError(f'physical_qty is required (row={row_no})')
+            text = text.replace(',', '')
+            try:
+                qty = Decimal(text)
+            except InvalidOperation:
+                raise ValueError(f'invalid physical_qty "{raw_value}" (row={row_no})')
+            if qty < 0:
+                raise ValueError(f'physical_qty must be >= 0 (row={row_no})')
+            return qty
+
+        def add_row(product_code, qty, row_no):
+            code = (product_code or '').strip()
+            if not code:
+                raise ValueError(f'product_code is required (row={row_no})')
+            aggregated[code] = aggregated.get(code, Decimal('0')) + qty
+
+        if filename.endswith('.xlsx'):
+            from openpyxl import load_workbook
+
+            wb = load_workbook(upload_file, data_only=True, read_only=True)
+            ws = wb.active
+            header = [str(v).strip() if v is not None else '' for v in next(ws.iter_rows(min_row=1, max_row=1, values_only=True))]
+            try:
+                product_col = header.index('product_code')
+                qty_col = header.index('physical_qty')
+            except ValueError:
+                raise ValueError('header must include product_code, physical_qty')
+
+            for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                product_val = row[product_col] if product_col < len(row) else None
+                qty_val = row[qty_col] if qty_col < len(row) else None
+                if product_val in [None, ''] and qty_val in [None, '']:
+                    continue
+                qty = parse_qty(qty_val, idx)
+                add_row(product_val, qty, idx)
+                row_count += 1
+
+        elif filename.endswith('.csv'):
+            raw = upload_file.read()
+            try:
+                text = raw.decode('utf-8-sig')
+            except UnicodeDecodeError:
+                text = raw.decode('cp932')
+            reader = csv.DictReader(io.StringIO(text))
+            if not reader.fieldnames:
+                raise ValueError('CSV header is missing')
+            names = {name.strip() for name in reader.fieldnames if name}
+            if 'product_code' not in names or 'physical_qty' not in names:
+                raise ValueError('CSV header must include product_code, physical_qty')
+
+            for idx, row in enumerate(reader, start=2):
+                product_val = row.get('product_code')
+                qty_val = row.get('physical_qty')
+                if (product_val is None or str(product_val).strip() == '') and (qty_val is None or str(qty_val).strip() == ''):
+                    continue
+                qty = parse_qty(qty_val, idx)
+                add_row(product_val, qty, idx)
+                row_count += 1
+        else:
+            raise ValueError('file must be .xlsx or .csv')
+
+        if not aggregated:
+            raise ValueError('no stocktake rows found')
+
+        return {
+            'row_count': row_count,
+            'rows': aggregated,
+        }
+
+    @action(detail=False, methods=['get'])
+    def download_stocktake_template(self, request):
+        """
+        棚卸取込用テンプレートExcelを返す。
+        """
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = 'stocktake'
+        ws.append(['product_code', 'physical_qty'])
+        ws.append(['ABC-001', 1500])
+        ws.append(['ABC-002', 800.5])
+        ws.append(['DEF-003', 0])
+
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+
+        response = HttpResponse(
+            buffer.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename="stocktake_template.xlsx"'
+        return response
+
+    @action(
+        detail=False,
+        methods=['post'],
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def import_stocktake_excel(self, request):
+        """
+        棚卸Excel/CSVを取り込み、在庫初期値を反映する。
+
+        期待payload:
+        - file: xlsx/csv
+        - stocktake_date: YYYY-MM-DD
+        """
+        from .inventory.inventory_calculator import get_progress_upper_bound_date
+
+        upload_file = request.FILES.get('file')
+        stocktake_date_raw = request.data.get('stocktake_date')
+        location = (request.data.get('location') or 'MAIN').strip() or 'MAIN'
+
+        if not upload_file:
+            return Response({'detail': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not stocktake_date_raw:
+            return Response({'detail': 'stocktake_date is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            stocktake_date = datetime.strptime(str(stocktake_date_raw), '%Y-%m-%d').date()
+        except ValueError as e:
+            return Response({'detail': f'Invalid stocktake_date format: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            parsed = self._parse_stocktake_file(upload_file)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        product_codes = list(parsed['rows'].keys())
+        products = Product.objects.filter(product_code__in=product_codes).values('id', 'product_code')
+        product_id_by_code = {p['product_code']: p['id'] for p in products}
+        product_code_by_id = {pid: code for code, pid in product_id_by_code.items()}
+        missing_codes = sorted([c for c in product_codes if c not in product_id_by_code])
+        if missing_codes:
+            return Response(
+                {'detail': 'unknown product_code found', 'missing_product_codes': missing_codes},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        upper_bound_date = get_progress_upper_bound_date()
+        baseline_date = min(stocktake_date, upper_bound_date)
+
+        allocation_created = 0
+        allocation_updated = 0
+        backlog_created = 0
+        backlog_updated = 0
+
+        try:
+            with transaction.atomic():
+                # 1) t_stock_allocation へ反映（MAIN固定）
+                for code, qty in parsed['rows'].items():
+                    product_id = product_id_by_code[code]
+                    obj, created = StockAllocation.objects.get_or_create(
+                        product_id=product_id,
+                        location=location,
+                        defaults={
+                            'current_stock': qty,
+                            'reserved_qty': Decimal('0'),
+                            'min_stock_qty': Decimal('0'),
+                            'is_bottleneck': False,
+                        }
+                    )
+                    if created:
+                        allocation_created += 1
+                    else:
+                        obj.current_stock = qty
+                        obj.reserved_qty = Decimal('0')
+                        obj.save(update_fields=['current_stock', 'reserved_qty', 'updated_at'])
+                        allocation_updated += 1
+
+                # 2) line_backlog (sequence_no=0) へ棚卸在庫を反映
+                target_product_ids = list(product_id_by_code.values())
+                step_qs = RoutingStep.objects.filter(
+                    routing__is_active=True,
+                    line_id__isnull=False,
+                ).filter(
+                    Q(output_product_id__in=target_product_ids) |
+                    Q(output_product_id__isnull=True, routing__product_id__in=target_product_ids)
+                ).select_related('routing')
+
+                unique_keys = set()
+                mapped_product_ids = set()
+                for step in step_qs:
+                    target_product_id = step.output_product_id or step.routing.product_id
+                    if target_product_id not in target_product_ids:
+                        continue
+                    key = (step.process_id, target_product_id, step.line_id)
+                    unique_keys.add(key)
+                    mapped_product_ids.add(target_product_id)
+
+                for process_id, product_id, line_id in unique_keys:
+                    # line_backlog はint管理のため、小数は切り捨てで保持
+                    product_code = product_code_by_id.get(product_id)
+                    stock_int = int(parsed['rows'][product_code]) if product_code else 0
+                    obj, created = LineBacklog.objects.get_or_create(
+                        plan_date=baseline_date,
+                        process_id=process_id,
+                        product_id=product_id,
+                        line_id=line_id,
+                        sequence_no=0,
+                        defaults={
+                            'demand_qty_plan': 0,
+                            'order_qty': 0,
+                            'plan_qty': 0,
+                            'actual_qty': 0,
+                            'stock_qty': stock_int,
+                            'planned_stock_qty': 0,
+                            'adjust_qty': 0,
+                            'scrap_adjust_qty': 0,
+                            'scrap_qty': 0,
+                            'actual_shipment_qty': 0,
+                            'progress_qty': 0,
+                            'planned_progress_qty': 0,
+                        },
+                    )
+                    if created:
+                        backlog_created += 1
+                    else:
+                        obj.stock_qty = stock_int
+                        obj.planned_stock_qty = 0
+                        obj.progress_qty = 0
+                        obj.planned_progress_qty = 0
+                        obj.save(update_fields=['stock_qty', 'planned_stock_qty', 'progress_qty', 'planned_progress_qty', 'updated_at'])
+                        backlog_updated += 1
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        unmapped_product_codes = sorted([
+            code for code, pid in product_id_by_code.items() if pid not in mapped_product_ids
+        ])
+
+        return Response({
+            'detail': 'Stocktake file imported successfully',
+            'stocktake_date': stocktake_date.isoformat(),
+            'baseline_date': baseline_date.isoformat(),
+            'upper_bound_date': upper_bound_date.isoformat(),
+            'location': location,
+            'loaded_rows': parsed['row_count'],
+            'product_count': len(product_codes),
+            'allocation_created': allocation_created,
+            'allocation_updated': allocation_updated,
+            'backlog_created': backlog_created,
+            'backlog_updated': backlog_updated,
+            'unmapped_product_codes': unmapped_product_codes,
+        })
+
+    @action(detail=False, methods=['post'])
+    def initialize_stocktake(self, request):
+        """
+        棚卸初期化（在庫/計画在庫/進度）を一括実行する。
+
+        期待payload:
+        - stocktake_date: YYYY-MM-DD
+        - end_date: YYYY-MM-DD
+        """
+        from .inventory.inventory_calculator import (
+            initialize_progress_from_stocktake,
+            recalculate_inventory_for_line,
+            resolve_progress_baseline_date,
+        )
+
+        stocktake_date_raw = request.data.get('stocktake_date')
+        end_date_raw = request.data.get('end_date')
+        if not stocktake_date_raw:
+            return Response({'detail': 'stocktake_date is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not end_date_raw:
+            return Response({'detail': 'end_date is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            stocktake_dt = datetime.strptime(str(stocktake_date_raw), '%Y-%m-%d').date()
+            end_dt = datetime.strptime(str(end_date_raw), '%Y-%m-%d').date()
+        except ValueError as e:
+            return Response({'detail': f'Invalid date format: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            baseline_dt, upper_bound = resolve_progress_baseline_date(stocktake_dt)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if end_dt < baseline_dt:
+            return Response(
+                {'detail': 'end_date must be on or after resolved baseline_date'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        line_ids = list(LineBacklog.objects.filter(
+            plan_date__gte=baseline_dt,
+            plan_date__lte=end_dt,
+        ).values_list('line_id', flat=True).distinct())
+
+        if not line_ids:
+            return Response(
+                {'detail': 'line_backlog rows not found in calculation range'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            for line_id in line_ids:
+                # 進度は棚卸初期化ロジックで別計算するため、ここでは在庫・計画在庫のみ再計算
+                recalculate_inventory_for_line(line_id, baseline_dt, end_dt, include_progress=False)
+            progress_result = initialize_progress_from_stocktake(baseline_dt)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({
+            'detail': 'Stocktake initialization completed',
+            'stocktake_date': stocktake_dt.isoformat(),
+            'baseline_date': baseline_dt.isoformat(),
+            'upper_bound_date': upper_bound.isoformat(),
+            'end_date': end_dt.isoformat(),
+            'line_count': len(line_ids),
+            **progress_result,
+        })
+
     @action(detail=False, methods=['post'])
     def recalculate_inventory(self, request):
         """
@@ -2331,6 +2663,63 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         try:
             recalculate_inventory_for_line(line_id, start_dt, end_dt, include_progress=include_progress, line_final_only=line_final_only)
             return Response({'detail': 'Inventory recalculated successfully'})
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['post'])
+    def initialize_progress(self, request):
+        """
+        棚卸在庫を起点に進度(progress_qty / planned_progress_qty)を初期化するAPI
+
+        期待payload: {
+            stocktake_date: str (YYYY-MM-DD, required)
+            baseline_date: str (YYYY-MM-DD, optional)  # 明示指定時のみ使用
+        }
+        """
+        from .inventory.inventory_calculator import (
+            initialize_progress_from_stocktake,
+            resolve_progress_baseline_date,
+        )
+
+        stocktake_date_raw = request.data.get('stocktake_date')
+        baseline_date_raw = request.data.get('baseline_date')
+        if not stocktake_date_raw and not baseline_date_raw:
+            return Response(
+                {'detail': 'stocktake_date is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        stocktake_dt = None
+        if stocktake_date_raw:
+            try:
+                stocktake_dt = datetime.strptime(str(stocktake_date_raw), '%Y-%m-%d').date()
+            except ValueError as e:
+                return Response({'detail': f'Invalid stocktake_date format: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if baseline_date_raw:
+            try:
+                baseline_dt = datetime.strptime(str(baseline_date_raw), '%Y-%m-%d').date()
+            except ValueError as e:
+                return Response({'detail': f'Invalid baseline_date format: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+            upper_bound = None
+        else:
+            try:
+                baseline_dt, upper_bound = resolve_progress_baseline_date(stocktake_dt)
+            except ValueError as e:
+                return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            result = initialize_progress_from_stocktake(baseline_dt)
+            response_payload = {
+                'detail': 'Progress initialized successfully',
+                'baseline_date': baseline_dt.isoformat(),
+                **result,
+            }
+            if stocktake_dt:
+                response_payload['stocktake_date'] = stocktake_dt.isoformat()
+            if upper_bound:
+                response_payload['upper_bound_date'] = upper_bound.isoformat()
+            return Response(response_payload)
         except Exception as e:
             return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

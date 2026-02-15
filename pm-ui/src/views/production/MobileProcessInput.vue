@@ -104,21 +104,6 @@
             »
           </button>
         </div>
-        <div v-if="record.record_type === 'PRODUCTION'" class="operator-action-row">
-          <span class="operator-action-title">{{ t('processInput.operatorAction') }}</span>
-          <div class="operator-action-buttons">
-            <button
-              v-for="action in operatorActionOptions"
-              :key="action.value"
-              type="button"
-              class="operator-action-btn"
-              :class="{ active: selectedOperatorAction === action.value }"
-              @click="selectOperatorAction(action.value)"
-            >
-              {{ action.label }}
-            </button>
-          </div>
-        </div>
         <label v-if="currentProductList.length" class="current-time-toggle">
           <input
             type="checkbox"
@@ -172,7 +157,7 @@
       </div>
     </div>
 
-    <div v-if="record.record_type && !isOperatorActionMode" class="section inline-row product-row">
+    <div v-if="record.record_type" class="section inline-row product-row">
       <div class="label-stack">
         <label :class="record.record_type === 'PRODUCTION' ? 'label-required inline-label' : 'inline-label'">
           {{ t('processInput.product') }}
@@ -226,12 +211,36 @@
     </div>
 
     <div
-      v-if="(record.record_type === 'PRODUCTION' || record.record_type === 'SCRAP') && !isOperatorActionMode"
+      v-if="shouldShowOperatorActionRow"
+      class="section operator-action-row"
+    >
+      <label class="label-required inline-label operator-action-title">{{ t('processInput.operatorAction') }}</label>
+      <div v-if="shouldShowOperatorActionSelector" class="operator-action-buttons">
+        <button
+          v-for="action in operatorActionOptions"
+          :key="action.value"
+          type="button"
+          class="operator-action-btn"
+          :class="{ active: isOperatorActionActive(action.value) }"
+          @click="selectOperatorAction(action.value)"
+        >
+          {{ action.label }}
+        </button>
+      </div>
+      <div v-else-if="shouldShowAutoStartAction" class="operator-action-buttons">
+        <button type="button" class="operator-action-btn active" disabled>
+          {{ t(OPERATOR_ACTION_LABEL_KEYS.START) }}
+        </button>
+      </div>
+    </div>
+
+    <div
+      v-if="(record.record_type === 'PRODUCTION' && hasSelectedProduct() && hasEffectiveOperatorAction()) || record.record_type === 'SCRAP'"
       class="form-section"
       :class="formModeClass"
     >
       <div class="section inline-row qty-row">
-        <div class="inline-group qty-group">
+        <div v-if="shouldShowQtyInput" class="inline-group qty-group">
           <label class="label-required inline-label">
             {{
               record.record_type === 'SCRAP'
@@ -260,7 +269,7 @@
         </div>
       </div>
 
-      <div class="quick-btns" v-if="quickQtyPresets.length">
+      <div class="quick-btns" v-if="shouldShowQtyInput && quickQtyPresets.length">
         <button
           v-for="preset in quickQtyPresets"
           :key="preset"
@@ -285,10 +294,20 @@
           <span class="plan-status__label">{{ t('processInput.remainingQty') }}</span>
           <span class="plan-status__value">{{ formatNumber(planStatus.remaining) }}</span>
         </div>
-        <div class="plan-status__row plan-status__row--muted" v-if="record.qty">
+        <div class="plan-status__row plan-status__row--muted" v-if="shouldShowQtyInput && record.qty">
           <span class="plan-status__label">{{ t('processInput.remainingAfterEntry') }}</span>
           <span class="plan-status__value">{{ formatNumber(planStatus.remainingAfterInput) }}</span>
         </div>
+      </div>
+
+      <div v-if="requiresOperatorActionReason" class="section">
+        <label class="label-required">{{ t(operatorActionReasonLabelKey) }}</label>
+        <input
+          type="text"
+          v-model="record.operator_action_reason"
+          :placeholder="t(operatorActionReasonPlaceholderKey)"
+          class="input-normal"
+        />
       </div>
 
       <div v-if="isScrapRecord" class="section inline-row dual-row">
@@ -471,12 +490,16 @@ const filterCurrentTime = ref(true)
 const timeSlots = ref([])
 const activeSlotIndex = ref(null)
 const selectedOperatorAction = ref('')
+const startedProductIds = ref(new Set())
+const startedProductIdsLoaded = ref(false)
+const latestOperatorActionByProduct = ref(new Map())
 
 const record = ref({
   record_type: '',
   product_id: '',
   product_code: '',
   qty: null,
+  operator_action_reason: '',
   reason: '',
   reason_detail: '',
   disposition_status: '',
@@ -549,8 +572,100 @@ const filteredProcesses = computed(() => {
 
 const isScrapOnlyPage = computed(() => route.name === 'ScrapRecordInput')
 const isScrapRecord = computed(() => record.value.record_type === 'SCRAP')
+const activeOperatorActions = new Set(['START', 'PAUSE', 'RESUME'])
+const startedStateOperatorActions = new Set(['START', 'RESUME'])
+const startedOperatorActions = ['END', 'PAUSE']
+const pausedOperatorActions = ['RESUME', 'TEMP_END']
+
+const selectedProductLatestOperatorAction = computed(() => {
+  if (record.value.record_type !== 'PRODUCTION') return ''
+  if (!startedProductIdsLoaded.value) return ''
+  const productId = record.value.product_id
+  if (!productId) return ''
+  return String(latestOperatorActionByProduct.value.get(String(productId)) || '').toUpperCase()
+})
+
+const selectedProductWorkState = computed(() => {
+  const latestAction = selectedProductLatestOperatorAction.value
+  if (latestAction === 'PAUSE') return 'PAUSED'
+  if (startedStateOperatorActions.has(latestAction)) return 'STARTED'
+  return 'NOT_STARTED'
+})
+
+const shouldAutoStartByProduct = computed(() => {
+  if (record.value.record_type !== 'PRODUCTION') return false
+  if (!startedProductIdsLoaded.value) return false
+  const productId = record.value.product_id
+  if (!productId) return false
+  return selectedProductWorkState.value === 'NOT_STARTED'
+})
+
+const operatorActionOptions = computed(() => {
+  if (record.value.record_type !== 'PRODUCTION') return []
+  if (!hasSelectedProduct()) return []
+  if (!startedProductIdsLoaded.value) return []
+
+  if (selectedProductWorkState.value === 'PAUSED') {
+    return pausedOperatorActions.map((action) => ({
+      value: action,
+      label: t(OPERATOR_ACTION_LABEL_KEYS[action]),
+    }))
+  }
+  if (selectedProductWorkState.value === 'STARTED') {
+    return startedOperatorActions.map((action) => ({
+      value: action,
+      label: t(OPERATOR_ACTION_LABEL_KEYS[action]),
+    }))
+  }
+  return []
+})
+
+const allowedOperatorActions = computed(() =>
+  operatorActionOptions.value.map((opt) => String(opt.value || '').toUpperCase())
+)
+
+const effectiveOperatorAction = computed(() => {
+  if (shouldAutoStartByProduct.value) return 'START'
+  const selectedAction = String(selectedOperatorAction.value || '').trim().toUpperCase()
+  if (allowedOperatorActions.value.includes(selectedAction)) return selectedAction
+  return ''
+})
+const shouldShowOperatorActionRow = computed(() => {
+  if (record.value.record_type !== 'PRODUCTION') return false
+  if (!hasSelectedProduct()) return false
+  return startedProductIdsLoaded.value
+})
+const shouldShowOperatorActionSelector = computed(() => {
+  return shouldShowOperatorActionRow.value && !shouldAutoStartByProduct.value
+})
+const shouldShowAutoStartAction = computed(
+  () => shouldShowOperatorActionRow.value && shouldAutoStartByProduct.value
+)
 const isOperatorActionMode = computed(
-  () => record.value.record_type === 'PRODUCTION' && !!selectedOperatorAction.value
+  () => record.value.record_type === 'PRODUCTION' && !!effectiveOperatorAction.value
+)
+const isStartOperatorAction = computed(
+  () => record.value.record_type === 'PRODUCTION' && effectiveOperatorAction.value === 'START'
+)
+const shouldShowQtyInput = computed(() => {
+  if (record.value.record_type === 'SCRAP') return true
+  if (record.value.record_type !== 'PRODUCTION') return false
+  return !isStartOperatorAction.value
+})
+const requiresOperatorActionReason = computed(
+  () =>
+    record.value.record_type === 'PRODUCTION' &&
+    ['PAUSE', 'TEMP_END'].includes(String(effectiveOperatorAction.value || '').toUpperCase())
+)
+const operatorActionReasonLabelKey = computed(() =>
+  effectiveOperatorAction.value === 'TEMP_END'
+    ? 'processInput.tempEndReason'
+    : 'processInput.pauseReason'
+)
+const operatorActionReasonPlaceholderKey = computed(() =>
+  effectiveOperatorAction.value === 'TEMP_END'
+    ? 'processInput.tempEndReasonPlaceholder'
+    : 'processInput.pauseReasonPlaceholder'
 )
 
 const OPERATOR_ACTION_LABEL_KEYS = {
@@ -558,14 +673,8 @@ const OPERATOR_ACTION_LABEL_KEYS = {
   END: 'processInput.operatorAction.end',
   PAUSE: 'processInput.operatorAction.pause',
   RESUME: 'processInput.operatorAction.resume',
+  TEMP_END: 'processInput.operatorAction.tempEnd',
 }
-
-const operatorActionOptions = computed(() => [
-  { value: 'START', label: t(OPERATOR_ACTION_LABEL_KEYS.START) },
-  { value: 'END', label: t(OPERATOR_ACTION_LABEL_KEYS.END) },
-  { value: 'PAUSE', label: t(OPERATOR_ACTION_LABEL_KEYS.PAUSE) },
-  { value: 'RESUME', label: t(OPERATOR_ACTION_LABEL_KEYS.RESUME) },
-])
 
 const equipmentStates = computed(() => [
   { value: 'RUNNING', label: t('processInput.equipmentState.running') },
@@ -913,6 +1022,10 @@ const selectOperatorAction = (action) => {
   selectedOperatorAction.value = selectedOperatorAction.value === action ? '' : action
 }
 
+const isOperatorActionActive = (action) => {
+  return String(effectiveOperatorAction.value || '').toUpperCase() === String(action || '').toUpperCase()
+}
+
 const getOperatorActionLabel = (action) => {
   const actionKey = String(action || '').toUpperCase()
   const labelKey = OPERATOR_ACTION_LABEL_KEYS[actionKey]
@@ -932,30 +1045,129 @@ const getRecentRecordTypeLabel = (rec) => {
   return rec.record_type_display
 }
 
+const getOperatorActionProductId = (rec) => {
+  if (!rec) return null
+  return (
+    rec.product ??
+    rec.product_id ??
+    rec.event_data?.plan_target?.product_id ??
+    null
+  )
+}
+
+const loadStartedProductIds = async () => {
+  startedProductIdsLoaded.value = false
+  latestOperatorActionByProduct.value = new Map()
+  if (!selectedProcessId.value) {
+    startedProductIds.value = new Set()
+    latestOperatorActionByProduct.value = new Map()
+    startedProductIdsLoaded.value = true
+    return
+  }
+
+  try {
+    const res = await api.processRealtime.list({
+      process_id: selectedProcessId.value,
+      record_type: 'OPERATOR_ACTION',
+      limit: 2000,
+      page_size: 2000,
+    })
+    const items = res.data.results || res.data || []
+    const latestActionByProduct = new Map()
+
+    ;(Array.isArray(items) ? items : []).forEach((rec) => {
+      const pid = getOperatorActionProductId(rec)
+      if (pid === null || pid === undefined || pid === '') return
+      const productId = String(pid)
+      if (latestActionByProduct.has(productId)) return
+
+      const action =
+        rec.event_data?.action ||
+        rec.event_data?.operator_action ||
+        rec.event_data?.action_type ||
+        ''
+      latestActionByProduct.set(productId, String(action).toUpperCase())
+    })
+
+    const started = new Set()
+    latestActionByProduct.forEach((action, productId) => {
+      if (activeOperatorActions.has(action)) {
+        started.add(productId)
+      }
+    })
+
+    startedProductIds.value = started
+    latestOperatorActionByProduct.value = latestActionByProduct
+    startedProductIdsLoaded.value = true
+  } catch (error) {
+    console.error('開始済み製品取得エラー:', error)
+    startedProductIds.value = new Set()
+    latestOperatorActionByProduct.value = new Map()
+    startedProductIdsLoaded.value = true
+  }
+}
+
+const findSelectedPlanTarget = () => {
+  const productId = record.value.product_id
+  if (!productId) return null
+  const productIdStr = String(productId)
+  const candidates = [
+    ...(Array.isArray(displayProductList.value) ? displayProductList.value : []),
+    ...(Array.isArray(currentProductList.value) ? currentProductList.value : []),
+    ...(Array.isArray(allPlanProducts.value) ? allPlanProducts.value : []),
+  ]
+  return candidates.find((item) => String(item?.product) === productIdStr) || null
+}
+
+const hasFilledText = (value) => {
+  return (value ?? '').toString().trim().length > 0
+}
+
+const hasSelectedProduct = () => {
+  return !!record.value.product_id || hasFilledText(record.value.product_code)
+}
+
+const hasEffectiveOperatorAction = () => {
+  return hasFilledText(effectiveOperatorAction.value)
+}
+
+const hasRequiredProductionFields = ({ requireQty = true } = {}) => {
+  if (!hasSelectedProduct()) return false
+  if (requireQty && !(record.value.qty > 0)) return false
+  if (!hasFilledText(record.value.operator_name)) return false
+  return true
+}
+
 const canSubmit = computed(() => {
   if (!selectedProcessId.value || !record.value.record_type) return false
 
   if (isOperatorActionMode.value) {
-    return true
+    if (!findSelectedPlanTarget()) return false
+    if (requiresOperatorActionReason.value && !hasFilledText(record.value.operator_action_reason)) return false
+    return hasRequiredProductionFields({ requireQty: shouldShowQtyInput.value })
   }
 
-  if (record.value.record_type === 'PRODUCTION' || record.value.record_type === 'SCRAP') {
-    const hasProduct = !!record.value.product_id || !!(record.value.product_code || '').trim()
-    if (!(record.value.qty > 0 && hasProduct)) return false
-    if (record.value.record_type === 'SCRAP') {
-      if (!record.value.reason) return false
-      const detailText = (record.value.reason_detail || '').trim()
-      if (record.value.reason === 'OTHER' && !detailText) return false
-      if (!(record.value.operator_name || '').trim()) return false
-      if (!(record.value.disposition_status || '').trim()) return false
-      if (record.value.is_production_recorded === '') return false
-      if (!scrapRelationFilter.value) return false
-    }
+  if (record.value.record_type === 'PRODUCTION') {
+    if (!hasEffectiveOperatorAction()) return false
+    if (requiresOperatorActionReason.value && !hasFilledText(record.value.operator_action_reason)) return false
+    return hasRequiredProductionFields({ requireQty: shouldShowQtyInput.value })
+  }
+
+  if (record.value.record_type === 'SCRAP') {
+    if (!hasRequiredProductionFields()) return false
+    if (!record.value.reason) return false
+    const detailText = (record.value.reason_detail || '').trim()
+    if (record.value.reason === 'OTHER' && !detailText) return false
+    if (!(record.value.disposition_status || '').trim()) return false
+    if (record.value.is_production_recorded === '') return false
+    if (!scrapRelationFilter.value) return false
     return true
   }
 
   if (record.value.record_type === 'EQUIPMENT_STATE') {
-    return !!record.value.equipment_state
+    if (!record.value.equipment_state) return false
+    if (!hasSelectedProduct()) return false
+    return true
   }
 
   return false
@@ -967,6 +1179,7 @@ const resetForm = () => {
     product_id: '',
     product_code: '',
     qty: null,
+    operator_action_reason: '',
     reason: '',
     reason_detail: '',
     disposition_status: '',
@@ -994,6 +1207,7 @@ const onProcessChange = () => {
   manualProductsLoaded.value = false
   manualProductsProcessId.value = null
   loadPlannedProducts()
+  loadStartedProductIds()
   loadRecentRecords()
 }
 
@@ -1006,6 +1220,9 @@ const onLineChange = () => {
   allScrapProducts.value = []
   timeSlots.value = []
   activeSlotIndex.value = null
+  startedProductIds.value = new Set()
+  startedProductIdsLoaded.value = false
+  latestOperatorActionByProduct.value = new Map()
   defaultProductId.value = null
   productImageMap.value = {}
   productMetaMap.value = {}
@@ -1041,8 +1258,11 @@ const onCurrentTimeToggle = () => {
 
 const submitRecord = async () => {
   if (!canSubmit.value) return
+  if (!window.confirm(t('processInput.alert.confirmSubmit'))) return
 
   submitting.value = true
+  let submittedOperatorAction = ''
+  let submittedOperatorProductId = ''
   try {
     const data = {
       process_id: selectedProcessId.value,
@@ -1050,14 +1270,52 @@ const submitRecord = async () => {
     }
 
     if (isOperatorActionMode.value) {
+      const selectedPlanTarget = findSelectedPlanTarget()
+      if (!selectedPlanTarget?.product) {
+        return
+      }
       data.record_type = 'OPERATOR_ACTION'
       data.qty = 0
+      data.product_id = selectedPlanTarget.product
       const operatorName = (record.value.operator_name || defaultOperatorName.value || '').trim()
       if (operatorName) {
         data.operator_name = operatorName
       }
+      const activeSlot =
+        filterCurrentTime.value && timeSlots.value.length
+          ? timeSlots.value[activeSlotIndex.value ?? 0]
+          : null
+      const targetStartIso =
+        toIsoDateTimeOrNull(selectedPlanTarget.start) || toIsoDateTimeOrNull(activeSlot?.start)
+      const targetEndIso =
+        toIsoDateTimeOrNull(selectedPlanTarget.end) || toIsoDateTimeOrNull(activeSlot?.end)
+
       data.event_data = {
-        action: selectedOperatorAction.value,
+        action: effectiveOperatorAction.value,
+        plan_target: {
+          line_id: selectedLineId.value || null,
+          process_id: selectedProcessId.value || null,
+          plan_date: selectedPlanTarget.plan_date || currentDateYmd.value || null,
+          product_id: selectedPlanTarget.product || null,
+          product_code: selectedPlanTarget.product_code || '',
+          product_name: selectedPlanTarget.product_name || '',
+          plan_qty: selectedPlanTarget.plan_qty ?? null,
+          actual_qty: selectedPlanTarget.actual_qty ?? null,
+          slot_start: targetStartIso,
+          slot_end: targetEndIso,
+          slot_label: slotLabel.value || null,
+        },
+      }
+      submittedOperatorAction = String(effectiveOperatorAction.value || '').toUpperCase()
+      submittedOperatorProductId = String(selectedPlanTarget.product || '')
+      if (requiresOperatorActionReason.value) {
+        const reasonText = (record.value.operator_action_reason || '').trim()
+        data.event_data.operator_action_reason = reasonText
+        if (submittedOperatorAction === 'PAUSE') {
+          data.event_data.pause_reason = reasonText
+        } else if (submittedOperatorAction === 'TEMP_END') {
+          data.event_data.temp_end_reason = reasonText
+        }
       }
     } else {
       if (record.value.product_id) {
@@ -1095,10 +1353,26 @@ const submitRecord = async () => {
     data.remarks = record.value.remarks
 
     await api.processRealtime.create(data)
+    if (submittedOperatorProductId) {
+      const nextStarted = new Set(startedProductIds.value)
+      const nextLatestOperatorAction = new Map(latestOperatorActionByProduct.value)
+      if (submittedOperatorAction) {
+        nextLatestOperatorAction.set(submittedOperatorProductId, submittedOperatorAction)
+      }
+      if (submittedOperatorAction === 'END' || submittedOperatorAction === 'TEMP_END') {
+        nextStarted.delete(submittedOperatorProductId)
+      } else if (activeOperatorActions.has(submittedOperatorAction)) {
+        nextStarted.add(submittedOperatorProductId)
+      }
+      startedProductIds.value = nextStarted
+      latestOperatorActionByProduct.value = nextLatestOperatorAction
+      startedProductIdsLoaded.value = true
+    }
 
     alert(t('processInput.alert.saved'))
     resetForm()
     await loadPlannedProducts()
+    await loadStartedProductIds()
     await loadRecentRecords()
   } catch (error) {
     console.error('記録登録エラー:', error)
@@ -1261,6 +1535,13 @@ const formatSlotTime = (dt) => {
   const hh = String(dt.getHours()).padStart(2, '0')
   const mm = String(dt.getMinutes()).padStart(2, '0')
   return `${hh}:${mm}`
+}
+
+const toIsoDateTimeOrNull = (value) => {
+  if (!value) return null
+  const dt = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(dt.getTime())) return null
+  return dt.toISOString()
 }
 
 const applyTimeSlotFilter = () => {
@@ -1784,6 +2065,9 @@ watch(
     recentRecords.value = []
     productionProducts.value = []
     scrapProducts.value = []
+    startedProductIds.value = new Set()
+    startedProductIdsLoaded.value = false
+    latestOperatorActionByProduct.value = new Map()
     defaultProductId.value = null
     productImageMap.value = {}
     productMetaMap.value = {}
@@ -1797,6 +2081,16 @@ watch(
   (val) => {
     if (val !== 'OTHER') {
       record.value.reason_detail = ''
+    }
+  }
+)
+
+watch(
+  () => effectiveOperatorAction.value,
+  (action) => {
+    const actionKey = String(action || '').toUpperCase()
+    if (!['PAUSE', 'TEMP_END'].includes(actionKey)) {
+      record.value.operator_action_reason = ''
     }
   }
 )

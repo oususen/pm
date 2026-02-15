@@ -47,6 +47,12 @@ const settings = [
     component: () => import("@/views/settings/ScheduledTasks.vue"),
     meta: { pageTitle: "定時タスク設定", resource: "settings" },
   },
+  {
+    path: "/settings/stocktake-init",
+    name: "StocktakeInit",
+    component: () => import("@/views/settings/StocktakeInit.vue"),
+    meta: { pageTitle: "棚卸初期化", resource: "settings" },
+  },
 ];
 
 export default settings;
