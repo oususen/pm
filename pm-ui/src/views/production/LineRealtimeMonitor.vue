@@ -187,8 +187,20 @@ const avgAchievement = computed(() => {
 const loadData = async () => {
   loading.value = true
   try {
-    const res = await api.lineRealtime.getLineStatuses()
-    lines.value = res.data || []
+    const [statusRes, productionLinesRes] = await Promise.all([
+      api.lineRealtime.getLineStatuses(),
+      api.lines.getProductionLines({ is_active: true }),
+    ])
+    const productionLinePayload = productionLinesRes?.data || []
+    const productionLines = Array.isArray(productionLinePayload)
+      ? productionLinePayload
+      : productionLinePayload.results || []
+    const productionLineIds = new Set(productionLines.map(line => String(line.id)))
+    const statusPayload = statusRes?.data || []
+    const allStatuses = Array.isArray(statusPayload)
+      ? statusPayload
+      : statusPayload.results || []
+    lines.value = allStatuses.filter(line => productionLineIds.has(String(line.line)))
     if (selectedLineId.value) {
       const exists = lines.value.some(line => String(line.line) === String(selectedLineId.value))
       if (!exists) {

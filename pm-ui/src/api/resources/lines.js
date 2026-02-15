@@ -2,8 +2,8 @@ export const createLinesAPI = (client) => ({
   getLines() {
     return client.get('/lines/')
   },
-  getProductionLines() {
-    return client.get('/production-lines/')
+  getProductionLines(params = {}) {
+    return client.get('/production-lines/', { params })
   },
   getLine(id) {
     return client.get(`/lines/${id}/`)
