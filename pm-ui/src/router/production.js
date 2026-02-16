@@ -143,6 +143,12 @@ const production = [
     },
   },
   {
+    path: "/production/record-inquiry",
+    name: "ProductionRecordInquiry",
+    component: () => import("@/views/production/ProductionRecordInquiry.vue"),
+    meta: { pageTitle: "生産実績照会", manualPath: "生産/生産実績照会.md" },
+  },
+  {
     path: "/production/process-gantt",
     name: "ProcessGanttView",
     component: () => import("@/views/production/ProcessGanttView.vue"),

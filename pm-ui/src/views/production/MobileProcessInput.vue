@@ -42,11 +42,34 @@
             v-for="type in availableRecordTypes"
             :key="type.value"
             @click="record.record_type = type.value"
-            class="type-btn"
+            class="type-btn record-type-btn"
             :class="{ active: record.record_type === type.value }"
           >
             {{ type.label }}
           </button>
+          <div
+            v-if="shouldShowOperatorActionRow"
+            class="operator-action-buttons operator-action-buttons-inline"
+          >
+            <button
+              v-if="shouldShowAutoStartAction"
+              type="button"
+              class="operator-action-btn active"
+              disabled
+            >
+              {{ t(OPERATOR_ACTION_LABEL_KEYS.START) }}
+            </button>
+            <button
+              v-for="action in shouldShowOperatorActionSelector ? operatorActionOptions : []"
+              :key="action.value"
+              type="button"
+              class="operator-action-btn"
+              :class="{ active: isOperatorActionActive(action.value) }"
+              @click="selectOperatorAction(action.value)"
+            >
+              {{ action.label }}
+            </button>
+          </div>
         </div>
       </div>
       <div
@@ -151,10 +174,14 @@
         >
           {{ p.product_code || t('processInput.unsetProductCode') }}
           <span v-if="p.plan_qty != null" class="plan-qty">
-            {{ t('processInput.planQtyBadge', { qty: formatNumber(p.plan_qty) }) }}
+            {{ t('processInput.planQtyBadge', { qty: getPlanQtyBadgeLabel(p) }) }}
           </span>
         </button>
       </div>
+    </div>
+
+    <div v-if="selectedProcessId && currentProcessingLabel" class="section current-processing-banner">
+      {{ currentProcessingLabel }}
     </div>
 
     <div v-if="record.record_type" class="section inline-row product-row">
@@ -183,7 +210,7 @@
                 :value="p.product"
               >
                 {{ p.product_code }} - {{ p.product_name || '' }}
-                {{ t('processInput.planQtyParen', { qty: formatNumber(p.plan_qty || 0) }) }}
+                {{ getPlanQtyParenLabel(p) }}
               </option>
             </select>
           </div>
@@ -211,7 +238,7 @@
     </div>
 
     <div
-      v-if="shouldShowOperatorActionRow"
+      v-if="shouldShowOperatorActionRow && !showRecordTypeSelection"
       class="section operator-action-row"
     >
       <label class="label-required inline-label operator-action-title">{{ t('processInput.operatorAction') }}</label>
@@ -511,8 +538,8 @@ const record = ref({
 })
 
 const recordTypeOptions = computed(() => [
-  { value: 'PRODUCTION', label: t('processInput.recordType.production') },
   { value: 'EQUIPMENT_STATE', label: t('processInput.recordType.equipment') },
+  { value: 'PRODUCTION', label: t('processInput.recordType.production') },
   { value: 'SCRAP', label: t('processInput.recordType.scrap') },
 ])
 
@@ -592,11 +619,24 @@ const selectedProductWorkState = computed(() => {
   return 'NOT_STARTED'
 })
 
+const hasStartedOtherProduct = computed(() => {
+  if (!startedProductIdsLoaded.value) return false
+  const selectedProductId = String(record.value.product_id || '')
+  for (const productId of startedProductIds.value) {
+    if (!selectedProductId || String(productId) !== selectedProductId) {
+      return true
+    }
+  }
+  return false
+})
+
 const shouldAutoStartByProduct = computed(() => {
   if (record.value.record_type !== 'PRODUCTION') return false
   if (!startedProductIdsLoaded.value) return false
   const productId = record.value.product_id
   if (!productId) return false
+  // 同工程で別製品が開始中（中断含む）の場合は新規STARTを出さない。
+  if (hasStartedOtherProduct.value) return false
   return selectedProductWorkState.value === 'NOT_STARTED'
 })
 
@@ -644,13 +684,15 @@ const shouldShowAutoStartAction = computed(
 const isOperatorActionMode = computed(
   () => record.value.record_type === 'PRODUCTION' && !!effectiveOperatorAction.value
 )
-const isStartOperatorAction = computed(
-  () => record.value.record_type === 'PRODUCTION' && effectiveOperatorAction.value === 'START'
-)
+const isQtyRequiredOperatorAction = computed(() => {
+  if (record.value.record_type !== 'PRODUCTION') return false
+  const actionKey = String(effectiveOperatorAction.value || '').toUpperCase()
+  return ['END', 'PAUSE'].includes(actionKey)
+})
 const shouldShowQtyInput = computed(() => {
   if (record.value.record_type === 'SCRAP') return true
   if (record.value.record_type !== 'PRODUCTION') return false
-  return !isStartOperatorAction.value
+  return isQtyRequiredOperatorAction.value
 })
 const requiresOperatorActionReason = computed(
   () =>
@@ -794,6 +836,85 @@ const currentProductList = computed(() => {
     return scrapProducts.value
   }
   return []
+})
+
+const productCodeLookup = computed(() => {
+  const lookup = new Map()
+  const apply = (pid, code) => {
+    if (pid === null || pid === undefined || pid === '') return
+    const normalizedCode = String(code || '').trim()
+    if (!normalizedCode) return
+    const key = String(pid)
+    if (!lookup.has(key)) {
+      lookup.set(key, normalizedCode)
+    }
+  }
+
+  const planLikeLists = [
+    ...(Array.isArray(displayProductList.value) ? displayProductList.value : []),
+    ...(Array.isArray(currentProductList.value) ? currentProductList.value : []),
+    ...(Array.isArray(allPlanProducts.value) ? allPlanProducts.value : []),
+    ...(Array.isArray(productionProducts.value) ? productionProducts.value : []),
+    ...(Array.isArray(manualProducts.value) ? manualProducts.value : []),
+  ]
+  planLikeLists.forEach((item) => {
+    apply(item?.product ?? item?.id, item?.product_code)
+  })
+
+  ;(Array.isArray(recentRecords.value) ? recentRecords.value : []).forEach((rec) => {
+    apply(
+      getOperatorActionProductId(rec) ?? rec?.product ?? rec?.product_id,
+      rec?.product_code || rec?.event_data?.plan_target?.product_code
+    )
+  })
+
+  return lookup
+})
+
+const currentProcessingProductId = computed(() => {
+  if (!selectedProcessId.value || !startedProductIdsLoaded.value) return ''
+
+  const activeProductIds = []
+  latestOperatorActionByProduct.value.forEach((action, productId) => {
+    if (startedStateOperatorActions.has(String(action || '').toUpperCase())) {
+      activeProductIds.push(String(productId))
+    }
+  })
+  if (!activeProductIds.length) return ''
+
+  const selectedProductId = String(record.value.product_id || '')
+  if (selectedProductId && activeProductIds.includes(selectedProductId)) {
+    return selectedProductId
+  }
+
+  const recentActive = (Array.isArray(recentRecords.value) ? recentRecords.value : []).find((rec) => {
+    if (rec?.record_type !== 'OPERATOR_ACTION') return false
+    const action =
+      rec?.event_data?.action ||
+      rec?.event_data?.operator_action ||
+      rec?.event_data?.action_type ||
+      ''
+    if (!startedStateOperatorActions.has(String(action).toUpperCase())) return false
+    const productId = String(getOperatorActionProductId(rec) || '')
+    return !!productId && activeProductIds.includes(productId)
+  })
+  if (recentActive) {
+    return String(getOperatorActionProductId(recentActive) || '')
+  }
+
+  return activeProductIds[0] || ''
+})
+
+const currentProcessingProductCode = computed(() => {
+  const productId = currentProcessingProductId.value
+  if (!productId) return ''
+  return productCodeLookup.value.get(String(productId)) || ''
+})
+
+const currentProcessingLabel = computed(() => {
+  const code = currentProcessingProductCode.value
+  if (!code) return ''
+  return t('processInput.currentProcessing', { code })
 })
 
 const isScrapFilterActive = computed(() => {
@@ -945,6 +1066,64 @@ const displayProductList = computed(() => {
 const toSafeNumber = (value) => {
   const num = Number(value)
   return Number.isFinite(num) ? num : 0
+}
+
+const getPlanQtyState = (item) => {
+  const planQty = toSafeNumber(item?.plan_qty)
+  const actualQty = toSafeNumber(item?.actual_qty)
+  if (planQty > 0 && actualQty === planQty) {
+    return 'done'
+  }
+  if (actualQty > planQty) {
+    return 'over'
+  }
+  return 'plan'
+}
+
+const getPlanQtyBadgeLabel = (item) => {
+  const state = getPlanQtyState(item)
+  const planQty = toSafeNumber(item?.plan_qty)
+  const actualQty = toSafeNumber(item?.actual_qty)
+  if (state === 'done') {
+    return t('processInput.planQtyDone')
+  }
+  if (state === 'over') {
+    const diff = formatNumber(Math.max(actualQty - planQty, 0))
+    return t('processInput.planQtyOver', { diff })
+  }
+  return formatNumber(planQty)
+}
+
+const getPlanQtyParenLabel = (item) => {
+  const badgeValue = getPlanQtyBadgeLabel(item)
+  if (['done', 'over'].includes(getPlanQtyState(item))) {
+    return `（${badgeValue}）`
+  }
+  return t('processInput.planQtyParen', { qty: badgeValue })
+}
+
+const buildActualQtyLookupByProductProcess = (items, processId) => {
+  const result = new Map()
+  const source = Array.isArray(items) ? items : []
+  source.forEach((item) => {
+    if (!item || item.product == null) return
+    const key = `${item.product}_${processId}`
+    const qty = toSafeNumber(item.actual_qty)
+    const seqRaw = item.sequence_no
+    const seqNo = seqRaw === null || seqRaw === undefined || seqRaw === '' ? null : Number(seqRaw)
+    // 実績は sequence_no=0 行が正なので最優先。次点は数量が大きい方を採用。
+    const priority = seqNo === 0 ? 2 : 1
+    const current = result.get(key)
+    if (!current || priority > current.priority || (priority === current.priority && qty > current.qty)) {
+      result.set(key, { qty, priority })
+    }
+  })
+
+  const qtyMap = new Map()
+  result.forEach((value, key) => {
+    qtyMap.set(key, value.qty)
+  })
+  return qtyMap
 }
 
 const planStatus = computed(() => {
@@ -1308,6 +1487,15 @@ const submitRecord = async () => {
       }
       submittedOperatorAction = String(effectiveOperatorAction.value || '').toUpperCase()
       submittedOperatorProductId = String(selectedPlanTarget.product || '')
+      if (submittedOperatorAction === 'PAUSE') {
+        data.qty = record.value.qty
+        data.batch_no = record.value.batch_no
+        data.event_data.pause_qty = record.value.qty
+      }
+      if (submittedOperatorAction === 'END') {
+        data.production_qty = record.value.qty
+        data.batch_no = record.value.batch_no
+      }
       if (requiresOperatorActionReason.value) {
         const reasonText = (record.value.operator_action_reason || '').trim()
         data.event_data.operator_action_reason = reasonText
@@ -1413,14 +1601,7 @@ const buildCurrentTimePlanItems = async (lineId, processId, existingItems = []) 
       return { items: [], hasPlan: false }
     }
 
-    const actualLookup = new Map()
-    ;(Array.isArray(existingItems) ? existingItems : []).forEach((item) => {
-      if (!item || item.product == null) return
-      const key = `${item.product}_${processId}`
-      if (!actualLookup.has(key)) {
-        actualLookup.set(key, toSafeNumber(item.actual_qty))
-      }
-    })
+    const actualLookup = buildActualQtyLookupByProductProcess(existingItems, processId)
 
     const now = new Date()
     const map = new Map()
@@ -1469,14 +1650,7 @@ const buildPlanTimeSlots = async (lineId, processId, existingItems = []) => {
       return { slots: [], activeIndex: null }
     }
 
-    const actualLookup = new Map()
-    ;(Array.isArray(existingItems) ? existingItems : []).forEach((item) => {
-      if (!item || item.product == null) return
-      const key = `${item.product}_${processId}`
-      if (!actualLookup.has(key)) {
-        actualLookup.set(key, toSafeNumber(item.actual_qty))
-      }
-    })
+    const actualLookup = buildActualQtyLookupByProductProcess(existingItems, processId)
 
     const slotMap = new Map()
     rawPlans.forEach((plan) => {
@@ -1648,10 +1822,16 @@ const loadPlannedProducts = async () => {
     timeSlots.value = slotResult.slots
     activeSlotIndex.value = slotResult.activeIndex
 
-    tempProducts = (Array.isArray(tempProducts) ? tempProducts : []).map((it) => ({
-      ...it,
-      actual_qty: toSafeNumber(it?.actual_qty),
-    }))
+    const actualLookup = buildActualQtyLookupByProductProcess(tempProducts, selectedProcessId.value)
+    tempProducts = (Array.isArray(tempProducts) ? tempProducts : []).map((it) => {
+      const key = `${it?.product}_${selectedProcessId.value}`
+      return {
+        ...it,
+        actual_qty: actualLookup.has(key)
+          ? toSafeNumber(actualLookup.get(key))
+          : toSafeNumber(it?.actual_qty),
+      }
+    })
 
     // 連産品の子品番を除外（生産記録用）
     const filteredForProduction = await filterCoproductChildrenFromList(tempProducts)
@@ -2601,6 +2781,19 @@ label {
   display: grid;
   gap: 4px;
 }
+.record-type-btn {
+  padding: 0;
+}
+.current-processing-banner {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #16a34a;
+  border: 1px solid #15803d;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
 .planned-header {
   display: grid;
   gap: 8px;
@@ -2656,6 +2849,9 @@ label {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+.operator-action-buttons-inline {
+  margin-left: 6px;
 }
 .operator-action-btn {
   min-width: 68px;

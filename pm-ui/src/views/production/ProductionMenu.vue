@@ -66,6 +66,13 @@ const tiles = computed(() => {
       resource: "production.process_input",
     },
     {
+      to: "/production/record-inquiry",
+      label: t("productionMenu.tiles.productionRecordInquiry"),
+      icon: "📑",
+      required: "view",
+      resource: "production.process_input",
+    },
+    {
       to: "/production/scrap-record",
       label: t("productionMenu.tiles.scrapRecord"),
       icon: "🛠️",

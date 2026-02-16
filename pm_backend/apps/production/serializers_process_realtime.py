@@ -11,6 +11,7 @@ from django.utils import timezone
 from masters.models import Process, Product, BOM, Line, Supplier, Routing, RoutingStep
 from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR
 from .models_process_realtime import ProcessRealtimeRecord
+from .models_process_work_session import ProcessWorkSession
 from .models_line_backlog import LineBacklog
 from .models_production import StockAllocation
 from quality.models_scrap import ScrapRecord, ScrapRecordDetail
@@ -488,6 +489,62 @@ def update_line_backlog_actual_shipment(process, product, qty, plan_date):
             )
 
 
+def expand_coproduct_children_production(
+    process,
+    product,
+    parent_qty,
+    plan_date,
+    batch_no='',
+    operator_name='',
+    remarks='',
+    parent_record_id=None,
+    base_event_data=None,
+    session=None,
+    session_issues=None,
+):
+    """
+    連産品（仮想セット品番）の親実績から子製品実績を展開する。
+    """
+    if not product or not getattr(product, 'is_virtual_set', False):
+        return
+
+    bom = BOM.objects.filter(parent_product=product, is_active=True).order_by('-valid_from').first()
+    if not bom or not bom.is_coproduct:
+        return
+
+    qty_decimal = parent_qty or Decimal('0')
+    for item in bom.items.select_related('child_product').all():
+        child_product = item.child_product
+        if not child_product:
+            continue
+        child_qty = qty_decimal * (item.quantity or Decimal('0'))
+        if child_qty == 0:
+            continue
+
+        child_event_data = dict(base_event_data or {})
+        child_event_data['coproduct_parent_product_code'] = product.product_code
+        if parent_record_id:
+            child_event_data['coproduct_parent_record_id'] = parent_record_id
+
+        child_record = ProcessRealtimeRecord.objects.create(
+            process=process,
+            product=child_product,
+            product_code=child_product.product_code,
+            product_name=child_product.product_name,
+            record_type='PRODUCTION',
+            qty=child_qty,
+            equipment_state=None,
+            event_data=child_event_data,
+            batch_no=batch_no,
+            operator_name=operator_name,
+            remarks=remarks,
+        )
+        if session:
+            _sync_record_session_meta(child_record, session, session_issues)
+
+        update_line_backlog_production(process, child_product, child_qty, plan_date)
+
+
 def resolve_workday_date_for_process(process, dt):
     """
     勤務カレンダに基づいて計画日を決定する。
@@ -513,6 +570,275 @@ def resolve_workday_date_for_process(process, dt):
         return dt.date()
     except Exception:
         return dt.date()
+
+
+SESSION_ACTIONS = {'START', 'PAUSE', 'RESUME', 'END', 'TEMP_END'}
+SESSION_ACTIVE_STATUSES = ['OPEN']
+SESSION_TYPE_WORK = 'WORK'
+SESSION_TYPE_PAUSE = 'PAUSE'
+
+
+def _extract_operator_action(event_data):
+    payload = event_data or {}
+    action = (
+        payload.get('action')
+        or payload.get('operator_action')
+        or payload.get('action_type')
+        or ''
+    )
+    return str(action).upper()
+
+
+def _append_issue_flag(flags, issue_code):
+    items = list(flags or [])
+    code = str(issue_code or '').strip().upper()
+    if code and code not in items:
+        items.append(code)
+    return items
+
+
+def _add_session_issues(session, issue_codes):
+    if not session:
+        return
+    merged = list(session.issue_flags or [])
+    changed = False
+    for code in issue_codes or []:
+        next_flags = _append_issue_flag(merged, code)
+        if len(next_flags) != len(merged):
+            merged = next_flags
+            changed = True
+    if changed:
+        session.issue_flags = merged
+        session.issue_count = len(merged)
+        session.save(update_fields=['issue_flags', 'issue_count', 'updated_at'])
+
+
+def _next_session_no(process, product, plan_date):
+    latest = ProcessWorkSession.objects.filter(
+        process=process,
+        product=product,
+        plan_date=plan_date,
+    ).order_by('-session_no').first()
+    return (latest.session_no if latest else 0) + 1
+
+
+def _create_session(
+    process,
+    product,
+    plan_date,
+    started_at,
+    start_record,
+    session_type=SESSION_TYPE_WORK,
+    start_action='',
+):
+    product_code = product.product_code if product else ''
+    product_name = product.product_name if product else ''
+    return ProcessWorkSession.objects.create(
+        process=process,
+        product=product,
+        product_code=product_code or '',
+        product_name=product_name or '',
+        plan_date=plan_date,
+        session_no=_next_session_no(process, product, plan_date),
+        started_at=started_at,
+        status='OPEN',
+        session_type=session_type,
+        start_action=str(start_action or '').upper(),
+        start_record=start_record,
+    )
+
+
+def _close_session(session, end_record, ended_at, end_action, production_qty=Decimal('0')):
+    duration_seconds = 0
+    if session.started_at and ended_at:
+        duration_seconds = int((ended_at - session.started_at).total_seconds())
+    session.ended_at = ended_at
+    session.end_record = end_record
+    session.end_action = str(end_action or '').upper()
+    session.status = 'CLOSED'
+    session.duration_seconds = max(duration_seconds, 0)
+    session.production_qty = production_qty or Decimal('0')
+    session.save(
+        update_fields=[
+            'ended_at',
+            'end_record',
+            'end_action',
+            'status',
+            'duration_seconds',
+            'production_qty',
+            'updated_at',
+        ]
+    )
+
+
+def _build_session_meta(session):
+    if not session:
+        return None
+    return {
+        'id': session.id,
+        'session_no': session.session_no,
+        'session_type': session.session_type,
+        'status': session.status,
+        'plan_date': session.plan_date.isoformat() if session.plan_date else None,
+        'start_action': session.start_action,
+        'end_action': session.end_action,
+        'started_at': session.started_at.isoformat() if session.started_at else None,
+        'ended_at': session.ended_at.isoformat() if session.ended_at else None,
+        'duration_seconds': int(session.duration_seconds or 0),
+        'production_qty': float(session.production_qty or 0),
+        'issue_count': int(session.issue_count or 0),
+        'issue_flags': list(session.issue_flags or []),
+    }
+
+
+def _sync_record_session_meta(record, session, issue_codes=None):
+    event_data = dict(record.event_data or {})
+    meta = _build_session_meta(session)
+    if meta:
+        event_data['session'] = meta
+    issues = list(event_data.get('session_issues') or [])
+    for code in issue_codes or []:
+        issues = _append_issue_flag(issues, code)
+    if issues:
+        event_data['session_issues'] = issues
+    record.event_data = event_data
+    record.save(update_fields=['event_data'])
+
+
+def apply_operator_action_session(process, product, action, action_record, plan_date, production_qty=Decimal('0')):
+    """
+    作業者アクションからセッション状態を更新し、不整合を検知する。
+    """
+    action_key = str(action or '').upper()
+    if action_key not in SESSION_ACTIONS:
+        return None, []
+    if not product:
+        return None, ['MISSING_PRODUCT']
+
+    session = ProcessWorkSession.objects.filter(
+        process=process,
+        product=product,
+        status__in=SESSION_ACTIVE_STATUSES,
+    ).order_by('-started_at', '-id').first()
+    other_open_session = ProcessWorkSession.objects.filter(
+        process=process,
+        session_type=SESSION_TYPE_WORK,
+        status__in=SESSION_ACTIVE_STATUSES,
+    ).exclude(product=product).order_by('-started_at', '-id').first()
+
+    issues = []
+    action_time = action_record.timestamp
+
+    def create_work(start_action):
+        return _create_session(
+            process=process,
+            product=product,
+            plan_date=plan_date,
+            started_at=action_time,
+            start_record=action_record,
+            session_type=SESSION_TYPE_WORK,
+            start_action=start_action,
+        )
+
+    def create_pause(start_action):
+        return _create_session(
+            process=process,
+            product=product,
+            plan_date=plan_date,
+            started_at=action_time,
+            start_record=action_record,
+            session_type=SESSION_TYPE_PAUSE,
+            start_action=start_action,
+        )
+
+    if action_key == 'START':
+        if session:
+            issues.append('DUPLICATE_START')
+        else:
+            session = create_work('START')
+        if other_open_session:
+            issues.append('OVERLAP_OTHER_PRODUCT')
+            issues.append(f"OVERLAP_SESSION_ID_{other_open_session.id}")
+
+    elif action_key == 'PAUSE':
+        qty = production_qty or Decimal('0')
+        if not session:
+            issues.append('PAUSE_WITHOUT_START')
+            session = create_pause('PAUSE')
+        elif session.session_type == SESSION_TYPE_PAUSE:
+            issues.append('DUPLICATE_PAUSE')
+        else:
+            _close_session(
+                session=session,
+                end_record=action_record,
+                ended_at=action_time,
+                end_action='PAUSE',
+                production_qty=qty,
+            )
+            session = create_pause('PAUSE')
+
+    elif action_key == 'RESUME':
+        if not session:
+            issues.append('RESUME_WITHOUT_PAUSE')
+            session = create_work('RESUME')
+        elif session.session_type == SESSION_TYPE_PAUSE:
+            _close_session(
+                session=session,
+                end_record=action_record,
+                ended_at=action_time,
+                end_action='RESUME',
+                production_qty=Decimal('0'),
+            )
+            session = create_work('RESUME')
+        else:
+            issues.append('RESUME_WHILE_WORK')
+        if other_open_session:
+            issues.append('OVERLAP_OTHER_PRODUCT')
+            issues.append(f"OVERLAP_SESSION_ID_{other_open_session.id}")
+
+    elif action_key in ('END', 'TEMP_END'):
+        qty = production_qty or Decimal('0')
+        if not session:
+            issues.append(f'{action_key}_WITHOUT_START')
+            session = create_work(action_key)
+            _close_session(
+                session=session,
+                end_record=action_record,
+                ended_at=action_time,
+                end_action=action_key,
+                production_qty=qty if action_key == 'END' else Decimal('0'),
+            )
+        else:
+            if session.session_type == SESSION_TYPE_PAUSE:
+                issues.append(f'{action_key}_WHILE_PAUSED')
+                _close_session(
+                    session=session,
+                    end_record=action_record,
+                    ended_at=action_time,
+                    end_action=action_key,
+                    production_qty=Decimal('0'),
+                )
+                if action_key == 'END':
+                    issues.append('IMPLICIT_RESUME_BEFORE_END')
+                    session = create_work('RESUME')
+                    _close_session(
+                        session=session,
+                        end_record=action_record,
+                        ended_at=action_time,
+                        end_action='END',
+                        production_qty=qty,
+                    )
+            else:
+                _close_session(
+                    session=session,
+                    end_record=action_record,
+                    ended_at=action_time,
+                    end_action=action_key,
+                    production_qty=qty if action_key == 'END' else Decimal('0'),
+                )
+
+    _add_session_issues(session, issues)
+    return session, issues
 
 
 class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
@@ -596,6 +922,54 @@ class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
         return sd.decided_by if sd else None
 
 
+class ProcessWorkSessionSerializer(serializers.ModelSerializer):
+    """工程作業セッションSerializer"""
+
+    process_code = serializers.CharField(source='process.process_code', read_only=True)
+    process_name = serializers.CharField(source='process.process_name', read_only=True)
+    operator_name = serializers.SerializerMethodField()
+
+    def get_operator_name(self, obj):
+        end_record = getattr(obj, 'end_record', None)
+        end_name = (getattr(end_record, 'operator_name', '') or '').strip() if end_record else ''
+        if end_name:
+            return end_name
+        start_record = getattr(obj, 'start_record', None)
+        start_name = (getattr(start_record, 'operator_name', '') or '').strip() if start_record else ''
+        if start_name:
+            return start_name
+        return ''
+
+    class Meta:
+        model = ProcessWorkSession
+        fields = [
+            'id',
+            'process',
+            'process_code',
+            'process_name',
+            'product',
+            'product_code',
+            'product_name',
+            'operator_name',
+            'plan_date',
+            'session_no',
+            'session_type',
+            'start_action',
+            'end_action',
+            'started_at',
+            'ended_at',
+            'status',
+            'duration_seconds',
+            'production_qty',
+            'issue_count',
+            'issue_flags',
+            'start_record',
+            'end_record',
+            'created_at',
+            'updated_at',
+        ]
+
+
 class ProcessRealtimeCreateSerializer(serializers.Serializer):
     """工程実時間記録作成用Serializer（簡易入力）"""
 
@@ -605,6 +979,12 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
     product_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
     record_type = serializers.ChoiceField(choices=ProcessRealtimeRecord.RECORD_TYPE_CHOICES)
     qty = serializers.DecimalField(max_digits=10, decimal_places=3, default=0)
+    production_qty = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        required=False,
+        allow_null=True,
+    )
     equipment_state = serializers.ChoiceField(
         choices=ProcessRealtimeRecord.EQUIPMENT_STATE_CHOICES,
         required=False,
@@ -621,6 +1001,19 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
             has_product_code = bool((attrs.get('product_code') or '').strip())
             if not has_product_id and not has_product_code:
                 raise serializers.ValidationError({'product_id': '生産記録は製品（品番）の指定が必要です。'})
+        if attrs.get('record_type') == 'OPERATOR_ACTION':
+            event_data = attrs.get('event_data') or {}
+            action = _extract_operator_action(event_data)
+            if action in SESSION_ACTIONS and not attrs.get('product_id'):
+                raise serializers.ValidationError({'product_id': '作業時刻記録は製品の指定が必要です。'})
+            if action == 'PAUSE':
+                pause_qty = attrs.get('qty')
+                if pause_qty is None or pause_qty <= 0:
+                    raise serializers.ValidationError({'qty': '中断時は数量の入力が必要です。'})
+            if action == 'END':
+                production_qty = attrs.get('production_qty')
+                if production_qty is None or production_qty <= 0:
+                    raise serializers.ValidationError({'production_qty': '終了時は数量の入力が必要です。'})
         return attrs
 
     def create(self, validated_data):
@@ -639,7 +1032,9 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
         product_id = validated_data.pop('product_id', None)
         product_code = (validated_data.pop('product_code', None) or '').strip() or None
         product_name = (validated_data.pop('product_name', None) or '').strip() or None
+        production_qty = validated_data.pop('production_qty', None)
         scrap_event = (validated_data.get('event_data') or {}) if validated_data else {}
+        operator_event = (validated_data.get('event_data') or {}) if validated_data else {}
 
         if product_id:
             try:
@@ -653,6 +1048,17 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
             product_code = product.product_code
             product_name = product.product_name
 
+        operator_action = _extract_operator_action(operator_event)
+        if validated_data.get('record_type') == 'OPERATOR_ACTION':
+            if operator_action in SESSION_ACTIONS and not product:
+                raise serializers.ValidationError({'product_id': '作業時刻記録は製品の指定が必要です。'})
+        if validated_data.get('record_type') == 'OPERATOR_ACTION' and operator_action == 'END':
+            qty_decimal = production_qty or Decimal('0')
+            if qty_decimal <= 0:
+                raise serializers.ValidationError({'production_qty': '終了時は数量の入力が必要です。'})
+            if not product:
+                raise serializers.ValidationError({'product_id': '終了実績の保存には製品の指定が必要です。'})
+
         with transaction.atomic():
             parent_record = ProcessRealtimeRecord.objects.create(
                 process=process,
@@ -662,6 +1068,76 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                 **validated_data
             )
 
+            session = None
+            session_issues = []
+            if validated_data.get('record_type') == 'OPERATOR_ACTION' and operator_action in SESSION_ACTIONS:
+                session_production_qty = Decimal('0')
+                if operator_action == 'END':
+                    session_production_qty = production_qty or Decimal('0')
+                elif operator_action == 'PAUSE':
+                    session_production_qty = validated_data.get('qty', Decimal('0')) or Decimal('0')
+                session, session_issues = apply_operator_action_session(
+                    process=process,
+                    product=product,
+                    action=operator_action,
+                    action_record=parent_record,
+                    plan_date=plan_date,
+                    production_qty=session_production_qty,
+                )
+                _sync_record_session_meta(parent_record, session, session_issues)
+
+            # 作業者アクション PAUSE / END では、生産実績を別レコードとして保存しLineBacklogに反映
+            if (
+                validated_data.get('record_type') == 'OPERATOR_ACTION'
+                and operator_action in ('PAUSE', 'END')
+            ):
+                qty_decimal = (
+                    production_qty if operator_action == 'END'
+                    else validated_data.get('qty', Decimal('0'))
+                ) or Decimal('0')
+                source = 'OPERATOR_ACTION_END' if operator_action == 'END' else 'OPERATOR_ACTION_PAUSE'
+                production_event_data = {
+                    'source': source,
+                    'operator_action_record_id': parent_record.id,
+                    'operator_action': operator_action,
+                }
+                if session:
+                    production_event_data['work_session_id'] = session.id
+                    production_event_data['session'] = _build_session_meta(session)
+                plan_target = operator_event.get('plan_target')
+                if isinstance(plan_target, dict):
+                    production_event_data['plan_target'] = plan_target
+                production_record = ProcessRealtimeRecord.objects.create(
+                    process=process,
+                    product=product,
+                    product_code=product_code,
+                    product_name=product_name,
+                    record_type='PRODUCTION',
+                    qty=qty_decimal,
+                    equipment_state=None,
+                    event_data=production_event_data,
+                    batch_no=validated_data.get('batch_no', ''),
+                    operator_name=validated_data.get('operator_name', ''),
+                    remarks=validated_data.get('remarks', ''),
+                )
+                if session:
+                    _sync_record_session_meta(production_record, session, session_issues)
+                update_line_backlog_production(process, product, qty_decimal, plan_date)
+                update_line_backlog_actual_shipment(process, product, qty_decimal, plan_date)
+                expand_coproduct_children_production(
+                    process=process,
+                    product=product,
+                    parent_qty=qty_decimal,
+                    plan_date=plan_date,
+                    batch_no=validated_data.get('batch_no', ''),
+                    operator_name=validated_data.get('operator_name', ''),
+                    remarks=validated_data.get('remarks', ''),
+                    parent_record_id=production_record.id,
+                    base_event_data=production_event_data,
+                    session=session,
+                    session_issues=session_issues,
+                )
+
             # 生産実績の場合、LineBacklogに反映
             if validated_data.get('record_type') == 'PRODUCTION':
                 qty_decimal = validated_data.get('qty', Decimal('0')) or Decimal('0')
@@ -669,38 +1145,18 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                 update_line_backlog_actual_shipment(process, product, qty_decimal, plan_date)
 
             # 連産品（仮想セット品番）の場合、子製品にも実績を保存する
-            if (
-                validated_data.get('record_type') == 'PRODUCTION'
-                and product
-                and getattr(product, 'is_virtual_set', False)
-            ):
-                bom = BOM.objects.filter(parent_product=product, is_active=True).order_by('-valid_from').first()
-                if bom and bom.is_coproduct:
-                    parent_qty = validated_data.get('qty', Decimal('0')) or Decimal('0')
-                    child_common = {
-                        'record_type': 'PRODUCTION',
-                        'equipment_state': None,
-                        'batch_no': validated_data.get('batch_no', ''),
-                        'operator_name': validated_data.get('operator_name', ''),
-                        'remarks': validated_data.get('remarks', ''),
-                        'event_data': {
-                            'coproduct_parent_product_code': product.product_code,
-                            'coproduct_parent_record_id': parent_record.id,
-                        },
-                    }
-                    for item in bom.items.select_related('child_product').all():
-                        child_product = item.child_product
-                        child_qty = parent_qty * (item.quantity or Decimal('0'))
-                        child_record = ProcessRealtimeRecord.objects.create(
-                            process=process,
-                            product=child_product,
-                            product_code=child_product.product_code,
-                            product_name=child_product.product_name,
-                            qty=child_qty,
-                            **child_common
-                        )
-                        # 子製品の実績もLineBacklogに反映
-                        update_line_backlog_production(process, child_product, child_qty, plan_date)
+            if validated_data.get('record_type') == 'PRODUCTION':
+                qty_decimal = validated_data.get('qty', Decimal('0')) or Decimal('0')
+                expand_coproduct_children_production(
+                    process=process,
+                    product=product,
+                    parent_qty=qty_decimal,
+                    plan_date=plan_date,
+                    batch_no=validated_data.get('batch_no', ''),
+                    operator_name=validated_data.get('operator_name', ''),
+                    remarks=validated_data.get('remarks', ''),
+                    parent_record_id=parent_record.id,
+                )
 
             # 仕損は別テーブルにも保存
             if validated_data.get('record_type') == 'SCRAP':

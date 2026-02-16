@@ -13,17 +13,57 @@ from decimal import Decimal, InvalidOperation
 from datetime import datetime, time, timedelta
 
 from .models_process_realtime import ProcessRealtimeRecord
+from .models_process_work_session import ProcessWorkSession
 from .models_line_backlog import LineBacklog
 from .serializers_process_realtime import (
     ProcessRealtimeRecordSerializer,
     ProcessRealtimeCreateSerializer,
+    ProcessWorkSessionSerializer,
     build_scrap_multiplier_details,
     _resolve_product_process_line,
     resolve_workday_date_for_process,
 )
+from .services.gantt_planning import LineWorkCalendar
 from masters.models import Product, Process, Supplier, BOM
 from quality.models_scrap import ScrapRecordDetail, ScrapRecord
 from orders.utils.calendar_utils import get_business_today, DAY_BOUNDARY_HOUR
+
+
+def _to_local_naive(dt):
+    if not dt:
+        return None
+    if timezone.is_aware(dt):
+        return timezone.localtime(dt).replace(tzinfo=None)
+    return dt
+
+
+def _calculate_effective_work_seconds(calendar, started_at, ended_at):
+    """
+    ラインカレンダ（勤務パターン＋休憩）で区切った実作業秒数を返す。
+    """
+    start_dt = _to_local_naive(started_at)
+    end_dt = _to_local_naive(ended_at)
+    if not start_dt or not end_dt or end_dt <= start_dt:
+        return 0
+
+    # カレンダ未解決時は生時間差をフォールバックとして返す。
+    if not calendar:
+        return max(int((end_dt - start_dt).total_seconds()), 0)
+
+    total_seconds = 0
+    check_date = start_dt.date() - timedelta(days=1)
+    last_date = end_dt.date() + timedelta(days=1)
+
+    while check_date <= last_date:
+        segments = calendar.get_segments(check_date) or []
+        for seg_start, seg_end in segments:
+            overlap_start = max(start_dt, seg_start)
+            overlap_end = min(end_dt, seg_end)
+            if overlap_end > overlap_start:
+                total_seconds += int((overlap_end - overlap_start).total_seconds())
+        check_date += timedelta(days=1)
+
+    return max(total_seconds, 0)
 
 
 class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
@@ -78,6 +118,199 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         record = serializer.save()
         return Response(ProcessRealtimeRecordSerializer(record).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path='sessions')
+    def sessions(self, request):
+        """
+        開始〜終了セッションの一覧を返す。
+        稼働時間分析と不整合検知の確認用。
+        """
+        queryset = ProcessWorkSession.objects.select_related(
+            'process',
+            'product',
+            'start_record',
+            'end_record',
+        )
+
+        process_id = request.query_params.get('process_id')
+        if process_id:
+            queryset = queryset.filter(process_id=process_id)
+
+        line_id = request.query_params.get('line_id')
+        if line_id:
+            queryset = queryset.filter(process__line_id=line_id)
+
+        product_id = request.query_params.get('product_id')
+        if product_id:
+            queryset = queryset.filter(product_id=product_id)
+        # 連産子への表示展開後にも適用できるよう、品番フィルタは後段で評価する。
+        product_code = (request.query_params.get('product_code') or '').strip()
+
+        status_param = (request.query_params.get('status') or '').strip().upper()
+        if status_param:
+            queryset = queryset.filter(status=status_param)
+
+        session_type = (request.query_params.get('session_type') or '').strip().upper()
+        if session_type:
+            queryset = queryset.filter(session_type=session_type)
+
+        start_date = request.query_params.get('start_date')
+        if start_date:
+            d = parse_date(start_date)
+            if d:
+                queryset = queryset.filter(started_at__date__gte=d)
+
+        end_date = request.query_params.get('end_date')
+        if end_date:
+            d = parse_date(end_date)
+            if d:
+                queryset = queryset.filter(started_at__date__lte=d)
+
+        has_issue = request.query_params.get('has_issue')
+        if has_issue is not None:
+            normalized = str(has_issue).strip().lower()
+            if normalized in ('1', 'true', 'yes'):
+                queryset = queryset.filter(issue_count__gt=0)
+            elif normalized in ('0', 'false', 'no'):
+                queryset = queryset.filter(issue_count=0)
+
+        limit = request.query_params.get('limit')
+        try:
+            limit_value = int(limit) if limit is not None else 200
+        except ValueError:
+            limit_value = 200
+        limit_value = max(1, min(limit_value, 2000))
+
+        sessions = list(queryset.order_by('-started_at', '-id')[:limit_value])
+        serializer = ProcessWorkSessionSerializer(sessions, many=True)
+        base_rows = list(serializer.data or [])
+        if not base_rows:
+            return Response([])
+
+        line_calendar_cache = {}
+        effective_seconds_map = {}
+
+        for session_obj in sessions:
+            session_id = getattr(session_obj, 'id', None)
+            if not session_id:
+                continue
+            process = getattr(session_obj, 'process', None)
+            line = getattr(process, 'line', None) if process else None
+            line_id = getattr(line, 'id', None) if line else None
+
+            calendar = None
+            if line_id is not None:
+                if line_id not in line_calendar_cache:
+                    try:
+                        line_calendar_cache[line_id] = LineWorkCalendar(line)
+                    except Exception:
+                        line_calendar_cache[line_id] = None
+                calendar = line_calendar_cache.get(line_id)
+
+            ended_at = session_obj.ended_at or timezone.now()
+            effective_seconds_map[session_id] = _calculate_effective_work_seconds(
+                calendar=calendar,
+                started_at=session_obj.started_at,
+                ended_at=ended_at,
+            )
+
+        def enrich_row_metrics(target_row):
+            session_id = target_row.get('id')
+            effective_seconds = int(effective_seconds_map.get(session_id) or 0)
+            target_row['effective_work_seconds'] = effective_seconds
+
+            qty_raw = target_row.get('production_qty')
+            try:
+                qty = Decimal(str(qty_raw or 0))
+            except (InvalidOperation, TypeError, ValueError):
+                qty = Decimal('0')
+
+            if effective_seconds > 0 and qty > 0:
+                productivity = (qty * Decimal('3600')) / Decimal(str(effective_seconds))
+                target_row['productivity_per_hour'] = float(productivity.quantize(Decimal('0.001')))
+            else:
+                target_row['productivity_per_hour'] = None
+
+        session_ids = [row.get('id') for row in base_rows if row.get('id')]
+        child_rows_by_session = {}
+        if session_ids:
+            production_rows = ProcessRealtimeRecord.objects.filter(
+                record_type='PRODUCTION',
+                event_data__work_session_id__in=session_ids,
+            ).values(
+                'id',
+                'product_id',
+                'product_code',
+                'product_name',
+                'qty',
+                'event_data',
+            )
+
+            for rec in production_rows:
+                event_data = rec.get('event_data') or {}
+                session_id_raw = event_data.get('work_session_id')
+                parent_record_id = event_data.get('coproduct_parent_record_id')
+                if not session_id_raw or not parent_record_id:
+                    # 連産子展開レコードのみ対象（親実績は表示置換に使わない）
+                    continue
+                try:
+                    session_id = int(session_id_raw)
+                except (TypeError, ValueError):
+                    continue
+
+                child_rows_by_session.setdefault(session_id, []).append({
+                    'source_record_id': rec.get('id'),
+                    'product_id': rec.get('product_id'),
+                    'product_code': (rec.get('product_code') or '').strip() or None,
+                    'product_name': (rec.get('product_name') or '').strip() or None,
+                    'production_qty': rec.get('qty') or 0,
+                    'coproduct_parent_product_code': (
+                        (event_data.get('coproduct_parent_product_code') or '').strip() or None
+                    ),
+                })
+
+            for key, values in child_rows_by_session.items():
+                values.sort(key=lambda x: (
+                    x.get('product_code') or '',
+                    x.get('product_id') or 0,
+                    x.get('source_record_id') or 0,
+                ))
+
+        result_rows = []
+        for row in base_rows:
+            session_id = row.get('id')
+            child_rows = child_rows_by_session.get(session_id) or []
+            if child_rows:
+                # 連産子がある場合は親ではなく子のみ表示
+                for child in child_rows:
+                    expanded = dict(row)
+                    expanded['product'] = child.get('product_id')
+                    expanded['product_code'] = child.get('product_code')
+                    expanded['product_name'] = child.get('product_name')
+                    expanded['production_qty'] = child.get('production_qty') or 0
+                    expanded['is_coproduct_child'] = True
+                    expanded['coproduct_parent_product_code'] = child.get('coproduct_parent_product_code')
+                    enrich_row_metrics(expanded)
+                    result_rows.append(expanded)
+                continue
+
+            expanded = dict(row)
+            expanded['is_coproduct_child'] = False
+            expanded['coproduct_parent_product_code'] = None
+            enrich_row_metrics(expanded)
+            result_rows.append(expanded)
+
+        if product_code:
+            keyword = product_code.lower()
+            filtered_rows = []
+            for row in result_rows:
+                code = str(row.get('product_code') or '').lower()
+                parent_code = str(row.get('coproduct_parent_product_code') or '').lower()
+                if keyword in code or (parent_code and keyword in parent_code):
+                    filtered_rows.append(row)
+            result_rows = filtered_rows
+
+        return Response(result_rows)
 
     @action(detail=False, methods=['get'], url_path='status')
     def status(self, request):
