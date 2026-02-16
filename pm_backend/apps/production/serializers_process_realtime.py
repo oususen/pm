@@ -1091,6 +1091,19 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                 validated_data.get('record_type') == 'OPERATOR_ACTION'
                 and operator_action in ('PAUSE', 'END')
             ):
+                production_session = session
+                if operator_action == 'PAUSE' and parent_record and process and product:
+                    # PAUSE時の数量は「直前で閉じた作業セッション」に紐付ける
+                    # （中断セッションへ紐付くと、実績照会で START/RESUME→PAUSE 行に数量が出ないため）
+                    closed_work_session = ProcessWorkSession.objects.filter(
+                        process=process,
+                        product=product,
+                        end_record=parent_record,
+                        session_type=SESSION_TYPE_WORK,
+                    ).order_by('-id').first()
+                    if closed_work_session:
+                        production_session = closed_work_session
+
                 qty_decimal = (
                     production_qty if operator_action == 'END'
                     else validated_data.get('qty', Decimal('0'))
@@ -1101,9 +1114,9 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                     'operator_action_record_id': parent_record.id,
                     'operator_action': operator_action,
                 }
-                if session:
-                    production_event_data['work_session_id'] = session.id
-                    production_event_data['session'] = _build_session_meta(session)
+                if production_session:
+                    production_event_data['work_session_id'] = production_session.id
+                    production_event_data['session'] = _build_session_meta(production_session)
                 plan_target = operator_event.get('plan_target')
                 if isinstance(plan_target, dict):
                     production_event_data['plan_target'] = plan_target
@@ -1120,8 +1133,8 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                     operator_name=validated_data.get('operator_name', ''),
                     remarks=validated_data.get('remarks', ''),
                 )
-                if session:
-                    _sync_record_session_meta(production_record, session, session_issues)
+                if production_session:
+                    _sync_record_session_meta(production_record, production_session, session_issues)
                 update_line_backlog_production(process, product, qty_decimal, plan_date)
                 update_line_backlog_actual_shipment(process, product, qty_decimal, plan_date)
                 expand_coproduct_children_production(
@@ -1134,7 +1147,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                     remarks=validated_data.get('remarks', ''),
                     parent_record_id=production_record.id,
                     base_event_data=production_event_data,
-                    session=session,
+                    session=production_session,
                     session_issues=session_issues,
                 )
 

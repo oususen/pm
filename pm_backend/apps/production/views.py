@@ -844,12 +844,14 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         def resolve_lead_time_days(current_product_id, bom_item=None):
             """現ラインのLTを優先して解決する。"""
             step = product_step_map.get(current_product_id)
-            # RoutingStep の LT（0含む）を最優先とする。
-            # 0 を未設定扱いにすると、Line.lead_time_days へフォールバックして
-            # 不要な前倒し（日付ずれ）が発生するため、0は有効値として扱う。
             if step is not None:
                 try:
-                    return max(int(step.lead_time_days or 0), 0)
+                    lead_days = step.lead_time_days or 0
+                    if not lead_days:
+                        step_line = getattr(step, 'line', None)
+                        if step_line and step_line.lead_time_days:
+                            lead_days = step_line.lead_time_days
+                    return max(int(lead_days or 0), 0)
                 except Exception:
                     return 0
             if bom_item and bom_item.lead_time_days:

@@ -470,18 +470,28 @@ const groups = computed(() => {
     const demandQty = Number(d.demand_qty_plan || 0);
     const planQty = Number(d.plan_qty || 0);
     const isDemandRow = (orderQty > 0 || demandQty > 0) && planQty === 0;
-    // 計需/実需は需要行のみ採用（計画行は除外）
+    const hasFirmSplit = d.firm_order_qty !== null && d.firm_order_qty !== undefined;
+    // 計需は需要行のみ採用（計画行は除外）
     if (isDemandRow) {
       const hasForecastSplit = d.forecast_order_qty !== null && d.forecast_order_qty !== undefined;
       const forecastVal = Number((hasForecastSplit ? d.forecast_order_qty : d.order_qty) || 0);
-      const hasFirmSplit = d.firm_order_qty !== null && d.firm_order_qty !== undefined;
-      const firmVal = Number((hasFirmSplit ? d.firm_order_qty : d.actual_shipment_qty) || 0);
       if (c.demand_seq === undefined || seqVal < c.demand_seq) {
         c.demand_seq = seqVal;
         c.forecast = forecastVal;
-        c.firm = firmVal;
       } else if (seqVal === c.demand_seq) {
         c.forecast = Math.max(c.forecast, forecastVal);
+      }
+    }
+    // 実需:
+    // - 最終品: 需要行の firm_order_qty を優先
+    // - 中間品: sequence_no 最小行の actual_shipment_qty（後工程実績）を採用
+    const firmVal = Number((hasFirmSplit ? d.firm_order_qty : d.actual_shipment_qty) || 0);
+    const shouldApplyFirm = (isDemandRow && hasFirmSplit) || !hasFirmSplit;
+    if (shouldApplyFirm) {
+      if (c.firm_seq === undefined || seqVal < c.firm_seq) {
+        c.firm_seq = seqVal;
+        c.firm = firmVal;
+      } else if (seqVal === c.firm_seq) {
         c.firm = Math.max(c.firm, firmVal);
       }
     }

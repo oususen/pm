@@ -232,9 +232,10 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 target_row['productivity_per_hour'] = None
 
         session_ids = [row.get('id') for row in base_rows if row.get('id')]
+        session_id_set = set(session_ids)
         child_rows_by_session = {}
         if session_ids:
-            production_rows = ProcessRealtimeRecord.objects.filter(
+            production_rows = list(ProcessRealtimeRecord.objects.filter(
                 record_type='PRODUCTION',
                 event_data__work_session_id__in=session_ids,
             ).values(
@@ -244,7 +245,38 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 'product_name',
                 'qty',
                 'event_data',
-            )
+            ))
+
+            # 既存データ互換:
+            # OPERATOR_ACTION=PAUSE の数量が中断セッションに紐付いている場合、
+            # 直前で閉じた作業セッション（end_action=PAUSE 側）へ寄せて表示する。
+            pause_action_record_ids = set()
+            for rec in production_rows:
+                event_data = rec.get('event_data') or {}
+                operator_action = str(event_data.get('operator_action') or '').upper()
+                if operator_action != 'PAUSE':
+                    continue
+                action_record_raw = event_data.get('operator_action_record_id')
+                try:
+                    action_record_id = int(action_record_raw)
+                except (TypeError, ValueError):
+                    continue
+                pause_action_record_ids.add(action_record_id)
+
+            pause_to_work_session = {}
+            if pause_action_record_ids:
+                work_rows = ProcessWorkSession.objects.filter(
+                    end_record_id__in=list(pause_action_record_ids),
+                    session_type='WORK',
+                ).values('end_record_id', 'id')
+                for work_row in work_rows:
+                    end_record_id = work_row.get('end_record_id')
+                    work_session_id = work_row.get('id')
+                    if not end_record_id or not work_session_id:
+                        continue
+                    prev_id = pause_to_work_session.get(end_record_id)
+                    if prev_id is None or work_session_id > prev_id:
+                        pause_to_work_session[end_record_id] = work_session_id
 
             for rec in production_rows:
                 event_data = rec.get('event_data') or {}
@@ -257,6 +289,17 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                     session_id = int(session_id_raw)
                 except (TypeError, ValueError):
                     continue
+
+                operator_action = str(event_data.get('operator_action') or '').upper()
+                if operator_action == 'PAUSE':
+                    action_record_raw = event_data.get('operator_action_record_id')
+                    try:
+                        action_record_id = int(action_record_raw)
+                    except (TypeError, ValueError):
+                        action_record_id = None
+                    mapped_session_id = pause_to_work_session.get(action_record_id)
+                    if mapped_session_id and mapped_session_id in session_id_set:
+                        session_id = mapped_session_id
 
                 child_rows_by_session.setdefault(session_id, []).append({
                     'source_record_id': rec.get('id'),
