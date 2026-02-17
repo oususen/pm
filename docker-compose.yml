@@ -26,7 +26,7 @@ services:
     command: >
       sh -c "python manage.py migrate &&
              python manage.py collectstatic --noinput &&
-             gunicorn project.wsgi:application --bind 0.0.0.0:8081 --workers 3 --timeout 120"
+             gunicorn project.wsgi:application --bind 0.0.0.0:8081 --workers 3 --timeout 300"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

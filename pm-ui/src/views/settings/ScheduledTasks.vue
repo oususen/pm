@@ -244,7 +244,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
@@ -322,6 +322,15 @@ const saveConfig = async (cfg) => {
   }
 }
 
+const pollTimer = ref(null)
+
+const stopPolling = () => {
+  if (pollTimer.value) {
+    clearInterval(pollTimer.value)
+    pollTimer.value = null
+  }
+}
+
 const runNow = async (cfg) => {
   if (!canEdit.value) return
   const key = configKey(cfg)
@@ -332,18 +341,47 @@ const runNow = async (cfg) => {
   const msg =
     cfg.task_name === 'AUTO_PLAN'
       ? `${targetName}を今すぐ実行しますか？`
-      : '取り込み＋在庫再計算を今すぐ実行しますか？\n処理に数分かかる場合があります。'
+      : '取り込み＋在庫再計算を今すぐ実行しますか？\nバックグラウンドで実行されます。'
   if (!confirm(msg)) return
 
   running.add(key)
   try {
     const res = await api.scheduleConfig.runNow({ task_name: cfg.task_name, config_id: cfg.id, line: cfg.line })
-    alert(`完了しました。\n${res.data?.detail || ''}`)
-    await loadConfig()
+    // 非同期実行の場合はポーリングで完了を待つ
+    if (res.data?.async) {
+      await loadConfig()
+      stopPolling()
+      const pollStart = Date.now()
+      const POLL_TIMEOUT = 10 * 60 * 1000 // 10分
+      pollTimer.value = setInterval(async () => {
+        // タイムアウト: 10分でポーリング停止
+        if (Date.now() - pollStart > POLL_TIMEOUT) {
+          stopPolling()
+          running.delete(key)
+          alert('タイムアウト：10分経過しても完了しませんでした。\n画面をリロードして最新状態を確認してください。')
+          return
+        }
+        await loadConfig()
+        const updated = configs.value.find((c) => c.task_name === cfg.task_name && c.line === cfg.line)
+        if (updated && updated.last_run_status !== 'RUNNING') {
+          stopPolling()
+          running.delete(key)
+          const statusLabel = updated.last_run_status === 'SUCCESS' ? '成功' : '失敗'
+          alert(`取り込み＋在庫再計算が完了しました（${statusLabel}）\n${updated.last_run_message || ''}`)
+        }
+      }, 5000)
+    } else {
+      alert(`完了しました。\n${res.data?.detail || ''}`)
+      await loadConfig()
+      running.delete(key)
+    }
   } catch (e) {
-    alert('実行に失敗しました。')
-  } finally {
     running.delete(key)
+    if (e.response?.status === 409) {
+      alert(e.response.data?.detail || '既に実行中です。')
+    } else {
+      alert('実行に失敗しました。')
+    }
   }
 }
 
@@ -404,9 +442,44 @@ const removeCode = (cfg, code) => {
   }
 }
 
-onMounted(() => {
-  loadConfig()
+const startPollingIfRunning = () => {
+  // ページ読み込み時にRUNNING状態のタスクがあればポーリング開始
+  const inv = inventoryConfig.value
+  if (inv && inv.last_run_status === 'RUNNING') {
+    // last_run_atから10分以上経過していたらスタック扱い（ポーリング不要）
+    if (inv.last_run_at) {
+      const elapsed = Date.now() - new Date(inv.last_run_at).getTime()
+      if (elapsed > 10 * 60 * 1000) return
+    }
+    const key = configKey(inv)
+    running.add(key)
+    stopPolling()
+    const pollStart = Date.now()
+    const POLL_TIMEOUT = 10 * 60 * 1000
+    pollTimer.value = setInterval(async () => {
+      if (Date.now() - pollStart > POLL_TIMEOUT) {
+        stopPolling()
+        running.delete(key)
+        return
+      }
+      await loadConfig()
+      const updated = inventoryConfig.value
+      if (updated && updated.last_run_status !== 'RUNNING') {
+        stopPolling()
+        running.delete(key)
+      }
+    }, 5000)
+  }
+}
+
+onMounted(async () => {
+  await loadConfig()
   loadUsers()
+  startPollingIfRunning()
+})
+
+onUnmounted(() => {
+  stopPolling()
 })
 </script>
 

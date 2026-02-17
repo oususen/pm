@@ -3644,9 +3644,10 @@ class ScheduleConfigView(APIView):
 
 
 class ScheduleRunNowView(APIView):
-    """手動で取り込み＋在庫再計算を実行"""
+    """手動で取り込み＋在庫再計算を実行（非同期）"""
 
     def post(self, request):
+        import threading
         from .scheduler.tasks import run_inventory_recalculation
         from .scheduler.tasks_auto_plan import run_auto_plan
         task = (request.data.get('task_name') or 'INVENTORY_RECALC').upper()
@@ -3664,8 +3665,45 @@ class ScheduleRunNowView(APIView):
                 result = run_auto_plan(force=True, config_id=config.id)
                 return Response({'detail': '生産計画自動生成を実行しました', **(result or {})})
             else:
-                result = run_inventory_recalculation()
-                return Response({'detail': '取り込み＋在庫再計算が完了しました', **result})
+                from django.utils import timezone
+                # 二重実行防止: RUNNING状態チェック（10分超はスタック扱いでリセット）
+                stale_cfg = ScheduleConfig.objects.filter(
+                    task_name='INVENTORY_RECALC',
+                    last_run_status='RUNNING',
+                ).first()
+                if stale_cfg:
+                    elapsed = (timezone.now() - stale_cfg.last_run_at).total_seconds() if stale_cfg.last_run_at else 9999
+                    if elapsed < 600:
+                        return Response(
+                            {'detail': '既に実行中です。完了までお待ちください。'},
+                            status=status.HTTP_409_CONFLICT,
+                        )
+                    # 10分超はスタックとみなしてリセット
+                    stale_cfg.last_run_status = 'FAILED'
+                    stale_cfg.last_run_message = f'タイムアウト（{int(elapsed)}秒経過）により強制リセット'
+                    stale_cfg.save(update_fields=['last_run_status', 'last_run_message'])
+                    logger.warning(f'[スケジューラ] RUNNING状態が{int(elapsed)}秒スタック → FAILEDにリセット')
+
+                # バックグラウンドスレッドで実行
+                def _run():
+                    import django
+                    django.db.connections.close_all()
+                    try:
+                        run_inventory_recalculation()
+                    except Exception:
+                        logger.exception('バックグラウンド在庫再計算に失敗')
+                        # 例外時もステータスを更新
+                        ScheduleConfig.objects.filter(
+                            task_name='INVENTORY_RECALC',
+                            last_run_status='RUNNING',
+                        ).update(last_run_status='FAILED', last_run_message='実行中にエラーが発生しました')
+
+                thread = threading.Thread(target=_run, daemon=True)
+                thread.start()
+                return Response({
+                    'detail': '取り込み＋在庫再計算をバックグラウンドで開始しました。',
+                    'async': True,
+                })
         except Exception as e:
             logger.exception('手動実行に失敗')
             return Response(
