@@ -597,7 +597,15 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         tree = self._build_bom_tree(bom, visited_bom_ids=set())
         return Response(tree)
 
-    def _collect_routing_items_recursive(self, bom: BOM, visited_bom_ids: set, collector: list, depth: int = 0, path_prefix: tuple = (), include_buy: bool = False):
+    def _collect_routing_items_recursive(
+        self,
+        bom: BOM,
+        active_path_bom_ids: set,
+        collector: list,
+        depth: int = 0,
+        path_prefix: tuple = (),
+        include_buy: bool = False,
+    ):
         """
         Depth-first collect routing items (MAKE/SUBCON/BUY) from bom and its descendants.
 
@@ -605,10 +613,13 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
           downstream工程が先に生成される（前後関係を表す工程順に近づける）。
         - collector に (depth, path, item, parent_product) を詰める。path は階層内の通し。
         - include_buy=True の場合、BUY品も収集対象に含める
+        - 同一BOMが別枝で再登場するケースは正しく再展開し、循環参照のみ抑止する
         """
-        if bom.id in visited_bom_ids:
+        if bom.id in active_path_bom_ids:
             return
-        visited_bom_ids.add(bom.id)
+
+        next_path_bom_ids = set(active_path_bom_ids)
+        next_path_bom_ids.add(bom.id)
 
         items_qs = BOMItem.objects.filter(bom=bom).select_related('child_product', 'process', 'line', 'supplier').order_by('id')
         for idx, item in enumerate(items_qs, start=1):
@@ -616,7 +627,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             if child_bom:
                 self._collect_routing_items_recursive(
                     child_bom,
-                    visited_bom_ids,
+                    next_path_bom_ids,
                     collector,
                     depth=depth + 1,
                     path_prefix=path_prefix + (idx,),
@@ -662,7 +673,12 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         bom = self.get_object()
         include_buy = request.data.get('include_buy', True)
         routing_items_info = []
-        self._collect_routing_items_recursive(bom, visited_bom_ids=set(), collector=routing_items_info, include_buy=include_buy)
+        self._collect_routing_items_recursive(
+            bom,
+            active_path_bom_ids=set(),
+            collector=routing_items_info,
+            include_buy=include_buy,
+        )
 
         item_types = 'MAKE/SUBCON/BUY' if include_buy else 'MAKE/SUBCON'
         if not routing_items_info:

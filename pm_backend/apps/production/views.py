@@ -2415,7 +2415,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         - file: xlsx/csv
         - stocktake_date: YYYY-MM-DD
         """
-        from .inventory.stocktake_initializer import get_progress_upper_bound_date
+        from .inventory.stocktake_initializer import (
+            get_progress_upper_bound_date,
+            _collect_stocktake_mapping_keys,
+        )
 
         upload_file = request.FILES.get('file')
         stocktake_date_raw = request.data.get('stocktake_date')
@@ -2480,23 +2483,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
                 # 2) line_backlog (sequence_no=0) へ棚卸在庫を反映
                 target_product_ids = list(product_id_by_code.values())
-                step_qs = RoutingStep.objects.filter(
-                    routing__is_active=True,
-                    line_id__isnull=False,
-                ).filter(
-                    Q(output_product_id__in=target_product_ids) |
-                    Q(output_product_id__isnull=True, routing__product_id__in=target_product_ids)
-                ).select_related('routing')
-
-                unique_keys = set()
-                mapped_product_ids = set()
-                for step in step_qs:
-                    target_product_id = step.output_product_id or step.routing.product_id
-                    if target_product_id not in target_product_ids:
-                        continue
-                    key = (step.process_id, target_product_id, step.line_id)
-                    unique_keys.add(key)
-                    mapped_product_ids.add(target_product_id)
+                unique_keys, mapped_product_ids = _collect_stocktake_mapping_keys(
+                    baseline_date,
+                    target_product_ids,
+                )
 
                 for process_id, product_id, line_id in unique_keys:
                     # line_backlog はint管理のため、小数は切り捨てで保持
@@ -2528,8 +2518,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         backlog_created += 1
                     else:
                         obj.stock_qty = stock_int
-                        # planned_stock_qty は後続の initialize_stocktake で再計算されるため、一旦stock_intを入れておく
-                        obj.planned_stock_qty = stock_int
+                        # planned_stock_qty は Step2(initialize_stocktake) で計算する。
+                        # Step1(取込)では値を確定させないため0を保持する。
+                        obj.planned_stock_qty = 0
                         obj.progress_qty = 0
                         obj.planned_progress_qty = 0
                         obj.is_stocktake_fix = True
@@ -2571,6 +2562,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             initialize_planned_stock,
             ensure_stocktake_backlogs,
             get_progress_upper_bound_date,
+            recalculate_progress_from_stocktake,
             recalculate_inventory_from_stocktake,
         )
 
@@ -2625,6 +2617,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             
             # 3. 進度の初期化（専用ロジック）
             progress_result = initialize_progress_from_stocktake(baseline_dt)
+            progress_recalc_results = []
+            for line_id in line_ids:
+                progress_recalc_results.append(
+                    recalculate_progress_from_stocktake(line_id, baseline_dt, end_dt)
+                )
         except Exception as e:
             return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -2638,6 +2635,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             'baseline_backlog_created': baseline_result.get('backlog_created', 0),
             'baseline_backlog_updated': baseline_result.get('backlog_updated', 0),
             'baseline_unmapped_product_codes': baseline_result.get('unmapped_product_codes', []),
+            'progress_recalc_line_count': len(progress_recalc_results),
+            'progress_recalc_product_count': sum(r.get('product_count', 0) for r in progress_recalc_results),
             **progress_result,
         })
 
