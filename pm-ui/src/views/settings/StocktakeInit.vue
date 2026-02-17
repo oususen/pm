@@ -8,7 +8,7 @@
         <div class="input-row">
           <input type="date" v-model="stocktakeDate" :disabled="running || !canEdit" />
         </div>
-        <p class="helper">棚卸実施日を指定します。基準日はサーバー側で自動決定されます。</p>
+        <p class="helper">棚卸実施日を指定します。基準日は棚卸日と同じになります。</p>
       </div>
 
       <div class="field">

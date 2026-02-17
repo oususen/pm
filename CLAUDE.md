@@ -148,6 +148,15 @@ docker exec -it pm-backend python manage.py migrate
 そのため、進度計算の需要（内示/確定）は必ず **LineDemand** を使用すること。
 LineBacklog の `order_qty` や `demand_qty_plan` をフォールバックとして使ってはならない。
 
+### 棚卸初期化と通常計算の分離
+
+棚卸初期化のために、通常の在庫・計画在庫・進度の計算ファイルを変更してはならない。
+
+- **通常計算**（日次再計算）: `inventory_calculator.py` / `progress_calculator.py` — 触らない
+- **棚卸初期化専用**: `stocktake_initializer.py` — 棚卸時のみ使用するロジックはすべてここに書く
+
+棚卸専用の在庫・計画在庫再計算は `stocktake_initializer.py` 内の専用関数で行い、`inventory_calculator.py` の関数を棚卸用に改変・流用しないこと。
+
 ## Docker本番環境
 
 ### 構成

@@ -2448,7 +2448,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             )
 
         upper_bound_date = get_progress_upper_bound_date()
-        baseline_date = min(stocktake_date, upper_bound_date)
+        baseline_date = stocktake_date
 
         allocation_created = 0
         allocation_updated = 0
@@ -2566,11 +2566,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         - stocktake_date: YYYY-MM-DD
         - end_date: YYYY-MM-DD
         """
-        from .inventory.inventory_calculator import recalculate_inventory_for_line
         from .inventory.stocktake_initializer import (
             initialize_progress_from_stocktake,
-            resolve_progress_baseline_date,
             initialize_planned_stock,
+            ensure_stocktake_backlogs,
+            get_progress_upper_bound_date,
+            recalculate_inventory_from_stocktake,
         )
 
         stocktake_date_raw = request.data.get('stocktake_date')
@@ -2586,16 +2587,19 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         except ValueError as e:
             return Response({'detail': f'Invalid date format: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            baseline_dt, upper_bound = resolve_progress_baseline_date(stocktake_dt)
-        except ValueError as e:
-            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        baseline_dt = stocktake_dt
+        upper_bound = get_progress_upper_bound_date()
 
         if end_dt < baseline_dt:
             return Response(
                 {'detail': 'end_date must be on or after resolved baseline_date'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        try:
+            baseline_result = ensure_stocktake_backlogs(baseline_dt)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         line_ids = list(LineBacklog.objects.filter(
             plan_date__gte=baseline_dt,
@@ -2613,12 +2617,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             # stock_qty - パイプライン需要
             initialize_planned_stock(line_ids, baseline_dt)
 
-            # 2. 通常の再計算（基準日以降）
-            # inventory_calculator.py 側で is_stocktake_fix=True の日は計算をスキップするようになっているため、
-            # 基準日の値は維持され、翌日以降にカスケードされる。
+            # 2. 棚卸専用の再計算（基準日以降）
+            # 通常計算の「前々営業日以前スキップ」を使わず、棚卸日を起点に連鎖計算する。
             for line_id in line_ids:
                 # 進度は棚卸初期化ロジックで別計算するため、ここでは在庫・計画在庫のみ再計算
-                recalculate_inventory_for_line(line_id, baseline_dt, end_dt, include_progress=False)
+                recalculate_inventory_from_stocktake(line_id, baseline_dt, end_dt)
             
             # 3. 進度の初期化（専用ロジック）
             progress_result = initialize_progress_from_stocktake(baseline_dt)
@@ -2632,6 +2635,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             'upper_bound_date': upper_bound.isoformat(),
             'end_date': end_dt.isoformat(),
             'line_count': len(line_ids),
+            'baseline_backlog_created': baseline_result.get('backlog_created', 0),
+            'baseline_backlog_updated': baseline_result.get('backlog_updated', 0),
+            'baseline_unmapped_product_codes': baseline_result.get('unmapped_product_codes', []),
             **progress_result,
         })
 
