@@ -173,7 +173,14 @@
           @click="selectPlannedProduct(p)"
         >
           {{ p.product_code || t('processInput.unsetProductCode') }}
-          <span v-if="p.plan_qty != null" class="plan-qty">
+          <span
+            v-if="p.plan_qty != null"
+            class="plan-qty"
+            :class="{
+              'plan-qty--done': getPlanQtyState(p) === 'done',
+              'plan-qty--over': getPlanQtyState(p) === 'over',
+            }"
+          >
             {{ t('processInput.planQtyBadge', { qty: getPlanQtyBadgeLabel(p) }) }}
           </span>
         </button>
@@ -329,7 +336,18 @@
 
       <div v-if="requiresOperatorActionReason" class="section">
         <label class="label-required">{{ t(operatorActionReasonLabelKey) }}</label>
+        <select
+          v-if="isPauseReasonDropdown"
+          v-model="record.operator_action_reason"
+          class="input-large"
+        >
+          <option value="">{{ t('processInput.pauseReasonSelectPlaceholder') }}</option>
+          <option v-for="reason in pauseReasons" :key="reason.value" :value="reason.value">
+            {{ reason.label }}
+          </option>
+        </select>
         <input
+          v-else
           type="text"
           v-model="record.operator_action_reason"
           :placeholder="t(operatorActionReasonPlaceholderKey)"
@@ -411,7 +429,7 @@
           <button
             v-for="state in equipmentStates"
             :key="state.value"
-            @click="record.equipment_state = state.value"
+            @click="setEquipmentState(state.value)"
             class="state-btn"
             :class="[
               { active: record.equipment_state === state.value },
@@ -709,6 +727,9 @@ const operatorActionReasonPlaceholderKey = computed(() =>
     ? 'processInput.tempEndReasonPlaceholder'
     : 'processInput.pauseReasonPlaceholder'
 )
+const isPauseReasonDropdown = computed(
+  () => String(effectiveOperatorAction.value || '').toUpperCase() === 'PAUSE'
+)
 
 const OPERATOR_ACTION_LABEL_KEYS = {
   START: 'processInput.operatorAction.start',
@@ -718,6 +739,8 @@ const OPERATOR_ACTION_LABEL_KEYS = {
   TEMP_END: 'processInput.operatorAction.tempEnd',
 }
 
+const PAUSE_REASON_EQUIPMENT_TROUBLE = '設備トラブル'
+
 const equipmentStates = computed(() => [
   { value: 'RUNNING', label: t('processInput.equipmentState.running') },
   { value: 'IDLE', label: t('processInput.equipmentState.idle') },
@@ -725,6 +748,49 @@ const equipmentStates = computed(() => [
   { value: 'MAINTENANCE', label: t('processInput.equipmentState.maintenance') },
   { value: 'BREAKDOWN', label: t('processInput.equipmentState.breakdown') },
   { value: 'STOPPED', label: t('processInput.equipmentState.stopped') },
+])
+
+const pauseReasons = computed(() => [
+  {
+    value: '設備トラブル',
+    label: t('processInput.pauseReasonOption.equipmentTrouble'),
+  },
+  {
+    value: '治具トラブル',
+    label: t('processInput.pauseReasonOption.jigTrouble'),
+  },
+  {
+    value: '品質トラブル',
+    label: t('processInput.pauseReasonOption.qualityTrouble'),
+  },
+  {
+    value: 'ティーチング',
+    label: t('processInput.pauseReasonOption.teaching'),
+  },
+  {
+    value: 'ワイヤ交換',
+    label: t('processInput.pauseReasonOption.wireChange'),
+  },
+  {
+    value: '班長/対応者待ち',
+    label: t('processInput.pauseReasonOption.leaderWait'),
+  },
+  {
+    value: '工程指導',
+    label: t('processInput.pauseReasonOption.processGuidance'),
+  },
+  {
+    value: '３ｓ活動',
+    label: t('processInput.pauseReasonOption.activity3s'),
+  },
+  {
+    value: '改善活動',
+    label: t('processInput.pauseReasonOption.improvement'),
+  },
+  {
+    value: 'その他',
+    label: t('processInput.pauseReasonOption.other'),
+  },
 ])
 
 const quickQtyPresets = ref([])
@@ -802,6 +868,44 @@ watch(
   },
   { immediate: true }
 )
+
+const equipmentStateStorageKey = computed(() => {
+  const lineId = selectedLineId.value || 'none'
+  const processId = selectedProcessId.value || 'none'
+  return `pm_equipment_state_${lineId}_${processId}`
+})
+
+const loadEquipmentStateCache = () => {
+  if (typeof window === 'undefined' || !window.localStorage) return ''
+  const key = equipmentStateStorageKey.value
+  if (!key) return ''
+  const cached = window.localStorage.getItem(key) || ''
+  if (!cached) return ''
+  const exists = equipmentStates.value.some((s) => s.value === cached)
+  return exists ? cached : ''
+}
+
+const saveEquipmentStateCache = (state) => {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  const key = equipmentStateStorageKey.value
+  if (!key) return
+  if (!state) return
+  window.localStorage.setItem(key, state)
+}
+
+const setEquipmentState = (state) => {
+  record.value.equipment_state = state
+  saveEquipmentStateCache(state)
+}
+
+const restoreEquipmentStateIfNeeded = () => {
+  if (record.value.record_type !== 'EQUIPMENT_STATE') return
+  if (record.value.equipment_state) return
+  const cached = loadEquipmentStateCache()
+  if (cached) {
+    record.value.equipment_state = cached
+  }
+}
 
 const getWorkDate = () => {
   // 勤務開始 08:00 を日付の境目にする。08:00 未満は前日扱い。
@@ -1066,6 +1170,26 @@ const displayProductList = computed(() => {
 const toSafeNumber = (value) => {
   const num = Number(value)
   return Number.isFinite(num) ? num : 0
+}
+
+const mergeProductionProductsByProduct = (items) => {
+  const mergedMap = new Map()
+  ;(Array.isArray(items) ? items : []).forEach((item) => {
+    if (!item || item.product === null || item.product === undefined || item.product === '') return
+    const key = String(item.product)
+    if (!mergedMap.has(key)) {
+      mergedMap.set(key, {
+        ...item,
+        plan_qty: toSafeNumber(item.plan_qty),
+        actual_qty: toSafeNumber(item.actual_qty),
+      })
+      return
+    }
+    const current = mergedMap.get(key)
+    current.plan_qty = toSafeNumber(current.plan_qty) + toSafeNumber(item.plan_qty)
+    current.actual_qty = Math.max(toSafeNumber(current.actual_qty), toSafeNumber(item.actual_qty))
+  })
+  return Array.from(mergedMap.values())
 }
 
 const getPlanQtyState = (item) => {
@@ -1375,6 +1499,28 @@ const resetForm = () => {
   ensureDefaultRecordType()
 }
 
+const prepareEquipmentStateForm = () => {
+  const productId = record.value.product_id
+  const productCode = record.value.product_code
+  record.value.record_type = 'EQUIPMENT_STATE'
+  record.value.product_id = productId
+  record.value.product_code = productCode
+  record.value.qty = null
+  record.value.batch_no = ''
+  record.value.operator_action_reason = ''
+  record.value.reason = ''
+  record.value.reason_detail = ''
+  record.value.disposition_status = ''
+  record.value.is_production_recorded = ''
+  record.value.equipment_state = ''
+  record.value.remarks = ''
+  selectedOperatorAction.value = ''
+}
+
+const isEquipmentTroubleReason = (value) => {
+  return String(value || '').trim() === PAUSE_REASON_EQUIPMENT_TROUBLE
+}
+
 const onProcessChange = () => {
   const proc = processes.value.find((p) => String(p.id) === String(selectedProcessId.value))
   if (proc?.line) {
@@ -1442,6 +1588,7 @@ const submitRecord = async () => {
   submitting.value = true
   let submittedOperatorAction = ''
   let submittedOperatorProductId = ''
+  let moveToEquipmentState = false
   try {
     const data = {
       process_id: selectedProcessId.value,
@@ -1501,6 +1648,7 @@ const submitRecord = async () => {
         data.event_data.operator_action_reason = reasonText
         if (submittedOperatorAction === 'PAUSE') {
           data.event_data.pause_reason = reasonText
+          moveToEquipmentState = isEquipmentTroubleReason(reasonText)
         } else if (submittedOperatorAction === 'TEMP_END') {
           data.event_data.temp_end_reason = reasonText
         }
@@ -1558,7 +1706,11 @@ const submitRecord = async () => {
     }
 
     alert(t('processInput.alert.saved'))
-    resetForm()
+    if (moveToEquipmentState) {
+      prepareEquipmentStateForm()
+    } else {
+      resetForm()
+    }
     await loadPlannedProducts()
     await loadStartedProductIds()
     await loadRecentRecords()
@@ -1722,7 +1874,7 @@ const applyTimeSlotFilter = () => {
   const slots = timeSlots.value || []
   let index = activeSlotIndex.value
   if (slots.length === 0 || !filterCurrentTime.value) {
-    productionProducts.value = [...allPlanProducts.value]
+    productionProducts.value = mergeProductionProductsByProduct(allPlanProducts.value)
     scrapProducts.value = [...allScrapProducts.value]
     return
   }
@@ -1730,7 +1882,7 @@ const applyTimeSlotFilter = () => {
   if (index > slots.length - 1) index = slots.length - 1
   activeSlotIndex.value = index
 
-  const slotItems = slots[index]?.items || []
+  const slotItems = mergeProductionProductsByProduct(slots[index]?.items || [])
   productionProducts.value = [...slotItems]
 
   const slotProductIds = new Set(slotItems.map((p) => String(p.product)))
@@ -2228,6 +2380,19 @@ const loadManualProducts = async (processId) => {
 }
 
 const selectPlannedProduct = (p) => {
+  const nextProductId = p?.product ?? ''
+  const isSameProduct = String(record.value.product_id || '') === String(nextProductId || '')
+  if (isSameProduct) {
+    record.value.product_id = ''
+    record.value.product_code = ''
+    if (record.value.record_type === 'PRODUCTION') {
+      record.value.qty = null
+      record.value.operator_action_reason = ''
+      selectedOperatorAction.value = ''
+    }
+    return
+  }
+
   record.value.product_id = p.product || ''
   record.value.product_code = p.product_code || ''
   manualProduct.value = false
@@ -2336,6 +2501,7 @@ watch(
         record.value.qty = 1
       }
     }
+    restoreEquipmentStateIfNeeded()
   },
   { immediate: true }
 )
@@ -2344,6 +2510,13 @@ watch(
   () => [record.value.product_id, record.value.product_code],
   () => {
     ensureScrapDefaults()
+  }
+)
+
+watch(
+  () => [selectedLineId.value, selectedProcessId.value],
+  () => {
+    restoreEquipmentStateIfNeeded()
   }
 )
 
@@ -2782,7 +2955,12 @@ label {
   gap: 4px;
 }
 .record-type-btn {
-  padding: 0;
+  padding: 6px 10px;
+}
+.record-type-btn.active {
+  border-color: #dc2626;
+  background: #ef4444;
+  color: #ffffff;
 }
 .current-processing-banner {
   padding: 10px 12px;
@@ -2954,11 +3132,18 @@ label {
 .btn-planned .plan-qty {
   margin-left: 4px;
   color: #475569;
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+.btn-planned .plan-qty.plan-qty--done,
+.btn-planned .plan-qty.plan-qty--over {
+  background: #ef4444;
+  color: #ffffff;
 }
 .btn-planned.active {
-  border-color: #4a7ae5;
-  background: #eff6ff;
-  color: #1f2a44;
+  border-color: #15803d;
+  background: #16a34a;
+  color: #ffffff;
 }
 
 .btn-link {
