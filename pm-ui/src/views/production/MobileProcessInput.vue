@@ -183,12 +183,18 @@
           >
             {{ t('processInput.planQtyBadge', { qty: getPlanQtyBadgeLabel(p) }) }}
           </span>
+          <span v-if="isTempEndedProduct(p.product)" class="status-badge status-badge--temp-end">
+            {{ t('processInput.tempEndBadge') }}
+          </span>
         </button>
       </div>
     </div>
 
     <div v-if="selectedProcessId && currentProcessingLabel" class="section current-processing-banner">
       {{ currentProcessingLabel }}
+    </div>
+    <div v-if="selectedProcessId && pauseNoticeLabel" class="section current-processing-banner pause-notice-banner">
+      {{ pauseNoticeLabel }}
     </div>
 
     <div v-if="record.record_type" class="section inline-row product-row">
@@ -346,6 +352,16 @@
             {{ reason.label }}
           </option>
         </select>
+        <select
+          v-else-if="isTempEndReasonDropdown"
+          v-model="record.operator_action_reason"
+          class="input-large"
+        >
+          <option value="">{{ t('processInput.tempEndReasonSelectPlaceholder') }}</option>
+          <option v-for="reason in tempEndReasons" :key="reason.value" :value="reason.value">
+            {{ reason.label }}
+          </option>
+        </select>
         <input
           v-else
           type="text"
@@ -410,13 +426,18 @@
       </div>
 
       <div class="section">
-        <label>{{ t('processInput.remarks') }}</label>
+        <label :class="{ 'label-required': requiresTempEndOtherRemarks }">
+          {{ t('processInput.remarks') }}
+        </label>
         <textarea
           v-model="record.remarks"
           rows="3"
           :placeholder="t('processInput.remarksPlaceholder')"
           class="textarea-normal"
         ></textarea>
+        <div v-if="requiresTempEndOtherRemarks" class="hint">
+          {{ t('processInput.tempEndRemarksRequiredHint') }}
+        </div>
       </div>
     </div>
 
@@ -545,6 +566,7 @@ const record = ref({
   product_code: '',
   qty: null,
   operator_action_reason: '',
+  operator_action_reason_detail: '',
   reason: '',
   reason_detail: '',
   disposition_status: '',
@@ -633,6 +655,7 @@ const selectedProductLatestOperatorAction = computed(() => {
 const selectedProductWorkState = computed(() => {
   const latestAction = selectedProductLatestOperatorAction.value
   if (latestAction === 'PAUSE') return 'PAUSED'
+  if (latestAction === 'TEMP_END') return 'TEMP_ENDED'
   if (startedStateOperatorActions.has(latestAction)) return 'STARTED'
   return 'NOT_STARTED'
 })
@@ -665,6 +688,12 @@ const operatorActionOptions = computed(() => {
 
   if (selectedProductWorkState.value === 'PAUSED') {
     return pausedOperatorActions.map((action) => ({
+      value: action,
+      label: t(OPERATOR_ACTION_LABEL_KEYS[action]),
+    }))
+  }
+  if (selectedProductWorkState.value === 'TEMP_ENDED') {
+    return ['RESUME', 'CANCEL'].map((action) => ({
       value: action,
       label: t(OPERATOR_ACTION_LABEL_KEYS[action]),
     }))
@@ -730,6 +759,22 @@ const operatorActionReasonPlaceholderKey = computed(() =>
 const isPauseReasonDropdown = computed(
   () => String(effectiveOperatorAction.value || '').toUpperCase() === 'PAUSE'
 )
+const isTempEndReasonDropdown = computed(
+  () => String(effectiveOperatorAction.value || '').toUpperCase() === 'TEMP_END'
+)
+const isTempEndReasonOtherSelected = computed(() => {
+  const val = String(record.value.operator_action_reason || '').trim()
+  if (!val) return false
+  const otherLabel = t('processInput.tempEndReasonOption.other')
+  if (val === 'その他' || val === 'OTHER' || val === otherLabel) return true
+  const matched = tempEndReasons.value.find((r) => String(r.value || '').trim() === val)
+  return !!matched && String(matched.label || '').trim() === String(otherLabel || '').trim()
+})
+
+const requiresTempEndOtherRemarks = computed(() => {
+  if (!isTempEndReasonOtherSelected.value) return false
+  return String(effectiveOperatorAction.value || '').toUpperCase() === 'TEMP_END'
+})
 
 const OPERATOR_ACTION_LABEL_KEYS = {
   START: 'processInput.operatorAction.start',
@@ -737,6 +782,7 @@ const OPERATOR_ACTION_LABEL_KEYS = {
   PAUSE: 'processInput.operatorAction.pause',
   RESUME: 'processInput.operatorAction.resume',
   TEMP_END: 'processInput.operatorAction.tempEnd',
+  CANCEL: 'processInput.operatorAction.cancel',
 }
 
 const PAUSE_REASON_EQUIPMENT_TROUBLE = '設備トラブル'
@@ -772,6 +818,10 @@ const pauseReasons = computed(() => [
     label: t('processInput.pauseReasonOption.wireChange'),
   },
   {
+    value: '部品ショート',
+    label: t('processInput.pauseReasonOption.partsShortage'),
+  },
+  {
     value: '班長/対応者待ち',
     label: t('processInput.pauseReasonOption.leaderWait'),
   },
@@ -790,6 +840,25 @@ const pauseReasons = computed(() => [
   {
     value: 'その他',
     label: t('processInput.pauseReasonOption.other'),
+  },
+])
+
+const tempEndReasons = computed(() => [
+  {
+    value: '本日設備復旧不可',
+    label: t('processInput.tempEndReasonOption.equipmentUnrecoverableToday'),
+  },
+  {
+    value: '本日治具使用不可',
+    label: t('processInput.tempEndReasonOption.jigUnavailableToday'),
+  },
+  {
+    value: '他へ製品切り替え',
+    label: t('processInput.tempEndReasonOption.switchProduct'),
+  },
+  {
+    value: 'その他',
+    label: t('processInput.tempEndReasonOption.other'),
   },
 ])
 
@@ -901,6 +970,10 @@ const setEquipmentState = (state) => {
 const restoreEquipmentStateIfNeeded = () => {
   if (record.value.record_type !== 'EQUIPMENT_STATE') return
   if (record.value.equipment_state) return
+  if (isProductionRunning.value) {
+    setEquipmentState('RUNNING')
+    return
+  }
   const cached = loadEquipmentStateCache()
   if (cached) {
     record.value.equipment_state = cached
@@ -1019,6 +1092,73 @@ const currentProcessingLabel = computed(() => {
   const code = currentProcessingProductCode.value
   if (!code) return ''
   return t('processInput.currentProcessing', { code })
+})
+
+const isProductionRunning = computed(() => {
+  return !!currentProcessingProductId.value
+})
+
+const tempEndedProductIds = computed(() => {
+  const ids = new Set()
+  latestOperatorActionByProduct.value.forEach((action, productId) => {
+    if (String(action || '').toUpperCase() === 'TEMP_END') {
+      ids.add(String(productId))
+    }
+  })
+  return ids
+})
+
+const isTempEndedProduct = (productId) => {
+  if (!productId) return false
+  return tempEndedProductIds.value.has(String(productId))
+}
+
+const pausedProductInfo = computed(() => {
+  if (!selectedProcessId.value || !startedProductIdsLoaded.value) return null
+
+  const pausedProductIds = []
+  latestOperatorActionByProduct.value.forEach((action, productId) => {
+    if (String(action || '').toUpperCase() === 'PAUSE') {
+      pausedProductIds.push(String(productId))
+    }
+  })
+  if (!pausedProductIds.length) return null
+
+  const selectedProductId = String(record.value.product_id || '')
+  const targetProductId = pausedProductIds.includes(selectedProductId)
+    ? selectedProductId
+    : pausedProductIds[0]
+
+  const code = productCodeLookup.value.get(String(targetProductId)) || ''
+
+  const recentPauseRecord = (Array.isArray(recentRecords.value) ? recentRecords.value : []).find((rec) => {
+    if (rec?.record_type !== 'OPERATOR_ACTION') return false
+    const action =
+      rec?.event_data?.action ||
+      rec?.event_data?.operator_action ||
+      rec?.event_data?.action_type ||
+      ''
+    if (String(action).toUpperCase() !== 'PAUSE') return false
+    const pid = String(getOperatorActionProductId(rec) || '')
+    return pid && pid === String(targetProductId)
+  })
+
+  const reason =
+    recentPauseRecord?.event_data?.pause_reason ||
+    recentPauseRecord?.event_data?.operator_action_reason ||
+    t('processInput.pauseReasonFallback')
+
+  if (!code) return null
+  return { code, reason }
+})
+
+const pauseNoticeLabel = computed(() => {
+  const info = pausedProductInfo.value
+  if (!info) return ''
+  return t('processInput.pauseNotice', {
+    code: info.code,
+    reason: info.reason,
+  })
 })
 
 const isScrapFilterActive = computed(() => {
@@ -1447,12 +1587,14 @@ const canSubmit = computed(() => {
   if (isOperatorActionMode.value) {
     if (!findSelectedPlanTarget()) return false
     if (requiresOperatorActionReason.value && !hasFilledText(record.value.operator_action_reason)) return false
+    if (requiresTempEndOtherRemarks.value && !hasFilledText(record.value.remarks)) return false
     return hasRequiredProductionFields({ requireQty: shouldShowQtyInput.value })
   }
 
   if (record.value.record_type === 'PRODUCTION') {
     if (!hasEffectiveOperatorAction()) return false
     if (requiresOperatorActionReason.value && !hasFilledText(record.value.operator_action_reason)) return false
+    if (requiresTempEndOtherRemarks.value && !hasFilledText(record.value.remarks)) return false
     return hasRequiredProductionFields({ requireQty: shouldShowQtyInput.value })
   }
 
@@ -1469,7 +1611,6 @@ const canSubmit = computed(() => {
 
   if (record.value.record_type === 'EQUIPMENT_STATE') {
     if (!record.value.equipment_state) return false
-    if (!hasSelectedProduct()) return false
     return true
   }
 
@@ -1483,6 +1624,7 @@ const resetForm = () => {
     product_code: '',
     qty: null,
     operator_action_reason: '',
+    operator_action_reason_detail: '',
     reason: '',
     reason_detail: '',
     disposition_status: '',
@@ -1508,6 +1650,7 @@ const prepareEquipmentStateForm = () => {
   record.value.qty = null
   record.value.batch_no = ''
   record.value.operator_action_reason = ''
+  record.value.operator_action_reason_detail = ''
   record.value.reason = ''
   record.value.reason_detail = ''
   record.value.disposition_status = ''
@@ -1644,7 +1787,10 @@ const submitRecord = async () => {
         data.batch_no = record.value.batch_no
       }
       if (requiresOperatorActionReason.value) {
-        const reasonText = (record.value.operator_action_reason || '').trim()
+        let reasonText = (record.value.operator_action_reason || '').trim()
+        if (submittedOperatorAction === 'TEMP_END' && isTempEndReasonOtherSelected.value) {
+          reasonText = (record.value.remarks || '').trim()
+        }
         data.event_data.operator_action_reason = reasonText
         if (submittedOperatorAction === 'PAUSE') {
           data.event_data.pause_reason = reasonText
@@ -1695,7 +1841,7 @@ const submitRecord = async () => {
       if (submittedOperatorAction) {
         nextLatestOperatorAction.set(submittedOperatorProductId, submittedOperatorAction)
       }
-      if (submittedOperatorAction === 'END' || submittedOperatorAction === 'TEMP_END') {
+      if (submittedOperatorAction === 'END' || submittedOperatorAction === 'TEMP_END' || submittedOperatorAction === 'CANCEL') {
         nextStarted.delete(submittedOperatorProductId)
       } else if (activeOperatorActions.has(submittedOperatorAction)) {
         nextStarted.add(submittedOperatorProductId)
@@ -2436,6 +2582,16 @@ watch(
     const actionKey = String(action || '').toUpperCase()
     if (!['PAUSE', 'TEMP_END'].includes(actionKey)) {
       record.value.operator_action_reason = ''
+      record.value.operator_action_reason_detail = ''
+    }
+  }
+)
+
+watch(
+  () => record.value.operator_action_reason,
+  (val) => {
+    if (val !== 'その他') {
+      record.value.operator_action_reason_detail = ''
     }
   }
 )
@@ -2972,6 +3128,11 @@ label {
   font-weight: 800;
   letter-spacing: 0.01em;
 }
+.current-processing-banner.pause-notice-banner {
+  background: #f97316;
+  border-color: #ea580c;
+  color: #ffffff;
+}
 .planned-header {
   display: grid;
   gap: 8px;
@@ -3134,6 +3295,17 @@ label {
   color: #475569;
   border-radius: 4px;
   padding: 1px 4px;
+}
+.status-badge {
+  margin-left: 4px;
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.status-badge--temp-end {
+  background: #94a3b8;
+  color: #ffffff;
 }
 .btn-planned .plan-qty.plan-qty--done,
 .btn-planned .plan-qty.plan-qty--over {

@@ -40,6 +40,7 @@
           <option value="">-- すべて --</option>
           <option value="WORK">作業セッション</option>
           <option value="PAUSE">中断セッション</option>
+          <option value="CANCEL">中止セッション</option>
         </select>
       </div>
       <div class="filter-row">
@@ -61,6 +62,11 @@
       <div class="actions">
         <button class="btn" :disabled="loading" @click="loadSessions">検索</button>
         <button class="btn btn-secondary" :disabled="loading" @click="resetFilters">リセット</button>
+      </div>
+      <div class="export-actions">
+        <button class="btn btn-secondary" :disabled="loading || !sessions.length" @click="exportCsv">CSV出力</button>
+        <button class="btn btn-secondary" :disabled="loading || !sessions.length" @click="exportExcel">Excel出力</button>
+        <button class="btn btn-secondary" :disabled="loading || !sessions.length" @click="exportPdf">印刷(PDF)</button>
       </div>
     </div>
 
@@ -139,8 +145,8 @@
               <td>{{ formatDateTime(row.started_at) }}</td>
               <td>{{ row.ended_at ? formatDateTime(row.ended_at) : '—' }}</td>
               <td>
-                <span class="badge" :class="row.session_type === 'PAUSE' ? 'badge-pause' : 'badge-work'">
-                  {{ row.session_type === 'PAUSE' ? '中断' : '作業' }}
+                <span class="badge" :class="getSessionTypeClass(row)">
+                  {{ getSessionTypeLabel(row) }}
                 </span>
               </td>
               <td>{{ row.start_action || '—' }}</td>
@@ -173,6 +179,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import * as XLSX from 'xlsx'
 import api from '@/api/client'
 
 const loading = ref(false)
@@ -202,6 +209,21 @@ const isCountableProductionRow = (row) => {
   if (!row || row.session_type !== 'WORK') return false
   const endAction = String(row.end_action || '').toUpperCase()
   return ['END', 'PAUSE'].includes(endAction)
+}
+
+const isCanceledSession = (row) => {
+  if (!row) return false
+  return String(row.end_action || '').toUpperCase() === 'CANCEL'
+}
+
+const getSessionTypeLabel = (row) => {
+  if (isCanceledSession(row)) return '中止'
+  return row.session_type === 'PAUSE' ? '中断' : '作業'
+}
+
+const getSessionTypeClass = (row) => {
+  if (isCanceledSession(row)) return 'badge-cancel'
+  return row.session_type === 'PAUSE' ? 'badge-pause' : 'badge-work'
 }
 
 const totalProductionQty = computed(() => {
@@ -272,6 +294,7 @@ const loadMasters = async () => {
 const loadSessions = async () => {
   loading.value = true
   error.value = ''
+  const wantsCancelOnly = sessionType.value === 'CANCEL'
   try {
     const params = {
       limit: 1000,
@@ -281,12 +304,19 @@ const loadSessions = async () => {
     if (lineId.value) params.line_id = lineId.value
     if (processId.value) params.process_id = processId.value
     if (productCode.value.trim()) params.product_code = productCode.value.trim()
-    if (sessionType.value) params.session_type = sessionType.value
+    if (sessionType.value && sessionType.value !== 'CANCEL') params.session_type = sessionType.value
     if (status.value) params.status = status.value
     if (hasIssue.value) params.has_issue = hasIssue.value
 
     const res = await api.processRealtime.getSessions(params)
-    sessions.value = res.data || []
+    const items = res.data || []
+    if (wantsCancelOnly) {
+      sessions.value = items.filter((row) => isCanceledSession(row))
+    } else if (sessionType.value === 'WORK') {
+      sessions.value = items.filter((row) => row.session_type === 'WORK' && !isCanceledSession(row))
+    } else {
+      sessions.value = items
+    }
   } catch (e) {
     console.error('セッション読込失敗:', e)
     error.value = '生産実績の取得に失敗しました。'
@@ -358,6 +388,193 @@ const formatProductivity = (value, row = null) => {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+const buildExportRows = () => {
+  const headers = [
+    '開始',
+    '終了',
+    '区分',
+    '開始操作',
+    '終了操作',
+    '工程',
+    '品番',
+    '品名',
+    '作業者',
+    '継続時間',
+    '作業時間(休憩除外)',
+    '実績数量',
+    '出来高(台/h)',
+    '出来高',
+    '不整合',
+  ]
+  const rows = (Array.isArray(sessions.value) ? sessions.value : []).map((row) => [
+    formatDateTime(row.started_at),
+    row.ended_at ? formatDateTime(row.ended_at) : '—',
+    getSessionTypeLabel(row),
+    row.start_action || '—',
+    row.end_action || '—',
+    `${row.process_code || ''} / ${row.process_name || ''}`.trim(),
+    row.product_code || '—',
+    row.product_name || '',
+    row.operator_name || '—',
+    formatDuration(row.duration_seconds, row.ended_at),
+    formatDuration(row.effective_work_seconds, true),
+    formatProductionQty(row),
+    formatProductivity(row.productivity_per_hour, row),
+    formatProductivity(calcDurationBasedProductivity(row), row),
+    (row.issue_flags || []).join(', ') || '—',
+  ])
+  return { headers, rows }
+}
+
+const downloadBlob = (blob, filename) => {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+const exportCsv = () => {
+  const { headers, rows } = buildExportRows()
+  if (!rows.length) {
+    alert('出力対象のデータがありません。')
+    return
+  }
+  const escapeCsv = (value) => {
+    const text = `${value ?? ''}`
+    const escaped = text.replace(/"/g, '""')
+    return `"${escaped}"`
+  }
+  const lines = [
+    headers.map(escapeCsv).join(','),
+    ...rows.map((r) => r.map(escapeCsv).join(',')),
+  ]
+  const bom = '\ufeff'
+  const csvContent = `${bom}${lines.join('\r\n')}`
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const filename = `production_record_${startDate.value}_${endDate.value}.csv`
+  downloadBlob(blob, filename)
+}
+
+const exportExcel = () => {
+  const { headers, rows } = buildExportRows()
+  if (!rows.length) {
+    alert('出力対象のデータがありません。')
+    return
+  }
+  const wb = XLSX.utils.book_new()
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
+  XLSX.utils.book_append_sheet(wb, ws, '生産実績')
+  const data = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+  const blob = new Blob([data], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+  const filename = `production_record_${startDate.value}_${endDate.value}.xlsx`
+  downloadBlob(blob, filename)
+}
+
+const escapeHtml = (value) => {
+  const text = `${value ?? ''}`
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+const buildPrintTableHtml = () => {
+  const { headers, rows } = buildExportRows()
+  const lineLabel =
+    lines.value.find((l) => String(l.id) === String(lineId.value))?.line_code || ''
+  const processLabel =
+    processes.value.find((p) => String(p.id) === String(processId.value))?.process_code || ''
+  const headerInfo = `
+    <div class="meta">
+      <div><strong>ライン:</strong> ${escapeHtml(lineLabel || 'すべて')}</div>
+      <div><strong>工程:</strong> ${escapeHtml(processLabel || 'すべて')}</div>
+      <div><strong>期間:</strong> ${escapeHtml(startDate.value)} ～ ${escapeHtml(endDate.value)}</div>
+    </div>
+  `
+  const summaryBlock = `
+    <div class="summary">
+      <div class="summary-line">
+        <div><strong>中断除く加工情報</strong></div>
+        <div>期間合計実績: ${escapeHtml(formatNumber(totalProductionQty.value))}</div>
+        <div>期間合計作業時間（休憩除外）: ${escapeHtml(formatDuration(totalEffectiveWorkSeconds.value, true))}</div>
+        <div>期間出来高（台/h）: ${escapeHtml(formatProductivity(totalProductivityPerHour.value))}</div>
+      </div>
+      <div class="summary-line">
+        <div><strong>中断含む加工情報</strong></div>
+        <div>期間合計実績: ${escapeHtml(formatNumber(totalProductionQty.value))}</div>
+        <div>期間合計作業時間（中断含む）: ${escapeHtml(formatDuration(totalDurationIncludingPauseSeconds.value, true))}</div>
+        <div>正味加工時間: ${escapeHtml(formatDuration(totalEffectiveWorkSeconds.value, true))}</div>
+        <div>中断時間: ${escapeHtml(formatDuration(totalPauseSeconds.value, true))}</div>
+        <div>期間出来高（台/h）: ${escapeHtml(formatProductivity(totalProductivityIncludingPausePerHour.value))}</div>
+      </div>
+    </div>
+  `
+  const thead = `<tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr>`
+  const tbody = rows.length
+    ? rows
+        .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`)
+        .join('')
+    : `<tr><td colspan="${headers.length}" class="no-data">データがありません</td></tr>`
+  return `
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <style>
+          @page { size: A4 landscape; margin: 10mm; }
+          body { font-family: "Noto Sans JP", "Segoe UI", sans-serif; color: #111; }
+          h1 { margin: 0 0 6px; font-size: 16px; }
+          .meta { display: flex; gap: 16px; margin-bottom: 6px; font-size: 11px; }
+          .summary { border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px; margin-bottom: 8px; }
+          .summary-line { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; margin-bottom: 4px; }
+          table { width: 100%; border-collapse: collapse; font-size: 10px; }
+          th, td { border: 1px solid #cbd5e1; padding: 4px 6px; }
+          th { background: #f8fafc; }
+          td { white-space: nowrap; }
+          .no-data { text-align: center; }
+        </style>
+        <title>生産実績照会</title>
+      </head>
+      <body>
+        <h1>生産実績照会</h1>
+        ${headerInfo}
+        ${summaryBlock}
+        <table>
+          <thead>${thead}</thead>
+          <tbody>${tbody}</tbody>
+        </table>
+      </body>
+    </html>
+  `
+}
+
+const exportPdf = () => {
+  const { rows } = buildExportRows()
+  if (!rows.length) {
+    alert('出力対象のデータがありません。')
+    return
+  }
+  const html = buildPrintTableHtml()
+  const win = window.open('', '_blank')
+  if (!win) {
+    alert('ポップアップがブロックされました。許可して再実行してください。')
+    return
+  }
+  win.document.write(html)
+  win.document.close()
+  win.focus()
+  setTimeout(() => {
+    win.print()
+    win.onafterprint = () => win.close()
+  }, 150)
+}
+
 onMounted(async () => {
   await loadMasters()
   await loadSessions()
@@ -413,6 +630,18 @@ onMounted(async () => {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
+}
+.export-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  padding-top: 4px;
+  border-top: 1px dashed #e2e8f0;
+  margin-top: 2px;
 }
 .btn {
   padding: 8px 12px;
@@ -545,6 +774,10 @@ onMounted(async () => {
 .badge-pause {
   background: #ffedd5;
   color: #c2410c;
+}
+.badge-cancel {
+  background: #e2e8f0;
+  color: #475569;
 }
 .row-pause {
   background: #fff7ed;

@@ -572,7 +572,7 @@ def resolve_workday_date_for_process(process, dt):
         return dt.date()
 
 
-SESSION_ACTIONS = {'START', 'PAUSE', 'RESUME', 'END', 'TEMP_END'}
+SESSION_ACTIONS = {'START', 'PAUSE', 'RESUME', 'END', 'TEMP_END', 'CANCEL'}
 SESSION_ACTIVE_STATUSES = ['OPEN']
 SESSION_TYPE_WORK = 'WORK'
 SESSION_TYPE_PAUSE = 'PAUSE'
@@ -796,18 +796,90 @@ def apply_operator_action_session(process, product, action, action_record, plan_
             issues.append('OVERLAP_OTHER_PRODUCT')
             issues.append(f"OVERLAP_SESSION_ID_{other_open_session.id}")
 
-    elif action_key in ('END', 'TEMP_END'):
-        qty = production_qty or Decimal('0')
-        if not session:
-            issues.append(f'{action_key}_WITHOUT_START')
-            session = create_work(action_key)
+    elif action_key == 'CANCEL':
+        qty = Decimal('0')
+        if session:
             _close_session(
                 session=session,
                 end_record=action_record,
                 ended_at=action_time,
-                end_action=action_key,
-                production_qty=qty if action_key == 'END' else Decimal('0'),
+                end_action='CANCEL',
+                production_qty=qty,
             )
+        else:
+            last_session = ProcessWorkSession.objects.filter(
+                process=process,
+                product=product,
+            ).order_by('-started_at', '-id').first()
+            last_end_action = str(getattr(last_session, 'end_action', '') or '').upper()
+            if last_session and last_end_action == 'TEMP_END':
+                start_time = last_session.ended_at or action_time
+                start_record = last_session.end_record or action_record
+                session = _create_session(
+                    process=process,
+                    product=product,
+                    plan_date=last_session.plan_date or plan_date,
+                    started_at=start_time,
+                    start_record=start_record,
+                    session_type=SESSION_TYPE_WORK,
+                    start_action='TEMP_END',
+                )
+                _close_session(
+                    session=session,
+                    end_record=action_record,
+                    ended_at=action_time,
+                    end_action='CANCEL',
+                    production_qty=qty,
+                )
+            else:
+                issues.append('CANCEL_WITHOUT_START')
+                session = create_work('CANCEL')
+                _close_session(
+                    session=session,
+                    end_record=action_record,
+                    ended_at=action_time,
+                    end_action='CANCEL',
+                    production_qty=qty,
+                )
+
+    elif action_key in ('END', 'TEMP_END'):
+        qty = production_qty or Decimal('0')
+        if not session:
+            if action_key == 'END':
+                last_session = ProcessWorkSession.objects.filter(
+                    process=process,
+                    product=product,
+                ).order_by('-started_at', '-id').first()
+                last_end_action = str(getattr(last_session, 'end_action', '') or '').upper()
+                if last_session and last_end_action == 'TEMP_END':
+                    session = create_work('RESUME')
+                    _close_session(
+                        session=session,
+                        end_record=action_record,
+                        ended_at=action_time,
+                        end_action='END',
+                        production_qty=qty,
+                    )
+                else:
+                    issues.append('END_WITHOUT_START')
+                    session = create_work('END')
+                    _close_session(
+                        session=session,
+                        end_record=action_record,
+                        ended_at=action_time,
+                        end_action='END',
+                        production_qty=qty,
+                    )
+            else:
+                issues.append('TEMP_END_WITHOUT_START')
+                session = create_work('TEMP_END')
+                _close_session(
+                    session=session,
+                    end_record=action_record,
+                    ended_at=action_time,
+                    end_action='TEMP_END',
+                    production_qty=Decimal('0'),
+                )
         else:
             if session.session_type == SESSION_TYPE_PAUSE:
                 issues.append(f'{action_key}_WHILE_PAUSED')
