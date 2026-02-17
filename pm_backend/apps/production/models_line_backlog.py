@@ -56,6 +56,9 @@ class LineBacklog(models.Model):
     # ライン計画との紐付けID（ライン_製品_日付_順番で一意）
     plan_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
 
+    # 棚卸確定フラグ（Trueの場合、在庫・計画在庫・進度の自動再計算による上書きを防止し、この値を起点とする）
+    is_stocktake_fix = models.BooleanField(default=False, verbose_name="棚卸確定")
+
     source_line = models.ForeignKey(Line, on_delete=models.SET_NULL, null=True, blank=True, related_name='backlog_sources')
     source_routing_step = models.ForeignKey(RoutingStep, on_delete=models.SET_NULL, null=True, blank=True, related_name='backlog_sources')
     updated_at = models.DateTimeField(auto_now=True)

@@ -2292,7 +2292,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
     def _parse_stocktake_file(self, upload_file):
         """
         棚卸ファイル（xlsx/csv）を読み込み、品番ごとの数量に集約する。
-        期待列: product_code, physical_qty
+        期待列: 製品番号, 製品名(任意), 数量
         """
         filename = (upload_file.name or '').lower()
         aggregated = {}
@@ -2301,20 +2301,26 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         def parse_qty(raw_value, row_no):
             text = '' if raw_value is None else str(raw_value).strip()
             if text == '':
-                raise ValueError(f'physical_qty is required (row={row_no})')
+                raise ValueError(f'数量が未入力です (行={row_no})')
             text = text.replace(',', '')
             try:
                 qty = Decimal(text)
             except InvalidOperation:
-                raise ValueError(f'invalid physical_qty "{raw_value}" (row={row_no})')
+                raise ValueError(f'数量が不正です: "{raw_value}" (行={row_no})')
             if qty < 0:
-                raise ValueError(f'physical_qty must be >= 0 (row={row_no})')
+                raise ValueError(f'数量は0以上にしてください (行={row_no})')
             return qty
 
         def add_row(product_code, qty, row_no):
-            code = (product_code or '').strip()
+            if product_code is None:
+                raise ValueError(f'製品番号が未入力です (行={row_no})')
+            # Excelが数値型で読み込んだ場合の対応（26.0 → "26"）
+            if isinstance(product_code, float) and product_code == int(product_code):
+                code = str(int(product_code))
+            else:
+                code = str(product_code).strip()
             if not code:
-                raise ValueError(f'product_code is required (row={row_no})')
+                raise ValueError(f'製品番号が未入力です (行={row_no})')
             aggregated[code] = aggregated.get(code, Decimal('0')) + qty
 
         if filename.endswith('.xlsx'):
@@ -2324,10 +2330,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             ws = wb.active
             header = [str(v).strip() if v is not None else '' for v in next(ws.iter_rows(min_row=1, max_row=1, values_only=True))]
             try:
-                product_col = header.index('product_code')
-                qty_col = header.index('physical_qty')
+                product_col = header.index('製品番号')
+                qty_col = header.index('数量')
             except ValueError:
-                raise ValueError('header must include product_code, physical_qty')
+                raise ValueError('ヘッダーに「製品番号」「数量」列が必要です')
 
             for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
                 product_val = row[product_col] if product_col < len(row) else None
@@ -2346,24 +2352,24 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 text = raw.decode('cp932')
             reader = csv.DictReader(io.StringIO(text))
             if not reader.fieldnames:
-                raise ValueError('CSV header is missing')
+                raise ValueError('CSVヘッダーがありません')
             names = {name.strip() for name in reader.fieldnames if name}
-            if 'product_code' not in names or 'physical_qty' not in names:
-                raise ValueError('CSV header must include product_code, physical_qty')
+            if '製品番号' not in names or '数量' not in names:
+                raise ValueError('CSVヘッダーに「製品番号」「数量」列が必要です')
 
             for idx, row in enumerate(reader, start=2):
-                product_val = row.get('product_code')
-                qty_val = row.get('physical_qty')
+                product_val = row.get('製品番号')
+                qty_val = row.get('数量')
                 if (product_val is None or str(product_val).strip() == '') and (qty_val is None or str(qty_val).strip() == ''):
                     continue
                 qty = parse_qty(qty_val, idx)
                 add_row(product_val, qty, idx)
                 row_count += 1
         else:
-            raise ValueError('file must be .xlsx or .csv')
+            raise ValueError('.xlsx または .csv ファイルを指定してください')
 
         if not aggregated:
-            raise ValueError('no stocktake rows found')
+            raise ValueError('棚卸データが見つかりません')
 
         return {
             'row_count': row_count,
@@ -2380,10 +2386,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         wb = Workbook()
         ws = wb.active
         ws.title = 'stocktake'
-        ws.append(['product_code', 'physical_qty'])
-        ws.append(['ABC-001', 1500])
-        ws.append(['ABC-002', 800.5])
-        ws.append(['DEF-003', 0])
+        ws.append(['製品番号', '製品名', '数量'])
+        ws.append(['ABC-001', 'サンプル製品A', 1500])
+        ws.append(['ABC-002', 'サンプル製品B', 800.5])
+        ws.append(['DEF-003', 'サンプル製品C', 0])
 
         buffer = io.BytesIO()
         wb.save(buffer)
@@ -2409,7 +2415,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         - file: xlsx/csv
         - stocktake_date: YYYY-MM-DD
         """
-        from .inventory.inventory_calculator import get_progress_upper_bound_date
+        from .inventory.stocktake_initializer import get_progress_upper_bound_date
 
         upload_file = request.FILES.get('file')
         stocktake_date_raw = request.data.get('stocktake_date')
@@ -2515,16 +2521,19 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             'actual_shipment_qty': 0,
                             'progress_qty': 0,
                             'planned_progress_qty': 0,
+                            'is_stocktake_fix': True,  # 棚卸確定フラグON
                         },
                     )
                     if created:
                         backlog_created += 1
                     else:
                         obj.stock_qty = stock_int
-                        obj.planned_stock_qty = 0
+                        # planned_stock_qty は後続の initialize_stocktake で再計算されるため、一旦stock_intを入れておく
+                        obj.planned_stock_qty = stock_int
                         obj.progress_qty = 0
                         obj.planned_progress_qty = 0
-                        obj.save(update_fields=['stock_qty', 'planned_stock_qty', 'progress_qty', 'planned_progress_qty', 'updated_at'])
+                        obj.is_stocktake_fix = True
+                        obj.save(update_fields=['stock_qty', 'planned_stock_qty', 'progress_qty', 'planned_progress_qty', 'is_stocktake_fix', 'updated_at'])
                         backlog_updated += 1
         except Exception as e:
             return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2557,10 +2566,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         - stocktake_date: YYYY-MM-DD
         - end_date: YYYY-MM-DD
         """
-        from .inventory.inventory_calculator import (
+        from .inventory.inventory_calculator import recalculate_inventory_for_line
+        from .inventory.stocktake_initializer import (
             initialize_progress_from_stocktake,
-            recalculate_inventory_for_line,
             resolve_progress_baseline_date,
+            initialize_planned_stock,
         )
 
         stocktake_date_raw = request.data.get('stocktake_date')
@@ -2599,9 +2609,18 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             )
 
         try:
+            # 1. 計画在庫の初期値を正しく計算してセットする（専用ロジック）
+            # stock_qty - パイプライン需要
+            initialize_planned_stock(line_ids, baseline_dt)
+
+            # 2. 通常の再計算（基準日以降）
+            # inventory_calculator.py 側で is_stocktake_fix=True の日は計算をスキップするようになっているため、
+            # 基準日の値は維持され、翌日以降にカスケードされる。
             for line_id in line_ids:
                 # 進度は棚卸初期化ロジックで別計算するため、ここでは在庫・計画在庫のみ再計算
                 recalculate_inventory_for_line(line_id, baseline_dt, end_dt, include_progress=False)
+            
+            # 3. 進度の初期化（専用ロジック）
             progress_result = initialize_progress_from_stocktake(baseline_dt)
         except Exception as e:
             return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2678,7 +2697,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             baseline_date: str (YYYY-MM-DD, optional)  # 明示指定時のみ使用
         }
         """
-        from .inventory.inventory_calculator import (
+        from .inventory.stocktake_initializer import (
             initialize_progress_from_stocktake,
             resolve_progress_baseline_date,
         )

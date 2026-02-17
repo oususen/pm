@@ -22,16 +22,13 @@
           />
         </div>
         <p class="helper">
-          フォーマット: <code>product_code</code>, <code>physical_qty</code>
+          フォーマット: 製品番号, 製品名(任意), 数量
           （同一品番が複数行の場合はサーバー側で合算）
-        </p>
-        <p class="helper">
-          テンプレート:
-          <a :href="templateUrl" target="_blank" rel="noopener">stocktake_template_20260228.xlsx</a>
         </p>
       </div>
 
       <div class="actions">
+        <button class="btn" @click="downloadTemplate" :disabled="running">テンプレートDL</button>
         <button class="btn primary" @click="importStocktakeExcel" :disabled="running || !canEdit">
           {{ importing ? "取込中..." : "1. 棚卸Excelを取込（在庫反映）" }}
         </button>
@@ -63,7 +60,8 @@
         <div class="input-row">
           <input type="date" v-model="endDate" :disabled="running || !canEdit" />
         </div>
-        <p class="helper">在庫・計画在庫・進度をこの日付まで再計算します。</p>
+        <p class="helper">在庫・計画在庫・進度をこの日付まで再計算します。デフォルト: 昨日</p>
+        <p class="helper">※ 棚卸日 + 最大LT営業日 以降の日付にしてください。</p>
       </div>
 
       <div class="actions">
@@ -100,8 +98,17 @@ import { hasPermission } from "@/router";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 const templateUrl = `${API_BASE_URL}/line-backlogs/download_stocktake_template/`;
-const stocktakeDate = ref("2026-02-28");
-const endDate = ref("2026-03-31");
+const getBusinessYesterday = () => {
+  const now = new Date();
+  // 8時区切り: 8時前は業務日付が前日→その前日=一昨日
+  const offset = now.getHours() < 8 ? 2 : 1;
+  const d = new Date(now);
+  d.setDate(d.getDate() - offset);
+  return d.toISOString().slice(0, 10);
+};
+
+const stocktakeDate = ref("");
+const endDate = ref(getBusinessYesterday());
 const importing = ref(false);
 const initializing = ref(false);
 const selectedFile = ref(null);
@@ -113,6 +120,10 @@ const canEdit = computed(() => hasPermission(authState.user, "settings", "edit")
 
 const onFileChange = (event) => {
   selectedFile.value = event.target.files?.[0] || null;
+};
+
+const downloadTemplate = () => {
+  window.open(templateUrl, "_blank");
 };
 
 const importStocktakeExcel = async () => {
@@ -138,7 +149,12 @@ const importStocktakeExcel = async () => {
     alert("棚卸Excelの取込が完了しました。");
   } catch (e) {
     console.error("棚卸Excel取込に失敗しました", e);
-    alert(e?.response?.data?.detail || "棚卸Excel取込に失敗しました。");
+    const data = e?.response?.data;
+    let msg = data?.detail || "棚卸Excel取込に失敗しました。";
+    if (data?.missing_product_codes?.length) {
+      msg += "\n\n未登録品番:\n" + data.missing_product_codes.join(", ");
+    }
+    alert(msg);
   } finally {
     importing.value = false;
   }
@@ -234,6 +250,8 @@ const initializeAll = async () => {
 
 .actions {
   margin-top: 12px;
+  display: flex;
+  gap: 8px;
 }
 
 .btn {

@@ -213,6 +213,15 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
         rows = by_date[plan_date]
         working_day = is_working_day(plan_date)
 
+        # 棚卸確定フラグがある場合、その値を正として採用
+        if any(getattr(r, 'is_stocktake_fix', False) for r in rows):
+            sample = rows[0]
+            last_progress = sample.progress_qty or 0
+            progress_by_date[plan_date] = last_progress
+            last_planned_progress = sample.planned_progress_qty or 0
+            planned_progress_by_date[plan_date] = last_planned_progress
+            continue
+
         # 計算開始日以前は既存の進度値を使用し、更新しない
         if plan_date <= calc_start_date:
             existing_progress = 0
