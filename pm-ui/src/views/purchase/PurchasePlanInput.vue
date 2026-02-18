@@ -81,13 +81,13 @@
             </td>
             <template v-for="(c, colIdx) in dateColumns" :key="c.key">
               <td class="num" :class="c.dayClass">
-                <span class="readonly-value">{{ displayValue(row.daily?.[c.key]?.demand) }}</span>
+                <span class="readonly-value" :class="{ negative: isNegativeValue(row.daily?.[c.key]?.demand) }">{{ displayValue(row.daily?.[c.key]?.demand) }}</span>
               </td>
               <td class="num" :class="c.dayClass">
-                <span class="readonly-value">{{ displayValue(row.daily?.[c.key]?.actual) }}</span>
+                <span class="readonly-value" :class="{ negative: isNegativeValue(row.daily?.[c.key]?.actual) }">{{ displayValue(row.daily?.[c.key]?.actual) }}</span>
               </td>
               <td class="num stock" :class="c.dayClass">
-                <span class="readonly-value">{{ displayValue(getStockDisplay(row, colIdx)) }}</span>
+                <span class="readonly-value" :class="{ negative: isNegativeValue(getStockDisplay(row, colIdx)) }">{{ displayValue(getStockDisplay(row, colIdx)) }}</span>
               </td>
               <td class="num plan" :class="c.dayClass">
                 <input
@@ -99,14 +99,14 @@
                   :data-col="colIdx"
                   @keydown="onCellKeydown($event, idx, colIdx)"
                   :disabled="isPlanCellLocked(c.key)"
-                  :class="{ locked: isPlanCellLocked(c.key) }"
+                  :class="{ locked: isPlanCellLocked(c.key), negative: isNegativeValue(row.daily[c.key].plan) }"
                 />
               </td>
               <td class="num stock-plan" :class="c.dayClass">
-                <span class="readonly-value">{{ displayValue(getPlanStockDisplay(row, colIdx)) }}</span>
+                <span class="readonly-value" :class="{ negative: isNegativeValue(getPlanStockDisplay(row, colIdx)) }">{{ displayValue(getPlanStockDisplay(row, colIdx)) }}</span>
               </td>
               <td class="num progress day-end" :class="c.dayClass">
-                <span class="readonly-value">{{ displayValue(getProgressDisplay(row, colIdx)) }}</span>
+                <span class="readonly-value" :class="{ negative: isNegativeValue(getProgressDisplay(row, colIdx)) }">{{ displayValue(getProgressDisplay(row, colIdx)) }}</span>
               </td>
             </template>
           </tr>
@@ -329,6 +329,12 @@ const displayValue = (val) => {
 const toNumber = (value) => {
   const num = Number(value)
   return Number.isFinite(num) ? num : 0
+}
+
+const isNegativeValue = (value) => {
+  if (value === null || value === undefined || value === '') return false
+  const num = Number(value)
+  return Number.isFinite(num) && num < 0
 }
 
 const getPlanQtyTotal = (daily) => {
@@ -897,6 +903,14 @@ thead .sticky-col {
   font-size: 12px;
   font-weight: 500;
   color: #000;
+}
+.readonly-value.negative {
+  color: #c62828;
+  font-weight: 700;
+}
+.num input.negative {
+  color: #c62828;
+  font-weight: 700;
 }
 .stock {
   background: #f7f9fb;

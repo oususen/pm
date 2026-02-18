@@ -745,14 +745,6 @@ const load = async () => {
       throw new Error("仕入れラインの解決に失敗しました");
     }
     await refreshScrapQty();
-    // 在庫・計画在庫・進度を再計算
-    const start = columns.value[0];
-    const end = columns.value[columns.value.length - 1];
-    await api.lineBacklogs.recalculateInventory({
-      line_id: purchaseLineId.value,
-      start_date: start,
-      end_date: end,
-    });
     const res = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
     const payload = res.data || [];
     applyDemands(payload);
@@ -779,7 +771,8 @@ const recalculateInventory = async () => {
       start_date: start,
       end_date: end,
     });
-    await load();
+    await reloadDemands();
+    await loadHolidayColumns();
   } catch (e) {
     error.value = e?.response?.data?.detail || e?.message || "在庫再計算に失敗しました";
     alert("エラー: " + error.value);
