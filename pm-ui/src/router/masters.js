@@ -66,6 +66,12 @@ const masters = [
     meta: { pageTitle: "構成マスタ（BOM）", resource: "masters" },
   },
   {
+    path: "/masters/routing",
+    name: "RoutingMaster",
+    component: () => import("@/views/masters/RoutingMaster.vue"),
+    meta: { pageTitle: "ルーティングマスタ", resource: "masters" },
+  },
+  {
     path: "/masters/contact",
     name: "ContactMaster",
     component: () => import("@/views/masters/ContactMaster.vue"),

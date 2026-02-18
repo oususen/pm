@@ -1,4 +1,6 @@
+from django import forms
 from django.contrib import admin
+from django.db.models import Sum
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay,
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProcessCycleTime, Contact
@@ -185,12 +187,90 @@ class BOMAdmin(admin.ModelAdmin):
     export_bom_tree_excel.short_description = '選択BOMの階層をExcel出力'
 
 
+def _find_parent_step_ids(step):
+    if not step or not step.routing_id:
+        return []
+
+    if step.hierarchy_path and '.' in step.hierarchy_path:
+        parent_path = step.hierarchy_path.rsplit('.', 1)[0]
+        parent_ids = list(
+            RoutingStep.objects.filter(
+                routing_id=step.routing_id,
+                hierarchy_path=parent_path,
+            ).values_list('id', flat=True)
+        )
+        if parent_ids:
+            return parent_ids
+
+    if step.remark:
+        parent_ids = list(
+            RoutingStep.objects.filter(
+                routing_id=step.routing_id,
+                output_product__product_code=step.remark,
+            ).values_list('id', flat=True)
+        )
+        if parent_ids:
+            return parent_ids
+
+    return []
+
+
+def _resolve_usage_quantity(step):
+    if not step or not step.output_product_id:
+        return None
+
+    parent_ids = _find_parent_step_ids(step)
+    if parent_ids:
+        total = RoutingStepMaterial.objects.filter(
+            routing_step_id__in=parent_ids,
+            component_id=step.output_product_id,
+        ).aggregate(total_quantity=Sum('quantity'))['total_quantity']
+        if total is not None:
+            return total
+
+    if step.remark:
+        bom_qty = BOMItem.objects.filter(
+            bom__parent_product__product_code=step.remark,
+            child_product_id=step.output_product_id,
+        ).order_by('-bom__valid_from', '-bom_id').values_list('quantity', flat=True).first()
+        if bom_qty is not None:
+            return bom_qty
+
+    return None
+
+
+class RoutingStepInlineForm(forms.ModelForm):
+    usage_quantity = forms.IntegerField(
+        label='使用個数',
+        required=False,
+        min_value=0,
+    )
+
+    class Meta:
+        model = RoutingStep
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if 'remark' in self.fields:
+            self.fields['remark'].label = '親製品'
+        if self.instance and self.instance.pk:
+            usage_initial = _resolve_usage_quantity(self.instance)
+            if usage_initial is not None:
+                self.fields['usage_quantity'].initial = int(usage_initial)
+
+
 class RoutingStepInline(admin.TabularInline):
     model = RoutingStep
+    form = RoutingStepInlineForm
     extra = 1
-    readonly_fields = ['hierarchy_indicator']
+    readonly_fields = ['hierarchy_indicator', 'parallel_group']
     autocomplete_fields = ['output_product']
-    fields = ['hierarchy_indicator', 'step_no', 'parallel_group', 'process', 'line', 'output_product', 'time_unit', 'lead_time_days', 'duration_min', 'remark']
+    fields = [
+        'hierarchy_indicator', 'step_no', 'parallel_group', 'process', 'line',
+        'output_product', 'time_unit', 'lead_time_days', 'duration_min',
+        'usage_quantity', 'remark'
+    ]
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -219,6 +299,7 @@ class RoutingStepAdmin(admin.ModelAdmin):
     list_filter = ['process', 'line', 'time_unit']
     search_fields = ['routing__routing_code', 'routing__product__product_code', 'process__process_code', 'line__line_code']
     autocomplete_fields = ['output_product']
+    readonly_fields = ['parallel_group', 'hierarchy_path']
     inlines = [RoutingStepMaterialInline]
 
     def routing_label(self, obj):
@@ -256,6 +337,44 @@ class RoutingAdmin(admin.ModelAdmin):
             return obj.product
         except Product.DoesNotExist:
             return f"(missing Product id={obj.product_id})"
+
+    def _save_usage_quantity_values(self, formset):
+        for inline_form in formset.forms:
+            cleaned = getattr(inline_form, 'cleaned_data', None)
+            if not cleaned or cleaned.get('DELETE'):
+                continue
+
+            step = inline_form.instance
+            usage_quantity = cleaned.get('usage_quantity')
+            if usage_quantity is None or not step.pk or not step.output_product_id:
+                continue
+
+            parent_ids = _find_parent_step_ids(step)
+            if len(parent_ids) != 1:
+                continue
+
+            material, _ = RoutingStepMaterial.objects.get_or_create(
+                routing_step_id=parent_ids[0],
+                component_id=step.output_product_id,
+                defaults={
+                    'quantity': usage_quantity,
+                    'consume_timing': 'START',
+                }
+            )
+            if material.quantity != usage_quantity:
+                material.quantity = usage_quantity
+                material.save()
+
+    def save_formset(self, request, form, formset, change):
+        instances = formset.save(commit=False)
+        for obj in formset.deleted_objects:
+            obj.delete()
+        for instance in instances:
+            instance.save()
+        formset.save_m2m()
+
+        if formset.model is RoutingStep:
+            self._save_usage_quantity_values(formset)
 
     def changeform_view(self, request, object_id=None, form_url='', extra_context=None):
         extra_context = extra_context or {}

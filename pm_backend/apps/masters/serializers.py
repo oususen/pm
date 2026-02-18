@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.db.models import Sum
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Contact
@@ -150,6 +151,7 @@ class RoutingStepSerializer(serializers.ModelSerializer):
     output_product_code = serializers.CharField(source='output_product.product_code', read_only=True)
     output_product_name = serializers.CharField(source='output_product.product_name', read_only=True)
     display_label = serializers.SerializerMethodField()
+    usage_quantity = serializers.SerializerMethodField()
 
     class Meta:
         model = RoutingStep
@@ -170,6 +172,44 @@ class RoutingStepSerializer(serializers.ModelSerializer):
         if out_code:
             parts.append(f"-> {out_code}")
         return " / ".join(parts)
+
+    def get_usage_quantity(self, obj: RoutingStep):
+        if not obj.output_product_id:
+            return None
+
+        if obj.hierarchy_path and '.' in obj.hierarchy_path:
+            parent_path = obj.hierarchy_path.rsplit('.', 1)[0]
+            parent_ids = RoutingStep.objects.filter(
+                routing_id=obj.routing_id,
+                hierarchy_path=parent_path,
+            ).values_list('id', flat=True)
+            total = RoutingStepMaterial.objects.filter(
+                routing_step_id__in=parent_ids,
+                component_id=obj.output_product_id,
+            ).aggregate(total_quantity=Sum('quantity'))['total_quantity']
+            if total is not None:
+                return total
+
+        if obj.remark:
+            parent_ids = RoutingStep.objects.filter(
+                routing_id=obj.routing_id,
+                output_product__product_code=obj.remark,
+            ).values_list('id', flat=True)
+            total = RoutingStepMaterial.objects.filter(
+                routing_step_id__in=parent_ids,
+                component_id=obj.output_product_id,
+            ).aggregate(total_quantity=Sum('quantity'))['total_quantity']
+            if total is not None:
+                return total
+
+            bom_qty = BOMItem.objects.filter(
+                bom__parent_product__product_code=obj.remark,
+                child_product_id=obj.output_product_id,
+            ).order_by('-bom__valid_from', '-bom_id').values_list('quantity', flat=True).first()
+            if bom_qty is not None:
+                return bom_qty
+
+        return None
 
 
 class RoutingSerializer(serializers.ModelSerializer):

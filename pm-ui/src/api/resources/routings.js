@@ -1,6 +1,6 @@
 export const createRoutingsAPI = (client) => ({
-  getRoutings() {
-    return client.get('/routings/')
+  getRoutings(params = {}) {
+    return client.get('/routings/', { params })
   },
   getRoutingStepsByLine(lineId) {
     return client.get(`/routing-steps/?line=${lineId}`)
@@ -19,8 +19,11 @@ export const createRoutingsAPI = (client) => ({
   },
 
   // Routing Steps
-  getRoutingSteps(routingId) {
-    return client.get(`/routing-steps/?routing=${routingId}`)
+  getRoutingSteps(routingOrParams) {
+    if (typeof routingOrParams === 'object' && routingOrParams !== null) {
+      return client.get('/routing-steps/', { params: routingOrParams })
+    }
+    return client.get(`/routing-steps/?routing=${routingOrParams}`)
   },
   createRoutingStep(data) {
     return client.post('/routing-steps/', data)
@@ -30,5 +33,8 @@ export const createRoutingsAPI = (client) => ({
   },
   deleteRoutingStep(id) {
     return client.delete(`/routing-steps/${id}/`)
+  },
+  getRoutingStepMaterials(params = {}) {
+    return client.get('/routing-step-materials/', { params })
   },
 })

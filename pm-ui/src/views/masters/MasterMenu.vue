@@ -23,6 +23,11 @@
         <div class="label">構成マスタ</div>
       </RouterLink>
 
+      <RouterLink to="/masters/routing" class="master-tile">
+        <div class="icon-box">🛣️</div>
+        <div class="label">ルーティングマスタ</div>
+      </RouterLink>
+
       <RouterLink to="/masters/customer" class="master-tile">
         <div class="icon-box">🏢</div>
         <div class="label">得意先マスタ</div>

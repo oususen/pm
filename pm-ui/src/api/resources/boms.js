@@ -8,6 +8,7 @@ export const createBomsAPI = (client) => ({
       queryParams.append('page_size', params.page_size)
     }
     if (params.search) queryParams.append('search', params.search)
+    if (params.parent_product) queryParams.append('parent_product', params.parent_product)
     if (params.parent_is_final !== undefined && params.parent_is_final !== '') {
       queryParams.append('parent_is_final', params.parent_is_final)
     }

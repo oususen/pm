@@ -916,6 +916,7 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 class RoutingViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Routing.objects.all()
     serializer_class = RoutingSerializer
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['product', 'is_active', 'is_default']
     ordering_fields = ['created_at']
     ordering = ['-created_at']
@@ -924,6 +925,7 @@ class RoutingViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = RoutingStep.objects.all()
     serializer_class = RoutingStepSerializer
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['routing', 'process', 'line', 'time_unit']
     ordering_fields = ['step_no']
     ordering = ['routing', 'step_no']
