@@ -32,11 +32,11 @@
         </div>
       </div>
       <div class="toolbar-right">
-        <button class="btn" @click="addRow" :disabled="processing">新規行追加</button>
         <button class="btn" @click="resetRows" :disabled="processing || !rows.length">クリア</button>
         <button class="btn" @click="openChangeReasonDialog" :disabled="processing">計画変更</button>
         <button class="btn" @click="savePlan" :disabled="processing || !rows.length || !selectedSupplier">保存</button>
         <button class="btn primary" @click="doPickup" :disabled="processing || !selectedSupplier">取り込み</button>
+        <button class="btn" @click="recalculateInventoryOnly" :disabled="processing || !selectedSupplier">在庫再計算</button>
       </div>
     </div>
 
@@ -50,7 +50,7 @@
             <th
               v-for="(c, colIdx) in dateColumns"
               :key="c.key"
-              colspan="5"
+              colspan="6"
               class="date-head day-end"
               :class="c.dayClass"
             >
@@ -63,7 +63,8 @@
               <th class="mini" :class="c.dayClass">実績</th>
               <th class="mini" :class="c.dayClass">在庫</th>
               <th class="mini" :class="c.dayClass">計画</th>
-              <th class="mini day-end" :class="c.dayClass">計画在庫</th>
+              <th class="mini" :class="c.dayClass">計庫</th>
+              <th class="mini day-end" :class="c.dayClass">進度</th>
             </template>
           </tr>
         </thead>
@@ -101,13 +102,16 @@
                   :class="{ locked: isPlanCellLocked(c.key) }"
                 />
               </td>
-              <td class="num stock-plan day-end" :class="c.dayClass">
+              <td class="num stock-plan" :class="c.dayClass">
                 <span class="readonly-value">{{ displayValue(getPlanStockDisplay(row, colIdx)) }}</span>
+              </td>
+              <td class="num progress day-end" :class="c.dayClass">
+                <span class="readonly-value">{{ displayValue(getProgressDisplay(row, colIdx)) }}</span>
               </td>
             </template>
           </tr>
           <tr v-if="!filteredRows.length">
-            <td :colspan="3 + dateColumns.length * 5" class="no-data">行を追加してください</td>
+            <td :colspan="3 + dateColumns.length * 6" class="no-data">データがありません</td>
           </tr>
         </tbody>
       </table>
@@ -165,7 +169,6 @@ const showChangeReasonDialog = ref(false)
 const suppliers = ref([])
 const products = ref([])
 const rows = ref([])
-let tempId = 1
 const processing = ref(false)
 
 const buildLocalDate = (dateText) => {
@@ -199,7 +202,7 @@ const dateColumns = computed(() => {
 
 const tableMinWidth = computed(() => {
   const fixedColsWidth = 40 + 187 + 100
-  const perDayWidth = 80 * 5
+  const perDayWidth = 270
   return fixedColsWidth + dateColumns.value.length * perDayWidth
 })
 
@@ -226,19 +229,9 @@ const isPlanCellLocked = (dateKey) => {
 const initDaily = () => {
   const daily = {}
   dateColumns.value.forEach((c) => {
-    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, plan_base: 0, has_row: false }
+    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, progress: 0, plan_base: 0, has_row: false }
   })
   return daily
-}
-
-const addRow = () => {
-  rows.value.push({
-    id: `tmp-${tempId++}`,
-    product_id: '',
-    product_code: '',
-    product_name: '',
-    daily: initDaily(),
-  })
 }
 
 const resetRows = () => {
@@ -380,6 +373,27 @@ const getStockDisplay = (row, colIdx) => {
     if (!key) continue
     const daily = row.daily[key] || {}
     const raw = daily.stock
+    const hasRow = daily.has_row === true
+    let value = raw
+    if (hasRow) {
+      carry = raw
+    } else if (carry !== null && carry !== undefined) {
+      value = carry
+    }
+    if (i === colIdx) return value
+  }
+  return ''
+}
+
+const getProgressDisplay = (row, colIdx) => {
+  if (!row || !row.daily) return ''
+  const cols = dateColumns.value
+  let carry = null
+  for (let i = 0; i <= colIdx; i += 1) {
+    const key = cols[i]?.key
+    if (!key) continue
+    const daily = row.daily[key] || {}
+    const raw = daily.progress
     const hasRow = daily.has_row === true
     let value = raw
     if (hasRow) {
@@ -546,12 +560,6 @@ const doPickup = async () => {
       return
     }
 
-    await api.lineBacklogs.recalculateInventory({
-      line_id: purchaseLineId.value,
-      start_date: startDate.value,
-      end_date: endDate.value,
-    })
-
     // 既存のLineBacklogデータを取得（line_idは仕入先IDとして使用）
     // 注：購買需要はpickup_purchaseで更新済み
     const backlogRes = await api.lineBacklogs.getLineBacklogs({
@@ -591,6 +599,7 @@ const doPickup = async () => {
         row.daily[dateKey].actual = Number(d.actual_qty || 0)
         row.daily[dateKey].stock = Number(d.stock_qty || 0)
         row.daily[dateKey].plan_stock = Number(d.planned_stock_qty || 0)
+        row.daily[dateKey].progress = Number(d.progress_qty || 0)
         row.daily[dateKey].plan_base = Number(d.plan_qty || 0)
         row.daily[dateKey].has_row = true
       }
@@ -600,6 +609,32 @@ const doPickup = async () => {
   } catch (e) {
     console.error('仕入れ計画 取り込みエラー', e)
     alert('取り込みに失敗しました。')
+  } finally {
+    processing.value = false
+  }
+}
+
+const recalculateInventoryOnly = async () => {
+  if (!selectedSupplier.value) {
+    alert('仕入先を選択してください。')
+    return
+  }
+  processing.value = true
+  try {
+    const lineId = await resolvePurchaseLineId()
+    if (!lineId) {
+      alert('仕入れラインの解決に失敗しました。')
+      return
+    }
+    await api.lineBacklogs.recalculateInventory({
+      line_id: lineId,
+      start_date: startDate.value,
+      end_date: endDate.value,
+    })
+    alert('在庫再計算が完了しました。')
+  } catch (e) {
+    console.error('仕入れ在庫再計算エラー', e)
+    alert('在庫再計算に失敗しました。')
   } finally {
     processing.value = false
   }
@@ -772,12 +807,12 @@ thead tr.head-level2 th.sticky-col {
 .date-head {
   text-align: center;
   font-weight: 700;
-  min-width: 400px;
+  min-width: 270px;
 }
 .mini {
   text-align: center;
   font-size: 12px;
-  min-width: 80px;
+  min-width: 30px;
 }
 .day-end {
   border-right: 4px solid #a2b0c5 !important;
@@ -799,15 +834,15 @@ thead .sticky-col {
 }
 .code-col {
   left: 40px;
-  width: 187px;
-  min-width: 187px;
-  max-width: 187px;
+  width: 125px;
+  min-width: 125px;
+  max-width: 125px;
 }
 .name-col {
-  left: 227px;
-  width: 100px;
-  min-width: 100px;
-  max-width: 100px;
+  left: 165px;
+  width: 130px;
+  min-width: 130px;
+  max-width: 130px;
   border-right: 2px solid #b5c1d2 !important;
 }
 .product-info {
@@ -838,7 +873,7 @@ thead .sticky-col {
 }
 .num {
   text-align: right;
-  min-width: 80px;
+  min-width: 30px;
 }
 .num input {
   width: 100%;
@@ -855,7 +890,7 @@ thead .sticky-col {
 }
 .readonly-value {
   display: inline-block;
-  width: 40px;
+  width: 28px;
   padding: 3px 4px;
   text-align: right;
   color: #666;
