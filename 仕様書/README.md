@@ -200,7 +200,8 @@ API の接続先は `src/api/client.js` の `API_BASE_URL` をバックエンド
 - `/api/boms/` - BOMヘッダ
 - `/api/bom-items/` - BOM明細
 - `/api/routings/` - ルーティングヘッダ
-- `/api/routing-steps/` - ルーティング工程
+- `/api/routing-steps/` - ルーティング工程（`routing` パラメータで絞り込み可、`usage_quantity` を返却）
+- `/api/routing-step-materials/` - ルーティング工程部品
 
 ### 受注管理
 
@@ -306,7 +307,7 @@ Django Admin: http://localhost:8000/admin/
 ## 次のステップ
 
 1. 未実装画面の追加
-   - RoutingMaster.vue（生産マスタ系）
+   - ルーティングマスタの編集機能（工程・使用個数の画面編集）拡張
 2. スケジューリングロジック実装
    - 逆算ロジック (scheduling_logic_v3.md参照)
    - 日跨ぎ計算

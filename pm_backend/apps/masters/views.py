@@ -903,6 +903,112 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             'items_copied': items.count(),
         }, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=['get'])
+    def export_excel(self, request, pk=None):
+        """BOM階層をExcel出力（管理サイトと同じロジック）"""
+        try:
+            from openpyxl import Workbook
+        except ImportError:
+            return Response({'detail': 'openpyxl is not installed'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        from django.http import HttpResponse
+
+        bom = self.get_object()
+        today = date.today()
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = 'BOM Tree'
+        ws.append(['BOM ID', '親製品', '部番表示', '製品名', '階層', '数量', '工程', 'ライン', '仕入先', 'リードタイム(日)', '所要時間(分)'])
+
+        def pick_child_bom(product):
+            qs = BOM.objects.filter(
+                parent_product=product,
+                is_active=True,
+                valid_from__lte=today,
+            ).order_by('-valid_from', '-id')
+            child = qs.first()
+            if child:
+                return child
+            return BOM.objects.filter(
+                parent_product=product,
+                is_active=True,
+            ).order_by('-valid_from', '-id').first()
+
+        def walk_bom(b, parent_prefix='', level=0, visited=None):
+            if visited is None:
+                visited = set()
+            if b.id in visited:
+                return
+            visited.add(b.id)
+
+            if level == 0:
+                root_label = '最上位組立（最終工程）'
+                display_name = f"{root_label} [{b.parent_product.product_code}]" if b.parent_product else root_label
+                process_display = ''
+                line_display = ''
+                if b.parent_product_id:
+                    default_routing = Routing.objects.filter(product_id=b.parent_product_id, is_default=True).order_by('-id').first()
+                    if default_routing:
+                        last_step = default_routing.steps.order_by('step_no').last()
+                        if last_step:
+                            if last_step.process:
+                                process_display = f"{last_step.process.process_code} - {last_step.process.process_name}"
+                            if last_step.line:
+                                line_display = f"{last_step.line.line_code} - {last_step.line.line_name}"
+
+                ws.append([
+                    b.id,
+                    b.parent_product.product_code if b.parent_product else '',
+                    display_name,
+                    b.parent_product.product_name if b.parent_product else '',
+                    level,
+                    '',
+                    process_display,
+                    line_display,
+                    '',
+                    '',
+                    '',
+                ])
+
+            items_qs = list(BOMItem.objects.filter(bom=b).select_related('child_product', 'process', 'line', 'supplier').order_by('id'))
+            for idx, item in enumerate(items_qs):
+                is_last = idx == len(items_qs) - 1
+                connector = '└─ ' if is_last else '├─ '
+                display_prefix = parent_prefix + connector
+                display_name = display_prefix + (item.child_product.product_code if item.child_product else '')
+
+                ws.append([
+                    b.id,
+                    b.parent_product.product_code if b.parent_product else '',
+                    display_name,
+                    item.child_product.product_name if item.child_product else '',
+                    level + 1,
+                    float(item.quantity) if item.quantity is not None else '',
+                    f"{item.process.process_code} - {item.process.process_name}" if item.process else '',
+                    f"{item.line.line_code} - {item.line.line_name}" if item.line else '',
+                    item.supplier.supplier_name if item.supplier else '',
+                    item.lead_time_days if item.lead_time_days is not None else '',
+                    item.duration_min if item.duration_min is not None else '',
+                ])
+
+                child_bom = pick_child_bom(item.child_product) if item.child_product else None
+                if child_bom and child_bom.id not in visited:
+                    child_prefix = parent_prefix + ('   ' if is_last else '│  ')
+                    walk_bom(child_bom, parent_prefix=child_prefix, level=level + 1, visited=visited)
+
+        walk_bom(bom, parent_prefix='', level=0, visited=set())
+
+        product_code = bom.parent_product.product_code if bom.parent_product else str(bom.id)
+        filename = f"bom_tree_{product_code}.xlsx"
+
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        wb.save(response)
+        return response
+
 
 class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = BOMItem.objects.all()

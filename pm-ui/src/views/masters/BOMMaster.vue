@@ -102,6 +102,7 @@
               <td>{{ bom.is_active ? '有効' : '無効' }}</td>
               <td>
                 <button @click="goToDetailPage(bom)" class="btn-sm">詳細</button>
+                <button @click="downloadBOMExcel(bom)" class="btn-sm btn-excel">Excel出力</button>
                 <button @click="openDetailsInNewTab(bom)" class="btn-sm">別タブ</button>
                 <button @click="viewTreeOnly(bom)" class="btn-sm">階層図</button>
                 <button @click="goToDetailPage(bom)" class="btn-sm">編集</button>
@@ -1543,6 +1544,27 @@ const flattenParents = (parents, level) => {
   return result
 }
 
+const downloadBOMExcel = async (bom) => {
+  try {
+    const response = await api.boms.exportBOMExcel(bom.id)
+    const productCode = getParentProductCode(bom)
+    const timestamp = new Date().toISOString().slice(0, 10)
+    const filename = `bom_tree_${productCode}_${timestamp}.xlsx`
+    const url = URL.createObjectURL(response.data)
+    const link = document.createElement('a')
+    link.setAttribute('href', url)
+    link.setAttribute('download', filename)
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    console.error('Excel出力エラー:', error)
+    alert('Excel出力に失敗しました')
+  }
+}
+
 const exportToExcel = () => {
   if (!bomTree.value) return
 
@@ -2186,6 +2208,16 @@ const TreeBranch = defineComponent({
   padding: 1rem;
   text-align: center;
   color: #666;
+}
+
+.btn-excel {
+  background-color: #217346;
+  color: white;
+  border-color: #1a5c38;
+}
+
+.btn-excel:hover {
+  background-color: #1a5c38;
 }
 
 .pagination-controls {

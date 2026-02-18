@@ -44,3 +44,23 @@ BOMからルーティングを自動生成する際のルールをまとめる�
 - step_noは `(routing_id, step_no, parallel_group)` で一意。
 - `time_unit='DAY'` の場合は `lead_time_days > 0` を必須。
 - リードタイムの遡りは稼働日(カレンダ)を考慮して算出する。
+
+## ルーティングマスタ画面（`/masters/routing`）の表示ルール
+
+### 一覧（左ペイン）
+- 列は `品番 / 品名 / 既定 / 有効` を表示する。
+- 一覧行を選択すると、右ペインは選択した `routing_id` の工程のみを表示する。
+
+### 工程一覧（右ペイン）
+- ソート順は `step_no` 昇順（同値時は `parallel_group` 昇順）。
+- ヘッダ行はスクロール時に固定表示する。
+- 旧「備考」列は「親製品」表示に変更し、値は `m_routing_step.remark`（親製品コード）を表示する。
+- `hierarchy_path`（階層）と `parallel_group`（並列G）は表示専用（編集不可）とする。
+- `使用個数` は整数で編集可能とする。
+
+### 使用個数（`usage_quantity`）算出
+- APIレスポンスで `routing-steps` の各行に `usage_quantity` を含める。
+- 算出優先順位:
+  1. `hierarchy_path` から直上親工程を特定し、親工程の `m_routing_step_material` で `component=当該step.output_product` の数量合計
+  2. `remark`（親製品コード）で親工程を特定し、同条件で数量合計
+  3. 最上位等で親工程が無い場合は、親製品BOM（`m_bom_item`）の `quantity` で補完
