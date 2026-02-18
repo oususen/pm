@@ -74,7 +74,11 @@
               <thead>
                 <tr>
                   <th class="label-col">項目</th>
-                  <th v-for="d in columns" :key="d" class="day-col">{{ d }}</th>
+                  <th v-for="d in columns"
+                    :key="d"
+                    class="day-col"
+                    :class="{ holiday: isHoliday(d) }"
+                  >{{ formatDayHeader(d) }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -83,8 +87,7 @@
                   <td
                     v-for="d in columns"
                     :key="`${row.key}-${d}`"
-                    class="cell"
-                    :class="getCellClass(g, d, row.key)"
+                    class="cell" :class="getCellClass(g, d, row.key)"
                   >
                     {{ fmt(getValue(g, d, row.key), row.showZero) }}
                   </td>
@@ -171,6 +174,7 @@ const recalculating = ref(false);
 const error = ref("");
 const backlogs = ref([]);
 const lineDemands = ref([]);
+const holidays = ref(new Set());
 let userSetStart = false;
 const onStartChange = () => {
   userSetStart = true;
@@ -195,6 +199,15 @@ const columns = computed(() => {
   return cols;
 });
 
+const formatDayHeader = (dateStr) => {
+  if (!dateStr) return "";
+  const d = parseISODate(dateStr);
+  if (!d || Number.isNaN(d.getTime())) return dateStr;
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  return `${m}/${day}`;
+};
+
 const rowDefs = [
   { key: "forecast", label: "内示" },
   { key: "firm", label: "確定" },
@@ -205,6 +218,48 @@ const rowDefs = [
   { key: "progress", label: "進度", showZero: true },
 ];
 
+const isWeekend = (dateStr) => {
+  const d = parseISODate(dateStr);
+  if (!d || Number.isNaN(d.getTime())) return false;
+  const day = d.getDay();
+  return day === 0 || day === 6;
+};
+
+const isHoliday = (dateStr) => holidays.value.has(dateStr) || isWeekend(dateStr);
+
+const buildWeekendFallback = () => {
+  return new Set(columns.value.filter((d) => isWeekend(d)));
+};
+
+const normalizeList = (payload) => {
+  return Array.isArray(payload) ? payload : payload?.results || [];
+};
+
+const loadHolidayColumns = async () => {
+  const fallback = buildWeekendFallback();
+  try {
+    // この画面は特定カレンダーに依存しないため、'daiso'をフォールバックとして使用
+    const res = await api.calendars.getCalendars({ search: "daiso", page_size: 1 });
+    const rows = normalizeList(res.data || []);
+    const daisoCalendar = rows.find((row) => String(row.calendar_code || "").toLowerCase() === "daiso");
+    if (!daisoCalendar?.id) {
+      holidays.value = fallback;
+      return;
+    }
+    const daysRes = await api.calendars.getCalendarDays(daisoCalendar.id, { page_size: 5000 });
+    const dayRows = normalizeList(daysRes.data || []);
+    const displayedDateSet = new Set(columns.value);
+    const holidaySet = new Set(
+      dayRows
+        .filter(day => !day.is_working_day && displayedDateSet.has(day.target_date))
+        .map(day => day.target_date)
+    );
+    holidays.value = holidaySet.size > 0 ? new Set([...fallback, ...holidaySet]) : fallback;
+  } catch (e) {
+    console.error("休日判定の取得に失敗:", e);
+    holidays.value = fallback;
+  }
+};
 const getBacklogParams = () => {
   const start = columns.value[0];
   const end = columns.value[columns.value.length - 1];
@@ -240,6 +295,7 @@ const load = async () => {
     ]);
     applyBacklogs(backlogRes.data || []);
     const demandPayload = demandRes?.data || [];
+    await loadHolidayColumns();
     lineDemands.value = Array.isArray(demandPayload) ? demandPayload : demandPayload.results || [];
   } catch (e) {
     error.value = e?.message || "読み込みに失敗しました";
@@ -506,9 +562,14 @@ const getValue = (group, date, key) => {
 
 const getCellClass = (group, date, rowKey) => {
   const val = Number(getValue(group, date, rowKey) || 0);
-  if (rowKey === "adjust" && val < 0) return "negative";
-  if ((rowKey === "progress" || rowKey === "plannedProgress") && val < 0) return "negative-strong";
-  return "";
+  const classes = [];
+  if (isHoliday(date)) {
+    classes.push("holiday");
+  }
+  if (rowKey === "adjust" && val < 0) classes.push("negative");
+  if ((rowKey === "progress" || rowKey === "plannedProgress") && val < 0) classes.push("negative-strong");
+  
+  return classes.join(" ");
 };
 </script>
 
@@ -605,6 +666,10 @@ const getCellClass = (group, date, rowKey) => {
   z-index: 1;
   text-align: center;
 }
+.matrix-table thead th.holiday {
+  background: #ffe5ef;
+  color: #b03060;
+}
 .label-col {
   position: sticky;
   left: 0;
@@ -616,13 +681,26 @@ const getCellClass = (group, date, rowKey) => {
 .cell {
   background: #fff;
 }
-.cell.negative {
+.cell.negative:not(.holiday) {
   background: #fff2f2;
   color: #c53030;
   font-weight: 700;
 }
 .cell.negative-strong {
   background: #ffe4e6;
+  color: #b91c1c;
+  font-weight: 700;
+}
+.cell.holiday {
+  background: #fff0f6;
+}
+.cell.holiday.negative {
+  background: #ffe0e0; /* 休日かつマイナスの場合は少し濃い赤 */
+  color: #c53030;
+  font-weight: 700;
+}
+.cell.holiday.negative-strong {
+  background: #ffc0c0;
   color: #b91c1c;
   font-weight: 700;
 }

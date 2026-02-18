@@ -85,7 +85,11 @@
               <thead>
                 <tr>
                   <th class="label-col">項目</th>
-                  <th v-for="d in columns" :key="d" class="day-col">{{ d }}</th>
+                  <th v-for="d in columns"
+                    :key="d"
+                    class="day-col"
+                    :class="{ holiday: isHoliday(d) }"
+                  >{{ formatDayHeader(d) }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -130,7 +134,11 @@
                   <thead>
                     <tr>
                       <th class="label-col">項目</th>
-                      <th v-for="d in columns" :key="d" class="day-col">{{ d }}</th>
+                      <th v-for="d in columns"
+                        :key="d"
+                        class="day-col"
+                        :class="{ holiday: isHoliday(d) }"
+                      >{{ formatDayHeader(d) }}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -184,6 +192,7 @@ const error = ref("");
 const recalculating = ref(false);
 const demands = ref([]);
 const suppliers = ref([]);
+const holidays = ref(new Set());
 const products = ref([]);
 const purchaseLineId = ref("");
 const adjustInputs = ref({});
@@ -202,6 +211,58 @@ const columns = computed(() => {
   }
   return cols;
 });
+
+const formatDayHeader = (dateStr) => {
+  if (!dateStr) return "";
+  const d = parseISODate(dateStr);
+  if (!d || Number.isNaN(d.getTime())) return dateStr;
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  return `${m}/${day}`;
+};
+
+const isWeekend = (dateStr) => {
+  const d = parseISODate(dateStr);
+  if (!d || Number.isNaN(d.getTime())) return false;
+  const day = d.getDay();
+  return day === 0 || day === 6;
+};
+
+const isHoliday = (dateStr) => holidays.value.has(dateStr) || isWeekend(dateStr);
+
+const buildWeekendFallback = () => {
+  return new Set(columns.value.filter((d) => isWeekend(d)));
+};
+
+const normalizeList = (payload) => {
+  return Array.isArray(payload) ? payload : payload?.results || [];
+};
+
+const loadHolidayColumns = async () => {
+  const fallback = buildWeekendFallback();
+  try {
+    // この画面は特定カレンダーに依存しないため、'daiso'をフォールバックとして使用
+    const res = await api.calendars.getCalendars({ search: "daiso", page_size: 1 });
+    const rows = normalizeList(res.data || []);
+    const daisoCalendar = rows.find((row) => String(row.calendar_code || "").toLowerCase() === "daiso");
+    if (!daisoCalendar?.id) {
+      holidays.value = fallback;
+      return;
+    }
+    const daysRes = await api.calendars.getCalendarDays(daisoCalendar.id, { page_size: 5000 });
+    const dayRows = normalizeList(daysRes.data || []);
+    const displayedDateSet = new Set(columns.value);
+    const holidaySet = new Set(
+      dayRows
+        .filter(day => !day.is_working_day && displayedDateSet.has(day.target_date))
+        .map(day => day.target_date)
+    );
+    holidays.value = holidaySet.size > 0 ? new Set([...fallback, ...holidaySet]) : fallback;
+  } catch (e) {
+    console.error("休日判定の取得に失敗:", e);
+    holidays.value = fallback;
+  }
+};
 
 const rowDefs = [
   { key: "forecast", label: "計需" },
@@ -346,13 +407,15 @@ const getValue = (group, date, key) => {
 };
 
 const getCellClass = (group, date, rowKey) => {
+  const classes = [];
+  if (isHoliday(date)) classes.push("holiday");
   if (rowKey === "stock" || rowKey === "planned_stock" || rowKey === "progress") {
     const value = getValue(group, date, rowKey);
     if (value !== null && value !== undefined && Number(value) < 0) {
-      return "negative";
+      classes.push("negative");
     }
   }
-  return "";
+  return classes.join(" ");
 };
 
 const adjustKey = (group, date) => `${group.key}__${date}`;
@@ -693,6 +756,7 @@ const load = async () => {
     const res = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
     const payload = res.data || [];
     applyDemands(payload);
+    await loadHolidayColumns();
   } catch (e) {
     error.value = e?.message || "読み込みに失敗しました";
   } finally {
@@ -812,6 +876,10 @@ onMounted(async () => {
   z-index: 1;
   text-align: center;
 }
+.matrix-table thead th.holiday {
+  background: #ffe5ef;
+  color: #b03060;
+}
 .label-col {
   position: sticky;
   left: 0;
@@ -827,6 +895,9 @@ onMounted(async () => {
     font-weight: bold;
   }
   background: #fff;
+}
+.cell.holiday:not(.negative) {
+  background: #fff0f6;
 }
 .cell-input {
   width: 100%;

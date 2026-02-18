@@ -1,6 +1,6 @@
 export const createCalendarsAPI = (client) => ({
-  getCalendars() {
-    return client.get('/calendars/')
+  getCalendars(params = {}) {
+    return client.get('/calendars/', { params })
   },
   getCalendar(id) {
     return client.get(`/calendars/${id}/`)
@@ -16,8 +16,13 @@ export const createCalendarsAPI = (client) => ({
   },
 
   // Calendar Days
-  getCalendarDays(calendarId) {
-    return client.get(`/calendar-days/?calendar=${calendarId}`)
+  getCalendarDays(calendarId, params = {}) {
+    return client.get('/calendar-days/', {
+      params: {
+        ...params,
+        calendar: calendarId,
+      },
+    })
   },
   createCalendarDay(data) {
     return client.post('/calendar-days/', data)

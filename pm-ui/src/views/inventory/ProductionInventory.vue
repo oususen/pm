@@ -234,9 +234,9 @@ const formatDayHeader = (dateStr) => {
   if (!dateStr) return "";
   const d = parseISODate(dateStr);
   if (!d || Number.isNaN(d.getTime())) return dateStr;
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${m}-${day}`;
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  return `${m}/${day}`;
 };
 
 const getBacklogParams = () => {
