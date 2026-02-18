@@ -1,3 +1,4 @@
+from collections import defaultdict
 from datetime import date, timedelta
 import math
 from decimal import Decimal, ROUND_HALF_UP
@@ -25,6 +26,7 @@ class OrderExpansionService:
         self._routing_cache: Dict[int, List] = {}
         self._child_bom_cache: Dict[int, BOM | None] = {}
         self._bom_multiplier_cache: Dict[int, Dict[int, Decimal]] = {}
+        self._bom_path_multiplier_cache: Dict[int, Dict[str, Decimal]] = {}
 
     def expand_open_orders(self, clear_existing: bool = True) -> Dict[str, object]:
         """
@@ -114,7 +116,28 @@ class OrderExpansionService:
                 self.warnings.append(f"ルーティング未設定のためスキップ: {product.product_code}")
                 continue
 
-            bom_multiplier = self._get_bom_multiplier_map(product.id)
+            # BOM倍率マップ（品番別合計・パス別）を取得
+            bom_multiplier, path_multiplier = self._get_bom_multiplier_maps(product.id)
+
+            # ルーティング上の按分倍率を集計し、BOM合計との補正係数を算出
+            routed_multiplier_by_product: Dict[int, Decimal] = defaultdict(Decimal)
+            for step in steps:
+                step_product = step.output_product if step.output_product_id else product
+                if not step_product:
+                    continue
+                if step.hierarchy_path == 'final':
+                    base_mult = Decimal('1')
+                else:
+                    base_mult = path_multiplier.get(step.hierarchy_path, Decimal('1'))
+                routed_multiplier_by_product[step_product.id] += base_mult
+
+            correction_by_product: Dict[int, Decimal] = {}
+            for pid, routed_mult in routed_multiplier_by_product.items():
+                expected_mult = bom_multiplier.get(pid)
+                if expected_mult is not None and routed_mult > 0:
+                    correction_by_product[pid] = expected_mult / routed_mult
+                else:
+                    correction_by_product[pid] = Decimal('1')
 
             required_date = ol.due_date
             final_required_date = required_date
@@ -181,7 +204,13 @@ class OrderExpansionService:
                 step_product = step.output_product if step.output_product_id else product
                 product_code = step_product.product_code if step_product else ol.product_code
                 product_id = step_product.id if step_product else (product.id if product else None)
-                multiplier = bom_multiplier.get(product_id, Decimal('1'))
+
+                # BOMパス倍率 × 補正係数 → 合計がBOM倍率と一致
+                if step.hierarchy_path == 'final':
+                    base_mult = Decimal('1')
+                else:
+                    base_mult = path_multiplier.get(step.hierarchy_path, Decimal('1'))
+                correction = correction_by_product.get(product_id, Decimal('1'))
 
                 key = (step.line_id, product_code, target_date)
                 entry = aggregated.get(key)
@@ -199,7 +228,7 @@ class OrderExpansionService:
                     }
                     aggregated[key] = entry
 
-                qty = (ol.quantity or Decimal('0')) * multiplier
+                qty = (ol.quantity or Decimal('0')) * base_mult * correction
                 if ol.order.order_type == 'FIRM':
                     entry['firm_qty'] += qty
                 else:
@@ -310,11 +339,13 @@ class OrderExpansionService:
         self,
         product_id: int,
         current_multiplier: Decimal,
+        path_prefix: Tuple[int, ...],
         active_bom_ids: set,
         result: Dict[int, Decimal],
+        path_result: Dict[str, Decimal],
     ):
         """
-        BOMツリーを再帰的に辿り、品番別の合計倍率を構築する。
+        BOMツリーを再帰的に辿り、品番別合計倍率とパス別倍率を構築する。
         連産品BOMは _pick_child_bom で除外済み。
         """
         bom = self._pick_child_bom(product_id)
@@ -327,8 +358,9 @@ class OrderExpansionService:
             BOMItem.objects
             .filter(bom_id=bom.id)
             .select_related('child_product')
+            .order_by('id')
         )
-        for item in items:
+        for idx, item in enumerate(items, start=1):
             if not item.child_product_id:
                 continue
             qty = Decimal(str(item.quantity or 0))
@@ -336,35 +368,49 @@ class OrderExpansionService:
                 continue
 
             child_multiplier = current_multiplier * qty
+            path_tuple = path_prefix + (idx,)
+            path_key = '.'.join(str(p) for p in path_tuple)
+
+            path_result[path_key] = (
+                path_result.get(path_key, Decimal('0')) + child_multiplier
+            )
             result[item.child_product_id] = (
                 result.get(item.child_product_id, Decimal('0')) + child_multiplier
             )
             self._collect_bom_multipliers(
                 product_id=item.child_product_id,
                 current_multiplier=child_multiplier,
+                path_prefix=path_tuple,
                 active_bom_ids=next_active,
                 result=result,
+                path_result=path_result,
             )
 
-    def _get_bom_multiplier_map(self, product_id: int) -> Dict[int, Decimal]:
+    def _get_bom_multiplier_maps(self, product_id: int):
         """
         最終品1個あたりのBOM倍率を返す。
-        product_id -> 合計倍率（最終品自身は1）
+        - bom_multiplier: product_id -> 合計倍率（最終品自身は1）
+        - path_multiplier: hierarchy_path -> 倍率（ステップ間の按分に使用）
         """
         cached = self._bom_multiplier_cache.get(product_id)
-        if cached is not None:
-            return cached
+        cached_path = self._bom_path_multiplier_cache.get(product_id)
+        if cached is not None and cached_path is not None:
+            return cached, cached_path
 
         result: Dict[int, Decimal] = {product_id: Decimal('1')}
+        path_result: Dict[str, Decimal] = {}
         self._collect_bom_multipliers(
             product_id=product_id,
             current_multiplier=Decimal('1'),
+            path_prefix=(),
             active_bom_ids=set(),
             result=result,
+            path_result=path_result,
         )
 
         self._bom_multiplier_cache[product_id] = result
-        return result
+        self._bom_path_multiplier_cache[product_id] = path_result
+        return result, path_result
 
     def _resolve_lead_time_days(self, step) -> int:
         """工程のLT（日）を決定する。"""
