@@ -6,7 +6,7 @@ from typing import Dict, List, Tuple
 
 from django.db import transaction
 
-from masters.models import BOM, BOMItem, Routing
+from masters.models import BOM, BOMItem, Line, Routing
 from orders.core.models import OrderLine
 from production.models import LineDemand
 
@@ -27,6 +27,7 @@ class OrderExpansionService:
         self._child_bom_cache: Dict[int, BOM | None] = {}
         self._bom_multiplier_cache: Dict[int, Dict[int, Decimal]] = {}
         self._bom_path_multiplier_cache: Dict[int, Dict[str, Decimal]] = {}
+        self._supplier_line_cache: Dict[int, int | None] = {}  # product_id -> 仕入先ラインID
 
     def expand_open_orders(self, clear_existing: bool = True) -> Dict[str, object]:
         """
@@ -157,7 +158,8 @@ class OrderExpansionService:
             final_step = next((s for s in steps if s.hierarchy_path == 'final'), None)
             if final_step:
                 final_calendar_id = resolve_calendar_id(final_step.line_id)
-                lead_days = self._resolve_lead_time_days(final_step) if final_step.time_unit == 'DAY' else 0
+                # 最終工程はproductを渡す（最終品判定）
+                lead_days = self._resolve_lead_time_days(final_step, product)
                 step_minutes = final_step.duration_min or 0 if final_step.time_unit == 'MINUTE' else 0
                 minute_shift, final_minutes = calc_shift_days(0, step_minutes)
                 final_required_date = shift_business_days(
@@ -173,7 +175,8 @@ class OrderExpansionService:
                 if not step:
                     return
                 calendar_id = resolve_calendar_id(step.line_id)
-                lead_days = self._resolve_lead_time_days(step) if step.time_unit == 'DAY' else 0
+                # output_productまたはメイン製品を渡して最終品・ライン最終品を判定
+                lead_days = self._resolve_lead_time_days(step, product)
                 step_minutes = step.duration_min or 0 if step.time_unit == 'MINUTE' else 0
                 minute_shift, total_minutes = calc_shift_days(parent_minutes, step_minutes)
                 required_for_step = shift_business_days(
@@ -193,15 +196,23 @@ class OrderExpansionService:
                     self.warnings.append(f"ライン未設定の工程をスキップ: routing_step_id={step.id}")
                     continue
 
-                calendar_id = resolve_calendar_id(step.line_id)
-                lead_days = self._resolve_lead_time_days(step) if step.time_unit == 'DAY' else 0
+                # OUTSOURCEラインの場合、BOMItemのsupplierから仕入先ラインに振り替える
+                effective_line_id = step.line_id
+                step_product = step.output_product if step.output_product_id else product
+                if step.line and step.line.line_type == 'OUTSOURCE' and step_product:
+                    supplier_line_id = self._get_supplier_line_id(step_product.id)
+                    if supplier_line_id:
+                        effective_line_id = supplier_line_id
+
+                calendar_id = resolve_calendar_id(effective_line_id)
+                # output_productまたはメイン製品を渡して最終品・ライン最終品を判定
+                lead_days = self._resolve_lead_time_days(step, product)
                 if step.hierarchy_path == 'final':
                     target_date = final_required_date
                 elif step.hierarchy_path in required_by_path:
                     target_date = required_by_path[step.hierarchy_path][0]
                 else:
                     target_date = shift_business_days(calendar_id, required_date, lead_days)
-                step_product = step.output_product if step.output_product_id else product
                 product_code = step_product.product_code if step_product else ol.product_code
                 product_id = step_product.id if step_product else (product.id if product else None)
 
@@ -212,11 +223,11 @@ class OrderExpansionService:
                     base_mult = path_multiplier.get(step.hierarchy_path, Decimal('1'))
                 correction = correction_by_product.get(product_id, Decimal('1'))
 
-                key = (step.line_id, product_code, target_date)
+                key = (effective_line_id, product_code, target_date)
                 entry = aggregated.get(key)
                 if not entry:
                     entry = {
-                        'line_id': step.line_id,
+                        'line_id': effective_line_id,
                         'routing_step_id': step.id,
                         'product_id': product_id,
                         'product_code': product_code,
@@ -412,14 +423,54 @@ class OrderExpansionService:
         self._bom_path_multiplier_cache[product_id] = path_result
         return result, path_result
 
-    def _resolve_lead_time_days(self, step) -> int:
-        """工程のLT（日）を決定する。"""
-        # 仕様書の優先順位に合わせる（RoutingStep > Line > 0）
-        if step.lead_time_days and step.lead_time_days > 0:
-            return step.lead_time_days
-        if step.line and step.line.lead_time_days:
-            return max(step.line.lead_time_days, 0)
-        return 0
+    def _get_supplier_line_id(self, product_id: int) -> int | None:
+        """
+        外注品のBOMItemからsupplierを取得し、対応する仕入先ライン（PURCHASE）のIDを返す。
+        見つからない場合はNoneを返す。
+        """
+        if product_id in self._supplier_line_cache:
+            return self._supplier_line_cache[product_id]
+
+        bom_item = (
+            BOMItem.objects
+            .filter(child_product_id=product_id, supplier__isnull=False)
+            .select_related('supplier')
+            .first()
+        )
+        supplier_line_id = None
+        if bom_item and bom_item.supplier_id:
+            supplier_code = bom_item.supplier.supplier_code
+            line = Line.objects.filter(line_code=supplier_code).first()
+            if line:
+                supplier_line_id = line.id
+
+        self._supplier_line_cache[product_id] = supplier_line_id
+        return supplier_line_id
+
+    def _resolve_lead_time_days(self, step, main_product=None) -> int:
+        """
+        工程のLT（日）を決定する。
+        - 最終品・ライン最終品（is_final_product or is_line_final_product）: ラインLT（Line.lead_time_days）のみ
+        - 中間品: RoutingStep.lead_time_days のみ使用（MINUTE管理工程はstep_lt=0なのでLT=0）
+        """
+        # 最終工程、またはoutput_productが最終品・ライン最終品かどうかを判定
+        product = step.output_product if step.output_product_id else main_product
+        is_final = (step.hierarchy_path == 'final') or (
+            product and (product.is_final_product or product.is_line_final_product)
+        )
+
+        if is_final:
+            # 最終品・ライン最終品: DAY管理でstep_ltが設定されていればRoutingStep.lead_time_daysを最優先
+            if step.time_unit == 'DAY' and step.lead_time_days:
+                return max(step.lead_time_days, 0)
+            # それ以外（MINUTE管理など）はラインLT
+            if step.line and step.line.lead_time_days:
+                return max(step.line.lead_time_days, 0)
+            return 0
+        else:
+            # 中間品: RoutingStep.lead_time_days のみ使用（expand_processesと同じロジック）
+            # MINUTE管理の工程はstep_lt=0なのでLT=0（分計算のみ）
+            return max(step.lead_time_days or 0, 0)
 
     def _calc_progress(self, numerator: Decimal, denominator: Decimal) -> Decimal:
         """0除算を避けつつ進捗（0-1）を小数3桁で返す。"""

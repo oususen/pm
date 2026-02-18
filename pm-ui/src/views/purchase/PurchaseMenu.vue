@@ -11,6 +11,10 @@
         <div class="icon-box">📊</div>
         <div class="label">在庫/残量</div>
       </RouterLink>
+      <RouterLink to="/purchase/progress-only" class="master-tile">
+        <div class="icon-box">📈</div>
+        <div class="label">仕入れ進度のみ</div>
+      </RouterLink>
     </div>
 
     <p class="helper-text">

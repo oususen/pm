@@ -477,9 +477,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     product_step_map[product.id] = step
                 if product.is_final_product:
                     final_products.add(product.id)
-                    lead_days = step.lead_time_days or 0
-                    if not lead_days and step.line_id and step.line.lead_time_days:
-                        lead_days = step.line.lead_time_days
+                    # 最終品はラインLTを使用
+                    lead_days = (step.line.lead_time_days or 0) if step.line_id and step.line else 0
                     if lead_days > max_lead_days:
                         max_lead_days = lead_days
 
@@ -535,9 +534,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 return current
 
             def resolve_lead_time_days(product_id):
+                # 最終品はラインLTを使用
                 step = product_step_map.get(product_id)
-                if step and step.lead_time_days:
-                    return step.lead_time_days
                 if step and step.line and step.line.lead_time_days:
                     return step.line.lead_time_days
                 return 0

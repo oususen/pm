@@ -17,6 +17,12 @@ const purchase = [
     component: () => import("@/views/inventory/PurchaseInventory.vue"),
     meta: { pageTitle: "仕入れ在庫/残量", resource: "purchase" },
   },
+  {
+    path: "/purchase/progress-only",
+    name: "PurchaseProgressOnly",
+    component: () => import("@/views/purchase/PurchaseProgressOnly.vue"),
+    meta: { pageTitle: "仕入れ進度のみ", resource: "purchase" },
+  },
 ];
 
 export default purchase;
