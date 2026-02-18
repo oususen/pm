@@ -224,39 +224,38 @@
         <p v-if="isPhantom(selectedBOM.parent_product)" class="phantom-info">
           この親製品は見なし組立です。リードタイム計算や展開ロジックの扱いに注意してください。
         </p>
-        <div v-if="bomTree" class="tree-section">
+        <div v-if="treeExcelRows.length" class="tree-section">
           <h3>階層表示</h3>
-          <div class="tree-controls">
-            <button type="button" class="btn-sm" @click="expandAllNodes">全展開</button>
-            <button type="button" class="btn-sm" @click="collapseAllNodes">全折りたたみ</button>
-          </div>
           <div class="tree-grid-container">
             <table class="tree-grid">
               <thead>
                 <tr>
-                  <th>部番</th>
+                  <th>BOM ID</th>
+                  <th>親製品</th>
+                  <th>部番表示</th>
+                  <th>製品名</th>
                   <th class="level-col">階層</th>
                   <th class="qty-col">数量</th>
-                  <th class="phantom-col">みなし組立</th>
+                  <th>工程</th>
+                  <th>ライン</th>
+                  <th>仕入先</th>
+                  <th>リードタイム(日)</th>
+                  <th>所要時間(分)</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="row in treeRows" :key="row.key">
-                  <td>
-                    <span class="tree-line">{{ row.prefix }}</span>
-                    <button
-                      v-if="row.hasChildren"
-                      @click="toggleNode(row.key)"
-                      class="expand-btn"
-                    >
-                      {{ row.isExpanded ? '－' : '＋' }}
-                    </button>
-                    <span v-else class="expand-placeholder"></span>
-                    {{ row.product }}
-                  </td>
+                <tr v-for="(row, idx) in treeExcelRows" :key="`${row.bom_id}-${idx}`">
+                  <td>{{ row.bom_id }}</td>
+                  <td>{{ row.parent_product }}</td>
+                  <td>{{ row.part_display }}</td>
+                  <td>{{ row.product_name }}</td>
                   <td class="level-col">{{ row.level }}</td>
                   <td class="qty-col">{{ row.quantity }}</td>
-                  <td class="phantom-col">{{ row.isPhantom ? '1' : '' }}</td>
+                  <td>{{ row.process }}</td>
+                  <td>{{ row.line }}</td>
+                  <td>{{ row.supplier }}</td>
+                  <td>{{ row.lead_time_days }}</td>
+                  <td>{{ row.duration_min }}</td>
                 </tr>
               </tbody>
             </table>
@@ -520,33 +519,36 @@
       <div class="modal-content modal-large">
         <h2>BOM階層図</h2>
         <div class="tree-section" v-if="!treeLoading">
-          <div v-if="bomTree" class="tree-grid-container">
+          <div v-if="treeExcelRows.length" class="tree-grid-container">
             <table class="tree-grid">
               <thead>
                 <tr>
-                  <th>部番</th>
+                  <th>BOM ID</th>
+                  <th>親製品</th>
+                  <th>部番表示</th>
+                  <th>製品名</th>
                   <th class="level-col">階層</th>
                   <th class="qty-col">数量</th>
-                  <th class="phantom-col">みなし組立</th>
+                  <th>工程</th>
+                  <th>ライン</th>
+                  <th>仕入先</th>
+                  <th>リードタイム(日)</th>
+                  <th>所要時間(分)</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="row in treeRows" :key="row.key">
-                  <td>
-                    <span class="tree-line">{{ row.prefix }}</span>
-                    <button
-                      v-if="row.hasChildren"
-                      @click="toggleNode(row.key)"
-                      class="expand-btn"
-                    >
-                      {{ row.isExpanded ? '－' : '＋' }}
-                    </button>
-                    <span v-else class="expand-placeholder"></span>
-                    {{ row.product }}
-                  </td>
+                <tr v-for="(row, idx) in treeExcelRows" :key="`${row.bom_id}-${idx}`">
+                  <td>{{ row.bom_id }}</td>
+                  <td>{{ row.parent_product }}</td>
+                  <td>{{ row.part_display }}</td>
+                  <td>{{ row.product_name }}</td>
                   <td class="level-col">{{ row.level }}</td>
                   <td class="qty-col">{{ row.quantity }}</td>
-                  <td class="phantom-col">{{ row.isPhantom ? '1' : '' }}</td>
+                  <td>{{ row.process }}</td>
+                  <td>{{ row.line }}</td>
+                  <td>{{ row.supplier }}</td>
+                  <td>{{ row.lead_time_days }}</td>
+                  <td>{{ row.duration_min }}</td>
                 </tr>
               </tbody>
             </table>
@@ -555,7 +557,7 @@
         </div>
         <div v-else>読み込み中...</div>
         <div class="form-actions">
-          <button type="button" @click="exportToExcel" class="btn-primary" :disabled="!bomTree">Excel出力</button>
+          <button type="button" @click="downloadTreeExcel" class="btn-primary" :disabled="!treeSourceBom?.id">Excel出力</button>
           <button type="button" @click="closeTreeDialog" class="btn-secondary">閉じる</button>
         </div>
       </div>
@@ -716,9 +718,11 @@ const showDetailsDialog = ref(false)
 const selectedBOM = ref({})
 const bomItems = ref([])
 const bomTree = ref(null)
+const treeExcelRows = ref([])
 const showTreeDialog = ref(false)
 const treeLoading = ref(false)
 const expandedNodes = ref(new Set())
+const treeSourceBom = ref(null)
 
 // 逆展開用
 const showWhereUsedDialog = ref(false)
@@ -1057,6 +1061,17 @@ const fetchBOMTree = async (bomId) => {
   }
 }
 
+const fetchBOMTreeExcelRows = async (bomId) => {
+  try {
+    const response = await api.boms.getBOMTreeExcelRows(bomId)
+    const payload = response.data || {}
+    treeExcelRows.value = payload.rows || []
+  } catch (error) {
+    console.error('BOM階層図（Excel列）取得エラー:', error)
+    treeExcelRows.value = []
+  }
+}
+
 const getProductName = (productId) => {
   const product = products.value.find(p => p.id === productId)
   return product ? `${product.product_code} - ${product.product_name}` : productId
@@ -1361,11 +1376,15 @@ const viewDetails = async (bom, { openDialog = true } = {}) => {
   childProductFilter.value = ''
   bomItems.value = []
   bomTree.value = null
+  treeExcelRows.value = []
   const token = ++bomItemsRequestToken.value
   showDetailsDialog.value = openDialog && !isStandaloneDetail.value
   try {
     await fetchBOMItems(bom.id, token)
-    await fetchBOMTree(bom.id)
+    await Promise.all([
+      fetchBOMTree(bom.id),
+      fetchBOMTreeExcelRows(bom.id),
+    ])
     collapseAllNodes()
   } catch (error) {
     console.error('BOM明細取得エラー:', error)
@@ -1392,6 +1411,7 @@ const closeDetailsDialog = () => {
   selectedBOM.value = {}
   bomItems.value = []
   bomTree.value = null
+  treeExcelRows.value = []
   bomItemsRequestToken.value += 1
   resetItemForm()
   childProductFilter.value = ''
@@ -1404,12 +1424,17 @@ const handleDetailsBackdropClick = () => {
 }
 
 const viewTreeOnly = async (bom) => {
+  treeSourceBom.value = bom
   showTreeDialog.value = true
   treeLoading.value = true
   bomTree.value = null
+  treeExcelRows.value = []
   expandedNodes.value = new Set()
   try {
-    await fetchBOMTree(bom.id)
+    await Promise.all([
+      fetchBOMTree(bom.id),
+      fetchBOMTreeExcelRows(bom.id),
+    ])
     // 初期状態：全て展開
     expandAllNodes()
   } catch (error) {
@@ -1451,6 +1476,8 @@ const collapseAllNodes = () => {
 const closeTreeDialog = () => {
   showTreeDialog.value = false
   bomTree.value = null
+  treeExcelRows.value = []
+  treeSourceBom.value = null
   expandedNodes.value = new Set()
 }
 
@@ -1565,55 +1592,9 @@ const downloadBOMExcel = async (bom) => {
   }
 }
 
-const exportToExcel = () => {
-  if (!bomTree.value) return
-
-  // CSVヘッダー
-  const headers = ['部番', '階層', '数量', 'みなし組立']
-  const rows = [headers]
-
-  // データ行を追加
-  treeRows.value.forEach((row) => {
-    // 罫線とボタン部分を含めた部番表示
-    const productDisplay = row.prefix + row.product
-    rows.push([
-      productDisplay,
-      row.level.toString(),
-      row.quantity || '',
-      row.isPhantom ? '1' : ''
-    ])
-  })
-
-  // CSV形式に変換
-  const csvContent = rows.map(row =>
-    row.map(cell => {
-      // セル内にカンマや改行、ダブルクォートがある場合はエスケープ
-      const cellStr = String(cell)
-      if (cellStr.includes(',') || cellStr.includes('\n') || cellStr.includes('"')) {
-        return '"' + cellStr.replace(/"/g, '""') + '"'
-      }
-      return cellStr
-    }).join(',')
-  ).join('\n')
-
-  // BOM UTF-8付きでダウンロード（Excelで正しく開けるように）
-  const bom = '\uFEFF'
-  const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' })
-  const link = document.createElement('a')
-  const url = URL.createObjectURL(blob)
-
-  // ファイル名を生成
-  const parentProduct = formatProductCode(bomTree.value.parent_product)
-  const timestamp = new Date().toISOString().slice(0, 10)
-  const filename = `BOM階層図_${parentProduct}_${timestamp}.csv`
-
-  link.setAttribute('href', url)
-  link.setAttribute('download', filename)
-  link.style.visibility = 'hidden'
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
+const downloadTreeExcel = async () => {
+  if (!treeSourceBom.value?.id) return
+  await downloadBOMExcel(treeSourceBom.value)
 }
 
 const startEditItem = (item) => {
@@ -1891,8 +1872,9 @@ const TreeBranch = defineComponent({
 }
 
 .modal-large {
-  min-width: 800px;
-  max-width: 900px;
+  width: min(96vw, 1600px);
+  min-width: 1100px;
+  max-width: 1600px;
 }
 
 .detail-page-card {
@@ -1976,7 +1958,8 @@ const TreeBranch = defineComponent({
 }
 
 .tree-grid {
-  width: 100%;
+  width: max-content;
+  min-width: 1400px;
   border-collapse: collapse;
   font-size: 0.95rem;
 }
@@ -1985,6 +1968,8 @@ const TreeBranch = defineComponent({
 .tree-grid td {
   border: 1px solid #d6dce6;
   padding: 6px 8px;
+  white-space: nowrap;
+  vertical-align: top;
 }
 
 .phantom-col {

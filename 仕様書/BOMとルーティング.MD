@@ -64,3 +64,11 @@ BOMからルーティングを自動生成する際のルールをまとめる�
   1. `hierarchy_path` から直上親工程を特定し、親工程の `m_routing_step_material` で `component=当該step.output_product` の数量合計
   2. `remark`（親製品コード）で親工程を特定し、同条件で数量合計
   3. 最上位等で親工程が無い場合は、親製品BOM（`m_bom_item`）の `quantity` で補完
+
+## BOM階層図の表示とExcel出力
+
+- BOMマスタの階層図表示（UI）と Excel出力は、同一の行生成ロジックを使用する。
+- UI表示用API: `GET /api/boms/{id}/tree_excel_rows/`
+- Excel出力API: `GET /api/boms/{id}/export_excel/`
+- 共通列は以下の順序で固定する。  
+  `BOM ID / 親製品 / 部番表示 / 製品名 / 階層 / 数量 / 工程 / ライン / 仕入先 / リードタイム(日) / 所要時間(分)`

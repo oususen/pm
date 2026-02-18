@@ -33,6 +33,9 @@ export const createBomsAPI = (client) => ({
   getBOMTree(id) {
     return client.get(`/boms/${id}/tree/`)
   },
+  getBOMTreeExcelRows(id) {
+    return client.get(`/boms/${id}/tree_excel_rows/`)
+  },
   createBOM(data) {
     return client.post('/boms/', data)
   },
