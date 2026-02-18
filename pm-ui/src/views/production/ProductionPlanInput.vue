@@ -17,6 +17,7 @@
         <div class="field">
           <label>期間</label>
           <select v-model.number="horizonDays" @change="refreshDates">
+            <option :value="14">14日</option>
             <option :value="30">30日</option>
             <option :value="60">60日</option>
             <option :value="90">90日</option>
@@ -330,7 +331,7 @@ const toDateInput = (dateObj) => {
 const defaultStart = new Date()
 defaultStart.setDate(defaultStart.getDate() - 1)
 const startDate = ref(toDateInput(defaultStart))
-const horizonDays = ref(30)
+const horizonDays = ref(14)
 const keyword = ref('')
 const TANK_LINE_CODE = 'L2200'
 const TANK_PRODUCT_ORDER = [
