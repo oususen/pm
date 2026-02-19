@@ -1346,17 +1346,18 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         if not parent_ids or not child_ids:
             return Response({'created': 0, 'updated': 0, 'items': 0})
 
-        parent_qs = LineBacklog.objects.filter(product_id__in=parent_ids)
+        parent_qs = LineBacklog.objects.filter(product_id__in=parent_ids).select_related('line')
         if start_dt:
             parent_qs = parent_qs.filter(plan_date__gte=start_dt)
         if end_dt:
             parent_qs = parent_qs.filter(plan_date__lte=end_dt)
 
-        # 親製品の計画数量(plan_qty)を取得（order_qtyではなくplan_qtyを使用）
-        # 後続で複数回参照するため、クエリを一度list化して確定させる
+        # 親製品の数量を取得:
+        # - 通常ライン: plan_qty > 0
+        # - 外作ライン(OUTSOURCE): 計画を持たないため order_qty > 0 も対象にする
         parent_orders = list(
-            parent_qs.values('product_id', 'line_id', 'plan_date', 'plan_qty', 'plan_id').filter(
-                plan_qty__gt=0  # 計画数量が0より大きいもののみ
+            parent_qs.values('product_id', 'line_id', 'line__line_type', 'plan_date', 'plan_qty', 'order_qty', 'plan_id').filter(
+                Q(plan_qty__gt=0) | Q(order_qty__gt=0, line__line_type='OUTSOURCE')
             )
         )
 
@@ -1447,7 +1448,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             parent_id = row['product_id']
             line_id_parent = row.get('line_id')
             plan_date = row['plan_date']
-            plan_qty = Decimal(str(row['plan_qty'] or 0))
+
+            # 外作ライン(OUTSOURCE)は計画を持たないため order_qty（需要）を使用する
+            if row.get('line__line_type') == 'OUTSOURCE':
+                plan_qty = Decimal(str(row.get('order_qty') or 0))
+            else:
+                plan_qty = Decimal(str(row['plan_qty'] or 0))
 
             # 購買需要では、計画日(plan_date)を基準にLTをシフトする
             effective_date = plan_date
@@ -1455,7 +1461,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             if plan_qty == 0:
                 continue
 
-            # 需要 = 親plan_qty × 子BOM数量（LTを考慮して日付をシフト）
+            # 需要 = 親数量 × 子BOM数量（LTを考慮して日付をシフト）
             for child_id, qty, lead_time_days in parent_to_children.get(parent_id, []):
                 target_date = shift_business_days(effective_date, lead_time_days)
                 demand_map[(child_id, target_date)] += plan_qty * qty
@@ -3499,7 +3505,13 @@ class ScheduleConfigView(APIView):
         ScheduleConfig.objects.get_or_create(
             task_name='INVENTORY_RECALC',
             line=None,
-            defaults={'scheduled_hour': 7, 'scheduled_minute': 0, 'is_enabled': True},
+            defaults={
+                'scheduled_hour': 7,
+                'scheduled_minute': 0,
+                'is_enabled': True,
+                'range_base_day': 'TODAY',
+                'range_days_after': 45,
+            },
         )
         base_plan = ScheduleConfig.objects.filter(task_name='AUTO_PLAN', line__isnull=False).first()
         if not base_plan:
@@ -3543,6 +3555,8 @@ class ScheduleConfigView(APIView):
         scheduled_hour = request.data.get('scheduled_hour')
         scheduled_minute = request.data.get('scheduled_minute', 0)
         scheduled_dom = request.data.get('scheduled_dom')
+        range_base_day = (request.data.get('range_base_day') or 'TODAY').upper()
+        range_days_after = request.data.get('range_days_after', 45)
         is_enabled = request.data.get('is_enabled', True)
         include_next_month = to_bool(request.data.get('include_next_month', True), True)
         include_second_month = to_bool(request.data.get('include_second_month', False), False)
@@ -3575,6 +3589,25 @@ class ScheduleConfigView(APIView):
         if isinstance(is_enabled, str):
             is_enabled = is_enabled.lower() in ('true', '1', 'yes')
 
+        allowed_base_days = {'TODAY', 'YESTERDAY', 'TWO_DAYS_AGO'}
+        if range_base_day not in allowed_base_days:
+            return Response(
+                {'detail': '開始基準日は 今日 / 昨日 / 一昨日 から選択してください'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            range_days_after = int(range_days_after)
+        except (TypeError, ValueError):
+            return Response(
+                {'detail': '何日後は整数で指定してください'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not (0 <= range_days_after <= 365):
+            return Response(
+                {'detail': '何日後は0〜365で指定してください'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         line_obj = None
         if task_name == 'AUTO_PLAN':
             if not line_id:
@@ -3597,6 +3630,8 @@ class ScheduleConfigView(APIView):
                     'scheduled_hour': scheduled_hour,
                     'scheduled_minute': scheduled_minute,
                     'scheduled_dom': scheduled_dom,
+                    'range_base_day': range_base_day,
+                    'range_days_after': range_days_after,
                     'is_enabled': is_enabled,
                     'include_next_month': include_next_month,
                     'include_second_month': include_second_month,
@@ -3608,6 +3643,8 @@ class ScheduleConfigView(APIView):
         config.scheduled_hour = scheduled_hour
         config.scheduled_minute = scheduled_minute
         config.scheduled_dom = scheduled_dom
+        config.range_base_day = range_base_day
+        config.range_days_after = range_days_after
         config.is_enabled = is_enabled
         config.include_next_month = include_next_month
         config.include_second_month = include_second_month
@@ -3617,6 +3654,7 @@ class ScheduleConfigView(APIView):
         config.updated_by = user
         config.save(update_fields=[
             'scheduled_hour', 'scheduled_minute', 'scheduled_dom',
+            'range_base_day', 'range_days_after',
             'is_enabled', 'include_next_month', 'include_second_month', 'include_third_month',
             'line', 'updated_at', 'updated_by',
         ])

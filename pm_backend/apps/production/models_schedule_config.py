@@ -4,6 +4,11 @@ from django.db import models
 
 class ScheduleConfig(models.Model):
     """定時タスクスケジュール設定"""
+    RANGE_BASE_CHOICES = [
+        ('TODAY', '今日'),
+        ('YESTERDAY', '昨日'),
+        ('TWO_DAYS_AGO', '一昨日'),
+    ]
     TASK_CHOICES = [
         ('INVENTORY_RECALC', '在庫再計算'),
         ('AUTO_PLAN', '生産計画自動生成'),
@@ -39,6 +44,26 @@ class ScheduleConfig(models.Model):
     scheduled_dom = models.PositiveSmallIntegerField(
         null=True, blank=True,
         verbose_name='実行日（1-31）'
+    )
+    range_start_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name='計算期間開始日'
+    )
+    range_end_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name='計算期間終了日'
+    )
+    range_base_day = models.CharField(
+        max_length=20,
+        choices=RANGE_BASE_CHOICES,
+        default='TODAY',
+        verbose_name='計算期間開始基準日'
+    )
+    range_days_after = models.PositiveSmallIntegerField(
+        default=45,
+        verbose_name='計算期間終了日数（基準日から何日後）'
     )
     last_run_at = models.DateTimeField(
         null=True, blank=True,

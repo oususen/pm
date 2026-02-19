@@ -53,8 +53,19 @@ def run_inventory_recalculation():
 
     start_time = time.perf_counter()
     today = get_business_today()
-    start_date = today - timedelta(days=5)
-    end_date = today + timedelta(days=45)
+    if config and config.range_base_day:
+        base_day = config.range_base_day
+        if base_day == 'YESTERDAY':
+            start_date = today - timedelta(days=1)
+        elif base_day == 'TWO_DAYS_AGO':
+            start_date = today - timedelta(days=2)
+        else:
+            start_date = today
+        days_after = int(config.range_days_after or 45)
+        end_date = start_date + timedelta(days=days_after)
+    else:
+        start_date = today - timedelta(days=5)
+        end_date = today + timedelta(days=45)
     start_date_str = str(start_date)
     end_date_str = str(end_date)
 
@@ -151,6 +162,8 @@ def run_inventory_recalculation():
         'pickup_lines': pickup_count,
         'purchase_suppliers': purchase_count,
         'recalc_lines': recalc_count,
+        'start_date': start_date_str,
+        'end_date': end_date_str,
         'duration_seconds': round(duration, 2),
         'errors': errors,
     }
@@ -160,6 +173,7 @@ def run_inventory_recalculation():
         config.last_run_duration_seconds = round(duration, 2)
         error_summary = '\n'.join(errors) if errors else ''
         config.last_run_message = (
+            f'期間: {start_date_str}〜{end_date_str}, '
             f'取込: {pickup_count}ライン, 購買取込: {purchase_count}仕入先, '
             f'在庫再計算: {recalc_count}ライン ({round(duration, 1)}秒)'
             + (f'\nエラー: {error_summary}' if error_summary else '')

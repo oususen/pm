@@ -188,6 +188,28 @@
       </div>
 
       <div class="field" style="margin-top: 12px">
+        <label>計算期間</label>
+        <div class="input-row">
+          <select v-model="inventoryConfig.range_base_day" :disabled="!canEdit" class="date-input">
+            <option value="TODAY">今日</option>
+            <option value="YESTERDAY">昨日</option>
+            <option value="TWO_DAYS_AGO">一昨日</option>
+          </select>
+          <span class="suffix">から</span>
+          <input
+            type="number"
+            min="0"
+            max="365"
+            v-model.number="inventoryConfig.range_days_after"
+            :disabled="!canEdit"
+            class="time-input"
+          />
+          <span class="suffix">日後</span>
+        </div>
+        <p class="helper">例: 今日から45日後まで。業務日付は8時境界です。</p>
+      </div>
+
+      <div class="field" style="margin-top: 12px">
         <label class="checkbox-label">
           <input type="checkbox" v-model="inventoryConfig.is_enabled" :disabled="!canEdit" />
           有効
@@ -307,6 +329,10 @@ const saveConfig = async (cfg) => {
       scheduled_hour: cfg.scheduled_hour,
       scheduled_minute: cfg.scheduled_minute,
       scheduled_dom: cfg.scheduled_dom,
+      range_start_date: null,
+      range_end_date: null,
+      range_base_day: cfg.range_base_day || 'TODAY',
+      range_days_after: Number.isFinite(Number(cfg.range_days_after)) ? Number(cfg.range_days_after) : 45,
       is_enabled: cfg.is_enabled,
       include_next_month: cfg.include_next_month,
       include_second_month: cfg.include_second_month,
@@ -553,6 +579,12 @@ onUnmounted(() => {
 }
 .time-input {
   width: 60px;
+  padding: 6px 8px;
+  border: 1px solid #cfd6e1;
+  border-radius: 3px;
+}
+.date-input {
+  width: 160px;
   padding: 6px 8px;
   border: 1px solid #cfd6e1;
   border-radius: 3px;

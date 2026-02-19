@@ -694,6 +694,9 @@ const getCellClass = (group, date, rowKey) => {
   min-width: 100%;
 }
 .info-block {
+  position: sticky;
+  left: 0;
+  z-index: 4;
   padding: 10px;
   border-right: 1px solid #e5e7eb;
   background: #f8fafc;
@@ -714,6 +717,7 @@ const getCellClass = (group, date, rowKey) => {
   margin-left: 8px;
 }
 .matrix-block {
+  --fixed-left: 260px;
   overflow: visible;
 }
 .matrix-table {
@@ -741,7 +745,7 @@ const getCellClass = (group, date, rowKey) => {
 }
 .label-col {
   position: sticky;
-  left: 0;
+  left: var(--fixed-left, 0px);
   background: #f9fafb;
   z-index: 2;
   text-align: left;

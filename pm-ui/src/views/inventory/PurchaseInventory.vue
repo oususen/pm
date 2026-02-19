@@ -900,6 +900,9 @@ onUpdated(() => {
   min-width: 100%;
 }
 .info-block {
+  position: sticky;
+  left: 0;
+  z-index: 4;
   padding: 10px;
   border-right: 1px solid #e5e7eb;
   background: #f8fafc;
@@ -920,6 +923,7 @@ onUpdated(() => {
   margin-left: 8px;
 }
 .matrix-block {
+  --fixed-left: 260px;
   overflow: visible;
 }
 .matrix-table {
@@ -947,7 +951,7 @@ onUpdated(() => {
 }
 .label-col {
   position: sticky;
-  left: 0;
+  left: var(--fixed-left, 0px);
   background: #f9fafb;
   z-index: 2;
   text-align: left;
@@ -1021,6 +1025,9 @@ onUpdated(() => {
   margin-bottom: 0;
 }
 .child-info {
+  position: sticky;
+  left: 0;
+  z-index: 4;
   padding: 8px;
   background: #fefce8;
   border-right: 1px solid #e5e7eb;
@@ -1043,6 +1050,7 @@ onUpdated(() => {
   color: #451a03;
 }
 .child-matrix {
+  --fixed-left: 200px;
   overflow: visible;
 }
 .processing-overlay {
