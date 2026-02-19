@@ -24,6 +24,61 @@ from .inventory_calculator import (
 logger = logging.getLogger(__name__)
 
 
+def _convert_minute_duration_to_lt_days(duration_min):
+    """
+    分管理の所要時間を営業日換算LTに変換する。
+    - 480分以下: 0日
+    - 480分超: duration_min // 480 日
+    """
+    minutes = int(duration_min or 0)
+    if minutes <= 480:
+        return 0
+    return max(minutes // 480, 0)
+
+
+def _resolve_edge_lead_time_days(line_id, child_product_id, bom_item=None, step_cache=None):
+    """
+    親子エッジ（子→直親）用のLT解決。
+    進度基準日計算の親子エッジLT解決。
+    time_unitルールは通常解決と同一とし、親子情報（bom_item）がある場合はそれを参照して判定する。
+    """
+    return _resolve_stocktake_lead_time_days(
+        line_id,
+        child_product_id,
+        bom_item=bom_item,
+        step_cache=step_cache,
+    )
+
+
+def _resolve_final_product_lt_days(line_id, product_id):
+    """
+    最終品/ライン最終品向けLT解決。
+    最終品はパイプライン需要控除の基準となるため、DAY工程優先・それ以外はラインLTを使用する。
+    """
+    step = (
+        RoutingStep.objects.filter(
+            routing__is_active=True,
+            line_id=line_id,
+        )
+        .filter(
+            Q(output_product_id=product_id)
+            | Q(output_product_id__isnull=True, routing__product_id=product_id)
+        )
+        .select_related('line')
+        .order_by('step_no', 'id')
+        .first()
+    )
+    if step is not None:
+        if getattr(step, 'time_unit', None) == 'DAY':
+            step_lt = int(step.lead_time_days or 0)
+            if step_lt > 0:
+                return step_lt
+        step_line = getattr(step, 'line', None)
+        if step_line and int(step_line.lead_time_days or 0) > 0:
+            return int(step_line.lead_time_days or 0)
+    return 0
+
+
 def _collect_stocktake_mapping_keys(stocktake_date, target_product_ids):
     """
     棚卸基準日の line_backlog 作成対象キーを収集する。
@@ -119,10 +174,14 @@ def _resolve_stocktake_lead_time_days(line_id, product_id, bom_item=None, step_c
     棚卸専用のLT解決。
 
     優先順位:
-    1. RoutingStep.lead_time_days
-    2. RoutingStep.line.lead_time_days
-    3. BOMItem.lead_time_days
-    4. 0
+    - time_unit=MINUTE:
+      - 中間品は duration_min のみで解決（ラインLTへフォールバックしない）
+      - 480分以下=0日、480分超=duration_min//480 日
+    - time_unit=DAY:
+      1. RoutingStep.lead_time_days
+      2. RoutingStep.line.lead_time_days
+      3. BOMItem.lead_time_days
+      4. 0
     """
     step = None
     cache_key = (line_id, product_id)
@@ -145,17 +204,24 @@ def _resolve_stocktake_lead_time_days(line_id, product_id, bom_item=None, step_c
         if step_cache is not None:
             step_cache[cache_key] = step
 
-    if step is not None:
-        lead_days = step.lead_time_days or 0
-        if not lead_days:
-            step_line = getattr(step, 'line', None)
-            if step_line and step_line.lead_time_days:
-                lead_days = step_line.lead_time_days
-        if lead_days:
-            return max(int(lead_days), 0)
+    # 分管理の中間品は duration_min のみを使用（ラインLTフォールバック禁止）
+    if bom_item is not None and getattr(bom_item, 'time_unit', None) == 'MINUTE':
+        return _convert_minute_duration_to_lt_days(getattr(bom_item, 'duration_min', 0))
 
-    if bom_item is not None and getattr(bom_item, 'lead_time_days', 0):
-        return max(int(bom_item.lead_time_days or 0), 0)
+    if step is not None:
+        if getattr(step, 'time_unit', None) == 'MINUTE':
+            return _convert_minute_duration_to_lt_days(getattr(step, 'duration_min', 0))
+
+        lead_days = int(step.lead_time_days or 0)
+        if lead_days > 0:
+            return lead_days
+
+        step_line = getattr(step, 'line', None)
+        if step_line and int(step_line.lead_time_days or 0) > 0:
+            return int(step_line.lead_time_days or 0)
+
+    if bom_item is not None and getattr(bom_item, 'time_unit', None) == 'DAY':
+        return max(int(getattr(bom_item, 'lead_time_days', 0) or 0), 0)
 
     return 0
 
@@ -510,6 +576,18 @@ def _build_global_stocktake_baseline_progress_map(baseline_date, is_working_day)
     from masters.models import BOMItem
     from ..models import LineDemand
 
+    def shift_working_days(target_date, days):
+        if not days:
+            return target_date
+        step = 1 if days > 0 else -1
+        remaining = abs(int(days))
+        current = target_date
+        while remaining > 0:
+            current = current + timedelta(days=step)
+            if is_working_day(current):
+                remaining -= 1
+        return current
+
     baseline_rows = list(
         LineBacklog.objects.filter(
             plan_date=baseline_date,
@@ -534,6 +612,8 @@ def _build_global_stocktake_baseline_progress_map(baseline_date, is_working_day)
     parent_to_children = defaultdict(list)
     child_to_parents = defaultdict(list)
     in_degree = {pid: 0 for pid in product_ids}
+    step_cache = {}
+    max_lt_days = 0
 
     # 子対象は基準日に棚卸行を持つ製品。親は他ラインの製品も含める。
     bom_items = list(
@@ -547,7 +627,15 @@ def _build_global_stocktake_baseline_progress_map(baseline_date, is_working_day)
         parent_id = item.bom.parent_product_id
         child_id = item.child_product_id
         qty = item.quantity or Decimal('0')
-        child_to_parents[child_id].append((parent_id, qty))
+        lead_days = _resolve_edge_lead_time_days(
+            None,
+            child_id,
+            bom_item=item,
+            step_cache=step_cache,
+        )
+        child_to_parents[child_id].append((parent_id, qty, lead_days))
+        if lead_days > max_lt_days:
+            max_lt_days = lead_days
 
         # トポロジカルソートは対象集合内の依存のみで組む
         if parent_id in in_degree:
@@ -568,11 +656,21 @@ def _build_global_stocktake_baseline_progress_map(baseline_date, is_working_day)
         missing = [pid for pid in product_ids if pid not in set(sorted_products)]
         sorted_products.extend(sorted(missing))
 
+    parent_product_ids = {
+        item.bom.parent_product_id
+        for item in bom_items
+        if item.bom.parent_product_id is not None
+    }
+    demand_product_ids = set(product_ids) | parent_product_ids
+
     demand_by_product = {}
-    if is_working_day(baseline_date):
+    demand_dates = {baseline_date}
+    for offset in range(1, max_lt_days + 1):
+        demand_dates.add(shift_working_days(baseline_date, offset))
+    if demand_dates:
         demand_qs = LineDemand.objects.filter(
-            plan_date=baseline_date,
-            product_id__in=product_ids,
+            plan_date__in=demand_dates,
+            product_id__in=demand_product_ids,
         )
         for demand in demand_qs:
             qty = Decimal('0')
@@ -582,19 +680,30 @@ def _build_global_stocktake_baseline_progress_map(baseline_date, is_working_day)
                 qty = demand.forecast_qty
             if not qty or not demand.product_id:
                 continue
-            key = demand.product_id
+            key = (demand.plan_date, demand.product_id)
             demand_by_product[key] = demand_by_product.get(key, Decimal('0')) + qty
 
     progress_map = {}
     for pid in sorted_products:
         parent_consumed = Decimal('0')
-        for parent_id, bom_qty in child_to_parents.get(pid, []):
+        for parent_id, bom_qty, _lead_days in child_to_parents.get(pid, []):
             parent_progress = progress_map.get(parent_id, 0)
             parent_consumed += Decimal(str(parent_progress)) * (bom_qty or Decimal('0'))
 
         anchor_progress = stock_by_product.get(pid, 0) + int(parent_consumed)
-        demand_qty = int(demand_by_product.get(pid, Decimal('0')) or 0) if is_working_day(baseline_date) else 0
-        progress_map[pid] = anchor_progress - demand_qty
+        if child_to_parents.get(pid):
+            parent_ltdemand = Decimal('0')
+            for parent_id, bom_qty, lead_days in child_to_parents.get(pid, []):
+                if not lead_days:
+                    continue
+                for offset in range(1, lead_days + 1):
+                    target_date = shift_working_days(baseline_date, offset)
+                    parent_qty = demand_by_product.get((target_date, parent_id), Decimal('0'))
+                    parent_ltdemand += parent_qty * (bom_qty or Decimal('0'))
+            progress_map[pid] = anchor_progress - int(parent_ltdemand)
+        else:
+            demand_qty = int(demand_by_product.get((baseline_date, pid), Decimal('0')) or 0)
+            progress_map[pid] = anchor_progress - demand_qty
 
     return progress_map
 
@@ -646,6 +755,18 @@ def recalculate_progress_from_stocktake(line_id, baseline_date, end_date):
             prev_date = prev_date - timedelta(days=1)
         return prev_date
 
+    def shift_working_days(target_date, days):
+        if not days:
+            return target_date
+        step = 1 if days > 0 else -1
+        remaining = abs(int(days))
+        current = target_date
+        while remaining > 0:
+            current = current + timedelta(days=step)
+            if is_working_day(current):
+                remaining -= 1
+        return current
+
     demand_by_step = {}
     demand_by_product = {}
     demand_qs = LineDemand.objects.filter(
@@ -683,15 +804,49 @@ def recalculate_progress_from_stocktake(line_id, baseline_date, end_date):
             child_product_id__in=product_ids,
         ).select_related('bom')
     )
+    max_lt_days = 0
+    lt_by_child_parent = defaultdict(dict)
+    lt_step_cache = {}
     for item in bom_items:
         parent_id = item.bom.parent_product_id
         child_id = item.child_product_id
         qty = item.quantity or Decimal('0')
+        lead_days = _resolve_edge_lead_time_days(
+            line_id,
+            child_id,
+            bom_item=item,
+            step_cache=lt_step_cache,
+        )
         parent_to_children[parent_id].append((child_id, qty))
         child_to_parents[child_id].append((parent_id, qty))
+        lt_by_child_parent[child_id][parent_id] = lead_days
+        if lead_days > max_lt_days:
+            max_lt_days = lead_days
         # 並び順はライン内製品の依存のみを対象にする
         if parent_id in in_degree:
             in_degree[child_id] = in_degree.get(child_id, 0) + 1
+
+    parent_product_ids = {item.bom.parent_product_id for item in bom_items if item.bom.parent_product_id is not None}
+    parent_demand_by_product = {}
+    if parent_product_ids:
+        demand_dates = set()
+        for offset in range(1, max_lt_days + 1):
+            demand_dates.add(shift_working_days(baseline_date, offset))
+        if demand_dates:
+            parent_demand_qs = LineDemand.objects.filter(
+                plan_date__in=demand_dates,
+                product_id__in=parent_product_ids,
+            )
+            for demand in parent_demand_qs:
+                qty = Decimal('0')
+                if demand.firm_qty and demand.firm_qty > 0:
+                    qty = demand.firm_qty
+                elif demand.forecast_qty and demand.forecast_qty > 0:
+                    qty = demand.forecast_qty
+                if not qty or not demand.product_id:
+                    continue
+                key = (demand.plan_date, demand.product_id)
+                parent_demand_by_product[key] = parent_demand_by_product.get(key, Decimal('0')) + qty
 
     queue = deque(sorted([pid for pid in product_ids if in_degree.get(pid, 0) == 0]))
     sorted_products = []
@@ -719,8 +874,11 @@ def recalculate_progress_from_stocktake(line_id, baseline_date, end_date):
             demand_by_product=demand_by_product,
             is_working_day=is_working_day,
             get_prev_working_day=get_prev_working_day,
+            shift_working_days=shift_working_days,
             child_to_parents=child_to_parents,
             baseline_progress_map=baseline_progress_map,
+            lt_by_child_parent=lt_by_child_parent,
+            parent_demand_by_product=parent_demand_by_product,
         )
         if baseline_progress is not None:
             baseline_progress_map[product_id] = baseline_progress
@@ -737,13 +895,16 @@ def _stocktake_recalc_progress(
     demand_by_product,
     is_working_day,
     get_prev_working_day,
+    shift_working_days,
     child_to_parents=None,
     baseline_progress_map=None,
+    lt_by_child_parent=None,
+    parent_demand_by_product=None,
 ):
     """
     棚卸専用: 進度を日次再計算する。
-    - 基準日のアンカーは「自製品在庫 + 親の基準日進度(需要控除後)×BOM数」で算出
-    - 当日需要(LineDemand)を控除して基準日進度を確定
+    - 基準日のアンカーは「自製品在庫 + 親の基準日進度×BOM数」で算出
+    - 基準日は、最終品は当日需要を控除、子品目は直親の翌日からLT日分需要を控除
     - start_date より前は参照しない
     """
     backlogs = list(LineBacklog.objects.filter(
@@ -810,7 +971,8 @@ def _stocktake_recalc_progress(
 
         anchor = pick_stocktake_anchor(rows)
         if anchor:
-            # 基準日は、親進度（需要控除後）を反映した上で当日需要を引く
+            # 基準日は、親進度を反映した上で需要を控除する。
+            # 子品目は「自分のLT日分の直親需要（翌日から）」を控除する。
             parent_consumed = Decimal('0')
             if child_to_parents and baseline_progress_map is not None:
                 for parent_id, bom_qty in child_to_parents.get(product_id, []):
@@ -819,13 +981,27 @@ def _stocktake_recalc_progress(
 
             anchor_progress_qty = (anchor.stock_qty or 0) + int(parent_consumed)
             anchor_planned_progress_qty = anchor_progress_qty
-            if is_working_day(plan_date):
-                # 棚卸初期化値は「前日進度相当」として扱い、当日需要を控除する
+            parent_lt_demand = Decimal('0')
+            if child_to_parents and child_to_parents.get(product_id):
+                for parent_id, bom_qty in child_to_parents.get(product_id, []):
+                    lead_days = 0
+                    if lt_by_child_parent and product_id in lt_by_child_parent:
+                        lead_days = int(lt_by_child_parent[product_id].get(parent_id, 0) or 0)
+                    if lead_days <= 0:
+                        continue
+                    for offset in range(1, lead_days + 1):
+                        target_date = shift_working_days(plan_date, offset)
+                        parent_qty = Decimal('0')
+                        if parent_demand_by_product:
+                            parent_qty = parent_demand_by_product.get((target_date, parent_id), Decimal('0'))
+                        parent_lt_demand += parent_qty * (bom_qty or Decimal('0'))
+
+            if child_to_parents and child_to_parents.get(product_id):
+                progress_qty = anchor_progress_qty - int(parent_lt_demand)
+                planned_progress_qty = anchor_planned_progress_qty - int(parent_lt_demand)
+            else:
                 progress_qty = anchor_progress_qty - progress_shipment
                 planned_progress_qty = anchor_planned_progress_qty - progress_shipment
-            else:
-                progress_qty = anchor_progress_qty
-                planned_progress_qty = anchor_planned_progress_qty
             rep = pick_representative(rows)
             for row in rows:
                 row.progress_qty = 0
@@ -1292,7 +1468,7 @@ def calculate_pipeline_demand(
 
     # 最終品/ライン最終品: 基準日+1..+LT の自需要を積算
     if is_final or is_line_final:
-        lt = _resolve_stocktake_lead_time_days(line_id, product_id, step_cache={})
+        lt = _resolve_final_product_lt_days(line_id, product_id)
         if lt <= 0:
             return 0
 
