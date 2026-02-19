@@ -49,9 +49,10 @@
       ライン、工程、または品番を入力してください
     </div>
     <div v-else>
-      <div v-if="groups.length" class="group-list">
-        <div v-for="g in groups" :key="g.key" class="group-card">
-          <div class="info-block">
+      <div v-if="groups.length" class="group-scroll" ref="groupScrollRef" @scroll="onMainScroll">
+        <div class="group-list">
+          <div v-for="g in groups" :key="g.key" class="group-card">
+            <div class="info-block">
             <div class="info-row">
               <span class="info-label">品番</span>
               <span class="info-value">{{ g.product_code || '-' }}</span>
@@ -92,41 +93,49 @@
               <span class="info-label">自LT</span>
               <span class="info-value">{{ fmt(g.self_lt_days) }}</span>
             </div>
-          </div>
+            </div>
 
-          <div class="matrix-block">
-            <table class="matrix-table">
-              <thead>
-                <tr>
-                  <th class="label-col">項目</th>
-                  <th
-                    v-for="d in columns"
-                    :key="d"
-                    class="day-col"
-                    :class="{ holiday: isHoliday(d) }"
-                  >
-                    {{ formatDayHeader(d) }}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="row in rowDefs" :key="row.key">
-                  <th class="label-col">{{ row.label }}</th>
-                  <td v-for="d in columns"
-                    :key="`${row.key}-${d}`"
-                    class="cell"
-                    :class="[getCellClass(g, d, row.key), { holiday: isHoliday(d) }]"
-                  >
-                    {{ fmt(getValue(g, d, row.key)) }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+            <div class="matrix-block">
+              <table class="matrix-table">
+                <thead>
+                  <tr>
+                    <th class="label-col">項目</th>
+                    <th
+                      v-for="d in columns"
+                      :key="d"
+                      class="day-col"
+                      :class="{ holiday: isHoliday(d) }"
+                    >
+                      {{ formatDayHeader(d) }}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in rowDefs" :key="row.key">
+                    <th class="label-col">{{ row.label }}</th>
+                    <td v-for="d in columns"
+                      :key="`${row.key}-${d}`"
+                      class="cell"
+                      :class="[getCellClass(g, d, row.key), { holiday: isHoliday(d) }]"
+                    >
+                      {{ fmt(getValue(g, d, row.key)) }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
-
         </div>
       </div>
       <div v-else class="no-data">データがありません</div>
+    </div>
+    <div
+      v-if="groups.length"
+      class="floating-x-scroll"
+      ref="floatingScrollRef"
+      @scroll="onFloatingScroll"
+    >
+      <div class="floating-x-scroll-inner" :style="{ width: `${floatingInnerWidth}px` }"></div>
     </div>
 
     <div v-if="loading || recalculating" class="processing-overlay">
@@ -190,7 +199,7 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onBeforeUnmount } from "vue";
+import { computed, ref, onMounted, onBeforeUnmount, onUpdated, nextTick } from "vue";
 import api from "@/api/client";
 import { addDays, formatISODate, parseISODate } from "@/utils/dateUtil";
 import {
@@ -210,6 +219,10 @@ const error = ref("");
 const demands = ref([]);
 const adjustInputs = ref({});
 const adjustSaving = ref({});
+const groupScrollRef = ref(null);
+const floatingScrollRef = ref(null);
+const floatingInnerWidth = ref(0);
+let syncingScroll = false;
 let userSetStart = false;
 const onStartChange = () => {
   userSetStart = true;
@@ -841,12 +854,49 @@ const handleKeyDown = (e) => {
   }
 };
 
+const updateFloatingScroll = () => {
+  const main = groupScrollRef.value;
+  const floating = floatingScrollRef.value;
+  if (!main || !floating) return;
+  floatingInnerWidth.value = Math.max(main.scrollWidth, main.clientWidth);
+  floating.scrollLeft = main.scrollLeft;
+};
+
+const onMainScroll = () => {
+  const main = groupScrollRef.value;
+  const floating = floatingScrollRef.value;
+  if (!main || !floating || syncingScroll) return;
+  syncingScroll = true;
+  floating.scrollLeft = main.scrollLeft;
+  syncingScroll = false;
+};
+
+const onFloatingScroll = () => {
+  const main = groupScrollRef.value;
+  const floating = floatingScrollRef.value;
+  if (!main || !floating || syncingScroll) return;
+  syncingScroll = true;
+  main.scrollLeft = floating.scrollLeft;
+  syncingScroll = false;
+};
+
+const onWindowResize = () => {
+  updateFloatingScroll();
+};
+
 onMounted(() => {
   window.addEventListener("keydown", handleKeyDown);
+  window.addEventListener("resize", onWindowResize);
+  nextTick(updateFloatingScroll);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", handleKeyDown);
+  window.removeEventListener("resize", onWindowResize);
+});
+
+onUpdated(() => {
+  nextTick(updateFloatingScroll);
 });
 
 // 画面を開いた時点ではデータを取得せず、フィルター入力後に更新ボタンで取得
@@ -886,13 +936,31 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 16px;
 }
+.group-scroll {
+  overflow-x: auto;
+}
+.floating-x-scroll {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid #d1d5db;
+  background: #f8fafc;
+  height: 16px;
+}
+.floating-x-scroll-inner {
+  height: 1px;
+}
 .group-card {
   display: grid;
   grid-template-columns: 260px 1fr;
   border: 1px solid #dce3ef;
   border-radius: 10px;
-  overflow: hidden;
+  overflow: visible;
   background: #fff;
+  width: max-content;
+  min-width: 100%;
 }
 .info-block {
   padding: 10px;
@@ -915,7 +983,7 @@ onBeforeUnmount(() => {
   margin-left: 8px;
 }
 .matrix-block {
-  overflow: auto;
+  overflow: visible;
 }
 .matrix-table {
   border-collapse: collapse;

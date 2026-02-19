@@ -40,127 +40,137 @@
       仕入先を選択してください
     </div>
     <div v-else>
-      <div v-if="groups.length" class="group-list">
-        <div v-for="g in groups" :key="g.key" class="group-card">
-          <div class="info-block">
-            <div class="info-row">
-              <span class="info-label">品番</span>
-              <span class="info-value">{{ g.product_code || '-' }}</span>
-              <button @click="toggleChildren(g)" class="expand-btn">
-                {{ g.showChildren ? '▼' : '▶' }} BOM展開
-              </button>
-            </div>
-            <div class="info-row">
-              <span class="info-label">品名</span>
-              <span class="info-value">{{ g.product_name || '-' }}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">仕入先</span>
-              <span class="info-value">{{ g.line_name || '-' }}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">仕入先コード</span>
-              <span class="info-value">{{ g.line_code || '-' }}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">翌月</span>
-              <span class="info-value"></span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">翌々月</span>
-              <span class="info-value"></span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">完成品向けLT</span>
-              <span class="info-value">{{ fmt(g.total_lt_days) }}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">自LT</span>
-              <span class="info-value">{{ fmt(g.self_lt_days) }}</span>
-            </div>
-          </div>
-
-          <div class="matrix-block">
-            <table class="matrix-table">
-              <thead>
-                <tr>
-                  <th class="label-col">項目</th>
-                  <th v-for="d in columns"
-                    :key="d"
-                    class="day-col"
-                    :class="{ holiday: isHoliday(d) }"
-                  >{{ formatDayHeader(d) }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="row in rowDefs" :key="row.key">
-                  <th class="label-col">{{ row.label }}</th>
-                  <td
-                    v-for="d in columns"
-                    :key="`${row.key}-${d}`"
-                    class="cell"
-                    :class="getCellClass(g, d, row.key)"
-                  >
-                    {{ fmt(getValue(g, d, row.key)) }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div v-if="g.showChildren" class="children-list">
-            <div v-if="g.children.length === 0" class="no-children">BOM子製品がありません</div>
-            <div v-for="(child, idx) in g.children" :key="idx" class="child-card">
-              <div class="child-info">
-                <div class="child-row">
-                  <span class="child-label">品番</span>
-                  <span class="child-value">{{ child.product_code }}</span>
-                </div>
-                <div class="child-row">
-                  <span class="child-label">品名</span>
-                  <span class="child-value">{{ child.product_name }}</span>
-                </div>
-                <div class="child-row">
-                  <span class="child-label">工程</span>
-                  <span class="child-value">{{ child.process_code }}</span>
-                </div>
-                <div class="child-row">
-                  <span class="child-label">BOM数量</span>
-                  <span class="child-value">{{ child.bom_quantity }}</span>
-                </div>
+      <div v-if="groups.length" class="group-scroll" ref="groupScrollRef" @scroll="onMainScroll">
+        <div class="group-list">
+          <div v-for="g in groups" :key="g.key" class="group-card">
+            <div class="info-block">
+              <div class="info-row">
+                <span class="info-label">品番</span>
+                <span class="info-value">{{ g.product_code || '-' }}</span>
+                <button @click="toggleChildren(g)" class="expand-btn">
+                  {{ g.showChildren ? '▼' : '▶' }} BOM展開
+                </button>
               </div>
-              <div class="child-matrix">
-                <table class="matrix-table">
-                  <thead>
-                    <tr>
-                      <th class="label-col">項目</th>
-                      <th v-for="d in columns"
-                        :key="d"
-                        class="day-col"
-                        :class="{ holiday: isHoliday(d) }"
-                      >{{ formatDayHeader(d) }}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="row in rowDefs" :key="row.key">
-                      <th class="label-col">{{ row.label }}</th>
-                      <td
-                        v-for="d in columns"
-                        :key="`${row.key}-${d}`"
-                        class="cell"
-                        :class="getCellClass(child, d, row.key)"
-                      >
-                        {{ fmt(getValue(child, d, row.key)) }}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+              <div class="info-row">
+                <span class="info-label">品名</span>
+                <span class="info-value">{{ g.product_name || '-' }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">仕入先</span>
+                <span class="info-value">{{ g.line_name || '-' }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">仕入先コード</span>
+                <span class="info-value">{{ g.line_code || '-' }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">翌月</span>
+                <span class="info-value"></span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">翌々月</span>
+                <span class="info-value"></span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">完成品向けLT</span>
+                <span class="info-value">{{ fmt(g.total_lt_days) }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">自LT</span>
+                <span class="info-value">{{ fmt(g.self_lt_days) }}</span>
+              </div>
+            </div>
+
+            <div class="matrix-block">
+              <table class="matrix-table">
+                <thead>
+                  <tr>
+                    <th class="label-col">項目</th>
+                    <th v-for="d in columns"
+                      :key="d"
+                      class="day-col"
+                      :class="{ holiday: isHoliday(d) }"
+                    >{{ formatDayHeader(d) }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in rowDefs" :key="row.key">
+                    <th class="label-col">{{ row.label }}</th>
+                    <td
+                      v-for="d in columns"
+                      :key="`${row.key}-${d}`"
+                      class="cell"
+                      :class="getCellClass(g, d, row.key)"
+                    >
+                      {{ fmt(getValue(g, d, row.key)) }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div v-if="g.showChildren" class="children-list">
+              <div v-if="g.children.length === 0" class="no-children">BOM子製品がありません</div>
+              <div v-for="(child, idx) in g.children" :key="idx" class="child-card">
+                <div class="child-info">
+                  <div class="child-row">
+                    <span class="child-label">品番</span>
+                    <span class="child-value">{{ child.product_code }}</span>
+                  </div>
+                  <div class="child-row">
+                    <span class="child-label">品名</span>
+                    <span class="child-value">{{ child.product_name }}</span>
+                  </div>
+                  <div class="child-row">
+                    <span class="child-label">工程</span>
+                    <span class="child-value">{{ child.process_code }}</span>
+                  </div>
+                  <div class="child-row">
+                    <span class="child-label">BOM数量</span>
+                    <span class="child-value">{{ child.bom_quantity }}</span>
+                  </div>
+                </div>
+                <div class="child-matrix">
+                  <table class="matrix-table">
+                    <thead>
+                      <tr>
+                        <th class="label-col">項目</th>
+                        <th v-for="d in columns"
+                          :key="d"
+                          class="day-col"
+                          :class="{ holiday: isHoliday(d) }"
+                        >{{ formatDayHeader(d) }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="row in rowDefs" :key="row.key">
+                        <th class="label-col">{{ row.label }}</th>
+                        <td
+                          v-for="d in columns"
+                          :key="`${row.key}-${d}`"
+                          class="cell"
+                          :class="getCellClass(child, d, row.key)"
+                        >
+                          {{ fmt(getValue(child, d, row.key)) }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
       <div v-else class="no-data">データがありません</div>
+    </div>
+    <div
+      v-if="groups.length"
+      class="floating-x-scroll"
+      ref="floatingScrollRef"
+      @scroll="onFloatingScroll"
+    >
+      <div class="floating-x-scroll-inner" :style="{ width: `${floatingInnerWidth}px` }"></div>
     </div>
 
     <div v-if="loading || recalculating" class="processing-overlay">
@@ -173,7 +183,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onBeforeUnmount, onUpdated, nextTick, ref } from "vue";
 import api from "@/api/client";
 import { addDays, formatISODate, parseISODate } from "@/utils/dateUtil";
 import {
@@ -197,6 +207,10 @@ const products = ref([]);
 const purchaseLineId = ref("");
 const adjustInputs = ref({});
 const adjustSaving = ref({});
+const groupScrollRef = ref(null);
+const floatingScrollRef = ref(null);
+const floatingInnerWidth = ref(0);
+let syncingScroll = false;
 let userSetStart = false;
 
 const onStartChange = () => {
@@ -781,8 +795,48 @@ const recalculateInventory = async () => {
   }
 };
 
+const updateFloatingScroll = () => {
+  const main = groupScrollRef.value;
+  const floating = floatingScrollRef.value;
+  if (!main || !floating) return;
+  floatingInnerWidth.value = Math.max(main.scrollWidth, main.clientWidth);
+  floating.scrollLeft = main.scrollLeft;
+};
+
+const onMainScroll = () => {
+  const main = groupScrollRef.value;
+  const floating = floatingScrollRef.value;
+  if (!main || !floating || syncingScroll) return;
+  syncingScroll = true;
+  floating.scrollLeft = main.scrollLeft;
+  syncingScroll = false;
+};
+
+const onFloatingScroll = () => {
+  const main = groupScrollRef.value;
+  const floating = floatingScrollRef.value;
+  if (!main || !floating || syncingScroll) return;
+  syncingScroll = true;
+  main.scrollLeft = floating.scrollLeft;
+  syncingScroll = false;
+};
+
+const onWindowResize = () => {
+  updateFloatingScroll();
+};
+
 onMounted(async () => {
+  window.addEventListener("resize", onWindowResize);
   await fetchSuppliers();
+  nextTick(updateFloatingScroll);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", onWindowResize);
+});
+
+onUpdated(() => {
+  nextTick(updateFloatingScroll);
 });
 </script>
 
@@ -819,13 +873,31 @@ onMounted(async () => {
   flex-direction: column;
   gap: 16px;
 }
+.group-scroll {
+  overflow-x: auto;
+}
+.floating-x-scroll {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid #d1d5db;
+  background: #f8fafc;
+  height: 16px;
+}
+.floating-x-scroll-inner {
+  height: 1px;
+}
 .group-card {
   display: grid;
   grid-template-columns: 260px 1fr;
   border: 1px solid #dce3ef;
   border-radius: 10px;
-  overflow: hidden;
+  overflow: visible;
   background: #fff;
+  width: max-content;
+  min-width: 100%;
 }
 .info-block {
   padding: 10px;
@@ -848,7 +920,7 @@ onMounted(async () => {
   margin-left: 8px;
 }
 .matrix-block {
-  overflow: auto;
+  overflow: visible;
 }
 .matrix-table {
   border-collapse: collapse;
@@ -971,7 +1043,7 @@ onMounted(async () => {
   color: #451a03;
 }
 .child-matrix {
-  overflow: auto;
+  overflow: visible;
 }
 .processing-overlay {
   position: fixed;
