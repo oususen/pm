@@ -14,6 +14,9 @@ export const createCalendarsAPI = (client) => ({
   deleteCalendar(id) {
     return client.delete(`/calendars/${id}/`)
   },
+  copyCalendar(srcId, data) {
+    return client.post(`/calendars/${srcId}/copy_to/`, data)
+  },
 
   // Calendar Days
   getCalendarDays(calendarId, params = {}) {

@@ -79,6 +79,44 @@
         </div>
       </div>
 
+      <div class="card inline-card">
+        <div class="card-title">カレンダコピー</div>
+        <div class="row inline">
+          <div class="field">
+            <label>コピー元</label>
+            <select v-model.number="copy.srcId">
+              <option value="">選択</option>
+              <option v-for="c in calendars" :key="c.id" :value="c.id">
+                {{ c.calendar_code }} - {{ c.calendar_name }}
+              </option>
+            </select>
+          </div>
+          <div class="field">
+            <label>コピー先</label>
+            <select v-model.number="copy.dstId">
+              <option value="">選択</option>
+              <option v-for="c in calendars" :key="c.id" :value="c.id">
+                {{ c.calendar_code }} - {{ c.calendar_name }}
+              </option>
+            </select>
+          </div>
+          <div class="field">
+            <label>開始日</label>
+            <input type="date" v-model="copy.start" />
+          </div>
+          <div class="field">
+            <label>終了日</label>
+            <input type="date" v-model="copy.end" />
+          </div>
+          <div class="field action-field">
+            <label>&nbsp;</label>
+            <button class="btn primary" @click="copyCalendar" :disabled="copyingCalendar">
+              コピー実行
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div class="card" v-if="showCreator">
         <div class="card-title">新規カレンダ</div>
         <div class="field">
@@ -176,6 +214,14 @@ const savingAssign = ref(false)
 const creatingCalendar = ref(false)
 const applyingRange = ref(false)
 const updatingDayId = ref(null)
+const copyingCalendar = ref(false)
+
+const copy = ref({
+  srcId: '',
+  dstId: '',
+  start: '',
+  end: '',
+})
 
 const newCalendar = ref({
   code: '',
@@ -385,6 +431,36 @@ const applyRange = async () => {
     alert('登録に失敗しました。')
   } finally {
     applyingRange.value = false
+  }
+}
+
+const copyCalendar = async () => {
+  if (!copy.value.srcId || !copy.value.dstId || !copy.value.start || !copy.value.end) {
+    alert('コピー元・コピー先・開始日・終了日をすべて入力してください。')
+    return
+  }
+  if (copy.value.srcId === copy.value.dstId) {
+    alert('コピー元とコピー先が同じカレンダーです。')
+    return
+  }
+  const srcName = calendars.value.find((c) => c.id === copy.value.srcId)?.calendar_name ?? ''
+  const dstName = calendars.value.find((c) => c.id === copy.value.dstId)?.calendar_name ?? ''
+  if (!confirm(`「${srcName}」の ${copy.value.start}〜${copy.value.end} を「${dstName}」にコピーします。\n同期間のコピー先データは上書きされます。よいですか？`)) return
+
+  copyingCalendar.value = true
+  try {
+    const res = await api.calendars.copyCalendar(copy.value.srcId, {
+      target_calendar_id: copy.value.dstId,
+      start_date: copy.value.start,
+      end_date: copy.value.end,
+    })
+    alert(`${res.data.copied} 件コピーしました。`)
+    if (selectedCalendar.value === copy.value.dstId) await loadCalendarDays()
+  } catch (e) {
+    console.error('カレンダコピーエラー', e)
+    alert('コピーに失敗しました。')
+  } finally {
+    copyingCalendar.value = false
   }
 }
 

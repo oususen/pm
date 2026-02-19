@@ -403,6 +403,49 @@ class CalendarViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     ordering_fields = ['calendar_code', 'created_at']
     ordering = ['calendar_code']
 
+    @action(detail=True, methods=['post'], url_path='copy_to')
+    def copy_to(self, request, pk=None):
+        """指定期間のカレンダー日データを別カレンダーにコピーする"""
+        from datetime import date
+        src_calendar = self.get_object()
+        target_id = request.data.get('target_calendar_id')
+        start_date = request.data.get('start_date')
+        end_date = request.data.get('end_date')
+
+        if not target_id or not start_date or not end_date:
+            return Response({'error': 'target_calendar_id, start_date, end_date は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            target_calendar = Calendar.objects.get(pk=target_id)
+        except Calendar.DoesNotExist:
+            return Response({'error': 'コピー先カレンダーが見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+
+        # コピー元の期間内データ取得
+        src_days = CalendarDay.objects.filter(
+            calendar=src_calendar,
+            target_date__gte=start_date,
+            target_date__lte=end_date,
+        )
+
+        # コピー先の既存データを削除してから再作成（upsert）
+        target_dates = [d.target_date for d in src_days]
+        CalendarDay.objects.filter(calendar=target_calendar, target_date__in=target_dates).delete()
+
+        new_days = [
+            CalendarDay(
+                calendar=target_calendar,
+                target_date=d.target_date,
+                is_working_day=d.is_working_day,
+                work_minutes=d.work_minutes,
+                work_pattern=d.work_pattern,
+                note=d.note,
+            )
+            for d in src_days
+        ]
+        CalendarDay.objects.bulk_create(new_days)
+
+        return Response({'copied': len(new_days)})
+
 
 class WorkPatternViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = WorkPattern.objects.all()

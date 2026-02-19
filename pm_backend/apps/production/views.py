@@ -3431,6 +3431,7 @@ class LineDefaultScheduleSettingViewSet(viewsets.ModelViewSet):
         errors = []
         user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
 
+        changed_line_ids = []
         for setting_data in settings_data:
             line_id = setting_data.get('line')
             if not line_id:
@@ -3453,8 +3454,13 @@ class LineDefaultScheduleSettingViewSet(viewsets.ModelViewSet):
                     created_count += 1
                 else:
                     updated_count += 1
+                changed_line_ids.append(line_id)
             except Exception as e:
                 errors.append({'error': str(e), 'data': setting_data})
+
+        # デフォルト変更時は日別設定をリセット（次回ロード時に新デフォルトが適用される）
+        if changed_line_ids:
+            LineDailyScheduleSetting.objects.filter(line_id__in=changed_line_ids).delete()
 
         return Response(
             {
