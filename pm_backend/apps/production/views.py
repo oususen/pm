@@ -844,16 +844,14 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             step = product_step_map.get(current_product_id)
             if step is not None:
                 try:
-                    # 分管理の中間品：ラインLTにフォールバックしない。480分以下は0日
+                    # time_unit基準でLT解決:
+                    # - MINUTE: line.lead_time_days を使用
+                    # - DAY: routing_step.lead_time_days を使用
                     if step.time_unit == 'MINUTE':
-                        duration = step.duration_min or 0
-                        return 0 if duration <= 480 else duration // 480
-                    lead_days = step.lead_time_days or 0
-                    if not lead_days:
                         step_line = getattr(step, 'line', None)
-                        if step_line and step_line.lead_time_days:
-                            lead_days = step_line.lead_time_days
-                    return max(int(lead_days or 0), 0)
+                        return max(int(getattr(step_line, 'lead_time_days', 0) or 0), 0)
+
+                    return max(int(step.lead_time_days or 0), 0)
                 except Exception:
                     return 0
             if bom_item and bom_item.lead_time_days:
