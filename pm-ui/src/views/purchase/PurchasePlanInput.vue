@@ -229,7 +229,7 @@ const isPlanCellLocked = (dateKey) => {
 const initDaily = () => {
   const daily = {}
   dateColumns.value.forEach((c) => {
-    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, progress: 0, plan_base: 0, has_row: false, sequence_no: null }
+    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, progress: 0, plan_base: 0, has_row: false }
   })
   return daily
 }
@@ -267,9 +267,6 @@ const savePlan = async () => {
         actual_qty: Number(daily.actual || 0),
         stock_qty: Number(daily.stock || 0),
         planned_stock_qty: Number(daily.plan_stock || 0),
-      }
-      if (daily.sequence_no !== null && daily.sequence_no !== undefined) {
-        item.sequence_no = daily.sequence_no
       }
       items.push(item)
     })
@@ -596,9 +593,10 @@ const doPickup = async () => {
       })
     })
 
-    // バックログデータがあれば上書き
+    // バックログデータがあれば上書き（sequence_no=0の基礎データレコードのみ使用）
     backlogs.forEach((d) => {
       if (!d.product) return
+      if (d.sequence_no !== 0) return  // 計画レコード（seq>0）はスキップ
       const row = grouped.get(d.product)
       if (!row) return
 
@@ -612,7 +610,6 @@ const doPickup = async () => {
         row.daily[dateKey].progress = Number(d.progress_qty || 0)
         row.daily[dateKey].plan_base = Number(d.plan_qty || 0)
         row.daily[dateKey].has_row = true
-        row.daily[dateKey].sequence_no = d.sequence_no ?? null
       }
     })
 
