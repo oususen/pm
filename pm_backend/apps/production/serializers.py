@@ -73,6 +73,7 @@ class LineDemandSerializer(serializers.ModelSerializer):
 class LineBacklogSerializer(serializers.ModelSerializer):
     product_code = serializers.CharField(source='product.product_code', read_only=True)
     product_name = serializers.CharField(source='product.product_name', read_only=True)
+    is_virtual_set = serializers.BooleanField(source='product.is_virtual_set', read_only=True)
     process_code = serializers.CharField(source='process.process_code', read_only=True)
     process_name = serializers.CharField(source='process.process_name', read_only=True)
     line_code = serializers.CharField(source='line.line_code', read_only=True)
@@ -93,7 +94,7 @@ class LineBacklogSerializer(serializers.ModelSerializer):
         model = LineBacklog
         fields = [
             'id', 'plan_date', 'process', 'process_code', 'process_name',
-            'product', 'product_code', 'product_name', 'is_final_product', 'is_line_final_product',
+            'product', 'product_code', 'product_name', 'is_virtual_set', 'is_final_product', 'is_line_final_product',
             'line', 'line_code', 'line_name',
             'demand_qty_plan', 'order_qty', 'firm_order_qty', 'forecast_order_qty',
             'plan_qty', 'actual_qty', 'stock_qty', 'planned_stock_qty', 'progress_qty',

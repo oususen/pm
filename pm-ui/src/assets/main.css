@@ -71,7 +71,7 @@ a {
 
 .app-main {
   flex: 1;
-  padding: 16px;
+  padding: 0;
   overflow-y: auto;
   font-size: 13px;
 }
@@ -100,7 +100,7 @@ a {
   }
 
   .app-main {
-    padding: 10px;
+    padding: 0;
   }
 }
 

@@ -553,6 +553,7 @@ const groups = computed(() => {
         product_id: d.product,
         product_code: d.product_code,
         product_name: d.product_name,
+        is_virtual_set: Boolean(d.is_virtual_set),
         special_display_order: specialDisplayOrder,
         cells: {},
       });
@@ -564,6 +565,7 @@ const groups = computed(() => {
         g.special_display_order = specialDisplayOrder;
       }
     }
+    if (d.is_virtual_set) g.is_virtual_set = true;
     if (!g.cells[d.plan_date]) {
       g.cells[d.plan_date] = createEmptyCell();
     }
@@ -584,11 +586,14 @@ const groups = computed(() => {
   }
 
   const result = Array.from(map.values());
-  result.sort((a, b) =>
-    compareBySpecialOrderThenProductCode(a, b, {
+  result.sort((a, b) => {
+    const aVirtual = Boolean(a?.is_virtual_set);
+    const bVirtual = Boolean(b?.is_virtual_set);
+    if (aVirtual !== bVirtual) return aVirtual ? 1 : -1;
+    return compareBySpecialOrderThenProductCode(a, b, {
       codeGetter: (item) => item.product_code || "",
-    })
-  );
+    });
+  });
   return result;
 });
 
@@ -636,6 +641,11 @@ const getCellClass = (group, date, rowKey) => {
   gap: 12px;
   flex-wrap: wrap;
   align-items: flex-start;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: #f5f5e6;
+  padding: 6px 0;
 }
 .page-actions {
   display: flex;

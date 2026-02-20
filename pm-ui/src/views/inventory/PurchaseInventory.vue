@@ -330,6 +330,7 @@ const groups = computed(() => {
           process_id: d.process,
           process_code: d.process_code || d.process || "",
           process_name: d.process_name || "",
+          is_virtual_set: Boolean(d.is_virtual_set),
           special_display_order: specialDisplayOrder,
           total_lt_days: null,
           self_lt_days: null,
@@ -352,6 +353,7 @@ const groups = computed(() => {
       if (g.self_lt_days === null && d.self_lt_days !== null && d.self_lt_days !== undefined) {
         g.self_lt_days = Number(d.self_lt_days);
       }
+      if (d.is_virtual_set) g.is_virtual_set = true;
     if (!g.cells[d.plan_date]) {
       g.cells[d.plan_date] = {
         forecast: 0,
@@ -400,11 +402,14 @@ const groups = computed(() => {
 
   const result = Array.from(map.values());
   result.forEach(carryForwardProgress);
-  result.sort((a, b) =>
-    compareBySpecialOrderThenProductCode(a, b, {
+  result.sort((a, b) => {
+    const aVirtual = Boolean(a?.is_virtual_set);
+    const bVirtual = Boolean(b?.is_virtual_set);
+    if (aVirtual !== bVirtual) return aVirtual ? 1 : -1;
+    return compareBySpecialOrderThenProductCode(a, b, {
       codeGetter: (item) => item.product_code || "",
-    })
-  );
+    });
+  });
   return result;
 });
 
@@ -852,6 +857,11 @@ onUpdated(() => {
   align-items: flex-start;
   gap: 12px;
   flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: #f5f5e6;
+  padding: 6px 0;
 }
 .page-actions {
   display: flex;

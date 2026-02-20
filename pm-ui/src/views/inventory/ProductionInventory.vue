@@ -63,11 +63,11 @@
             </div>
             <div class="info-row">
               <span class="info-label">工程名</span>
-              <span class="info-value">{{ g.process_name || '-' }}</span>
+              <span class="info-value">{{ getDisplayProcessName(g) || '-' }}</span>
             </div>
             <div class="info-row">
               <span class="info-label">工程コード</span>
-              <span class="info-value">{{ g.process_code || '-' }}</span>
+              <span class="info-value">{{ getDisplayProcessCode(g) || '-' }}</span>
             </div>
             <div class="info-row">
               <span class="info-label">予定</span>
@@ -415,7 +415,9 @@ const groups = computed(() => {
       d.plan_date >= columns.value[0] &&
       d.plan_date <= columns.value[columns.value.length - 1];
     const lineText = `${d.line_code || ""}${d.line_name || ""}`.toLowerCase();
-    const processText = `${d.process_code || ""}${d.process_name || ""}`.toLowerCase();
+    const processCodeForFilter = d.process_code === "PURCHASE" ? (d.supplier_code || d.line_code || d.process_code || "") : (d.process_code || "");
+    const processNameForFilter = d.process_code === "PURCHASE" ? (d.supplier_name || d.line_name || d.process_name || "") : (d.process_name || "");
+    const processText = `${processCodeForFilter}${processNameForFilter}`.toLowerCase();
     const prodText = `${d.product_code || ""}${d.product_name || ""}`.toLowerCase();
     const okLine =
       !lineFilter.value ||
@@ -445,6 +447,9 @@ const groups = computed(() => {
           process_id: d.process,
           process_code: d.process_code || d.process || "",
           process_name: d.process_name || "",
+          is_virtual_set: Boolean(d.is_virtual_set),
+          supplier_code: d.supplier_code || (d.process_code === "PURCHASE" ? (d.line_code || "") : ""),
+          supplier_name: d.supplier_name || (d.process_code === "PURCHASE" ? (d.line_name || "") : ""),
           special_display_order: specialDisplayOrder,
           total_lt_days: null,
           self_lt_days: null,
@@ -464,6 +469,9 @@ const groups = computed(() => {
       if (g.self_lt_days === null && d.self_lt_days !== null && d.self_lt_days !== undefined) {
         g.self_lt_days = Number(d.self_lt_days);
       }
+      if (d.is_virtual_set) g.is_virtual_set = true;
+      if (!g.supplier_code && d.supplier_code) g.supplier_code = d.supplier_code;
+      if (!g.supplier_name && d.supplier_name) g.supplier_name = d.supplier_name;
     if (!g.cells[d.plan_date]) {
       g.cells[d.plan_date] = {
         forecast: 0,
@@ -519,11 +527,14 @@ const groups = computed(() => {
     c.progress += Number(d.progress_qty || 0);
   }
   const result = Array.from(map.values());
-  result.sort((a, b) =>
-    compareBySpecialOrderThenProductCode(a, b, {
+  result.sort((a, b) => {
+    const aVirtual = Boolean(a?.is_virtual_set);
+    const bVirtual = Boolean(b?.is_virtual_set);
+    if (aVirtual !== bVirtual) return aVirtual ? 1 : -1;
+    return compareBySpecialOrderThenProductCode(a, b, {
       codeGetter: (item) => item.product_code || "",
-    })
-  );
+    });
+  });
   return result;
 });
 
@@ -533,6 +544,29 @@ const fmt = (n) => {
   if (Number.isNaN(num)) return "";
   if (num === 0) return "";
   return num.toLocaleString();
+};
+
+const isPurchaseProcessGroup = (group) => String(group?.process_code || "").toUpperCase() === "PURCHASE";
+
+const normalizePurchaseSupplierName = (name) => {
+  const raw = String(name || "").trim();
+  if (!raw) return "";
+  return raw.startsWith("仕入:") ? raw.slice(3).trim() : raw;
+};
+
+const getDisplayProcessName = (group) => {
+  if (isPurchaseProcessGroup(group)) {
+    const name = group?.supplier_name || group?.line_name || "";
+    return normalizePurchaseSupplierName(name);
+  }
+  return group?.process_name || "";
+};
+
+const getDisplayProcessCode = (group) => {
+  if (isPurchaseProcessGroup(group)) {
+    return group?.supplier_code || group?.line_code || "";
+  }
+  return group?.process_code || "";
 };
 
 const monthKey = (dateStr) => String(dateStr || "").slice(0, 7);
@@ -914,6 +948,11 @@ onUpdated(() => {
   align-items: flex-start;
   gap: 12px;
   flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: #f5f5e6;
+  padding: 6px 0;
 }
 .page-actions {
   display: flex;
