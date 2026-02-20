@@ -145,6 +145,7 @@ class Line(models.Model):
         db_table = 'm_line'
         verbose_name = 'ライン'
         verbose_name_plural = 'ライン'
+        ordering = ['line_code']
 
     def __str__(self):
         return f"{self.line_code} - {self.line_name}"
@@ -160,6 +161,7 @@ class Supplier(models.Model):
         db_table = 'm_supplier'
         verbose_name = '仕入先'
         verbose_name_plural = '仕入先'
+        ordering = ['supplier_code']
 
     def __str__(self):
         return f"{self.supplier_code} - {self.supplier_name}"
@@ -178,6 +180,7 @@ class Calendar(models.Model):
         db_table = 'm_calendar'
         verbose_name = 'カレンダ'
         verbose_name_plural = 'カレンダ'
+        ordering = ['calendar_code']
 
     def __str__(self):
         return f"{self.calendar_code} - {self.calendar_name}"
