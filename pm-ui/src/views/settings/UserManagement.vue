@@ -10,6 +10,42 @@
           placeholder="ユーザー名/氏名/メールで検索"
           @keyup.enter="loadUsers"
         />
+        <select v-model="filterDepartmentId" class="search-select">
+          <option :value="''">部署: すべて</option>
+          <option value="__unset__">部署: 未設定</option>
+          <option v-for="dept in filterDepartmentOptions" :key="dept.value" :value="String(dept.value)">
+            {{ dept.label }}
+          </option>
+        </select>
+        <select v-model="filterGroupId" class="search-select">
+          <option value="">係: すべて</option>
+          <option value="__unset__">係: 未設定</option>
+          <option v-for="grp in filterGroupOptions" :key="grp.value" :value="String(grp.value)">
+            {{ grp.label }}
+          </option>
+        </select>
+        <select v-model="filterTeamId" class="search-select">
+          <option value="">班: すべて</option>
+          <option value="__unset__">班: 未設定</option>
+          <option v-for="tm in filterTeamOptions" :key="tm.value" :value="String(tm.value)">
+            {{ tm.label }}
+          </option>
+        </select>
+        <select v-model="filterPosition" class="search-select">
+          <option value="">役職: すべて</option>
+          <option value="__unset__">役職: 未設定</option>
+          <option v-for="pos in positionOptions" :key="pos" :value="pos">
+            {{ pos }}
+          </option>
+        </select>
+        <label class="filter-check">
+          <input v-model="filterActiveOnly" type="checkbox" />
+          有効のみ
+        </label>
+        <label class="filter-check">
+          <input v-model="filterInactiveOnly" type="checkbox" />
+          無効のみ
+        </label>
         <button class="btn" @click="loadUsers" :disabled="loading">
           更新
         </button>
@@ -25,9 +61,12 @@
       </div>
       <div v-else class="user-grid">
         <section class="user-list">
-          <h3 class="section-title">ユーザー一覧</h3>
+          <h3 class="section-title">
+            ユーザー一覧
+            <span class="count-text">（{{ filteredUsers.length }} / {{ users.length }}件）</span>
+          </h3>
           <div v-if="loading" class="helper-text">読み込み中...</div>
-          <div v-else-if="users.length === 0" class="helper-text">ユーザーがありません。</div>
+          <div v-else-if="filteredUsers.length === 0" class="helper-text">該当ユーザーがありません。</div>
           <table v-else class="data-table">
             <thead>
               <tr>
@@ -40,7 +79,7 @@
             </thead>
             <tbody>
               <tr
-                v-for="user in users"
+                v-for="user in filteredUsers"
                 :key="user.id"
                 :class="{ active: user.id === selectedUserId }"
                 @click="selectUser(user)"
@@ -198,7 +237,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
@@ -214,6 +253,12 @@ const saving = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
 const searchKeyword = ref('')
+const filterDepartmentId = ref('')
+const filterGroupId = ref('')
+const filterTeamId = ref('')
+const filterPosition = ref('')
+const filterActiveOnly = ref(false)
+const filterInactiveOnly = ref(false)
 const selectedUserId = ref(null)
 const isCreating = ref(false)
 const passwordConfirm = ref('')
@@ -298,7 +343,101 @@ const departmentOptions = computed(() =>
   }))
 )
 
+const filterDepartmentOptions = computed(() =>
+  departments.value
+    .filter((dept) => dept.level === 'division')
+    .map((dept) => ({
+      value: dept.id,
+      label: `${dept.name} (${levelLabels[dept.level] || dept.level})`,
+    }))
+)
+
 const positionOptions = computed(() => positions.value)
+
+const filterGroupOptions = computed(() => {
+  const targetDepartment = filterDepartmentId.value
+  return allGroups.value
+    .filter((grp) => !targetDepartment || String(grp.parent ?? '') === targetDepartment)
+    .map((grp) => ({
+      value: grp.id,
+      label: grp.name,
+    }))
+})
+
+const filterTeamOptions = computed(() => {
+  const targetDepartment = filterDepartmentId.value
+  const targetGroup = filterGroupId.value
+  if (targetGroup) {
+    return allTeams.value
+      .filter((tm) => String(tm.parent ?? '') === targetGroup)
+      .map((tm) => ({
+        value: tm.id,
+        label: tm.name,
+      }))
+  }
+  if (targetDepartment) {
+    const groupIds = new Set(
+      allGroups.value
+        .filter((grp) => String(grp.parent ?? '') === targetDepartment)
+        .map((grp) => String(grp.id))
+    )
+    return allTeams.value
+      .filter((tm) => groupIds.has(String(tm.parent ?? '')))
+      .map((tm) => ({
+        value: tm.id,
+        label: tm.name,
+      }))
+  }
+  return allTeams.value.map((tm) => ({
+    value: tm.id,
+    label: tm.name,
+  }))
+})
+
+const filteredUsers = computed(() => {
+  const targetDepartment = filterDepartmentId.value
+  const targetGroup = filterGroupId.value
+  const targetTeam = filterTeamId.value
+  const targetPosition = filterPosition.value
+  return users.value.filter((user) => {
+    const departmentValue = String(user.profile?.department ?? '')
+    const groupValue = String(user.profile?.group ?? '')
+    const teamValue = String(user.profile?.team ?? '')
+    const positionValue = String(user.profile?.position ?? '')
+
+    if (targetDepartment && targetDepartment !== '__unset__' && departmentValue !== targetDepartment) {
+      return false
+    }
+    if (targetDepartment === '__unset__' && departmentValue) {
+      return false
+    }
+    if (targetGroup && targetGroup !== '__unset__' && groupValue !== targetGroup) {
+      return false
+    }
+    if (targetGroup === '__unset__' && groupValue) {
+      return false
+    }
+    if (targetTeam && targetTeam !== '__unset__' && teamValue !== targetTeam) {
+      return false
+    }
+    if (targetTeam === '__unset__' && teamValue) {
+      return false
+    }
+    if (targetPosition && targetPosition !== '__unset__' && positionValue !== targetPosition) {
+      return false
+    }
+    if (targetPosition === '__unset__' && positionValue) {
+      return false
+    }
+    if (filterInactiveOnly.value && user.is_active) {
+      return false
+    }
+    if (filterActiveOnly.value && !filterInactiveOnly.value && !user.is_active) {
+      return false
+    }
+    return true
+  })
+})
 
 const divisionOptions = computed(() =>
   divisions.value.map((div) => ({
@@ -570,6 +709,15 @@ onMounted(async () => {
     loadUsers(),
   ])
 })
+
+watch(filterDepartmentId, () => {
+  filterGroupId.value = ''
+  filterTeamId.value = ''
+})
+
+watch(filterGroupId, () => {
+  filterTeamId.value = ''
+})
 </script>
 
 <style scoped>
@@ -590,6 +738,12 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.count-text {
+  font-size: 12px;
+  color: #666;
+  font-weight: 500;
 }
 
 .mode-badge {
@@ -635,6 +789,23 @@ onMounted(async () => {
   padding: 4px 8px;
   font-size: 12px;
   min-width: 220px;
+}
+
+.search-select {
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  min-width: 170px;
+}
+
+.filter-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #333;
+  white-space: nowrap;
 }
 
 .btn {
@@ -761,3 +932,4 @@ onMounted(async () => {
   }
 }
 </style>
+
