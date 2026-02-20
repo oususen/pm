@@ -171,10 +171,16 @@
             <td :class="{ over: item.excess_purchase_qty > 0 }">{{ item.excess_purchase_qty }}</td>
             <td :class="{ over: item.excess_production_qty > 0 }">{{ item.excess_production_qty }}</td>
             <td v-if="editingId !== item.id">
+              <button class="btn-secondary" type="button" @click="recalculateCase(item.case_id)" :disabled="Boolean(recalculatingByCase[item.case_id])">
+                {{ recalculatingByCase[item.case_id] ? "再計算中..." : "再計算" }}
+              </button>
               <button class="btn-secondary" type="button" @click="startEdit(item)">編集</button>
               <button class="btn-danger" type="button" @click="removeRecord(item.id)">削除</button>
             </td>
             <td v-else>
+              <button class="btn-secondary" type="button" @click="recalculateCase(item.case_id)" :disabled="Boolean(recalculatingByCase[item.case_id])">
+                {{ recalculatingByCase[item.case_id] ? "再計算中..." : "再計算" }}
+              </button>
               <button class="btn-primary" type="button" @click="saveEdit(item.id)">保存</button>
               <button class="btn-secondary" type="button" @click="cancelEdit">取消</button>
               <button class="btn-danger" type="button" @click="removeRecord(item.id)">削除</button>
@@ -218,6 +224,7 @@ const products = ref([]);
 const processing = ref(false);
 const editingId = ref(null);
 const showCreateForm = ref(false);
+const recalculatingByCase = ref({});
 const editForm = reactive({
   case_name: "",
   old_part_code: "",
@@ -322,6 +329,23 @@ const removeRecord = async (id) => {
   } catch (e) {
     console.error("設変削除失敗", e);
     alert("削除に失敗しました。");
+  }
+};
+
+const recalculateCase = async (caseId) => {
+  if (!caseId) return;
+  if (recalculatingByCase.value[caseId]) return;
+  recalculatingByCase.value = { ...recalculatingByCase.value, [caseId]: true };
+  try {
+    await api.engineeringChanges.recalculateCase(caseId);
+    await loadRecords();
+  } catch (e) {
+    console.error("設変案件再計算失敗", e);
+    alert("再計算に失敗しました。");
+  } finally {
+    const next = { ...recalculatingByCase.value };
+    delete next[caseId];
+    recalculatingByCase.value = next;
   }
 };
 

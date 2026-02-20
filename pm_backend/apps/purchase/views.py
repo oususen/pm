@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 
 from masters.models import BOMItem, Product
 from production.models_line_backlog import LineBacklog
+from production.inventory.inventory_calculator import recalculate_inventory_for_line
 
 from .models import EngineeringChangeCase, EngineeringChangePart, PurchasePlanLockSetting
 from .serializers import PurchasePlanLockSettingSerializer
@@ -260,3 +261,51 @@ class EngineeringChangePartDetailView(APIView):
 
         serializer = PurchasePlanLockSettingSerializer(setting)
         return Response(serializer.data)
+
+
+class EngineeringChangeCaseRecalculateView(APIView):
+    def post(self, request, case_id: int):
+        today = date.today()
+        parts = list(
+            EngineeringChangePart.objects
+            .select_related('old_part')
+            .filter(case_id=case_id)
+        )
+        if not parts:
+            return Response({'detail': 'case not found or no parts'}, status=status.HTTP_404_NOT_FOUND)
+
+        switch_dates = [p.switch_date for p in parts if p.switch_date]
+        end_date = max(switch_dates) if switch_dates else today
+        if end_date < today:
+            end_date = today
+
+        old_part_ids = [p.old_part_id for p in parts]
+        line_ids = {p.old_part.line_id for p in parts if getattr(p.old_part, 'line_id', None)}
+        if not line_ids:
+            line_ids = set(
+                LineBacklog.objects.filter(
+                    product_id__in=old_part_ids,
+                    plan_date__gte=today,
+                    plan_date__lte=end_date,
+                ).values_list('line_id', flat=True)
+            )
+            line_ids.discard(None)
+
+        recalculated = 0
+        for line_id in sorted(line_ids):
+            recalculate_inventory_for_line(
+                line_id=line_id,
+                start_date=today,
+                end_date=end_date,
+                include_progress=True,
+                line_final_only=False,
+            )
+            recalculated += 1
+
+        return Response({
+            'detail': 'recalculated',
+            'case_id': case_id,
+            'line_count': recalculated,
+            'start_date': str(today),
+            'end_date': str(end_date),
+        })

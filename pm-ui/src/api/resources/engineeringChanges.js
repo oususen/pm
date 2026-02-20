@@ -8,6 +8,9 @@ export const createEngineeringChangesAPI = (client) => ({
   updatePart(id, payload) {
     return client.put(`/engineering-changes/parts/${id}/`, payload)
   },
+  recalculateCase(caseId) {
+    return client.post(`/engineering-changes/cases/${caseId}/recalculate/`)
+  },
   deletePart(id) {
     return client.delete(`/engineering-changes/parts/${id}/`)
   },
