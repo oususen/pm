@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2 class="page-title">ユーザー管理</h2>
+      <h2 class="page-title">ユーザー権限編集</h2>
       <div class="page-actions">
         <input
           v-model="searchKeyword"
@@ -181,6 +181,55 @@
               <label>有効</label>
               <input v-model="form.is_active" type="checkbox" />
             </div>
+            <div class="form-row inline">
+              <label>backendスタッフ</label>
+              <input v-model="form.is_staff" type="checkbox" />
+            </div>
+            <div class="form-row inline">
+              <label>管理者</label>
+              <input v-model="form.is_superuser" type="checkbox" />
+            </div>
+
+            <div class="form-row full permission-section">
+              <div class="permission-header">
+                <label>ユーザー個別 権限設定</label>
+                <label class="permission-toggle">
+                  <input v-model="useUserPermissions" type="checkbox" :disabled="!canManagePermissions" />
+                  個別権限を使う
+                </label>
+              </div>
+              <table class="permission-table" :class="{ disabled: !useUserPermissions || !canManagePermissions }">
+                <thead>
+                  <tr>
+                    <th>機能</th>
+                    <th>閲覧</th>
+                    <th>編集</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="perm in form.permissions" :key="perm.resource">
+                    <td>{{ getPermissionLabel(perm.resource) }}</td>
+                    <td>
+                      <input
+                        type="checkbox"
+                        v-model="perm.can_view"
+                        @change="onPermissionChange(perm, 'can_view')"
+                        :disabled="!useUserPermissions || !canManagePermissions"
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="checkbox"
+                        v-model="perm.can_edit"
+                        @change="onPermissionChange(perm, 'can_edit')"
+                        :disabled="!useUserPermissions || !canManagePermissions"
+                      />
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
             <div class="form-actions">
               <button type="submit" class="btn primary" :disabled="saving || !canManageBasic">
                 {{ saving ? '保存中...' : '保存' }}
@@ -217,6 +266,7 @@ const searchKeyword = ref('')
 const selectedUserId = ref(null)
 const isCreating = ref(false)
 const passwordConfirm = ref('')
+const useUserPermissions = ref(false)
 
 const roleOptions = [
   { value: 'staff', label: '一般' },
@@ -230,6 +280,42 @@ const employmentOptions = [
   { value: 'skilled', label: '特定技能実習生' },
   { value: 'intern', label: '実習生' },
   { value: 'temporary', label: '人材派遣' },
+]
+
+const permissionResources = [
+  { value: 'dashboard', label: 'ダッシュボード' },
+  { value: 'orders', label: '受注' },
+  { value: 'production', label: '生産' },
+  { value: 'production.process_input', label: '生産: 工程作業入力' },
+  { value: 'production.scrap_record', label: '生産: 仕損品記録' },
+  { value: 'production.plan_input', label: '生産: 生産計画入力' },
+  { value: 'production.inventory', label: '生産: 在庫/残量一覧' },
+  { value: 'production.scrap_history', label: '生産: 仕損履歴' },
+  { value: 'production.progress', label: '生産: 進捗管理' },
+  { value: 'production.line_demands', label: '生産: ライン需要一覧' },
+  { value: 'production.line_calendars', label: '生産: ライン勤務カレンダ' },
+  { value: 'production.stock_allocations', label: '生産: 在庫引当' },
+  { value: 'production.orders', label: '生産: 製造指示' },
+  { value: 'production.sequence_board', label: '生産: ミックス順序ボード' },
+  { value: 'production.line_monitor', label: '生産: ライン稼働監視' },
+  { value: 'production.mobile_input', label: '生産: モバイル作業入力（ライン）' },
+  { value: 'purchase', label: '仕入' },
+  { value: 'shipping', label: '出荷' },
+  { value: 'inventory', label: '在庫' },
+  { value: 'quality', label: '品質' },
+  { value: 'notifications', label: '通知作成' },
+  { value: 'masters', label: 'マスタ' },
+  { value: 'settings', label: '設定' },
+  { value: 'settings.profile', label: '設定: プロフィール編集' },
+  { value: 'settings.users', label: '設定: ユーザー管理' },
+  { value: 'settings.user_permissions', label: '設定: ユーザー権限編集' },
+  { value: 'settings.permission_templates', label: '設定: 権限テンプレート' },
+  { value: 'settings.smtp', label: '設定: SMTP設定' },
+  { value: 'settings.purchase_plan_lock', label: '設定: 仕入計画ロック設定' },
+  { value: 'settings.production_plan_lock', label: '設定: 生産計画ロック設定' },
+  { value: 'settings.scheduled_tasks', label: '設定: 定時タスク設定' },
+  { value: 'settings.stocktake_init', label: '設定: 棚卸初期化' },
+  { value: 'manual', label: 'マニュアル' },
 ]
 
 const roleLabels = roleOptions.reduce((acc, option) => {
@@ -255,6 +341,13 @@ const emptyProfile = () => ({
   joined_on: '',
 })
 
+const emptyPermissions = () =>
+  permissionResources.map((resource) => ({
+    resource: resource.value,
+    can_view: false,
+    can_edit: false,
+  }))
+
 const form = reactive({
   id: null,
   username: '',
@@ -266,6 +359,7 @@ const form = reactive({
   is_superuser: false,
   password: '',
   profile: emptyProfile(),
+  permissions: emptyPermissions(),
 })
 
 const passwordHint = computed(() => (isCreating.value ? '必須' : '変更時のみ入力'))
@@ -287,8 +381,15 @@ const canManageBasic = computed(() => {
   return canAccessByResource('settings.users', 'view')
 })
 
+const canManagePermissions = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
+  return canAccessByResource('settings.user_permissions', 'edit')
+})
+
 const isAdminUser = computed(() => {
-  return canManageBasic.value
+  return canManageBasic.value || canManagePermissions.value
 })
 
 const departmentOptions = computed(() =>
@@ -334,6 +435,32 @@ const teamOptions = computed(() => {
 const getUserDisplayName = (user) => {
   const fullName = `${user.last_name || ''} ${user.first_name || ''}`.trim()
   return fullName || user.username || user.email || '-'
+}
+
+const getPermissionLabel = (resource) => {
+  const found = permissionResources.find((item) => item.value === resource)
+  return found ? found.label : resource
+}
+
+const buildPermissions = (permissions) => {
+  const list = Array.isArray(permissions) ? permissions : []
+  return permissionResources.map((resource) => {
+    const existing = list.find((perm) => perm.resource === resource.value)
+    return {
+      resource: resource.value,
+      can_view: Boolean(existing?.can_view),
+      can_edit: Boolean(existing?.can_edit),
+    }
+  })
+}
+
+const onPermissionChange = (perm, field) => {
+  if (field === 'can_edit' && perm.can_edit) {
+    perm.can_view = true
+  }
+  if (field === 'can_view' && !perm.can_view) {
+    perm.can_edit = false
+  }
 }
 
 const onDivisionChange = () => {
@@ -433,6 +560,8 @@ const selectUser = (user) => {
     ...emptyProfile(),
     ...(user.profile || {}),
   }
+  form.permissions = buildPermissions(user.permissions)
+  useUserPermissions.value = Array.isArray(user.permissions) && user.permissions.length > 0
   if (form.profile.department === undefined) {
     form.profile.department = user.profile?.department_id || null
   }
@@ -451,6 +580,8 @@ const resetForm = () => {
     form.password = ''
     passwordConfirm.value = ''
     form.profile = emptyProfile()
+    form.permissions = emptyPermissions()
+    useUserPermissions.value = false
     return
   }
 
@@ -486,6 +617,16 @@ const buildPayload = () => {
     is_staff: form.is_staff,
     is_superuser: form.is_superuser,
     profile,
+  }
+
+  if (canManagePermissions.value) {
+    payload.permissions = useUserPermissions.value
+      ? form.permissions.map((perm) => ({
+          resource: perm.resource,
+          can_view: Boolean(perm.can_view),
+          can_edit: Boolean(perm.can_edit),
+        }))
+      : []
   }
 
   if (form.password) {
@@ -692,6 +833,28 @@ onMounted(async () => {
   flex-direction: row;
   align-items: center;
   gap: 6px;
+}
+
+.permission-section {
+  margin-top: 6px;
+}
+
+.permission-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.permission-table th,
+.permission-table td {
+  border: 1px solid #d6d6d6;
+  padding: 4px 6px;
+  text-align: center;
+}
+
+.permission-table th {
+  background: #f4f6ff;
+  font-weight: 600;
 }
 
 .form-row label {

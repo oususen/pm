@@ -274,7 +274,19 @@ import { hasPermission } from '@/router'
 const configs = ref([])
 const saving = reactive(new Set())
 const running = reactive(new Set())
-const canEdit = computed(() => hasPermission(authState.user, 'settings', 'edit'))
+const canEdit = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
+
+  const permissions = Array.isArray(user.effective_permissions)
+    ? user.effective_permissions
+    : []
+  if (permissions.some((item) => item.resource === 'settings.scheduled_tasks')) {
+    return hasPermission(user, 'settings.scheduled_tasks', 'edit')
+  }
+  return hasPermission(user, 'settings', 'edit')
+})
 const userList = ref([])
 
 const autoPlanConfigs = computed(() =>

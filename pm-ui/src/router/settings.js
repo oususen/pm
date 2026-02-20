@@ -15,13 +15,19 @@ const settings = [
     path: "/settings/users",
     name: "UserManagement",
     component: () => import("@/views/settings/UserManagement.vue"),
-    meta: { pageTitle: "ユーザー管理", resource: "users" },
+    meta: { pageTitle: "ユーザー管理", resource: "settings.users" },
+  },
+  {
+    path: "/settings/user-permissions",
+    name: "UserPermissionManagement",
+    component: () => import("@/views/settings/UserPermissionManagement.vue"),
+    meta: { pageTitle: "ユーザー権限編集", resource: "settings.user_permissions" },
   },
   {
     path: "/settings/permission-templates",
     name: "PermissionTemplates",
     component: () => import("@/views/settings/PermissionTemplates.vue"),
-    meta: { pageTitle: "権限テンプレート", resource: "settings" },
+    meta: { pageTitle: "権限テンプレート", resource: "settings.permission_templates" },
   },
   {
     path: "/settings/smtp",

@@ -120,8 +120,6 @@ def _build_effective_permissions(user):
         perm = permission_map.get(resource)
         if perm:
             result.append(perm)
-        else:
-            result.append({'resource': resource, 'can_view': False, 'can_edit': False})
     return result
 
 

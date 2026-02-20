@@ -57,9 +57,6 @@
         <div v-if="templateError" class="alert alert-danger">
           {{ templateError }}
         </div>
-        <div v-if="templateSuccess" class="alert alert-success">
-          {{ templateSuccess }}
-        </div>
 
         <div v-if="templateLoading" class="helper-text">読み込み中...</div>
 
@@ -73,7 +70,7 @@
           </thead>
           <tbody>
             <tr v-for="perm in templatePermissions" :key="perm.resource">
-              <td>{{ getPermissionLabel(perm.resource) }}</td>
+              <td :class="getPermissionCellClass(perm)">{{ getPermissionLabel(perm.resource) }}</td>
               <td>
                 <input
                   type="checkbox"
@@ -95,6 +92,9 @@
         </table>
 
         <div class="form-actions">
+          <div v-if="templateSuccess" class="save-message success">
+            {{ templateSuccess }}
+          </div>
           <button type="button" class="btn primary" @click="saveTemplate" :disabled="templateSaving">
             {{ templateSaving ? '保存中...' : '保存' }}
           </button>
@@ -121,9 +121,6 @@
         <div v-if="departmentTemplateError" class="alert alert-danger">
           {{ departmentTemplateError }}
         </div>
-        <div v-if="departmentTemplateSuccess" class="alert alert-success">
-          {{ departmentTemplateSuccess }}
-        </div>
 
         <div v-if="departmentTemplateLoading" class="helper-text">読み込み中...</div>
 
@@ -137,7 +134,7 @@
           </thead>
           <tbody>
             <tr v-for="perm in departmentTemplatePermissions" :key="perm.resource">
-              <td>{{ getPermissionLabel(perm.resource) }}</td>
+              <td :class="getPermissionCellClass(perm)">{{ getPermissionLabel(perm.resource) }}</td>
               <td>
                 <input
                   type="checkbox"
@@ -159,6 +156,9 @@
         </table>
 
         <div class="form-actions">
+          <div v-if="departmentTemplateSuccess" class="save-message success">
+            {{ departmentTemplateSuccess }}
+          </div>
           <button type="button" class="btn primary" @click="saveDepartmentTemplate" :disabled="departmentTemplateSaving">
             {{ departmentTemplateSaving ? '保存中...' : '保存' }}
           </button>
@@ -195,9 +195,6 @@
         <div v-if="positionTemplateError" class="alert alert-danger">
           {{ positionTemplateError }}
         </div>
-        <div v-if="positionTemplateSuccess" class="alert alert-success">
-          {{ positionTemplateSuccess }}
-        </div>
 
         <div v-if="positionTemplateLoading" class="helper-text">読み込み中...</div>
 
@@ -211,7 +208,7 @@
           </thead>
           <tbody>
             <tr v-for="perm in positionTemplatePermissions" :key="perm.resource">
-              <td>{{ getPermissionLabel(perm.resource) }}</td>
+              <td :class="getPermissionCellClass(perm)">{{ getPermissionLabel(perm.resource) }}</td>
               <td>
                 <input
                   type="checkbox"
@@ -233,6 +230,9 @@
         </table>
 
         <div class="form-actions">
+          <div v-if="positionTemplateSuccess" class="save-message success">
+            {{ positionTemplateSuccess }}
+          </div>
           <button type="button" class="btn primary" @click="savePositionTemplate" :disabled="positionTemplateSaving">
             {{ positionTemplateSaving ? '保存中...' : '保存' }}
           </button>
@@ -301,7 +301,15 @@ const departmentTemplatePermissions = ref([])
     { value: 'notifications', label: '通知' },
     { value: 'masters', label: 'マスタ' },
     { value: 'settings', label: '設定' },
-  { value: 'users', label: 'ユーザー管理' },
+  { value: 'settings.profile', label: '設定: プロフィール編集' },
+  { value: 'settings.users', label: '設定: ユーザー管理' },
+  { value: 'settings.user_permissions', label: '設定: ユーザー権限編集' },
+  { value: 'settings.permission_templates', label: '設定: 権限テンプレート' },
+  { value: 'settings.smtp', label: '設定: SMTP設定' },
+  { value: 'settings.purchase_plan_lock', label: '設定: 仕入計画ロック設定' },
+  { value: 'settings.production_plan_lock', label: '設定: 生産計画ロック設定' },
+  { value: 'settings.scheduled_tasks', label: '設定: 定時タスク設定' },
+  { value: 'settings.stocktake_init', label: '設定: 棚卸初期化' },
   { value: 'manual', label: 'マニュアル' },
 ]
 
@@ -312,10 +320,16 @@ const levelLabels = {
 }
 
 const isAdminUser = computed(() => {
-  // is_staff/is_superuser または settings リソースの編集権限があるユーザー
+  // is_staff/is_superuser または権限テンプレート編集権限があるユーザー
   const user = authState.user
   if (!user) return false
   if (user.is_staff || user.is_superuser) return true
+  // 新リソース優先、未設定時は従来の settings 編集権限にフォールバック
+  const hasSpecificEntry = Array.isArray(user.effective_permissions)
+    && user.effective_permissions.some((item) => item.resource === 'settings.permission_templates')
+  if (hasSpecificEntry) {
+    return hasPermission(user, 'settings.permission_templates', 'edit')
+  }
   return hasPermission(user, 'settings', 'edit')
 })
 
@@ -331,6 +345,12 @@ const departmentOptions = computed(() =>
 const getPermissionLabel = (resource) => {
   const found = permissionResources.find((item) => item.value === resource)
   return found ? found.label : resource
+}
+
+const getPermissionCellClass = (perm) => {
+  if (perm.can_edit) return 'permission-cell-edit'
+  if (perm.can_view) return 'permission-cell-view'
+  return ''
 }
 
 const emptyPermissions = () =>
@@ -747,6 +767,19 @@ onMounted(async () => {
   text-align: center;
 }
 
+.permission-table th:first-child,
+.permission-table td:first-child {
+  text-align: right;
+}
+
+.permission-table td.permission-cell-edit {
+  background: #9ed7a5;
+}
+
+.permission-table td.permission-cell-view {
+  background: #9fbcf7;
+}
+
 .permission-table th {
   background: #f4f6ff;
   font-weight: 600;
@@ -755,7 +788,21 @@ onMounted(async () => {
 .form-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
   margin-top: 8px;
+}
+
+.save-message {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.save-message.success {
+  background: #e7f6e9;
+  color: #1a7f37;
+  border: 1px solid #b7dfb9;
 }
 
 .btn {

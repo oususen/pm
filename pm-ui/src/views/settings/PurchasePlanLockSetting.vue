@@ -26,7 +26,19 @@ import { hasPermission } from '@/router'
 
 const lockDays = ref(0)
 const saving = ref(false)
-const canEdit = computed(() => hasPermission(authState.user, 'settings', 'edit'))
+const canEdit = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
+
+  const permissions = Array.isArray(user.effective_permissions)
+    ? user.effective_permissions
+    : []
+  if (permissions.some((item) => item.resource === 'settings.purchase_plan_lock')) {
+    return hasPermission(user, 'settings.purchase_plan_lock', 'edit')
+  }
+  return hasPermission(user, 'settings', 'edit')
+})
 
 const loadSetting = async () => {
   try {
@@ -124,3 +136,4 @@ onMounted(loadSetting)
   border-color: #3865c7;
 }
 </style>
+

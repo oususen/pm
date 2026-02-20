@@ -116,7 +116,19 @@ const importResult = ref(null);
 const initResult = ref(null);
 
 const running = computed(() => importing.value || initializing.value);
-const canEdit = computed(() => hasPermission(authState.user, "settings", "edit"));
+const canEdit = computed(() => {
+  const user = authState.user;
+  if (!user) return false;
+  if (user.is_staff || user.is_superuser) return true;
+
+  const permissions = Array.isArray(user.effective_permissions)
+    ? user.effective_permissions
+    : [];
+  if (permissions.some((item) => item.resource === "settings.stocktake_init")) {
+    return hasPermission(user, "settings.stocktake_init", "edit");
+  }
+  return hasPermission(user, "settings", "edit");
+});
 
 const onFileChange = (event) => {
   selectedFile.value = event.target.files?.[0] || null;
