@@ -127,7 +127,7 @@ class EngineeringChangeView(APIView):
                 'switch_prod_planned_progress_qty': switch_prod_planned_progress_qty,
                 'stock_qty': stock_qty,
                 'progress_qty': progress_qty,
-                'excess_purchase_qty': purchase_plan_qty - required,
+                'excess_purchase_qty': purchase_plan_qty - required_until_switch_qty,
                 'excess_production_qty': production_plan_qty - required,
             })
         return Response(rows)
