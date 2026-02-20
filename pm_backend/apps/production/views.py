@@ -2218,7 +2218,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if plan_qty_provided:
                     # plan_idを生成: 製品コード_YYYYMMDD_数量_順番
                     # gantt_planning.pyと同じフォーマットを使用
-                    from datetime import datetime
                     plan_date_obj = parse_plan_date(plan_date)
 
                     # 数量ラベルを生成（小数点以下の0を除去、小数点を'p'に変換）
