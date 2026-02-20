@@ -2125,7 +2125,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     plan_qty_value = Decimal(str(it['plan_qty'] or 0))
                     if plan_qty_value == 0:
                         # 既存レコードを取得（sequence_noで絞り込み）
-                        _seq_for_zero = it.get('sequence_no') or 1
+                        _seq_for_zero = it.get('sequence_no') if it.get('sequence_no') is not None else 0
                         existing = LineBacklog.objects.filter(
                             plan_date=plan_date,
                             process_id=process_id,
@@ -2195,10 +2195,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                                 )
                                 continue
 
-                # sequence_noを取得（デフォルトは1）
-                sequence_no = it.get('sequence_no', 1)
+                # sequence_noを取得（デフォルトは0）
+                sequence_no = it.get('sequence_no')
                 if sequence_no is None:
-                    sequence_no = 1
+                    sequence_no = 0
 
                 # 既存レコードを取得（sequence_noで絞り込み）
                 existing = LineBacklog.objects.filter(

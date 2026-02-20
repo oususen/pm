@@ -229,7 +229,7 @@ const isPlanCellLocked = (dateKey) => {
 const initDaily = () => {
   const daily = {}
   dateColumns.value.forEach((c) => {
-    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, progress: 0, plan_base: 0, has_row: false }
+    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, progress: 0, plan_base: 0, has_row: false, sequence_no: null }
   })
   return daily
 }
@@ -259,7 +259,7 @@ const savePlan = async () => {
     const process_id = r.process_id || purchaseProcessId.value
     dateColumns.value.forEach((c) => {
       const daily = r.daily[c.key]
-      items.push({
+      const item = {
         product_id: r.product_id,
         process_id: process_id,
         plan_date: c.key,
@@ -267,7 +267,11 @@ const savePlan = async () => {
         actual_qty: Number(daily.actual || 0),
         stock_qty: Number(daily.stock || 0),
         planned_stock_qty: Number(daily.plan_stock || 0),
-      })
+      }
+      if (daily.sequence_no !== null && daily.sequence_no !== undefined) {
+        item.sequence_no = daily.sequence_no
+      }
+      items.push(item)
     })
   })
   if (!items.length) {
@@ -608,6 +612,7 @@ const doPickup = async () => {
         row.daily[dateKey].progress = Number(d.progress_qty || 0)
         row.daily[dateKey].plan_base = Number(d.plan_qty || 0)
         row.daily[dateKey].has_row = true
+        row.daily[dateKey].sequence_no = d.sequence_no ?? null
       }
     })
 
