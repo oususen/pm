@@ -144,6 +144,7 @@
                     data-field="plan"
                     @keydown="onCellKeydown($event, idx, colIdx, 'plan')"
                     :disabled="isPlanCellLocked(c.key)"
+                    :readonly="isHolidayDate(c.key)"
                     :class="{ locked: isPlanCellLocked(c.key) }"
                   />
                   <div
@@ -157,10 +158,11 @@
                       :value="lot.plan_qty === 0 || lot.plan_qty === '' || lot.plan_qty == null ? '' : lot.plan_qty"
                       @input="onExtraPlanInput(row, c.key, lot, $event.target.value)"
                       :disabled="isPlanCellLocked(c.key)"
+                      :readonly="isHolidayDate(c.key)"
                       :class="{ locked: isPlanCellLocked(c.key) }"
                     />
                   </div>
-                  <button class="mini-btn lot-add" type="button" @click="addExtraLot(row, c.key)" :disabled="isPlanCellLocked(c.key)">+</button>
+                  <button class="mini-btn lot-add" type="button" @click="addExtraLot(row, c.key)" :disabled="isPlanCellLocked(c.key) || isHolidayDate(c.key)">+</button>
                 </div>
               </td>
               <td class="num sequence" :class="c.dayClass">
@@ -273,11 +275,12 @@
       </div>
     </div>
     <div class="footer-actions">
-      <button class="btn-secondary">F1: 終了</button>
-      <button class="btn-secondary">F3: クリア</button>
-      <button class="btn-secondary">F5: 備考</button>
+      <button class="btn-secondary" @click="goBack">F1: 戻る</button>
+      <button class="btn-secondary" @click="goForward">F2: 進む</button>
+      <button class="btn-secondary" @click="resetRows" :disabled="processing">F3: クリア</button>
+      <button class="btn-secondary" @click="doPickup" :disabled="processing || !selectedLine">F4: 更新</button>
+      <button class="btn-secondary" @click="resetRows" :disabled="processing">F5: キャンセル</button>
       <button class="btn-secondary" @click="openExportDialog" :disabled="processing || !filteredRows.length">F10: 印刷</button>
-      <button class="btn-secondary">F12: 更新</button>
     </div>
     <div v-if="showChangeReasonDialog" class="modal-overlay" @click.self="closeChangeReasonDialog">
       <div class="modal-content">
@@ -319,8 +322,10 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import ProcessGanttView from './ProcessGanttView.vue'
+const router = useRouter()
 const selectedLine = ref('')
 const toDateInput = (dateObj) => {
   const y = dateObj.getFullYear()
@@ -402,6 +407,15 @@ const isPlanCellLocked = (dateKey) => {
   if (!dateKey) return false
   const target = buildLocalDate(dateKey)
   return target <= lockUntilDate.value && !isEditUnlocked.value
+}
+
+const isHolidayDate = (dateKey) => {
+  if (!dateKey) return false
+  const day = calendarDayMap.value[dateKey]
+  if (day && day.is_working_day === false) return true
+  const target = buildLocalDate(dateKey)
+  const weekday = target.getDay()
+  return weekday === 0 || weekday === 6
 }
 
 const endDate = computed(() => {
@@ -493,6 +507,14 @@ const moveRow = (rowId, direction) => {
 
 const resetRows = () => {
   rows.value = []
+}
+
+const goBack = () => {
+  router.back()
+}
+
+const goForward = () => {
+  router.forward()
 }
 
 const savePlan = async () => {
@@ -721,20 +743,20 @@ const getStockDisplay = (row, colIdx) => {
 
 const focusCellInput = (rowIdx, colIdx, field) => {
   const root = gridWrapperRef.value
-  if (!root) return
+  if (!root) return false
   const selector = `input[data-row="${rowIdx}"][data-col="${colIdx}"][data-field="${field}"]`
   const target = root.querySelector(selector)
-  if (target) {
-    target.focus()
-    if (typeof target.select === 'function') {
-      target.select()
-    }
+  if (!target || target.disabled || target.readOnly) return false
+  target.focus()
+  if (typeof target.select === 'function') {
+    target.select()
   }
+  return true
 }
 
 const onCellKeydown = (event, rowIdx, colIdx, field) => {
   const key = event.key
-  const supportedKeys = ['Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']
+  const supportedKeys = ['Enter', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']
   if (!supportedKeys.includes(key)) return
 
   event.preventDefault()
@@ -744,38 +766,50 @@ const onCellKeydown = (event, rowIdx, colIdx, field) => {
   if (maxRow < 0 || maxCol < 0) return
 
   const fieldOrder = ['plan', 'sequence']
+  const moveHorizontal = (row, col, currentField, forward) => {
+    const fieldIdx = fieldOrder.indexOf(currentField)
+    if (forward) {
+      if (fieldIdx < fieldOrder.length - 1) {
+        return { row, col, field: fieldOrder[fieldIdx + 1] }
+      }
+      return { row, col: col + 1, field: fieldOrder[0] }
+    }
+    if (fieldIdx > 0) {
+      return { row, col, field: fieldOrder[fieldIdx - 1] }
+    }
+    return { row, col: col - 1, field: fieldOrder[fieldOrder.length - 1] }
+  }
+
   let nextRow = rowIdx
   let nextCol = colIdx
   let nextField = field
-
-  if (key === 'Enter') {
-    nextRow += event.shiftKey ? -1 : 1
-  } else if (key === 'ArrowUp') {
-    nextRow -= 1
-  } else if (key === 'ArrowDown') {
-    nextRow += 1
-  } else if (key === 'ArrowLeft') {
-    const fieldIdx = fieldOrder.indexOf(field)
-    if (fieldIdx > 0) {
-      nextField = fieldOrder[fieldIdx - 1]
-    } else {
-      nextCol -= 1
-      nextField = fieldOrder[fieldOrder.length - 1]
-    }
-  } else if (key === 'ArrowRight') {
-    const fieldIdx = fieldOrder.indexOf(field)
-    if (fieldIdx < fieldOrder.length - 1) {
-      nextField = fieldOrder[fieldIdx + 1]
-    } else {
-      nextCol += 1
-      nextField = fieldOrder[0]
-    }
+  let advance
+  if (key === 'ArrowUp' || (key === 'Enter' && event.shiftKey)) {
+    advance = () => ({ row: nextRow - 1, col: nextCol, field: nextField })
+  } else if (key === 'ArrowDown' || key === 'Enter') {
+    advance = () => ({ row: nextRow + 1, col: nextCol, field: nextField })
+  } else if (key === 'ArrowLeft' || (key === 'Tab' && event.shiftKey)) {
+    advance = () => moveHorizontal(nextRow, nextCol, nextField, false)
+  } else {
+    advance = () => moveHorizontal(nextRow, nextCol, nextField, true)
   }
 
-  if (nextRow < 0 || nextRow > maxRow) return
-  if (nextCol < 0 || nextCol > maxCol) return
+  const first = advance()
+  nextRow = first.row
+  nextCol = first.col
+  nextField = first.field
+  const maxAttempts = (maxRow + 1) * (maxCol + 1) * fieldOrder.length
+  let attempts = 0
 
-  focusCellInput(nextRow, nextCol, nextField)
+  while (attempts < maxAttempts) {
+    if (nextRow < 0 || nextRow > maxRow || nextCol < 0 || nextCol > maxCol) return
+    if (focusCellInput(nextRow, nextCol, nextField)) return
+    const moved = advance()
+    nextRow = moved.row
+    nextCol = moved.col
+    nextField = moved.field
+    attempts += 1
+  }
 }
 
 const refreshDates = () => {
@@ -1424,7 +1458,28 @@ const exportToPdf = () => {
 }
 
 const onGlobalKeydown = (event) => {
-  if (event.key === 'F10') {
+  if (event.key === 'F1') {
+    event.preventDefault()
+    goBack()
+  } else if (event.key === 'F2') {
+    event.preventDefault()
+    goForward()
+  } else if (event.key === 'F3') {
+    event.preventDefault()
+    if (!processing.value) resetRows()
+  } else if (event.key === 'F4') {
+    event.preventDefault()
+    if (!processing.value && selectedLine.value) doPickup()
+  } else if (event.key === 'F5') {
+    event.preventDefault()
+    if (showChangeReasonDialog.value) {
+      closeChangeReasonDialog()
+    } else if (showExportDialog.value) {
+      closeExportDialog()
+    } else if (!processing.value) {
+      resetRows()
+    }
+  } else if (event.key === 'F10') {
     event.preventDefault()
     openExportDialog()
   }
