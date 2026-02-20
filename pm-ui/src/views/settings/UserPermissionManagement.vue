@@ -358,6 +358,7 @@ const permissionResources = [
   { value: 'inventory', label: '在庫' },
   { value: 'quality', label: '品質' },
   { value: 'notifications', label: '通知作成' },
+  { value: 'engineering_change', label: '設変' },
   { value: 'masters', label: 'マスタ' },
   { value: 'settings', label: '設定' },
   { value: 'settings.profile', label: '設定: プロフィール編集' },

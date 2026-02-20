@@ -156,6 +156,7 @@ class UserPermission(models.Model):
         ('inventory', '在庫'),
         ('quality', '品質'),
         ('notifications', '通知'),
+        ('engineering_change', '設変'),
         ('masters', 'マスタ'),
         ('settings', '設定'),
         ('settings.profile', '設定: プロフィール編集'),

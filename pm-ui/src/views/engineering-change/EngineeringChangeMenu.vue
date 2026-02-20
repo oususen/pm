@@ -2,8 +2,10 @@
   <div class="master-menu">
     <h2 class="page-title">設変新規管理メニュー</h2>
 
-    <div class="master-grid">
-      <RouterLink to="/engineering-change/new" class="master-tile">
+    <p v-if="!canView" class="helper-text">この画面を閲覧する権限がありません。</p>
+
+    <div v-else class="master-grid">
+      <RouterLink to="/engineering-change/new" class="master-tile" :class="{ disabled: !canEdit }">
         <div class="icon-box">🆕</div>
         <div class="label">新規タイル</div>
       </RouterLink>
@@ -18,7 +20,19 @@
 </template>
 
 <script setup>
+import { computed } from "vue";
+import { authState } from "@/auth";
+import { hasPermission } from "@/router";
 import { RouterLink } from "vue-router";
+
+const canAccessEngineeringChange = (level = "view") => {
+  const user = authState.user;
+  if (!user) return false;
+  return hasPermission(user, "engineering_change", level);
+};
+
+const canView = computed(() => canAccessEngineeringChange("view"));
+const canEdit = computed(() => canAccessEngineeringChange("edit"));
 </script>
 
 <style scoped>
@@ -40,6 +54,10 @@ import { RouterLink } from "vue-router";
   display: grid;
   gap: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+.master-tile.disabled {
+  pointer-events: none;
+  opacity: 0.45;
 }
 .master-tile .icon-box {
   font-size: 22px;

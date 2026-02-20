@@ -2,12 +2,14 @@
   <div class="page">
     <div class="page-header">
       <h2 class="page-title">設変タイル</h2>
-      <button class="btn-primary" type="button" @click="toggleCreateForm">
+      <button class="btn-primary" type="button" @click="toggleCreateForm" :disabled="!canEdit">
         {{ showCreateForm ? "新規作成を閉じる" : "新規作成" }}
       </button>
     </div>
+    <p v-if="!canView" class="helper warning">この画面を閲覧する権限がありません。</p>
+    <p v-else-if="!canEdit" class="helper warning">閲覧のみ可能です（編集権限がありません）。</p>
 
-    <div class="card form-card" v-if="showCreateForm">
+    <div class="card form-card" v-if="showCreateForm && canEdit">
       <h3>設変対象 登録</h3>
       <div class="grid top-grid">
         <label>
@@ -18,7 +20,7 @@
 
       <div class="parts-header">
         <h4>構成部品（複数登録）</h4>
-        <button class="btn-secondary" type="button" @click="addPartRow">部品行を追加</button>
+        <button class="btn-secondary" type="button" @click="addPartRow" :disabled="!canEdit">部品行を追加</button>
       </div>
 
       <div class="parts-table-wrap">
@@ -69,7 +71,7 @@
               <td><input v-model="row.switchDate" type="date" /></td>
               <td><input v-model.number="row.requiredQtyAfterEol" type="number" min="0" step="1" /></td>
               <td>
-                <button class="btn-danger" type="button" @click="removePartRow(row.id)">削除</button>
+                <button class="btn-danger" type="button" @click="removePartRow(row.id)" :disabled="!canEdit">削除</button>
               </td>
             </tr>
           </tbody>
@@ -77,13 +79,13 @@
       </div>
 
       <div class="actions">
-        <button class="btn-primary" type="button" @click="addRecords">一括追加</button>
-        <button class="btn-secondary" type="button" @click="resetForm">クリア</button>
+        <button class="btn-primary" type="button" @click="addRecords" :disabled="!canEdit">一括追加</button>
+        <button class="btn-secondary" type="button" @click="resetForm" :disabled="!canEdit">クリア</button>
         <button class="btn-secondary" type="button" @click="downloadCsv" :disabled="records.length === 0">CSV出力</button>
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" v-if="canView">
       <h3>設変過剰管理一覧</h3>
       <div class="grid list-filters">
         <label>
@@ -171,19 +173,19 @@
             <td :class="{ over: item.excess_purchase_qty > 0 }">{{ item.excess_purchase_qty }}</td>
             <td :class="{ over: item.excess_production_qty > 0 }">{{ item.excess_production_qty }}</td>
             <td v-if="editingId !== item.id">
-              <button class="btn-secondary" type="button" @click="recalculateCase(item.case_id)" :disabled="Boolean(recalculatingByCase[item.case_id])">
+              <button class="btn-secondary" type="button" @click="recalculateCase(item.case_id)" :disabled="!canEdit || Boolean(recalculatingByCase[item.case_id])">
                 {{ recalculatingByCase[item.case_id] ? "再計算中..." : "再計算" }}
               </button>
-              <button class="btn-secondary" type="button" @click="startEdit(item)">編集</button>
-              <button class="btn-danger" type="button" @click="removeRecord(item.id)">削除</button>
+              <button class="btn-secondary" type="button" @click="startEdit(item)" :disabled="!canEdit">編集</button>
+              <button class="btn-danger" type="button" @click="removeRecord(item.id)" :disabled="!canEdit">削除</button>
             </td>
             <td v-else>
-              <button class="btn-secondary" type="button" @click="recalculateCase(item.case_id)" :disabled="Boolean(recalculatingByCase[item.case_id])">
+              <button class="btn-secondary" type="button" @click="recalculateCase(item.case_id)" :disabled="!canEdit || Boolean(recalculatingByCase[item.case_id])">
                 {{ recalculatingByCase[item.case_id] ? "再計算中..." : "再計算" }}
               </button>
-              <button class="btn-primary" type="button" @click="saveEdit(item.id)">保存</button>
+              <button class="btn-primary" type="button" @click="saveEdit(item.id)" :disabled="!canEdit">保存</button>
               <button class="btn-secondary" type="button" @click="cancelEdit">取消</button>
-              <button class="btn-danger" type="button" @click="removeRecord(item.id)">削除</button>
+              <button class="btn-danger" type="button" @click="removeRecord(item.id)" :disabled="!canEdit">削除</button>
             </td>
           </tr>
         </tbody>
@@ -195,6 +197,8 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
+import { authState } from "@/auth";
+import { hasPermission } from "@/router";
 import api from "@/api/client";
 
 const defaultForm = () => ({
@@ -232,6 +236,15 @@ const editForm = reactive({
   switch_date: "",
   required_qty_after_eol: 0,
 });
+
+const canAccessEngineeringChange = (level = "view") => {
+  const user = authState.user;
+  if (!user) return false;
+  return hasPermission(user, "engineering_change", level);
+};
+
+const canView = computed(() => canAccessEngineeringChange("view"));
+const canEdit = computed(() => canAccessEngineeringChange("edit"));
 
 const loadRecords = async () => {
   try {

@@ -7,7 +7,13 @@ from rest_framework.views import APIView
 
 from masters.models import BOMItem, Product
 from production.models_line_backlog import LineBacklog
-from production.inventory.inventory_calculator import recalculate_inventory_for_line
+from production.inventory.inventory_calculator import (
+    _build_firm_order_map,
+    aggregate_scrap_to_backlog,
+    recalculate_planned_stock_qty,
+    recalculate_stock_qty,
+)
+from production.inventory.progress_calculator import recalculate_progress_qty
 
 from .models import EngineeringChangeCase, EngineeringChangePart, PurchasePlanLockSetting
 from .serializers import PurchasePlanLockSettingSerializer
@@ -279,33 +285,50 @@ class EngineeringChangeCaseRecalculateView(APIView):
         if end_date < today:
             end_date = today
 
-        old_part_ids = [p.old_part_id for p in parts]
-        line_ids = {p.old_part.line_id for p in parts if getattr(p.old_part, 'line_id', None)}
-        if not line_ids:
-            line_ids = set(
+        line_products_map = {}
+        target_product_ids = set()
+        for part in parts:
+            product_id = part.old_part_id
+            target_product_ids.add(product_id)
+            line_ids = set()
+            if getattr(part.old_part, 'line_id', None):
+                line_ids.add(part.old_part.line_id)
+            backlog_line_ids = (
                 LineBacklog.objects.filter(
-                    product_id__in=old_part_ids,
+                    product_id=product_id,
                     plan_date__gte=today,
                     plan_date__lte=end_date,
-                ).values_list('line_id', flat=True)
+                )
+                .values_list('line_id', flat=True)
+                .distinct()
             )
-            line_ids.discard(None)
+            line_ids.update([lid for lid in backlog_line_ids if lid])
+            for line_id in line_ids:
+                line_products_map.setdefault(line_id, set()).add(product_id)
 
-        recalculated = 0
-        for line_id in sorted(line_ids):
-            recalculate_inventory_for_line(
-                line_id=line_id,
-                start_date=today,
-                end_date=end_date,
-                include_progress=True,
-                line_final_only=False,
-            )
-            recalculated += 1
+        if not line_products_map:
+            return Response({'detail': 'target lines not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        recalculated_lines = 0
+        recalculated_pairs = 0
+        for line_id in sorted(line_products_map.keys()):
+            # 仕損集計と確定受注マップはライン単位で1回だけ実行
+            aggregate_scrap_to_backlog(line_id, today, end_date)
+            firm_map = _build_firm_order_map(line_id, today, end_date)
+
+            for product_id in sorted(line_products_map[line_id]):
+                recalculate_stock_qty(line_id, product_id, today, end_date, firm_map=firm_map)
+                recalculate_planned_stock_qty(line_id, product_id, today, end_date, firm_map=firm_map)
+                recalculate_progress_qty(line_id, product_id, today, end_date)
+                recalculated_pairs += 1
+            recalculated_lines += 1
 
         return Response({
             'detail': 'recalculated',
             'case_id': case_id,
-            'line_count': recalculated,
+            'line_count': recalculated_lines,
+            'part_count': len(target_product_ids),
+            'target_pairs': recalculated_pairs,
             'start_date': str(today),
             'end_date': str(end_date),
         })
