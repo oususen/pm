@@ -1490,7 +1490,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 defaults={
                     'order_qty': qty_val,
                     'demand_qty_plan': qty_val,
-                    'plan_qty': 0,
                     'sequence_no': 0,
                 }
             )

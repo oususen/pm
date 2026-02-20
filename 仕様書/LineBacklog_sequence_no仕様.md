@@ -7,9 +7,11 @@
 
 ## sequence_no の役割と定義
 
-### 制約（2026-02-08更新）
+### 制約（2026-02-21更新）
 - `NOT NULL` かつ **デフォルト0** とする。
-- `sequence_no = 0` は基礎データ専用（需要・実績・在庫・進度）であり、計画行や実績入力で使用してはならない。
+- `sequence_no = 0` は基礎データの代表行として扱う。
+- **生産計画**では `sequence_no = 0` を計画行として使わない（計画は `sequence_no > 0`）。
+- **購買計画**では同日複数ロット管理を行わないため、`sequence_no = 0` 行に `plan_qty` を入力する運用を許容する。
 - `sequence_no > 0` は計画レコード専用。`plan_qty` / `sequence_no` を持つロットは必ず1以上。
 - `sequence_no = 0` のレコードは削除禁止。計画削除時も温存する。
 - 可能なら DB 側に `CHECK (sequence_no >= 0)` を追加する。
@@ -59,6 +61,7 @@
 
 - **更新ルール**:
   - **需要展開時**: `order_qty` と `demand_qty_plan` のみ更新
+    - `pickup` / `pickup_purchase` は `plan_qty` を更新しない（既存の計画入力値を保持）
   - **実績記録時**: `actual_qty` のみ更新（加算）
   - `plan_qty`, `stock_qty` は他の処理で更新
   - 常に `get_or_create` または `update_or_create` で既存レコードを更新または新規作成
@@ -278,6 +281,7 @@ WHERE line_id = 11
 | 2026-01-14 | 1.0 | 初版作成 | Claude Sonnet 4.5 |
 | 2026-01-14 | 1.1 | 自動採番機能の説明を追加 | Claude Sonnet 4.5 |
 | 2026-02-08 | 1.2 | sequence_no を NOT NULL/デフォルト0とする運用を明記。0は基礎行専用・削除禁止、計画は1以上を使用 | ChatGPT |
+| 2026-02-21 | 1.3 | 生産計画と購買計画での `sequence_no=0` 運用差を明記。`pickup_purchase` が `plan_qty` を更新しないことを追記 | Codex |
 
 ## 関連ドキュメント
 
