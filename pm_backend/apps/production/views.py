@@ -3562,6 +3562,7 @@ class ScheduleConfigView(APIView):
         range_base_day = (request.data.get('range_base_day') or 'TODAY').upper()
         range_days_after = request.data.get('range_days_after', 45)
         is_enabled = request.data.get('is_enabled', True)
+        include_current_month = to_bool(request.data.get('include_current_month', False), False)
         include_next_month = to_bool(request.data.get('include_next_month', True), True)
         include_second_month = to_bool(request.data.get('include_second_month', False), False)
         include_third_month = to_bool(request.data.get('include_third_month', False), False)
@@ -3619,7 +3620,7 @@ class ScheduleConfigView(APIView):
             line_obj = Line.objects.filter(id=line_id, line_type='PROD').first()
             if not line_obj:
                 return Response({'detail': '指定されたラインが見つかりません（生産ラインのみ設定可能）'}, status=status.HTTP_400_BAD_REQUEST)
-            if not (include_next_month or include_second_month or include_third_month):
+            if not (include_current_month or include_next_month or include_second_month or include_third_month):
                 return Response({'detail': '実行期間を1つ以上選択してください'}, status=status.HTTP_400_BAD_REQUEST)
 
         if config_id:
@@ -3637,6 +3638,7 @@ class ScheduleConfigView(APIView):
                     'range_base_day': range_base_day,
                     'range_days_after': range_days_after,
                     'is_enabled': is_enabled,
+                    'include_current_month': include_current_month,
                     'include_next_month': include_next_month,
                     'include_second_month': include_second_month,
                     'include_third_month': include_third_month,
@@ -3650,6 +3652,7 @@ class ScheduleConfigView(APIView):
         config.range_base_day = range_base_day
         config.range_days_after = range_days_after
         config.is_enabled = is_enabled
+        config.include_current_month = include_current_month
         config.include_next_month = include_next_month
         config.include_second_month = include_second_month
         config.include_third_month = include_third_month
@@ -3659,7 +3662,7 @@ class ScheduleConfigView(APIView):
         config.save(update_fields=[
             'scheduled_hour', 'scheduled_minute', 'scheduled_dom',
             'range_base_day', 'range_days_after',
-            'is_enabled', 'include_next_month', 'include_second_month', 'include_third_month',
+            'is_enabled', 'include_current_month', 'include_next_month', 'include_second_month', 'include_third_month',
             'line', 'updated_at', 'updated_by',
         ])
 

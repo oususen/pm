@@ -23,6 +23,8 @@ def _month_range_from(base_date, months_ahead):
 
 def _selected_month_offsets(config):
     months = []
+    if getattr(config, 'include_current_month', False):
+        months.append(0)
     if getattr(config, 'include_next_month', True):
         months.append(1)
     if getattr(config, 'include_second_month', False):

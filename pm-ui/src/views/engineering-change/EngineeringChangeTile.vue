@@ -1,31 +1,18 @@
 <template>
   <div class="page">
-    <h2 class="page-title">設変タイル</h2>
+    <div class="page-header">
+      <h2 class="page-title">設変タイル</h2>
+      <button class="btn-primary" type="button" @click="toggleCreateForm">
+        {{ showCreateForm ? "新規作成を閉じる" : "新規作成" }}
+      </button>
+    </div>
 
-    <div class="card form-card">
+    <div class="card form-card" v-if="showCreateForm">
       <h3>設変対象 登録</h3>
       <div class="grid top-grid">
-        <div class="final-product-field">
-          <div class="field-label">親製品 <span class="required">*</span></div>
-          <input
-            v-model="form.finalProductFilter"
-            type="text"
-            placeholder="品番/品名で絞り込み"
-          />
-          <select v-model="form.finalProductCode" @change="onFinalProductChange">
-            <option value="">選択してください</option>
-            <option
-              v-for="product in filteredFinalProducts"
-              :key="product.id"
-              :value="product.product_code"
-            >
-              {{ product.product_code }} - {{ product.product_name }}
-            </option>
-          </select>
-        </div>
         <label>
-          切替予定日
-          <input v-model="form.switchDate" type="date" />
+          案件名
+          <input v-model="form.caseName" type="text" placeholder="案件名を入力" />
         </label>
       </div>
 
@@ -41,6 +28,7 @@
               <th>旧部品コード</th>
               <th>旧部品名</th>
               <th>新部品コード</th>
+              <th>切替予定日</th>
               <th>打ち切り後必要量</th>
               <th></th>
             </tr>
@@ -78,6 +66,7 @@
                   </select>
                 </div>
               </td>
+              <td><input v-model="row.switchDate" type="date" /></td>
               <td><input v-model.number="row.requiredQtyAfterEol" type="number" min="0" step="1" /></td>
               <td>
                 <button class="btn-danger" type="button" @click="removePartRow(row.id)">削除</button>
@@ -96,16 +85,36 @@
 
     <div class="card">
       <h3>設変過剰管理一覧</h3>
+      <div class="grid list-filters">
+        <label>
+          案件名
+          <input v-model="filters.caseName" type="text" placeholder="案件名で絞り込み" />
+        </label>
+        <label>
+          部品名
+          <input v-model="filters.partName" type="text" placeholder="部品コード/部品名で絞り込み" />
+        </label>
+        <label>
+          切替日の進度
+          <select v-model="filters.switchProgressSign">
+            <option value="all">すべて</option>
+            <option value="plus">＋</option>
+            <option value="minus">－</option>
+            <option value="zero">0</option>
+          </select>
+        </label>
+      </div>
       <div class="summary">
-        <span>件数: {{ records.length }}</span>
+        <span>件数: {{ filteredRecords.length }}</span>
         <span>発注過剰合計: {{ totalExcessPurchaseQty }}</span>
         <span>生産過剰合計: {{ totalExcessProductionQty }}</span>
       </div>
 
-      <table class="table" v-if="records.length">
+      <table class="table" v-if="filteredRecords.length">
         <thead>
           <tr>
-            <th>最終品</th>
+            <th>案件コード</th>
+            <th>案件名</th>
             <th>旧部品</th>
             <th>共用親製品</th>
             <th>新部品</th>
@@ -122,19 +131,9 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in records" :key="item.id">
-            <td v-if="editingId !== item.id">{{ item.final_product_code }} {{ item.final_product_name }}</td>
-            <td v-else>
-              <select v-model="editForm.final_product_code">
-                <option
-                  v-for="product in filteredFinalProducts"
-                  :key="`edit-final-${item.id}-${product.id}`"
-                  :value="product.product_code"
-                >
-                  {{ product.product_code }} - {{ product.product_name }}
-                </option>
-              </select>
-            </td>
+          <tr v-for="item in filteredRecords" :key="item.id">
+            <td>{{ item.case_code || "-" }}</td>
+            <td>{{ item.case_name || "-" }}</td>
             <td v-if="editingId !== item.id">{{ item.old_part_code }} {{ item.old_part_name }}</td>
             <td v-else>
               <select v-model="editForm.old_part_code">
@@ -193,10 +192,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import api from "@/api/client";
 
 const defaultForm = () => ({
-  finalProductFilter: "",
-  finalProductCode: "",
-  finalProductName: "",
-  switchDate: "",
+  caseName: "",
 });
 
 const createPartRow = () => ({
@@ -206,32 +202,28 @@ const createPartRow = () => ({
   oldPartName: "",
   newPartFilter: "",
   newPartCode: "",
+  switchDate: "",
   requiredQtyAfterEol: 0,
 });
 
 const form = reactive(defaultForm());
 const partRows = ref([createPartRow()]);
 const records = ref([]);
-const finalProducts = ref([]);
+const filters = reactive({
+  caseName: "",
+  partName: "",
+  switchProgressSign: "all",
+});
 const products = ref([]);
 const processing = ref(false);
 const editingId = ref(null);
+const showCreateForm = ref(false);
 const editForm = reactive({
-  final_product_code: "",
+  case_name: "",
   old_part_code: "",
   new_part_code: "",
   switch_date: "",
   required_qty_after_eol: 0,
-});
-
-const filteredFinalProducts = computed(() => {
-  const keyword = form.finalProductFilter.trim().toLowerCase();
-  if (!keyword) return finalProducts.value;
-  return finalProducts.value.filter((product) => {
-    const code = String(product.product_code || "").toLowerCase();
-    const name = String(product.product_name || "").toLowerCase();
-    return code.includes(keyword) || name.includes(keyword);
-  });
 });
 
 const loadRecords = async () => {
@@ -241,16 +233,6 @@ const loadRecords = async () => {
   } catch (error) {
     console.error("設変データ取得失敗:", error);
     records.value = [];
-  }
-};
-
-const loadFinalProducts = async () => {
-  try {
-    const finalList = await api.products.getAllProducts({ is_final_product: true });
-    finalProducts.value = Array.isArray(finalList) ? finalList : [];
-  } catch (error) {
-    console.error("最終品一覧の取得に失敗:", error);
-    finalProducts.value = [];
   }
 };
 
@@ -272,11 +254,6 @@ const getFilteredProducts = (keyword) => {
     const name = String(product.product_name || "").toLowerCase();
     return code.includes(normalized) || name.includes(normalized);
   });
-};
-
-const onFinalProductChange = () => {
-  const selected = finalProducts.value.find((item) => item.product_code === form.finalProductCode);
-  form.finalProductName = selected?.product_name || "";
 };
 
 const onOldPartChange = (row) => {
@@ -303,10 +280,6 @@ const resetForm = () => {
 
 const addRecords = () => {
   if (processing.value) return;
-  if (!form.finalProductCode.trim()) {
-    alert("最終品コードは必須です。");
-    return;
-  }
 
   const targets = partRows.value.filter((row) => row.oldPartCode.trim());
   if (targets.length === 0) {
@@ -318,16 +291,17 @@ const addRecords = () => {
     return {
       old_part_code: row.oldPartCode.trim(),
       new_part_code: row.newPartCode.trim(),
+      switch_date: row.switchDate || null,
       required_qty_after_eol: Number(row.requiredQtyAfterEol || 0),
     };
   });
   processing.value = true;
   api.engineeringChanges.create({
-    final_product_code: form.finalProductCode.trim(),
-    switch_date: form.switchDate || null,
+    case_name: form.caseName.trim(),
     parts,
   }).then(async () => {
     resetForm();
+    showCreateForm.value = false;
     await loadRecords();
   }).catch((e) => {
     console.error("設変登録失敗", e);
@@ -335,6 +309,10 @@ const addRecords = () => {
   }).finally(() => {
     processing.value = false;
   });
+};
+
+const toggleCreateForm = () => {
+  showCreateForm.value = !showCreateForm.value;
 };
 
 const removeRecord = async (id) => {
@@ -349,7 +327,7 @@ const removeRecord = async (id) => {
 
 const startEdit = (item) => {
   editingId.value = item.id;
-  editForm.final_product_code = item.final_product_code || "";
+  editForm.case_name = item.case_name || "";
   editForm.old_part_code = item.old_part_code || "";
   editForm.new_part_code = item.new_part_code || "";
   editForm.switch_date = item.switch_date || "";
@@ -363,7 +341,7 @@ const cancelEdit = () => {
 const saveEdit = async (id) => {
   try {
     await api.engineeringChanges.updatePart(id, {
-      final_product_code: editForm.final_product_code,
+      case_name: editForm.case_name,
       old_part_code: editForm.old_part_code,
       new_part_code: editForm.new_part_code,
       switch_date: editForm.switch_date || null,
@@ -378,17 +356,36 @@ const saveEdit = async (id) => {
 };
 
 const totalExcessPurchaseQty = computed(() => {
-  return records.value.reduce((sum, item) => sum + Number(item.excess_purchase_qty || 0), 0);
+  return filteredRecords.value.reduce((sum, item) => sum + Number(item.excess_purchase_qty || 0), 0);
 });
 
 const totalExcessProductionQty = computed(() => {
-  return records.value.reduce((sum, item) => sum + Number(item.excess_production_qty || 0), 0);
+  return filteredRecords.value.reduce((sum, item) => sum + Number(item.excess_production_qty || 0), 0);
+});
+
+const filteredRecords = computed(() => {
+  const caseKw = String(filters.caseName || "").trim().toLowerCase();
+  const partKw = String(filters.partName || "").trim().toLowerCase();
+  return records.value.filter((item) => {
+    const caseName = String(item.case_name || "").toLowerCase();
+    if (caseKw && !caseName.includes(caseKw)) return false;
+
+    const partCode = String(item.old_part_code || "").toLowerCase();
+    const partName = String(item.old_part_name || "").toLowerCase();
+    if (partKw && !partCode.includes(partKw) && !partName.includes(partKw)) return false;
+
+    const progress = Number(item.switch_prod_progress_qty || 0);
+    if (filters.switchProgressSign === "plus" && progress <= 0) return false;
+    if (filters.switchProgressSign === "minus" && progress >= 0) return false;
+    if (filters.switchProgressSign === "zero" && progress !== 0) return false;
+    return true;
+  });
 });
 
 const downloadCsv = () => {
   const header = [
-    "最終品コード",
-    "最終品名",
+    "案件コード",
+    "案件名",
     "旧部品コード",
     "旧部品名",
     "共用親製品",
@@ -405,8 +402,8 @@ const downloadCsv = () => {
   ];
 
   const rows = records.value.map((item) => [
-    item.final_product_code,
-    item.final_product_name,
+    item.case_code,
+    item.case_name,
     item.old_part_code,
     item.old_part_name,
     item.parent_products_text,
@@ -436,7 +433,7 @@ const downloadCsv = () => {
 };
 
 onMounted(async () => {
-  await Promise.all([loadFinalProducts(), loadProducts(), loadRecords()]);
+  await Promise.all([loadProducts(), loadRecords()]);
 });
 </script>
 
@@ -445,6 +442,11 @@ onMounted(async () => {
   padding: 16px;
   display: grid;
   gap: 16px;
+}
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .card {
   background: #fff;
@@ -460,6 +462,9 @@ onMounted(async () => {
 .top-grid {
   grid-template-columns: minmax(320px, 1fr) 220px;
   align-items: end;
+}
+.list-filters {
+  margin-bottom: 10px;
 }
 .final-product-field {
   display: grid;
@@ -518,7 +523,7 @@ select {
 .cell-select select {
   min-width: 160px;
 }
-.parts-table td:nth-child(4) input {
+.parts-table td:nth-child(5) input {
   width: 55px;
   min-width: 55px;
 }

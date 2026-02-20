@@ -7,7 +7,7 @@
         <div>
           <div class="card-title">生産計画自動生成（需要→計画上書き）</div>
           <p class="helper">
-            毎月指定日・時刻に需要取り込みのみ実行し、指定月の計画を需要で上書きします。対象月（翌月／翌々月／翌々翌月）をラインごとに選択できます。
+            毎月指定日・時刻に需要取り込みのみ実行し、指定月の計画を需要で上書きします。対象月（今月／翌月／翌々月／翌々翌月）をラインごとに選択できます。
           </p>
         </div>
       </div>
@@ -65,6 +65,10 @@
                 </div>
               </td>
               <td class="period-cell">
+                <label class="checkbox-label">
+                  <input type="checkbox" v-model="cfg.include_current_month" :disabled="!canEdit" />
+                  今月
+                </label>
                 <label class="checkbox-label">
                   <input type="checkbox" v-model="cfg.include_next_month" :disabled="!canEdit" />
                   翌月
@@ -346,6 +350,7 @@ const saveConfig = async (cfg) => {
       range_base_day: cfg.range_base_day || 'TODAY',
       range_days_after: Number.isFinite(Number(cfg.range_days_after)) ? Number(cfg.range_days_after) : 45,
       is_enabled: cfg.is_enabled,
+      include_current_month: cfg.include_current_month,
       include_next_month: cfg.include_next_month,
       include_second_month: cfg.include_second_month,
       include_third_month: cfg.include_third_month,

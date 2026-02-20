@@ -51,7 +51,7 @@ class EngineeringChangeView(APIView):
 
         rows = []
         for part in parts:
-            switch_date = part.case.switch_date or today
+            switch_date = part.switch_date or part.case.switch_date or today
             start_date = today
             end_date = switch_date if switch_date >= today else today
 
@@ -108,9 +108,11 @@ class EngineeringChangeView(APIView):
             rows.append({
                 'id': part.id,
                 'case_id': part.case_id,
-                'final_product_code': part.case.final_product.product_code,
-                'final_product_name': part.case.final_product.product_name,
-                'switch_date': part.case.switch_date,
+                'case_code': part.case.case_code or f'EC-{part.case_id:06d}',
+                'case_name': part.case.case_name or '',
+                'final_product_code': part.case.final_product.product_code if part.case.final_product else '',
+                'final_product_name': part.case.final_product.product_name if part.case.final_product else '',
+                'switch_date': switch_date,
                 'old_part_code': part.old_part.product_code,
                 'old_part_name': part.old_part.product_name,
                 'parent_products': parent_products,
@@ -132,23 +134,25 @@ class EngineeringChangeView(APIView):
 
     def post(self, request):
         final_product_code = (request.data.get('final_product_code') or '').strip()
-        if not final_product_code:
-            return Response({'detail': 'final_product_code is required'}, status=status.HTTP_400_BAD_REQUEST)
         parts = request.data.get('parts') or []
         if not isinstance(parts, list) or not parts:
             return Response({'detail': 'parts is required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            final_product = Product.objects.get(product_code=final_product_code)
-        except Product.DoesNotExist:
-            return Response({'detail': f'final product not found: {final_product_code}'}, status=status.HTTP_400_BAD_REQUEST)
+        final_product = None
+        if final_product_code:
+            try:
+                final_product = Product.objects.get(product_code=final_product_code)
+            except Product.DoesNotExist:
+                return Response({'detail': f'final product not found: {final_product_code}'}, status=status.HTTP_400_BAD_REQUEST)
 
-        switch_date = request.data.get('switch_date') or None
         case = EngineeringChangeCase.objects.create(
+            case_name=(request.data.get('case_name') or '').strip() or None,
             final_product=final_product,
-            switch_date=switch_date,
+            switch_date=None,
             note=(request.data.get('note') or '').strip() or None,
         )
+        case.case_code = f'EC-{case.id:06d}'
+        case.save(update_fields=['case_code', 'updated_at'])
 
         created = 0
         for part in parts:
@@ -167,6 +171,7 @@ class EngineeringChangeView(APIView):
 
             EngineeringChangePart.objects.create(
                 case=case,
+                switch_date=part.get('switch_date') or request.data.get('switch_date') or None,
                 old_part=old_part,
                 new_part=new_part,
                 required_qty_after_eol=int(part.get('required_qty_after_eol') or 0),
@@ -177,7 +182,10 @@ class EngineeringChangeView(APIView):
         if created == 0:
             case.delete()
             return Response({'detail': 'valid parts not found'}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({'detail': 'created', 'case_id': case.id, 'created_parts': created}, status=status.HTTP_201_CREATED)
+        return Response(
+            {'detail': 'created', 'case_id': case.id, 'case_code': case.case_code, 'created_parts': created},
+            status=status.HTTP_201_CREATED
+        )
 
 
 class EngineeringChangePartDetailView(APIView):
@@ -186,17 +194,19 @@ class EngineeringChangePartDetailView(APIView):
         if not part:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        final_product_code = (request.data.get('final_product_code') or '').strip()
-        if final_product_code:
-            final_product = Product.objects.filter(product_code=final_product_code).first()
-            if not final_product:
-                return Response({'detail': f'final product not found: {final_product_code}'}, status=status.HTTP_400_BAD_REQUEST)
-            part.case.final_product = final_product
+        if 'final_product_code' in request.data:
+            final_product_code = (request.data.get('final_product_code') or '').strip()
+            if final_product_code:
+                final_product = Product.objects.filter(product_code=final_product_code).first()
+                if not final_product:
+                    return Response({'detail': f'final product not found: {final_product_code}'}, status=status.HTTP_400_BAD_REQUEST)
+                part.case.final_product = final_product
+            else:
+                part.case.final_product = None
+        if 'case_name' in request.data:
+            part.case.case_name = (request.data.get('case_name') or '').strip() or None
 
-        if 'switch_date' in request.data:
-            switch_date = request.data.get('switch_date') or None
-            part.case.switch_date = switch_date
-        part.case.save(update_fields=['final_product', 'switch_date', 'updated_at'])
+        part.case.save(update_fields=['final_product', 'case_name', 'updated_at'])
 
         old_part_code = (request.data.get('old_part_code') or '').strip()
         if old_part_code:
@@ -214,8 +224,10 @@ class EngineeringChangePartDetailView(APIView):
 
         if 'required_qty_after_eol' in request.data:
             part.required_qty_after_eol = int(request.data.get('required_qty_after_eol') or 0)
+        if 'switch_date' in request.data:
+            part.switch_date = request.data.get('switch_date') or None
 
-        part.save(update_fields=['old_part', 'new_part', 'required_qty_after_eol', 'updated_at'])
+        part.save(update_fields=['switch_date', 'old_part', 'new_part', 'required_qty_after_eol', 'updated_at'])
         return Response({'detail': 'updated'})
 
     def delete(self, request, pk: int):

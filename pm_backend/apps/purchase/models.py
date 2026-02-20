@@ -53,7 +53,15 @@ class PurchasePlanChangeLog(models.Model):
 
 class EngineeringChangeCase(models.Model):
     """設変管理ヘッダ（最終品単位）"""
-    final_product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='engineering_change_cases')
+    case_code = models.CharField(max_length=30, null=True, blank=True, unique=True, verbose_name='案件コード')
+    case_name = models.CharField(max_length=100, null=True, blank=True, verbose_name='案件名')
+    final_product = models.ForeignKey(
+        Product,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='engineering_change_cases'
+    )
     switch_date = models.DateField(null=True, blank=True, verbose_name='切替予定日')
     note = models.CharField(max_length=255, null=True, blank=True, verbose_name='備考')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -70,6 +78,7 @@ class EngineeringChangeCase(models.Model):
 class EngineeringChangePart(models.Model):
     """設変対象部品（旧→新）"""
     case = models.ForeignKey(EngineeringChangeCase, on_delete=models.CASCADE, related_name='parts')
+    switch_date = models.DateField(null=True, blank=True, verbose_name='切替予定日')
     old_part = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='engineering_change_old_parts')
     new_part = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, related_name='engineering_change_new_parts')
     required_qty_after_eol = models.IntegerField(default=0, verbose_name='打ち切り後必要量')

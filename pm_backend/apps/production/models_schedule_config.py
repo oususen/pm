@@ -83,6 +83,10 @@ class ScheduleConfig(models.Model):
         null=True, blank=True,
         verbose_name='最終実行時間（秒）'
     )
+    include_current_month = models.BooleanField(
+        default=False,
+        verbose_name='今月を対象'
+    )
     include_next_month = models.BooleanField(
         default=True,
         verbose_name='翌月を対象'
