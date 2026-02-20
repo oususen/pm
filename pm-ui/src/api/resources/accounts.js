@@ -32,6 +32,9 @@ export const createAccountsAPI = (client) => ({
   updateUserPartial(id, data) {
     return client.patch(`/accounts/users/${id}/`, data)
   },
+  deleteUser(id) {
+    return client.delete(`/accounts/users/${id}/`)
+  },
   getPositions() {
     return client.get('/accounts/positions/')
   },

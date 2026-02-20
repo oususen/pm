@@ -276,6 +276,15 @@
               <button type="button" class="btn" @click="resetForm" :disabled="!canManageBasic">
                 リセット
               </button>
+              <button
+                v-if="!isCreating && selectedUserId"
+                type="button"
+                class="btn danger"
+                @click="deleteUser"
+                :disabled="saving || !canManageBasic"
+              >
+                削除
+              </button>
             </div>
           </form>
         </section>
@@ -811,6 +820,40 @@ const saveUser = async () => {
   }
 }
 
+const deleteUser = async () => {
+  if (!canManageBasic.value || !form.id) return
+  if (!confirm(`ユーザー「${form.username}」を削除します。よろしいですか？`)) return
+
+  saving.value = true
+  errorMessage.value = ''
+  successMessage.value = ''
+  try {
+    await api.accounts.deleteUser(form.id)
+    successMessage.value = 'ユーザーを削除しました。'
+    selectedUserId.value = null
+    isCreating.value = false
+    form.id = null
+    form.username = ''
+    form.email = ''
+    form.first_name = ''
+    form.last_name = ''
+    form.is_active = true
+    form.is_staff = false
+    form.is_superuser = false
+    form.password = ''
+    passwordConfirm.value = ''
+    form.profile = emptyProfile()
+    form.permissions = emptyPermissions()
+    useUserPermissions.value = false
+    await loadUsers()
+  } catch (error) {
+    const detail = error?.response?.data
+    errorMessage.value = extractErrorMessage(detail) || '削除に失敗しました。'
+  } finally {
+    saving.value = false
+  }
+}
+
 const extractErrorMessage = (detail) => {
   if (!detail) return ''
   if (typeof detail === 'string') return detail
@@ -961,6 +1004,12 @@ watch(filterGroupId, () => {
 .btn.primary {
   background: #2f6fed;
   border-color: #2f6fed;
+  color: #fff;
+}
+
+.btn.danger {
+  background: #ef4444;
+  border-color: #ef4444;
   color: #fff;
 }
 

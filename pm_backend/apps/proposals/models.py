@@ -36,7 +36,7 @@ class Employee(models.Model):
     )
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
+        on_delete=models.DO_NOTHING,
         null=True,
         blank=True,
         db_column='user_id',
