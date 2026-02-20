@@ -10,6 +10,7 @@ import quality from "./quality";
 import manual from "./manual";
 import settings from "./settings";
 import notifications from "./notifications";
+import engineeringChange from "./engineeringChange";
 import Login from "../views/auth/Login.vue";
 import { ensureAuth } from "../auth";
 
@@ -43,6 +44,7 @@ const router = createRouter({
     ...quality,
     ...settings,
     ...notifications,
+    ...engineeringChange,
     ...manual,
   ],
 });

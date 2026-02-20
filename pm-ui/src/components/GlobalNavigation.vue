@@ -145,6 +145,7 @@ const mainTabs = computed(() => [
   { id: 'inventory', label: t('nav.tabs.inventory'), link: '/inventory', resource: 'inventory' },
   { id: 'quality', label: t('nav.tabs.quality'), link: '/quality', resource: 'quality' },
   { id: 'notifications', label: t('nav.tabs.notifications'), link: '/notifications/sources', resource: 'notifications' },
+  { id: 'engineeringChange', label: t('nav.tabs.engineeringChange'), link: '/engineering-change/menu', resource: 'masters' },
   { id: 'masters', label: t('nav.tabs.masters'), link: '/masters', resource: 'masters' },
   { id: 'settings', label: t('nav.tabs.settings'), link: '/settings', resource: 'settings' },
 ])
@@ -170,6 +171,7 @@ const isActiveTab = (tabId) => {
   if (tabId === 'inventory' && path.startsWith('/inventory')) return true
   if (tabId === 'quality' && path.startsWith('/quality')) return true
   if (tabId === 'notifications' && path.startsWith('/notifications')) return true
+  if (tabId === 'engineeringChange' && path.startsWith('/engineering-change')) return true
   if (tabId === 'masters' && path.startsWith('/masters')) return true
   if (tabId === 'settings' && path.startsWith('/settings')) return true
   return false
@@ -226,7 +228,11 @@ const userDivisionId = computed(() => authState.user?.profile?.division_id ?? au
 const userGroupId = computed(() => authState.user?.profile?.group_id ?? authState.user?.profile?.group ?? null)
 const userTeamId = computed(() => authState.user?.profile?.team_id ?? authState.user?.profile?.team ?? null)
 const userPosition = computed(() => authState.user?.profile?.position || '')
-const showNotificationBell = computed(() => Boolean(authState.user))
+const canAccessNotifications = computed(() => {
+  const user = authState.user
+  return hasPermission(user, 'notifications', 'view')
+})
+const showNotificationBell = computed(() => Boolean(authState.user) && canAccessNotifications.value)
 const departments = ref([])
 
 const toId = (value) => (value === null || value === undefined ? '' : String(value))
@@ -315,6 +321,10 @@ const unreadNotifications = computed(() => {
 const notificationCount = computed(() => unreadNotifications.value.length)
 
 const loadNotifications = async () => {
+  if (!canAccessNotifications.value) {
+    notifications.value = []
+    return
+  }
   try {
     const res = await api.notifications.list({ ordering: 'display_order,id' })
     const data = res.data?.results || res.data || []
@@ -325,6 +335,10 @@ const loadNotifications = async () => {
 }
 
 const loadDepartments = async () => {
+  if (!canAccessNotifications.value) {
+    departments.value = []
+    return
+  }
   try {
     const res = await api.accounts.getDepartments({ ordering: 'display_id,name' })
     const data = res.data?.results || res.data || []
@@ -415,7 +429,7 @@ const checkForNewNotifications = (currentIds) => {
 
 // ポーリングで通知を取得
 const pollNotifications = async () => {
-  if (!authState.user) return
+  if (!authState.user || !canAccessNotifications.value) return
 
   try {
     await loadDepartments()
@@ -431,6 +445,7 @@ const pollNotifications = async () => {
 
 // ポーリング開始
 const startPolling = () => {
+  if (!canAccessNotifications.value) return
   if (pollingInterval.value) return
 
   // 初回実行
@@ -476,9 +491,9 @@ onUnmounted(() => {
 
 // ユーザーのログイン状態を監視してポーリングを制御
 watch(
-  () => authState.user,
-  (newUser) => {
-    if (newUser) {
+  () => [authState.user, canAccessNotifications.value],
+  ([newUser, canNotify]) => {
+    if (newUser && canNotify) {
       startPolling()
     } else {
       stopPolling()

@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { authState } from './auth'
 import api from '@/api/client'
+import { hasPermission } from './router'
 
 // グローバル状態
 const notifications = ref([])
@@ -116,6 +117,10 @@ const unreadNotifications = computed(() => {
 
 // 通知数
 const notificationCount = computed(() => unreadNotifications.value.length)
+const canAccessNotifications = computed(() => {
+  const user = authState.user
+  return hasPermission(user, 'notifications', 'view')
+})
 
 // チャイム音を鳴らす
 const playChimeSound = () => {
@@ -171,6 +176,10 @@ const checkForNewNotifications = (currentIds) => {
 
 // 通知を取得
 const loadNotifications = async () => {
+  if (!canAccessNotifications.value) {
+    notifications.value = []
+    return
+  }
   try {
     const res = await api.notifications.list({ ordering: 'display_order,id' })
     const data = res.data?.results || res.data || []
@@ -182,6 +191,10 @@ const loadNotifications = async () => {
 
 // 部署を取得
 const loadDepartments = async () => {
+  if (!canAccessNotifications.value) {
+    departments.value = []
+    return
+  }
   try {
     const res = await api.accounts.getDepartments({ ordering: 'display_id,name' })
     const data = res.data?.results || res.data || []
@@ -194,7 +207,7 @@ const loadDepartments = async () => {
 
 // ポーリング実行
 const pollNotifications = async () => {
-  if (!authState.user) return
+  if (!authState.user || !canAccessNotifications.value) return
 
   try {
     await loadDepartments()
@@ -209,6 +222,7 @@ const pollNotifications = async () => {
 
 // ポーリング開始
 const startPolling = () => {
+  if (!canAccessNotifications.value) return
   if (pollingInterval) return
 
   pollNotifications()
