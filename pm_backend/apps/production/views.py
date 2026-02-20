@@ -2124,12 +2124,14 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if plan_qty_provided:
                     plan_qty_value = Decimal(str(it['plan_qty'] or 0))
                     if plan_qty_value == 0:
-                        # 既存レコードを取得
+                        # 既存レコードを取得（sequence_noで絞り込み）
+                        _seq_for_zero = it.get('sequence_no') or 1
                         existing = LineBacklog.objects.filter(
                             plan_date=plan_date,
                             process_id=process_id,
                             product_id=product_id,
                             line_id=line_id,
+                            sequence_no=_seq_for_zero,
                         ).first()
 
                         if existing and existing.plan_id:
@@ -2198,12 +2200,13 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if sequence_no is None:
                     sequence_no = 1
 
-                # 既存レコードを取得
+                # 既存レコードを取得（sequence_noで絞り込み）
                 existing = LineBacklog.objects.filter(
                     plan_date=plan_date,
                     process_id=process_id,
                     product_id=product_id,
                     line_id=line_id,
+                    sequence_no=sequence_no,
                 ).first()
                 if existing:
                     existing_plan_qty = int(existing.plan_qty or 0)
@@ -2250,12 +2253,14 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if 'sequence_no' in it:
                     defaults['sequence_no'] = sequence_no
 
-                # LineBacklogに保存
+                # LineBacklogに保存（sequence_noを検索条件に含める）
+                defaults.pop('sequence_no', None)
                 obj, is_created = LineBacklog.objects.update_or_create(
                     plan_date=plan_date,
                     process_id=process_id,
                     product_id=product_id,
                     line_id=line_id,
+                    sequence_no=sequence_no,
                     defaults=defaults
                 )
                 if is_created:
