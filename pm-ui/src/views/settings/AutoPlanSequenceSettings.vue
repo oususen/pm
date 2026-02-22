@@ -15,6 +15,7 @@
                   <th>ライン</th>
                   <th>対象月</th>
                   <th>有効</th>
+                  <th>失敗時通知先</th>
                   <th>個別実行</th>
                   <th>最終実行情報</th>
                 </tr>
@@ -31,6 +32,42 @@
                     </div>
                   </td>
                   <td><label class="checkbox-label"><input type="checkbox" v-model="cfg.is_enabled" :disabled="!canEdit" />有効</label></td>
+                  <td class="notify-cell">
+                    <div class="notify-search">
+                      <input
+                        v-model="cfg.searchCode"
+                        :disabled="!canEdit"
+                        class="notify-search-input"
+                        placeholder="社員コード/氏名/ユーザー名で検索して追加"
+                        @keyup.enter.prevent="addFirstCandidate(cfg)"
+                      />
+                    </div>
+                    <div v-if="candidateList(cfg).length" class="candidate-list">
+                      <div
+                        v-for="u in candidateList(cfg)"
+                        :key="u.id"
+                        class="candidate-item"
+                        @click="addUser(cfg, u)"
+                      >
+                        <span class="candidate-code">{{ codeLabel(u) }}</span>
+                        <span class="candidate-name">{{ nameLabel(u) }}</span>
+                      </div>
+                    </div>
+                    <div class="selected-list" v-if="cfg.notify_user_codes?.length">
+                      <span class="chip" v-for="code in cfg.notify_user_codes" :key="code">
+                        <span class="chip-code">{{ code }}</span>
+                        <span class="chip-name">{{ chipName(cfg, code) }}</span>
+                        <button
+                          type="button"
+                          class="chip-remove"
+                          :disabled="!canEdit"
+                          @click="removeCode(cfg, code)"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    </div>
+                  </td>
                   <td><button class="btn mini" :disabled="!canEdit || runningOne === cfg.id" @click="runNowOne(cfg)">{{ runningOne === cfg.id ? '実行中...' : '今すぐ実行' }}</button></td>
                   <td class="last-cell">
                     <div class="last-row"><span class="last-label">日時</span><span>{{ formatDateTime(cfg.last_run_at) }}</span></div>
@@ -97,6 +134,7 @@
                   <th>区分</th>
                   <th>対象月</th>
                   <th>有効</th>
+                  <th>失敗時通知先</th>
                   <th>個別実行</th>
                   <th>最終実行情報</th>
                 </tr>
@@ -114,6 +152,42 @@
                     </div>
                   </td>
                   <td><label class="checkbox-label"><input type="checkbox" v-model="cfg.is_enabled" :disabled="!canEdit" />有効</label></td>
+                  <td class="notify-cell">
+                    <div class="notify-search">
+                      <input
+                        v-model="cfg.searchCode"
+                        :disabled="!canEdit"
+                        class="notify-search-input"
+                        placeholder="社員コード/氏名/ユーザー名で検索して追加"
+                        @keyup.enter.prevent="addFirstCandidate(cfg)"
+                      />
+                    </div>
+                    <div v-if="candidateList(cfg).length" class="candidate-list">
+                      <div
+                        v-for="u in candidateList(cfg)"
+                        :key="u.id"
+                        class="candidate-item"
+                        @click="addUser(cfg, u)"
+                      >
+                        <span class="candidate-code">{{ codeLabel(u) }}</span>
+                        <span class="candidate-name">{{ nameLabel(u) }}</span>
+                      </div>
+                    </div>
+                    <div class="selected-list" v-if="cfg.notify_user_codes?.length">
+                      <span class="chip" v-for="code in cfg.notify_user_codes" :key="code">
+                        <span class="chip-code">{{ code }}</span>
+                        <span class="chip-name">{{ chipName(cfg, code) }}</span>
+                        <button
+                          type="button"
+                          class="chip-remove"
+                          :disabled="!canEdit"
+                          @click="removeCode(cfg, code)"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    </div>
+                  </td>
                   <td><button class="btn mini" :disabled="!canEdit || runningOne === cfg.id" @click="runNowOne(cfg)">{{ runningOne === cfg.id ? '実行中...' : '今すぐ実行' }}</button></td>
                   <td class="last-cell">
                     <div class="last-row"><span class="last-label">日時</span><span>{{ formatDateTime(cfg.last_run_at) }}</span></div>
@@ -173,8 +247,14 @@
           <button class="btn primary" :disabled="!canEdit || saving" @click="saveAll">
             {{ saving ? '保存中...' : '保存' }}
           </button>
+          <button class="btn" :disabled="!canEdit || runningProd" @click="runNowByGroup('prod')">
+            {{ runningProd ? '社内実行中...' : '社内 今すぐ実行' }}
+          </button>
+          <button class="btn" :disabled="!canEdit || runningExt" @click="runNowByGroup('ext')">
+            {{ runningExt ? '外作/購入実行中...' : '外作/購入 今すぐ実行' }}
+          </button>
           <button class="btn" :disabled="!canEdit || running" @click="runNowAll">
-            {{ running ? '実行中...' : '今すぐ実行' }}
+            {{ running ? '全体実行中...' : '全体 今すぐ実行' }}
           </button>
         </div>
         <p class="helper">保存すると、ライン別設定（対象月/有効）と社内/外作購入の各実行タイミング・順序を一括で反映します。</p>
@@ -194,7 +274,10 @@ const lineToAddProd = ref('')
 const lineToAddExt = ref('')
 const saving = ref(false)
 const running = ref(false)
+const runningProd = ref(false)
+const runningExt = ref(false)
 const runningOne = ref(null)
+const userList = ref([])
 const scheduledDomProd = ref(1)
 const scheduledHourProd = ref(3)
 const scheduledMinuteProd = ref(0)
@@ -220,22 +303,36 @@ const autoPlanConfigsByLine = computed(() =>
     .sort((a, b) => (a.line_code || '').localeCompare(b.line_code || ''))
 )
 const isExternalType = (cfg) => ['OUTSOURCE', 'PURCHASE'].includes(String(cfg?.line_type || '').toUpperCase())
+const isRightBucket = (cfg) => Number(cfg?.execution_order || 0) >= 1000
 const prodConfigsByLine = computed(() => autoPlanConfigsByLine.value.filter((cfg) => !isExternalType(cfg)))
 const extConfigsByLine = computed(() => autoPlanConfigsByLine.value.filter((cfg) => isExternalType(cfg)))
 
 const selectedConfigs = computed(() =>
   autoPlanConfigs.value.filter((cfg) => cfg.is_enabled)
 )
-const selectedProdConfigs = computed(() => selectedConfigs.value.filter((cfg) => !isExternalType(cfg)))
-const selectedExtConfigs = computed(() => selectedConfigs.value.filter((cfg) => isExternalType(cfg)))
+const selectedProdConfigs = computed(() =>
+  selectedConfigs.value
+    .filter((cfg) => !isRightBucket(cfg))
+    .sort((a, b) => (a.execution_order || 0) - (b.execution_order || 0))
+)
+const selectedExtConfigs = computed(() =>
+  selectedConfigs.value
+    .filter((cfg) => isRightBucket(cfg))
+    .sort((a, b) => (a.execution_order || 0) - (b.execution_order || 0))
+)
 
-const addableProdLines = computed(() => autoPlanConfigs.value.filter((cfg) => !cfg.is_enabled && !isExternalType(cfg)))
-const addableExtLines = computed(() => autoPlanConfigs.value.filter((cfg) => !cfg.is_enabled && isExternalType(cfg)))
+const addableProdLines = computed(() => autoPlanConfigs.value.filter((cfg) => !cfg.is_enabled))
+const addableExtLines = computed(() => autoPlanConfigs.value.filter((cfg) => !cfg.is_enabled))
 
 const loadConfigs = async () => {
   const res = await api.scheduleConfig.getConfigs()
   const rows = Array.isArray(res.data) ? res.data : []
-  configs.value = rows
+  configs.value = rows.map((r) => ({
+    ...r,
+    notify_user_codes: Array.isArray(r.notify_user_codes) ? r.notify_user_codes : [],
+    notify_user_names: r.notify_user_names || {},
+    searchCode: '',
+  }))
   const autoRows = rows.filter((r) => r.task_name === 'AUTO_PLAN')
   const prodBase = autoRows.find((r) => !isExternalType(r) && r.is_enabled) || autoRows.find((r) => !isExternalType(r))
   const extBase = autoRows.find((r) => isExternalType(r) && r.is_enabled) || autoRows.find((r) => isExternalType(r))
@@ -248,6 +345,31 @@ const loadConfigs = async () => {
     scheduledDomExt.value = extBase.scheduled_dom || 1
     scheduledHourExt.value = extBase.scheduled_hour ?? 3
     scheduledMinuteExt.value = extBase.scheduled_minute ?? 0
+  }
+
+  // 旧データ（連番のみ）から左右バケットへ補正
+  const enabled = configs.value.filter((c) => c.task_name === 'AUTO_PLAN' && c.is_enabled)
+  const hasRightBucket = enabled.some((c) => isRightBucket(c))
+  if (!hasRightBucket) {
+    let leftNo = 1
+    let rightNo = 1000
+    const sorted = [...enabled].sort((a, b) => (a.execution_order || 9999) - (b.execution_order || 9999))
+    for (const cfg of sorted) {
+      if (isExternalType(cfg)) {
+        cfg.execution_order = rightNo++
+      } else {
+        cfg.execution_order = leftNo++
+      }
+    }
+  }
+}
+
+const loadUsers = async () => {
+  try {
+    const res = await api.accounts.getUsers({ is_active: true })
+    userList.value = res.data?.results || res.data || []
+  } catch (e) {
+    console.error('ユーザー一覧の取得に失敗', e)
   }
 }
 
@@ -266,7 +388,7 @@ const addLineExt = () => {
   const cfg = findConfig(lineToAddExt.value)
   if (!cfg) return
   cfg.is_enabled = true
-  cfg.execution_order = selectedExtConfigs.value.length + 1
+  cfg.execution_order = 1000 + selectedExtConfigs.value.length
   lineToAddExt.value = ''
   normalizeOrder()
 }
@@ -280,12 +402,12 @@ const removeLine = (lineId) => {
 }
 
 const normalizeOrder = () => {
-  // 実行順は社内ブロック→外作/購入ブロックで連番にする
+  // 実行順は左ブロック(1〜)→右ブロック(1000〜)で固定
   selectedProdConfigs.value.forEach((cfg, idx) => {
     cfg.execution_order = idx + 1
   })
   selectedExtConfigs.value.forEach((cfg, idx) => {
-    cfg.execution_order = selectedProdConfigs.value.length + idx + 1
+    cfg.execution_order = 1000 + idx
   })
 }
 
@@ -332,14 +454,14 @@ const saveAll = async () => {
     normalizeOrder()
     const targets = autoPlanConfigs.value
     for (const cfg of targets) {
-      const isExt = isExternalType(cfg)
+      const isRight = isRightBucket(cfg)
       await api.scheduleConfig.saveConfig({
         id: cfg.id,
         task_name: cfg.task_name,
         line: cfg.line,
-        scheduled_hour: isExt ? scheduledHourExt.value : scheduledHourProd.value,
-        scheduled_minute: isExt ? scheduledMinuteExt.value : scheduledMinuteProd.value,
-        scheduled_dom: isExt ? scheduledDomExt.value : scheduledDomProd.value,
+        scheduled_hour: isRight ? scheduledHourExt.value : scheduledHourProd.value,
+        scheduled_minute: isRight ? scheduledMinuteExt.value : scheduledMinuteProd.value,
+        scheduled_dom: isRight ? scheduledDomExt.value : scheduledDomProd.value,
         execution_order: cfg.is_enabled ? cfg.execution_order : 9999,
         from_sequence_ui: true,
         range_base_day: cfg.range_base_day || 'TODAY',
@@ -384,6 +506,43 @@ const runNowAll = async () => {
   }
 }
 
+const runNowByGroup = async (group) => {
+  if (!canEdit.value) return
+  const isProd = group === 'prod'
+  const targets = isProd ? selectedProdConfigs.value : selectedExtConfigs.value
+  if (!targets.length) {
+    alert(isProd ? '社内ラインの実行対象がありません。' : '外作・購入ラインの実行対象がありません。')
+    return
+  }
+  const label = isProd ? '社内ライン' : '外作・購入ライン'
+  if (!confirm(`${label}を順番に今すぐ実行しますか？`)) return
+
+  if (isProd) runningProd.value = true
+  else runningExt.value = true
+
+  let executed = 0
+  let failed = 0
+  try {
+    for (const cfg of targets) {
+      try {
+        await api.scheduleConfig.runNow({ task_name: 'AUTO_PLAN', config_id: cfg.id, line: cfg.line })
+        executed += 1
+      } catch (e) {
+        failed += 1
+      }
+    }
+    if (failed > 0) {
+      alert(`${label}の実行完了（一部失敗あり）\n成功: ${executed} / 失敗: ${failed}`)
+    } else {
+      alert(`${label}の実行完了\n実行件数: ${executed}`)
+    }
+    await loadConfigs()
+  } finally {
+    if (isProd) runningProd.value = false
+    else runningExt.value = false
+  }
+}
+
 const runNowOne = async (cfg) => {
   if (!canEdit.value) return
   if (!confirm(`${cfg.line_code || ''} ${cfg.line_name || ''} を今すぐ実行しますか？`)) return
@@ -420,8 +579,60 @@ const lineTypeLabel = (lineType) => {
   return '-'
 }
 
+const codeLabel = (u) => u?.profile?.employee_code || u.username || u.email || `ID:${u.id}`
+
+const nameLabel = (u) => {
+  const name = `${u.last_name || ''}${u.first_name || ''}`.trim()
+  return name || u.username || u.email || `ID:${u.id}`
+}
+
+const candidateList = (cfg) => {
+  const kw = String(cfg.searchCode || '').trim().toLowerCase()
+  if (!kw) return []
+  return userList.value
+    .filter((u) => {
+      const code = codeLabel(u).toLowerCase()
+      const name = nameLabel(u).toLowerCase()
+      return code.includes(kw) || name.includes(kw)
+    })
+    .slice(0, 10)
+}
+
+const chipName = (cfg, code) => {
+  if (cfg.notify_user_names && cfg.notify_user_names[code]) return cfg.notify_user_names[code]
+  const user = userList.value.find((u) => codeLabel(u) === code)
+  return user ? nameLabel(user) : ''
+}
+
+const addUser = (cfg, user) => {
+  const code = codeLabel(user)
+  if (!cfg.notify_user_codes.includes(code)) {
+    cfg.notify_user_codes = [...cfg.notify_user_codes, code]
+    cfg.notify_user_names = {
+      ...(cfg.notify_user_names || {}),
+      [code]: nameLabel(user),
+    }
+  }
+  cfg.searchCode = ''
+}
+
+const addFirstCandidate = (cfg) => {
+  const first = candidateList(cfg)[0]
+  if (first) addUser(cfg, first)
+}
+
+const removeCode = (cfg, code) => {
+  cfg.notify_user_codes = cfg.notify_user_codes.filter((c) => c !== code)
+  if (cfg.notify_user_names) {
+    const names = { ...cfg.notify_user_names }
+    delete names[code]
+    cfg.notify_user_names = names
+  }
+}
+
 onMounted(async () => {
   await loadConfigs()
+  await loadUsers()
 })
 </script>
 
@@ -542,6 +753,77 @@ onMounted(async () => {
   padding: 8px 6px;
   text-align: left;
   vertical-align: top;
+}
+.notify-cell {
+  min-width: 220px;
+}
+.notify-search-input {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12px;
+  border: 1px solid #cfd6e1;
+  border-radius: 3px;
+}
+.candidate-list {
+  border: 1px solid #e5e9ef;
+  border-radius: 4px;
+  margin-top: 6px;
+  max-height: 160px;
+  overflow: auto;
+  background: #fff;
+}
+.candidate-item {
+  padding: 6px 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+}
+.candidate-item:hover {
+  background: #f3f6fb;
+}
+.candidate-code {
+  font-weight: 700;
+  color: #1f2a44;
+  min-width: 80px;
+}
+.candidate-name {
+  color: #444;
+  font-size: 12px;
+}
+.selected-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.chip {
+  background: #eef2f6;
+  border: 1px solid #cfd6e1;
+  border-radius: 14px;
+  padding: 4px 8px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chip-code {
+  font-weight: 700;
+}
+.chip-name {
+  color: #4b5563;
+}
+.chip-remove {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+  color: #6b7280;
+}
+.chip-remove:disabled {
+  cursor: not-allowed;
+  color: #9ca3af;
 }
 .period-cell {
   display: flex;

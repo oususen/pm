@@ -499,14 +499,16 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
             def is_working_day(target_date):
                 if not calendar_id:
-                    return True
+                    # カレンダー未設定時は週末を非稼働日扱い（pickupと同一ルール）
+                    return target_date.weekday() < 5
                 if target_date in workday_cache:
                     return workday_cache[target_date]
                 cal = CalendarDay.objects.filter(
                     calendar_id=calendar_id,
                     target_date=target_date
                 ).first()
-                is_work = cal.is_working_day if cal is not None else True
+                # カレンダ未登録日も週末は非稼働日扱い（pickupと同一ルール）
+                is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
                 workday_cache[target_date] = is_work
                 return is_work
 
@@ -1161,11 +1163,14 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         # 期間内の全日付に対して、存在しない場合はsequence_no=0の行を用意する
         if start_dt and end_dt:
+            # sequence_no=0(需要行)の存在だけを判定する。
+            # 計画行(sequence_no>0)が存在していても、需要行が無ければ新規作成する。
             existing_any = set(
                 LineBacklog.objects.filter(
                     line_id=line_id,
                     product_id__in=target_products,
                     plan_date__range=[start_dt, end_dt],
+                    sequence_no=0,
                 ).values_list('product_id', 'plan_date', 'process_id')
             )
             total_days = (end_dt - start_dt).days + 1
@@ -1209,6 +1214,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     obj = existing_records[key]
                     obj.order_qty = order_qty
                     obj.demand_qty_plan = order_qty
+                    # sequence_no=0 は需要行なので、計画数は常に0を維持する
+                    obj.plan_qty = 0
                     to_update.append(obj)
                 else:
                     to_create.append(LineBacklog(
@@ -1226,7 +1233,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             if to_create:
                 LineBacklog.objects.bulk_create(to_create)
             if to_update:
-                LineBacklog.objects.bulk_update(to_update, ['order_qty', 'demand_qty_plan'])
+                LineBacklog.objects.bulk_update(to_update, ['order_qty', 'demand_qty_plan', 'plan_qty'])
 
             upserted_items = to_create + to_update
 

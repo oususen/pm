@@ -9,7 +9,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.db.models import Max
 
-from masters.models import Line, Product
+from masters.models import Line, Product, Supplier
 from production.models_line_backlog import LineBacklog
 from production.models_line_plan import LinePlan
 from production.models_line_gantt_plan import LineGanttPlan
@@ -73,10 +73,29 @@ def iter_lines(line_ids):
 
 
 def run_pickup(line_id, start_date, end_date):
-    """pickupを実行して需要を最新化"""
+    """ライン種別に応じて需要取り込みを実行する。"""
     viewset = LineBacklogViewSet()
     viewset.format_kwarg = None
     viewset.kwargs = {}
+    line = Line.objects.filter(id=line_id).first()
+    if not line:
+        raise CommandError(f'Line not found: {line_id}')
+
+    if line.line_type == 'PURCHASE':
+        supplier = Supplier.objects.filter(supplier_code=line.line_code).first()
+        if not supplier:
+            raise CommandError(
+                f'PURCHASE line {line.line_code} に対応する仕入先が見つかりません'
+            )
+        req = DummyRequest({
+            'supplier_id': supplier.id,
+            'start_date': str(start_date),
+            'end_date': str(end_date),
+        })
+        viewset.request = req
+        viewset.pickup_purchase(req)
+        return
+
     req = DummyRequest({
         'line_id': line_id,
         'start_date': str(start_date),
@@ -87,14 +106,20 @@ def run_pickup(line_id, start_date, end_date):
 
 
 def fetch_final_demands(line_id, start_date, end_date):
-    """ライン最終品のみの需要行を取得"""
-    return LineBacklog.objects.filter(
+    """自動計画対象の需要行を取得（ライン種別に応じて条件を切り替え）"""
+    line_type = Line.objects.filter(id=line_id).values_list('line_type', flat=True).first()
+    base_qs = LineBacklog.objects.filter(
         line_id=line_id,
         plan_date__range=[start_date, end_date],
         sequence_no=0,
-        product__is_line_final_product=True,
         demand_qty_plan__gt=0,
-    ).values('plan_date', 'process_id', 'product_id', 'demand_qty_plan')
+    )
+
+    # 社内ライン(PROD)はライン最終品のみを対象にする。
+    # 外作/購入ライン(OUTSOURCE/PURCHASE)は最終品フラグに依存せず需要行を対象にする。
+    if line_type == 'PROD':
+        base_qs = base_qs.filter(product__is_line_final_product=True)
+    return base_qs.values('plan_date', 'process_id', 'product_id', 'demand_qty_plan')
 
 
 def delete_existing(line_id, start_date, end_date):
@@ -194,6 +219,68 @@ def generate_line_plans(line_id, demand_rows):
             next_seq += 1
 
     return created, created_plan_ids
+
+
+def apply_purchase_plan_to_backlog(line_id, start_date, end_date, demand_rows):
+    """
+    購買ラインは LineBacklog(sequence_no=0) の plan_qty に計画値を保存する。
+    需要取り込みで作成済みの基礎行を更新し、需要が消えた日は plan_qty を 0 に戻す。
+    """
+    demand_map = {}
+    process_map = {}
+    for row in demand_rows:
+        plan_date = row['plan_date']
+        product_id = row['product_id']
+        key = (product_id, plan_date)
+        qty = int(Decimal(row.get('demand_qty_plan') or 0))
+        demand_map[key] = max(qty, 0)
+        process_map[key] = row.get('process_id')
+
+    qs = LineBacklog.objects.filter(
+        line_id=line_id,
+        plan_date__range=[start_date, end_date],
+        sequence_no=0,
+    )
+    existing_map = {(obj.product_id, obj.plan_date): obj for obj in qs}
+
+    created = 0
+    updated = 0
+    to_update = []
+    to_create = []
+
+    for key, qty_val in demand_map.items():
+        obj = existing_map.pop(key, None)
+        if obj is None:
+            process_id = process_map.get(key)
+            if not process_id:
+                continue
+            to_create.append(LineBacklog(
+                plan_date=key[1],
+                process_id=process_id,
+                product_id=key[0],
+                line_id=line_id,
+                sequence_no=0,
+                plan_qty=qty_val,
+            ))
+            created += 1
+            continue
+        if int(obj.plan_qty or 0) != qty_val:
+            obj.plan_qty = qty_val
+            to_update.append(obj)
+            updated += 1
+
+    for obj in existing_map.values():
+        if int(obj.plan_qty or 0) != 0:
+            obj.plan_qty = 0
+            to_update.append(obj)
+            updated += 1
+
+    if to_create:
+        LineBacklog.objects.bulk_create(to_create, batch_size=1000)
+    if to_update:
+        LineBacklog.objects.bulk_update(to_update, ['plan_qty'], batch_size=1000)
+
+    return created, updated
 
 
 def generate_gantt(line_id, start_date, end_date):
@@ -300,15 +387,23 @@ class Command(BaseCommand):
                 # Step3: カスケード削除（期間一括クリア）
                 delete_existing(line.id, line_start, line_end)
 
-                # Step4: LinePlan作成
-                created_count, _ = generate_line_plans(line.id, demand_rows)
-                summary['created'] += created_count
+                if line.line_type == 'PURCHASE':
+                    # 購買は sequence_no=0 基礎行に計画を保存する。
+                    created_count, updated_count = apply_purchase_plan_to_backlog(
+                        line.id, line_start, line_end, demand_rows
+                    )
+                    summary['created'] += created_count
+                    summary['updated'] += updated_count
+                else:
+                    # Step4: LinePlan作成
+                    created_count, _ = generate_line_plans(line.id, demand_rows)
+                    summary['created'] += created_count
 
-                # Step5a: 工程展開
-                expand_processes_for_auto_plan(line.id, line_start, line_end)
+                    # Step5a: 工程展開
+                    expand_processes_for_auto_plan(line.id, line_start, line_end)
 
-                # Step5b: ガント生成（在庫計算は日次バッチに任せる）
-                generate_gantt(line.id, line_start, line_end)
+                    # Step5b: ガント生成（在庫計算は日次バッチに任せる）
+                    generate_gantt(line.id, line_start, line_end)
 
                 if dry_run:
                     raise transaction.TransactionManagementError('dry-run rollback')
@@ -320,7 +415,7 @@ class Command(BaseCommand):
                     'start': str(line_start),
                     'end': str(line_end),
                     'created': created_count,
-                    'updated': 0,  # 自動生成では更新は0（互換用フィールド）
+                    'updated': updated_count if line.line_type == 'PURCHASE' else 0,
                 })
 
         self.stdout.write(self.style.SUCCESS(
