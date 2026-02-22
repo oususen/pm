@@ -676,7 +676,7 @@ def _build_global_stocktake_baseline_progress_map(baseline_date, is_working_day)
             qty = Decimal('0')
             firm_qty = demand.firm_qty if demand.firm_qty and demand.firm_qty > 0 else Decimal('0')
             forecast_qty = demand.forecast_qty if demand.forecast_qty and demand.forecast_qty > 0 else Decimal('0')
-            is_shifted = bool(getattr(demand, 'is_shifted', False) or (demand.lead_time_days or 0) > 0)
+            is_shifted = bool(getattr(demand, 'is_shifted', False))
             if is_shifted and firm_qty > 0 and forecast_qty > 0:
                 qty = firm_qty + forecast_qty
             elif firm_qty > 0:
@@ -782,7 +782,7 @@ def recalculate_progress_from_stocktake(line_id, baseline_date, end_date):
         qty = Decimal('0')
         firm_qty = demand.firm_qty if demand.firm_qty and demand.firm_qty > 0 else Decimal('0')
         forecast_qty = demand.forecast_qty if demand.forecast_qty and demand.forecast_qty > 0 else Decimal('0')
-        is_shifted = bool(getattr(demand, 'is_shifted', False) or (demand.lead_time_days or 0) > 0)
+        is_shifted = bool(getattr(demand, 'is_shifted', False))
         if is_shifted and firm_qty > 0 and forecast_qty > 0:
             qty = firm_qty + forecast_qty
         elif firm_qty > 0:
@@ -851,7 +851,7 @@ def recalculate_progress_from_stocktake(line_id, baseline_date, end_date):
                 qty = Decimal('0')
                 firm_qty = demand.firm_qty if demand.firm_qty and demand.firm_qty > 0 else Decimal('0')
                 forecast_qty = demand.forecast_qty if demand.forecast_qty and demand.forecast_qty > 0 else Decimal('0')
-                is_shifted = bool(getattr(demand, 'is_shifted', False) or (demand.lead_time_days or 0) > 0)
+                is_shifted = bool(getattr(demand, 'is_shifted', False))
                 if is_shifted and firm_qty > 0 and forecast_qty > 0:
                     qty = firm_qty + forecast_qty
                 elif firm_qty > 0:

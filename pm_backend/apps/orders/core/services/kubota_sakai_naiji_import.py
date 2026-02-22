@@ -301,6 +301,7 @@ class KubotaSakaiNaijiImportService:
         Returns:
             tuple: (raw_count, daily_count, min_raw_id, max_raw_id)
         """
+        from collections import defaultdict
         with transaction.atomic():
             # Save raw records
             StgOrderRawKubota.objects.bulk_create(raw_records)
@@ -323,9 +324,29 @@ class KubotaSakaiNaijiImportService:
             except Customer.DoesNotExist:
                 raise ValueError(f'Customer not found: {customer_code}')
 
+            # 確定済み（FIRM）の納期を事前取得
+            # 同一顧客・品番・納期でFIRMが存在する場合、内示（FORECAST）は除外する
+            # ※ plant_code/ship_to_code は現在のクボタインポートではNULL固定のためキーに含めない
+            #   将来的に納入先別管理が必要になった場合はキーを拡張する
+            # ※ 過去FIRMによる恒久的除外を防ぐため直近90日のFIRMのみ参照する
+            from django.utils import timezone
+            from datetime import timedelta
+            firm_cutoff = timezone.now() - timedelta(days=90)
+            product_codes = list({r.product_code for r in raw_records_with_ids})
+            firm_dates_by_product = defaultdict(set)
+            firm_qs = StgOrderDaily.objects.filter(
+                customer=customer,
+                order_type='FIRM',
+                product_code__in=product_codes,
+                created_at__gte=firm_cutoff,
+            ).values('product_code', 'due_date')
+            for r in firm_qs:
+                firm_dates_by_product[r['product_code']].add(r['due_date'])
+
             # Convert horizontal data to daily records
             daily_records = []
             error_count = 0
+            skipped_firm = 0
 
             for raw in raw_records_with_ids:
                 if not raw.date_headers or not raw.quantities:
@@ -343,6 +364,11 @@ class KubotaSakaiNaijiImportService:
 
                         # Skip if date cannot be parsed (e.g., AA01, A011, 10, 0)
                         if not due_date:
+                            continue
+
+                        # 確定優先: 同一品番・納期でFIRMがあれば内示を除外
+                        if due_date in firm_dates_by_product.get(raw.product_code, set()):
+                            skipped_firm += 1
                             continue
 
                         # Parse quantity
@@ -392,5 +418,8 @@ class KubotaSakaiNaijiImportService:
             # Save daily records
             if daily_records:
                 StgOrderDaily.objects.bulk_create(daily_records)
+
+            if skipped_firm > 0:
+                self.warnings.append(f'確定優先: {skipped_firm}件の内示を除外（同一品番・納期でFIRM存在）')
 
         return len(raw_records), len(daily_records), min_raw_id, max_raw_id

@@ -213,6 +213,7 @@ class OrderExpansionService:
                     target_date = required_by_path[step.hierarchy_path][0]
                 else:
                     target_date = shift_business_days(calendar_id, required_date, lead_days)
+                is_shifted = bool(target_date != ol.due_date)
                 product_code = step_product.product_code if step_product else ol.product_code
                 product_id = step_product.id if step_product else (product.id if product else None)
 
@@ -233,11 +234,14 @@ class OrderExpansionService:
                         'product_code': product_code,
                         'plan_date': target_date,
                         'lead_time_days': lead_days,
+                        'is_shifted': is_shifted,
                         'forecast_qty': Decimal('0'),
                         'firm_qty': Decimal('0'),
                         'order_numbers': set(),
                     }
                     aggregated[key] = entry
+                else:
+                    entry['is_shifted'] = bool(entry.get('is_shifted') or is_shifted)
 
                 qty = (ol.quantity or Decimal('0')) * base_mult * correction
                 if ol.order.order_type == 'FIRM':
@@ -271,6 +275,7 @@ class OrderExpansionService:
                     product_code=data['product_code'],
                     plan_date=data['plan_date'],
                     lead_time_days=data['lead_time_days'],
+                    is_shifted=bool(data.get('is_shifted')),
                     forecast_qty=data['forecast_qty'],
                     firm_qty=data['firm_qty'],
                     plan_qty=plan_qty,
