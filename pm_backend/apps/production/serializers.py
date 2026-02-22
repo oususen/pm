@@ -455,16 +455,19 @@ class ScheduleConfigSerializer(serializers.ModelSerializer):
     last_run_status_display = serializers.SerializerMethodField()
     line_code = serializers.CharField(source='line.line_code', read_only=True)
     line_name = serializers.CharField(source='line.line_name', read_only=True)
+    line_type = serializers.CharField(source='line.line_type', read_only=True)
     notify_user_names = serializers.SerializerMethodField()
     notify_user_codes = serializers.SerializerMethodField()
 
     class Meta:
         model = ScheduleConfig
         fields = [
-            'id', 'task_name', 'task_name_display', 'line', 'line_code', 'line_name',
+            'id', 'task_name', 'task_name_display', 'line', 'line_code', 'line_name', 'line_type',
             'is_enabled',
             'scheduled_hour', 'scheduled_minute',
             'scheduled_dom',
+            'execution_order',
+            'auto_plan_sequence_locked',
             'range_base_day', 'range_days_after',
             'include_current_month', 'include_next_month', 'include_second_month', 'include_third_month',
             'notify_users', 'notify_user_names', 'notify_user_codes',

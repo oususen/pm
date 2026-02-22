@@ -99,6 +99,14 @@ class ScheduleConfig(models.Model):
         default=False,
         verbose_name='翌々翌月を対象'
     )
+    execution_order = models.PositiveIntegerField(
+        default=100,
+        verbose_name='実行順'
+    )
+    auto_plan_sequence_locked = models.BooleanField(
+        default=False,
+        verbose_name='順序運用ロック'
+    )
     notify_users = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
         blank=True,

@@ -2,12 +2,15 @@
   <div class="settings-container">
     <h2 class="page-title">定時タスク設定</h2>
 
-    <div class="card">
+    <div class="card" v-if="showAutoPlanSection">
       <div class="card-header">
         <div>
           <div class="card-title">生産計画自動生成（需要→計画上書き）</div>
           <p class="helper">
             毎月指定日・時刻に需要取り込みのみ実行し、指定月の計画を需要で上書きします。対象月（今月／翌月／翌々月／翌々翌月）をラインごとに選択できます。
+          </p>
+          <p v-if="autoPlanLocked" class="helper warning">
+            順序運用モードのため、この画面の自動計画設定は読み取り専用です。編集は「自動計画」画面で行ってください。
           </p>
         </div>
       </div>
@@ -38,7 +41,7 @@
                     min="1"
                     max="31"
                     v-model.number="cfg.scheduled_dom"
-                    :disabled="!canEdit"
+                    :disabled="!canEditAutoPlan"
                     class="time-input"
                   />
                   <span class="suffix">日</span>
@@ -49,7 +52,7 @@
                     min="0"
                     max="23"
                     v-model.number="cfg.scheduled_hour"
-                    :disabled="!canEdit"
+                    :disabled="!canEditAutoPlan"
                     class="time-input"
                   />
                   <span class="suffix">時</span>
@@ -58,7 +61,7 @@
                     min="0"
                     max="59"
                     v-model.number="cfg.scheduled_minute"
-                    :disabled="!canEdit"
+                    :disabled="!canEditAutoPlan"
                     class="time-input"
                   />
                   <span class="suffix">分</span>
@@ -66,25 +69,25 @@
               </td>
               <td class="period-cell">
                 <label class="checkbox-label">
-                  <input type="checkbox" v-model="cfg.include_current_month" :disabled="!canEdit" />
+                  <input type="checkbox" v-model="cfg.include_current_month" :disabled="!canEditAutoPlan" />
                   今月
                 </label>
                 <label class="checkbox-label">
-                  <input type="checkbox" v-model="cfg.include_next_month" :disabled="!canEdit" />
+                  <input type="checkbox" v-model="cfg.include_next_month" :disabled="!canEditAutoPlan" />
                   翌月
                 </label>
                 <label class="checkbox-label">
-                  <input type="checkbox" v-model="cfg.include_second_month" :disabled="!canEdit" />
+                  <input type="checkbox" v-model="cfg.include_second_month" :disabled="!canEditAutoPlan" />
                   翌々月
                 </label>
                 <label class="checkbox-label">
-                  <input type="checkbox" v-model="cfg.include_third_month" :disabled="!canEdit" />
+                  <input type="checkbox" v-model="cfg.include_third_month" :disabled="!canEditAutoPlan" />
                   翌々翌月
                 </label>
               </td>
               <td>
                 <label class="checkbox-label">
-                  <input type="checkbox" v-model="cfg.is_enabled" :disabled="!canEdit" />
+                  <input type="checkbox" v-model="cfg.is_enabled" :disabled="!canEditAutoPlan" />
                   有効
                 </label>
               </td>
@@ -92,7 +95,7 @@
                 <div class="notify-search">
                   <input
                     v-model="cfg.searchCode"
-                    :disabled="!canEdit"
+                    :disabled="!canEditAutoPlan"
                     class="notify-search-input"
                     placeholder="社員コード/氏名/ユーザー名で検索して追加"
                     @keyup.enter.prevent="addFirstCandidate(cfg)"
@@ -123,7 +126,7 @@
                     <button
                       type="button"
                       class="chip-remove"
-                      :disabled="!canEdit"
+                      :disabled="!canEditAutoPlan"
                       @click="removeCode(cfg, code)"
                     >
                       ×
@@ -135,7 +138,7 @@
                 <button
                   class="btn primary"
                   @click="saveConfig(cfg)"
-                  :disabled="saving.has(configKey(cfg)) || !canEdit"
+                  :disabled="saving.has(configKey(cfg)) || !canEditAutoPlan"
                 >
                   {{ saving.has(configKey(cfg)) ? '保存中...' : '保存' }}
                 </button>
@@ -271,10 +274,12 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
 
+const route = useRoute()
 const configs = ref([])
 const saving = reactive(new Set())
 const running = reactive(new Set())
@@ -299,6 +304,15 @@ const autoPlanConfigs = computed(() =>
     .sort((a, b) => (a.line_code || '').localeCompare(b.line_code || ''))
 )
 const inventoryConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'INVENTORY_RECALC'))
+const showAutoPlanSection = computed(() => {
+  const isInventoryRoute = route.name === 'InventoryTaskSettings' || String(route.path || '').includes('/inventory-task-settings')
+  const isInventoryMode = String(route.query?.mode || '') === 'inventory'
+  return !(isInventoryRoute || isInventoryMode)
+})
+const autoPlanLocked = computed(() =>
+  autoPlanConfigs.value.some((cfg) => cfg.auto_plan_sequence_locked)
+)
+const canEditAutoPlan = computed(() => canEdit.value && !autoPlanLocked.value)
 
 const statusClass = (cfg) => ({
   'status-success': cfg.last_run_status === 'SUCCESS',
@@ -335,6 +349,10 @@ const loadUsers = async () => {
 
 const saveConfig = async (cfg) => {
   if (!canEdit.value) return
+  if (cfg.task_name === 'AUTO_PLAN' && autoPlanLocked.value) {
+    alert('順序運用モード中のため、この画面では自動計画設定を編集できません。')
+    return
+  }
   const key = configKey(cfg)
   saving.add(key)
   try {

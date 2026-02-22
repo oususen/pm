@@ -36,29 +36,16 @@ def _selected_month_offsets(config):
     return months
 
 
-def run_auto_plan(force=False, config_id=None):
-    """
-    指定ライン・期間で生産計画を自動生成する。
-
-    ScheduleConfig(task_name='AUTO_PLAN', line=対象ライン) の設定を使用:
-      - scheduled_dom: 実行する日（1-31）。None の場合は毎日対象。
-      - include_*_month: 対象期間（翌月/翌々月/翌々翌月）
-    """
-    qs = ScheduleConfig.objects.filter(task_name='AUTO_PLAN')
-    if config_id:
-        qs = qs.filter(id=config_id)
-    config = qs.select_related('line').first()
-    if not config:
-        logger.info('[AUTO_PLAN] 対象設定が存在しないためスキップ')
-        return
-
-    today = datetime.now().date()
+def _run_single_config(config, today, force=False):
     if not force and config.scheduled_dom and today.day != config.scheduled_dom:
         logger.info(f'[AUTO_PLAN] 本日({today.day})は実行日({config.scheduled_dom})ではないためスキップ (cfg_id={config.id})')
-        return
+        return None
+    if not force and not config.is_enabled:
+        logger.info(f'[AUTO_PLAN] 無効設定のためスキップ (cfg_id={config.id})')
+        return None
     if not config.line_id:
         logger.warning('[AUTO_PLAN] 対象ラインが設定されていないためスキップ')
-        return
+        return None
 
     # 実行開始を記録
     config.last_run_at = datetime.now()
@@ -133,4 +120,38 @@ def run_auto_plan(force=False, config_id=None):
         'lines': line_stats,
         'months': months,
         'config_id': config.id,
+    }
+
+
+def run_auto_plan(force=False, config_id=None):
+    """
+    指定ライン・期間で生産計画を自動生成する。
+
+    - config_id指定: 単一設定を実行
+    - config_id未指定: AUTO_PLAN設定を実行順で順次実行
+    """
+    qs = ScheduleConfig.objects.filter(task_name='AUTO_PLAN').select_related('line')
+    if config_id:
+        qs = qs.filter(id=config_id)
+    else:
+        qs = qs.order_by('execution_order', 'line__line_code', 'id')
+    configs = list(qs)
+    if not configs:
+        logger.info('[AUTO_PLAN] 対象設定が存在しないためスキップ')
+        return
+
+    today = datetime.now().date()
+    results = []
+    for config in configs:
+        single = _run_single_config(config=config, today=today, force=force)
+        if single is not None:
+            results.append(single)
+
+    if config_id:
+        return results[0] if results else {'success': True, 'errors': [], 'duration': 0, 'lines': [], 'months': [], 'config_id': config_id}
+
+    return {
+        'success': all(item.get('success', False) for item in results) if results else True,
+        'executed': len(results),
+        'results': results,
     }

@@ -665,6 +665,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         ).select_related('output_product', 'routing__product', 'process')
 
         steps_on_line_count = 0
+        max_source_lt_days = 0
         for step in steps_on_line:
             steps_on_line_count += 1
             product = step.output_product or step.routing.product
@@ -681,6 +682,17 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 else:
                     intermediate_products.add(product.id)
 
+            # 需要元データの取得上限をLT分だけ先まで広げるための最大LT
+            try:
+                if step.time_unit == 'MINUTE':
+                    step_lt = int(getattr(getattr(step, 'line', None), 'lead_time_days', 0) or 0)
+                else:
+                    step_lt = int(step.lead_time_days or 0)
+                if step_lt > max_source_lt_days:
+                    max_source_lt_days = step_lt
+            except Exception:
+                pass
+
         logger.info(
             "pickup: line_id=%s steps_on_line=%s target_products=%s final_products=%s intermediate_products=%s",
             line_id,
@@ -692,6 +704,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         if not target_products:
             return Response([])
+        source_end_dt = (end_dt + timedelta(days=max_source_lt_days + 7)) if end_dt else None
 
         # 需要を計算：(product_id, plan_date) -> order_qty
         demand_map = defaultdict(Decimal)
@@ -759,6 +772,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 tuple(sorted(product_ids)),
                 start_date,
                 end_date,
+                source_end_dt,
             )
             if key in gantt_usage_cache:
                 return gantt_usage_cache[key]
@@ -795,7 +809,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         continue
                 if start_dt and plan_day < start_dt:
                     continue
-                if end_dt and plan_day > end_dt:
+                if source_end_dt and plan_day > source_end_dt:
                     continue
                 try:
                     qty = Decimal(str(plan.plan_qty or 0))
@@ -822,7 +836,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 target_line_id,
                 tuple(sorted(target_ids)),
                 start_dt,
-                end_dt,
+                source_end_dt or end_dt,
             )
             if cache_key in downstream_backlog_cache:
                 return downstream_backlog_cache[cache_key]
@@ -833,8 +847,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             )
             if start_dt:
                 qs = qs.filter(plan_date__gte=start_dt)
-            if end_dt:
-                qs = qs.filter(plan_date__lte=end_dt)
+            if source_end_dt or end_dt:
+                qs = qs.filter(plan_date__lte=source_end_dt or end_dt)
             rows = list(qs.values_list('product_id', 'plan_date', 'plan_qty', 'plan_id'))
             downstream_backlog_cache[cache_key] = rows
             return rows
@@ -880,8 +894,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
             if start_date:
                 order_lines_qs = order_lines_qs.filter(due_date__gte=start_date)
-            if end_date:
-                order_lines_qs = order_lines_qs.filter(due_date__lte=end_date)
+            if source_end_dt or end_date:
+                order_lines_qs = order_lines_qs.filter(due_date__lte=source_end_dt or end_date)
 
             order_lines = list(order_lines_qs)
 
@@ -1093,8 +1107,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 )
                 if start_date:
                     backlog_qs_parent = backlog_qs_parent.filter(plan_date__gte=start_date)
-                if end_date:
-                    backlog_qs_parent = backlog_qs_parent.filter(plan_date__lte=end_date)
+                if source_end_dt or end_date:
+                    backlog_qs_parent = backlog_qs_parent.filter(plan_date__lte=source_end_dt or end_date)
                 for prod_id, plan_date, plan_qty in backlog_qs_parent.values_list('product_id', 'plan_date', 'plan_qty'):
                     if prod_id not in backlog_by_product:
                         backlog_by_product[prod_id] = []
@@ -1134,6 +1148,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         target_keys = []
         target_key_set = set()
         for (product_id, plan_date), order_qty in demand_map.items():
+            if start_dt and plan_date < start_dt:
+                continue
+            if end_dt and plan_date > end_dt:
+                continue
             process_id = product_process_map.get(product_id)
             if not process_id:
                 continue
@@ -1524,6 +1542,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         end_date = request.data.get('end_date')
         items = request.data.get('items', [])
         read_only = request.data.get('read_only', False)  # デフォルトはFalse（保存する）
+        auto_plan_mode = request.data.get('auto_plan_mode', False)
+        if isinstance(auto_plan_mode, str):
+            auto_plan_mode = auto_plan_mode.lower() in ['true', '1', 'yes']
+        else:
+            auto_plan_mode = bool(auto_plan_mode)
         include_coproduct_children = request.data.get('include_coproduct_children', False)
         if isinstance(include_coproduct_children, str):
             include_coproduct_children = include_coproduct_children.lower() in ['true', '1', 'yes']
@@ -1850,6 +1873,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             sequence_no = plan.get('sequence_no')
             parent_plan_id = plan.get('plan_id')  # 親（ライン最終品）のplan_id
             seq_key = sequence_no if sequence_no is not None else 1
+            seen_target_keys = set() if auto_plan_mode else None
 
             steps = steps_map.get(product_id, [])
             if not steps:
@@ -1955,9 +1979,19 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     if parent_plan_id:
                         entry['plan_ids'].add(parent_plan_id)
 
+                main_key = (target_product_id, step.process_id, target_date, seq_key)
+                if auto_plan_mode:
+                    if main_key in seen_target_keys:
+                        continue
+                    seen_target_keys.add(main_key)
                 add_aggregate(target_product_id, plan_qty_step, computed_time_min, order_qty_step, demand_qty_step)
 
                 if child_target_product_id and child_target_product_id != target_product_id:
+                    child_key = (child_target_product_id, step.process_id, target_date, seq_key)
+                    if auto_plan_mode:
+                        if child_key in seen_target_keys:
+                            continue
+                        seen_target_keys.add(child_key)
                     add_aggregate(child_target_product_id, child_plan_qty, 0, order_qty_step, demand_qty_step)
 
         for (target_id, process_id, target_date, seq_key), entry in aggregated.items():
@@ -3508,7 +3542,7 @@ class ScheduleConfigView(APIView):
     """定時タスクスケジュール設定API"""
 
     def _ensure_defaults(self):
-        """既定設定を補完（全社内ライン分を作成）"""
+        """既定設定を補完（自動計画は社内/外作/購買ライン分を作成）"""
         ScheduleConfig.objects.get_or_create(
             task_name='INVENTORY_RECALC',
             line=None,
@@ -3532,16 +3566,20 @@ class ScheduleConfigView(APIView):
             'include_second_month': getattr(base_plan, 'include_second_month', False),
             'include_third_month': getattr(base_plan, 'include_third_month', False),
         }
-        for line in Line.objects.filter(is_active=True, line_type='PROD'):
+        target_types = ['PROD', 'OUTSOURCE', 'PURCHASE']
+        for idx, line in enumerate(
+            Line.objects.filter(is_active=True, line_type__in=target_types).order_by('line_type', 'line_code', 'id'),
+            start=1
+        ):
             ScheduleConfig.objects.get_or_create(
                 task_name='AUTO_PLAN',
                 line=line,
-                defaults=template,
+                defaults={**template, 'execution_order': idx},
             )
 
     def get(self, request):
         self._ensure_defaults()
-        configs = ScheduleConfig.objects.select_related('line').order_by('task_name', 'line__line_code')
+        configs = ScheduleConfig.objects.select_related('line').order_by('task_name', 'execution_order', 'line__line_code')
         serializer = ScheduleConfigSerializer(configs, many=True)
         return Response(serializer.data)
 
@@ -3562,6 +3600,7 @@ class ScheduleConfigView(APIView):
         scheduled_hour = request.data.get('scheduled_hour')
         scheduled_minute = request.data.get('scheduled_minute', 0)
         scheduled_dom = request.data.get('scheduled_dom')
+        execution_order = request.data.get('execution_order')
         range_base_day = (request.data.get('range_base_day') or 'TODAY').upper()
         range_days_after = request.data.get('range_days_after', 45)
         is_enabled = request.data.get('is_enabled', True)
@@ -3569,6 +3608,7 @@ class ScheduleConfigView(APIView):
         include_next_month = to_bool(request.data.get('include_next_month', True), True)
         include_second_month = to_bool(request.data.get('include_second_month', False), False)
         include_third_month = to_bool(request.data.get('include_third_month', False), False)
+        from_sequence_ui = to_bool(request.data.get('from_sequence_ui', False), False)
 
         try:
             scheduled_hour = int(scheduled_hour)
@@ -3593,6 +3633,15 @@ class ScheduleConfigView(APIView):
                 return Response({'detail': '実行日は1-31の範囲で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
         else:
             scheduled_dom = None
+        if execution_order in (None, ''):
+            execution_order = None
+        else:
+            try:
+                execution_order = int(execution_order)
+            except (TypeError, ValueError):
+                return Response({'detail': '実行順は整数で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+            if execution_order < 1:
+                return Response({'detail': '実行順は1以上で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
 
         if isinstance(is_enabled, str):
             is_enabled = is_enabled.lower() in ('true', '1', 'yes')
@@ -3620,9 +3669,9 @@ class ScheduleConfigView(APIView):
         if task_name == 'AUTO_PLAN':
             if not line_id:
                 return Response({'detail': 'ラインを指定してください'}, status=status.HTTP_400_BAD_REQUEST)
-            line_obj = Line.objects.filter(id=line_id, line_type='PROD').first()
+            line_obj = Line.objects.filter(id=line_id, line_type__in=['PROD', 'OUTSOURCE', 'PURCHASE']).first()
             if not line_obj:
-                return Response({'detail': '指定されたラインが見つかりません（生産ラインのみ設定可能）'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'detail': '指定されたラインが見つかりません（社内/外作/購買ラインのみ設定可能）'}, status=status.HTTP_400_BAD_REQUEST)
             if not (include_current_month or include_next_month or include_second_month or include_third_month):
                 return Response({'detail': '実行期間を1つ以上選択してください'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -3648,6 +3697,12 @@ class ScheduleConfigView(APIView):
                 },
             )
 
+        if task_name == 'AUTO_PLAN' and getattr(config, 'auto_plan_sequence_locked', False) and not from_sequence_ui:
+            return Response(
+                {'detail': '自動計画は順序運用モードです。順序設定画面から編集してください。'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
         user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
         config.scheduled_hour = scheduled_hour
         config.scheduled_minute = scheduled_minute
@@ -3659,15 +3714,24 @@ class ScheduleConfigView(APIView):
         config.include_next_month = include_next_month
         config.include_second_month = include_second_month
         config.include_third_month = include_third_month
+        if execution_order is not None:
+            config.execution_order = execution_order
+        if task_name == 'AUTO_PLAN':
+            config.auto_plan_sequence_locked = from_sequence_ui
         if line_obj:
             config.line = line_obj
         config.updated_by = user
-        config.save(update_fields=[
+        update_fields = [
             'scheduled_hour', 'scheduled_minute', 'scheduled_dom',
             'range_base_day', 'range_days_after',
             'is_enabled', 'include_current_month', 'include_next_month', 'include_second_month', 'include_third_month',
             'line', 'updated_at', 'updated_by',
-        ])
+        ]
+        if execution_order is not None:
+            update_fields.append('execution_order')
+        if task_name == 'AUTO_PLAN':
+            update_fields.append('auto_plan_sequence_locked')
+        config.save(update_fields=update_fields)
 
         notify_user_ids = request.data.get('notify_users', None)
         notify_user_codes = request.data.get('notify_user_codes', None)
@@ -3705,14 +3769,19 @@ class ScheduleRunNowView(APIView):
         line_id = request.data.get('line')
         try:
             if task == 'AUTO_PLAN':
-                config = None
+                # config_id/line指定が無い場合は、設定済みAUTO_PLANを実行順で順次実行する
                 if config_id:
                     config = ScheduleConfig.objects.filter(id=config_id).first()
+                    if not config:
+                        return Response({'detail': '対象設定が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+                    result = run_auto_plan(force=True, config_id=config.id)
                 elif line_id:
                     config = ScheduleConfig.objects.filter(task_name='AUTO_PLAN', line_id=line_id).first()
-                if not config:
-                    return Response({'detail': '対象設定が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
-                result = run_auto_plan(force=True, config_id=config.id)
+                    if not config:
+                        return Response({'detail': '対象設定が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+                    result = run_auto_plan(force=True, config_id=config.id)
+                else:
+                    result = run_auto_plan(force=True)
                 return Response({'detail': '生産計画自動生成を実行しました', **(result or {})})
             else:
                 from django.utils import timezone

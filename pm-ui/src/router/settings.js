@@ -54,6 +54,30 @@ const settings = [
     meta: { pageTitle: "定時タスク設定", resource: "settings" },
   },
   {
+    path: "/settings/inventory-task-settings",
+    name: "InventoryTaskSettings",
+    component: () => import("@/views/settings/ScheduledTasks.vue"),
+    meta: { pageTitle: "取り込み＋在庫進度計算", resource: "settings" },
+  },
+  {
+    path: "/settings/task-settings",
+    name: "TaskSettingsMenu",
+    component: () => import("@/views/settings/TaskSettingsMenu.vue"),
+    meta: { pageTitle: "タスク設定", resource: "settings" },
+  },
+  {
+    path: "/settings/auto-plan",
+    name: "AutoPlanMenu",
+    component: () => import("@/views/settings/AutoPlanSequenceSettings.vue"),
+    meta: { pageTitle: "自動計画", resource: "settings" },
+  },
+  {
+    path: "/settings/auto-plan-sequence",
+    name: "AutoPlanSequenceSettings",
+    component: () => import("@/views/settings/AutoPlanSequenceSettings.vue"),
+    meta: { pageTitle: "自動計画順序設定", resource: "settings" },
+  },
+  {
     path: "/settings/stocktake-init",
     name: "StocktakeInit",
     component: () => import("@/views/settings/StocktakeInit.vue"),

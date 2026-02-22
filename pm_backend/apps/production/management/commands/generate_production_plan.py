@@ -16,6 +16,7 @@ from production.models_line_gantt_plan import LineGanttPlan
 from production.models_line_default_schedule_setting import LineDefaultScheduleSetting
 from production.views import LineBacklogViewSet
 from production.services.gantt_planning import generate_line_gantt_plans
+from production.services.auto_plan_expansion import expand_processes_for_auto_plan
 
 logger = logging.getLogger('production')
 
@@ -63,9 +64,11 @@ def month_range(run_date: date):
 
 
 def iter_lines(line_ids):
-    qs = Line.objects.filter(is_active=True, line_type='PROD')
     if line_ids:
-        qs = qs.filter(id__in=line_ids)
+        # 自動計画から明示指定されたラインは種別を問わず対象化
+        qs = Line.objects.filter(is_active=True, id__in=line_ids)
+    else:
+        qs = Line.objects.filter(is_active=True, line_type='PROD')
     return list(qs)
 
 
@@ -193,23 +196,6 @@ def generate_line_plans(line_id, demand_rows):
     return created, created_plan_ids
 
 
-def expand_processes(line_id, start_date, end_date):
-    """LinePlan→LineBacklog工程展開"""
-    viewset = LineBacklogViewSet()
-    viewset.format_kwarg = None
-    viewset.kwargs = {}
-    req = DummyRequest({
-        'line_id': line_id,
-        'start_date': str(start_date),
-        'end_date': str(end_date),
-        'items': [],
-        'read_only': False,
-        'include_coproduct_children': True,
-    })
-    viewset.request = req
-    viewset.expand_processes(req)
-
-
 def generate_gantt(line_id, start_date, end_date):
     """LineGanttPlan再生成（手動generate互換）"""
     default_setting = LineDefaultScheduleSetting.objects.filter(line_id=line_id).first()
@@ -319,7 +305,7 @@ class Command(BaseCommand):
                 summary['created'] += created_count
 
                 # Step5a: 工程展開
-                expand_processes(line.id, line_start, line_end)
+                expand_processes_for_auto_plan(line.id, line_start, line_end)
 
                 # Step5b: ガント生成（在庫計算は日次バッチに任せる）
                 generate_gantt(line.id, line_start, line_end)
