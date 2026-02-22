@@ -23,6 +23,12 @@ const purchase = [
     component: () => import("@/views/purchase/PurchaseProgressOnly.vue"),
     meta: { pageTitle: "仕入れ進度のみ", resource: "purchase" },
   },
+  {
+    path: "/purchase/supplier-calendar",
+    name: "PurchaseSupplierCalendar",
+    component: () => import("@/views/purchase/PurchaseSupplierCalendar.vue"),
+    meta: { pageTitle: "仕入れ先カレンダ", resource: "purchase" },
+  },
 ];
 
 export default purchase;

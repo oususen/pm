@@ -27,8 +27,8 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
 
     需要の取得:
     - LineDemandから取得（受注をRoutingでLT遡りして展開済み）
-    - 確定（firm_qty）があれば確定を使用
-    - 確定がなければ内示（forecast_qty）を使用
+    - 前倒しあり（lead_time_days > 0）で確定/内示が同日にある場合は合算
+    - それ以外は従来どおり確定優先（確定が無ければ内示）
     - どちらもなければ 0
 
     Args:
@@ -195,10 +195,15 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
 
         for demand in demand_qs:
             qty = Decimal('0')
-            if demand.firm_qty and demand.firm_qty > 0:
-                qty = demand.firm_qty
-            elif demand.forecast_qty and demand.forecast_qty > 0:
-                qty = demand.forecast_qty
+            firm_qty = demand.firm_qty if demand.firm_qty and demand.firm_qty > 0 else Decimal('0')
+            forecast_qty = demand.forecast_qty if demand.forecast_qty and demand.forecast_qty > 0 else Decimal('0')
+            is_shifted = bool(getattr(demand, 'is_shifted', False) or (demand.lead_time_days or 0) > 0)
+            if is_shifted and firm_qty > 0 and forecast_qty > 0:
+                qty = firm_qty + forecast_qty
+            elif firm_qty > 0:
+                qty = firm_qty
+            elif forecast_qty > 0:
+                qty = forecast_qty
             if demand.routing_step_id:
                 key = (demand.plan_date, demand.routing_step_id)
                 demand_by_step[key] = demand_by_step.get(key, Decimal('0')) + qty
@@ -306,3 +311,4 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
 
     if backlogs_to_update:
         LineBacklog.objects.bulk_update(backlogs_to_update, ['progress_qty', 'planned_progress_qty'])
+

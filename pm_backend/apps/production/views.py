@@ -905,6 +905,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
             firm_map = defaultdict(Decimal)
             forecast_map = defaultdict(Decimal)
+            shifted_keys = set()
 
             for ol in order_lines:
                 if not ol.product_id:
@@ -916,6 +917,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 lead_days = resolve_lead_time_days(ol.product_id)
                 plan_date = shift_business_days(ol.due_date, lead_days)
                 key = (ol.product_id, plan_date)
+                if plan_date != ol.due_date:
+                    shifted_keys.add(key)
 
                 qty = Decimal(str(ol.quantity or 0))
                 order_type = (ol.order.order_type or '').upper()
@@ -927,7 +930,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             for key in set(firm_map) | set(forecast_map):
                 firm_qty = firm_map.get(key, Decimal('0'))
                 forecast_qty = forecast_map.get(key, Decimal('0'))
-                demand_qty = firm_qty if firm_qty > 0 else forecast_qty
+                # 前倒しで同日に重なった需要のみ、確定＋内示を合算する。
+                # 前倒しが無い場合は従来どおり「確定優先」。
+                if key in shifted_keys and firm_qty > 0 and forecast_qty > 0:
+                    demand_qty = firm_qty + forecast_qty
+                else:
+                    demand_qty = firm_qty if firm_qty > 0 else forecast_qty
                 demand_map[key] = demand_qty
 
         # B. 中間品は後工程から需要を取得
@@ -1406,7 +1414,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if check_date in calendar_day_cache:
                     return calendar_day_cache[check_date]
                 cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=check_date).first()
-                is_work = cal.is_working_day if cal is not None else check_date.weekday() < 5
+                # 仕入先カレンダ運用:
+                # カレンダが設定されている場合、未登録日は「休み」とみなす。
+                is_work = cal.is_working_day if cal is not None else False
                 calendar_day_cache[check_date] = is_work
                 return is_work
             # カレンダ未設定時は週末判定（月〜金を稼働日）を使う

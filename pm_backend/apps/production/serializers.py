@@ -35,7 +35,7 @@ class LineDemandSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'line', 'line_code', 'line_name', 'routing_step', 'process', 'process_code', 'process_name',
             'product', 'product_code', 'product_name', 'is_final_product',
-            'plan_date', 'lead_time_days',
+            'plan_date', 'lead_time_days', 'is_shifted',
             'forecast_qty', 'firm_qty', 'plan_qty', 'actual_qty',
             'plan_progress', 'actual_progress', 'required_qty',
             'order_numbers', 'created_at', 'updated_at',

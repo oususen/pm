@@ -674,10 +674,15 @@ def _build_global_stocktake_baseline_progress_map(baseline_date, is_working_day)
         )
         for demand in demand_qs:
             qty = Decimal('0')
-            if demand.firm_qty and demand.firm_qty > 0:
-                qty = demand.firm_qty
-            elif demand.forecast_qty and demand.forecast_qty > 0:
-                qty = demand.forecast_qty
+            firm_qty = demand.firm_qty if demand.firm_qty and demand.firm_qty > 0 else Decimal('0')
+            forecast_qty = demand.forecast_qty if demand.forecast_qty and demand.forecast_qty > 0 else Decimal('0')
+            is_shifted = bool(getattr(demand, 'is_shifted', False) or (demand.lead_time_days or 0) > 0)
+            if is_shifted and firm_qty > 0 and forecast_qty > 0:
+                qty = firm_qty + forecast_qty
+            elif firm_qty > 0:
+                qty = firm_qty
+            elif forecast_qty > 0:
+                qty = forecast_qty
             if not qty or not demand.product_id:
                 continue
             key = (demand.plan_date, demand.product_id)
@@ -775,10 +780,15 @@ def recalculate_progress_from_stocktake(line_id, baseline_date, end_date):
     )
     for demand in demand_qs:
         qty = Decimal('0')
-        if demand.firm_qty and demand.firm_qty > 0:
-            qty = demand.firm_qty
-        elif demand.forecast_qty and demand.forecast_qty > 0:
-            qty = demand.forecast_qty
+        firm_qty = demand.firm_qty if demand.firm_qty and demand.firm_qty > 0 else Decimal('0')
+        forecast_qty = demand.forecast_qty if demand.forecast_qty and demand.forecast_qty > 0 else Decimal('0')
+        is_shifted = bool(getattr(demand, 'is_shifted', False) or (demand.lead_time_days or 0) > 0)
+        if is_shifted and firm_qty > 0 and forecast_qty > 0:
+            qty = firm_qty + forecast_qty
+        elif firm_qty > 0:
+            qty = firm_qty
+        elif forecast_qty > 0:
+            qty = forecast_qty
         if demand.routing_step_id:
             key = (demand.plan_date, demand.routing_step_id)
             demand_by_step[key] = demand_by_step.get(key, Decimal('0')) + qty
@@ -839,10 +849,15 @@ def recalculate_progress_from_stocktake(line_id, baseline_date, end_date):
             )
             for demand in parent_demand_qs:
                 qty = Decimal('0')
-                if demand.firm_qty and demand.firm_qty > 0:
-                    qty = demand.firm_qty
-                elif demand.forecast_qty and demand.forecast_qty > 0:
-                    qty = demand.forecast_qty
+                firm_qty = demand.firm_qty if demand.firm_qty and demand.firm_qty > 0 else Decimal('0')
+                forecast_qty = demand.forecast_qty if demand.forecast_qty and demand.forecast_qty > 0 else Decimal('0')
+                is_shifted = bool(getattr(demand, 'is_shifted', False) or (demand.lead_time_days or 0) > 0)
+                if is_shifted and firm_qty > 0 and forecast_qty > 0:
+                    qty = firm_qty + forecast_qty
+                elif firm_qty > 0:
+                    qty = firm_qty
+                elif forecast_qty > 0:
+                    qty = forecast_qty
                 if not qty or not demand.product_id:
                     continue
                 key = (demand.plan_date, demand.product_id)
@@ -1628,3 +1643,4 @@ def initialize_planned_stock(line_ids, baseline_date):
             
     logger.info("initialize_planned_stock: updated %d records on %s", updated_count, baseline_date)
     return updated_count
+

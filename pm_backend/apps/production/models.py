@@ -32,6 +32,7 @@ class LineDemand(models.Model):
     product_code = models.CharField(max_length=50, verbose_name='製品コード')
     plan_date = models.DateField(verbose_name='必要日')
     lead_time_days = models.IntegerField(default=0, verbose_name='リードタイム(日)')
+    is_shifted = models.BooleanField(default=False, verbose_name='前倒し需要フラグ')
 
     forecast_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='内示数量')
     firm_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='確定数量')
