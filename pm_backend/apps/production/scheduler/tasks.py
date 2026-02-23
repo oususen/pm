@@ -73,7 +73,7 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
     """
     from masters.models import Line, BOMItem
     from orders.utils.calendar_utils import get_business_today
-    from production.inventory.inventory_calculator import recalculate_inventory_for_line
+    from production.inventory.inventory_calculator import recalculate_inventory_for_line, _build_adjustment_maps
     from production.inventory.progress_calculator import recalculate_progress_qty
     from production.models_line_backlog import LineBacklog
     from production.models_schedule_config import ScheduleConfig
@@ -208,6 +208,7 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
         )
         for line in active_lines:
             try:
+                adjustment_maps = _build_adjustment_maps(line.id, start_date, end_date)
                 products = (
                     LineBacklog.objects.filter(
                         line_id=line.id,
@@ -223,6 +224,8 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                         product_id=row['product_id'],
                         start_date=start_date,
                         end_date=end_date,
+                        progress_adjust_map=adjustment_maps.get('PROGRESS'),
+                        planned_progress_adjust_map=adjustment_maps.get('PLANNED_PROGRESS'),
                     )
                     progress_count += 1
             except Exception as e:

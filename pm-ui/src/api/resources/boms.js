@@ -59,8 +59,12 @@ export const createBomsAPI = (client) => ({
   getBOMItems(params = {}) {
     const queryParams = new URLSearchParams()
     if (params.bom) queryParams.append('bom', params.bom)
+    if (params.child_product) queryParams.append('child_product', params.child_product)
     if (params.sourcing_type) queryParams.append('sourcing_type', params.sourcing_type)
+    if (params.process) queryParams.append('process', params.process)
+    if (params.line) queryParams.append('line', params.line)
     if (params.supplier) queryParams.append('supplier', params.supplier)
+    if (params.page_size) queryParams.append('page_size', params.page_size)
     const query = queryParams.toString()
     return client.get(`/bom-items/${query ? '?' + query : ''}`)
   },

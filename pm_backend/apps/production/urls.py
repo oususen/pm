@@ -12,6 +12,7 @@ from production.views import (
     ProductionPlanLockSettingView,
     ScheduleConfigView,
     ScheduleRunNowView,
+    LineBacklogAdjustmentView,
     ProcessActualViewSet,
     ProductionOrderViewSet,
     StockAllocationViewSet,
@@ -50,4 +51,5 @@ urlpatterns = [
     path('production-plan-lock-setting/', ProductionPlanLockSettingView.as_view(), name='production-plan-lock-setting'),
     path('schedule-config/', ScheduleConfigView.as_view(), name='schedule-config'),
     path('schedule-config/run-now/', ScheduleRunNowView.as_view(), name='schedule-run-now'),
+    path('line-backlog-adjustments/', LineBacklogAdjustmentView.as_view(), name='line-backlog-adjustments'),
 ]

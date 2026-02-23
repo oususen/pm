@@ -8,6 +8,7 @@ from django.db.models import F
 from orders.models import OrderLine
 from orders.utils.calendar_utils import get_business_today
 from ..models_line_backlog import LineBacklog
+from ..models_line_backlog_adjustment import LineBacklogAdjustment
 from ..serializers_process_realtime import _resolve_product_process_line
 from quality.models_scrap import ScrapRecord, ScrapRecordDetail
 
@@ -287,6 +288,41 @@ def _get_max_parent_bom_lead_time(product_id):
         bom__is_active=True
     ).values_list('lead_time_days', flat=True)
     return max(max_lt, default=0) or 0
+
+
+def _build_adjustment_maps(line_id, start_date, end_date):
+    """調整を一括取得して辞書化（計算ループ中はDB参照しない）"""
+    rows = LineBacklogAdjustment.objects.filter(
+        line_id=line_id,
+        plan_date__range=[start_date, end_date],
+    ).values('adjust_type', 'product_id', 'process_id', 'plan_date', 'adjust_qty')
+
+    maps = {
+        'STOCK': {},
+        'PLANNED_STOCK': {},
+        'PROGRESS': {},
+        'PLANNED_PROGRESS': {},
+    }
+    for row in rows:
+        ad_type = row['adjust_type']
+        if ad_type not in maps:
+            continue
+        key = (row['product_id'], row['plan_date'], row['process_id'])
+        maps[ad_type][key] = maps[ad_type].get(key, 0) + int(row['adjust_qty'] or 0)
+    return maps
+
+
+def _resolve_day_adjustment(rows, ad_map):
+    """行（日付×製品）に対する調整値を解決（工程一致を優先）"""
+    if not rows or not ad_map:
+        return 0
+    product_id = rows[0].product_id
+    plan_date = rows[0].plan_date
+    process_ids = {r.process_id for r in rows if r.process_id}
+    total = ad_map.get((product_id, plan_date, None), 0)
+    for pid in process_ids:
+        total += ad_map.get((product_id, plan_date, pid), 0)
+    return int(total)
 
 
 def _sum_parent_shipments(backlog, pick_qty, shift_fn=None):
@@ -586,7 +622,7 @@ def has_downstream_actual(backlog):
     return False
 
 
-def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=None):
+def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=None, stock_adjust_map=None):
     """
     実在庫を日次で再計算
 
@@ -795,12 +831,14 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
         prev_day = get_prev_working_day(plan_date)
         prev_stock = stock_by_date.get(prev_day, last_stock)
 
-        # 在庫 = 前日在庫 + 実績 - 出庫 + scrap_adjust_qty(非自工程仕損は負値で蓄積)
+        stock_adjust = _resolve_day_adjustment(rows, stock_adjust_map)
+        # 在庫 = 前日在庫 + 実績 - 出庫 + scrap_adjust_qty(非自工程仕損は負値で蓄積) + 手動調整
         stock_qty = (
             prev_stock
             + actual_total
             - actual_shipment
             + scrap_adjust_total
+            + stock_adjust
         )
 
         rep = pick_representative(rows)
@@ -819,7 +857,7 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
         LineBacklog.objects.bulk_update(backlogs_to_update, ['stock_qty', 'actual_shipment_qty'])
 
 
-def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, firm_map=None):
+def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, firm_map=None, planned_stock_adjust_map=None):
     """
     計画在庫を日次で再計算（時制考慮版）
     - 過去（plan_date < today）:
@@ -968,6 +1006,7 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
 
         prev_day = get_prev_working_day(plan_date)
         prev_planned = planned_by_date.get(prev_day, last_planned)
+        planned_stock_adjust = _resolve_day_adjustment(rows, planned_stock_adjust_map)
 
         # 計画在庫 = 前日計画在庫 + 実績/計画 - 出庫
         # 仕損による子部品消費は出庫計算で反映済み（adjust_qty は使用しない）
@@ -976,12 +1015,14 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
                 prev_planned
                 + actual_total
                 - planned_shipment
+                + planned_stock_adjust
             )
         else:
             planned_stock = (
                 prev_planned
                 + plan_total
                 - planned_shipment
+                + planned_stock_adjust
             )
 
         rep = pick_representative(rows)
@@ -1024,6 +1065,7 @@ def recalculate_inventory_for_line(line_id, start_date, end_date, include_progre
     firm_start = time.perf_counter()
     firm_map = _build_firm_order_map(line_id, start_date, end_date)
     logger.info("確定受注マップ作成時間: %.3fs", time.perf_counter() - firm_start)
+    adjustment_maps = _build_adjustment_maps(line_id, start_date, end_date)
 
     # 製品ごとに在庫計算
     product_qs = LineBacklog.objects.filter(
@@ -1048,7 +1090,14 @@ def recalculate_inventory_for_line(line_id, start_date, end_date, include_progre
 
         # 実在庫を計算
         t0 = time.perf_counter()
-        recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=firm_map)
+        recalculate_stock_qty(
+            line_id,
+            product_id,
+            start_date,
+            end_date,
+            firm_map=firm_map,
+            stock_adjust_map=adjustment_maps.get('STOCK'),
+        )
         stock_elapsed = time.perf_counter() - t0
         stock_total += stock_elapsed
         if stock_elapsed > stock_max[0]:
@@ -1056,7 +1105,14 @@ def recalculate_inventory_for_line(line_id, start_date, end_date, include_progre
 
         # 計画在庫を計算
         t1 = time.perf_counter()
-        recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, firm_map=firm_map)
+        recalculate_planned_stock_qty(
+            line_id,
+            product_id,
+            start_date,
+            end_date,
+            firm_map=firm_map,
+            planned_stock_adjust_map=adjustment_maps.get('PLANNED_STOCK'),
+        )
         planned_elapsed = time.perf_counter() - t1
         planned_total += planned_elapsed
         if planned_elapsed > planned_max[0]:
@@ -1067,7 +1123,14 @@ def recalculate_inventory_for_line(line_id, start_date, end_date, include_progre
 
             # 進度を計算
             t2 = time.perf_counter()
-            recalculate_progress_qty(line_id, product_id, start_date, end_date)
+            recalculate_progress_qty(
+                line_id,
+                product_id,
+                start_date,
+                end_date,
+                progress_adjust_map=adjustment_maps.get('PROGRESS'),
+                planned_progress_adjust_map=adjustment_maps.get('PLANNED_PROGRESS'),
+            )
             progress_elapsed = time.perf_counter() - t2
             progress_total += progress_elapsed
             if progress_elapsed > progress_max[0]:

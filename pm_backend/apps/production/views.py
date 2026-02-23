@@ -18,6 +18,7 @@ from django.http import HttpResponse
 from .models import LineDemand
 from orders.models import OrderLine
 from .models_line_backlog import LineBacklog
+from .models_line_backlog_adjustment import LineBacklogAdjustment
 from .models_line_plan import LinePlan
 from .models_production import StockAllocation, ProductionOrder, ProcessActual
 from .models_line_gantt_plan import LineGanttPlan
@@ -40,6 +41,7 @@ from .serializers import (
     ProductionOrderSerializer,
     ProductionOrderListSerializer,
     ProcessActualSerializer,
+    LineBacklogAdjustmentSerializer,
 )
 from .services.order_expansion import OrderExpansionService
 from .services.gantt_planning import generate_line_gantt_plans
@@ -3569,6 +3571,91 @@ class ProductionPlanLockSettingView(APIView):
             setting.save(update_fields=['lock_days', 'updated_at', 'updated_by'])
 
         serializer = ProductionPlanLockSettingSerializer(setting)
+        return Response(serializer.data)
+
+
+class LineBacklogAdjustmentView(APIView):
+    """LineBacklog調整の保存/取得API"""
+
+    def get(self, request):
+        qs = LineBacklogAdjustment.objects.select_related('line', 'product', 'process').all().order_by('-plan_date', '-id')
+
+        line_code = (request.query_params.get('line_code') or '').strip()
+        product_code = (request.query_params.get('product_code') or '').strip()
+        process_code = (request.query_params.get('process_code') or '').strip()
+        adjust_type = (request.query_params.get('adjust_type') or '').strip().upper()
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+
+        if line_code:
+            qs = qs.filter(line__line_code=line_code)
+        if product_code:
+            qs = qs.filter(product__product_code=product_code)
+        if process_code:
+            qs = qs.filter(process__process_code=process_code)
+        if adjust_type:
+            qs = qs.filter(adjust_type=adjust_type)
+        if start_date:
+            qs = qs.filter(plan_date__gte=start_date)
+        if end_date:
+            qs = qs.filter(plan_date__lte=end_date)
+
+        serializer = LineBacklogAdjustmentSerializer(qs[:500], many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        line_code = (request.data.get('line_code') or '').strip()
+        product_code = (request.data.get('product_code') or '').strip()
+        process_code = (request.data.get('process_code') or '').strip()
+        plan_date_raw = request.data.get('plan_date')
+        adjust_type = str(request.data.get('adjust_type') or '').upper().strip()
+        reason = str(request.data.get('reason') or '').strip()
+
+        if not line_code or not product_code or not plan_date_raw or not adjust_type:
+            return Response({'detail': 'line_code, product_code, plan_date, adjust_type は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            plan_date = datetime.strptime(str(plan_date_raw), '%Y-%m-%d').date()
+        except ValueError as e:
+            return Response({'detail': f'plan_date形式が不正です: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            adjust_qty = int(request.data.get('adjust_qty', 0))
+        except (TypeError, ValueError):
+            return Response({'detail': 'adjust_qty は整数で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+
+        valid_types = {'STOCK', 'PLANNED_STOCK', 'PROGRESS', 'PLANNED_PROGRESS'}
+        if adjust_type not in valid_types:
+            return Response({'detail': 'adjust_type が不正です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        line = Line.objects.filter(line_code=line_code, is_active=True).first()
+        if not line:
+            return Response({'detail': f'ラインが見つかりません: {line_code}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        product = Product.objects.filter(product_code=product_code).first()
+        if not product:
+            return Response({'detail': f'品番が見つかりません: {product_code}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        process = None
+        if process_code:
+            process = Process.objects.filter(process_code=process_code).first()
+            if not process:
+                return Response({'detail': f'工程が見つかりません: {process_code}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+        obj, _ = LineBacklogAdjustment.objects.update_or_create(
+            line=line,
+            product=product,
+            process=process,
+            plan_date=plan_date,
+            adjust_type=adjust_type,
+            defaults={
+                'adjust_qty': adjust_qty,
+                'reason': reason,
+                'updated_by': user,
+            },
+        )
+        serializer = LineBacklogAdjustmentSerializer(obj)
         return Response(serializer.data)
 
 

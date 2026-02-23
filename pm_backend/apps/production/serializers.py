@@ -11,6 +11,7 @@ from .models_line_plan import LinePlan
 from .models_line_gantt_plan import LineGanttPlan
 from .models_line_daily_schedule_setting import LineDailyScheduleSetting
 from .models_line_default_schedule_setting import LineDefaultScheduleSetting
+from .models_line_backlog_adjustment import LineBacklogAdjustment
 from .models_plan_change_log import ProductionPlanChangeLog
 from .models_plan_lock_setting import ProductionPlanLockSetting
 from .models_schedule_config import ScheduleConfig
@@ -516,3 +517,28 @@ class ScheduleConfigSerializer(serializers.ModelSerializer):
             elif user.email:
                 codes.append(user.email)
         return codes
+
+
+class LineBacklogAdjustmentSerializer(serializers.ModelSerializer):
+    line_code = serializers.CharField(source='line.line_code', read_only=True)
+    product_code = serializers.CharField(source='product.product_code', read_only=True)
+    process_code = serializers.CharField(source='process.process_code', read_only=True)
+
+    class Meta:
+        model = LineBacklogAdjustment
+        fields = [
+            'id',
+            'line',
+            'line_code',
+            'product',
+            'product_code',
+            'process',
+            'process_code',
+            'plan_date',
+            'adjust_type',
+            'adjust_qty',
+            'reason',
+            'updated_at',
+            'updated_by',
+        ]
+        read_only_fields = ['id', 'updated_at', 'updated_by']

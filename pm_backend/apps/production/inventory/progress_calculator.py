@@ -14,7 +14,14 @@ from ..models_line_backlog import LineBacklog
 from .inventory_calculator import _get_max_parent_bom_lead_time
 
 
-def recalculate_progress_qty(line_id, product_id, start_date, end_date):
+def recalculate_progress_qty(
+    line_id,
+    product_id,
+    start_date,
+    end_date,
+    progress_adjust_map=None,
+    planned_progress_adjust_map=None,
+):
     """
     進度を日次で再計算
 
@@ -138,6 +145,16 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
         plan_rows = [r for r in rows if (r.plan_qty or 0) > 0]
         candidates = plan_rows if plan_rows else rows
         return min(candidates, key=lambda r: (r.sequence_no if r.sequence_no is not None else 0, r.id))
+
+    def resolve_day_adjustment(rows, ad_map):
+        if not rows or not ad_map:
+            return 0
+        plan_date = rows[0].plan_date
+        process_ids = {r.process_id for r in rows if r.process_id}
+        total = ad_map.get((product_id, plan_date, None), 0)
+        for pid in process_ids:
+            total += ad_map.get((product_id, plan_date, pid), 0)
+        return int(total)
 
     today = get_business_today()
     # 製品のBOMの最大LTを取得し、LT+1日前から再計算
@@ -282,12 +299,15 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
             continue
 
         # 進度 = 前日進度 + 実績 - 需要 + 調整 + 非自工程仕損調整
+        progress_adjust = resolve_day_adjustment(rows, progress_adjust_map)
+        planned_progress_adjust = resolve_day_adjustment(rows, planned_progress_adjust_map)
         progress_qty = (
             prev_progress
             + actual_total
             - progress_shipment
             + adjust_total
             + scrap_adjust_total
+            + progress_adjust
         )
         planned_progress_qty = (
             prev_planned_progress
@@ -295,6 +315,7 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
             - progress_shipment
             + adjust_total
             + scrap_adjust_total
+            + planned_progress_adjust
         )
 
         rep = pick_representative(rows)
@@ -311,4 +332,3 @@ def recalculate_progress_qty(line_id, product_id, start_date, end_date):
 
     if backlogs_to_update:
         LineBacklog.objects.bulk_update(backlogs_to_update, ['progress_qty', 'planned_progress_qty'])
-

@@ -80,7 +80,14 @@ const sections = [
   {
     id: "inventory",
     title: "在庫管理",
-    items: [{ label: "在庫メニュー", link: "/inventory" }],
+    items: [
+      { label: "在庫メニュー", link: "/inventory" },
+      { label: "調整メニュー", link: "/inventory/adjustments" },
+      { label: "進度調整", link: "/inventory/adjustments/progress" },
+      { label: "在庫調整", link: "/inventory/adjustments/stock" },
+      { label: "計画在庫調整", link: "/inventory/adjustments/planned-stock" },
+      { label: "計画進度調整", link: "/inventory/adjustments/planned-progress" },
+    ],
   },
   {
     id: "quality",
