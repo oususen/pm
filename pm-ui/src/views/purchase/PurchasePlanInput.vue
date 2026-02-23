@@ -494,6 +494,7 @@ const fetchLockSetting = async () => {
 const fetchProducts = async (supplierId = null) => {
   try {
     let bomItems = []
+    let routingProductIds = new Set()
     if (supplierId) {
       const baseParams = { supplier: supplierId }
       const [buyRes, subconRes] = await Promise.all([
@@ -503,6 +504,23 @@ const fetchProducts = async (supplierId = null) => {
       const buyItems = buyRes.data.results || buyRes.data || []
       const subconItems = subconRes.data.results || subconRes.data || []
       bomItems = [...buyItems, ...subconItems]
+
+      // BOM未紐付け品も表示できるよう、仕入先ラインのルーティング出力品目を対象に含める
+      const supplier = suppliers.value.find((s) => Number(s.id) === Number(supplierId))
+      if (supplier?.supplier_code) {
+        const linesRes = await api.lines.getLines()
+        const lines = linesRes.data.results || linesRes.data || []
+        const purchaseLine = lines.find((l) => l.line_code === supplier.supplier_code)
+        if (purchaseLine?.id) {
+          const stepsRes = await api.routings.getRoutingSteps({ line: purchaseLine.id })
+          const steps = stepsRes.data.results || stepsRes.data || []
+          routingProductIds = new Set(
+            steps
+              .map((s) => Number(s.output_product))
+              .filter((id) => Number.isFinite(id) && id > 0)
+          )
+        }
+      }
     } else {
       const params = { sourcing_type: 'BUY' }
       const bomItemsRes = await api.bomItems.getBOMItems(params)
@@ -511,6 +529,7 @@ const fetchProducts = async (supplierId = null) => {
 
     // 子製品IDを抽出
     const targetProductIds = new Set(bomItems.map((item) => item.child_product))
+    routingProductIds.forEach((id) => targetProductIds.add(id))
 
     // 全製品から対象のみを抽出（仕入先指定時は該当BOMがあるもののみ）
     const allProducts = await api.products.getAllProducts()

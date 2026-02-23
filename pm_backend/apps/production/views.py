@@ -1356,9 +1356,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             bom__is_active=True,
         ).select_related('bom', 'bom__parent_product')
 
-        if not bom_items.exists():
-            return Response({'created': 0, 'updated': 0, 'items': 0, 'line_id': line_id, 'process_id': process_id})
-
         parent_to_children = defaultdict(list)
         parent_ids = set()
         child_ids = set()
@@ -1374,23 +1371,22 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             child_ids.add(item.child_product_id)
             parent_to_children[parent_id].append((item.child_product_id, qty, lead_time_days))
 
-        if not parent_ids or not child_ids:
-            return Response({'created': 0, 'updated': 0, 'items': 0})
+        parent_orders = []
+        if parent_ids:
+            parent_qs = LineBacklog.objects.filter(product_id__in=parent_ids).select_related('line')
+            if start_dt:
+                parent_qs = parent_qs.filter(plan_date__gte=start_dt)
+            if end_dt:
+                parent_qs = parent_qs.filter(plan_date__lte=end_dt)
 
-        parent_qs = LineBacklog.objects.filter(product_id__in=parent_ids).select_related('line')
-        if start_dt:
-            parent_qs = parent_qs.filter(plan_date__gte=start_dt)
-        if end_dt:
-            parent_qs = parent_qs.filter(plan_date__lte=end_dt)
-
-        # 親製品の数量を取得:
-        # - 通常ライン: plan_qty > 0
-        # - 外作ライン(OUTSOURCE): 計画を持たないため order_qty > 0 も対象にする
-        parent_orders = list(
-            parent_qs.values('product_id', 'line_id', 'line__line_type', 'plan_date', 'plan_qty', 'order_qty', 'plan_id').filter(
-                Q(plan_qty__gt=0) | Q(order_qty__gt=0, line__line_type='OUTSOURCE')
+            # 親製品の数量を取得:
+            # - 通常ライン: plan_qty > 0
+            # - 外作ライン(OUTSOURCE): 計画を持たないため order_qty > 0 も対象にする
+            parent_orders = list(
+                parent_qs.values('product_id', 'line_id', 'line__line_type', 'plan_date', 'plan_qty', 'order_qty', 'plan_id').filter(
+                    Q(plan_qty__gt=0) | Q(order_qty__gt=0, line__line_type='OUTSOURCE')
+                )
             )
-        )
 
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
             calendar_code='daiso'
@@ -1499,10 +1495,31 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 target_date = shift_business_days(effective_date, lead_time_days)
                 demand_map[(child_id, target_date)] += plan_qty * qty
 
+        # フォールバック: 購買ラインのLineDemand（内示/確定集計）を需要として取り込む
+        # BOM展開で同一キーがある場合はBOM計算値を優先する。
+        direct_qs = LineDemand.objects.filter(line_id=line_id)
+        if start_dt:
+            direct_qs = direct_qs.filter(plan_date__gte=start_dt)
+        if end_dt:
+            direct_qs = direct_qs.filter(plan_date__lte=end_dt)
+
+        direct_demand_product_ids = set()
+        for row in direct_qs.values('product_id', 'plan_date', 'plan_qty'):
+            product_id = row.get('product_id')
+            plan_date = row.get('plan_date')
+            qty = Decimal(str(row.get('plan_qty') or 0))
+            if not product_id or not plan_date or qty == 0:
+                continue
+            direct_demand_product_ids.add(product_id)
+            key = (product_id, plan_date)
+            if key not in demand_map:
+                demand_map[key] = qty
+
+        target_product_ids = set(child_ids) | direct_demand_product_ids
         existing_qs = LineBacklog.objects.filter(
             line_id=line_id,
             process_id=process_id,
-            product_id__in=child_ids,
+            product_id__in=target_product_ids,
         )
         if start_dt:
             existing_qs = existing_qs.filter(plan_date__gte=start_dt)
