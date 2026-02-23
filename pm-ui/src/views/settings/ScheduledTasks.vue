@@ -168,7 +168,7 @@
       <p v-else class="helper warning">生産ラインの設定が見つかりません。</p>
     </div>
 
-    <div class="card" v-if="inventoryConfig">
+    <div class="card" v-if="inventoryConfig && showInventorySection">
       <div class="field">
         <label>取り込み＋在庫再計算 - 実行時刻</label>
         <div class="input-row">
@@ -269,6 +269,86 @@
         </table>
       </div>
     </div>
+
+    <div class="card" v-if="orderExpansionConfig && showOrderExpansionSection">
+      <div class="field">
+        <label>自動受注展開 - 実行時刻</label>
+        <div class="input-row">
+          <input
+            type="number"
+            min="0"
+            max="23"
+            v-model.number="orderExpansionConfig.scheduled_hour"
+            :disabled="!canEdit"
+            class="time-input"
+          />
+          <span class="suffix">時</span>
+          <input
+            type="number"
+            min="0"
+            max="59"
+            v-model.number="orderExpansionConfig.scheduled_minute"
+            :disabled="!canEdit"
+            class="time-input"
+          />
+          <span class="suffix">分</span>
+        </div>
+        <p class="helper">毎日指定した時刻にOPEN受注をLineDemandへ自動展開します。</p>
+      </div>
+
+      <div class="field" style="margin-top: 12px">
+        <label class="checkbox-label">
+          <input type="checkbox" v-model="orderExpansionConfig.is_enabled" :disabled="!canEdit" />
+          有効
+        </label>
+      </div>
+
+      <div class="actions">
+        <button
+          class="btn primary"
+          @click="saveConfig(orderExpansionConfig)"
+          :disabled="saving.has(configKey(orderExpansionConfig)) || !canEdit"
+        >
+          {{ saving.has(configKey(orderExpansionConfig)) ? '保存中...' : '保存' }}
+        </button>
+        <button
+          class="btn"
+          @click="runNow(orderExpansionConfig)"
+          :disabled="running.has(configKey(orderExpansionConfig)) || !canEdit"
+          style="margin-left: 8px"
+        >
+          {{ running.has(configKey(orderExpansionConfig)) ? '実行中...' : '今すぐ実行' }}
+        </button>
+      </div>
+
+      <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
+
+      <div v-if="orderExpansionConfig.last_run_at" class="last-run">
+        <h3 class="section-title">最終実行情報</h3>
+        <table class="info-table">
+          <tbody>
+            <tr>
+              <th>実行日時</th>
+              <td>{{ formatDateTime(orderExpansionConfig.last_run_at) }}</td>
+            </tr>
+            <tr>
+              <th>結果</th>
+              <td>
+                <span :class="statusClass(orderExpansionConfig)">{{ orderExpansionConfig.last_run_status_display || '-' }}</span>
+              </td>
+            </tr>
+            <tr>
+              <th>実行時間</th>
+              <td>{{ orderExpansionConfig.last_run_duration_seconds != null ? orderExpansionConfig.last_run_duration_seconds + '秒' : '-' }}</td>
+            </tr>
+            <tr>
+              <th>詳細</th>
+              <td class="message-cell">{{ orderExpansionConfig.last_run_message || '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -304,10 +384,18 @@ const autoPlanConfigs = computed(() =>
     .sort((a, b) => (a.line_code || '').localeCompare(b.line_code || ''))
 )
 const inventoryConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'INVENTORY_RECALC'))
+const orderExpansionConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'ORDER_EXPANSION'))
 const showAutoPlanSection = computed(() => {
-  const isInventoryRoute = route.name === 'InventoryTaskSettings' || String(route.path || '').includes('/inventory-task-settings')
-  const isInventoryMode = String(route.query?.mode || '') === 'inventory'
-  return !(isInventoryRoute || isInventoryMode)
+  const mode = String(route.query?.mode || '').toLowerCase()
+  return mode !== 'inventory' && mode !== 'order-expansion'
+})
+const showInventorySection = computed(() => {
+  const mode = String(route.query?.mode || '').toLowerCase()
+  return mode === '' || mode === 'inventory'
+})
+const showOrderExpansionSection = computed(() => {
+  const mode = String(route.query?.mode || '').toLowerCase()
+  return mode === '' || mode === 'order-expansion'
 })
 const autoPlanLocked = computed(() =>
   autoPlanConfigs.value.some((cfg) => cfg.auto_plan_sequence_locked)
@@ -398,11 +486,15 @@ const runNow = async (cfg) => {
   const targetName =
     cfg.task_name === 'AUTO_PLAN'
       ? `生産計画自動生成（${cfg.line_name || cfg.line_code || 'ライン未設定'}）`
-      : '取り込み＋在庫再計算'
+      : cfg.task_name === 'ORDER_EXPANSION'
+        ? '自動受注展開'
+        : '取り込み＋在庫再計算'
   const msg =
     cfg.task_name === 'AUTO_PLAN'
       ? `${targetName}を今すぐ実行しますか？`
-      : '取り込み＋在庫再計算を今すぐ実行しますか？\nバックグラウンドで実行されます。'
+      : cfg.task_name === 'ORDER_EXPANSION'
+        ? '自動受注展開を今すぐ実行しますか？'
+        : '取り込み＋在庫再計算を今すぐ実行しますか？\nバックグラウンドで実行されます。'
   if (!confirm(msg)) return
 
   running.add(key)
@@ -428,7 +520,7 @@ const runNow = async (cfg) => {
           stopPolling()
           running.delete(key)
           const statusLabel = updated.last_run_status === 'SUCCESS' ? '成功' : '失敗'
-          alert(`取り込み＋在庫再計算が完了しました（${statusLabel}）\n${updated.last_run_message || ''}`)
+          alert(`${targetName}が完了しました（${statusLabel}）\n${updated.last_run_message || ''}`)
         }
       }, 5000)
     } else {

@@ -3,7 +3,7 @@
     <div class="header-row">
       <div class="title-wrap">
         <h2 class="page-title">仕入れ先カレンダ</h2>
-        <div class="title-note">注意事項：デフォルトは毎日休みです。必ず設定してください</div>
+        <div class="title-note">注意事項：未設定日はダイソウカレンダの稼働日を既定値として表示します</div>
       </div>
       <button class="btn primary" @click="showCreate = !showCreate">
         {{ showCreate ? '新規作成を閉じる' : '新規作成' }}
@@ -124,6 +124,8 @@ const suppliers = ref([])
 const lines = ref([])
 const calendars = ref([])
 const calendarDays = ref([])
+const daisoCalendarId = ref('')
+const daisoCalendarDays = ref([])
 
 const selectedSupplierId = ref('')
 const selectedCalendarId = ref('')
@@ -176,6 +178,14 @@ const dayMap = computed(() => {
   return map
 })
 
+const daisoDayMap = computed(() => {
+  const map = new Map()
+  for (const row of daisoCalendarDays.value) {
+    map.set(row.target_date, row)
+  }
+  return map
+})
+
 const monthWeeks = computed(() => {
   const { start, end } = monthRange.value
   const firstDay = new Date(start)
@@ -191,13 +201,15 @@ const monthWeeks = computed(() => {
       const dateStr = ymd(cursor)
       const inMonth = cursor.getMonth() === currentMonth.value.getMonth()
       const existing = dayMap.value.get(dateStr)
+      const daiso = daisoDayMap.value.get(dateStr)
+      const fallbackWorking = daiso ? !!daiso.is_working_day : cursor.getDay() !== 0 && cursor.getDay() !== 6
       week.push({
         key: `${dateStr}-${i}`,
         date: dateStr,
         day: cursor.getDate(),
         inMonth,
         record: existing || null,
-        is_working_day: existing ? !!existing.is_working_day : false,
+        is_working_day: existing ? !!existing.is_working_day : fallbackWorking,
       })
       cursor.setDate(cursor.getDate() + 1)
     }
@@ -236,7 +248,7 @@ const supplierToLine = (supplierId) => {
 const onSupplierChange = async () => {
   const line = supplierToLine(selectedSupplierId.value)
   selectedCalendarId.value = line?.calendar || ''
-  await loadCalendarDays()
+  await Promise.all([loadCalendarDays(), loadDaisoCalendarDays()])
 }
 
 const loadCalendarDays = async () => {
@@ -253,9 +265,29 @@ const loadCalendarDays = async () => {
   calendarDays.value = res.data.results || res.data || []
 }
 
+const loadDaisoCalendarDays = async () => {
+  const { start, end } = monthRange.value
+  if (!daisoCalendarId.value) {
+    const res = await api.calendars.getCalendars({ search: 'daiso', page_size: 200 })
+    const rows = res.data.results || res.data || []
+    const found = rows.find((row) => String(row.calendar_code || '').toLowerCase() === 'daiso')
+    daisoCalendarId.value = found?.id || ''
+  }
+  if (!daisoCalendarId.value) {
+    daisoCalendarDays.value = []
+    return
+  }
+  const res = await api.calendars.getCalendarDays(daisoCalendarId.value, {
+    page_size: 500,
+    target_date__gte: ymd(start),
+    target_date__lte: ymd(end),
+  })
+  daisoCalendarDays.value = res.data.results || res.data || []
+}
+
 const moveMonth = async (delta) => {
   currentMonth.value = new Date(currentMonth.value.getFullYear(), currentMonth.value.getMonth() + delta, 1)
-  await loadCalendarDays()
+  await Promise.all([loadCalendarDays(), loadDaisoCalendarDays()])
 }
 
 const toggleWeekday = async (weekday, checked) => {
@@ -417,6 +449,7 @@ const saveDayNote = async (day, event) => {
 
 onMounted(async () => {
   await Promise.all([loadSuppliers(), loadLines(), loadCalendars()])
+  await loadDaisoCalendarDays()
 })
 </script>
 

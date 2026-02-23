@@ -3571,6 +3571,17 @@ class ScheduleConfigView(APIView):
                 'range_days_after': 45,
             },
         )
+        ScheduleConfig.objects.get_or_create(
+            task_name='ORDER_EXPANSION',
+            line=None,
+            defaults={
+                'scheduled_hour': 6,
+                'scheduled_minute': 0,
+                'is_enabled': False,
+                'range_base_day': 'TODAY',
+                'range_days_after': 45,
+            },
+        )
         base_plan = ScheduleConfig.objects.filter(task_name='AUTO_PLAN', line__isnull=False).first()
         if not base_plan:
             base_plan = ScheduleConfig.objects.filter(task_name='AUTO_PLAN', line__isnull=True).first()
@@ -3781,6 +3792,7 @@ class ScheduleRunNowView(APIView):
         import threading
         from .scheduler.tasks import run_inventory_recalculation
         from .scheduler.tasks_auto_plan import run_auto_plan
+        from .scheduler.tasks_order_expansion import run_order_expansion
         task = (request.data.get('task_name') or 'INVENTORY_RECALC').upper()
         config_id = request.data.get('config_id') or request.data.get('id')
         line_id = request.data.get('line')
@@ -3800,6 +3812,9 @@ class ScheduleRunNowView(APIView):
                 else:
                     result = run_auto_plan(force=True)
                 return Response({'detail': '生産計画自動生成を実行しました', **(result or {})})
+            elif task == 'ORDER_EXPANSION':
+                result = run_order_expansion()
+                return Response({'detail': '自動受注展開を実行しました', **(result or {})})
             else:
                 from django.utils import timezone
                 # 二重実行防止: RUNNING状態チェック（10分超はスタック扱いでリセット）

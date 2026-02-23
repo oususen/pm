@@ -64,6 +64,7 @@ class Command(BaseCommand):
         from production.models_schedule_config import ScheduleConfig
         from production.scheduler.tasks import run_inventory_recalculation
         from production.scheduler.tasks_auto_plan import run_auto_plan
+        from production.scheduler.tasks_order_expansion import run_order_expansion
 
         # 既存ジョブ（設定チェックを除く）をクリア
         for job in scheduler.get_jobs():
@@ -122,6 +123,32 @@ class Command(BaseCommand):
                 f'ジョブ登録: {job_id} - {cfg.scheduled_hour:02d}:{cfg.scheduled_minute:02d} '
                 f'(line={cfg.line.line_code if cfg.line_id else "-"})'
             )
+
+        order_cfg, _ = ScheduleConfig.objects.get_or_create(
+            task_name='ORDER_EXPANSION',
+            line=None,
+            defaults={
+                'scheduled_hour': 6,
+                'scheduled_minute': 0,
+                'is_enabled': False,
+            },
+        )
+        if order_cfg.is_enabled:
+            trigger = CronTrigger(
+                hour=order_cfg.scheduled_hour,
+                minute=order_cfg.scheduled_minute,
+                timezone='Asia/Tokyo',
+            )
+            scheduler.add_job(
+                run_order_expansion,
+                trigger,
+                id='order_expansion',
+                replace_existing=True,
+                misfire_grace_time=3600,
+            )
+            logger.info(f'ジョブ登録: order_expansion - {order_cfg.scheduled_hour:02d}:{order_cfg.scheduled_minute:02d}')
+        else:
+            logger.info('ジョブ無効: order_expansion')
 
     def _check_config_changes(self, scheduler):
         """DB設定の変更を検知してジョブを再登録"""

@@ -10,6 +10,10 @@
         <div class="tile-title">取り込み＋在庫/計画在庫/進度計算</div>
         <div class="tile-desc">需要取り込みと在庫関連の定時計算を設定します。</div>
       </RouterLink>
+      <RouterLink :to="{ path: '/settings/scheduled-tasks', query: { mode: 'order-expansion' } }" class="tile">
+        <div class="tile-title">自動受注展開</div>
+        <div class="tile-desc">OPEN受注をLineDemandへ展開する定時実行を設定します。</div>
+      </RouterLink>
     </div>
   </div>
 </template>
