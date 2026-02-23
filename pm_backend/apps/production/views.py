@@ -3577,17 +3577,24 @@ class ScheduleConfigView(APIView):
 
     def _ensure_defaults(self):
         """既定設定を補完（自動計画は社内/外作/購買ライン分を作成）"""
-        ScheduleConfig.objects.get_or_create(
-            task_name='INVENTORY_RECALC',
-            line=None,
-            defaults={
-                'scheduled_hour': 7,
-                'scheduled_minute': 0,
-                'is_enabled': True,
-                'range_base_day': 'TODAY',
-                'range_days_after': 45,
-            },
-        )
+        inventory_defaults = [
+            ('INVENTORY_RECALC', 7, 0, True),
+            ('PICKUP_ONLY', 7, 30, False),
+            ('INVENTORY_ONLY', 8, 0, False),
+            ('PROGRESS_ONLY', 8, 30, False),
+        ]
+        for task_name, hour, minute, is_enabled in inventory_defaults:
+            ScheduleConfig.objects.get_or_create(
+                task_name=task_name,
+                line=None,
+                defaults={
+                    'scheduled_hour': hour,
+                    'scheduled_minute': minute,
+                    'is_enabled': is_enabled,
+                    'range_base_day': 'TODAY',
+                    'range_days_after': 45,
+                },
+            )
         ScheduleConfig.objects.get_or_create(
             task_name='ORDER_EXPANSION',
             line=None,
@@ -3811,6 +3818,12 @@ class ScheduleRunNowView(APIView):
         from .scheduler.tasks_auto_plan import run_auto_plan
         from .scheduler.tasks_order_expansion import run_order_expansion
         task = (request.data.get('task_name') or 'INVENTORY_RECALC').upper()
+        task_labels = {
+            'INVENTORY_RECALC': '取り込み＋在庫再計算',
+            'PICKUP_ONLY': '取り込みのみ',
+            'INVENTORY_ONLY': '在庫計算のみ',
+            'PROGRESS_ONLY': '進度計算のみ',
+        }
         config_id = request.data.get('config_id') or request.data.get('id')
         line_id = request.data.get('line')
         try:
@@ -3832,11 +3845,11 @@ class ScheduleRunNowView(APIView):
             elif task == 'ORDER_EXPANSION':
                 result = run_order_expansion()
                 return Response({'detail': '自動受注展開を実行しました', **(result or {})})
-            else:
+            elif task in task_labels:
                 from django.utils import timezone
-                # 二重実行防止: RUNNING状態チェック（10分超はスタック扱いでリセット）
+                # 二重実行防止: 同一タスクのRUNNING状態チェック（10分超はスタック扱いでリセット）
                 stale_cfg = ScheduleConfig.objects.filter(
-                    task_name='INVENTORY_RECALC',
+                    task_name=task,
                     last_run_status='RUNNING',
                 ).first()
                 if stale_cfg:
@@ -3846,32 +3859,35 @@ class ScheduleRunNowView(APIView):
                             {'detail': '既に実行中です。完了までお待ちください。'},
                             status=status.HTTP_409_CONFLICT,
                         )
-                    # 10分超はスタックとみなしてリセット
                     stale_cfg.last_run_status = 'FAILED'
                     stale_cfg.last_run_message = f'タイムアウト（{int(elapsed)}秒経過）により強制リセット'
                     stale_cfg.save(update_fields=['last_run_status', 'last_run_message'])
-                    logger.warning(f'[スケジューラ] RUNNING状態が{int(elapsed)}秒スタック → FAILEDにリセット')
+                    logger.warning(f'[スケジューラ] {task} RUNNING状態が{int(elapsed)}秒スタック → FAILEDにリセット')
 
                 # バックグラウンドスレッドで実行
                 def _run():
                     import django
                     django.db.connections.close_all()
                     try:
-                        run_inventory_recalculation()
+                        run_inventory_recalculation(task_name=task)
                     except Exception:
-                        logger.exception('バックグラウンド在庫再計算に失敗')
-                        # 例外時もステータスを更新
+                        logger.exception('バックグラウンドタスク実行に失敗')
                         ScheduleConfig.objects.filter(
-                            task_name='INVENTORY_RECALC',
+                            task_name=task,
                             last_run_status='RUNNING',
                         ).update(last_run_status='FAILED', last_run_message='実行中にエラーが発生しました')
 
                 thread = threading.Thread(target=_run, daemon=True)
                 thread.start()
                 return Response({
-                    'detail': '取り込み＋在庫再計算をバックグラウンドで開始しました。',
+                    'detail': f'{task_labels[task]}をバックグラウンドで開始しました。',
                     'async': True,
                 })
+            else:
+                return Response(
+                    {'detail': f'未対応のタスクです: {task}'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         except Exception as e:
             logger.exception('手動実行に失敗')
             return Response(

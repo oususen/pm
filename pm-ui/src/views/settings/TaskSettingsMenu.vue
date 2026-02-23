@@ -7,7 +7,7 @@
         <div class="tile-desc">ライン別/順序の自動計画設定を管理します。</div>
       </RouterLink>
       <RouterLink :to="{ path: '/settings/inventory-task-settings', query: { mode: 'inventory' } }" class="tile">
-        <div class="tile-title">取り込み＋在庫/計画在庫/進度計算</div>
+        <div class="tile-title">取り込み・在庫計算・進度計算（定時タスク）</div>
         <div class="tile-desc">需要取り込みと在庫関連の定時計算を設定します。</div>
       </RouterLink>
       <RouterLink :to="{ path: '/settings/scheduled-tasks', query: { mode: 'order-expansion' } }" class="tile">

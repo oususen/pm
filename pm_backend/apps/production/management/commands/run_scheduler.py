@@ -75,30 +75,35 @@ class Command(BaseCommand):
             except Exception:
                 pass
 
-        inv_cfg, _ = ScheduleConfig.objects.get_or_create(
-            task_name='INVENTORY_RECALC',
-            defaults={
-                'scheduled_hour': 7,
-                'scheduled_minute': 0,
-                'is_enabled': True,
-            },
-        )
-        if inv_cfg.is_enabled:
+        inventory_jobs = [
+            ('INVENTORY_RECALC', 'inventory_recalc', {'scheduled_hour': 7, 'scheduled_minute': 0, 'is_enabled': True}),
+            ('PICKUP_ONLY', 'pickup_only', {'scheduled_hour': 7, 'scheduled_minute': 30, 'is_enabled': False}),
+            ('INVENTORY_ONLY', 'inventory_only', {'scheduled_hour': 8, 'scheduled_minute': 0, 'is_enabled': False}),
+            ('PROGRESS_ONLY', 'progress_only', {'scheduled_hour': 8, 'scheduled_minute': 30, 'is_enabled': False}),
+        ]
+        for task_name, job_id, defaults in inventory_jobs:
+            cfg, _ = ScheduleConfig.objects.get_or_create(
+                task_name=task_name,
+                line=None,
+                defaults=defaults,
+            )
+            if not cfg.is_enabled:
+                logger.info(f'ジョブ無効: {job_id}')
+                continue
             trigger = CronTrigger(
-                hour=inv_cfg.scheduled_hour,
-                minute=inv_cfg.scheduled_minute,
+                hour=cfg.scheduled_hour,
+                minute=cfg.scheduled_minute,
                 timezone='Asia/Tokyo',
             )
             scheduler.add_job(
                 run_inventory_recalculation,
                 trigger,
-                id='inventory_recalc',
+                id=job_id,
                 replace_existing=True,
                 misfire_grace_time=3600,
+                kwargs={'task_name': task_name},
             )
-            logger.info(f'ジョブ登録: inventory_recalc - {inv_cfg.scheduled_hour:02d}:{inv_cfg.scheduled_minute:02d}')
-        else:
-            logger.info('ジョブ無効: inventory_recalc')
+            logger.info(f'ジョブ登録: {job_id} - {cfg.scheduled_hour:02d}:{cfg.scheduled_minute:02d}')
 
         auto_configs = ScheduleConfig.objects.filter(task_name='AUTO_PLAN', line__isnull=False)
         for cfg in auto_configs:

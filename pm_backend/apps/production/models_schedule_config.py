@@ -11,6 +11,9 @@ class ScheduleConfig(models.Model):
     ]
     TASK_CHOICES = [
         ('INVENTORY_RECALC', '在庫再計算'),
+        ('PICKUP_ONLY', '取り込みのみ'),
+        ('INVENTORY_ONLY', '在庫計算のみ'),
+        ('PROGRESS_ONLY', '進度計算のみ'),
         ('AUTO_PLAN', '生産計画自動生成'),
         ('ORDER_EXPANSION', '自動受注展開'),
     ]

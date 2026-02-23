@@ -168,15 +168,16 @@
       <p v-else class="helper warning">生産ラインの設定が見つかりません。</p>
     </div>
 
-    <div class="card" v-if="inventoryConfig && showInventorySection">
+    <template v-if="showInventorySection">
+    <div class="card" v-for="cfg in inventoryTaskConfigs" :key="configKey(cfg)">
       <div class="field">
-        <label>取り込み＋在庫再計算 - 実行時刻</label>
+        <label>{{ inventoryTaskLabel(cfg.task_name) }} - 実行時刻</label>
         <div class="input-row">
           <input
             type="number"
             min="0"
             max="23"
-            v-model.number="inventoryConfig.scheduled_hour"
+            v-model.number="cfg.scheduled_hour"
             :disabled="!canEdit"
             class="time-input"
           />
@@ -185,29 +186,34 @@
             type="number"
             min="0"
             max="59"
-            v-model.number="inventoryConfig.scheduled_minute"
+            v-model.number="cfg.scheduled_minute"
             :disabled="!canEdit"
             class="time-input"
           />
           <span class="suffix">分</span>
         </div>
-        <p class="helper">毎日指定した時刻に需要取り込み（pickup）→ 在庫・計画在庫・進度の自動再計算を実行します。</p>
+        <p class="helper">{{ inventoryTaskHelp(cfg.task_name) }}</p>
       </div>
 
       <div class="field" style="margin-top: 12px">
-        <label>計算期間</label>
+        <label>{{ showRangeBaseDay(cfg.task_name) ? '計算期間' : '対象期間' }}</label>
         <div class="input-row">
-          <select v-model="inventoryConfig.range_base_day" :disabled="!canEdit" class="date-input">
-            <option value="TODAY">今日</option>
-            <option value="YESTERDAY">昨日</option>
-            <option value="TWO_DAYS_AGO">一昨日</option>
-          </select>
-          <span class="suffix">から</span>
+          <template v-if="showRangeBaseDay(cfg.task_name)">
+            <select v-model="cfg.range_base_day" :disabled="!canEdit" class="date-input">
+              <option value="TODAY">今日</option>
+              <option value="YESTERDAY">昨日</option>
+              <option value="TWO_DAYS_AGO">一昨日</option>
+            </select>
+            <span class="suffix">から</span>
+          </template>
+          <template v-else>
+            <span class="suffix">今日から</span>
+          </template>
           <input
             type="number"
             min="0"
             max="365"
-            v-model.number="inventoryConfig.range_days_after"
+            v-model.number="cfg.range_days_after"
             :disabled="!canEdit"
             class="time-input"
           />
@@ -218,7 +224,7 @@
 
       <div class="field" style="margin-top: 12px">
         <label class="checkbox-label">
-          <input type="checkbox" v-model="inventoryConfig.is_enabled" :disabled="!canEdit" />
+          <input type="checkbox" v-model="cfg.is_enabled" :disabled="!canEdit" />
           有効
         </label>
       </div>
@@ -226,49 +232,50 @@
       <div class="actions">
         <button
           class="btn primary"
-          @click="saveConfig(inventoryConfig)"
-          :disabled="saving.has(configKey(inventoryConfig)) || !canEdit"
+          @click="saveConfig(cfg)"
+          :disabled="saving.has(configKey(cfg)) || !canEdit"
         >
-          {{ saving.has(configKey(inventoryConfig)) ? '保存中...' : '保存' }}
+          {{ saving.has(configKey(cfg)) ? '保存中...' : '保存' }}
         </button>
         <button
           class="btn"
-          @click="runNow(inventoryConfig)"
-          :disabled="running.has(configKey(inventoryConfig)) || !canEdit"
+          @click="runNow(cfg)"
+          :disabled="running.has(configKey(cfg)) || !canEdit"
           style="margin-left: 8px"
         >
-          {{ running.has(configKey(inventoryConfig)) ? '実行中...' : '今すぐ実行' }}
+          {{ running.has(configKey(cfg)) ? '実行中...' : '今すぐ実行' }}
         </button>
       </div>
 
       <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
 
-      <div v-if="inventoryConfig.last_run_at" class="last-run">
+      <div v-if="cfg.last_run_at" class="last-run">
         <h3 class="section-title">最終実行情報</h3>
         <table class="info-table">
           <tbody>
             <tr>
               <th>実行日時</th>
-              <td>{{ formatDateTime(inventoryConfig.last_run_at) }}</td>
+              <td>{{ formatDateTime(cfg.last_run_at) }}</td>
             </tr>
             <tr>
               <th>結果</th>
               <td>
-                <span :class="statusClass(inventoryConfig)">{{ inventoryConfig.last_run_status_display || '-' }}</span>
+                <span :class="statusClass(cfg)">{{ cfg.last_run_status_display || '-' }}</span>
               </td>
             </tr>
             <tr>
               <th>実行時間</th>
-              <td>{{ inventoryConfig.last_run_duration_seconds != null ? inventoryConfig.last_run_duration_seconds + '秒' : '-' }}</td>
+              <td>{{ cfg.last_run_duration_seconds != null ? cfg.last_run_duration_seconds + '秒' : '-' }}</td>
             </tr>
             <tr>
               <th>詳細</th>
-              <td class="message-cell">{{ inventoryConfig.last_run_message || '-' }}</td>
+              <td class="message-cell">{{ cfg.last_run_message || '-' }}</td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
+    </template>
 
     <div class="card" v-if="orderExpansionConfig && showOrderExpansionSection">
       <div class="field">
@@ -383,7 +390,12 @@ const autoPlanConfigs = computed(() =>
     .filter((cfg) => cfg.task_name === 'AUTO_PLAN')
     .sort((a, b) => (a.line_code || '').localeCompare(b.line_code || ''))
 )
-const inventoryConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'INVENTORY_RECALC'))
+const inventoryTaskOrder = ['INVENTORY_RECALC', 'PICKUP_ONLY', 'INVENTORY_ONLY', 'PROGRESS_ONLY']
+const inventoryTaskConfigs = computed(() =>
+  configs.value
+    .filter((cfg) => inventoryTaskOrder.includes(cfg.task_name))
+    .sort((a, b) => inventoryTaskOrder.indexOf(a.task_name) - inventoryTaskOrder.indexOf(b.task_name))
+)
 const orderExpansionConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'ORDER_EXPANSION'))
 const showAutoPlanSection = computed(() => {
   const mode = String(route.query?.mode || '').toLowerCase()
@@ -407,6 +419,22 @@ const statusClass = (cfg) => ({
   'status-failed': cfg.last_run_status === 'FAILED',
   'status-running': cfg.last_run_status === 'RUNNING',
 })
+
+const inventoryTaskLabel = (taskName) => {
+  if (taskName === 'PICKUP_ONLY') return '取り込みのみ'
+  if (taskName === 'INVENTORY_ONLY') return '在庫計算のみ'
+  if (taskName === 'PROGRESS_ONLY') return '進度計算のみ'
+  return '取り込み＋在庫再計算'
+}
+
+const inventoryTaskHelp = (taskName) => {
+  if (taskName === 'PICKUP_ONLY') return '毎日指定した時刻に需要取り込み（pickup / pickup_purchase）のみを実行します。'
+  if (taskName === 'INVENTORY_ONLY') return '毎日指定した時刻に在庫・計画在庫の再計算のみを実行します（進度は更新しません）。'
+  if (taskName === 'PROGRESS_ONLY') return '毎日指定した時刻に進度のみを再計算します。'
+  return '毎日指定した時刻に需要取り込み（pickup）→ 在庫・計画在庫・進度の自動再計算を実行します。'
+}
+
+const showRangeBaseDay = (taskName) => taskName === 'INVENTORY_RECALC' || taskName === 'PICKUP_ONLY'
 
 const configKey = (cfg) => `${cfg.task_name}-${cfg.line || 'none'}-${cfg.id || 'new'}`
 
@@ -453,7 +481,7 @@ const saveConfig = async (cfg) => {
       scheduled_dom: cfg.scheduled_dom,
       range_start_date: null,
       range_end_date: null,
-      range_base_day: cfg.range_base_day || 'TODAY',
+      range_base_day: showRangeBaseDay(cfg.task_name) ? (cfg.range_base_day || 'TODAY') : 'TODAY',
       range_days_after: Number.isFinite(Number(cfg.range_days_after)) ? Number(cfg.range_days_after) : 45,
       is_enabled: cfg.is_enabled,
       include_current_month: cfg.include_current_month,
@@ -488,13 +516,13 @@ const runNow = async (cfg) => {
       ? `生産計画自動生成（${cfg.line_name || cfg.line_code || 'ライン未設定'}）`
       : cfg.task_name === 'ORDER_EXPANSION'
         ? '自動受注展開'
-        : '取り込み＋在庫再計算'
+        : inventoryTaskLabel(cfg.task_name)
   const msg =
     cfg.task_name === 'AUTO_PLAN'
       ? `${targetName}を今すぐ実行しますか？`
       : cfg.task_name === 'ORDER_EXPANSION'
         ? '自動受注展開を今すぐ実行しますか？'
-        : '取り込み＋在庫再計算を今すぐ実行しますか？\nバックグラウンドで実行されます。'
+        : `${inventoryTaskLabel(cfg.task_name)}を今すぐ実行しますか？\nバックグラウンドで実行されます。`
   if (!confirm(msg)) return
 
   running.add(key)
@@ -596,33 +624,30 @@ const removeCode = (cfg, code) => {
 }
 
 const startPollingIfRunning = () => {
-  // ページ読み込み時にRUNNING状態のタスクがあればポーリング開始
-  const inv = inventoryConfig.value
-  if (inv && inv.last_run_status === 'RUNNING') {
-    // last_run_atから10分以上経過していたらスタック扱い（ポーリング不要）
-    if (inv.last_run_at) {
-      const elapsed = Date.now() - new Date(inv.last_run_at).getTime()
-      if (elapsed > 10 * 60 * 1000) return
-    }
-    const key = configKey(inv)
-    running.add(key)
-    stopPolling()
-    const pollStart = Date.now()
-    const POLL_TIMEOUT = 10 * 60 * 1000
-    pollTimer.value = setInterval(async () => {
-      if (Date.now() - pollStart > POLL_TIMEOUT) {
-        stopPolling()
-        running.delete(key)
-        return
-      }
-      await loadConfig()
-      const updated = inventoryConfig.value
-      if (updated && updated.last_run_status !== 'RUNNING') {
-        stopPolling()
-        running.delete(key)
-      }
-    }, 5000)
+  const runningTask = inventoryTaskConfigs.value.find((cfg) => cfg.last_run_status === 'RUNNING')
+  if (!runningTask) return
+  if (runningTask.last_run_at) {
+    const elapsed = Date.now() - new Date(runningTask.last_run_at).getTime()
+    if (elapsed > 10 * 60 * 1000) return
   }
+  const key = configKey(runningTask)
+  running.add(key)
+  stopPolling()
+  const pollStart = Date.now()
+  const POLL_TIMEOUT = 10 * 60 * 1000
+  pollTimer.value = setInterval(async () => {
+    if (Date.now() - pollStart > POLL_TIMEOUT) {
+      stopPolling()
+      running.delete(key)
+      return
+    }
+    await loadConfig()
+    const updated = inventoryTaskConfigs.value.find((cfg) => configKey(cfg) === key)
+    if (updated && updated.last_run_status !== 'RUNNING') {
+      stopPolling()
+      running.delete(key)
+    }
+  }, 5000)
 }
 
 onMounted(async () => {
