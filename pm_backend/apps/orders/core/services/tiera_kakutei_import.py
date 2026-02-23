@@ -32,6 +32,8 @@ class TieraKakuteiImportService:
     COL_PRODUCT_NAME_KANA = 48  # 納品書用品名カナ
     COL_QUANTITY = 15      # 数量
     COL_C_TABLE_NO = 43    # C表No/不良通知Ｎｏ
+    COL_SUPPLIER_CODE = 2  # サプライヤコード
+    EXPECTED_SUPPLIER_CODE = 'E820T2'
 
     def __init__(self):
         self.errors = []
@@ -113,6 +115,7 @@ class TieraKakuteiImportService:
             raw_records = []
             row_no = 0
             col_map = {}
+            supplier_codes = set()
 
             # Read header row (if exists)
             header = next(csv_reader, None)
@@ -160,6 +163,13 @@ class TieraKakuteiImportService:
                     # 図番列が製品コード
                     product_code_col = col_map.get('図番', self.COL_PRODUCT_CODE)
                     product_code = row[product_code_col].strip()
+
+                    supplier_code_col = col_map.get('サプライヤコード', self.COL_SUPPLIER_CODE)
+                    supplier_code = ''
+                    if supplier_code_col is not None and len(row) > supplier_code_col:
+                        supplier_code = row[supplier_code_col].strip()
+                    if supplier_code:
+                        supplier_codes.add(supplier_code)
 
                     delivery_date_str = row[delivery_date_col].strip()
                     quantity_str = row[quantity_col].strip()
@@ -223,6 +233,19 @@ class TieraKakuteiImportService:
                     'message': f'No valid Y55 records found in file',
                     'errors': self.errors
                 }
+
+            if self.EXPECTED_SUPPLIER_CODE:
+                unexpected_codes = sorted(code for code in supplier_codes if code != self.EXPECTED_SUPPLIER_CODE)
+                if unexpected_codes:
+                    codes_text = ', '.join(unexpected_codes[:10])
+                    return {
+                        'success': False,
+                        'message': 'サプライヤコードが想定値と一致しないため取込を中止しました',
+                        'errors': [
+                            f'サプライヤコード不一致: 想定={self.EXPECTED_SUPPLIER_CODE}, 検出={codes_text}'
+                        ],
+                        'warnings': self.warnings,
+                    }
 
             # Save to database
             raw_count, daily_count, min_raw_id, max_raw_id = self.save_to_database(raw_records, file, customer_code)

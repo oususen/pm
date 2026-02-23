@@ -88,6 +88,20 @@
           </label>
         </div>
 
+        <div v-if="showTieraT3Option" class="form-group">
+          <div class="group-header">
+            <label>ティエラ{{ formData.order_type === 'FIRM' ? '確定' : '内示' }}（T3）</label>
+            <span class="hint">新データ（末尾 _T3）はこちら</span>
+          </div>
+          <label class="toggle-row">
+            <input
+              type="checkbox"
+              v-model="formData.is_tiera_t3"
+            />
+            <span>T3{{ formData.order_type === 'FIRM' ? '確定' : '内示' }}CSVとして取り込む</span>
+          </label>
+        </div>
+
         <div class="form-group">
           <label for="source_system">Source System</label>
           <input v-model="formData.source_system" type="text" id="source_system" placeholder="CSV" />
@@ -175,12 +189,17 @@ const formData = ref({
   order_type: 'FIRM',
   source_system: 'CSV',
   factory: 'SAKAI',  // Default to Sakai for Kubota
-  is_hirakata_special: false
+  is_hirakata_special: false,
+  is_tiera_t3: false
 })
 
 // Check if selected customer is Kubota (000196)
 const isKubotaCustomer = computed(() => {
   return formData.value.customer_code === '000196'
+})
+
+const isTieraCustomer = computed(() => {
+  return formData.value.customer_code === '000001'
 })
 
 const showHirakataSpecialOption = computed(() => {
@@ -189,6 +208,10 @@ const showHirakataSpecialOption = computed(() => {
     formData.value.order_type === 'FIRM' &&
     formData.value.factory === 'HIRAKATA'
   )
+})
+
+const showTieraT3Option = computed(() => {
+  return isTieraCustomer.value
 })
 
 const fetchCustomers = async () => {
@@ -241,12 +264,14 @@ const selectCustomer = (customer) => {
     formData.value.factory = null
   }
   formData.value.is_hirakata_special = false
+  formData.value.is_tiera_t3 = false
 }
 
 const selectOrderType = (type) => {
   formData.value.order_type = type
   if (type !== 'FIRM') {
     formData.value.is_hirakata_special = false
+    formData.value.is_tiera_t3 = false
   }
 }
 
@@ -282,6 +307,7 @@ const uploadCSV = async () => {
     formDataToSend.append('customer_code', formData.value.customer_code)
     formDataToSend.append('order_type', formData.value.order_type)
     formDataToSend.append('source_system', formData.value.source_system)
+    formDataToSend.append('is_tiera_t3', formData.value.is_tiera_t3 ? '1' : '0')
 
     // Add factory parameter for Kubota customer
     if (isKubotaCustomer.value && formData.value.factory) {

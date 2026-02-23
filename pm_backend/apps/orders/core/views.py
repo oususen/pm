@@ -69,7 +69,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'due_date']
     ordering = ['-created_at']
 
-    def _get_import_service(self, customer_code, order_type, filename, factory=None):
+    def _get_import_service(self, customer_code, order_type, filename, factory=None, is_tiera_t3=False):
         """Select appropriate import service based on customer code, order type, and factory
 
         Args:
@@ -77,6 +77,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             order_type: 'FIRM' or 'FORECAST'
             filename: CSV filename (for fallback detection)
             factory: Explicit factory code (e.g., 'SAKAI', 'HIRAKATA')
+            is_tiera_t3: True の場合はティエラT3専用ロジックを利用
         """
         # Import services here to avoid circular imports
         from .services.csv_import import CSVImportService
@@ -88,10 +89,16 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         if customer_code == '000001':
             if order_type == 'FORECAST':
                 # ティエラ_内示
+                if is_tiera_t3:
+                    from .services.tiera_naiji_t3_import import TieraNaijiT3ImportService
+                    return TieraNaijiT3ImportService()
                 from .services.tiera_naiji_import import TieraNaijiImportService
                 return TieraNaijiImportService()
             elif order_type == 'FIRM':
                 # ティエラ_確定
+                if is_tiera_t3:
+                    from .services.tiera_kakutei_t3_import import TieraKakuteiT3ImportService
+                    return TieraKakuteiT3ImportService()
                 from .services.tiera_kakutei_import import TieraKakuteiImportService
                 return TieraKakuteiImportService()
 
@@ -149,6 +156,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             order_type = request.data.get('order_type', 'FIRM')
             source_system = request.data.get('source_system', 'CSV')
             factory = request.data.get('factory')  # Optional: for multi-factory customers like Kubota
+            is_tiera_t3 = str(request.data.get('is_tiera_t3', '')).strip().lower() in ('1', 'true', 'on')
 
             if not file:
                 return Response(
@@ -177,7 +185,13 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 )
 
             # Select appropriate import service based on customer code, order type, and factory
-            import_service = self._get_import_service(customer_code, order_type, file.name, factory)
+            import_service = self._get_import_service(
+                customer_code,
+                order_type,
+                file.name,
+                factory,
+                is_tiera_t3=is_tiera_t3
+            )
             result = import_service.import_csv(file, customer_code, order_type, source_system)
 
             if result['success']:

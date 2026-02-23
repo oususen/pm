@@ -25,6 +25,8 @@ class TieraNaijiImportService:
     COL_QUANTITY = 11      # 数量
     COL_PRODUCT_NAME_FULL = 12  # 品名（全角）列13
     COL_PRODUCT_NAME_HALF = 13  # 品名半角 列14
+    COL_SUPPLIER_CODE = 2  # サプライヤコード
+    EXPECTED_SUPPLIER_CODE = 'E820T2'
 
     def __init__(self):
         self.errors = []
@@ -105,17 +107,31 @@ class TieraNaijiImportService:
 
             raw_records = []
             row_no = 0
+            col_map = {}
+            supplier_codes = set()
+
+            # Read header row
+            header = next(csv_reader, None)
+            if header:
+                row_no = 1
+                for idx, name in enumerate(header):
+                    col_map[name.strip()] = idx
 
             for row in csv_reader:
                 row_no += 1
 
-                # Skip header
-                if row_no == 1:
-                    continue
-
                 # Check minimum columns
-                required_cols = max(self.IDENTIFIER_COL, self.COL_PRODUCT_CODE, 
-                                   self.COL_DELIVERY_DATE, self.COL_QUANTITY) + 1
+                product_code_col = col_map.get('図番', self.COL_PRODUCT_CODE)
+                delivery_date_col = col_map.get('納期', self.COL_DELIVERY_DATE)
+                quantity_col = col_map.get('注文数量', self.COL_QUANTITY)
+                if '数量' in col_map:
+                    quantity_col = col_map['数量']
+                required_cols = max(
+                    self.IDENTIFIER_COL,
+                    product_code_col,
+                    delivery_date_col,
+                    quantity_col
+                ) + 1
                 if len(row) < required_cols:
                     continue
 
@@ -124,12 +140,21 @@ class TieraNaijiImportService:
                     continue
 
                 try:
+                    supplier_code_col = col_map.get('サプライヤコード', self.COL_SUPPLIER_CODE)
+                    supplier_code = ''
+                    if supplier_code_col is not None and len(row) > supplier_code_col:
+                        supplier_code = row[supplier_code_col].strip()
+                    if supplier_code:
+                        supplier_codes.add(supplier_code)
+
                     # Extract data
-                    product_code = row[self.COL_PRODUCT_CODE].strip()
-                    delivery_date_str = row[self.COL_DELIVERY_DATE].strip()
-                    quantity_str = row[self.COL_QUANTITY].strip()
-                    product_name_full = row[self.COL_PRODUCT_NAME_FULL].strip() if len(row) > self.COL_PRODUCT_NAME_FULL else ''
-                    product_name_half = row[self.COL_PRODUCT_NAME_HALF].strip() if len(row) > self.COL_PRODUCT_NAME_HALF else ''
+                    product_code = row[product_code_col].strip()
+                    delivery_date_str = row[delivery_date_col].strip()
+                    quantity_str = row[quantity_col].strip()
+                    product_name_col = col_map.get('納品書用品名', self.COL_PRODUCT_NAME_FULL)
+                    product_name_half_col = col_map.get('納品書用品名カナ', self.COL_PRODUCT_NAME_HALF)
+                    product_name_full = row[product_name_col].strip() if len(row) > product_name_col else ''
+                    product_name_half = row[product_name_half_col].strip() if len(row) > product_name_half_col else ''
 
                     # Parse date
                     due_date = self.parse_date(delivery_date_str)
@@ -168,6 +193,19 @@ class TieraNaijiImportService:
                     'message': f'No valid B17 records found in file',
                     'errors': self.errors
                 }
+
+            if self.EXPECTED_SUPPLIER_CODE:
+                unexpected_codes = sorted(code for code in supplier_codes if code != self.EXPECTED_SUPPLIER_CODE)
+                if unexpected_codes:
+                    codes_text = ', '.join(unexpected_codes[:10])
+                    return {
+                        'success': False,
+                        'message': 'サプライヤコードが想定値と一致しないため取込を中止しました',
+                        'errors': [
+                            f'サプライヤコード不一致: 想定={self.EXPECTED_SUPPLIER_CODE}, 検出={codes_text}'
+                        ],
+                        'warnings': self.warnings,
+                    }
 
             # Save to database
             raw_count, daily_count, min_raw_id, max_raw_id = self.save_to_database(raw_records, file, customer_code)
