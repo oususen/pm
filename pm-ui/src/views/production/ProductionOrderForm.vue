@@ -7,11 +7,12 @@
       </div>
       <div class="page-actions">
         <button class="btn-secondary" @click="goList">一覧へ戻る</button>
-        <button class="btn-primary" @click="saveOrder">保存</button>
+        <button class="btn-primary" @click="saveOrder" :disabled="!canEdit">保存</button>
       </div>
     </div>
 
     <div class="page-content">
+      <p v-if="!canEdit" class="helper-text">閲覧のみ可能です（編集権限がありません）。</p>
       <form class="form-grid" @submit.prevent="saveOrder">
         <div class="form-group">
           <label>製造指示番号 *</label>
@@ -114,6 +115,8 @@
 
 <script>
 import api from '@/api/client'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
 
 export default {
   name: 'ProductionOrderForm',
@@ -153,6 +156,15 @@ export default {
       const d = String(now.getDate()).padStart(2, '0')
       const rand = String(Math.floor(Math.random() * 900) + 100)
       return `MO-${y}${m}${d}-${rand}`
+    },
+    canEdit() {
+      const user = authState.user
+      if (!user) return false
+      const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+      if (permissions.some((item) => item.resource === 'production.orders')) {
+        return hasPermission(user, 'production.orders', 'edit')
+      }
+      return hasPermission(user, 'production', 'edit')
     }
   },
   mounted() {
@@ -260,6 +272,7 @@ export default {
       return true
     },
     async saveOrder() {
+      if (!this.canEdit) return
       if (!this.validate()) return
       try {
         if (this.isEdit) {

@@ -13,6 +13,7 @@
     </div>
 
     <div class="page-content">
+      <p v-if="!canEdit" class="helper-text">閲覧のみ可能です（編集権限がありません）。</p>
       <section v-if="order" class="summary">
         <div><label>指示番号</label><span>{{ order.order_no }}</span></div>
         <div><label>製品</label><span>{{ order.product_code }} - {{ order.product_name }}</span></div>
@@ -28,7 +29,7 @@
           <form class="form-grid" @submit.prevent="saveActual">
             <div class="form-group">
               <label>工程 (ルーティング)</label>
-              <select v-model="form.routing_step" @change="onRoutingStepChange">
+              <select v-model="form.routing_step" @change="onRoutingStepChange" :disabled="!canEdit">
                 <option value="">選択してください</option>
                 <option v-for="step in routingSteps" :key="step.id" :value="step.id">
                   {{
@@ -42,7 +43,7 @@
 
             <div class="form-group">
               <label>工程 *</label>
-              <select v-model="form.process" required>
+              <select v-model="form.process" required :disabled="!canEdit">
                 <option value="">選択してください</option>
                 <option v-for="p in processes" :key="p.id" :value="p.id">
                   {{ p.process_code }} - {{ p.process_name }}
@@ -52,7 +53,7 @@
 
             <div class="form-group">
               <label>ライン *</label>
-              <select v-model="form.line" required>
+              <select v-model="form.line" required :disabled="!canEdit">
                 <option value="">選択してください</option>
                 <option v-for="l in lines" :key="l.id" :value="l.id">
                   {{ l.line_code }} - {{ l.line_name }}
@@ -62,32 +63,32 @@
 
             <div class="form-group">
               <label>完了数量 *</label>
-              <input v-model.number="form.completed_qty" type="number" min="0" step="0.001" required />
+              <input v-model.number="form.completed_qty" type="number" min="0" step="0.001" required :disabled="!canEdit" />
             </div>
 
             <div class="form-group">
               <label>実績工数(分) *</label>
-              <input v-model.number="form.actual_duration_min" type="number" min="1" step="1" required />
+              <input v-model.number="form.actual_duration_min" type="number" min="1" step="1" required :disabled="!canEdit" />
             </div>
 
             <div class="form-group">
               <label>完了日時 *</label>
-              <input v-model="form.completed_at" type="datetime-local" required />
+              <input v-model="form.completed_at" type="datetime-local" required :disabled="!canEdit" />
             </div>
 
             <div class="form-group">
               <label>作業者</label>
-              <input v-model="form.operator" placeholder="任意" />
+              <input v-model="form.operator" placeholder="任意" :disabled="!canEdit" />
             </div>
 
             <div class="form-group full-row">
               <label>備考</label>
-              <textarea v-model="form.remark" rows="3"></textarea>
+              <textarea v-model="form.remark" rows="3" :disabled="!canEdit"></textarea>
             </div>
 
             <div class="form-actions">
-              <button type="button" class="btn-secondary" @click="resetForm">リセット</button>
-              <button type="submit" class="btn-primary" :disabled="orderLocked">
+              <button type="button" class="btn-secondary" @click="resetForm" :disabled="!canEdit">リセット</button>
+              <button type="submit" class="btn-primary" :disabled="orderLocked || !canEdit">
                 {{ editingId ? '更新' : '登録' }}
               </button>
             </div>
@@ -119,8 +120,8 @@
                 <td>{{ actual.operator || '-' }}</td>
                 <td>
                   <div class="btn-group">
-                    <button class="btn-sm" @click="editActual(actual)" :disabled="orderLocked">編集</button>
-                    <button class="btn-sm btn-danger" @click="deleteActual(actual)" :disabled="orderLocked">削除</button>
+                    <button class="btn-sm" @click="editActual(actual)" :disabled="orderLocked || !canEdit">編集</button>
+                    <button class="btn-sm btn-danger" @click="deleteActual(actual)" :disabled="orderLocked || !canEdit">削除</button>
                   </div>
                 </td>
               </tr>
@@ -135,6 +136,8 @@
 
 <script>
 import api from '@/api/client'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
 
 export default {
   name: 'ProcessActualEntry',
@@ -161,6 +164,15 @@ export default {
   computed: {
     orderLocked() {
       return this.order && this.order.status === 'CANCELED'
+    },
+    canEdit() {
+      const user = authState.user
+      if (!user) return false
+      const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+      if (permissions.some((item) => item.resource === 'production.orders')) {
+        return hasPermission(user, 'production.orders', 'edit')
+      }
+      return hasPermission(user, 'production', 'edit')
     }
   },
   mounted() {
@@ -226,6 +238,7 @@ export default {
       }
     },
     async saveActual() {
+      if (!this.canEdit) return
       if (this.orderLocked) return
       if (!this.order) return
       if (!this.form.process || !this.form.line || !this.form.completed_at) {
@@ -263,6 +276,7 @@ export default {
       }
     },
     editActual(actual) {
+      if (!this.canEdit) return
       this.editingId = actual.id
       this.form = {
         routing_step: actual.routing_step || '',
@@ -276,6 +290,7 @@ export default {
       }
     },
     async deleteActual(actual) {
+      if (!this.canEdit) return
       if (this.orderLocked) return
       if (!confirm('この実績を削除しますか？')) return
       try {

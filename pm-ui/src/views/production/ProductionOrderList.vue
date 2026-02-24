@@ -7,7 +7,7 @@
       </div>
       <div class="page-actions">
         <button class="btn-secondary" @click="fetchOrders">再読込</button>
-        <button class="btn-success" @click="goNew">新規指示作成</button>
+        <button class="btn-success" @click="goNew" :disabled="!canEdit">新規指示作成</button>
       </div>
     </div>
 
@@ -105,11 +105,12 @@
               <td>
                 <div class="btn-group">
                   <button class="btn-sm" @click="openDetail(order)">詳細</button>
-                  <button class="btn-sm" @click="goEdit(order.id)">編集</button>
+                  <button class="btn-sm" @click="goEdit(order.id)" :disabled="!canEdit">編集</button>
                   <button class="btn-sm btn-secondary" @click="goActuals(order.id)">実績入力</button>
                   <button
                     v-if="order.status === 'PLANNED'"
                     class="btn-sm btn-primary"
+                    :disabled="!canEdit"
                     @click="transition(order, 'release')"
                   >
                     発行
@@ -117,6 +118,7 @@
                   <button
                     v-if="order.status === 'RELEASED'"
                     class="btn-sm btn-success"
+                    :disabled="!canEdit"
                     @click="transition(order, 'start')"
                   >
                     開始
@@ -124,6 +126,7 @@
                   <button
                     v-if="order.status === 'IN_PROGRESS'"
                     class="btn-sm btn-info"
+                    :disabled="!canEdit"
                     @click="transition(order, 'complete')"
                   >
                     完了
@@ -131,6 +134,7 @@
                   <button
                     v-if="['PLANNED', 'RELEASED', 'IN_PROGRESS'].includes(order.status)"
                     class="btn-sm btn-danger"
+                    :disabled="!canEdit"
                     @click="transition(order, 'cancel')"
                   >
                     中止
@@ -172,6 +176,8 @@
 
 <script>
 import api from '@/api/client'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
 
 export default {
   name: 'ProductionOrderList',
@@ -216,6 +222,15 @@ export default {
         acc[cur.status] = (acc[cur.status] || 0) + 1
         return acc
       }, {})
+    },
+    canEdit() {
+      const user = authState.user
+      if (!user) return false
+      const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+      if (permissions.some((item) => item.resource === 'production.orders')) {
+        return hasPermission(user, 'production.orders', 'edit')
+      }
+      return hasPermission(user, 'production', 'edit')
     }
   },
   mounted() {
@@ -291,6 +306,7 @@ export default {
       this.fetchOrders()
     },
     async transition(order, action) {
+      if (!this.canEdit) return
       const allowMap = {
         release: ['PLANNED'],
         start: ['RELEASED'],
@@ -314,9 +330,11 @@ export default {
       }
     },
     goNew() {
+      if (!this.canEdit) return
       this.$router.push('/production/orders/new')
     },
     goEdit(id) {
+      if (!this.canEdit) return
       this.$router.push(`/production/orders/${id}/edit`)
     },
     goActuals(id) {

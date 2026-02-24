@@ -434,6 +434,13 @@ const canManageBasic = computed(() => {
   const user = authState.user
   if (!user) return false
   if (user.is_staff || user.is_superuser) return true
+  return canAccessByResource('settings.users', 'edit')
+})
+
+const canViewUsers = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
   return canAccessByResource('settings.users', 'view')
 })
 
@@ -445,7 +452,7 @@ const canManagePermissions = computed(() => {
 })
 
 const isAdminUser = computed(() => {
-  return canManageBasic.value || canManagePermissions.value
+  return canViewUsers.value || canManagePermissions.value
 })
 
 const departmentOptions = computed(() =>

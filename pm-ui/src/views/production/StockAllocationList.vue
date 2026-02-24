@@ -10,8 +10,8 @@
       <div class="page-actions">
         <button @click="fetchAllocations" class="btn-secondary">再読込</button>
         <button @click="downloadCsv" class="btn-secondary">CSV出力</button>
-        <button @click="bulkRelease" class="btn-danger" :disabled="!selectedIds.length">一括解除</button>
-        <button @click="goNew" class="btn-success">新規</button>
+        <button @click="bulkRelease" class="btn-danger" :disabled="!selectedIds.length || !canEdit">一括解除</button>
+        <button @click="goNew" class="btn-success" :disabled="!canEdit">新規</button>
       </div>
     </div>
 
@@ -113,9 +113,9 @@
               <td>{{ formatDateTime(allocation.updated_at) }}</td>
               <td>
                 <div class="btn-group">
-                  <button @click="showReserveDialog(allocation)" class="btn-sm btn-primary">引当</button>
-                  <button @click="showReleaseDialog(allocation)" class="btn-sm btn-secondary">解除</button>
-                  <button @click="goEdit(allocation.id)" class="btn-sm">編集</button>
+                  <button @click="showReserveDialog(allocation)" class="btn-sm btn-primary" :disabled="!canEdit">引当</button>
+                  <button @click="showReleaseDialog(allocation)" class="btn-sm btn-secondary" :disabled="!canEdit">解除</button>
+                  <button @click="goEdit(allocation.id)" class="btn-sm" :disabled="!canEdit">編集</button>
                 </div>
               </td>
             </tr>
@@ -176,6 +176,8 @@
 
 <script>
 import axios from 'axios'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
 
 const API_BASE = 'http://localhost:8000/api'
 
@@ -216,6 +218,15 @@ export default {
     isAllSelected() {
       return this.filteredAllocations.length > 0 &&
         this.filteredAllocations.every((item) => this.selectedIds.includes(item.id))
+    },
+    canEdit() {
+      const user = authState.user
+      if (!user) return false
+      const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+      if (permissions.some((item) => item.resource === 'production.stock_allocations')) {
+        return hasPermission(user, 'production.stock_allocations', 'edit')
+      }
+      return hasPermission(user, 'production', 'edit')
     }
   },
   mounted() {
@@ -250,12 +261,15 @@ export default {
       this.fetchAllocations()
     },
     goNew() {
+      if (!this.canEdit) return
       this.$router.push('/production/stock-allocations/new')
     },
     goEdit(id) {
+      if (!this.canEdit) return
       this.$router.push(`/production/stock-allocations/${id}/edit`)
     },
     showReserveDialog(allocation) {
+      if (!this.canEdit) return
       this.selectedAllocation = allocation
       this.reserveQty = allocation.available_qty > 0 ? allocation.available_qty : 0
       this.showReserveDialogFlag = true
@@ -278,6 +292,7 @@ export default {
       }
     },
     showReleaseDialog(allocation) {
+      if (!this.canEdit) return
       this.selectedAllocation = allocation
       this.releaseQty = allocation.reserved_qty
       this.showReleaseDialogFlag = true
@@ -300,6 +315,7 @@ export default {
       }
     },
     async bulkRelease() {
+      if (!this.canEdit) return
       const targets = this.allocations.filter(
         (item) => this.selectedIds.includes(item.id) && parseFloat(item.reserved_qty) > 0
       )

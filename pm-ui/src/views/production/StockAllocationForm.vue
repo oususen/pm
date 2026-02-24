@@ -9,12 +9,13 @@
       </div>
       <div class="page-actions">
         <button class="btn-secondary" @click="goList">一覧へ戻る</button>
-        <button class="btn-danger" v-if="isEdit" @click="deleteAllocation">削除</button>
-        <button class="btn-primary" @click="saveAllocation">保存</button>
+        <button class="btn-danger" v-if="isEdit" @click="deleteAllocation" :disabled="!canEdit">削除</button>
+        <button class="btn-primary" @click="saveAllocation" :disabled="!canEdit">保存</button>
       </div>
     </div>
 
     <div class="page-content">
+      <p v-if="!canEdit" class="helper-text">閲覧のみ可能です（編集権限がありません）。</p>
       <form class="form-grid" @submit.prevent="saveAllocation">
         <div class="form-group">
           <label>製品 *</label>
@@ -86,6 +87,8 @@
 
 <script>
 import axios from 'axios'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
 
 const API_BASE = 'http://localhost:8000/api'
 
@@ -112,6 +115,15 @@ export default {
     },
     availableQty() {
       return Number(this.form.current_stock || 0) - Number(this.form.reserved_qty || 0)
+    },
+    canEdit() {
+      const user = authState.user
+      if (!user) return false
+      const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+      if (permissions.some((item) => item.resource === 'production.stock_allocations')) {
+        return hasPermission(user, 'production.stock_allocations', 'edit')
+      }
+      return hasPermission(user, 'production', 'edit')
     }
   },
   mounted() {
@@ -169,6 +181,7 @@ export default {
       return true
     },
     async saveAllocation() {
+      if (!this.canEdit) return
       if (!this.validateForm()) return
       try {
         if (this.isEdit) {
@@ -185,6 +198,7 @@ export default {
       }
     },
     async deleteAllocation() {
+      if (!this.canEdit) return
       if (!confirm('この在庫引当を削除しますか？')) return
       try {
         await axios.delete(`${API_BASE}/orders/stock-allocations/${this.$route.params.id}/`)
@@ -196,6 +210,7 @@ export default {
       }
     },
     adjustReserved(amount) {
+      if (!this.canEdit) return
       const next = Number(this.form.reserved_qty || 0) + amount
       this.form.reserved_qty = next < 0 ? 0 : next
     },
