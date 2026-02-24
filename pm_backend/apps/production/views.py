@@ -1513,6 +1513,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             if not product_id or not plan_date or qty == 0:
                 continue
             direct_demand_product_ids.add(product_id)
+            # BOM展開対象品は、需要ソースを親計画由来（BOM）に統一する
+            if product_id in child_ids:
+                continue
             key = (product_id, plan_date)
             if key not in demand_map:
                 demand_map[key] = qty
