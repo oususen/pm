@@ -29,6 +29,18 @@ const purchase = [
     component: () => import("@/views/purchase/PurchaseSupplierCalendar.vue"),
     meta: { pageTitle: "仕入れ先カレンダ", resource: "purchase" },
   },
+  {
+    path: "/purchase/actual-input",
+    name: "PurchaseActualInput",
+    component: () => import("@/views/purchase/PurchaseActualInput.vue"),
+    meta: { pageTitle: "仕入れ実績入力", resource: "purchase" },
+  },
+  {
+    path: "/purchase/actual-inquiry",
+    name: "PurchaseActualInquiry",
+    component: () => import("@/views/purchase/PurchaseActualInquiry.vue"),
+    meta: { pageTitle: "納入実績照会", resource: "purchase" },
+  },
 ];
 
 export default purchase;

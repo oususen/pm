@@ -15,6 +15,14 @@
         <div class="icon-box">📈</div>
         <div class="label">仕入れ進度のみ</div>
       </RouterLink>
+      <RouterLink to="/purchase/actual-input" class="master-tile">
+        <div class="icon-box">🧾</div>
+        <div class="label">仕入れ実績入力</div>
+      </RouterLink>
+      <RouterLink to="/purchase/actual-inquiry" class="master-tile">
+        <div class="icon-box">📋</div>
+        <div class="label">納入実績照会</div>
+      </RouterLink>
       <RouterLink to="/purchase/supplier-calendar" class="master-tile">
         <div class="icon-box">🗓️</div>
         <div class="label">仕入れ先カレンダ</div>

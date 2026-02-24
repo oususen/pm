@@ -1,12 +1,19 @@
-from datetime import date
+from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
+import re
 
 from django.db.models import Sum
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from masters.models import BOMItem, Product
+from masters.models import BOMItem, Line, Process, Product, Supplier
+from production.models_process_realtime import ProcessRealtimeRecord
 from production.models_line_backlog import LineBacklog
+from production.serializers_process_realtime import (
+    ProcessRealtimeCreateSerializer,
+    resolve_workday_date_for_process,
+)
 from production.inventory.inventory_calculator import (
     _build_firm_order_map,
     aggregate_scrap_to_backlog,
@@ -17,6 +24,403 @@ from production.inventory.progress_calculator import recalculate_progress_qty
 
 from .models import EngineeringChangeCase, EngineeringChangePart, PurchasePlanLockSetting
 from .serializers import PurchasePlanLockSettingSerializer
+
+
+def _normalize_product_code(text: str) -> str:
+    base = str(text or '').strip().upper()
+    return re.sub(r'[^A-Z0-9]', '', base)
+
+
+def _resolve_product_by_code(code: str):
+    raw = str(code or '').strip()
+    if not raw:
+        return None
+
+    # 1. 完全一致
+    exact = Product.objects.filter(product_code=raw).first()
+    if exact:
+        return exact
+
+    # 2. 前方一致/部分一致
+    prefix = Product.objects.filter(product_code__istartswith=raw).order_by('product_code').first()
+    if prefix:
+        return prefix
+    partial = Product.objects.filter(product_code__icontains=raw).order_by('product_code').first()
+    if partial:
+        return partial
+
+    # 3. 記号除去した一致（例: YD40002386-28 と YD4000238628）
+    target = _normalize_product_code(raw)
+    if not target:
+        return None
+    for p in Product.objects.only('id', 'product_code', 'product_name'):
+        if _normalize_product_code(p.product_code) == target:
+            return p
+    return None
+
+
+def _resolve_purchase_line(supplier: Supplier | None):
+    if not supplier:
+        return None
+    line_code = supplier.supplier_code
+    line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
+    if len(line_name) > 50:
+        line_name = line_name[:50]
+    line_obj, created = Line.objects.get_or_create(
+        line_code=line_code,
+        defaults={
+            'line_name': line_name,
+            'line_type': 'PURCHASE',
+            'is_active': True,
+        }
+    )
+    if not created and line_obj.line_type != 'PURCHASE':
+        line_obj.line_type = 'PURCHASE'
+        line_obj.save(update_fields=['line_type'])
+    return line_obj
+
+
+class PurchaseActualCandidatesView(APIView):
+    def get(self, request):
+        product_code = (request.query_params.get('product_code') or '').strip()
+        if not product_code:
+            return Response({'detail': 'product_code is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        product = _resolve_product_by_code(product_code)
+        if not product:
+            return Response({'detail': f'product not found: {product_code}'}, status=status.HTTP_404_NOT_FOUND)
+
+        bom_items = list(
+            BOMItem.objects.filter(child_product_id=product.id).select_related('supplier', 'line', 'process')
+        )
+        purchase_like = [
+            item for item in bom_items
+            if str(item.sourcing_type or '').upper() in ('BUY', 'SUBCON') or item.supplier_id
+        ]
+
+        process_purchase = (
+            Process.objects.filter(process_code='PURCHASE').first()
+            or Process.objects.filter(process_name__icontains='購買').first()
+        )
+        line_by_name = {str(l.line_name or '').strip(): l for l in Line.objects.filter(is_active=True)}
+        line_by_code = {str(l.line_code or '').strip(): l for l in Line.objects.filter(is_active=True)}
+
+        candidates = []
+        for idx, item in enumerate(purchase_like):
+            supplier = item.supplier
+            if not supplier:
+                continue
+            # 在庫/残量一覧と同じ仕入ライン解決を使う
+            line = _resolve_purchase_line(supplier)
+            if not line:
+                line = item.line
+            if not line:
+                line = line_by_name.get(str(supplier.supplier_name or '').strip()) or line_by_code.get(str(supplier.supplier_code or '').strip())
+            process = item.process or process_purchase
+            if not process and line:
+                process = Process.objects.filter(
+                    line_id=line.id, process_code='PURCHASE'
+                ).first()
+            if not process and line:
+                process = Process.objects.filter(line_id=line.id).order_by('id').first()
+
+            candidates.append({
+                'key': f'{item.id}-{idx}',
+                'step_no': int(item.id or 0),
+                'supplier_id': supplier.id,
+                'supplier_code': supplier.supplier_code,
+                'supplier_name': supplier.supplier_name,
+                'line_id': line.id if line else None,
+                'line_code': line.line_code if line else supplier.supplier_code,
+                'line_name': line.line_name if line else supplier.supplier_name,
+                'process_id': process.id if process else None,
+                'process_code': process.process_code if process else 'PURCHASE',
+            })
+
+        # 重複候補を圧縮
+        uniq = {}
+        for c in candidates:
+            key = (c['supplier_id'], c['line_id'], c['process_id'])
+            if key not in uniq:
+                uniq[key] = c
+
+        result = list(uniq.values())
+        return Response({
+            'product': {
+                'id': product.id,
+                'product_code': product.product_code,
+                'product_name': product.product_name,
+            },
+            'candidates': result,
+        })
+
+
+class PurchaseActualRegisterView(APIView):
+    def post(self, request):
+        product_code = (request.data.get('product_code') or '').strip()
+        if not product_code:
+            return Response({'detail': 'product_code is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        qty_raw = request.data.get('qty')
+        try:
+            qty = Decimal(str(qty_raw))
+        except (InvalidOperation, TypeError, ValueError):
+            return Response({'detail': 'qty must be a number'}, status=status.HTTP_400_BAD_REQUEST)
+        if qty <= 0:
+            return Response({'detail': 'qty must be > 0'}, status=status.HTTP_400_BAD_REQUEST)
+
+        process_id = request.data.get('process_id')
+        supplier_id = request.data.get('supplier_id')
+        line_id = request.data.get('line_id')
+
+        supplier_obj = Supplier.objects.filter(id=supplier_id).first() if supplier_id else None
+        canonical_line = _resolve_purchase_line(supplier_obj) if supplier_obj else None
+        effective_line_id = canonical_line.id if canonical_line else line_id
+
+        process_obj = None
+        if process_id:
+            process_obj = Process.objects.filter(id=process_id).first()
+
+        if not process_obj and effective_line_id:
+            process_obj = (
+                Process.objects.filter(line_id=effective_line_id, process_code='PURCHASE').first()
+                or Process.objects.filter(line_id=effective_line_id).order_by('id').first()
+            )
+
+        if not process_obj and canonical_line:
+            process_obj = (
+                Process.objects.filter(line_id=canonical_line.id, process_code='PURCHASE').first()
+                or Process.objects.filter(line_id=canonical_line.id).order_by('id').first()
+            )
+
+        if not process_obj:
+            process_obj = (
+                Process.objects.filter(process_code='PURCHASE').first()
+                or Process.objects.filter(process_name__icontains='購買').first()
+            )
+        if not process_obj:
+            return Response({'detail': 'purchase process not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        product = _resolve_product_by_code(product_code)
+        if not product:
+            return Response({'detail': f'product not found: {product_code}'}, status=status.HTTP_404_NOT_FOUND)
+
+        payload = {
+            'process_id': process_obj.id,
+            'product_id': product.id,
+            'record_type': 'PRODUCTION',
+            'qty': qty,
+            'operator_name': (request.data.get('operator_name') or '').strip(),
+            'remarks': (request.data.get('remarks') or '').strip(),
+            'event_data': {
+                'source': 'PURCHASE_ACTUAL_INPUT',
+                'arrival_date': (request.data.get('arrival_date') or '').strip(),
+                'supplier_id': request.data.get('supplier_id'),
+            },
+        }
+
+        serializer = ProcessRealtimeCreateSerializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+        record = serializer.save()
+
+        # 仕入れ在庫画面は購入先ライン単位で参照するため、
+        # process.line と選択ラインが異なる場合は選択ラインへ actual を補正反映する。
+        target_line_id = None
+        try:
+            target_line_id = int(effective_line_id) if effective_line_id else None
+        except (TypeError, ValueError):
+            target_line_id = None
+
+        arrival_date_text = (request.data.get('arrival_date') or '').strip()
+        target_date = record.timestamp.date()
+        if arrival_date_text:
+            try:
+                target_date = date.fromisoformat(arrival_date_text.replace('/', '-'))
+            except ValueError:
+                target_date = record.timestamp.date()
+
+        now = record.timestamp
+        if getattr(now, 'tzinfo', None):
+            from django.utils import timezone
+            now = timezone.localtime(now).replace(tzinfo=None)
+        serializer_plan_date = resolve_workday_date_for_process(process_obj, now)
+
+        if target_line_id and (process_obj.line_id != target_line_id or target_date != serializer_plan_date):
+            backlog, _ = LineBacklog.objects.get_or_create(
+                line_id=target_line_id,
+                process_id=process_obj.id,
+                product_id=product.id,
+                plan_date=target_date,
+                sequence_no=0,
+                defaults={
+                    'order_qty': 0,
+                    'plan_qty': 0,
+                    'actual_qty': 0,
+                    'stock_qty': 0,
+                    'planned_stock_qty': 0,
+                    'adjust_qty': 0,
+                    'scrap_qty': 0,
+                    'actual_shipment_qty': 0,
+                }
+            )
+            backlog.actual_qty = int(backlog.actual_qty or 0) + int(qty)
+            backlog.save(update_fields=['actual_qty'])
+
+        return Response({'id': record.id, 'detail': 'created'}, status=status.HTTP_201_CREATED)
+
+
+class PurchaseActualProgressView(APIView):
+    def get(self, request):
+        product_code = (request.query_params.get('product_code') or '').strip()
+        start_date_text = (request.query_params.get('start_date') or '').strip()
+        line_id = request.query_params.get('line_id')
+        process_id = request.query_params.get('process_id')
+
+        if not product_code:
+            return Response({'detail': 'product_code is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        product = _resolve_product_by_code(product_code)
+        if not product:
+            return Response({'detail': f'product not found: {product_code}'}, status=status.HTTP_404_NOT_FOUND)
+
+        start_date = date.today()
+        if start_date_text:
+            try:
+                start_date = date.fromisoformat(start_date_text.replace('/', '-'))
+            except ValueError:
+                return Response({'detail': 'start_date must be YYYY-MM-DD or YYYY/MM/DD'}, status=status.HTTP_400_BAD_REQUEST)
+        end_date = start_date + timedelta(days=17)
+
+        qs = LineBacklog.objects.filter(
+            product_id=product.id,
+            plan_date__gte=start_date,
+            plan_date__lte=end_date,
+        )
+        if line_id:
+            qs = qs.filter(line_id=line_id)
+        if process_id:
+            qs = qs.filter(process_id=process_id)
+
+        rows_by_date = {}
+        for obj in qs:
+            key = obj.plan_date.isoformat()
+            if key not in rows_by_date:
+                rows_by_date[key] = {
+                    'date': key,
+                    'plan_demand': 0,
+                    'actual_demand': 0,
+                    'forecast': 0,
+                    'firm': 0,
+                    'inbound': 0,
+                    'adjust': 0,
+                    'stock': 0,
+                    'planned_stock': 0,
+                    'progress': 0,
+                    'planned_progress': 0,
+                }
+            rows_by_date[key]['plan_demand'] += int(obj.demand_qty_plan or 0)
+            rows_by_date[key]['actual_demand'] += int(obj.order_qty or 0)
+            # 購買ラインでは order_qty を確定需要として扱う
+            # 内示は別系統が未整備のため現時点では0固定
+            rows_by_date[key]['firm'] += int(obj.order_qty or 0)
+            rows_by_date[key]['forecast'] += 0
+            rows_by_date[key]['inbound'] += int(obj.actual_qty or 0)
+            rows_by_date[key]['adjust'] += int(obj.adjust_qty or 0)
+            rows_by_date[key]['stock'] += int(obj.stock_qty or 0)
+            rows_by_date[key]['planned_stock'] += int(obj.planned_stock_qty or 0)
+            rows_by_date[key]['progress'] += int(obj.progress_qty or 0)
+            rows_by_date[key]['planned_progress'] += int(obj.planned_progress_qty or 0)
+
+        rows = []
+        for i in range(18):
+            d = start_date + timedelta(days=i)
+            key = d.isoformat()
+            rows.append(rows_by_date.get(key, {
+                'date': key,
+                'plan_demand': 0,
+                'actual_demand': 0,
+                'forecast': 0,
+                'firm': 0,
+                'inbound': 0,
+                'adjust': 0,
+                'stock': 0,
+                'planned_stock': 0,
+                'progress': 0,
+                'planned_progress': 0,
+            }))
+
+        month_forecast = sum(r['forecast'] for r in rows)
+        month_firm = sum(r['firm'] for r in rows)
+        month_inbound = sum(r['inbound'] for r in rows)
+
+        return Response({
+            'product': {
+                'id': product.id,
+                'product_code': product.product_code,
+                'product_name': product.product_name,
+            },
+            'summary': {
+                'forecast': month_forecast,
+                'firm': month_firm,
+                'inbound': month_inbound,
+            },
+            'rows': rows,
+        })
+
+
+class PurchaseActualInquiryView(APIView):
+    def get(self, request):
+        start_date_text = (request.query_params.get('start_date') or '').strip()
+        end_date_text = (request.query_params.get('end_date') or '').strip()
+        product_code = (request.query_params.get('product_code') or '').strip()
+        supplier_id = request.query_params.get('supplier_id')
+
+        qs = ProcessRealtimeRecord.objects.filter(
+            record_type='PRODUCTION',
+            event_data__source='PURCHASE_ACTUAL_INPUT',
+        ).select_related('product', 'process')
+
+        if start_date_text:
+            try:
+                start_date = date.fromisoformat(start_date_text.replace('/', '-'))
+                qs = qs.filter(timestamp__date__gte=start_date)
+            except ValueError:
+                return Response({'detail': 'start_date is invalid'}, status=status.HTTP_400_BAD_REQUEST)
+        if end_date_text:
+            try:
+                end_date = date.fromisoformat(end_date_text.replace('/', '-'))
+                qs = qs.filter(timestamp__date__lte=end_date)
+            except ValueError:
+                return Response({'detail': 'end_date is invalid'}, status=status.HTTP_400_BAD_REQUEST)
+        if product_code:
+            qs = qs.filter(product_code__icontains=product_code)
+        if supplier_id:
+            qs = qs.filter(event_data__supplier_id=int(supplier_id))
+
+        rows = []
+        for rec in qs.order_by('-timestamp', '-id')[:2000]:
+            supplier_name = ''
+            supplier_code = ''
+            supplier_raw = (rec.event_data or {}).get('supplier_id')
+            try:
+                supplier = Supplier.objects.filter(id=int(supplier_raw)).first() if supplier_raw else None
+            except (TypeError, ValueError):
+                supplier = None
+            if supplier:
+                supplier_name = supplier.supplier_name or ''
+                supplier_code = supplier.supplier_code or ''
+
+            rows.append({
+                'id': rec.id,
+                'delivery_date': rec.timestamp.date().isoformat(),
+                'product_code': rec.product_code or '',
+                'product_name': rec.product_name or '',
+                'supplier': f'{supplier_code} - {supplier_name}'.strip(' -'),
+                'qty': float(rec.qty or 0),
+                'operator_name': rec.operator_name or '',
+            })
+
+        return Response(rows)
 
 
 class PurchasePlanLockSettingView(APIView):
