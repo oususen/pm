@@ -124,7 +124,7 @@
       </section>
     </div>
     <div class="actions">
-      <button class="btn primary" :disabled="submitting" @click="submit">登録</button>
+      <button class="btn primary" :disabled="submitting || !canEdit" @click="submit">登録</button>
       <button class="btn" :disabled="submitting" @click="clearForm">画面クリア</button>
     </div>
 
@@ -141,6 +141,17 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
+import { hasPermission } from '@/router'
+
+const canEdit = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_superuser) return true
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  const entry = permissions.find((item) => item.resource === 'purchase.actual_input')
+  if (entry) return Boolean(entry.can_edit)
+  return hasPermission(user, 'purchase', 'edit')
+})
 
 const lines = ref([])
 const processes = ref([])
@@ -405,6 +416,7 @@ const clearForm = async () => {
 }
 
 const submit = async () => {
+  if (!canEdit.value) return
   if (!supplierId.value) {
     alert('購入先を選択してください。')
     return

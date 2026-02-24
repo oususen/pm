@@ -5,7 +5,7 @@
         <h2 class="page-title">仕入れ先カレンダ</h2>
         <div class="title-note">注意事項：未設定日はダイソウカレンダの稼働日を既定値として表示します</div>
       </div>
-      <button class="btn primary" @click="showCreate = !showCreate">
+      <button class="btn primary" @click="showCreate = !showCreate" :disabled="!canEdit">
         {{ showCreate ? '新規作成を閉じる' : '新規作成' }}
       </button>
     </div>
@@ -39,7 +39,7 @@
         </div>
         <div class="field action-field">
           <label>&nbsp;</label>
-          <button class="btn primary" @click="createAndAssignCalendar" :disabled="creating">
+          <button class="btn primary" @click="createAndAssignCalendar" :disabled="creating || !canEdit">
             作成して割当
           </button>
         </div>
@@ -70,7 +70,7 @@
                 <input
                   type="checkbox"
                   v-model="weekdayChecks[idx]"
-                  :disabled="!selectedCalendarId || applyingWeekday"
+                  :disabled="!selectedCalendarId || applyingWeekday || !canEdit"
                   @change="toggleWeekday(idx, $event.target.checked)"
                 />
               </label>
@@ -91,7 +91,7 @@
                     <input
                       type="checkbox"
                       :checked="day.is_working_day"
-                      :disabled="savingDateKey === day.date"
+                      :disabled="savingDateKey === day.date || !canEdit"
                       @change="toggleDay(day)"
                     />
                     {{ day.is_working_day ? '稼働中' : '休み' }}
@@ -103,7 +103,7 @@
                     class="note-input"
                     :value="day.record?.note || ''"
                     placeholder="メモ"
-                    :disabled="savingDateKey === day.date || savingNoteDateKey === day.date"
+                    :disabled="savingDateKey === day.date || savingNoteDateKey === day.date || !canEdit"
                     @blur="saveDayNote(day, $event)"
                   ></textarea>
                 </div>
@@ -119,6 +119,18 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
+
+const canEdit = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_superuser) return true
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  const entry = permissions.find((item) => item.resource === 'purchase.supplier_calendar')
+  if (entry) return Boolean(entry.can_edit)
+  return hasPermission(user, 'purchase', 'edit')
+})
 
 const suppliers = ref([])
 const lines = ref([])
@@ -291,6 +303,7 @@ const moveMonth = async (delta) => {
 }
 
 const toggleWeekday = async (weekday, checked) => {
+  if (!canEdit.value) return
   if (!selectedCalendarId.value) return
   applyingWeekday.value = true
   try {
@@ -342,6 +355,7 @@ const toggleWeekday = async (weekday, checked) => {
 }
 
 const createAndAssignCalendar = async () => {
+  if (!canEdit.value) return
   if (!selectedSupplierId.value) {
     alert('先に仕入れ先を選択してください。')
     return
@@ -381,6 +395,7 @@ const createAndAssignCalendar = async () => {
 }
 
 const toggleDay = async (day) => {
+  if (!canEdit.value) return
   if (!day?.inMonth || !selectedCalendarId.value) return
   savingDateKey.value = day.date
   try {
@@ -412,6 +427,7 @@ const toggleDay = async (day) => {
 }
 
 const saveDayNote = async (day, event) => {
+  if (!canEdit.value) return
   if (!day?.inMonth || !selectedCalendarId.value) return
   const inputNote = String(event?.target?.value || '').trim()
   const currentNote = String(day.record?.note || '').trim()

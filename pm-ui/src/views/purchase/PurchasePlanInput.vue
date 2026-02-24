@@ -33,10 +33,10 @@
       </div>
       <div class="toolbar-right">
         <button class="btn" @click="resetRows" :disabled="processing || !rows.length">クリア</button>
-        <button class="btn" @click="openChangeReasonDialog" :disabled="processing">計画変更</button>
-        <button class="btn" @click="savePlan" :disabled="processing || !rows.length || !selectedSupplier">保存</button>
-        <button class="btn primary" @click="doPickup" :disabled="processing || !selectedSupplier">取り込み</button>
-        <button class="btn" @click="recalculateInventoryOnly" :disabled="processing || !selectedSupplier">在庫再計算</button>
+        <button class="btn" @click="openChangeReasonDialog" :disabled="processing || !canEdit">計画変更</button>
+        <button class="btn" @click="savePlan" :disabled="processing || !rows.length || !selectedSupplier || !canEdit">保存</button>
+        <button class="btn primary" @click="doPickup" :disabled="processing || !selectedSupplier || !canEdit">取り込み</button>
+        <button class="btn" @click="recalculateInventoryOnly" :disabled="processing || !selectedSupplier || !canEdit">在庫再計算</button>
       </div>
     </div>
 
@@ -98,7 +98,7 @@
                   :data-row="idx"
                   :data-col="colIdx"
                   @keydown="onCellKeydown($event, idx, colIdx)"
-                  :disabled="isPlanCellLocked(c.key)"
+                  :disabled="!canEdit || isPlanCellLocked(c.key)"
                   :class="{ locked: isPlanCellLocked(c.key), negative: isNegativeValue(row.daily[c.key].plan) }"
                 />
               </td>
@@ -152,6 +152,18 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
+
+const canEdit = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_superuser) return true
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  const entry = permissions.find((item) => item.resource === 'purchase.plan_input')
+  if (entry) return Boolean(entry.can_edit)
+  return hasPermission(user, 'purchase', 'edit')
+})
 
 const selectedSupplier = ref('')
 const purchaseLineId = ref('')
@@ -239,6 +251,7 @@ const resetRows = () => {
 }
 
 const savePlan = async () => {
+  if (!canEdit.value) return
   if (!selectedSupplier.value) {
     alert('仕入先を選択してください。')
     return
@@ -472,6 +485,7 @@ const loadData = async () => {
 }
 
 const onPlanInput = (row, dateKey, value) => {
+  if (!canEdit.value) return
   if (isPlanCellLocked(dateKey)) return
   row.daily[dateKey].plan = value === '' ? '' : value
 }
@@ -555,6 +569,7 @@ onMounted(async () => {
 })
 
 const doPickup = async () => {
+  if (!canEdit.value) return
   if (!selectedSupplier.value) {
     alert('仕入先を選択してください。')
     return
@@ -642,6 +657,7 @@ const doPickup = async () => {
 }
 
 const recalculateInventoryOnly = async () => {
+  if (!canEdit.value) return
   if (!selectedSupplier.value) {
     alert('仕入先を選択してください。')
     return
@@ -686,6 +702,7 @@ const resolvePurchaseLineId = async () => {
 }
 
 const openChangeReasonDialog = () => {
+  if (!canEdit.value) return
   changeReasonDraft.value = changeReason.value
   showChangeReasonDialog.value = true
 }
