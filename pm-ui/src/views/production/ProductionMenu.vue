@@ -73,6 +73,13 @@ const tiles = computed(() => {
       resource: "production.process_input",
     },
     {
+      to: "/production/record-edit",
+      label: t("productionMenu.tiles.productionRecordEdit"),
+      icon: "✏️",
+      required: "edit",
+      resource: "production.process_input",
+    },
+    {
       to: "/production/scrap-record",
       label: t("productionMenu.tiles.scrapRecord"),
       icon: "🛠️",

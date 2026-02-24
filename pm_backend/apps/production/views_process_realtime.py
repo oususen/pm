@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.db import transaction
 from django.db.models import Sum
-from django.utils.dateparse import parse_date
+from django.utils.dateparse import parse_date, parse_datetime
 from django.utils import timezone
 from django.conf import settings
 from decimal import Decimal, InvalidOperation
@@ -29,12 +29,55 @@ from quality.models_scrap import ScrapRecordDetail, ScrapRecord
 from orders.utils.calendar_utils import get_business_today, DAY_BOUNDARY_HOUR
 
 
+def _is_countable_session_for_actual(session_type, end_action):
+    return str(session_type or '').upper() == 'WORK' and str(end_action or '').upper() in ('END', 'PAUSE')
+
+
+def _adjust_backlog_actual_for_session(session_obj, delta_qty):
+    if not session_obj or not delta_qty:
+        return
+    if not session_obj.product_id or not session_obj.process_id or not session_obj.plan_date:
+        return
+
+    line = getattr(session_obj.process, 'line', None)
+    if not line:
+        return
+
+    backlog, _created = LineBacklog.objects.get_or_create(
+        line=line,
+        process_id=session_obj.process_id,
+        product_id=session_obj.product_id,
+        plan_date=session_obj.plan_date,
+        sequence_no=0,
+        defaults={
+            'order_qty': 0,
+            'plan_qty': 0,
+            'actual_qty': 0,
+            'stock_qty': 0,
+            'planned_stock_qty': 0,
+            'adjust_qty': 0,
+            'scrap_qty': 0,
+            'actual_shipment_qty': 0,
+        }
+    )
+    backlog.actual_qty = (backlog.actual_qty or 0) + int(delta_qty)
+    backlog.save(update_fields=['actual_qty'])
+
+
 def _to_local_naive(dt):
     if not dt:
         return None
     if timezone.is_aware(dt):
         return timezone.localtime(dt).replace(tzinfo=None)
     return dt
+
+
+def _normalize_input_datetime(dt):
+    if not dt:
+        return None
+    if settings.USE_TZ:
+        return timezone.make_aware(dt) if timezone.is_naive(dt) else dt
+    return timezone.localtime(dt).replace(tzinfo=None) if timezone.is_aware(dt) else dt
 
 
 def _calculate_effective_work_seconds(calendar, started_at, ended_at):
@@ -354,6 +397,85 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             result_rows = filtered_rows
 
         return Response(result_rows)
+
+    @action(detail=False, methods=['patch', 'delete'], url_path=r'sessions/(?P<session_id>[^/.]+)')
+    def session_detail(self, request, session_id=None):
+        session = ProcessWorkSession.objects.select_related('process', 'product').filter(id=session_id).first()
+        if not session:
+            return Response({'detail': 'セッションが見つかりません。'}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.method.lower() == 'delete':
+            with transaction.atomic():
+                old_qty = int(session.production_qty or 0) if _is_countable_session_for_actual(
+                    session.session_type, session.end_action
+                ) else 0
+                if old_qty:
+                    _adjust_backlog_actual_for_session(session, -old_qty)
+
+                ProcessRealtimeRecord.objects.filter(
+                    record_type='PRODUCTION',
+                    event_data__work_session_id=session.id,
+                ).delete()
+                session.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        payload = request.data or {}
+        started_at = session.started_at
+        ended_at = session.ended_at
+        production_qty = session.production_qty
+
+        if 'started_at' in payload:
+            next_started = payload.get('started_at')
+            parsed = parse_datetime(next_started) if isinstance(next_started, str) and next_started else None
+            if next_started and parsed is None:
+                return Response({'detail': 'started_at の形式が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+            started_at = _normalize_input_datetime(parsed)
+
+        if 'ended_at' in payload:
+            next_ended = payload.get('ended_at')
+            parsed = parse_datetime(next_ended) if isinstance(next_ended, str) and next_ended else None
+            if next_ended and parsed is None:
+                return Response({'detail': 'ended_at の形式が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+            ended_at = _normalize_input_datetime(parsed)
+
+        if 'production_qty' in payload:
+            try:
+                production_qty = Decimal(str(payload.get('production_qty') or 0))
+            except (InvalidOperation, TypeError, ValueError):
+                return Response({'detail': 'production_qty の形式が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+            if production_qty < 0:
+                return Response({'detail': 'production_qty は0以上で入力してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if started_at and ended_at and ended_at < started_at:
+            return Response({'detail': '終了時刻は開始時刻以降にしてください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        old_qty = int(session.production_qty or 0) if _is_countable_session_for_actual(session.session_type, session.end_action) else 0
+        new_qty = int(production_qty or 0) if _is_countable_session_for_actual(session.session_type, session.end_action) else 0
+        delta = new_qty - old_qty
+
+        with transaction.atomic():
+            session.started_at = started_at
+            session.ended_at = ended_at
+            session.production_qty = production_qty
+            session.status = 'CLOSED' if ended_at else 'OPEN'
+            if started_at and ended_at and ended_at >= started_at:
+                session.duration_seconds = int((ended_at - started_at).total_seconds())
+            else:
+                session.duration_seconds = 0
+            session.save(update_fields=[
+                'started_at',
+                'ended_at',
+                'production_qty',
+                'status',
+                'duration_seconds',
+                'updated_at',
+            ])
+
+            if delta:
+                _adjust_backlog_actual_for_session(session, delta)
+
+        serializer = ProcessWorkSessionSerializer(session)
+        return Response(serializer.data)
 
     @action(detail=False, methods=['get'], url_path='status')
     def status(self, request):

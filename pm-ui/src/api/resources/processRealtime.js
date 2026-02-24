@@ -15,6 +15,12 @@ export function createProcessRealtimeAPI(client) {
     getSessions(params = {}) {
       return client.get('/process-realtime-records/sessions/', { params })
     },
+    updateSession(sessionId, data) {
+      return client.patch(`/process-realtime-records/sessions/${sessionId}/`, data)
+    },
+    deleteSession(sessionId) {
+      return client.delete(`/process-realtime-records/sessions/${sessionId}/`)
+    },
     getScrapBreakdown(id) {
       return client.get(`/process-realtime-records/${id}/scrap-breakdown/`)
     },

@@ -149,6 +149,12 @@ const production = [
     meta: { pageTitle: "生産実績照会", manualPath: "生産/生産実績照会.md" },
   },
   {
+    path: "/production/record-edit",
+    name: "ProductionRecordEdit",
+    component: () => import("@/views/production/ProductionRecordEdit.vue"),
+    meta: { pageTitle: "実績変更", manualPath: "生産/実績変更.md" },
+  },
+  {
     path: "/production/process-gantt",
     name: "ProcessGanttView",
     component: () => import("@/views/production/ProcessGanttView.vue"),
