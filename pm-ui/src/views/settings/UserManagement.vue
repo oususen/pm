@@ -114,12 +114,16 @@
           <div v-if="successMessage" class="alert alert-success">
             {{ successMessage }}
           </div>
+          <div v-if="!canManageBasic" class="helper-text">
+            閲覧のみ可能です（編集権限がありません）。
+          </div>
 
           <div v-if="!isCreating && !selectedUserId" class="empty-state">
             <p>左側のリストからユーザーを選択して編集するか、「新規ユーザー」ボタンをクリックして新しいユーザーを作成してください。</p>
           </div>
 
           <form v-else class="form-grid" @submit.prevent="saveUser">
+            <fieldset :disabled="!canManageBasic" class="form-fieldset">
             <div class="form-row">
               <label>ユーザー名</label>
               <input v-model="form.username" type="text" required />
@@ -228,6 +232,7 @@
                 リセット
               </button>
             </div>
+            </fieldset>
           </form>
         </section>
       </div>
@@ -329,11 +334,18 @@ const canManageBasic = computed(() => {
   const user = authState.user
   if (!user) return false
   if (user.is_staff || user.is_superuser) return true
+  return canAccessByResource('settings.users', 'edit')
+})
+
+const canViewUsers = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
   return canAccessByResource('settings.users', 'view')
 })
 
 const isAdminUser = computed(() => {
-  return canManageBasic.value
+  return canViewUsers.value
 })
 
 const departmentOptions = computed(() =>
@@ -846,6 +858,14 @@ watch(filterGroupId, () => {
   display: grid;
   grid-template-columns: repeat(2, minmax(140px, 1fr));
   gap: 10px;
+}
+
+.form-fieldset {
+  grid-column: span 2;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: contents;
 }
 
 .form-row {

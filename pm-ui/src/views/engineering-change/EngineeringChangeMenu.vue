@@ -5,7 +5,14 @@
     <p v-if="!canView" class="helper-text">この画面を閲覧する権限がありません。</p>
 
     <div v-else class="master-grid">
-      <RouterLink to="/engineering-change/new" class="master-tile" :class="{ disabled: !canEdit }">
+      <RouterLink
+        to="/engineering-change/new"
+        class="master-tile"
+        :class="{ disabled: !canEdit }"
+        :aria-disabled="canEdit ? 'false' : 'true'"
+        :tabindex="canEdit ? 0 : -1"
+        @click="onNewTileClick"
+      >
         <div class="icon-box">🆕</div>
         <div class="label">新規タイル</div>
       </RouterLink>
@@ -33,6 +40,11 @@ const canAccessEngineeringChange = (level = "view") => {
 
 const canView = computed(() => canAccessEngineeringChange("view"));
 const canEdit = computed(() => canAccessEngineeringChange("edit"));
+
+const onNewTileClick = (event) => {
+  if (canEdit.value) return;
+  event.preventDefault();
+};
 </script>
 
 <style scoped>

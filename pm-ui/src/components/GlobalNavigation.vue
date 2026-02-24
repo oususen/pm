@@ -150,11 +150,28 @@ const mainTabs = computed(() => [
   { id: 'settings', label: t('nav.tabs.settings'), link: '/settings', resource: 'settings' },
 ])
 
+const hasChildResourcePermission = (user, parentResource) => {
+  if (!user) return false
+  if (user.is_superuser) return true
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  const prefix = `${parentResource}.`
+  return permissions.some((item) => {
+    if (!item || typeof item.resource !== 'string') return false
+    if (!item.resource.startsWith(prefix)) return false
+    return Boolean(item.can_view || item.can_edit)
+  })
+}
+
+const canShowTabByPermission = (user, resource) => {
+  if (hasPermission(user, resource, 'view')) return true
+  return hasChildResourcePermission(user, resource)
+}
+
 // ユーザーの権限に基づいてタブをフィルタリング
 const displayTabs = computed(() => {
   const user = authState.user
   // 権限がないタブを非表示
-  let tabs = mainTabs.value.filter(tab => hasPermission(user, tab.resource, 'view'))
+  let tabs = mainTabs.value.filter((tab) => canShowTabByPermission(user, tab.resource))
   // スマホでは生産・マニュアルのみ表示（権限がある場合）
   if (props.isMobile) {
     tabs = tabs.filter(tab => ['production', 'manual'].includes(tab.id))

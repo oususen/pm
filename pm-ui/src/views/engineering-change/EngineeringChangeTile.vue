@@ -245,6 +245,11 @@ const canAccessEngineeringChange = (level = "view") => {
 
 const canView = computed(() => canAccessEngineeringChange("view"));
 const canEdit = computed(() => canAccessEngineeringChange("edit"));
+const ensureCanEdit = () => {
+  if (canEdit.value) return true;
+  alert("編集権限がありません。");
+  return false;
+};
 
 const loadRecords = async () => {
   try {
@@ -282,10 +287,12 @@ const onOldPartChange = (row) => {
 };
 
 const addPartRow = () => {
+  if (!ensureCanEdit()) return;
   partRows.value.push(createPartRow());
 };
 
 const removePartRow = (id) => {
+  if (!ensureCanEdit()) return;
   if (partRows.value.length === 1) {
     partRows.value = [createPartRow()];
     return;
@@ -294,11 +301,13 @@ const removePartRow = (id) => {
 };
 
 const resetForm = () => {
+  if (!ensureCanEdit()) return;
   Object.assign(form, defaultForm());
   partRows.value = [createPartRow()];
 };
 
 const addRecords = () => {
+  if (!ensureCanEdit()) return;
   if (processing.value) return;
 
   const targets = partRows.value.filter((row) => row.oldPartCode.trim());
@@ -332,10 +341,12 @@ const addRecords = () => {
 };
 
 const toggleCreateForm = () => {
+  if (!ensureCanEdit()) return;
   showCreateForm.value = !showCreateForm.value;
 };
 
 const removeRecord = async (id) => {
+  if (!ensureCanEdit()) return;
   try {
     await api.engineeringChanges.deletePart(id);
     await loadRecords();
@@ -346,6 +357,7 @@ const removeRecord = async (id) => {
 };
 
 const recalculateCase = async (caseId) => {
+  if (!ensureCanEdit()) return;
   if (!caseId) return;
   if (recalculatingByCase.value[caseId]) return;
   recalculatingByCase.value = { ...recalculatingByCase.value, [caseId]: true };
@@ -363,6 +375,7 @@ const recalculateCase = async (caseId) => {
 };
 
 const startEdit = (item) => {
+  if (!ensureCanEdit()) return;
   editingId.value = item.id;
   editForm.case_name = item.case_name || "";
   editForm.old_part_code = item.old_part_code || "";
@@ -376,6 +389,7 @@ const cancelEdit = () => {
 };
 
 const saveEdit = async (id) => {
+  if (!ensureCanEdit()) return;
   try {
     await api.engineeringChanges.updatePart(id, {
       case_name: editForm.case_name,

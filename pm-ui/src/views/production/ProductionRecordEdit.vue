@@ -4,8 +4,10 @@
       <h2 class="page-title">実績変更</h2>
       <p class="subtitle">セッション単位で実績数量・開始時刻・終了時刻を修正/削除します。</p>
     </div>
+    <p v-if="!canView" class="error">この画面を閲覧する権限がありません。</p>
+    <p v-else-if="!canEdit" class="loading">閲覧のみ可能です（編集権限がありません）。</p>
 
-    <div class="filters">
+    <div class="filters" v-if="canView">
       <div class="filter-row">
         <label>レコードID</label>
         <input v-model="sessionId" type="number" min="1" placeholder="例: 12345" />
@@ -60,10 +62,10 @@
             <td>{{ row.process_code }} / {{ row.process_name }}</td>
             <td>{{ row.product_code || '—' }}</td>
             <td>
-              <input v-model="edits[row.id].started_at" type="datetime-local" />
+              <input v-model="edits[row.id].started_at" type="datetime-local" :disabled="!canEdit" />
             </td>
             <td>
-              <input v-model="edits[row.id].ended_at" type="datetime-local" />
+              <input v-model="edits[row.id].ended_at" type="datetime-local" :disabled="!canEdit" />
             </td>
             <td class="num">
               <input
@@ -72,11 +74,12 @@
                 min="0"
                 step="1"
                 class="qty-input"
+                :disabled="!canEdit"
               />
             </td>
             <td class="action-cell">
-              <button class="btn btn-secondary" :disabled="savingId === row.id" @click="saveRow(row.id)">保存</button>
-              <button class="btn btn-danger" :disabled="savingId === row.id" @click="deleteRow(row.id)">削除</button>
+              <button class="btn btn-secondary" :disabled="savingId === row.id || !canEdit" @click="saveRow(row.id)">保存</button>
+              <button class="btn btn-danger" :disabled="savingId === row.id || !canEdit" @click="deleteRow(row.id)">削除</button>
             </td>
           </tr>
           <tr v-if="!sessions.length">
@@ -91,6 +94,8 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
 
 const loading = ref(false)
 const error = ref('')
@@ -108,6 +113,19 @@ const startDate = ref(toISODate(new Date(today.getTime() - 7 * 24 * 60 * 60 * 10
 const endDate = ref(toISODate(new Date(today.getTime() + 24 * 60 * 60 * 1000)))
 const lineId = ref('')
 const processId = ref('')
+
+const canAccessRecordEdit = (level = 'view') => {
+  const user = authState.user
+  if (!user) return false
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  if (permissions.some((item) => item.resource === 'production.record_edit')) {
+    return hasPermission(user, 'production.record_edit', level)
+  }
+  return hasPermission(user, 'production', level)
+}
+
+const canView = computed(() => canAccessRecordEdit('view'))
+const canEdit = computed(() => canAccessRecordEdit('edit'))
 
 const filteredProcesses = computed(() => {
   if (!lineId.value) return processes.value
@@ -176,6 +194,7 @@ const loadSessions = async () => {
 }
 
 const saveRow = async (id) => {
+  if (!canEdit.value) return
   const edit = edits.value[id]
   if (!edit) return
   if (!window.confirm(`レコードID ${id} を更新します。よろしいですか？`)) return
@@ -198,6 +217,7 @@ const saveRow = async (id) => {
 }
 
 const deleteRow = async (id) => {
+  if (!canEdit.value) return
   if (!window.confirm(`レコードID ${id} を削除します。よろしいですか？`)) return
   savingId.value = id
   try {
@@ -213,6 +233,7 @@ const deleteRow = async (id) => {
 }
 
 onMounted(async () => {
+  if (!canView.value) return
   await loadMasters()
   await loadSessions()
 })

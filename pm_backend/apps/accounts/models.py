@@ -139,6 +139,7 @@ class UserPermission(models.Model):
         ('orders', '受注'),
         ('production', '生産'),
         ('production.process_input', '生産: 工程作業入力'),
+        ('production.record_edit', '生産: 実績変更'),
         ('production.scrap_record', '生産: 仕損品記録'),
         ('production.plan_input', '生産: 生産計画入力'),
         ('production.inventory', '生産: 在庫/残量一覧'),

@@ -7,35 +7,35 @@
       <section class="dashboard-section">
         <h2 class="section-title">{{ t('dashboard.section.main') }}</h2>
         <div class="menu-grid">
-          <RouterLink v-if="hasPermission(user, 'orders')" to="/orders/menu" class="menu-card">
+          <RouterLink v-if="canShowResource('orders')" to="/orders/menu" class="menu-card">
             <div class="menu-icon">📋</div>
             <div class="menu-label">{{ t('dashboard.menu.orders') }}</div>
           </RouterLink>
-          <RouterLink v-if="hasPermission(user, 'production')" to="/production/menu" class="menu-card">
+          <RouterLink v-if="canShowResource('production')" to="/production/menu" class="menu-card">
             <div class="menu-icon">🏭</div>
             <div class="menu-label">{{ t('dashboard.menu.production') }}</div>
           </RouterLink>
-          <RouterLink v-if="hasPermission(user, 'purchase')" to="/purchase/menu" class="menu-card">
+          <RouterLink v-if="canShowResource('purchase')" to="/purchase/menu" class="menu-card">
             <div class="menu-icon">🛒</div>
             <div class="menu-label">{{ t('dashboard.menu.purchase') }}</div>
           </RouterLink>
-          <RouterLink v-if="hasPermission(user, 'shipping')" to="/shipping/menu" class="menu-card">
+          <RouterLink v-if="canShowResource('shipping')" to="/shipping/menu" class="menu-card">
             <div class="menu-icon">🚚</div>
             <div class="menu-label">{{ t('dashboard.menu.shipping') }}</div>
           </RouterLink>
-          <RouterLink v-if="hasPermission(user, 'inventory')" to="/inventory" class="menu-card">
+          <RouterLink v-if="canShowResource('inventory')" to="/inventory" class="menu-card">
             <div class="menu-icon">📦</div>
             <div class="menu-label">{{ t('dashboard.menu.inventory') }}</div>
           </RouterLink>
-          <RouterLink v-if="hasPermission(user, 'quality')" to="/quality" class="menu-card">
+          <RouterLink v-if="canShowResource('quality')" to="/quality" class="menu-card">
             <div class="menu-icon">✅</div>
             <div class="menu-label">{{ t('dashboard.menu.quality') }}</div>
           </RouterLink>
-          <RouterLink v-if="hasPermission(user, 'masters')" to="/masters" class="menu-card">
+          <RouterLink v-if="canShowResource('masters')" to="/masters" class="menu-card">
             <div class="menu-icon">⚙️</div>
             <div class="menu-label">{{ t('dashboard.menu.masters') }}</div>
           </RouterLink>
-          <RouterLink v-if="hasPermission(user, 'notifications')" to="/notifications/sources" class="menu-card">
+          <RouterLink v-if="canShowResource('notifications')" to="/notifications/sources" class="menu-card">
             <div class="menu-icon">🔔</div>
             <div class="menu-label">{{ t('dashboard.menu.notifications') }}</div>
           </RouterLink>
@@ -53,6 +53,17 @@ import { hasPermission } from '@/router'
 import { t } from '@/i18n'
 
 const user = authState.user
+const canShowResource = (resource) => {
+  if (hasPermission(user, resource)) return true
+  const permissions = Array.isArray(user?.effective_permissions) ? user.effective_permissions : []
+  const prefix = `${resource}.`
+  return permissions.some((item) => {
+    if (!item || typeof item.resource !== 'string') return false
+    if (!item.resource.startsWith(prefix)) return false
+    return Boolean(item.can_view || item.can_edit)
+  })
+}
+
 const userName = computed(() => {
   const current = authState.user
   if (!current) return t('nav.guest')

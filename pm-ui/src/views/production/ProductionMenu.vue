@@ -62,7 +62,7 @@ const tiles = computed(() => {
       to: "/production/mobile-process-input",
       label: t("productionMenu.tiles.processInput"),
       icon: "📱",
-      required: "view",
+      required: "edit",
       resource: "production.process_input",
     },
     {
@@ -77,7 +77,7 @@ const tiles = computed(() => {
       label: t("productionMenu.tiles.productionRecordEdit"),
       icon: "✏️",
       required: "edit",
-      resource: "production.process_input",
+      resource: "production.record_edit",
     },
     {
       to: "/production/scrap-record",
