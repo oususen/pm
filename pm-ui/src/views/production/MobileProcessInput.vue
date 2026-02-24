@@ -168,7 +168,10 @@
           v-for="p in displayProductList"
           :key="`${p.plan_date}-${p.product}-${p.process}`"
           class="btn-planned"
-          :class="{ active: record.product_id === p.product }"
+          :class="{
+            active: record.product_id === p.product,
+            'current-processing': isCurrentProcessingProduct(p.product),
+          }"
           type="button"
           @click="selectPlannedProduct(p)"
         >
@@ -291,7 +294,7 @@
           <input
             type="number"
             v-model.number="record.qty"
-            min="1"
+            :min="qtyInputMin"
             step="1"
             inputmode="numeric"
             class="input-large input-qty flex-input"
@@ -1113,6 +1116,11 @@ const isTempEndedProduct = (productId) => {
   return tempEndedProductIds.value.has(String(productId))
 }
 
+const isCurrentProcessingProduct = (productId) => {
+  if (!productId) return false
+  return String(currentProcessingProductId.value || '') === String(productId)
+}
+
 const pausedProductInfo = computed(() => {
   if (!selectedProcessId.value || !startedProductIdsLoaded.value) return null
 
@@ -1574,9 +1582,32 @@ const hasEffectiveOperatorAction = () => {
   return hasFilledText(effectiveOperatorAction.value)
 }
 
+const isEndOperatorAction = computed(() => {
+  return String(effectiveOperatorAction.value || '').toUpperCase() === 'END'
+})
+
+const qtyInputMin = computed(() => {
+  return isEndOperatorAction.value && hasFilledText(record.value.remarks) ? 0 : 1
+})
+
 const hasRequiredProductionFields = ({ requireQty = true } = {}) => {
   if (!hasSelectedProduct()) return false
-  if (requireQty && !(record.value.qty > 0)) return false
+  if (requireQty) {
+    const qtyValue = Number(record.value.qty)
+    const hasQty =
+      record.value.qty !== null &&
+      record.value.qty !== '' &&
+      !Number.isNaN(qtyValue)
+    if (!hasQty) return false
+
+    const allowZeroOnEndWithRemarks =
+      isEndOperatorAction.value && hasFilledText(record.value.remarks)
+    if (allowZeroOnEndWithRemarks) {
+      if (qtyValue < 0) return false
+    } else if (qtyValue <= 0) {
+      return false
+    }
+  }
   if (!hasFilledText(record.value.operator_name)) return false
   return true
 }
@@ -2543,7 +2574,7 @@ const selectPlannedProduct = (p) => {
   record.value.product_code = p.product_code || ''
   manualProduct.value = false
   if (record.value.record_type === 'PRODUCTION') {
-    record.value.qty = 1
+    record.value.qty = null
   }
   applyScrapTypeDefaults(p)
 }
@@ -2654,7 +2685,7 @@ watch(
         (p) => String(p.product) === String(defaultProductId.value)
       )
       if (plan) {
-        record.value.qty = 1
+        record.value.qty = null
       }
     }
     restoreEquipmentStateIfNeeded()
@@ -2854,12 +2885,16 @@ label {
 }
 
 .input-qty {
-  font-size: 24px !important;
+  font-size: 30px !important;
   height: 40px;
   line-height: 40px;
   padding: 0 8px;
   text-align: center;
   font-weight: 700;
+}
+.input-qty::placeholder {
+  font-size: 20px;
+  font-weight: 400;
 }
 .qty-row .input-qty {
   max-width: 140px;
@@ -3315,6 +3350,11 @@ label {
 .btn-planned.active {
   border-color: #15803d;
   background: #16a34a;
+  color: #ffffff;
+}
+.btn-planned.current-processing {
+  border-color: #1d4ed8;
+  background: #2563eb;
   color: #ffffff;
 }
 

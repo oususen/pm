@@ -6,7 +6,7 @@
     </div>
 
     <div class="filters">
-      <div class="filter-row">
+      <div class="filter-row filter-row-period">
         <label>期間</label>
         <input v-model="startDate" type="date" />
         <span>〜</span>
@@ -119,6 +119,7 @@
         <table class="list-table">
         <thead>
           <tr>
+            <th>レコードID</th>
             <th>開始</th>
             <th>終了</th>
             <th>区分</th>
@@ -142,6 +143,7 @@
               :key="`${row.id}-${row.product || row.product_code || 'none'}-${rowIndex}`"
               :class="{ 'row-pause': row.session_type === 'PAUSE' }"
             >
+              <td>{{ row.id ?? '—' }}</td>
               <td>{{ formatDateTime(row.started_at) }}</td>
               <td>{{ row.ended_at ? formatDateTime(row.ended_at) : '—' }}</td>
               <td>
@@ -168,7 +170,7 @@
               </td>
             </tr>
             <tr v-if="!sessions.length">
-              <td colspan="15" class="no-data">データがありません</td>
+              <td colspan="16" class="no-data">データがありません</td>
             </tr>
           </tbody>
         </table>
@@ -390,6 +392,7 @@ const formatProductivity = (value, row = null) => {
 
 const buildExportRows = () => {
   const headers = [
+    'レコードID',
     '開始',
     '終了',
     '区分',
@@ -407,6 +410,7 @@ const buildExportRows = () => {
     '不整合',
   ]
   const rows = (Array.isArray(sessions.value) ? sessions.value : []).map((row) => [
+    row.id ?? '—',
     formatDateTime(row.started_at),
     row.ended_at ? formatDateTime(row.ended_at) : '—',
     getSessionTypeLabel(row),
@@ -599,7 +603,7 @@ onMounted(async () => {
 }
 .filters {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 8px 12px;
   margin-bottom: 12px;
   padding: 12px;
@@ -611,6 +615,9 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.filter-row-period {
+  grid-column: span 2;
 }
 .filter-row label {
   min-width: 44px;
@@ -625,6 +632,12 @@ onMounted(async () => {
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   font-size: 13px;
+}
+.filter-row-period input[type="date"] {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 115px;
+  padding: 6px 4px;
 }
 .actions {
   display: flex;

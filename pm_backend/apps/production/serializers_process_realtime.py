@@ -1084,8 +1084,13 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                     raise serializers.ValidationError({'qty': '中断時は数量の入力が必要です。'})
             if action == 'END':
                 production_qty = attrs.get('production_qty')
-                if production_qty is None or production_qty <= 0:
+                remarks_text = (attrs.get('remarks') or '').strip()
+                if production_qty is None:
                     raise serializers.ValidationError({'production_qty': '終了時は数量の入力が必要です。'})
+                if production_qty < 0:
+                    raise serializers.ValidationError({'production_qty': '終了時の数量は0以上で入力してください。'})
+                if production_qty == 0 and not remarks_text:
+                    raise serializers.ValidationError({'production_qty': '終了時に数量0を入力する場合は備考の入力が必要です。'})
         return attrs
 
     def create(self, validated_data):
@@ -1126,8 +1131,11 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                 raise serializers.ValidationError({'product_id': '作業時刻記録は製品の指定が必要です。'})
         if validated_data.get('record_type') == 'OPERATOR_ACTION' and operator_action == 'END':
             qty_decimal = production_qty or Decimal('0')
-            if qty_decimal <= 0:
-                raise serializers.ValidationError({'production_qty': '終了時は数量の入力が必要です。'})
+            remarks_text = (validated_data.get('remarks') or '').strip()
+            if qty_decimal < 0:
+                raise serializers.ValidationError({'production_qty': '終了時の数量は0以上で入力してください。'})
+            if qty_decimal == 0 and not remarks_text:
+                raise serializers.ValidationError({'production_qty': '終了時に数量0を入力する場合は備考の入力が必要です。'})
             if not product:
                 raise serializers.ValidationError({'product_id': '終了実績の保存には製品の指定が必要です。'})
 
