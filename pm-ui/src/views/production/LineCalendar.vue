@@ -1,11 +1,16 @@
 <template>
   <div class="page">
+    <div v-if="!canView" class="empty">
+      この画面を閲覧する権限がありません。
+    </div>
+
+    <template v-else>
     <div class="header-row">
       <div class="title-wrap">
         <h2 class="page-title">ライン勤務カレンダ</h2>
         <p class="hint">勤務時間の編集は常に表示、新規カレンダ作成は必要時のみ開きます。</p>
       </div>
-      <button class="btn toggle" @click="showCreator = !showCreator">
+      <button class="btn toggle" @click="showCreator = !showCreator" :disabled="!canEdit">
         {{ showCreator ? '作成を閉じる' : 'カレンダ作成' }}
       </button>
     </div>
@@ -33,7 +38,7 @@
           </select>
         </div>
         <div class="actions">
-          <button class="btn secondary" @click="showAssign = !showAssign">
+          <button class="btn secondary" @click="showAssign = !showAssign" :disabled="!canEdit">
             {{ showAssign ? '割当を隠す' : '割当設定' }}
           </button>
           <button class="btn" @click="loadCalendars">再読込</button>
@@ -49,15 +54,15 @@
           <div class="row inline">
             <div class="field">
               <label>開始日</label>
-              <input type="date" v-model="range.start" :disabled="isReadOnlyLine" />
+              <input type="date" v-model="range.start" :disabled="!canEdit || isReadOnlyLine" />
             </div>
             <div class="field">
               <label>終了日</label>
-              <input type="date" v-model="range.end" :disabled="isReadOnlyLine" />
+              <input type="date" v-model="range.end" :disabled="!canEdit || isReadOnlyLine" />
             </div>
             <div class="field">
               <label>勤務パターン</label>
-              <select v-model.number="range.workPattern" @change="onPatternChange" :disabled="isReadOnlyLine">
+              <select v-model.number="range.workPattern" @change="onPatternChange" :disabled="!canEdit || isReadOnlyLine">
                 <option value="">選択なし</option>
                 <option v-for="p in workPatterns" :key="p.id" :value="p.id">
                   {{ p.pattern_name }} ({{ p.start_time }}〜{{ p.end_time }} / {{ formatMinutes(calculateWorkMinutes(p)) }})
@@ -66,17 +71,17 @@
             </div>
             <div class="field small">
               <label>稼働分</label>
-              <input type="number" v-model.number="range.workMinutes" min="0" :disabled="isReadOnlyLine" />
+              <input type="number" v-model.number="range.workMinutes" min="0" :disabled="!canEdit || isReadOnlyLine" />
             </div>
             <div class="field checkbox inline-check">
               <label>
-                <input type="checkbox" v-model="range.isWorkingDay" :disabled="isReadOnlyLine" />
+                <input type="checkbox" v-model="range.isWorkingDay" :disabled="!canEdit || isReadOnlyLine" />
                 稼働日として登録
               </label>
             </div>
             <div class="field action-field">
               <label>&nbsp;</label>
-              <button class="btn primary" @click="applyRange" :disabled="!selectedCalendar || applyingRange || isReadOnlyLine">
+              <button class="btn primary" @click="applyRange" :disabled="!selectedCalendar || applyingRange || !canEdit || isReadOnlyLine">
                 登録 / 更新
               </button>
             </div>
@@ -88,7 +93,7 @@
           <div class="row inline">
             <div class="field">
               <label>コピー元</label>
-              <select v-model.number="copy.srcId" :disabled="isReadOnlyLine">
+              <select v-model.number="copy.srcId" :disabled="!canEdit || isReadOnlyLine">
                 <option value="">選択</option>
                 <option v-for="c in calendars" :key="c.id" :value="c.id">
                   {{ c.calendar_code }} - {{ c.calendar_name }}
@@ -97,7 +102,7 @@
             </div>
             <div class="field">
               <label>コピー先</label>
-              <select v-model.number="copy.dstId" :disabled="isReadOnlyLine">
+              <select v-model.number="copy.dstId" :disabled="!canEdit || isReadOnlyLine">
                 <option value="">選択</option>
                 <option v-for="c in calendars" :key="c.id" :value="c.id">
                   {{ c.calendar_code }} - {{ c.calendar_name }}
@@ -106,15 +111,15 @@
             </div>
             <div class="field">
               <label>開始日</label>
-              <input type="date" v-model="copy.start" :disabled="isReadOnlyLine" />
+              <input type="date" v-model="copy.start" :disabled="!canEdit || isReadOnlyLine" />
             </div>
             <div class="field">
               <label>終了日</label>
-              <input type="date" v-model="copy.end" :disabled="isReadOnlyLine" />
+              <input type="date" v-model="copy.end" :disabled="!canEdit || isReadOnlyLine" />
             </div>
             <div class="field action-field">
               <label>&nbsp;</label>
-              <button class="btn primary" @click="copyCalendar" :disabled="copyingCalendar || isReadOnlyLine">
+              <button class="btn primary" @click="copyCalendar" :disabled="copyingCalendar || !canEdit || isReadOnlyLine">
                 コピー実行
               </button>
             </div>
@@ -127,13 +132,13 @@
         <div class="card-title">新規カレンダ</div>
         <div class="field">
           <label>カレンダコード</label>
-          <input v-model="newCalendar.code" placeholder="例: line_T1" :disabled="isReadOnlyLine" />
+          <input v-model="newCalendar.code" placeholder="例: line_T1" :disabled="!canEdit || isReadOnlyLine" />
         </div>
         <div class="field">
           <label>カレンダ名</label>
-          <input v-model="newCalendar.name" placeholder="例: タンクライン勤務" :disabled="isReadOnlyLine" />
+          <input v-model="newCalendar.name" placeholder="例: タンクライン勤務" :disabled="!canEdit || isReadOnlyLine" />
         </div>
-        <button class="btn primary" @click="createCalendar" :disabled="creatingCalendar || isReadOnlyLine">作成</button>
+        <button class="btn primary" @click="createCalendar" :disabled="creatingCalendar || !canEdit || isReadOnlyLine">作成</button>
       </div>
     </div>
 
@@ -141,7 +146,7 @@
       <div class="row compact">
         <div class="field">
           <label>ラインにカレンダ割当</label>
-          <button class="btn primary" @click="assignCalendar" :disabled="!selectedLine || !selectedCalendar || savingAssign || isReadOnlyLine">
+          <button class="btn primary" @click="assignCalendar" :disabled="!selectedLine || !selectedCalendar || savingAssign || !canEdit || isReadOnlyLine">
             ラインに割当
           </button>
         </div>
@@ -193,7 +198,7 @@
                         <input
                           type="checkbox"
                           :checked="day.is_working_day"
-                          :disabled="savingDateKey === day.date || isReadOnlyLine"
+                          :disabled="savingDateKey === day.date || !canEdit || isReadOnlyLine"
                           @change="toggleDay(day)"
                         />
                         {{ day.is_working_day ? '出' : '休み' }}
@@ -212,7 +217,7 @@
                     class="note-input"
                     :value="day.record?.note || ''"
                     placeholder="メモ"
-                    :disabled="savingDateKey === day.date || savingNoteDateKey === day.date || isReadOnlyLine"
+                    :disabled="savingDateKey === day.date || savingNoteDateKey === day.date || !canEdit || isReadOnlyLine"
                     @blur="saveDayNote(day, $event)"
                   ></textarea>
                 </div>
@@ -224,12 +229,29 @@
     </div>
       </div>
     </div>
+    </template>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
+
+const canAccessLineCalendars = (level = 'view') => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_superuser) return true
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  if (permissions.some((item) => item.resource === 'production.line_calendars')) {
+    return hasPermission(user, 'production.line_calendars', level)
+  }
+  return hasPermission(user, 'production', level)
+}
+
+const canView = computed(() => canAccessLineCalendars('view'))
+const canEdit = computed(() => canAccessLineCalendars('edit'))
 
 const lines = ref([])
 const calendars = ref([])
@@ -477,6 +499,7 @@ const moveMonth = async (delta) => {
 }
 
 const toggleWeekday = async (weekday, checked) => {
+  if (!canEdit.value) return
   if (!selectedCalendar.value) return
   applyingWeekday.value = true
   try {
@@ -528,6 +551,7 @@ const toggleWeekday = async (weekday, checked) => {
 }
 
 const assignCalendar = async () => {
+  if (!canEdit.value) return
   if (!selectedLine.value || !selectedCalendar.value) return
   savingAssign.value = true
   try {
@@ -542,6 +566,7 @@ const assignCalendar = async () => {
 }
 
 const createCalendar = async () => {
+  if (!canEdit.value) return
   if (!newCalendar.value.code || !newCalendar.value.name) {
     alert('コードと名称を入力してください。')
     return
@@ -566,6 +591,7 @@ const createCalendar = async () => {
 }
 
 const applyRange = async () => {
+  if (!canEdit.value) return
   if (isReadOnlyLine.value) return
   if (!selectedCalendar.value || !range.value.start || !range.value.end) {
     alert('開始日/終了日/カレンダを入力してください。')
@@ -606,6 +632,7 @@ const applyRange = async () => {
 }
 
 const copyCalendar = async () => {
+  if (!canEdit.value) return
   if (isReadOnlyLine.value) return
   if (!copy.value.srcId || !copy.value.dstId || !copy.value.start || !copy.value.end) {
     alert('コピー元・コピー先・開始日・終了日をすべて入力してください。')
@@ -637,6 +664,7 @@ const copyCalendar = async () => {
 }
 
 const toggleDay = async (day) => {
+  if (!canEdit.value) return
   if (isReadOnlyLine.value) return
   if (!day?.inMonth || !selectedCalendar.value) return
   savingDateKey.value = day.date
@@ -669,6 +697,7 @@ const toggleDay = async (day) => {
 }
 
 const saveDayNote = async (day, event) => {
+  if (!canEdit.value) return
   if (isReadOnlyLine.value) return
   if (!day?.inMonth || !selectedCalendar.value) return
   const inputNote = String(event?.target?.value || '').trim()
@@ -706,6 +735,7 @@ const saveDayNote = async (day, event) => {
 }
 
 onMounted(async () => {
+  if (!canView.value) return
   await Promise.all([loadLines(), loadCalendars(), loadWorkPatterns()])
   await loadDaisoCalendarDays()
 })

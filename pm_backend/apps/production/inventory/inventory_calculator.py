@@ -1153,3 +1153,9 @@ def recalculate_inventory_for_line(line_id, start_date, end_date, include_progre
         progress_max[1],
     )
     logger.info("在庫再計算完了: total_time=%.3fs", time.perf_counter() - overall_start)
+
+    return {
+        'line_id': line_id,
+        'product_count': len(product_ids),
+        'progress_product_count': len(product_ids) if include_progress else 0,
+    }

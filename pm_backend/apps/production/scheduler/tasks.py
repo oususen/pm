@@ -189,7 +189,7 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                 logger.info(
                     f'[スケジューラ] 在庫再計算: ライン {line.line_code} ({line.line_name})'
                 )
-                recalculate_inventory_for_line(
+                recalc_result = recalculate_inventory_for_line(
                     line_id=line.id,
                     start_date=start_date,
                     end_date=end_date,
@@ -197,6 +197,12 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                     line_final_only=False,
                 )
                 recalc_count += 1
+                if task_spec['include_progress_in_inventory'] and isinstance(recalc_result, dict):
+                    progress_count += int(
+                        recalc_result.get('progress_product_count')
+                        or recalc_result.get('product_count')
+                        or 0
+                    )
             except Exception as e:
                 error_msg = f'在庫再計算 {line.line_code}: {str(e)}'
                 logger.error(f'[スケジューラ] {error_msg}', exc_info=True)
