@@ -7,6 +7,11 @@ from shipping.views_shipping_order import (
     get_available_dates,
     get_shipping_order_data,
 )
+from shipping.views_fujishoji_document import (
+    get_fujishoji_available_dates,
+    get_fujishoji_document_data,
+    generate_fujishoji_pdf_api,
+)
 from shipping.views_hirakata_pickup import (
     generate_hirakata_pickup_pdf,
     generate_hirakata_pickup_excel,
@@ -25,6 +30,10 @@ urlpatterns = [
     path('shipping/available-dates/', get_available_dates, name='shipping-available-dates'),
     path('shipping/order-data/<str:target_date_str>/', get_shipping_order_data, name='shipping-order-data'),
     path('shipping/generate-pdf/', generate_shipping_order_pdf_api, name='shipping-generate-pdf'),
+    # 富士商事出荷指示書API
+    path('shipping/fujishoji-document/available-dates/', get_fujishoji_available_dates, name='fujishoji-available-dates'),
+    path('shipping/fujishoji-document/generate-pdf/', generate_fujishoji_pdf_api, name='fujishoji-document-pdf'),
+    path('shipping/fujishoji-document/<str:target_date_str>/', get_fujishoji_document_data, name='fujishoji-document-data'),
     # Hirakata pickup APIs
     path('hirakata-pickup/generate-pdf/', generate_hirakata_pickup_pdf, name='hirakata-pickup-generate-pdf'),
     path('hirakata-pickup/generate-excel/', generate_hirakata_pickup_excel, name='hirakata-pickup-generate-excel'),

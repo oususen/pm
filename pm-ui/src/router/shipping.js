@@ -30,6 +30,12 @@ const shipping = [
     meta: { pageTitle: "出荷指示書", manualPath: "出荷/出荷指示書.md", resource: "shipping" },
   },
   {
+    path: "/shipping/fujishoji-document",
+    name: "FujishojiShippingDocument",
+    component: () => import("@/views/shipping/FujishojiShippingDocument.vue"),
+    meta: { pageTitle: "富士商事出荷指示書", resource: "shipping" },
+  },
+  {
     path: "/shipping/hirakata-pickup",
     name: "HirakataPickup",
     component: () => import("@/views/shipping/HirakataPickup.vue"),
