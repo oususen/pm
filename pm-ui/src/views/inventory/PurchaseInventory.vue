@@ -739,13 +739,9 @@ const refreshScrapQty = async () => {
   }
 };
 
-const onSupplierChange = async () => {
+const onSupplierChange = () => {
   demands.value = [];
   purchaseLineId.value = "";
-  if (selectedSupplier.value) {
-    await fetchProducts(selectedSupplier.value);
-    await load();
-  }
 };
 
 const load = async () => {
