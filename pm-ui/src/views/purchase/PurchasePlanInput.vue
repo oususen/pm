@@ -15,11 +15,11 @@
         </div>
         <div class="field">
           <label>表示開始日</label>
-          <input type="date" v-model="startDate" @change="refreshDates" />
+          <input type="date" v-model="startDate" @change="refreshDates" class="input-narrow" />
         </div>
         <div class="field">
           <label>期間</label>
-          <select v-model.number="horizonDays" @change="refreshDates">
+          <select v-model.number="horizonDays" @change="refreshDates" class="select-narrow">
             <option :value="30">30日</option>
             <option :value="60">60日</option>
             <option :value="90">90日</option>
@@ -772,6 +772,15 @@ const confirmChangeReason = () => {
 .field select {
   padding: 6px 8px;
   min-width: 140px;
+}
+.field input.input-narrow {
+  min-width: unset;
+  width: 110px;
+}
+.field select.select-narrow {
+  min-width: unset;
+  width: 55px;
+  padding: 6px 0;
   border: 1px solid #cfd6e1;
   border-radius: 3px;
 }
