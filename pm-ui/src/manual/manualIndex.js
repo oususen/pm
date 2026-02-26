@@ -40,6 +40,7 @@ export const manualSections = [
     id: "production",
     title: "生産管理",
     items: [
+      { title: "生産計画員業務手順書", path: "生産計画員業務手順書.md" },
       { title: "工程作業入力", path: "生産/工程作業入力.md" },
       { title: "仕損品記録", path: "生産/仕損品記録.md" },
       { title: "仕損履歴", path: "生産/仕損履歴.md" },
