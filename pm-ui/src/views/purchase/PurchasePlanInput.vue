@@ -924,6 +924,17 @@ thead .sticky-col {
   color: #666;
   cursor: not-allowed;
 }
+.plan-grid tbody td.num.plan {
+  padding: 0 !important;
+}
+.plan-grid tbody td.num.plan input {
+  border: 0;
+  border-radius: 0;
+  padding: 0 4px;
+  margin: 0;
+  min-height: 24px;
+  background: transparent;
+}
 .num {
   text-align: right;
   min-width: 30px;

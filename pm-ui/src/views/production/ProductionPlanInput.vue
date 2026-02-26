@@ -12,11 +12,11 @@
         </div>
         <div class="field">
           <label>表示開始日</label>
-          <input type="date" v-model="startDate" @change="refreshDates" />
+          <input type="date" v-model="startDate" @change="refreshDates" class="input-narrow" />
         </div>
         <div class="field">
           <label>期間</label>
-          <select v-model.number="horizonDays" @change="refreshDates">
+          <select v-model.number="horizonDays" @change="refreshDates" class="select-narrow">
             <option :value="14">14日</option>
             <option :value="30">30日</option>
             <option :value="60">60日</option>
@@ -1844,6 +1844,17 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
   border: 1px solid #cfd6e1;
   border-radius: 3px;
 }
+.field input.input-narrow {
+  min-width: unset;
+  width: 110px;
+}
+.field select.select-narrow {
+  min-width: unset;
+  width: 55px;
+  padding: 6px 0;
+  border: 1px solid #cfd6e1;
+  border-radius: 3px;
+}
 .grid-wrapper {
   margin-top: 6px;
   flex: 1;
@@ -2084,6 +2095,36 @@ thead .sticky-col {
   background: #f1f5f9;
   color: #666;
   cursor: not-allowed;
+}
+.plan-grid tbody td.num.plan {
+  padding: 0 !important;
+}
+.plan-grid tbody td.num.plan .lot-stack {
+  height: 100%;
+  gap: 0;
+}
+.plan-grid tbody td.num.plan .lot-item {
+  gap: 0;
+  border-top: 1px solid #d7dfe8;
+}
+.plan-grid tbody td.num.plan input {
+  border: 0;
+  border-radius: 0;
+  padding: 0 4px;
+  margin: 0;
+  min-height: 24px;
+  background: transparent;
+}
+.plan-grid tbody td.num.plan .lot-add {
+  width: 100%;
+  height: 20px;
+  padding: 0 4px;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid #d7dfe8;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
 }
 .num {
   text-align: right;
