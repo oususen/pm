@@ -63,6 +63,19 @@
 
     <div class="grid-wrapper" ref="gridWrapperRef">
       <table class="plan-grid" :style="{ minWidth: tableMinWidth + 'px' }">
+        <colgroup>
+          <col style="width: 60px" />
+          <col style="width: 135px" />
+          <col style="width: 100px" />
+          <template v-for="c in dateColumns" :key="`col-${c.key}`">
+            <col :style="{ width: DAY_COL_WIDTH + 'px' }" />
+            <col :style="{ width: DAY_COL_WIDTH + 'px' }" />
+            <col :style="{ width: DAY_COL_WIDTH + 'px' }" />
+            <col :style="{ width: DAY_COL_WIDTH + 'px' }" />
+            <col :style="{ width: SEQUENCE_COL_WIDTH + 'px' }" />
+            <col :style="{ width: DAY_COL_WIDTH + 'px' }" />
+          </template>
+        </colgroup>
         <thead>
           <tr class="head-level1">
             <th rowspan="2" class="sticky-col number-col">No</th>
@@ -100,7 +113,7 @@
               <th class="mini actual-col" :class="c.dayClass">実績</th>
               <th class="mini stock-col" :class="c.dayClass">在庫</th>
               <th class="mini plan-col" :class="c.dayClass">計画</th>
-              <th class="mini sequence-col" :class="c.dayClass">順序</th>
+              <th class="mini sequence-col" :class="c.dayClass">順</th>
               <th class="mini stock-plan-col day-end" :class="c.dayClass">計画在庫</th>
             </template>
           </tr>
@@ -440,10 +453,13 @@ const dateColumns = computed(() => {
   return cols
 })
 
+const DAY_COL_WIDTH = 54
+const SEQUENCE_COL_WIDTH = 27
+
 // テーブルの最小幅を計算して、縮みすぎを防ぐ
 const tableMinWidth = computed(() => {
   const fixedColsWidth = 60 + 135 + 100 // No + 品番 + 品名
-  const perDayWidth = (60 * 5) + 40 // 需要/実績/在庫/計画/計画在庫=64px、順序=80px
+  const perDayWidth = (DAY_COL_WIDTH * 5) + SEQUENCE_COL_WIDTH
   return fixedColsWidth + dateColumns.value.length * perDayWidth
 })
 
@@ -1999,7 +2015,9 @@ thead tr.head-level2 th.sticky-col {
   min-width: 54px;
 }
 .plan-grid .mini.sequence-col {
-  min-width: 60px;
+  min-width: 27px !important;
+  width: 27px !important;
+  max-width: 27px !important;
 }
 .day-end {
   border-right: 4px solid #a2b0c5 !important;
@@ -2126,6 +2144,12 @@ thead .sticky-col {
   background: transparent;
   text-align: left;
 }
+.plan-grid tbody td.num.sequence {
+  padding: 0 !important;
+}
+.plan-grid tbody td.num.sequence input {
+  padding: 0 4px;
+}
 .num {
   text-align: right;
   min-width: 80px; /* セル幅を広げて日付列が潰れないようにする */
@@ -2138,7 +2162,9 @@ thead .sticky-col {
   min-width: 40px;
 }
 .num.sequence {
-  min-width: 40px;
+  min-width: 27px;
+  width: 27px;
+  max-width: 27px;
 }
 .num input {
   width: 100%;
