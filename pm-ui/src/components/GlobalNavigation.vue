@@ -144,7 +144,7 @@ const mainTabs = computed(() => [
   { id: 'shipping', label: t('nav.tabs.shipping'), link: '/shipping/menu', resource: 'shipping' },
   { id: 'inventory', label: t('nav.tabs.inventory'), link: '/inventory', resource: 'inventory' },
   { id: 'quality', label: t('nav.tabs.quality'), link: '/quality', resource: 'quality' },
-  { id: 'notifications', label: t('nav.tabs.notifications'), link: '/notifications/sources', resource: 'notifications' },
+  { id: 'notifications', label: t('nav.tabs.notifications'), link: '/notifications/sources', resource: 'notifications.create' },
   { id: 'engineeringChange', label: t('nav.tabs.engineeringChange'), link: '/engineering-change/menu', resource: 'engineering_change' },
   { id: 'masters', label: t('nav.tabs.masters'), link: '/masters', resource: 'masters' },
   { id: 'settings', label: t('nav.tabs.settings'), link: '/settings', resource: 'settings' },
@@ -246,8 +246,7 @@ const userGroupId = computed(() => authState.user?.profile?.group_id ?? authStat
 const userTeamId = computed(() => authState.user?.profile?.team_id ?? authState.user?.profile?.team ?? null)
 const userPosition = computed(() => authState.user?.profile?.position || '')
 const canAccessNotifications = computed(() => {
-  const user = authState.user
-  return hasPermission(user, 'notifications', 'view')
+  return Boolean(authState.user)
 })
 const showNotificationBell = computed(() => Boolean(authState.user) && canAccessNotifications.value)
 const departments = ref([])

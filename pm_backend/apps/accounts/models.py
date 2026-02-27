@@ -163,6 +163,7 @@ class UserPermission(models.Model):
         ('inventory', '在庫'),
         ('quality', '品質'),
         ('notifications', '通知'),
+        ('notifications.create', '通知: 通知作成'),
         ('engineering_change', '設変'),
         ('masters', 'マスタ'),
         ('settings', '設定'),
