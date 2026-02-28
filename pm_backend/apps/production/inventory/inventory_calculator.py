@@ -886,12 +886,14 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
 
     calendar_id = None
     workday_cache = {}
+    is_purchase_line = False
     if line_id:
         from masters.models import Line, Calendar, CalendarDay
         line_obj = Line.objects.filter(id=line_id).first()
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
             calendar_code='daiso'
         ).values_list('id', flat=True).first()
+        is_purchase_line = getattr(line_obj, 'line_type', None) == 'PURCHASE'
 
     def is_working_day(target_date):
         if not calendar_id:
@@ -989,7 +991,12 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
 
         is_final = bool(getattr(sample.product, 'is_final_product', False))
         is_line_final = bool(getattr(sample.product, 'is_line_final_product', False))
-        if is_final:
+        if is_purchase_line:
+            # 購買ラインは order_qty（需要）を出庫量として使用する。
+            # 計画在庫 = 前日計画在庫 + 入庫計画 - 需要 となり、
+            # 入庫計画 = 需要のとき計画在庫が変化しないことが保証される。
+            planned_shipment = Decimal(str(order_total))
+        elif is_final:
             firm_qty = firm_map.get((sample.product_id, plan_date), Decimal('0'))
             if plan_date <= today:
                 planned_shipment = firm_qty

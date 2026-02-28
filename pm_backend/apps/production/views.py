@@ -1373,23 +1373,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             child_ids.add(item.child_product_id)
             parent_to_children[parent_id].append((item.child_product_id, qty, lead_time_days))
 
-        parent_orders = []
-        if parent_ids:
-            parent_qs = LineBacklog.objects.filter(product_id__in=parent_ids).select_related('line')
-            if start_dt:
-                parent_qs = parent_qs.filter(plan_date__gte=start_dt)
-            if end_dt:
-                parent_qs = parent_qs.filter(plan_date__lte=end_dt)
-
-            # 親製品の数量を取得:
-            # - 通常ライン: plan_qty > 0
-            # - 外作ライン(OUTSOURCE): 計画を持たないため order_qty > 0 も対象にする
-            parent_orders = list(
-                parent_qs.values('product_id', 'line_id', 'line__line_type', 'plan_date', 'plan_qty', 'order_qty', 'plan_id').filter(
-                    Q(plan_qty__gt=0) | Q(order_qty__gt=0, line__line_type='OUTSOURCE')
-                )
-            )
-
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
             calendar_code='daiso'
         ).values_list('id', flat=True).first()
@@ -1419,6 +1402,32 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 return is_work
             # カレンダ未設定時は週末判定（月〜金を稼働日）を使う
             return check_date.weekday() < 5
+
+        # 親計画の検索範囲を end_dt の「翌出勤日」まで延長する。
+        # 表示期間（30日/60日）の末日直後の出勤日の親計画も需要計算に含めることで、
+        # 表示期間によって需要値が変わらないようにする。
+        parent_orders = []
+        if parent_ids:
+            parent_qs = LineBacklog.objects.filter(product_id__in=parent_ids).select_related('line')
+            if start_dt:
+                parent_qs = parent_qs.filter(plan_date__gte=start_dt)
+            if end_dt:
+                # end_dt の翌日から最初の出勤日を探す（最大14日先まで）
+                next_work = end_dt + timedelta(days=1)
+                for _ in range(14):
+                    if is_working_day(next_work):
+                        break
+                    next_work += timedelta(days=1)
+                parent_qs = parent_qs.filter(plan_date__lte=next_work)
+
+            # 親製品の数量を取得:
+            # - 通常ライン: plan_qty > 0
+            # - 外作ライン(OUTSOURCE): 計画を持たないため order_qty > 0 も対象にする
+            parent_orders = list(
+                parent_qs.values('product_id', 'line_id', 'line__line_type', 'plan_date', 'plan_qty', 'order_qty', 'plan_id').filter(
+                    Q(plan_qty__gt=0) | Q(order_qty__gt=0, line__line_type='OUTSOURCE')
+                )
+            )
 
         # 日替わり8時ルール: 8時より前は前日扱い
         def apply_day_boundary(dt_val):

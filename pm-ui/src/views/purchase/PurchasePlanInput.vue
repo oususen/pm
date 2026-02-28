@@ -33,11 +33,16 @@
       </div>
       <div class="toolbar-right">
         <button class="btn" @click="resetRows" :disabled="processing || !rows.length">クリア</button>
+        <button class="btn" @click="autoFillPlan" :disabled="processing || !rows.length || !canEdit">自動計画</button>
         <button class="btn" @click="openChangeReasonDialog" :disabled="processing || !canEdit">計画変更</button>
         <button class="btn" @click="savePlan" :disabled="processing || !rows.length || !selectedSupplier || !canEdit">保存</button>
         <button class="btn primary" @click="doPickup" :disabled="processing || !selectedSupplier || !canEdit">取り込み</button>
         <button class="btn" @click="recalculateInventoryOnly" :disabled="processing || !selectedSupplier || !canEdit">在庫再計算</button>
       </div>
+    </div>
+
+    <div class="notice-bar">
+      ※ 需要は「取り込み」実行時の表示期間（開始日〜期間）で集計した値です。期間を変えて取り込み直すと需要が変わります。
     </div>
 
     <div class="grid-wrapper" ref="gridWrapperRef">
@@ -701,6 +706,32 @@ const resolvePurchaseLineId = async () => {
   }
 }
 
+const autoFillPlan = () => {
+  if (!canEdit.value) return
+  if (!rows.value.length) return
+
+  const hasExistingPlan = rows.value.some((r) =>
+    dateColumns.value.some((c) => {
+      const plan = r.daily[c.key]?.plan
+      return plan !== '' && plan != null && Number(plan) !== 0
+    })
+  )
+
+  if (hasExistingPlan) {
+    if (!confirm('既存の計画値を上書きしますか？')) return
+  }
+
+  rows.value.forEach((r) => {
+    dateColumns.value.forEach((c) => {
+      if (isPlanCellLocked(c.key)) return
+      const demand = r.daily[c.key]?.demand
+      if (demand !== null && demand !== undefined && Number(demand) !== 0) {
+        r.daily[c.key].plan = demand
+      }
+    })
+  })
+}
+
 const openChangeReasonDialog = () => {
   if (!canEdit.value) return
   changeReasonDraft.value = changeReason.value
@@ -739,6 +770,15 @@ const confirmChangeReason = () => {
   margin: 0 0 6px;
   font-size: 16px;
   font-weight: 700;
+}
+.notice-bar {
+  font-size: 11px;
+  color: #7a5800;
+  background: #fff8e1;
+  border-left: 3px solid #f0b429;
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  border-radius: 2px;
 }
 .toolbar {
   display: flex;
