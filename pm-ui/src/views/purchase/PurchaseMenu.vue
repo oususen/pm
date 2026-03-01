@@ -98,6 +98,20 @@ const tiles = computed(() => [
     required: "edit",
     resource: "purchase.supplier_calendar",
   },
+  {
+    to: "/purchase/order-proposals",
+    label: "発注提案",
+    icon: "📝",
+    required: "view",
+    resource: "purchase.order_proposals",
+  },
+  {
+    to: "/purchase/order-tasks",
+    label: "発注タスク",
+    icon: "📌",
+    required: "view",
+    resource: "purchase.order_proposals",
+  },
 ].map((tile) => ({
   ...tile,
   disabled: !hasMenuPermission(tile.resource, tile.required),

@@ -41,6 +41,24 @@ const purchase = [
     component: () => import("@/views/purchase/PurchaseActualInquiry.vue"),
     meta: { pageTitle: "納入実績照会", resource: "purchase" },
   },
+  {
+    path: "/purchase/order-proposals",
+    name: "PurchaseOrderProposalList",
+    component: () => import("@/views/purchase/PurchaseOrderProposalList.vue"),
+    meta: { pageTitle: "発注提案書一覧", resource: "purchase.order_proposals" },
+  },
+  {
+    path: "/purchase/order-tasks",
+    name: "PurchaseOrderTaskList",
+    component: () => import("@/views/purchase/PurchaseOrderTaskList.vue"),
+    meta: { pageTitle: "発注タスク一覧", resource: "purchase.order_proposals" },
+  },
+  {
+    path: "/purchase/order-proposals/:id",
+    name: "PurchaseOrderProposalDetail",
+    component: () => import("@/views/purchase/PurchaseOrderProposalDetail.vue"),
+    meta: { pageTitle: "発注提案書詳細", resource: "purchase.order_proposals" },
+  },
 ];
 
 export default purchase;

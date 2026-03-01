@@ -18,6 +18,7 @@ class ScheduleConfig(models.Model):
         ('ORDER_EXPANSION', '自動受注展開'),
         ('AUTO_SAFETY_STOCK_INTERNAL', '自動安全在庫（社内）'),
         ('AUTO_SAFETY_STOCK_PURCHASE', '自動安全在庫（購入品）'),
+        ('AUTO_PURCHASE_ORDER_CHECK', '発注タイミング日次チェック'),
     ]
     STATUS_CHOICES = [
         ('SUCCESS', '成功'),

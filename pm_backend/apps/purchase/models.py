@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.db import models
 
-from masters.models import Line, Process, Product
+from masters.models import Line, Process, Product, Supplier
 
 
 class PurchasePlanLockSetting(models.Model):
@@ -20,6 +20,226 @@ class PurchasePlanLockSetting(models.Model):
 
     def __str__(self):
         return f'PurchasePlanLockSetting(lock_days={self.lock_days})'
+
+
+class SupplierOrderSchedule(models.Model):
+    PATTERN_WEEKLY_NTH_DAY = 'WEEKLY_NTH_DAY'
+    PATTERN_MONTHLY_DATE = 'MONTHLY_DATE'
+    PATTERN_EVERY_WEEK = 'EVERY_WEEK'
+
+    PATTERN_TYPE_CHOICES = [
+        (PATTERN_WEEKLY_NTH_DAY, '月の第N週の曜日'),
+        (PATTERN_MONTHLY_DATE, '毎月日付'),
+        (PATTERN_EVERY_WEEK, '毎週曜日'),
+    ]
+
+    supplier = models.ForeignKey(
+        Supplier,
+        on_delete=models.CASCADE,
+        related_name='order_schedules',
+    )
+    pattern_type = models.CharField(max_length=30, choices=PATTERN_TYPE_CHOICES)
+    nth_week = models.SmallIntegerField(null=True, blank=True)
+    day_of_week = models.SmallIntegerField(null=True, blank=True)
+    day_of_month = models.SmallIntegerField(null=True, blank=True)
+    lead_time_days = models.PositiveIntegerField(default=0)
+    is_enabled = models.BooleanField(default=True)
+    note = models.CharField(max_length=200, null=True, blank=True)
+
+    class Meta:
+        db_table = 'supplier_order_schedule'
+        indexes = [
+            models.Index(fields=['supplier', 'is_enabled']),
+            models.Index(fields=['pattern_type']),
+        ]
+
+    def __str__(self):
+        return f'{self.supplier_id}:{self.pattern_type}'
+
+
+class PurchaseOrderProposal(models.Model):
+    STATUS_DRAFT = 'DRAFT'
+    STATUS_SUBMITTED = 'SUBMITTED'
+    STATUS_APPROVED_L2 = 'APPROVED_L2'
+    STATUS_APPROVED_L3 = 'APPROVED_L3'
+    STATUS_APPROVED = 'APPROVED'
+    STATUS_SENT = 'SENT'
+    STATUS_REJECTED = 'REJECTED'
+    STATUS_CANCELED = 'CANCELED'
+
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, '作成中'),
+        (STATUS_SUBMITTED, '業務員サイン済'),
+        (STATUS_APPROVED_L2, '班長承認済'),
+        (STATUS_APPROVED_L3, '係長承認済'),
+        (STATUS_APPROVED, '最終承認済'),
+        (STATUS_SENT, '購入先送信済'),
+        (STATUS_REJECTED, '差戻'),
+        (STATUS_CANCELED, 'キャンセル'),
+    ]
+
+    proposal_no = models.CharField(max_length=30, unique=True)
+    supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name='order_proposals')
+    order_date = models.DateField()
+    desired_delivery_date = models.DateField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='purchase_order_proposals_created',
+    )
+    note = models.TextField(blank=True, default='')
+    generated_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'purchase_order_proposal'
+        indexes = [
+            models.Index(fields=['supplier', 'order_date']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        return self.proposal_no
+
+
+class PurchaseOrderProposalLine(models.Model):
+    proposal = models.ForeignKey(
+        PurchaseOrderProposal,
+        on_delete=models.CASCADE,
+        related_name='lines',
+    )
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='purchase_order_proposal_lines')
+    line = models.ForeignKey(Line, on_delete=models.PROTECT, related_name='purchase_order_proposal_lines')
+    shortage_date = models.DateField(null=True, blank=True)
+    shortage_qty = models.IntegerField(null=True, blank=True)
+    order_qty = models.IntegerField(default=0)
+    snapshot_stock = models.IntegerField(null=True, blank=True)
+    snapshot_min_stock = models.IntegerField(null=True, blank=True)
+    note = models.CharField(max_length=200, blank=True, default='')
+
+    class Meta:
+        db_table = 'purchase_order_proposal_line'
+        indexes = [
+            models.Index(fields=['proposal']),
+            models.Index(fields=['product']),
+        ]
+
+    def __str__(self):
+        return f'{self.proposal_id}:{self.product_id}'
+
+
+class PurchaseOrderProposalApproval(models.Model):
+    ACTION_APPROVED = 'APPROVED'
+    ACTION_REJECTED = 'REJECTED'
+    ACTION_CHOICES = [
+        (ACTION_APPROVED, '承認'),
+        (ACTION_REJECTED, '差戻'),
+    ]
+
+    proposal = models.ForeignKey(
+        PurchaseOrderProposal,
+        on_delete=models.CASCADE,
+        related_name='approvals',
+    )
+    approval_level = models.SmallIntegerField()
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='purchase_order_proposal_approvals',
+    )
+    approved_at = models.DateTimeField(auto_now_add=True)
+    comment = models.TextField(blank=True, default='')
+
+    class Meta:
+        db_table = 'purchase_order_proposal_approval'
+        indexes = [
+            models.Index(fields=['proposal', 'approval_level']),
+        ]
+
+    def __str__(self):
+        return f'{self.proposal_id}:L{self.approval_level}:{self.action}'
+
+
+class PurchaseOrderApprovalConfig(models.Model):
+    approval_level = models.SmallIntegerField(unique=True)
+    level_name = models.CharField(max_length=50)
+    approver_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='purchase_order_approval_levels',
+    )
+    notify_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='purchase_order_approval_notify_levels',
+    )
+
+    class Meta:
+        db_table = 'purchase_order_approval_config'
+        ordering = ['approval_level']
+
+    def __str__(self):
+        return f'L{self.approval_level}:{self.level_name}'
+
+
+class PurchaseOrderTask(models.Model):
+    TASK_CREATE_PROPOSAL = 'CREATE_PROPOSAL'
+    TASK_APPROVE_L2 = 'APPROVE_L2'
+    TASK_APPROVE_L3 = 'APPROVE_L3'
+    TASK_APPROVE_L4 = 'APPROVE_L4'
+    TASK_SEND_TO_SUPPLIER = 'SEND_TO_SUPPLIER'
+    TASK_TYPE_CHOICES = [
+        (TASK_CREATE_PROPOSAL, '発注提案書作成'),
+        (TASK_APPROVE_L2, '班長承認'),
+        (TASK_APPROVE_L3, '係長承認'),
+        (TASK_APPROVE_L4, '事業部長承認'),
+        (TASK_SEND_TO_SUPPLIER, '購入先送信'),
+    ]
+
+    STATUS_PENDING = 'PENDING'
+    STATUS_DONE = 'DONE'
+    STATUS_SKIPPED = 'SKIPPED'
+    STATUS_CHOICES = [
+        (STATUS_PENDING, '未対応'),
+        (STATUS_DONE, '完了'),
+        (STATUS_SKIPPED, 'スキップ'),
+    ]
+
+    proposal = models.ForeignKey(
+        PurchaseOrderProposal,
+        on_delete=models.CASCADE,
+        related_name='tasks',
+    )
+    task_type = models.CharField(max_length=30, choices=TASK_TYPE_CHOICES)
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='purchase_order_tasks',
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    due_date = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    done_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'purchase_order_task'
+        indexes = [
+            models.Index(fields=['assigned_to', 'status']),
+            models.Index(fields=['task_type', 'status']),
+            models.Index(fields=['proposal']),
+        ]
+
+    def __str__(self):
+        return f'{self.task_type}:{self.assigned_to_id}:{self.status}'
 
 
 class PurchasePlanChangeLog(models.Model):

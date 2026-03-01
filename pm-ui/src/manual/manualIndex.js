@@ -7,7 +7,10 @@ export const manualSections = [
   {
     id: "common",
     title: "共通",
-    items: [{ title: "基本操作", path: "共通/基本操作.md" }],
+    items: [
+      { title: "基本操作", path: "共通/基本操作.md" },
+      { title: "タスク受信箱", path: "共通/タスク受信箱.md" },
+    ],
   },
   {
     id: "masters",
@@ -34,6 +37,13 @@ export const manualSections = [
       { title: "出荷指示書", path: "出荷/出荷指示書.md" },
       { title: "枚方集荷依頼書", path: "出荷/枚方集荷依頼書.md" },
       { title: "出荷実績", path: "出荷/出荷実績.md" },
+    ],
+  },
+  {
+    id: "purchase",
+    title: "仕入れ管理",
+    items: [
+      { title: "発注提案システム", path: "仕入れ/発注提案システム.md" },
     ],
   },
   {

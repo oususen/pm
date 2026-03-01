@@ -45,6 +45,8 @@ class Product(models.Model):
         verbose_name='仮想セット品番',
         help_text='連産品を表す仮想的なセット品番（この品番自体は在庫を持たない）'
     )
+    order_lot_min = models.PositiveIntegerField(null=True, blank=True, verbose_name='最小発注数')
+    order_lot_multiple = models.PositiveIntegerField(default=1, verbose_name='発注倍数')
 
     # 出荷指示書用フィールド
     model_name = models.CharField(max_length=50, null=True, blank=True, verbose_name='機種名')
@@ -156,6 +158,13 @@ class Supplier(models.Model):
     id = models.BigAutoField(primary_key=True)
     supplier_code = models.CharField(max_length=20, unique=True, verbose_name='仕入先コード')
     supplier_name = models.CharField(max_length=100, verbose_name='仕入先名')
+    calendar = models.ForeignKey(
+        'Calendar',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name='仕入先専用カレンダー'
+    )
 
     class Meta:
         db_table = 'm_supplier'

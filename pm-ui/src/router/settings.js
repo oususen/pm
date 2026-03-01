@@ -83,6 +83,18 @@ const settings = [
     component: () => import("@/views/settings/StocktakeInit.vue"),
     meta: { pageTitle: "棚卸初期化", resource: "settings" },
   },
+  {
+    path: "/settings/supplier-order-schedule",
+    name: "SupplierOrderScheduleSettings",
+    component: () => import("@/views/settings/SupplierOrderScheduleSettings.vue"),
+    meta: { pageTitle: "発注スケジュール設定", resource: "settings.supplier_order_schedule" },
+  },
+  {
+    path: "/settings/purchase-order-approval",
+    name: "PurchaseOrderApprovalSettings",
+    component: () => import("@/views/settings/PurchaseOrderApprovalSettings.vue"),
+    meta: { pageTitle: "発注承認者設定", resource: "settings.purchase_order_approval" },
+  },
 ];
 
 export default settings;

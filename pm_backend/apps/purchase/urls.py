@@ -1,5 +1,18 @@
 from django.urls import path
 
+from .order_proposal_views import (
+    PurchaseOrderApprovalConfigView,
+    PurchaseOrderProposalApproveView,
+    PurchaseOrderProposalAutoFillView,
+    PurchaseOrderProposalDetailView,
+    PurchaseOrderProposalListCreateView,
+    PurchaseOrderProposalRejectView,
+    PurchaseOrderProposalSendView,
+    PurchaseOrderProposalSubmitView,
+    PurchaseOrderTaskListView,
+    SupplierOrderScheduleDetailView,
+    SupplierOrderScheduleListCreateView,
+)
 from .views import (
     EngineeringChangeCaseRecalculateView,
     EngineeringChangePartDetailView,
@@ -20,4 +33,15 @@ urlpatterns = [
     path('purchase-actual/inquiry/', PurchaseActualInquiryView.as_view(), name='purchase-actual-inquiry'),
     path('purchase-actual/progress/', PurchaseActualProgressView.as_view(), name='purchase-actual-progress'),
     path('purchase-actual/register/', PurchaseActualRegisterView.as_view(), name='purchase-actual-register'),
+    path('supplier-order-schedules/', SupplierOrderScheduleListCreateView.as_view(), name='supplier-order-schedules'),
+    path('supplier-order-schedules/<int:pk>/', SupplierOrderScheduleDetailView.as_view(), name='supplier-order-schedule-detail'),
+    path('purchase-order-proposals/', PurchaseOrderProposalListCreateView.as_view(), name='purchase-order-proposals'),
+    path('purchase-order-proposals/<int:pk>/', PurchaseOrderProposalDetailView.as_view(), name='purchase-order-proposal-detail'),
+    path('purchase-order-proposals/<int:pk>/submit/', PurchaseOrderProposalSubmitView.as_view(), name='purchase-order-proposal-submit'),
+    path('purchase-order-proposals/<int:pk>/approve/', PurchaseOrderProposalApproveView.as_view(), name='purchase-order-proposal-approve'),
+    path('purchase-order-proposals/<int:pk>/reject/', PurchaseOrderProposalRejectView.as_view(), name='purchase-order-proposal-reject'),
+    path('purchase-order-proposals/<int:pk>/send/', PurchaseOrderProposalSendView.as_view(), name='purchase-order-proposal-send'),
+    path('purchase-order-proposals/<int:pk>/auto_fill/', PurchaseOrderProposalAutoFillView.as_view(), name='purchase-order-proposal-auto-fill'),
+    path('purchase-order-tasks/', PurchaseOrderTaskListView.as_view(), name='purchase-order-tasks'),
+    path('purchase-order-approval-config/', PurchaseOrderApprovalConfigView.as_view(), name='purchase-order-approval-config'),
 ]

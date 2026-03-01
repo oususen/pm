@@ -302,6 +302,7 @@ const departmentTemplatePermissions = ref([])
   { value: 'purchase.actual_input', label: '仕入: 仕入れ実績入力' },
   { value: 'purchase.actual_inquiry', label: '仕入: 納入実績照会' },
   { value: 'purchase.supplier_calendar', label: '仕入: 仕入れ先カレンダ' },
+  { value: 'purchase.order_proposals', label: '仕入: 発注提案' },
   { value: 'shipping', label: '出荷' },
     { value: 'inventory', label: '在庫' },
     { value: 'quality', label: '品質' },
@@ -317,6 +318,8 @@ const departmentTemplatePermissions = ref([])
   { value: 'settings.purchase_plan_lock', label: '設定: 仕入計画ロック設定' },
   { value: 'settings.production_plan_lock', label: '設定: 生産計画ロック設定' },
   { value: 'settings.scheduled_tasks', label: '設定: 定時タスク設定' },
+  { value: 'settings.supplier_order_schedule', label: '設定: 発注スケジュール設定' },
+  { value: 'settings.purchase_order_approval', label: '設定: 発注承認者設定' },
   { value: 'settings.stocktake_init', label: '設定: 棚卸初期化' },
   { value: 'manual', label: 'マニュアル' },
 ]

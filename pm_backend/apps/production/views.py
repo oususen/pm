@@ -3681,6 +3681,7 @@ class ScheduleConfigView(APIView):
             ('PICKUP_ONLY', 7, 30, False),
             ('INVENTORY_ONLY', 8, 0, False),
             ('PROGRESS_ONLY', 8, 30, False),
+            ('AUTO_PURCHASE_ORDER_CHECK', 6, 30, False),
         ]
         for task_name, hour, minute, is_enabled in inventory_defaults:
             ScheduleConfig.objects.get_or_create(
@@ -3969,6 +3970,7 @@ class ScheduleRunNowView(APIView):
         from .scheduler.tasks_safety_stock import run_auto_safety_stock
         from .scheduler.tasks_auto_plan import run_auto_plan
         from .scheduler.tasks_order_expansion import run_order_expansion
+        from purchase.order_proposal_views import run_auto_purchase_order_check
         task = (request.data.get('task_name') or 'INVENTORY_RECALC').upper()
         task_labels = {
             'INVENTORY_RECALC': '取り込み＋在庫再計算',
@@ -3977,6 +3979,7 @@ class ScheduleRunNowView(APIView):
             'PROGRESS_ONLY': '進度計算のみ',
             'AUTO_SAFETY_STOCK_INTERNAL': '自動安全在庫（社内）',
             'AUTO_SAFETY_STOCK_PURCHASE': '自動安全在庫（購入品）',
+            'AUTO_PURCHASE_ORDER_CHECK': '発注タイミング日次チェック',
         }
         config_id = request.data.get('config_id') or request.data.get('id')
         line_id = request.data.get('line')
@@ -4025,6 +4028,8 @@ class ScheduleRunNowView(APIView):
                     try:
                         if task in {'AUTO_SAFETY_STOCK_INTERNAL', 'AUTO_SAFETY_STOCK_PURCHASE'}:
                             run_auto_safety_stock(task_name=task)
+                        elif task == 'AUTO_PURCHASE_ORDER_CHECK':
+                            run_auto_purchase_order_check()
                         else:
                             run_inventory_recalculation(task_name=task)
                     except Exception:

@@ -35,6 +35,9 @@ import { createProductionPlanChangeLogsAPI } from './resources/productionPlanCha
 import { createEngineeringChangesAPI } from './resources/engineeringChanges'
 import { createPurchaseActualsAPI } from './resources/purchaseActuals'
 import { createFujishojiDocumentAPI } from './resources/fujishojiDocument'
+import { createSupplierOrderSchedulesAPI } from './resources/supplierOrderSchedules'
+import { createPurchaseOrderProposalsAPI } from './resources/purchaseOrderProposals'
+import { createPurchaseOrderApprovalConfigAPI } from './resources/purchaseOrderApprovalConfig'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
@@ -126,4 +129,7 @@ export default {
   engineeringChanges: createEngineeringChangesAPI(client),
   purchaseActuals: createPurchaseActualsAPI(client),
   fujishojiDocument: createFujishojiDocumentAPI(client),
+  supplierOrderSchedules: createSupplierOrderSchedulesAPI(client),
+  purchaseOrderProposals: createPurchaseOrderProposalsAPI(client),
+  purchaseOrderApprovalConfig: createPurchaseOrderApprovalConfigAPI(client),
 }

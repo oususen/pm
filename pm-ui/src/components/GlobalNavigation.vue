@@ -94,6 +94,16 @@
             </RouterLink>
           </div>
         </div>
+        <RouterLink
+          v-if="showTaskButton"
+          to="/tasks"
+          class="nav-action-btn task-btn"
+          :class="{ active: isTaskPage }"
+          title="タスク"
+        >
+          <span>📌</span>
+          <span class="btn-label">タスク</span>
+        </RouterLink>
         <RouterLink to="/settings" class="nav-action-btn" :title="t('nav.settings')" v-if="!isMobile">
           <span>⚙️</span>
           <span class="btn-label">{{ t('nav.settings') }}</span>
@@ -245,6 +255,8 @@ const userDivisionId = computed(() => authState.user?.profile?.division_id ?? au
 const userGroupId = computed(() => authState.user?.profile?.group_id ?? authState.user?.profile?.group ?? null)
 const userTeamId = computed(() => authState.user?.profile?.team_id ?? authState.user?.profile?.team ?? null)
 const userPosition = computed(() => authState.user?.profile?.position || '')
+const showTaskButton = computed(() => Boolean(authState.user))
+const isTaskPage = computed(() => route.path.startsWith('/tasks'))
 const canAccessNotifications = computed(() => {
   return Boolean(authState.user)
 })
@@ -888,6 +900,10 @@ const handleLogout = async () => {
 
 .nav-action-btn:hover {
   background: rgba(255, 255, 255, 0.25);
+}
+
+.nav-action-btn.active {
+  background: rgba(255, 255, 255, 0.35);
 }
 
 .btn-label {

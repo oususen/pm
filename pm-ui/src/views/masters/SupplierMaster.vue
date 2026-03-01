@@ -14,6 +14,7 @@
           <tr>
             <th>仕入先コード</th>
             <th>仕入先名</th>
+            <th>専用カレンダー</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -21,6 +22,7 @@
           <tr v-for="supplier in suppliers" :key="supplier.id">
             <td>{{ supplier.supplier_code }}</td>
             <td>{{ supplier.supplier_name }}</td>
+            <td>{{ getCalendarLabel(supplier.calendar) }}</td>
             <td>
               <button @click="editSupplier(supplier)" class="btn-sm">編集</button>
               <button @click="deleteSupplier(supplier.id)" class="btn-sm btn-danger">削除</button>
@@ -47,6 +49,15 @@
             <label>仕入先名 *</label>
             <input v-model="formData.supplier_name" required />
           </div>
+          <div class="form-group">
+            <label>専用カレンダー</label>
+            <select v-model="formData.calendar">
+              <option :value="null">未設定</option>
+              <option v-for="calendar in calendars" :key="calendar.id" :value="calendar.id">
+                {{ calendar.calendar_code }} - {{ calendar.calendar_name }}
+              </option>
+            </select>
+          </div>
           <div class="form-actions">
             <button type="submit" class="btn-primary">保存</button>
             <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
@@ -62,11 +73,13 @@ import { ref, onMounted } from 'vue'
 import api from '@/api/client'
 
 const suppliers = ref([])
+const calendars = ref([])
 const showDialog = ref(false)
 const isEdit = ref(false)
 const formData = ref({
   supplier_code: '',
-  supplier_name: ''
+  supplier_name: '',
+  calendar: null,
 })
 
 const fetchSuppliers = async () => {
@@ -79,11 +92,28 @@ const fetchSuppliers = async () => {
   }
 }
 
+const fetchCalendars = async () => {
+  try {
+    const response = await api.calendars.getCalendars()
+    calendars.value = response.data.results || response.data || []
+  } catch (error) {
+    console.error('カレンダー取得エラー:', error)
+  }
+}
+
+const getCalendarLabel = (calendarId) => {
+  if (!calendarId) return '-'
+  const found = calendars.value.find((item) => item.id === calendarId)
+  if (!found) return '-'
+  return `${found.calendar_code} - ${found.calendar_name}`
+}
+
 const showNewDialog = () => {
   isEdit.value = false
   formData.value = {
     supplier_code: '',
-    supplier_name: ''
+    supplier_name: '',
+    calendar: null,
   }
   showDialog.value = true
 }
@@ -100,11 +130,15 @@ const closeDialog = () => {
 
 const saveSupplier = async () => {
   try {
+    const payload = {
+      ...formData.value,
+      calendar: formData.value.calendar || null,
+    }
     if (isEdit.value) {
-      await api.suppliers.updateSupplier(formData.value.id, formData.value)
+      await api.suppliers.updateSupplier(formData.value.id, payload)
       alert('更新しました')
     } else {
-      await api.suppliers.createSupplier(formData.value)
+      await api.suppliers.createSupplier(payload)
       alert('作成しました')
     }
     await fetchSuppliers()
@@ -130,6 +164,7 @@ const deleteSupplier = async (id) => {
 
 onMounted(() => {
   fetchSuppliers()
+  fetchCalendars()
 })
 </script>
 
@@ -175,7 +210,8 @@ onMounted(() => {
   color: #555;
 }
 
-.form-group input[type="text"] {
+.form-group input[type="text"],
+.form-group select {
   width: 100%;
   padding: 0.5rem;
   border: 1px solid #ddd;

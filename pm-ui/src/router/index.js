@@ -11,6 +11,7 @@ import manual from "./manual";
 import settings from "./settings";
 import notifications from "./notifications";
 import engineeringChange from "./engineeringChange";
+import tasks from "./tasks";
 import Login from "../views/auth/Login.vue";
 import { ensureAuth } from "../auth";
 
@@ -45,6 +46,7 @@ const router = createRouter({
     ...settings,
     ...notifications,
     ...engineeringChange,
+    ...tasks,
     ...manual,
   ],
 });

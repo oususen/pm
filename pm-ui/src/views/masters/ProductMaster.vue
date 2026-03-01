@@ -101,6 +101,8 @@
               <th>カテゴリ</th>
               <th>単位</th>
               <th>標準LT(日)</th>
+              <th>最小発注数</th>
+              <th>発注倍数</th>
               <th>機種名</th>
               <th>グループ</th>
               <th>容器</th>
@@ -120,6 +122,8 @@
               <td>{{ getCategoryLabel(product.category) }}</td>
               <td>{{ product.unit }}</td>
               <td>{{ product.standard_lt_days }}</td>
+              <td>{{ product.order_lot_min ?? '-' }}</td>
+              <td>{{ product.order_lot_multiple ?? 1 }}</td>
               <td>{{ product.model_name || '-' }}</td>
               <td>{{ getProductGroupLabel(product.product_group) }}</td>
               <td>{{ getContainerLabel(product.used_container) }}</td>
@@ -199,6 +203,14 @@
           <div class="form-group">
             <label>標準LT(日)</label>
             <input v-model.number="formData.standard_lt_days" type="number" min="0" />
+          </div>
+          <div class="form-group">
+            <label>最小発注数</label>
+            <input v-model.number="formData.order_lot_min" type="number" min="0" />
+          </div>
+          <div class="form-group">
+            <label>発注倍数</label>
+            <input v-model.number="formData.order_lot_multiple" type="number" min="1" />
           </div>
           <div class="form-group">
             <label>機種名</label>
@@ -414,6 +426,8 @@ const formData = ref({
   category: '',
   unit: '個',
   standard_lt_days: 0,
+  order_lot_min: null,
+  order_lot_multiple: 1,
   product_group: null,
   used_container: null,
   capacity: null,
@@ -611,6 +625,8 @@ const showNewDialog = () => {
     category: '',
     unit: '個',
     standard_lt_days: 0,
+    order_lot_min: null,
+    order_lot_multiple: 1,
     product_group: null,
     used_container: null,
     capacity: null,
@@ -632,6 +648,8 @@ const editProduct = (product) => {
   formData.value = {
     ...product,
     model_name: product.model_name ?? '',
+    order_lot_min: product.order_lot_min ?? null,
+    order_lot_multiple: product.order_lot_multiple ?? 1,
     line: product.line ?? null,
     process: product.process ?? null,
     management_unit: product.management_unit ?? null,
@@ -682,6 +700,8 @@ const saveProduct = async () => {
       product_group: formData.value.product_group || null,
       used_container: formData.value.used_container || null,
       standard_lt_days: normalizeNumber(formData.value.standard_lt_days),
+      order_lot_min: normalizeNumber(formData.value.order_lot_min),
+      order_lot_multiple: Math.max(1, Number(formData.value.order_lot_multiple || 1)),
       self_lt_days: normalizeNumber(formData.value.self_lt_days),
       capacity: normalizeNumber(formData.value.capacity),
     }

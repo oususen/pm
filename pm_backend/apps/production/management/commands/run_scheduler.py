@@ -66,6 +66,7 @@ class Command(BaseCommand):
         from production.scheduler.tasks_auto_plan import run_auto_plan
         from production.scheduler.tasks_order_expansion import run_order_expansion
         from production.scheduler.tasks_safety_stock import run_auto_safety_stock
+        from purchase.order_proposal_views import run_auto_purchase_order_check
 
         # 既存ジョブ（設定チェックを除く）をクリア
         for job in scheduler.get_jobs():
@@ -195,6 +196,35 @@ class Command(BaseCommand):
                 f'ジョブ登録: {job_id} - 毎月{cfg.scheduled_dom if cfg.scheduled_dom is not None else 1}日 '
                 f'{cfg.scheduled_hour:02d}:{cfg.scheduled_minute:02d}'
             )
+
+        purchase_check_cfg, _ = ScheduleConfig.objects.get_or_create(
+            task_name='AUTO_PURCHASE_ORDER_CHECK',
+            line=None,
+            defaults={
+                'scheduled_hour': 6,
+                'scheduled_minute': 30,
+                'is_enabled': False,
+            },
+        )
+        if purchase_check_cfg.is_enabled:
+            trigger = CronTrigger(
+                hour=purchase_check_cfg.scheduled_hour,
+                minute=purchase_check_cfg.scheduled_minute,
+                timezone='Asia/Tokyo',
+            )
+            scheduler.add_job(
+                run_auto_purchase_order_check,
+                trigger,
+                id='auto_purchase_order_check',
+                replace_existing=True,
+                misfire_grace_time=3600,
+            )
+            logger.info(
+                f'ジョブ登録: auto_purchase_order_check - '
+                f'{purchase_check_cfg.scheduled_hour:02d}:{purchase_check_cfg.scheduled_minute:02d}'
+            )
+        else:
+            logger.info('ジョブ無効: auto_purchase_order_check')
 
     def _check_config_changes(self, scheduler):
         """DB設定の変更を検知してジョブを再登録"""
