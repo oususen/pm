@@ -174,6 +174,14 @@ const tiles = computed(() => {
       resource: "production.stock_allocations",
     },
     {
+      to: "/production/safety-stock-list",
+      label: t("productionMenu.tiles.safetyStockList"),
+      icon: "🛡️",
+      iconLabel: "安全",
+      required: "view",
+      resource: "production.inventory",
+    },
+    {
       to: "/production/orders",
       label: t("productionMenu.tiles.orders"),
       icon: "🛠️",

@@ -190,7 +190,7 @@ def apply_scrap_to_stock(multipliers: dict):
                 location='DEFAULT',
                 current_stock=-qty,
                 reserved_qty=Decimal('0'),
-                min_stock_qty=Decimal('0'),
+                min_stock_qty=0,
                 is_bottleneck=False,
             )
 
@@ -212,7 +212,7 @@ def apply_scrap_return_to_stock(multipliers: dict):
                 location='DEFAULT',
                 current_stock=qty,
                 reserved_qty=Decimal('0'),
-                min_stock_qty=Decimal('0'),
+                min_stock_qty=0,
                 is_bottleneck=False,
             )
 

@@ -2560,7 +2560,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         defaults={
                             'current_stock': qty,
                             'reserved_qty': Decimal('0'),
-                            'min_stock_qty': Decimal('0'),
+                            'min_stock_qty': 0,
                             'is_bottleneck': False,
                         }
                     )
@@ -3705,6 +3705,25 @@ class ScheduleConfigView(APIView):
                 'range_days_after': 45,
             },
         )
+        safety_defaults = [
+            ('AUTO_SAFETY_STOCK_INTERNAL', 1, 3, 0, 60, 1, False),
+            ('AUTO_SAFETY_STOCK_PURCHASE', 1, 3, 30, 60, 1, False),
+        ]
+        for task_name, dom, hour, minute, average_days_window, safety_days, is_enabled in safety_defaults:
+            ScheduleConfig.objects.get_or_create(
+                task_name=task_name,
+                line=None,
+                defaults={
+                    'scheduled_dom': dom,
+                    'scheduled_hour': hour,
+                    'scheduled_minute': minute,
+                    'is_enabled': is_enabled,
+                    'range_base_day': 'TODAY',
+                    'range_days_after': 45,
+                    'average_days_window': average_days_window,
+                    'safety_days': safety_days,
+                },
+            )
         base_plan = ScheduleConfig.objects.filter(task_name='AUTO_PLAN', line__isnull=False).first()
         if not base_plan:
             base_plan = ScheduleConfig.objects.filter(task_name='AUTO_PLAN', line__isnull=True).first()
@@ -3754,6 +3773,8 @@ class ScheduleConfigView(APIView):
         execution_order = request.data.get('execution_order')
         range_base_day = (request.data.get('range_base_day') or 'TODAY').upper()
         range_days_after = request.data.get('range_days_after', 45)
+        average_days_window = request.data.get('average_days_window', 60)
+        safety_days = request.data.get('safety_days', 1)
         is_enabled = request.data.get('is_enabled', True)
         include_current_month = to_bool(request.data.get('include_current_month', False), False)
         include_next_month = to_bool(request.data.get('include_next_month', True), True)
@@ -3815,8 +3836,33 @@ class ScheduleConfigView(APIView):
                 {'detail': '何日後は0〜365で指定してください'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        try:
+            average_days_window = int(average_days_window)
+        except (TypeError, ValueError):
+            return Response(
+                {'detail': '実行日からの平均日数は整数で指定してください'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not (1 <= average_days_window <= 365):
+            return Response(
+                {'detail': '実行日からの平均日数は1〜365で指定してください'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            safety_days = int(safety_days)
+        except (TypeError, ValueError):
+            return Response(
+                {'detail': '安全在庫日数は整数で指定してください'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not (1 <= safety_days <= 365):
+            return Response(
+                {'detail': '安全在庫日数は1〜365で指定してください'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         line_obj = None
+        safety_task_names = {'AUTO_SAFETY_STOCK_INTERNAL', 'AUTO_SAFETY_STOCK_PURCHASE'}
         if task_name == 'AUTO_PLAN':
             if not line_id:
                 return Response({'detail': 'ラインを指定してください'}, status=status.HTTP_400_BAD_REQUEST)
@@ -3825,6 +3871,8 @@ class ScheduleConfigView(APIView):
                 return Response({'detail': '指定されたラインが見つかりません（社内/外作/購買ラインのみ設定可能）'}, status=status.HTTP_400_BAD_REQUEST)
             if not (include_current_month or include_next_month or include_second_month or include_third_month):
                 return Response({'detail': '実行期間を1つ以上選択してください'}, status=status.HTTP_400_BAD_REQUEST)
+        if task_name in safety_task_names and scheduled_dom is None:
+            return Response({'detail': '安全在庫タスクは実行日（1-31）を指定してください'}, status=status.HTTP_400_BAD_REQUEST)
 
         if config_id:
             config = ScheduleConfig.objects.filter(id=config_id).first()
@@ -3840,6 +3888,8 @@ class ScheduleConfigView(APIView):
                     'scheduled_dom': scheduled_dom,
                     'range_base_day': range_base_day,
                     'range_days_after': range_days_after,
+                    'average_days_window': average_days_window,
+                    'safety_days': safety_days,
                     'is_enabled': is_enabled,
                     'include_current_month': include_current_month,
                     'include_next_month': include_next_month,
@@ -3860,6 +3910,8 @@ class ScheduleConfigView(APIView):
         config.scheduled_dom = scheduled_dom
         config.range_base_day = range_base_day
         config.range_days_after = range_days_after
+        config.average_days_window = average_days_window
+        config.safety_days = safety_days
         config.is_enabled = is_enabled
         config.include_current_month = include_current_month
         config.include_next_month = include_next_month
@@ -3874,7 +3926,7 @@ class ScheduleConfigView(APIView):
         config.updated_by = user
         update_fields = [
             'scheduled_hour', 'scheduled_minute', 'scheduled_dom',
-            'range_base_day', 'range_days_after',
+            'range_base_day', 'range_days_after', 'average_days_window', 'safety_days',
             'is_enabled', 'include_current_month', 'include_next_month', 'include_second_month', 'include_third_month',
             'line', 'updated_at', 'updated_by',
         ]
@@ -3909,11 +3961,12 @@ class ScheduleConfigView(APIView):
 
 
 class ScheduleRunNowView(APIView):
-    """手動で取り込み＋在庫再計算を実行（非同期）"""
+    """定時タスクを手動実行（非同期）"""
 
     def post(self, request):
         import threading
         from .scheduler.tasks import run_inventory_recalculation
+        from .scheduler.tasks_safety_stock import run_auto_safety_stock
         from .scheduler.tasks_auto_plan import run_auto_plan
         from .scheduler.tasks_order_expansion import run_order_expansion
         task = (request.data.get('task_name') or 'INVENTORY_RECALC').upper()
@@ -3922,6 +3975,8 @@ class ScheduleRunNowView(APIView):
             'PICKUP_ONLY': '取り込みのみ',
             'INVENTORY_ONLY': '在庫計算のみ',
             'PROGRESS_ONLY': '進度計算のみ',
+            'AUTO_SAFETY_STOCK_INTERNAL': '自動安全在庫（社内）',
+            'AUTO_SAFETY_STOCK_PURCHASE': '自動安全在庫（購入品）',
         }
         config_id = request.data.get('config_id') or request.data.get('id')
         line_id = request.data.get('line')
@@ -3968,7 +4023,10 @@ class ScheduleRunNowView(APIView):
                     import django
                     django.db.connections.close_all()
                     try:
-                        run_inventory_recalculation(task_name=task)
+                        if task in {'AUTO_SAFETY_STOCK_INTERNAL', 'AUTO_SAFETY_STOCK_PURCHASE'}:
+                            run_auto_safety_stock(task_name=task)
+                        else:
+                            run_inventory_recalculation(task_name=task)
                     except Exception:
                         logger.exception('バックグラウンドタスク実行に失敗')
                         ScheduleConfig.objects.filter(

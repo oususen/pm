@@ -551,7 +551,7 @@ CREATE TABLE t_stock_allocation (
   location VARCHAR(50) NOT NULL,
   current_stock DECIMAL(14,3) NOT NULL,
   reserved_qty DECIMAL(14,3) NOT NULL,
-  min_stock_qty DECIMAL(14,3) NOT NULL,
+  min_stock_qty INT UNSIGNED NOT NULL,
   is_bottleneck TINYINT(1) NOT NULL,
   created_at DATETIME(6) NOT NULL,
   updated_at DATETIME(6) NOT NULL,

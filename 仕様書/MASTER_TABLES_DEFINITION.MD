@@ -493,7 +493,7 @@ WHERE rs.time_unit='DAY';
 | location | VARCHAR(50) | 保管場所 |
 | current_stock | DECIMAL(14,3) | 現在庫数 |
 | reserved_qty | DECIMAL(14,3)| 引当済数量 |
-| min_stock_qty | DECIMAL(14,3) | 最小在庫数 |
+| min_stock_qty | INT UNSIGNED | 最小在庫数 |
 | is_bottleneck | TINYINT(1)| ボトルネック品 |
 | created_at/updated_at | DATETIME | |
 

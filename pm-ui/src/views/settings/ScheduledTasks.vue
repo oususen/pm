@@ -277,6 +277,127 @@
     </div>
     </template>
 
+    <template v-if="showSafetyStockSection">
+    <div class="card" v-for="cfg in safetyStockConfigs" :key="configKey(cfg)">
+      <div class="field">
+        <label>{{ safetyStockTaskLabel(cfg.task_name) }} - 実行日・時刻</label>
+        <div class="input-row">
+          <input
+            type="number"
+            min="1"
+            max="31"
+            v-model.number="cfg.scheduled_dom"
+            :disabled="!canEdit"
+            class="time-input"
+          />
+          <span class="suffix">日</span>
+          <input
+            type="number"
+            min="0"
+            max="23"
+            v-model.number="cfg.scheduled_hour"
+            :disabled="!canEdit"
+            class="time-input"
+          />
+          <span class="suffix">時</span>
+          <input
+            type="number"
+            min="0"
+            max="59"
+            v-model.number="cfg.scheduled_minute"
+            :disabled="!canEdit"
+            class="time-input"
+          />
+          <span class="suffix">分</span>
+        </div>
+      </div>
+
+      <div class="field" style="margin-top: 12px">
+        <label>実行日から何日間の平均日あたりを計算</label>
+        <div class="input-row">
+          <input
+            type="number"
+            min="1"
+            max="365"
+            v-model.number="cfg.average_days_window"
+            :disabled="!canEdit"
+            class="time-input"
+          />
+          <span class="suffix">日</span>
+        </div>
+      </div>
+
+      <div class="field" style="margin-top: 12px">
+        <label>上記の日当たりの何日分を安全在庫とする</label>
+        <div class="input-row">
+          <input
+            type="number"
+            min="1"
+            max="365"
+            v-model.number="cfg.safety_days"
+            :disabled="!canEdit"
+            class="time-input"
+          />
+          <span class="suffix">日分</span>
+        </div>
+        <p class="helper">算出式: （実行日からの平均日あたり）×（安全在庫日数）で最小在庫数を更新します。</p>
+      </div>
+
+      <div class="field" style="margin-top: 12px">
+        <label class="checkbox-label">
+          <input type="checkbox" v-model="cfg.is_enabled" :disabled="!canEdit" />
+          有効
+        </label>
+      </div>
+
+      <div class="actions">
+        <button
+          class="btn primary"
+          @click="saveConfig(cfg)"
+          :disabled="saving.has(configKey(cfg)) || !canEdit"
+        >
+          {{ saving.has(configKey(cfg)) ? '保存中...' : '保存' }}
+        </button>
+        <button
+          class="btn"
+          @click="runNow(cfg)"
+          :disabled="running.has(configKey(cfg)) || !canEdit"
+          style="margin-left: 8px"
+        >
+          {{ running.has(configKey(cfg)) ? '実行中...' : '今すぐ実行' }}
+        </button>
+      </div>
+
+      <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
+
+      <div v-if="cfg.last_run_at" class="last-run">
+        <h3 class="section-title">最終実行情報</h3>
+        <table class="info-table">
+          <tbody>
+            <tr>
+              <th>実行日時</th>
+              <td>{{ formatDateTime(cfg.last_run_at) }}</td>
+            </tr>
+            <tr>
+              <th>結果</th>
+              <td>
+                <span :class="statusClass(cfg)">{{ cfg.last_run_status_display || '-' }}</span>
+              </td>
+            </tr>
+            <tr>
+              <th>実行時間</th>
+              <td>{{ cfg.last_run_duration_seconds != null ? cfg.last_run_duration_seconds + '秒' : '-' }}</td>
+            </tr>
+            <tr>
+              <th>詳細</th>
+              <td class="message-cell">{{ cfg.last_run_message || '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    </template>
+
     <div class="card" v-if="orderExpansionConfig && showOrderExpansionSection">
       <div class="field">
         <label>自動受注展開 - 実行時刻</label>
@@ -396,14 +517,24 @@ const inventoryTaskConfigs = computed(() =>
     .filter((cfg) => inventoryTaskOrder.includes(cfg.task_name))
     .sort((a, b) => inventoryTaskOrder.indexOf(a.task_name) - inventoryTaskOrder.indexOf(b.task_name))
 )
+const safetyStockTaskOrder = ['AUTO_SAFETY_STOCK_INTERNAL', 'AUTO_SAFETY_STOCK_PURCHASE']
+const safetyStockConfigs = computed(() =>
+  configs.value
+    .filter((cfg) => safetyStockTaskOrder.includes(cfg.task_name))
+    .sort((a, b) => safetyStockTaskOrder.indexOf(a.task_name) - safetyStockTaskOrder.indexOf(b.task_name))
+)
 const orderExpansionConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'ORDER_EXPANSION'))
 const showAutoPlanSection = computed(() => {
   const mode = String(route.query?.mode || '').toLowerCase()
-  return mode !== 'inventory' && mode !== 'order-expansion'
+  return mode !== 'inventory' && mode !== 'order-expansion' && mode !== 'safety-stock'
 })
 const showInventorySection = computed(() => {
   const mode = String(route.query?.mode || '').toLowerCase()
   return mode === '' || mode === 'inventory'
+})
+const showSafetyStockSection = computed(() => {
+  const mode = String(route.query?.mode || '').toLowerCase()
+  return mode === '' || mode === 'safety-stock'
 })
 const showOrderExpansionSection = computed(() => {
   const mode = String(route.query?.mode || '').toLowerCase()
@@ -433,6 +564,11 @@ const inventoryTaskHelp = (taskName) => {
   if (taskName === 'PROGRESS_ONLY') return '毎日指定した時刻に進度のみを再計算します。'
   return '毎日指定した時刻に需要取り込み（pickup）→ 在庫・計画在庫・進度の自動再計算を実行します。'
 }
+const isSafetyStockTask = (taskName) => safetyStockTaskOrder.includes(taskName)
+const safetyStockTaskLabel = (taskName) => {
+  if (taskName === 'AUTO_SAFETY_STOCK_PURCHASE') return '自動安全在庫（購入品）'
+  return '自動安全在庫（社内）'
+}
 
 const showRangeBaseDay = (taskName) => taskName === 'INVENTORY_RECALC' || taskName === 'PICKUP_ONLY'
 
@@ -444,6 +580,8 @@ const loadConfig = async () => {
     const data = Array.isArray(res.data) ? res.data : [res.data]
     configs.value = data.map((cfg) => ({
       ...cfg,
+      average_days_window: Number.isFinite(Number(cfg.average_days_window)) ? Number(cfg.average_days_window) : 60,
+      safety_days: Number.isFinite(Number(cfg.safety_days)) ? Number(cfg.safety_days) : 1,
       notify_users: cfg.notify_users || [],
       notify_user_codes: cfg.notify_user_codes || [],
       notify_user_names: cfg.notify_user_names || {},
@@ -483,6 +621,8 @@ const saveConfig = async (cfg) => {
       range_end_date: null,
       range_base_day: showRangeBaseDay(cfg.task_name) ? (cfg.range_base_day || 'TODAY') : 'TODAY',
       range_days_after: Number.isFinite(Number(cfg.range_days_after)) ? Number(cfg.range_days_after) : 45,
+      average_days_window: Number.isFinite(Number(cfg.average_days_window)) ? Number(cfg.average_days_window) : 60,
+      safety_days: Number.isFinite(Number(cfg.safety_days)) ? Number(cfg.safety_days) : 1,
       is_enabled: cfg.is_enabled,
       include_current_month: cfg.include_current_month,
       include_next_month: cfg.include_next_month,
@@ -516,12 +656,16 @@ const runNow = async (cfg) => {
       ? `生産計画自動生成（${cfg.line_name || cfg.line_code || 'ライン未設定'}）`
       : cfg.task_name === 'ORDER_EXPANSION'
         ? '自動受注展開'
+        : isSafetyStockTask(cfg.task_name)
+          ? safetyStockTaskLabel(cfg.task_name)
         : inventoryTaskLabel(cfg.task_name)
   const msg =
     cfg.task_name === 'AUTO_PLAN'
       ? `${targetName}を今すぐ実行しますか？`
       : cfg.task_name === 'ORDER_EXPANSION'
         ? '自動受注展開を今すぐ実行しますか？'
+        : isSafetyStockTask(cfg.task_name)
+          ? `${safetyStockTaskLabel(cfg.task_name)}を今すぐ実行しますか？\nバックグラウンドで実行されます。`
         : `${inventoryTaskLabel(cfg.task_name)}を今すぐ実行しますか？\nバックグラウンドで実行されます。`
   if (!confirm(msg)) return
 
@@ -624,7 +768,8 @@ const removeCode = (cfg, code) => {
 }
 
 const startPollingIfRunning = () => {
-  const runningTask = inventoryTaskConfigs.value.find((cfg) => cfg.last_run_status === 'RUNNING')
+  const pollTargets = [...inventoryTaskConfigs.value, ...safetyStockConfigs.value]
+  const runningTask = pollTargets.find((cfg) => cfg.last_run_status === 'RUNNING')
   if (!runningTask) return
   if (runningTask.last_run_at) {
     const elapsed = Date.now() - new Date(runningTask.last_run_at).getTime()
@@ -642,7 +787,7 @@ const startPollingIfRunning = () => {
       return
     }
     await loadConfig()
-    const updated = inventoryTaskConfigs.value.find((cfg) => configKey(cfg) === key)
+    const updated = [...inventoryTaskConfigs.value, ...safetyStockConfigs.value].find((cfg) => configKey(cfg) === key)
     if (updated && updated.last_run_status !== 'RUNNING') {
       stopPolling()
       running.delete(key)

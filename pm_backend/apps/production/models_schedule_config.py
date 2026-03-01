@@ -16,6 +16,8 @@ class ScheduleConfig(models.Model):
         ('PROGRESS_ONLY', '進度計算のみ'),
         ('AUTO_PLAN', '生産計画自動生成'),
         ('ORDER_EXPANSION', '自動受注展開'),
+        ('AUTO_SAFETY_STOCK_INTERNAL', '自動安全在庫（社内）'),
+        ('AUTO_SAFETY_STOCK_PURCHASE', '自動安全在庫（購入品）'),
     ]
     STATUS_CHOICES = [
         ('SUCCESS', '成功'),
@@ -68,6 +70,14 @@ class ScheduleConfig(models.Model):
     range_days_after = models.PositiveSmallIntegerField(
         default=45,
         verbose_name='計算期間終了日数（基準日から何日後）'
+    )
+    average_days_window = models.PositiveSmallIntegerField(
+        default=60,
+        verbose_name='平均算出日数'
+    )
+    safety_days = models.PositiveSmallIntegerField(
+        default=1,
+        verbose_name='安全在庫日数'
     )
     last_run_at = models.DateTimeField(
         null=True, blank=True,

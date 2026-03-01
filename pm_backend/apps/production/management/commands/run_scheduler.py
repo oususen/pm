@@ -65,6 +65,7 @@ class Command(BaseCommand):
         from production.scheduler.tasks import run_inventory_recalculation
         from production.scheduler.tasks_auto_plan import run_auto_plan
         from production.scheduler.tasks_order_expansion import run_order_expansion
+        from production.scheduler.tasks_safety_stock import run_auto_safety_stock
 
         # 既存ジョブ（設定チェックを除く）をクリア
         for job in scheduler.get_jobs():
@@ -154,6 +155,46 @@ class Command(BaseCommand):
             logger.info(f'ジョブ登録: order_expansion - {order_cfg.scheduled_hour:02d}:{order_cfg.scheduled_minute:02d}')
         else:
             logger.info('ジョブ無効: order_expansion')
+
+        safety_jobs = [
+            (
+                'AUTO_SAFETY_STOCK_INTERNAL',
+                'auto_safety_stock_internal',
+                {'scheduled_dom': 1, 'scheduled_hour': 3, 'scheduled_minute': 0, 'is_enabled': False, 'average_days_window': 60, 'safety_days': 1},
+            ),
+            (
+                'AUTO_SAFETY_STOCK_PURCHASE',
+                'auto_safety_stock_purchase',
+                {'scheduled_dom': 1, 'scheduled_hour': 3, 'scheduled_minute': 30, 'is_enabled': False, 'average_days_window': 60, 'safety_days': 1},
+            ),
+        ]
+        for task_name, job_id, defaults in safety_jobs:
+            cfg, _ = ScheduleConfig.objects.get_or_create(
+                task_name=task_name,
+                line=None,
+                defaults=defaults,
+            )
+            if not cfg.is_enabled:
+                logger.info(f'ジョブ無効: {job_id}')
+                continue
+            trigger = CronTrigger(
+                day=cfg.scheduled_dom if cfg.scheduled_dom is not None else 1,
+                hour=cfg.scheduled_hour,
+                minute=cfg.scheduled_minute,
+                timezone='Asia/Tokyo',
+            )
+            scheduler.add_job(
+                run_auto_safety_stock,
+                trigger,
+                id=job_id,
+                replace_existing=True,
+                misfire_grace_time=3600,
+                kwargs={'task_name': task_name},
+            )
+            logger.info(
+                f'ジョブ登録: {job_id} - 毎月{cfg.scheduled_dom if cfg.scheduled_dom is not None else 1}日 '
+                f'{cfg.scheduled_hour:02d}:{cfg.scheduled_minute:02d}'
+            )
 
     def _check_config_changes(self, scheduler):
         """DB設定の変更を検知してジョブを再登録"""

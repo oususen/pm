@@ -14,6 +14,10 @@
         <div class="tile-title">自動受注展開</div>
         <div class="tile-desc">OPEN受注をLineDemandへ展開する定時実行を設定します。</div>
       </RouterLink>
+      <RouterLink :to="{ path: '/settings/scheduled-tasks', query: { mode: 'safety-stock' } }" class="tile">
+        <div class="tile-title">自動安全在庫</div>
+        <div class="tile-desc">社内品・購入品ごとの自動安全在庫タスクを設定します。</div>
+      </RouterLink>
     </div>
   </div>
 </template>

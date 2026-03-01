@@ -328,7 +328,6 @@ class StockAllocationSerializer(serializers.ModelSerializer):
         max_digits=14,
         decimal_places=3,
         read_only=True,
-        source='available_qty'
     )
 
     class Meta:
@@ -467,6 +466,7 @@ class ScheduleConfigSerializer(serializers.ModelSerializer):
             'is_enabled',
             'scheduled_hour', 'scheduled_minute',
             'scheduled_dom',
+            'average_days_window', 'safety_days',
             'execution_order',
             'auto_plan_sequence_locked',
             'range_base_day', 'range_days_after',

@@ -63,7 +63,7 @@
 
         <div class="form-group">
           <label>最小在庫 *</label>
-          <input v-model.number="form.min_stock_qty" type="number" min="0" step="0.001" required />
+          <input v-model.number="form.min_stock_qty" type="number" min="0" step="1" required />
         </div>
 
         <div class="form-group">
@@ -86,11 +86,9 @@
 </template>
 
 <script>
-import axios from 'axios'
+import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
-
-const API_BASE = 'http://localhost:8000/api'
 
 export default {
   name: 'StockAllocationForm',
@@ -135,10 +133,10 @@ export default {
   methods: {
     async searchProducts() {
       try {
-        const params = {}
+        const params = { page_size: 1000 }
         if (this.productSearch) params.search = this.productSearch
-        const res = await axios.get(`${API_BASE}/masters/products/`, { params })
-        this.products = res.data
+        const res = await api.products.getProducts(params)
+        this.products = Array.isArray(res.data) ? res.data : (res.data?.results || [])
       } catch (error) {
         console.error('製品検索エラー', error)
         alert('製品の取得に失敗しました')
@@ -148,7 +146,7 @@ export default {
       this.loading = true
       try {
         const { id } = this.$route.params
-        const res = await axios.get(`${API_BASE}/orders/stock-allocations/${id}/`)
+        const res = await api.orders.getStockAllocation(id)
         const data = res.data
         this.form = {
           product: data.product,
@@ -157,6 +155,13 @@ export default {
           reserved_qty: Number(data.reserved_qty),
           min_stock_qty: Number(data.min_stock_qty),
           is_bottleneck: data.is_bottleneck
+        }
+        if (!this.products.some((p) => p.id === data.product)) {
+          this.products.push({
+            id: data.product,
+            product_code: data.product_code,
+            product_name: data.product_name,
+          })
         }
       } catch (error) {
         console.error('取得エラー', error)
@@ -178,17 +183,25 @@ export default {
         alert('数値は0以上で入力してください')
         return false
       }
+      if (!Number.isInteger(Number(this.form.min_stock_qty))) {
+        alert('最小在庫は整数で入力してください')
+        return false
+      }
       return true
     },
     async saveAllocation() {
       if (!this.canEdit) return
       if (!this.validateForm()) return
+      const payload = {
+        ...this.form,
+        min_stock_qty: Number.parseInt(this.form.min_stock_qty, 10),
+      }
       try {
         if (this.isEdit) {
-          await axios.put(`${API_BASE}/orders/stock-allocations/${this.$route.params.id}/`, this.form)
+          await api.orders.updateStockAllocation(this.$route.params.id, payload)
           alert('在庫引当を更新しました')
         } else {
-          await axios.post(`${API_BASE}/orders/stock-allocations/`, this.form)
+          await api.orders.createStockAllocation(payload)
           alert('在庫引当を登録しました')
         }
         this.goList()
@@ -201,7 +214,7 @@ export default {
       if (!this.canEdit) return
       if (!confirm('この在庫引当を削除しますか？')) return
       try {
-        await axios.delete(`${API_BASE}/orders/stock-allocations/${this.$route.params.id}/`)
+        await api.orders.deleteStockAllocation(this.$route.params.id)
         alert('削除しました')
         this.goList()
       } catch (error) {

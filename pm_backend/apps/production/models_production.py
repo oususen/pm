@@ -32,9 +32,7 @@ class StockAllocation(models.Model):
         default=0,
         verbose_name='引当済数量'
     )
-    min_stock_qty = models.DecimalField(
-        max_digits=14,
-        decimal_places=3,
+    min_stock_qty = models.PositiveIntegerField(
         verbose_name='最小在庫数',
         help_text='この数量を下回るとアラート'
     )

@@ -175,11 +175,9 @@
 </template>
 
 <script>
-import axios from 'axios'
+import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
-
-const API_BASE = 'http://localhost:8000/api'
 
 export default {
   name: 'StockAllocationList',
@@ -236,13 +234,13 @@ export default {
     async fetchAllocations() {
       this.loading = true
       try {
-        const params = {}
+        const params = { page_size: 20000 }
         if (this.filters.search) params.search = this.filters.search
         if (this.filters.location) params.location = this.filters.location
         if (this.filters.is_bottleneck) params.is_bottleneck = this.filters.is_bottleneck === 'true'
 
-        const response = await axios.get(`${API_BASE}/orders/stock-allocations/`, { params })
-        this.allocations = response.data
+        const response = await api.orders.getStockAllocations(params)
+        this.allocations = Array.isArray(response.data) ? response.data : (response.data?.results || [])
         this.selectedIds = []
       } catch (error) {
         console.error('在庫引当取得エラー:', error)
@@ -280,9 +278,7 @@ export default {
     },
     async reserveStock() {
       try {
-        await axios.post(`${API_BASE}/orders/stock-allocations/${this.selectedAllocation.id}/reserve/`, {
-          quantity: this.reserveQty
-        })
+        await api.orders.reserveStockAllocation(this.selectedAllocation.id, this.reserveQty)
         alert('在庫を引当しました')
         this.closeReserveDialog()
         this.fetchAllocations()
@@ -303,9 +299,7 @@ export default {
     },
     async releaseStock() {
       try {
-        await axios.post(`${API_BASE}/orders/stock-allocations/${this.selectedAllocation.id}/release/`, {
-          quantity: this.releaseQty
-        })
+        await api.orders.releaseStockAllocation(this.selectedAllocation.id, this.releaseQty)
         alert('引当を解除しました')
         this.closeReleaseDialog()
         this.fetchAllocations()
@@ -327,9 +321,7 @@ export default {
 
       for (const target of targets) {
         try {
-          await axios.post(`${API_BASE}/orders/stock-allocations/${target.id}/release/`, {
-            quantity: target.reserved_qty
-          })
+          await api.orders.releaseStockAllocation(target.id, target.reserved_qty)
         } catch (error) {
           console.error('一括解除エラー:', error)
           alert(`ID ${target.id} の解除に失敗しました: ${error.response?.data?.detail || error.message}`)

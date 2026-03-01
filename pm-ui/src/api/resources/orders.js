@@ -23,6 +23,24 @@ export const createOrdersAPI = (client) => ({
   getStockAllocations(params = {}) {
     return client.get('/stock-allocations/', { params })
   },
+  getStockAllocation(id) {
+    return client.get(`/stock-allocations/${id}/`)
+  },
+  createStockAllocation(data) {
+    return client.post('/stock-allocations/', data)
+  },
+  updateStockAllocation(id, data) {
+    return client.put(`/stock-allocations/${id}/`, data)
+  },
+  deleteStockAllocation(id) {
+    return client.delete(`/stock-allocations/${id}/`)
+  },
+  reserveStockAllocation(id, quantity) {
+    return client.post(`/stock-allocations/${id}/reserve/`, { quantity })
+  },
+  releaseStockAllocation(id, quantity) {
+    return client.post(`/stock-allocations/${id}/release/`, { quantity })
+  },
   calculateLineLoad(payload) {
     return client.post('/crp/calculate-line-load/', payload)
   },

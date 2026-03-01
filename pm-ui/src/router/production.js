@@ -66,6 +66,12 @@ const production = [
     meta: { pageTitle: "在庫引当一覧", manualPath: "生産/在庫引当一覧.md" },
   },
   {
+    path: "/production/safety-stock-list",
+    name: "SafetyStockList",
+    component: () => import("@/views/production/SafetyStockList.vue"),
+    meta: { pageTitle: "安全在庫一覧", manualPath: "生産/安全在庫一覧.md" },
+  },
+  {
     path: "/production/stock-allocations/new",
     name: "StockAllocationCreate",
     component: () => import("@/views/production/StockAllocationForm.vue"),
