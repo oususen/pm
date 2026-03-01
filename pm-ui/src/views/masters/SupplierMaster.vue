@@ -14,6 +14,7 @@
           <tr>
             <th>仕入先コード</th>
             <th>仕入先名</th>
+            <th>送信メールアドレス</th>
             <th>専用カレンダー</th>
             <th>操作</th>
           </tr>
@@ -22,7 +23,8 @@
           <tr v-for="supplier in suppliers" :key="supplier.id">
             <td>{{ supplier.supplier_code }}</td>
             <td>{{ supplier.supplier_name }}</td>
-            <td>{{ getCalendarLabel(supplier.calendar) }}</td>
+            <td>{{ supplier.order_email || '-' }}</td>
+            <td>{{ getCalendarLabelBySupplier(supplier) }}</td>
             <td>
               <button @click="editSupplier(supplier)" class="btn-sm">編集</button>
               <button @click="deleteSupplier(supplier.id)" class="btn-sm btn-danger">削除</button>
@@ -50,6 +52,10 @@
             <input v-model="formData.supplier_name" required />
           </div>
           <div class="form-group">
+            <label>送信メールアドレス</label>
+            <input v-model="formData.order_email" type="email" placeholder="example@company.co.jp" />
+          </div>
+          <div class="form-group">
             <label>専用カレンダー</label>
             <select v-model="formData.calendar">
               <option :value="null">未設定</option>
@@ -74,11 +80,13 @@ import api from '@/api/client'
 
 const suppliers = ref([])
 const calendars = ref([])
+const purchaseLines = ref([])
 const showDialog = ref(false)
 const isEdit = ref(false)
 const formData = ref({
   supplier_code: '',
   supplier_name: '',
+  order_email: '',
   calendar: null,
 })
 
@@ -101,6 +109,16 @@ const fetchCalendars = async () => {
   }
 }
 
+const fetchPurchaseLines = async () => {
+  try {
+    const response = await api.lines.getLines()
+    const lines = response.data.results || response.data || []
+    purchaseLines.value = lines.filter((row) => row.line_type === 'PURCHASE')
+  } catch (error) {
+    console.error('購買ライン取得エラー:', error)
+  }
+}
+
 const getCalendarLabel = (calendarId) => {
   if (!calendarId) return '-'
   const found = calendars.value.find((item) => item.id === calendarId)
@@ -108,11 +126,18 @@ const getCalendarLabel = (calendarId) => {
   return `${found.calendar_code} - ${found.calendar_name}`
 }
 
+const getCalendarLabelBySupplier = (supplier) => {
+  const purchaseLine = purchaseLines.value.find((line) => line.line_code === supplier.supplier_code)
+  const calendarId = purchaseLine?.calendar || null
+  return getCalendarLabel(calendarId)
+}
+
 const showNewDialog = () => {
   isEdit.value = false
   formData.value = {
     supplier_code: '',
     supplier_name: '',
+    order_email: '',
     calendar: null,
   }
   showDialog.value = true
@@ -132,6 +157,7 @@ const saveSupplier = async () => {
   try {
     const payload = {
       ...formData.value,
+      order_email: (formData.value.order_email || '').trim(),
       calendar: formData.value.calendar || null,
     }
     if (isEdit.value) {
@@ -165,6 +191,7 @@ const deleteSupplier = async (id) => {
 onMounted(() => {
   fetchSuppliers()
   fetchCalendars()
+  fetchPurchaseLines()
 })
 </script>
 
@@ -210,7 +237,7 @@ onMounted(() => {
   color: #555;
 }
 
-.form-group input[type="text"],
+.form-group input,
 .form-group select {
   width: 100%;
   padding: 0.5rem;

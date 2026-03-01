@@ -158,6 +158,7 @@ class Supplier(models.Model):
     id = models.BigAutoField(primary_key=True)
     supplier_code = models.CharField(max_length=20, unique=True, verbose_name='仕入先コード')
     supplier_name = models.CharField(max_length=100, verbose_name='仕入先名')
+    order_email = models.EmailField(blank=True, default='', verbose_name='送信メールアドレス')
     calendar = models.ForeignKey(
         'Calendar',
         on_delete=models.SET_NULL,

@@ -23,6 +23,9 @@ export const createPurchaseOrderProposalsAPI = (client) => ({
   send(id, data = {}) {
     return client.post(`/purchase-order-proposals/${id}/send/`, data)
   },
+  downloadPdf(id) {
+    return client.get(`/purchase-order-proposals/${id}/pdf/`, { responseType: 'blob' })
+  },
   autoFill(id, data = {}) {
     return client.post(`/purchase-order-proposals/${id}/auto_fill/`, data)
   },

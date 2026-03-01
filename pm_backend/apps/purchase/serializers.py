@@ -162,6 +162,7 @@ class PurchaseOrderTaskSerializer(serializers.ModelSerializer):
 class PurchaseOrderProposalListSerializer(serializers.ModelSerializer):
     supplier_code = serializers.CharField(source='supplier.supplier_code', read_only=True)
     supplier_name = serializers.CharField(source='supplier.supplier_name', read_only=True)
+    supplier_order_email = serializers.CharField(source='supplier.order_email', read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)
     created_by_name = serializers.SerializerMethodField()
     line_count = serializers.IntegerField(source='lines.count', read_only=True)
@@ -175,6 +176,7 @@ class PurchaseOrderProposalListSerializer(serializers.ModelSerializer):
             'supplier',
             'supplier_code',
             'supplier_name',
+            'supplier_order_email',
             'order_date',
             'desired_delivery_date',
             'status',
@@ -203,6 +205,7 @@ class PurchaseOrderProposalListSerializer(serializers.ModelSerializer):
 class PurchaseOrderProposalDetailSerializer(serializers.ModelSerializer):
     supplier_code = serializers.CharField(source='supplier.supplier_code', read_only=True)
     supplier_name = serializers.CharField(source='supplier.supplier_name', read_only=True)
+    supplier_order_email = serializers.CharField(source='supplier.order_email', read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)
     created_by_name = serializers.SerializerMethodField()
     lines = PurchaseOrderProposalLineSerializer(many=True, read_only=True)
@@ -217,6 +220,7 @@ class PurchaseOrderProposalDetailSerializer(serializers.ModelSerializer):
             'supplier',
             'supplier_code',
             'supplier_name',
+            'supplier_order_email',
             'order_date',
             'desired_delivery_date',
             'status',

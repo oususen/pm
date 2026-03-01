@@ -11,6 +11,7 @@
     <div class="page-content">
       <div class="summary-grid">
         <div><strong>仕入先:</strong> {{ proposal.supplier_code }} - {{ proposal.supplier_name }}</div>
+        <div><strong>送信先メール:</strong> {{ proposal.supplier_order_email || '-' }}</div>
         <div><strong>ステータス:</strong> {{ statusLabel(proposal.status) }}</div>
         <div><strong>発注日:</strong> {{ proposal.order_date }}</div>
         <div><strong>希望納入日:</strong> {{ proposal.desired_delivery_date }}</div>
@@ -86,7 +87,18 @@
         </table>
         <div v-if="canEdit" class="line-actions">
           <button class="btn-secondary" @click="addLine">行追加</button>
-          <button class="btn-secondary" @click="runAutoFill">在庫から自動提案</button>
+          <label class="horizon-label">
+            参照日数
+            <input
+              v-model.number="autoFillHorizonDays"
+              class="horizon-input"
+              type="number"
+              min="1"
+              max="365"
+            />
+          </label>
+          <button class="btn-secondary" @click="runAutoFill('PROGRESS')">進度から提案</button>
+          <button class="btn-secondary" @click="runAutoFill('PLANNED_STOCK')">計画在庫から提案</button>
         </div>
       </div>
 
@@ -95,7 +107,8 @@
         <button class="btn-success" v-if="proposal.status === 'DRAFT'" @click="submitProposal">業務員サイン</button>
         <button class="btn-success" v-if="canApprove" @click="approveProposal">承認</button>
         <button class="btn-danger" v-if="canReject" @click="rejectProposal">差戻</button>
-        <button class="btn-success" v-if="proposal.status === 'APPROVED'" @click="sendProposal">送信済にする</button>
+        <button class="btn-secondary" v-if="canGenerateOrderPdf" @click="downloadOrderPdf">注文書作成</button>
+        <button class="btn-success" v-if="proposal.status === 'APPROVED'" @click="sendProposal">購入先へ送信</button>
       </div>
 
       <div class="section">
@@ -162,6 +175,7 @@ const proposal = ref(null)
 const suppliers = ref([])
 const products = ref([])
 const purchaseLines = ref([])
+const autoFillHorizonDays = ref(30)
 
 const form = ref({
   supplier: null,
@@ -190,6 +204,9 @@ const canApprove = computed(() =>
 )
 const canReject = computed(() =>
   proposal.value && !['SENT', 'CANCELED', 'DRAFT'].includes(proposal.value.status)
+)
+const canGenerateOrderPdf = computed(() =>
+  proposal.value && ['APPROVED', 'SENT'].includes(proposal.value.status)
 )
 
 const goBack = () => {
@@ -267,10 +284,27 @@ const saveProposal = async () => {
   alert('保存しました')
 }
 
-const runAutoFill = async () => {
-  await api.purchaseOrderProposals.autoFill(proposalId, { clear_existing: true, horizon_days: 90 })
+const autoFillSourceLabel = (source) => {
+  if (source === 'PROGRESS') return '進度'
+  return '計画在庫'
+}
+
+const normalizeHorizonDays = (value) => {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return 30
+  return Math.max(1, Math.min(Math.trunc(parsed), 365))
+}
+
+const runAutoFill = async (source) => {
+  const horizonDays = normalizeHorizonDays(autoFillHorizonDays.value)
+  autoFillHorizonDays.value = horizonDays
+  await api.purchaseOrderProposals.autoFill(proposalId, {
+    clear_existing: true,
+    horizon_days: horizonDays,
+    source,
+  })
   await fetchDetail()
-  alert('自動提案を反映しました')
+  alert(`${autoFillSourceLabel(source)}から提案を反映しました（参照${horizonDays}日）`)
 }
 
 const submitProposal = async () => {
@@ -298,11 +332,49 @@ const rejectProposal = async () => {
   alert('差戻しました')
 }
 
+const resolvePdfFilename = (contentDisposition, fallback) => {
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match && utf8Match[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1])
+    } catch (_) {
+      return fallback
+    }
+  }
+  const plainMatch = contentDisposition.match(/filename="?([^"]+)"?/i)
+  if (plainMatch && plainMatch[1]) {
+    return plainMatch[1]
+  }
+  return fallback
+}
+
+const downloadOrderPdf = async () => {
+  const response = await api.purchaseOrderProposals.downloadPdf(proposalId)
+  const blob = new Blob([response.data], { type: 'application/pdf' })
+  const contentDisposition = response.headers?.['content-disposition'] || ''
+  const fallbackName = `purchase_order_${proposal.value?.proposal_no || proposalId}.pdf`
+  const filename = resolvePdfFilename(contentDisposition, fallbackName)
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(url)
+}
+
 const sendProposal = async () => {
-  if (!confirm('送信済みにしますか？')) return
-  await api.purchaseOrderProposals.send(proposalId, {})
+  const toEmail = proposal.value?.supplier_order_email || ''
+  if (!toEmail) {
+    alert('仕入先マスタに送信メールアドレスが設定されていません')
+    return
+  }
+  if (!confirm(`${toEmail} に購入先送信しますか？`)) return
+  const response = await api.purchaseOrderProposals.send(proposalId, {})
   await fetchDetail()
-  alert('送信済みにしました')
+  const result = response.data?.send_result || ''
+  alert(result ? `購入先へ送信しました\n${result}` : '購入先へ送信しました')
 }
 
 onMounted(async () => {
@@ -332,6 +404,18 @@ onMounted(async () => {
   margin-top: 8px;
   display: flex;
   gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.horizon-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.horizon-input {
+  width: 90px;
+  padding: 4px 6px;
 }
 .action-row {
   display: flex;

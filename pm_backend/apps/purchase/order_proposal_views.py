@@ -1,12 +1,21 @@
 import math
 from calendar import monthrange
 from datetime import date, timedelta
+from io import BytesIO
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from django.db.models import Max, Q
+from django.http import HttpResponse
 from django.utils import timezone
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.platypus import Table, TableStyle
+from reportlab.pdfgen import canvas
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -17,6 +26,7 @@ from notifications.models import Notification
 from orders.utils.calendar_utils import WorkingDayCalculator, get_business_today
 from production.models_line_backlog import LineBacklog
 from production.models_production import StockAllocation
+from shipping.services.email_service import EmailService
 
 from .models import (
     PurchaseOrderApprovalConfig,
@@ -78,6 +88,12 @@ APPROVAL_TRANSITION = {
         'next_task_type': PurchaseOrderTask.TASK_SEND_TO_SUPPLIER,
     },
 }
+
+AUTO_FILL_SOURCE_PROGRESS = 'PROGRESS'
+AUTO_FILL_SOURCE_PLANNED_STOCK = 'PLANNED_STOCK'
+AUTO_FILL_SOURCE_DEFAULT = AUTO_FILL_SOURCE_PLANNED_STOCK
+
+PURCHASE_ORDER_PDF_FONT = 'HeiseiKakuGo-W5'
 
 
 def _ensure_approval_config_defaults():
@@ -381,10 +397,20 @@ def _collect_supplier_product_line_pairs(supplier: Supplier, order_date: date):
     return results
 
 
-def _build_auto_fill_lines(proposal: PurchaseOrderProposal, horizon_days: int = 90):
+def _normalize_auto_fill_source(value):
+    raw = str(value or '').strip().upper()
+    if raw in ('PROGRESS', '進度'):
+        return AUTO_FILL_SOURCE_PROGRESS
+    if raw in ('PLANNED_STOCK', 'STOCK', '計画在庫', '在庫'):
+        return AUTO_FILL_SOURCE_PLANNED_STOCK
+    return AUTO_FILL_SOURCE_DEFAULT
+
+
+def _build_auto_fill_lines(proposal: PurchaseOrderProposal, horizon_days: int = 30, source: str = AUTO_FILL_SOURCE_DEFAULT):
     order_date = proposal.order_date
     end_date = order_date + timedelta(days=max(1, min(horizon_days, 365)))
     generated = []
+    source = _normalize_auto_fill_source(source)
 
     for line_obj, product in _collect_supplier_product_line_pairs(proposal.supplier, order_date):
         min_stock_qty = (
@@ -401,7 +427,7 @@ def _build_auto_fill_lines(proposal: PurchaseOrderProposal, horizon_days: int = 
                 plan_date__lte=end_date,
             )
             .order_by('plan_date')
-            .values('plan_date', 'planned_stock_qty')
+            .values('plan_date', 'planned_stock_qty', 'progress_qty')
         )
         if not rows:
             continue
@@ -409,13 +435,18 @@ def _build_auto_fill_lines(proposal: PurchaseOrderProposal, horizon_days: int = 
         shortage_date = None
         shortage_qty = 0
         snapshot_stock = None
+        snapshot_min_stock = int(min_stock_qty) if source == AUTO_FILL_SOURCE_PLANNED_STOCK else 0
         for row in rows:
-            planned_stock = int(row['planned_stock_qty'] or 0)
-            current_shortage = int(min_stock_qty) - planned_stock
+            if source == AUTO_FILL_SOURCE_PROGRESS:
+                reference_value = int(row['progress_qty'] or 0)
+                current_shortage = abs(reference_value) if reference_value < 0 else 0
+            else:
+                reference_value = int(row['planned_stock_qty'] or 0)
+                current_shortage = int(min_stock_qty) - reference_value
             if current_shortage > 0:
                 if shortage_date is None:
                     shortage_date = row['plan_date']
-                    snapshot_stock = planned_stock
+                    snapshot_stock = reference_value
                 shortage_qty = max(shortage_qty, current_shortage)
 
         if shortage_qty <= 0:
@@ -436,11 +467,188 @@ def _build_auto_fill_lines(proposal: PurchaseOrderProposal, horizon_days: int = 
             'shortage_qty': shortage_qty,
             'order_qty': order_qty,
             'snapshot_stock': snapshot_stock,
-            'snapshot_min_stock': int(min_stock_qty),
+            'snapshot_min_stock': snapshot_min_stock,
             'note': '',
         })
 
     return generated
+
+
+def _proposal_detail_queryset():
+    return (
+        PurchaseOrderProposal.objects.select_related('supplier', 'created_by')
+        .prefetch_related('lines__product', 'lines__line', 'approvals__approved_by', 'tasks__assigned_to')
+    )
+
+
+def _load_proposal_detail(pk: int):
+    return _proposal_detail_queryset().filter(pk=pk).first()
+
+
+def _ensure_purchase_order_pdf_font():
+    registered = pdfmetrics.getRegisteredFontNames()
+    if PURCHASE_ORDER_PDF_FONT in registered:
+        return PURCHASE_ORDER_PDF_FONT
+    try:
+        pdfmetrics.registerFont(UnicodeCIDFont(PURCHASE_ORDER_PDF_FONT))
+        return PURCHASE_ORDER_PDF_FONT
+    except Exception:
+        return 'Helvetica'
+
+
+def _short_text(value, limit: int):
+    text = str(value or '').replace('\n', ' ').strip()
+    if len(text) <= limit:
+        return text
+    return f'{text[: max(limit - 1, 0)]}…'
+
+
+def _proposal_pdf_filename(proposal: PurchaseOrderProposal):
+    safe_no = str(proposal.proposal_no or '').replace('/', '_')
+    return f'purchase_order_{safe_no}.pdf'
+
+
+def _build_purchase_order_email_subject(proposal: PurchaseOrderProposal):
+    return f'【発注書】{proposal.proposal_no} {proposal.supplier.supplier_name}'
+
+
+def _build_purchase_order_email_body(proposal: PurchaseOrderProposal):
+    return (
+        f'{proposal.supplier.supplier_name} 御中\n\n'
+        'お世話になっております。\n'
+        '発注書を送付いたします。\n\n'
+        f'提案書番号: {proposal.proposal_no}\n'
+        f'発注日: {proposal.order_date}\n'
+        f'希望納入日: {proposal.desired_delivery_date}\n\n'
+        '添付のPDFをご確認のうえ、手配をお願いいたします。\n'
+    )
+
+
+def _build_purchase_order_pdf(proposal: PurchaseOrderProposal):
+    font_name = _ensure_purchase_order_pdf_font()
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    page_width, page_height = A4
+    left_margin = 12 * mm
+
+    proposal_lines = list(proposal.lines.select_related('product', 'line').order_by('id'))
+    lines_per_page = 20
+    chunks = [
+        proposal_lines[idx: idx + lines_per_page]
+        for idx in range(0, len(proposal_lines), lines_per_page)
+    ] or [[]]
+
+    approved_rows = [
+        row
+        for row in proposal.approvals.all()
+        if row.action == PurchaseOrderProposalApproval.ACTION_APPROVED
+    ]
+    approval_map = {}
+    for row in sorted(approved_rows, key=lambda item: (item.approval_level, item.approved_at or timezone.now()), reverse=True):
+        approval_map.setdefault(int(row.approval_level), row)
+
+    creator_name = ''
+    if proposal.created_by_id:
+        creator_name = (proposal.created_by.get_full_name() or '').strip() or proposal.created_by.username
+
+    table_col_widths = [10 * mm, 28 * mm, 42 * mm, 42 * mm, 22 * mm, 16 * mm, 16 * mm, 32 * mm]
+    table_headers = ['No', '品番', '品名', '購買ライン', '不足日', '不足数', '発注数', '備考']
+
+    for page_index, line_chunk in enumerate(chunks):
+        y = page_height - 15 * mm
+        title = '発注書' if page_index == 0 else '発注書（続き）'
+        pdf.setFont(font_name, 16)
+        pdf.drawString(left_margin, y, title)
+
+        pdf.setFont(font_name, 10)
+        y -= 6 * mm
+        pdf.drawString(left_margin, y, f'提案書番号: {proposal.proposal_no}')
+        pdf.drawRightString(page_width - left_margin, y, f'出力日: {timezone.localdate()}')
+        y -= 5 * mm
+        pdf.drawString(left_margin, y, f'仕入先: {proposal.supplier.supplier_code} {proposal.supplier.supplier_name}')
+        y -= 5 * mm
+        pdf.drawString(left_margin, y, f'発注日: {proposal.order_date}')
+        pdf.drawString(left_margin + 70 * mm, y, f'希望納入日: {proposal.desired_delivery_date}')
+        y -= 5 * mm
+        pdf.drawString(left_margin, y, f'作成者: {creator_name or "-"}')
+        if page_index == 0 and proposal.note:
+            y -= 5 * mm
+            pdf.drawString(left_margin, y, f'備考: {_short_text(proposal.note, 80)}')
+
+        y -= 7 * mm
+        table_rows = [table_headers]
+        for offset, line in enumerate(line_chunk):
+            row_no = page_index * lines_per_page + offset + 1
+            table_rows.append([
+                str(row_no),
+                _short_text(getattr(line.product, 'product_code', ''), 14),
+                _short_text(getattr(line.product, 'product_name', ''), 20),
+                _short_text(f'{getattr(line.line, "line_code", "")} {getattr(line.line, "line_name", "")}', 20),
+                str(line.shortage_date or ''),
+                '' if line.shortage_qty is None else str(int(line.shortage_qty)),
+                str(int(line.order_qty or 0)),
+                _short_text(line.note or '', 15),
+            ])
+        if not line_chunk:
+            table_rows.append(['', '', '明細なし', '', '', '', '', ''])
+
+        table = Table(table_rows, colWidths=table_col_widths, repeatRows=1)
+        table.setStyle(TableStyle([
+            ('FONT', (0, 0), (-1, -1), font_name, 8.5),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+            ('ALIGN', (4, 1), (6, -1), 'RIGHT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BOX', (0, 0), (-1, -1), 0.8, colors.black),
+            ('INNERGRID', (0, 0), (-1, -1), 0.4, colors.black),
+        ]))
+        _, table_height = table.wrap(page_width - left_margin * 2, page_height)
+        table.drawOn(pdf, left_margin, y - table_height)
+        y = y - table_height - 7 * mm
+
+        if page_index == len(chunks) - 1:
+            if y < 45 * mm:
+                pdf.showPage()
+                y = page_height - 20 * mm
+            sign_rows = [
+                ['業務員', '班長', '係長', '事業部長'],
+                ['', '', '', ''],
+                ['', '', '', ''],
+            ]
+            for level in (1, 2, 3, 4):
+                row = approval_map.get(level)
+                if not row:
+                    continue
+                user_name = ''
+                if row.approved_by_id:
+                    user_name = (row.approved_by.get_full_name() or '').strip() or row.approved_by.username
+                approved_at = ''
+                if row.approved_at:
+                    approved_at = timezone.localtime(row.approved_at).strftime('%Y-%m-%d %H:%M')
+                sign_rows[1][level - 1] = _short_text(user_name, 14)
+                sign_rows[2][level - 1] = approved_at
+
+            sign_table = Table(sign_rows, colWidths=[(page_width - left_margin * 2) / 4] * 4, rowHeights=[8 * mm, 10 * mm, 8 * mm])
+            sign_table.setStyle(TableStyle([
+                ('FONT', (0, 0), (-1, -1), font_name, 9),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f0f0f0')),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('BOX', (0, 0), (-1, -1), 0.8, colors.black),
+                ('INNERGRID', (0, 0), (-1, -1), 0.4, colors.black),
+            ]))
+            _, sign_height = sign_table.wrap(page_width - left_margin * 2, page_height)
+            sign_table.drawOn(pdf, left_margin, y - sign_height)
+
+        pdf.setFont(font_name, 8)
+        pdf.drawRightString(page_width - left_margin, 8 * mm, f'出力日時: {timezone.localtime().strftime("%Y-%m-%d %H:%M")}')
+
+        if page_index < len(chunks) - 1:
+            pdf.showPage()
+
+    pdf.save()
+    buffer.seek(0)
+    return buffer
 
 
 def run_auto_purchase_order_check():
@@ -910,11 +1118,38 @@ class PurchaseOrderProposalSendView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk: int):
-        proposal = PurchaseOrderProposal.objects.filter(pk=pk).first()
+        proposal = (
+            PurchaseOrderProposal.objects.select_related('supplier', 'created_by')
+            .prefetch_related('lines__product', 'lines__line', 'approvals__approved_by')
+            .filter(pk=pk)
+            .first()
+        )
         if not proposal:
             return Response(status=status.HTTP_404_NOT_FOUND)
         if proposal.status != PurchaseOrderProposal.STATUS_APPROVED:
             return Response({'detail': '最終承認済みのみ送信できます'}, status=status.HTTP_400_BAD_REQUEST)
+        if not proposal.lines.exists():
+            return Response({'detail': '明細がないため送信できません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        to_email = str(proposal.supplier.order_email or '').strip()
+        if not to_email:
+            return Response({'detail': '仕入先マスタに送信メールアドレスが未設定です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        pdf_buffer = _build_purchase_order_pdf(proposal)
+        email_service = EmailService()
+        send_result = email_service.send_email_with_attachment(
+            to_emails=[to_email],
+            subject=_build_purchase_order_email_subject(proposal),
+            body=_build_purchase_order_email_body(proposal),
+            attachment_data=pdf_buffer,
+            attachment_filename=_proposal_pdf_filename(proposal),
+            user_id=request.user.id if request.user and request.user.is_authenticated else None,
+        )
+        if not send_result.get('success'):
+            return Response(
+                {'detail': send_result.get('message') or '購入先送信に失敗しました'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         with transaction.atomic():
             proposal.status = PurchaseOrderProposal.STATUS_SENT
@@ -922,12 +1157,29 @@ class PurchaseOrderProposalSendView(APIView):
             proposal.save(update_fields=['status', 'sent_at', 'updated_at'])
             _mark_tasks_done(proposal, PurchaseOrderTask.TASK_SEND_TO_SUPPLIER)
 
+        proposal = _load_proposal_detail(pk)
+        payload = PurchaseOrderProposalDetailSerializer(proposal).data
+        payload['send_result'] = send_result.get('message') or ''
+        return Response(payload)
+
+
+class PurchaseOrderProposalPdfView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk: int):
         proposal = (
             PurchaseOrderProposal.objects.select_related('supplier', 'created_by')
-            .prefetch_related('lines__product', 'lines__line', 'approvals__approved_by', 'tasks__assigned_to')
-            .get(pk=pk)
+            .prefetch_related('lines__product', 'lines__line', 'approvals__approved_by')
+            .filter(pk=pk)
+            .first()
         )
-        return Response(PurchaseOrderProposalDetailSerializer(proposal).data)
+        if not proposal:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        pdf_buffer = _build_purchase_order_pdf(proposal)
+        response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{_proposal_pdf_filename(proposal)}"'
+        return response
 
 
 class PurchaseOrderProposalAutoFillView(APIView):
@@ -941,13 +1193,18 @@ class PurchaseOrderProposalAutoFillView(APIView):
             return Response({'detail': 'DRAFTまたはREJECTEDのみ自動提案できます'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            horizon_days = int(request.data.get('horizon_days', 90))
+            horizon_days = int(request.data.get('horizon_days', 30))
         except (TypeError, ValueError):
             return Response({'detail': 'horizon_days must be integer'}, status=status.HTTP_400_BAD_REQUEST)
         horizon_days = max(1, min(horizon_days, 365))
 
+        source = _normalize_auto_fill_source(request.data.get('source'))
         clear_existing = str(request.data.get('clear_existing', 'true')).lower() in ('true', '1', 'yes')
-        generated_lines = _build_auto_fill_lines(proposal, horizon_days=horizon_days)
+        generated_lines = _build_auto_fill_lines(
+            proposal,
+            horizon_days=horizon_days,
+            source=source,
+        )
 
         with transaction.atomic():
             if clear_existing:
@@ -972,6 +1229,7 @@ class PurchaseOrderProposalAutoFillView(APIView):
         detail = PurchaseOrderProposalDetailSerializer(proposal)
         return Response({
             'generated_count': len(generated_lines),
+            'source': source,
             'proposal': detail.data,
         })
 

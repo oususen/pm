@@ -391,7 +391,7 @@ class ProductionLineViewSet(viewsets.ReadOnlyModelViewSet):
 class SupplierViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Supplier.objects.all()
     serializer_class = SupplierSerializer
-    search_fields = ['supplier_code', 'supplier_name']
+    search_fields = ['supplier_code', 'supplier_name', 'order_email']
     ordering_fields = ['supplier_code']
     ordering = ['supplier_code']
 
