@@ -110,8 +110,7 @@
         <button class="btn-secondary" v-if="canGenerateOrderPdf" @click="downloadOrderPdf">注文書作成</button>
         <button
           class="btn-success"
-          v-if="proposal.status === 'APPROVED'"
-          :disabled="hasPendingCreateOrderPdfTask"
+          v-if="canShowSendButton"
           @click="sendProposal"
         >
           購入先へ送信
@@ -136,7 +135,7 @@
           <tbody>
             <tr v-for="row in proposal.approvals" :key="row.id">
               <td>{{ row.approval_level }}</td>
-              <td>{{ row.action }}</td>
+              <td>{{ approvalActionLabel(row.action) }}</td>
               <td>{{ row.approved_by_name || row.approved_by_username }}</td>
               <td>{{ row.approved_at }}</td>
               <td>{{ row.comment }}</td>
@@ -159,9 +158,9 @@
           </thead>
           <tbody>
             <tr v-for="row in proposal.tasks" :key="row.id">
-              <td>{{ row.task_type }}</td>
+              <td>{{ taskTypeLabel(row.task_type) }}</td>
               <td>{{ row.assigned_to_name || row.assigned_to_username }}</td>
-              <td>{{ row.status }}</td>
+              <td>{{ taskStatusLabel(row.status) }}</td>
               <td>{{ row.due_date }}</td>
               <td>{{ row.done_at }}</td>
             </tr>
@@ -208,6 +207,32 @@ const statusMap = {
 
 const statusLabel = (status) => statusMap[status] || status
 
+const approvalActionMap = {
+  APPROVED: '承認',
+  REJECTED: '差戻',
+}
+
+const approvalActionLabel = (action) => approvalActionMap[action] || action
+
+const taskTypeMap = {
+  CREATE_PROPOSAL: '提案書作成',
+  CREATE_ORDER_PDF: '注文書作成',
+  APPROVE_L2: '班長承認',
+  APPROVE_L3: '係長承認',
+  APPROVE_L4: '部長承認',
+  SEND_TO_SUPPLIER: '購入先送信',
+}
+
+const taskTypeLabel = (taskType) => taskTypeMap[taskType] || taskType
+
+const taskStatusMap = {
+  PENDING: '未対応',
+  DONE: '完了',
+  SKIPPED: 'スキップ',
+}
+
+const taskStatusLabel = (taskStatus) => taskStatusMap[taskStatus] || taskStatus
+
 const canEdit = computed(() => proposal.value && proposal.value.status === 'DRAFT')
 const canApprove = computed(() =>
   proposal.value && ['SUBMITTED', 'APPROVED_L2', 'APPROVED_L3'].includes(proposal.value.status)
@@ -225,6 +250,17 @@ const hasPendingCreateOrderPdfTask = computed(() =>
         (row) => row.task_type === 'CREATE_ORDER_PDF' && row.status === 'PENDING'
       )
   )
+)
+const hasPendingSendToSupplierTask = computed(() =>
+  Boolean(
+    proposal.value &&
+      (proposal.value.tasks || []).some(
+        (row) => row.task_type === 'SEND_TO_SUPPLIER' && row.status === 'PENDING'
+      )
+  )
+)
+const canShowSendButton = computed(() =>
+  Boolean(proposal.value && proposal.value.status === 'APPROVED' && hasPendingSendToSupplierTask.value)
 )
 
 const goBack = () => {
@@ -429,7 +465,11 @@ const sendProposal = async () => {
   const response = await api.purchaseOrderProposals.send(proposalId, {})
   await fetchDetail()
   const result = response.data?.send_result || ''
-  alert(result ? `購入先へ送信しました\n${result}` : '購入先へ送信しました')
+  const savedPath = response.data?.saved_pdf_path || ''
+  const lines = ['購入先へ送信しました']
+  if (result) lines.push(result)
+  if (savedPath) lines.push(`保存先: ${savedPath}`)
+  alert(lines.join('\n'))
 }
 
 onMounted(async () => {

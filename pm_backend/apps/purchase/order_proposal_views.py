@@ -1,8 +1,11 @@
 import math
+import re
 from calendar import monthrange
 from datetime import date, timedelta
 from io import BytesIO
+from pathlib import Path
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
@@ -305,6 +308,10 @@ def _create_notification(title: str, description: str, users, operator_name: str
 def _display_user_name(user):
     if not user or not getattr(user, 'id', None):
         return ''
+    last_name = (getattr(user, 'last_name', '') or '').strip()
+    first_name = (getattr(user, 'first_name', '') or '').strip()
+    if last_name or first_name:
+        return f'{last_name} {first_name}'.strip()
     full_name = (user.get_full_name() or '').strip()
     if full_name:
         return full_name
@@ -575,6 +582,34 @@ def _proposal_pdf_filename(proposal: PurchaseOrderProposal):
     return f'purchase_order_{safe_no}.pdf'
 
 
+def _build_saved_purchase_order_pdf_path(proposal: PurchaseOrderProposal):
+    now = timezone.now()
+    if timezone.is_aware(now):
+        now = timezone.localtime(now)
+
+    base_dir = Path(settings.MEDIA_ROOT)
+    supplier_code = re.sub(r'[^0-9A-Za-z_-]+', '_', str(getattr(proposal.supplier, 'supplier_code', '') or 'UNKNOWN'))
+    proposal_no = re.sub(r'[^0-9A-Za-z_-]+', '_', str(proposal.proposal_no or proposal.id))
+    target_dir = base_dir / 'purchase_orders' / f'{now.year:04d}' / f'{now.month:02d}' / supplier_code
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    stem = f'{proposal_no}_{now.strftime("%Y%m%d%H%M%S")}'
+    target_path = target_dir / f'{stem}.pdf'
+    suffix = 1
+    while target_path.exists():
+        target_path = target_dir / f'{stem}_{suffix:02d}.pdf'
+        suffix += 1
+
+    return target_path
+
+
+def _save_purchase_order_pdf(proposal: PurchaseOrderProposal, pdf_bytes: bytes):
+    target_path = _build_saved_purchase_order_pdf_path(proposal)
+    target_path.write_bytes(pdf_bytes)
+    relative_path = target_path.relative_to(Path(settings.MEDIA_ROOT))
+    return str(relative_path).replace('\\', '/')
+
+
 def _format_pdf_output_date():
     current = timezone.now()
     if timezone.is_aware(current):
@@ -630,7 +665,7 @@ def _build_purchase_order_pdf(proposal: PurchaseOrderProposal):
 
     creator_name = ''
     if proposal.created_by_id:
-        creator_name = (proposal.created_by.get_full_name() or '').strip() or proposal.created_by.username
+        creator_name = _display_user_name(proposal.created_by)
 
     table_col_widths = [10 * mm, 28 * mm, 42 * mm, 42 * mm, 22 * mm, 16 * mm, 16 * mm, 32 * mm]
     table_headers = ['No', '品番', '品名', '購買ライン', '不足日', '不足数', '発注数', '備考']
@@ -702,7 +737,7 @@ def _build_purchase_order_pdf(proposal: PurchaseOrderProposal):
                     continue
                 user_name = ''
                 if row.approved_by_id:
-                    user_name = (row.approved_by.get_full_name() or '').strip() or row.approved_by.username
+                    user_name = _display_user_name(row.approved_by)
                 approved_at = ''
                 if row.approved_at:
                     approved_at = _format_pdf_output_datetime(row.approved_at)
@@ -1094,8 +1129,8 @@ class PurchaseOrderProposalApproveView(APIView):
         next_users = []
         notify_users = []
         if next_task_type in (PurchaseOrderTask.TASK_CREATE_ORDER_PDF, PurchaseOrderTask.TASK_SEND_TO_SUPPLIER):
-            level4_config = _get_approval_config(4)
-            next_users = list(level4_config.notify_users.all())
+            if proposal.created_by_id:
+                next_users = [proposal.created_by]
             if not next_users:
                 next_users = list(_get_approval_config(1).approver_users.all())
             notify_users = next_users
@@ -1233,17 +1268,27 @@ class PurchaseOrderProposalSendView(APIView):
         ).exists():
             return Response({'detail': '先に注文書作成を実行してください'}, status=status.HTTP_400_BAD_REQUEST)
 
-        to_email = str(proposal.supplier.order_email or '').strip()
+        to_email = str(request.data.get('to_email') or proposal.supplier.order_email or '').strip()
         if not to_email:
             return Response({'detail': '仕入先マスタに送信メールアドレスが未設定です'}, status=status.HTTP_400_BAD_REQUEST)
+        subject = str(request.data.get('subject') or '').strip() or _build_purchase_order_email_subject(proposal)
+        body_raw = request.data.get('body')
+        if body_raw is None:
+            body = _build_purchase_order_email_body(proposal)
+        else:
+            body = str(body_raw)
+            if not body.strip():
+                body = _build_purchase_order_email_body(proposal)
 
         pdf_buffer = _build_purchase_order_pdf(proposal)
+        pdf_bytes = pdf_buffer.getvalue()
+        saved_pdf_path = _save_purchase_order_pdf(proposal, pdf_bytes)
         email_service = EmailService()
         send_result = email_service.send_email_with_attachment(
             to_emails=[to_email],
-            subject=_build_purchase_order_email_subject(proposal),
-            body=_build_purchase_order_email_body(proposal),
-            attachment_data=pdf_buffer,
+            subject=subject,
+            body=body,
+            attachment_data=BytesIO(pdf_bytes),
             attachment_filename=_proposal_pdf_filename(proposal),
             user_id=request.user.id if request.user and request.user.is_authenticated else None,
         )
@@ -1262,6 +1307,7 @@ class PurchaseOrderProposalSendView(APIView):
         proposal = _load_proposal_detail(pk)
         payload = PurchaseOrderProposalDetailSerializer(proposal).data
         payload['send_result'] = send_result.get('message') or ''
+        payload['saved_pdf_path'] = saved_pdf_path
         return Response(payload)
 
 

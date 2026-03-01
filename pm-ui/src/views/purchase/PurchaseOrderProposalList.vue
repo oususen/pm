@@ -69,7 +69,7 @@
             <td>{{ row.desired_delivery_date }}</td>
             <td>{{ statusLabel(row.status) }}</td>
             <td>{{ row.line_count }}</td>
-            <td>{{ (row.pending_tasks || []).join(', ') }}</td>
+            <td>{{ pendingTaskLabels(row.pending_tasks) }}</td>
             <td>
               <button class="btn-sm" @click="goDetail(row.id)">詳細</button>
               <button
@@ -163,6 +163,20 @@ const statusOptions = [
 const statusLabel = (status) => {
   const found = statusOptions.find((item) => item.value === status)
   return found ? found.label : status
+}
+
+const taskTypeMap = {
+  CREATE_PROPOSAL: '提案書作成',
+  CREATE_ORDER_PDF: '注文書作成',
+  APPROVE_L2: '班長承認',
+  APPROVE_L3: '係長承認',
+  APPROVE_L4: '部長承認',
+  SEND_TO_SUPPLIER: '購入先送信',
+}
+
+const pendingTaskLabels = (taskTypes = []) => {
+  if (!Array.isArray(taskTypes) || taskTypes.length === 0) return ''
+  return taskTypes.map((taskType) => taskTypeMap[taskType] || taskType).join(', ')
 }
 
 const fetchSuppliers = async () => {

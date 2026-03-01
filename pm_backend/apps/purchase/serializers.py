@@ -11,6 +11,19 @@ from .models import (
 )
 
 
+def _display_user_name(user):
+    if not user:
+        return ''
+    last_name = (getattr(user, 'last_name', '') or '').strip()
+    first_name = (getattr(user, 'first_name', '') or '').strip()
+    if last_name or first_name:
+        return f'{last_name} {first_name}'.strip()
+    full_name = (user.get_full_name() or '').strip()
+    if full_name:
+        return full_name
+    return (getattr(user, 'username', '') or '').strip()
+
+
 class PurchasePlanLockSettingSerializer(serializers.ModelSerializer):
     class Meta:
         model = PurchasePlanLockSetting
@@ -120,8 +133,7 @@ class PurchaseOrderProposalApprovalSerializer(serializers.ModelSerializer):
     def get_approved_by_name(self, obj):
         if not obj.approved_by_id:
             return ''
-        full_name = obj.approved_by.get_full_name() or ''
-        return full_name.strip() or obj.approved_by.username
+        return _display_user_name(obj.approved_by)
 
 
 class PurchaseOrderTaskSerializer(serializers.ModelSerializer):
@@ -155,8 +167,7 @@ class PurchaseOrderTaskSerializer(serializers.ModelSerializer):
     def get_assigned_to_name(self, obj):
         if not obj.assigned_to_id:
             return ''
-        full_name = obj.assigned_to.get_full_name() or ''
-        return full_name.strip() or obj.assigned_to.username
+        return _display_user_name(obj.assigned_to)
 
 
 class PurchaseOrderProposalListSerializer(serializers.ModelSerializer):
@@ -194,8 +205,7 @@ class PurchaseOrderProposalListSerializer(serializers.ModelSerializer):
     def get_created_by_name(self, obj):
         if not obj.created_by_id:
             return ''
-        full_name = obj.created_by.get_full_name() or ''
-        return full_name.strip() or obj.created_by.username
+        return _display_user_name(obj.created_by)
 
     def get_pending_tasks(self, obj):
         tasks = obj.tasks.filter(status=PurchaseOrderTask.STATUS_PENDING).values_list('task_type', flat=True)
@@ -239,8 +249,7 @@ class PurchaseOrderProposalDetailSerializer(serializers.ModelSerializer):
     def get_created_by_name(self, obj):
         if not obj.created_by_id:
             return ''
-        full_name = obj.created_by.get_full_name() or ''
-        return full_name.strip() or obj.created_by.username
+        return _display_user_name(obj.created_by)
 
 
 class PurchaseOrderApprovalConfigSerializer(serializers.ModelSerializer):
@@ -262,13 +271,11 @@ class PurchaseOrderApprovalConfigSerializer(serializers.ModelSerializer):
     def get_approver_user_names(self, obj):
         names = []
         for user in obj.approver_users.all():
-            full_name = user.get_full_name() or ''
-            names.append(full_name.strip() or user.username)
+            names.append(_display_user_name(user))
         return names
 
     def get_notify_user_names(self, obj):
         names = []
         for user in obj.notify_users.all():
-            full_name = user.get_full_name() or ''
-            names.append(full_name.strip() or user.username)
+            names.append(_display_user_name(user))
         return names
