@@ -98,6 +98,7 @@
             />
           </label>
           <button class="btn-secondary" @click="runAutoFill('PROGRESS')">進度から提案</button>
+          <button class="btn-secondary" @click="runAutoFill('PLANNED_PROGRESS')">計画進度から提案</button>
           <button class="btn-secondary" @click="runAutoFill('PLANNED_STOCK')">計画在庫から提案</button>
         </div>
       </div>
@@ -111,7 +112,7 @@
         <button
           class="btn-success"
           v-if="canShowSendButton"
-          @click="sendProposal"
+          @click="openSendDialog"
         >
           購入先へ送信
         </button>
@@ -168,6 +169,30 @@
         </table>
       </div>
     </div>
+
+    <div v-if="showSendDialog" class="modal-overlay" @click.self="closeSendDialog">
+      <div class="modal-content send-dialog">
+        <h3>購入先へ送信</h3>
+        <div class="form-group">
+          <label>宛先メールアドレス</label>
+          <input v-model="sendForm.to_email" type="email" />
+        </div>
+        <div class="form-group">
+          <label>件名</label>
+          <input v-model="sendForm.subject" type="text" />
+        </div>
+        <div class="form-group">
+          <label>本文</label>
+          <textarea v-model="sendForm.body" rows="10" />
+        </div>
+        <div class="dialog-actions">
+          <button class="btn-primary" :disabled="sendingMail" @click="sendProposal">
+            {{ sendingMail ? '送信中...' : '送信' }}
+          </button>
+          <button class="btn-secondary" :disabled="sendingMail" @click="closeSendDialog">キャンセル</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -185,6 +210,13 @@ const suppliers = ref([])
 const products = ref([])
 const purchaseLines = ref([])
 const autoFillHorizonDays = ref(30)
+const showSendDialog = ref(false)
+const sendingMail = ref(false)
+const sendForm = ref({
+  to_email: '',
+  subject: '',
+  body: '',
+})
 
 const form = ref({
   supplier: null,
@@ -340,6 +372,7 @@ const saveProposal = async () => {
 
 const autoFillSourceLabel = (source) => {
   if (source === 'PROGRESS') return '進度'
+  if (source === 'PLANNED_PROGRESS') return '計画進度'
   return '計画在庫'
 }
 
@@ -402,6 +435,40 @@ const resolvePdfFilename = (contentDisposition, fallback) => {
   return fallback
 }
 
+const sanitizeFilePart = (value, fallback = '-') => {
+  const raw = String(value ?? '').trim()
+  const sanitized = raw.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '')
+  return sanitized || fallback
+}
+
+const extractDailySerialNo = (proposalNo, fallbackId) => {
+  const matched = String(proposalNo || '').match(/-(\d+)$/)
+  if (matched && matched[1]) {
+    const parsed = Number(matched[1])
+    if (Number.isFinite(parsed) && parsed > 0) return String(parsed)
+  }
+  return String(fallbackId || proposalId || 1)
+}
+
+const buildFallbackOrderPdfFilename = () => {
+  if (!proposal.value) return `注文書_${proposalId}.pdf`
+
+  const orderDateRaw = String(proposal.value.order_date || '').replace(/-/g, '')
+  const orderDate = /^\d{8}$/.test(orderDateRaw)
+    ? orderDateRaw
+    : new Date().toISOString().slice(0, 10).replace(/-/g, '')
+
+  const supplierCode = sanitizeFilePart(proposal.value.supplier_code, 'UNKNOWN')
+  const totalAmount = Array.isArray(proposal.value.lines)
+    ? proposal.value.lines.reduce((sum, row) => {
+        const qty = Number(row?.order_qty ?? 0)
+        return sum + (Number.isFinite(qty) && qty > 0 ? Math.trunc(qty) : 0)
+      }, 0)
+    : 0
+  const dailySerialNo = extractDailySerialNo(proposal.value.proposal_no, proposal.value.id)
+  return `${orderDate}_${supplierCode}_${totalAmount}_注文書_${dailySerialNo}.pdf`
+}
+
 const parsePdfErrorMessage = async (error) => {
   try {
     const response = error?.response
@@ -429,7 +496,7 @@ const downloadOrderPdf = async () => {
     const response = await api.purchaseOrderProposals.downloadPdf(proposalId)
     const blob = new Blob([response.data], { type: 'application/pdf' })
     const contentDisposition = response.headers?.['content-disposition'] || ''
-    const fallbackName = `purchase_order_${proposal.value?.proposal_no || proposalId}.pdf`
+    const fallbackName = buildFallbackOrderPdfFilename()
     const filename = resolvePdfFilename(contentDisposition, fallbackName)
     const url = window.URL.createObjectURL(blob)
 
@@ -455,21 +522,88 @@ const downloadOrderPdf = async () => {
   }
 }
 
-const sendProposal = async () => {
+const buildDefaultSendSubject = () => {
+  if (!proposal.value) return ''
+  return `【発注書】${proposal.value.proposal_no} ${proposal.value.supplier_name}`
+}
+
+const buildDefaultSendBody = () => {
+  if (!proposal.value) return ''
+  const supplierName = proposal.value.supplier_name || ''
+  const proposalNo = proposal.value.proposal_no || ''
+  const orderDate = proposal.value.order_date || ''
+  const desiredDeliveryDate = proposal.value.desired_delivery_date || ''
+  const creatorName = proposal.value.created_by_name || proposal.value.created_by_username || '-'
+  const creatorEmail = proposal.value.created_by_email || '-'
+  return (
+    `${supplierName} 御中\n\n` +
+    'お世話になっております。\n' +
+    '発注書を送付いたします。\n\n' +
+    `注文書番号: ${proposalNo}\n` +
+    `発注日: ${orderDate}\n` +
+    `希望納入日: ${desiredDeliveryDate}\n\n` +
+    '添付のPDFをご確認のうえ、手配をお願いいたします。\n\n' +
+    '------------------------------\n' +
+    'ダイソウ工業株式会社\n' +
+    `${creatorName}\n\n` +
+    'ご不明な点がございましたら下記までご連絡ください。\n' +
+    `Email:${creatorEmail}\n`
+  )
+}
+
+const openSendDialog = () => {
   const toEmail = proposal.value?.supplier_order_email || ''
   if (!toEmail) {
     alert('仕入先マスタに送信メールアドレスが設定されていません')
     return
   }
-  if (!confirm(`${toEmail} に購入先送信しますか？`)) return
-  const response = await api.purchaseOrderProposals.send(proposalId, {})
-  await fetchDetail()
-  const result = response.data?.send_result || ''
-  const savedPath = response.data?.saved_pdf_path || ''
-  const lines = ['購入先へ送信しました']
-  if (result) lines.push(result)
-  if (savedPath) lines.push(`保存先: ${savedPath}`)
-  alert(lines.join('\n'))
+  sendForm.value = {
+    to_email: toEmail,
+    subject: buildDefaultSendSubject(),
+    body: buildDefaultSendBody(),
+  }
+  showSendDialog.value = true
+}
+
+const closeSendDialog = () => {
+  showSendDialog.value = false
+}
+
+const sendProposal = async () => {
+  const toEmail = String(sendForm.value.to_email || '').trim()
+  if (!toEmail) {
+    alert('宛先メールアドレスを入力してください')
+    return
+  }
+  const subject = String(sendForm.value.subject || '').trim()
+  if (!subject) {
+    alert('件名を入力してください')
+    return
+  }
+  const body = String(sendForm.value.body || '').trim()
+  if (!body) {
+    alert('本文を入力してください')
+    return
+  }
+
+  sendingMail.value = true
+  try {
+    const response = await api.purchaseOrderProposals.send(proposalId, {
+      to_email: toEmail,
+      subject,
+      body: sendForm.value.body,
+    })
+    closeSendDialog()
+    await fetchDetail()
+    const result = response.data?.send_result || ''
+    const savedPath = response.data?.saved_pdf_path || ''
+    const lines = ['購入先へ送信しました']
+    if (result) lines.push(result)
+    if (savedPath) lines.push(`保存先: ${savedPath}`)
+    alert(lines.join('\n'))
+  } finally {
+    sendingMail.value = false
+  }
 }
 
 onMounted(async () => {
@@ -521,5 +655,51 @@ onMounted(async () => {
 .pending-send-hint {
   font-size: 12px;
   color: #92400e;
+}
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+.modal-content {
+  background: #fff;
+  border-radius: 8px;
+  padding: 20px;
+  width: min(980px, 96vw);
+  max-height: 88vh;
+  overflow: auto;
+}
+.send-dialog h3 {
+  margin: 0 0 14px;
+  font-size: 24px;
+}
+.send-dialog .form-group {
+  margin-bottom: 12px;
+}
+.send-dialog .form-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 16px;
+}
+.send-dialog .form-group input,
+.send-dialog .form-group textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 18px;
+  line-height: 1.45;
+  padding: 8px 10px;
+}
+.send-dialog .form-group textarea {
+  min-height: 320px;
+  resize: vertical;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 </style>

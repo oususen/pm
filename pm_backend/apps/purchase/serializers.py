@@ -176,6 +176,7 @@ class PurchaseOrderProposalListSerializer(serializers.ModelSerializer):
     supplier_order_email = serializers.CharField(source='supplier.order_email', read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)
     created_by_name = serializers.SerializerMethodField()
+    created_by_email = serializers.CharField(source='created_by.email', read_only=True)
     line_count = serializers.IntegerField(source='lines.count', read_only=True)
     pending_tasks = serializers.SerializerMethodField()
 
@@ -194,6 +195,7 @@ class PurchaseOrderProposalListSerializer(serializers.ModelSerializer):
             'created_by',
             'created_by_username',
             'created_by_name',
+            'created_by_email',
             'note',
             'generated_at',
             'updated_at',
@@ -218,6 +220,7 @@ class PurchaseOrderProposalDetailSerializer(serializers.ModelSerializer):
     supplier_order_email = serializers.CharField(source='supplier.order_email', read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)
     created_by_name = serializers.SerializerMethodField()
+    created_by_email = serializers.CharField(source='created_by.email', read_only=True)
     lines = PurchaseOrderProposalLineSerializer(many=True, read_only=True)
     approvals = PurchaseOrderProposalApprovalSerializer(many=True, read_only=True)
     tasks = PurchaseOrderTaskSerializer(many=True, read_only=True)
@@ -237,6 +240,7 @@ class PurchaseOrderProposalDetailSerializer(serializers.ModelSerializer):
             'created_by',
             'created_by_username',
             'created_by_name',
+            'created_by_email',
             'note',
             'generated_at',
             'updated_at',

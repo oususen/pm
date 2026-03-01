@@ -39,7 +39,7 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>提案書番号</th>
+            <th>注文書番号</th>
             <th>仕入先</th>
             <th>タスク種別</th>
             <th>状態</th>

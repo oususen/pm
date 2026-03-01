@@ -51,7 +51,7 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>提案書番号</th>
+            <th>注文書番号</th>
             <th>仕入先</th>
             <th>発注日</th>
             <th>希望納入日</th>

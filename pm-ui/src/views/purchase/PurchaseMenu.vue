@@ -100,7 +100,7 @@ const tiles = computed(() => [
   },
   {
     to: "/purchase/order-proposals",
-    label: "発注提案",
+    label: "発注業務",
     icon: "📝",
     required: "view",
     resource: "purchase.order_proposals",

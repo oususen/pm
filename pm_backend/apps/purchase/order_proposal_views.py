@@ -4,6 +4,7 @@ from calendar import monthrange
 from datetime import date, timedelta
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import quote
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -94,6 +95,7 @@ APPROVAL_TRANSITION = {
 
 AUTO_FILL_SOURCE_PROGRESS = 'PROGRESS'
 AUTO_FILL_SOURCE_PLANNED_STOCK = 'PLANNED_STOCK'
+AUTO_FILL_SOURCE_PLANNED_PROGRESS = 'PLANNED_PROGRESS'
 AUTO_FILL_SOURCE_DEFAULT = AUTO_FILL_SOURCE_PLANNED_STOCK
 
 PURCHASE_ORDER_PDF_FONT = 'HeiseiKakuGo-W5'
@@ -475,6 +477,8 @@ def _normalize_auto_fill_source(value):
     raw = str(value or '').strip().upper()
     if raw in ('PROGRESS', '進度'):
         return AUTO_FILL_SOURCE_PROGRESS
+    if raw in ('PLANNED_PROGRESS', '計画進度'):
+        return AUTO_FILL_SOURCE_PLANNED_PROGRESS
     if raw in ('PLANNED_STOCK', 'STOCK', '計画在庫', '在庫'):
         return AUTO_FILL_SOURCE_PLANNED_STOCK
     return AUTO_FILL_SOURCE_DEFAULT
@@ -501,7 +505,7 @@ def _build_auto_fill_lines(proposal: PurchaseOrderProposal, horizon_days: int = 
                 plan_date__lte=end_date,
             )
             .order_by('plan_date')
-            .values('plan_date', 'planned_stock_qty', 'progress_qty')
+            .values('plan_date', 'planned_stock_qty', 'progress_qty', 'planned_progress_qty')
         )
         if not rows:
             continue
@@ -513,6 +517,9 @@ def _build_auto_fill_lines(proposal: PurchaseOrderProposal, horizon_days: int = 
         for row in rows:
             if source == AUTO_FILL_SOURCE_PROGRESS:
                 reference_value = int(row['progress_qty'] or 0)
+                current_shortage = abs(reference_value) if reference_value < 0 else 0
+            elif source == AUTO_FILL_SOURCE_PLANNED_PROGRESS:
+                reference_value = int(row['planned_progress_qty'] or 0)
                 current_shortage = abs(reference_value) if reference_value < 0 else 0
             else:
                 reference_value = int(row['planned_stock_qty'] or 0)
@@ -578,8 +585,45 @@ def _short_text(value, limit: int):
 
 
 def _proposal_pdf_filename(proposal: PurchaseOrderProposal):
-    safe_no = str(proposal.proposal_no or '').replace('/', '_')
-    return f'purchase_order_{safe_no}.pdf'
+    return f'{_proposal_pdf_stem(proposal)}.pdf'
+
+
+def _sanitize_filename_part(value, fallback: str = '-'):
+    raw = str(value or '').strip()
+    sanitized = re.sub(r'[\\/:*?"<>|]+', '_', raw)
+    sanitized = re.sub(r'\s+', '', sanitized)
+    return sanitized or fallback
+
+
+def _proposal_daily_serial_no(proposal: PurchaseOrderProposal):
+    proposal_no = str(proposal.proposal_no or '')
+    matched = re.search(r'-(\d+)$', proposal_no)
+    if matched:
+        try:
+            return str(int(matched.group(1)))
+        except (TypeError, ValueError):
+            pass
+    return str(proposal.id or 1)
+
+
+def _proposal_total_order_amount(proposal: PurchaseOrderProposal):
+    total = 0
+    for row in proposal.lines.all():
+        try:
+            qty = int(row.order_qty or 0)
+        except (TypeError, ValueError):
+            qty = 0
+        if qty > 0:
+            total += qty
+    return total
+
+
+def _proposal_pdf_stem(proposal: PurchaseOrderProposal):
+    order_date = proposal.order_date.strftime('%Y%m%d') if proposal.order_date else '00000000'
+    supplier_code = _sanitize_filename_part(getattr(proposal.supplier, 'supplier_code', ''), 'UNKNOWN')
+    total_amount = _proposal_total_order_amount(proposal)
+    daily_serial = _proposal_daily_serial_no(proposal)
+    return f'{order_date}_{supplier_code}_{total_amount}_注文書_{daily_serial}'
 
 
 def _build_saved_purchase_order_pdf_path(proposal: PurchaseOrderProposal):
@@ -589,11 +633,10 @@ def _build_saved_purchase_order_pdf_path(proposal: PurchaseOrderProposal):
 
     base_dir = Path(settings.MEDIA_ROOT)
     supplier_code = re.sub(r'[^0-9A-Za-z_-]+', '_', str(getattr(proposal.supplier, 'supplier_code', '') or 'UNKNOWN'))
-    proposal_no = re.sub(r'[^0-9A-Za-z_-]+', '_', str(proposal.proposal_no or proposal.id))
     target_dir = base_dir / 'purchase_orders' / f'{now.year:04d}' / f'{now.month:02d}' / supplier_code
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    stem = f'{proposal_no}_{now.strftime("%Y%m%d%H%M%S")}'
+    stem = _proposal_pdf_stem(proposal)
     target_path = target_dir / f'{stem}.pdf'
     suffix = 1
     while target_path.exists():
@@ -629,14 +672,21 @@ def _build_purchase_order_email_subject(proposal: PurchaseOrderProposal):
 
 
 def _build_purchase_order_email_body(proposal: PurchaseOrderProposal):
+    creator_name = _display_user_name(getattr(proposal, 'created_by', None)) or '-'
+    creator_email = str(getattr(getattr(proposal, 'created_by', None), 'email', '') or '').strip() or '-'
     return (
         f'{proposal.supplier.supplier_name} 御中\n\n'
         'お世話になっております。\n'
         '発注書を送付いたします。\n\n'
-        f'提案書番号: {proposal.proposal_no}\n'
+        f'注文書番号: {proposal.proposal_no}\n'
         f'発注日: {proposal.order_date}\n'
         f'希望納入日: {proposal.desired_delivery_date}\n\n'
-        '添付のPDFをご確認のうえ、手配をお願いいたします。\n'
+        '添付のPDFをご確認のうえ、手配をお願いいたします。\n\n'
+        '------------------------------\n'
+        'ダイソウ工業株式会社\n'
+        f'{creator_name}\n\n'
+        'ご不明な点がございましたら下記までご連絡ください。\n'
+        f'Email:{creator_email}\n'
     )
 
 
@@ -678,7 +728,7 @@ def _build_purchase_order_pdf(proposal: PurchaseOrderProposal):
 
         pdf.setFont(font_name, 10)
         y -= 6 * mm
-        pdf.drawString(left_margin, y, f'提案書番号: {proposal.proposal_no}')
+        pdf.drawString(left_margin, y, f'注文書番号: {proposal.proposal_no}')
         pdf.drawRightString(page_width - left_margin, y, f'出力日: {_format_pdf_output_date()}')
         y -= 5 * mm
         pdf.drawString(left_margin, y, f'仕入先: {proposal.supplier.supplier_code} {proposal.supplier.supplier_name}')
@@ -1333,7 +1383,9 @@ class PurchaseOrderProposalPdfView(APIView):
 
         pdf_buffer = _build_purchase_order_pdf(proposal)
         response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{_proposal_pdf_filename(proposal)}"'
+        filename = _proposal_pdf_filename(proposal)
+        quoted = quote(filename)
+        response['Content-Disposition'] = f"attachment; filename*=UTF-8''{quoted}"
         return response
 
 
