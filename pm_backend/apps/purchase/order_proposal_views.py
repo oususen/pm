@@ -85,7 +85,7 @@ APPROVAL_TRANSITION = {
         'level': 4,
         'next_status': PurchaseOrderProposal.STATUS_APPROVED,
         'next_level': None,
-        'next_task_type': PurchaseOrderTask.TASK_SEND_TO_SUPPLIER,
+        'next_task_type': PurchaseOrderTask.TASK_CREATE_ORDER_PDF,
     },
 }
 
@@ -283,11 +283,12 @@ def _resolve_purchase_line_for_supplier(supplier: Supplier):
     return line_obj
 
 
-def _create_notification(title: str, description: str, users):
+def _create_notification(title: str, description: str, users, operator_name: str | None = None):
     user_ids = sorted({u.id for u in users if getattr(u, 'id', None)})
     if not user_ids:
         return
     today = get_business_today()
+    operator = (operator_name or '').strip() or 'system'
     notification = Notification.objects.create(
         title=title[:200],
         category='購買',
@@ -296,9 +297,28 @@ def _create_notification(title: str, description: str, users):
         valid_to=today + timedelta(days=14),
         display_order=0,
         description=description or '',
-        operator_name='system',
+        operator_name=operator,
     )
     notification.target_users.set(user_ids)
+
+
+def _display_user_name(user):
+    if not user or not getattr(user, 'id', None):
+        return ''
+    full_name = (user.get_full_name() or '').strip()
+    if full_name:
+        return full_name
+    return (getattr(user, 'username', '') or '').strip()
+
+
+def _resolve_notification_operator_name(proposal: PurchaseOrderProposal, fallback_user=None):
+    creator_name = _display_user_name(getattr(proposal, 'created_by', None))
+    if creator_name:
+        return creator_name
+    fallback_name = _display_user_name(fallback_user)
+    if fallback_name:
+        return fallback_name
+    return 'system'
 
 
 def _create_tasks_for_users(proposal: PurchaseOrderProposal, task_type: str, users, due_date: date | None = None):
@@ -340,6 +360,53 @@ def _mark_all_pending_tasks_skipped(proposal: PurchaseOrderProposal):
         proposal=proposal,
         status=PurchaseOrderTask.STATUS_PENDING,
     ).update(status=PurchaseOrderTask.STATUS_SKIPPED, done_at=now)
+
+
+def _complete_order_pdf_task_for_user(proposal: PurchaseOrderProposal, user) -> bool:
+    if not user or not getattr(user, 'id', None):
+        return False
+
+    now = timezone.now()
+    updated = PurchaseOrderTask.objects.filter(
+        proposal=proposal,
+        task_type=PurchaseOrderTask.TASK_CREATE_ORDER_PDF,
+        assigned_to=user,
+        status=PurchaseOrderTask.STATUS_PENDING,
+    ).update(status=PurchaseOrderTask.STATUS_DONE, done_at=now)
+
+    # 旧データ互換: 既に SEND_TO_SUPPLIER タスクが直接作られていた提案に対して
+    # 注文書作成実行時に完了履歴を補完する。
+    if not updated and proposal.status == PurchaseOrderProposal.STATUS_APPROVED:
+        has_pending_send = PurchaseOrderTask.objects.filter(
+            proposal=proposal,
+            task_type=PurchaseOrderTask.TASK_SEND_TO_SUPPLIER,
+            assigned_to=user,
+            status=PurchaseOrderTask.STATUS_PENDING,
+        ).exists()
+        has_create_task_row = PurchaseOrderTask.objects.filter(
+            proposal=proposal,
+            task_type=PurchaseOrderTask.TASK_CREATE_ORDER_PDF,
+            assigned_to=user,
+        ).exists()
+        if has_pending_send and not has_create_task_row:
+            PurchaseOrderTask.objects.create(
+                proposal=proposal,
+                task_type=PurchaseOrderTask.TASK_CREATE_ORDER_PDF,
+                assigned_to=user,
+                status=PurchaseOrderTask.STATUS_DONE,
+                due_date=proposal.order_date,
+                done_at=now,
+            )
+            updated = 1
+
+    if updated:
+        _create_tasks_for_users(
+            proposal=proposal,
+            task_type=PurchaseOrderTask.TASK_SEND_TO_SUPPLIER,
+            users=[user],
+            due_date=proposal.order_date,
+        )
+    return bool(updated)
 
 
 def _delivery_date_with_supplier_calendar(order_date: date, lead_time_days: int, supplier: Supplier):
@@ -508,6 +575,20 @@ def _proposal_pdf_filename(proposal: PurchaseOrderProposal):
     return f'purchase_order_{safe_no}.pdf'
 
 
+def _format_pdf_output_date():
+    current = timezone.now()
+    if timezone.is_aware(current):
+        current = timezone.localtime(current)
+    return current.date().isoformat()
+
+
+def _format_pdf_output_datetime(value=None, fmt: str = '%Y-%m-%d %H:%M'):
+    current = value or timezone.now()
+    if timezone.is_aware(current):
+        current = timezone.localtime(current)
+    return current.strftime(fmt)
+
+
 def _build_purchase_order_email_subject(proposal: PurchaseOrderProposal):
     return f'【発注書】{proposal.proposal_no} {proposal.supplier.supplier_name}'
 
@@ -563,7 +644,7 @@ def _build_purchase_order_pdf(proposal: PurchaseOrderProposal):
         pdf.setFont(font_name, 10)
         y -= 6 * mm
         pdf.drawString(left_margin, y, f'提案書番号: {proposal.proposal_no}')
-        pdf.drawRightString(page_width - left_margin, y, f'出力日: {timezone.localdate()}')
+        pdf.drawRightString(page_width - left_margin, y, f'出力日: {_format_pdf_output_date()}')
         y -= 5 * mm
         pdf.drawString(left_margin, y, f'仕入先: {proposal.supplier.supplier_code} {proposal.supplier.supplier_name}')
         y -= 5 * mm
@@ -624,7 +705,7 @@ def _build_purchase_order_pdf(proposal: PurchaseOrderProposal):
                     user_name = (row.approved_by.get_full_name() or '').strip() or row.approved_by.username
                 approved_at = ''
                 if row.approved_at:
-                    approved_at = timezone.localtime(row.approved_at).strftime('%Y-%m-%d %H:%M')
+                    approved_at = _format_pdf_output_datetime(row.approved_at)
                 sign_rows[1][level - 1] = _short_text(user_name, 14)
                 sign_rows[2][level - 1] = approved_at
 
@@ -641,7 +722,7 @@ def _build_purchase_order_pdf(proposal: PurchaseOrderProposal):
             sign_table.drawOn(pdf, left_margin, y - sign_height)
 
         pdf.setFont(font_name, 8)
-        pdf.drawRightString(page_width - left_margin, 8 * mm, f'出力日時: {timezone.localtime().strftime("%Y-%m-%d %H:%M")}')
+        pdf.drawRightString(page_width - left_margin, 8 * mm, f'出力日時: {_format_pdf_output_datetime()}')
 
         if page_index < len(chunks) - 1:
             pdf.showPage()
@@ -925,6 +1006,15 @@ class PurchaseOrderProposalDetailView(APIView):
         )
         return Response(PurchaseOrderProposalDetailSerializer(proposal).data)
 
+    def delete(self, request, pk: int):
+        proposal = PurchaseOrderProposal.objects.filter(pk=pk).first()
+        if not proposal:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        if proposal.status != PurchaseOrderProposal.STATUS_DRAFT:
+            return Response({'detail': 'DRAFTのみ削除できます'}, status=status.HTTP_400_BAD_REQUEST)
+        proposal.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class PurchaseOrderProposalSubmitView(APIView):
     permission_classes = [IsAuthenticated]
@@ -972,6 +1062,7 @@ class PurchaseOrderProposalSubmitView(APIView):
             title=f'発注提案書 承認依頼: {proposal.proposal_no}',
             description='班長承認待ちです。',
             users=level2_users + list(level2_config.notify_users.all()),
+            operator_name=_resolve_notification_operator_name(proposal, request.user),
         )
 
         proposal = (
@@ -1002,7 +1093,7 @@ class PurchaseOrderProposalApproveView(APIView):
 
         next_users = []
         notify_users = []
-        if next_task_type == PurchaseOrderTask.TASK_SEND_TO_SUPPLIER:
+        if next_task_type in (PurchaseOrderTask.TASK_CREATE_ORDER_PDF, PurchaseOrderTask.TASK_SEND_TO_SUPPLIER):
             level4_config = _get_approval_config(4)
             next_users = list(level4_config.notify_users.all())
             if not next_users:
@@ -1036,10 +1127,14 @@ class PurchaseOrderProposalApproveView(APIView):
                 )
 
         if notify_users:
+            notify_description = f'ステータスが {next_status} になりました。'
+            if next_task_type == PurchaseOrderTask.TASK_CREATE_ORDER_PDF:
+                notify_description = '最終承認済みです。注文書作成を行ってください。'
             _create_notification(
                 title=f'発注提案書 承認依頼: {proposal.proposal_no}',
-                description=f'ステータスが {next_status} になりました。',
+                description=notify_description,
                 users=notify_users,
+                operator_name=_resolve_notification_operator_name(proposal, request.user),
             )
 
         proposal = (
@@ -1104,6 +1199,7 @@ class PurchaseOrderProposalRejectView(APIView):
             title=f'発注提案書 差戻: {proposal.proposal_no}',
             description=comment,
             users=notify_users,
+            operator_name=_resolve_notification_operator_name(proposal, request.user),
         )
 
         proposal = (
@@ -1130,6 +1226,12 @@ class PurchaseOrderProposalSendView(APIView):
             return Response({'detail': '最終承認済みのみ送信できます'}, status=status.HTTP_400_BAD_REQUEST)
         if not proposal.lines.exists():
             return Response({'detail': '明細がないため送信できません'}, status=status.HTTP_400_BAD_REQUEST)
+        if PurchaseOrderTask.objects.filter(
+            proposal=proposal,
+            task_type=PurchaseOrderTask.TASK_CREATE_ORDER_PDF,
+            status=PurchaseOrderTask.STATUS_PENDING,
+        ).exists():
+            return Response({'detail': '先に注文書作成を実行してください'}, status=status.HTTP_400_BAD_REQUEST)
 
         to_email = str(proposal.supplier.order_email or '').strip()
         if not to_email:
@@ -1169,12 +1271,19 @@ class PurchaseOrderProposalPdfView(APIView):
     def get(self, request, pk: int):
         proposal = (
             PurchaseOrderProposal.objects.select_related('supplier', 'created_by')
-            .prefetch_related('lines__product', 'lines__line', 'approvals__approved_by')
+            .prefetch_related('lines__product', 'lines__line', 'approvals__approved_by', 'tasks')
             .filter(pk=pk)
             .first()
         )
         if not proposal:
             return Response(status=status.HTTP_404_NOT_FOUND)
+
+        if proposal.status == PurchaseOrderProposal.STATUS_APPROVED:
+            with transaction.atomic():
+                _complete_order_pdf_task_for_user(
+                    proposal=proposal,
+                    user=request.user if request.user.is_authenticated else None,
+                )
 
         pdf_buffer = _build_purchase_order_pdf(proposal)
         response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
@@ -1215,11 +1324,6 @@ class PurchaseOrderProposalAutoFillView(APIView):
                 serializer = PurchaseOrderProposalLineSerializer(data=line_data)
                 serializer.is_valid(raise_exception=True)
                 created.append(serializer.save(proposal=proposal))
-
-            shortage_dates = [row.shortage_date for row in created if row.shortage_date]
-            if shortage_dates:
-                proposal.desired_delivery_date = min(shortage_dates)
-                proposal.save(update_fields=['desired_delivery_date', 'updated_at'])
 
         proposal = (
             PurchaseOrderProposal.objects.select_related('supplier', 'created_by')

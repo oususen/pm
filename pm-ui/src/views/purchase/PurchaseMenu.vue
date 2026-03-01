@@ -105,13 +105,6 @@ const tiles = computed(() => [
     required: "view",
     resource: "purchase.order_proposals",
   },
-  {
-    to: "/purchase/order-tasks",
-    label: "発注タスク",
-    icon: "📌",
-    required: "view",
-    resource: "purchase.order_proposals",
-  },
 ].map((tile) => ({
   ...tile,
   disabled: !hasMenuPermission(tile.resource, tile.required),

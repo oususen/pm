@@ -103,6 +103,7 @@
         >
           <span>📌</span>
           <span class="btn-label">タスク</span>
+          <span v-if="pendingTaskCount" class="task-badge">{{ pendingTaskCount }}</span>
         </RouterLink>
         <RouterLink to="/settings" class="nav-action-btn" :title="t('nav.settings')" v-if="!isMobile">
           <span>⚙️</span>
@@ -241,6 +242,7 @@ const userAccountName = computed(() => {
 const showUserMenu = ref(false)
 const showNotificationMenu = ref(false)
 const notifications = ref([])
+const pendingTaskCount = ref(0)
 const previousNotificationIds = ref(new Set())
 const pollingInterval = ref(null)
 const POLLING_INTERVAL_MS = 30000 // 30秒ごとにポーリング
@@ -311,13 +313,24 @@ const matchesUserTarget = (targetUsers, userId) => {
 }
 
 const activeNotifications = computed(() => {
-  const today = new Date()
-  const todayYmd = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const parseLocalDate = (value) => {
+    if (!value) return null
+    const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value))
+    if (matched) {
+      return new Date(Number(matched[1]), Number(matched[2]) - 1, Number(matched[3]))
+    }
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return null
+    return parsed
+  }
+
+  const now = new Date()
+  const todayYmd = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const userId = authState.user?.id
   return notifications.value.filter((item) => {
     if (!item) return false
-    const from = item.valid_from ? new Date(item.valid_from) : null
-    const to = item.valid_to ? new Date(item.valid_to) : null
+    const from = parseLocalDate(item.valid_from)
+    const to = parseLocalDate(item.valid_to)
     if (from && todayYmd < from) return false
     if (to && todayYmd > to) return false
     const targetDepartments = Array.isArray(item.target_departments) ? item.target_departments : []
@@ -359,6 +372,24 @@ const loadNotifications = async () => {
     notifications.value = Array.isArray(data) ? data : []
   } catch (error) {
     console.error('通知取得エラー:', error)
+  }
+}
+
+const loadPendingTaskCount = async () => {
+  if (!authState.user) {
+    pendingTaskCount.value = 0
+    return
+  }
+  try {
+    const response = await api.purchaseOrderProposals.listTasks({
+      assigned_to_me: true,
+      status: 'PENDING',
+    })
+    const rows = response.data || []
+    pendingTaskCount.value = Array.isArray(rows) ? rows.length : 0
+  } catch (error) {
+    console.error('タスク件数の取得に失敗しました:', error)
+    pendingTaskCount.value = 0
   }
 }
 
@@ -457,11 +488,16 @@ const checkForNewNotifications = (currentIds) => {
 
 // ポーリングで通知を取得
 const pollNotifications = async () => {
-  if (!authState.user || !canAccessNotifications.value) return
+  if (!authState.user) return
 
   try {
-    await loadDepartments()
-    await loadNotifications()
+    if (canAccessNotifications.value) {
+      await loadDepartments()
+      await loadNotifications()
+    } else {
+      notifications.value = []
+    }
+    await loadPendingTaskCount()
 
     // 未読通知のIDセットを作成（未読ベースで新着検出）
     const currentIds = new Set(unreadNotifications.value.map((n) => n.id))
@@ -473,7 +509,7 @@ const pollNotifications = async () => {
 
 // ポーリング開始
 const startPolling = () => {
-  if (!canAccessNotifications.value) return
+  if (!authState.user) return
   if (pollingInterval.value) return
 
   // 初回実行
@@ -519,13 +555,14 @@ onUnmounted(() => {
 
 // ユーザーのログイン状態を監視してポーリングを制御
 watch(
-  () => [authState.user, canAccessNotifications.value],
-  ([newUser, canNotify]) => {
-    if (newUser && canNotify) {
+  () => authState.user,
+  (newUser) => {
+    if (newUser) {
       startPolling()
     } else {
       stopPolling()
       notifications.value = []
+      pendingTaskCount.value = 0
       previousNotificationIds.value = new Set()
     }
   }
@@ -826,6 +863,16 @@ const handleLogout = async () => {
 }
 
 .notification-badge {
+  background: #ef4444;
+  color: #fff;
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 10px;
+  line-height: 16px;
+  font-weight: 700;
+}
+
+.task-badge {
   background: #ef4444;
   color: #fff;
   border-radius: 999px;

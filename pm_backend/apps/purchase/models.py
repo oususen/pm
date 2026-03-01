@@ -191,12 +191,14 @@ class PurchaseOrderApprovalConfig(models.Model):
 
 class PurchaseOrderTask(models.Model):
     TASK_CREATE_PROPOSAL = 'CREATE_PROPOSAL'
+    TASK_CREATE_ORDER_PDF = 'CREATE_ORDER_PDF'
     TASK_APPROVE_L2 = 'APPROVE_L2'
     TASK_APPROVE_L3 = 'APPROVE_L3'
     TASK_APPROVE_L4 = 'APPROVE_L4'
     TASK_SEND_TO_SUPPLIER = 'SEND_TO_SUPPLIER'
     TASK_TYPE_CHOICES = [
         (TASK_CREATE_PROPOSAL, '発注提案書作成'),
+        (TASK_CREATE_ORDER_PDF, '注文書作成'),
         (TASK_APPROVE_L2, '班長承認'),
         (TASK_APPROVE_L3, '係長承認'),
         (TASK_APPROVE_L4, '事業部長承認'),

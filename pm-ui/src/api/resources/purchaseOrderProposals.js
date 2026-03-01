@@ -11,6 +11,9 @@ export const createPurchaseOrderProposalsAPI = (client) => ({
   update(id, data) {
     return client.put(`/purchase-order-proposals/${id}/`, data)
   },
+  delete(id) {
+    return client.delete(`/purchase-order-proposals/${id}/`)
+  },
   submit(id, data = {}) {
     return client.post(`/purchase-order-proposals/${id}/submit/`, data)
   },

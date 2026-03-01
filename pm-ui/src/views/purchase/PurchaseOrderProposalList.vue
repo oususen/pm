@@ -72,6 +72,13 @@
             <td>{{ (row.pending_tasks || []).join(', ') }}</td>
             <td>
               <button class="btn-sm" @click="goDetail(row.id)">詳細</button>
+              <button
+                v-if="canDelete(row)"
+                class="btn-sm btn-danger"
+                @click="deleteProposal(row)"
+              >
+                削除
+              </button>
             </td>
           </tr>
         </tbody>
@@ -119,6 +126,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api/client'
+import { authState } from '@/auth'
 
 const router = useRouter()
 
@@ -186,6 +194,20 @@ const resetFilters = async () => {
 
 const goDetail = (id) => {
   router.push(`/purchase/order-proposals/${id}`)
+}
+
+const canDelete = (row) => {
+  const currentUserId = authState.user?.id
+  if (!currentUserId) return false
+  return row.status === 'DRAFT' && Number(row.created_by) === Number(currentUserId)
+}
+
+const deleteProposal = async (row) => {
+  if (!canDelete(row)) return
+  if (!confirm(`提案書 ${row.proposal_no} を削除しますか？`)) return
+  await api.purchaseOrderProposals.delete(row.id)
+  await fetchList()
+  alert('削除しました')
 }
 
 const openCreateDialog = () => {

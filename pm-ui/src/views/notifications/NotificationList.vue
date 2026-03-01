@@ -5,6 +5,9 @@
     <div class="list-card">
       <div class="list-header">
         <div class="list-note">通知の一覧を表示します。</div>
+        <button class="btn confirm-all-btn" type="button" @click="handleMarkAllRead" :disabled="!unreadCount">
+          すべて確認済み
+        </button>
       </div>
 
       <table class="notification-table">
@@ -19,6 +22,7 @@
             <th>対象者</th>
             <th>入力者</th>
             <th>説明</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -33,9 +37,20 @@
               <td>{{ getTargetLabel(item) }}</td>
               <td>{{ item.operator_name || '-' }}</td>
               <td class="description">{{ item.description || '-' }}</td>
+              <td class="action-cell">
+                <button
+                  v-if="!item.is_read"
+                  class="btn confirm-btn-inline"
+                  type="button"
+                  @click.stop="handleMarkRead(item.id)"
+                >
+                  ✓ 確認
+                </button>
+                <span v-else class="confirmed-label">確認済み</span>
+              </td>
             </tr>
             <tr v-if="expandedIds.has(item.id)" class="row-detail">
-              <td colspan="9">
+              <td colspan="10">
                 <div class="detail-grid">
                   <div class="detail-item">
                     <span class="detail-label">タイトル</span>
@@ -69,6 +84,14 @@
                   </div>
                   <div class="detail-item full detail-actions">
                     <button
+                      v-if="isPurchaseOrderNotification(item)"
+                      class="btn task-link-btn"
+                      type="button"
+                      @click.stop="openTaskInbox(item)"
+                    >
+                      📌 タスクへ
+                    </button>
+                    <button
                       v-if="!item.is_read"
                       class="btn confirm-btn"
                       @click.stop="handleMarkRead(item.id)"
@@ -82,7 +105,7 @@
             </tr>
           </template>
           <tr v-if="!sortedNotifications.length">
-            <td colspan="9" class="empty">通知はありません。</td>
+            <td colspan="10" class="empty">通知はありません。</td>
           </tr>
         </tbody>
       </table>
@@ -92,9 +115,11 @@
 
 <script setup>
 import { ref, computed, onMounted } from "vue";
+import { useRouter } from "vue-router";
 import { authState } from "@/auth";
 import api from "@/api/client";
 
+const router = useRouter();
 const notifications = ref([]);
 const expandedIds = ref(new Set());
 const departments = ref([]);
@@ -163,11 +188,22 @@ const matchesPositionTarget = (targetPositions, userPosition) => {
   return targetPositions.some((pos) => String(pos) === String(userPosition));
 };
 
+const parseLocalDate = (value) => {
+  if (!value) return null;
+  const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value));
+  if (matched) {
+    return new Date(Number(matched[1]), Number(matched[2]) - 1, Number(matched[3]));
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
 const isWithinRange = (item) => {
-  const today = new Date();
-  const todayYmd = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const from = item.valid_from ? new Date(item.valid_from) : null;
-  const to = item.valid_to ? new Date(item.valid_to) : null;
+  const now = new Date();
+  const todayYmd = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const from = parseLocalDate(item.valid_from);
+  const to = parseLocalDate(item.valid_to);
   if (from && todayYmd < from) return false;
   if (to && todayYmd > to) return false;
   return true;
@@ -220,6 +256,8 @@ const sortedNotifications = computed(() => {
   });
 });
 
+const unreadCount = computed(() => filteredNotifications.value.filter((item) => !item.is_read).length);
+
 const getDomainLabel = (domain) => {
   const found = domainOptions.find((opt) => opt.value === domain);
   return found ? found.label : domain;
@@ -233,11 +271,17 @@ const getCategoryLabel = (category) => {
 const getTargetLabel = (item) => {
   const deptNames = Array.isArray(item.target_department_names) ? item.target_department_names : [];
   const posList = Array.isArray(item.target_positions) ? item.target_positions : [];
+  const userNames = Array.isArray(item.target_user_names) ? item.target_user_names : [];
   const deptText = deptNames.length ? deptNames.join(" / ") : "";
   const posText = posList.length ? posList.join(" / ") : "";
+  const userText = userNames.length ? userNames.join(" / ") : "";
+  if (deptText && posText && userText) return `${deptText} / ${posText} / ${userText}`;
   if (deptText && posText) return `${deptText} / ${posText}`;
+  if (deptText && userText) return `${deptText} / ${userText}`;
+  if (posText && userText) return `${posText} / ${userText}`;
   if (deptText) return deptText;
   if (posText) return posText;
+  if (userText) return userText;
   return "-";
 };
 
@@ -280,6 +324,15 @@ const formatDateRange = (from, to) => {
   return "-";
 };
 
+const isPurchaseOrderNotification = (item) => {
+  const domain = String(item?.domain || "").toUpperCase();
+  return domain === "PURCHASE_ORDER";
+};
+
+const openTaskInbox = () => {
+  router.push("/tasks");
+};
+
 const handleMarkRead = async (id) => {
   try {
     await api.notifications.markRead(id);
@@ -287,6 +340,17 @@ const handleMarkRead = async (id) => {
     await loadNotifications();
   } catch (error) {
     console.error("確認処理に失敗しました:", error);
+  }
+};
+
+const handleMarkAllRead = async () => {
+  const targetIds = filteredNotifications.value.filter((item) => !item.is_read).map((item) => item.id);
+  if (!targetIds.length) return;
+  try {
+    await api.notifications.markAllRead(targetIds);
+    await loadNotifications();
+  } catch (error) {
+    console.error("一括確認処理に失敗しました:", error);
   }
 };
 
@@ -367,6 +431,10 @@ onMounted(() => {
   color: #475569;
 }
 
+.action-cell {
+  white-space: nowrap;
+}
+
 .empty {
   text-align: center;
   padding: 16px;
@@ -418,9 +486,21 @@ onMounted(() => {
 }
 
 .detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid #e2e8f0;
+}
+
+.task-link-btn {
+  background: #2563eb;
+  color: #fff;
+}
+
+.task-link-btn:hover {
+  background: #1d4ed8;
 }
 
 .confirm-btn {
@@ -430,6 +510,27 @@ onMounted(() => {
 
 .confirm-btn:hover {
   background: #059669;
+}
+
+.confirm-btn-inline {
+  background: #10b981;
+  color: #fff;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.confirm-btn-inline:hover {
+  background: #059669;
+}
+
+.confirm-all-btn {
+  background: #0f766e;
+  color: #fff;
+}
+
+.confirm-all-btn:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
 }
 
 .confirmed-label {

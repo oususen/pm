@@ -108,7 +108,17 @@
         <button class="btn-success" v-if="canApprove" @click="approveProposal">承認</button>
         <button class="btn-danger" v-if="canReject" @click="rejectProposal">差戻</button>
         <button class="btn-secondary" v-if="canGenerateOrderPdf" @click="downloadOrderPdf">注文書作成</button>
-        <button class="btn-success" v-if="proposal.status === 'APPROVED'" @click="sendProposal">購入先へ送信</button>
+        <button
+          class="btn-success"
+          v-if="proposal.status === 'APPROVED'"
+          :disabled="hasPendingCreateOrderPdfTask"
+          @click="sendProposal"
+        >
+          購入先へ送信
+        </button>
+        <span v-if="proposal.status === 'APPROVED' && hasPendingCreateOrderPdfTask" class="pending-send-hint">
+          注文書作成後に送信できます
+        </span>
       </div>
 
       <div class="section">
@@ -207,6 +217,14 @@ const canReject = computed(() =>
 )
 const canGenerateOrderPdf = computed(() =>
   proposal.value && ['APPROVED', 'SENT'].includes(proposal.value.status)
+)
+const hasPendingCreateOrderPdfTask = computed(() =>
+  Boolean(
+    proposal.value &&
+      (proposal.value.tasks || []).some(
+        (row) => row.task_type === 'CREATE_ORDER_PDF' && row.status === 'PENDING'
+      )
+  )
 )
 
 const goBack = () => {
@@ -348,20 +366,57 @@ const resolvePdfFilename = (contentDisposition, fallback) => {
   return fallback
 }
 
+const parsePdfErrorMessage = async (error) => {
+  try {
+    const response = error?.response
+    if (!response) return '注文書PDFの作成に失敗しました'
+    const payload = response.data
+    if (payload instanceof Blob) {
+      const text = await payload.text()
+      try {
+        const json = JSON.parse(text)
+        if (json?.detail) return String(json.detail)
+      } catch (_) {
+        if (text) return text
+      }
+      return '注文書PDFの作成に失敗しました'
+    }
+    if (payload?.detail) return String(payload.detail)
+    return '注文書PDFの作成に失敗しました'
+  } catch (_) {
+    return '注文書PDFの作成に失敗しました'
+  }
+}
+
 const downloadOrderPdf = async () => {
-  const response = await api.purchaseOrderProposals.downloadPdf(proposalId)
-  const blob = new Blob([response.data], { type: 'application/pdf' })
-  const contentDisposition = response.headers?.['content-disposition'] || ''
-  const fallbackName = `purchase_order_${proposal.value?.proposal_no || proposalId}.pdf`
-  const filename = resolvePdfFilename(contentDisposition, fallbackName)
-  const url = window.URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  window.URL.revokeObjectURL(url)
+  try {
+    const response = await api.purchaseOrderProposals.downloadPdf(proposalId)
+    const blob = new Blob([response.data], { type: 'application/pdf' })
+    const contentDisposition = response.headers?.['content-disposition'] || ''
+    const fallbackName = `purchase_order_${proposal.value?.proposal_no || proposalId}.pdf`
+    const filename = resolvePdfFilename(contentDisposition, fallbackName)
+    const url = window.URL.createObjectURL(blob)
+
+    const opened = window.open(url, '_blank')
+    if (!opened) {
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      alert('PDFをダウンロードしました（ポップアップを許可すると画面表示できます）')
+    }
+
+    window.setTimeout(() => {
+      window.URL.revokeObjectURL(url)
+    }, 60000)
+
+    await fetchDetail()
+  } catch (error) {
+    const message = await parsePdfErrorMessage(error)
+    alert(message)
+  }
 }
 
 const sendProposal = async () => {
@@ -421,5 +476,10 @@ onMounted(async () => {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  align-items: center;
+}
+.pending-send-hint {
+  font-size: 12px;
+  color: #92400e;
 }
 </style>
