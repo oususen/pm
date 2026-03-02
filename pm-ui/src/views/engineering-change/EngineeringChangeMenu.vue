@@ -27,10 +27,13 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { authState } from "@/auth";
 import { hasPermission } from "@/router";
 import { RouterLink } from "vue-router";
+import api from "@/api/client";
+
+const permissionReady = ref(false);
 
 const canAccessEngineeringChange = (level = "view") => {
   const user = authState.user;
@@ -38,13 +41,28 @@ const canAccessEngineeringChange = (level = "view") => {
   return hasPermission(user, "engineering_change", level);
 };
 
-const canView = computed(() => canAccessEngineeringChange("view"));
-const canEdit = computed(() => canAccessEngineeringChange("edit"));
+const canView = computed(() => permissionReady.value && canAccessEngineeringChange("view"));
+const canEdit = computed(() => permissionReady.value && canAccessEngineeringChange("edit"));
+
+const refreshAuthPermission = async () => {
+  try {
+    const response = await api.auth.me();
+    authState.user = response.data?.authenticated ? response.data?.user || null : null;
+  } catch (_) {
+    authState.user = null;
+  } finally {
+    permissionReady.value = true;
+  }
+};
 
 const onNewTileClick = (event) => {
   if (canEdit.value) return;
   event.preventDefault();
 };
+
+onMounted(async () => {
+  await refreshAuthPermission();
+});
 </script>
 
 <style scoped>

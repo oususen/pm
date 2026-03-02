@@ -200,6 +200,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
+import { authState } from '@/auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -266,12 +267,26 @@ const taskStatusMap = {
 const taskStatusLabel = (taskStatus) => taskStatusMap[taskStatus] || taskStatus
 
 const canEdit = computed(() => proposal.value && proposal.value.status === 'DRAFT')
-const canApprove = computed(() =>
-  proposal.value && ['SUBMITTED', 'APPROVED_L2', 'APPROVED_L3'].includes(proposal.value.status)
-)
-const canReject = computed(() =>
-  proposal.value && !['SENT', 'CANCELED', 'DRAFT'].includes(proposal.value.status)
-)
+const currentUserId = computed(() => Number(authState.user?.id || 0))
+const approvalTaskTypeByStatus = {
+  SUBMITTED: 'APPROVE_L2',
+  APPROVED_L2: 'APPROVE_L3',
+  APPROVED_L3: 'APPROVE_L4',
+}
+const hasMyPendingApprovalTask = computed(() => {
+  if (!proposal.value) return false
+  const expectedTaskType = approvalTaskTypeByStatus[proposal.value.status]
+  if (!expectedTaskType) return false
+  if (!currentUserId.value) return false
+  return (proposal.value.tasks || []).some(
+    (row) =>
+      row.status === 'PENDING' &&
+      row.task_type === expectedTaskType &&
+      Number(row.assigned_to) === currentUserId.value
+  )
+})
+const canApprove = computed(() => Boolean(proposal.value && hasMyPendingApprovalTask.value))
+const canReject = computed(() => Boolean(proposal.value && hasMyPendingApprovalTask.value))
 const canGenerateOrderPdf = computed(() =>
   proposal.value && ['APPROVED', 'SENT'].includes(proposal.value.status)
 )
@@ -402,6 +417,10 @@ const submitProposal = async () => {
 }
 
 const approveProposal = async () => {
+  if (!canApprove.value) {
+    alert('この承認は担当者のみ実行できます')
+    return
+  }
   const comment = window.prompt('承認コメント（任意）', '') || ''
   await api.purchaseOrderProposals.approve(proposalId, { comment })
   await fetchDetail()
@@ -409,6 +428,10 @@ const approveProposal = async () => {
 }
 
 const rejectProposal = async () => {
+  if (!canReject.value) {
+    alert('この差戻は担当者のみ実行できます')
+    return
+  }
   const comment = window.prompt('差戻理由（必須）', '')
   if (!comment || !comment.trim()) {
     alert('差戻理由を入力してください')

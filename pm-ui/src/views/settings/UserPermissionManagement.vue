@@ -361,7 +361,7 @@ const permissionResources = [
   { value: 'purchase.actual_input', label: '仕入: 仕入れ実績入力' },
   { value: 'purchase.actual_inquiry', label: '仕入: 納入実績照会' },
   { value: 'purchase.supplier_calendar', label: '仕入: 仕入れ先カレンダ' },
-  { value: 'purchase.order_proposals', label: '仕入: 発注提案' },
+  { value: 'purchase.order_proposals', label: '仕入: 発注業務' },
   { value: 'shipping', label: '出荷' },
   { value: 'inventory', label: '在庫' },
   { value: 'quality', label: '品質' },

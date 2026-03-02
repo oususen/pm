@@ -404,6 +404,8 @@ def _calculate_parent_actual_shipment(backlog, shift_fn=None):
     if not parent_bom_items.exists():
         return Decimal('0')
 
+    from django.db.models import Sum
+
     total_shipment = Decimal('0')
     for bom_item in parent_bom_items:
         parent_product = bom_item.bom.parent_product
@@ -416,20 +418,23 @@ def _calculate_parent_actual_shipment(backlog, shift_fn=None):
         parent_date = backlog.plan_date
         if shift_fn:
             parent_date = shift_fn(backlog.plan_date, lead_days)
-        downstream_backlogs = LineBacklog.objects.filter(
+        # sequence_no違いの同一工程行を集約し、仕損の重複加算を防ぐ
+        downstream_groups = LineBacklog.objects.filter(
             product=parent_product,
             plan_date=parent_date,
+        ).values('product_id', 'line_id', 'process_id', 'plan_date').annotate(
+            actual_total=Sum('actual_qty'),
         )
-        for downstream in downstream_backlogs:
-            actual = downstream.actual_qty or 0
-            # 全ての仕損を出庫に含める
+        for downstream in downstream_groups:
+            actual = int(downstream.get('actual_total') or 0)
+            # 全ての仕損を出庫に含める（line+process単位で1回のみ）
             scrap = _get_shipment_scrap_qty(
-                downstream.product_id,
-                downstream.line_id,
-                downstream.process_id,
-                downstream.plan_date
+                downstream['product_id'],
+                downstream['line_id'],
+                downstream['process_id'],
+                downstream['plan_date']
             )
-            use_qty = actual + scrap
+            use_qty = Decimal(str(actual)) + scrap
             if use_qty:
                 total_shipment += Decimal(str(use_qty)) * Decimal(str(qty_per))
 
@@ -460,6 +465,8 @@ def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None):
     if not parent_bom_items.exists():
         return Decimal('0')
 
+    from django.db.models import Sum
+
     total_shipment = Decimal('0')
     for bom_item in parent_bom_items:
         parent_product = bom_item.bom.parent_product
@@ -472,23 +479,28 @@ def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None):
         parent_date = backlog.plan_date
         if shift_fn:
             parent_date = shift_fn(backlog.plan_date, lead_days)
-        downstream_backlogs = LineBacklog.objects.filter(
+        # sequence_no違いの同一工程行を集約し、仕損の重複加算を防ぐ
+        downstream_groups = LineBacklog.objects.filter(
             product=parent_product,
             plan_date=parent_date,
+        ).values('product_id', 'line_id', 'process_id', 'plan_date').annotate(
+            actual_total=Sum('actual_qty'),
+            plan_total=Sum('plan_qty'),
         )
-        for downstream in downstream_backlogs:
-            actual = downstream.actual_qty or 0
-            # 全ての仕損を出庫に含める
+        for downstream in downstream_groups:
+            actual = int(downstream.get('actual_total') or 0)
+            plan = int(downstream.get('plan_total') or 0)
+            # 全ての仕損を出庫に含める（line+process単位で1回のみ）
             scrap = _get_shipment_scrap_qty(
-                downstream.product_id,
-                downstream.line_id,
-                downstream.process_id,
-                downstream.plan_date
+                downstream['product_id'],
+                downstream['line_id'],
+                downstream['process_id'],
+                downstream['plan_date']
             )
             if actual > 0 or scrap > 0:
-                use_qty = actual + scrap
+                use_qty = Decimal(str(actual)) + scrap
             else:
-                use_qty = downstream.plan_qty or 0
+                use_qty = Decimal(str(plan))
             if use_qty:
                 total_shipment += Decimal(str(use_qty)) * Decimal(str(qty_per))
 
@@ -518,6 +530,8 @@ def _calculate_parent_planned_shipment(backlog, today, shift_fn):
     if not parent_bom_items.exists():
         return Decimal('0')
 
+    from django.db.models import Sum
+
     total_shipment = Decimal('0')
     for bom_item in parent_bom_items:
         parent_product = bom_item.bom.parent_product
@@ -530,20 +544,23 @@ def _calculate_parent_planned_shipment(backlog, today, shift_fn):
         parent_date = backlog.plan_date
         if shift_fn:
             parent_date = shift_fn(backlog.plan_date, lead_days)
-        downstream_backlogs = LineBacklog.objects.filter(
+        # sequence_no違いの同一工程行を集約し、仕損の重複加算を防ぐ
+        downstream_groups = LineBacklog.objects.filter(
             product=parent_product,
             plan_date=parent_date,
+        ).values('product_id', 'line_id', 'process_id', 'plan_date').annotate(
+            plan_total=Sum('plan_qty'),
         )
-        for downstream in downstream_backlogs:
-            plan = downstream.plan_qty or 0
-            # 全ての仕損を出庫に含める
+        for downstream in downstream_groups:
+            plan = int(downstream.get('plan_total') or 0)
+            # 全ての仕損を出庫に含める（line+process単位で1回のみ）
             scrap = _get_shipment_scrap_qty(
-                downstream.product_id,
-                downstream.line_id,
-                downstream.process_id,
-                downstream.plan_date
+                downstream['product_id'],
+                downstream['line_id'],
+                downstream['process_id'],
+                downstream['plan_date']
             )
-            use_qty = plan + scrap
+            use_qty = Decimal(str(plan)) + scrap
             if use_qty:
                 total_shipment += Decimal(str(use_qty)) * Decimal(str(qty_per))
 

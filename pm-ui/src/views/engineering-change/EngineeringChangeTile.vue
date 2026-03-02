@@ -229,6 +229,7 @@ const processing = ref(false);
 const editingId = ref(null);
 const showCreateForm = ref(false);
 const recalculatingByCase = ref({});
+const permissionReady = ref(false);
 const editForm = reactive({
   case_name: "",
   old_part_code: "",
@@ -243,12 +244,23 @@ const canAccessEngineeringChange = (level = "view") => {
   return hasPermission(user, "engineering_change", level);
 };
 
-const canView = computed(() => canAccessEngineeringChange("view"));
-const canEdit = computed(() => canAccessEngineeringChange("edit"));
+const canView = computed(() => permissionReady.value && canAccessEngineeringChange("view"));
+const canEdit = computed(() => permissionReady.value && canAccessEngineeringChange("edit"));
 const ensureCanEdit = () => {
   if (canEdit.value) return true;
   alert("編集権限がありません。");
   return false;
+};
+
+const refreshAuthPermission = async () => {
+  try {
+    const response = await api.auth.me();
+    authState.user = response.data?.authenticated ? response.data?.user || null : null;
+  } catch (_) {
+    authState.user = null;
+  } finally {
+    permissionReady.value = true;
+  }
 };
 
 const loadRecords = async () => {
@@ -484,6 +496,7 @@ const downloadCsv = () => {
 };
 
 onMounted(async () => {
+  await refreshAuthPermission();
   await Promise.all([loadProducts(), loadRecords()]);
 });
 </script>
