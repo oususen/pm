@@ -819,6 +819,47 @@ def _build_purchase_order_pdf(proposal: PurchaseOrderProposal):
         line_amount_map[getattr(line, 'id', None)] = amount
         proposal_total_amount += amount
 
+    approved_rows = [
+        row
+        for row in proposal.approvals.all()
+        if row.action == PurchaseOrderProposalApproval.ACTION_APPROVED
+    ]
+    approval_by_level = {}
+    for row in sorted(
+        approved_rows,
+        key=lambda item: (int(getattr(item, 'approval_level', 0) or 0), item.approved_at or timezone.now()),
+        reverse=True,
+    ):
+        level = int(getattr(row, 'approval_level', 0) or 0)
+        if level and level not in approval_by_level:
+            approval_by_level[level] = row
+
+    creator_last_name = _display_user_last_name(getattr(proposal, 'created_by', None))
+    level4_proxy_user_ids = set(_get_approval_config(4).proxy_approver_users.values_list('id', flat=True))
+    level4_approval = approval_by_level.get(4)
+    approver_name = ''
+    if level4_approval and level4_approval.approved_by_id:
+        approver_name = _display_user_last_name(level4_approval.approved_by)
+        approved_profile = _get_user_profile(level4_approval.approved_by)
+        is_proxy_approval = level4_approval.approved_by_id in level4_proxy_user_ids
+        if not is_proxy_approval and approved_profile:
+            is_proxy_approval = str(getattr(approved_profile, 'role', '') or '').strip() != 'manager'
+        if approver_name and is_proxy_approval:
+            approver_name = f'{approver_name}(代)'
+
+    confirm_names = []
+    # 確認欄は左から「係長 → 班長」の順で表示する（班長を右側に配置）。
+    for level in (3, 2):
+        approved = approval_by_level.get(level)
+        if not approved or not approved.approved_by_id:
+            continue
+        name = _display_user_last_name(approved.approved_by)
+        if name:
+            confirm_names.append(name)
+    confirm_col_count = max(1, len(confirm_names))
+    while len(confirm_names) < confirm_col_count:
+        confirm_names.append('')
+
     table_col_widths = [30 * mm, 30 * mm, 31 * mm, 21 * mm, 21 * mm, 21 * mm, 21 * mm, 19 * mm]
     table_headers = ['部品番号', '部品名', '材質・材寸', '納期', '発注量', '単価', '金額', '備考']
     header_height = 10 * mm
@@ -863,20 +904,30 @@ def _build_purchase_order_pdf(proposal: PurchaseOrderProposal):
             pdf.drawString(info_x, info_top - i * 5 * mm, text)
 
         # 承認枠
-        sign_width = 48 * mm
+        sign_headers = ['承認'] + ['確認'] * confirm_col_count + ['作成']
+        sign_values = [approver_name] + list(confirm_names) + [creator_last_name]
+        sign_col_w = 16 * mm
+        sign_width = sign_col_w * len(sign_headers)
         sign_height = 24 * mm
         sign_x = page_width - right_margin - sign_width
         sign_y = page_height - 82 * mm
         sign_header_h = 8 * mm
-        sign_col_w = sign_width / 3
         pdf.rect(sign_x, sign_y, sign_width, sign_height, stroke=1, fill=0)
         pdf.line(sign_x, sign_y + sign_height - sign_header_h, sign_x + sign_width, sign_y + sign_height - sign_header_h)
-        pdf.line(sign_x + sign_col_w, sign_y, sign_x + sign_col_w, sign_y + sign_height)
-        pdf.line(sign_x + sign_col_w * 2, sign_y, sign_x + sign_col_w * 2, sign_y + sign_height)
+        for idx in range(1, len(sign_headers)):
+            line_x = sign_x + sign_col_w * idx
+            pdf.line(line_x, sign_y, line_x, sign_y + sign_height)
         pdf.setFont(font_name, 11)
-        for idx, header in enumerate(['承認', '確認', '作成']):
+        for idx, header in enumerate(sign_headers):
             cx = sign_x + sign_col_w * idx + sign_col_w / 2
             pdf.drawCentredString(cx, sign_y + sign_height - 5.8 * mm, header)
+        pdf.setFont(font_name, 10)
+        sign_name_y = sign_y + (sign_height - sign_header_h) / 2 - 1.6 * mm
+        for idx, name in enumerate(sign_values):
+            if not name:
+                continue
+            cx = sign_x + sign_col_w * idx + sign_col_w / 2
+            pdf.drawCentredString(cx, sign_name_y, _short_text(name, 8))
 
         # 明細テーブル
         rows = []

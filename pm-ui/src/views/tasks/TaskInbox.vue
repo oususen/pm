@@ -61,7 +61,7 @@
             <td>{{ row.due_date || '-' }}</td>
             <td>{{ formatDateTime(row.created_at) }}</td>
             <td>
-              <button class="btn-sm" @click="openPurchaseProposal(row.proposal)">提案書へ</button>
+              <button class="btn-sm" @click="openPurchaseProposal(row.proposal)">{{ actionLabel(row) }}</button>
             </td>
           </tr>
         </tbody>
@@ -102,6 +102,15 @@ const statusMap = {
 
 const taskTypeLabel = (value) => taskTypeMap[value] || value
 const statusLabel = (value) => statusMap[value] || value
+const purchaseTaskTypes = new Set([
+  'CREATE_PROPOSAL',
+  'CREATE_ORDER_PDF',
+  'APPROVE_L2',
+  'APPROVE_L3',
+  'APPROVE_L4',
+  'SEND_TO_SUPPLIER',
+])
+const actionLabel = (row) => (purchaseTaskTypes.has(String(row?.task_type || '')) ? '注文書へ' : '提案書へ')
 
 const formatDateTime = (value) => {
   if (!value) return "-"

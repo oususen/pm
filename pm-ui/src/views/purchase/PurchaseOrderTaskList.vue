@@ -59,7 +59,7 @@
             <td>{{ row.created_at }}</td>
             <td>{{ row.done_at || '-' }}</td>
             <td>
-              <button class="btn-sm" @click="openProposal(row.proposal)">提案書へ</button>
+              <button class="btn-sm" @click="openProposal(row.proposal)">注文書へ</button>
             </td>
           </tr>
         </tbody>
