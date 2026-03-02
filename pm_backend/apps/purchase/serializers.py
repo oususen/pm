@@ -258,6 +258,7 @@ class PurchaseOrderProposalDetailSerializer(serializers.ModelSerializer):
 
 class PurchaseOrderApprovalConfigSerializer(serializers.ModelSerializer):
     approver_user_names = serializers.SerializerMethodField()
+    proxy_approver_user_names = serializers.SerializerMethodField()
     notify_user_names = serializers.SerializerMethodField()
 
     class Meta:
@@ -267,8 +268,10 @@ class PurchaseOrderApprovalConfigSerializer(serializers.ModelSerializer):
             'approval_level',
             'level_name',
             'approver_users',
+            'proxy_approver_users',
             'notify_users',
             'approver_user_names',
+            'proxy_approver_user_names',
             'notify_user_names',
         ]
 
@@ -281,5 +284,11 @@ class PurchaseOrderApprovalConfigSerializer(serializers.ModelSerializer):
     def get_notify_user_names(self, obj):
         names = []
         for user in obj.notify_users.all():
+            names.append(_display_user_name(user))
+        return names
+
+    def get_proxy_approver_user_names(self, obj):
+        names = []
+        for user in obj.proxy_approver_users.all():
             names.append(_display_user_name(user))
         return names

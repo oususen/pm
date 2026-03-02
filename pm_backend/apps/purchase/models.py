@@ -175,6 +175,11 @@ class PurchaseOrderApprovalConfig(models.Model):
         blank=True,
         related_name='purchase_order_approval_levels',
     )
+    proxy_approver_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='purchase_order_approval_proxy_levels',
+    )
     notify_users = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
         blank=True,

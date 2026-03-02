@@ -106,7 +106,7 @@
       <div class="section action-row">
         <button class="btn-primary" :disabled="!canEdit" @click="saveProposal">保存</button>
         <button class="btn-success" v-if="proposal.status === 'DRAFT'" @click="submitProposal">業務員サイン</button>
-        <button class="btn-success" v-if="canApprove" @click="approveProposal">承認</button>
+        <button class="btn-success" v-if="canApprove" @click="approveProposal">{{ approveButtonLabel }}</button>
         <button class="btn-danger" v-if="canReject" @click="rejectProposal">差戻</button>
         <button class="btn-secondary" v-if="canGenerateOrderPdf" @click="downloadOrderPdf">注文書作成</button>
         <button
@@ -207,6 +207,7 @@ const router = useRouter()
 const proposalId = Number(route.params.id)
 
 const proposal = ref(null)
+const approvalConfigs = ref([])
 const suppliers = ref([])
 const products = ref([])
 const purchaseLines = ref([])
@@ -273,18 +274,34 @@ const approvalTaskTypeByStatus = {
   APPROVED_L2: 'APPROVE_L3',
   APPROVED_L3: 'APPROVE_L4',
 }
-const hasMyPendingApprovalTask = computed(() => {
+const myPendingApprovalTask = computed(() => {
   if (!proposal.value) return false
   const expectedTaskType = approvalTaskTypeByStatus[proposal.value.status]
   if (!expectedTaskType) return false
   if (!currentUserId.value) return false
-  return (proposal.value.tasks || []).some(
+  return (proposal.value.tasks || []).find(
     (row) =>
       row.status === 'PENDING' &&
       row.task_type === expectedTaskType &&
       Number(row.assigned_to) === currentUserId.value
   )
 })
+const hasMyPendingApprovalTask = computed(() => Boolean(myPendingApprovalTask.value))
+const level4ProxyApproverSet = computed(() => {
+  const level4 = (approvalConfigs.value || []).find((row) => Number(row.approval_level) === 4)
+  const ids = Array.isArray(level4?.proxy_approver_users) ? level4.proxy_approver_users : []
+  return new Set(ids.map((id) => Number(id)).filter((id) => Number.isFinite(id)))
+})
+const isProxyFinalApproval = computed(() =>
+  Boolean(
+    proposal.value &&
+      proposal.value.status === 'APPROVED_L3' &&
+      myPendingApprovalTask.value &&
+      myPendingApprovalTask.value.task_type === 'APPROVE_L4' &&
+      level4ProxyApproverSet.value.has(currentUserId.value)
+  )
+)
+const approveButtonLabel = computed(() => (isProxyFinalApproval.value ? '部長代理承認' : '承認'))
 const canApprove = computed(() => Boolean(proposal.value && hasMyPendingApprovalTask.value))
 const canReject = computed(() => Boolean(proposal.value && hasMyPendingApprovalTask.value))
 const canGenerateOrderPdf = computed(() =>
@@ -344,6 +361,11 @@ const fetchMasterData = async () => {
   products.value = productRes.data.results || productRes.data || []
   const lines = lineRes.data.results || lineRes.data || []
   purchaseLines.value = lines.filter((row) => row.line_type === 'PURCHASE')
+}
+
+const fetchApprovalConfigs = async () => {
+  const response = await api.purchaseOrderApprovalConfig.get()
+  approvalConfigs.value = response.data || []
 }
 
 const fetchDetail = async () => {
@@ -630,7 +652,7 @@ const sendProposal = async () => {
 }
 
 onMounted(async () => {
-  await Promise.all([fetchMasterData(), fetchDetail()])
+  await Promise.all([fetchMasterData(), fetchDetail(), fetchApprovalConfigs()])
 })
 </script>
 

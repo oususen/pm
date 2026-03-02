@@ -324,6 +324,20 @@ def _display_user_name(user):
     return (getattr(user, 'username', '') or '').strip()
 
 
+def _display_user_last_name(user):
+    if not user or not getattr(user, 'id', None):
+        return ''
+    last_name = str(getattr(user, 'last_name', '') or '').strip()
+    if last_name:
+        return last_name
+    full_name = str(user.get_full_name() or '').strip()
+    if full_name:
+        tokens = [token for token in re.split(r'[\s　]+', full_name) if token]
+        if tokens:
+            return tokens[0]
+    return (getattr(user, 'username', '') or '').strip()
+
+
 def _resolve_notification_operator_name(proposal: PurchaseOrderProposal, fallback_user=None):
     creator_name = _display_user_name(getattr(proposal, 'created_by', None))
     if creator_name:
@@ -1307,6 +1321,8 @@ class PurchaseOrderProposalApproveView(APIView):
         elif next_level:
             next_config = _get_approval_config(next_level)
             next_users = list(next_config.approver_users.all())
+            if int(next_level) == 4:
+                next_users.extend(list(next_config.proxy_approver_users.all()))
             notify_users = next_users + list(next_config.notify_users.all())
 
         with transaction.atomic():
@@ -1582,7 +1598,11 @@ class PurchaseOrderApprovalConfigView(APIView):
 
     def get(self, request):
         _ensure_approval_config_defaults()
-        queryset = PurchaseOrderApprovalConfig.objects.prefetch_related('approver_users', 'notify_users').order_by('approval_level')
+        queryset = PurchaseOrderApprovalConfig.objects.prefetch_related(
+            'approver_users',
+            'proxy_approver_users',
+            'notify_users',
+        ).order_by('approval_level')
         serializer = PurchaseOrderApprovalConfigSerializer(queryset, many=True)
         return Response(serializer.data)
 
@@ -1610,9 +1630,15 @@ class PurchaseOrderApprovalConfigView(APIView):
                     config.save(update_fields=['level_name'])
                 if 'approver_users' in item:
                     config.approver_users.set(item.get('approver_users') or [])
+                if 'proxy_approver_users' in item:
+                    config.proxy_approver_users.set(item.get('proxy_approver_users') or [])
                 if 'notify_users' in item:
                     config.notify_users.set(item.get('notify_users') or [])
 
-        queryset = PurchaseOrderApprovalConfig.objects.prefetch_related('approver_users', 'notify_users').order_by('approval_level')
+        queryset = PurchaseOrderApprovalConfig.objects.prefetch_related(
+            'approver_users',
+            'proxy_approver_users',
+            'notify_users',
+        ).order_by('approval_level')
         serializer = PurchaseOrderApprovalConfigSerializer(queryset, many=True)
         return Response(serializer.data)

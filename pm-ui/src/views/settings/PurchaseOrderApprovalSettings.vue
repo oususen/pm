@@ -15,6 +15,7 @@
             <th>承認レベル</th>
             <th>レベル名</th>
             <th>承認可能ユーザー</th>
+            <th>代理承認者</th>
             <th>通知先ユーザー</th>
           </tr>
         </thead>
@@ -49,6 +50,35 @@
                   </span>
                 </div>
               </div>
+            </td>
+            <td class="picker-cell">
+              <div v-if="row.approval_level === 4" class="user-picker">
+                <input
+                  v-model="row.proxy_search"
+                  class="picker-search-input"
+                  placeholder="社員コード/氏名/ユーザー名で検索"
+                  @keyup.enter.prevent="addFirstCandidate(row, 'proxy')"
+                />
+                <div v-if="candidateList(row, 'proxy').length" class="candidate-list">
+                  <div
+                    v-for="user in candidateList(row, 'proxy')"
+                    :key="user.id"
+                    class="candidate-item"
+                    @click="addUser(row, 'proxy', user)"
+                  >
+                    <span class="candidate-code">{{ codeLabel(user) }}</span>
+                    <span class="candidate-name">{{ nameLabel(user) }}</span>
+                  </div>
+                </div>
+                <div v-if="row.proxy_approver_users.length" class="selected-list">
+                  <span v-for="userId in row.proxy_approver_users" :key="`proxy-${row.approval_level}-${userId}`" class="chip">
+                    <span class="chip-code">{{ chipCode(userId) }}</span>
+                    <span class="chip-name">{{ chipName(userId) }}</span>
+                    <button type="button" class="chip-remove" @click="removeUser(row, 'proxy', userId)">×</button>
+                  </span>
+                </div>
+              </div>
+              <div v-else class="proxy-disabled">-</div>
             </td>
             <td class="picker-cell">
               <div class="user-picker">
@@ -112,8 +142,10 @@ const normalizeConfig = (row) => ({
   approval_level: row.approval_level,
   level_name: row.level_name || '',
   approver_users: normalizeUserIds(row.approver_users),
+  proxy_approver_users: normalizeUserIds(row.proxy_approver_users),
   notify_users: normalizeUserIds(row.notify_users),
   approver_search: '',
+  proxy_search: '',
   notify_search: '',
 })
 
@@ -134,9 +166,20 @@ const nameLabel = (user) => {
   return name || user?.username || user?.email || `ID:${user?.id}`
 }
 
+const resolveUserFieldKeys = (type) => {
+  if (type === 'approver') {
+    return { targetKey: 'approver_users', searchKey: 'approver_search' }
+  }
+  if (type === 'proxy') {
+    return { targetKey: 'proxy_approver_users', searchKey: 'proxy_search' }
+  }
+  return { targetKey: 'notify_users', searchKey: 'notify_search' }
+}
+
 const candidateList = (row, type) => {
-  const targetSearch = type === 'approver' ? row.approver_search : row.notify_search
-  const selected = type === 'approver' ? row.approver_users : row.notify_users
+  const { targetKey, searchKey } = resolveUserFieldKeys(type)
+  const targetSearch = row[searchKey]
+  const selected = row[targetKey]
   const keyword = String(targetSearch || '').trim().toLowerCase()
   if (!keyword) return []
   const selectedSet = new Set((selected || []).map((id) => Number(id)))
@@ -154,8 +197,7 @@ const candidateList = (row, type) => {
 
 const addUser = (row, type, user) => {
   const userId = Number(user.id)
-  const targetKey = type === 'approver' ? 'approver_users' : 'notify_users'
-  const searchKey = type === 'approver' ? 'approver_search' : 'notify_search'
+  const { targetKey, searchKey } = resolveUserFieldKeys(type)
   if (!row[targetKey].includes(userId)) {
     row[targetKey] = [...row[targetKey], userId]
   }
@@ -168,7 +210,7 @@ const addFirstCandidate = (row, type) => {
 }
 
 const removeUser = (row, type, userId) => {
-  const targetKey = type === 'approver' ? 'approver_users' : 'notify_users'
+  const { targetKey } = resolveUserFieldKeys(type)
   row[targetKey] = row[targetKey].filter((id) => Number(id) !== Number(userId))
 }
 
@@ -192,6 +234,7 @@ const save = async () => {
       approval_level: row.approval_level,
       level_name: row.level_name,
       approver_users: row.approver_users || [],
+      proxy_approver_users: row.proxy_approver_users || [],
       notify_users: row.notify_users || [],
     })),
   }
@@ -278,6 +321,12 @@ onMounted(async () => {
 
 .chip-name {
   color: #4b5563;
+}
+
+.proxy-disabled {
+  color: #6b7280;
+  font-size: 12px;
+  text-align: center;
 }
 
 .chip-remove {
