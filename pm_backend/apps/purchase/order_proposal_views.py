@@ -1,7 +1,8 @@
 import math
 import re
 from calendar import monthrange
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote
@@ -25,7 +26,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from masters.models import BOMItem, Calendar, Line, Product, Supplier
+from masters.models import BOMItem, Calendar, Contact, Line, Product, Supplier
 from notifications.models import Notification
 from orders.utils.calendar_utils import WorkingDayCalculator, get_business_today
 from production.models_line_backlog import LineBacklog
@@ -128,39 +129,42 @@ def _get_user_profile(user):
 
 
 def _resolve_level2_approvers_for_submit(proposal: PurchaseOrderProposal, configured_users):
-    if not configured_users:
-        return []
-
     creator = proposal.created_by
     profile = _get_user_profile(creator)
     if not profile:
-        return configured_users
+        return [u for u in configured_users if getattr(u, 'id', None)]
 
     team_id = getattr(profile, 'team_id', None)
     group_id = getattr(profile, 'group_id', None)
-    if not team_id and not group_id:
-        return configured_users
+    creator_id = getattr(creator, 'id', None)
+
+    def _same_org_supervisors(user_ids=None):
+        user_qs = get_user_model().objects.filter(
+            is_active=True,
+            profile__role='supervisor',
+        ).exclude(id=creator_id)
+
+        if user_ids is not None:
+            user_qs = user_qs.filter(id__in=user_ids)
+
+        if team_id:
+            user_qs = user_qs.filter(profile__team_id=team_id)
+        elif group_id:
+            user_qs = user_qs.filter(profile__group_id=group_id)
+        else:
+            return []
+        return list(user_qs.distinct())
 
     configured_user_ids = [u.id for u in configured_users if getattr(u, 'id', None)]
-    if not configured_user_ids:
-        return []
+    if configured_user_ids:
+        matched = _same_org_supervisors(configured_user_ids)
+        if matched:
+            return matched
 
-    user_qs = get_user_model().objects.filter(
-        id__in=configured_user_ids,
-        is_active=True,
-        profile__role='supervisor',
-    ).exclude(id=getattr(creator, 'id', None))
+        return [u for u in configured_users if getattr(u, 'id', None)]
 
-    if team_id:
-        user_qs = user_qs.filter(profile__team_id=team_id)
-    elif group_id:
-        user_qs = user_qs.filter(profile__group_id=group_id)
-
-    matched = list(user_qs.distinct())
-    if matched:
-        return matched
-
-    return configured_users
+    # L2設定が空でも、作成者と同班（なければ同係）の班長へ自動割当する。
+    return _same_org_supervisors()
 
 
 def _proposal_no_prefix(target_date: date) -> str:
@@ -667,6 +671,92 @@ def _format_pdf_output_datetime(value=None, fmt: str = '%Y-%m-%d %H:%M'):
     return current.strftime(fmt)
 
 
+def _format_pdf_japanese_date(value=None):
+    current = value or timezone.now()
+    if timezone.is_aware(current):
+        current = timezone.localtime(current)
+    if isinstance(current, datetime):
+        current = current.date()
+    if not isinstance(current, date):
+        return ''
+    return f'{current.year}年{current.month}月{current.day}日'
+
+
+def _format_pdf_month_day(value):
+    if not value:
+        return ''
+    if isinstance(value, datetime):
+        value = value.date()
+    if isinstance(value, date):
+        return f'{value.month}/{value.day}'
+    raw = str(value).strip()
+    if not raw:
+        return ''
+    try:
+        parsed = date.fromisoformat(raw)
+        return f'{parsed.month}/{parsed.day}'
+    except ValueError:
+        return raw
+
+
+def _format_pdf_integer(value):
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError):
+        return ''
+    return f'{number:,}'
+
+
+def _format_pdf_decimal(value, digits: int = 2):
+    if value is None:
+        return ''
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return ''
+    quantized = number.quantize(Decimal(f'1.{"0" * digits}'))
+    text = f'{quantized:,}'
+    if '.' in text:
+        text = text.rstrip('0').rstrip('.')
+    return text
+
+
+def _resolve_supplier_contact_person(supplier: Supplier):
+    if not supplier:
+        return 'ご担当者'
+    contact = (
+        Contact.objects.filter(
+            is_active=True,
+            company_name=str(supplier.supplier_name or '').strip(),
+        )
+        .exclude(contact_person__isnull=True)
+        .exclude(contact_person__exact='')
+        .order_by('display_order', 'id')
+        .first()
+    )
+    person = str(getattr(contact, 'contact_person', '') or '').strip()
+    return person or 'ご担当者'
+
+
+def _resolve_line_unit_price(line):
+    for target in (line, getattr(line, 'product', None)):
+        if not target:
+            continue
+        for attr_name in ('unit_price', 'purchase_unit_price', 'price', 'cost'):
+            if not hasattr(target, attr_name):
+                continue
+            raw = getattr(target, attr_name)
+            if raw in (None, ''):
+                continue
+            try:
+                value = Decimal(str(raw))
+            except (InvalidOperation, TypeError, ValueError):
+                continue
+            if value >= 0:
+                return value
+    return None
+
+
 def _build_purchase_order_email_subject(proposal: PurchaseOrderProposal):
     return f'【発注書】{proposal.proposal_no} {proposal.supplier.supplier_name}'
 
@@ -695,121 +785,151 @@ def _build_purchase_order_pdf(proposal: PurchaseOrderProposal):
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
     page_width, page_height = A4
-    left_margin = 12 * mm
+    left_margin = 8 * mm
+    right_margin = 8 * mm
 
     proposal_lines = list(proposal.lines.select_related('product', 'line').order_by('id'))
-    lines_per_page = 20
+    lines_per_page = 15
     chunks = [
         proposal_lines[idx: idx + lines_per_page]
         for idx in range(0, len(proposal_lines), lines_per_page)
     ] or [[]]
+    total_pages = len(chunks)
+    contact_person = _resolve_supplier_contact_person(proposal.supplier)
+    line_amount_map = {}
+    proposal_total_amount = Decimal('0')
+    for line in proposal_lines:
+        order_qty = int(line.order_qty or 0)
+        unit_price = _resolve_line_unit_price(line)
+        amount = (unit_price * Decimal(order_qty)) if unit_price is not None else Decimal(order_qty)
+        line_amount_map[getattr(line, 'id', None)] = amount
+        proposal_total_amount += amount
 
-    approved_rows = [
-        row
-        for row in proposal.approvals.all()
-        if row.action == PurchaseOrderProposalApproval.ACTION_APPROVED
-    ]
-    approval_map = {}
-    for row in sorted(approved_rows, key=lambda item: (item.approval_level, item.approved_at or timezone.now()), reverse=True):
-        approval_map.setdefault(int(row.approval_level), row)
+    table_col_widths = [30 * mm, 30 * mm, 31 * mm, 21 * mm, 21 * mm, 21 * mm, 21 * mm, 19 * mm]
+    table_headers = ['部品番号', '部品名', '材質・材寸', '納期', '発注量', '単価', '金額', '備考']
+    header_height = 10 * mm
+    row_height = 8.2 * mm
 
-    creator_name = ''
-    if proposal.created_by_id:
-        creator_name = _display_user_name(proposal.created_by)
-
-    table_col_widths = [10 * mm, 28 * mm, 42 * mm, 42 * mm, 22 * mm, 16 * mm, 16 * mm, 32 * mm]
-    table_headers = ['No', '品番', '品名', '購買ライン', '不足日', '不足数', '発注数', '備考']
-
-    for page_index, line_chunk in enumerate(chunks):
-        y = page_height - 15 * mm
-        title = '発注書' if page_index == 0 else '発注書（続き）'
+    for page_index, line_chunk in enumerate(chunks, start=1):
+        # タイトル
+        title_y = page_height - 20 * mm
         pdf.setFont(font_name, 16)
-        pdf.drawString(left_margin, y, title)
+        pdf.drawCentredString(page_width / 2, title_y, '購　入　品　注　文　書')
+        pdf.line(page_width / 2 - 42 * mm, title_y - 2 * mm, page_width / 2 + 42 * mm, title_y - 2 * mm)
 
-        pdf.setFont(font_name, 10)
-        y -= 6 * mm
-        pdf.drawString(left_margin, y, f'注文書番号: {proposal.proposal_no}')
-        pdf.drawRightString(page_width - left_margin, y, f'出力日: {_format_pdf_output_date()}')
-        y -= 5 * mm
-        pdf.drawString(left_margin, y, f'仕入先: {proposal.supplier.supplier_code} {proposal.supplier.supplier_name}')
-        y -= 5 * mm
-        pdf.drawString(left_margin, y, f'発注日: {proposal.order_date}')
-        pdf.drawString(left_margin + 70 * mm, y, f'希望納入日: {proposal.desired_delivery_date}')
-        y -= 5 * mm
-        pdf.drawString(left_margin, y, f'作成者: {creator_name or "-"}')
-        if page_index == 0 and proposal.note:
-            y -= 5 * mm
-            pdf.drawString(left_margin, y, f'備考: {_short_text(proposal.note, 80)}')
+        # 右上ヘッダ
+        pdf.setFont(font_name, 8)
+        pdf.drawRightString(page_width - right_margin, page_height - 17 * mm, f'PAGE ({page_index}/{total_pages})')
+        pdf.setFont(font_name, 11)
+        pdf.drawRightString(page_width - right_margin, page_height - 30 * mm, _format_pdf_japanese_date())
+        pdf.drawRightString(page_width - right_margin, page_height - 40 * mm, 'ダイソウ工業株式会社')
 
-        y -= 7 * mm
-        table_rows = [table_headers]
-        for offset, line in enumerate(line_chunk):
-            row_no = page_index * lines_per_page + offset + 1
-            table_rows.append([
-                str(row_no),
-                _short_text(getattr(line.product, 'product_code', ''), 14),
-                _short_text(getattr(line.product, 'product_name', ''), 20),
-                _short_text(f'{getattr(line.line, "line_code", "")} {getattr(line.line, "line_name", "")}', 20),
-                str(line.shortage_date or ''),
-                '' if line.shortage_qty is None else str(int(line.shortage_qty)),
-                str(int(line.order_qty or 0)),
-                _short_text(line.note or '', 15),
+        # 仕入先
+        supplier_name = _short_text(getattr(proposal.supplier, 'supplier_name', ''), 22)
+        pdf.setFont(font_name, 14)
+        pdf.drawString(left_margin + 8 * mm, page_height - 42 * mm, supplier_name)
+        pdf.setDash(2, 2)
+        pdf.line(left_margin, page_height - 45 * mm, left_margin + 62 * mm, page_height - 45 * mm)
+        pdf.line(left_margin, page_height - 57 * mm, left_margin + 62 * mm, page_height - 57 * mm)
+        pdf.setDash()
+        pdf.setFont(font_name, 15)
+        pdf.drawCentredString(left_margin + 43 * mm, page_height - 53 * mm, f'{contact_person} 様')
+
+        # 注意書き
+        pdf.setFont(font_name, 9)
+        info_x = left_margin + 68 * mm
+        info_top = page_height - 41 * mm
+        info_lines = [
+            '下記内容にて、不都合な点がございましたら',
+            '御連絡下さい。',
+            '※納期に間に合わない場合は、',
+            '早急に御連絡下さい。',
+        ]
+        for i, text in enumerate(info_lines):
+            pdf.drawString(info_x, info_top - i * 5 * mm, text)
+
+        # 承認枠
+        sign_width = 48 * mm
+        sign_height = 24 * mm
+        sign_x = page_width - right_margin - sign_width
+        sign_y = page_height - 82 * mm
+        sign_header_h = 8 * mm
+        sign_col_w = sign_width / 3
+        pdf.rect(sign_x, sign_y, sign_width, sign_height, stroke=1, fill=0)
+        pdf.line(sign_x, sign_y + sign_height - sign_header_h, sign_x + sign_width, sign_y + sign_height - sign_header_h)
+        pdf.line(sign_x + sign_col_w, sign_y, sign_x + sign_col_w, sign_y + sign_height)
+        pdf.line(sign_x + sign_col_w * 2, sign_y, sign_x + sign_col_w * 2, sign_y + sign_height)
+        pdf.setFont(font_name, 11)
+        for idx, header in enumerate(['承認', '確認', '作成']):
+            cx = sign_x + sign_col_w * idx + sign_col_w / 2
+            pdf.drawCentredString(cx, sign_y + sign_height - 5.8 * mm, header)
+
+        # 明細テーブル
+        rows = []
+        for line in line_chunk:
+            order_qty = int(line.order_qty or 0)
+            unit_price = _resolve_line_unit_price(line)
+            line_amount = line_amount_map.get(getattr(line, 'id', None), Decimal(order_qty))
+
+            rows.append([
+                _short_text(getattr(line.product, 'product_code', ''), 20),
+                _short_text(getattr(line.product, 'product_name', ''), 24),
+                '',
+                _format_pdf_month_day(line.shortage_date or proposal.desired_delivery_date),
+                _format_pdf_integer(order_qty),
+                _format_pdf_decimal(unit_price, 2),
+                _format_pdf_decimal(line_amount, 0),
+                _short_text(line.note or '', 20),
             ])
-        if not line_chunk:
-            table_rows.append(['', '', '明細なし', '', '', '', '', ''])
 
-        table = Table(table_rows, colWidths=table_col_widths, repeatRows=1)
+        while len(rows) < lines_per_page:
+            rows.append(['', '', '', '', '', '', '', ''])
+
+        table = Table(
+            [table_headers, *rows],
+            colWidths=table_col_widths,
+            rowHeights=[header_height] + [row_height] * lines_per_page,
+            repeatRows=1,
+        )
         table.setStyle(TableStyle([
-            ('FONT', (0, 0), (-1, -1), font_name, 8.5),
-            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-            ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+            ('FONT', (0, 0), (-1, 0), font_name, 12),
+            ('FONT', (0, 1), (-1, -1), font_name, 10),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('ALIGN', (0, 1), (0, -1), 'CENTER'),
+            ('ALIGN', (1, 1), (2, -1), 'LEFT'),
+            ('ALIGN', (3, 1), (3, -1), 'CENTER'),
             ('ALIGN', (4, 1), (6, -1), 'RIGHT'),
+            ('ALIGN', (7, 1), (7, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('BOX', (0, 0), (-1, -1), 0.8, colors.black),
             ('INNERGRID', (0, 0), (-1, -1), 0.4, colors.black),
         ]))
-        _, table_height = table.wrap(page_width - left_margin * 2, page_height)
-        table.drawOn(pdf, left_margin, y - table_height)
-        y = y - table_height - 7 * mm
 
-        if page_index == len(chunks) - 1:
-            if y < 45 * mm:
-                pdf.showPage()
-                y = page_height - 20 * mm
-            sign_rows = [
-                ['業務員', '班長', '係長', '事業部長'],
-                ['', '', '', ''],
-                ['', '', '', ''],
-            ]
-            for level in (1, 2, 3, 4):
-                row = approval_map.get(level)
-                if not row:
-                    continue
-                user_name = ''
-                if row.approved_by_id:
-                    user_name = _display_user_name(row.approved_by)
-                approved_at = ''
-                if row.approved_at:
-                    approved_at = _format_pdf_output_datetime(row.approved_at)
-                sign_rows[1][level - 1] = _short_text(user_name, 14)
-                sign_rows[2][level - 1] = approved_at
+        table_top_y = page_height - 90 * mm
+        table_height = header_height + row_height * lines_per_page
+        table.wrapOn(pdf, page_width - left_margin - right_margin, table_height)
+        table.drawOn(pdf, left_margin, table_top_y - table_height)
 
-            sign_table = Table(sign_rows, colWidths=[(page_width - left_margin * 2) / 4] * 4, rowHeights=[8 * mm, 10 * mm, 8 * mm])
-            sign_table.setStyle(TableStyle([
-                ('FONT', (0, 0), (-1, -1), font_name, 9),
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f0f0f0')),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('BOX', (0, 0), (-1, -1), 0.8, colors.black),
-                ('INNERGRID', (0, 0), (-1, -1), 0.4, colors.black),
-            ]))
-            _, sign_height = sign_table.wrap(page_width - left_margin * 2, page_height)
-            sign_table.drawOn(pdf, left_margin, y - sign_height)
+        # フッタ
+        footer_y = table_top_y - table_height - 10 * mm
+        pdf.setFont(font_name, 18)
+        pdf.drawCentredString(page_width / 2 - 6 * mm, footer_y, '※納期通りに納入宜しくお願い致します。')
+        label_x = page_width - right_margin - 42 * mm
+        total_box_x = page_width - right_margin - 22 * mm
+        total_box_w = 22 * mm
+        total_box_h = 10 * mm
+        pdf.setFont(font_name, 11)
+        pdf.drawString(label_x, footer_y + 2 * mm, '合計金額')
+        pdf.rect(total_box_x, footer_y - 2.5 * mm, total_box_w, total_box_h, stroke=1, fill=0)
+        pdf.setFont(font_name, 12)
+        pdf.drawCentredString(total_box_x + total_box_w / 2, footer_y + 1 * mm, _format_pdf_decimal(proposal_total_amount, 0))
 
+        # 識別情報
         pdf.setFont(font_name, 8)
-        pdf.drawRightString(page_width - left_margin, 8 * mm, f'出力日時: {_format_pdf_output_datetime()}')
+        pdf.drawString(left_margin, 8 * mm, f'注文書番号: {proposal.proposal_no}')
+        pdf.drawRightString(page_width - right_margin, 8 * mm, f'出力日時: {_format_pdf_output_datetime()}')
 
-        if page_index < len(chunks) - 1:
+        if page_index < total_pages:
             pdf.showPage()
 
     pdf.save()
