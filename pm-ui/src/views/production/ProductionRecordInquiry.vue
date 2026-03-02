@@ -139,7 +139,8 @@
             <th>品名</th>
             <th>作業者</th>
             <th class="num">継続時間</th>
-            <th class="num">作業時間(休憩除外)</th>
+            <th class="num">作業時間(休憩除き)</th>
+            <th class="num">作業時間(休憩、中断除き)</th>
             <th class="num">生産数量</th>
             <th class="num">実績数量</th>
             <th class="num">出来高(台/h)</th>
@@ -170,6 +171,7 @@
               <td>{{ row.operator_name || '—' }}</td>
               <td class="num">{{ formatDuration(row.duration_seconds, row.ended_at) }}</td>
               <td class="num">{{ formatDuration(row.effective_work_seconds, true) }}</td>
+              <td class="num">{{ formatDuration(calcWorkSecondsExcludingPause(row), true) }}</td>
               <td class="num">{{ formatNumber(row.production_qty ?? '') }}</td>
               <td class="num">{{ formatProductionQty(row) }}</td>
               <td class="num">{{ formatProductivity(row.productivity_per_hour, row) }}</td>
@@ -182,7 +184,7 @@
               </td>
             </tr>
             <tr v-if="!sessions.length">
-              <td colspan="18" class="no-data">データがありません</td>
+              <td colspan="19" class="no-data">データがありません</td>
             </tr>
           </tbody>
         </table>
@@ -398,6 +400,13 @@ const formatNumber = (value) => {
 const formatProductionQty = (row) => {
   if (!isCountableProductionRow(row)) return '—'
   return formatNumber(row.production_qty || 0)
+}
+
+const calcWorkSecondsExcludingPause = (row) => {
+  if (!row) return 0
+  return String(row.session_type || '').toUpperCase() === 'PAUSE'
+    ? 0
+    : Math.max(Number(row.effective_work_seconds || 0), 0)
 }
 
 const calcDurationBasedProductivity = (row) => {

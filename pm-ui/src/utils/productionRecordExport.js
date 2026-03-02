@@ -49,6 +49,13 @@ const formatProductionQty = (row) => {
   return formatNumber(row.production_qty || 0)
 }
 
+const calcWorkSecondsExcludingPause = (row) => {
+  if (!row) return 0
+  return String(row.session_type || '').toUpperCase() === 'PAUSE'
+    ? 0
+    : Math.max(Number(row.effective_work_seconds || 0), 0)
+}
+
 const calcDurationBasedProductivity = (row) => {
   if (!row || !isCountableProductionRow(row)) return null
   const qty = Number(row.production_qty || 0)
@@ -87,7 +94,8 @@ export const buildExportRows = (sessions) => {
   const headers = [
     'レコードID', '開始', '終了', '区分', '開始操作', '終了操作',
     '中断理由',
-    '工程', '品番', '品名', '作業者', '継続時間', '作業時間(休憩除外)',
+    '工程', '品番', '品名', '作業者', '継続時間', '作業時間(休憩除き)',
+    '作業時間(休憩、中断除き)',
     '生産数量', '実績数量', '出来高(台/h)', '出来高', '不整合',
   ]
   const rows = (Array.isArray(sessions) ? sessions : []).map((row) => [
@@ -104,6 +112,7 @@ export const buildExportRows = (sessions) => {
     row.operator_name || '—',
     formatDuration(row.duration_seconds, row.ended_at),
     formatDuration(row.effective_work_seconds, true),
+    formatDuration(calcWorkSecondsExcludingPause(row), true),
     formatNumber(row.production_qty ?? ''),
     formatProductionQty(row),
     formatProductivity(row.productivity_per_hour, row),
