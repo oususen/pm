@@ -15,4 +15,7 @@ export const createLineGanttPlansAPI = (client) => ({
   bulkUpdate(payload) {
     return client.put('/line-gantt-plans/bulk-update/', payload)
   },
+  manualAdd(payload) {
+    return client.post('/line-gantt-plans/manual-add/', payload)
+  },
 })

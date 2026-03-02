@@ -2,6 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.views import APIView
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from datetime import timedelta, datetime
+from uuid import uuid4
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -46,6 +47,7 @@ from .serializers import (
 from .services.order_expansion import OrderExpansionService
 from .services.gantt_planning import generate_line_gantt_plans
 from masters.models import Routing, RoutingStep, ProcessCycleTime, Line, Supplier, Process, Calendar, CalendarDay, BOM, BOMItem, Product
+from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 
@@ -2957,11 +2959,142 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
             plan_ids = [p['plan_id'] for p in plans]
             if plan_ids:
                 qs = qs.exclude(plan_id__in=plan_ids)
+            qs = qs.exclude(plan_id__startswith='MANUAL_')
             deleted_count, _ = qs.delete()
             logger.info('line_gantt_plans.generate: cleared=%s', deleted_count)
 
         serializer = self.get_serializer(upserted, many=True)
         return Response(serializer.data)
+
+    @action(detail=False, methods=['post'], url_path='manual-add')
+    def manual_add(self, request):
+        """
+        工程ガントに手動バーを1件追加する。
+        期待payload: { line_id, process_id, output_product_id, start_time, end_time, quantity, process_number? }
+        """
+        line_id = request.data.get('line_id')
+        process_id = request.data.get('process_id')
+        output_product_id = request.data.get('output_product_id')
+        start_time = request.data.get('start_time')
+        end_time = request.data.get('end_time')
+        quantity_raw = request.data.get('quantity')
+        process_number_raw = request.data.get('process_number')
+
+        try:
+            line_id = int(line_id)
+            process_id = int(process_id)
+            output_product_id = int(output_product_id)
+        except (TypeError, ValueError):
+            return Response(
+                {'detail': 'line_id, process_id, output_product_id must be numeric'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            quantity = Decimal(str(quantity_raw)).quantize(Decimal('0.001'))
+        except Exception:
+            return Response({'detail': 'quantity is invalid'}, status=status.HTTP_400_BAD_REQUEST)
+        if quantity <= 0:
+            return Response({'detail': 'quantity must be greater than 0'}, status=status.HTTP_400_BAD_REQUEST)
+
+        def parse_datetime_value(value):
+            if not value:
+                return None
+            try:
+                raw = str(value).strip()
+                if raw.endswith('Z'):
+                    raw = raw[:-1] + '+00:00'
+                dt = datetime.fromisoformat(raw)
+            except Exception:
+                return None
+            if getattr(dt, 'tzinfo', None) is not None:
+                try:
+                    from django.utils import timezone
+                    dt = timezone.localtime(dt).replace(tzinfo=None)
+                except Exception:
+                    dt = dt.replace(tzinfo=None)
+            return dt
+
+        start_dt = parse_datetime_value(start_time)
+        end_dt = parse_datetime_value(end_time)
+        if not start_dt or not end_dt:
+            return Response(
+                {'detail': 'start_time and end_time must be ISO datetime'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if end_dt <= start_dt:
+            return Response({'detail': 'end_time must be after start_time'}, status=status.HTTP_400_BAD_REQUEST)
+
+        line = Line.objects.filter(id=line_id).first()
+        process = Process.objects.filter(id=process_id).first()
+        output_product = Product.objects.filter(id=output_product_id).first()
+        if not line or not process or not output_product:
+            return Response(
+                {'detail': 'line/process/product not found'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        routing_step = (
+            RoutingStep.objects
+            .filter(line_id=line_id, process_id=process_id)
+            .filter(Q(output_product_id=output_product_id) | Q(output_product_id__isnull=True))
+            .order_by('step_no', 'parallel_group')
+            .first()
+        )
+
+        try:
+            process_number = int(process_number_raw) if process_number_raw not in [None, ''] else None
+        except (TypeError, ValueError):
+            process_number = None
+        if process_number is None:
+            process_number = int(routing_step.step_no) if routing_step and routing_step.step_no is not None else 0
+
+        parallel_group = int(routing_step.parallel_group) if routing_step and routing_step.parallel_group else 1
+        parallel_count = int(routing_step.parallel_count) if routing_step and routing_step.parallel_count else 1
+        duration_minutes = max((end_dt - start_dt).total_seconds() / 60.0, 0.0)
+
+        plan_date_anchor = start_dt if start_dt.hour >= DAY_BOUNDARY_HOUR else (start_dt - timedelta(days=1))
+        plan_date = plan_date_anchor.date()
+
+        plan_id = (
+            f"MANUAL_{line_id}_{output_product_id}_"
+            f"{start_dt.strftime('%Y%m%d%H%M%S')}_{uuid4().hex[:8]}"
+        )
+
+        process_plan = [{
+            'plan_id': plan_id,
+            'process_id': process_id,
+            'process_name': process.process_name,
+            'process_number': process_number,
+            'start_time': start_dt.strftime('%Y-%m-%dT%H:%M:%S'),
+            'end_time': end_dt.strftime('%Y-%m-%dT%H:%M:%S'),
+            'quantity': float(quantity),
+            'cycle_time_minutes': 0.0,
+            'setup_time_minutes': 0.0,
+            'total_minutes_required': round(duration_minutes, 1),
+            'parallel_group': parallel_group,
+            'parallel_count': parallel_count,
+            'transfer_time_minutes': 0.0,
+            'output_product_id': output_product.id,
+            'output_product_code': output_product.product_code,
+            'output_product_name': output_product.product_name,
+        }]
+
+        with transaction.atomic():
+            created = LineGanttPlan.objects.create(
+                plan_id=plan_id,
+                line_id=line_id,
+                product_id=output_product_id,
+                plan_date=plan_date,
+                plan_qty=quantity,
+                sequence_no=None,
+                start_datetime=start_dt,
+                end_datetime=end_dt,
+                processes_plan=process_plan,
+            )
+
+        serializer = self.get_serializer(created)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['put'], url_path='bulk-update')
     def bulk_update(self, request):

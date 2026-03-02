@@ -142,6 +142,18 @@
                     </span>
                   </div>
                 </div>
+                <button
+                  v-for="anchor in rowAddAnchors"
+                  :key="`add-${idx}-${anchor.key}`"
+                  type="button"
+                  class="gantt-row-add-btn"
+                  :style="{ left: Math.max(anchor.leftPx - 10, 2) + 'px' }"
+                  :title="`${anchor.dateKey} 勤務終了時刻付近に追加`"
+                  :disabled="manualAddLoading || mergeConsecutive || !item.product_id"
+                  @click.stop="openManualAdd(proc, item, anchor)"
+                >
+                  +
+                </button>
               </div>
             </div>
           </div>
@@ -195,6 +207,7 @@ const timelineStart = ref(null)
 const timelineEnd = ref(null)
 const timelineSlots = ref([])
 const hasUnsavedChanges = ref(false)
+const manualAddLoading = ref(false)
 const debugEnabled = true
 const calendarDayMap = ref({})
 const workPatternMap = ref({})
@@ -230,6 +243,40 @@ const displayDays = computed(() => {
 })
 
 const timelineWidthPx = computed(() => timelineSlots.value.length * pixelsPerSlot)
+const rowAddAnchors = computed(() => {
+  if (!timelineStart.value || !timelineEnd.value) return []
+  const anchors = []
+  const startMs = timelineStart.value.getTime()
+  const endMs = timelineEnd.value.getTime()
+  const msPerSlot = slotHours * 60 * 60 * 1000
+  const cursor = new Date(timelineStart.value)
+  cursor.setHours(0, 0, 0, 0)
+
+  while (cursor.getTime() < endMs) {
+    const dateKey = formatDateKey(cursor)
+    const workStart = getWorkStartForDate(dateKey)
+    const workEnd = getWorkEndForDate(dateKey, workStart)
+    if (!workStart || !workEnd) {
+      cursor.setDate(cursor.getDate() + 1)
+      continue
+    }
+
+    const anchorTime = new Date(cursor)
+    anchorTime.setDate(anchorTime.getDate() + (workEnd.dayOffset || 0))
+    anchorTime.setHours(workEnd.hour, workEnd.minute, 0, 0)
+    const anchorMs = anchorTime.getTime()
+    if (anchorMs >= startMs && anchorMs < endMs) {
+      anchors.push({
+        key: dateKey,
+        dateKey: dateKey,
+        leftPx: ((anchorMs - startMs) / msPerSlot) * pixelsPerSlot,
+        startAt: anchorTime,
+      })
+    }
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return anchors
+})
 const workMarkers = computed(() => {
   if (!timelineStart.value || !timelineEnd.value) return []
   const markers = []
@@ -966,6 +1013,85 @@ function openQuantityEdit(bar) {
   alert('数量を変更しました。保存ボタンで確定してください。')
 }
 
+async function openManualAdd(proc, item, anchor) {
+  if (!selectedLine.value || !proc?.process_id || !item?.product_id) return
+  if (mergeConsecutive.value) {
+    alert('連結表示中は追加できません。分解表示に切り替えてください。')
+    return
+  }
+  if (hasUnsavedChanges.value) {
+    alert('未保存の変更があります。先に工程ガント保存を実行してください。')
+    return
+  }
+
+  const defaultStart = anchor?.startAt ? new Date(anchor.startAt) : new Date()
+  const defaultEnd = new Date(defaultStart.getTime() + 120 * 60 * 1000)
+
+  const startInput = window.prompt(
+    '追加バーの開始日時を入力してください (YYYY-MM-DD HH:mm)',
+    formatDateTimeInput(defaultStart)
+  )
+  if (startInput === null) return
+  const startDt = parseDateTimeInput(startInput)
+  if (!startDt) {
+    alert('開始日時の形式が正しくありません。例: 2026-03-02 17:30')
+    return
+  }
+
+  const endInput = window.prompt(
+    '追加バーの終了日時を入力してください (YYYY-MM-DD HH:mm)',
+    formatDateTimeInput(defaultEnd)
+  )
+  if (endInput === null) return
+  const endDt = parseDateTimeInput(endInput)
+  if (!endDt) {
+    alert('終了日時の形式が正しくありません。例: 2026-03-02 18:00')
+    return
+  }
+  if (endDt.getTime() <= startDt.getTime()) {
+    alert('終了日時は開始日時より後にしてください。')
+    return
+  }
+
+  const qtyInput = window.prompt('数量を入力してください（0より大きい数値）', '1')
+  if (qtyInput === null) return
+  const qty = parseQuantityInput(qtyInput)
+  if (qty === null) {
+    alert('数量の形式が正しくありません。例: 18 または 18.5')
+    return
+  }
+
+  const confirmMessage = [
+    `工程: ${proc.process_name || ''}`,
+    `品番: ${item.product_code || item.product_name || item.product_id}`,
+    `時間: ${formatTimeRange(startDt, endDt)}`,
+    `数量: ${formatQuantity(qty)}`,
+    '',
+    'この内容で追加しますか？',
+  ].join('\n')
+  if (!window.confirm(confirmMessage)) return
+
+  try {
+    manualAddLoading.value = true
+    await api.lineGanttPlans.manualAdd({
+      line_id: Number(selectedLine.value),
+      process_id: Number(proc.process_id),
+      output_product_id: Number(item.product_id),
+      start_time: toLocalISO(startDt),
+      end_time: toLocalISO(endDt),
+      quantity: qty,
+      process_number: Number(proc.process_number || 0),
+    })
+    await loadData()
+    alert('追加しました')
+  } catch (e) {
+    console.error('工程ガント追加エラー', e)
+    alert('追加に失敗しました')
+  } finally {
+    manualAddLoading.value = false
+  }
+}
+
 function buildProcessGantt(plans) {
   const processMap = new Map()
   const allDates = []
@@ -1399,6 +1525,32 @@ onMounted(async () => {
   position: relative;
   flex: 1;
   min-height: 30px;
+}
+.gantt-row-add-btn {
+  position: absolute;
+  top: 5px;
+  width: 20px;
+  height: 20px;
+  border: 1px solid #0f766e;
+  border-radius: 9999px;
+  background: #ffffff;
+  color: #0f766e;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 4;
+  padding: 0;
+}
+.gantt-row-add-btn:hover {
+  background: #ecfeff;
+}
+.gantt-row-add-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .gantt-bar-wrapper {
   position: absolute;
