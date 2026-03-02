@@ -117,15 +117,15 @@ def _draw_cell(c: canvas.Canvas, cart: Optional[Dict],
         c.setFillColor(tc)
 
         # [番号] - 上部
-        c.setFont("MSGothic-Bold", 7)
-        c.drawCentredString(cx + cw / 2, cy_bottom + ch - 10, f"[{cart['number']}]")
+        c.setFont("MSGothic-Bold", 10)
+        c.drawCentredString(cx + cw / 2, cy_bottom + ch - 13, f"[{cart['number']}]")
 
         # 種別・モデル - 中央
         lines = _cell_lines(cart["label"], cart["qty_in_cart"])
-        c.setFont("MSGothic-Bold", 8.5)
-        c.drawCentredString(cx + cw / 2, cy_bottom + ch / 2 + 2, lines[0])
-        c.setFont("MSGothic", 8)
-        c.drawCentredString(cx + cw / 2, cy_bottom + ch / 2 - 10, lines[1])
+        c.setFont("MSGothic-Bold", 12)
+        c.drawCentredString(cx + cw / 2, cy_bottom + ch / 2 + 3, lines[0])
+        c.setFont("MSGothic", 10)
+        c.drawCentredString(cx + cw / 2, cy_bottom + ch / 2 - 12, lines[1])
     else:
         # 空セル
         c.setFillColor(_hex("#f2f2f2"))
