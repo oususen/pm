@@ -59,6 +59,13 @@
           <option value="false">なし</option>
         </select>
       </div>
+      <div class="filter-row">
+        <label>生産数0</label>
+        <select v-model="excludeZeroProduction">
+          <option value="">-- すべて --</option>
+          <option value="true">除く</option>
+        </select>
+      </div>
       <div class="actions">
         <button class="btn" :disabled="loading" @click="loadSessions">検索</button>
         <button class="btn btn-secondary" :disabled="loading" @click="resetFilters">リセット</button>
@@ -126,6 +133,7 @@
             <th>区分</th>
             <th>開始操作</th>
             <th>終了操作</th>
+            <th>中断理由</th>
             <th>工程</th>
             <th>品番</th>
             <th>品名</th>
@@ -155,6 +163,7 @@
               </td>
               <td>{{ row.start_action || '—' }}</td>
               <td>{{ row.end_action || '—' }}</td>
+              <td>{{ row.pause_reason || '—' }}</td>
               <td>{{ row.process_code }} / {{ row.process_name }}</td>
               <td>{{ row.product_code || '—' }}</td>
               <td>{{ row.product_name || '' }}</td>
@@ -173,7 +182,7 @@
               </td>
             </tr>
             <tr v-if="!sessions.length">
-              <td colspan="17" class="no-data">データがありません</td>
+              <td colspan="18" class="no-data">データがありません</td>
             </tr>
           </tbody>
         </table>
@@ -209,6 +218,7 @@ const productCode = ref('')
 const sessionType = ref('')
 const status = ref('')
 const hasIssue = ref('')
+const excludeZeroProduction = ref('')
 
 const filteredProcesses = computed(() => {
   if (!lineId.value) return processes.value
@@ -320,12 +330,16 @@ const loadSessions = async () => {
 
     const res = await api.processRealtime.getSessions(params)
     const items = res.data || []
+    const filteredByProduction = excludeZeroProduction.value === 'true'
+      ? items.filter((row) => Number(row?.production_qty || 0) !== 0)
+      : items
+
     if (wantsCancelOnly) {
-      sessions.value = items.filter((row) => isCanceledSession(row))
+      sessions.value = filteredByProduction.filter((row) => isCanceledSession(row))
     } else if (sessionType.value === 'WORK') {
-      sessions.value = items.filter((row) => row.session_type === 'WORK' && !isCanceledSession(row))
+      sessions.value = filteredByProduction.filter((row) => row.session_type === 'WORK' && !isCanceledSession(row))
     } else {
-      sessions.value = items
+      sessions.value = filteredByProduction
     }
   } catch (e) {
     console.error('セッション読込失敗:', e)
@@ -343,6 +357,7 @@ const resetFilters = async () => {
   sessionType.value = ''
   status.value = ''
   hasIssue.value = ''
+  excludeZeroProduction.value = ''
   startDate.value = toISODate(new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000))
   endDate.value = toISODate(new Date(today.getTime() + 24 * 60 * 60 * 1000))
   await loadSessions()

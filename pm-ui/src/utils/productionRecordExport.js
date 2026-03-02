@@ -86,6 +86,7 @@ const downloadBlob = (blob, filename) => {
 export const buildExportRows = (sessions) => {
   const headers = [
     'レコードID', '開始', '終了', '区分', '開始操作', '終了操作',
+    '中断理由',
     '工程', '品番', '品名', '作業者', '継続時間', '作業時間(休憩除外)',
     '生産数量', '実績数量', '出来高(台/h)', '出来高', '不整合',
   ]
@@ -96,6 +97,7 @@ export const buildExportRows = (sessions) => {
     getSessionTypeLabel(row),
     row.start_action || '—',
     row.end_action || '—',
+    row.pause_reason || '—',
     `${row.process_code || ''} / ${row.process_name || ''}`.trim(),
     row.product_code || '—',
     row.product_name || '',

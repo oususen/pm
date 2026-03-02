@@ -1000,6 +1000,23 @@ class ProcessWorkSessionSerializer(serializers.ModelSerializer):
     process_code = serializers.CharField(source='process.process_code', read_only=True)
     process_name = serializers.CharField(source='process.process_name', read_only=True)
     operator_name = serializers.SerializerMethodField()
+    pause_reason = serializers.SerializerMethodField()
+
+    @staticmethod
+    def _extract_pause_reason_from_record(record):
+        if not record:
+            return ''
+        event_data = getattr(record, 'event_data', None)
+        if not isinstance(event_data, dict):
+            return ''
+        for key in ('pause_reason', 'operator_action_reason'):
+            value = event_data.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return ''
 
     def get_operator_name(self, obj):
         end_record = getattr(obj, 'end_record', None)
@@ -1010,6 +1027,23 @@ class ProcessWorkSessionSerializer(serializers.ModelSerializer):
         start_name = (getattr(start_record, 'operator_name', '') or '').strip() if start_record else ''
         if start_name:
             return start_name
+        return ''
+
+    def get_pause_reason(self, obj):
+        session_type = str(getattr(obj, 'session_type', '') or '').upper()
+        end_action = str(getattr(obj, 'end_action', '') or '').upper()
+
+        if session_type == 'PAUSE':
+            candidate_records = [getattr(obj, 'start_record', None), getattr(obj, 'end_record', None)]
+        elif session_type == 'WORK' and end_action == 'PAUSE':
+            candidate_records = [getattr(obj, 'end_record', None), getattr(obj, 'start_record', None)]
+        else:
+            candidate_records = [getattr(obj, 'start_record', None), getattr(obj, 'end_record', None)]
+
+        for record in candidate_records:
+            reason = self._extract_pause_reason_from_record(record)
+            if reason:
+                return reason
         return ''
 
     class Meta:
@@ -1028,6 +1062,7 @@ class ProcessWorkSessionSerializer(serializers.ModelSerializer):
             'session_type',
             'start_action',
             'end_action',
+            'pause_reason',
             'started_at',
             'ended_at',
             'status',
