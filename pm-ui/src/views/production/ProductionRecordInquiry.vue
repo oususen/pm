@@ -284,7 +284,7 @@ const totalDurationIncludingPauseSeconds = computed(() => {
       if (countedSessionIds.has(sessionId)) return sum
       countedSessionIds.add(sessionId)
     }
-    return sum + Number(row.duration_seconds || 0)
+    return sum + Number(row.effective_work_seconds || 0)
   }, 0)
 })
 
@@ -295,9 +295,18 @@ const totalProductivityIncludingPausePerHour = computed(() => {
 })
 
 const totalPauseSeconds = computed(() => {
-  const total = Number(totalDurationIncludingPauseSeconds.value || 0)
-  const net = Number(totalEffectiveWorkSeconds.value || 0)
-  return Math.max(total - net, 0)
+  const rows = Array.isArray(sessions.value) ? sessions.value : []
+  const countedSessionIds = new Set()
+  return rows.reduce((sum, row) => {
+    const sessionId = row?.id == null ? '' : String(row.id)
+    if (sessionId) {
+      if (countedSessionIds.has(sessionId)) return sum
+      countedSessionIds.add(sessionId)
+    }
+    return String(row?.session_type || '').toUpperCase() === 'PAUSE'
+      ? sum + Number(row?.duration_seconds || 0)
+      : sum
+  }, 0)
 })
 
 const loadMasters = async () => {
