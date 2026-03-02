@@ -1,5 +1,6 @@
 from django import forms
 from django.contrib import admin
+from django.forms.models import BaseInlineFormSet
 from django.db.models import Sum
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay,
@@ -239,6 +240,42 @@ def _resolve_usage_quantity(step):
     return None
 
 
+def _apply_hierarchy_defaults(step):
+    """
+    階層未設定の工程に、管理画面運用向けの最小デフォルトを付与する。
+    """
+    if not step:
+        return
+
+    raw_path = (step.hierarchy_path or '').strip()
+    if raw_path:
+        step.hierarchy_path = raw_path
+        if raw_path == 'final':
+            step.hierarchy_depth = 0
+        else:
+            segments = [seg for seg in raw_path.split('.') if seg]
+            step.hierarchy_depth = len(segments) if segments else 1
+        return
+
+    routing_product_id = None
+    if step.routing_id:
+        try:
+            routing_product_id = step.routing.product_id
+        except Routing.DoesNotExist:
+            routing_product_id = None
+
+    # ルート製品を出力する工程は最終工程として扱う
+    if routing_product_id and step.output_product_id == routing_product_id:
+        step.hierarchy_path = 'final'
+        step.hierarchy_depth = 0
+        return
+
+    # それ以外はトップ階層として parallel_group を階層キーに採用
+    parallel_group = step.parallel_group or 1
+    step.hierarchy_path = str(parallel_group)
+    step.hierarchy_depth = 1
+
+
 class RoutingStepInlineForm(forms.ModelForm):
     usage_quantity = forms.IntegerField(
         label='使用個数',
@@ -260,11 +297,52 @@ class RoutingStepInlineForm(forms.ModelForm):
                 self.fields['usage_quantity'].initial = int(usage_initial)
 
 
+class RoutingStepInlineFormSet(BaseInlineFormSet):
+    def clean(self):
+        super().clean()
+
+        # (step_no, parallel_group) は1ルーティング内で重複禁止
+        seen_keys = {}
+        for inline_form in self.forms:
+            cleaned = getattr(inline_form, 'cleaned_data', None)
+            if not cleaned or cleaned.get('DELETE'):
+                continue
+
+            step_no = cleaned.get('step_no')
+            parallel_group = cleaned.get('parallel_group')
+            if step_no is None or parallel_group is None:
+                continue
+
+            key = (step_no, parallel_group)
+            first_form = seen_keys.get(key)
+            if first_form is not None:
+                message = '同一ルーティング内で「工程番号」と「並列グループ」の組み合わせが重複しています。'
+                inline_form.add_error('step_no', message)
+                inline_form.add_error('parallel_group', message)
+                first_form.add_error('step_no', message)
+                first_form.add_error('parallel_group', message)
+                continue
+            seen_keys[key] = inline_form
+
+            qs = RoutingStep.objects.filter(
+                routing=self.instance,
+                step_no=step_no,
+                parallel_group=parallel_group,
+            )
+            if inline_form.instance.pk:
+                qs = qs.exclude(pk=inline_form.instance.pk)
+            if qs.exists():
+                message = '既存データと「工程番号」「並列グループ」が重複しています。値を変更してください。'
+                inline_form.add_error('step_no', message)
+                inline_form.add_error('parallel_group', message)
+
+
 class RoutingStepInline(admin.TabularInline):
     model = RoutingStep
     form = RoutingStepInlineForm
+    formset = RoutingStepInlineFormSet
     extra = 1
-    readonly_fields = ['hierarchy_indicator', 'parallel_group']
+    readonly_fields = ['hierarchy_indicator']
     autocomplete_fields = ['output_product']
     fields = [
         'hierarchy_indicator', 'step_no', 'parallel_group', 'process', 'line',
@@ -366,12 +444,14 @@ class RoutingAdmin(admin.ModelAdmin):
                 material.save()
 
     def save_formset(self, request, form, formset, change):
-        instances = formset.save(commit=False)
-        for obj in formset.deleted_objects:
-            obj.delete()
-        for instance in instances:
-            instance.save()
-        formset.save_m2m()
+        if formset.model is RoutingStep:
+            for inline_form in formset.forms:
+                cleaned = getattr(inline_form, 'cleaned_data', None)
+                if not cleaned or cleaned.get('DELETE'):
+                    continue
+                _apply_hierarchy_defaults(inline_form.instance)
+
+        super().save_formset(request, form, formset, change)
 
         if formset.model is RoutingStep:
             self._save_usage_quantity_values(formset)
