@@ -1,21 +1,20 @@
 <template>
-  <div class="page-container">
-    <h2 class="page-title">品質管理</h2>
-    <p class="placeholder">品質機能は未実装です。</p>
+  <div class="master-menu">
+    <h2 class="page-title">品質管理メニュー</h2>
+
+    <div class="master-grid">
+      <RouterLink to="/quality/equipment-inspection" class="master-tile">
+        <div class="icon-box">🧰</div>
+        <div class="label">設備点検表</div>
+      </RouterLink>
+    </div>
+
+    <p class="helper-text">
+      品質管理メニューから各機能に遷移します。
+    </p>
   </div>
 </template>
 
-<style scoped>
-.page-container {
-  padding: 16px;
-}
-.page-title {
-  margin: 0 0 8px;
-  font-size: 20px;
-}
-.placeholder {
-  margin: 0;
-  color: #6b7280;
-  font-size: 14px;
-}
-</style>
+<script setup>
+import { RouterLink } from "vue-router";
+</script>

@@ -92,7 +92,10 @@ const sections = [
   {
     id: "quality",
     title: "品質管理",
-    items: [{ label: "品質メニュー", link: "/quality" }],
+    items: [
+      { label: "品質メニュー", link: "/quality" },
+      { label: "設備点検表", link: "/quality/equipment-inspection" },
+    ],
   },
   {
     id: "masters",

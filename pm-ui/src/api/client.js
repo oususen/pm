@@ -38,6 +38,7 @@ import { createFujishojiDocumentAPI } from './resources/fujishojiDocument'
 import { createSupplierOrderSchedulesAPI } from './resources/supplierOrderSchedules'
 import { createPurchaseOrderProposalsAPI } from './resources/purchaseOrderProposals'
 import { createPurchaseOrderApprovalConfigAPI } from './resources/purchaseOrderApprovalConfig'
+import { createQualityEquipmentInspectionsAPI } from './resources/qualityEquipmentInspections'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
@@ -132,4 +133,5 @@ export default {
   supplierOrderSchedules: createSupplierOrderSchedulesAPI(client),
   purchaseOrderProposals: createPurchaseOrderProposalsAPI(client),
   purchaseOrderApprovalConfig: createPurchaseOrderApprovalConfigAPI(client),
+  qualityEquipmentInspections: createQualityEquipmentInspectionsAPI(client),
 }
