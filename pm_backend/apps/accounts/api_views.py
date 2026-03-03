@@ -161,6 +161,7 @@ class PositionListView(viewsets.ViewSet):
                 'position_name', flat=True
             )
         )
+        names.update(label for _, label in UserProfile.ROLE_CHOICES)
         return Response(sorted(names))
 
 
@@ -239,6 +240,7 @@ class DepartmentPositionListView(viewsets.ViewSet):
             .exclude(position_name='')
             .values_list('position_name', flat=True)
         )
+        names.update(label for _, label in UserProfile.ROLE_CHOICES)
         return Response(sorted(names))
 
 
