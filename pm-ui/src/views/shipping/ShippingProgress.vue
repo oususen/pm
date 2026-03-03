@@ -228,6 +228,29 @@ const normalizeList = (payload) => {
   return Array.isArray(payload) ? payload : payload?.results || [];
 };
 
+const ORDER_LINES_PAGE_SIZE = 20000;
+
+const fetchAllOpenOrderLines = async () => {
+  const rows = [];
+  let page = 1;
+
+  while (true) {
+    const res = await api.orders.listOrderLines({
+      page_size: ORDER_LINES_PAGE_SIZE,
+      page,
+    });
+    const payload = res.data || {};
+    const pageRows = normalizeList(payload);
+
+    if (!pageRows.length) break;
+    rows.push(...pageRows);
+    if (!payload.next) break;
+    page += 1;
+  }
+
+  return rows;
+};
+
 function formatDateHeader(dateStr) {
   const d = parseISODate(dateStr);
   if (!d || Number.isNaN(d.getTime())) return dateStr;
@@ -567,8 +590,7 @@ const load = async () => {
   loading.value = true;
   error.value = "";
   try {
-    const orderLinesRes = await api.orders.listOrderLines({ page_size: 10000 });
-    orderLines.value = normalizeList(orderLinesRes.data || []);
+    orderLines.value = await fetchAllOpenOrderLines();
     const shipmentActualsRes = await api.shipmentActuals.getShipmentActuals({
       shipment_date__gte: startDate.value,
       shipment_date__lte: endDate.value,
