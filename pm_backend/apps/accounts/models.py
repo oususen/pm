@@ -8,6 +8,7 @@ class Department(models.Model):
         ('division', '事業部'),
         ('group', '係'),
         ('team', '班'),
+        ('unit', 'グループ'),
     ]
 
     name = models.CharField(max_length=100, verbose_name='部署名')
@@ -37,6 +38,7 @@ class UserProfile(models.Model):
     """ユーザープロファイル（auth_userの拡張）"""
     ROLE_CHOICES = [
         ('staff', '一般'),
+        ('leader', 'リーダー'),
         ('supervisor', '班長'),
         ('chief', '係長'),
         ('manager', '事業部長'),
@@ -101,6 +103,15 @@ class UserProfile(models.Model):
         related_name='team_users',
         verbose_name='班',
         limit_choices_to={'level': 'team'}
+    )
+    unit = models.ForeignKey(
+        Department,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='unit_users',
+        verbose_name='グループ',
+        limit_choices_to={'level': 'unit'}
     )
 
     joined_on = models.DateField(null=True, blank=True, verbose_name='入社日')

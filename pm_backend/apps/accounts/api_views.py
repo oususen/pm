@@ -280,6 +280,20 @@ class TeamListView(viewsets.ViewSet):
         return Response(serializer.data)
 
 
+class UnitListView(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request):
+        # parent_idが指定されている場合は、その班の子（グループ）のみを取得
+        parent_id = request.query_params.get('parent')
+        queryset = Department.objects.filter(level='unit')
+        if parent_id:
+            queryset = queryset.filter(parent_id=parent_id)
+        queryset = queryset.order_by('display_id', 'name')
+        serializer = DepartmentSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+
 class UserSmtpConfigViewSet(viewsets.ModelViewSet):
     queryset = UserSmtpConfig.objects.select_related('user')
     serializer_class = UserSmtpConfigSerializer

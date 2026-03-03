@@ -53,4 +53,7 @@ export const createAccountsAPI = (client) => ({
   getTeams(params = {}) {
     return client.get('/accounts/teams/', { params })
   },
+  getUnits(params = {}) {
+    return client.get('/accounts/units/', { params })
+  },
 })

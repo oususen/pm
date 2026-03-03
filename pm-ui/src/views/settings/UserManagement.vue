@@ -31,6 +31,13 @@
             {{ tm.label }}
           </option>
         </select>
+        <select v-model="filterUnitId" class="search-select">
+          <option value="">グループ: すべて</option>
+          <option value="__unset__">グループ: 未設定</option>
+          <option v-for="ut in filterUnitOptions" :key="ut.value" :value="String(ut.value)">
+            {{ ut.label }}
+          </option>
+        </select>
         <select v-model="filterPosition" class="search-select">
           <option value="">役職: すべて</option>
           <option value="__unset__">役職: 未設定</option>
@@ -199,10 +206,19 @@
             </div>
             <div class="form-row">
               <label>班</label>
-              <select v-model="form.profile.team" :disabled="!form.profile.group">
+              <select v-model="form.profile.team" @change="onTeamChange" :disabled="!form.profile.group">
                 <option :value="null">未設定</option>
                 <option v-for="tm in teamOptions" :key="tm.value" :value="tm.value">
                   {{ tm.label }}
+                </option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>グループ</label>
+              <select v-model="form.profile.unit" :disabled="!form.profile.team">
+                <option :value="null">未設定</option>
+                <option v-for="ut in unitOptions" :key="ut.value" :value="ut.value">
+                  {{ ut.label }}
                 </option>
               </select>
             </div>
@@ -253,6 +269,7 @@ const positions = ref([])
 const divisions = ref([])
 const allGroups = ref([])
 const allTeams = ref([])
+const allUnits = ref([])
 const loading = ref(false)
 const saving = ref(false)
 const errorMessage = ref('')
@@ -261,6 +278,7 @@ const searchKeyword = ref('')
 const filterDepartmentId = ref('')
 const filterGroupId = ref('')
 const filterTeamId = ref('')
+const filterUnitId = ref('')
 const filterPosition = ref('')
 const filterActiveOnly = ref(false)
 const filterInactiveOnly = ref(false)
@@ -270,6 +288,7 @@ const passwordConfirm = ref('')
 
 const roleOptions = [
   { value: 'staff', label: '一般' },
+  { value: 'leader', label: 'リーダー' },
   { value: 'supervisor', label: '班長' },
   { value: 'chief', label: '係長' },
   { value: 'manager', label: '事業部長' },
@@ -291,6 +310,7 @@ const levelLabels = {
   division: '事業部',
   group: '係',
   team: '班',
+  unit: 'グループ',
 }
 
 const emptyProfile = () => ({
@@ -302,6 +322,7 @@ const emptyProfile = () => ({
   division: null,
   group: null,
   team: null,
+  unit: null,
   joined_on: '',
 })
 
@@ -406,15 +427,54 @@ const filterTeamOptions = computed(() => {
   }))
 })
 
+const filterUnitOptions = computed(() => {
+  const targetTeam = filterTeamId.value
+  const targetGroup = filterGroupId.value
+  const targetDepartment = filterDepartmentId.value
+  if (targetTeam && targetTeam !== '__unset__') {
+    return allUnits.value
+      .filter((ut) => String(ut.parent ?? '') === targetTeam)
+      .map((ut) => ({ value: ut.id, label: ut.name }))
+  }
+  if (targetGroup && targetGroup !== '__unset__') {
+    const teamIds = new Set(
+      allTeams.value
+        .filter((tm) => String(tm.parent ?? '') === targetGroup)
+        .map((tm) => String(tm.id))
+    )
+    return allUnits.value
+      .filter((ut) => teamIds.has(String(ut.parent ?? '')))
+      .map((ut) => ({ value: ut.id, label: ut.name }))
+  }
+  if (targetDepartment && targetDepartment !== '__unset__') {
+    const groupIds = new Set(
+      allGroups.value
+        .filter((grp) => String(grp.parent ?? '') === targetDepartment)
+        .map((grp) => String(grp.id))
+    )
+    const teamIds = new Set(
+      allTeams.value
+        .filter((tm) => groupIds.has(String(tm.parent ?? '')))
+        .map((tm) => String(tm.id))
+    )
+    return allUnits.value
+      .filter((ut) => teamIds.has(String(ut.parent ?? '')))
+      .map((ut) => ({ value: ut.id, label: ut.name }))
+  }
+  return allUnits.value.map((ut) => ({ value: ut.id, label: ut.name }))
+})
+
 const filteredUsers = computed(() => {
   const targetDepartment = filterDepartmentId.value
   const targetGroup = filterGroupId.value
   const targetTeam = filterTeamId.value
+  const targetUnit = filterUnitId.value
   const targetPosition = filterPosition.value
   return users.value.filter((user) => {
     const departmentValue = String(user.profile?.department ?? '')
     const groupValue = String(user.profile?.group ?? '')
     const teamValue = String(user.profile?.team ?? '')
+    const unitValue = String(user.profile?.unit ?? '')
     const positionValue = String(user.profile?.position ?? '')
 
     if (targetDepartment && targetDepartment !== '__unset__' && departmentValue !== targetDepartment) {
@@ -433,6 +493,12 @@ const filteredUsers = computed(() => {
       return false
     }
     if (targetTeam === '__unset__' && teamValue) {
+      return false
+    }
+    if (targetUnit && targetUnit !== '__unset__' && unitValue !== targetUnit) {
+      return false
+    }
+    if (targetUnit === '__unset__' && unitValue) {
       return false
     }
     if (targetPosition && targetPosition !== '__unset__' && positionValue !== targetPosition) {
@@ -482,20 +548,39 @@ const teamOptions = computed(() => {
     }))
 })
 
+const unitOptions = computed(() => {
+  if (!form.profile.team) {
+    return []
+  }
+  return allUnits.value
+    .filter((ut) => ut.parent === form.profile.team)
+    .map((ut) => ({
+      value: ut.id,
+      label: ut.name,
+    }))
+})
+
 const getUserDisplayName = (user) => {
   const fullName = `${user.last_name || ''} ${user.first_name || ''}`.trim()
   return fullName || user.username || user.email || '-'
 }
 
 const onDivisionChange = () => {
-  // 事業部が変更されたら、係と班をクリア
+  // 事業部が変更されたら、係・班・グループをクリア
   form.profile.group = null
   form.profile.team = null
+  form.profile.unit = null
 }
 
 const onGroupChange = () => {
-  // 係が変更されたら、班をクリア
+  // 係が変更されたら、班とグループをクリア
   form.profile.team = null
+  form.profile.unit = null
+}
+
+const onTeamChange = () => {
+  // 班が変更されたら、グループをクリア
+  form.profile.unit = null
 }
 
 const loadDepartments = async () => {
@@ -542,6 +627,16 @@ const loadTeams = async () => {
     allTeams.value = Array.isArray(response.data) ? response.data : []
   } catch (error) {
     allTeams.value = []
+  }
+}
+
+const loadUnits = async () => {
+  if (!isAdminUser.value) return
+  try {
+    const response = await api.accounts.getUnits()
+    allUnits.value = Array.isArray(response.data) ? response.data : []
+  } catch (error) {
+    allUnits.value = []
   }
 }
 
@@ -625,6 +720,7 @@ const buildPayload = () => {
     division: form.profile.division || null,
     group: form.profile.group || null,
     team: form.profile.team || null,
+    unit: form.profile.unit || null,
     joined_on: form.profile.joined_on || null,
   }
 
@@ -718,6 +814,7 @@ onMounted(async () => {
     loadDivisions(),
     loadGroups(),
     loadTeams(),
+    loadUnits(),
     loadUsers(),
   ])
 })
@@ -729,6 +826,11 @@ watch(filterDepartmentId, () => {
 
 watch(filterGroupId, () => {
   filterTeamId.value = ''
+  filterUnitId.value = ''
+})
+
+watch(filterTeamId, () => {
+  filterUnitId.value = ''
 })
 </script>
 

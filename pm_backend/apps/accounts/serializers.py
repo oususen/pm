@@ -26,6 +26,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     division_name = serializers.CharField(source='division.name', read_only=True)
     group_name = serializers.CharField(source='group.name', read_only=True)
     team_name = serializers.CharField(source='team.name', read_only=True)
+    unit_name = serializers.CharField(source='unit.name', read_only=True)
 
     class Meta:
         model = UserProfile
@@ -42,6 +43,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'group_name',
             'team',
             'team_name',
+            'unit',
+            'unit_name',
             'joined_on',
         ]
         extra_kwargs = {
