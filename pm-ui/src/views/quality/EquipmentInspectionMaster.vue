@@ -9,14 +9,21 @@
         <button class="btn-secondary" @click="loadTemplateList" :disabled="loadingList || detailLoading">
           更新
         </button>
+        <button
+          class="btn-secondary"
+          @click="toggleTemplateList"
+          :disabled="saving || actionLoading"
+        >
+          {{ isListHidden ? "一覧表示" : "一覧隠す" }}
+        </button>
         <button class="btn-primary" @click="startNewTemplate" :disabled="saving || actionLoading">
           新規作成
         </button>
       </div>
     </div>
 
-    <div class="master-layout">
-      <section class="panel list-panel">
+    <div class="master-layout" :class="{ 'create-mode': isListHidden }">
+      <section v-if="!isListHidden" class="panel list-panel">
         <h3 class="panel-title">テンプレート一覧</h3>
         <div class="table-wrap">
           <table class="data-table compact">
@@ -134,10 +141,10 @@
             </button>
           </div>
           <div class="table-wrap">
-            <table class="data-table compact">
+            <table class="data-table compact daily-inspection-table">
               <thead>
                 <tr>
-                  <th>No</th>
+                  <th class="col-no">No</th>
                   <th>点検項目</th>
                   <th>規格</th>
                   <th>確認頻度</th>
@@ -152,13 +159,19 @@
               </thead>
               <tbody>
                 <tr v-for="item in dailyItems" :key="item.local_key">
-                  <td>
-                    <input type="number" min="1" v-model.number="item.inspection_no" :disabled="!canEditFields" />
+                  <td class="col-no">
+                    <input
+                      class="no-input"
+                      type="number"
+                      min="1"
+                      v-model.number="item.inspection_no"
+                      :disabled="!canEditFields"
+                    />
                   </td>
-                  <td><textarea v-model="item.item_name" rows="2" :disabled="!canEditFields" /></td>
-                  <td><textarea v-model="item.standard" rows="2" :disabled="!canEditFields" /></td>
+                  <td><textarea class="auto-grow-textarea" v-model="item.item_name" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
+                  <td><textarea class="auto-grow-textarea" v-model="item.standard" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
                   <td><input v-model="item.frequency" :disabled="!canEditFields" /></td>
-                  <td><textarea v-model="item.method" rows="2" :disabled="!canEditFields" /></td>
+                  <td><textarea class="auto-grow-textarea" v-model="item.method" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
                   <td>
                     <select v-model="item.record_type" :disabled="!canEditFields">
                       <option value="CHECK">チェック</option>
@@ -167,7 +180,7 @@
                     </select>
                   </td>
                   <td><input v-model="item.unit" :disabled="!canEditFields" /></td>
-                  <td><textarea v-model="item.criteria" rows="2" :disabled="!canEditFields" /></td>
+                  <td><textarea class="auto-grow-textarea" v-model="item.criteria" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
                   <td class="center"><input type="checkbox" v-model="item.is_required" :disabled="!canEditFields" /></td>
                   <td class="center"><input type="checkbox" v-model="item.is_active" :disabled="!canEditFields" /></td>
                   <td>
@@ -201,10 +214,10 @@
               </thead>
               <tbody>
                 <tr v-for="item in quarterlyItems" :key="item.local_key">
-                  <td><textarea v-model="item.item_name" rows="2" :disabled="!canEditFields" /></td>
-                  <td><textarea v-model="item.standard" rows="2" :disabled="!canEditFields" /></td>
-                  <td><textarea v-model="item.method" rows="2" :disabled="!canEditFields" /></td>
-                  <td><textarea v-model="item.criteria" rows="2" :disabled="!canEditFields" /></td>
+                  <td><textarea class="auto-grow-textarea" v-model="item.item_name" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
+                  <td><textarea class="auto-grow-textarea" v-model="item.standard" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
+                  <td><textarea class="auto-grow-textarea" v-model="item.method" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
+                  <td><textarea class="auto-grow-textarea" v-model="item.criteria" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
                   <td>
                     <select v-model="item.record_type" :disabled="!canEditFields">
                       <option value="CHECK">チェック</option>
@@ -259,7 +272,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue"
+import { computed, nextTick, onMounted, ref } from "vue"
 import api from "@/api/client"
 import { authState } from "@/auth"
 import { hasPermission } from "@/router"
@@ -311,6 +324,7 @@ const detailLoading = ref(false)
 const saving = ref(false)
 const actionLoading = ref(false)
 const selectedTemplateId = ref(null)
+const isListHidden = ref(false)
 
 const createEmptyForm = () => ({
   id: null,
@@ -540,6 +554,21 @@ const formatDateTime = (value) => {
   return date.toLocaleString("ja-JP")
 }
 
+const resizeTextarea = (eventOrElement) => {
+  const element = eventOrElement?.target || eventOrElement
+  if (!(element instanceof HTMLTextAreaElement)) return
+  element.style.height = "auto"
+  element.style.height = `${element.scrollHeight}px`
+}
+
+const resizeAllTextareas = async () => {
+  await nextTick()
+  const textareas = document.querySelectorAll(".inspection-master textarea.auto-grow-textarea")
+  textareas.forEach((textarea) => {
+    resizeTextarea(textarea)
+  })
+}
+
 const createLocalKey = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 
 const buildSm009Defaults = () => {
@@ -622,11 +651,13 @@ const addItem = (sectionType) => {
     is_required: true,
     is_active: true,
   })
+  resizeAllTextareas()
 }
 
 const removeItem = (targetItem) => {
   form.value.items = form.value.items.filter((item) => item.local_key !== targetItem.local_key)
   resequenceSection(targetItem.section_type)
+  resizeAllTextareas()
 }
 
 const loadSm009Defaults = () => {
@@ -635,6 +666,7 @@ const loadSm009Defaults = () => {
     if (!ok) return
   }
   form.value.items = buildSm009Defaults()
+  resizeAllTextareas()
 }
 
 const toFormModel = (raw) => {
@@ -730,6 +762,7 @@ const loadTemplateDetail = async (id) => {
     const response = await api.qualityEquipmentInspections.get(id)
     form.value = toFormModel(response.data)
     selectedTemplateId.value = id
+    await resizeAllTextareas()
   } catch (error) {
     console.error("設備点検テンプレート詳細取得に失敗:", error)
     alert("テンプレート詳細の取得に失敗しました。")
@@ -743,9 +776,15 @@ const selectTemplate = async (id) => {
 }
 
 const startNewTemplate = () => {
+  isListHidden.value = true
   selectedTemplateId.value = null
   form.value = createEmptyForm()
   form.value.items = buildSm009Defaults()
+  resizeAllTextareas()
+}
+
+const toggleTemplateList = () => {
+  isListHidden.value = !isListHidden.value
 }
 
 const saveTemplate = async () => {
@@ -866,6 +905,7 @@ onMounted(async () => {
   } else {
     startNewTemplate()
   }
+  await resizeAllTextareas()
 })
 </script>
 
@@ -875,12 +915,20 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  color: #111827;
+  font-family: "Meiryo", "Yu Gothic UI", "Yu Gothic", sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
 }
 .master-layout {
   display: grid;
   grid-template-columns: 34% 1fr;
   gap: 12px;
   min-height: 0;
+}
+.master-layout.create-mode {
+  grid-template-columns: 1fr;
 }
 .panel {
   background: #fff;
@@ -893,8 +941,9 @@ onMounted(async () => {
 }
 .panel-title {
   margin: 0;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
+  color: #0f172a;
 }
 .table-wrap {
   overflow: auto;
@@ -904,8 +953,33 @@ onMounted(async () => {
 .data-table.compact th,
 .data-table.compact td {
   padding: 4px 6px;
-  font-size: 12px;
+  font-size: 14px;
+  line-height: 1.45;
   vertical-align: top;
+  color: #0f172a;
+  letter-spacing: 0.02em;
+}
+.data-table.compact th {
+  font-weight: 700;
+}
+.data-table.compact td {
+  font-weight: 400;
+}
+.daily-inspection-table th.col-no,
+.daily-inspection-table td.col-no {
+  width: 72px;
+  min-width: 72px;
+  max-width: 72px;
+}
+.daily-inspection-table td.col-no {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+.daily-inspection-table td.col-no .no-input {
+  min-width: 0;
+  text-align: right;
+  padding-left: 4px;
+  padding-right: 4px;
 }
 .data-table.compact tbody tr {
   cursor: pointer;
@@ -952,7 +1026,8 @@ onMounted(async () => {
   color: #991b1b;
 }
 .status-meta {
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 500;
   color: #334155;
 }
 .form-grid {
@@ -967,7 +1042,9 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
 }
 .check-line {
   flex-direction: row !important;
@@ -986,7 +1063,9 @@ onMounted(async () => {
 }
 .item-section h4 {
   margin: 0;
-  font-size: 14px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
 }
 .section-header {
   display: flex;
@@ -1004,10 +1083,30 @@ textarea {
   border-radius: 4px;
   padding: 4px 6px;
   background: #fff;
-  font-size: 12px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #0f172a;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+input::placeholder,
+textarea::placeholder {
+  color: #64748b;
+}
+input:disabled,
+select:disabled,
+textarea:disabled {
+  color: #334155;
+  background: #f8fafc;
+  opacity: 1;
 }
 textarea {
-  resize: vertical;
+  resize: none;
+  overflow: hidden;
+  min-height: 2.8em;
+}
+.auto-grow-textarea {
+  line-height: 1.45;
 }
 .rejection-box {
   border: 1px solid #f5b7b1;
