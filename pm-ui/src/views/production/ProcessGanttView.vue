@@ -211,6 +211,8 @@ const manualAddLoading = ref(false)
 const debugEnabled = true
 const calendarDayMap = ref({})
 const workPatternMap = ref({})
+const processOutputCandidatesMap = ref({})
+const processCoproductChildMap = ref({})
 const selectedLineObj = computed(() =>
   lines.value.find((l) => String(l.id) === String(selectedLine.value))
 )
@@ -390,6 +392,81 @@ const fetchLines = async () => {
   lines.value = res.data.results || res.data || []
 }
 
+const shouldDisplayProductInProcess = (processId, productId, productCode, childMapSource = processCoproductChildMap.value) => {
+  const code = String(productCode || '').trim().toUpperCase()
+  if (code.startsWith('ST')) return true
+  const pid = Number(productId)
+  if (!Number.isFinite(pid) || pid <= 0) return false
+  const childSet = childMapSource?.[Number(processId)]
+  if (childSet && childSet.has(pid)) return false
+  return true
+}
+
+const loadProcessOutputCandidates = async (lineId) => {
+  if (!lineId) {
+    processOutputCandidatesMap.value = {}
+    processCoproductChildMap.value = {}
+    return
+  }
+  try {
+    const res = await api.routings.getRoutingStepsByLine(lineId)
+    const rows = res.data?.results || res.data || []
+
+    const coproductBomsRes = await api.boms.getBOMs({
+      is_coproduct: true,
+      is_active: true,
+      page_size: 5000,
+    })
+    const coproductBoms = coproductBomsRes.data?.results || coproductBomsRes.data || []
+    const coproductBomIdSet = new Set(
+      (Array.isArray(coproductBoms) ? coproductBoms : [])
+        .map((bom) => Number(bom?.id))
+        .filter((bomId) => Number.isFinite(bomId) && bomId > 0)
+    )
+
+    const bomItemsRes = await api.bomItems.getBOMItems({
+      line: lineId,
+      page_size: 5000,
+    })
+    const bomItems = bomItemsRes.data?.results || bomItemsRes.data || []
+    const nextChildMap = {}
+    ;(Array.isArray(bomItems) ? bomItems : []).forEach((item) => {
+      const bomId = Number(item?.bom)
+      const processId = Number(item?.process)
+      const childId = Number(item?.child_product)
+      if (!coproductBomIdSet.has(bomId)) return
+      if (!Number.isFinite(processId) || processId <= 0) return
+      if (!Number.isFinite(childId) || childId <= 0) return
+      if (!nextChildMap[processId]) nextChildMap[processId] = new Set()
+      nextChildMap[processId].add(childId)
+    })
+    processCoproductChildMap.value = nextChildMap
+
+    const nextMap = {}
+    rows.forEach((row) => {
+      const processId = Number(row?.process)
+      const productId = Number(row?.output_product)
+      const productCode = String(row?.output_product_code || '').trim()
+      if (!Number.isFinite(processId) || processId <= 0) return
+      if (!Number.isFinite(productId) || productId <= 0) return
+      if (!productCode) return
+      if (!shouldDisplayProductInProcess(processId, productId, productCode, nextChildMap)) return
+      if (!nextMap[processId]) nextMap[processId] = []
+      if (!nextMap[processId].some((item) => Number(item.product_id) === productId)) {
+        nextMap[processId].push({
+          product_id: productId,
+          product_code: productCode,
+          product_name: String(row?.output_product_name || '').trim(),
+        })
+      }
+    })
+    processOutputCandidatesMap.value = nextMap
+  } catch (e) {
+    console.error('工程ガント候補品番取得エラー', e)
+    processOutputCandidatesMap.value = {}
+  }
+}
+
 const formatDateKey = (dateObj) => {
   return `${dateObj.getFullYear()}-${pad2(dateObj.getMonth() + 1)}-${pad2(dateObj.getDate())}`
 }
@@ -510,6 +587,7 @@ const loadData = async () => {
 
     logDebug('loadData', { line: selectedLine.value, startDate, endDate })
     await loadWorkPatternData(selectedLine.value, startDate, endDate)
+    await loadProcessOutputCandidates(selectedLine.value)
     const ganttRes = await api.lineGanttPlans.getLineGanttPlans({
       line: selectedLine.value,
       plan_date__gte: startDate,
@@ -539,6 +617,7 @@ const generateSchedule = async (clearExisting = true) => {
     const endDate = displayDays.value[displayDays.value.length - 1].date
     logDebug('generateSchedule', { line: selectedLine.value, startDate, endDate, clearExisting })
     await loadWorkPatternData(selectedLine.value, startDate, endDate)
+    await loadProcessOutputCandidates(selectedLine.value)
     const ganttRes = await api.lineGanttPlans.generate({
       line_id: selectedLine.value,
       start_date: startDate,
@@ -1204,6 +1283,33 @@ function buildProcessGantt(plans) {
 
   const msPerSlot = slotHours * 60 * 60 * 1000
   processMap.forEach((procEntry) => {
+    procEntry.items = procEntry.items.filter((item) =>
+      shouldDisplayProductInProcess(procEntry.process_id, item.product_id, item.product_code)
+    )
+
+    const candidates = processOutputCandidatesMap.value[procEntry.process_id] || []
+    const existingProductIds = new Set(
+      procEntry.items
+        .map((item) => Number(item.product_id))
+        .filter((pid) => Number.isFinite(pid) && pid > 0)
+    )
+    candidates.forEach((candidate) => {
+      const pid = Number(candidate.product_id)
+      if (!Number.isFinite(pid) || pid <= 0 || existingProductIds.has(pid)) return
+      if (!shouldDisplayProductInProcess(procEntry.process_id, pid, candidate.product_code)) return
+      procEntry.items.push({
+        product_id: pid,
+        product_code: candidate.product_code || String(pid),
+        product_name: candidate.product_name || '',
+        parent_product_code: candidate.product_code || String(pid),
+        plan_qty: 0,
+        sequence_no: null,
+        bars: [],
+        barsMap: new Map(),
+      })
+      existingProductIds.add(pid)
+    })
+
     procEntry.items.sort((a, b) => {
       const codeA = isTankLine.value ? (a.parent_product_code || a.product_code || '') : (a.product_code || '')
       const codeB = isTankLine.value ? (b.parent_product_code || b.product_code || '') : (b.product_code || '')
