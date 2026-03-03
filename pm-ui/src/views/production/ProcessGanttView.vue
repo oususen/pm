@@ -201,6 +201,8 @@ const mergeConsecutive = ref(false)
 const slotHours = 4
 const pixelsPerSlot = 80
 const mergeGapToleranceMs = 60 * 1000 // 連続とみなす隙間（1分）
+const sameBusinessDayMergeGapToleranceMs = 120 * 60 * 1000 // 同一稼働日内なら最大120分の分断を連結
+const businessDayBoundaryHour = 8
 const workStartFallback = { hour: 8, minute: 0 }
 const workMinutesFallback = 480
 const timelineStart = ref(null)
@@ -469,6 +471,15 @@ const loadProcessOutputCandidates = async (lineId) => {
 
 const formatDateKey = (dateObj) => {
   return `${dateObj.getFullYear()}-${pad2(dateObj.getMonth() + 1)}-${pad2(dateObj.getDate())}`
+}
+
+const getBusinessDateKey = (dateObj) => {
+  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return ''
+  const target = new Date(dateObj)
+  if (target.getHours() < businessDayBoundaryHour) {
+    target.setDate(target.getDate() - 1)
+  }
+  return formatDateKey(target)
 }
 
 const parseTimeParts = (value) => {
@@ -944,6 +955,9 @@ function buildBarTooltip(bar, item, proc) {
   if (proc?.process_name) detailLines.push(`工程: ${proc.process_name}`)
   if (item?.product_code) detailLines.push(`品番: ${item.product_code}`)
   detailLines.push(`数量: ${formatQuantity(bar.planQty)}`)
+  if (Array.isArray(bar.mergedPlanIds) && bar.mergedPlanIds.length > 1) {
+    detailLines.push(`連結本数: ${bar.mergedPlanIds.length}`)
+  }
   if (bar.startLabel && bar.endLabel) {
     detailLines.push(`時間: ${bar.startLabel} - ${bar.endLabel}`)
   }
@@ -1010,6 +1024,21 @@ function cloneBarForMerge(bar) {
   }
 }
 
+function shouldMergeBarByRule(currentBar, nextBar) {
+  const gap = nextBar.startTime.getTime() - currentBar.endTime.getTime()
+  if (gap >= -mergeGapToleranceMs && gap <= mergeGapToleranceMs) {
+    return true
+  }
+
+  const currentBusinessDate = getBusinessDateKey(currentBar.startTime)
+  const nextBusinessDate = getBusinessDateKey(nextBar.startTime)
+  if (!currentBusinessDate || !nextBusinessDate || currentBusinessDate !== nextBusinessDate) {
+    return false
+  }
+
+  return gap >= -sameBusinessDayMergeGapToleranceMs && gap <= sameBusinessDayMergeGapToleranceMs
+}
+
 // 連結表示用に同一製品の連続バーをまとめる
 function mergeBars(bars) {
   if (!mergeConsecutive.value) return bars
@@ -1025,9 +1054,8 @@ function mergeBars(bars) {
       current = cloned
       return
     }
-    const gap = cloned.startTime.getTime() - current.endTime.getTime()
-    if (gap >= -mergeGapToleranceMs && gap <= mergeGapToleranceMs) {
-      current.endTime = new Date(cloned.endTime)
+    if (shouldMergeBarByRule(current, cloned)) {
+      current.endTime = new Date(Math.max(current.endTime.getTime(), cloned.endTime.getTime()))
       current.durationMs = current.endTime.getTime() - current.startTime.getTime()
       current.planQty = Number(current.planQty || 0) + Number(cloned.planQty || 0)
       const baseMinutes = Number(current.totalMinutesRequired || current.durationMs / 60000)
