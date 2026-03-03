@@ -21,7 +21,6 @@
             <th>有効終了日</th>
             <th>対象者</th>
             <th>入力者</th>
-            <th>説明</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -36,7 +35,6 @@
               <td>{{ item.valid_to || '-' }}</td>
               <td>{{ getTargetLabel(item) }}</td>
               <td>{{ item.operator_name || '-' }}</td>
-              <td class="description">{{ item.description || '-' }}</td>
               <td class="action-cell">
                 <button
                   v-if="!item.is_read"
@@ -80,7 +78,7 @@
                   </div>
                   <div class="detail-item full">
                     <span class="detail-label">説明</span>
-                    <span class="detail-value">{{ item.description || '-' }}</span>
+                    <span class="detail-value" v-html="item.description || '-'"></span>
                   </div>
                   <div class="detail-item full detail-actions">
                     <button
@@ -483,6 +481,11 @@ onMounted(() => {
 .detail-value {
   font-size: 13px;
   color: #1f2a44;
+}
+
+/* HTMLテーブルを含む説明欄の余白調整 */
+.detail-value :deep(table) {
+  margin-top: 4px;
 }
 
 .detail-actions {

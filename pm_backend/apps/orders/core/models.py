@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from masters.models import Customer, Product
 
@@ -323,3 +324,22 @@ class StgOrderDaily(models.Model):
 
     def __str__(self):
         return f"{self.product_code} - {self.due_date}: {self.quantity}"
+
+
+class KubotaSakaiImportConfig(models.Model):
+    """クボタ堺 確定取り込み通知設定（シングルトン）"""
+    notify_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='kubota_sakai_import_notify',
+        verbose_name='通知先ユーザー',
+    )
+
+    class Meta:
+        db_table = 'kubota_sakai_import_config'
+        verbose_name = 'クボタ堺取り込み通知設定'
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj

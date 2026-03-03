@@ -95,6 +95,12 @@ const settings = [
     component: () => import("@/views/settings/PurchaseOrderApprovalSettings.vue"),
     meta: { pageTitle: "発注承認者設定", resource: "settings.purchase_order_approval" },
   },
+  {
+    path: "/settings/kubota-import",
+    name: "KubotaImportSettings",
+    component: () => import("@/views/settings/KubotaImportSettings.vue"),
+    meta: { pageTitle: "クボタ堺取り込み通知設定", resource: "settings" },
+  },
 ];
 
 export default settings;

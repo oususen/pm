@@ -346,3 +346,35 @@ class StgOrderDailyViewSet(viewsets.ModelViewSet):
     search_fields = ['product_code']
     ordering_fields = ['due_date', 'created_at']
     ordering = ['due_date']
+
+
+from rest_framework.decorators import api_view, permission_classes
+from django.contrib.auth import get_user_model
+
+@api_view(['GET', 'PATCH'])
+@permission_classes([AllowAny])
+def kubota_sakai_import_config_view(request):
+    """クボタ堺確定取り込み通知設定 GET/PATCH"""
+    from .models import KubotaSakaiImportConfig
+    config = KubotaSakaiImportConfig.get_solo()
+    User = get_user_model()
+
+    if request.method == 'GET':
+        notify_users = [
+            {'id': u.id, 'full_name': u.get_full_name() or u.username}
+            for u in config.notify_users.all()
+        ]
+        all_users = [
+            {'id': u.id, 'full_name': u.get_full_name() or u.username}
+            for u in User.objects.filter(is_active=True).order_by('last_name', 'first_name')
+        ]
+        return Response({'notify_users': notify_users, 'all_users': all_users})
+
+    # PATCH
+    user_ids = request.data.get('notify_user_ids', [])
+    config.notify_users.set(user_ids)
+    notify_users = [
+        {'id': u.id, 'full_name': u.get_full_name() or u.username}
+        for u in config.notify_users.all()
+    ]
+    return Response({'notify_users': notify_users})

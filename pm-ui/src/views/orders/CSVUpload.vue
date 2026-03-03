@@ -144,6 +144,35 @@
             <p>{{ result.order_creation_error }}</p>
           </div>
 
+          <!-- 確定vs内示 比較 (クボタ堺確定取り込み時) -->
+          <div v-if="result.forecast_diffs && result.forecast_diffs.length > 0" class="forecast-diff">
+            <h4>確定・内示 数量比較 ({{ result.forecast_diffs.length }}件)</h4>
+            <table class="diff-table">
+              <thead>
+                <tr>
+                  <th>製品コード</th>
+                  <th>納期</th>
+                  <th>確定数</th>
+                  <th>内示数</th>
+                  <th>差分</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="(d, index) in result.forecast_diffs"
+                  :key="index"
+                  :class="d.diff !== 0 ? (d.diff > 0 ? 'diff-up' : 'diff-down') : ''"
+                >
+                  <td>{{ d.product_code }}</td>
+                  <td>{{ d.due_date }}</td>
+                  <td class="num">{{ d.firm_qty.toLocaleString() }}</td>
+                  <td class="num">{{ d.forecast_qty.toLocaleString() }}</td>
+                  <td class="num diff-cell">{{ d.diff > 0 ? '+' : '' }}{{ d.diff.toLocaleString() }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
           <div v-if="result.errors && result.errors.length > 0" class="errors">
             <h4>エラー:</h4>
             <ul>
@@ -589,5 +618,63 @@ onMounted(() => {
 .toggle-row input[type="checkbox"] {
   width: 16px;
   height: 16px;
+}
+
+/* 確定・内示 比較テーブル */
+.forecast-diff {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #f0f4ff;
+  border: 1px solid #b8c8ff;
+  border-radius: 4px;
+}
+
+.forecast-diff h4 {
+  margin: 0 0 0.75rem 0;
+  color: #2c3e7a;
+  font-size: 0.95rem;
+}
+
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.diff-table th {
+  background: #dde6ff;
+  color: #2c3e7a;
+  padding: 5px 10px;
+  text-align: center;
+  border: 1px solid #b8c8ff;
+  white-space: nowrap;
+}
+
+.diff-table td {
+  padding: 4px 10px;
+  border: 1px solid #d0d8f0;
+  text-align: left;
+}
+
+.diff-table td.num {
+  text-align: right;
+}
+
+.diff-table tr.diff-up td.diff-cell {
+  color: #c00;
+  font-weight: 600;
+}
+
+.diff-table tr.diff-down td.diff-cell {
+  color: #0066cc;
+  font-weight: 600;
+}
+
+.diff-table tr.diff-up {
+  background: #fff5f5;
+}
+
+.diff-table tr.diff-down {
+  background: #f5f8ff;
 }
 </style>

@@ -2,6 +2,7 @@ import csv
 from datetime import datetime
 from decimal import Decimal
 from django.db import transaction
+from django.db.models import Max
 from orders.core.models import StgOrderRawKubota, StgOrderDaily
 from masters.models import Customer, Product
 
@@ -282,7 +283,12 @@ class KubotaSakaiKakuteiImportService:
                 }
 
             # Save to database
-            raw_count, daily_count, min_raw_id, max_raw_id = self.save_to_database(raw_records, file, customer_code)
+            raw_count, daily_count, min_raw_id, max_raw_id, forecast_diffs = self.save_to_database(raw_records, file, customer_code)
+
+            # 差分があるとき（diff != 0）通知を作成
+            changed_diffs = [d for d in forecast_diffs if d['diff'] != 0]
+            if changed_diffs:
+                self._create_diff_notification(changed_diffs, file.name)
 
             return {
                 'success': True,
@@ -291,6 +297,7 @@ class KubotaSakaiKakuteiImportService:
                 'daily_count': daily_count,
                 'min_raw_id': min_raw_id,
                 'max_raw_id': max_raw_id,
+                'forecast_diffs': forecast_diffs,
                 'errors': self.errors,
                 'warnings': self.warnings
             }
@@ -392,4 +399,107 @@ class KubotaSakaiKakuteiImportService:
             if daily_records:
                 StgOrderDaily.objects.bulk_create(daily_records)
 
-        return len(raw_records), len(daily_records), min_raw_id, max_raw_id
+            # 確定ファイルの製品・日付について、内示データと比較
+            forecast_diffs = []
+            if daily_records:
+                # 今回確定の (product_code, due_date) → 合計数量
+                firm_dict = {}
+                for daily in daily_records:
+                    key = (daily.product_code, daily.due_date)
+                    firm_dict[key] = firm_dict.get(key, Decimal('0')) + daily.quantity
+
+                product_codes = list({k[0] for k in firm_dict.keys()})
+                due_dates = list({k[1] for k in firm_dict.keys()})
+
+                # 同製品・同日の内示データのうち、最新（最大ID）のレコードを取得
+                max_id_qs = (
+                    StgOrderDaily.objects
+                    .filter(
+                        customer=customer,
+                        order_type='FORECAST',
+                        product_code__in=product_codes,
+                        due_date__in=due_dates,
+                    )
+                    .values('product_code', 'due_date')
+                    .annotate(max_id=Max('id'))
+                )
+                latest_ids = [row['max_id'] for row in max_id_qs]
+                forecast_dict = {
+                    (rec.product_code, rec.due_date): rec.quantity
+                    for rec in StgOrderDaily.objects
+                    .filter(id__in=latest_ids)
+                    .only('product_code', 'due_date', 'quantity')
+                }
+
+                # 内示が存在する製品・日付を一覧化（数量一致でも含める）
+                for (product_code, due_date) in sorted(firm_dict.keys()):
+                    if (product_code, due_date) not in forecast_dict:
+                        continue
+                    firm_qty = int(firm_dict[(product_code, due_date)])
+                    forecast_qty = int(forecast_dict[(product_code, due_date)])
+                    forecast_diffs.append({
+                        'product_code': product_code,
+                        'due_date': str(due_date),
+                        'firm_qty': firm_qty,
+                        'forecast_qty': forecast_qty,
+                        'diff': firm_qty - forecast_qty,
+                    })
+
+        return len(raw_records), len(daily_records), min_raw_id, max_raw_id, forecast_diffs
+
+    def _create_diff_notification(self, changed_diffs, filename):
+        """確定vs内示の差分通知を作成する"""
+        try:
+            from datetime import date, timedelta
+            from notifications.models import Notification
+            from orders.core.models import KubotaSakaiImportConfig
+
+            config = KubotaSakaiImportConfig.get_solo()
+            if not config.notify_users.exists():
+                return  # 通知先なし
+
+            th = "style='padding:4px 10px;border:1px solid #b8c8ff;text-align:center'"
+            td = "style='padding:4px 10px;border:1px solid #d0d8f0'"
+            td_r = "style='padding:4px 10px;border:1px solid #d0d8f0;text-align:right'"
+
+            rows = []
+            for d in changed_diffs:
+                sign = '+' if d['diff'] > 0 else ''
+                diff_color = '#c00' if d['diff'] > 0 else '#0066cc'
+                td_diff = f"style='padding:4px 10px;border:1px solid #d0d8f0;text-align:right;color:{diff_color};font-weight:600'"
+                rows.append(
+                    f"<tr>"
+                    f"<td {td}>{d['product_code']}</td>"
+                    f"<td {td}>{d['due_date']}</td>"
+                    f"<td {td_r}>{d['forecast_qty']:,}</td>"
+                    f"<td {td_r}>{d['firm_qty']:,}</td>"
+                    f"<td {td_diff}>{sign}{d['diff']:,}</td>"
+                    f"</tr>"
+                )
+            description = (
+                "<table style='border-collapse:collapse;font-size:0.9em'>"
+                f"<thead><tr style='background:#dde6ff'>"
+                f"<th {th}>品番</th>"
+                f"<th {th}>日付</th>"
+                f"<th {th}>内示数</th>"
+                f"<th {th}>確定数</th>"
+                f"<th {th}>差分</th>"
+                "</tr></thead>"
+                "<tbody>" + "".join(rows) + "</tbody>"
+                "</table>"
+            )
+
+            today = date.today()
+            notification = Notification.objects.create(
+                title=f'[クボタ堺確定] 内示との差分あり ({len(changed_diffs)}件) - {filename}',
+                category='受注',
+                domain='KUBOTA_SAKAI_FIRM',
+                description=description,
+                valid_from=today,
+                valid_to=today + timedelta(days=7),
+                operator_name='system',
+            )
+            notification.target_users.set(config.notify_users.all())
+        except Exception as e:
+            # 通知失敗はインポート処理を止めない
+            print(f"通知作成エラー: {e}")
