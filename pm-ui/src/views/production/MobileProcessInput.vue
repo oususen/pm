@@ -117,7 +117,7 @@
             «
           </button>
           <span class="planned-label">{{ t('processInput.plannedToday') }}</span>
-          <span v-if="slotLabel" class="slot-label">{{ slotLabel }}</span>
+          <span v-if="plannedTimeLabel" class="slot-label">{{ plannedTimeLabel }}</span>
           <button
             type="button"
             class="slot-btn"
@@ -555,7 +555,8 @@ const scrapSearchText = ref('')
 const defaultProductId = ref(null)
 const productImageMap = ref({})
 const productMetaMap = ref({})
-const filterCurrentTime = ref(true)
+// 現場では同一品番を連続で扱うケースが多いため、初期表示は時間帯絞り込みOFF
+const filterCurrentTime = ref(false)
 const timeSlots = ref([])
 const activeSlotIndex = ref(null)
 const selectedOperatorAction = ref('')
@@ -2047,11 +2048,42 @@ const toIsoDateTimeOrNull = (value) => {
   return dt.toISOString()
 }
 
+const ensureStartedProductsVisible = (items) => {
+  const base = [...(Array.isArray(items) ? items : [])]
+  if (!startedProductIdsLoaded.value || !startedProductIds.value?.size) {
+    return base
+  }
+
+  const existingIds = new Set(
+    base
+      .map((item) => String(item?.product || ''))
+      .filter((id) => id !== '')
+  )
+  const allMerged = mergeProductionProductsByProduct(allPlanProducts.value)
+  const allMap = new Map(
+    allMerged
+      .map((item) => [String(item?.product || ''), item])
+      .filter(([id]) => id !== '')
+  )
+
+  startedProductIds.value.forEach((productId) => {
+    const key = String(productId || '')
+    if (!key || existingIds.has(key)) return
+    const src = allMap.get(key)
+    if (!src) return
+    base.push({ ...src })
+    existingIds.add(key)
+  })
+
+  return base
+}
+
 const applyTimeSlotFilter = () => {
   const slots = timeSlots.value || []
   let index = activeSlotIndex.value
   if (slots.length === 0 || !filterCurrentTime.value) {
-    productionProducts.value = mergeProductionProductsByProduct(allPlanProducts.value)
+    const mergedAll = mergeProductionProductsByProduct(allPlanProducts.value)
+    productionProducts.value = ensureStartedProductsVisible(mergedAll)
     scrapProducts.value = [...allScrapProducts.value]
     return
   }
@@ -2060,7 +2092,7 @@ const applyTimeSlotFilter = () => {
   activeSlotIndex.value = index
 
   const slotItems = mergeProductionProductsByProduct(slots[index]?.items || [])
-  productionProducts.value = [...slotItems]
+  productionProducts.value = ensureStartedProductsVisible(slotItems)
 
   const slotProductIds = new Set(slotItems.map((p) => String(p.product)))
   let filteredScrap = allScrapProducts.value.filter((p) =>
@@ -2085,11 +2117,51 @@ const canNextSlot = computed(() => {
 })
 
 const slotLabel = computed(() => {
-  if (!filterCurrentTime.value || !timeSlots.value.length) return ''
-  const idx = activeSlotIndex.value ?? 0
-  const slot = timeSlots.value[idx]
-  if (!slot) return ''
-  return `${formatSlotTime(slot.start)} - ${formatSlotTime(slot.end)}`
+  if (!timeSlots.value.length) return ''
+  if (filterCurrentTime.value) {
+    const idx = activeSlotIndex.value ?? 0
+    const slot = timeSlots.value[idx]
+    if (!slot) return ''
+    return `${formatSlotTime(slot.start)} - ${formatSlotTime(slot.end)}`
+  }
+  // 「現在時刻のみ」OFF時は当日計画の全体時間帯を表示
+  const first = timeSlots.value[0]
+  const last = timeSlots.value[timeSlots.value.length - 1]
+  if (!first || !last) return ''
+  return `${formatSlotTime(first.start)} - ${formatSlotTime(last.end)}`
+})
+
+const selectedProductTimeLabel = computed(() => {
+  if (!timeSlots.value.length) return ''
+  const productId = String(record.value.product_id || '').trim()
+  if (!productId) return ''
+
+  let startTime = null
+  let endTime = null
+  ;(timeSlots.value || []).forEach((slot) => {
+    const slotItems = Array.isArray(slot?.items) ? slot.items : []
+    const hasSelectedProduct = slotItems.some(
+      (item) => String(item?.product || '').trim() === productId
+    )
+    if (!hasSelectedProduct) return
+
+    const slotStart = slot?.start instanceof Date ? slot.start : new Date(slot?.start)
+    const slotEnd = slot?.end instanceof Date ? slot.end : new Date(slot?.end)
+    if (Number.isNaN(slotStart.getTime()) || Number.isNaN(slotEnd.getTime())) return
+    if (!startTime || slotStart.getTime() < startTime.getTime()) {
+      startTime = slotStart
+    }
+    if (!endTime || slotEnd.getTime() > endTime.getTime()) {
+      endTime = slotEnd
+    }
+  })
+
+  if (!startTime || !endTime) return ''
+  return `${formatSlotTime(startTime)} - ${formatSlotTime(endTime)}`
+})
+
+const plannedTimeLabel = computed(() => {
+  return selectedProductTimeLabel.value || slotLabel.value
 })
 
 const goPrevSlot = () => {
