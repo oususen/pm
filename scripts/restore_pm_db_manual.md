@@ -13,7 +13,7 @@
 `d:\pm` で以下を実行:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\restore_pm_db.ps1 pm_db_backup_20260219_211529.SQL
+powershell -ExecutionPolicy Bypass -File .\scripts\restore_pm_db.ps1 pm_db_backup.SQL
 ```
 
 ## 3. 成功判定

@@ -148,7 +148,7 @@
                   type="button"
                   class="gantt-row-add-btn"
                   :style="{ left: Math.max(anchor.leftPx - 10, 2) + 'px' }"
-                  :title="`${anchor.dateKey} 勤務終了時刻付近に追加`"
+                  :title="`${anchor.dateKey} 17:00付近に追加`"
                   :disabled="manualAddLoading || mergeConsecutive || !item.product_id"
                   @click.stop="openManualAdd(proc, item, anchor)"
                 >
@@ -203,6 +203,8 @@ const pixelsPerSlot = 80
 const mergeGapToleranceMs = 60 * 1000 // 連続とみなす隙間（1分）
 const sameBusinessDayMergeGapToleranceMs = 120 * 60 * 1000 // 同一稼働日内なら最大120分の分断を連結
 const businessDayBoundaryHour = 8
+const manualAddAnchorHour = 17
+const manualAddAnchorMinute = 0
 const workStartFallback = { hour: 8, minute: 0 }
 const workMinutesFallback = 480
 const timelineStart = ref(null)
@@ -259,15 +261,13 @@ const rowAddAnchors = computed(() => {
   while (cursor.getTime() < endMs) {
     const dateKey = formatDateKey(cursor)
     const workStart = getWorkStartForDate(dateKey)
-    const workEnd = getWorkEndForDate(dateKey, workStart)
-    if (!workStart || !workEnd) {
+    if (!workStart) {
       cursor.setDate(cursor.getDate() + 1)
       continue
     }
 
     const anchorTime = new Date(cursor)
-    anchorTime.setDate(anchorTime.getDate() + (workEnd.dayOffset || 0))
-    anchorTime.setHours(workEnd.hour, workEnd.minute, 0, 0)
+    anchorTime.setHours(manualAddAnchorHour, manualAddAnchorMinute, 0, 0)
     const anchorMs = anchorTime.getTime()
     if (anchorMs >= startMs && anchorMs < endMs) {
       anchors.push({

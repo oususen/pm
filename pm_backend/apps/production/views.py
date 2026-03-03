@@ -47,7 +47,7 @@ from .serializers import (
 from .services.order_expansion import OrderExpansionService
 from .services.gantt_planning import generate_line_gantt_plans
 from masters.models import Routing, RoutingStep, ProcessCycleTime, Line, Supplier, Process, Calendar, CalendarDay, BOM, BOMItem, Product
-from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR
+from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR, get_business_today
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 
@@ -2779,8 +2779,74 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         except ValueError as e:
             return Response({'detail': f'Invalid date format: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # 在庫計算仕様書の開始日ルールに合わせて、計算開始日を補正する。
+        # - 実在庫: 前々営業日
+        # - 計画在庫/進度: 今日 - (最大LT + 1)営業日
+        # API入力start_dateがこれより未来日の場合でも、必要分は遡って再計算する。
+        line_obj = Line.objects.filter(id=line_id).first()
+        calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
+            calendar_code='daiso'
+        ).values_list('id', flat=True).first()
+        workday_cache = {}
+
+        def is_working_day(target_date):
+            if not calendar_id:
+                return target_date.weekday() < 5
+            if target_date in workday_cache:
+                return workday_cache[target_date]
+            cal = CalendarDay.objects.filter(
+                calendar_id=calendar_id,
+                target_date=target_date,
+            ).first()
+            is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
+            workday_cache[target_date] = is_work
+            return is_work
+
+        def get_prev_working_day(target_date):
+            prev_date = target_date - timedelta(days=1)
+            while not is_working_day(prev_date):
+                prev_date = prev_date - timedelta(days=1)
+            return prev_date
+
+        def shift_working_days(target_date, days):
+            if not days:
+                return target_date
+            if not calendar_id:
+                return target_date + timedelta(days=days)
+            step = 1 if days > 0 else -1
+            remaining = abs(int(days))
+            current = target_date
+            while remaining > 0:
+                current = current + timedelta(days=step)
+                if is_working_day(current):
+                    remaining -= 1
+            return current
+
+        today = get_business_today()
+        stock_start_dt = get_prev_working_day(get_prev_working_day(today))
+        product_ids_for_line = list(
+            LineBacklog.objects.filter(
+                line_id=line_id,
+                plan_date__lte=end_dt,
+            ).values_list('product_id', flat=True).distinct()
+        )
+        max_lt = 0
+        if product_ids_for_line:
+            max_lt = BOMItem.objects.filter(
+                bom__is_active=True,
+                child_product_id__in=product_ids_for_line,
+            ).aggregate(v=Max('lead_time_days'))['v'] or 0
+        planned_progress_start_dt = shift_working_days(today, -(int(max_lt) + 1))
+        effective_start_dt = min(start_dt, stock_start_dt, planned_progress_start_dt)
+
         try:
-            recalculate_inventory_for_line(line_id, start_dt, end_dt, include_progress=include_progress, line_final_only=line_final_only)
+            recalculate_inventory_for_line(
+                line_id,
+                effective_start_dt,
+                end_dt,
+                include_progress=include_progress,
+                line_final_only=line_final_only,
+            )
             return Response({'detail': 'Inventory recalculated successfully'})
         except Exception as e:
             return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
