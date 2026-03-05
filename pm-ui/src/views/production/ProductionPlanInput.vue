@@ -880,9 +880,11 @@ const collectCoproductParentCandidates = (rows) => {
     if (!row) return
     const productId = Number(row.product)
     if (!Number.isFinite(productId) || productId <= 0) return
+    // L2201では「ライン最終品」も連産親候補として扱う
+    const isLineFinalProduct = row.is_line_final_product === true || row.product_is_line_final_product === true
     const isVirtualSet = row.is_virtual_set === true
     const productCode = String(row.product_code || '').trim().toUpperCase()
-    if (isVirtualSet || productCode.startsWith('ST')) {
+    if (isLineFinalProduct || isVirtualSet || productCode.startsWith('ST')) {
       parentIds.add(productId)
     }
   })
@@ -999,6 +1001,39 @@ const filterPlanRowsForCoproductDisplay = async (backlogRows, planRows) => {
     backlogRows: filterRowsByExcludedProductIds(backlogRows, excludedIds),
     planRows: filterRowsByExcludedProductIds(planRows, excludedIds),
   }
+}
+
+const ensureL2201LineFinalRows = (grouped, productInfoByProdKey) => {
+  if (!shouldLimitToCoproductParentAndDriver.value) return
+  const lineId = Number(selectedLine.value)
+  if (!Number.isFinite(lineId) || lineId <= 0) return
+
+  ;(Array.isArray(products.value) ? products.value : []).forEach((prod) => {
+    if (!prod || prod.is_line_final_product !== true) return
+    if (Number(prod.line) !== lineId) return
+    const pid = Number(prod.id)
+    if (!Number.isFinite(pid) || pid <= 0) return
+    const prodKey = String(pid)
+
+    if (!productInfoByProdKey.has(prodKey)) {
+      productInfoByProdKey.set(prodKey, {
+        product_id: pid,
+        product_code: String(prod.product_code || ''),
+        product_name: String(prod.product_name || ''),
+        process_id: prod.process || '',
+      })
+    }
+    if (!grouped.has(prodKey)) {
+      grouped.set(prodKey, {
+        id: `pl-${prodKey}`,
+        product_id: pid,
+        product_code: String(prod.product_code || ''),
+        product_name: String(prod.product_name || ''),
+        process_id: prod.process || '',
+        daily: initDaily(),
+      })
+    }
+  })
 }
 
 const onPlanInput = (row, dateKey, value) => {
@@ -1819,6 +1854,9 @@ const doPickup = async () => {
       daily.actual = Number(actualMap.get(dateKey) || 0)
       daily.has_row = true
     })
+
+    // L2201専用: ライン最終品は計画/在庫データが未作成でも行表示する
+    ensureL2201LineFinalRows(grouped, productInfoByProdKey)
 
     rows.value = sortRowsForLine(Array.from(grouped.values()))
 
