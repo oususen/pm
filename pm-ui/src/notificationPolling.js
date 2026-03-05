@@ -67,7 +67,7 @@ const activeNotifications = computed(() => {
   const userDivisionId = user?.profile?.division_id ?? user?.profile?.division ?? null
   const userGroupId = user?.profile?.group_id ?? user?.profile?.group ?? null
   const userTeamId = user?.profile?.team_id ?? user?.profile?.team ?? null
-  const userPosition = user?.profile?.position || ''
+  const userPosition = user?.profile?.role || ''
 
   const parseLocalDate = (val) => {
     if (!val) return null

@@ -39,10 +39,9 @@
           </option>
         </select>
         <select v-model="filterPosition" class="search-select">
-          <option value="">役職: すべて</option>
-          <option value="__unset__">役職: 未設定</option>
-          <option v-for="pos in positionOptions" :key="pos" :value="pos">
-            {{ pos }}
+          <option value="">役割: すべて</option>
+          <option v-for="option in roleOptions" :key="option.value" :value="option.value">
+            {{ option.label }}
           </option>
         </select>
         <label class="filter-check">
@@ -153,15 +152,6 @@
               <input v-model="form.profile.employee_code" type="text" />
             </div>
             <div class="form-row">
-              <label>役職</label>
-              <select v-model="form.profile.position">
-                <option value="">未設定</option>
-                <option v-for="pos in positionOptions" :key="pos" :value="pos">
-                  {{ pos }}
-                </option>
-              </select>
-            </div>
-            <div class="form-row">
               <label>役割</label>
               <select v-model="form.profile.role">
                 <option v-for="option in roleOptions" :key="option.value" :value="option.value">
@@ -265,7 +255,6 @@ import { hasPermission } from '@/router'
 
 const users = ref([])
 const departments = ref([])
-const positions = ref([])
 const divisions = ref([])
 const allGroups = ref([])
 const allTeams = ref([])
@@ -287,18 +276,20 @@ const isCreating = ref(false)
 const passwordConfirm = ref('')
 
 const roleOptions = [
-  { value: 'staff', label: '一般' },
-  { value: 'leader', label: 'リーダー' },
-  { value: 'supervisor', label: '班長' },
+  { value: 'manager', label: '事業部長・課長' },
   { value: 'chief', label: '係長' },
-  { value: 'manager', label: '事業部長' },
+  { value: 'supervisor', label: '班長' },
+  { value: 'leader', label: 'リーダー' },
+  { value: 'staff', label: '一般' },
 ]
 
 const employmentOptions = [
-  { value: 'regular', label: '正社員' },
-  { value: 'skilled', label: '特定技能実習生' },
+  { value: 'regular', label: '正準社員' },
+  { value: 'dispatch', label: '人材派遣' },
   { value: 'intern', label: '実習生' },
-  { value: 'temporary', label: '人材派遣' },
+  { value: 'skilled', label: '特定技能実習生' },
+  { value: 'contract', label: '嘱託社員' },
+  { value: 'part', label: 'パート' },
 ]
 
 const roleLabels = roleOptions.reduce((acc, option) => {
@@ -315,7 +306,6 @@ const levelLabels = {
 
 const emptyProfile = () => ({
   employee_code: '',
-  position: '',
   role: 'staff',
   employment_type: 'regular',
   department: null,
@@ -384,8 +374,6 @@ const filterDepartmentOptions = computed(() =>
       label: `${dept.name} (${levelLabels[dept.level] || dept.level})`,
     }))
 )
-
-const positionOptions = computed(() => positions.value)
 
 const filterGroupOptions = computed(() => {
   const targetDepartment = filterDepartmentId.value
@@ -475,7 +463,7 @@ const filteredUsers = computed(() => {
     const groupValue = String(user.profile?.group ?? '')
     const teamValue = String(user.profile?.team ?? '')
     const unitValue = String(user.profile?.unit ?? '')
-    const positionValue = String(user.profile?.position ?? '')
+    const roleValue = String(user.profile?.role ?? '')
 
     if (targetDepartment && targetDepartment !== '__unset__' && departmentValue !== targetDepartment) {
       return false
@@ -501,10 +489,10 @@ const filteredUsers = computed(() => {
     if (targetUnit === '__unset__' && unitValue) {
       return false
     }
-    if (targetPosition && targetPosition !== '__unset__' && positionValue !== targetPosition) {
+    if (targetPosition && targetPosition !== '__unset__' && roleValue !== targetPosition) {
       return false
     }
-    if (targetPosition === '__unset__' && positionValue) {
+    if (targetPosition === '__unset__' && roleValue) {
       return false
     }
     if (filterInactiveOnly.value && user.is_active) {
@@ -588,16 +576,6 @@ const loadDepartments = async () => {
   const response = await api.accounts.getDepartments({ page_size: 500 })
   const data = response.data
   departments.value = Array.isArray(data) ? data : data.results || []
-}
-
-const loadPositions = async () => {
-  if (!isAdminUser.value) return
-  try {
-    const response = await api.accounts.getPositions()
-    positions.value = Array.isArray(response.data) ? response.data : []
-  } catch (error) {
-    positions.value = []
-  }
 }
 
 const loadDivisions = async () => {
@@ -810,7 +788,6 @@ onMounted(async () => {
   }
   await Promise.all([
     loadDepartments(),
-    loadPositions(),
     loadDivisions(),
     loadGroups(),
     loadTeams(),

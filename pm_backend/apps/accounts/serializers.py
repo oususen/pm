@@ -32,7 +32,6 @@ class UserProfileSerializer(serializers.ModelSerializer):
         model = UserProfile
         fields = [
             'employee_code',
-            'position',
             'role',
             'employment_type',
             'department',
@@ -234,8 +233,8 @@ class UserSerializer(serializers.ModelSerializer):
         if is_manager:
             # For managers: Position permissions first, then department-specific permissions
             try:
-                if instance.profile and instance.profile.position:
-                    pos_perms = PositionPermission.objects.filter(position_name=instance.profile.position)
+                if instance.profile and instance.profile.role:
+                    pos_perms = PositionPermission.objects.filter(position_name=instance.profile.role)
                     for perm in pos_perms:
                         permissions[perm.resource]['can_view'] = perm.can_view
                         permissions[perm.resource]['can_edit'] = perm.can_edit
@@ -264,8 +263,8 @@ class UserSerializer(serializers.ModelSerializer):
 
             # Position permissions
             try:
-                if instance.profile and instance.profile.position:
-                    pos_perms = PositionPermission.objects.filter(position_name=instance.profile.position)
+                if instance.profile and instance.profile.role:
+                    pos_perms = PositionPermission.objects.filter(position_name=instance.profile.role)
                     for perm in pos_perms:
                         permissions[perm.resource]['can_view'] = permissions[perm.resource]['can_view'] or perm.can_view
                         permissions[perm.resource]['can_edit'] = permissions[perm.resource]['can_edit'] or perm.can_edit
@@ -274,10 +273,10 @@ class UserSerializer(serializers.ModelSerializer):
 
         # DepartmentPosition permissions (highest priority)
         try:
-            if instance.profile and instance.profile.department and instance.profile.position:
+            if instance.profile and instance.profile.department and instance.profile.role:
                 dept_pos_perms = DepartmentPositionPermission.objects.filter(
                     department=instance.profile.department,
-                    position_name=instance.profile.position
+                    position_name=instance.profile.role
                 )
                 for perm in dept_pos_perms:
                     permissions[perm.resource]['can_view'] = perm.can_view

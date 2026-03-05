@@ -37,18 +37,20 @@ class Department(models.Model):
 class UserProfile(models.Model):
     """ユーザープロファイル（auth_userの拡張）"""
     ROLE_CHOICES = [
-        ('staff', '一般'),
-        ('leader', 'リーダー'),
-        ('supervisor', '班長'),
+        ('manager', '事業部長・課長'),
         ('chief', '係長'),
-        ('manager', '事業部長'),
+        ('supervisor', '班長'),
+        ('leader', 'リーダー'),
+        ('staff', '一般'),
     ]
 
     EMPLOYMENT_TYPE_CHOICES = [
-        ('regular', '正社員'),
-        ('skilled', '特定技能実習生'),
+        ('regular', '正準社員'),
+        ('dispatch', '人材派遣'),
         ('intern', '実習生'),
-        ('temporary', '人材派遣'),
+        ('skilled', '特定技能実習生'),
+        ('contract', '嘱託社員'),
+        ('part', 'パート'),
     ]
 
     user = models.OneToOneField(
@@ -60,7 +62,6 @@ class UserProfile(models.Model):
     )
 
     employee_code = models.CharField(max_length=32, unique=True, blank=True, null=True, verbose_name='社員コード')
-    position = models.CharField(max_length=100, blank=True, verbose_name='役職')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='staff', verbose_name='役割')
     employment_type = models.CharField(
         max_length=20,

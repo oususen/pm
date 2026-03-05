@@ -30,7 +30,6 @@ def _profile_payload(user):
 
     return {
         'employee_code': profile.employee_code,
-        'position': profile.position,
         'role': profile.role,
         'employment_type': profile.employment_type,
         'department': profile.department_id,
@@ -85,7 +84,7 @@ def _build_effective_permissions(user):
 
     profile = getattr(user, 'profile', None)
     department_id = profile.department_id if profile else None
-    position_name = profile.position.strip() if profile and profile.position else ''
+    position_name = profile.role if profile and profile.role else ''
 
     # 1. 部署のみの権限
     if department_id:

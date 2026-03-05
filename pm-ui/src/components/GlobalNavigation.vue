@@ -256,7 +256,7 @@ const userDepartmentId = computed(() => authState.user?.profile?.department_id ?
 const userDivisionId = computed(() => authState.user?.profile?.division_id ?? authState.user?.profile?.division ?? null)
 const userGroupId = computed(() => authState.user?.profile?.group_id ?? authState.user?.profile?.group ?? null)
 const userTeamId = computed(() => authState.user?.profile?.team_id ?? authState.user?.profile?.team ?? null)
-const userPosition = computed(() => authState.user?.profile?.position || '')
+const userPosition = computed(() => authState.user?.profile?.role || '')
 const showTaskButton = computed(() => Boolean(authState.user))
 const isTaskPage = computed(() => route.path.startsWith('/tasks'))
 const canAccessNotifications = computed(() => {

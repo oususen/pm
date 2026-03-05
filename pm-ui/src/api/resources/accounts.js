@@ -44,6 +44,15 @@ export const createAccountsAPI = (client) => ({
   setPositionPermissions(payload) {
     return client.post('/accounts/position-permissions/set/', payload)
   },
+  createDepartment(data) {
+    return client.post('/accounts/departments/', data)
+  },
+  updateDepartment(id, data) {
+    return client.patch(`/accounts/departments/${id}/`, data)
+  },
+  deleteDepartment(id) {
+    return client.delete(`/accounts/departments/${id}/`)
+  },
   getDivisions() {
     return client.get('/accounts/divisions/')
   },
