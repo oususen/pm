@@ -63,7 +63,14 @@
               <div class="process-sub">{{ proc.line_name }}</div>
             </div>
           </div>
-          <div class="gantt-chart">
+          <div
+            class="gantt-chart"
+            :style="{
+              '--process-col-width': processColWidthPx + 'px',
+              '--product-col-width': productColWidthPx + 'px',
+              minWidth: chartContentWidthPx + 'px',
+            }"
+          >
             <div
               v-if="workBands.length || workMarkers.length"
               class="gantt-guides"
@@ -85,6 +92,7 @@
             </div>
             <!-- タイムライン ヘッダー -->
             <div class="timeline-header">
+              <div class="timeline-process-label">工程コード</div>
               <div class="timeline-label">品番</div>
               <div class="timeline-axis" :style="{ width: timelineWidthPx + 'px' }">
                 <div
@@ -105,6 +113,9 @@
               :key="idx"
               class="gantt-row"
             >
+              <div class="gantt-row-process">
+                <div class="process-name-inline">{{ getProcessCode(proc) }}</div>
+              </div>
               <div class="gantt-row-label">
                 <div class="product-code">{{ item.product_code }}</div>
               </div>
@@ -183,6 +194,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['dirty-change'])
 const TANK_LINE_CODE = 'L2200'
+const L2201_LINE_CODE = 'L2201'
 const TANK_PRODUCT_ORDER = [
   'YD60003386',
   'YD60011305',
@@ -205,6 +217,8 @@ const sameBusinessDayMergeGapToleranceMs = 120 * 60 * 1000 // 同一稼働日内
 const businessDayBoundaryHour = 8
 const manualAddAnchorHour = 17
 const manualAddAnchorMinute = 0
+const processColWidthPx = 75
+const productColWidthPx = 120
 const workStartFallback = { hour: 8, minute: 0 }
 const workMinutesFallback = 480
 const timelineStart = ref(null)
@@ -216,11 +230,16 @@ const debugEnabled = true
 const calendarDayMap = ref({})
 const workPatternMap = ref({})
 const processOutputCandidatesMap = ref({})
+const processCoproductChildMap = ref({})
+const processCodeMap = ref({})
 const selectedLineObj = computed(() =>
   lines.value.find((l) => String(l.id) === String(selectedLine.value))
 )
 const tankOrderMap = computed(() => new Map(TANK_PRODUCT_ORDER.map((code, idx) => [code, idx])))
 const isTankLine = computed(() => selectedLineObj.value?.line_code === TANK_LINE_CODE)
+const isL2201Line = computed(
+  () => String(selectedLineObj.value?.line_code || '').trim().toUpperCase() === L2201_LINE_CODE
+)
 
 const logDebug = (...args) => {
   if (debugEnabled) console.info('[ProcessGanttView]', ...args)
@@ -248,6 +267,7 @@ const displayDays = computed(() => {
 })
 
 const timelineWidthPx = computed(() => timelineSlots.value.length * pixelsPerSlot)
+const chartContentWidthPx = computed(() => processColWidthPx + productColWidthPx + timelineWidthPx.value)
 const rowAddAnchors = computed(() => {
   if (!timelineStart.value || !timelineEnd.value) return []
   const anchors = []
@@ -393,21 +413,69 @@ const fetchLines = async () => {
   lines.value = res.data.results || res.data || []
 }
 
-const shouldDisplayProductInProcess = (_processId, productId, productCode) => {
+const shouldDisplayProductInProcess = (
+  processId,
+  productId,
+  productCode,
+  childMapSource = processCoproductChildMap.value,
+  l2201Mode = isL2201Line.value
+) => {
   const code = String(productCode || '').trim()
-  if (code) return true
+  if (l2201Mode) {
+    if (code) return true
+    const pid = Number(productId)
+    return Number.isFinite(pid) && pid > 0
+  }
+  const codeUpper = code.toUpperCase()
+  if (codeUpper.startsWith('ST')) return true
   const pid = Number(productId)
-  return Number.isFinite(pid) && pid > 0
+  if (!Number.isFinite(pid) || pid <= 0) return false
+  const childSet = childMapSource?.[Number(processId)]
+  if (childSet && childSet.has(pid)) return false
+  return true
 }
 
 const loadProcessOutputCandidates = async (lineId) => {
   if (!lineId) {
     processOutputCandidatesMap.value = {}
+    processCoproductChildMap.value = {}
     return
   }
   try {
     const res = await api.routings.getRoutingStepsByLine(lineId)
     const rows = res.data?.results || res.data || []
+    const nextChildMap = {}
+    const lineCode = String(lines.value.find((l) => String(l.id) === String(lineId))?.line_code || '').trim().toUpperCase()
+    const l2201Mode = lineCode === L2201_LINE_CODE
+    if (!l2201Mode) {
+      const coproductBomsRes = await api.boms.getBOMs({
+        is_coproduct: true,
+        is_active: true,
+        page_size: 5000,
+      })
+      const coproductBoms = coproductBomsRes.data?.results || coproductBomsRes.data || []
+      const coproductBomIdSet = new Set(
+        (Array.isArray(coproductBoms) ? coproductBoms : [])
+          .map((bom) => Number(bom?.id))
+          .filter((bomId) => Number.isFinite(bomId) && bomId > 0)
+      )
+      const bomItemsRes = await api.bomItems.getBOMItems({
+        line: lineId,
+        page_size: 5000,
+      })
+      const bomItems = bomItemsRes.data?.results || bomItemsRes.data || []
+      ;(Array.isArray(bomItems) ? bomItems : []).forEach((item) => {
+        const bomId = Number(item?.bom)
+        const processId = Number(item?.process)
+        const childId = Number(item?.child_product)
+        if (!coproductBomIdSet.has(bomId)) return
+        if (!Number.isFinite(processId) || processId <= 0) return
+        if (!Number.isFinite(childId) || childId <= 0) return
+        if (!nextChildMap[processId]) nextChildMap[processId] = new Set()
+        nextChildMap[processId].add(childId)
+      })
+    }
+    processCoproductChildMap.value = nextChildMap
 
     const nextMap = {}
     rows.forEach((row) => {
@@ -417,7 +485,7 @@ const loadProcessOutputCandidates = async (lineId) => {
       if (!Number.isFinite(processId) || processId <= 0) return
       if (!Number.isFinite(productId) || productId <= 0) return
       if (!productCode) return
-      if (!shouldDisplayProductInProcess(processId, productId, productCode)) return
+      if (!shouldDisplayProductInProcess(processId, productId, productCode, nextChildMap, l2201Mode)) return
       if (!nextMap[processId]) nextMap[processId] = []
       if (!nextMap[processId].some((item) => Number(item.product_id) === productId)) {
         nextMap[processId].push({
@@ -431,6 +499,7 @@ const loadProcessOutputCandidates = async (lineId) => {
   } catch (e) {
     console.error('工程ガント候補品番取得エラー', e)
     processOutputCandidatesMap.value = {}
+    processCoproductChildMap.value = {}
   }
 }
 
@@ -552,6 +621,53 @@ const loadWorkPatternData = async (lineId, startDate, endDate) => {
   }
 }
 
+const ensureProcessCodes = async (plans) => {
+  const nextMap = { ...processCodeMap.value }
+  const processIds = new Set()
+  let changed = false
+
+  ;(Array.isArray(plans) ? plans : []).forEach((plan) => {
+    const processes = Array.isArray(plan?.processes_plan) ? plan.processes_plan : []
+    processes.forEach((proc) => {
+      const processId = Number(proc?.process_id)
+      if (!Number.isFinite(processId) || processId <= 0) return
+      processIds.add(processId)
+      const code = String(proc?.process_code || '').trim()
+      if (code && nextMap[processId] !== code) {
+        nextMap[processId] = code
+        changed = true
+      }
+    })
+  })
+
+  const missingIds = Array.from(processIds).filter((id) => !String(nextMap[id] || '').trim())
+  if (missingIds.length) {
+    const fetched = await Promise.all(
+      missingIds.map(async (id) => {
+        try {
+          const res = await api.processes.getProcess(id)
+          const code = String(res.data?.process_code || '').trim()
+          return code ? { id, code } : null
+        } catch (e) {
+          console.error(`工程コード取得エラー process_id=${id}`, e)
+          return null
+        }
+      })
+    )
+    fetched.forEach((item) => {
+      if (!item) return
+      if (nextMap[item.id] !== item.code) {
+        nextMap[item.id] = item.code
+        changed = true
+      }
+    })
+  }
+
+  if (changed) {
+    processCodeMap.value = nextMap
+  }
+}
+
 const loadData = async () => {
   if (!selectedLine.value) return
   setUnsavedChanges(false)
@@ -576,6 +692,7 @@ const loadData = async () => {
       await generateSchedule(false)
       return
     }
+    await ensureProcessCodes(rawPlans)
     processGanttData.value = buildProcessGantt(rawPlans)
   } catch (e) {
     console.error('工程ガント読込エラー', e)
@@ -602,6 +719,7 @@ const generateSchedule = async (clearExisting = true) => {
     })
     const rawPlans = ganttRes.data?.results || ganttRes.data || []
     logDebug('generateSchedule response', { count: rawPlans.length, sample: rawPlans[0] })
+    await ensureProcessCodes(rawPlans)
     processGanttData.value = buildProcessGantt(rawPlans)
     return rawPlans
   } catch (e) {
@@ -880,6 +998,16 @@ function buildTimelineSlots(startDate, endDate) {
     current.setHours(current.getHours() + slotHours)
   }
   return slots
+}
+
+function getProcessCode(proc) {
+  const code = String(proc?.process_code || '').trim()
+  if (code) return code
+  const processId = Number(proc?.process_id)
+  if (!Number.isFinite(processId) || processId <= 0) return ''
+  const mappedCode = String(processCodeMap.value[processId] || processCodeMap.value[String(processId)] || '').trim()
+  if (mappedCode) return mappedCode
+  return ''
 }
 
 function formatDateTime(date) {
@@ -1181,6 +1309,7 @@ function buildProcessGantt(plans) {
       if (!processMap.has(key)) {
         processMap.set(key, {
           process_id: proc.process_id,
+          process_code: getProcessCode(proc),
           process_name: proc.process_name || '',
           process_number: proc.process_number || 0,
           items: [],
@@ -1188,6 +1317,9 @@ function buildProcessGantt(plans) {
         })
       }
       const procEntry = processMap.get(key)
+      if (!procEntry.process_code) {
+        procEntry.process_code = getProcessCode(proc)
+      }
       const outputProductId = proc.output_product_id != null ? proc.output_product_id : plan.product
       const outputProductCode = proc.output_product_code || plan.product_code || ''
       const outputProductName = proc.output_product_name || plan.product_name || ''
@@ -1518,6 +1650,9 @@ onMounted(async () => {
   color: #6b7280;
 }
 .gantt-chart {
+  --process-col-width: 150px;
+  --product-col-width: 120px;
+  --fixed-cols-width: calc(var(--process-col-width) + var(--product-col-width));
   display: flex;
   flex-direction: column;
   position: relative;
@@ -1526,7 +1661,7 @@ onMounted(async () => {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 120px;
+  left: var(--fixed-cols-width);
   pointer-events: none;
   z-index: 1;
 }
@@ -1551,9 +1686,24 @@ onMounted(async () => {
   border-bottom: 2px solid #374151;
   margin-bottom: 4px;
 }
+.timeline-process-label {
+  width: var(--process-col-width);
+  min-width: var(--process-col-width);
+  padding: 4px 8px;
+  font-size: 13px;
+  font-weight: 700;
+  background: #e8edf4;
+  border-right: 1px solid #d1d5db;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: sticky;
+  left: 0;
+  z-index: 4;
+}
 .timeline-label {
-  width: 120px;
-  min-width: 120px;
+  width: var(--product-col-width);
+  min-width: var(--product-col-width);
   padding: 4px 8px;
   font-size: 13px;
   font-weight: 700;
@@ -1563,8 +1713,8 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
   position: sticky;
-  left: 0;
-  z-index: 3;
+  left: var(--process-col-width);
+  z-index: 4;
 }
 .timeline-axis {
   display: flex;
@@ -1602,18 +1752,39 @@ onMounted(async () => {
   min-height: 23px;
   position: relative;
 }
-.gantt-row-label {
+.gantt-row-process {
   position: sticky;
   left: 0;
   z-index: 2;
-  width: 120px;
-  min-width: 120px;
+  width: var(--process-col-width);
+  min-width: var(--process-col-width);
+  padding: 4px 8px;
+  border-right: 1px solid #d1d5db;
+  display: flex;
+  align-items: center;
+  background: #f1f5f9;
+}
+.gantt-row-label {
+  position: sticky;
+  left: var(--process-col-width);
+  z-index: 2;
+  width: var(--product-col-width);
+  min-width: var(--product-col-width);
   padding: 4px 6px;
   border-right: 1px solid #d1d5db;
   display: flex;
   flex-direction: column;
   gap: 1px;
   background: #fafafa;
+}
+.process-name-inline {
+  width: 100%;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1f2937;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .product-code {
   font-size: 13px;
