@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 from masters.models import BOMItem, Line, Process, Product, Supplier
 from production.models_process_realtime import ProcessRealtimeRecord
 from production.models_line_backlog import LineBacklog
+from production.models_line_plan import LinePlan
 from production.serializers_process_realtime import (
     ProcessRealtimeCreateSerializer,
     resolve_workday_date_for_process,
@@ -423,6 +424,73 @@ class PurchaseActualInquiryView(APIView):
         return Response(rows)
 
 
+class PurchaseActualBulkItemsView(APIView):
+    """購入先と納入日から、その日の計画品目一覧を返す"""
+    def get(self, request):
+        supplier_id = request.query_params.get('supplier_id')
+        plan_date_text = (request.query_params.get('plan_date') or '').strip()
+
+        supplier = Supplier.objects.filter(id=supplier_id).first() if supplier_id else None
+        if not supplier:
+            return Response({'items': [], 'line_id': None, 'line_name': ''})
+
+        line = _resolve_purchase_line(supplier)
+        if not line:
+            return Response({'items': [], 'line_id': None, 'line_name': ''})
+
+        plan_date = date.today()
+        if plan_date_text:
+            try:
+                plan_date = date.fromisoformat(plan_date_text.replace('/', '-'))
+            except ValueError:
+                pass
+
+        process = (
+            Process.objects.filter(line=line, process_code='PURCHASE').first()
+            or Process.objects.filter(line=line).order_by('id').first()
+        )
+
+        # 仕入計画は LineBacklog.plan_qty (sequence_no=0) に格納されている
+        backlogs = (
+            LineBacklog.objects.filter(
+                line__line_code=supplier.supplier_code,
+                plan_date=plan_date,
+                sequence_no=0,
+                plan_qty__gt=0,
+            )
+            .select_related('product')
+            .order_by('product__product_code')
+        )
+
+        product_map = {}
+        for b in backlogs:
+            if not b.product:
+                continue
+            pid = b.product_id
+            if pid not in product_map:
+                product_map[pid] = {
+                    'product_id': pid,
+                    'product_code': b.product.product_code,
+                    'product_name': b.product.product_name,
+                    'process_id': process.id if process else None,
+                    'line_id': line.id,
+                    'plan_qty': 0,
+                    'actual_qty': 0,
+                }
+            product_map[pid]['plan_qty'] += int(b.plan_qty or 0)
+            product_map[pid]['actual_qty'] += int(b.actual_qty or 0)
+
+        items = sorted(product_map.values(), key=lambda x: x['product_code'])
+
+        return Response({
+            'line_id': line.id,
+            'line_code': line.line_code,
+            'line_name': line.line_name,
+            'process_id': process.id if process else None,
+            'items': items,
+        })
+
+
 class PurchasePlanLockSettingView(APIView):
     def get(self, request):
         setting = PurchasePlanLockSetting.objects.first()
@@ -462,7 +530,8 @@ class EngineeringChangeView(APIView):
 
         rows = []
         for part in parts:
-            switch_date = part.switch_date or part.case.switch_date or today
+            # 完成品（案件）切替日を正とし、旧データ互換で部品切替日をフォールバック
+            switch_date = part.case.switch_date or part.switch_date or today
             start_date = today
             end_date = switch_date if switch_date >= today else today
 
@@ -559,7 +628,7 @@ class EngineeringChangeView(APIView):
         case = EngineeringChangeCase.objects.create(
             case_name=(request.data.get('case_name') or '').strip() or None,
             final_product=final_product,
-            switch_date=None,
+            switch_date=request.data.get('switch_date') or None,
             note=(request.data.get('note') or '').strip() or None,
         )
         case.case_code = f'EC-{case.id:06d}'
@@ -582,7 +651,7 @@ class EngineeringChangeView(APIView):
 
             EngineeringChangePart.objects.create(
                 case=case,
-                switch_date=part.get('switch_date') or request.data.get('switch_date') or None,
+                switch_date=part.get('switch_date') or None,
                 old_part=old_part,
                 new_part=new_part,
                 required_qty_after_eol=int(part.get('required_qty_after_eol') or 0),
@@ -605,6 +674,7 @@ class EngineeringChangePartDetailView(APIView):
         if not part:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
+        case_update_fields = []
         if 'final_product_code' in request.data:
             final_product_code = (request.data.get('final_product_code') or '').strip()
             if final_product_code:
@@ -614,17 +684,25 @@ class EngineeringChangePartDetailView(APIView):
                 part.case.final_product = final_product
             else:
                 part.case.final_product = None
+            case_update_fields.append('final_product')
         if 'case_name' in request.data:
             part.case.case_name = (request.data.get('case_name') or '').strip() or None
+            case_update_fields.append('case_name')
+        if 'switch_date' in request.data:
+            part.case.switch_date = request.data.get('switch_date') or None
+            case_update_fields.append('switch_date')
 
-        part.case.save(update_fields=['final_product', 'case_name', 'updated_at'])
+        if case_update_fields:
+            part.case.save(update_fields=[*case_update_fields, 'updated_at'])
 
+        part_update_fields = ['updated_at']
         old_part_code = (request.data.get('old_part_code') or '').strip()
         if old_part_code:
             old_part = Product.objects.filter(product_code=old_part_code).first()
             if not old_part:
                 return Response({'detail': f'old part not found: {old_part_code}'}, status=status.HTTP_400_BAD_REQUEST)
             part.old_part = old_part
+            part_update_fields.append('old_part')
 
         if 'new_part_code' in request.data:
             new_part_code = (request.data.get('new_part_code') or '').strip()
@@ -632,13 +710,17 @@ class EngineeringChangePartDetailView(APIView):
             if new_part_code and not new_part:
                 return Response({'detail': f'new part not found: {new_part_code}'}, status=status.HTTP_400_BAD_REQUEST)
             part.new_part = new_part
+            part_update_fields.append('new_part')
 
         if 'required_qty_after_eol' in request.data:
             part.required_qty_after_eol = int(request.data.get('required_qty_after_eol') or 0)
-        if 'switch_date' in request.data:
-            part.switch_date = request.data.get('switch_date') or None
+            part_update_fields.append('required_qty_after_eol')
+        # 部品単位の切替日を扱いたい場合だけ明示キーで更新する
+        if 'part_switch_date' in request.data:
+            part.switch_date = request.data.get('part_switch_date') or None
+            part_update_fields.append('switch_date')
 
-        part.save(update_fields=['switch_date', 'old_part', 'new_part', 'required_qty_after_eol', 'updated_at'])
+        part.save(update_fields=part_update_fields)
         return Response({'detail': 'updated'})
 
     def delete(self, request, pk: int):
@@ -676,6 +758,10 @@ class EngineeringChangePartDetailView(APIView):
 class EngineeringChangeCaseRecalculateView(APIView):
     def post(self, request, case_id: int):
         today = date.today()
+        case = EngineeringChangeCase.objects.filter(pk=case_id).first()
+        if not case:
+            return Response({'detail': 'case not found or no parts'}, status=status.HTTP_404_NOT_FOUND)
+
         parts = list(
             EngineeringChangePart.objects
             .select_related('old_part')
@@ -685,7 +771,7 @@ class EngineeringChangeCaseRecalculateView(APIView):
             return Response({'detail': 'case not found or no parts'}, status=status.HTTP_404_NOT_FOUND)
 
         switch_dates = [p.switch_date for p in parts if p.switch_date]
-        end_date = max(switch_dates) if switch_dates else today
+        end_date = case.switch_date or (max(switch_dates) if switch_dates else today)
         if end_date < today:
             end_date = today
 

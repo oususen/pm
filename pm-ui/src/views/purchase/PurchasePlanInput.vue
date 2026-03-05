@@ -679,6 +679,7 @@ const recalculateInventoryOnly = async () => {
       start_date: startDate.value,
       end_date: endDate.value,
     })
+    await loadData()
     alert('在庫再計算が完了しました。')
   } catch (e) {
     console.error('仕入れ在庫再計算エラー', e)
