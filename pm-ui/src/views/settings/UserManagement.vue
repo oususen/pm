@@ -234,15 +234,6 @@
               <input v-model="form.profile.joined_on" type="date" />
             </div>
 
-            <div class="form-row">
-              <label>パスワード</label>
-              <input v-model="form.password" type="password" :placeholder="passwordHint" />
-            </div>
-            <div class="form-row">
-              <label>パスワード確認</label>
-              <input v-model="passwordConfirm" type="password" :placeholder="passwordHint" />
-            </div>
-
             <div class="form-row inline">
               <label>有効</label>
               <input v-model="form.is_active" type="checkbox" />
@@ -290,8 +281,6 @@ const filterActiveOnly = ref(false)
 const filterInactiveOnly = ref(false)
 const selectedUserId = ref(null)
 const isCreating = ref(false)
-const passwordConfirm = ref('')
-
 const roleOptions = [
   { value: 'manager', label: '事業部長・課長' },
   { value: 'chief', label: '係長' },
@@ -344,11 +333,9 @@ const form = reactive({
   is_active: true,
   is_staff: false,
   is_superuser: false,
-  password: '',
   profile: emptyProfile(),
 })
 
-const passwordHint = computed(() => (isCreating.value ? '必須' : '変更時のみ入力'))
 const isLeaderRole = computed(() => form.profile.role === 'leader')
 const assignmentLabel = computed(() => (isLeaderRole.value ? '担当グループ（複数）' : '担当班（複数）'))
 const assignmentHint = computed(() => (
@@ -691,8 +678,6 @@ const selectUser = (user) => {
   form.is_active = Boolean(user.is_active)
   form.is_staff = Boolean(user.is_staff)
   form.is_superuser = Boolean(user.is_superuser)
-  form.password = ''
-  passwordConfirm.value = ''
   form.profile = {
     ...emptyProfile(),
     ...(user.profile || {}),
@@ -769,10 +754,6 @@ const buildPayload = () => {
     profile,
   }
 
-  if (form.password) {
-    payload.password = form.password
-  }
-
   return payload
 }
 
@@ -781,11 +762,6 @@ const saveUser = async () => {
   successMessage.value = ''
   if (!canManageBasic.value) {
     errorMessage.value = 'ユーザー基本情報を編集する権限がありません。'
-    return
-  }
-
-  if (form.password && form.password !== passwordConfirm.value) {
-    errorMessage.value = 'パスワードが一致しません。'
     return
   }
 
