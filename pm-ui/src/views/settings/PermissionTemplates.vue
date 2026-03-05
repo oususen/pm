@@ -29,28 +29,17 @@
             </select>
           </div>
           <div class="template-select">
-            <label>役職選択</label>
-            <div class="position-row">
-              <select
-                v-model="selectedPositionName"
-                :disabled="!selectedDepartmentId"
-                @change="loadTemplate"
-              >
-                <option value="">選択してください</option>
-                <option v-for="name in positions" :key="name" :value="name">
-                  {{ name }}
-                </option>
-              </select>
-              <input
-                v-model="newPositionName"
-                type="text"
-                placeholder="新しい役職名"
-                :disabled="!selectedDepartmentId"
-              />
-              <button type="button" class="btn" @click="addPosition" :disabled="!selectedDepartmentId">
-                追加
-              </button>
-            </div>
+            <label>役割選択</label>
+            <select
+              v-model="selectedPositionName"
+              :disabled="!selectedDepartmentId"
+              @change="loadTemplate"
+            >
+              <option value="">選択してください</option>
+              <option v-for="r in ROLE_CHOICES" :key="r.value" :value="r.value">
+                {{ r.label }}
+              </option>
+            </select>
           </div>
         </div>
 
@@ -172,23 +161,13 @@
 
         <div class="template-controls">
           <div class="template-select">
-            <label>役職選択</label>
-            <div class="position-row">
-              <select v-model="selectedPositionOnlyName" @change="loadPositionTemplate">
-                <option value="">選択してください</option>
-                <option v-for="name in allPositions" :key="name" :value="name">
-                  {{ name }}
-                </option>
-              </select>
-              <input
-                v-model="newPositionOnlyName"
-                type="text"
-                placeholder="新しい役職名"
-              />
-              <button type="button" class="btn" @click="addPositionOnly">
-                追加
-              </button>
-            </div>
+            <label>役割選択</label>
+            <select v-model="selectedPositionOnlyName" @change="loadPositionTemplate">
+              <option value="">選択してください</option>
+              <option v-for="r in ROLE_CHOICES" :key="r.value" :value="r.value">
+                {{ r.label }}
+              </option>
+            </select>
           </div>
         </div>
 
@@ -248,6 +227,14 @@ import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
 
+const ROLE_CHOICES = [
+  { value: 'manager', label: '事業部長・課長' },
+  { value: 'chief', label: '係長' },
+  { value: 'supervisor', label: '班長' },
+  { value: 'leader', label: 'リーダー' },
+  { value: 'staff', label: '一般' },
+]
+
 const loading = ref(false)
 const templateLoading = ref(false)
 const templateSaving = ref(false)
@@ -255,19 +242,15 @@ const templateError = ref('')
 const templateSuccess = ref('')
 
 const departments = ref([])
-const positions = ref([])
 const selectedDepartmentId = ref(null)
 const selectedPositionName = ref('')
-const newPositionName = ref('')
 const templatePermissions = ref([])
 
 const positionTemplateLoading = ref(false)
 const positionTemplateSaving = ref(false)
 const positionTemplateError = ref('')
 const positionTemplateSuccess = ref('')
-const allPositions = ref([])
 const selectedPositionOnlyName = ref('')
-const newPositionOnlyName = ref('')
 const positionTemplatePermissions = ref([])
 
 const departmentTemplateLoading = ref(false)
@@ -417,37 +400,6 @@ const loadDepartments = async () => {
   departments.value = Array.isArray(data) ? data : data.results || []
 }
 
-const loadPositions = async () => {
-  if (!isAdminUser.value || !selectedDepartmentId.value) {
-    positions.value = []
-    return
-  }
-  try {
-    const response = await api.accounts.getDepartmentPositions({
-      department: selectedDepartmentId.value,
-    })
-    const data = response.data
-    positions.value = Array.isArray(data) ? data : []
-  } catch (error) {
-    positions.value = []
-    templateError.value =
-      error?.response?.data?.detail || '役職一覧の取得に失敗しました。'
-  }
-}
-
-const loadAllPositions = async () => {
-  if (!isAdminUser.value) {
-    allPositions.value = []
-    return
-  }
-  try {
-    const response = await api.accounts.getPositions()
-    const data = response.data
-    allPositions.value = Array.isArray(data) ? data : []
-  } catch (error) {
-    allPositions.value = []
-  }
-}
 const loadDepartmentTemplate = async () => {
   departmentTemplateError.value = ''
   departmentTemplateSuccess.value = ''
@@ -574,20 +526,6 @@ const savePositionTemplate = async () => {
   }
 }
 
-const addPositionOnly = async () => {
-  const name = newPositionOnlyName.value.trim()
-  if (!name) {
-    positionTemplateError.value = '役職名を入力してください。'
-    return
-  }
-  positionTemplateError.value = ''
-  if (!allPositions.value.includes(name)) {
-    allPositions.value = [...allPositions.value, name].sort()
-  }
-  selectedPositionOnlyName.value = name
-  newPositionOnlyName.value = ''
-  await loadPositionTemplate()
-}
 
 const loadTemplate = async () => {
   templateError.value = ''
@@ -614,20 +552,6 @@ const loadTemplate = async () => {
   }
 }
 
-const addPosition = async () => {
-  const name = newPositionName.value.trim()
-  if (!name) {
-    templateError.value = '役職名を入力してください。'
-    return
-  }
-  templateError.value = ''
-  if (!positions.value.includes(name)) {
-    positions.value = [...positions.value, name].sort()
-  }
-  selectedPositionName.value = name
-  newPositionName.value = ''
-  await loadTemplate()
-}
 
 const saveTemplate = async () => {
   templateError.value = ''
@@ -658,9 +582,7 @@ const saveTemplate = async () => {
 
 const onDepartmentChange = async () => {
   selectedPositionName.value = ''
-  newPositionName.value = ''
   templatePermissions.value = emptyPermissions()
-  await loadPositions()
 }
 
 const refreshAll = async () => {
@@ -671,8 +593,6 @@ const refreshAll = async () => {
   positionTemplateSuccess.value = ''
   try {
     await loadDepartments()
-    await loadAllPositions()
-    await loadPositions()
     await loadTemplate()
     await loadPositionTemplate()
   } finally {

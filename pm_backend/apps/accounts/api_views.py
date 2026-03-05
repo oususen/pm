@@ -154,14 +154,18 @@ class PositionListView(viewsets.ViewSet):
 
     def list(self, request):
         names = set(
-            UserProfile.objects.exclude(position='').values_list('position', flat=True)
+            UserProfile.objects.exclude(role='').values_list('role', flat=True)
         )
         names.update(
             PositionPermission.objects.exclude(position_name='').values_list(
                 'position_name', flat=True
             )
         )
-        names.update(label for _, label in UserProfile.ROLE_CHOICES)
+        names.update(
+            DepartmentPositionPermission.objects.exclude(position_name='').values_list(
+                'position_name', flat=True
+            )
+        )
         return Response(sorted(names))
 
 
@@ -232,15 +236,14 @@ class DepartmentPositionListView(viewsets.ViewSet):
 
         names = set(
             UserProfile.objects.filter(department_id=department_id)
-            .exclude(position='')
-            .values_list('position', flat=True)
+            .exclude(role='')
+            .values_list('role', flat=True)
         )
         names.update(
             DepartmentPositionPermission.objects.filter(department_id=department_id)
             .exclude(position_name='')
             .values_list('position_name', flat=True)
         )
-        names.update(label for _, label in UserProfile.ROLE_CHOICES)
         return Response(sorted(names))
 
 
