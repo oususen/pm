@@ -96,6 +96,12 @@ const settings = [
     meta: { pageTitle: "発注承認者設定", resource: "settings.purchase_order_approval" },
   },
   {
+    path: "/settings/departments",
+    name: "DepartmentManagement",
+    component: () => import("@/views/settings/DepartmentManagement.vue"),
+    meta: { pageTitle: "組織管理", resource: "settings.users" },
+  },
+  {
     path: "/settings/kubota-import",
     name: "KubotaImportSettings",
     component: () => import("@/views/settings/KubotaImportSettings.vue"),
