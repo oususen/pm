@@ -76,7 +76,16 @@
         <div class="form-grid">
           <label>
             設備コード
-            <input v-model.trim="form.sheet_code" :disabled="!canEditFields" />
+            <select v-model="form.sheet_code" :disabled="!canEditFields || equipmentLoading" @change="handleSheetCodeChange">
+              <option value="">選択してください</option>
+              <option
+                v-for="equipment in equipmentSelectOptions"
+                :key="equipment.id || equipment.equipment_code"
+                :value="equipment.equipment_code"
+              >
+                {{ equipment.equipment_code }} - {{ equipment.equipment_name || "名称未設定" }}
+              </option>
+            </select>
           </label>
           <label>
             設備名
@@ -93,6 +102,10 @@
           <label>
             改訂日
             <input type="date" v-model="form.revision_date" :disabled="!canEditFields" />
+          </label>
+          <label class="wide">
+            改訂内容
+            <textarea v-model="form.revision_notes" :disabled="!canEditFields" rows="2" />
           </label>
           <label>
             運用開始日
@@ -325,6 +338,8 @@ const saving = ref(false)
 const actionLoading = ref(false)
 const selectedTemplateId = ref(null)
 const isListHidden = ref(false)
+const equipmentOptions = ref([])
+const equipmentLoading = ref(false)
 
 const createEmptyForm = () => ({
   id: null,
@@ -333,6 +348,7 @@ const createEmptyForm = () => ({
   title: "設備始業点検表（SM-009：M6ナット専用機）",
   source_sheet_name: "SM-009",
   revision_date: "",
+  revision_notes: "",
   effective_from: "",
   version: 1,
   status: "DRAFT",
@@ -349,6 +365,20 @@ const createEmptyForm = () => ({
 })
 
 const form = ref(createEmptyForm())
+
+const equipmentSelectOptions = computed(() => {
+  const options = Array.isArray(equipmentOptions.value) ? [...equipmentOptions.value] : []
+  const currentCode = String(form.value.sheet_code || "").trim()
+  if (!currentCode) return options
+  const exists = options.some((item) => String(item.equipment_code || "").trim() === currentCode)
+  if (exists) return options
+  options.unshift({
+    id: `legacy-${currentCode}`,
+    equipment_code: currentCode,
+    equipment_name: form.value.sheet_name || "マスタ未登録",
+  })
+  return options
+})
 
 const canView = computed(() => {
   return hasPermission(authState.user, "quality", "view") || hasPermission(authState.user, "quality", "edit")
@@ -569,6 +599,25 @@ const resizeAllTextareas = async () => {
   })
 }
 
+const findEquipmentByCode = (code) => {
+  const target = String(code || "").trim()
+  if (!target) return null
+  return (
+    equipmentOptions.value.find((item) => String(item.equipment_code || "").trim() === target) || null
+  )
+}
+
+const applyEquipmentToForm = (code) => {
+  const equipment = findEquipmentByCode(code)
+  if (!equipment) return
+  form.value.sheet_name = String(equipment.equipment_name || form.value.sheet_name || "")
+  form.value.source_sheet_name = String(equipment.equipment_code || form.value.source_sheet_name || "")
+}
+
+const handleSheetCodeChange = () => {
+  applyEquipmentToForm(form.value.sheet_code)
+}
+
 const createLocalKey = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 
 const buildSm009Defaults = () => {
@@ -677,6 +726,7 @@ const toFormModel = (raw) => {
     title: raw.title || "",
     source_sheet_name: raw.source_sheet_name || "",
     revision_date: raw.revision_date || "",
+    revision_notes: raw.revision_notes || "",
     effective_from: raw.effective_from || "",
     version: Number(raw.version || 1),
     status: raw.status || "DRAFT",
@@ -734,10 +784,27 @@ const buildPayload = () => {
     title: String(form.value.title || "").trim(),
     source_sheet_name: String(form.value.source_sheet_name || "").trim(),
     revision_date: form.value.revision_date || null,
+    revision_notes: String(form.value.revision_notes || ""),
     effective_from: form.value.effective_from || null,
     version: Number(form.value.version || 1),
     is_active: Boolean(form.value.is_active),
     items: normalizedItems,
+  }
+}
+
+const loadEquipmentOptions = async () => {
+  equipmentLoading.value = true
+  try {
+    const response = await api.equipments.getEquipments({
+      is_active: true,
+      ordering: "display_order,equipment_code",
+    })
+    equipmentOptions.value = response.data?.results || response.data || []
+  } catch (error) {
+    console.error("設備マスタ取得に失敗:", error)
+    equipmentOptions.value = []
+  } finally {
+    equipmentLoading.value = false
   }
 }
 
@@ -779,6 +846,11 @@ const startNewTemplate = () => {
   isListHidden.value = true
   selectedTemplateId.value = null
   form.value = createEmptyForm()
+  if (equipmentOptions.value.length) {
+    const defaultEquipment = findEquipmentByCode(form.value.sheet_code) || equipmentOptions.value[0]
+    form.value.sheet_code = String(defaultEquipment?.equipment_code || "")
+    applyEquipmentToForm(form.value.sheet_code)
+  }
   form.value.items = buildSm009Defaults()
   resizeAllTextareas()
 }
@@ -899,6 +971,7 @@ const rejectTemplate = async () => {
 
 onMounted(async () => {
   if (!canView.value) return
+  await loadEquipmentOptions()
   await loadTemplateList()
   if (templates.value.length) {
     await loadTemplateDetail(templates.value[0].id)

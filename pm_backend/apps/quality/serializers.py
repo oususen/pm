@@ -81,6 +81,7 @@ class EquipmentInspectionTemplateSerializer(serializers.ModelSerializer):
             "title",
             "source_sheet_name",
             "revision_date",
+            "revision_notes",
             "effective_from",
             "version",
             "status",
