@@ -270,14 +270,8 @@ const departmentTemplatePermissions = ref([])
   { value: 'production.plan_input', label: '生産: 生産計画入力' },
   { value: 'production.inventory', label: '生産: 在庫/残量一覧' },
   { value: 'production.scrap_history', label: '生産: 仕損履歴' },
-  { value: 'production.progress', label: '生産: 進捗管理' },
-  { value: 'production.line_demands', label: '生産: ライン需要一覧' },
   { value: 'production.line_calendars', label: '生産: ライン勤務カレンダ' },
-  { value: 'production.stock_allocations', label: '生産: 在庫引当' },
-  { value: 'production.orders', label: '生産: 製造指示' },
-  { value: 'production.sequence_board', label: '生産: ミックス順序ボード' },
   { value: 'production.line_monitor', label: '生産: ライン稼働監視' },
-  { value: 'production.mobile_input', label: '生産: モバイル作業入力（ライン）' },
   { value: 'purchase', label: '仕入' },
   { value: 'purchase.plan_input', label: '仕入: 仕入れ計画' },
   { value: 'purchase.inventory', label: '仕入: 在庫/残量' },
@@ -396,7 +390,7 @@ const onPositionPermissionChange = (perm, field) => {
 
 const loadDepartments = async () => {
   if (!isAdminUser.value) return
-  const response = await api.accounts.getDepartments({ page_size: 500 })
+  const response = await api.accounts.getDepartments({ page_size: 20000 })
   const data = response.data
   departments.value = Array.isArray(data) ? data : data.results || []
 }

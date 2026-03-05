@@ -6,6 +6,12 @@ const production = [
     meta: { pageTitle: "生産管理メニュー", manualPath: "README.md" },
   },
   {
+    path: "/production/unused",
+    name: "ProductionUnusedMenu",
+    component: () => import("@/views/production/ProductionUnusedMenu.vue"),
+    meta: { pageTitle: "未使用機能", manualPath: "README.md" },
+  },
+  {
     path: "/production/line-demands",
     name: "LineDemandList",
     component: () => import("@/views/production/LineDemandList.vue"),
