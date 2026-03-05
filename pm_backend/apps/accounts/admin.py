@@ -28,7 +28,7 @@ class UserProfileInline(admin.StackedInline):
     verbose_name_plural = 'プロファイル'
     fk_name = 'user'
     fields = ('employee_code', 'department', 'division', 'group', 'team',
-              'position', 'role', 'employment_type', 'joined_on')
+              'role', 'employment_type', 'joined_on')
 
 
 class UserAdmin(BaseUserAdmin):

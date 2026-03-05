@@ -199,6 +199,32 @@
                 </option>
               </select>
             </div>
+            <div class="form-row full">
+              <label>{{ assignmentLabel }}</label>
+              <select
+                v-if="isLeaderRole"
+                v-model="form.profile.leader_units"
+                class="multi-select"
+                multiple
+                :disabled="!form.profile.team"
+              >
+                <option v-for="ut in unitOptions" :key="ut.value" :value="ut.value">
+                  {{ ut.label }}
+                </option>
+              </select>
+              <select
+                v-else
+                v-model="form.profile.supervisor_teams"
+                class="multi-select"
+                multiple
+                :disabled="!form.profile.group"
+              >
+                <option v-for="tm in teamOptions" :key="tm.value" :value="tm.value">
+                  {{ tm.label }}
+                </option>
+              </select>
+              <div class="helper-text">{{ assignmentHint }}</div>
+            </div>
             <div class="form-row">
               <label>グループ</label>
               <select v-model="form.profile.unit" :disabled="!form.profile.team">
@@ -413,6 +439,8 @@ const emptyProfile = () => ({
   division: null,
   group: null,
   team: null,
+  supervisor_teams: [],
+  leader_units: [],
   unit: null,
   joined_on: '',
 })
@@ -439,6 +467,13 @@ const form = reactive({
 })
 
 const passwordHint = computed(() => (isCreating.value ? '必須' : '変更時のみ入力'))
+const isLeaderRole = computed(() => form.profile.role === 'leader')
+const assignmentLabel = computed(() => (isLeaderRole.value ? '担当グループ（複数）' : '担当班（複数）'))
+const assignmentHint = computed(() => (
+  isLeaderRole.value
+    ? 'リーダーの場合は担当グループを設定できます。'
+    : '役割に関係なく担当班を設定できます。'
+))
 
 const canAccessByResource = (resource, level = 'view') => {
   const user = authState.user
@@ -578,6 +613,12 @@ const filteredUsers = computed(() => {
     const departmentValue = String(user.profile?.department ?? '')
     const groupValue = String(user.profile?.group ?? '')
     const teamValue = String(user.profile?.team ?? '')
+    const supervisorTeamValues = Array.isArray(user.profile?.supervisor_teams)
+      ? user.profile.supervisor_teams.map((value) => String(value))
+      : []
+    const leaderUnitValues = Array.isArray(user.profile?.leader_units)
+      ? user.profile.leader_units.map((value) => String(value))
+      : []
     const unitValue = String(user.profile?.unit ?? '')
     const roleValue = String(user.profile?.role ?? '')
 
@@ -593,16 +634,26 @@ const filteredUsers = computed(() => {
     if (targetGroup === '__unset__' && groupValue) {
       return false
     }
-    if (targetTeam && targetTeam !== '__unset__' && teamValue !== targetTeam) {
+    if (
+      targetTeam
+      && targetTeam !== '__unset__'
+      && teamValue !== targetTeam
+      && !supervisorTeamValues.includes(targetTeam)
+    ) {
       return false
     }
-    if (targetTeam === '__unset__' && teamValue) {
+    if (targetTeam === '__unset__' && (teamValue || supervisorTeamValues.length > 0)) {
       return false
     }
-    if (targetUnit && targetUnit !== '__unset__' && unitValue !== targetUnit) {
+    if (
+      targetUnit
+      && targetUnit !== '__unset__'
+      && unitValue !== targetUnit
+      && !leaderUnitValues.includes(targetUnit)
+    ) {
       return false
     }
-    if (targetUnit === '__unset__' && unitValue) {
+    if (targetUnit === '__unset__' && (unitValue || leaderUnitValues.length > 0)) {
       return false
     }
     if (targetPosition && targetPosition !== '__unset__' && roleValue !== targetPosition) {
@@ -699,17 +750,22 @@ const onDivisionChange = () => {
   // 事業部が変更されたら、係・班・グループをクリア
   form.profile.group = null
   form.profile.team = null
+  form.profile.supervisor_teams = []
+  form.profile.leader_units = []
   form.profile.unit = null
 }
 
 const onGroupChange = () => {
   // 係が変更されたら、班とグループをクリア
   form.profile.team = null
+  form.profile.supervisor_teams = []
+  form.profile.leader_units = []
   form.profile.unit = null
 }
 
 const onTeamChange = () => {
   // 班が変更されたら、グループをクリア
+  form.profile.leader_units = []
   form.profile.unit = null
 }
 
@@ -800,6 +856,16 @@ const selectUser = (user) => {
     ...emptyProfile(),
     ...(user.profile || {}),
   }
+  form.profile.supervisor_teams = Array.isArray(form.profile.supervisor_teams)
+    ? form.profile.supervisor_teams
+        .map((value) => Number(value))
+        .filter((value) => !Number.isNaN(value))
+    : []
+  form.profile.leader_units = Array.isArray(form.profile.leader_units)
+    ? form.profile.leader_units
+        .map((value) => Number(value))
+        .filter((value) => !Number.isNaN(value))
+    : []
   form.permissions = buildPermissions(user.permissions)
   useUserPermissions.value = Array.isArray(user.permissions) && user.permissions.length > 0
   if (form.profile.department === undefined) {
@@ -839,12 +905,21 @@ const startCreate = () => {
 }
 
 const buildPayload = () => {
+  const supervisorTeams = Array.isArray(form.profile.supervisor_teams)
+    ? form.profile.supervisor_teams.filter((value) => value !== null && value !== undefined && value !== '')
+    : []
+  const leaderUnits = Array.isArray(form.profile.leader_units)
+    ? form.profile.leader_units.filter((value) => value !== null && value !== undefined && value !== '')
+    : []
+
   const profile = {
     ...form.profile,
     department: form.profile.department || null,
     division: form.profile.division || null,
     group: form.profile.group || null,
     team: form.profile.team || null,
+    supervisor_teams: form.profile.role === 'leader' ? [] : supervisorTeams,
+    leader_units: form.profile.role === 'leader' ? leaderUnits : [],
     unit: form.profile.unit || null,
     joined_on: form.profile.joined_on || null,
   }
@@ -1185,6 +1260,11 @@ watch(filterTeamId, () => {
   border-radius: 4px;
   padding: 4px 8px;
   font-size: 12px;
+}
+
+.form-row select.multi-select {
+  min-height: 88px;
+  padding: 6px 8px;
 }
 
 .form-actions {

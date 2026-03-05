@@ -99,7 +99,7 @@ const settings = [
     path: "/settings/departments",
     name: "DepartmentManagement",
     component: () => import("@/views/settings/DepartmentManagement.vue"),
-    meta: { pageTitle: "組織管理", resource: "settings.users" },
+    meta: { pageTitle: "組織管理", resource: "settings.departments" },
   },
   {
     path: "/settings/kubota-import",

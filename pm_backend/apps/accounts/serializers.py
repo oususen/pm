@@ -26,6 +26,18 @@ class UserProfileSerializer(serializers.ModelSerializer):
     division_name = serializers.CharField(source='division.name', read_only=True)
     group_name = serializers.CharField(source='group.name', read_only=True)
     team_name = serializers.CharField(source='team.name', read_only=True)
+    supervisor_teams = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.filter(level='team'),
+        many=True,
+        required=False,
+    )
+    supervisor_team_names = serializers.SerializerMethodField()
+    leader_units = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.filter(level='unit'),
+        many=True,
+        required=False,
+    )
+    leader_unit_names = serializers.SerializerMethodField()
     unit_name = serializers.CharField(source='unit.name', read_only=True)
 
     class Meta:
@@ -42,6 +54,10 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'group_name',
             'team',
             'team_name',
+            'supervisor_teams',
+            'supervisor_team_names',
+            'leader_units',
+            'leader_unit_names',
             'unit',
             'unit_name',
             'joined_on',
@@ -49,6 +65,12 @@ class UserProfileSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'employee_code': {'validators': []},  # Disable default unique validator
         }
+
+    def get_supervisor_team_names(self, obj):
+        return [team.name for team in obj.supervisor_teams.all()]
+
+    def get_leader_unit_names(self, obj):
+        return [unit.name for unit in obj.leader_units.all()]
 
 
 class UserPermissionSerializer(serializers.ModelSerializer):
@@ -135,6 +157,8 @@ class UserSerializer(serializers.ModelSerializer):
         user.save()
 
         if profile_data is not None:
+            supervisor_teams = profile_data.pop('supervisor_teams', None)
+            leader_units = profile_data.pop('leader_units', None)
             if profile_data.get('employee_code') == '':
                 profile_data['employee_code'] = None
 
@@ -148,7 +172,11 @@ class UserSerializer(serializers.ModelSerializer):
                     }
                 })
 
-            UserProfile.objects.update_or_create(user=user, defaults=profile_data)
+            profile, _ = UserProfile.objects.update_or_create(user=user, defaults=profile_data)
+            if supervisor_teams is not None:
+                profile.supervisor_teams.set(supervisor_teams)
+            if leader_units is not None:
+                profile.leader_units.set(leader_units)
 
         if permissions_data is not None:
             self._replace_permissions(user, permissions_data)
@@ -169,6 +197,8 @@ class UserSerializer(serializers.ModelSerializer):
         instance.save()
 
         if profile_data is not None:
+            supervisor_teams = profile_data.pop('supervisor_teams', None)
+            leader_units = profile_data.pop('leader_units', None)
             if profile_data.get('employee_code') == '':
                 profile_data['employee_code'] = None
 
@@ -187,6 +217,10 @@ class UserSerializer(serializers.ModelSerializer):
             for attr, value in profile_data.items():
                 setattr(profile, attr, value)
             profile.save()
+            if supervisor_teams is not None:
+                profile.supervisor_teams.set(supervisor_teams)
+            if leader_units is not None:
+                profile.leader_units.set(leader_units)
 
         if permissions_data is not None:
             self._replace_permissions(instance, permissions_data)

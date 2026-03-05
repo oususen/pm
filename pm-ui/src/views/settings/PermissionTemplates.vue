@@ -295,6 +295,7 @@ const departmentTemplatePermissions = ref([])
     { value: 'settings', label: '設定' },
   { value: 'settings.profile', label: '設定: プロフィール編集' },
   { value: 'settings.users', label: '設定: ユーザー管理' },
+  { value: 'settings.departments', label: '設定: 組織管理' },
   { value: 'settings.user_permissions', label: '設定: ユーザー権限編集' },
   { value: 'settings.permission_templates', label: '設定: 権限テンプレート' },
   { value: 'settings.smtp', label: '設定: SMTP設定' },

@@ -105,6 +105,20 @@ class UserProfile(models.Model):
         verbose_name='班',
         limit_choices_to={'level': 'team'}
     )
+    supervisor_teams = models.ManyToManyField(
+        Department,
+        blank=True,
+        related_name='supervisor_users',
+        verbose_name='班長担当班',
+        limit_choices_to={'level': 'team'},
+    )
+    leader_units = models.ManyToManyField(
+        Department,
+        blank=True,
+        related_name='leader_users',
+        verbose_name='リーダー担当グループ',
+        limit_choices_to={'level': 'unit'},
+    )
     unit = models.ForeignKey(
         Department,
         on_delete=models.SET_NULL,
@@ -182,6 +196,7 @@ class UserPermission(models.Model):
         ('settings', '設定'),
         ('settings.profile', '設定: プロフィール編集'),
         ('settings.users', '設定: ユーザー管理'),
+        ('settings.departments', '設定: 組織管理'),
         ('settings.user_permissions', '設定: ユーザー権限編集'),
         ('settings.permission_templates', '設定: 権限テンプレート'),
         ('settings.smtp', '設定: SMTP設定'),

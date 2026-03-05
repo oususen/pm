@@ -35,7 +35,10 @@ class DepartmentViewSet(viewsets.ModelViewSet):
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.select_related('profile__department').prefetch_related('permissions')
+    queryset = (
+        User.objects.select_related('profile__department')
+        .prefetch_related('permissions', 'profile__supervisor_teams', 'profile__leader_units')
+    )
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]

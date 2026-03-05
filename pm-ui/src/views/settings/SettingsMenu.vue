@@ -11,7 +11,7 @@
         <div class="icon-box">👤</div>
         <div class="label">ユーザー管理</div>
       </RouterLink>
-      <RouterLink v-if="canAccessSetting('settings.users', 'view')" to="/settings/departments" class="master-tile">
+      <RouterLink v-if="canAccessSetting('settings.departments', 'view')" to="/settings/departments" class="master-tile">
         <div class="icon-box">🏢</div>
         <div class="label">組織管理</div>
       </RouterLink>

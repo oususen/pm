@@ -19,6 +19,7 @@ def _profile_payload(user):
     try:
         profile = (
             UserProfile.objects.select_related('department', 'division', 'group', 'team')
+            .prefetch_related('supervisor_teams', 'leader_units')
             .filter(user_id=user.id)
             .first()
         )
@@ -27,6 +28,9 @@ def _profile_payload(user):
 
     if not profile:
         return None
+
+    supervisor_teams = list(profile.supervisor_teams.all())
+    leader_units = list(profile.leader_units.all())
 
     return {
         'employee_code': profile.employee_code,
@@ -44,6 +48,10 @@ def _profile_payload(user):
         'team': profile.team_id,
         'team_id': profile.team_id,
         'team_name': profile.team.name if profile.team_id else None,
+        'supervisor_teams': [team.id for team in supervisor_teams],
+        'supervisor_team_names': [team.name for team in supervisor_teams],
+        'leader_units': [unit.id for unit in leader_units],
+        'leader_unit_names': [unit.name for unit in leader_units],
         'joined_on': profile.joined_on.isoformat() if profile.joined_on else None,
     }
 
