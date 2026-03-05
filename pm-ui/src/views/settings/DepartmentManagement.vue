@@ -156,7 +156,7 @@ const loadAll = async () => {
   loading.value = true
   errorMessage.value = ''
   try {
-    const res = await api.accounts.getDepartments()
+    const res = await api.accounts.getDepartments({ page_size: 20000 })
     allDepts.value = Array.isArray(res.data) ? res.data : (res.data.results || [])
     tree.value = buildTree(allDepts.value)
   } catch {

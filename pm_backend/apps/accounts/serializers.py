@@ -144,6 +144,16 @@ class UserSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('このユーザー名は既に使用されています。')
         return value
 
+    def _sync_department_and_division(self, profile_data):
+        if profile_data is None:
+            return profile_data
+
+        if 'division' in profile_data:
+            profile_data['department'] = profile_data.get('division')
+        elif 'department' in profile_data:
+            profile_data['division'] = profile_data.get('department')
+        return profile_data
+
     def create(self, validated_data):
         profile_data = validated_data.pop('profile', None)
         permissions_data = validated_data.pop('permissions', None)
@@ -159,6 +169,7 @@ class UserSerializer(serializers.ModelSerializer):
         if profile_data is not None:
             supervisor_teams = profile_data.pop('supervisor_teams', None)
             leader_units = profile_data.pop('leader_units', None)
+            profile_data = self._sync_department_and_division(profile_data)
             if profile_data.get('employee_code') == '':
                 profile_data['employee_code'] = None
 
@@ -199,6 +210,7 @@ class UserSerializer(serializers.ModelSerializer):
         if profile_data is not None:
             supervisor_teams = profile_data.pop('supervisor_teams', None)
             leader_units = profile_data.pop('leader_units', None)
+            profile_data = self._sync_department_and_division(profile_data)
             if profile_data.get('employee_code') == '':
                 profile_data['employee_code'] = None
 

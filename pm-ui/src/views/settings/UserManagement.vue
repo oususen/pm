@@ -11,8 +11,8 @@
           @keyup.enter="loadUsers"
         />
         <select v-model="filterDepartmentId" class="search-select">
-          <option :value="''">部署: すべて</option>
-          <option value="__unset__">部署: 未設定</option>
+          <option :value="''">事業部: すべて</option>
+          <option value="__unset__">事業部: 未設定</option>
           <option v-for="dept in filterDepartmentOptions" :key="dept.value" :value="String(dept.value)">
             {{ dept.label }}
           </option>
@@ -78,7 +78,7 @@
               <tr>
                 <th>ユーザー名</th>
                 <th>氏名</th>
-                <th>部署</th>
+                <th>事業部</th>
                 <th>役割</th>
                 <th>状態</th>
               </tr>
@@ -92,7 +92,7 @@
               >
                 <td>{{ user.username }}</td>
                 <td>{{ getUserDisplayName(user) }}</td>
-                <td>{{ user.profile?.department_name || '-' }}</td>
+                <td>{{ user.profile?.division_name || user.profile?.department_name || '-' }}</td>
                 <td>{{ roleLabels[user.profile?.role] || '-' }}</td>
                 <td>
                   <span :class="user.is_active ? 'status active' : 'status inactive'">
@@ -164,15 +164,6 @@
               <select v-model="form.profile.employment_type">
                 <option v-for="option in employmentOptions" :key="option.value" :value="option.value">
                   {{ option.label }}
-                </option>
-              </select>
-            </div>
-            <div class="form-row full">
-              <label>部署</label>
-              <select v-model="form.profile.department">
-                <option :value="null">未設定</option>
-                <option v-for="dept in departmentOptions" :key="dept.value" :value="dept.value">
-                  {{ dept.label }}
                 </option>
               </select>
             </div>
@@ -393,13 +384,6 @@ const canViewUsers = computed(() => {
 const isAdminUser = computed(() => {
   return canViewUsers.value
 })
-
-const departmentOptions = computed(() =>
-  departments.value.map((dept) => ({
-    value: dept.id,
-    label: `${dept.name} (${levelLabels[dept.level] || dept.level})`,
-  }))
-)
 
 const filterDepartmentOptions = computed(() =>
   departments.value
@@ -629,7 +613,7 @@ const onTeamChange = () => {
 
 const loadDepartments = async () => {
   if (!isAdminUser.value) return
-  const response = await api.accounts.getDepartments({ page_size: 500 })
+  const response = await api.accounts.getDepartments({ page_size: 20000 })
   const data = response.data
   departments.value = Array.isArray(data) ? data : data.results || []
 }
@@ -723,9 +707,6 @@ const selectUser = (user) => {
         .map((value) => Number(value))
         .filter((value) => !Number.isNaN(value))
     : []
-  if (form.profile.department === undefined) {
-    form.profile.department = user.profile?.department_id || null
-  }
 }
 
 const resetForm = () => {
@@ -767,8 +748,8 @@ const buildPayload = () => {
 
   const profile = {
     ...form.profile,
-    department: form.profile.department || null,
     division: form.profile.division || null,
+    department: form.profile.division || null,
     group: form.profile.group || null,
     team: form.profile.team || null,
     supervisor_teams: form.profile.role === 'leader' ? [] : supervisorTeams,
