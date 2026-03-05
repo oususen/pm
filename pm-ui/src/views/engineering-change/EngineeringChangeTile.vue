@@ -16,6 +16,10 @@
           案件名
           <input v-model="form.caseName" type="text" placeholder="案件名を入力" />
         </label>
+        <label>
+          完成品切替予定日
+          <input v-model="form.switchDate" type="date" />
+        </label>
       </div>
 
       <div class="parts-header">
@@ -30,7 +34,6 @@
               <th>旧部品コード</th>
               <th>旧部品名</th>
               <th>新部品コード</th>
-              <th>切替予定日</th>
               <th>打ち切り後必要量</th>
               <th></th>
             </tr>
@@ -68,7 +71,6 @@
                   </select>
                 </div>
               </td>
-              <td><input v-model="row.switchDate" type="date" /></td>
               <td><input v-model.number="row.requiredQtyAfterEol" type="number" min="0" step="1" /></td>
               <td>
                 <button class="btn-danger" type="button" @click="removePartRow(row.id)" :disabled="!canEdit">削除</button>
@@ -203,6 +205,7 @@ import api from "@/api/client";
 
 const defaultForm = () => ({
   caseName: "",
+  switchDate: "",
 });
 
 const createPartRow = () => ({
@@ -212,7 +215,6 @@ const createPartRow = () => ({
   oldPartName: "",
   newPartFilter: "",
   newPartCode: "",
-  switchDate: "",
   requiredQtyAfterEol: 0,
 });
 
@@ -332,13 +334,13 @@ const addRecords = () => {
     return {
       old_part_code: row.oldPartCode.trim(),
       new_part_code: row.newPartCode.trim(),
-      switch_date: row.switchDate || null,
       required_qty_after_eol: Number(row.requiredQtyAfterEol || 0),
     };
   });
   processing.value = true;
   api.engineeringChanges.create({
     case_name: form.caseName.trim(),
+    switch_date: form.switchDate || null,
     parts,
   }).then(async () => {
     resetForm();
@@ -587,7 +589,7 @@ select {
 .cell-select select {
   min-width: 160px;
 }
-.parts-table td:nth-child(5) input {
+.parts-table td:nth-child(4) input {
   width: 55px;
   min-width: 55px;
 }
