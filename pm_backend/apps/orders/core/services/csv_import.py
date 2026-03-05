@@ -322,6 +322,7 @@ class CSVImportService:
         created_orders = 0
         created_lines = 0
         superseded_orders = 0
+        additional_order_notices = []
 
         with transaction.atomic():
             for (customer_id, order_type, version_no, source_file), dailies in orders_dict.items():
@@ -410,6 +411,26 @@ class CSVImportService:
                         else:
                             # Other customers: use timestamp
                             order_no = f"FIRM-{customer.customer_code}-{timestamp}"
+
+                is_additional_import = '-tuika' in str(source_file or '').lower()
+                if order_type == 'FIRM' and is_additional_import and not order_no.endswith('-tuika'):
+                    order_no = f"{order_no}-tuika"
+
+                additional_order_items = []
+                if order_type == 'FIRM' and is_additional_import:
+                    product_qty_map = {}
+                    for daily in dailies:
+                        product_code = (daily.product_code or '').strip()
+                        if not product_code:
+                            continue
+                        product_qty_map[product_code] = product_qty_map.get(product_code, Decimal('0')) + (daily.quantity or Decimal('0'))
+                    additional_order_items = [
+                        {
+                            'product_code': product_code,
+                            'quantity': float(total_qty),
+                        }
+                        for product_code, total_qty in sorted(product_qty_map.items(), key=lambda x: x[0])
+                    ]
 
                 # Create order header
                 order_defaults = {
@@ -533,12 +554,18 @@ class CSVImportService:
                 # 確定インポート時は内示をSUPERSEDEDにしない
                 # 内示インポート時のみ、古い内示をSUPERSEDEDにする
                 # （確定と内示は別々に管理する）
-                pass
+                if additional_order_items:
+                    additional_order_notices.append({
+                        'order_no': order_no,
+                        'source_file': source_file,
+                        'items': additional_order_items,
+                    })
 
         return {
             'orders': created_orders,
             'lines': created_lines,
-            'deleted_forecast_orders': superseded_orders
+            'deleted_forecast_orders': superseded_orders,
+            'additional_order_notices': additional_order_notices,
         }
 
     @staticmethod

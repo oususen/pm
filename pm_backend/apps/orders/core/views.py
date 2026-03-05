@@ -209,6 +209,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     result['orders_created'] = order_result.get('orders', 0)
                     result['lines_created'] = order_result.get('lines', 0)
                     result['superseded_forecast_orders'] = order_result.get('deleted_forecast_orders', 0)
+                    result['additional_order_notices'] = order_result.get('additional_order_notices', [])
                 except Exception as e:
                     # If order creation fails, still return the staging import success
                     # but include the error
@@ -290,6 +291,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     result['orders_created'] = order_result.get('orders', 0)
                     result['lines_created'] = order_result.get('lines', 0)
                     result['superseded_forecast_orders'] = order_result.get('deleted_forecast_orders', 0)
+                    result['additional_order_notices'] = order_result.get('additional_order_notices', [])
                 except Exception as e:
                     result['order_creation_error'] = str(e)
                     result['message'] = f"CSV imported to staging successfully, but order creation failed: {str(e)}"

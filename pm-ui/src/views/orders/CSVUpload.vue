@@ -138,6 +138,26 @@
             </ul>
           </div>
 
+          <div
+            v-if="result.additional_order_notices && result.additional_order_notices.length > 0"
+            class="additional-order-notice"
+          >
+            <h4>お知らせ:</h4>
+            <p>追加注文がありました。部番と数量を確認してください。</p>
+            <div
+              v-for="(notice, noticeIndex) in result.additional_order_notices"
+              :key="`${notice.order_no || 'additional'}-${noticeIndex}`"
+              class="additional-order-block"
+            >
+              <p class="additional-order-title">受注番号: {{ notice.order_no || '—' }}</p>
+              <ul>
+                <li v-for="(item, itemIndex) in (notice.items || [])" :key="`${item.product_code || 'product'}-${itemIndex}`">
+                  部番 {{ item.product_code || '—' }} / 数量 {{ formatNumber(item.quantity) }}
+                </li>
+              </ul>
+            </div>
+          </div>
+
           <div v-if="result.order_creation_error" class="warnings">
             <h4>注意:</h4>
             <p>CSVはステージングに取り込まれましたが、受注作成時にエラーが発生しました。</p>
@@ -504,6 +524,27 @@ onMounted(() => {
   background: #fff3cd;
   border: 1px solid #ffeeba;
   border-radius: 4px;
+}
+
+.additional-order-notice {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #d1ecf1;
+  border: 1px solid #bee5eb;
+  border-radius: 4px;
+  color: #0c5460;
+}
+
+.additional-order-block {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: #eef9fb;
+  border-radius: 4px;
+}
+
+.additional-order-title {
+  margin: 0 0 0.5rem 0;
+  font-weight: 600;
 }
 
 .group-header {
