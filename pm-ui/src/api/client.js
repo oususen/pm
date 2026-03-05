@@ -7,6 +7,7 @@ import { createLinesAPI } from './resources/lines'
 import { createSuppliersAPI } from './resources/suppliers'
 import { createProductGroupsAPI } from './resources/productGroups'
 import { createContainerCapacitiesAPI } from './resources/containerCapacities'
+import { createEquipmentsAPI } from './resources/equipments'
 import { createCalendarsAPI } from './resources/calendars'
 import { createWorkPatternsAPI } from './resources/workPatterns'
 import { createBomsAPI } from './resources/boms'
@@ -96,6 +97,7 @@ export default {
   products: createProductsAPI(client),
   productGroups: createProductGroupsAPI(client),
   containerCapacities: createContainerCapacitiesAPI(client),
+  equipments: createEquipmentsAPI(client),
   customers: createCustomersAPI(client),
   lines: createLinesAPI(client),
   suppliers: createSuppliersAPI(client),

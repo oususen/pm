@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.db.models import Sum
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
-    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Contact
+    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact
 )
 
 
@@ -21,6 +21,15 @@ class ProductGroupSerializer(serializers.ModelSerializer):
 class ContainerCapacitySerializer(serializers.ModelSerializer):
     class Meta:
         model = ContainerCapacity
+        fields = '__all__'
+
+
+class EquipmentSerializer(serializers.ModelSerializer):
+    line_name = serializers.CharField(source='line.line_name', read_only=True)
+    process_name = serializers.CharField(source='process.process_name', read_only=True)
+
+    class Meta:
+        model = Equipment
         fields = '__all__'
 
 

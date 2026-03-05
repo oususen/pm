@@ -3,13 +3,14 @@ from .views import (
     ProductViewSet, CustomerViewSet, ProcessViewSet, LineViewSet, ProductionLineViewSet,
     SupplierViewSet, CalendarViewSet, CalendarDayViewSet, WorkPatternViewSet, BreakTimeViewSet,
     BOMViewSet, BOMItemViewSet, RoutingViewSet, RoutingStepViewSet,
-    RoutingStepMaterialViewSet, ProductGroupViewSet, ContainerCapacityViewSet, ContactViewSet
+    RoutingStepMaterialViewSet, ProductGroupViewSet, ContainerCapacityViewSet, EquipmentViewSet, ContactViewSet
 )
 
 router = DefaultRouter()
 router.register(r'products', ProductViewSet)
 router.register(r'product-groups', ProductGroupViewSet)
 router.register(r'container-capacities', ContainerCapacityViewSet)
+router.register(r'equipments', EquipmentViewSet)
 router.register(r'customers', CustomerViewSet)
 router.register(r'processes', ProcessViewSet)
 router.register(r'lines', LineViewSet)

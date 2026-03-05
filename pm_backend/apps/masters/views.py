@@ -12,13 +12,13 @@ import uuid
 from datetime import date
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
-    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Contact
+    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact
 )
 from .serializers import (
     ProductSerializer, CustomerSerializer, ProcessSerializer, LineSerializer,
     SupplierSerializer, CalendarSerializer, CalendarDaySerializer, WorkPatternSerializer, BreakTimeSerializer,
     BOMSerializer, BOMItemSerializer, RoutingSerializer, RoutingStepSerializer,
-    RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer, ContactSerializer
+    RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer, EquipmentSerializer, ContactSerializer
 )
 from accounts.permissions import HasResourcePermissionOrReadOnly
 
@@ -203,6 +203,16 @@ class ContainerCapacityViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     search_fields = ['name', 'container_code']
     ordering_fields = ['name', 'capacity']
     ordering = ['name']
+
+
+class EquipmentViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
+    queryset = Equipment.objects.all().select_related('line', 'process')
+    serializer_class = EquipmentSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_active', 'line', 'process']
+    search_fields = ['equipment_code', 'equipment_name', 'line__line_code', 'line__line_name', 'process__process_code', 'process__process_name']
+    ordering_fields = ['display_order', 'equipment_code', 'created_at']
+    ordering = ['display_order', 'equipment_code']
 
 
 class CustomerViewSet(MastersPermissionMixin, viewsets.ModelViewSet):

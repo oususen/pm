@@ -24,6 +24,12 @@ const masters = [
     meta: { pageTitle: "容器マスタ", resource: "masters" },
   },
   {
+    path: "/masters/equipment",
+    name: "EquipmentMaster",
+    component: () => import("@/views/masters/EquipmentMaster.vue"),
+    meta: { pageTitle: "設備マスタ", resource: "masters" },
+  },
+  {
     path: "/masters/customer",
     name: "CustomerMaster",
     component: () => import("@/views/masters/CustomerMaster.vue"),

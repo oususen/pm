@@ -18,6 +18,11 @@
         <div class="label">容器マスタ</div>
       </RouterLink>
 
+      <RouterLink to="/masters/equipment" class="master-tile">
+        <div class="icon-box">🛠️</div>
+        <div class="label">設備マスタ</div>
+      </RouterLink>
+
       <RouterLink to="/masters/bom" class="master-tile">
         <div class="icon-box">🧩</div>
         <div class="label">構成マスタ</div>

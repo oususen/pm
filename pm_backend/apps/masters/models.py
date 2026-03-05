@@ -558,6 +558,29 @@ class ContainerCapacity(models.Model):
         return f"{self.name}"
 
 
+class Equipment(models.Model):
+    """設備マスタ"""
+    id = models.BigAutoField(primary_key=True)
+    equipment_code = models.CharField(max_length=30, unique=True, verbose_name='設備コード')
+    equipment_name = models.CharField(max_length=100, verbose_name='設備名')
+    line = models.ForeignKey('Line', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='ライン')
+    process = models.ForeignKey('Process', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='工程')
+    display_order = models.IntegerField(default=0, verbose_name='表示順')
+    is_active = models.BooleanField(default=True, verbose_name='有効')
+    notes = models.TextField(null=True, blank=True, verbose_name='備考')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'm_equipment'
+        verbose_name = '設備'
+        verbose_name_plural = '設備'
+        ordering = ['display_order', 'equipment_code']
+
+    def __str__(self):
+        return f"{self.equipment_code} - {self.equipment_name}"
+
+
 class Contact(models.Model):
     """連絡先マスタ"""
     id = models.BigAutoField(primary_key=True)
