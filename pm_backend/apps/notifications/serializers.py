@@ -151,7 +151,7 @@ class NotificationSerializer(serializers.ModelSerializer):
 
             # 役職チェック
             if target_positions:
-                user_position = profile.position or ''
+                user_position = profile.role or ''
                 if user_position not in target_positions:
                     continue
 
