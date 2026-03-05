@@ -3,12 +3,15 @@
     <div class="page-header">
       <h1 class="page-title">SMTP設定管理</h1>
       <div class="page-actions">
-        <button @click="fetchConfigs" class="btn-primary" :disabled="loading">更新</button>
-        <button @click="showNewDialog" class="btn-success">新規</button>
+        <button @click="fetchConfigs" class="btn-primary" :disabled="loading || !canViewPage">更新</button>
+        <button @click="showNewDialog" class="btn-success" :disabled="!canEditPage">新規</button>
       </div>
     </div>
 
-    <div class="page-content">
+    <div v-if="!canViewPage" class="page-content">
+      <div class="no-data">この画面を開く権限がありません。</div>
+    </div>
+    <div v-else class="page-content">
       <div v-if="loading" class="loading-message">読み込み中...</div>
       <template v-else>
         <table class="data-table">
@@ -34,8 +37,8 @@
               <td>{{ config.is_admin ? '✓' : '' }}</td>
               <td>{{ config.is_active ? '有効' : '無効' }}</td>
               <td>
-                <button @click="editConfig(config)" class="btn-sm">編集</button>
-                <button @click="deleteConfig(config.id)" class="btn-sm btn-danger">削除</button>
+                <button @click="editConfig(config)" class="btn-sm" :disabled="!canEditPage">編集</button>
+                <button @click="deleteConfig(config.id)" class="btn-sm btn-danger" :disabled="!canEditPage">削除</button>
               </td>
             </tr>
           </tbody>
@@ -54,7 +57,7 @@
         <form @submit.prevent="saveConfig">
           <div class="form-group">
             <label>ユーザー *</label>
-            <select v-model="formData.user" required :disabled="isEdit">
+            <select v-model="formData.user" required :disabled="isEdit || !canEditPage">
               <option value="">選択してください</option>
               <option v-for="user in users" :key="user.id" :value="user.id">
                 {{ user.username }} ({{ user.email }})
@@ -63,38 +66,38 @@
           </div>
           <div class="form-group">
             <label>SMTPホスト *</label>
-            <input v-model="formData.smtp_host" required placeholder="例: smtp.gmail.com" />
+            <input v-model="formData.smtp_host" required placeholder="例: smtp.gmail.com" :disabled="!canEditPage" />
           </div>
           <div class="form-group">
             <label>SMTPポート</label>
-            <input type="number" v-model.number="formData.smtp_port" placeholder="587" />
+            <input type="number" v-model.number="formData.smtp_port" placeholder="587" :disabled="!canEditPage" />
             <small>デフォルト: 587</small>
           </div>
           <div class="form-group">
             <label>SMTPユーザー *</label>
-            <input v-model="formData.smtp_user" required placeholder="メールアドレス" />
+            <input v-model="formData.smtp_user" required placeholder="メールアドレス" :disabled="!canEditPage" />
           </div>
           <div class="form-group">
             <label>SMTPパスワード *</label>
             <input type="password" v-model="formData.smtp_password" :required="!isEdit"
-              placeholder="パスワード" />
+              placeholder="パスワード" :disabled="!canEditPage" />
             <small v-if="isEdit">※ 変更する場合のみ入力してください</small>
           </div>
           <div class="form-group">
             <label>
-              <input type="checkbox" v-model="formData.is_admin" />
+              <input type="checkbox" v-model="formData.is_admin" :disabled="!canEditPage" />
               デフォルト設定（全ユーザーで使用可能）
             </label>
             <small>※ チェックを入れると、SMTP設定を持たないユーザーがこの設定を使用します</small>
           </div>
           <div class="form-group">
             <label>
-              <input type="checkbox" v-model="formData.is_active" />
+              <input type="checkbox" v-model="formData.is_active" :disabled="!canEditPage" />
               有効
             </label>
           </div>
           <div class="form-actions">
-            <button type="submit" class="btn-primary">保存</button>
+            <button type="submit" class="btn-primary" :disabled="!canEditPage">保存</button>
             <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
           </div>
         </form>
@@ -104,8 +107,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
 
 const configs = ref([])
 const users = ref([])
@@ -122,7 +127,32 @@ const formData = ref({
   is_active: true
 })
 
+const canAccessByResource = (resource, level = 'view') => {
+  const user = authState.user
+  if (!user || !resource) return false
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  if (permissions.some((item) => item.resource === resource)) {
+    return hasPermission(user, resource, level)
+  }
+  return hasPermission(user, 'settings', level)
+}
+
+const canViewPage = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
+  return canAccessByResource('settings.smtp', 'view')
+})
+
+const canEditPage = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
+  return canAccessByResource('settings.smtp', 'edit')
+})
+
 const fetchConfigs = async () => {
+  if (!canViewPage.value) return
   loading.value = true
   try {
     const response = await api.smtpConfigs.getSmtpConfigs()
@@ -136,6 +166,7 @@ const fetchConfigs = async () => {
 }
 
 const fetchUsers = async () => {
+  if (!canViewPage.value) return
   try {
     // 全ユーザー（管理者含む）を大量に取得
     const response = await api.accounts.getUsers({
@@ -156,6 +187,7 @@ const fetchUsers = async () => {
 }
 
 const showNewDialog = () => {
+  if (!canEditPage.value) return
   isEdit.value = false
   formData.value = {
     user: '',
@@ -170,6 +202,7 @@ const showNewDialog = () => {
 }
 
 const editConfig = (config) => {
+  if (!canEditPage.value) return
   isEdit.value = true
   formData.value = {
     ...config,
@@ -183,6 +216,7 @@ const closeDialog = () => {
 }
 
 const saveConfig = async () => {
+  if (!canEditPage.value) return
   try {
     const dataToSend = { ...formData.value }
 
@@ -207,6 +241,7 @@ const saveConfig = async () => {
 }
 
 const deleteConfig = async (id) => {
+  if (!canEditPage.value) return
   if (!confirm('本当に削除しますか？')) return
 
   try {
@@ -220,6 +255,7 @@ const deleteConfig = async (id) => {
 }
 
 onMounted(async () => {
+  if (!canViewPage.value) return
   await Promise.all([fetchConfigs(), fetchUsers()])
 })
 </script>

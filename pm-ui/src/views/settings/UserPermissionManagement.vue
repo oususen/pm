@@ -474,14 +474,14 @@ const canManageBasic = computed(() => {
   const user = authState.user
   if (!user) return false
   if (user.is_staff || user.is_superuser) return true
-  return canAccessByResource('settings.users', 'edit')
+  return canAccessByResource('settings.user_permissions', 'edit')
 })
 
 const canViewUsers = computed(() => {
   const user = authState.user
   if (!user) return false
   if (user.is_staff || user.is_superuser) return true
-  return canAccessByResource('settings.users', 'view')
+  return canAccessByResource('settings.user_permissions', 'view')
 })
 
 const canManagePermissions = computed(() => {

@@ -3,12 +3,15 @@
     <div class="page-header">
       <h1 class="page-title">発注スケジュール設定</h1>
       <div class="page-actions">
-        <button class="btn-primary" @click="fetchSchedules">更新</button>
-        <button class="btn-success" @click="openNew">新規</button>
+        <button class="btn-primary" @click="fetchSchedules" :disabled="!canViewPage">更新</button>
+        <button class="btn-success" @click="openNew" :disabled="!canEditPage">新規</button>
       </div>
     </div>
 
-    <div class="page-content">
+    <div v-if="!canViewPage" class="page-content">
+      <div class="no-data">この画面を開く権限がありません。</div>
+    </div>
+    <div v-else class="page-content">
       <table class="data-table">
         <thead>
           <tr>
@@ -30,8 +33,8 @@
             <td>{{ row.is_enabled ? '有効' : '無効' }}</td>
             <td>{{ row.note }}</td>
             <td>
-              <button class="btn-sm" @click="openEdit(row)">編集</button>
-              <button class="btn-sm btn-danger" @click="remove(row.id)">削除</button>
+              <button class="btn-sm" @click="openEdit(row)" :disabled="!canEditPage">編集</button>
+              <button class="btn-sm btn-danger" @click="remove(row.id)" :disabled="!canEditPage">削除</button>
             </td>
           </tr>
         </tbody>
@@ -45,7 +48,7 @@
         <form @submit.prevent="save">
           <div class="form-group">
             <label>仕入先 *</label>
-            <select v-model="form.supplier" required>
+            <select v-model="form.supplier" required :disabled="!canEditPage">
               <option value="">選択してください</option>
               <option v-for="supplier in suppliers" :key="supplier.id" :value="supplier.id">
                 {{ supplier.supplier_code }} - {{ supplier.supplier_name }}
@@ -54,7 +57,7 @@
           </div>
           <div class="form-group">
             <label>パターン *</label>
-            <select v-model="form.pattern_type" required>
+            <select v-model="form.pattern_type" required :disabled="!canEditPage">
               <option v-for="item in patternOptions" :key="item.value" :value="item.value">
                 {{ item.label }}
               </option>
@@ -62,11 +65,11 @@
           </div>
           <div class="form-group" v-if="form.pattern_type === 'WEEKLY_NTH_DAY'">
             <label>第N週 *</label>
-            <input v-model.number="form.nth_week" type="number" min="1" max="5" required />
+            <input v-model.number="form.nth_week" type="number" min="1" max="5" required :disabled="!canEditPage" />
           </div>
           <div class="form-group" v-if="['WEEKLY_NTH_DAY', 'EVERY_WEEK'].includes(form.pattern_type)">
             <label>曜日 *</label>
-            <select v-model.number="form.day_of_week" required>
+            <select v-model.number="form.day_of_week" required :disabled="!canEditPage">
               <option v-for="item in dayOptions" :key="item.value" :value="item.value">
                 {{ item.label }}
               </option>
@@ -74,24 +77,24 @@
           </div>
           <div class="form-group" v-if="form.pattern_type === 'MONTHLY_DATE'">
             <label>日付 *</label>
-            <input v-model.number="form.day_of_month" type="number" min="1" max="31" required />
+            <input v-model.number="form.day_of_month" type="number" min="1" max="31" required :disabled="!canEditPage" />
           </div>
           <div class="form-group">
             <label>リードタイム(日)</label>
-            <input v-model.number="form.lead_time_days" type="number" min="0" />
+            <input v-model.number="form.lead_time_days" type="number" min="0" :disabled="!canEditPage" />
           </div>
           <div class="form-group">
             <label>
-              <input v-model="form.is_enabled" type="checkbox" />
+              <input v-model="form.is_enabled" type="checkbox" :disabled="!canEditPage" />
               有効
             </label>
           </div>
           <div class="form-group">
             <label>備考</label>
-            <input v-model="form.note" />
+            <input v-model="form.note" :disabled="!canEditPage" />
           </div>
           <div class="form-actions">
-            <button class="btn-primary" type="submit">保存</button>
+            <button class="btn-primary" type="submit" :disabled="!canEditPage">保存</button>
             <button class="btn-secondary" type="button" @click="closeDialog">キャンセル</button>
           </div>
         </form>
@@ -101,8 +104,10 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
 
 const rows = ref([])
 const suppliers = ref([])
@@ -137,6 +142,30 @@ const form = ref({
   note: '',
 })
 
+const canAccessByResource = (resource, level = 'view') => {
+  const user = authState.user
+  if (!user || !resource) return false
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  if (permissions.some((item) => item.resource === resource)) {
+    return hasPermission(user, resource, level)
+  }
+  return hasPermission(user, 'settings', level)
+}
+
+const canViewPage = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
+  return canAccessByResource('settings.supplier_order_schedule', 'view')
+})
+
+const canEditPage = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
+  return canAccessByResource('settings.supplier_order_schedule', 'edit')
+})
+
 const patternLabel = (value) => {
   const found = patternOptions.find((item) => item.value === value)
   return found ? found.label : value
@@ -155,16 +184,19 @@ const patternCondition = (row) => {
 }
 
 const fetchSuppliers = async () => {
+  if (!canViewPage.value) return
   const response = await api.suppliers.getSuppliers()
   suppliers.value = response.data.results || response.data || []
 }
 
 const fetchSchedules = async () => {
+  if (!canViewPage.value) return
   const response = await api.supplierOrderSchedules.list()
   rows.value = response.data || []
 }
 
 const openNew = () => {
+  if (!canEditPage.value) return
   isEdit.value = false
   form.value = {
     id: null,
@@ -181,6 +213,7 @@ const openNew = () => {
 }
 
 const openEdit = (row) => {
+  if (!canEditPage.value) return
   isEdit.value = true
   form.value = { ...row }
   showDialog.value = true
@@ -215,6 +248,7 @@ const buildPayload = () => {
 }
 
 const save = async () => {
+  if (!canEditPage.value) return
   const payload = buildPayload()
   if (isEdit.value) {
     await api.supplierOrderSchedules.update(form.value.id, payload)
@@ -226,12 +260,14 @@ const save = async () => {
 }
 
 const remove = async (id) => {
+  if (!canEditPage.value) return
   if (!confirm('削除しますか？')) return
   await api.supplierOrderSchedules.delete(id)
   await fetchSchedules()
 }
 
 onMounted(async () => {
+  if (!canViewPage.value) return
   await Promise.all([fetchSuppliers(), fetchSchedules()])
 })
 </script>

@@ -3,14 +3,17 @@
     <div class="page-header">
       <h1 class="page-title">組織管理</h1>
       <div class="page-actions">
-        <button @click="loadAll" class="btn-primary">更新</button>
-        <button @click="showCreate(null, 'division')" class="btn-success">事業部を追加</button>
+        <button @click="loadAll" class="btn-primary" :disabled="loading || !canView">更新</button>
+        <button @click="showCreate(null, 'division')" class="btn-success" :disabled="!canEdit">事業部を追加</button>
       </div>
     </div>
 
     <div v-if="errorMessage" class="error-msg">{{ errorMessage }}</div>
 
-    <div class="page-content">
+    <div v-if="!canView" class="page-content">
+      <div class="no-data">この画面を開く権限がありません。</div>
+    </div>
+    <div v-else class="page-content">
       <div v-if="loading" class="no-data">読み込み中...</div>
       <table v-else class="data-table">
         <thead>
@@ -29,9 +32,9 @@
               <td>{{ div.name }}</td>
               <td>{{ div.display_id }}</td>
               <td class="actions">
-                <button class="btn-sm" @click="showEdit(div)">編集</button>
-                <button class="btn-sm btn-success" @click="showCreate(div.id, 'group')">係を追加</button>
-                <button class="btn-sm btn-danger" @click="confirmDelete(div)">削除</button>
+                <button class="btn-sm" @click="showEdit(div)" :disabled="!canEdit">編集</button>
+                <button class="btn-sm btn-success" @click="showCreate(div.id, 'group')" :disabled="!canEdit">係を追加</button>
+                <button class="btn-sm btn-danger" @click="confirmDelete(div)" :disabled="!canEdit">削除</button>
               </td>
             </tr>
             <!-- 係 -->
@@ -41,9 +44,9 @@
                 <td class="indent-1">{{ grp.name }}</td>
                 <td>{{ grp.display_id }}</td>
                 <td class="actions">
-                  <button class="btn-sm" @click="showEdit(grp)">編集</button>
-                  <button class="btn-sm btn-success" @click="showCreate(grp.id, 'team')">班を追加</button>
-                  <button class="btn-sm btn-danger" @click="confirmDelete(grp)">削除</button>
+                  <button class="btn-sm" @click="showEdit(grp)" :disabled="!canEdit">編集</button>
+                  <button class="btn-sm btn-success" @click="showCreate(grp.id, 'team')" :disabled="!canEdit">班を追加</button>
+                  <button class="btn-sm btn-danger" @click="confirmDelete(grp)" :disabled="!canEdit">削除</button>
                 </td>
               </tr>
               <!-- 班 -->
@@ -53,9 +56,9 @@
                   <td class="indent-2">{{ team.name }}</td>
                   <td>{{ team.display_id }}</td>
                   <td class="actions">
-                    <button class="btn-sm" @click="showEdit(team)">編集</button>
-                    <button class="btn-sm btn-success" @click="showCreate(team.id, 'unit')">グループを追加</button>
-                    <button class="btn-sm btn-danger" @click="confirmDelete(team)">削除</button>
+                    <button class="btn-sm" @click="showEdit(team)" :disabled="!canEdit">編集</button>
+                    <button class="btn-sm btn-success" @click="showCreate(team.id, 'unit')" :disabled="!canEdit">グループを追加</button>
+                    <button class="btn-sm btn-danger" @click="confirmDelete(team)" :disabled="!canEdit">削除</button>
                   </td>
                 </tr>
                 <!-- グループ -->
@@ -64,8 +67,8 @@
                   <td class="indent-3">{{ unit.name }}</td>
                   <td>{{ unit.display_id }}</td>
                   <td class="actions">
-                    <button class="btn-sm" @click="showEdit(unit)">編集</button>
-                    <button class="btn-sm btn-danger" @click="confirmDelete(unit)">削除</button>
+                    <button class="btn-sm" @click="showEdit(unit)" :disabled="!canEdit">編集</button>
+                    <button class="btn-sm btn-danger" @click="confirmDelete(unit)" :disabled="!canEdit">削除</button>
                   </td>
                 </tr>
               </template>
@@ -83,14 +86,14 @@
         <form @submit.prevent="save">
           <div class="form-group">
             <label>名前 <span class="required">*</span></label>
-            <input v-model="form.name" required autofocus />
+            <input v-model="form.name" required autofocus :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>表示順</label>
-            <input v-model.number="form.display_id" type="number" />
+            <input v-model.number="form.display_id" type="number" :disabled="!canEdit" />
           </div>
           <div class="form-actions">
-            <button type="submit" class="btn-primary" :disabled="saving">
+            <button type="submit" class="btn-primary" :disabled="saving || !canEdit">
               {{ saving ? '保存中...' : '保存' }}
             </button>
             <button type="button" class="btn-secondary" @click="closeDialog">キャンセル</button>
@@ -105,7 +108,7 @@
         <h2>削除確認</h2>
         <p>「{{ deleteTarget.name }}」を削除しますか？<br>配下の組織も削除されます。</p>
         <div class="form-actions">
-          <button class="btn-danger" @click="doDelete" :disabled="saving">削除</button>
+          <button class="btn-danger" @click="doDelete" :disabled="saving || !canEdit">削除</button>
           <button class="btn-secondary" @click="deleteTarget = null">キャンセル</button>
         </div>
       </div>
@@ -114,8 +117,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -132,6 +137,30 @@ const deleteTarget = ref(null)
 const form = ref({ name: '', display_id: 0 })
 
 const levelLabels = { division: '事業部', group: '係', team: '班', unit: 'グループ' }
+
+const canAccessByResource = (resource, level = 'view') => {
+  const user = authState.user
+  if (!user || !resource) return false
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  if (permissions.some((item) => item.resource === resource)) {
+    return hasPermission(user, resource, level)
+  }
+  return hasPermission(user, 'settings', level)
+}
+
+const canView = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
+  return canAccessByResource('settings.departments', 'view')
+})
+
+const canEdit = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
+  return canAccessByResource('settings.departments', 'edit')
+})
 
 const buildTree = (depts) => {
   const map = {}
@@ -153,6 +182,7 @@ const buildTree = (depts) => {
 }
 
 const loadAll = async () => {
+  if (!canView.value) return
   loading.value = true
   errorMessage.value = ''
   try {
@@ -167,6 +197,7 @@ const loadAll = async () => {
 }
 
 const showCreate = (parentId, level) => {
+  if (!canEdit.value) return
   editTarget.value = null
   dialogLevel.value = level
   dialogParentId.value = parentId
@@ -175,6 +206,7 @@ const showCreate = (parentId, level) => {
 }
 
 const showEdit = (dept) => {
+  if (!canEdit.value) return
   editTarget.value = dept
   dialogLevel.value = dept.level
   dialogParentId.value = dept.parent
@@ -188,6 +220,7 @@ const closeDialog = () => {
 }
 
 const save = async () => {
+  if (!canEdit.value) return
   saving.value = true
   errorMessage.value = ''
   try {
@@ -214,10 +247,12 @@ const save = async () => {
 }
 
 const confirmDelete = (dept) => {
+  if (!canEdit.value) return
   deleteTarget.value = dept
 }
 
 const doDelete = async () => {
+  if (!canEdit.value) return
   if (!deleteTarget.value) return
   saving.value = true
   errorMessage.value = ''

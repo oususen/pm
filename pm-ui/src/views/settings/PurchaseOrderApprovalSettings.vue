@@ -3,12 +3,15 @@
     <div class="page-header">
       <h1 class="page-title">発注承認者設定</h1>
       <div class="page-actions">
-        <button class="btn-primary" @click="fetchAll">更新</button>
-        <button class="btn-success" @click="save">保存</button>
+        <button class="btn-primary" @click="fetchAll" :disabled="!canViewPage">更新</button>
+        <button class="btn-success" @click="save" :disabled="!canEditPage">保存</button>
       </div>
     </div>
 
-    <div class="page-content">
+    <div v-if="!canViewPage" class="page-content">
+      <div class="no-data">この画面を開く権限がありません。</div>
+    </div>
+    <div v-else class="page-content">
       <table class="data-table">
         <thead>
           <tr>
@@ -22,7 +25,7 @@
         <tbody>
           <tr v-for="row in configs" :key="row.approval_level">
             <td>{{ row.approval_level }}</td>
-            <td><input v-model="row.level_name" /></td>
+            <td><input v-model="row.level_name" :disabled="!canEditPage" /></td>
             <td class="picker-cell">
               <div class="user-picker">
                 <input
@@ -30,8 +33,9 @@
                   class="picker-search-input"
                   placeholder="社員コード/氏名/ユーザー名で検索"
                   @keyup.enter.prevent="addFirstCandidate(row, 'approver')"
+                  :disabled="!canEditPage"
                 />
-                <div v-if="candidateList(row, 'approver').length" class="candidate-list">
+                <div v-if="canEditPage && candidateList(row, 'approver').length" class="candidate-list">
                   <div
                     v-for="user in candidateList(row, 'approver')"
                     :key="user.id"
@@ -46,7 +50,7 @@
                   <span v-for="userId in row.approver_users" :key="`approver-${row.approval_level}-${userId}`" class="chip">
                     <span class="chip-code">{{ chipCode(userId) }}</span>
                     <span class="chip-name">{{ chipName(userId) }}</span>
-                    <button type="button" class="chip-remove" @click="removeUser(row, 'approver', userId)">×</button>
+                    <button type="button" class="chip-remove" @click="removeUser(row, 'approver', userId)" :disabled="!canEditPage">×</button>
                   </span>
                 </div>
               </div>
@@ -58,8 +62,9 @@
                   class="picker-search-input"
                   placeholder="社員コード/氏名/ユーザー名で検索"
                   @keyup.enter.prevent="addFirstCandidate(row, 'proxy')"
+                  :disabled="!canEditPage"
                 />
-                <div v-if="candidateList(row, 'proxy').length" class="candidate-list">
+                <div v-if="canEditPage && candidateList(row, 'proxy').length" class="candidate-list">
                   <div
                     v-for="user in candidateList(row, 'proxy')"
                     :key="user.id"
@@ -74,7 +79,7 @@
                   <span v-for="userId in row.proxy_approver_users" :key="`proxy-${row.approval_level}-${userId}`" class="chip">
                     <span class="chip-code">{{ chipCode(userId) }}</span>
                     <span class="chip-name">{{ chipName(userId) }}</span>
-                    <button type="button" class="chip-remove" @click="removeUser(row, 'proxy', userId)">×</button>
+                    <button type="button" class="chip-remove" @click="removeUser(row, 'proxy', userId)" :disabled="!canEditPage">×</button>
                   </span>
                 </div>
               </div>
@@ -87,8 +92,9 @@
                   class="picker-search-input"
                   placeholder="社員コード/氏名/ユーザー名で検索"
                   @keyup.enter.prevent="addFirstCandidate(row, 'notify')"
+                  :disabled="!canEditPage"
                 />
-                <div v-if="candidateList(row, 'notify').length" class="candidate-list">
+                <div v-if="canEditPage && candidateList(row, 'notify').length" class="candidate-list">
                   <div
                     v-for="user in candidateList(row, 'notify')"
                     :key="user.id"
@@ -103,7 +109,7 @@
                   <span v-for="userId in row.notify_users" :key="`notify-${row.approval_level}-${userId}`" class="chip">
                     <span class="chip-code">{{ chipCode(userId) }}</span>
                     <span class="chip-name">{{ chipName(userId) }}</span>
-                    <button type="button" class="chip-remove" @click="removeUser(row, 'notify', userId)">×</button>
+                    <button type="button" class="chip-remove" @click="removeUser(row, 'notify', userId)" :disabled="!canEditPage">×</button>
                   </span>
                 </div>
               </div>
@@ -119,6 +125,8 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
 
 const configs = ref([])
 const users = ref([])
@@ -128,6 +136,30 @@ const usersById = computed(() => {
     map.set(Number(user.id), user)
   }
   return map
+})
+
+const canAccessByResource = (resource, level = 'view') => {
+  const user = authState.user
+  if (!user || !resource) return false
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  if (permissions.some((item) => item.resource === resource)) {
+    return hasPermission(user, resource, level)
+  }
+  return hasPermission(user, 'settings', level)
+}
+
+const canViewPage = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
+  return canAccessByResource('settings.purchase_order_approval', 'view')
+})
+
+const canEditPage = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
+  return canAccessByResource('settings.purchase_order_approval', 'edit')
 })
 
 const normalizeUserIds = (list) => {
@@ -196,6 +228,7 @@ const candidateList = (row, type) => {
 }
 
 const addUser = (row, type, user) => {
+  if (!canEditPage.value) return
   const userId = Number(user.id)
   const { targetKey, searchKey } = resolveUserFieldKeys(type)
   if (!row[targetKey].includes(userId)) {
@@ -205,11 +238,13 @@ const addUser = (row, type, user) => {
 }
 
 const addFirstCandidate = (row, type) => {
+  if (!canEditPage.value) return
   const first = candidateList(row, type)[0]
   if (first) addUser(row, type, first)
 }
 
 const removeUser = (row, type, userId) => {
+  if (!canEditPage.value) return
   const { targetKey } = resolveUserFieldKeys(type)
   row[targetKey] = row[targetKey].filter((id) => Number(id) !== Number(userId))
 }
@@ -225,10 +260,12 @@ const chipName = (userId) => {
 }
 
 const fetchAll = async () => {
+  if (!canViewPage.value) return
   await Promise.all([fetchUsers(), fetchConfigs()])
 }
 
 const save = async () => {
+  if (!canEditPage.value) return
   const payload = {
     configs: configs.value.map((row) => ({
       approval_level: row.approval_level,
@@ -244,6 +281,7 @@ const save = async () => {
 }
 
 onMounted(async () => {
+  if (!canViewPage.value) return
   await fetchAll()
 })
 </script>

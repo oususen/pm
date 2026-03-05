@@ -4,7 +4,10 @@
       <h1 class="page-title">クボタ堺 確定取り込み通知設定</h1>
     </div>
 
-    <div class="page-content">
+    <div v-if="!canViewPage" class="page-content">
+      <div class="loading">この画面を開く権限がありません。</div>
+    </div>
+    <div v-else class="page-content">
       <div class="settings-card">
         <p class="description">
           クボタ堺の確定CSVを取り込んだ際に、内示と数量が異なる品番があった場合、
@@ -26,6 +29,7 @@
                   type="checkbox"
                   :value="user.id"
                   v-model="selectedUserIds"
+                  :disabled="!canEditPage"
                 />
                 <span>{{ user.full_name }}</span>
               </label>
@@ -33,7 +37,7 @@
           </div>
 
           <div class="form-actions">
-            <button @click="save" :disabled="saving" class="btn-primary">
+            <button @click="save" :disabled="saving || !canEditPage" class="btn-primary">
               {{ saving ? '保存中...' : '保存' }}
             </button>
           </div>
@@ -48,8 +52,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import axios from 'axios'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
 
@@ -60,7 +66,22 @@ const selectedUserIds = ref([])
 const saveMessage = ref('')
 const saveError = ref(false)
 
+const canViewPage = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
+  return hasPermission(user, 'settings', 'view')
+})
+
+const canEditPage = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
+  return hasPermission(user, 'settings', 'edit')
+})
+
 const fetchConfig = async () => {
+  if (!canViewPage.value) return
   try {
     const res = await axios.get(`${API_BASE_URL}/kubota-sakai-import-config/`)
     allUsers.value = res.data.all_users
@@ -73,6 +94,7 @@ const fetchConfig = async () => {
 }
 
 const save = async () => {
+  if (!canEditPage.value) return
   saving.value = true
   saveMessage.value = ''
   try {
@@ -89,7 +111,10 @@ const save = async () => {
   }
 }
 
-onMounted(fetchConfig)
+onMounted(() => {
+  if (!canViewPage.value) return
+  fetchConfig()
+})
 </script>
 
 <style scoped>
