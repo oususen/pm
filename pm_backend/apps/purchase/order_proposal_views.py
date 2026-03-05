@@ -134,7 +134,11 @@ def _resolve_level2_approvers_for_submit(proposal: PurchaseOrderProposal, config
     if not profile:
         return [u for u in configured_users if getattr(u, 'id', None)]
 
-    team_id = getattr(profile, 'team_id', None)
+    supervisor_team_ids = list(profile.supervisor_teams.values_list('id', flat=True))
+    if not supervisor_team_ids:
+        team_id = getattr(profile, 'team_id', None)
+        if team_id:
+            supervisor_team_ids = [team_id]
     group_id = getattr(profile, 'group_id', None)
     creator_id = getattr(creator, 'id', None)
 
@@ -147,8 +151,11 @@ def _resolve_level2_approvers_for_submit(proposal: PurchaseOrderProposal, config
         if user_ids is not None:
             user_qs = user_qs.filter(id__in=user_ids)
 
-        if team_id:
-            user_qs = user_qs.filter(profile__team_id=team_id)
+        if supervisor_team_ids:
+            user_qs = user_qs.filter(
+                Q(profile__team_id__in=supervisor_team_ids)
+                | Q(profile__supervisor_teams__id__in=supervisor_team_ids)
+            )
         elif group_id:
             user_qs = user_qs.filter(profile__group_id=group_id)
         else:
