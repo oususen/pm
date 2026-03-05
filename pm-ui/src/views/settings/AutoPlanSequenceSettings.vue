@@ -1,7 +1,10 @@
 <template>
   <div class="settings-container">
     <h2 class="page-title">自動計画設定</h2>
-    <div class="two-col">
+    <div v-if="!canView" class="card no-permission">
+      この画面を開く権限がありません。
+    </div>
+    <div v-else class="two-col">
       <div class="col">
         <div class="card">
           <div class="field">
@@ -285,12 +288,22 @@ const scheduledDomExt = ref(1)
 const scheduledHourExt = ref(3)
 const scheduledMinuteExt = ref(0)
 
-const canEdit = computed(() => {
+const canAccessByResource = (resource, level = 'view') => {
   const user = authState.user
   if (!user) return false
   if (user.is_staff || user.is_superuser) return true
-  return hasPermission(user, 'settings', 'edit')
-})
+
+  const permissions = Array.isArray(user.effective_permissions)
+    ? user.effective_permissions
+    : []
+  if (permissions.some((item) => item.resource === resource)) {
+    return hasPermission(user, resource, level)
+  }
+  return hasPermission(user, 'settings', level)
+}
+
+const canView = computed(() => canAccessByResource('settings.scheduled_tasks', 'view'))
+const canEdit = computed(() => canAccessByResource('settings.scheduled_tasks', 'edit'))
 
 const autoPlanConfigs = computed(() =>
   configs.value
@@ -325,6 +338,7 @@ const addableProdLines = computed(() => autoPlanConfigs.value.filter((cfg) => !c
 const addableExtLines = computed(() => autoPlanConfigs.value.filter((cfg) => !cfg.is_enabled))
 
 const loadConfigs = async () => {
+  if (!canView.value) return
   const res = await api.scheduleConfig.getConfigs()
   const rows = Array.isArray(res.data) ? res.data : []
   configs.value = rows.map((r) => ({
@@ -365,6 +379,7 @@ const loadConfigs = async () => {
 }
 
 const loadUsers = async () => {
+  if (!canView.value) return
   try {
     const res = await api.accounts.getUsers({ is_active: true })
     userList.value = res.data?.results || res.data || []
@@ -631,6 +646,7 @@ const removeCode = (cfg, code) => {
 }
 
 onMounted(async () => {
+  if (!canView.value) return
   await loadConfigs()
   await loadUsers()
 })
@@ -660,6 +676,10 @@ onMounted(async () => {
   border: 1px solid #c5cfde;
   border-radius: 4px;
   padding: 12px;
+}
+.no-permission {
+  color: #b91c1c;
+  font-weight: 600;
 }
 .field {
   margin-bottom: 12px;

@@ -9,7 +9,7 @@ const notifications = [
     path: "/notifications/sources",
     name: "NotificationSourceInput",
     component: () => import("@/views/notifications/NotificationSourceInput.vue"),
-    meta: { pageTitle: "通知編集", resource: "notifications.create" },
+    meta: { pageTitle: "通知編集", resource: "notifications" },
   },
 ];
 

@@ -3,17 +3,18 @@
     <div class="page-header">
       <h2 class="page-title">権限テンプレート</h2>
       <div class="page-actions">
-        <button class="btn" @click="refreshAll" :disabled="loading">
+        <button class="btn" @click="refreshAll" :disabled="loading || !canViewPage">
           更新
         </button>
       </div>
     </div>
 
     <div class="page-content">
-      <div v-if="!isAdminUser" class="helper-text">
+      <div v-if="!canViewPage" class="helper-text">
         この画面を開く権限がありません。
       </div>
-      <div v-else class="template-card">
+      <template v-else>
+      <div class="template-card">
         <div class="template-header">
           <h3 class="section-title">部署・役職 権限テンプレート</h3>
         </div>
@@ -65,7 +66,7 @@
                   type="checkbox"
                   v-model="perm.can_view"
                   @change="onPermissionChange(perm, 'can_view')"
-                  :disabled="!selectedPositionName"
+                  :disabled="!selectedPositionName || !canEditPage"
                 />
               </td>
               <td>
@@ -73,7 +74,7 @@
                   type="checkbox"
                   v-model="perm.can_edit"
                   @change="onPermissionChange(perm, 'can_edit')"
-                  :disabled="!selectedPositionName"
+                  :disabled="!selectedPositionName || !canEditPage"
                 />
               </td>
             </tr>
@@ -84,7 +85,7 @@
           <div v-if="templateSuccess" class="save-message success">
             {{ templateSuccess }}
           </div>
-          <button type="button" class="btn primary" @click="saveTemplate" :disabled="templateSaving">
+          <button type="button" class="btn primary" @click="saveTemplate" :disabled="templateSaving || !canEditPage">
             {{ templateSaving ? '保存中...' : '保存' }}
           </button>
         </div>
@@ -129,7 +130,7 @@
                   type="checkbox"
                   v-model="perm.can_view"
                   @change="onDepartmentPermissionChange(perm, 'can_view')"
-                  :disabled="!selectedDepartmentOnlyId"
+                  :disabled="!selectedDepartmentOnlyId || !canEditPage"
                 />
               </td>
               <td>
@@ -137,7 +138,7 @@
                   type="checkbox"
                   v-model="perm.can_edit"
                   @change="onDepartmentPermissionChange(perm, 'can_edit')"
-                  :disabled="!selectedDepartmentOnlyId"
+                  :disabled="!selectedDepartmentOnlyId || !canEditPage"
                 />
               </td>
             </tr>
@@ -148,7 +149,7 @@
           <div v-if="departmentTemplateSuccess" class="save-message success">
             {{ departmentTemplateSuccess }}
           </div>
-          <button type="button" class="btn primary" @click="saveDepartmentTemplate" :disabled="departmentTemplateSaving">
+          <button type="button" class="btn primary" @click="saveDepartmentTemplate" :disabled="departmentTemplateSaving || !canEditPage">
             {{ departmentTemplateSaving ? '保存中...' : '保存' }}
           </button>
         </div>
@@ -193,7 +194,7 @@
                   type="checkbox"
                   v-model="perm.can_view"
                   @change="onPositionPermissionChange(perm, 'can_view')"
-                  :disabled="!selectedPositionOnlyName"
+                  :disabled="!selectedPositionOnlyName || !canEditPage"
                 />
               </td>
               <td>
@@ -201,7 +202,7 @@
                   type="checkbox"
                   v-model="perm.can_edit"
                   @change="onPositionPermissionChange(perm, 'can_edit')"
-                  :disabled="!selectedPositionOnlyName"
+                  :disabled="!selectedPositionOnlyName || !canEditPage"
                 />
               </td>
             </tr>
@@ -212,11 +213,12 @@
           <div v-if="positionTemplateSuccess" class="save-message success">
             {{ positionTemplateSuccess }}
           </div>
-          <button type="button" class="btn primary" @click="savePositionTemplate" :disabled="positionTemplateSaving">
+          <button type="button" class="btn primary" @click="savePositionTemplate" :disabled="positionTemplateSaving || !canEditPage">
             {{ positionTemplateSaving ? '保存中...' : '保存' }}
           </button>
         </div>
       </div>
+      </template>
     </div>
   </div>
 </template>
@@ -308,19 +310,22 @@ const levelLabels = {
   team: '班',
 }
 
-const isAdminUser = computed(() => {
-  // is_staff/is_superuser または権限テンプレート編集権限があるユーザー
+const canAccessByResource = (resource, level = 'view') => {
   const user = authState.user
-  if (!user) return false
+  if (!user || !resource) return false
   if (user.is_staff || user.is_superuser) return true
-  // 新リソース優先、未設定時は従来の settings 編集権限にフォールバック
-  const hasSpecificEntry = Array.isArray(user.effective_permissions)
-    && user.effective_permissions.some((item) => item.resource === 'settings.permission_templates')
-  if (hasSpecificEntry) {
-    return hasPermission(user, 'settings.permission_templates', 'edit')
+
+  const permissions = Array.isArray(user.effective_permissions)
+    ? user.effective_permissions
+    : []
+  if (permissions.some((item) => item.resource === resource)) {
+    return hasPermission(user, resource, level)
   }
-  return hasPermission(user, 'settings', 'edit')
-})
+  return hasPermission(user, 'settings', level)
+}
+
+const canViewPage = computed(() => canAccessByResource('settings.permission_templates', 'view'))
+const canEditPage = computed(() => canAccessByResource('settings.permission_templates', 'edit'))
 
 const departmentOptions = computed(() =>
   departments.value
@@ -371,6 +376,7 @@ const serializePermissions = () =>
     }))
 
 const onPermissionChange = (perm, field) => {
+  if (!canEditPage.value) return
   if (field === 'can_edit' && perm.can_edit) {
     perm.can_view = true
   }
@@ -380,6 +386,7 @@ const onPermissionChange = (perm, field) => {
 }
 
 const onPositionPermissionChange = (perm, field) => {
+  if (!canEditPage.value) return
   if (field === 'can_edit' && perm.can_edit) {
     perm.can_view = true
   }
@@ -389,13 +396,14 @@ const onPositionPermissionChange = (perm, field) => {
 }
 
 const loadDepartments = async () => {
-  if (!isAdminUser.value) return
+  if (!canViewPage.value) return
   const response = await api.accounts.getDepartments({ page_size: 20000 })
   const data = response.data
   departments.value = Array.isArray(data) ? data : data.results || []
 }
 
 const loadDepartmentTemplate = async () => {
+  if (!canViewPage.value) return
   departmentTemplateError.value = ''
   departmentTemplateSuccess.value = ''
   if (!selectedDepartmentOnlyId.value) {
@@ -420,6 +428,7 @@ const loadDepartmentTemplate = async () => {
 }
 
 const saveDepartmentTemplate = async () => {
+  if (!canEditPage.value) return
   departmentTemplateError.value = ''
   departmentTemplateSuccess.value = ''
   if (!selectedDepartmentOnlyId.value) {
@@ -454,6 +463,7 @@ const saveDepartmentTemplate = async () => {
 }
 
 const onDepartmentPermissionChange = (perm, field) => {
+  if (!canEditPage.value) return
   // 編集権限がある場合、閲覧権限も自動で付与
   if (field === 'can_edit' && perm.can_edit) {
     perm.can_view = true
@@ -464,6 +474,7 @@ const onDepartmentPermissionChange = (perm, field) => {
   }
 }
 const loadPositionTemplate = async () => {
+  if (!canViewPage.value) return
   positionTemplateError.value = ''
   positionTemplateSuccess.value = ''
   if (!selectedPositionOnlyName.value) {
@@ -488,6 +499,7 @@ const loadPositionTemplate = async () => {
 }
 
 const savePositionTemplate = async () => {
+  if (!canEditPage.value) return
   positionTemplateError.value = ''
   positionTemplateSuccess.value = ''
   if (!selectedPositionOnlyName.value) {
@@ -523,6 +535,7 @@ const savePositionTemplate = async () => {
 
 
 const loadTemplate = async () => {
+  if (!canViewPage.value) return
   templateError.value = ''
   templateSuccess.value = ''
   if (!selectedDepartmentId.value || !selectedPositionName.value) {
@@ -549,6 +562,7 @@ const loadTemplate = async () => {
 
 
 const saveTemplate = async () => {
+  if (!canEditPage.value) return
   templateError.value = ''
   templateSuccess.value = ''
   if (!selectedDepartmentId.value || !selectedPositionName.value) {
@@ -581,6 +595,7 @@ const onDepartmentChange = async () => {
 }
 
 const refreshAll = async () => {
+  if (!canViewPage.value) return
   loading.value = true
   templateError.value = ''
   templateSuccess.value = ''
@@ -621,7 +636,7 @@ const extractErrorMessage = (detail) => {
 }
 
 onMounted(async () => {
-  if (!isAdminUser.value) return
+  if (!canViewPage.value) return
   templatePermissions.value = emptyPermissions()
   positionTemplatePermissions.value = emptyPermissions()
   await refreshAll()

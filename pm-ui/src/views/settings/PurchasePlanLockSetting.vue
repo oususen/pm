@@ -1,7 +1,8 @@
 <template>
   <div class="settings-container">
     <h2 class="page-title">仕入計画ロック設定</h2>
-    <div class="card">
+    <div v-if="!canView" class="card no-permission">この画面を開く権限がありません。</div>
+    <div v-else class="card">
       <div class="field">
         <label>計画入力を読み取りにする日数</label>
         <div class="input-row">
@@ -26,7 +27,7 @@ import { hasPermission } from '@/router'
 
 const lockDays = ref(0)
 const saving = ref(false)
-const canEdit = computed(() => {
+const canAccessByResource = (resource, level = 'view') => {
   const user = authState.user
   if (!user) return false
   if (user.is_staff || user.is_superuser) return true
@@ -34,13 +35,17 @@ const canEdit = computed(() => {
   const permissions = Array.isArray(user.effective_permissions)
     ? user.effective_permissions
     : []
-  if (permissions.some((item) => item.resource === 'settings.purchase_plan_lock')) {
-    return hasPermission(user, 'settings.purchase_plan_lock', 'edit')
+  if (permissions.some((item) => item.resource === resource)) {
+    return hasPermission(user, resource, level)
   }
-  return hasPermission(user, 'settings', 'edit')
-})
+  return hasPermission(user, 'settings', level)
+}
+
+const canView = computed(() => canAccessByResource('settings.purchase_plan_lock', 'view'))
+const canEdit = computed(() => canAccessByResource('settings.purchase_plan_lock', 'edit'))
 
 const loadSetting = async () => {
+  if (!canView.value) return
   try {
     const res = await api.purchasePlanLockSetting.getSetting()
     lockDays.value = Number(res.data?.lock_days ?? 0)
@@ -65,7 +70,10 @@ const saveSetting = async () => {
   }
 }
 
-onMounted(loadSetting)
+onMounted(() => {
+  if (!canView.value) return
+  loadSetting()
+})
 </script>
 
 <style scoped>
@@ -87,6 +95,10 @@ onMounted(loadSetting)
   border-radius: 4px;
   padding: 12px;
   max-width: 560px;
+}
+.no-permission {
+  color: #b91c1c;
+  font-weight: 600;
 }
 .field {
   display: flex;

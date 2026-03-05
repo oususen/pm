@@ -26,7 +26,7 @@ const canAccess = (resource) => {
   if (hasSpecific) {
     return hasPermission(user, resource, 'view')
   }
-  return hasPermission(user, 'settings.scheduled_tasks', 'view')
+  return hasPermission(user, 'settings', 'view')
 }
 
 const allTiles = [

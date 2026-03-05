@@ -5,51 +5,65 @@
     </div>
 
     <div class="page-content">
-      <div v-if="errorMessage" class="alert alert-danger">
-        {{ errorMessage }}
-      </div>
-      <div v-if="successMessage" class="alert alert-success">
-        {{ successMessage }}
-      </div>
+      <div v-if="!canView" class="alert alert-danger">この画面を開く権限がありません。</div>
+      <template v-else>
+        <div v-if="errorMessage" class="alert alert-danger">
+          {{ errorMessage }}
+        </div>
+        <div v-if="successMessage" class="alert alert-success">
+          {{ successMessage }}
+        </div>
 
-      <form class="form-grid" @submit.prevent="saveProfile">
-        <div class="form-row">
-          <label>ユーザー名</label>
-          <input v-model="form.username" type="text" required />
-        </div>
-        <div class="form-row">
-          <label>メールアドレス</label>
-          <input v-model="form.email" type="email" />
-        </div>
-        <div class="form-row">
-          <label>姓</label>
-          <input v-model="form.last_name" type="text" />
-        </div>
-        <div class="form-row">
-          <label>名</label>
-          <input v-model="form.first_name" type="text" />
-        </div>
-        <div class="form-row">
-          <label>パスワード変更</label>
-          <input v-model="form.password" type="password" placeholder="変更する場合のみ入力" />
-        </div>
-        <div class="form-row">
-          <label>パスワード確認</label>
-          <input v-model="form.password_confirm" type="password" placeholder="パスワード確認" />
-        </div>
-        <div class="form-actions">
-          <button type="submit" class="btn primary" :disabled="loading">
-            {{ loading ? '保存中...' : '保存' }}
-          </button>
-        </div>
-      </form>
+        <form class="form-grid" @submit.prevent="saveProfile">
+          <div class="form-row">
+            <label>ユーザー名</label>
+            <input v-model="form.username" type="text" required :disabled="!canEdit" />
+          </div>
+          <div class="form-row">
+            <label>メールアドレス</label>
+            <input v-model="form.email" type="email" :disabled="!canEdit" />
+          </div>
+          <div class="form-row">
+            <label>姓</label>
+            <input v-model="form.last_name" type="text" :disabled="!canEdit" />
+          </div>
+          <div class="form-row">
+            <label>名</label>
+            <input v-model="form.first_name" type="text" :disabled="!canEdit" />
+          </div>
+          <div class="form-row">
+            <label>パスワード変更</label>
+            <input
+              v-model="form.password"
+              type="password"
+              placeholder="変更する場合のみ入力"
+              :disabled="!canEdit"
+            />
+          </div>
+          <div class="form-row">
+            <label>パスワード確認</label>
+            <input
+              v-model="form.password_confirm"
+              type="password"
+              placeholder="パスワード確認"
+              :disabled="!canEdit"
+            />
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn primary" :disabled="loading || !canEdit">
+              {{ loading ? '保存中...' : '保存' }}
+            </button>
+          </div>
+        </form>
+      </template>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { authState } from '../../auth'
+import { hasPermission } from '@/router'
 import api from '../../api/client'
 
 const form = ref({
@@ -65,7 +79,23 @@ const loading = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
 
+const canAccessByResource = (resource, level = 'view') => {
+  const user = authState.user
+  if (!user || !resource) return false
+  if (user.is_staff || user.is_superuser) return true
+
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  if (permissions.some((item) => item.resource === resource)) {
+    return hasPermission(user, resource, level)
+  }
+  return hasPermission(user, 'settings', level)
+}
+
+const canView = computed(() => canAccessByResource('settings.profile', 'view'))
+const canEdit = computed(() => canAccessByResource('settings.profile', 'edit'))
+
 const loadProfile = async () => {
+  if (!canView.value) return
   try {
     const response = await api.accounts.getUser('me')
     const user = response.data
@@ -84,6 +114,7 @@ const loadProfile = async () => {
 }
 
 const saveProfile = async () => {
+  if (!canEdit.value) return
   if (form.value.password && form.value.password !== form.value.password_confirm) {
     errorMessage.value = 'パスワードが一致しません。'
     return
@@ -118,7 +149,9 @@ const saveProfile = async () => {
 }
 
 onMounted(() => {
-  loadProfile()
+  if (canView.value) {
+    loadProfile()
+  }
 })
 </script>
 
