@@ -216,7 +216,6 @@ const debugEnabled = true
 const calendarDayMap = ref({})
 const workPatternMap = ref({})
 const processOutputCandidatesMap = ref({})
-const processCoproductChildMap = ref({})
 const selectedLineObj = computed(() =>
   lines.value.find((l) => String(l.id) === String(selectedLine.value))
 )
@@ -394,55 +393,21 @@ const fetchLines = async () => {
   lines.value = res.data.results || res.data || []
 }
 
-const shouldDisplayProductInProcess = (processId, productId, productCode, childMapSource = processCoproductChildMap.value) => {
-  const code = String(productCode || '').trim().toUpperCase()
-  if (code.startsWith('ST')) return true
+const shouldDisplayProductInProcess = (_processId, productId, productCode) => {
+  const code = String(productCode || '').trim()
+  if (code) return true
   const pid = Number(productId)
-  if (!Number.isFinite(pid) || pid <= 0) return false
-  const childSet = childMapSource?.[Number(processId)]
-  if (childSet && childSet.has(pid)) return false
-  return true
+  return Number.isFinite(pid) && pid > 0
 }
 
 const loadProcessOutputCandidates = async (lineId) => {
   if (!lineId) {
     processOutputCandidatesMap.value = {}
-    processCoproductChildMap.value = {}
     return
   }
   try {
     const res = await api.routings.getRoutingStepsByLine(lineId)
     const rows = res.data?.results || res.data || []
-
-    const coproductBomsRes = await api.boms.getBOMs({
-      is_coproduct: true,
-      is_active: true,
-      page_size: 5000,
-    })
-    const coproductBoms = coproductBomsRes.data?.results || coproductBomsRes.data || []
-    const coproductBomIdSet = new Set(
-      (Array.isArray(coproductBoms) ? coproductBoms : [])
-        .map((bom) => Number(bom?.id))
-        .filter((bomId) => Number.isFinite(bomId) && bomId > 0)
-    )
-
-    const bomItemsRes = await api.bomItems.getBOMItems({
-      line: lineId,
-      page_size: 5000,
-    })
-    const bomItems = bomItemsRes.data?.results || bomItemsRes.data || []
-    const nextChildMap = {}
-    ;(Array.isArray(bomItems) ? bomItems : []).forEach((item) => {
-      const bomId = Number(item?.bom)
-      const processId = Number(item?.process)
-      const childId = Number(item?.child_product)
-      if (!coproductBomIdSet.has(bomId)) return
-      if (!Number.isFinite(processId) || processId <= 0) return
-      if (!Number.isFinite(childId) || childId <= 0) return
-      if (!nextChildMap[processId]) nextChildMap[processId] = new Set()
-      nextChildMap[processId].add(childId)
-    })
-    processCoproductChildMap.value = nextChildMap
 
     const nextMap = {}
     rows.forEach((row) => {
@@ -452,7 +417,7 @@ const loadProcessOutputCandidates = async (lineId) => {
       if (!Number.isFinite(processId) || processId <= 0) return
       if (!Number.isFinite(productId) || productId <= 0) return
       if (!productCode) return
-      if (!shouldDisplayProductInProcess(processId, productId, productCode, nextChildMap)) return
+      if (!shouldDisplayProductInProcess(processId, productId, productCode)) return
       if (!nextMap[processId]) nextMap[processId] = []
       if (!nextMap[processId].some((item) => Number(item.product_id) === productId)) {
         nextMap[processId].push({

@@ -61,6 +61,11 @@
       </div>
     </div>
 
+    <div v-if="shouldLimitToCoproductParentAndDriver" class="line-rule-notice">
+      注意: このラインでは、連産品は「親品番 + 代表部番（is_coproduct_driver）」のみ表示します。
+      連産品の非代表子は表示しません。非連産品は通常どおり表示します。
+    </div>
+
     <div class="grid-wrapper" ref="gridWrapperRef">
       <table class="plan-grid" :style="{ minWidth: tableMinWidth + 'px' }">
         <colgroup>
@@ -352,6 +357,7 @@ const startDate = ref(toDateInput(defaultStart))
 const horizonDays = ref(14)
 const keyword = ref('')
 const TANK_LINE_CODE = 'L2200'
+const COPRODUCT_LIMITED_LINE_CODES = new Set(['L2201'])
 const TANK_PRODUCT_ORDER = [
   'YD60003386',
   'YD60011305',
@@ -389,9 +395,14 @@ const workPatternMap = ref({})
 const workStartFallback = { hour: 8, minute: 0 }
 const workMinutesFallback = 480
 const processing = ref(false)
+const coproductDisplayCache = new Map()
 const selectedLineObj = computed(() =>
   lines.value.find((l) => `${l.id}` === `${selectedLine.value}`)
 )
+const shouldLimitToCoproductParentAndDriver = computed(() => {
+  const code = String(selectedLineObj.value?.line_code || '').trim().toUpperCase()
+  return COPRODUCT_LIMITED_LINE_CODES.has(code)
+})
 const showExportDialog = ref(false)
 const PRINT_CHUNK_DAYS = 14
 
@@ -853,6 +864,140 @@ const loadData = async () => {
     // ライン未選択時はデフォルト値に戻す
     finalProcessStartTime.value = '08:00'
     adjustToBreakEnd.value = true
+  }
+}
+
+const toApiRows = (payload) => {
+  if (!payload) return []
+  if (Array.isArray(payload.results)) return payload.results
+  if (Array.isArray(payload)) return payload
+  return []
+}
+
+const collectCoproductParentCandidates = (rows) => {
+  const parentIds = new Set()
+  ;(Array.isArray(rows) ? rows : []).forEach((row) => {
+    if (!row) return
+    const productId = Number(row.product)
+    if (!Number.isFinite(productId) || productId <= 0) return
+    const isVirtualSet = row.is_virtual_set === true
+    const productCode = String(row.product_code || '').trim().toUpperCase()
+    if (isVirtualSet || productCode.startsWith('ST')) {
+      parentIds.add(productId)
+    }
+  })
+  return Array.from(parentIds)
+}
+
+const fetchCoproductDisplayProductIdSet = async (parentIds) => {
+  const parentIdSet = new Set()
+  const driverIdSet = new Set()
+  const childIdSet = new Set()
+  if (!Array.isArray(parentIds) || parentIds.length === 0) {
+    return { parentIdSet, driverIdSet, childIdSet }
+  }
+
+  const responses = await Promise.all(
+    parentIds.map(async (parentId) => {
+      const cacheKey = String(parentId)
+      if (coproductDisplayCache.has(cacheKey)) {
+        return coproductDisplayCache.get(cacheKey)
+      }
+      try {
+        const bomRes = await api.boms.getBOMs({
+          parent_product: parentId,
+          is_coproduct: true,
+          is_active: true,
+          page_size: 100,
+        })
+        const bomRows = toApiRows(bomRes?.data)
+        if (!bomRows.length) {
+          coproductDisplayCache.set(cacheKey, null)
+          return null
+        }
+
+        const childIds = new Set()
+        const driverIds = new Set()
+        for (const bomRow of bomRows) {
+          if (!bomRow) continue
+          let bomItems = Array.isArray(bomRow.items) ? bomRow.items : []
+          // 一覧で明細が返らない環境向けのフォールバック
+          if (!bomItems.length && bomRow.id) {
+            try {
+              const detailRes = await api.boms.getBOM(bomRow.id)
+              bomItems = toApiRows(detailRes?.data?.items)
+            } catch (detailError) {
+              console.warn('連産品BOM明細取得エラー:', { parentId, bomId: bomRow.id, detailError })
+            }
+          }
+          ;(Array.isArray(bomItems) ? bomItems : []).forEach((item) => {
+            if (!item) return
+            const childId = Number(item.child_product)
+            if (!Number.isFinite(childId) || childId <= 0) return
+            const childIdStr = String(childId)
+            childIds.add(childIdStr)
+            if (item.is_coproduct_driver === true) {
+              driverIds.add(childIdStr)
+            }
+          })
+        }
+
+        const entry = {
+          parentId: String(parentId),
+          childIds: Array.from(childIds),
+          driverIds: Array.from(driverIds),
+        }
+        coproductDisplayCache.set(cacheKey, entry)
+        return entry
+      } catch (error) {
+        console.warn('連産品BOM取得エラー:', { parentId, error })
+        coproductDisplayCache.set(cacheKey, null)
+        return null
+      }
+    })
+  )
+
+  responses.forEach((entry) => {
+    if (!entry) return
+    parentIdSet.add(entry.parentId)
+    ;(entry.driverIds || []).forEach((driverId) => {
+      if (!driverId) return
+      driverIdSet.add(String(driverId))
+    })
+    ;(entry.childIds || []).forEach((childId) => {
+      if (!childId) return
+      childIdSet.add(String(childId))
+    })
+  })
+
+  return { parentIdSet, driverIdSet, childIdSet }
+}
+
+const filterRowsByExcludedProductIds = (rows, excludedIds) => {
+  return (Array.isArray(rows) ? rows : []).filter((row) => {
+    const productId = row?.product
+    if (productId === null || productId === undefined || productId === '') return false
+    return !excludedIds.has(String(productId))
+  })
+}
+
+const filterPlanRowsForCoproductDisplay = async (backlogRows, planRows) => {
+  const candidates = collectCoproductParentCandidates([...(backlogRows || []), ...(planRows || [])])
+  const { parentIdSet, driverIdSet, childIdSet } = await fetchCoproductDisplayProductIdSet(candidates)
+  const excludedIds = new Set()
+  childIdSet.forEach((childId) => {
+    if (!childId) return
+    const childKey = String(childId)
+    if (driverIdSet.has(childKey)) return
+    excludedIds.add(childKey)
+  })
+  parentIdSet.forEach((parentId) => {
+    if (!parentId) return
+    excludedIds.delete(String(parentId))
+  })
+  return {
+    backlogRows: filterRowsByExcludedProductIds(backlogRows, excludedIds),
+    planRows: filterRowsByExcludedProductIds(planRows, excludedIds),
   }
 }
 
@@ -1531,9 +1676,13 @@ const doPickup = async () => {
     ])
     const backlogData = backlogRes.data?.results || backlogRes.data || []
     const planData = planRes.data?.results || planRes.data || []
-
-    const lineFinalBacklogs = backlogData.filter(d => d.is_line_final_product === true)
-    const lineFinalPlans = planData.filter(d => d.is_line_final_product !== false)
+    let displayBacklogs = backlogData.filter(d => d.is_line_final_product === true)
+    let displayPlans = planData.filter(d => d.is_line_final_product !== false)
+    if (shouldLimitToCoproductParentAndDriver.value) {
+      const filtered = await filterPlanRowsForCoproductDisplay(backlogData, planData)
+      displayBacklogs = filtered.backlogRows
+      displayPlans = filtered.planRows
+    }
 
     const grouped = new Map()
     const demandMap = new Map()
@@ -1563,7 +1712,7 @@ const doPickup = async () => {
       return grouped.get(prodKey)
     }
 
-    lineFinalPlans.forEach((d) => {
+    displayPlans.forEach((d) => {
       if (!d.product) return
       const prodKey = `${d.product}`
       const dateKey = `${prodKey}__${d.plan_date}`
@@ -1583,7 +1732,7 @@ const doPickup = async () => {
       })
     })
 
-    lineFinalBacklogs.forEach((d) => {
+    displayBacklogs.forEach((d) => {
       if (!d.product) return
       const prodKey = `${d.product}`
       const dateKey = `${prodKey}__${d.plan_date}`
@@ -1879,6 +2028,16 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
   background: #fff;
   border: 1px solid #c5cfde;
   border-radius: 4px;
+}
+.line-rule-notice {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: 1px solid #f3d08a;
+  background: #fff8e8;
+  color: #7a4b00;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.5;
 }
 .plan-grid {
   width: 100%;
