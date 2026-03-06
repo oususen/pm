@@ -864,12 +864,22 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             step = product_step_map.get(current_product_id)
             if step is not None:
                 try:
+                    step_product = getattr(step, 'output_product', None) or getattr(step.routing, 'product', None)
+                    is_final_like = bool(
+                        step_product and (
+                            getattr(step_product, 'is_final_product', False)
+                            or getattr(step_product, 'is_line_final_product', False)
+                        )
+                    )
                     # time_unit基準でLT解決:
-                    # - MINUTE: line.lead_time_days を使用
+                    # - MINUTEの最終品/ライン最終品: line.lead_time_days を使用
+                    # - MINUTEの中間品: RoutingStep.lead_time_days のみ使用（0なら0のまま）
                     # - DAY: routing_step.lead_time_days を使用
                     if step.time_unit == 'MINUTE':
-                        step_line = getattr(step, 'line', None)
-                        return max(int(getattr(step_line, 'lead_time_days', 0) or 0), 0)
+                        if is_final_like:
+                            step_line = getattr(step, 'line', None)
+                            return max(int(getattr(step_line, 'lead_time_days', 0) or 0), 0)
+                        return max(int(step.lead_time_days or 0), 0)
 
                     return max(int(step.lead_time_days or 0), 0)
                 except Exception:
@@ -1646,6 +1656,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     continue
                 base_plans.append({
                     'product_id': product_id,
+                    'process_id': it.get('process_id'),
                     'plan_date': plan_date,
                     'plan_qty': plan_qty,
                     'order_qty': order_qty,
@@ -1659,6 +1670,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             for obj in qs:
                 base_plans.append({
                     'product_id': obj.product_id,
+                    'process_id': obj.process_id,
                     'plan_date': obj.plan_date,
                     'plan_qty': Decimal(str(obj.plan_qty or 0)),
                     'order_qty': Decimal('0'),
@@ -1794,6 +1806,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         # ラインに紐づくカレンダがあれば使用、無ければdaisoを使用
         line_obj = Line.objects.filter(id=line_id).first()
+        is_l2201_line = str(getattr(line_obj, 'line_code', '') or '').strip().upper() == 'L2201'
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(calendar_code='daiso').values_list('id', flat=True).first()
         calendar_work_map = {}
         if calendar_id:
@@ -1840,6 +1853,29 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             for pid in set(product_keys):
                 steps_map[pid].append(step)
 
+        line_final_plan_product_ids = set(
+            Product.objects.filter(
+                id__in={int(p['product_id']) for p in base_plans if p.get('product_id')},
+                is_line_final_product=True,
+            ).values_list('id', flat=True)
+        )
+        plan_process_map = Process.objects.in_bulk(
+            [int(p['process_id']) for p in base_plans if p.get('process_id')]
+        )
+
+        def sort_steps_for_plan(steps):
+            return sorted(steps, key=lambda s: (s.step_no or 0, getattr(s, 'parallel_group', 1) or 1, s.id or 0))
+
+        def select_steps_for_plan_product(product_id):
+            steps = list(steps_map.get(product_id, []))
+            if not steps:
+                return []
+            if not is_l2201_line:
+                return sort_steps_for_plan(steps)
+
+            owned_steps = [step for step in steps if step.routing_id and step.routing.product_id == product_id]
+            return sort_steps_for_plan(owned_steps)
+
         # サイクルタイムをまとめて取得（ライン特定優先、なければライン指定なしを使用）
         cycle_time_map = defaultdict(list)
         if process_ids and cycle_product_ids:
@@ -1880,8 +1916,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 plan_date = plan['plan_date']
                 sequence_no = plan.get('sequence_no')
                 seq_key = sequence_no if sequence_no is not None else 1
-                steps = steps_map.get(product_id, [])
+                plan_process_id = plan.get('process_id')
+                steps = select_steps_for_plan_product(product_id)
                 if not steps:
+                    if is_l2201_line and product_id in line_final_plan_product_ids and plan_process_id:
+                        affected_keys.add((product_id, plan_process_id, plan_date, seq_key))
                     continue
                 for step in sorted(steps, key=lambda s: s.step_no or 0):
                     target_date = shift_business_days(plan_date, step.lead_time_days or 0)
@@ -1924,9 +1963,46 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             parent_plan_id = plan.get('plan_id')  # 親（ライン最終品）のplan_id
             seq_key = sequence_no if sequence_no is not None else 1
             seen_target_keys = set() if auto_plan_mode else None
+            plan_process_id = plan.get('process_id')
 
-            steps = steps_map.get(product_id, [])
+            steps = select_steps_for_plan_product(product_id)
             if not steps:
+                if is_l2201_line and product_id in line_final_plan_product_ids and plan_process_id:
+                    computed_time_min = None
+                    ct = pick_cycle_time(product_id, plan_process_id, plan_date)
+                    process_obj = plan_process_map.get(int(plan_process_id))
+                    if process_obj and process_obj.management_unit == 'MINUTE' and ct:
+                        try:
+                            computed_time_min = float(
+                                (Decimal(plan_qty) * Decimal(ct.cycle_time_min or 0)) + Decimal(ct.setup_time_min or 0)
+                            )
+                        except Exception:
+                            computed_time_min = None
+
+                    key = (product_id, plan_process_id, plan_date, seq_key)
+                    entry = aggregated.get(key)
+                    if not entry:
+                        entry = {
+                            'plan_qty': Decimal('0'),
+                            'order_qty': Decimal('0'),
+                            'demand_qty_plan': Decimal('0'),
+                            'time_min': Decimal('0'),
+                            'plan_ids': set(),
+                            'step': None,
+                            'cycle_time': ct,
+                            'routing_product_id': None,
+                            'source_routing_step_id': None,
+                            'step_no': None,
+                        }
+                        aggregated[key] = entry
+                    entry['plan_qty'] += Decimal(plan_qty or 0)
+                    entry['order_qty'] += Decimal(order_qty or 0)
+                    entry['demand_qty_plan'] += Decimal(demand_qty_plan or 0)
+                    if computed_time_min is not None:
+                        entry['time_min'] += Decimal(str(computed_time_min))
+                    if parent_plan_id:
+                        entry['plan_ids'].add(parent_plan_id)
+                    continue
                 skipped.append({'product_id': product_id, 'plan_date': plan_date, 'reason': 'RoutingStep not found on line'})
                 continue
 
@@ -2019,6 +2095,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             'step': step,
                             'cycle_time': ct,
                             'routing_product_id': step.routing.product_id if step.routing_id and step.routing else None,
+                            'source_routing_step_id': step.id if step else None,
+                            'step_no': step.step_no if step else None,
                         }
                         aggregated[key] = entry
                     entry['plan_qty'] += Decimal(qty_value or 0)
@@ -2072,7 +2150,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         order_qty=order_qty_value,
                         demand_qty_plan=demand_qty_value,
                         source_line_id=line_id,
-                        source_routing_step_id=entry['step'].id,
+                        source_routing_step_id=entry.get('source_routing_step_id'),
                         sequence_no=seq_key,
                     )
             else:
@@ -2080,7 +2158,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     'order_qty': order_qty_value,
                     'demand_qty_plan': demand_qty_value,
                     'source_line_id': line_id,
-                    'source_routing_step_id': entry['step'].id,
+                    'source_routing_step_id': entry.get('source_routing_step_id'),
                     'plan_qty': plan_qty_value,
                     'sequence_no': seq_key,
                 }
@@ -2102,7 +2180,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
             obj.computed_time_min = float(entry['time_min']) if entry['time_min'] is not None else None
             obj.work_minutes = calendar_work_map.get(target_date)
-            obj.step_no = entry['step'].step_no
+            obj.step_no = entry.get('step_no')
             obj.cycle_time_min = float(entry['cycle_time'].cycle_time_min) if entry['cycle_time'] and entry['cycle_time'].cycle_time_min else None
             obj.routing_product_id = entry['routing_product_id']
             upserted.append(obj)

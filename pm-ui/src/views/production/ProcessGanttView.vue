@@ -417,15 +417,9 @@ const shouldDisplayProductInProcess = (
   processId,
   productId,
   productCode,
-  childMapSource = processCoproductChildMap.value,
-  l2201Mode = isL2201Line.value
+  childMapSource = processCoproductChildMap.value
 ) => {
   const code = String(productCode || '').trim()
-  if (l2201Mode) {
-    if (code) return true
-    const pid = Number(productId)
-    return Number.isFinite(pid) && pid > 0
-  }
   const codeUpper = code.toUpperCase()
   if (codeUpper.startsWith('ST')) return true
   const pid = Number(productId)
@@ -433,6 +427,22 @@ const shouldDisplayProductInProcess = (
   const childSet = childMapSource?.[Number(processId)]
   if (childSet && childSet.has(pid)) return false
   return true
+}
+
+const appendProcessOutputCandidate = (targetMap, processId, productId, productCode, productName = '') => {
+  const pid = Number(processId)
+  const outId = Number(productId)
+  const code = String(productCode || '').trim()
+  if (!Number.isFinite(pid) || pid <= 0) return
+  if (!Number.isFinite(outId) || outId <= 0) return
+  if (!code) return
+  if (!targetMap[pid]) targetMap[pid] = []
+  if (targetMap[pid].some((item) => Number(item.product_id) === outId)) return
+  targetMap[pid].push({
+    product_id: outId,
+    product_code: code,
+    product_name: String(productName || '').trim(),
+  })
 }
 
 const loadProcessOutputCandidates = async (lineId) => {
@@ -447,34 +457,32 @@ const loadProcessOutputCandidates = async (lineId) => {
     const nextChildMap = {}
     const lineCode = String(lines.value.find((l) => String(l.id) === String(lineId))?.line_code || '').trim().toUpperCase()
     const l2201Mode = lineCode === L2201_LINE_CODE
-    if (!l2201Mode) {
-      const coproductBomsRes = await api.boms.getBOMs({
-        is_coproduct: true,
-        is_active: true,
-        page_size: 5000,
-      })
-      const coproductBoms = coproductBomsRes.data?.results || coproductBomsRes.data || []
-      const coproductBomIdSet = new Set(
-        (Array.isArray(coproductBoms) ? coproductBoms : [])
-          .map((bom) => Number(bom?.id))
-          .filter((bomId) => Number.isFinite(bomId) && bomId > 0)
-      )
-      const bomItemsRes = await api.bomItems.getBOMItems({
-        line: lineId,
-        page_size: 5000,
-      })
-      const bomItems = bomItemsRes.data?.results || bomItemsRes.data || []
-      ;(Array.isArray(bomItems) ? bomItems : []).forEach((item) => {
-        const bomId = Number(item?.bom)
-        const processId = Number(item?.process)
-        const childId = Number(item?.child_product)
-        if (!coproductBomIdSet.has(bomId)) return
-        if (!Number.isFinite(processId) || processId <= 0) return
-        if (!Number.isFinite(childId) || childId <= 0) return
-        if (!nextChildMap[processId]) nextChildMap[processId] = new Set()
-        nextChildMap[processId].add(childId)
-      })
-    }
+    const coproductBomsRes = await api.boms.getBOMs({
+      is_coproduct: true,
+      is_active: true,
+      page_size: 5000,
+    })
+    const coproductBoms = coproductBomsRes.data?.results || coproductBomsRes.data || []
+    const coproductBomIdSet = new Set(
+      (Array.isArray(coproductBoms) ? coproductBoms : [])
+        .map((bom) => Number(bom?.id))
+        .filter((bomId) => Number.isFinite(bomId) && bomId > 0)
+    )
+    const bomItemsRes = await api.bomItems.getBOMItems({
+      line: lineId,
+      page_size: 5000,
+    })
+    const bomItems = bomItemsRes.data?.results || bomItemsRes.data || []
+    ;(Array.isArray(bomItems) ? bomItems : []).forEach((item) => {
+      const bomId = Number(item?.bom)
+      const processId = Number(item?.process)
+      const childId = Number(item?.child_product)
+      if (!coproductBomIdSet.has(bomId)) return
+      if (!Number.isFinite(processId) || processId <= 0) return
+      if (!Number.isFinite(childId) || childId <= 0) return
+      if (!nextChildMap[processId]) nextChildMap[processId] = new Set()
+      nextChildMap[processId].add(childId)
+    })
     processCoproductChildMap.value = nextChildMap
 
     const nextMap = {}
@@ -485,16 +493,36 @@ const loadProcessOutputCandidates = async (lineId) => {
       if (!Number.isFinite(processId) || processId <= 0) return
       if (!Number.isFinite(productId) || productId <= 0) return
       if (!productCode) return
-      if (!shouldDisplayProductInProcess(processId, productId, productCode, nextChildMap, l2201Mode)) return
-      if (!nextMap[processId]) nextMap[processId] = []
-      if (!nextMap[processId].some((item) => Number(item.product_id) === productId)) {
-        nextMap[processId].push({
-          product_id: productId,
-          product_code: productCode,
-          product_name: String(row?.output_product_name || '').trim(),
-        })
-      }
+      if (!shouldDisplayProductInProcess(processId, productId, productCode, nextChildMap)) return
+      appendProcessOutputCandidate(
+        nextMap,
+        processId,
+        productId,
+        productCode,
+        String(row?.output_product_name || '').trim()
+      )
     })
+
+    // L2201専用: 下ガントの候補行にST連産品を表示する
+    if (l2201Mode) {
+      const products = await api.products.getAllProducts({
+        line: lineId,
+        is_line_final_product: true,
+      })
+      ;(Array.isArray(products) ? products : []).forEach((product) => {
+        if (Number(product?.line) !== Number(lineId)) return
+        const productCode = String(product?.product_code || '').trim()
+        if (!productCode.toUpperCase().startsWith('ST')) return
+        if (!shouldDisplayProductInProcess(product?.process, product?.id, productCode, nextChildMap)) return
+        appendProcessOutputCandidate(
+          nextMap,
+          product?.process,
+          product?.id,
+          productCode,
+          String(product?.product_name || '').trim()
+        )
+      })
+    }
     processOutputCandidatesMap.value = nextMap
   } catch (e) {
     console.error('工程ガント候補品番取得エラー', e)
@@ -1350,13 +1378,20 @@ function buildProcessGantt(plans) {
         item.sequence_no = seq
       }
 
-      const barKey = proc.coproduct_group_key || `${plan.plan_id}_${proc.process_id}_${proc.output_product_id}`
-      const existingBar = proc.coproduct_group_key ? item.barsMap.get(barKey) : null
+      const shouldMergeSameSlotBars = isL2201Line.value
+      const timeSlotKey = `${startTime.getTime()}_${endTime.getTime()}`
+      const barKey = proc.coproduct_group_key ||
+        (shouldMergeSameSlotBars
+          ? `${proc.process_id}_${outputProductId}_${timeSlotKey}`
+          : `${plan.plan_id}_${proc.process_id}_${proc.output_product_id}`)
+      const existingBar = (proc.coproduct_group_key || shouldMergeSameSlotBars) ? item.barsMap.get(barKey) : null
       if (existingBar) {
         existingBar.startTime = new Date(Math.min(existingBar.startTime.getTime(), startTime.getTime()))
         existingBar.endTime = new Date(Math.max(existingBar.endTime.getTime(), endTime.getTime()))
         existingBar.durationMs = existingBar.endTime.getTime() - existingBar.startTime.getTime()
-        existingBar.planQty = Math.max(existingBar.planQty, qtyValue)
+        existingBar.planQty = proc.coproduct_group_key
+          ? Math.max(existingBar.planQty, qtyValue)
+          : Number(existingBar.planQty || 0) + qtyValue
         existingBar.totalMinutesRequired = Math.max(
           existingBar.totalMinutesRequired || 0,
           Number(proc.total_minutes_required ?? 0)
@@ -1383,7 +1418,7 @@ function buildProcessGantt(plans) {
           widthPx: 0,
         }
         item.bars.push(newBar)
-        if (proc.coproduct_group_key) {
+        if (proc.coproduct_group_key || shouldMergeSameSlotBars) {
           item.barsMap.set(barKey, newBar)
         }
       }

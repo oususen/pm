@@ -274,6 +274,41 @@ def _build_process_specs(steps: List[RoutingStep], plan_qty: Decimal, plan_date,
     return specs
 
 
+def _build_l2201_synthetic_spec(product: Product, process, cycle_time_minutes: float, process_number: int = 0) -> Optional[ProcessSpec]:
+    process_obj = process or getattr(product, 'process', None)
+    process_id = getattr(process_obj, 'id', None) or getattr(product, 'process_id', None)
+    if not product or not process_id:
+        return None
+    return ProcessSpec(
+        process_id=process_id,
+        process_name=getattr(process_obj, 'process_name', '') or '',
+        process_number=process_number or 0,
+        cycle_time_minutes=float(cycle_time_minutes or 0.0),
+        setup_time_minutes=0.0,
+        parallel_count=1,
+        parallel_group=1,
+        output_product_id=product.id,
+        output_product_code=product.product_code or '',
+        output_product_name=product.product_name or '',
+        transfer_time_minutes=0.0,
+    )
+
+
+def _sort_routing_steps(steps: List[RoutingStep]) -> List[RoutingStep]:
+    return sorted(steps, key=lambda s: (s.step_no or 0, getattr(s, 'parallel_group', 1) or 1, s.id or 0))
+
+
+def _select_steps_for_gantt_product(product: Product, steps_by_product: Dict[int, List[RoutingStep]], is_l2201_line: bool) -> List[RoutingStep]:
+    steps = list(steps_by_product.get(product.id, []))
+    if not steps:
+        return []
+    if not is_l2201_line:
+        return _sort_routing_steps(steps)
+
+    owned_steps = [step for step in steps if step.routing_id and step.routing.product_id == product.id]
+    return _sort_routing_steps(owned_steps)
+
+
 def _calculate_total_minutes(spec: ProcessSpec, quantity: Decimal) -> float:
     if spec.cycle_time_minutes <= 0:
         return 0.0
@@ -595,12 +630,41 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
         product = obj.product
         multiplier_map = _build_bom_multiplier_map(product.id, obj.plan_date)
         coproduct_parent_map, coproduct_children_set, driver_cycle_time_map = _build_coproduct_maps(obj.plan_date)
-        steps = sorted(steps_by_product.get(product.id, []), key=lambda s: (s.step_no or 0, getattr(s, 'parallel_group', 1) or 1))
-        if not steps:
-            steps = default_steps
-        if not steps:
-            continue
-        process_specs = _build_process_specs(steps, obj.plan_qty, obj.plan_date, product.id)
+        coproduct_parent_ids = {parent.id for parent in coproduct_parent_map.values()}
+        l2201_synthetic_plan = is_l2201_line and getattr(product, 'is_line_final_product', False)
+        steps = _select_steps_for_gantt_product(product, steps_by_product, is_l2201_line)
+        if not steps and l2201_synthetic_plan:
+            # L2201専用: 自分を親に持つルーティングが無いライン最終品は計画行の工程で1本扱いにする
+            synthetic_cycle_time = driver_cycle_time_map.get(product.id, 0.0) if product.id in coproduct_parent_ids else 0.0
+            synthetic_spec = _build_l2201_synthetic_spec(
+                product,
+                getattr(obj, 'process', None),
+                synthetic_cycle_time,
+                step_no_by_process.get(getattr(obj, 'process_id', None) or getattr(product, 'process_id', None), 0),
+            )
+            if not synthetic_spec:
+                logger.warning(
+                    'gantt_plans: skip L2201 synthetic plan_id=%s product_id=%s code=%s because synthetic spec could not be built',
+                    getattr(obj, 'plan_id', None),
+                    product.id,
+                    getattr(product, 'product_code', ''),
+                )
+                continue
+            process_specs = [synthetic_spec]
+        else:
+            if not steps and is_l2201_line:
+                logger.warning(
+                    'gantt_plans: skip L2201 plan_id=%s product_id=%s code=%s because no owned routing steps were found',
+                    getattr(obj, 'plan_id', None),
+                    product.id,
+                    getattr(product, 'product_code', ''),
+                )
+                continue
+            if not steps:
+                steps = default_steps
+            if not steps:
+                continue
+            process_specs = _build_process_specs(steps, obj.plan_qty, obj.plan_date, product.id)
         process_specs.sort(key=lambda s: (s.process_number or 0, s.parallel_group or 1))
 
         qty_label = str(obj.plan_qty).rstrip('0').rstrip('.')
