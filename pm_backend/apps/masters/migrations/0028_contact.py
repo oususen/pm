@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('masters', '0027_alter_capacity_nullable'),
+        ('masters', '0026_rename_container_capacity_table'),
     ]
 
     operations = [

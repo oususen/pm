@@ -8,7 +8,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('production', '0001_initial'),
-        ('masters', '0027_alter_capacity_nullable'),
+        ('masters', '0026_rename_container_capacity_table'),
     ]
 
     operations = [
