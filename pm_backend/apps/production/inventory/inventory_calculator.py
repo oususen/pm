@@ -303,12 +303,16 @@ def _get_max_parent_bom_lead_time(product_id):
     return max(max_lt, default=0) or 0
 
 
-def _build_adjustment_maps(line_id, start_date, end_date):
+def _build_adjustment_maps(line_id, start_date, end_date, product_ids=None):
     """調整を一括取得して辞書化（計算ループ中はDB参照しない）"""
-    rows = LineBacklogAdjustment.objects.filter(
+    target_product_ids = sorted({int(pid) for pid in (product_ids or []) if pid is not None})
+    qs = LineBacklogAdjustment.objects.filter(
         line_id=line_id,
         plan_date__range=[start_date, end_date],
-    ).values('adjust_type', 'product_id', 'process_id', 'plan_date', 'adjust_qty')
+    )
+    if target_product_ids:
+        qs = qs.filter(product_id__in=target_product_ids)
+    rows = qs.values('adjust_type', 'product_id', 'process_id', 'plan_date', 'adjust_qty')
 
     maps = {
         'STOCK': {},
@@ -1129,7 +1133,12 @@ def recalculate_inventory_for_line(
     firm_start = time.perf_counter()
     firm_map = _build_firm_order_map(line_id, start_date, end_date)
     logger.info("確定受注マップ作成時間: %.3fs", time.perf_counter() - firm_start)
-    adjustment_maps = _build_adjustment_maps(line_id, start_date, end_date)
+    adjustment_maps = _build_adjustment_maps(
+        line_id,
+        start_date,
+        end_date,
+        product_ids=target_product_ids or None,
+    )
 
     # 製品ごとに在庫計算
     product_qs = LineBacklog.objects.filter(

@@ -31,6 +31,12 @@
         >
           在庫再計算
         </button>
+        <button
+          @click="recalculateVisibleProducts"
+          :disabled="loading || recalculating || !purchaseLineId || !groups.length"
+        >
+          表示品番だけ再計算
+        </button>
       </div>
     </div>
 
@@ -670,6 +676,28 @@ const getBacklogParams = () => {
   };
 };
 
+const getDisplayedProductTargets = () => {
+  const productIds = new Set();
+  const productCodes = new Set();
+  groups.value.forEach((group) => {
+    if (!group.product_id) return;
+    productIds.add(group.product_id);
+    if (group.product_code) {
+      productCodes.add(group.product_code);
+    }
+  });
+  return {
+    product_ids: Array.from(productIds).sort((a, b) => a - b),
+    product_codes: Array.from(productCodes).sort(),
+  };
+};
+
+const buildVisibleProductConfirmMessage = (target) => {
+  const preview = target.product_codes.slice(0, 10).join(", ");
+  const suffix = target.product_codes.length > 10 ? ` ほか${target.product_codes.length - 10}件` : "";
+  return `表示中の${target.product_codes.length}件を再計算しますか？\n${preview}${suffix}`;
+};
+
 const fetchSuppliers = async () => {
   const res = await api.suppliers.getSuppliers();
   suppliers.value = res.data.results || res.data || [];
@@ -790,6 +818,51 @@ const recalculateInventory = async () => {
     await loadHolidayColumns();
   } catch (e) {
     error.value = e?.response?.data?.detail || e?.message || "在庫再計算に失敗しました";
+    alert("エラー: " + error.value);
+  } finally {
+    recalculating.value = false;
+  }
+};
+
+const recalculateVisibleProducts = async () => {
+  if (!purchaseLineId.value || !selectedSupplier.value) return;
+  const target = getDisplayedProductTargets();
+  if (!target.product_ids.length) {
+    alert("再計算対象の品番がありません。");
+    return;
+  }
+  if (!confirm(buildVisibleProductConfirmMessage(target))) {
+    return;
+  }
+
+  recalculating.value = true;
+  error.value = "";
+  try {
+    const start = columns.value[0];
+    const end = columns.value[columns.value.length - 1];
+
+    await api.lineBacklogs.pickupPurchaseForProducts({
+      supplier_id: selectedSupplier.value,
+      start_date: start,
+      end_date: end,
+      product_ids: target.product_ids,
+    });
+    await api.lineBacklogs.recalculateScrapForProducts({
+      line_id: purchaseLineId.value,
+      start_date: start,
+      end_date: end,
+      product_ids: target.product_ids,
+    });
+    await api.lineBacklogs.recalculateInventoryForProducts({
+      line_id: purchaseLineId.value,
+      start_date: start,
+      end_date: end,
+      product_ids: target.product_ids,
+    });
+    await reloadDemands();
+    await loadHolidayColumns();
+  } catch (e) {
+    error.value = e?.response?.data?.detail || e?.message || "表示品番の再計算に失敗しました";
     alert("エラー: " + error.value);
   } finally {
     recalculating.value = false;

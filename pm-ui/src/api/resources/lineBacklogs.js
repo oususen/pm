@@ -12,8 +12,14 @@ export const createLineBacklogsAPI = (client) => ({
   pickup(payload) {
     return client.post('/line-backlogs/pickup/', payload)
   },
+  pickupForProducts(payload) {
+    return client.post('/line-backlogs/pickup_for_products/', payload)
+  },
   pickupPurchase(payload) {
     return client.post('/line-backlogs/pickup_purchase/', payload)
+  },
+  pickupPurchaseForProducts(payload) {
+    return client.post('/line-backlogs/pickup_purchase_for_products/', payload)
   },
   expandProcesses(payload) {
     return client.post('/line-backlogs/expand_processes/', payload)
@@ -26,6 +32,9 @@ export const createLineBacklogsAPI = (client) => ({
   },
   recalculateInventory(payload) {
     return client.post('/line-backlogs/recalculate_inventory/', payload)
+  },
+  recalculateInventoryForProducts(payload) {
+    return client.post('/line-backlogs/recalculate_inventory_for_products/', payload)
   },
   importStocktakeExcel(formData) {
     return client.post('/line-backlogs/import_stocktake_excel/', formData, {
@@ -40,5 +49,8 @@ export const createLineBacklogsAPI = (client) => ({
   },
   recalculateScrap(payload) {
     return client.post('/line-backlogs/recalculate_scrap/', payload)
+  },
+  recalculateScrapForProducts(payload) {
+    return client.post('/line-backlogs/recalculate_scrap_for_products/', payload)
   },
 })

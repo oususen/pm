@@ -40,6 +40,12 @@
         </select>
         <button @click="load" :disabled="loading">更新</button>
         <button @click="recalculate" :disabled="loading || recalculating">再計算</button>
+        <button
+          @click="recalculateVisibleProducts"
+          :disabled="loading || recalculating || !groups.length"
+        >
+          表示品番だけ再計算
+        </button>
       </div>
     </div>
 
@@ -722,6 +728,39 @@ const getDisplayedLineIds = () => {
   return [...new Set(groups.value.map((g) => g.line_id).filter(Boolean))];
 };
 
+const getDisplayedLineTargets = () => {
+  const map = new Map();
+  groups.value.forEach((group) => {
+    if (!group.line_id || !group.product_id) return;
+    if (!map.has(group.line_id)) {
+      map.set(group.line_id, {
+        line_id: group.line_id,
+        line_code: group.line_code || "",
+        product_ids: new Set(),
+        product_codes: new Set(),
+      });
+    }
+    const entry = map.get(group.line_id);
+    entry.product_ids.add(group.product_id);
+    if (group.product_code) {
+      entry.product_codes.add(group.product_code);
+    }
+  });
+  return Array.from(map.values()).map((entry) => ({
+    line_id: entry.line_id,
+    line_code: entry.line_code,
+    product_ids: Array.from(entry.product_ids).sort((a, b) => a - b),
+    product_codes: Array.from(entry.product_codes).sort(),
+  }));
+};
+
+const buildVisibleProductConfirmMessage = (targets) => {
+  const allCodes = targets.flatMap((target) => target.product_codes);
+  const preview = allCodes.slice(0, 10).join(", ");
+  const suffix = allCodes.length > 10 ? ` ほか${allCodes.length - 10}件` : "";
+  return `表示中の${allCodes.length}件を再計算しますか？\n${preview}${suffix}`;
+};
+
 const refreshOrderQty = async (lineIds) => {
   if (!lineIds.length) return false;
 
@@ -813,6 +852,65 @@ const recalculate = async () => {
     await updateHolidays();
   } catch (e) {
     error.value = e?.message || "再計算に失敗しました";
+  } finally {
+    recalculating.value = false;
+  }
+};
+
+const recalculateVisibleProducts = async () => {
+  const targets = getDisplayedLineTargets();
+  if (targets.length === 0) {
+    alert("再計算対象の品番がありません。");
+    return;
+  }
+  if (!confirm(buildVisibleProductConfirmMessage(targets))) {
+    return;
+  }
+
+  recalculating.value = true;
+  error.value = "";
+  try {
+    const start = columns.value[0];
+    const end = columns.value[columns.value.length - 1];
+
+    await Promise.all(
+      targets.map((target) =>
+        api.lineBacklogs.pickupForProducts({
+          line_id: target.line_id,
+          start_date: start,
+          end_date: end,
+          product_ids: target.product_ids,
+        })
+      )
+    );
+
+    await Promise.all(
+      targets.map((target) =>
+        api.lineBacklogs.recalculateScrapForProducts({
+          line_id: target.line_id,
+          start_date: start,
+          end_date: end,
+          product_ids: target.product_ids,
+        })
+      )
+    );
+
+    await Promise.all(
+      targets.map((target) =>
+        api.lineBacklogs.recalculateInventoryForProducts({
+          line_id: target.line_id,
+          start_date: start,
+          end_date: end,
+          product_ids: target.product_ids,
+        })
+      )
+    );
+
+    const finalRes = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
+    applyDemands(finalRes.data || []);
+    await updateHolidays();
+  } catch (e) {
+    error.value = e?.response?.data?.detail || e?.message || "表示品番の再計算に失敗しました";
   } finally {
     recalculating.value = false;
   }
