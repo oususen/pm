@@ -59,6 +59,89 @@ def _create_drf_request(data):
     return Request(django_request, parsers=[JSONParser()])
 
 
+def _resolve_effective_start_date(
+    line,
+    requested_start_date,
+    end_date,
+    today,
+    *,
+    include_stock_anchor,
+    include_lt_anchor,
+    product_id=None,
+):
+    """API と同じ開始日補正を、定時タスク側でも適用する。"""
+    from django.db.models import Max
+
+    from masters.models import BOMItem, Calendar, CalendarDay
+    from production.models_line_backlog import LineBacklog
+    from production.inventory.inventory_calculator import _get_max_parent_bom_lead_time
+
+    calendar_id = getattr(line, 'calendar_id', None) or Calendar.objects.filter(
+        calendar_code='daiso'
+    ).values_list('id', flat=True).first()
+    workday_cache = {}
+
+    def is_working_day(target_date):
+        if not calendar_id:
+            return target_date.weekday() < 5
+        if target_date in workday_cache:
+            return workday_cache[target_date]
+        cal = CalendarDay.objects.filter(
+            calendar_id=calendar_id,
+            target_date=target_date,
+        ).first()
+        is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
+        workday_cache[target_date] = is_work
+        return is_work
+
+    def get_prev_working_day(target_date):
+        prev_date = target_date - timedelta(days=1)
+        while not is_working_day(prev_date):
+            prev_date = prev_date - timedelta(days=1)
+        return prev_date
+
+    def shift_working_days(target_date, days):
+        if not days:
+            return target_date
+        if not calendar_id:
+            return target_date + timedelta(days=days)
+        step = 1 if days > 0 else -1
+        remaining = abs(int(days))
+        current = target_date
+        while remaining > 0:
+            current = current + timedelta(days=step)
+            if is_working_day(current):
+                remaining -= 1
+        return current
+
+    effective_start_date = requested_start_date
+
+    if include_stock_anchor:
+        stock_start_dt = get_prev_working_day(get_prev_working_day(today))
+        effective_start_date = min(effective_start_date, stock_start_dt)
+
+    if include_lt_anchor:
+        max_lt = 0
+        if product_id is not None:
+            max_lt = _get_max_parent_bom_lead_time(product_id)
+        else:
+            product_ids = list(
+                LineBacklog.objects.filter(
+                    line_id=line.id,
+                    plan_date__lte=end_date,
+                ).values_list('product_id', flat=True).distinct()
+            )
+            if product_ids:
+                max_lt = BOMItem.objects.filter(
+                    bom__is_active=True,
+                    child_product_id__in=product_ids,
+                ).aggregate(v=Max('lead_time_days'))['v'] or 0
+        lt_start_dt = shift_working_days(today, -(int(max_lt) + 1))
+        effective_start_date = min(effective_start_date, lt_start_dt)
+
+    return effective_start_date
+
+
 def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
     """
     定時タスク: 取り込み → 在庫再計算
@@ -186,12 +269,21 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
         )
         for line in active_lines:
             try:
+                effective_start_date = _resolve_effective_start_date(
+                    line,
+                    start_date,
+                    end_date,
+                    today,
+                    include_stock_anchor=True,
+                    include_lt_anchor=True,
+                )
                 logger.info(
-                    f'[スケジューラ] 在庫再計算: ライン {line.line_code} ({line.line_name})'
+                    f'[スケジューラ] 在庫再計算: ライン {line.line_code} ({line.line_name}) '
+                    f'要求開始={start_date} 実効開始={effective_start_date}'
                 )
                 recalc_result = recalculate_inventory_for_line(
                     line_id=line.id,
-                    start_date=start_date,
+                    start_date=effective_start_date,
                     end_date=end_date,
                     include_progress=task_spec['include_progress_in_inventory'],
                     line_final_only=False,
@@ -214,21 +306,42 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
         )
         for line in active_lines:
             try:
-                adjustment_maps = _build_adjustment_maps(line.id, start_date, end_date)
+                line_effective_start_date = _resolve_effective_start_date(
+                    line,
+                    start_date,
+                    end_date,
+                    today,
+                    include_stock_anchor=False,
+                    include_lt_anchor=True,
+                )
+                logger.info(
+                    f'[スケジューラ] 進度再計算: ライン {line.line_code} ({line.line_name}) '
+                    f'要求開始={start_date} 実効開始={line_effective_start_date}'
+                )
+                adjustment_maps = _build_adjustment_maps(line.id, line_effective_start_date, end_date)
                 products = (
                     LineBacklog.objects.filter(
                         line_id=line.id,
-                        plan_date__range=[start_date, end_date],
+                        plan_date__range=[line_effective_start_date, end_date],
                     )
                     .values('product_id')
                     .annotate(min_process_id=Min('process_id'))
                     .filter(product_id__isnull=False, min_process_id__isnull=False)
                 )
                 for row in products:
+                    product_effective_start_date = _resolve_effective_start_date(
+                        line,
+                        start_date,
+                        end_date,
+                        today,
+                        include_stock_anchor=False,
+                        include_lt_anchor=True,
+                        product_id=row['product_id'],
+                    )
                     recalculate_progress_qty(
                         line_id=line.id,
                         product_id=row['product_id'],
-                        start_date=start_date,
+                        start_date=product_effective_start_date,
                         end_date=end_date,
                         progress_adjust_map=adjustment_maps.get('PROGRESS'),
                         planned_progress_adjust_map=adjustment_maps.get('PLANNED_PROGRESS'),

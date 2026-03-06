@@ -560,8 +560,8 @@ const inventoryTaskLabel = (taskName) => {
 
 const inventoryTaskHelp = (taskName) => {
   if (taskName === 'PICKUP_ONLY') return '毎日指定した時刻に需要取り込み（pickup / pickup_purchase）のみを実行します。'
-  if (taskName === 'INVENTORY_ONLY') return '毎日指定した時刻に在庫・計画在庫の再計算のみを実行します（進度は更新しません）。'
-  if (taskName === 'PROGRESS_ONLY') return '毎日指定した時刻に進度のみを再計算します。'
+  if (taskName === 'INVENTORY_ONLY') return '毎日指定した時刻に在庫・計画在庫の再計算のみを実行します（必要に応じて過去営業日まで遡って再計算、進度は更新しません）。'
+  if (taskName === 'PROGRESS_ONLY') return '毎日指定した時刻に進度のみを再計算します（必要に応じてLT+1営業日前まで遡って再計算します）。'
   return '毎日指定した時刻に需要取り込み（pickup）→ 在庫・計画在庫・進度の自動再計算を実行します。'
 }
 const isSafetyStockTask = (taskName) => safetyStockTaskOrder.includes(taskName)
