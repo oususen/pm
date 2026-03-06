@@ -2,26 +2,24 @@ from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 import re
 
-from django.db.models import Sum
+from django.db.models import Max, Sum
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from masters.models import BOMItem, Line, Process, Product, Supplier
+from masters.models import BOMItem, Calendar, CalendarDay, Line, Process, Product, Supplier
+from orders.utils.calendar_utils import get_business_today
 from production.models_process_realtime import ProcessRealtimeRecord
 from production.models_line_backlog import LineBacklog
 from production.models_line_plan import LinePlan
+from production.serializers import LineBacklogSerializer
 from production.serializers_process_realtime import (
     ProcessRealtimeCreateSerializer,
     resolve_workday_date_for_process,
 )
 from production.inventory.inventory_calculator import (
-    _build_firm_order_map,
-    aggregate_scrap_to_backlog,
-    recalculate_planned_stock_qty,
-    recalculate_stock_qty,
+    recalculate_inventory_for_line,
 )
-from production.inventory.progress_calculator import recalculate_progress_qty
 
 from .models import EngineeringChangeCase, EngineeringChangePart, PurchasePlanLockSetting
 from .serializers import PurchasePlanLockSettingSerializer
@@ -79,6 +77,101 @@ def _resolve_purchase_line(supplier: Supplier | None):
         line_obj.line_type = 'PURCHASE'
         line_obj.save(update_fields=['line_type'])
     return line_obj
+
+
+def _resolve_inventory_effective_start_date(line_id: int, requested_start_date: date, end_date: date) -> date:
+    line_obj = Line.objects.filter(id=line_id).first()
+    calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
+        calendar_code='daiso'
+    ).values_list('id', flat=True).first()
+    workday_cache = {}
+
+    def is_working_day(target_date):
+        if not calendar_id:
+            return target_date.weekday() < 5
+        if target_date in workday_cache:
+            return workday_cache[target_date]
+        cal = CalendarDay.objects.filter(
+            calendar_id=calendar_id,
+            target_date=target_date,
+        ).first()
+        is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
+        workday_cache[target_date] = is_work
+        return is_work
+
+    def get_prev_working_day(target_date):
+        prev_date = target_date - timedelta(days=1)
+        while not is_working_day(prev_date):
+            prev_date = prev_date - timedelta(days=1)
+        return prev_date
+
+    def shift_working_days(target_date, days):
+        if not days:
+            return target_date
+        if not calendar_id:
+            return target_date + timedelta(days=days)
+        step = 1 if days > 0 else -1
+        remaining = abs(int(days))
+        current = target_date
+        while remaining > 0:
+            current = current + timedelta(days=step)
+            if is_working_day(current):
+                remaining -= 1
+        return current
+
+    business_today = get_business_today()
+    stock_start_dt = get_prev_working_day(get_prev_working_day(business_today))
+    product_ids_for_line = list(
+        LineBacklog.objects.filter(
+            line_id=line_id,
+            plan_date__lte=end_date,
+        ).values_list('product_id', flat=True).distinct()
+    )
+    max_lt = 0
+    if product_ids_for_line:
+        max_lt = BOMItem.objects.filter(
+            bom__is_active=True,
+            child_product_id__in=product_ids_for_line,
+        ).aggregate(v=Max('lead_time_days'))['v'] or 0
+    planned_progress_start_dt = shift_working_days(business_today, -(int(max_lt) + 1))
+    return min(requested_start_date, stock_start_dt, planned_progress_start_dt)
+
+
+def _is_working_day(calendar_id, target_date, workday_cache):
+    if not calendar_id:
+        return target_date.weekday() < 5
+    cache = workday_cache.setdefault(calendar_id, {})
+    if target_date in cache:
+        return cache[target_date]
+    cal = CalendarDay.objects.filter(
+        calendar_id=calendar_id,
+        target_date=target_date,
+    ).first()
+    is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
+    cache[target_date] = is_work
+    return is_work
+
+
+def _shift_business_days(calendar_id, target_date, days, workday_cache):
+    if not days:
+        if not calendar_id:
+            return target_date
+        if _is_working_day(calendar_id, target_date, workday_cache):
+            return target_date
+        current = target_date
+        while True:
+            current = current - timedelta(days=1)
+            if _is_working_day(calendar_id, current, workday_cache):
+                return current
+
+    step = -1 if days > 0 else 1
+    remaining = abs(int(days))
+    current = target_date
+    while remaining > 0:
+        current = current + timedelta(days=step)
+        if _is_working_day(calendar_id, current, workday_cache):
+            remaining -= 1
+    return current
 
 
 class PurchaseActualCandidatesView(APIView):
@@ -504,6 +597,9 @@ class PurchasePlanLockSettingView(APIView):
 class EngineeringChangeView(APIView):
     def get(self, request):
         today = date.today()
+        default_calendar_id = Calendar.objects.filter(
+            calendar_code='daiso'
+        ).values_list('id', flat=True).first()
         parts = (
             EngineeringChangePart.objects
             .select_related('case__final_product', 'old_part', 'new_part')
@@ -528,40 +624,73 @@ class EngineeringChangeView(APIView):
                     'product_name': parent.product_name,
                 }
 
+        workday_cache = {}
+        lt_days_cache = {}
         rows = []
         for part in parts:
             # 完成品（案件）切替日を正とし、旧データ互換で部品切替日をフォールバック
             switch_date = part.case.switch_date or part.switch_date or today
             start_date = today
-            end_date = switch_date if switch_date >= today else today
+            display_end_date = switch_date if switch_date >= today else today
 
             base_qs = LineBacklog.objects.filter(
                 product=part.old_part,
                 plan_date__gte=start_date,
-                plan_date__lte=end_date,
+                plan_date__lte=display_end_date,
             )
             has_prod = base_qs.filter(line__line_type='PROD').exists()
             target_line_type = 'PROD' if has_prod else 'PURCHASE'
             purchase_plan_qty = base_qs.filter(line__line_type='PURCHASE').aggregate(v=Sum('plan_qty'))['v'] or 0
             production_plan_qty = base_qs.filter(line__line_type='PROD').aggregate(v=Sum('plan_qty'))['v'] or 0
             target_base_qs = base_qs.filter(line__line_type=target_line_type)
-            required_until_switch_qty = target_base_qs.aggregate(v=Sum('order_qty'))['v'] or 0
+
+            lt_sample = (
+                target_base_qs.select_related('product', 'line', 'process').order_by('plan_date').first()
+                or LineBacklog.objects.filter(
+                    product=part.old_part,
+                    line__line_type=target_line_type,
+                ).select_related('product', 'line', 'process').order_by('plan_date').first()
+            )
+            component_lt_days = 0
+            component_switch_date = switch_date
+            if lt_sample:
+                lt_key = (lt_sample.product_id, lt_sample.line_id, lt_sample.process_id)
+                if lt_key not in lt_days_cache:
+                    lt_serializer = LineBacklogSerializer(instance=lt_sample)
+                    lt_days_cache[lt_key] = int(lt_serializer.get_total_lt_days(lt_sample) or 0)
+                component_lt_days = int(lt_days_cache[lt_key] or 0)
+                calendar_id = getattr(lt_sample.line, 'calendar_id', None) or default_calendar_id
+                component_switch_date = _shift_business_days(
+                    calendar_id,
+                    switch_date,
+                    component_lt_days,
+                    workday_cache,
+                )
+
+            component_end_date = component_switch_date if component_switch_date >= today else today
+            required_base_qs = LineBacklog.objects.filter(
+                product=part.old_part,
+                plan_date__gte=start_date,
+                plan_date__lte=component_end_date,
+                line__line_type=target_line_type,
+            )
+            required_until_switch_qty = required_base_qs.aggregate(v=Sum('order_qty'))['v'] or 0
             # 購買BACKLOG運用で order_qty が未計算/0 の場合に備えて plan_qty をフォールバック
             if required_until_switch_qty == 0:
-                required_until_switch_qty = target_base_qs.aggregate(v=Sum('plan_qty'))['v'] or 0
+                required_until_switch_qty = required_base_qs.aggregate(v=Sum('plan_qty'))['v'] or 0
 
             today_qs = LineBacklog.objects.filter(product=part.old_part, plan_date=today)
             stock_qty = today_qs.aggregate(v=Sum('stock_qty'))['v'] or 0
             progress_qty = today_qs.aggregate(v=Sum('progress_qty'))['v'] or 0
             switch_day_prod_qs = LineBacklog.objects.filter(
                 product=part.old_part,
-                plan_date=switch_date,
+                plan_date=component_switch_date,
                 line__line_type=target_line_type,
             )
             switch_prod_planned_stock_qty = switch_day_prod_qs.aggregate(v=Sum('planned_stock_qty'))['v'] or 0
             switch_prod_progress_qty = switch_day_prod_qs.aggregate(v=Sum('progress_qty'))['v'] or 0
             switch_prod_planned_progress_qty = switch_day_prod_qs.aggregate(v=Sum('planned_progress_qty'))['v'] or 0
-            # 切替日当日に行がない場合、切替日以前の直近バックログ値を採用
+            # LT反映日に行がない場合、基準日以前の直近バックログ値を採用
             if (
                 switch_prod_planned_stock_qty == 0
                 and switch_prod_progress_qty == 0
@@ -570,7 +699,7 @@ class EngineeringChangeView(APIView):
                 latest_qs = (
                     LineBacklog.objects.filter(
                         product=part.old_part,
-                        plan_date__lte=switch_date,
+                        plan_date__lte=component_switch_date,
                         line__line_type=target_line_type,
                     )
                     .order_by('-plan_date')
@@ -593,6 +722,8 @@ class EngineeringChangeView(APIView):
                 'final_product_code': part.case.final_product.product_code if part.case.final_product else '',
                 'final_product_name': part.case.final_product.product_name if part.case.final_product else '',
                 'switch_date': switch_date,
+                'component_switch_date': component_switch_date,
+                'component_lt_days': component_lt_days,
                 'old_part_code': part.old_part.product_code,
                 'old_part_name': part.old_part.product_name,
                 'parent_products': parent_products,
@@ -757,7 +888,7 @@ class EngineeringChangePartDetailView(APIView):
 
 class EngineeringChangeCaseRecalculateView(APIView):
     def post(self, request, case_id: int):
-        today = date.today()
+        today = get_business_today()
         case = EngineeringChangeCase.objects.filter(pk=case_id).first()
         if not case:
             return Response({'detail': 'case not found or no parts'}, status=status.HTTP_404_NOT_FOUND)
@@ -801,16 +932,18 @@ class EngineeringChangeCaseRecalculateView(APIView):
 
         recalculated_lines = 0
         recalculated_pairs = 0
+        effective_start_dates = {}
         for line_id in sorted(line_products_map.keys()):
-            # 仕損集計と確定受注マップはライン単位で1回だけ実行
-            aggregate_scrap_to_backlog(line_id, today, end_date)
-            firm_map = _build_firm_order_map(line_id, today, end_date)
-
-            for product_id in sorted(line_products_map[line_id]):
-                recalculate_stock_qty(line_id, product_id, today, end_date, firm_map=firm_map)
-                recalculate_planned_stock_qty(line_id, product_id, today, end_date, firm_map=firm_map)
-                recalculate_progress_qty(line_id, product_id, today, end_date)
-                recalculated_pairs += 1
+            effective_start_dt = _resolve_inventory_effective_start_date(line_id, today, end_date)
+            recalculate_inventory_for_line(
+                line_id,
+                effective_start_dt,
+                end_date,
+                include_progress=True,
+                line_final_only=False,
+            )
+            effective_start_dates[str(line_id)] = str(effective_start_dt)
+            recalculated_pairs += len(line_products_map[line_id])
             recalculated_lines += 1
 
         return Response({
@@ -819,6 +952,8 @@ class EngineeringChangeCaseRecalculateView(APIView):
             'line_count': recalculated_lines,
             'part_count': len(target_product_ids),
             'target_pairs': recalculated_pairs,
-            'start_date': str(today),
+            'requested_start_date': str(today),
+            'start_date': min(effective_start_dates.values()) if effective_start_dates else str(today),
+            'effective_start_dates': effective_start_dates,
             'end_date': str(end_date),
         })

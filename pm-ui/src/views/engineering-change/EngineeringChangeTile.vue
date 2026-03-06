@@ -99,7 +99,7 @@
           <input v-model="filters.partName" type="text" placeholder="部品コード/部品名で絞り込み" />
         </label>
         <label>
-          切替日の進度
+          LT反映日の進度
           <select v-model="filters.switchProgressSign">
             <option value="all">すべて</option>
             <option value="plus">＋</option>
@@ -123,10 +123,11 @@
             <th>共用親製品</th>
             <th>新部品</th>
             <th>切替日</th>
-            <th>切替日まで必要量</th>
-            <th>切替日の生産計画在庫</th>
-            <th>切替日の進度</th>
-            <th>切替日の計進</th>
+            <th>LT反映日</th>
+            <th>LT反映日まで必要量</th>
+            <th>LT反映日の生産計画在庫</th>
+            <th>LT反映日の進度</th>
+            <th>LT反映日の計進</th>
             <th>在庫</th>
             <th>進度</th>
             <th>発注過剰</th>
@@ -166,6 +167,7 @@
             </td>
             <td v-if="editingId !== item.id">{{ item.switch_date || '-' }}</td>
             <td v-else><input v-model="editForm.switch_date" type="date" /></td>
+            <td>{{ item.component_switch_date || item.switch_date || '-' }}</td>
             <td>{{ item.required_until_switch_qty }}</td>
             <td>{{ item.switch_prod_planned_stock_qty }}</td>
             <td>{{ item.switch_prod_progress_qty }}</td>
@@ -456,10 +458,11 @@ const downloadCsv = () => {
     "共用親製品",
     "新部品コード",
     "切替予定日",
-    "切替日まで必要量",
-    "切替日の生産計画在庫",
-    "切替日の進度",
-    "切替日の計進",
+    "LT反映日",
+    "LT反映日まで必要量",
+    "LT反映日の生産計画在庫",
+    "LT反映日の進度",
+    "LT反映日の計進",
     "在庫",
     "進度",
     "発注過剰",
@@ -474,6 +477,7 @@ const downloadCsv = () => {
     item.parent_products_text,
     item.new_part_code,
     item.switch_date,
+    item.component_switch_date,
     item.required_until_switch_qty,
     item.switch_prod_planned_stock_qty,
     item.switch_prod_progress_qty,

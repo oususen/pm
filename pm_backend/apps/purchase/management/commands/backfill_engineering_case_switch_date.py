@@ -85,19 +85,19 @@ class Command(BaseCommand):
                 conflict_cases += 1
 
             target_date = self._pick_date(part_dates, strategy)
-            candidates.append((case, target_date, unique_dates))
+            candidates.append((case, case.switch_date, target_date, unique_dates))
 
         updated = 0
         if apply_changes and candidates:
             with transaction.atomic():
-                for case, target_date, _unique_dates in candidates:
+                for case, before_date, target_date, _unique_dates in candidates:
                     if case.switch_date == target_date:
                         continue
                     case.switch_date = target_date
                     case.save(update_fields=["switch_date", "updated_at"])
                     updated += 1
         else:
-            updated = sum(1 for case, target_date, _ in candidates if case.switch_date != target_date)
+            updated = sum(1 for case, _before_date, target_date, _ in candidates if case.switch_date != target_date)
 
         mode_text = "APPLY" if apply_changes else "DRY-RUN"
         self.stdout.write(
@@ -107,12 +107,10 @@ class Command(BaseCommand):
             f"conflict_cases={conflict_cases}"
         )
 
-        for case, target_date, unique_dates in candidates:
-            before = case.switch_date
+        for case, before_date, target_date, unique_dates in candidates:
             marker = " CONFLICT" if len(unique_dates) > 1 else ""
             self.stdout.write(
                 f"- {case.case_code or f'EC-{case.id:06d}'}: "
-                f"{before} -> {target_date} "
+                f"{before_date} -> {target_date} "
                 f"(part_dates={','.join([str(d) for d in unique_dates])}){marker}"
             )
-
