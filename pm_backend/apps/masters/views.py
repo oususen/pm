@@ -99,6 +99,7 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     def line_final_candidates(self, request):
         """ライン別にルーティングステップの出力品目を返す（ライン最終品の一括設定用）"""
         line_id = request.query_params.get('line_id')
+        process_id = request.query_params.get('process_id')
         steps_qs = RoutingStep.objects.filter(
             routing__is_active=True,
             line__isnull=False,
@@ -106,6 +107,8 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         if line_id:
             steps_qs = steps_qs.filter(line_id=line_id)
+        if process_id:
+            steps_qs = steps_qs.filter(process_id=process_id)
 
         # ライン別に出力品目を収集（重複排除）
         from collections import OrderedDict

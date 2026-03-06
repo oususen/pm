@@ -7,6 +7,82 @@
     <p v-if="!canView" class="error">この画面を閲覧する権限がありません。</p>
     <p v-else-if="!canEdit" class="loading">閲覧のみ可能です（編集権限がありません）。</p>
 
+    <!-- 新規セッション後入力フォーム -->
+    <div v-if="canEdit" class="add-section">
+      <button class="btn btn-toggle" @click="showAddForm = !showAddForm">
+        {{ showAddForm ? '▲ 新規セッション追加を閉じる' : '▼ 新規セッション追加（登録し忘れ補完）' }}
+      </button>
+      <div v-if="showAddForm" class="add-form">
+        <div class="add-form-row">
+          <label>ライン <span class="required">*</span></label>
+          <select v-model="newLineId" @change="newProcessId = ''">
+            <option value="">-- 選択 --</option>
+            <option v-for="line in lines" :key="line.id" :value="String(line.id)">
+              {{ line.line_code }} - {{ line.line_name }}
+            </option>
+          </select>
+        </div>
+        <div class="add-form-row">
+          <label>工程 <span class="required">*</span></label>
+          <select v-model="newProcessId">
+            <option value="">-- 選択 --</option>
+            <option v-for="p in newFilteredProcesses" :key="p.id" :value="String(p.id)">
+              {{ p.process_code }} - {{ p.process_name }}
+            </option>
+          </select>
+        </div>
+        <div class="add-form-row product-row">
+          <label>品番 <span class="required">*</span></label>
+          <div class="product-autocomplete">
+            <input
+              v-model="newProductCode"
+              type="text"
+              placeholder="品番または品名で検索"
+              autocomplete="off"
+              @input="onProductInput"
+              @keydown.down.prevent="moveSuggestion(1)"
+              @keydown.up.prevent="moveSuggestion(-1)"
+              @keydown.enter.prevent="confirmSuggestion"
+              @keydown.escape="closeSuggestions"
+              @blur="onProductBlur"
+            />
+            <ul v-if="showSuggestions && productSuggestions.length" class="suggestion-list">
+              <li
+                v-for="(p, i) in productSuggestions"
+                :key="p.product_code"
+                :class="{ active: i === suggestionIndex }"
+                @mousedown.prevent="selectProduct(p)"
+              >
+                <span class="sug-code">{{ p.product_code }}</span>
+                <span class="sug-name">{{ p.product_name }}</span>
+              </li>
+            </ul>
+            <p v-if="!newProcessId && newProductCode.length >= 1" class="sug-empty">工程を先に選択してください</p>
+            <p v-else-if="showSuggestions && productSearching" class="sug-loading">読込中...</p>
+            <p v-else-if="showSuggestions && newProductCode.length >= 1 && !productSearching && !productSuggestions.length" class="sug-empty">該当なし</p>
+          </div>
+        </div>
+        <div class="add-form-row">
+          <label>開始日時 <span class="required">*</span></label>
+          <input v-model="newStartedAt" type="datetime-local" />
+        </div>
+        <div class="add-form-row">
+          <label>終了日時 <span class="required">*</span></label>
+          <input v-model="newEndedAt" type="datetime-local" />
+        </div>
+        <div class="add-form-row">
+          <label>実績数量 <span class="required">*</span></label>
+          <input v-model.number="newProductionQty" type="number" min="0" step="1" class="qty-input" />
+        </div>
+        <div class="add-form-actions">
+          <button class="btn" :disabled="adding" @click="addSession">
+            {{ adding ? '登録中...' : '追加登録' }}
+          </button>
+          <span v-if="addError" class="add-error">{{ addError }}</span>
+        </div>
+      </div>
+    </div>
+
     <div class="filters" v-if="canView">
       <div class="filter-row">
         <label>レコードID</label>
@@ -92,7 +168,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
@@ -105,6 +181,82 @@ const edits = ref({})
 
 const lines = ref([])
 const processes = ref([])
+
+// 新規セッション追加フォーム
+const showAddForm = ref(false)
+const adding = ref(false)
+const addError = ref('')
+const newLineId = ref('')
+const newProcessId = ref('')
+const newProductCode = ref('')
+const newStartedAt = ref('')
+const newEndedAt = ref('')
+const newProductionQty = ref(0)
+
+// 品番オートコンプリート（工程のラインで絞り込み）
+const lineProducts = ref([])          // 選択工程のライン製品プール
+const productSuggestions = ref([])
+const showSuggestions = ref(false)
+const productSearching = ref(false)
+const suggestionIndex = ref(-1)
+
+// 工程が変わったらそのラインの製品を先読み
+watch(() => newProcessId.value, async (processId) => {
+  lineProducts.value = []
+  newProductCode.value = ''
+  showSuggestions.value = false
+  if (!processId) return
+
+  const proc = processes.value.find((p) => String(p.id) === String(processId))
+  const lineId = proc?.line
+  if (!lineId) return
+
+  productSearching.value = true
+  try {
+    const res = await api.products.getLineFinalCandidates(lineId, processId)
+    const group = (res.data || []).find((g) => String(g.line_id) === String(lineId))
+    lineProducts.value = group?.products || []
+  } catch {
+    lineProducts.value = []
+  } finally {
+    productSearching.value = false
+  }
+})
+
+const filterProducts = (keyword) => {
+  if (!keyword) { productSuggestions.value = []; showSuggestions.value = false; return }
+  showSuggestions.value = true
+  const kw = keyword.toLowerCase()
+  productSuggestions.value = lineProducts.value
+    .filter((p) => p.product_code.toLowerCase().includes(kw) || p.product_name.toLowerCase().includes(kw))
+    .slice(0, 20)
+}
+
+const onProductInput = () => {
+  suggestionIndex.value = -1
+  filterProducts(newProductCode.value)
+}
+
+const selectProduct = (p) => {
+  newProductCode.value = p.product_code
+  showSuggestions.value = false
+  productSuggestions.value = []
+}
+
+const moveSuggestion = (dir) => {
+  if (!showSuggestions.value || !productSuggestions.value.length) return
+  const max = productSuggestions.value.length - 1
+  suggestionIndex.value = Math.max(0, Math.min(max, suggestionIndex.value + dir))
+}
+
+const confirmSuggestion = () => {
+  if (suggestionIndex.value >= 0 && productSuggestions.value[suggestionIndex.value]) {
+    selectProduct(productSuggestions.value[suggestionIndex.value])
+  }
+}
+
+const closeSuggestions = () => { showSuggestions.value = false }
+const onProductBlur = () => { setTimeout(() => { showSuggestions.value = false }, 150) }
 
 const today = new Date()
 const toISODate = (d) => d.toISOString().slice(0, 10)
@@ -130,6 +282,11 @@ const canEdit = computed(() => canAccessRecordEdit('edit'))
 const filteredProcesses = computed(() => {
   if (!lineId.value) return processes.value
   return processes.value.filter((p) => String(p.line) === String(lineId.value))
+})
+
+const newFilteredProcesses = computed(() => {
+  if (!newLineId.value) return processes.value
+  return processes.value.filter((p) => String(p.line) === String(newLineId.value))
 })
 
 const toLocalDateTimeInput = (value) => {
@@ -229,6 +386,44 @@ const deleteRow = async (id) => {
     alert('削除に失敗しました。')
   } finally {
     savingId.value = null
+  }
+}
+
+const addSession = async () => {
+  if (!canEdit.value) return
+  addError.value = ''
+  if (!newProcessId.value) { addError.value = '工程を選択してください。'; return }
+  if (!newProductCode.value.trim()) { addError.value = '品番を入力してください。'; return }
+  if (!newStartedAt.value) { addError.value = '開始日時を入力してください。'; return }
+  if (!newEndedAt.value) { addError.value = '終了日時を入力してください。'; return }
+  if (newProductionQty.value < 0) { addError.value = '実績数量は0以上で入力してください。'; return }
+  if (!window.confirm('後入力セッションを登録し、LineBacklog.actual_qty に加算します。よろしいですか？')) return
+
+  adding.value = true
+  try {
+    await api.processRealtime.createSession({
+      process_id: Number(newProcessId.value),
+      product_code: newProductCode.value.trim(),
+      started_at: newStartedAt.value,
+      ended_at: newEndedAt.value,
+      production_qty: newProductionQty.value,
+    })
+    // フォームリセット
+    newProcessId.value = ''
+    newProductCode.value = ''
+    newStartedAt.value = ''
+    newEndedAt.value = ''
+    newProductionQty.value = 0
+    lineProducts.value = []
+    showAddForm.value = false
+    await loadSessions()
+    alert('追加登録しました。LineBacklog.actual_qty に加算反映済みです。')
+  } catch (e) {
+    const msg = e.response?.data?.detail || '登録に失敗しました。入力内容を確認してください。'
+    addError.value = msg
+    console.error('追加登録失敗:', e)
+  } finally {
+    adding.value = false
   }
 }
 
@@ -358,5 +553,121 @@ onMounted(async () => {
   text-align: center !important;
   color: #64748b;
   padding: 20px !important;
+}
+.add-section {
+  margin-bottom: 12px;
+}
+.btn-toggle {
+  border-color: #0f766e;
+  background: #0f766e;
+  margin-bottom: 8px;
+}
+.add-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 8px 12px;
+  padding: 12px;
+  border: 1px solid #99f6e4;
+  border-radius: 10px;
+  background: #f0fdfa;
+}
+.add-form-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.add-form-row label {
+  min-width: 80px;
+  font-weight: 700;
+  font-size: 13px;
+}
+.add-form-row input,
+.add-form-row select {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+}
+.add-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  grid-column: 1 / -1;
+}
+.add-error {
+  color: #991b1b;
+  font-size: 13px;
+}
+.required {
+  color: #dc2626;
+}
+.product-row {
+  align-items: flex-start;
+}
+.product-autocomplete {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+.product-autocomplete input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.suggestion-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  max-height: 220px;
+  overflow-y: auto;
+}
+.suggestion-list li {
+  display: flex;
+  gap: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.suggestion-list li:last-child {
+  border-bottom: none;
+}
+.suggestion-list li:hover,
+.suggestion-list li.active {
+  background: #eff6ff;
+}
+.sug-code {
+  font-weight: 700;
+  white-space: nowrap;
+  color: #1e40af;
+}
+.sug-name {
+  color: #475569;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sug-loading,
+.sug-empty {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #64748b;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
 }
 </style>

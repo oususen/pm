@@ -42,9 +42,10 @@ export const createProductsAPI = (client) => ({
       params: { recursive: recursive ? 'true' : 'false' },
     })
   },
-  getLineFinalCandidates(lineId = null) {
+  getLineFinalCandidates(lineId = null, processId = null) {
     const params = {}
     if (lineId) params.line_id = lineId
+    if (processId) params.process_id = processId
     return client.get('/products/line-final-candidates/', { params })
   },
   bulkUpdateLineFinal(updates) {

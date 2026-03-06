@@ -22,6 +22,7 @@ from .serializers_process_realtime import (
     build_scrap_multiplier_details,
     _resolve_product_process_line,
     resolve_workday_date_for_process,
+    _next_session_no,
 )
 from .services.gantt_planning import LineWorkCalendar
 from masters.models import Product, Process, Supplier, BOM
@@ -162,10 +163,15 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         record = serializer.save()
         return Response(ProcessRealtimeRecordSerializer(record).data, status=status.HTTP_201_CREATED)
 
-    @action(detail=False, methods=['get'], url_path='sessions')
+    @action(detail=False, methods=['get', 'post'], url_path='sessions')
     def sessions(self, request):
         """
-        開始〜終了セッションの一覧を返す。
+        開始〜終了セッションの一覧を返す（GET）、または後入力セッションを新規作成する（POST）。
+        """
+        if request.method.lower() == 'post':
+            return self._create_manual_session(request)
+
+        """
         稼働時間分析と不整合検知の確認用。
         """
         queryset = ProcessWorkSession.objects.select_related(
@@ -397,6 +403,87 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             result_rows = filtered_rows
 
         return Response(result_rows)
+
+    def _create_manual_session(self, request):
+        """
+        後入力セッションを新規作成する。
+        入力: process_id, product_code, started_at, ended_at, production_qty
+        """
+        payload = request.data or {}
+
+        process_id = payload.get('process_id')
+        product_code = str(payload.get('product_code') or '').strip()
+        started_at_raw = payload.get('started_at')
+        ended_at_raw = payload.get('ended_at')
+        production_qty_raw = payload.get('production_qty')
+
+        if not process_id:
+            return Response({'detail': 'process_id は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not product_code:
+            return Response({'detail': 'product_code は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not started_at_raw:
+            return Response({'detail': 'started_at は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not ended_at_raw:
+            return Response({'detail': 'ended_at は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            production_qty = Decimal(str(production_qty_raw or 0))
+        except (InvalidOperation, TypeError, ValueError):
+            return Response({'detail': 'production_qty の形式が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if production_qty < 0:
+            return Response({'detail': 'production_qty は0以上で入力してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            process = Process.objects.get(id=process_id)
+        except Process.DoesNotExist:
+            return Response({'detail': '指定された工程が存在しません。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            product = Product.objects.get(product_code=product_code)
+        except Product.DoesNotExist:
+            return Response({'detail': f'品番 {product_code} が存在しません。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        parsed_start = parse_datetime(started_at_raw) if isinstance(started_at_raw, str) else None
+        if not parsed_start:
+            return Response({'detail': 'started_at の形式が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+        parsed_end = parse_datetime(ended_at_raw) if isinstance(ended_at_raw, str) else None
+        if not parsed_end:
+            return Response({'detail': 'ended_at の形式が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        started_at = _normalize_input_datetime(parsed_start)
+        ended_at = _normalize_input_datetime(parsed_end)
+
+        if ended_at < started_at:
+            return Response({'detail': '終了時刻は開始時刻以降にしてください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 日替わり時刻（8時）を考慮して計画日を算出
+        local_start = _to_local_naive(started_at)
+        plan_date = resolve_workday_date_for_process(process, local_start)
+
+        duration_seconds = int((ended_at - started_at).total_seconds())
+
+        with transaction.atomic():
+            session = ProcessWorkSession.objects.create(
+                process=process,
+                product=product,
+                product_code=product.product_code,
+                product_name=product.product_name,
+                plan_date=plan_date,
+                session_no=_next_session_no(process, product, plan_date),
+                session_type='WORK',
+                start_action='MANUAL',
+                end_action='END',
+                started_at=started_at,
+                ended_at=ended_at,
+                status='CLOSED',
+                duration_seconds=duration_seconds,
+                production_qty=production_qty,
+            )
+            if production_qty:
+                _adjust_backlog_actual_for_session(session, int(production_qty))
+
+        serializer = ProcessWorkSessionSerializer(session)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['patch', 'delete'], url_path=r'sessions/(?P<session_id>[^/.]+)')
     def session_detail(self, request, session_id=None):

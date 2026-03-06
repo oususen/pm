@@ -15,6 +15,9 @@ export function createProcessRealtimeAPI(client) {
     getSessions(params = {}) {
       return client.get('/process-realtime-records/sessions/', { params })
     },
+    createSession(data) {
+      return client.post('/process-realtime-records/sessions/', data)
+    },
     updateSession(sessionId, data) {
       return client.patch(`/process-realtime-records/sessions/${sessionId}/`, data)
     },
