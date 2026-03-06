@@ -72,6 +72,11 @@ export const manualSections = [
       { title: "ライン作業記録", path: "生産/ライン作業記録.md" },
     ],
   },
+  {
+    id: "engineeringChange",
+    title: "設変管理",
+    items: [{ title: "設変管理", path: "設変/設変管理.md" }],
+  },
 ];
 
 export const manualLookup = manualSections.reduce((acc, section) => {
