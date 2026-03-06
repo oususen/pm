@@ -37,6 +37,12 @@
         >
           表示品番だけ再計算
         </button>
+        <button
+          @click="exportToExcel"
+          :disabled="!groups.length"
+        >
+          Excel出力
+        </button>
       </div>
     </div>
 
@@ -867,6 +873,78 @@ const recalculateVisibleProducts = async () => {
   } finally {
     recalculating.value = false;
   }
+};
+
+const escapeCsv = (val) => {
+  if (val === null || val === undefined) return '';
+  const str = String(val);
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
+};
+
+const formatDateSlash = (dateStr) => {
+  if (!dateStr) return dateStr;
+  const d = parseISODate(dateStr);
+  if (!d || Number.isNaN(d.getTime())) return dateStr;
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+};
+
+const exportToExcel = () => {
+  if (!groups.value.length) {
+    alert('出力対象のデータがありません。');
+    return;
+  }
+  const supplierObj = suppliers.value.find((s) => s.id === selectedSupplier.value);
+  const supplierLabel = supplierObj
+    ? `${supplierObj.supplier_code} - ${supplierObj.supplier_name}`
+    : String(selectedSupplier.value || '');
+  const start = columns.value[0] || '';
+  const end = columns.value[columns.value.length - 1] || '';
+
+  const bom = '\ufeff';
+  const lines = [];
+  lines.push([escapeCsv('仕入先'), escapeCsv(supplierLabel)].join(','));
+  lines.push([escapeCsv('期間'), escapeCsv(`${start} ～ ${end}`)].join(','));
+  lines.push('');
+
+  // ヘッダー行（日付をYYYY/M/D形式に）
+  const headerRow = ['品番', '品名', '完成品向けLT', '自LT', '項目', ...columns.value.map(formatDateSlash)];
+  lines.push(headerRow.map(escapeCsv).join(','));
+
+  // データ行（品番・品名は各品番の最初の行のみ出力）
+  for (const g of groups.value) {
+    const ltDays = g.total_lt_days !== null && g.total_lt_days !== undefined ? g.total_lt_days : '';
+    const selfLt = g.self_lt_days !== null && g.self_lt_days !== undefined ? g.self_lt_days : '';
+    rowDefs.forEach((row, idx) => {
+      const isFirst = idx === 0;
+      const cells = [
+        isFirst ? (g.product_code || '') : '',
+        isFirst ? (g.product_name || '') : '',
+        ltDays,
+        selfLt,
+        row.label,
+        ...columns.value.map((d) => {
+          const val = getValue(g, d, row.key);
+          if (val === null || val === undefined || val === '') return '';
+          const num = Number(val);
+          return Number.isNaN(num) ? '' : num;
+        }),
+      ];
+      lines.push(cells.map(escapeCsv).join(','));
+    });
+  }
+
+  const csvContent = bom + lines.join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const supplierCode = supplierObj?.supplier_code || '';
+  link.href = url;
+  link.download = `仕入れ在庫_${supplierCode}_${start}_${end}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
 };
 
 const updateFloatingScroll = () => {

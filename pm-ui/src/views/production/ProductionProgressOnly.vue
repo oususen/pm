@@ -40,6 +40,18 @@
         </select>
         <button @click="load" :disabled="loading">更新</button>
         <button @click="recalculate" :disabled="loading || recalculating || !hasFilter">再計算</button>
+        <button
+          @click="recalculateVisibleProducts"
+          :disabled="loading || recalculating || !hasFilter || !groups.length"
+        >
+          表示品番だけ再計算
+        </button>
+        <button
+          @click="exportToExcel"
+          :disabled="!groups.length"
+        >
+          Excel出力
+        </button>
       </div>
     </div>
 
@@ -326,6 +338,39 @@ const getDisplayedLineIds = () => {
   return Array.from(ids);
 };
 
+const getDisplayedLineTargets = () => {
+  const map = new Map();
+  groups.value.forEach((group) => {
+    if (!group.line_id || !group.product_id) return;
+    if (!map.has(group.line_id)) {
+      map.set(group.line_id, {
+        line_id: group.line_id,
+        line_code: group.line_code || "",
+        product_ids: new Set(),
+        product_codes: new Set(),
+      });
+    }
+    const entry = map.get(group.line_id);
+    entry.product_ids.add(group.product_id);
+    if (group.product_code) {
+      entry.product_codes.add(group.product_code);
+    }
+  });
+  return Array.from(map.values()).map((entry) => ({
+    line_id: entry.line_id,
+    line_code: entry.line_code,
+    product_ids: Array.from(entry.product_ids).sort((a, b) => a - b),
+    product_codes: Array.from(entry.product_codes).sort(),
+  }));
+};
+
+const buildVisibleProductConfirmMessage = (targets) => {
+  const allCodes = targets.flatMap((target) => target.product_codes);
+  const preview = allCodes.slice(0, 10).join(", ");
+  const suffix = allCodes.length > 10 ? ` ほか${allCodes.length - 10}件` : "";
+  return `表示中の${allCodes.length}件を再計算しますか？\n${preview}${suffix}`;
+};
+
 const recalculate = async () => {
   const lineIds = getDisplayedLineIds();
   if (!lineIds.length) {
@@ -353,6 +398,41 @@ const recalculate = async () => {
   } catch (e) {
     console.error(e);
     error.value = e?.message || "再計算に失敗しました";
+  } finally {
+    recalculating.value = false;
+  }
+};
+
+const recalculateVisibleProducts = async () => {
+  const targets = getDisplayedLineTargets();
+  if (!targets.length) {
+    alert("再計算対象の品番がありません。");
+    return;
+  }
+  if (!confirm(buildVisibleProductConfirmMessage(targets))) {
+    return;
+  }
+
+  recalculating.value = true;
+  error.value = "";
+  try {
+    const start = columns.value[0];
+    const end = columns.value[columns.value.length - 1];
+    await Promise.all(
+      targets.map((target) =>
+        api.lineBacklogs.recalculateInventoryForProducts({
+          line_id: target.line_id,
+          start_date: start,
+          end_date: end,
+          include_progress: true,
+          product_ids: target.product_ids,
+        })
+      )
+    );
+    await load();
+  } catch (e) {
+    console.error(e);
+    error.value = e?.response?.data?.detail || e?.message || "表示品番の再計算に失敗しました";
   } finally {
     recalculating.value = false;
   }
@@ -614,6 +694,78 @@ const fmt = (n, showZero = false) => {
 
 const getValue = (group, date, key) => {
   return group.cells?.[date]?.[key] ?? "";
+};
+
+const escapeCsv = (val) => {
+  if (val === null || val === undefined) return '';
+  const str = String(val);
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
+};
+
+const formatDateSlash = (dateStr) => {
+  if (!dateStr) return dateStr;
+  const d = parseISODate(dateStr);
+  if (!d || Number.isNaN(d.getTime())) return dateStr;
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+};
+
+const exportToExcel = () => {
+  if (!groups.value.length) {
+    alert('出力対象のデータがありません。');
+    return;
+  }
+  const start = columns.value[0] || '';
+  const end = columns.value[columns.value.length - 1] || '';
+
+  const bom = '\ufeff';
+  const lines = [];
+  const filterLabel = [
+    lineFilter.value ? `ライン:${lineFilter.value}` : '',
+    processFilter.value ? `工程:${processFilter.value}` : '',
+    productFilter.value ? `品番:${productFilter.value}` : '',
+  ].filter(Boolean).join(' / ') || '（フィルタなし）';
+  lines.push([escapeCsv('フィルタ'), escapeCsv(filterLabel)].join(','));
+  lines.push([escapeCsv('期間'), escapeCsv(`${start} ～ ${end}`)].join(','));
+  lines.push('');
+
+  // ヘッダー行
+  const headerRow = ['ライン', '工程', '品番', '品名', '項目', ...columns.value.map(formatDateSlash)];
+  lines.push(headerRow.map(escapeCsv).join(','));
+
+  // データ行（ライン・工程・品番・品名は各グループの最初の行のみ出力）
+  for (const g of groups.value) {
+    rowDefs.forEach((row, idx) => {
+      const isFirst = idx === 0;
+      const cells = [
+        isFirst ? (formatLine(g)) : '',
+        isFirst ? (`${g.process_code || ''}${g.process_name ? ' ' + g.process_name : ''}`.trim()) : '',
+        isFirst ? (g.product_code || '') : '',
+        isFirst ? (g.product_name || '') : '',
+        row.label,
+        ...columns.value.map((d) => {
+          const val = getValue(g, d, row.key);
+          if (val === null || val === undefined || val === '') return '';
+          const num = Number(val);
+          return Number.isNaN(num) ? '' : num;
+        }),
+      ];
+      lines.push(cells.map(escapeCsv).join(','));
+    });
+  }
+
+  const csvContent = bom + lines.join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const filterSuffix = [lineFilter.value, processFilter.value, productFilter.value]
+    .filter(Boolean).join('_') || 'all';
+  link.href = url;
+  link.download = `進度のみ_${filterSuffix}_${start}_${end}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
 };
 
 const getCellClass = (group, date, rowKey) => {
