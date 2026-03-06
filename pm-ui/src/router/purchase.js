@@ -15,7 +15,7 @@ const purchase = [
     path: "/purchase/inventory",
     name: "PurchaseInventory",
     component: () => import("@/views/inventory/PurchaseInventory.vue"),
-    meta: { pageTitle: "仕入れ在庫/残量", resource: "purchase" },
+    meta: { pageTitle: "仕入れ在庫/残量", manualPath: "生産/仕入れ在庫残量一覧.md", resource: "purchase" },
   },
   {
     path: "/purchase/progress-only",
