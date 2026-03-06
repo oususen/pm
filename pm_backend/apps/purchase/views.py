@@ -1,13 +1,15 @@
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
+import math
 import re
 
 from django.db.models import Max, Sum
+from django.db.models import Q
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from masters.models import BOMItem, Calendar, CalendarDay, Line, Process, Product, Supplier
+from masters.models import BOMItem, Calendar, CalendarDay, Line, Process, Product, RoutingStep, Supplier
 from orders.utils.calendar_utils import get_business_today
 from production.models_process_realtime import ProcessRealtimeRecord
 from production.models_line_backlog import LineBacklog
@@ -79,62 +81,194 @@ def _resolve_purchase_line(supplier: Supplier | None):
     return line_obj
 
 
-def _resolve_inventory_effective_start_date(line_id: int, requested_start_date: date, end_date: date) -> date:
+def _resolve_inventory_effective_start_date(
+    line_id: int,
+    requested_start_date: date,
+    end_date: date,
+    product_ids=None,
+) -> date:
     line_obj = Line.objects.filter(id=line_id).first()
     calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
         calendar_code='daiso'
     ).values_list('id', flat=True).first()
     workday_cache = {}
 
-    def is_working_day(target_date):
-        if not calendar_id:
-            return target_date.weekday() < 5
-        if target_date in workday_cache:
-            return workday_cache[target_date]
-        cal = CalendarDay.objects.filter(
-            calendar_id=calendar_id,
-            target_date=target_date,
-        ).first()
-        is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
-        workday_cache[target_date] = is_work
-        return is_work
-
-    def get_prev_working_day(target_date):
-        prev_date = target_date - timedelta(days=1)
-        while not is_working_day(prev_date):
-            prev_date = prev_date - timedelta(days=1)
-        return prev_date
-
-    def shift_working_days(target_date, days):
-        if not days:
-            return target_date
-        if not calendar_id:
-            return target_date + timedelta(days=days)
-        step = 1 if days > 0 else -1
-        remaining = abs(int(days))
-        current = target_date
-        while remaining > 0:
-            current = current + timedelta(days=step)
-            if is_working_day(current):
-                remaining -= 1
-        return current
-
     business_today = get_business_today()
-    stock_start_dt = get_prev_working_day(get_prev_working_day(business_today))
-    product_ids_for_line = list(
-        LineBacklog.objects.filter(
-            line_id=line_id,
-            plan_date__lte=end_date,
-        ).values_list('product_id', flat=True).distinct()
-    )
+    stock_start_dt = _shift_business_days(calendar_id, business_today, 2, workday_cache)
+    target_product_ids = sorted({int(pid) for pid in (product_ids or []) if pid is not None})
+    if target_product_ids:
+        product_ids_for_line = target_product_ids
+    else:
+        product_ids_for_line = list(
+            LineBacklog.objects.filter(
+                line_id=line_id,
+                plan_date__lte=end_date,
+            ).values_list('product_id', flat=True).distinct()
+        )
     max_lt = 0
     if product_ids_for_line:
         max_lt = BOMItem.objects.filter(
             bom__is_active=True,
             child_product_id__in=product_ids_for_line,
         ).aggregate(v=Max('lead_time_days'))['v'] or 0
-    planned_progress_start_dt = shift_working_days(business_today, -(int(max_lt) + 1))
+    planned_progress_start_dt = _shift_business_days(
+        calendar_id,
+        business_today,
+        int(max_lt) + 1,
+        workday_cache,
+    )
     return min(requested_start_date, stock_start_dt, planned_progress_start_dt)
+
+
+def _routing_path_key(path):
+    try:
+        return tuple(int(p) for p in str(path).split('.'))
+    except Exception:
+        return (str(path),)
+
+
+def _resolve_engineering_change_step_lt_days(step):
+    product = step.output_product if step.output_product_id else (step.routing.product if step.routing_id else None)
+    is_final = (step.hierarchy_path == 'final') or (
+        product and (product.is_final_product or product.is_line_final_product)
+    )
+    if is_final:
+        if step.time_unit == 'DAY' and int(step.lead_time_days or 0) > 0:
+            return int(step.lead_time_days or 0)
+        if step.line and int(step.line.lead_time_days or 0) > 0:
+            return int(step.line.lead_time_days or 0)
+        return 0
+    if step.time_unit == 'DAY':
+        return int(step.lead_time_days or 0)
+    return 0
+
+
+def _build_engineering_change_routing_lt_cache(routing_id: int, routing_lt_cache: dict):
+    if routing_id in routing_lt_cache:
+        return routing_lt_cache[routing_id]
+
+    steps = list(
+        RoutingStep.objects.filter(routing_id=routing_id)
+        .select_related('routing__product', 'line', 'output_product')
+        .order_by('step_no', 'parallel_group', 'id')
+    )
+    if not steps:
+        routing_lt_cache[routing_id] = {}
+        return routing_lt_cache[routing_id]
+
+    minutes_per_day = 480
+
+    def calc_shift_days(prev_minutes, add_minutes):
+        prev_days = math.floor(prev_minutes / minutes_per_day) if prev_minutes > 0 else 0
+        total_minutes = prev_minutes + add_minutes
+        total_days = math.floor(total_minutes / minutes_per_day) if total_minutes > 0 else 0
+        return total_days - prev_days, total_minutes
+
+    step_map = {
+        s.hierarchy_path: s
+        for s in steps
+        if s.hierarchy_path and s.hierarchy_path != 'final'
+    }
+    children_map = {}
+    for path in step_map.keys():
+        parent_path = path.rsplit('.', 1)[0] if '.' in path else None
+        children_map.setdefault(parent_path, []).append(path)
+
+    lt_by_step = {}
+    final_step = next((s for s in steps if s.hierarchy_path == 'final'), None)
+    base_days = 0
+    base_minutes = 0
+    if final_step:
+        base_days = _resolve_engineering_change_step_lt_days(final_step)
+        final_minutes = int(final_step.duration_min or 0) if final_step.time_unit == 'MINUTE' else 0
+        minute_shift, base_minutes = calc_shift_days(0, final_minutes)
+        base_days += minute_shift
+        lt_by_step[final_step.id] = {
+            'total': base_days,
+            'self': base_days,
+        }
+
+    def compute(path, parent_days, parent_minutes):
+        step = step_map.get(path)
+        if not step:
+            return
+        lead_days = _resolve_engineering_change_step_lt_days(step)
+        step_minutes = int(step.duration_min or 0) if step.time_unit == 'MINUTE' else 0
+        minute_shift, total_minutes = calc_shift_days(parent_minutes, step_minutes)
+        self_days = lead_days + minute_shift
+        total_days = parent_days + self_days
+        lt_by_step[step.id] = {
+            'total': total_days,
+            'self': self_days,
+        }
+        for child_path in sorted(children_map.get(path, []), key=_routing_path_key):
+            compute(child_path, total_days, total_minutes)
+
+    for root_path in sorted(children_map.get(None, []), key=_routing_path_key):
+        compute(root_path, base_days, base_minutes)
+
+    routing_lt_cache[routing_id] = lt_by_step
+    return lt_by_step
+
+
+def _resolve_engineering_change_component_lt_info(case, old_part, target_line_type, routing_lt_cache):
+    step_qs = (
+        RoutingStep.objects
+        .filter(
+            output_product_id=old_part.id,
+            routing__is_default=True,
+            routing__is_active=True,
+            routing__product__is_active=True,
+        )
+        .select_related('routing__product', 'line', 'output_product')
+    )
+
+    def apply_line_type_filter(steps):
+        if not target_line_type:
+            return steps
+        filtered = [s for s in steps if getattr(s.line, 'line_type', None) == target_line_type]
+        return filtered or steps
+
+    candidate_steps = []
+    if case.final_product_id:
+        candidate_steps = list(step_qs.filter(routing__product_id=case.final_product_id))
+    if not candidate_steps:
+        candidate_steps = list(
+            step_qs.filter(
+                Q(routing__product__is_final_product=True) | Q(routing__product__is_line_final_product=True)
+            )
+        )
+    if not candidate_steps:
+        candidate_steps = list(step_qs)
+
+    candidate_steps = apply_line_type_filter(candidate_steps)
+
+    max_lt_days = 0
+    calendar_id = None
+    for step in candidate_steps:
+        lt_by_step = _build_engineering_change_routing_lt_cache(step.routing_id, routing_lt_cache)
+        total_lt_days = lt_by_step.get(step.id, {}).get('total')
+        if total_lt_days is None:
+            continue
+        step_lt_days = int(total_lt_days or 0)
+        if step_lt_days >= max_lt_days:
+            max_lt_days = step_lt_days
+            calendar_id = getattr(step.line, 'calendar_id', None)
+
+    if max_lt_days > 0:
+        return max_lt_days, calendar_id
+
+    lt_sample = (
+        LineBacklog.objects.filter(
+            product=old_part,
+            line__line_type=target_line_type,
+        ).select_related('product', 'line', 'process').order_by('plan_date').first()
+    )
+    if lt_sample:
+        lt_serializer = LineBacklogSerializer(instance=lt_sample)
+        return int(lt_serializer.get_total_lt_days(lt_sample) or 0), getattr(lt_sample.line, 'calendar_id', None)
+
+    return 0, None
 
 
 def _is_working_day(calendar_id, target_date, workday_cache):
@@ -625,7 +759,7 @@ class EngineeringChangeView(APIView):
                 }
 
         workday_cache = {}
-        lt_days_cache = {}
+        routing_lt_cache = {}
         rows = []
         for part in parts:
             # 完成品（案件）切替日を正とし、旧データ互換で部品切替日をフォールバック
@@ -644,22 +778,16 @@ class EngineeringChangeView(APIView):
             production_plan_qty = base_qs.filter(line__line_type='PROD').aggregate(v=Sum('plan_qty'))['v'] or 0
             target_base_qs = base_qs.filter(line__line_type=target_line_type)
 
-            lt_sample = (
-                target_base_qs.select_related('product', 'line', 'process').order_by('plan_date').first()
-                or LineBacklog.objects.filter(
-                    product=part.old_part,
-                    line__line_type=target_line_type,
-                ).select_related('product', 'line', 'process').order_by('plan_date').first()
-            )
             component_lt_days = 0
             component_switch_date = switch_date
-            if lt_sample:
-                lt_key = (lt_sample.product_id, lt_sample.line_id, lt_sample.process_id)
-                if lt_key not in lt_days_cache:
-                    lt_serializer = LineBacklogSerializer(instance=lt_sample)
-                    lt_days_cache[lt_key] = int(lt_serializer.get_total_lt_days(lt_sample) or 0)
-                component_lt_days = int(lt_days_cache[lt_key] or 0)
-                calendar_id = getattr(lt_sample.line, 'calendar_id', None) or default_calendar_id
+            component_lt_days, component_calendar_id = _resolve_engineering_change_component_lt_info(
+                part.case,
+                part.old_part,
+                target_line_type,
+                routing_lt_cache,
+            )
+            if component_lt_days > 0:
+                calendar_id = component_calendar_id or getattr(part.old_part.line, 'calendar_id', None) or default_calendar_id
                 component_switch_date = _shift_business_days(
                     calendar_id,
                     switch_date,
@@ -934,13 +1062,20 @@ class EngineeringChangeCaseRecalculateView(APIView):
         recalculated_pairs = 0
         effective_start_dates = {}
         for line_id in sorted(line_products_map.keys()):
-            effective_start_dt = _resolve_inventory_effective_start_date(line_id, today, end_date)
+            target_product_ids_for_line = sorted(line_products_map[line_id])
+            effective_start_dt = _resolve_inventory_effective_start_date(
+                line_id,
+                today,
+                end_date,
+                product_ids=target_product_ids_for_line,
+            )
             recalculate_inventory_for_line(
                 line_id,
                 effective_start_dt,
                 end_date,
                 include_progress=True,
                 line_final_only=False,
+                product_ids=target_product_ids_for_line,
             )
             effective_start_dates[str(line_id)] = str(effective_start_dt)
             recalculated_pairs += len(line_products_map[line_id])

@@ -13,7 +13,7 @@ from ..serializers_process_realtime import _resolve_product_process_line
 from quality.models_scrap import ScrapRecord, ScrapRecordDetail
 
 
-def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
+def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None, product_ids=None):
     """
     ScrapRecordとScrapRecordDetailから仕損数を集計し、LineBacklogに反映
 
@@ -25,7 +25,10 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
         line_id: 対象ラインID（Noneの場合は全ライン）
         start_date: 開始日
         end_date: 終了日
+        product_ids: 対象製品ID配列（指定時はその製品のみ集計）
     """
+    target_product_ids = {int(pid) for pid in (product_ids or []) if pid is not None}
+
     # まず対象期間・対象ラインを決めるために ScrapRecord を取得し、影響する line_id を集計する
     scrap_filter = {
         'disposition_status__in': ['PENDING', 'PARTIAL', 'REJECTED', 'APPROVED'],
@@ -34,6 +37,8 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
     }
     if start_date and end_date:
         scrap_filter['plan_date__range'] = [start_date, end_date]
+    if target_product_ids:
+        scrap_filter['product_id__in'] = list(target_product_ids)
 
     # 発生ラインで絞り込むと、前工程品が別ラインに計上されるケースを取りこぼすため、
     # line_id 指定時もフィルタしないで取得し、後段で actual_line で判定する。
@@ -61,6 +66,8 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
     }
     if start_date and end_date:
         detail_filter['scrap_record__plan_date__range'] = [start_date, end_date]
+    if target_product_ids:
+        detail_filter['product_id__in'] = list(target_product_ids)
 
     details = ScrapRecordDetail.objects.filter(**detail_filter).select_related('scrap_record', 'product')
     if not line_id:
@@ -76,6 +83,8 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
         reset_filter['line_id'] = line_id
     if start_date and end_date:
         reset_filter['plan_date__range'] = [start_date, end_date]
+    if target_product_ids:
+        reset_filter['product_id__in'] = list(target_product_ids)
 
     LineBacklog.objects.filter(**reset_filter).update(scrap_qty=0, scrap_adjust_qty=0)
     # 仕損由来の adjust_qty もリセット（他の調整との区別が難しいため注意）
@@ -98,6 +107,8 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
 
         if line_id and getattr(actual_line, 'id', actual_line) != line_id:
             # 指定ラインの再計算時は、そのラインに計上されるものだけ処理
+            continue
+        if target_product_ids and scrap.product_id not in target_product_ids:
             continue
 
         LineBacklog.objects.get_or_create(
@@ -135,6 +146,8 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None):
             continue
         if line_id and detail.line_id != line_id:
             # 対象ライン以外の子部品はスキップ（line_id 未指定時は全件）
+            continue
+        if target_product_ids and detail.product_id not in target_product_ids:
             continue
         # 自製品（親と同じ製品）はスキップ（scrap_qty で既に処理済み）
         if (detail.product_id == detail.scrap_record.product_id
@@ -1069,9 +1082,16 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
         LineBacklog.objects.bulk_update(backlogs_to_update, ['planned_stock_qty'])
 
 
-def recalculate_inventory_for_line(line_id, start_date, end_date, include_progress=True, line_final_only=False):
+def recalculate_inventory_for_line(
+    line_id,
+    start_date,
+    end_date,
+    include_progress=True,
+    line_final_only=False,
+    product_ids=None,
+):
     """
-    指定ラインの全製品について在庫を再計算
+    指定ラインの在庫を再計算
 
     Args:
         line_id: ラインID
@@ -1079,17 +1099,31 @@ def recalculate_inventory_for_line(line_id, start_date, end_date, include_progre
         end_date: 終了日
         include_progress: 進度も再計算するか（デフォルト: True）
         line_final_only: ライン最終品のみ計算するか（デフォルト: False）
+        product_ids: 対象製品ID配列（指定時はその製品のみ計算）
     """
     import logging
     import time
     logger = logging.getLogger(__name__)
+    target_product_ids = sorted({int(pid) for pid in (product_ids or []) if pid is not None})
 
     overall_start = time.perf_counter()
-    logger.info(f"在庫再計算開始: line_id={line_id}, {start_date} ~ {end_date}, line_final_only={line_final_only}")
+    logger.info(
+        "在庫再計算開始: line_id=%s, %s ~ %s, line_final_only=%s, product_count=%s",
+        line_id,
+        start_date,
+        end_date,
+        line_final_only,
+        len(target_product_ids) if target_product_ids else "ALL",
+    )
 
     # まず仕損数を集計
     scrap_start = time.perf_counter()
-    aggregate_scrap_to_backlog(line_id, start_date, end_date)
+    aggregate_scrap_to_backlog(
+        line_id,
+        start_date,
+        end_date,
+        product_ids=target_product_ids or None,
+    )
     logger.info("仕損集計時間: %.3fs", time.perf_counter() - scrap_start)
 
     firm_start = time.perf_counter()
@@ -1102,6 +1136,8 @@ def recalculate_inventory_for_line(line_id, start_date, end_date, include_progre
         line_id=line_id,
         plan_date__range=[start_date, end_date]
     )
+    if target_product_ids:
+        product_qs = product_qs.filter(product_id__in=target_product_ids)
     if line_final_only:
         product_qs = product_qs.filter(product__is_line_final_product=True)
     product_ids = list(product_qs.values_list('product_id', flat=True).distinct())
