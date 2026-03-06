@@ -250,6 +250,38 @@
             {{ t('processInput.noPlanHint') }}
           </div>
         </template>
+        <div
+          v-if="record.record_type === 'PRODUCTION' && (selectedCoproductNoticeLoading || selectedCoproductChildren.length)"
+          class="coproduct-notice"
+        >
+          <div v-if="selectedCoproductNoticeLoading" class="coproduct-notice__loading">
+            {{ t('processInput.coproductNotice.loading') }}
+          </div>
+          <template v-else>
+            <div class="coproduct-notice__title">
+              {{
+                t('processInput.coproductNotice.message', {
+                  code: selectedCoproductParentCode || record.product_code || '',
+                })
+              }}
+            </div>
+            <div class="coproduct-notice__label">
+              {{ t('processInput.coproductNotice.childrenLabel') }}
+            </div>
+            <div class="coproduct-notice__children">
+              <span
+                v-for="child in selectedCoproductChildren"
+                :key="child.product_id"
+                class="coproduct-notice__chip"
+              >
+                {{ child.product_code }}
+                <span v-if="child.product_name" class="coproduct-notice__chip-name">
+                  {{ child.product_name }}
+                </span>
+              </span>
+            </div>
+          </template>
+        </div>
       </div>
     </div>
 
@@ -563,6 +595,11 @@ const selectedOperatorAction = ref('')
 const startedProductIds = ref(new Set())
 const startedProductIdsLoaded = ref(false)
 const latestOperatorActionByProduct = ref(new Map())
+const selectedCoproductChildren = ref([])
+const selectedCoproductParentCode = ref('')
+const selectedCoproductNoticeLoading = ref(false)
+const bomTreeCache = new Map()
+let selectedCoproductNoticeRequestSeq = 0
 
 const record = ref({
   record_type: '',
@@ -1579,6 +1616,115 @@ const hasSelectedProduct = () => {
   return !!record.value.product_id || hasFilledText(record.value.product_code)
 }
 
+const findSelectedProductCandidate = () => {
+  const productId = String(record.value.product_id || '').trim()
+  if (!productId) return null
+
+  const candidates = [
+    findSelectedPlanTarget(),
+    ...(Array.isArray(displayProductList.value) ? displayProductList.value : []),
+    ...(Array.isArray(currentProductList.value) ? currentProductList.value : []),
+    ...(Array.isArray(allPlanProducts.value) ? allPlanProducts.value : []),
+    ...(Array.isArray(manualProducts.value) ? manualProducts.value : []),
+  ]
+
+  return (
+    candidates.find((item) => {
+      const candidateId = item?.product ?? item?.id
+      return candidateId != null && String(candidateId) === productId
+    }) || null
+  )
+}
+
+const clearSelectedCoproductNotice = () => {
+  selectedCoproductChildren.value = []
+  selectedCoproductParentCode.value = ''
+  selectedCoproductNoticeLoading.value = false
+}
+
+const invalidateSelectedCoproductNotice = () => {
+  selectedCoproductNoticeRequestSeq += 1
+  clearSelectedCoproductNotice()
+}
+
+const isStProductCode = (productCode) => {
+  return String(productCode || '').trim().toUpperCase().startsWith('ST')
+}
+
+const getBomTreeCached = async (productId) => {
+  const cacheKey = String(productId || '').trim()
+  if (!cacheKey) return null
+  if (bomTreeCache.has(cacheKey)) {
+    return bomTreeCache.get(cacheKey)
+  }
+  try {
+    const res = await api.bomService.getBomTree(productId)
+    const tree = res?.data || null
+    bomTreeCache.set(cacheKey, tree)
+    return tree
+  } catch (error) {
+    console.error('連産品BOM取得エラー:', error)
+    bomTreeCache.set(cacheKey, null)
+    return null
+  }
+}
+
+const loadSelectedCoproductNotice = async () => {
+  if (record.value.record_type !== 'PRODUCTION') {
+    invalidateSelectedCoproductNotice()
+    return
+  }
+
+  const productId = String(record.value.product_id || '').trim()
+  if (!productId) {
+    invalidateSelectedCoproductNotice()
+    return
+  }
+
+  const selectedProduct = findSelectedProductCandidate()
+  const productCode = String(selectedProduct?.product_code || record.value.product_code || '').trim()
+  if (productCode && !isStProductCode(productCode)) {
+    invalidateSelectedCoproductNotice()
+    return
+  }
+
+  const requestSeq = ++selectedCoproductNoticeRequestSeq
+  selectedCoproductNoticeLoading.value = true
+
+  try {
+    const tree = await getBomTreeCached(productId)
+    if (requestSeq !== selectedCoproductNoticeRequestSeq) return
+    if (!tree?.is_coproduct || !Array.isArray(tree.children) || tree.children.length === 0) {
+      clearSelectedCoproductNotice()
+      return
+    }
+
+    const childMap = new Map()
+    tree.children.forEach((child) => {
+      if (!child?.product_id) return
+      const key = String(child.product_id)
+      if (childMap.has(key)) return
+      childMap.set(key, {
+        product_id: child.product_id,
+        product_code: child.product_code || String(child.product_id),
+        product_name: child.product_name || '',
+      })
+    })
+
+    if (childMap.size === 0) {
+      clearSelectedCoproductNotice()
+      return
+    }
+
+    selectedCoproductParentCode.value = String(tree.product_code || productCode || '').trim()
+    selectedCoproductChildren.value = Array.from(childMap.values())
+  } finally {
+    if (requestSeq === selectedCoproductNoticeRequestSeq) {
+      selectedCoproductNoticeLoading.value = false
+    }
+  }
+}
+
 const hasEffectiveOperatorAction = () => {
   return hasFilledText(effectiveOperatorAction.value)
 }
@@ -2529,14 +2675,13 @@ const filterCoproductChildrenFromList = async (candidates) => {
 
   for (const parentId of parentIds) {
     try {
-      const res = await api.bomService.getBomTree(parentId)
-      const tree = res.data
+      const tree = await getBomTreeCached(parentId)
       if (!tree || !tree.is_coproduct) continue
       for (const ch of tree.children || []) {
         if (ch?.product_id) childIds.add(ch.product_id)
       }
     } catch (error) {
-      console.error('連産品BOM取得エラー:', error)
+      console.error('連産品候補除外エラー:', error)
     }
   }
 
@@ -2769,6 +2914,7 @@ watch(
   () => [record.value.product_id, record.value.product_code],
   () => {
     ensureScrapDefaults()
+    loadSelectedCoproductNotice()
   }
 )
 
@@ -3494,6 +3640,50 @@ label {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.coproduct-notice {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  background: #fffbeb;
+}
+.coproduct-notice__loading {
+  font-size: 12px;
+  color: #92400e;
+  font-weight: 600;
+}
+.coproduct-notice__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #92400e;
+  line-height: 1.5;
+}
+.coproduct-notice__label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #b45309;
+}
+.coproduct-notice__children {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.coproduct-notice__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid #fcd34d;
+  color: #78350f;
+  font-size: 12px;
+  font-weight: 700;
+}
+.coproduct-notice__chip-name {
+  font-weight: 500;
 }
 .product-toggle {
   margin-top: 0;
