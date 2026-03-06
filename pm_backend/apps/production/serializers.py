@@ -322,6 +322,8 @@ class StockAllocationSerializer(serializers.ModelSerializer):
     """在庫引当シリアライザー"""
     product_code = serializers.CharField(source='product.product_code', read_only=True)
     product_name = serializers.CharField(source='product.product_name', read_only=True)
+    product_line_name = serializers.SerializerMethodField()
+    product_supplier_name = serializers.SerializerMethodField()
     scrap_qty = serializers.SerializerMethodField()
     available_qty_net = serializers.SerializerMethodField()
     available_qty = serializers.DecimalField(
@@ -333,11 +335,23 @@ class StockAllocationSerializer(serializers.ModelSerializer):
     class Meta:
         model = StockAllocation
         fields = [
-            'id', 'product', 'product_code', 'product_name', 'location',
+            'id', 'product', 'product_code', 'product_name', 'product_line_name', 'product_supplier_name', 'location',
             'current_stock', 'reserved_qty', 'scrap_qty', 'available_qty', 'available_qty_net', 'min_stock_qty',
             'is_bottleneck', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'scrap_qty', 'available_qty', 'available_qty_net', 'created_at', 'updated_at']
+
+    def get_product_line_name(self, obj):
+        for item in getattr(obj.product, 'prefetched_bom_items', []):
+            if item.line:
+                return item.line.line_name
+        return ''
+
+    def get_product_supplier_name(self, obj):
+        for item in getattr(obj.product, 'prefetched_bom_items', []):
+            if item.supplier:
+                return item.supplier.supplier_name
+        return ''
 
     def get_scrap_qty(self, obj):
         agg = ProcessRealtimeRecord.objects.filter(

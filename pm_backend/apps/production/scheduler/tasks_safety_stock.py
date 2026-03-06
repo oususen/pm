@@ -110,9 +110,11 @@ def run_auto_safety_stock(task_name='AUTO_SAFETY_STOCK_INTERNAL'):
                 )
             )
             total_qty_by_product = defaultdict(Decimal)
+            day_count_by_product = defaultdict(int)
             for row in daily_rows:
                 demand_qty = _to_decimal(row.get('firm_day_qty')) + _to_decimal(row.get('forecast_day_qty'))
                 total_qty_by_product[row['product_id']] += demand_qty
+                day_count_by_product[row['product_id']] += 1
 
             allocations_by_product = defaultdict(list)
             for allocation in StockAllocation.objects.filter(product_id__in=target_product_ids).select_related('product'):
@@ -121,7 +123,8 @@ def run_auto_safety_stock(task_name='AUTO_SAFETY_STOCK_INTERNAL'):
             with transaction.atomic():
                 for product_id in target_product_ids:
                     total_qty = total_qty_by_product.get(product_id, Decimal('0'))
-                    avg_per_day = total_qty / Decimal(average_days_window)
+                    actual_days = day_count_by_product.get(product_id, average_days_window)
+                    avg_per_day = total_qty / Decimal(actual_days)
                     # 業務ルール: 自動算出結果が0でも最小在庫は最低1を保持する
                     safe_qty = _round_to_int(avg_per_day * Decimal(safety_days), min_value=1)
                     product_allocations = allocations_by_product.get(product_id, [])

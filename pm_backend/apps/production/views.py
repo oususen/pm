@@ -9,7 +9,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 import django_filters
-from django.db.models import Q, Max
+from django.db.models import Q, Max, Prefetch
 from django.db import transaction
 import logging
 import csv
@@ -3403,7 +3403,13 @@ class StockAllocationFilter(django_filters.FilterSet):
 
 class StockAllocationViewSet(viewsets.ModelViewSet):
     """在庫引当ViewSet"""
-    queryset = StockAllocation.objects.all().select_related('product')
+    queryset = StockAllocation.objects.all().select_related('product').prefetch_related(
+        Prefetch(
+            'product__bomitem_set',
+            queryset=BOMItem.objects.select_related('line', 'supplier'),
+            to_attr='prefetched_bom_items',
+        )
+    )
     serializer_class = StockAllocationSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = StockAllocationFilter

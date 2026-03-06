@@ -59,6 +59,8 @@
             <tr>
               <th>品番</th>
               <th>品名</th>
+              <th>加工先</th>
+              <th>購入先</th>
               <th>保管場所</th>
               <th class="text-right">現在在庫</th>
               <th class="text-right">引当済</th>
@@ -73,6 +75,8 @@
             <tr v-for="row in filteredRows" :key="row.id">
               <td>{{ row.product_code }}</td>
               <td>{{ row.product_name }}</td>
+              <td>{{ row.product_line_name }}</td>
+              <td>{{ row.product_supplier_name }}</td>
               <td>{{ row.location }}</td>
               <td class="text-right">{{ formatNumber(row.current_stock) }}</td>
               <td class="text-right">{{ formatNumber(row.reserved_qty) }}</td>
@@ -184,6 +188,8 @@ const downloadCsv = () => {
   const header = [
     'product_code',
     'product_name',
+    'product_line_name',
+    'product_supplier_name',
     'location',
     'current_stock',
     'reserved_qty',
@@ -196,6 +202,8 @@ const downloadCsv = () => {
     [
       row.product_code,
       row.product_name,
+      row.product_line_name,
+      row.product_supplier_name,
       row.location,
       row.current_stock,
       row.reserved_qty,
