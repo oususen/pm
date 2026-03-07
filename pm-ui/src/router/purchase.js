@@ -9,7 +9,7 @@ const purchase = [
     path: "/purchase/plan-input",
     name: "PurchasePlanInput",
     component: () => import("@/views/purchase/PurchasePlanInput.vue"),
-    meta: { pageTitle: "仕入れ計画", resource: "purchase" },
+    meta: { pageTitle: "仕入れ計画", manualPath: "仕入れ/仕入計画入力.md", resource: "purchase" },
   },
   {
     path: "/purchase/inventory",

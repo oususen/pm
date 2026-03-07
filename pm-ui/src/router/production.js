@@ -33,7 +33,7 @@ const production = [
     path: "/production/progress-only",
     name: "ProductionProgressOnly",
     component: () => import("@/views/production/ProductionProgressOnly.vue"),
-    meta: { pageTitle: "進度のみ", manualPath: "生産/進捗管理.md" },
+    meta: { pageTitle: "進度のみ", manualPath: "生産/進捗のみ.md" },
   },
   {
     path: "/production/plan-input",

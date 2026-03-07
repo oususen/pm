@@ -51,7 +51,9 @@
         <button class="btn" @click="resetRows" :disabled="processing || !rows.length">クリア</button>
         <button class="btn" @click="openChangeReasonDialog" :disabled="processing">計画変更</button>
         <button class="btn" @click="savePlan" :disabled="processing || !rows.length || !selectedLine">保存</button>
-        <button class="btn primary" @click="doPickup" :disabled="processing || !selectedLine">取り込み</button>
+        <button class="btn" @click="doDisplayOnly" :disabled="processing || !selectedLine">表示のみ</button>
+        <button class="btn" @click="doFetchOnly" :disabled="processing || !selectedLine">需要取込</button>
+        <button class="btn primary" @click="doPickup" :disabled="processing || !selectedLine">取込＋在庫計算</button>
         <button class="btn accent" @click="toggleProcessGantt" :disabled="processing || !selectedLine">
           {{ showProcessGantt ? '工程ガントを閉じる' : '工程ガント表示' }}
         </button>
@@ -296,7 +298,9 @@
       <button class="btn-secondary" @click="goBack">F1: 戻る</button>
       <button class="btn-secondary" @click="goForward">F2: 進む</button>
       <button class="btn-secondary" @click="resetRows" :disabled="processing">F3: クリア</button>
-      <button class="btn-secondary" @click="doPickup" :disabled="processing || !selectedLine">F4: 更新</button>
+      <button class="btn-secondary" @click="doDisplayOnly" :disabled="processing || !selectedLine">F4: 表示のみ</button>
+      <button class="btn-secondary" @click="doFetchOnly" :disabled="processing || !selectedLine">F6: 需要取込</button>
+      <button class="btn-secondary" @click="doPickup" :disabled="processing || !selectedLine">F8: 取込＋在庫計算</button>
       <button class="btn-secondary" @click="resetRows" :disabled="processing">F5: キャンセル</button>
       <button class="btn-secondary" @click="openExportDialog" :disabled="processing || !filteredRows.length">F10: 印刷</button>
     </div>
@@ -1665,6 +1669,12 @@ const onGlobalKeydown = (event) => {
     if (!processing.value) resetRows()
   } else if (event.key === 'F4') {
     event.preventDefault()
+    if (!processing.value && selectedLine.value) doDisplayOnly()
+  } else if (event.key === 'F6') {
+    event.preventDefault()
+    if (!processing.value && selectedLine.value) doFetchOnly()
+  } else if (event.key === 'F8') {
+    event.preventDefault()
     if (!processing.value && selectedLine.value) doPickup()
   } else if (event.key === 'F5') {
     event.preventDefault()
@@ -1681,22 +1691,7 @@ const onGlobalKeydown = (event) => {
   }
 }
 
-const doPickup = async () => {
-  if (!selectedLine.value) return
-  processing.value = true
-  try {
-    await api.lineBacklogs.pickup({
-      line_id: selectedLine.value,
-      start_date: startDate.value,
-      end_date: endDate.value,
-    })
-    await api.lineBacklogs.recalculateInventory({
-      line_id: selectedLine.value,
-      start_date: startDate.value,
-      end_date: endDate.value,
-      include_progress: false,
-      line_final_only: true,
-    })
+const fetchAndApplyData = async () => {
     const [backlogRes, planRes] = await Promise.all([
       api.lineBacklogs.getLineBacklogs({
         line: selectedLine.value,
@@ -1863,9 +1858,59 @@ const doPickup = async () => {
     // 日別設定を読み込み、未設定の日にデフォルト値をセット
     await loadDailySettings()
     applyDefaultToDailySettings()
+}
+
+const doPickup = async () => {
+  if (!selectedLine.value) return
+  processing.value = true
+  try {
+    await api.lineBacklogs.pickup({
+      line_id: selectedLine.value,
+      start_date: startDate.value,
+      end_date: endDate.value,
+    })
+    await api.lineBacklogs.recalculateInventory({
+      line_id: selectedLine.value,
+      start_date: startDate.value,
+      end_date: endDate.value,
+      include_progress: false,
+      line_final_only: true,
+    })
+    await fetchAndApplyData()
   } catch (e) {
     console.error('バックログ取り込みエラー', e)
     alert('取り込みに失敗しました。')
+  } finally {
+    processing.value = false
+  }
+}
+
+const doDisplayOnly = async () => {
+  if (!selectedLine.value) return
+  processing.value = true
+  try {
+    await fetchAndApplyData()
+  } catch (e) {
+    console.error('データ取得エラー', e)
+    alert('データの取得に失敗しました。')
+  } finally {
+    processing.value = false
+  }
+}
+
+const doFetchOnly = async () => {
+  if (!selectedLine.value) return
+  processing.value = true
+  try {
+    await api.lineBacklogs.pickup({
+      line_id: selectedLine.value,
+      start_date: startDate.value,
+      end_date: endDate.value,
+    })
+    await fetchAndApplyData()
+  } catch (e) {
+    console.error('データ取得エラー', e)
+    alert('データの取得に失敗しました。')
   } finally {
     processing.value = false
   }

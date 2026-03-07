@@ -36,13 +36,14 @@
         <button class="btn" @click="autoFillPlan" :disabled="processing || !rows.length || !canEdit">自動計画</button>
         <button class="btn" @click="openChangeReasonDialog" :disabled="processing || !canEdit">計画変更</button>
         <button class="btn" @click="savePlan" :disabled="processing || !rows.length || !selectedSupplier || !canEdit">保存</button>
-        <button class="btn primary" @click="doPickup" :disabled="processing || !selectedSupplier || !canEdit">取り込み</button>
-        <button class="btn" @click="recalculateInventoryOnly" :disabled="processing || !selectedSupplier || !canEdit">在庫再計算</button>
+        <button class="btn" @click="doDisplayOnly" :disabled="processing || !selectedSupplier">表示のみ</button>
+        <button class="btn" @click="doPickup" :disabled="processing || !selectedSupplier || !canEdit">需要取込</button>
+        <button class="btn primary" @click="doPickupWithInventory" :disabled="processing || !selectedSupplier || !canEdit">取込＋在庫計算</button>
       </div>
     </div>
 
     <div class="notice-bar">
-      ※ 需要は「取り込み」実行時の表示期間（開始日〜期間）で集計した値です。期間を変えて取り込み直すと需要が変わります。
+      ※ 需要は「需要取込」実行時の表示期間（開始日〜期間）で集計した値です。期間を変えて取り込み直すと需要が変わります。
     </div>
 
     <div class="grid-wrapper" ref="gridWrapperRef">
@@ -55,7 +56,7 @@
             <th
               v-for="(c, colIdx) in dateColumns"
               :key="c.key"
-              colspan="6"
+              colspan="7"
               class="date-head day-end"
               :class="c.dayClass"
             >
@@ -69,7 +70,8 @@
               <th class="mini" :class="c.dayClass">在庫</th>
               <th class="mini" :class="c.dayClass">計画</th>
               <th class="mini" :class="c.dayClass">計庫</th>
-              <th class="mini day-end" :class="c.dayClass">進度</th>
+              <th class="mini" :class="c.dayClass">進度</th>
+              <th class="mini day-end" :class="c.dayClass">計進</th>
             </template>
           </tr>
         </thead>
@@ -110,13 +112,16 @@
               <td class="num stock-plan" :class="c.dayClass">
                 <span class="readonly-value" :class="{ negative: isNegativeValue(getPlanStockDisplay(row, colIdx)) }">{{ displayValue(getPlanStockDisplay(row, colIdx)) }}</span>
               </td>
-              <td class="num progress day-end" :class="c.dayClass">
+              <td class="num progress" :class="c.dayClass">
                 <span class="readonly-value" :class="{ negative: isNegativeValue(getProgressDisplay(row, colIdx)) }">{{ displayValue(getProgressDisplay(row, colIdx)) }}</span>
+              </td>
+              <td class="num planned-progress day-end" :class="c.dayClass">
+                <span class="readonly-value" :class="{ negative: isNegativeValue(getPlannedProgressDisplay(row, colIdx)) }">{{ displayValue(getPlannedProgressDisplay(row, colIdx)) }}</span>
               </td>
             </template>
           </tr>
           <tr v-if="!filteredRows.length">
-            <td :colspan="3 + dateColumns.length * 6" class="no-data">データがありません</td>
+            <td :colspan="3 + dateColumns.length * 7" class="no-data">データがありません</td>
           </tr>
         </tbody>
       </table>
@@ -125,9 +130,11 @@
     <div class="footer-actions">
       <button class="btn-secondary">F1: 終了</button>
       <button class="btn-secondary">F3: クリア</button>
+      <button class="btn-secondary" @click="doDisplayOnly" :disabled="processing || !selectedSupplier">F4: 表示のみ</button>
       <button class="btn-secondary">F5: 備考</button>
+      <button class="btn-secondary" @click="doPickup" :disabled="processing || !selectedSupplier || !canEdit">F6: 需要取込</button>
+      <button class="btn-secondary" @click="doPickupWithInventory" :disabled="processing || !selectedSupplier || !canEdit">F8: 取込＋在庫計算</button>
       <button class="btn-secondary">F10: 印刷</button>
-      <button class="btn-secondary">F12: 更新</button>
     </div>
 
     <div v-if="showChangeReasonDialog" class="modal-overlay" @click.self="closeChangeReasonDialog">
@@ -219,7 +226,7 @@ const dateColumns = computed(() => {
 
 const tableMinWidth = computed(() => {
   const fixedColsWidth = 40 + 187 + 100
-  const perDayWidth = 270
+  const perDayWidth = 315
   return fixedColsWidth + dateColumns.value.length * perDayWidth
 })
 
@@ -246,7 +253,7 @@ const isPlanCellLocked = (dateKey) => {
 const initDaily = () => {
   const daily = {}
   dateColumns.value.forEach((c) => {
-    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, progress: 0, plan_base: 0, has_row: false }
+    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, progress: 0, planned_progress: 0, plan_base: 0, has_row: false }
   })
   return daily
 }
@@ -431,6 +438,27 @@ const getProgressDisplay = (row, colIdx) => {
   return ''
 }
 
+const getPlannedProgressDisplay = (row, colIdx) => {
+  if (!row || !row.daily) return ''
+  const cols = dateColumns.value
+  let carry = null
+  for (let i = 0; i <= colIdx; i += 1) {
+    const key = cols[i]?.key
+    if (!key) continue
+    const daily = row.daily[key] || {}
+    const raw = daily.planned_progress
+    const hasRow = daily.has_row === true
+    let value = raw
+    if (hasRow) {
+      carry = raw
+    } else if (carry !== null && carry !== undefined) {
+      value = carry
+    }
+    if (i === colIdx) return value
+  }
+  return ''
+}
+
 const focusCellInput = (rowIdx, colIdx) => {
   const root = gridWrapperRef.value
   if (!root) return
@@ -573,6 +601,92 @@ onMounted(async () => {
   }
 })
 
+const fetchAndApplyData = async (lineId) => {
+  const productIds = products.value.map((p) => p.id)
+  if (!productIds.length) {
+    alert('この仕入先の購入部品が見つかりません。')
+    rows.value = []
+    return
+  }
+
+  // LineBacklogデータを取得（sequence_no=0の基礎データレコードのみ使用）
+  const backlogRes = await api.lineBacklogs.getLineBacklogs({
+    line: lineId,
+    product__in: productIds.join(','),
+    plan_date__gte: startDate.value,
+    plan_date__lte: endDate.value,
+  })
+  const backlogs = backlogRes.data.results || backlogRes.data || []
+
+  // 製品ごとにグルーピング
+  const grouped = new Map()
+  products.value.forEach((p) => {
+    grouped.set(p.id, {
+      id: `prod-${p.id}`,
+      product_id: p.id,
+      product_code: p.product_code,
+      product_name: p.product_name,
+      process_id: purchaseProcessId.value,
+      daily: initDaily(),
+    })
+  })
+
+  backlogs.forEach((d) => {
+    if (!d.product) return
+    if (d.sequence_no !== 0) return
+    const row = grouped.get(d.product)
+    if (!row) return
+    const dateKey = d.plan_date
+    if (row.daily[dateKey]) {
+      row.daily[dateKey].demand = Number(d.order_qty || 0)
+      row.daily[dateKey].plan = d.plan_qty === null || d.plan_qty === undefined ? '' : d.plan_qty === 0 ? '' : d.plan_qty
+      row.daily[dateKey].actual = Number(d.actual_qty || 0)
+      row.daily[dateKey].stock = Number(d.stock_qty || 0)
+      row.daily[dateKey].plan_stock = Number(d.planned_stock_qty || 0)
+      row.daily[dateKey].progress = Number(d.progress_qty || 0)
+      row.daily[dateKey].planned_progress = Number(d.planned_progress_qty || 0)
+      row.daily[dateKey].plan_base = Number(d.plan_qty || 0)
+      row.daily[dateKey].has_row = true
+    }
+  })
+
+  rows.value = Array.from(grouped.values())
+}
+
+const doDisplayOnly = async () => {
+  if (!selectedSupplier.value) {
+    alert('仕入先を選択してください。')
+    return
+  }
+  processing.value = true
+  try {
+    await fetchProducts(selectedSupplier.value)
+    // pickupPurchaseを呼ばずにラインを解決する
+    let lineId = purchaseLineId.value
+    if (!lineId) {
+      const supplier = suppliers.value.find((s) => Number(s.id) === Number(selectedSupplier.value))
+      if (supplier?.supplier_code) {
+        const linesRes = await api.lines.getLines()
+        const lines = linesRes.data.results || linesRes.data || []
+        const purchaseLine = lines.find((l) => l.line_code === supplier.supplier_code)
+        lineId = purchaseLine?.id || ''
+        purchaseLineId.value = lineId
+      }
+    }
+    if (!lineId) {
+      alert('仕入れラインの解決に失敗しました。')
+      rows.value = []
+      return
+    }
+    await fetchAndApplyData(lineId)
+  } catch (e) {
+    console.error('仕入れ計画 表示のみエラー', e)
+    alert('データ取得に失敗しました。')
+  } finally {
+    processing.value = false
+  }
+}
+
 const doPickup = async () => {
   if (!canEdit.value) return
   if (!selectedSupplier.value) {
@@ -581,18 +695,7 @@ const doPickup = async () => {
   }
   processing.value = true
   try {
-    // 選択仕入先の製品リストを最新取得
     await fetchProducts(selectedSupplier.value)
-
-    // 対象製品のIDリストを取得
-    const productIds = products.value.map(p => p.id)
-
-    if (!productIds.length) {
-      alert('この仕入先の購入部品が見つかりません。')
-      rows.value = []
-      return
-    }
-
     const pickupRes = await api.lineBacklogs.pickupPurchase({
       supplier_id: selectedSupplier.value,
       start_date: startDate.value,
@@ -605,63 +708,16 @@ const doPickup = async () => {
       rows.value = []
       return
     }
-
-    // 既存のLineBacklogデータを取得（line_idは仕入先IDとして使用）
-    // 注：購買需要はpickup_purchaseで更新済み
-    const backlogRes = await api.lineBacklogs.getLineBacklogs({
-      line: purchaseLineId.value,
-      product__in: productIds.join(','),
-      plan_date__gte: startDate.value,
-      plan_date__lte: endDate.value,
-    })
-
-    const backlogs = backlogRes.data.results || backlogRes.data || []
-
-    // 製品ごとにグルーピング
-    const grouped = new Map()
-
-    // まず製品リストから空行を作成
-    products.value.forEach((p) => {
-      grouped.set(p.id, {
-        id: `prod-${p.id}`,
-        product_id: p.id,
-        product_code: p.product_code,
-        product_name: p.product_name,
-        process_id: purchaseProcessId.value,
-        daily: initDaily(),
-      })
-    })
-
-    // バックログデータがあれば上書き（sequence_no=0の基礎データレコードのみ使用）
-    backlogs.forEach((d) => {
-      if (!d.product) return
-      if (d.sequence_no !== 0) return  // 計画レコード（seq>0）はスキップ
-      const row = grouped.get(d.product)
-      if (!row) return
-
-      const dateKey = d.plan_date
-      if (row.daily[dateKey]) {
-        row.daily[dateKey].demand = Number(d.order_qty || 0)
-        row.daily[dateKey].plan = d.plan_qty === null || d.plan_qty === undefined ? '' : d.plan_qty === 0 ? '' : d.plan_qty
-        row.daily[dateKey].actual = Number(d.actual_qty || 0)
-        row.daily[dateKey].stock = Number(d.stock_qty || 0)
-        row.daily[dateKey].plan_stock = Number(d.planned_stock_qty || 0)
-        row.daily[dateKey].progress = Number(d.progress_qty || 0)
-        row.daily[dateKey].plan_base = Number(d.plan_qty || 0)
-        row.daily[dateKey].has_row = true
-      }
-    })
-
-    rows.value = Array.from(grouped.values())
+    await fetchAndApplyData(purchaseLineId.value)
   } catch (e) {
-    console.error('仕入れ計画 取り込みエラー', e)
+    console.error('仕入れ計画 需要取込エラー', e)
     alert('取り込みに失敗しました。')
   } finally {
     processing.value = false
   }
 }
 
-const recalculateInventoryOnly = async () => {
+const doPickupWithInventory = async () => {
   if (!canEdit.value) return
   if (!selectedSupplier.value) {
     alert('仕入先を選択してください。')
@@ -669,21 +725,28 @@ const recalculateInventoryOnly = async () => {
   }
   processing.value = true
   try {
-    const lineId = await resolvePurchaseLineId()
-    if (!lineId) {
-      alert('仕入れラインの解決に失敗しました。')
-      return
-    }
-    await api.lineBacklogs.recalculateInventory({
-      line_id: lineId,
+    await fetchProducts(selectedSupplier.value)
+    const pickupRes = await api.lineBacklogs.pickupPurchase({
+      supplier_id: selectedSupplier.value,
       start_date: startDate.value,
       end_date: endDate.value,
     })
-    await loadData()
-    alert('在庫再計算が完了しました。')
+    purchaseLineId.value = pickupRes?.data?.line_id || ''
+    purchaseProcessId.value = pickupRes?.data?.process_id || ''
+    if (!purchaseLineId.value || !purchaseProcessId.value) {
+      alert('仕入れラインの解決に失敗しました。')
+      rows.value = []
+      return
+    }
+    await api.lineBacklogs.recalculateInventory({
+      line_id: purchaseLineId.value,
+      start_date: startDate.value,
+      end_date: endDate.value,
+    })
+    await fetchAndApplyData(purchaseLineId.value)
   } catch (e) {
-    console.error('仕入れ在庫再計算エラー', e)
-    alert('在庫再計算に失敗しました。')
+    console.error('仕入れ計画 取込＋在庫計算エラー', e)
+    alert('取り込みに失敗しました。')
   } finally {
     processing.value = false
   }
