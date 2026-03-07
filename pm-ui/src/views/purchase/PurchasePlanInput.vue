@@ -407,6 +407,7 @@ const getStockDisplay = (row, colIdx) => {
     const raw = daily.stock
     const hasRow = daily.has_row === true
     let value = raw
+
     if (hasRow) {
       carry = raw
     } else if (carry !== null && carry !== undefined) {
@@ -442,6 +443,7 @@ const getPlannedProgressDisplay = (row, colIdx) => {
   if (!row || !row.daily) return ''
   const cols = dateColumns.value
   let carry = null
+  let delta = 0
   for (let i = 0; i <= colIdx; i += 1) {
     const key = cols[i]?.key
     if (!key) continue
@@ -449,12 +451,17 @@ const getPlannedProgressDisplay = (row, colIdx) => {
     const raw = daily.planned_progress
     const hasRow = daily.has_row === true
     let value = raw
+
     if (hasRow) {
       carry = raw
     } else if (carry !== null && carry !== undefined) {
       value = carry
     }
-    if (i === colIdx) return value
+    delta += getPlanDelta(daily)
+    if (i === colIdx) {
+      const baseValue = value === null || value === undefined ? 0 : Number(value)
+      return baseValue + delta
+    }
   }
   return ''
 }
