@@ -263,41 +263,20 @@ def _stocktake_sum_parent_shipments(backlog, pick_qty, shift_fn=None, step_cache
         if shift_fn:
             parent_date = shift_fn(backlog.plan_date, lead_days)
 
-        downstream_backlogs = LineBacklog.objects.filter(
+        # 集約して取得（仕損の重複計上防止、および実績/計画の混在対応）
+        downstream_groups = LineBacklog.objects.filter(
             product=parent_product,
             plan_date=parent_date,
+        ).values('product_id', 'line_id', 'process_id', 'plan_date').annotate(
+            actual_total=Sum('actual_qty'),
+            plan_total=Sum('plan_qty'),
         )
-        for downstream in downstream_backlogs:
-            use_qty = pick_qty(downstream)
+        for group in downstream_groups:
+            use_qty = pick_qty(group)
             if use_qty:
                 total_shipment += Decimal(str(use_qty)) * Decimal(str(qty_per))
 
     return total_shipment
-
-
-def _stocktake_calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None, step_cache=None):
-    """
-    棚卸専用: 計画在庫向け出庫（実績優先、なければ計画）。
-    """
-
-    def pick_qty(downstream):
-        actual = downstream.actual_qty or 0
-        scrap = _get_shipment_scrap_qty(
-            downstream.product_id,
-            downstream.line_id,
-            downstream.process_id,
-            downstream.plan_date
-        )
-        if actual > 0 or scrap > 0:
-            return actual + scrap
-        return downstream.plan_qty or 0
-
-    return _stocktake_sum_parent_shipments(
-        backlog,
-        pick_qty,
-        shift_fn=shift_fn,
-        step_cache=step_cache,
-    )
 
 
 def _stocktake_calculate_parent_actual_shipment_only(backlog, shift_fn=None, step_cache=None):
@@ -305,13 +284,13 @@ def _stocktake_calculate_parent_actual_shipment_only(backlog, shift_fn=None, ste
     棚卸専用: 計画在庫の過去分計算用。
     親の実績のみを集計し、計画値へのフォールバックを行わない。
     """
-    def pick_qty(downstream):
-        actual = downstream.actual_qty or 0
+    def pick_qty(group):
+        actual = group['actual_total'] or 0
         scrap = _get_shipment_scrap_qty(
-            downstream.product_id,
-            downstream.line_id,
-            downstream.process_id,
-            downstream.plan_date
+            group['product_id'],
+            group['line_id'],
+            group['process_id'],
+            group['plan_date']
         )
         return actual + scrap
 
@@ -328,13 +307,13 @@ def _stocktake_calculate_parent_planned_shipment(backlog, today, shift_fn, step_
     棚卸専用: 計画在庫向け出庫（計画 + 仕損）。
     """
 
-    def pick_qty(downstream):
-        plan = downstream.plan_qty or 0
+    def pick_qty(group):
+        plan = group['plan_total'] or 0
         scrap = _get_shipment_scrap_qty(
-            downstream.product_id,
-            downstream.line_id,
-            downstream.process_id,
-            downstream.plan_date
+            group['product_id'],
+            group['line_id'],
+            group['process_id'],
+            group['plan_date']
         )
         return plan + scrap
 
@@ -1580,9 +1559,12 @@ def calculate_pipeline_demand(
 
         return int(total_demand)
 
+    if today is None:
+        today = get_business_today()
+
     total_demand = Decimal('0')
     step_cache = {}
-    
+
     for bom_item in parent_bom_items:
         parent_product = bom_item.bom.parent_product
         if not parent_product:
@@ -1613,12 +1595,20 @@ def calculate_pipeline_demand(
             )
             
             parent_daily_demand = Decimal('0')
+            # scrapは(line_id, process_id)単位で1回だけ取得する
+            # sequence_noが複数ある場合に同じScrapRecordが重複カウントされるのを防ぐ
+            scrap_counted_keys = set()
             for bl in parent_backlogs:
                 # 実績があれば実績+仕損、なければ計画を採用
                 actual = bl.actual_qty or 0
-                scrap = _get_shipment_scrap_qty(
-                    bl.product_id, bl.line_id, bl.process_id, bl.plan_date
-                )
+                key = (bl.line_id, bl.process_id)
+                if key not in scrap_counted_keys:
+                    scrap = _get_shipment_scrap_qty(
+                        bl.product_id, bl.line_id, bl.process_id, bl.plan_date
+                    )
+                    scrap_counted_keys.add(key)
+                else:
+                    scrap = Decimal('0')
                 if target_date < today:
                     use_qty = actual + scrap
                 else:
