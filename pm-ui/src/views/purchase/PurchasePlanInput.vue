@@ -284,16 +284,18 @@ const savePlan = async () => {
     const process_id = r.process_id || purchaseProcessId.value
     dateColumns.value.forEach((c) => {
       const daily = r.daily[c.key]
-      const item = {
-        product_id: r.product_id,
-        process_id: process_id,
-        plan_date: c.key,
-        plan_qty: daily.plan === '' || daily.plan == null ? 0 : Number(daily.plan),
-        actual_qty: Number(daily.actual || 0),
-        stock_qty: Number(daily.stock || 0),
-        planned_stock_qty: Number(daily.plan_stock || 0),
+      const currentPlan = daily.plan === '' || daily.plan == null ? 0 : Number(daily.plan)
+      const originalPlan = toNumber(daily.plan_base)
+
+      // 変更があったデータのみを送信対象とする
+      if (currentPlan !== originalPlan) {
+        items.push({
+          product_id: r.product_id,
+          process_id: process_id,
+          plan_date: c.key,
+          plan_qty: currentPlan,
+        })
       }
-      items.push(item)
     })
   })
   if (!items.length) {
@@ -311,14 +313,26 @@ const savePlan = async () => {
     }
     const res = await api.lineBacklogs.save(payload)
     console.info('保存結果', res.data)
-    await api.lineBacklogs.recalculateInventory({
+
+    // 再計算の開始日は、画面の表示開始日と今日のうち、早い方（過去の方）を採用する
+    // これにより、未来の日付を表示して保存した場合でも、今日からの在庫推移が正しく再計算されるようにする
+    // JST(UTC+9)に変換し、8時区切りで業務日を算出
+    const nowJst = new Date(Date.now() + 9 * 60 * 60 * 1000)
+    if (nowJst.getUTCHours() < 8) nowJst.setUTCDate(nowJst.getUTCDate() - 1)
+    const today = nowJst.toISOString().slice(0, 10)
+    const recalcStartDate = startDate.value < today ? startDate.value : today
+
+    const recalcRes = await api.lineBacklogs.recalculateInventory({
       line_id: lineId,
-      start_date: startDate.value,
+      start_date: recalcStartDate,
       end_date: endDate.value,
     })
-    alert('保存しました。')
+    const productCount = recalcRes?.data?.product_count ?? 0
+    const recalcDays = Math.round((new Date(endDate.value) - new Date(recalcStartDate)) / 86400000) + 1
+    alert(`${items.length}件の計画を保存しました。\n${productCount}製品 × ${recalcDays}日分の在庫・進度を再計算しました。`)
     isEditUnlocked.value = false
     changeReason.value = ''
+    await fetchAndApplyData(lineId)
   } catch (e) {
     console.error('保存エラー', e)
     alert('保存に失敗しました。')
@@ -641,6 +655,9 @@ const fetchAndApplyData = async (lineId) => {
   backlogs.forEach((d) => {
     if (!d.product) return
     if (d.sequence_no !== 0) return
+    if (!purchaseProcessId.value && d.process) {
+      purchaseProcessId.value = d.process
+    }
     const row = grouped.get(d.product)
     if (!row) return
     const dateKey = d.plan_date
@@ -685,6 +702,15 @@ const doDisplayOnly = async () => {
       rows.value = []
       return
     }
+
+    if (!purchaseProcessId.value) {
+      const stepsRes = await api.routings.getRoutingSteps({ line: lineId })
+      const steps = stepsRes.data.results || stepsRes.data || []
+      if (steps.length > 0) {
+        purchaseProcessId.value = steps[0].process
+      }
+    }
+
     await fetchAndApplyData(lineId)
   } catch (e) {
     console.error('仕入れ計画 表示のみエラー', e)

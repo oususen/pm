@@ -3042,7 +3042,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         )
 
         try:
-            recalculate_inventory_for_line(
+            result = recalculate_inventory_for_line(
                 line_id,
                 effective_start_dt,
                 end_dt,
@@ -3050,7 +3050,15 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 line_final_only=line_final_only,
                 product_ids=requested_product_ids or None,
             )
-            return Response({'detail': 'Inventory recalculated successfully'})
+            record_count = LineBacklog.objects.filter(
+                line_id=line_id,
+                plan_date__range=[effective_start_dt, end_dt],
+            ).count()
+            return Response({
+                'detail': 'Inventory recalculated successfully',
+                'product_count': result.get('product_count', 0),
+                'record_count': record_count,
+            })
         except Exception as e:
             return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
