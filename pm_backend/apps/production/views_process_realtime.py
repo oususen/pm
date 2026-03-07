@@ -5,7 +5,7 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Sum, F
 from django.utils.dateparse import parse_date, parse_datetime
 from django.utils import timezone
 from django.conf import settings
@@ -63,6 +63,73 @@ def _adjust_backlog_actual_for_session(session_obj, delta_qty):
     )
     backlog.actual_qty = (backlog.actual_qty or 0) + int(delta_qty)
     backlog.save(update_fields=['actual_qty'])
+
+
+def _apply_delta_to_inventory_and_progress(session, delta):
+    """
+    実績変更に伴い、当日以降の在庫・進度・計画在庫・計進に差分を反映する。
+    親製品: 全てに delta 加算
+    子製品: 在庫・計画在庫に -(delta * bom_qty) 加算
+    """
+    if not delta or not session.product_id or not session.plan_date:
+        return
+
+    today = get_business_today()
+    if session.plan_date > today:
+        return
+
+    # 1. 親製品 (変更された製品)
+    # LineBacklog (line_id=session.process.line_id)
+    line = getattr(session.process, 'line', None)
+    if line:
+        LineBacklog.objects.filter(
+            line_id=line.id,
+            product_id=session.product_id,
+            plan_date__range=[session.plan_date, today],
+            sequence_no=0,
+        ).update(
+            stock_qty=F('stock_qty') + delta,
+            planned_stock_qty=F('planned_stock_qty') + delta,
+            progress_qty=F('progress_qty') + delta,
+            planned_progress_qty=F('planned_progress_qty') + delta
+        )
+
+    # 2. 子製品 (BOM構成品)
+    # 親 = session.product_id
+    # 子の在庫・計画在庫から (delta * quantity) を減算
+    boms = BOM.objects.filter(
+        parent_product_id=session.product_id,
+        is_active=True
+    ).prefetch_related('items')
+
+    for bom in boms:
+        for item in bom.items.all():
+            child_id = item.child_product_id
+            qty_per = item.quantity or 0
+            if not child_id or qty_per == 0:
+                continue
+            
+            child_delta = int(Decimal(str(delta)) * qty_per)
+            if child_delta == 0:
+                continue
+
+            # 在庫・計画在庫: 消費が増える(=在庫が減る)ので減算（累積のためplan_date〜today）
+            LineBacklog.objects.filter(
+                product_id=child_id,
+                plan_date__range=[session.plan_date, today],
+                sequence_no=0,
+            ).update(
+                stock_qty=F('stock_qty') - child_delta,
+                planned_stock_qty=F('planned_stock_qty') - child_delta
+            )
+            # actual_shipment_qty（実需表示に使用）: 消費実績なのでplan_dateのみ更新
+            LineBacklog.objects.filter(
+                product_id=child_id,
+                plan_date=session.plan_date,
+                sequence_no=0,
+            ).update(
+                actual_shipment_qty=F('actual_shipment_qty') + child_delta
+            )
 
 
 def _to_local_naive(dt):
@@ -481,6 +548,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             )
             if production_qty:
                 _adjust_backlog_actual_for_session(session, int(production_qty))
+                _apply_delta_to_inventory_and_progress(session, int(production_qty))
 
         serializer = ProcessWorkSessionSerializer(session)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -498,6 +566,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 ) else 0
                 if old_qty:
                     _adjust_backlog_actual_for_session(session, -old_qty)
+                    _apply_delta_to_inventory_and_progress(session, -old_qty)
 
                 ProcessRealtimeRecord.objects.filter(
                     record_type='PRODUCTION',
@@ -560,6 +629,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
 
             if delta:
                 _adjust_backlog_actual_for_session(session, delta)
+                _apply_delta_to_inventory_and_progress(session, delta)
 
         serializer = ProcessWorkSessionSerializer(session)
         return Response(serializer.data)

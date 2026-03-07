@@ -70,6 +70,7 @@ export const manualSections = [
       { title: "ミックス順序ボード", path: "生産/ミックス順序ボード.md" },
       { title: "ライン稼働監視", path: "生産/ライン稼働監視.md" },
       { title: "ライン作業記録", path: "生産/ライン作業記録.md" },
+      { title: "実績変更", path: "生産/実績変更.md" },
     ],
   },
   {
