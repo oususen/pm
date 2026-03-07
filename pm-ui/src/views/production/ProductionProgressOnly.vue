@@ -289,11 +289,15 @@ const loadHolidayColumns = async () => {
 const getBacklogParams = () => {
   const start = columns.value[0];
   const end = columns.value[columns.value.length - 1];
-  return {
+  const params = {
     plan_date__gte: start,
     plan_date__lte: end,
     include_order_split: true,
   };
+  if (lineFilter.value.trim()) params.line_search = lineFilter.value.trim();
+  if (processFilter.value.trim()) params.process_search = processFilter.value.trim();
+  if (productFilter.value.trim()) params.product_search = productFilter.value.trim();
+  return params;
 };
 
 const applyBacklogs = (payload) => {
@@ -311,13 +315,17 @@ const load = async () => {
   loading.value = true;
   error.value = "";
   try {
+    const demandParams = {
+      plan_date__gte: columns.value[0],
+      plan_date__lte: columns.value[columns.value.length - 1],
+      page_size: 5000,
+    };
+    if (lineFilter.value.trim()) demandParams.line_search = lineFilter.value.trim();
+    if (processFilter.value.trim()) demandParams.process_search = processFilter.value.trim();
+    if (productFilter.value.trim()) demandParams.product_search = productFilter.value.trim();
     const [backlogRes, demandRes] = await Promise.all([
       api.lineBacklogs.getLineBacklogs(getBacklogParams()),
-      api.lineDemands.list({
-        plan_date__gte: columns.value[0],
-        plan_date__lte: columns.value[columns.value.length - 1],
-        page_size: 5000,
-      }),
+      api.lineDemands.list(demandParams),
     ]);
     applyBacklogs(backlogRes.data || []);
     const demandPayload = demandRes?.data || [];

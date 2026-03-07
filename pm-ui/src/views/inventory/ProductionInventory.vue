@@ -261,11 +261,15 @@ const formatDayHeader = (dateStr) => {
 const getBacklogParams = () => {
   const start = columns.value[0];
   const end = columns.value[columns.value.length - 1];
-  return {
+  const params = {
     plan_date__gte: start,
     plan_date__lte: end,
     include_order_split: true,
   };
+  if (lineFilter.value.trim()) params.line_search = lineFilter.value.trim();
+  if (processFilter.value.trim()) params.process_search = processFilter.value.trim();
+  if (productFilter.value.trim()) params.product_search = productFilter.value.trim();
+  return params;
 };
 
 const rowDefs = [

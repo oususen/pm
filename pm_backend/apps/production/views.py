@@ -147,6 +147,42 @@ def _resolve_inventory_effective_start_date(line_id, requested_start_date, end_d
     return min(requested_start_date, stock_start_dt, planned_progress_start_dt)
 
 
+class LineDemandFilter(django_filters.FilterSet):
+    """LineDemandのカスタムフィルタ"""
+    plan_date__gte = django_filters.DateFilter(field_name='plan_date', lookup_expr='gte')
+    plan_date__lte = django_filters.DateFilter(field_name='plan_date', lookup_expr='lte')
+    line_search = django_filters.CharFilter(method='filter_line_search')
+    process_search = django_filters.CharFilter(method='filter_process_search')
+    product_search = django_filters.CharFilter(method='filter_product_search')
+
+    class Meta:
+        model = LineDemand
+        fields = ['line', 'routing_step', 'product', 'plan_date']
+
+    def filter_line_search(self, queryset, name, value):
+        if value:
+            return queryset.filter(
+                Q(line__line_code__icontains=value) | Q(line__line_name__icontains=value)
+            )
+        return queryset
+
+    def filter_process_search(self, queryset, name, value):
+        if value:
+            return queryset.filter(
+                Q(routing_step__process__process_code__icontains=value) |
+                Q(routing_step__process__process_name__icontains=value)
+            )
+        return queryset
+
+    def filter_product_search(self, queryset, name, value):
+        if value:
+            return queryset.filter(
+                Q(product__product_code__icontains=value) | Q(product__product_name__icontains=value) |
+                Q(product_code__icontains=value)
+            )
+        return queryset
+
+
 class LineDemandViewSet(viewsets.ModelViewSet):
     """ライン需要展開ViewSet"""
 
@@ -154,7 +190,7 @@ class LineDemandViewSet(viewsets.ModelViewSet):
     serializer_class = LineDemandSerializer
     pagination_class = None  # 小規模データ想定のためページングなしで返却
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['line', 'routing_step', 'product', 'plan_date']
+    filterset_class = LineDemandFilter
     search_fields = ['product_code', 'order_numbers']
     ordering_fields = ['plan_date', 'line', 'product_code', 'created_at']
     ordering = ['plan_date', 'line']
@@ -184,6 +220,9 @@ class LineBacklogFilter(django_filters.FilterSet):
     plan_date = django_filters.DateFilter(field_name='plan_date')
     plan_date__gte = django_filters.DateFilter(field_name='plan_date', lookup_expr='gte')
     plan_date__lte = django_filters.DateFilter(field_name='plan_date', lookup_expr='lte')
+    line_search = django_filters.CharFilter(method='filter_line_search')
+    process_search = django_filters.CharFilter(method='filter_process_search')
+    product_search = django_filters.CharFilter(method='filter_product_search')
 
     class Meta:
         model = LineBacklog
@@ -197,6 +236,30 @@ class LineBacklogFilter(django_filters.FilterSet):
                 return queryset.filter(product_id__in=product_ids)
             except (ValueError, TypeError):
                 return queryset.none()
+        return queryset
+
+    def filter_line_search(self, queryset, name, value):
+        """ラインコード/名称の部分一致フィルタ"""
+        if value:
+            return queryset.filter(
+                Q(line__line_code__icontains=value) | Q(line__line_name__icontains=value)
+            )
+        return queryset
+
+    def filter_process_search(self, queryset, name, value):
+        """工程コード/名称の部分一致フィルタ"""
+        if value:
+            return queryset.filter(
+                Q(process__process_code__icontains=value) | Q(process__process_name__icontains=value)
+            )
+        return queryset
+
+    def filter_product_search(self, queryset, name, value):
+        """品番/品名の部分一致フィルタ"""
+        if value:
+            return queryset.filter(
+                Q(product__product_code__icontains=value) | Q(product__product_name__icontains=value)
+            )
         return queryset
 
 
