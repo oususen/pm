@@ -19,6 +19,7 @@ from .inventory_calculator import (
     _get_shipment_scrap_qty,
     aggregate_scrap_to_backlog,
     _build_firm_order_map,
+    _get_max_parent_bom_lead_time,
 )
 
 logger = logging.getLogger(__name__)
@@ -299,6 +300,29 @@ def _stocktake_calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None, 
     )
 
 
+def _stocktake_calculate_parent_actual_shipment_only(backlog, shift_fn=None, step_cache=None):
+    """
+    棚卸専用: 計画在庫の過去分計算用。
+    親の実績のみを集計し、計画値へのフォールバックを行わない。
+    """
+    def pick_qty(downstream):
+        actual = downstream.actual_qty or 0
+        scrap = _get_shipment_scrap_qty(
+            downstream.product_id,
+            downstream.line_id,
+            downstream.process_id,
+            downstream.plan_date
+        )
+        return actual + scrap
+
+    return _stocktake_sum_parent_shipments(
+        backlog,
+        pick_qty,
+        shift_fn=shift_fn,
+        step_cache=step_cache,
+    )
+
+
 def _stocktake_calculate_parent_planned_shipment(backlog, today, shift_fn, step_cache=None):
     """
     棚卸専用: 計画在庫向け出庫（計画 + 仕損）。
@@ -557,6 +581,7 @@ def recalculate_inventory_from_stocktake(line_id, baseline_date, end_date):
         _stocktake_recalc_planned_stock(
             line_id, product_id, baseline_date, end_date,
             firm_map, today, get_prev_working_day, shift_working_days,
+            is_working_day=is_working_day,
         )
 
     return {
@@ -1176,7 +1201,8 @@ def _stocktake_recalc_stock(line_id, product_id, start_date, end_date,
 
 
 def _stocktake_recalc_planned_stock(line_id, product_id, start_date, end_date,
-                                     firm_map, today, get_prev_working_day, shift_working_days):
+                                     firm_map, today, get_prev_working_day, shift_working_days,
+                                     is_working_day=None):
     """
     棚卸専用: 計画在庫を日次で再計算。
 
@@ -1245,11 +1271,29 @@ def _stocktake_recalc_planned_stock(line_id, product_id, start_date, end_date,
                 planned_shipment = firm_qty
             else:
                 planned_shipment = firm_qty if firm_qty > 0 else Decimal(str(order_total))
-        elif is_line_final:
-            planned_shipment = Decimal(str(order_total))
+        elif is_line_final or bool(getattr(sample.product, 'is_purchase_product', False)) or getattr(sample, 'process_code', '') == 'PURCHASE':
+            # is_line_final または 購入品の場合
+            # LT後の日付が過去なら親の実績(Planフォールバックなし)、そうでなければ計需（order_total）
+            # LTは親BOMの最大LTを使用する（最も遅い消費に合わせる）
+            lt_days = _resolve_stocktake_lead_time_days(line_id, product_id, step_cache=step_cache)
+            if lt_days == 0:
+                lt_days = _get_max_parent_bom_lead_time(product_id)
+            lt_shifted_date = shift_working_days(plan_date, lt_days)
+            if lt_shifted_date < today:
+                planned_shipment = _stocktake_calculate_parent_actual_shipment_only(
+                    sample,
+                    shift_fn=shift_working_days,
+                    step_cache=step_cache,
+                )
+            else:
+                planned_shipment = Decimal(str(order_total))
         else:
-            if plan_date < today:
-                planned_shipment = _stocktake_calculate_parent_actual_or_plan_shipment(
+            # その他（通常の中間品）: 従来通り
+            # 過去は実績のみ(Planフォールバックなし)、未来は計画
+            lt_days = _resolve_stocktake_lead_time_days(line_id, product_id, step_cache=step_cache)
+            lt_shifted_date = shift_working_days(plan_date, lt_days)
+            if lt_shifted_date < today:
+                planned_shipment = _stocktake_calculate_parent_actual_shipment_only(
                     sample,
                     shift_fn=shift_working_days,
                     step_cache=step_cache,
@@ -1266,7 +1310,10 @@ def _stocktake_recalc_planned_stock(line_id, product_id, start_date, end_date,
         prev_day = get_prev_working_day(plan_date)
         prev_planned = planned_by_date.get(prev_day, last_planned)
 
-        if plan_date < today:
+        # 非稼働日はキャリーフォワード
+        if is_working_day is not None and not is_working_day(plan_date):
+            planned_stock = prev_planned
+        elif plan_date < today:
             planned_stock = prev_planned + actual_total - planned_shipment
         else:
             planned_stock = prev_planned + plan_total - planned_shipment
@@ -1481,8 +1528,17 @@ def calculate_pipeline_demand(
         is_final = bool(product_flags.get('is_final_product', False))
         is_line_final = bool(product_flags.get('is_line_final_product', False))
 
-    # 最終品/ライン最終品: 基準日+1..+LT の自需要を積算
-    if is_final or is_line_final:
+    # 親BOMを取得（複数親対応）
+    parent_bom_items = BOMItem.objects.filter(
+        child_product_id=product_id,
+        bom__is_active=True,
+        bom__is_coproduct=False
+    ).select_related('bom__parent_product')
+    
+    has_parents = parent_bom_items.exists()
+
+    # 最終品、または (ライン最終品 かつ 親がいない場合): 基準日+1..+LT の自需要を積算
+    if is_final or (is_line_final and not has_parents):
         lt = _resolve_final_product_lt_days(line_id, product_id)
         if lt <= 0:
             return 0
@@ -1514,19 +1570,15 @@ def calculate_pipeline_demand(
                 else:
                     use_qty = firm_qty if firm_qty > 0 else Decimal(str(order_total))
             else:
-                # ライン最終品は需要(order_qty)を採用
-                use_qty = Decimal(str(order_total))
+                # ライン最終品: 過去/今日は実需(firm_qty)優先、将来はorder_qty
+                if target_date <= today:
+                    use_qty = firm_qty if firm_qty > 0 else Decimal(str(order_total))
+                else:
+                    use_qty = Decimal(str(order_total))
 
             total_demand += use_qty
 
         return int(total_demand)
-
-    # 親BOMを取得（複数親対応）
-    parent_bom_items = BOMItem.objects.filter(
-        child_product_id=product_id,
-        bom__is_active=True,
-        bom__is_coproduct=False
-    ).select_related('bom__parent_product')
 
     total_demand = Decimal('0')
     step_cache = {}
@@ -1567,10 +1619,13 @@ def calculate_pipeline_demand(
                 scrap = _get_shipment_scrap_qty(
                     bl.product_id, bl.line_id, bl.process_id, bl.plan_date
                 )
-                if actual > 0 or scrap > 0:
+                if target_date < today:
                     use_qty = actual + scrap
                 else:
-                    use_qty = bl.plan_qty or 0
+                    if actual > 0 or scrap > 0:
+                        use_qty = actual + scrap
+                    else:
+                        use_qty = bl.plan_qty or 0
                 parent_daily_demand += Decimal(str(use_qty))
             
             total_demand += parent_daily_demand * qty_per
@@ -1643,4 +1698,3 @@ def initialize_planned_stock(line_ids, baseline_date):
             
     logger.info("initialize_planned_stock: updated %d records on %s", updated_count, baseline_date)
     return updated_count
-
