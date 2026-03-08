@@ -223,11 +223,13 @@ def generate_line_plans(line_id, demand_rows):
 
 def apply_purchase_plan_to_backlog(line_id, start_date, end_date, demand_rows):
     """
-    購買ラインは LineBacklog(sequence_no=0) の plan_qty に計画値を保存する。
-    需要取り込みで作成済みの基礎行を更新し、需要が消えた日は plan_qty を 0 に戻す。
+    購買ラインは LineBacklog(sequence_no=1) に plan_qty を保存する（1ロット固定）。
+    sequence_no=0 は基礎データ行（需要・実績・在庫・進度・調整）として保護し、触らない。
+    需要が消えた日の seq=1 レコードは削除する。
     """
     demand_map = {}
     process_map = {}
+    product_ids = set()
     for row in demand_rows:
         plan_date = row['plan_date']
         product_id = row['product_id']
@@ -235,11 +237,19 @@ def apply_purchase_plan_to_backlog(line_id, start_date, end_date, demand_rows):
         qty = int(Decimal(row.get('demand_qty_plan') or 0))
         demand_map[key] = max(qty, 0)
         process_map[key] = row.get('process_id')
+        product_ids.add(product_id)
 
+    # plan_id 生成用に製品コードを取得
+    product_code_map = {
+        p.id: p.product_code
+        for p in Product.objects.filter(id__in=product_ids).only('id', 'product_code')
+    }
+
+    # 期間内の seq=1 既存レコードを取得
     qs = LineBacklog.objects.filter(
         line_id=line_id,
         plan_date__range=[start_date, end_date],
-        sequence_no=0,
+        sequence_no=1,
     )
     existing_map = {(obj.product_id, obj.plan_date): obj for obj in qs}
 
@@ -247,38 +257,44 @@ def apply_purchase_plan_to_backlog(line_id, start_date, end_date, demand_rows):
     updated = 0
     to_update = []
     to_create = []
+    to_delete_ids = []
 
     for key, qty_val in demand_map.items():
+        product_id, plan_date = key
         obj = existing_map.pop(key, None)
+        product_code = product_code_map.get(product_id, str(product_id))
+        plan_id = f"{product_code}_{plan_date.strftime('%Y%m%d')}_{qty_val}_1"
         if obj is None:
             process_id = process_map.get(key)
             if not process_id:
                 continue
             to_create.append(LineBacklog(
-                plan_date=key[1],
+                plan_date=plan_date,
                 process_id=process_id,
-                product_id=key[0],
+                product_id=product_id,
                 line_id=line_id,
-                sequence_no=0,
+                sequence_no=1,
                 plan_qty=qty_val,
+                plan_id=plan_id,
             ))
             created += 1
             continue
-        if int(obj.plan_qty or 0) != qty_val:
+        if int(obj.plan_qty or 0) != qty_val or obj.plan_id != plan_id:
             obj.plan_qty = qty_val
+            obj.plan_id = plan_id
             to_update.append(obj)
             updated += 1
 
+    # 需要が消えた seq=1 レコードは削除（plan_qty=0 に戻さず削除）
     for obj in existing_map.values():
-        if int(obj.plan_qty or 0) != 0:
-            obj.plan_qty = 0
-            to_update.append(obj)
-            updated += 1
+        to_delete_ids.append(obj.id)
 
     if to_create:
         LineBacklog.objects.bulk_create(to_create, batch_size=1000)
     if to_update:
-        LineBacklog.objects.bulk_update(to_update, ['plan_qty'], batch_size=1000)
+        LineBacklog.objects.bulk_update(to_update, ['plan_qty', 'plan_id'], batch_size=1000)
+    if to_delete_ids:
+        LineBacklog.objects.filter(id__in=to_delete_ids).delete()
 
     return created, updated
 
@@ -388,7 +404,7 @@ class Command(BaseCommand):
                 delete_existing(line.id, line_start, line_end)
 
                 if line.line_type == 'PURCHASE':
-                    # 購買は sequence_no=0 基礎行に計画を保存する。
+                    # 購買は sequence_no=1 に計画を保存する（seq=0 は基礎データ行として保護）。
                     created_count, updated_count = apply_purchase_plan_to_backlog(
                         line.id, line_start, line_end, demand_rows
                     )

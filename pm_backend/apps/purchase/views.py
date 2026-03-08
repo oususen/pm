@@ -677,12 +677,12 @@ class PurchaseActualBulkItemsView(APIView):
             or Process.objects.filter(line=line).order_by('id').first()
         )
 
-        # 仕入計画は LineBacklog.plan_qty (sequence_no=0) に格納されている
+        # 仕入計画は LineBacklog.plan_qty (sequence_no=1) に格納されている
         backlogs = (
             LineBacklog.objects.filter(
                 line__line_code=supplier.supplier_code,
                 plan_date=plan_date,
-                sequence_no=0,
+                sequence_no=1,
                 plan_qty__gt=0,
             )
             .select_related('product')
