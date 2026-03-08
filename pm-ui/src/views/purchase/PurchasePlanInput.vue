@@ -294,6 +294,7 @@ const savePlan = async () => {
           process_id: process_id,
           plan_date: c.key,
           plan_qty: currentPlan,
+          sequence_no: 1,
         })
       }
     })
@@ -654,23 +655,27 @@ const fetchAndApplyData = async (lineId) => {
 
   backlogs.forEach((d) => {
     if (!d.product) return
-    if (d.sequence_no !== 0) return
+    if (d.sequence_no !== 0 && d.sequence_no !== 1) return
     if (!purchaseProcessId.value && d.process) {
       purchaseProcessId.value = d.process
     }
     const row = grouped.get(d.product)
     if (!row) return
     const dateKey = d.plan_date
-    if (row.daily[dateKey]) {
+    if (!row.daily[dateKey]) return
+    if (d.sequence_no === 0) {
+      // 基礎行: 需要・実績・在庫・進度
       row.daily[dateKey].demand = Number(d.order_qty || 0)
-      row.daily[dateKey].plan = d.plan_qty === null || d.plan_qty === undefined ? '' : d.plan_qty === 0 ? '' : d.plan_qty
       row.daily[dateKey].actual = Number(d.actual_qty || 0)
       row.daily[dateKey].stock = Number(d.stock_qty || 0)
       row.daily[dateKey].plan_stock = Number(d.planned_stock_qty || 0)
       row.daily[dateKey].progress = Number(d.progress_qty || 0)
       row.daily[dateKey].planned_progress = Number(d.planned_progress_qty || 0)
-      row.daily[dateKey].plan_base = Number(d.plan_qty || 0)
       row.daily[dateKey].has_row = true
+    } else if (d.sequence_no === 1) {
+      // 計画行: plan_qty のみ
+      row.daily[dateKey].plan = d.plan_qty === null || d.plan_qty === undefined ? '' : d.plan_qty === 0 ? '' : d.plan_qty
+      row.daily[dateKey].plan_base = Number(d.plan_qty || 0)
     }
   })
 
