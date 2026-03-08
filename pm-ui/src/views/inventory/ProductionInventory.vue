@@ -46,6 +46,7 @@
         >
           表示品番だけ再計算
         </button>
+        <button @click="exportToExcel" :disabled="!groups.length">Excel出力</button>
       </div>
     </div>
 
@@ -280,7 +281,7 @@ const rowDefs = [
   { key: "adjust", label: "調整" },
   { key: "scrap", label: "仕損" },
   { key: "stock", label: "在庫" },
-  { key: "planned_stock", label: "計画在庫" },
+  { key: "planned_stock", label: "計庫" },
   { key: "progress", label: "進度" },
 ];
 
@@ -1035,6 +1036,78 @@ onUpdated(() => {
   nextTick(updateFloatingScroll);
 });
 
+const escapeCsv = (val) => {
+  if (val === null || val === undefined) return '';
+  const str = String(val);
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
+};
+
+const formatDateSlash = (dateStr) => {
+  if (!dateStr) return dateStr;
+  const d = parseISODate(dateStr);
+  if (!d || Number.isNaN(d.getTime())) return dateStr;
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+};
+
+const exportToExcel = () => {
+  if (!groups.value.length) {
+    alert('出力対象のデータがありません。');
+    return;
+  }
+  const start = columns.value[0] || '';
+  const end = columns.value[columns.value.length - 1] || '';
+
+  const bom = '\ufeff';
+  const lines = [];
+  const filterLabel = [
+    lineFilter.value ? `ライン:${lineFilter.value}` : '',
+    processFilter.value ? `工程:${processFilter.value}` : '',
+    productFilter.value ? `品番:${productFilter.value}` : '',
+  ].filter(Boolean).join(' / ') || '（フィルタなし）';
+  lines.push([escapeCsv('フィルタ'), escapeCsv(filterLabel)].join(','));
+  lines.push([escapeCsv('期間'), escapeCsv(`${start} ～ ${end}`)].join(','));
+  lines.push('');
+
+  const headerRow = ['ライン', '工程コード', '工程名', '品番', '品名', '項目', ...columns.value.map(formatDateSlash)];
+  lines.push(headerRow.map(escapeCsv).join(','));
+
+  for (const g of groups.value) {
+    rowDefs.forEach((row, idx) => {
+      const isFirst = idx === 0;
+      const lineLabel = isFirst ? (`${g.line_code || ''}${g.line_name ? ' ' + g.line_name : ''}`.trim()) : '';
+      const cells = [
+        lineLabel,
+        isFirst ? getDisplayProcessCode(g) : '',
+        isFirst ? getDisplayProcessName(g) : '',
+        isFirst ? (g.product_code || '') : '',
+        isFirst ? (g.product_name || '') : '',
+        row.label,
+        ...columns.value.map((d) => {
+          const val = getValue(g, d, row.key);
+          if (val === null || val === undefined || val === '') return '';
+          const num = Number(val);
+          return Number.isNaN(num) ? '' : num;
+        }),
+      ];
+      lines.push(cells.map(escapeCsv).join(','));
+    });
+  }
+
+  const csvContent = bom + lines.join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const filterSuffix = [lineFilter.value, processFilter.value, productFilter.value]
+    .filter(Boolean).join('_') || 'all';
+  link.href = url;
+  link.download = `在庫残量一覧_${filterSuffix}_${start}_${end}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
 // 画面を開いた時点ではデータを取得せず、フィルター入力後に更新ボタンで取得
 </script>
 
@@ -1141,6 +1214,9 @@ onUpdated(() => {
   padding: 6px 8px;
   text-align: right;
   min-width: 80px;
+}
+.day-col {
+  min-width: 54px !important;
 }
 .matrix-table thead th {
   position: sticky;
