@@ -9,7 +9,7 @@ const orders = [
     path: "/orders/kubota-naiji-analysis",
     name: "KubotaNaijiAnalysis",
     component: () => import("@/views/orders/KubotaNaijiAnalysis.vue"),
-    meta: { pageTitle: "クボタ内示変化推移分析", resource: "orders" },
+    meta: { pageTitle: "クボタ内示変化推移分析", manualPath: "受注/クボタ内示変化推移分析.md", resource: "orders" },
   },
   {
     path: "/orders",

@@ -119,6 +119,46 @@
             </div>
           </div>
 
+          <!-- 収束安定期間ブロック -->
+          <div class="summary-block">
+            <div class="block-title">収束安定期間（内示＝確定が続いた日数）</div>
+            <div class="block-rows">
+              <div class="block-note" style="margin-bottom:6px;">
+                ※ 各納期について、内示が確定値と一致してから納期まで連続して変わらなかった日数
+              </div>
+              <div class="block-row highlight-row">
+                <span class="block-label">平均</span>
+                <span class="block-val">
+                  {{ analysisData.period_summary.stable_days_mean != null ? analysisData.period_summary.stable_days_mean + ' 日' : '—' }}
+                </span>
+              </div>
+              <div class="block-row">
+                <span class="block-label">最短</span>
+                <span class="block-val">
+                  {{ analysisData.period_summary.stable_days_min != null ? analysisData.period_summary.stable_days_min + ' 日' : '—' }}
+                  <small v-if="analysisData.period_summary.stable_days_min_date" class="diff-date">
+                    （{{ analysisData.period_summary.stable_days_min_date }}）
+                  </small>
+                </span>
+              </div>
+              <div class="block-row">
+                <span class="block-label">最長</span>
+                <span class="block-val">
+                  {{ analysisData.period_summary.stable_days_max != null ? analysisData.period_summary.stable_days_max + ' 日' : '—' }}
+                  <small v-if="analysisData.period_summary.stable_days_max_date" class="diff-date">
+                    （{{ analysisData.period_summary.stable_days_max_date }}）
+                  </small>
+                </span>
+              </div>
+              <div class="block-row">
+                <span class="block-label">対象納期数</span>
+                <span class="block-val">
+                  {{ analysisData.period_summary.stable_days_count != null ? analysisData.period_summary.stable_days_count + ' 件' : '—' }}
+                </span>
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
 

@@ -566,6 +566,44 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             if has_shortage:
                 n_dates_shortage += 1
 
+        # ---- 収束安定期間（内示が確定値と一致してから納期まで何日間） ----
+        # 各納期について、最後に連続して確定値と一致し始めた日から納期までの日数
+        stable_days_list = []  # (days, due_date_str)
+        for ds in all_due_dates:
+            firm_qty = firm_quantities.get(ds)
+            if firm_qty is None:
+                continue
+            due_date_obj = date.fromisoformat(ds)
+            current_streak_start = None
+            for sf in ordered_files:
+                if ds not in snapshots_map[sf]:
+                    continue
+                qty = snapshots_map[sf][ds]
+                snap_date = snapshot_dates[sf].date()
+                if abs(qty - firm_qty) < 0.5:  # 一致（小数誤差考慮）
+                    if current_streak_start is None:
+                        current_streak_start = snap_date
+                else:
+                    current_streak_start = None  # 不一致でリセット
+            if current_streak_start is not None:
+                days = (due_date_obj - current_streak_start).days
+                if days >= 0:
+                    stable_days_list.append((days, ds))
+
+        if stable_days_list:
+            days_vals = [d for d, _ in stable_days_list]
+            stable_days_mean = round(sum(days_vals) / len(days_vals), 1)
+            _min_entry = min(stable_days_list, key=lambda x: x[0])
+            _max_entry = max(stable_days_list, key=lambda x: x[0])
+            stable_days_min = _min_entry[0]
+            stable_days_min_date = _min_entry[1]
+            stable_days_max = _max_entry[0]
+            stable_days_max_date = _max_entry[1]
+            stable_days_count = len(stable_days_list)
+        else:
+            stable_days_mean = stable_days_min = stable_days_min_date = None
+            stable_days_max = stable_days_max_date = stable_days_count = None
+
         import math
         n = len(all_errors)
         if n > 0:
@@ -613,6 +651,12 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             'safety_stock_90': ss_90,
             'safety_stock_95': ss_95,
             'safety_stock_99': ss_99,
+            'stable_days_mean': stable_days_mean,       # 収束安定期間 平均日数
+            'stable_days_min': stable_days_min,         # 収束安定期間 最短日数
+            'stable_days_min_date': stable_days_min_date, # 最短が発生した納期
+            'stable_days_max': stable_days_max,         # 収束安定期間 最長日数
+            'stable_days_max_date': stable_days_max_date, # 最長が発生した納期
+            'stable_days_count': stable_days_count,     # 収束確認できた納期数
         }
 
         return Response({
