@@ -455,7 +455,7 @@
                 <th class="cat-error">平均差</th>
                 <th class="cat-error">σ</th>
                 <th class="cat-error">スナップ数</th>
-                <th class="cat-error">納期数</th>
+                <th class="cat-error">分析納期数</th>
                 <th class="cat-shortage">過小率%</th>
                 <th class="cat-shortage">最大過小量</th>
                 <th class="cat-safety">90%</th>
