@@ -172,7 +172,7 @@
             <th class="col-name">品名</th>
             <th class="col-qty">計画数</th>
             <th class="col-qty">入荷数</th>
-            <th class="col-remarks">備考</th>
+            <th v-for="dc in dateColumns" :key="dc.key" class="col-date">{{ dc.label }}</th>
             <th class="col-status"></th>
           </tr>
         </thead>
@@ -211,9 +211,12 @@
             <td class="col-qty">
               <input v-model.number="row.qty" type="number" min="0" step="1" class="qty-input" />
             </td>
-            <td class="col-remarks">
-              <input v-model.trim="row.remarks" type="text" class="remarks-input" />
-            </td>
+            <td
+              v-for="dc in dateColumns"
+              :key="dc.key"
+              class="col-date text-right"
+              :class="{ 'cell-actual': row.actualsByDate[dc.key] > 0 }"
+            >{{ row.actualsByDate[dc.key] > 0 ? row.actualsByDate[dc.key].toLocaleString() : '' }}</td>
             <td class="col-status">
               <span v-if="row.result === 'ok'" class="icon-ok">✓</span>
               <span v-else-if="row.result === 'error'" class="icon-error" :title="row.error">×</span>
@@ -496,6 +499,22 @@ const bulkProcessId = ref('')
 const bulkRows = ref([])
 const bulkSubmitting = ref(false)
 
+// 直近14日分の日付列（計画日±7日）
+const dateColumns = computed(() => {
+  const cols = []
+  const base = bulkPlanDate.value ? new Date(bulkPlanDate.value.replace(/\//g, '-')) : new Date()
+  if (isNaN(base.getTime())) return cols
+  for (let i = -7; i <= 7; i++) {
+    const d = new Date(base)
+    d.setDate(base.getDate() + i)
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    cols.push({ key: `${y}-${m}-${day}`, label: `${d.getMonth() + 1}/${d.getDate()}` })
+  }
+  return cols
+})
+
 const createBulkRow = (opts = {}) => ({
   barcode: opts.productCode || '',
   productCode: opts.productCode || '',
@@ -508,7 +527,7 @@ const createBulkRow = (opts = {}) => ({
   resolved: opts.resolved || false,
   planQty: opts.planQty || 0,
   qty: null,
-  remarks: '',
+  actualsByDate: opts.actualsByDate || {},
   error: '',
   result: '',
 })
@@ -561,6 +580,7 @@ const loadBulkItems = async () => {
         lineId: item.line_id ? String(item.line_id) : bulkLineId.value,
         processId: item.process_id ? String(item.process_id) : bulkProcessId.value,
         planQty: item.plan_qty || 0,
+        actualsByDate: item.actuals_by_date || {},
         resolved: true,
       })
     )
@@ -687,7 +707,6 @@ const submitBulk = async () => {
         supplier_id: bulkSupplierId.value ? Number(bulkSupplierId.value) : null,
         line_id: row.lineId ? Number(row.lineId) : (bulkLineId.value ? Number(bulkLineId.value) : null),
         operator_name: operatorName.value || '',
-        remarks: row.remarks || '',
       })
       row.result = 'ok'
       successCount++
@@ -850,8 +869,9 @@ onMounted(async () => {
 .col-code { width: 180px; }
 .col-name { }
 .col-qty { width: 80px; }
-.col-remarks { }
+.col-date { width: 46px; text-align: center; font-size: 11px; white-space: nowrap; }
 .col-status { width: 36px; text-align: center; }
+.cell-actual { background: #d4edda; font-weight: 700; color: #155724; }
 .text-right { text-align: right; }
 .code-input { width: 100%; border: 1px solid #9ca3af; background: #f5f2bc; padding: 3px 5px; font-size: 12px; box-sizing: border-box; }
 .code-input[readonly] { background: #e6e6e6; }

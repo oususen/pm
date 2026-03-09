@@ -702,10 +702,32 @@ class PurchaseActualBulkItemsView(APIView):
                     'process_id': process.id if process else None,
                     'line_id': line.id,
                     'plan_qty': 0,
-                    'actual_qty': 0,
+                    'actuals_by_date': {},
                 }
             product_map[pid]['plan_qty'] += int(b.plan_qty or 0)
-            product_map[pid]['actual_qty'] += int(b.actual_qty or 0)
+
+        # 直近納入実績: 計画日±7日のsequence_no=0行からactual_qtyを取得
+        range_start = plan_date - timedelta(days=7)
+        range_end = plan_date + timedelta(days=7)
+        actual_backlogs = (
+            LineBacklog.objects.filter(
+                line__line_code=supplier.supplier_code,
+                plan_date__gte=range_start,
+                plan_date__lte=range_end,
+                sequence_no=0,
+                actual_qty__gt=0,
+            )
+            .select_related('product')
+        )
+        for ab in actual_backlogs:
+            if not ab.product:
+                continue
+            pid = ab.product_id
+            if pid not in product_map:
+                continue  # 計画にない品目は除外
+            date_str = ab.plan_date.strftime('%Y-%m-%d')
+            existing = product_map[pid]['actuals_by_date'].get(date_str, 0)
+            product_map[pid]['actuals_by_date'][date_str] = existing + int(ab.actual_qty or 0)
 
         items = sorted(product_map.values(), key=lambda x: x['product_code'])
 
