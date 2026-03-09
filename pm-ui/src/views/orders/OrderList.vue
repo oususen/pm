@@ -82,7 +82,7 @@
             <td>{{ order.status_display }}</td>
             <td>
               <button @click="viewDetails(order)" class="btn-sm">詳細</button>
-              <button @click="confirmDelete(order)" class="btn-sm btn-danger">削除</button>
+              <button v-if="canDelete" @click="confirmDelete(order)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
         </tbody>
@@ -141,6 +141,18 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
+
+const canDelete = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_superuser) return true
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  const entry = permissions.find((item) => item.resource === 'orders.list')
+  if (entry) return Boolean(entry.can_edit)
+  return hasPermission(user, 'orders', 'edit')
+})
 
 const orders = ref([])
 const showDetailsDialog = ref(false)
