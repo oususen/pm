@@ -94,7 +94,7 @@ const tiles = computed(() => [
   {
     key: "kubota_analysis",
     to: "/orders/kubota-naiji-analysis",
-    label: "クボタ内示<br>変化推移分析",
+    label: "クボタ内示分析",
     icon: "📊",
     required: "view",
     resource: "orders.kubota_analysis",
