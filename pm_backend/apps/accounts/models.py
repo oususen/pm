@@ -163,6 +163,10 @@ class UserPermission(models.Model):
     RESOURCE_CHOICES = [
         ('dashboard', 'ダッシュボード'),
         ('orders', '受注'),
+        ('orders.list', '受注: 受注一覧'),
+        ('orders.csv_import', '受注: 受注取込'),
+        ('orders.kubota_analysis', '受注: クボタ内示変化推移分析'),
+        ('orders.line_expand', '受注: ライン展開'),
         ('production', '生産'),
         ('production.process_input', '生産: 工程作業入力'),
         ('production.record_edit', '生産: 実績変更'),
