@@ -167,13 +167,16 @@
       <table class="bulk-table">
         <thead>
           <tr>
-            <th class="col-no">#</th>
-            <th class="col-code">品番</th>
-            <th class="col-name">品名</th>
-            <th class="col-qty">計画数</th>
-            <th class="col-qty">入荷数</th>
+            <th class="col-no" rowspan="2">#</th>
+            <th class="col-code" rowspan="2">品番</th>
+            <th class="col-name" rowspan="2">品名</th>
+            <th class="col-qty" rowspan="2">計画数</th>
+            <th class="col-qty" rowspan="2">入荷数</th>
+            <th :colspan="dateColumns.length" class="col-date-group">直近納入実績</th>
+            <th class="col-status" rowspan="2"></th>
+          </tr>
+          <tr>
             <th v-for="dc in dateColumns" :key="dc.key" class="col-date">{{ dc.label }}</th>
-            <th class="col-status"></th>
           </tr>
         </thead>
         <tbody>
@@ -869,6 +872,7 @@ onMounted(async () => {
 .col-code { width: 180px; }
 .col-name { }
 .col-qty { width: 80px; }
+.col-date-group { background: #3a5a6e; text-align: center; font-size: 11px; padding: 2px 4px; }
 .col-date { width: 46px; text-align: center; font-size: 11px; white-space: nowrap; }
 .col-status { width: 36px; text-align: center; }
 .cell-actual { background: #d4edda; font-weight: 700; color: #155724; }
