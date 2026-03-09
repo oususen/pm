@@ -22,4 +22,13 @@ export const createStagingAPI = (client) => ({
   getKubotaNaijiAnalysis(params) {
     return client.get('/stg-order-raw/kubota_naiji_analysis/', { params })
   },
+  getKubotaNaijiBatchPreview(params) {
+    return client.get('/stg-order-raw/kubota_naiji_batch_preview/', { params })
+  },
+  downloadKubotaNaijiBatchReport(params) {
+    return client.get('/stg-order-raw/kubota_naiji_batch_report/', {
+      params,
+      responseType: 'arraybuffer',
+    })
+  },
 })

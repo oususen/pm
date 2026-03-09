@@ -338,6 +338,204 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    @staticmethod
+    def _compute_naiji_summary(product_code, start_date, end_date):
+        """製品1件の内示分析サマリーを計算して返す。
+
+        Returns: dict (period_summary と同じキー構成) + 'snapshot_count', 'product_name'
+        """
+        from datetime import date
+        import statistics
+        from django.db.models import Sum as _Sum
+        from masters.models import Calendar as _Calendar
+        from orders.utils.calendar_utils import WorkingDayCalculator
+
+        # 製品名取得
+        first = StgOrderRawKubota.objects.filter(
+            product_code=product_code, data_no='36', parse_status='PARSED'
+        ).values('product_name').first()
+        product_name = first['product_name'] if first else ''
+
+        qs = (
+            StgOrderRawKubota.objects
+            .filter(product_code=product_code, data_no='36', parse_status='PARSED')
+            .order_by('created_at', 'id')
+        )
+
+        def _parse_date_str(date_str):
+            s = str(date_str).strip()
+            try:
+                if len(s) == 5 and s.isdigit():
+                    y = int(s[0]); mm = int(s[1:3]); dd = int(s[3:5])
+                    return date(2020 + y, mm, dd)
+                if len(s) == 6 and s.isdigit():
+                    yy = int(s[:2]); mm = int(s[2:4]); dd = int(s[4:6])
+                    return date(2000 + yy, mm, dd)
+            except (ValueError, IndexError):
+                pass
+            return None
+
+        snapshots_map = {}
+        snapshot_dates = {}
+        for raw in qs:
+            if not raw.date_headers or not raw.quantities:
+                continue
+            sf = raw.source_file
+            if sf not in snapshots_map:
+                snapshots_map[sf] = {}
+                snapshot_dates[sf] = raw.created_at
+            for dh, qty_str in zip(raw.date_headers, raw.quantities):
+                due_date = _parse_date_str(dh)
+                if not due_date:
+                    continue
+                if start_date and due_date < start_date:
+                    continue
+                if end_date and due_date > end_date:
+                    continue
+                try:
+                    qty = float(qty_str) if qty_str and str(qty_str).strip() else 0.0
+                except (ValueError, TypeError):
+                    qty = 0.0
+                ds = due_date.isoformat()
+                snapshots_map[sf][ds] = snapshots_map[sf].get(ds, 0.0) + qty
+
+        try:
+            kubota_cal = _Calendar.objects.get(calendar_code='kubota_muke')
+        except _Calendar.DoesNotExist:
+            kubota_cal = None
+        _wdc = WorkingDayCalculator(kubota_cal)
+
+        all_due_dates = sorted({
+            ds
+            for qtys in snapshots_map.values()
+            for ds in qtys.keys()
+            if _wdc.is_working_day(date.fromisoformat(ds))
+        })
+
+        ordered_files = sorted(snapshots_map.keys(), key=lambda f: snapshot_dates[f])
+
+        firm_qs = OrderLine.objects.filter(
+            order__order_type='FIRM', order__status='OPEN', product_code=product_code,
+        )
+        if start_date:
+            firm_qs = firm_qs.filter(due_date__gte=start_date)
+        if end_date:
+            firm_qs = firm_qs.filter(due_date__lte=end_date)
+        firm_quantities = {}
+        for row in firm_qs.values('due_date').annotate(total_qty=_Sum('quantity')):
+            firm_quantities[row['due_date'].isoformat()] = float(row['total_qty'])
+
+        all_errors = []
+        n_dates_with_firm = 0
+        n_dates_shortage = 0
+        _max_diff_val = _max_diff_date = _min_diff_val = _min_diff_date = None
+
+        for ds in all_due_dates:
+            firm_qty = firm_quantities.get(ds)
+            if firm_qty is None:
+                continue
+            n_dates_with_firm += 1
+            qty_series = [snapshots_map[sf][ds] for sf in ordered_files if ds in snapshots_map[sf]]
+            if not qty_series:
+                continue
+            has_shortage = False
+            for q in qty_series:
+                err = q - firm_qty
+                all_errors.append(err)
+                if _max_diff_val is None or err > _max_diff_val:
+                    _max_diff_val = err; _max_diff_date = ds
+                if _min_diff_val is None or err < _min_diff_val:
+                    _min_diff_val = err; _min_diff_date = ds
+                if q < firm_qty:
+                    has_shortage = True
+            if has_shortage:
+                n_dates_shortage += 1
+
+        stable_days_list = []
+        for ds in all_due_dates:
+            firm_qty = firm_quantities.get(ds)
+            if firm_qty is None:
+                continue
+            due_date_obj = date.fromisoformat(ds)
+            current_streak_start = None
+            for sf in ordered_files:
+                if ds not in snapshots_map[sf]:
+                    continue
+                qty = snapshots_map[sf][ds]
+                snap_date = snapshot_dates[sf].date()
+                if abs(qty - firm_qty) < 0.5:
+                    if current_streak_start is None:
+                        current_streak_start = snap_date
+                else:
+                    current_streak_start = None
+            if current_streak_start is not None:
+                days = (due_date_obj - current_streak_start).days
+                if days >= 0:
+                    stable_days_list.append((days, ds))
+
+        if stable_days_list:
+            days_vals = [d for d, _ in stable_days_list]
+            stable_days_mean = round(sum(days_vals) / len(days_vals), 1)
+            _min_e = min(stable_days_list, key=lambda x: x[0])
+            _max_e = max(stable_days_list, key=lambda x: x[0])
+            stable_days_min, stable_days_min_date = _min_e
+            stable_days_max, stable_days_max_date = _max_e
+            stable_days_count = len(stable_days_list)
+        else:
+            stable_days_mean = stable_days_min = stable_days_min_date = None
+            stable_days_max = stable_days_max_date = stable_days_count = None
+
+        n = len(all_errors)
+        if n > 0:
+            abs_errors = [abs(e) for e in all_errors]
+            shortage_diffs = [-e for e in all_errors if e < 0]
+            mae = round(sum(abs_errors) / n, 2)
+            max_diff = round(_max_diff_val, 2)
+            max_diff_date = _max_diff_date
+            min_diff = round(_min_diff_val, 2)
+            min_diff_date = _min_diff_date
+            mean_err = round(sum(all_errors) / n, 2)
+            sigma = round(statistics.stdev(all_errors), 2) if n >= 2 else 0.0
+            shortage_rate = round(n_dates_shortage / n_dates_with_firm * 100, 1) if n_dates_with_firm > 0 else 0.0
+            max_shortage = round(max(shortage_diffs), 2) if shortage_diffs else 0.0
+            bias = -mean_err if mean_err < 0 else 0.0
+            ss_90 = round(1.28 * sigma + bias, 1)
+            ss_95 = round(1.65 * sigma + bias, 1)
+            ss_99 = round(2.33 * sigma + bias, 1)
+        else:
+            mae = max_diff = max_diff_date = min_diff = min_diff_date = mean_err = sigma = None
+            shortage_rate = max_shortage = None
+            ss_90 = ss_95 = ss_99 = None
+            n_dates_with_firm = 0
+            n_dates_shortage = 0
+
+        return {
+            'product_code': product_code,
+            'product_name': product_name,
+            'snapshot_count': len(ordered_files),
+            'analyzed_dates': len(all_due_dates),
+            'dates_with_firm': n_dates_with_firm,
+            'mae': mae,
+            'max_diff': max_diff,
+            'max_diff_date': max_diff_date,
+            'min_diff': min_diff,
+            'min_diff_date': min_diff_date,
+            'mean_error': mean_err,
+            'sigma': sigma,
+            'shortage_rate': shortage_rate,
+            'shortage_dates': n_dates_shortage,
+            'max_shortage': max_shortage,
+            'safety_stock_90': ss_90,
+            'safety_stock_95': ss_95,
+            'safety_stock_99': ss_99,
+            'stable_days_mean': stable_days_mean,
+            'stable_days_min': stable_days_min,
+            'stable_days_min_date': stable_days_min_date,
+            'stable_days_max': stable_days_max,
+            'stable_days_max_date': stable_days_max_date,
+            'stable_days_count': stable_days_count,
+        }
+
     @action(detail=False, methods=['get'])
     def kubota_naiji_products(self, request):
         """クボタ内示（36番）の製品一覧を返す"""
@@ -667,6 +865,197 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             'statistics': stat_results,
             'period_summary': period_summary,
         })
+
+    @action(detail=False, methods=['get'])
+    def kubota_naiji_batch_report(self, request):
+        """複数製品のクボタ内示分析サマリーをExcelで返す
+
+        Query params:
+            product_codes: カンマ区切りの品番リスト（必須）
+            start_date: 納期開始 (YYYY-MM-DD)
+            end_date: 納期終了 (YYYY-MM-DD)
+        """
+        from datetime import datetime
+        import io
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from django.http import HttpResponse
+
+        codes_str = request.query_params.get('product_codes', '')
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+
+        product_codes = [c.strip() for c in codes_str.split(',') if c.strip()]
+        if not product_codes:
+            return Response({'error': 'product_codes は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date() if start_date_str else None
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else None
+        except ValueError:
+            return Response({'error': '日付形式が不正です (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Excel生成
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'クボタ内示分析'
+
+        # ヘッダースタイル
+        header_fill = PatternFill(start_color='1F4E79', end_color='1F4E79', fill_type='solid')
+        header_font = Font(color='FFFFFF', bold=True, size=10)
+        sub_fill = PatternFill(start_color='2E75B6', end_color='2E75B6', fill_type='solid')
+        sub_font = Font(color='FFFFFF', bold=True, size=9)
+        center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        thin = Side(style='thin', color='CCCCCC')
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+        # 期間情報
+        period_str = ''
+        if start_date_str:
+            period_str += f'納期: {start_date_str}'
+        if end_date_str:
+            period_str += f' ～ {end_date_str}'
+        ws.append([f'クボタ内示変化推移分析 一括レポート　{period_str}'])
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=22)
+        title_cell = ws.cell(row=1, column=1)
+        title_cell.font = Font(bold=True, size=12, color='1F4E79')
+        title_cell.alignment = Alignment(horizontal='left', vertical='center')
+        ws.row_dimensions[1].height = 22
+
+        # カテゴリヘッダー行
+        ws.append(['', '', '', '予測誤差（全スナップショット − 確定）', '', '', '', '', '', '', '欠品リスク', '', '推奨安全在庫量', '', '', '収束安定期間（日数）', '', '', '', '', '', ''])
+        cat_row = 2
+        # カテゴリセル結合とスタイル
+        cat_ranges = [(4, 10), (11, 12), (13, 15), (16, 22)]
+        cat_labels = ['予測誤差（全スナップショット − 確定）', '欠品リスク（内示＜確定）', '推奨安全在庫量（Z×σ）', '収束安定期間（内示＝確定が続いた日数）']
+        cat_fills = ['2E75B6', 'C00000', '375623', '7030A0']
+        for (start_col, end_col), label, fill_color in zip(cat_ranges, cat_labels, cat_fills):
+            ws.merge_cells(start_row=cat_row, start_column=start_col, end_row=cat_row, end_column=end_col)
+            cell = ws.cell(row=cat_row, column=start_col)
+            cell.value = label
+            cell.font = Font(color='FFFFFF', bold=True, size=9)
+            cell.fill = PatternFill(start_color=fill_color, end_color=fill_color, fill_type='solid')
+            cell.alignment = center
+            cell.border = border
+
+        # 製品情報カラム見出し
+        for col in range(1, 4):
+            cell = ws.cell(row=cat_row, column=col)
+            cell.fill = PatternFill(start_color='1F4E79', end_color='1F4E79', fill_type='solid')
+            cell.border = border
+
+        # 列ヘッダー行
+        headers = [
+            '品番', '品名', 'スナップ\nショット数',
+            '最大差', '最大差日', '最小差', '最小差日', 'MAE', '平均差', 'σ',
+            '内示過小率(%)', '最大過小量',
+            '安全在庫\n90%', '安全在庫\n95%', '安全在庫\n99%',
+            '収束\n平均日', '収束\n最短日', '収束最短日', '収束\n最長日', '収束最長日', '収束\n対象件数', '分析\n納期数',
+        ]
+        ws.append(headers)
+        header_row = 3
+        header_col_fills = (
+            ['1F4E79'] * 3 +
+            ['2E75B6'] * 7 +
+            ['C00000'] * 2 +
+            ['375623'] * 3 +
+            ['7030A0'] * 7
+        )
+        for col_idx, (hdr, fill_color) in enumerate(zip(headers, header_col_fills), start=1):
+            cell = ws.cell(row=header_row, column=col_idx)
+            cell.value = hdr
+            cell.font = Font(color='FFFFFF', bold=True, size=9)
+            cell.fill = PatternFill(start_color=fill_color, end_color=fill_color, fill_type='solid')
+            cell.alignment = center
+            cell.border = border
+        ws.row_dimensions[header_row].height = 30
+
+        # データ行
+        def _v(val):
+            return val if val is not None else ''
+
+        for row_idx, product_code in enumerate(product_codes, start=4):
+            summary = StgOrderRawViewSet._compute_naiji_summary(product_code, start_date, end_date)
+            row_data = [
+                summary['product_code'],
+                summary['product_name'],
+                _v(summary['snapshot_count']),
+                _v(summary['max_diff']),
+                _v(summary['max_diff_date']),
+                _v(summary['min_diff']),
+                _v(summary['min_diff_date']),
+                _v(summary['mae']),
+                _v(summary['mean_error']),
+                _v(summary['sigma']),
+                _v(summary['shortage_rate']),
+                _v(summary['max_shortage']),
+                _v(summary['safety_stock_90']),
+                _v(summary['safety_stock_95']),
+                _v(summary['safety_stock_99']),
+                _v(summary['stable_days_mean']),
+                _v(summary['stable_days_min']),
+                _v(summary['stable_days_min_date']),
+                _v(summary['stable_days_max']),
+                _v(summary['stable_days_max_date']),
+                _v(summary['stable_days_count']),
+                _v(summary['analyzed_dates']),
+            ]
+            ws.append(row_data)
+            # 行スタイル
+            row_fill = 'EBF3FB' if row_idx % 2 == 0 else 'FFFFFF'
+            for col_idx in range(1, 23):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                cell.border = border
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+                if col_idx in (1, 2):
+                    cell.alignment = Alignment(horizontal='left', vertical='center')
+                cell.fill = PatternFill(start_color=row_fill, end_color=row_fill, fill_type='solid')
+
+        # 列幅設定
+        col_widths = [18, 20, 8, 7, 12, 7, 12, 7, 7, 7, 10, 10, 9, 9, 9, 8, 8, 12, 8, 12, 8, 8]
+        for i, w in enumerate(col_widths, start=1):
+            ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+
+        ws.freeze_panes = 'A4'
+
+        # ファイル返却
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        period_label = f'{start_date_str or ""}_{end_date_str or ""}'
+        filename = f'クボタ内示分析_{period_label}.xlsx'
+        from urllib.parse import quote
+        response = HttpResponse(
+            buf.read(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = f"attachment; filename*=UTF-8''{quote(filename)}"
+        return response
+
+    @action(detail=False, methods=['get'])
+    def kubota_naiji_batch_preview(self, request):
+        """複数製品の内示分析サマリーをJSONで返す（画面プレビュー用）"""
+        from datetime import datetime
+
+        codes_str = request.query_params.get('product_codes', '')
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+
+        product_codes = [c.strip() for c in codes_str.split(',') if c.strip()]
+        if not product_codes:
+            return Response({'error': 'product_codes は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date() if start_date_str else None
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else None
+        except ValueError:
+            return Response({'error': '日付形式が不正です (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
+
+        results = [
+            StgOrderRawViewSet._compute_naiji_summary(pc, start_date, end_date)
+            for pc in product_codes
+        ]
+        return Response(results)
 
     @action(detail=False, methods=['get'])
     def check_filename(self, request):
