@@ -26,6 +26,7 @@ export const manualSections = [
     items: [
       { title: "受注取込", path: "受注/受注取込.md" },
       { title: "受注一覧", path: "受注/受注一覧.md" },
+      { title: "クボタ内示変化推移分析", path: "受注/クボタ内示変化推移分析.md" },
     ],
   },
   {
