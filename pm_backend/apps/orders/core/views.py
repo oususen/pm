@@ -47,6 +47,24 @@ class OrderViewSet(viewsets.ModelViewSet):
             return OrderListSerializer
         return super().get_serializer_class()
 
+    def destroy(self, request, *args, **kwargs):
+        """受注削除：Order + OrderLine（cascade）+ ステージングレコードをまとめて削除"""
+        order = self.get_object()
+        source_file = order.source_file
+
+        # ステージングレコード削除（source_file が一致するもの・全顧客対応）
+        if source_file:
+            StgOrderRaw.objects.filter(source_file=source_file).delete()
+            StgOrderRawKubota.objects.filter(source_file=source_file).delete()
+            StgOrderRawTiera.objects.filter(source_file=source_file).delete()
+            StgOrderRawRieden.objects.filter(source_file=source_file).delete()
+            StgOrderDaily.objects.filter(source_file=source_file).delete()
+
+        # Order 削除（OrderLine は CASCADE で自動削除）
+        order.delete()
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class OrderLineViewSet(viewsets.ModelViewSet):
     """受注明細ViewSet"""

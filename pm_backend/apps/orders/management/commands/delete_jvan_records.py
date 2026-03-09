@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from orders.core.models import StgOrderRawKubota, StgOrderDaily
+from orders.core.models import StgOrderRawKubota, StgOrderDaily, Order, OrderLine
 
 class Command(BaseCommand):
     help = 'Delete JVAN import records by source file'
@@ -21,6 +21,7 @@ class Command(BaseCommand):
         self.stdout.write('\n===== 削除対象レコードの確認 =====')
         total_raw_records = 0
         total_daily_records = 0
+        total_order_records = 0
         deletion_map = {}
 
         for filename in files:
@@ -30,7 +31,11 @@ class Command(BaseCommand):
             daily_records = StgOrderDaily.objects.filter(source_file=filename)
             daily_count = daily_records.count()
             
-            if raw_count > 0 or daily_count > 0:
+            order_records = Order.objects.filter(source_file=filename)
+            order_count = order_records.count()
+            line_count = OrderLine.objects.filter(order__source_file=filename).count()
+
+            if raw_count > 0 or daily_count > 0 or order_count > 0:
                 self.stdout.write(f'\n{filename}')
                 if raw_count > 0:
                     self.stdout.write(f'  raw: {raw_count}件')
@@ -38,10 +43,16 @@ class Command(BaseCommand):
                 if daily_count > 0:
                     self.stdout.write(f'  daily: {daily_count}件')
                     total_daily_records += daily_count
+                if order_count > 0:
+                    self.stdout.write(f'  order（ヘッダ）: {order_count}件')
+                    self.stdout.write(f'  order（明細行）: {line_count}件')
+                    total_order_records += order_count
                 
                 deletion_map[filename] = {
                     'raw_count': raw_count,
                     'daily_count': daily_count,
+                    'order_count': order_count,
+                    'line_count': line_count,
                 }
             else:
                 self.stdout.write(f'\n{filename}: レコードなし')
@@ -49,9 +60,12 @@ class Command(BaseCommand):
         self.stdout.write(f'\n===== 削除予定サマリー =====')
         self.stdout.write(f'stg_order_raw_kubota: {total_raw_records}件')
         self.stdout.write(f'stg_order_daily: {total_daily_records}件')
-        self.stdout.write(f'総レコード数: {total_raw_records + total_daily_records}件')
+        total_line_records = sum(v['line_count'] for v in deletion_map.values())
+        self.stdout.write(f't_order ヘッダ: {total_order_records}件')
+        self.stdout.write(f't_order 明細行（カスケード削除）: {total_line_records}件')
+        self.stdout.write(f'総レコード数: {total_raw_records + total_daily_records + total_order_records}件')
 
-        if total_raw_records == 0 and total_daily_records == 0:
+        if total_raw_records == 0 and total_daily_records == 0 and total_order_records == 0:
             self.stdout.write(self.style.WARNING('\n削除対象レコードがありません'))
             return
 
@@ -66,6 +80,7 @@ class Command(BaseCommand):
         for filename in deletion_map.keys():
             raw_records = StgOrderRawKubota.objects.filter(source_file=filename)
             daily_records = StgOrderDaily.objects.filter(source_file=filename)
+            order_records = Order.objects.filter(source_file=filename)
             
             if daily_records.exists():
                 daily_count = daily_records.count()
@@ -76,5 +91,10 @@ class Command(BaseCommand):
                 raw_count = raw_records.count()
                 raw_records.delete()
                 self.stdout.write(f'{filename}: raw {raw_count}件を削除')
+            
+            if order_records.exists():
+                order_count = order_records.count()
+                order_records.delete()
+                self.stdout.write(f'{filename}: order {order_count}件を削除')
 
-        self.stdout.write(self.style.SUCCESS(f'\n削除完了! 合計 {total_raw_records + total_daily_records}件を削除しました'))
+        self.stdout.write(self.style.SUCCESS(f'\n削除完了! 合計 {total_raw_records + total_daily_records + total_order_records}件を削除しました'))

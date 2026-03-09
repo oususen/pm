@@ -82,6 +82,7 @@
             <td>{{ order.status_display }}</td>
             <td>
               <button @click="viewDetails(order)" class="btn-sm">詳細</button>
+              <button @click="confirmDelete(order)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
         </tbody>
@@ -273,6 +274,20 @@ const closeDetailsDialog = () => {
   showDetailsDialog.value = false
 }
 
+const confirmDelete = async (order) => {
+  const confirmed = window.confirm(
+    `受注「${order.order_no}」を削除しますか？\n明細行もすべて削除されます。`
+  )
+  if (!confirmed) return
+  try {
+    await api.orders.deleteOrder(order.id)
+    orders.value = orders.value.filter((o) => o.id !== order.id)
+  } catch (error) {
+    console.error('Error deleting order:', error)
+    alert('削除に失敗しました')
+  }
+}
+
 onMounted(() => {
   fetchOrders()
 })
@@ -349,6 +364,17 @@ onMounted(() => {
 
 .btn-secondary:hover {
   background-color: #f5f5f5;
+}
+
+.btn-danger {
+  background-color: #e53e3e;
+  color: white;
+  border: none;
+  margin-left: 4px;
+}
+
+.btn-danger:hover {
+  background-color: #c53030;
 }
 
 .no-data {

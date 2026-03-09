@@ -470,7 +470,9 @@ class CSVImportService:
 
                 elif customer.customer_code == '000196' and order_type == 'FIRM':
                     # クボタFIRM（非special）: 発注番号で追加/重複を行単位で判断
-                    #   既存OPEN FIRM行(同製品+同日付)なし        → regular（通常 order_no）
+                    #   既存OPEN FIRM行(同製品+同日付)なし
+                    #     - 同じ発行日で複数ファイルあり           → additional（order_no + "-tuika2"）
+                    #     - 単独                                  → regular（通常 order_no）
                     #   既存あり、発注番号が違う                  → additional（order_no + "-tuika"）
                     #   既存あり、発注番号が同じ                  → 重複取込 → スキップ
                     def _get_kubota_no(d):
@@ -479,9 +481,31 @@ class CSVImportService:
                             return rp.get('kubota_order_no') or d.raw_kubota.order_no
                         return None
 
+                    # 同じ order_no で複数ファイルがあるかチェック
+                    def _check_duplicate_order_no(order_no_val):
+                        """同じ order_no の Order がすでに存在するかチェック
+                        
+                        ロジック：
+                        - ファイルA取込時：Order なし → False → regular になる
+                        - ファイルB取込時：ファイルAの Order あり → True → -tuika2 になる
+                        
+                        exists() は SQL インデックスヒットで高速
+                        """
+                        if not order_no_val:
+                            return False
+                        return Order.objects.filter(
+                            customer_id=customer_id,
+                            order_type=order_type,
+                            order_no=order_no_val
+                        ).exists()
                     regular_dailies = []
                     additional_dailies = []
+                    additional_tuika2_dailies = []
                     skipped_dup_count = 0
+
+                    # 生成された order_no で複数ファイルがあるかチェック
+                    has_duplicate_order_no = _check_duplicate_order_no(order_no)
+
                     for daily in dailies:
                         new_no = _get_kubota_no(daily)
                         existing_qs = OrderLine.objects.filter(
@@ -492,8 +516,15 @@ class CSVImportService:
                             due_date=daily.due_date,
                         )
                         if not existing_qs.exists():
-                            regular_dailies.append(daily)
+                            # 同製品+同納期の既存行がない場合
+                            if has_duplicate_order_no:
+                                # order_no が重複 → -tuika2 対象
+                                additional_tuika2_dailies.append(daily)
+                            else:
+                                # order_no が単独 → 通常
+                                regular_dailies.append(daily)
                         elif new_no and new_no not in set(existing_qs.values_list('customer_order_no', flat=True)):
+                            # 既存あり、発注番号が違う → -tuika 対象
                             additional_dailies.append(daily)
                         else:
                             # 同一発注番号が既に存在 → 重複取込のためスキップ
@@ -560,6 +591,56 @@ class CSVImportService:
                                 product = None
                             OrderLine.objects.create(
                                 order=tuika_order,
+                                line_no=line_no,
+                                product=product,
+                                product_code=daily.product_code,
+                                order_type=order_type,
+                                customer_order_no=_get_kubota_no(daily),
+                                quantity=daily.quantity,
+                                due_date=daily.due_date,
+                                plant_code=daily.plant_code,
+                                ship_to_code=daily.ship_to_code
+                            )
+                            line_no += 1
+                            created_lines += 1
+                        created_orders += 1
+
+                    # 発行日重複グループ: order_no に -tuika2-{取込日} を付与
+                    if additional_tuika2_dailies:
+                        # ファイル名から取込日を抽出（最初の8文字 YYYYMMDD）
+                        import_date = ''
+                        if source_file and len(source_file) >= 8:
+                            # パターン: 20260304取込済_RCV_JVAN - 47sakai.csv
+                            import_date = source_file[:8]
+                            # 数字8文字だけ抽出（日付形式確認）
+                            if not import_date.isdigit():
+                                import_date = ''
+                        
+                        if import_date:
+                            tuika2_order_no = f"{order_no}-tuika2-{import_date}"
+                        else:
+                            # フォールバック：日付が取得できない場合はタイムスタンプ
+                            tuika2_order_no = f"{order_no}-tuika2-{timestamp}"
+                        
+                        tuika2_defaults = {**order_defaults, 'order_no': tuika2_order_no}
+                        tuika2_order, _ = Order.objects.get_or_create(
+                            customer_id=customer_id,
+                            order_no=tuika2_order_no,
+                            order_type=order_type,
+                            version_no=version_no,
+                            defaults=tuika2_defaults
+                        )
+                        line_no = tuika2_order.lines.count() + 1
+                        for daily in additional_tuika2_dailies:
+                            cutoff = product_cutoffs.get(daily.product_code)
+                            if cutoff is None or daily.due_date > cutoff:
+                                product_cutoffs[daily.product_code] = daily.due_date
+                            try:
+                                product = Product.objects.get(product_code=daily.product_code)
+                            except Product.DoesNotExist:
+                                product = None
+                            OrderLine.objects.create(
+                                order=tuika2_order,
                                 line_no=line_no,
                                 product=product,
                                 product_code=daily.product_code,
