@@ -435,7 +435,10 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             if firm_qty is None:
                 continue
             n_dates_with_firm += 1
-            qty_series = [snapshots_map[sf][ds] for sf in ordered_files if ds in snapshots_map[sf]]
+            _raw = [snapshots_map[sf][ds] for sf in ordered_files if ds in snapshots_map[sf]]
+            # 内示未着荷（数量=0）のスナップショットを先頭から除外
+            _first_pos = next((i for i, q in enumerate(_raw) if q > 0), None)
+            qty_series = _raw[_first_pos:] if _first_pos is not None else []
             if not qty_series:
                 continue
             has_shortage = False
@@ -458,10 +461,16 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 continue
             due_date_obj = date.fromisoformat(ds)
             current_streak_start = None
+            _seen_positive = False
             for sf in ordered_files:
                 if ds not in snapshots_map[sf]:
                     continue
                 qty = snapshots_map[sf][ds]
+                # 内示未着荷（数量=0）のスナップショットは収束判定から除外
+                if not _seen_positive:
+                    if qty <= 0:
+                        continue
+                    _seen_positive = True
                 snap_date = snapshot_dates[sf].date()
                 if abs(qty - firm_qty) < 0.5:
                     if current_streak_start is None:
@@ -693,11 +702,10 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         # 統計計算（納期ごと）
         stat_results = {}
         for ds in all_due_dates:
-            qty_series = [
-                s['quantities'][ds]
-                for s in snapshots
-                if ds in s['quantities']
-            ]
+            _raw = [s['quantities'][ds] for s in snapshots if ds in s['quantities']]
+            # 内示未着荷（数量=0）のスナップショットを先頭から除外
+            _first_pos = next((i for i, q in enumerate(_raw) if q > 0), None)
+            qty_series = _raw[_first_pos:] if _first_pos is not None else []
             if not qty_series:
                 continue
 
@@ -742,11 +750,10 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             if firm_qty is None:
                 continue
             n_dates_with_firm += 1
-            qty_series = [
-                s['quantities'][ds]
-                for s in snapshots
-                if ds in s['quantities']
-            ]
+            _raw = [s['quantities'][ds] for s in snapshots if ds in s['quantities']]
+            # 内示未着荷（数量=0）のスナップショットを先頭から除外
+            _first_pos = next((i for i, q in enumerate(_raw) if q > 0), None)
+            qty_series = _raw[_first_pos:] if _first_pos is not None else []
             if not qty_series:
                 continue
             has_shortage = False
@@ -773,10 +780,16 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 continue
             due_date_obj = date.fromisoformat(ds)
             current_streak_start = None
+            _seen_positive = False
             for sf in ordered_files:
                 if ds not in snapshots_map[sf]:
                     continue
                 qty = snapshots_map[sf][ds]
+                # 内示未着荷（数量=0）のスナップショットは収束判定から除外
+                if not _seen_positive:
+                    if qty <= 0:
+                        continue
+                    _seen_positive = True
                 snap_date = snapshot_dates[sf].date()
                 if abs(qty - firm_qty) < 0.5:  # 一致（小数誤差考慮）
                     if current_streak_start is None:

@@ -48,6 +48,11 @@
             期間全体サマリー — 安全在庫分析
             <span class="summary-sub">（全スナップショット vs 確定、{{ analysisData.period_summary.dates_with_firm }} 納期 × 全取込分）</span>
           </h3>
+          <div class="summary-meta">
+            <span class="meta-item">分析納期数：<strong>{{ analysisData.period_summary.analyzed_dates }}</strong> 日</span>
+            <span class="meta-sep">／</span>
+            <span class="meta-item">うち確定あり：<strong>{{ analysisData.period_summary.dates_with_firm }}</strong> 日</span>
+          </div>
           <div class="summary-grid">
 
             <!-- 予測誤差ブロック -->
@@ -863,6 +868,15 @@ const exportExcel = async () => {
 }
 .period-summary .section-title { margin-bottom: 12px; }
 .summary-sub { font-size: 12px; font-weight: normal; color: #666; margin-left: 8px; }
+.summary-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: #555;
+}
+.meta-sep { color: #bbb; }
 .summary-grid {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
