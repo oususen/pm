@@ -412,25 +412,7 @@ class CSVImportService:
                             # Other customers: use timestamp
                             order_no = f"FIRM-{customer.customer_code}-{timestamp}"
 
-                is_additional_import = '-tuika' in str(source_file or '').lower()
-                if order_type == 'FIRM' and is_additional_import and not order_no.endswith('-tuika'):
-                    order_no = f"{order_no}-tuika"
-
                 additional_order_items = []
-                if order_type == 'FIRM' and is_additional_import:
-                    product_qty_map = {}
-                    for daily in dailies:
-                        product_code = (daily.product_code or '').strip()
-                        if not product_code:
-                            continue
-                        product_qty_map[product_code] = product_qty_map.get(product_code, Decimal('0')) + (daily.quantity or Decimal('0'))
-                    additional_order_items = [
-                        {
-                            'product_code': product_code,
-                            'quantity': float(total_qty),
-                        }
-                        for product_code, total_qty in sorted(product_qty_map.items(), key=lambda x: x[0])
-                    ]
 
                 # Create order header
                 order_defaults = {
@@ -459,9 +441,144 @@ class CSVImportService:
                         order.status = 'OPEN'
                         order.save()
                         order.lines.all().delete()
+                    created_orders += 1
+                    line_no = 1
+                    for daily in dailies:
+                        try:
+                            product = Product.objects.get(product_code=daily.product_code)
+                        except Product.DoesNotExist:
+                            product = None
+                        kubota_no = None
+                        if hasattr(daily, 'raw_kubota') and daily.raw_kubota:
+                            rp = daily.raw_kubota.raw_payload or {}
+                            kubota_no = rp.get('kubota_order_no') or daily.raw_kubota.order_no
+                        OrderLine.objects.create(
+                            order=order,
+                            line_no=line_no,
+                            product=product,
+                            product_code=daily.product_code,
+                            order_type=order_type,
+                            customer_order_no=kubota_no,
+                            quantity=daily.quantity,
+                            due_date=daily.due_date,
+                            plant_code=daily.plant_code,
+                            ship_to_code=daily.ship_to_code
+                        )
+                        line_no += 1
+                        created_lines += 1
+                    continue  # skip generic line creation below
+
+                elif customer.customer_code == '000196' and order_type == 'FIRM':
+                    # クボタFIRM（非special）: 発注番号で追加/重複を行単位で判断
+                    #   既存OPEN FIRM行(同製品+同日付)なし        → regular（通常 order_no）
+                    #   既存あり、発注番号が違う                  → additional（order_no + "-tuika"）
+                    #   既存あり、発注番号が同じ                  → 重複取込 → スキップ
+                    def _get_kubota_no(d):
+                        if hasattr(d, 'raw_kubota') and d.raw_kubota:
+                            rp = d.raw_kubota.raw_payload or {}
+                            return rp.get('kubota_order_no') or d.raw_kubota.order_no
+                        return None
+
+                    regular_dailies = []
+                    additional_dailies = []
+                    skipped_dup_count = 0
+                    for daily in dailies:
+                        new_no = _get_kubota_no(daily)
+                        existing_qs = OrderLine.objects.filter(
+                            order__customer_id=customer_id,
+                            order__order_type='FIRM',
+                            order__status='OPEN',
+                            product_code=daily.product_code,
+                            due_date=daily.due_date,
+                        )
+                        if not existing_qs.exists():
+                            regular_dailies.append(daily)
+                        elif new_no and new_no not in set(existing_qs.values_list('customer_order_no', flat=True)):
+                            additional_dailies.append(daily)
+                        else:
+                            # 同一発注番号が既に存在 → 重複取込のためスキップ
+                            skipped_dup_count += 1
+
+                    if skipped_dup_count:
+                        self.warnings.append(
+                            f'{skipped_dup_count}件は同一発注番号が既に存在するためスキップしました（重複取込）'
+                        )
+
+                    # 通常グループ: get_or_create（一意違反回避）
+                    if regular_dailies:
+                        reg_order, _ = Order.objects.get_or_create(
+                            customer_id=customer_id,
+                            order_no=order_no,
+                            order_type=order_type,
+                            version_no=version_no,
+                            defaults=order_defaults
+                        )
+                        line_no = reg_order.lines.count() + 1
+                        for daily in regular_dailies:
+                            cutoff = product_cutoffs.get(daily.product_code)
+                            if cutoff is None or daily.due_date > cutoff:
+                                product_cutoffs[daily.product_code] = daily.due_date
+                            try:
+                                product = Product.objects.get(product_code=daily.product_code)
+                            except Product.DoesNotExist:
+                                product = None
+                            OrderLine.objects.create(
+                                order=reg_order,
+                                line_no=line_no,
+                                product=product,
+                                product_code=daily.product_code,
+                                order_type=order_type,
+                                customer_order_no=_get_kubota_no(daily),
+                                quantity=daily.quantity,
+                                due_date=daily.due_date,
+                                plant_code=daily.plant_code,
+                                ship_to_code=daily.ship_to_code
+                            )
+                            line_no += 1
+                            created_lines += 1
+                        created_orders += 1
+
+                    # 追加注文グループ: order_no に -tuika を付与
+                    if additional_dailies:
+                        tuika_order_no = f"{order_no}-tuika"
+                        tuika_defaults = {**order_defaults, 'order_no': tuika_order_no}
+                        tuika_order, _ = Order.objects.get_or_create(
+                            customer_id=customer_id,
+                            order_no=tuika_order_no,
+                            order_type=order_type,
+                            version_no=version_no,
+                            defaults=tuika_defaults
+                        )
+                        line_no = tuika_order.lines.count() + 1
+                        for daily in additional_dailies:
+                            cutoff = product_cutoffs.get(daily.product_code)
+                            if cutoff is None or daily.due_date > cutoff:
+                                product_cutoffs[daily.product_code] = daily.due_date
+                            try:
+                                product = Product.objects.get(product_code=daily.product_code)
+                            except Product.DoesNotExist:
+                                product = None
+                            OrderLine.objects.create(
+                                order=tuika_order,
+                                line_no=line_no,
+                                product=product,
+                                product_code=daily.product_code,
+                                order_type=order_type,
+                                customer_order_no=_get_kubota_no(daily),
+                                quantity=daily.quantity,
+                                due_date=daily.due_date,
+                                plant_code=daily.plant_code,
+                                ship_to_code=daily.ship_to_code
+                            )
+                            line_no += 1
+                            created_lines += 1
+                        created_orders += 1
+
+                    continue  # skip generic line creation below
+
                 else:
                     order = Order.objects.create(**order_defaults)
-                created_orders += 1
+                    created_orders += 1
 
                 # Process order lines
                 if order_type == 'FORECAST':
@@ -507,8 +624,7 @@ class CSVImportService:
                         created_lines += 1
                         line_no += 1
 
-                else:  # FIRM
-                    # For FIRM: Always create new lines
+                else:  # FIRM（クボタ以外: ティエラ、リーデン等）
                     line_no = 1
                     for daily in dailies:
                         # Find product
@@ -528,13 +644,6 @@ class CSVImportService:
                             customer_order_no = daily.raw_rieden.order_no
                         elif hasattr(daily, 'raw_tiera') and daily.raw_tiera:
                             customer_order_no = daily.raw_tiera.order_document_no
-                        elif hasattr(daily, 'raw_kubota') and daily.raw_kubota:
-                            # For Kubota NO=47 format, use kubota_order_no from raw_payload
-                            # For Kubota NO=45 format (legacy), use order_no
-                            if daily.raw_kubota.raw_payload and daily.raw_kubota.raw_payload.get('kubota_order_no'):
-                                customer_order_no = daily.raw_kubota.raw_payload['kubota_order_no']
-                            else:
-                                customer_order_no = daily.raw_kubota.order_no
 
                         OrderLine.objects.create(
                             order=order,

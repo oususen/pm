@@ -14,4 +14,12 @@ export const createStagingAPI = (client) => ({
   getStgOrderDailyItem(id) {
     return client.get(`/stg-order-daily/${id}/`)
   },
+
+  // クボタ内示分析
+  getKubotaNaijiProducts() {
+    return client.get('/stg-order-raw/kubota_naiji_products/')
+  },
+  getKubotaNaijiAnalysis(params) {
+    return client.get('/stg-order-raw/kubota_naiji_analysis/', { params })
+  },
 })

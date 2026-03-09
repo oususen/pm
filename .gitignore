@@ -48,6 +48,10 @@ pm_backend/__pycache__/
 pm_backend/masters/__pycache__/
 pm_backend/masters/migrations/__pycache__/
 pm_backend/pm_backend/__pycache__/
+
+# Backup files (large files)
+pm_db_backup.sql
+*.sql.bak
 参照ファイル/
 create_table.py
 create_userprofile_table.sql

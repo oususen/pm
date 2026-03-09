@@ -13,6 +13,11 @@
         <div class="label">受注取込</div>
       </RouterLink>
 
+      <RouterLink to="/orders/kubota-naiji-analysis" class="master-tile">
+        <div class="icon-box">📊</div>
+        <div class="label">クボタ内示<br>変化推移分析</div>
+      </RouterLink>
+
       <div class="master-tile">
         <div class="icon-box">🛠️</div>
         <div class="label">ライン展開</div>

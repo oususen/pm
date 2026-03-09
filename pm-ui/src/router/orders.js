@@ -6,6 +6,12 @@ const orders = [
     meta: { pageTitle: "受注管理メニュー", manualPath: "README.md", resource: "orders" },
   },
   {
+    path: "/orders/kubota-naiji-analysis",
+    name: "KubotaNaijiAnalysis",
+    component: () => import("@/views/orders/KubotaNaijiAnalysis.vue"),
+    meta: { pageTitle: "クボタ内示変化推移分析", resource: "orders" },
+  },
+  {
     path: "/orders",
     name: "OrderList",
     component: () => import("@/views/orders/OrderList.vue"),
