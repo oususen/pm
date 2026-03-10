@@ -31,6 +31,9 @@ export const createRoutingsAPI = (client) => ({
   updateRoutingStep(id, data) {
     return client.put(`/routing-steps/${id}/`, data)
   },
+  patchRoutingStep(id, data) {
+    return client.patch(`/routing-steps/${id}/`, data)
+  },
   deleteRoutingStep(id) {
     return client.delete(`/routing-steps/${id}/`)
   },

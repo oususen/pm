@@ -400,6 +400,7 @@ const workStartFallback = { hour: 8, minute: 0 }
 const workMinutesFallback = 480
 const processing = ref(false)
 const coproductDisplayCache = new Map()
+
 const selectedLineObj = computed(() =>
   lines.value.find((l) => `${l.id}` === `${selectedLine.value}`)
 )
@@ -2765,4 +2766,5 @@ thead .sticky-col {
   font-size: 13px;
   opacity: 0.9;
 }
+
 </style>

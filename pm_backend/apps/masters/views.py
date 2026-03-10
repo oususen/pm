@@ -1148,6 +1148,13 @@ class RoutingStepMaterialViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     ordering_fields = ['routing_step', 'component']
     ordering = ['routing_step', 'component']
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        routing_id = self.request.query_params.get('routing')
+        if routing_id:
+            qs = qs.filter(routing_step__routing_id=routing_id)
+        return qs
+
 
 class ContactFilter(django_filters.FilterSet):
     search = django_filters.CharFilter(method='filter_search')
