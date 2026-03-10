@@ -978,7 +978,7 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
     initial_backlog = LineBacklog.objects.filter(
         line_id=line_id,
         product_id=product_id,
-        plan_date__lte=calc_start_date,
+        plan_date__lt=calc_start_date,
         stock_qty__isnull=False
     ).order_by('-plan_date', 'sequence_no', 'id').first()
 
@@ -1006,7 +1006,7 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
             continue
 
         # 計算開始日以前は実在庫の値を使用し、更新しない
-        if plan_date <= calc_start_date:
+        if plan_date < calc_start_date:
             # 既存の実在庫値を取得してplanned_by_dateに保持（後続の計算用）
             existing_stock = 0
             for row in rows:
@@ -1015,12 +1015,6 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
                     break
             planned_by_date[plan_date] = existing_stock
             last_planned = existing_stock
-            if plan_date == calc_start_date:
-                rep = pick_representative(rows)
-                for row in rows:
-                    row.planned_stock_qty = 0
-                rep.planned_stock_qty = existing_stock
-                backlogs_to_update.extend(rows)
             continue
 
         plan_total = sum(r.plan_qty or 0 for r in rows)

@@ -170,7 +170,7 @@ def recalculate_progress_qty(
     initial_backlog = LineBacklog.objects.filter(
         line_id=line_id,
         product_id=product_id,
-        plan_date__lte=calc_start_date,
+        plan_date__lt=calc_start_date,
         progress_qty__isnull=False
     ).order_by('-plan_date', 'sequence_no', 'id').first()
 
@@ -245,7 +245,7 @@ def recalculate_progress_qty(
             continue
 
         # 計算開始日以前は既存の進度値を使用し、更新しない
-        if plan_date <= calc_start_date:
+        if plan_date < calc_start_date:
             existing_progress = 0
             existing_planned_progress = 0
             for row in rows:
