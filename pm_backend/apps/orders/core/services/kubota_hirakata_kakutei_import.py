@@ -18,12 +18,20 @@ class KubotaHirakataKakuteiImportService:
     - Column 21: issue_date (発行日) - YYMMDD format (Order識別用)
     - Column 19: Quantity (納入指示数)
 
-    Note: NO=47 rows are ignored (legacy format no longer used)
+    Format NO=47 (RCV_NVAN.csv / NVAN-2 mixed in same file):
+    - Column 0: NO (データNo) = "47"
+    - Column 3: Order No (注番)
+    - Column 5: Product Code (品番)
+    - Column 10: Product Name (品名)
+    - Column 14: Inspection Type (検区)
+    - Column 23: Delivery Date (納期) - MMDD / MDD / YYMMDD / YYYYMMDD
+    - Column 24: Quantity (指示数)
+    - Column 26: issue_date (発行日) - YYMMDD format (Order識別用)
     """
 
-    # Format: NO=45 (primary and only supported format)
-    DATA_NO = '45'
-    DATA_NO_LEGACY = '47'  # Ignored
+    # Supported formats
+    DATA_NO_45 = '45'
+    DATA_NO_47 = '47'
 
     # Column positions
     COL_DATA_NO = 0
@@ -34,6 +42,13 @@ class KubotaHirakataKakuteiImportService:
     COL_QUANTITY_45 = 19
     COL_ISSUE_DATE_45 = 21  # 発行日 (T_ORDER.ORDER_NO識別用)
     COL_INSPECTION_TYPE = 10
+
+    COL_PRODUCT_CODE_47 = 5
+    COL_PRODUCT_NAME_47 = 10
+    COL_INSPECTION_TYPE_47 = 14
+    COL_DELIVERY_DATE_47 = 23
+    COL_QUANTITY_47 = 24
+    COL_ISSUE_DATE_47 = 26  # 発行日 (T_ORDER.ORDER_NO識別用)
     
     def __init__(self):
         self.errors = []
@@ -87,8 +102,45 @@ class KubotaHirakataKakuteiImportService:
         except:
             return None
 
+    def parse_date_from_mmdd(self, date_str, base_date=None):
+        """Parse date string in MMDD/MDD format with year inference.
+
+        Examples:
+            "0115" -> 2026-01-15 (year inferred)
+            "317"  -> 2026-03-17 (year inferred)
+        """
+        if not date_str or str(date_str).strip() == '':
+            return None
+
+        s = str(date_str).strip()
+        if not s.isdigit():
+            return None
+
+        if base_date is None:
+            base_date = datetime.today().date()
+
+        def _infer_year(mm: int) -> int:
+            year = base_date.year
+            if mm > base_date.month + 6:
+                return year - 1
+            if mm < base_date.month - 6:
+                return year + 1
+            return year
+
+        try:
+            if len(s) == 4:
+                mm = int(s[:2]); dd = int(s[2:4])
+                return datetime(_infer_year(mm), mm, dd).date()
+            if len(s) == 3:
+                mm = int(s[0]); dd = int(s[1:3])
+                return datetime(_infer_year(mm), mm, dd).date()
+        except ValueError:
+            return None
+
+        return None
+
     def import_csv(self, file, customer_code, order_type, source_system='CSV'):
-        """Import Kubota Hirakata confirmed order CSV (NO=45 format only)
+        """Import Kubota Hirakata confirmed order CSV (NO=45 / NO=47)
 
         Args:
             file: Uploaded file object
@@ -100,7 +152,7 @@ class KubotaHirakataKakuteiImportService:
             dict: Import result with statistics
 
         Note:
-            NO=47 rows are skipped (legacy format no longer used)
+            RCV_NVAN は NO=45 と NO=47 が同一ファイルに混在する場合があります。
         """
         self.errors = []
         self.warnings = []
@@ -133,38 +185,70 @@ class KubotaHirakataKakuteiImportService:
             for row in csv_reader:
                 row_no += 1
 
-                # Skip header
-                if row_no == 1:
-                    continue
-
-                # Check minimum columns (at least 20 for safety)
-                if len(row) < 20:
-                    continue
-
                 # Detect format by data_no
                 data_no = row[self.COL_DATA_NO].strip() if len(row) > self.COL_DATA_NO else ''
 
-                # Only support NO=45 format (primary)
-                # NO=47 is ignored (legacy format no longer used)
-                if data_no == self.DATA_NO:
-                    # NO=45 format (primary)
+                if data_no == self.DATA_NO_45:
                     if format_detected is None:
                         format_detected = '45'
-                elif data_no == self.DATA_NO_LEGACY:
-                    # Skip NO=47 rows (legacy format - ignored)
-                    continue
+                elif data_no == self.DATA_NO_47:
+                    if format_detected is None:
+                        format_detected = '47'
                 else:
-                    # Skip other row types
+                    # Header行や別レコードをスキップ
                     continue
 
                 try:
-                    # Extract data (NO=45 format only)
-                    product_code = row[self.COL_PRODUCT_CODE_45].strip() if len(row) > self.COL_PRODUCT_CODE_45 else ''
-                    product_name = row[self.COL_PRODUCT_NAME_45].strip() if len(row) > self.COL_PRODUCT_NAME_45 else ''
-                    delivery_date_str = row[self.COL_DELIVERY_DATE_45].strip() if len(row) > self.COL_DELIVERY_DATE_45 else ''
-                    quantity_str = row[self.COL_QUANTITY_45].strip() if len(row) > self.COL_QUANTITY_45 else ''
-                    issue_date_str = row[self.COL_ISSUE_DATE_45].strip() if len(row) > self.COL_ISSUE_DATE_45 else ''
-                    order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
+                    if data_no == self.DATA_NO_45:
+                        min_cols = max(
+                            self.COL_PRODUCT_CODE_45,
+                            self.COL_PRODUCT_NAME_45,
+                            self.COL_DELIVERY_DATE_45,
+                            self.COL_QUANTITY_45,
+                            self.COL_ISSUE_DATE_45,
+                            self.COL_ORDER_NO,
+                            self.COL_INSPECTION_TYPE,
+                        ) + 1
+                        if len(row) < min_cols:
+                            continue
+
+                        product_code = row[self.COL_PRODUCT_CODE_45].strip() if len(row) > self.COL_PRODUCT_CODE_45 else ''
+                        product_name = row[self.COL_PRODUCT_NAME_45].strip() if len(row) > self.COL_PRODUCT_NAME_45 else ''
+                        delivery_date_str = row[self.COL_DELIVERY_DATE_45].strip() if len(row) > self.COL_DELIVERY_DATE_45 else ''
+                        quantity_str = row[self.COL_QUANTITY_45].strip() if len(row) > self.COL_QUANTITY_45 else ''
+                        issue_date_str = row[self.COL_ISSUE_DATE_45].strip() if len(row) > self.COL_ISSUE_DATE_45 else ''
+                        order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
+                        inspection_type = row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else ''
+
+                        due_date = self.parse_date_from_yymmdd(delivery_date_str)
+                        fmt = '45'
+
+                    else:
+                        min_cols = max(
+                            self.COL_PRODUCT_CODE_47,
+                            self.COL_PRODUCT_NAME_47,
+                            self.COL_DELIVERY_DATE_47,
+                            self.COL_QUANTITY_47,
+                            self.COL_ISSUE_DATE_47,
+                            self.COL_ORDER_NO,
+                            self.COL_INSPECTION_TYPE_47,
+                        ) + 1
+                        if len(row) < min_cols:
+                            continue
+
+                        product_code = row[self.COL_PRODUCT_CODE_47].strip() if len(row) > self.COL_PRODUCT_CODE_47 else ''
+                        product_name = row[self.COL_PRODUCT_NAME_47].strip() if len(row) > self.COL_PRODUCT_NAME_47 else ''
+                        delivery_date_str = row[self.COL_DELIVERY_DATE_47].strip() if len(row) > self.COL_DELIVERY_DATE_47 else ''
+                        quantity_str = row[self.COL_QUANTITY_47].strip() if len(row) > self.COL_QUANTITY_47 else ''
+                        issue_date_str = row[self.COL_ISSUE_DATE_47].strip() if len(row) > self.COL_ISSUE_DATE_47 else ''
+                        order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
+                        inspection_type = row[self.COL_INSPECTION_TYPE_47].strip() if len(row) > self.COL_INSPECTION_TYPE_47 else ''
+
+                        due_date = (
+                            self.parse_date_from_mmdd(delivery_date_str)
+                            or self.parse_date_from_yymmdd(delivery_date_str)
+                        )
+                        fmt = '47'
 
                     if not product_code:
                         continue
@@ -175,8 +259,6 @@ class KubotaHirakataKakuteiImportService:
                             continue
                         file_order_nos.add(order_no)
 
-                    # Parse date (YYMMDD format)
-                    due_date = self.parse_date_from_yymmdd(delivery_date_str)
                     if not due_date:
                         self.warnings.append(f"Row {row_no}: Invalid date: {delivery_date_str}")
                         continue
@@ -191,7 +273,7 @@ class KubotaHirakataKakuteiImportService:
                     raw_payload = {
                         'row': row,
                         'encoding': encoding,
-                        'format': '45'
+                        'format': fmt
                     }
                     if issue_date_str:
                         raw_payload['issue_date'] = issue_date_str
@@ -206,6 +288,7 @@ class KubotaHirakataKakuteiImportService:
                         record_type='',  # Not applicable for confirmed orders
                         product_code=product_code,
                         product_name=product_name,
+                        inspection_type=inspection_type,
                         delivery_date=due_date,
                         quantity=quantity,
                         order_no=order_no,
@@ -220,7 +303,7 @@ class KubotaHirakataKakuteiImportService:
             if not raw_records:
                 return {
                     'success': False,
-                    'message': f'No valid records found with NO=45',
+                    'message': f'No valid records found with NO=45/47',
                     'errors': self.errors,
                     'warnings': self.warnings + ['Column positions may need adjustment if file format changed.']
                 }
@@ -265,7 +348,7 @@ class KubotaHirakataKakuteiImportService:
             raw_records_with_ids = StgOrderRawKubota.objects.filter(
                 source_file=file.name,
                 customer_code=customer_code,
-                data_no=self.DATA_NO
+                data_no__in=[self.DATA_NO_45, self.DATA_NO_47]
             ).order_by('-id')[:len(raw_records)]
 
             # Track min and max IDs

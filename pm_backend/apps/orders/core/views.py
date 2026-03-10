@@ -247,85 +247,8 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             )
 
     @action(
-        detail=False,
-        methods=['post'],
-        parser_classes=[MultiPartParser, FormParser],
-        authentication_classes=[],
-        permission_classes=[AllowAny],
+        detail=False, methods=['post']
     )
-    def upload_hirakata_special(self, request):
-        """Upload Kubota Hirakata special confirmed order CSV"""
-        try:
-            file = request.FILES.get('file')
-            customer_code = request.data.get('customer_code')
-            order_type = request.data.get('order_type', 'FIRM')
-            source_system = request.data.get('source_system', 'CSV')
-
-            if not file:
-                return Response(
-                    {'error': 'No file provided'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            if not customer_code:
-                return Response(
-                    {'error': 'Customer code is required'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            if customer_code != '000196':
-                return Response(
-                    {'error': 'This endpoint is only for customer_code 000196'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            if (StgOrderRaw.objects.filter(source_file=file.name).exists() or
-                StgOrderRawKubota.objects.filter(source_file=file.name).exists() or
-                StgOrderRawTiera.objects.filter(source_file=file.name).exists() or
-                StgOrderRawRieden.objects.filter(source_file=file.name).exists()):
-                return Response(
-                    {
-                        'success': False,
-                        'error': f'このファイル名は既にアップロード済みです: {file.name}',
-                        'message': f'ファイル名 \"{file.name}\" は既にステージングに存在します。別のファイル名でアップロードしてください。'
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            from .services.kubota_hirakata_special_kakutei_import import (
-                KubotaHirakataSpecialKakuteiImportService,
-            )
-            import_service = KubotaHirakataSpecialKakuteiImportService()
-            result = import_service.import_csv(file, customer_code, order_type, source_system)
-
-            if result['success']:
-                try:
-                    order_service = CSVImportService()
-                    raw_id_range = (result.get('min_raw_id'), result.get('max_raw_id'))
-                    order_result = order_service.create_orders_from_staging(
-                        source_file=file.name,
-                        raw_id_range=raw_id_range
-                    )
-                    result['orders_created'] = order_result.get('orders', 0)
-                    result['lines_created'] = order_result.get('lines', 0)
-                    result['superseded_forecast_orders'] = order_result.get('deleted_forecast_orders', 0)
-                    result['additional_order_notices'] = order_result.get('additional_order_notices', [])
-                except Exception as e:
-                    result['order_creation_error'] = str(e)
-                    result['message'] = f"CSV imported to staging successfully, but order creation failed: {str(e)}"
-
-                return Response(result, status=status.HTTP_201_CREATED)
-
-            print(f"CSV Import Error: {result}")
-            return Response(result, status=status.HTTP_400_BAD_REQUEST)
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-    @action(detail=False, methods=['post'])
     def create_orders(self, request):
         """Create orders from staging data"""
         try:

@@ -49,7 +49,6 @@ d:\pm\
 │       │       ├── kubota_sakai_naiji_import.py
 │       │       ├── kubota_sakai_kakutei_import.py
 │       │       ├── kubota_hirakata_kakutei_import.py
-│       │       ├── kubota_hirakata_special_kakutei_import.py
 │       │       └── rieden_kakutei_import.py
 │       ├── production/        # 生産管理アプリ
 │       │   └── inventory/     # 在庫計算ロジック
@@ -210,7 +209,6 @@ API の接続先は `src/api/client.js` の `API_BASE_URL` をバックエンド
 - `/api/order-lines/` - 受注明細
 - `/api/stg-order-raw/` - 受注取込ステージング（生データ）
   - `POST /api/stg-order-raw/upload_csv/` - CSVアップロード
-  - `POST /api/stg-order-raw/upload_hirakata_special/` - 枚方特殊確定CSVアップロード
   - `POST /api/stg-order-raw/create_orders/` - ステージングから受注作成
 - `/api/stg-order-daily/` - 受注取込ステージング（日別）
 

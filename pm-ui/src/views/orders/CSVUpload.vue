@@ -74,20 +74,6 @@
           </div>
         </div>
 
-        <div v-if="showHirakataSpecialOption" class="form-group">
-          <div class="group-header">
-            <label>枚方特殊確定</label>
-            <span class="hint">特殊CSV（NVAN-2）はこちら</span>
-          </div>
-          <label class="toggle-row">
-            <input
-              type="checkbox"
-              v-model="formData.is_hirakata_special"
-            />
-            <span>枚方特殊確定CSVとして取り込む</span>
-          </label>
-        </div>
-
         <div v-if="showTieraT3Option" class="form-group">
           <div class="group-header">
             <label>ティエラ{{ formData.order_type === 'FIRM' ? '確定' : '内示' }}（T3）</label>
@@ -238,7 +224,6 @@ const formData = ref({
   order_type: 'FIRM',
   source_system: 'CSV',
   factory: 'SAKAI',  // Default to Sakai for Kubota
-  is_hirakata_special: false,
   is_tiera_t3: false
 })
 
@@ -249,14 +234,6 @@ const isKubotaCustomer = computed(() => {
 
 const isTieraCustomer = computed(() => {
   return formData.value.customer_code === '000001'
-})
-
-const showHirakataSpecialOption = computed(() => {
-  return (
-    isKubotaCustomer.value &&
-    formData.value.order_type === 'FIRM' &&
-    formData.value.factory === 'HIRAKATA'
-  )
 })
 
 const showTieraT3Option = computed(() => {
@@ -312,23 +289,18 @@ const selectCustomer = (customer) => {
   } else {
     formData.value.factory = null
   }
-  formData.value.is_hirakata_special = false
   formData.value.is_tiera_t3 = false
 }
 
 const selectOrderType = (type) => {
   formData.value.order_type = type
   if (type !== 'FIRM') {
-    formData.value.is_hirakata_special = false
     formData.value.is_tiera_t3 = false
   }
 }
 
 const selectFactory = (factory) => {
   formData.value.factory = factory
-  if (factory !== 'HIRAKATA') {
-    formData.value.is_hirakata_special = false
-  }
 }
 
 const uploadCSV = async () => {
@@ -363,14 +335,7 @@ const uploadCSV = async () => {
       formDataToSend.append('factory', formData.value.factory)
     }
 
-    const uploadPath = (
-      isKubotaCustomer.value &&
-      formData.value.order_type === 'FIRM' &&
-      formData.value.factory === 'HIRAKATA' &&
-      formData.value.is_hirakata_special
-    )
-      ? '/stg-order-raw/upload_hirakata_special/'
-      : '/stg-order-raw/upload_csv/'
+    const uploadPath = '/stg-order-raw/upload_csv/'
 
     const response = await axios.post(
       `${API_BASE_URL}${uploadPath}`,
