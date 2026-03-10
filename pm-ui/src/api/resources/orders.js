@@ -1,6 +1,7 @@
 export const createOrdersAPI = (client) => ({
-  getOrders() {
-    return client.get('/orders/')
+  getOrders(params = {}) {
+    const query = { page_size: 500, ...params }
+    return client.get('/orders/', { params: query })
   },
   getProductionOrders(params = {}) {
     return client.get('/production-orders/', { params })

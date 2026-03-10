@@ -3,6 +3,12 @@
     <div class="page-header">
       <h1 class="page-title">受注一覧</h1>
       <div class="page-actions">
+        <label class="page-size">
+          <span>表示件数</span>
+          <select v-model.number="pageSize" class="page-size-select">
+            <option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }}</option>
+          </select>
+        </label>
         <button @click="fetchOrders" class="btn-primary">更新</button>
       </div>
     </div>
@@ -160,6 +166,8 @@ const selectedOrder = ref({})
 const orderLines = ref([])
 const loading = ref(false)
 const errorMessage = ref('')
+const pageSizeOptions = [50, 100, 200, 500, 1000]
+const pageSize = ref(500)
 const filters = ref({
   orderNo: '',
   sourceFile: '',
@@ -245,7 +253,7 @@ const fetchOrders = async (retry = 2) => {
   loading.value = true
   errorMessage.value = ''
   try {
-    const response = await api.orders.getOrders()
+    const response = await api.orders.getOrders({ page_size: pageSize.value })
     orders.value = response.data.results || response.data
   } catch (error) {
     console.error('Error fetching orders:', error)
@@ -449,5 +457,27 @@ onMounted(() => {
   border: 1px solid #ffcccc;
   border-radius: 4px;
   color: #c12b2b;
+}
+
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.page-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #555;
+}
+
+.page-size-select {
+  padding: 6px 8px;
+  border: 1px solid #d6dbe7;
+  border-radius: 4px;
+  font-size: 13px;
+  background: #fff;
 }
 </style>
