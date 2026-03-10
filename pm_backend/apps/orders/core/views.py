@@ -349,6 +349,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             firm_quantities[row['due_date'].isoformat()] = float(row['total_qty'])
 
         all_errors = []
+        date_max_shortages = []  # 各納期の最大過小量（ワースト集計用）
         n_dates_with_firm = 0
         n_dates_shortage = 0
         _max_diff_val = _max_diff_date = _min_diff_val = _min_diff_date = None
@@ -365,6 +366,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             if not qty_series:
                 continue
             has_shortage = False
+            _date_worst = 0.0
             for q in qty_series:
                 err = q - firm_qty
                 all_errors.append(err)
@@ -374,6 +376,11 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     _min_diff_val = err; _min_diff_date = ds
                 if q < firm_qty:
                     has_shortage = True
+                    s = firm_qty - q
+                    if s > _date_worst:
+                        _date_worst = s
+            if _date_worst > 0:
+                date_max_shortages.append(round(_date_worst, 1))
             if has_shortage:
                 n_dates_shortage += 1
 
@@ -418,9 +425,10 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             stable_days_max = stable_days_max_date = stable_days_count = None
 
         n = len(all_errors)
+        total_dates = len(all_due_dates)
         if n > 0:
+            from collections import Counter as _Counter
             abs_errors = [abs(e) for e in all_errors]
-            shortage_diffs = [-e for e in all_errors if e < 0]
             mae = round(sum(abs_errors) / n, 2)
             max_diff = round(_max_diff_val, 2)
             max_diff_date = _max_diff_date
@@ -429,14 +437,24 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             mean_err = round(sum(all_errors) / n, 2)
             sigma = round(statistics.stdev(all_errors), 2) if n >= 2 else 0.0
             shortage_rate = round(n_dates_shortage / n_dates_with_firm * 100, 1) if n_dates_with_firm > 0 else 0.0
-            max_shortage = round(max(shortage_diffs), 2) if shortage_diffs else 0.0
+            # ワースト1・2位（納期単位の最大過小量でランキング）
+            if date_max_shortages:
+                _counter = _Counter(date_max_shortages)
+                _sorted = sorted(_counter.items(), key=lambda x: x[0], reverse=True)
+                max_shortage = _sorted[0][0]
+                worst1_rate = round(_sorted[0][1] / total_dates * 100, 1) if total_dates > 0 else None
+                worst2_qty = _sorted[1][0] if len(_sorted) > 1 else None
+                worst2_rate = round(_sorted[1][1] / total_dates * 100, 1) if len(_sorted) > 1 and total_dates > 0 else None
+            else:
+                max_shortage = 0.0
+                worst1_rate = worst2_qty = worst2_rate = None
             bias = -mean_err if mean_err < 0 else 0.0
             ss_90 = round(1.28 * sigma + bias, 1)
             ss_95 = round(1.65 * sigma + bias, 1)
             ss_99 = round(2.33 * sigma + bias, 1)
         else:
             mae = max_diff = max_diff_date = min_diff = min_diff_date = mean_err = sigma = None
-            shortage_rate = max_shortage = None
+            shortage_rate = max_shortage = worst1_rate = worst2_qty = worst2_rate = None
             ss_90 = ss_95 = ss_99 = None
             n_dates_with_firm = 0
             n_dates_shortage = 0
@@ -457,6 +475,9 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             'shortage_rate': shortage_rate,
             'shortage_dates': n_dates_shortage,
             'max_shortage': max_shortage,
+            'worst1_rate': worst1_rate,
+            'worst2_qty': worst2_qty,
+            'worst2_rate': worst2_rate,
             'safety_stock_90': ss_90,
             'safety_stock_95': ss_95,
             'safety_stock_99': ss_99,
@@ -663,6 +684,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         all_errors = []      # snapshot_qty - firm（符号付き、全スナップショット分）
         n_dates_with_firm = 0  # 確定データがある納期数
         n_dates_shortage = 0   # 一度でも内示＜確定になった納期数
+        date_max_shortages = []  # 各納期の最大過小量（ワースト集計用）
         _max_diff_val = None
         _max_diff_date = None
         _min_diff_val = None
@@ -680,6 +702,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             if not qty_series:
                 continue
             has_shortage = False
+            _date_worst = 0.0
             for q in qty_series:
                 err = q - firm_qty
                 all_errors.append(err)
@@ -691,6 +714,11 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     _min_diff_date = ds
                 if q < firm_qty:
                     has_shortage = True
+                    s = firm_qty - q
+                    if s > _date_worst:
+                        _date_worst = s
+            if _date_worst > 0:
+                date_max_shortages.append(round(_date_worst, 1))
             if has_shortage:
                 n_dates_shortage += 1
 
@@ -738,11 +766,11 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             stable_days_mean = stable_days_min = stable_days_min_date = None
             stable_days_max = stable_days_max_date = stable_days_count = None
 
-        import math
+        from collections import Counter as _Counter
         n = len(all_errors)
+        total_dates = len(all_due_dates)
         if n > 0:
             abs_errors = [abs(e) for e in all_errors]
-            shortage_diffs = [-e for e in all_errors if e < 0]  # 内示過小の絶対量
 
             mae = round(sum(abs_errors) / n, 2)
             max_diff = round(_max_diff_val, 2)         # 最大差（内示 - 確定）符号付き
@@ -754,8 +782,17 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
 
             # 内示過小率（何割の納期で一度でも内示＜確定があったか）
             shortage_rate = round(n_dates_shortage / n_dates_with_firm * 100, 1) if n_dates_with_firm > 0 else 0.0
-            # 最大過小量（確定を最も下回ったスナップショットの量）
-            max_shortage = round(max(shortage_diffs), 2) if shortage_diffs else 0.0
+            # ワースト1・2位（納期単位の最大過小量でランキング）
+            if date_max_shortages:
+                _counter = _Counter(date_max_shortages)
+                _sorted = sorted(_counter.items(), key=lambda x: x[0], reverse=True)
+                max_shortage = _sorted[0][0]                  # ワースト1位の過小量
+                worst1_rate = round(_sorted[0][1] / total_dates * 100, 1) if total_dates > 0 else None
+                worst2_qty = _sorted[1][0] if len(_sorted) > 1 else None
+                worst2_rate = round(_sorted[1][1] / total_dates * 100, 1) if len(_sorted) > 1 and total_dates > 0 else None
+            else:
+                max_shortage = 0.0
+                worst1_rate = worst2_qty = worst2_rate = None
 
             # 安全在庫推奨（Z×σ）。バイアスがある場合は補正
             bias = -mean_err if mean_err < 0 else 0.0
@@ -764,7 +801,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             ss_99 = round(2.33 * sigma + bias, 1)
         else:
             mae = max_diff = max_diff_date = min_diff = min_diff_date = mean_err = sigma = None
-            shortage_rate = max_shortage = None
+            shortage_rate = max_shortage = worst1_rate = worst2_qty = worst2_rate = None
             ss_90 = ss_95 = ss_99 = None
             n_dates_with_firm = 0
             n_dates_shortage = 0
@@ -781,7 +818,10 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             'sigma': sigma,                      # 予測誤差の標準偏差（全スナップショット）
             'shortage_rate': shortage_rate,      # 内示過小が発生した納期の割合(%)
             'shortage_dates': n_dates_shortage,  # 内示過小が発生した納期数
-            'max_shortage': max_shortage,        # 最大過小量（欠品ワーストケース）
+            'max_shortage': max_shortage,        # ワースト1位の過小量
+            'worst1_rate': worst1_rate,          # ワースト1位の出現率
+            'worst2_qty': worst2_qty,            # ワースト2位の過小量
+            'worst2_rate': worst2_rate,          # ワースト2位の出現率
             'safety_stock_90': ss_90,
             'safety_stock_95': ss_95,
             'safety_stock_99': ss_99,
@@ -852,17 +892,17 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         if end_date_str:
             period_str += f' ～ {end_date_str}'
         ws.append([f'クボタ内示変化推移分析 一括レポート　{period_str}'])
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=22)
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=25)
         title_cell = ws.cell(row=1, column=1)
         title_cell.font = Font(bold=True, size=12, color='1F4E79')
         title_cell.alignment = Alignment(horizontal='left', vertical='center')
         ws.row_dimensions[1].height = 22
 
         # カテゴリヘッダー行
-        ws.append(['', '', '', '予測誤差（全スナップショット − 確定）', '', '', '', '', '', '', '欠品リスク', '', '推奨安全在庫量', '', '', '収束安定期間（日数）', '', '', '', '', '', ''])
+        ws.append(['', '', '', '予測誤差（全スナップショット − 確定）', '', '', '', '', '', '', '欠品リスク', '', '', '', '', '推奨安全在庫量', '', '', '収束安定期間（日数）', '', '', '', '', '', ''])
         cat_row = 2
         # カテゴリセル結合とスタイル
-        cat_ranges = [(4, 10), (11, 12), (13, 15), (16, 22)]
+        cat_ranges = [(4, 10), (11, 15), (16, 18), (19, 25)]
         cat_labels = ['予測誤差（全スナップショット − 確定）', '欠品リスク（内示＜確定）', '推奨安全在庫量（Z×σ）', '収束安定期間（内示＝確定が続いた日数）']
         cat_fills = ['2E75B6', 'C00000', '375623', '7030A0']
         for (start_col, end_col), label, fill_color in zip(cat_ranges, cat_labels, cat_fills):
@@ -884,7 +924,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         headers = [
             '品番', '品名', 'スナップ\nショット数',
             '最大差', '最大差日', '最小差', '最小差日', 'MAE', '平均差', 'σ',
-            '内示過小率(%)', '最大過小量',
+            '内示過小率(%)', 'ワースト1\n過小量', 'ワースト1\n出現率(%)', 'ワースト2\n過小量', 'ワースト2\n出現率(%)',
             '安全在庫\n90%', '安全在庫\n95%', '安全在庫\n99%',
             '収束\n平均日', '収束\n最短日', '収束最短日', '収束\n最長日', '収束最長日', '収束\n対象件数', '分析\n納期数',
         ]
@@ -893,7 +933,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         header_col_fills = (
             ['1F4E79'] * 3 +
             ['2E75B6'] * 7 +
-            ['C00000'] * 2 +
+            ['C00000'] * 5 +
             ['375623'] * 3 +
             ['7030A0'] * 7
         )
@@ -925,6 +965,9 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 _v(summary['sigma']),
                 _v(summary['shortage_rate']),
                 _v(summary['max_shortage']),
+                _v(summary['worst1_rate']),
+                _v(summary['worst2_qty']),
+                _v(summary['worst2_rate']),
                 _v(summary['safety_stock_90']),
                 _v(summary['safety_stock_95']),
                 _v(summary['safety_stock_99']),
@@ -939,7 +982,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             ws.append(row_data)
             # 行スタイル
             row_fill = 'EBF3FB' if row_idx % 2 == 0 else 'FFFFFF'
-            for col_idx in range(1, 23):
+            for col_idx in range(1, 26):
                 cell = ws.cell(row=row_idx, column=col_idx)
                 cell.border = border
                 cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -948,7 +991,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 cell.fill = PatternFill(start_color=row_fill, end_color=row_fill, fill_type='solid')
 
         # 列幅設定
-        col_widths = [18, 20, 8, 7, 12, 7, 12, 7, 7, 7, 10, 10, 9, 9, 9, 8, 8, 12, 8, 12, 8, 8]
+        col_widths = [18, 20, 8, 7, 12, 7, 12, 7, 7, 7, 10, 10, 9, 10, 9, 9, 9, 9, 8, 8, 12, 8, 12, 8, 8]
         for i, w in enumerate(col_widths, start=1):
             ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
 

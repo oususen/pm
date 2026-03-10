@@ -107,9 +107,17 @@
                   </span>
                 </div>
                 <div class="block-row">
-                  <span class="block-label">最大過小量（ワースト）</span>
+                  <span class="block-label">ワースト1位</span>
                   <span class="block-val" :class="analysisData.period_summary.max_shortage > 0 ? 'val-danger' : ''">
                     {{ fmt(analysisData.period_summary.max_shortage) }}
+                    <small class="diff-date">出現率 {{ fmt(analysisData.period_summary.worst1_rate) }}%</small>
+                  </span>
+                </div>
+                <div class="block-row">
+                  <span class="block-label">ワースト2位</span>
+                  <span class="block-val" :class="analysisData.period_summary.worst2_qty > 0 ? 'val-danger' : ''">
+                    {{ analysisData.period_summary.worst2_qty != null ? fmt(analysisData.period_summary.worst2_qty) : '—' }}
+                    <small v-if="analysisData.period_summary.worst2_rate != null" class="diff-date">出現率 {{ fmt(analysisData.period_summary.worst2_rate) }}%</small>
                   </span>
                 </div>
               </div>
@@ -444,7 +452,7 @@
                 <th rowspan="2">品番</th>
                 <th rowspan="2">品名</th>
                 <th colspan="7" class="cat-error">予測誤差</th>
-                <th colspan="2" class="cat-shortage">欠品リスク</th>
+                <th colspan="5" class="cat-shortage">欠品リスク</th>
                 <th colspan="3" class="cat-safety">推奨安全在庫</th>
                 <th colspan="4" class="cat-stable">収束安定期間</th>
               </tr>
@@ -457,7 +465,10 @@
                 <th class="cat-error">スナップ数</th>
                 <th class="cat-error">分析納期数</th>
                 <th class="cat-shortage">過小率%</th>
-                <th class="cat-shortage">最大過小量</th>
+                <th class="cat-shortage">W1<br>過小量</th>
+                <th class="cat-shortage">W1<br>出現率%</th>
+                <th class="cat-shortage">W2<br>過小量</th>
+                <th class="cat-shortage">W2<br>出現率%</th>
                 <th class="cat-safety">90%</th>
                 <th class="cat-safety">95%</th>
                 <th class="cat-safety">99%</th>
@@ -480,6 +491,9 @@
                 <td>{{ r.analyzed_dates }}</td>
                 <td>{{ fmt(r.shortage_rate) }}</td>
                 <td>{{ fmt(r.max_shortage) }}</td>
+                <td>{{ fmt(r.worst1_rate) }}</td>
+                <td>{{ r.worst2_qty != null ? fmt(r.worst2_qty) : '—' }}</td>
+                <td>{{ r.worst2_rate != null ? fmt(r.worst2_rate) : '—' }}</td>
                 <td class="ss-cell">{{ fmt(r.safety_stock_90) }}</td>
                 <td class="ss-cell">{{ fmt(r.safety_stock_95) }}</td>
                 <td class="ss-cell">{{ fmt(r.safety_stock_99) }}</td>
