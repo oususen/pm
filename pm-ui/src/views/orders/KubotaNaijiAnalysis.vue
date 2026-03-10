@@ -113,12 +113,20 @@
                     <small class="diff-date">出現率 {{ fmt(analysisData.period_summary.worst1_rate) }}%</small>
                   </span>
                 </div>
+                <div v-if="analysisData.period_summary.worst1_dates && analysisData.period_summary.worst1_dates.length" class="worst-dates-row">
+                  <span class="worst-dates-label">出現日：</span>
+                  <span v-for="d in analysisData.period_summary.worst1_dates" :key="d" class="worst-date-chip">{{ d }}</span>
+                </div>
                 <div class="block-row">
                   <span class="block-label">ワースト2位</span>
                   <span class="block-val" :class="analysisData.period_summary.worst2_qty > 0 ? 'val-danger' : ''">
                     {{ analysisData.period_summary.worst2_qty != null ? fmt(analysisData.period_summary.worst2_qty) : '—' }}
                     <small v-if="analysisData.period_summary.worst2_rate != null" class="diff-date">出現率 {{ fmt(analysisData.period_summary.worst2_rate) }}%</small>
                   </span>
+                </div>
+                <div v-if="analysisData.period_summary.worst2_dates && analysisData.period_summary.worst2_dates.length" class="worst-dates-row">
+                  <span class="worst-dates-label">出現日：</span>
+                  <span v-for="d in analysisData.period_summary.worst2_dates" :key="d" class="worst-date-chip">{{ d }}</span>
                 </div>
               </div>
             </div>
@@ -932,6 +940,9 @@ const exportExcel = async () => {
 .val-info   { color: #2471a3; }
 .bias-note { font-size: 10px; font-weight: normal; color: #888; display: block; text-align: right; }
 .diff-date { font-size: 11px; font-weight: normal; color: #666; margin-left: 4px; }
+.worst-dates-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px 8px 6px 8px; }
+.worst-dates-label { font-size: 11px; color: #888; white-space: nowrap; }
+.worst-date-chip { font-size: 11px; background: #fce8e8; color: #a00; border-radius: 3px; padding: 1px 5px; white-space: nowrap; }
 .block-note { font-size: 10px; color: #999; margin-top: 4px; }
 
 /* 納期タブ */

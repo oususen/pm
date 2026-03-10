@@ -718,7 +718,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     if s > _date_worst:
                         _date_worst = s
             if _date_worst > 0:
-                date_max_shortages.append(round(_date_worst, 1))
+                date_max_shortages.append((round(_date_worst, 1), ds))  # (過小量, 納期)
             if has_shortage:
                 n_dates_shortage += 1
 
@@ -784,15 +784,19 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             shortage_rate = round(n_dates_shortage / n_dates_with_firm * 100, 1) if n_dates_with_firm > 0 else 0.0
             # ワースト1・2位（納期単位の最大過小量でランキング）
             if date_max_shortages:
-                _counter = _Counter(date_max_shortages)
+                _qty_list = [qty for qty, _ in date_max_shortages]
+                _counter = _Counter(_qty_list)
                 _sorted = sorted(_counter.items(), key=lambda x: x[0], reverse=True)
-                max_shortage = _sorted[0][0]                  # ワースト1位の過小量
+                max_shortage = _sorted[0][0]
                 worst1_rate = round(_sorted[0][1] / total_dates * 100, 1) if total_dates > 0 else None
+                worst1_dates = sorted([ds for qty, ds in date_max_shortages if qty == max_shortage])
                 worst2_qty = _sorted[1][0] if len(_sorted) > 1 else None
                 worst2_rate = round(_sorted[1][1] / total_dates * 100, 1) if len(_sorted) > 1 and total_dates > 0 else None
+                worst2_dates = sorted([ds for qty, ds in date_max_shortages if qty == worst2_qty]) if worst2_qty is not None else []
             else:
                 max_shortage = 0.0
                 worst1_rate = worst2_qty = worst2_rate = None
+                worst1_dates = worst2_dates = []
 
             # 安全在庫推奨（Z×σ）。バイアスがある場合は補正
             bias = -mean_err if mean_err < 0 else 0.0
@@ -802,6 +806,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         else:
             mae = max_diff = max_diff_date = min_diff = min_diff_date = mean_err = sigma = None
             shortage_rate = max_shortage = worst1_rate = worst2_qty = worst2_rate = None
+            worst1_dates = worst2_dates = []
             ss_90 = ss_95 = ss_99 = None
             n_dates_with_firm = 0
             n_dates_shortage = 0
@@ -820,8 +825,10 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             'shortage_dates': n_dates_shortage,  # 内示過小が発生した納期数
             'max_shortage': max_shortage,        # ワースト1位の過小量
             'worst1_rate': worst1_rate,          # ワースト1位の出現率
+            'worst1_dates': worst1_dates,        # ワースト1位が発生した納期リスト
             'worst2_qty': worst2_qty,            # ワースト2位の過小量
             'worst2_rate': worst2_rate,          # ワースト2位の出現率
+            'worst2_dates': worst2_dates,        # ワースト2位が発生した納期リスト
             'safety_stock_90': ss_90,
             'safety_stock_95': ss_95,
             'safety_stock_99': ss_99,
