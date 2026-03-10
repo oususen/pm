@@ -4491,3 +4491,266 @@ class ScheduleRunNowView(APIView):
                 {'detail': f'実行に失敗しました: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+class StockMigrationDetectView(APIView):
+    """
+    ルーティング変更による孤立在庫を検出するAPI。
+    ピックアップ実行前に呼び出し、移行候補を返す。
+
+    POST payload: { line_id }
+    返却: [{ product_id, product_code, product_name, old_line_id, old_line_code, old_line_name,
+             old_process_id, old_process_code, old_process_name, stock_qty, new_line_id,
+             new_line_code, new_line_name, new_process_id, new_process_code, new_process_name }]
+    """
+
+    def post(self, request):
+        from django.db.models import Q
+        from masters.models import RoutingStep
+        from .models_line_backlog import LineBacklog
+
+        line_id = request.data.get('line_id')
+        if not line_id:
+            return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 新ルーティングでこのラインに属する品番を取得
+        # is_default=True のルーティングを優先し、同一品番に複数有効ルーティングがあっても決定論的に選定
+        active_steps = RoutingStep.objects.filter(
+            Q(line_id=line_id) | Q(line__isnull=True, process__line_id=line_id),
+            routing__is_active=True,
+        ).select_related('output_product', 'routing__product', 'process', 'line', 'process__line').order_by('-routing__is_default', 'step_no')
+
+        product_new_info = {}
+        for step in active_steps:
+            product = step.output_product or step.routing.product
+            if not product:
+                continue
+            if product.id in product_new_info:
+                continue
+            process = step.process
+            new_line = step.line or (process.line if hasattr(process, 'line') else None)
+            product_new_info[product.id] = {
+                'product': product,
+                'new_line': new_line,
+                'new_process': process,
+            }
+
+        if not product_new_info:
+            return Response([])
+
+        # 対象品番のうち、別ライン（新ラインと異なる）かつ在庫>0 かつ source_routing_step=NULL のLineBacklogを検索
+        product_ids = list(product_new_info.keys())
+        orphaned = (
+            LineBacklog.objects
+            .filter(
+                product_id__in=product_ids,
+                source_routing_step__isnull=True,
+                stock_qty__gt=0,
+                sequence_no=0,
+            )
+            .exclude(line_id=line_id)
+            .select_related('product', 'line', 'process')
+            .order_by('product__product_code', '-plan_date')
+        )
+
+        # 品番×旧ライン×旧工程の組み合わせごとに最新日の1件を返す（複数旧ライン対応）
+        seen = set()
+        results = []
+        for lb in orphaned:
+            key = (lb.product_id, lb.line_id, lb.process_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            new_info = product_new_info[lb.product_id]
+            new_line = new_info['new_line']
+            new_process = new_info['new_process']
+            results.append({
+                'product_id': lb.product_id,
+                'product_code': lb.product.product_code,
+                'product_name': lb.product.product_name,
+                'old_line_id': lb.line_id,
+                'old_line_code': lb.line.line_code if lb.line else '',
+                'old_line_name': lb.line.line_name if lb.line else '',
+                'old_process_id': lb.process_id,
+                'old_process_code': lb.process.process_code if lb.process else '',
+                'old_process_name': lb.process.process_name if lb.process else '',
+                'stock_qty': lb.stock_qty,
+                'new_line_id': new_line.id if new_line else None,
+                'new_line_code': new_line.line_code if new_line else '',
+                'new_line_name': new_line.line_name if new_line else '',
+                'new_process_id': new_process.id if new_process else None,
+                'new_process_code': new_process.process_code if new_process else '',
+                'new_process_name': new_process.process_name if new_process else '',
+            })
+
+        return Response(results)
+
+
+class StockMigrationExecuteView(APIView):
+    """
+    ルーティング変更による在庫移行を実行するAPI。
+
+    POST payload:
+    {
+      migration_date: "YYYY-MM-DD",
+      items: [
+        { product_id, old_line_id, old_process_id, new_line_id, new_process_id, migrate_qty }
+      ]
+    }
+    """
+
+    def post(self, request):
+        from datetime import date
+        from django.db import transaction
+        from .models_line_backlog import LineBacklog
+        from .models_line_backlog_adjustment import LineBacklogAdjustment
+        from .models_routing_migration_log import RoutingMigrationLog
+
+        migration_date_str = request.data.get('migration_date')
+        items = request.data.get('items', [])
+
+        if not migration_date_str or not items:
+            return Response({'detail': 'migration_date and items are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            migration_date = date.fromisoformat(migration_date_str)
+        except ValueError:
+            return Response({'detail': 'migration_date format must be YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # トランザクション前に全件バリデーション（部分失敗を防ぐ）
+        validated = []
+        for item in items:
+            product_id = item.get('product_id')
+            old_line_id = item.get('old_line_id')
+            old_process_id = item.get('old_process_id')
+            new_line_id = item.get('new_line_id')
+            new_process_id = item.get('new_process_id')
+            raw_qty = item.get('migrate_qty')
+
+            if not all([product_id, old_line_id, old_process_id, new_line_id, new_process_id, raw_qty is not None]):
+                return Response(
+                    {'detail': f'必須フィールドが不足しています: {item}'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                migrate_qty = int(raw_qty)
+            except (TypeError, ValueError):
+                return Response(
+                    {'detail': f'migrate_qty は整数で指定してください: {raw_qty}'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if migrate_qty <= 0:
+                return Response(
+                    {'detail': f'品番ID {product_id}: migrate_qty は1以上で指定してください'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # 孤立在庫（source_routing_step=NULL）の現在在庫を確認（超過移行を防ぐ）
+            latest = (
+                LineBacklog.objects
+                .filter(
+                    product_id=product_id,
+                    line_id=old_line_id,
+                    process_id=old_process_id,
+                    sequence_no=0,
+                    source_routing_step__isnull=True,
+                    stock_qty__gt=0,
+                )
+                .order_by('-plan_date')
+                .first()
+            )
+            current_stock = latest.stock_qty if latest else 0
+            if migrate_qty > current_stock:
+                return Response(
+                    {'detail': f'品番ID {product_id}: 移行数量({migrate_qty})が現在在庫({current_stock})を超えています'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # 同一内容の移行が既に実行済みでないか確認（二重実行防止）
+            already_migrated = RoutingMigrationLog.objects.filter(
+                product_id=product_id,
+                old_line_id=old_line_id,
+                old_process_id=old_process_id,
+                new_line_id=new_line_id,
+                new_process_id=new_process_id,
+                migration_date=migration_date,
+            ).exists()
+            if already_migrated:
+                return Response(
+                    {'detail': f'品番ID {product_id}: 同日・同ライン組み合わせの移行が既に実行済みです。二重実行を防ぐためスキップしてください。'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            validated.append({
+                'product_id': product_id,
+                'old_line_id': old_line_id,
+                'old_process_id': old_process_id,
+                'new_line_id': new_line_id,
+                'new_process_id': new_process_id,
+                'migrate_qty': migrate_qty,
+            })
+
+        # 全件を1トランザクションで実行（1件でも失敗したら全ロールバック）
+        migrated = []
+        try:
+            with transaction.atomic():
+                for item in validated:
+                    product_id = item['product_id']
+                    old_line_id = item['old_line_id']
+                    old_process_id = item['old_process_id']
+                    new_line_id = item['new_line_id']
+                    new_process_id = item['new_process_id']
+                    migrate_qty = item['migrate_qty']
+                    user = request.user if request.user.is_authenticated else None
+
+                    # 旧ラインの在庫をマイナス調整
+                    old_adj, _ = LineBacklogAdjustment.objects.get_or_create(
+                        line_id=old_line_id,
+                        product_id=product_id,
+                        process_id=old_process_id,
+                        plan_date=migration_date,
+                        adjust_type='STOCK',
+                        defaults={'adjust_qty': 0, 'reason': 'ルーティング変更による在庫移行（移行元）'},
+                    )
+                    old_adj.adjust_qty -= migrate_qty
+                    old_adj.reason = 'ルーティング変更による在庫移行（移行元）'
+                    old_adj.updated_by = user
+                    old_adj.save()
+
+                    # 新ラインの在庫をプラス調整
+                    new_adj, _ = LineBacklogAdjustment.objects.get_or_create(
+                        line_id=new_line_id,
+                        product_id=product_id,
+                        process_id=new_process_id,
+                        plan_date=migration_date,
+                        adjust_type='STOCK',
+                        defaults={'adjust_qty': 0, 'reason': 'ルーティング変更による在庫移行（移行先）'},
+                    )
+                    new_adj.adjust_qty += migrate_qty
+                    new_adj.reason = 'ルーティング変更による在庫移行（移行先）'
+                    new_adj.updated_by = user
+                    new_adj.save()
+
+                    # 移行ログ記録
+                    RoutingMigrationLog.objects.create(
+                        product_id=product_id,
+                        old_line_id=old_line_id,
+                        old_process_id=old_process_id,
+                        new_line_id=new_line_id,
+                        new_process_id=new_process_id,
+                        migrated_qty=migrate_qty,
+                        migration_date=migration_date,
+                        migrated_by=user,
+                    )
+
+                    migrated.append({
+                        'product_id': product_id,
+                        'migrate_qty': migrate_qty,
+                    })
+        except Exception as e:
+            return Response(
+                {'detail': f'移行処理中にエラーが発生しました（全件ロールバック済み）: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response({'migrated': migrated, 'count': len(migrated)})

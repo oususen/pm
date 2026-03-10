@@ -16,6 +16,8 @@ from production.views import (
     ProcessActualViewSet,
     ProductionOrderViewSet,
     StockAllocationViewSet,
+    StockMigrationDetectView,
+    StockMigrationExecuteView,
 )
 from production.views_line_realtime import LineRealtimeRecordViewSet, LineStatusViewSet
 from production.views_process_realtime import ProcessRealtimeRecordViewSet
@@ -52,4 +54,6 @@ urlpatterns = [
     path('schedule-config/', ScheduleConfigView.as_view(), name='schedule-config'),
     path('schedule-config/run-now/', ScheduleRunNowView.as_view(), name='schedule-run-now'),
     path('line-backlog-adjustments/', LineBacklogAdjustmentView.as_view(), name='line-backlog-adjustments'),
+    path('stock-migration/detect/', StockMigrationDetectView.as_view(), name='stock-migration-detect'),
+    path('stock-migration/execute/', StockMigrationExecuteView.as_view(), name='stock-migration-execute'),
 ]

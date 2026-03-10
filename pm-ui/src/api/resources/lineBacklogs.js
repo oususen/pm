@@ -53,4 +53,10 @@ export const createLineBacklogsAPI = (client) => ({
   recalculateScrapForProducts(payload) {
     return client.post('/line-backlogs/recalculate_scrap_for_products/', payload)
   },
+  detectStockMigration(payload) {
+    return client.post('/stock-migration/detect/', payload)
+  },
+  executeStockMigration(payload) {
+    return client.post('/stock-migration/execute/', payload)
+  },
 })

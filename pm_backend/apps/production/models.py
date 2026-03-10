@@ -9,6 +9,7 @@ from .models_plan_change_log import ProductionPlanChangeLog
 from .models_plan_lock_setting import ProductionPlanLockSetting
 from .models_process_work_session import ProcessWorkSession
 from .models_schedule_config import ScheduleConfig
+from .models_routing_migration_log import RoutingMigrationLog
 
 
 class LineDemand(models.Model):
