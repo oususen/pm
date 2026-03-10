@@ -332,6 +332,8 @@ class UserSerializer(serializers.ModelSerializer):
 
         # User permissions override templates
         for perm in user_perms:
+            if not (perm.can_view or perm.can_edit):
+                continue
             permissions[perm.resource]['can_view'] = perm.can_view
             permissions[perm.resource]['can_edit'] = perm.can_edit
 

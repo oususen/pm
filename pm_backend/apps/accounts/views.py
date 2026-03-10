@@ -56,14 +56,18 @@ def _profile_payload(user):
     }
 
 def _permissions_to_map(permissions):
-    return {
-        perm.resource: {
+    result = {}
+    for perm in permissions:
+        can_view = bool(getattr(perm, 'can_view', False))
+        can_edit = bool(getattr(perm, 'can_edit', False))
+        if not (can_view or can_edit):
+            continue
+        result[perm.resource] = {
             'resource': perm.resource,
-            'can_view': perm.can_view,
-            'can_edit': perm.can_edit,
+            'can_view': can_view,
+            'can_edit': can_edit,
         }
-        for perm in permissions
-    }
+    return result
 
 
 def _merge_permissions(base, overrides):

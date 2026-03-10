@@ -916,11 +916,13 @@ const buildPayload = () => {
 
   if (canManagePermissions.value) {
     payload.permissions = useUserPermissions.value
-      ? form.permissions.map((perm) => ({
-          resource: perm.resource,
-          can_view: Boolean(perm.can_view),
-          can_edit: Boolean(perm.can_edit),
-        }))
+      ? form.permissions
+          .filter((perm) => Boolean(perm.can_view) || Boolean(perm.can_edit))
+          .map((perm) => ({
+            resource: perm.resource,
+            can_view: Boolean(perm.can_view),
+            can_edit: Boolean(perm.can_edit),
+          }))
       : []
   }
 
