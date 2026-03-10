@@ -442,9 +442,9 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 _counter = _Counter(date_max_shortages)
                 _sorted = sorted(_counter.items(), key=lambda x: x[0], reverse=True)
                 max_shortage = _sorted[0][0]
-                worst1_rate = round(_sorted[0][1] / total_dates * 100, 1) if total_dates > 0 else None
+                worst1_rate = round(_sorted[0][1] / n_dates_with_firm * 100, 1) if n_dates_with_firm > 0 else None
                 worst2_qty = _sorted[1][0] if len(_sorted) > 1 else None
-                worst2_rate = round(_sorted[1][1] / total_dates * 100, 1) if len(_sorted) > 1 and total_dates > 0 else None
+                worst2_rate = round(_sorted[1][1] / n_dates_with_firm * 100, 1) if len(_sorted) > 1 and n_dates_with_firm > 0 else None
             else:
                 max_shortage = 0.0
                 worst1_rate = worst2_qty = worst2_rate = None
@@ -788,10 +788,10 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 _counter = _Counter(_qty_list)
                 _sorted = sorted(_counter.items(), key=lambda x: x[0], reverse=True)
                 max_shortage = _sorted[0][0]
-                worst1_rate = round(_sorted[0][1] / total_dates * 100, 1) if total_dates > 0 else None
+                worst1_rate = round(_sorted[0][1] / n_dates_with_firm * 100, 1) if n_dates_with_firm > 0 else None
                 worst1_dates = sorted([ds for qty, ds in date_max_shortages if qty == max_shortage])
                 worst2_qty = _sorted[1][0] if len(_sorted) > 1 else None
-                worst2_rate = round(_sorted[1][1] / total_dates * 100, 1) if len(_sorted) > 1 and total_dates > 0 else None
+                worst2_rate = round(_sorted[1][1] / n_dates_with_firm * 100, 1) if len(_sorted) > 1 and n_dates_with_firm > 0 else None
                 worst2_dates = sorted([ds for qty, ds in date_max_shortages if qty == worst2_qty]) if worst2_qty is not None else []
             else:
                 max_shortage = 0.0
