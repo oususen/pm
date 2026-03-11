@@ -188,6 +188,17 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+            # リーデンは現行運用で「確定（FIRM）のみ」受付
+            if customer_code == '000018' and order_type != 'FIRM':
+                return Response(
+                    {
+                        'success': False,
+                        'error': 'リーデン取込は確定（FIRM）のみ対応です。',
+                        'message': 'customer_code=000018 の場合、order_type=FIRM を指定してください。'
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
             # Check for duplicate file name across all raw tables
             if (StgOrderRaw.objects.filter(source_file=file.name).exists() or
                 StgOrderRawKubota.objects.filter(source_file=file.name).exists() or
