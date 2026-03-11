@@ -2,7 +2,7 @@
   <div class="page">
     <div class="page-header">
       <h2 class="page-title">生産実績照会</h2>
-      <p class="subtitle">開始〜終了をセッション単位で照会します（中断区間も表示）。</p>
+      <p class="subtitle">開始〜終了をセッション単位で照会します（中断区間も表示。期間は08:00〜翌07:59で判定）。</p>
     </div>
 
     <div class="filters">
@@ -196,6 +196,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
+import { addDays, formatISODate, getBusinessDate } from '@/utils/dateUtil'
 import { exportProductionSummaryExcel } from '@/utils/productionRecordExport2'
 import {
   exportCsv as _exportCsv,
@@ -210,10 +211,16 @@ const sessions = ref([])
 const lines = ref([])
 const processes = ref([])
 
-const today = new Date()
-const toISODate = (d) => d.toISOString().slice(0, 10)
-const startDate = ref(toISODate(new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)))
-const endDate = ref(toISODate(new Date(today.getTime() + 24 * 60 * 60 * 1000)))
+const buildDefaultDateRange = () => {
+  const businessToday = getBusinessDate()
+  return {
+    start: formatISODate(addDays(businessToday, -7)),
+    end: formatISODate(businessToday),
+  }
+}
+const defaultDateRange = buildDefaultDateRange()
+const startDate = ref(defaultDateRange.start)
+const endDate = ref(defaultDateRange.end)
 const lineId = ref('')
 const processId = ref('')
 const productCode = ref('')
@@ -362,6 +369,7 @@ const loadSessions = async () => {
 }
 
 const resetFilters = async () => {
+  const nextDefaultDateRange = buildDefaultDateRange()
   lineId.value = ''
   processId.value = ''
   productCode.value = ''
@@ -369,8 +377,8 @@ const resetFilters = async () => {
   status.value = ''
   hasIssue.value = ''
   excludeZeroProduction.value = ''
-  startDate.value = toISODate(new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000))
-  endDate.value = toISODate(new Date(today.getTime() + 24 * 60 * 60 * 1000))
+  startDate.value = nextDefaultDateRange.start
+  endDate.value = nextDefaultDateRange.end
   await loadSessions()
 }
 

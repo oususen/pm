@@ -34,6 +34,16 @@ def _is_countable_session_for_actual(session_type, end_action):
     return str(session_type or '').upper() == 'WORK' and str(end_action or '').upper() in ('END', 'PAUSE')
 
 
+def _build_business_boundary_datetime(target_date, day_offset=0):
+    boundary_dt = datetime.combine(
+        target_date + timedelta(days=day_offset),
+        time(DAY_BOUNDARY_HOUR, 0),
+    )
+    if settings.USE_TZ:
+        return timezone.make_aware(boundary_dt, timezone.get_current_timezone())
+    return boundary_dt
+
+
 def _adjust_backlog_actual_for_session(session_obj, delta_qty):
     if not session_obj or not delta_qty:
         return
@@ -274,13 +284,17 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         if start_date:
             d = parse_date(start_date)
             if d:
-                queryset = queryset.filter(started_at__date__gte=d)
+                queryset = queryset.filter(
+                    started_at__gte=_build_business_boundary_datetime(d)
+                )
 
         end_date = request.query_params.get('end_date')
         if end_date:
             d = parse_date(end_date)
             if d:
-                queryset = queryset.filter(started_at__date__lte=d)
+                queryset = queryset.filter(
+                    started_at__lt=_build_business_boundary_datetime(d, day_offset=1)
+                )
 
         has_issue = request.query_params.get('has_issue')
         if has_issue is not None:
