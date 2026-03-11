@@ -268,6 +268,7 @@
               <th>工程コード</th>
               <th>基幹品番</th>
               <th>工順</th>
+              <th title="工程順位→生産数のEnterキー回数（自動入力用）">Enter回数</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -286,12 +287,15 @@
                 <input v-model="item.row.coreProcessOrder" type="text" class="map-input" placeholder="例: 10" />
               </td>
               <td>
+                <input v-model.number="item.row.enterCount" type="number" class="map-input map-input-narrow" min="1" max="20" placeholder="空=デフォ" />
+              </td>
+              <td>
                 <button class="btn btn-secondary" type="button" @click="copyAppToCore(item.row)">コピー</button>
                 <button class="btn btn-secondary" type="button" @click="removeMappingRow(item.index)">削除</button>
               </td>
             </tr>
             <tr v-if="!filteredMappingEditRows.length">
-              <td colspan="5" class="no-data">加工品がありません</td>
+              <td colspan="6" class="no-data">加工品がありません</td>
             </tr>
           </tbody>
         </table>
@@ -708,6 +712,7 @@ const loadMappingCandidates = async (tabKey = settingsTargetTab.value) => {
         processCode,
         coreProductCode: exactCore?.coreProductCode || fallbackCore?.coreProductCode || '',
         coreProcessOrder: exactCore?.coreProcessOrder || fallbackCore?.coreProcessOrder || '',
+        enterCount: exactCore?.enterCount ?? fallbackCore?.enterCount ?? null,
       })
     })
 
@@ -720,6 +725,7 @@ const loadMappingCandidates = async (tabKey = settingsTargetTab.value) => {
           processCode: row.processCode,
           coreProductCode: row.coreProductCode,
           coreProcessOrder: row.coreProcessOrder || '',
+          enterCount: row.enterCount ?? null,
         })
       }
     })
@@ -787,7 +793,7 @@ const saveTargetLines = async () => {
 
 const addMappingRow = () => {
   if (!canEditRecordInquirySettings.value) return
-  mappingEditRows.value.push({ appProductCode: '', processCode: '', coreProductCode: '', coreProcessOrder: '' })
+  mappingEditRows.value.push({ appProductCode: '', processCode: '', coreProductCode: '', coreProcessOrder: '', enterCount: null })
   mappingSaveMessage.value = ''
 }
 
@@ -1245,6 +1251,11 @@ onMounted(async () => {
 }
 .mapping-table {
   min-width: 760px;
+}
+.map-input-narrow {
+  min-width: 60px !important;
+  width: 70px !important;
+  text-align: center;
 }
 .map-input {
   width: 100%;

@@ -37,7 +37,7 @@ export const buildProductionSummaryRows = (
   const mappings = getProductionRecordMappingsByTab(mappingsByTab, tabKey)
   const startKey = toDateKey(startDate)
   const endKey = toDateKey(endDate)
-  const headers = ['生産日', 'アプリ品番', '基幹品番', '工程コード', '工順', '開始時間', '終了時間', '生産数量', 'マッピング状態']
+  const headers = ['生産日', 'アプリ品番', '基幹品番', '工程コード', '工順', '開始時間', '終了時間', '生産数量', 'Enter回数', 'マッピング状態']
   const rows = (Array.isArray(sessions) ? sessions : [])
     .map((row) => {
       const appProductCode = row.product_code || ''
@@ -74,6 +74,7 @@ export const buildProductionSummaryRows = (
         formatTimeOnly(row.started_at),
         row.ended_at ? formatTimeOnly(row.ended_at) : '—',
         productionQty ?? '',
+        mapped.enterCount ?? '',
         mapped.mapped ? '変換済み' : '未設定(アプリ品番)',
       ]
     })

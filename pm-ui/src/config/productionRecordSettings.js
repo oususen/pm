@@ -25,12 +25,19 @@ const normalizeLineCodes = (lineCodes) => Array.from(
 )
 
 const normalizeMappingRows = (rows) => (Array.isArray(rows) ? rows : [])
-  .map((row) => ({
-    appProductCode: normalize(row?.appProductCode),
-    processCode: normalize(row?.processCode),
-    coreProductCode: String(row?.coreProductCode || '').trim(),
-    coreProcessOrder: String(row?.coreProcessOrder || '').trim(),
-  }))
+  .map((row) => {
+    const enterCountRaw = row?.enterCount
+    const enterCount = enterCountRaw !== null && enterCountRaw !== undefined && enterCountRaw !== ''
+      ? (parseInt(enterCountRaw, 10) || null)
+      : null
+    return {
+      appProductCode: normalize(row?.appProductCode),
+      processCode: normalize(row?.processCode),
+      coreProductCode: String(row?.coreProductCode || '').trim(),
+      coreProcessOrder: String(row?.coreProcessOrder || '').trim(),
+      enterCount,  // 工程順位→生産数のEnter回数（null=アプリデフォルト使用）
+    }
+  })
   .filter((row) => row.appProductCode && row.coreProductCode)
 
 export const createDefaultTargetLineCodesByTab = () => ({
@@ -147,6 +154,7 @@ export const resolveCoreMapping = (appProductCode, processCode, mappings = []) =
     return {
       coreProductCode: exact.coreProductCode || appProductCode,
       coreProcessOrder: exact.coreProcessOrder || '',
+      enterCount: exact.enterCount ?? null,
       mapped: true,
     }
   }
@@ -158,9 +166,10 @@ export const resolveCoreMapping = (appProductCode, processCode, mappings = []) =
     return {
       coreProductCode: fallback.coreProductCode || appProductCode,
       coreProcessOrder: fallback.coreProcessOrder || '',
+      enterCount: fallback.enterCount ?? null,
       mapped: true,
     }
   }
 
-  return { coreProductCode: appProductCode, coreProcessOrder: '', mapped: false }
+  return { coreProductCode: appProductCode, coreProcessOrder: '', enterCount: null, mapped: false }
 }

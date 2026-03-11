@@ -14,11 +14,15 @@ from tkinter import ttk, filedialog, messagebox
 import threading
 import json
 import time
+import ctypes
+import keyboard
 import pyautogui
 import pyperclip
 import openpyxl
 import win32gui
 import win32con
+import win32process
+import win32api
 from pathlib import Path
 
 # ============================================================
@@ -28,9 +32,8 @@ CONFIG_FILE = Path(__file__).parent / "kikan_input_config.json"
 
 DEFAULT_CONFIG = {
     "window_title":        "SSE0040",
-    "tabs_to_seisanbi":    1,
     "tabs_to_hinban":      1,
-    "tabs_after_hinban":   2,
+    "tabs_after_hinban":   1,
     "tabs_to_seisansu":    5,
     "tabs_to_jikan_start": 5,
     "tabs_to_jikan_end":   1,
@@ -56,8 +59,36 @@ def find_window(title_part):
 
 
 def activate_window(hwnd):
+    """Windowsのフォーカス制限を回避してウィンドウをアクティブ化"""
+    # 最小化されていれば復元
     win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-    win32gui.SetForegroundWindow(hwnd)
+
+    # AttachThreadInput でフォーカス権限を移譲してから SetForegroundWindow
+    fg_hwnd      = win32gui.GetForegroundWindow()
+    fg_thread    = win32process.GetWindowThreadProcessId(fg_hwnd)[0]
+    my_thread    = win32api.GetCurrentThreadId()
+    tgt_thread   = win32process.GetWindowThreadProcessId(hwnd)[0]
+
+    attached_fg  = fg_thread  != my_thread
+    attached_tgt = fg_thread  != tgt_thread
+
+    if attached_fg:
+        win32process.AttachThreadInput(fg_thread, my_thread, True)
+    if attached_tgt:
+        win32process.AttachThreadInput(fg_thread, tgt_thread, True)
+
+    try:
+        win32gui.BringWindowToTop(hwnd)
+        win32gui.SetForegroundWindow(hwnd)
+    except Exception:
+        # 最終手段: ctypes で強制フォーカス
+        ctypes.windll.user32.SetForegroundWindow(hwnd)
+    finally:
+        if attached_fg:
+            win32process.AttachThreadInput(fg_thread, my_thread, False)
+        if attached_tgt:
+            win32process.AttachThreadInput(fg_thread, tgt_thread, False)
+
     time.sleep(0.5)
 
 
@@ -101,18 +132,24 @@ def load_excel(filepath):
     return records, skipped, ws.title
 
 
-def input_one_record(record, hwnd, cfg):
-    activate_window(hwnd)
-
+def input_one_record(record, cfg, stop_check=None):
     delay_key    = cfg["delay_key"]
     delay_hinban = cfg["delay_hinban"]
 
-    def tab(n=1):
+    def check_stop():
+        """停止フラグまたはCtrl+Pで中断"""
+        if (stop_check and stop_check()) or keyboard.is_pressed('ctrl+p'):
+            raise InterruptedError("停止")
+
+    def next_field(n=1):
+        """Enterキーでフィールドを移動（n回）"""
         for _ in range(n):
-            pyautogui.press('tab')
+            check_stop()
+            pyautogui.press('enter')
             time.sleep(delay_key)
 
     def clear_input(text):
+        check_stop()
         pyautogui.hotkey('ctrl', 'a')
         time.sleep(0.05)
         pyperclip.copy(str(text))
@@ -126,35 +163,43 @@ def input_one_record(record, hwnd, cfg):
     start_t   = format_time(record.get('開始時間'))
     end_t     = format_time(record.get('終了時間'))
 
-    # 処理区分 → 生産日
-    tab(cfg["tabs_to_seisanbi"])
+    # 生産日（カーソルはここから開始）
     clear_input(seisanbi)
 
     # 生産日 → 品番
-    tab(cfg["tabs_to_hinban"])
+    next_field(cfg["tabs_to_hinban"])
     clear_input(hinban)
-    pyautogui.press('enter')
+    pyautogui.press('enter')       # 品番確定（品名・工程情報を引く）
     time.sleep(delay_hinban)
 
     # 品番確定後 → 工程順位
-    tab(cfg["tabs_after_hinban"])
+    next_field(cfg["tabs_after_hinban"])
     clear_input(koukei)
 
     # 工程順位 → 生産数(完成)
-    tab(cfg["tabs_to_seisansu"])
+    # Enter回数はマッピング設定の値を優先、なければアプリ設定値を使用
+    enter_count_raw = record.get('Enter回数')
+    if enter_count_raw is not None and str(enter_count_raw).strip() not in ('', 'None', '—'):
+        tabs_to_seisansu = int(float(enter_count_raw))
+    else:
+        tabs_to_seisansu = cfg["tabs_to_seisansu"]
+    next_field(tabs_to_seisansu)
     clear_input(seisansu)
 
     # 生産数 → 加工時間1 開始
     if start_t:
-        tab(cfg["tabs_to_jikan_start"])
+        next_field(cfg["tabs_to_jikan_start"])
         clear_input(start_t)
         if end_t:
-            tab(cfg["tabs_to_jikan_end"])
+            next_field(cfg["tabs_to_jikan_end"])
             clear_input(end_t)
 
-    # F12 登録
+    # F12 登録 → 「入力しますか？」確認ダイアログ → Enter（はい）
+    check_stop()
     pyautogui.press('f12')
-    time.sleep(cfg["delay_register"])
+    time.sleep(0.6)               # 確認ダイアログが表示されるまで待機
+    pyautogui.press('enter')      # 「はい」を選択
+    time.sleep(cfg["delay_register"])  # 登録処理完了まで待機
 
     return seisanbi, hinban, koukei, seisansu
 
@@ -171,8 +216,9 @@ class KikanInputApp:
 
         self.cfg = self._load_config()
         self.records = []
-        self._stop_flag = False
-        self._running  = False
+        self._stop_flag    = False
+        self._running      = False
+        self._hotkey_handle = None
 
         self._build_ui()
 
@@ -206,7 +252,6 @@ class KikanInputApp:
 
         return {
             "window_title":        self.v_window_title.get(),
-            "tabs_to_seisanbi":    iv(self.v_t_seisanbi,    1),
             "tabs_to_hinban":      iv(self.v_t_hinban,       1),
             "tabs_after_hinban":   iv(self.v_t_after_hinban, 2),
             "tabs_to_seisansu":    iv(self.v_t_seisansu,     5),
@@ -241,7 +286,6 @@ class KikanInputApp:
         frm_tab.grid(row=1, column=0, sticky="ew", padx=10, pady=4)
 
         tab_items = [
-            ("処理区分 → 生産日",     "v_t_seisanbi",    "tabs_to_seisanbi"),
             ("生産日 → 品番",         "v_t_hinban",      "tabs_to_hinban"),
             ("品番確定後 → 工程順位", "v_t_after_hinban","tabs_after_hinban"),
             ("工程順位 → 生産数",     "v_t_seisansu",    "tabs_to_seisansu"),
@@ -436,29 +480,83 @@ class KikanInputApp:
     def _stop(self):
         self._stop_flag = True
         self._log("★ 停止リクエストを送信しました...")
-        self.lbl_status.config(text="停止中...", foreground="orange")
+        # tkinter UIはメインスレッドからのみ操作可（keyboard コールバック対応）
+        self.root.after(0, lambda: self.lbl_status.config(text="停止中...", foreground="orange"))
+
+    def _show_countdown_popup(self, seconds, cancel_event):
+        """カウントダウンポップアップをメインスレッドで表示"""
+        popup = tk.Toplevel(self.root)
+        popup.title("入力開始まで")
+        popup.resizable(False, False)
+        popup.attributes("-topmost", True)
+
+        # 画面中央に配置
+        popup.update_idletasks()
+        w, h = 340, 220
+        sx = self.root.winfo_screenwidth()
+        sy = self.root.winfo_screenheight()
+        popup.geometry(f"{w}x{h}+{(sx-w)//2}+{(sy-h)//2}")
+
+        tk.Label(popup, text="基幹システムの\n生産日にカーソルを置いてください",
+                 font=("Yu Gothic UI", 12), fg="#333").pack(pady=(18, 6))
+
+        lbl_num = tk.Label(popup, text=str(seconds),
+                           font=("Yu Gothic UI", 56, "bold"), fg="#e05c00")
+        lbl_num.pack()
+
+        tk.Label(popup, text="秒後に入力を開始します",
+                 font=("Yu Gothic UI", 10), fg="#555").pack(pady=(0, 4))
+
+        tk.Label(popup, text="停止: Ctrl+P",
+                 font=("Yu Gothic UI", 9), fg="#888").pack(pady=(0, 8))
+
+        self._countdown_popup  = popup
+        self._countdown_label  = lbl_num
+
+    def _update_countdown_label(self, val):
+        try:
+            self._countdown_label.config(text=str(val))
+        except Exception:
+            pass
+
+    def _close_countdown_popup(self):
+        try:
+            self._countdown_popup.destroy()
+        except Exception:
+            pass
 
     def _run_input(self, hwnd):
         """入力処理（別スレッド）"""
-        countdown = int(self.cfg.get("countdown_sec", 5))
-        self._set_status(f"開始まで {countdown} 秒...", "orange")
-        self._log(f"★ {countdown}秒後に開始します。基幹の処理区分にカーソルを置いてください。")
-        self._log("★ 緊急停止: マウスを画面の左上角に移動")
+        countdown    = int(self.cfg.get("countdown_sec", 5))
+        cancel_event = threading.Event()
+
+        # ポップアップをメインスレッドで表示
+        self.root.after(0, lambda: self._show_countdown_popup(countdown, cancel_event))
+        self._log(f"★ {countdown}秒後に開始します。基幹の生産日にカーソルを置いてください。")
+        self._log("★ 停止: Ctrl+P  /  緊急停止: マウスを画面の左上角に移動")
 
         for i in range(countdown, 0, -1):
-            if self._stop_flag:
+            if self._stop_flag or cancel_event.is_set():
+                self.root.after(0, self._close_countdown_popup)
                 self._finish(0, 0, stopped=True)
                 return
-            self._set_status(f"開始まで {i} 秒...", "orange")
+            self.root.after(0, lambda v=i: self._update_countdown_label(v))
             time.sleep(1)
+
+        self.root.after(0, self._close_countdown_popup)
 
         pyautogui.FAILSAFE = True
         total   = len(self.records)
         success = 0
         errors  = 0
 
+        # 停止判定関数（停止ボタン / Ctrl+P どちらでも止まる）
+        def should_stop():
+            return self._stop_flag or keyboard.is_pressed('ctrl+p')
+
         for i, record in enumerate(self.records):
-            if self._stop_flag:
+            if should_stop():
+                self._stop_flag = True
                 break
 
             self._set_status(f"入力中 {i+1}/{total}", "blue")
@@ -467,9 +565,14 @@ class KikanInputApp:
 
             try:
                 seisanbi, hinban, koukei, seisansu = input_one_record(
-                    record, hwnd, self.cfg)
+                    record, self.cfg, stop_check=should_stop)
                 success += 1
                 self._log(f"  → 登録OK  生産日={seisanbi}")
+            except InterruptedError:
+                # 停止ボタン / Ctrl+P による中断
+                self._stop_flag = True
+                self._log("★ 入力中に停止しました")
+                break
             except pyautogui.FailSafeException:
                 self._log("★★ フェイルセーフ発動 - 緊急停止 ★★")
                 break
