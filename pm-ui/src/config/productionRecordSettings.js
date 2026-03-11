@@ -1,5 +1,6 @@
 const TARGET_LINE_CODES_KEY = 'production_record_target_line_codes'
 const PRODUCT_MAPPINGS_KEY = 'production_record_product_mappings'
+const DEFAULT_ENTER_COUNT = 2
 
 const TAB_KEYS = ['tank', 'floor', 'blade']
 const DEFAULT_TARGET_LINE_CODES_BY_TAB = {
@@ -24,18 +25,23 @@ const normalizeLineCodes = (lineCodes) => Array.from(
   new Set((Array.isArray(lineCodes) ? lineCodes : []).map((v) => normalize(v)).filter(Boolean)),
 )
 
+const normalizeEnterCount = (value) => {
+  if (value === null || value === undefined || value === '') return DEFAULT_ENTER_COUNT
+  const parsed = parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return DEFAULT_ENTER_COUNT
+  if (parsed < 1 || parsed > 20) return DEFAULT_ENTER_COUNT
+  return parsed
+}
+
 const normalizeMappingRows = (rows) => (Array.isArray(rows) ? rows : [])
   .map((row) => {
-    const enterCountRaw = row?.enterCount
-    const enterCount = enterCountRaw !== null && enterCountRaw !== undefined && enterCountRaw !== ''
-      ? (parseInt(enterCountRaw, 10) || null)
-      : null
+    const enterCount = normalizeEnterCount(row?.enterCount)
     return {
       appProductCode: normalize(row?.appProductCode),
       processCode: normalize(row?.processCode),
       coreProductCode: String(row?.coreProductCode || '').trim(),
       coreProcessOrder: String(row?.coreProcessOrder || '').trim(),
-      enterCount,  // 工程順位→生産数のEnter回数（null=アプリデフォルト使用）
+      enterCount,  // 品番確定後→工程順のEnter回数（未指定時は既定値2）
     }
   })
   .filter((row) => row.appProductCode && row.coreProductCode)
@@ -145,7 +151,7 @@ export const resolveCoreMapping = (appProductCode, processCode, mappings = []) =
   const source = normalizeMappingRows(mappings)
   const app = normalize(appProductCode)
   const proc = normalize(processCode)
-  if (!app) return { coreProductCode: '', coreProcessOrder: '', mapped: false }
+  if (!app) return { coreProductCode: '', coreProcessOrder: '', enterCount: DEFAULT_ENTER_COUNT, mapped: false }
 
   const exact = source.find(
     (row) => normalize(row.appProductCode) === app && normalize(row.processCode) === proc,
@@ -154,7 +160,7 @@ export const resolveCoreMapping = (appProductCode, processCode, mappings = []) =
     return {
       coreProductCode: exact.coreProductCode || appProductCode,
       coreProcessOrder: exact.coreProcessOrder || '',
-      enterCount: exact.enterCount ?? null,
+      enterCount: exact.enterCount ?? DEFAULT_ENTER_COUNT,
       mapped: true,
     }
   }
@@ -166,10 +172,10 @@ export const resolveCoreMapping = (appProductCode, processCode, mappings = []) =
     return {
       coreProductCode: fallback.coreProductCode || appProductCode,
       coreProcessOrder: fallback.coreProcessOrder || '',
-      enterCount: fallback.enterCount ?? null,
+      enterCount: fallback.enterCount ?? DEFAULT_ENTER_COUNT,
       mapped: true,
     }
   }
 
-  return { coreProductCode: appProductCode, coreProcessOrder: '', enterCount: null, mapped: false }
+  return { coreProductCode: appProductCode, coreProcessOrder: '', enterCount: DEFAULT_ENTER_COUNT, mapped: false }
 }

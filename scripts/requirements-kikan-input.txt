@@ -1,0 +1,5 @@
+pyautogui
+pyperclip
+openpyxl
+pywin32
+keyboard

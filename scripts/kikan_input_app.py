@@ -6,7 +6,7 @@ kikan_input_app.py
     python kikan_input_app.py
 
 事前準備:
-    pip install pyautogui pyperclip openpyxl pywin32
+    pip install pyautogui pyperclip openpyxl pywin32 keyboard
 """
 
 import tkinter as tk
@@ -109,6 +109,19 @@ def format_time(raw):
     return f"{s[:2]}:{s[2:4]}"
 
 
+def parse_enter_count(raw, default_value):
+    """Enter回数を1〜20の整数に正規化。範囲外/不正値はdefaultにフォールバック"""
+    try:
+        if raw is None or str(raw).strip() in ('', 'None', '—'):
+            return default_value
+        parsed = int(float(raw))
+    except (TypeError, ValueError):
+        return default_value
+    if 1 <= parsed <= 20:
+        return parsed
+    return default_value
+
+
 def load_excel(filepath):
     wb = openpyxl.load_workbook(filepath)
     ws = wb['生産実績2'] if '生産実績2' in wb.sheetnames else wb.active
@@ -169,21 +182,21 @@ def input_one_record(record, cfg, stop_check=None):
     # 生産日 → 品番
     next_field(cfg["tabs_to_hinban"])
     clear_input(hinban)
-    pyautogui.press('enter')       # 品番確定（品名・工程情報を引く）
-    time.sleep(delay_hinban)
 
-    # 品番確定後 → 工程順位
-    next_field(cfg["tabs_after_hinban"])
+    # 品番入力後 → 工程順位
+    # Enter回数はマッピング設定の値を優先、なければアプリ設定値を使用
+    # 固定Enterは行わず、ここで指定した回数のみEnterを送る
+    enter_count_raw = record.get('工程順行きエンター回数')
+    tabs_after_hinban = parse_enter_count(enter_count_raw, cfg["tabs_after_hinban"])
+    if tabs_after_hinban > 0:
+        next_field(1)
+        time.sleep(delay_hinban)
+        if tabs_after_hinban > 1:
+            next_field(tabs_after_hinban - 1)
     clear_input(koukei)
 
     # 工程順位 → 生産数(完成)
-    # Enter回数はマッピング設定の値を優先、なければアプリ設定値を使用
-    enter_count_raw = record.get('Enter回数')
-    if enter_count_raw is not None and str(enter_count_raw).strip() not in ('', 'None', '—'):
-        tabs_to_seisansu = int(float(enter_count_raw))
-    else:
-        tabs_to_seisansu = cfg["tabs_to_seisansu"]
-    next_field(tabs_to_seisansu)
+    next_field(cfg["tabs_to_seisansu"])
     clear_input(seisansu)
 
     # 生産数 → 加工時間1 開始
@@ -219,6 +232,8 @@ class KikanInputApp:
         self._stop_flag    = False
         self._running      = False
         self._hotkey_handle = None
+        self._mouse_locked = False
+        self._right_button_prev = False
 
         self._build_ui()
 
@@ -483,6 +498,39 @@ class KikanInputApp:
         # tkinter UIはメインスレッドからのみ操作可（keyboard コールバック対応）
         self.root.after(0, lambda: self.lbl_status.config(text="停止中...", foreground="orange"))
 
+    def _lock_mouse_cursor(self):
+        """現在位置にマウスカーソルを固定する（右クリックで解除可能）"""
+        if self._mouse_locked:
+            return
+        x, y = win32gui.GetCursorPos()
+
+        class RECT(ctypes.Structure):
+            _fields_ = [
+                ('left', ctypes.c_long),
+                ('top', ctypes.c_long),
+                ('right', ctypes.c_long),
+                ('bottom', ctypes.c_long),
+            ]
+
+        rect = RECT(x, y, x + 1, y + 1)
+        ctypes.windll.user32.ClipCursor(ctypes.byref(rect))
+        self._mouse_locked = True
+
+    def _unlock_mouse_cursor(self):
+        """マウス固定を解除する"""
+        if not self._mouse_locked:
+            return
+        ctypes.windll.user32.ClipCursor(None)
+        self._mouse_locked = False
+
+    def _poll_right_click_unlock(self):
+        """右クリック押下エッジでマウス固定解除"""
+        is_pressed = bool(win32api.GetAsyncKeyState(win32con.VK_RBUTTON) & 0x8000)
+        if self._mouse_locked and is_pressed and not self._right_button_prev:
+            self._unlock_mouse_cursor()
+            self._log("★ 右クリックでマウス固定を解除しました")
+        self._right_button_prev = is_pressed
+
     def _show_countdown_popup(self, seconds, cancel_event):
         """カウントダウンポップアップをメインスレッドで表示"""
         popup = tk.Toplevel(self.root)
@@ -534,6 +582,7 @@ class KikanInputApp:
         self.root.after(0, lambda: self._show_countdown_popup(countdown, cancel_event))
         self._log(f"★ {countdown}秒後に開始します。基幹の生産日にカーソルを置いてください。")
         self._log("★ 停止: Ctrl+P  /  緊急停止: マウスを画面の左上角に移動")
+        self._log("★ 入力開始後はマウス固定（右クリックで解除）")
 
         for i in range(countdown, 0, -1):
             if self._stop_flag or cancel_event.is_set():
@@ -546,15 +595,19 @@ class KikanInputApp:
         self.root.after(0, self._close_countdown_popup)
 
         pyautogui.FAILSAFE = True
+        self._right_button_prev = False
+        self._lock_mouse_cursor()
         total   = len(self.records)
         success = 0
         errors  = 0
 
         # 停止判定関数（停止ボタン / Ctrl+P どちらでも止まる）
         def should_stop():
+            self._poll_right_click_unlock()
             return self._stop_flag or keyboard.is_pressed('ctrl+p')
 
         for i, record in enumerate(self.records):
+            self._poll_right_click_unlock()
             if should_stop():
                 self._stop_flag = True
                 break
@@ -590,6 +643,7 @@ class KikanInputApp:
         self._finish(success, errors)
 
     def _finish(self, success, errors, stopped=False):
+        self._unlock_mouse_cursor()
         self._running = False
         self.root.after(0, lambda: (
             self.btn_start.config(state="normal"),

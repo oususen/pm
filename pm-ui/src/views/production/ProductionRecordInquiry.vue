@@ -268,7 +268,7 @@
               <th>工程コード</th>
               <th>基幹品番</th>
               <th>工順</th>
-              <th title="工程順位→生産数のEnterキー回数（自動入力用）">Enter回数</th>
+              <th title="品番確定後→工程順のEnterキー回数（自動入力用）">工程順行きエンター回数</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -712,7 +712,7 @@ const loadMappingCandidates = async (tabKey = settingsTargetTab.value) => {
         processCode,
         coreProductCode: exactCore?.coreProductCode || fallbackCore?.coreProductCode || '',
         coreProcessOrder: exactCore?.coreProcessOrder || fallbackCore?.coreProcessOrder || '',
-        enterCount: exactCore?.enterCount ?? fallbackCore?.enterCount ?? null,
+        enterCount: exactCore?.enterCount ?? fallbackCore?.enterCount ?? 2,
       })
     })
 
@@ -725,7 +725,7 @@ const loadMappingCandidates = async (tabKey = settingsTargetTab.value) => {
           processCode: row.processCode,
           coreProductCode: row.coreProductCode,
           coreProcessOrder: row.coreProcessOrder || '',
-          enterCount: row.enterCount ?? null,
+          enterCount: row.enterCount ?? 2,
         })
       }
     })
@@ -793,7 +793,7 @@ const saveTargetLines = async () => {
 
 const addMappingRow = () => {
   if (!canEditRecordInquirySettings.value) return
-  mappingEditRows.value.push({ appProductCode: '', processCode: '', coreProductCode: '', coreProcessOrder: '', enterCount: null })
+  mappingEditRows.value.push({ appProductCode: '', processCode: '', coreProductCode: '', coreProcessOrder: '', enterCount: 2 })
   mappingSaveMessage.value = ''
 }
 

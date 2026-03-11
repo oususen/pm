@@ -5,7 +5,7 @@
 ## 事前準備
 
 ```bash
-pip install pyautogui pyperclip openpyxl pywin32
+pip install pyautogui pyperclip openpyxl pywin32 keyboard
 ```
 
 ## 使用手順

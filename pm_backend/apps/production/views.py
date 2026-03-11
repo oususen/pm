@@ -4053,6 +4053,17 @@ class ProductionRecordInquirySettingView(APIView):
             process_code = self._normalize((row or {}).get('processCode'))
             core_product_code = str((row or {}).get('coreProductCode') or '').strip()
             core_process_order = str((row or {}).get('coreProcessOrder') or '').strip()
+            enter_count_raw = (row or {}).get('enterCount')
+            enter_count = 2
+            try:
+                if enter_count_raw is not None and str(enter_count_raw).strip() != '':
+                    value = int(float(enter_count_raw))
+                    if 1 <= value <= 20:
+                        enter_count = value
+                    else:
+                        enter_count = 2
+            except (TypeError, ValueError):
+                enter_count = 2
             if not app_product_code or not core_product_code:
                 continue
             normalized.append({
@@ -4060,6 +4071,7 @@ class ProductionRecordInquirySettingView(APIView):
                 'processCode': process_code,
                 'coreProductCode': core_product_code,
                 'coreProcessOrder': core_process_order,
+                'enterCount': enter_count,
             })
         return normalized
 

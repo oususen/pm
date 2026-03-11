@@ -30,11 +30,11 @@ import win32con
 
 WINDOW_TITLE_PART = "SSE0040"       # 基幹システムのウィンドウタイトルの一部
 
-# --- Tab数設定（処理区分を起点とするTab回数） ---
+# --- Tab数設定（処理区分を起点とするEnter/Tab回数） ---
 # 実際の画面でTabキーを押しながら数えて確認してください
 TABS_TO_SEISANBI       = 1   # 処理区分 → 生産日
 TABS_TO_HINBAN         = 1   # 生産日   → 品番
-TABS_AFTER_HINBAN      = 2   # 品番確定後（品名スキップ等）→ 工程順位  ★要確認
+TABS_AFTER_HINBAN      = 1   # 品番入力後 → 工程順位（固定Enterなし） ★要確認
 TABS_TO_SEISANSU       = 5   # 工程順位 → 生産数(完成)              ★要確認
 TABS_TO_JIKAN_START    = 5   # 生産数(完成) → 加工時間1(開始)       ★要確認
 TABS_TO_JIKAN_END      = 1   # 加工時間1(開始) → 加工時間1(終了)    ★要確認
@@ -183,11 +183,14 @@ def input_one_record(record, hwnd):
     # ---- 品番 ----
     tab(TABS_TO_HINBAN)
     clear_and_input(hinban)
-    pyautogui.press('enter')        # 品番確定（品名・工程情報を引く）
-    time.sleep(DELAY_HINBAN)
 
     # ---- 工程順位 ----
-    tab(TABS_AFTER_HINBAN)
+    # 固定Enterは行わず、設定回数のみEnterを送る
+    if TABS_AFTER_HINBAN > 0:
+        tab(1)
+        time.sleep(DELAY_HINBAN)
+        if TABS_AFTER_HINBAN > 1:
+            tab(TABS_AFTER_HINBAN - 1)
     clear_and_input(kouteijun)
 
     # ---- 生産数(完成) ----
