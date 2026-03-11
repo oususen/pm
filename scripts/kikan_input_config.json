@@ -1,0 +1,12 @@
+{
+  "window_title": "SSE0040",
+  "tabs_to_hinban": 1,
+  "tabs_after_hinban": 1,
+  "tabs_to_seisansu": 3,
+  "tabs_to_jikan_start": 8,
+  "tabs_to_jikan_end": 1,
+  "delay_key": 1.0,
+  "delay_hinban": 2.0,
+  "delay_register": 1.0,
+  "countdown_sec": 10
+}
