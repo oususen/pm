@@ -11,6 +11,12 @@ const formatDateCompact = (value) => {
   return String(value).replace(/-/g, '')
 }
 
+const toDateKey = (value) => {
+  if (!value) return ''
+  const digits = String(value).replace(/[^0-9]/g, '')
+  return digits.length >= 8 ? digits.slice(0, 8) : ''
+}
+
 const formatTimeOnly = (value) => {
   if (!value) return '—'
   const d = new Date(value)
@@ -20,9 +26,17 @@ const formatTimeOnly = (value) => {
   return `${h}${mm}`
 }
 
-export const buildProductionSummaryRows = (sessions, tabKey = 'tank', mappingsByTabInput = null) => {
+export const buildProductionSummaryRows = (
+  sessions,
+  tabKey = 'tank',
+  mappingsByTabInput = null,
+  startDate = '',
+  endDate = '',
+) => {
   const mappingsByTab = mappingsByTabInput || loadProductionRecordMappingsByTab()
   const mappings = getProductionRecordMappingsByTab(mappingsByTab, tabKey)
+  const startKey = toDateKey(startDate)
+  const endKey = toDateKey(endDate)
   const headers = ['生産日', 'アプリ品番', '基幹品番', '工程コード', '工順', '開始時間', '終了時間', '生産数量', 'マッピング状態']
   const rows = (Array.isArray(sessions) ? sessions : [])
     .map((row) => {
@@ -31,16 +45,23 @@ export const buildProductionSummaryRows = (sessions, tabKey = 'tank', mappingsBy
       const mapped = resolveCoreMapping(appProductCode, processCode, mappings)
       const qtyRaw = Number(row.production_qty)
       const productionQty = Number.isFinite(qtyRaw) ? Math.trunc(qtyRaw) : null
-      return { row, appProductCode, processCode, mapped, productionQty }
+      const planDateKey = toDateKey(row.plan_date)
+      return { row, appProductCode, processCode, mapped, productionQty, planDateKey }
     })
-    .filter(({ row, mapped, productionQty }) => {
+    .filter(({ row, mapped, productionQty, planDateKey }) => {
       const sessionType = String(row?.session_type || '').toUpperCase()
       const endAction = String(row?.end_action || '').toUpperCase()
+      const inDateRange = (
+        !!planDateKey &&
+        (!startKey || planDateKey >= startKey) &&
+        (!endKey || planDateKey <= endKey)
+      )
       return (
         sessionType === 'WORK' &&
         ['END', 'PAUSE'].includes(endAction) &&
         mapped?.mapped === true &&
-        (productionQty || 0) > 0
+        (productionQty || 0) > 0 &&
+        inDateRange
       )
     })
     .map(({ row, appProductCode, processCode, mapped, productionQty }) => {
@@ -61,7 +82,13 @@ export const buildProductionSummaryRows = (sessions, tabKey = 'tank', mappingsBy
 
 export const exportProductionSummaryExcel = (sessions, startDate, endDate, options = {}) => {
   const tabKey = options?.tabKey || 'tank'
-  const { headers, rows } = buildProductionSummaryRows(sessions, tabKey, options?.mappingsByTab || null)
+  const { headers, rows } = buildProductionSummaryRows(
+    sessions,
+    tabKey,
+    options?.mappingsByTab || null,
+    startDate,
+    endDate,
+  )
   if (!rows.length) {
     alert('出力対象のデータがありません。')
     return
