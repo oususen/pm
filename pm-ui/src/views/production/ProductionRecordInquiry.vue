@@ -5,7 +5,21 @@
       <p class="subtitle">開始〜終了をセッション単位で照会します（中断区間も表示。期間は08:00〜翌07:59で判定）。</p>
     </div>
 
-    <div class="filters">
+    <div class="tab-bar">
+      <button
+        v-for="tab in recordTabs"
+        :key="tab.key"
+        type="button"
+        class="tab-item"
+        :class="{ active: activeTab === tab.key }"
+        @click="activeTab = tab.key"
+      >
+        {{ tab.label }}
+      </button>
+    </div>
+
+    <div v-show="activeTab === 'tank'">
+      <div class="filters">
       <div class="filter-row filter-row-period">
         <label>期間</label>
         <input v-model="startDate" type="date" />
@@ -16,7 +30,7 @@
         <label>ライン</label>
         <select v-model="lineId">
           <option value="">-- すべて --</option>
-          <option v-for="line in lines" :key="line.id" :value="String(line.id)">
+          <option v-for="line in visibleLines" :key="line.id" :value="String(line.id)">
             {{ line.line_code }} - {{ line.line_name }}
           </option>
         </select>
@@ -190,14 +204,126 @@
         </table>
       </div>
     </div>
+    </div>
+
+    <div v-show="activeTab === 'floor'" class="empty-tab">
+      フロアタブは準備中です。
+    </div>
+    <div v-show="activeTab === 'blade'" class="empty-tab">
+      ブレードタブは準備中です。
+    </div>
+    <div v-show="activeTab === 'line-settings'" class="settings-panel">
+      <h3 class="settings-title">対象ライン編集</h3>
+      <p class="settings-note">対象タブを選び、抽出するラインを設定します。</p>
+      <div class="settings-selector">
+        <label>対象タブ</label>
+        <select v-model="settingsTargetTab">
+          <option v-for="tab in configurableTabs" :key="`line-setting-${tab.key}`" :value="tab.key">
+            {{ tab.label }}
+          </option>
+        </select>
+      </div>
+      <div class="settings-list">
+        <label v-for="line in lines" :key="`target-${line.id}`" class="settings-check">
+          <input
+            type="checkbox"
+            :checked="isTargetLineSelected(line.line_code)"
+            @change="toggleTargetLine(line.line_code)"
+          />
+          <span>{{ line.line_code }} - {{ line.line_name }}</span>
+        </label>
+      </div>
+      <div class="settings-actions">
+        <button class="btn" type="button" @click="saveTargetLines">保存</button>
+      </div>
+      <div v-if="targetLineSaveMessage" class="settings-message">{{ targetLineSaveMessage }}</div>
+    </div>
+    <div v-show="activeTab === 'mapping-settings'" class="settings-panel">
+      <h3 class="settings-title">マッピング作成</h3>
+      <p class="settings-note">対象タブ選択後、まず加工品一覧を表示します。基幹品番を編集して保存してください。</p>
+      <div class="settings-selector">
+        <label>対象タブ</label>
+        <select v-model="settingsTargetTab">
+          <option v-for="tab in configurableTabs" :key="`map-setting-${tab.key}`" :value="tab.key">
+            {{ tab.label }}
+          </option>
+        </select>
+      </div>
+      <div class="settings-selector">
+        <label>工程フィルタ</label>
+        <select v-model="mappingProcessFilter">
+          <option value="">-- すべて --</option>
+          <option v-for="code in mappingProcessFilterOptions" :key="`map-process-${code}`" :value="code">
+            {{ code }}
+          </option>
+        </select>
+      </div>
+      <div v-if="mappingCandidateLoading" class="settings-info">加工品一覧を読込中...</div>
+      <div v-else-if="mappingCandidateError" class="settings-error">{{ mappingCandidateError }}</div>
+      <div class="table-wrap settings-table-wrap">
+        <table class="list-table mapping-table">
+          <thead>
+            <tr>
+              <th>アプリ品番</th>
+              <th>工程コード</th>
+              <th>基幹品番</th>
+              <th>工順</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in filteredMappingEditRows" :key="`map-${settingsTargetTab}-${item.index}`">
+              <td>
+                <input v-model="item.row.appProductCode" type="text" class="map-input" placeholder="例: YD40000001" />
+              </td>
+              <td>
+                <input v-model="item.row.processCode" type="text" class="map-input" placeholder="例: 4010" />
+              </td>
+              <td>
+                <input v-model="item.row.coreProductCode" type="text" class="map-input" placeholder="例: A-0001" />
+              </td>
+              <td>
+                <input v-model="item.row.coreProcessOrder" type="text" class="map-input" placeholder="例: 10" />
+              </td>
+              <td>
+                <button class="btn btn-secondary" type="button" @click="copyAppToCore(item.row)">コピー</button>
+                <button class="btn btn-secondary" type="button" @click="removeMappingRow(item.index)">削除</button>
+              </td>
+            </tr>
+            <tr v-if="!filteredMappingEditRows.length">
+              <td colspan="5" class="no-data">加工品がありません</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="settings-actions">
+        <button class="btn btn-secondary" type="button" @click="addMappingRow">行追加</button>
+        <button class="btn" type="button" @click="saveMappings">保存</button>
+      </div>
+      <div v-if="mappingSaveMessage" class="settings-message">{{ mappingSaveMessage }}</div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { authState } from '@/auth'
 import api from '@/api/client'
+import { hasPermission } from '@/router'
 import { addDays, formatISODate, getBusinessDate } from '@/utils/dateUtil'
 import { exportProductionSummaryExcel } from '@/utils/productionRecordExport2'
+import {
+  createDefaultMappingsByTab,
+  createDefaultTargetLineCodesByTab,
+  getProductionRecordMappingsByTab,
+  getTargetLineCodesByTab,
+  loadProductionRecordMappingsByTab,
+  loadTargetLineCodesByTab,
+  normalizeProductionRecordMappingsByTab,
+  normalizeTargetLineCodesByTab,
+  saveProductionRecordMappingsByTab,
+  saveTargetLineCodesByTab,
+} from '@/config/productionRecordSettings'
 import {
   exportCsv as _exportCsv,
   exportExcel as _exportExcel,
@@ -207,6 +333,23 @@ import {
 const loading = ref(false)
 const error = ref('')
 const sessions = ref([])
+const activeTab = ref('tank')
+const operationalTabKeys = ['tank', 'floor', 'blade']
+const settingsTargetTab = ref('tank')
+const configurableTabs = [
+  { key: 'tank', label: 'タンク' },
+  { key: 'floor', label: 'フロア' },
+  { key: 'blade', label: 'ブレード' },
+]
+const baseRecordTabs = [
+  { key: 'tank', label: 'タンク' },
+  { key: 'floor', label: 'フロア' },
+  { key: 'blade', label: 'ブレード' },
+]
+const settingsTabs = [
+  { key: 'line-settings', label: '対象ライン編集' },
+  { key: 'mapping-settings', label: 'マッピング作成' },
+]
 
 const lines = ref([])
 const processes = ref([])
@@ -228,10 +371,75 @@ const sessionType = ref('')
 const status = ref('')
 const hasIssue = ref('')
 const excludeZeroProduction = ref('')
+const targetLineCodesByTab = ref(createDefaultTargetLineCodesByTab())
+const targetLineSaveMessage = ref('')
+const mappingsByTab = ref(createDefaultMappingsByTab())
+const mappingEditRows = ref(getProductionRecordMappingsByTab(mappingsByTab.value, settingsTargetTab.value))
+const mappingSaveMessage = ref('')
+const mappingCandidateLoading = ref(false)
+const mappingCandidateError = ref('')
+const mappingProcessFilter = ref('')
+const ACTIVE_LINE_CODES = computed(() => getTargetLineCodesByTab(targetLineCodesByTab.value, activeTab.value))
+const canEditRecordInquirySettings = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_superuser) return true
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  const hasSpecific = permissions.some((item) => item.resource === 'production.record_inquiry')
+  if (hasSpecific) return hasPermission(user, 'production.record_inquiry', 'edit')
+  return hasPermission(user, 'production', 'edit')
+})
+const recordTabs = computed(() => (
+  canEditRecordInquirySettings.value
+    ? [...baseRecordTabs, ...settingsTabs]
+    : baseRecordTabs
+))
+
+const tankLineOptions = computed(() => {
+  const codeSet = new Set(ACTIVE_LINE_CODES.value)
+  return (Array.isArray(lines.value) ? lines.value : []).filter((line) => codeSet.has(String(line?.line_code || '')))
+})
+
+const visibleLines = computed(() => {
+  if (operationalTabKeys.includes(activeTab.value)) return tankLineOptions.value
+  return lines.value
+})
+
+const tankProcessIdSet = computed(() => {
+  const lineIds = new Set(tankLineOptions.value.map((line) => String(line.id)))
+  const ids = new Set()
+  const baseProcesses = Array.isArray(processes.value) ? processes.value : []
+  baseProcesses.forEach((p) => {
+    if (lineIds.has(String(p?.line))) ids.add(String(p.id))
+  })
+  return ids
+})
 
 const filteredProcesses = computed(() => {
-  if (!lineId.value) return processes.value
-  return processes.value.filter((p) => String(p.line) === String(lineId.value))
+  let base = Array.isArray(processes.value) ? processes.value : []
+  if (operationalTabKeys.includes(activeTab.value)) {
+    const allowed = tankProcessIdSet.value
+    base = base.filter((p) => allowed.has(String(p.id)))
+  }
+  if (!lineId.value) return base
+  return base.filter((p) => String(p.line) === String(lineId.value))
+})
+
+const mappingProcessFilterOptions = computed(() => {
+  const codes = new Set()
+  ;(Array.isArray(mappingEditRows.value) ? mappingEditRows.value : []).forEach((row) => {
+    const code = String(row?.processCode || '').trim()
+    if (code) codes.add(code)
+  })
+  return Array.from(codes).sort((a, b) => a.localeCompare(b))
+})
+
+const filteredMappingEditRows = computed(() => {
+  const rows = Array.isArray(mappingEditRows.value) ? mappingEditRows.value : []
+  const filterCode = String(mappingProcessFilter.value || '').trim()
+  return rows
+    .map((row, index) => ({ row, index }))
+    .filter((item) => !filterCode || String(item.row?.processCode || '').trim() === filterCode)
 })
 
 const isCountableProductionRow = (row) => {
@@ -329,6 +537,43 @@ const loadMasters = async () => {
   }
 }
 
+const applyProductionRecordSettingsPayload = (payload) => {
+  targetLineCodesByTab.value = normalizeTargetLineCodesByTab(payload?.target_line_codes_by_tab)
+  mappingsByTab.value = normalizeProductionRecordMappingsByTab(payload?.mappings_by_tab)
+  mappingEditRows.value = getProductionRecordMappingsByTab(mappingsByTab.value, settingsTargetTab.value)
+}
+
+const loadProductionRecordSettings = async () => {
+  try {
+    const res = await api.productionRecordSettings.getSettings()
+    applyProductionRecordSettingsPayload(res.data || {})
+  } catch (e) {
+    console.error('生産実績照会設定取得失敗:', e)
+    // API障害時はローカル保存値で継続運用する
+    targetLineCodesByTab.value = loadTargetLineCodesByTab()
+    mappingsByTab.value = loadProductionRecordMappingsByTab()
+    mappingEditRows.value = getProductionRecordMappingsByTab(mappingsByTab.value, settingsTargetTab.value)
+  }
+}
+
+const saveProductionRecordSettings = async () => {
+  const payload = {
+    target_line_codes_by_tab: normalizeTargetLineCodesByTab(targetLineCodesByTab.value),
+    mappings_by_tab: normalizeProductionRecordMappingsByTab(mappingsByTab.value),
+  }
+  try {
+    const res = await api.productionRecordSettings.saveSettings(payload)
+    applyProductionRecordSettingsPayload(res.data || payload)
+  } catch (e) {
+    console.error('生産実績照会設定保存失敗:', e)
+    // API障害時はローカルへ退避
+    targetLineCodesByTab.value = saveTargetLineCodesByTab(payload.target_line_codes_by_tab)
+    mappingsByTab.value = saveProductionRecordMappingsByTab(payload.mappings_by_tab)
+    mappingEditRows.value = getProductionRecordMappingsByTab(mappingsByTab.value, settingsTargetTab.value)
+    throw e
+  }
+}
+
 const loadSessions = async () => {
   loading.value = true
   error.value = ''
@@ -348,9 +593,13 @@ const loadSessions = async () => {
 
     const res = await api.processRealtime.getSessions(params)
     const items = res.data || []
-    const filteredByProduction = excludeZeroProduction.value === 'true'
-      ? items.filter((row) => Number(row?.production_qty || 0) !== 0)
+    const filteredByTab = operationalTabKeys.includes(activeTab.value)
+      ? items.filter((row) => tankProcessIdSet.value.has(String(row?.process || '')))
       : items
+
+    const filteredByProduction = excludeZeroProduction.value === 'true'
+      ? filteredByTab.filter((row) => Number(row?.production_qty || 0) !== 0)
+      : filteredByTab
 
     if (wantsCancelOnly) {
       sessions.value = filteredByProduction.filter((row) => isCanceledSession(row))
@@ -380,6 +629,198 @@ const resetFilters = async () => {
   startDate.value = nextDefaultDateRange.start
   endDate.value = nextDefaultDateRange.end
   await loadSessions()
+}
+
+watch(activeTab, async (nextTab) => {
+  if ((nextTab === 'line-settings' || nextTab === 'mapping-settings') && !canEditRecordInquirySettings.value) {
+    activeTab.value = 'tank'
+    return
+  }
+  if (nextTab === 'mapping-settings') {
+    await loadMappingCandidates(settingsTargetTab.value)
+    return
+  }
+  if (!operationalTabKeys.includes(nextTab)) return
+  const visibleLineIds = new Set(visibleLines.value.map((line) => String(line.id)))
+  if (lineId.value && !visibleLineIds.has(String(lineId.value))) {
+    lineId.value = ''
+    processId.value = ''
+  }
+  await loadSessions()
+})
+
+watch(settingsTargetTab, (nextTab) => {
+  void loadMappingCandidates(nextTab)
+  targetLineSaveMessage.value = ''
+  mappingSaveMessage.value = ''
+  mappingProcessFilter.value = ''
+})
+
+const buildMappingKey = (appProductCode, processCode) => {
+  const app = String(appProductCode || '').trim().toUpperCase()
+  const proc = String(processCode || '').trim().toUpperCase()
+  return `${app}__${proc}`
+}
+
+const loadMappingCandidates = async (tabKey = settingsTargetTab.value) => {
+  mappingCandidateLoading.value = true
+  mappingCandidateError.value = ''
+  mappingProcessFilter.value = ''
+  try {
+    const targetCodes = new Set(getTargetLineCodesByTab(targetLineCodesByTab.value, tabKey))
+    const targetLineIds = new Set(
+      (Array.isArray(lines.value) ? lines.value : [])
+        .filter((line) => targetCodes.has(String(line?.line_code || '').toUpperCase()))
+        .map((line) => String(line.id)),
+    )
+    const targetProcesses = (Array.isArray(processes.value) ? processes.value : [])
+      .filter((p) => targetLineIds.has(String(p?.line)))
+    const targetProcessMap = new Map(
+      targetProcesses.map((p) => [String(p.id), String(p?.process_code || '').trim()]),
+    )
+
+    const existing = getProductionRecordMappingsByTab(mappingsByTab.value, tabKey)
+    const exactMap = new Map(existing.map((row) => [buildMappingKey(row.appProductCode, row.processCode), row]))
+    const fallbackMap = new Map(existing.map((row) => [String(row.appProductCode || '').trim().toUpperCase(), row]))
+
+    const candidateMap = new Map()
+    const routingResults = await Promise.all(Array.from(targetLineIds).map(async (lineId) => {
+      try {
+        const res = await api.routings.getRoutingSteps({ line: lineId, page_size: 5000 })
+        return res.data?.results || res.data || []
+      } catch (_e) {
+        return []
+      }
+    }))
+
+    routingResults.flat().forEach((step) => {
+      const processId = String(step?.process || '')
+      if (!targetProcessMap.has(processId)) return
+      const processCode = targetProcessMap.get(processId)
+      const appCode = String(step?.output_product_code || '').trim()
+      if (!processCode || !appCode) return
+      const key = buildMappingKey(appCode, processCode)
+      if (candidateMap.has(key)) return
+      const exactCore = exactMap.get(key)
+      const fallbackCore = fallbackMap.get(appCode.toUpperCase())
+      candidateMap.set(key, {
+        appProductCode: appCode,
+        processCode,
+        coreProductCode: exactCore?.coreProductCode || fallbackCore?.coreProductCode || '',
+        coreProcessOrder: exactCore?.coreProcessOrder || fallbackCore?.coreProcessOrder || '',
+      })
+    })
+
+    // 既存保存分（ルーティング上で消えた品番含む）は編集できるよう残す
+    existing.forEach((row) => {
+      const key = buildMappingKey(row.appProductCode, row.processCode)
+      if (!candidateMap.has(key)) {
+        candidateMap.set(key, {
+          appProductCode: row.appProductCode,
+          processCode: row.processCode,
+          coreProductCode: row.coreProductCode,
+          coreProcessOrder: row.coreProcessOrder || '',
+        })
+      }
+    })
+
+    mappingEditRows.value = Array.from(candidateMap.values()).sort((a, b) => {
+      const p = String(a.appProductCode || '').localeCompare(String(b.appProductCode || ''))
+      if (p !== 0) return p
+      return String(a.processCode || '').localeCompare(String(b.processCode || ''))
+    })
+  } catch (e) {
+    console.error('加工品一覧取得失敗:', e)
+    mappingCandidateError.value = '加工品一覧の取得に失敗しました。'
+    mappingEditRows.value = getProductionRecordMappingsByTab(mappingsByTab.value, tabKey)
+  } finally {
+    mappingCandidateLoading.value = false
+  }
+}
+
+const isTargetLineSelected = (lineCode) => {
+  const code = String(lineCode || '').trim().toUpperCase()
+  if (!code) return false
+  const current = getTargetLineCodesByTab(targetLineCodesByTab.value, settingsTargetTab.value)
+  return current.includes(code)
+}
+
+const toggleTargetLine = (lineCode) => {
+  if (!canEditRecordInquirySettings.value) return
+  const code = String(lineCode || '').trim().toUpperCase()
+  if (!code) return
+  const tabKey = settingsTargetTab.value
+  const current = new Set(getTargetLineCodesByTab(targetLineCodesByTab.value, tabKey))
+  if (current.has(code)) current.delete(code)
+  else current.add(code)
+  targetLineCodesByTab.value = {
+    ...targetLineCodesByTab.value,
+    [tabKey]: Array.from(current),
+  }
+  targetLineSaveMessage.value = ''
+}
+
+const saveTargetLines = async () => {
+  if (!canEditRecordInquirySettings.value) return
+  try {
+    await saveProductionRecordSettings()
+  } catch (e) {
+    console.error('対象ライン保存失敗:', e)
+    targetLineSaveMessage.value = '対象ラインの保存に失敗しました。'
+    return
+  }
+  targetLineSaveMessage.value = '対象ラインを保存しました。'
+
+  if (operationalTabKeys.includes(activeTab.value)) {
+    const selectedLineCode = lines.value.find((line) => String(line.id) === String(lineId.value))?.line_code
+    const savedActiveCodes = getTargetLineCodesByTab(targetLineCodesByTab.value, activeTab.value)
+    if (selectedLineCode && !savedActiveCodes.includes(String(selectedLineCode).toUpperCase())) {
+      lineId.value = ''
+      processId.value = ''
+    }
+    await loadSessions()
+  }
+  if (activeTab.value === 'mapping-settings') {
+    await loadMappingCandidates(settingsTargetTab.value)
+  }
+}
+
+const addMappingRow = () => {
+  if (!canEditRecordInquirySettings.value) return
+  mappingEditRows.value.push({ appProductCode: '', processCode: '', coreProductCode: '', coreProcessOrder: '' })
+  mappingSaveMessage.value = ''
+}
+
+const removeMappingRow = (index) => {
+  if (!canEditRecordInquirySettings.value) return
+  mappingEditRows.value.splice(index, 1)
+  mappingSaveMessage.value = ''
+}
+
+const copyAppToCore = (row) => {
+  if (!canEditRecordInquirySettings.value) return
+  if (!row) return
+  row.coreProductCode = String(row.appProductCode || '').trim()
+  mappingSaveMessage.value = ''
+}
+
+const saveMappings = () => {
+  if (!canEditRecordInquirySettings.value) return
+  const persist = async () => {
+    const tabKey = settingsTargetTab.value
+    mappingsByTab.value = {
+      ...mappingsByTab.value,
+      [tabKey]: mappingEditRows.value,
+    }
+    await saveProductionRecordSettings()
+    mappingEditRows.value = getProductionRecordMappingsByTab(mappingsByTab.value, tabKey)
+    mappingSaveMessage.value = 'マッピングを保存しました。'
+  }
+
+  persist().catch((e) => {
+    console.error('マッピング保存失敗:', e)
+    mappingSaveMessage.value = 'マッピングの保存に失敗しました。'
+  })
 }
 
 const formatDateTime = (value) => {
@@ -448,7 +889,12 @@ const exportCsv = () => _exportCsv(sessions.value, startDate.value, endDate.valu
 
 const exportExcel = () => _exportExcel(sessions.value, startDate.value, endDate.value)
 
-const exportExcel2 = () => exportProductionSummaryExcel(sessions.value, startDate.value, endDate.value)
+const exportExcel2 = () => exportProductionSummaryExcel(
+  sessions.value,
+  startDate.value,
+  endDate.value,
+  { tabKey: activeTab.value, mappingsByTab: mappingsByTab.value },
+)
 
 const exportPdf = () => {
   const lineLabel = lines.value.find((l) => String(l.id) === String(lineId.value))?.line_code || ''
@@ -471,6 +917,8 @@ const exportPdf = () => {
 
 onMounted(async () => {
   await loadMasters()
+  await loadProductionRecordSettings()
+  await loadMappingCandidates(settingsTargetTab.value)
   await loadSessions()
 })
 </script>
@@ -490,6 +938,28 @@ onMounted(async () => {
   margin: 6px 0 0;
   color: #64748b;
   font-size: 13px;
+}
+.tab-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #cbd5e1;
+}
+.tab-item {
+  padding: 7px 14px;
+  border: 1px solid #cbd5e1;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.tab-item.active {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
 }
 .filters {
   display: grid;
@@ -693,5 +1163,95 @@ onMounted(async () => {
   text-align: center !important;
   color: #64748b;
   padding: 20px !important;
+}
+.empty-tab {
+  margin-top: 8px;
+  padding: 20px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  color: #64748b;
+  font-weight: 700;
+}
+.settings-panel {
+  margin-top: 8px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+.settings-title {
+  margin: 0;
+  font-size: 17px;
+}
+.settings-note {
+  margin: 6px 0 12px;
+  color: #64748b;
+  font-size: 13px;
+}
+.settings-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.settings-selector label {
+  font-size: 13px;
+  font-weight: 700;
+}
+.settings-selector select {
+  min-width: 160px;
+  padding: 7px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.settings-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+.settings-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.settings-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+}
+.settings-message {
+  margin-top: 8px;
+  color: #166534;
+  font-size: 13px;
+  font-weight: 700;
+}
+.settings-info {
+  margin: 6px 0 8px;
+  color: #1e3a8a;
+  font-size: 13px;
+  font-weight: 700;
+}
+.settings-error {
+  margin: 6px 0 8px;
+  color: #991b1b;
+  font-size: 13px;
+  font-weight: 700;
+}
+.settings-table-wrap {
+  margin-top: 8px;
+}
+.mapping-table {
+  min-width: 760px;
+}
+.map-input {
+  width: 100%;
+  min-width: 140px;
+  padding: 7px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
 }
 </style>

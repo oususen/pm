@@ -372,6 +372,7 @@ const permissionResources = [
   { value: 'orders.line_expand', label: '受注: ライン展開' },
   { value: 'production', label: '生産' },
   { value: 'production.process_input', label: '生産: 工程作業入力' },
+  { value: 'production.record_inquiry', label: '生産: 生産実績照会' },
   { value: 'production.record_edit', label: '生産: 実績変更' },
   { value: 'production.scrap_record', label: '生産: 仕損品記録' },
   { value: 'production.plan_input', label: '生産: 生産計画入力' },

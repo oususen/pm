@@ -27,6 +27,7 @@ from .models_line_daily_schedule_setting import LineDailyScheduleSetting
 from .models_line_default_schedule_setting import LineDefaultScheduleSetting
 from .models_plan_change_log import ProductionPlanChangeLog
 from .models_plan_lock_setting import ProductionPlanLockSetting
+from .models_record_inquiry_setting import ProductionRecordInquirySetting
 from .models_schedule_config import ScheduleConfig
 from .serializers import (
     LineDemandSerializer,
@@ -4019,6 +4020,90 @@ class ProductionPlanLockSettingView(APIView):
 
         serializer = ProductionPlanLockSettingSerializer(setting)
         return Response(serializer.data)
+
+
+class ProductionRecordInquirySettingView(APIView):
+    TAB_KEYS = ['tank', 'floor', 'blade']
+    DEFAULT_TARGET_LINE_CODES_BY_TAB = {
+        'tank': ['L2200', 'L2201'],
+        'floor': [],
+        'blade': [],
+    }
+
+    def _normalize(self, value):
+        return str(value or '').strip().upper()
+
+    def _normalize_line_codes(self, values):
+        source = values if isinstance(values, list) else []
+        result = []
+        seen = set()
+        for item in source:
+            code = self._normalize(item)
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            result.append(code)
+        return result
+
+    def _normalize_mapping_rows(self, rows):
+        source = rows if isinstance(rows, list) else []
+        normalized = []
+        for row in source:
+            app_product_code = self._normalize((row or {}).get('appProductCode'))
+            process_code = self._normalize((row or {}).get('processCode'))
+            core_product_code = str((row or {}).get('coreProductCode') or '').strip()
+            core_process_order = str((row or {}).get('coreProcessOrder') or '').strip()
+            if not app_product_code or not core_product_code:
+                continue
+            normalized.append({
+                'appProductCode': app_product_code,
+                'processCode': process_code,
+                'coreProductCode': core_product_code,
+                'coreProcessOrder': core_process_order,
+            })
+        return normalized
+
+    def _build_response_payload(self):
+        target_line_codes_by_tab = {
+            key: list(self.DEFAULT_TARGET_LINE_CODES_BY_TAB.get(key, []))
+            for key in self.TAB_KEYS
+        }
+        mappings_by_tab = {key: [] for key in self.TAB_KEYS}
+
+        rows = ProductionRecordInquirySetting.objects.filter(tab_key__in=self.TAB_KEYS)
+        for row in rows:
+            target_line_codes_by_tab[row.tab_key] = self._normalize_line_codes(row.target_line_codes)
+            mappings_by_tab[row.tab_key] = self._normalize_mapping_rows(row.product_mappings)
+
+        return {
+            'target_line_codes_by_tab': target_line_codes_by_tab,
+            'mappings_by_tab': mappings_by_tab,
+        }
+
+    def get(self, request):
+        return Response(self._build_response_payload())
+
+    def post(self, request):
+        payload = request.data if isinstance(request.data, dict) else {}
+        raw_target = payload.get('target_line_codes_by_tab') if isinstance(payload.get('target_line_codes_by_tab'), dict) else {}
+        raw_mappings = payload.get('mappings_by_tab') if isinstance(payload.get('mappings_by_tab'), dict) else {}
+        user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+
+        for tab_key in self.TAB_KEYS:
+            target_line_codes = self._normalize_line_codes(
+                raw_target.get(tab_key, self.DEFAULT_TARGET_LINE_CODES_BY_TAB.get(tab_key, []))
+            )
+            product_mappings = self._normalize_mapping_rows(raw_mappings.get(tab_key, []))
+            ProductionRecordInquirySetting.objects.update_or_create(
+                tab_key=tab_key,
+                defaults={
+                    'target_line_codes': target_line_codes,
+                    'product_mappings': product_mappings,
+                    'updated_by': user,
+                },
+            )
+
+        return Response(self._build_response_payload())
 
 
 class LineBacklogAdjustmentView(APIView):

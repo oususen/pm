@@ -14,6 +14,7 @@ from .models_line_default_schedule_setting import LineDefaultScheduleSetting
 from .models_line_backlog_adjustment import LineBacklogAdjustment
 from .models_plan_change_log import ProductionPlanChangeLog
 from .models_plan_lock_setting import ProductionPlanLockSetting
+from .models_record_inquiry_setting import ProductionRecordInquirySetting
 from .models_schedule_config import ScheduleConfig
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_production import ProcessActual, ProductionOrder, StockAllocation
@@ -459,6 +460,13 @@ class ProductionPlanLockSettingSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductionPlanLockSetting
         fields = ['id', 'lock_days', 'updated_at', 'updated_by']
+        read_only_fields = ['id', 'updated_at', 'updated_by']
+
+
+class ProductionRecordInquirySettingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductionRecordInquirySetting
+        fields = ['id', 'tab_key', 'target_line_codes', 'product_mappings', 'updated_at', 'updated_by']
         read_only_fields = ['id', 'updated_at', 'updated_by']
 
 

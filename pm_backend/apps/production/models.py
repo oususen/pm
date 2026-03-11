@@ -7,6 +7,7 @@ from .models_line_default_schedule_setting import LineDefaultScheduleSetting
 from .models_line_backlog_adjustment import LineBacklogAdjustment
 from .models_plan_change_log import ProductionPlanChangeLog
 from .models_plan_lock_setting import ProductionPlanLockSetting
+from .models_record_inquiry_setting import ProductionRecordInquirySetting
 from .models_process_work_session import ProcessWorkSession
 from .models_schedule_config import ScheduleConfig
 from .models_routing_migration_log import RoutingMigrationLog

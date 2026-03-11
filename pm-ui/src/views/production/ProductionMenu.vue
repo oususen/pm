@@ -70,7 +70,7 @@ const tiles = computed(() => {
       label: t("productionMenu.tiles.productionRecordInquiry"),
       icon: "📑",
       required: "view",
-      resource: "production.process_input",
+      resource: "production.record_inquiry",
     },
     {
       to: "/production/record-edit",
