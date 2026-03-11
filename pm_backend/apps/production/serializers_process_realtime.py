@@ -928,6 +928,7 @@ class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
     scrap_disposition_status = serializers.SerializerMethodField()
     scrap_disposition_display = serializers.SerializerMethodField()
     scrap_return_qty = serializers.SerializerMethodField()
+    scrap_is_production_recorded = serializers.SerializerMethodField()
     scrap_decided_at = serializers.SerializerMethodField()
     scrap_decided_by = serializers.SerializerMethodField()
 
@@ -957,6 +958,7 @@ class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
             'scrap_disposition_status',
             'scrap_disposition_display',
             'scrap_return_qty',
+            'scrap_is_production_recorded',
             'scrap_decided_at',
             'scrap_decided_by',
         ]
@@ -984,6 +986,10 @@ class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
     def get_scrap_return_qty(self, obj):
         sd = getattr(obj, 'scrap_detail', None)
         return sd.return_qty if sd else None
+
+    def get_scrap_is_production_recorded(self, obj):
+        sd = getattr(obj, 'scrap_detail', None)
+        return sd.is_production_recorded if sd else None
 
     def get_scrap_decided_at(self, obj):
         sd = getattr(obj, 'scrap_detail', None)

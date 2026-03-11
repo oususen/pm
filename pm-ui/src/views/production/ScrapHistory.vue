@@ -66,6 +66,7 @@
             <th class="num">仕損数</th>
             <th>判定</th>
             <th class="num">戻し数量</th>
+            <th>発見時点</th>
             <th>理由</th>
             <th>理由詳細</th>
             <th>記入者</th>
@@ -86,6 +87,7 @@
             <td class="num">{{ formatNumber(rec.qty) }}</td>
             <td>{{ dispositionLabel(rec.scrap_disposition_status) }}</td>
             <td class="num">{{ formatNumber(rec.scrap_return_qty) }}</td>
+            <td>{{ productionRecordedLabel(rec) }}</td>
             <td>{{ reasonLabel(rec.event_data?.reason) }}</td>
             <td>{{ rec.event_data?.reason_detail || '' }}</td>
             <td>{{ rec.operator_name || '' }}</td>
@@ -94,7 +96,7 @@
             </td>
           </tr>
           <tr v-if="!filteredRecords.length">
-            <td colspan="11" class="no-data">データがありません</td>
+            <td colspan="12" class="no-data">データがありません</td>
           </tr>
         </tbody>
       </table>
@@ -272,6 +274,14 @@ const dispositionStatuses = [
 ]
 const dispositionMap = dispositionStatuses.reduce((acc, s) => ({ ...acc, [s.value]: s.label }), {})
 const dispositionLabel = (val) => dispositionMap[val] || ''
+const productionRecordedLabel = (rec) => {
+  const raw =
+    rec?.scrap_is_production_recorded !== null &&
+    rec?.scrap_is_production_recorded !== undefined
+      ? rec.scrap_is_production_recorded
+      : rec?.event_data?.is_production_recorded
+  return raw ? '実績入力後' : '実績入力前'
+}
 const isPurchaseRow = (row) => Boolean(row?.supplier_code || row?.supplier_name)
 const isProcessRow = (row) => Boolean(!isPurchaseRow(row) && row?.process_code)
 
@@ -355,6 +365,7 @@ const exportExcel = () => {
     '仕損数',
     '判定',
     '戻し数量',
+    '発見時点',
     '理由',
     '理由詳細',
     '記入者',
@@ -368,6 +379,7 @@ const exportExcel = () => {
     formatNumber(rec.qty),
     dispositionLabel(rec.scrap_disposition_status),
     formatNumber(rec.scrap_return_qty),
+    productionRecordedLabel(rec),
     reasonLabel(rec.event_data?.reason),
     rec.event_data?.reason_detail || '',
     rec.operator_name || '',

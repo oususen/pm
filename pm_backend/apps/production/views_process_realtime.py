@@ -1086,13 +1086,13 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
 
                     if is_self:
                         # 自工程仕損の戻し: scrap_qty 減算 + actual_qty 加算
+                        # 戻し時は実績入力済みフラグに関係なく実績を復元する。
                         LineBacklog.objects.filter(**backlog_filter).update(
                             scrap_qty=F('scrap_qty') - qty_int
                         )
-                        if sd.is_production_recorded:
-                            LineBacklog.objects.filter(**backlog_filter).update(
-                                actual_qty=F('actual_qty') + qty_int
-                            )
+                        LineBacklog.objects.filter(**backlog_filter).update(
+                            actual_qty=F('actual_qty') + qty_int
+                        )
                     else:
                         # 他工程仕損の戻し: scrap_adjust_qty をプラスに戻す
                         LineBacklog.objects.filter(**backlog_filter).update(
