@@ -127,7 +127,7 @@
             <th>LT反映日まで必要量</th>
             <th>LT反映日の生産計画在庫</th>
             <th>LT反映日の進度</th>
-            <th>LT反映日の計進</th>
+            <th class="lt-planned-progress-col">LT反映日の計進</th>
             <th>在庫</th>
             <th>進度</th>
             <th>発注過剰</th>
@@ -171,7 +171,7 @@
             <td>{{ item.required_until_switch_qty }}</td>
             <td>{{ item.switch_prod_planned_stock_qty }}</td>
             <td>{{ item.switch_prod_progress_qty }}</td>
-            <td>{{ item.switch_prod_planned_progress_qty }}</td>
+            <td class="lt-planned-progress-col">{{ item.switch_prod_planned_progress_qty }}</td>
             <td>{{ item.stock_qty }}</td>
             <td>{{ item.progress_qty }}</td>
             <td :class="{ over: item.excess_purchase_qty > 0 }">{{ item.excess_purchase_qty }}</td>
@@ -640,6 +640,9 @@ select {
   border: 1px solid #e2e8f0;
   padding: 6px;
   text-align: left;
+}
+.lt-planned-progress-col {
+  font-weight: 700;
 }
 .badge {
   padding: 2px 8px;
