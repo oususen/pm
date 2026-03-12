@@ -44,8 +44,9 @@
                 <tr>
                   <th>工程順位</th>
                   <th>工程CD</th>
-                  <th>加工先CD</th>
-                  <th>加工先名</th>
+                  <th>工程名</th>
+                  <th>ラインCD</th>
+                  <th>ライン名</th>
                 </tr>
               </thead>
               <tbody>
@@ -57,6 +58,7 @@
                 >
                   <td>{{ item.stepNo }}</td>
                   <td>{{ item.processCode }}</td>
+                  <td>{{ item.processName }}</td>
                   <td>{{ item.lineCode }}</td>
                   <td>{{ item.lineName }}</td>
                 </tr>
@@ -69,16 +71,25 @@
             <input v-model="form.processCode" type="text" placeholder="工程CD" />
           </div>
           <div class="row">
-            <label>加工先</label>
+            <label>工程名</label>
+            <input v-model="form.processName" type="text" />
+          </div>
+          <div class="row">
+            <label>ラインCD</label>
             <input v-model="form.lineCode" type="text" placeholder="ラインCD" />
           </div>
           <div class="row">
-            <label>加工先名</label>
+            <label>ライン名</label>
             <input v-model="form.lineName" type="text" />
           </div>
           <div class="row">
             <label>表示開始日</label>
             <input v-model="displayStartDate" type="date" @change="reload" />
+          </div>
+          <div class="adjust-note">
+            <p>※ この画面の調整値は「調整マスタ（production_line_backlog_adjustment）」に保存されます。</p>
+            <p>※ 在庫残量一覧の「調整」（LineBacklog.adjust_qty）とは別管理です。</p>
+            <p>※ 調整値は {{ recalculationLabel }} 実行後に {{ reflectionLabel }} へ反映されます。</p>
           </div>
         </div>
       </section>
@@ -163,6 +174,7 @@ const form = reactive({
   processOrder: 10,
   processId: null,
   processCode: "",
+  processName: "",
   lineId: null,
   lineCode: "",
   lineName: "",
@@ -173,6 +185,7 @@ const applyProcessToForm = (item) => {
   form.processOrder = Number(item.stepNo || 10);
   form.processId = item.processId || null;
   form.processCode = item.processCode || "";
+  form.processName = item.processName || "";
   form.lineId = item.lineId || null;
   form.lineCode = item.lineCode || "";
   form.lineName = item.lineName || "";
@@ -299,14 +312,16 @@ const loadHolidays = async (startDate, endDate) => {
 const resolveByProductCode = async () => {
   const productCode = String(form.productCode || "").trim();
   if (!productCode || resolvingProduct.value) return;
+  const normalizedInputCode = productCode.toUpperCase();
 
   resolvingProduct.value = true;
   try {
     const productRes = await api.products.getProducts({ search: productCode, page_size: 20 });
     const products = normalizeList(productRes.data);
+    const normalizeCode = (value) => String(value || "").trim().toUpperCase();
     const product =
-      products.find((p) => p.product_code === productCode) ||
-      products.find((p) => String(p.product_code || "").startsWith(productCode)) ||
+      products.find((p) => normalizeCode(p.product_code) === normalizedInputCode) ||
+      products.find((p) => normalizeCode(p.product_code).startsWith(normalizedInputCode)) ||
       products[0];
 
     if (!product) {
@@ -334,11 +349,13 @@ const resolveByProductCode = async () => {
       const withMaster = await Promise.all(
         purchaseLike.map(async (item, idx) => {
           let processCode = "";
+          let processName = "";
           let lineCode = "";
           let lineName = "";
           if (item.process) {
             const processRes = await api.processes.getProcess(item.process);
             processCode = processRes?.data?.process_code || "";
+            processName = processRes?.data?.process_name || "";
           }
           if (item.line) {
             const lineRes = await api.lines.getLine(item.line);
@@ -357,6 +374,7 @@ const resolveByProductCode = async () => {
             stepNo: 10 + idx,
             processId: item.process || null,
             processCode: processCode || (String(item.sourcing_type || "").toUpperCase() === "BUY" ? "PURCHASE" : ""),
+            processName: processName || (String(item.sourcing_type || "").toUpperCase() === "BUY" ? "購買" : ""),
             lineId: item.line || null,
             lineCode,
             lineName,
@@ -393,11 +411,13 @@ const resolveByProductCode = async () => {
       const withMaster = await Promise.all(
         bomItems.map(async (item) => {
           let processCode = "";
+          let processName = "";
           let lineCode = "";
           let lineName = "";
           if (item.process) {
             const processRes = await api.processes.getProcess(item.process);
             processCode = processRes?.data?.process_code || "";
+            processName = processRes?.data?.process_name || "";
           }
           if (item.line) {
             const lineRes = await api.lines.getLine(item.line);
@@ -407,6 +427,7 @@ const resolveByProductCode = async () => {
           return {
             ...item,
             processCode,
+            processName,
             lineCode,
             lineName,
             key: `${processCode}::${lineCode}`,
@@ -424,6 +445,7 @@ const resolveByProductCode = async () => {
         stepNo: Number(x.step_no || 10 + idx),
         processId: x.process || null,
         processCode: x.processCode || "",
+        processName: x.processName || "",
         lineId: x.line || null,
         lineCode: x.lineCode || "",
         lineName: x.lineName || "",
@@ -443,6 +465,7 @@ const resolveByProductCode = async () => {
         const processRes = await api.processes.getProcess(product.process);
         if (!form.processId) form.processId = processRes?.data?.id || null;
         if (!form.processCode) form.processCode = processRes?.data?.process_code || "";
+        if (!form.processName) form.processName = processRes?.data?.process_name || "";
       }
       if (product.line) {
         const lineRes = await api.lines.getLine(product.line);
@@ -454,16 +477,20 @@ const resolveByProductCode = async () => {
       return;
     }
 
-    const stepRes = await api.routings.getRoutingSteps({ routing: routing.id });
-    const steps = normalizeList(stepRes.data).sort((a, b) => Number(a.step_no || 0) - Number(b.step_no || 0));
+    const stepRes = await api.routings.getRoutingSteps({ routing: routing.id, page_size: 5000 });
+    const steps = normalizeList(stepRes.data)
+      .filter((step) => Number(step.output_product || 0) === Number(product.id))
+      .sort((a, b) => Number(a.step_no || 0) - Number(b.step_no || 0));
     const candidateRows = [];
     for (const step of steps) {
       let processCode = "";
+      let processName = "";
       let lineCode = "";
       let lineName = "";
       if (step.process) {
         const processRes = await api.processes.getProcess(step.process);
         processCode = processRes?.data?.process_code || "";
+        processName = processRes?.data?.process_name || "";
       }
       if (step.line) {
         const lineRes = await api.lines.getLine(step.line);
@@ -475,6 +502,7 @@ const resolveByProductCode = async () => {
         stepNo: Number(step.step_no || 0),
         processId: step.process || null,
         processCode,
+        processName,
         lineId: step.line || null,
         lineCode,
         lineName,
@@ -512,6 +540,16 @@ const planHeaderLabel = "計画";
 const adjustHeaderLabel = "調整値";
 const currentAdjustHeaderLabel = "今回調整値";
 const metricHeaderLabel =
+  props.adjustType === "STOCK"
+    ? "在庫"
+    : props.adjustType === "PLANNED_STOCK"
+    ? "計画在庫"
+    : props.adjustType === "PLANNED_PROGRESS"
+    ? "計画進度"
+    : "進度";
+const recalculationLabel =
+  props.adjustType === "STOCK" || props.adjustType === "PLANNED_STOCK" ? "在庫再計算" : "進度再計算";
+const reflectionLabel =
   props.adjustType === "STOCK"
     ? "在庫"
     : props.adjustType === "PLANNED_STOCK"
@@ -735,6 +773,16 @@ onMounted(() => {
   color: #fff;
   text-align: center;
   padding: 3px;
+}
+.adjust-note {
+  margin-top: 8px;
+  border: 1px solid #8d9498;
+  background: #ecebd2;
+  padding: 6px 8px;
+  line-height: 1.5;
+}
+.adjust-note p {
+  margin: 0;
 }
 .row input,
 .toolbar input,
