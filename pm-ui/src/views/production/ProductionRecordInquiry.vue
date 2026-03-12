@@ -895,12 +895,16 @@ const exportCsv = () => _exportCsv(sessions.value, startDate.value, endDate.valu
 
 const exportExcel = () => _exportExcel(sessions.value, startDate.value, endDate.value)
 
-const exportExcel2 = () => exportProductionSummaryExcel(
-  sessions.value,
-  startDate.value,
-  endDate.value,
-  { tabKey: activeTab.value, mappingsByTab: mappingsByTab.value },
-)
+const exportExcel2 = () => {
+  const confirmed = window.confirm('出力したexcelの内容を基幹システムに入力するため、必ず期間を入力したい日にしてください')
+  if (!confirmed) return
+  exportProductionSummaryExcel(
+    sessions.value,
+    startDate.value,
+    endDate.value,
+    { tabKey: activeTab.value, mappingsByTab: mappingsByTab.value },
+  )
+}
 
 const exportPdf = () => {
   const lineLabel = lines.value.find((l) => String(l.id) === String(lineId.value))?.line_code || ''
