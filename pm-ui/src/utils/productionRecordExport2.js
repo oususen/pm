@@ -104,7 +104,9 @@ export const exportProductionSummaryExcel = (sessions, startDate, endDate, optio
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `production_record2_${startDate}_${endDate}.xlsx`
+  const compactStart = formatDateCompact(startDate)
+  const compactEnd   = formatDateCompact(endDate)
+  link.download = `${tabKey}_${compactStart}_${compactEnd}.xlsx`
   link.click()
   URL.revokeObjectURL(url)
 }

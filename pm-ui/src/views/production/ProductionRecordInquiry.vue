@@ -87,7 +87,7 @@
       <div class="export-actions">
         <button class="btn btn-secondary" :disabled="loading || !sessions.length" @click="exportCsv">CSV出力</button>
         <button class="btn btn-secondary" :disabled="loading || !sessions.length" @click="exportExcel">Excel出力</button>
-        <button class="btn btn-secondary" :disabled="loading || !sessions.length" @click="exportExcel2">Excel出力2</button>
+        <button class="btn btn-secondary" :disabled="loading || !sessions.length" @click="exportExcel2">基幹システム入力用Excel</button>
         <button class="btn btn-secondary" :disabled="loading || !sessions.length" @click="exportPdf">印刷(PDF)</button>
       </div>
     </div>
