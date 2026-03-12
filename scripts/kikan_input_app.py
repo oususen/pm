@@ -34,13 +34,13 @@ DEFAULT_CONFIG = {
     "window_title":        "SSE0040",
     "tabs_to_hinban":      1,
     "tabs_after_hinban":   1,
-    "tabs_to_seisansu":    5,
-    "tabs_to_jikan_start": 5,
+    "tabs_to_seisansu":    3,
+    "tabs_to_jikan_start": 8,
     "tabs_to_jikan_end":   1,
-    "delay_key":           0.15,
-    "delay_hinban":        0.8,
-    "delay_register":      1.2,
-    "countdown_sec":       5,
+    "delay_key":           1.0,
+    "delay_hinban":        2.0,
+    "delay_register":      1.0,
+    "countdown_sec":       10,
 }
 
 
@@ -145,7 +145,53 @@ def load_excel(filepath):
     return records, skipped, ws.title
 
 
-def input_one_record(record, cfg, stop_check=None):
+def wait_for_screen_change(hwnd_main, min_wait=0.3, max_wait=8.0, interval=0.15, stop_check=None):
+    """画面変化を待つ（基幹システムの応答待ち）
+    Enter後に基幹システムが応答するまで監視し、変化を検出したら戻る。
+    min_wait後から監視開始。max_waitに達してもタイムアウトとして続行。
+    stop_checkを渡すと待機中も右クリック解除・Ctrl+P停止が有効になる。
+    """
+    time.sleep(min_wait)
+    if not hwnd_main:
+        return
+    try:
+        rect = win32gui.GetWindowRect(hwnd_main)
+        x, y, x2, y2 = rect
+        w, h = x2 - x, y2 - y
+        # ウィンドウ内の品名・工程情報エリアを監視
+        region = (x + 5, y + 30, w - 10, min(250, h - 50))
+        before = pyautogui.screenshot(region=region)
+        elapsed = min_wait
+        while elapsed < max_wait:
+            time.sleep(interval)
+            if stop_check:
+                stop_check()   # 右クリック解除・Ctrl+P・停止ボタンをここでも処理
+            after = pyautogui.screenshot(region=region)
+            if before.tobytes() != after.tobytes():
+                time.sleep(0.1)  # 表示安定待ち
+                return
+            elapsed += interval
+        # タイムアウト：そのまま続行
+    except InterruptedError:
+        raise   # 停止リクエストはそのまま伝播
+    except Exception:
+        pass
+
+
+def check_error_dialog(hwnd_main):
+    """エラーダイアログが前面に出ていないか確認。出ていればEnterで閉じてRuntimeError"""
+    if not hwnd_main:
+        return
+    fg = win32gui.GetForegroundWindow()
+    if fg != hwnd_main:
+        title = win32gui.GetWindowText(fg)
+        # ダイアログをEnterで閉じる
+        pyautogui.press('enter')
+        time.sleep(0.3)
+        raise RuntimeError(f"エラーダイアログ検出: [{title}] → Enterで閉じてスキップ")
+
+
+def input_one_record(record, cfg, hwnd_main=None, stop_check=None):
     delay_key    = cfg["delay_key"]
     delay_hinban = cfg["delay_hinban"]
 
@@ -159,7 +205,7 @@ def input_one_record(record, cfg, stop_check=None):
         for _ in range(n):
             check_stop()
             pyautogui.press('enter')
-            time.sleep(delay_key)
+            _poll_sleep(delay_key)
 
     def clear_input(text):
         check_stop()
@@ -167,7 +213,17 @@ def input_one_record(record, cfg, stop_check=None):
         time.sleep(0.05)
         pyperclip.copy(str(text))
         pyautogui.hotkey('ctrl', 'v')
-        time.sleep(delay_key)
+        _poll_sleep(delay_key)
+
+    def _poll_sleep(duration, poll_interval=0.1):
+        """待機中も0.1秒ごとに右クリック・停止をポーリングする"""
+        deadline = time.monotonic() + duration
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(poll_interval, remaining))
+            check_stop()
 
     seisanbi  = format_seisanbi(record['生産日'])
     hinban    = str(record['基幹品番']).strip()
@@ -188,15 +244,22 @@ def input_one_record(record, cfg, stop_check=None):
     # 固定Enterは行わず、ここで指定した回数のみEnterを送る
     enter_count_raw = record.get('工程順行きエンター回数')
     tabs_after_hinban = parse_enter_count(enter_count_raw, cfg["tabs_after_hinban"])
-    if tabs_after_hinban > 0:
-        next_field(1)
-        time.sleep(delay_hinban)
-        if tabs_after_hinban > 1:
-            next_field(tabs_after_hinban - 1)
-    clear_input(koukei)
+    # デバッグ: Enter回数の確認（動作確認後に削除可）
+    print(f"[DEBUG] 品番={hinban} Excel列値={enter_count_raw!r} → Enter回数={tabs_after_hinban}")
+    next_field(1)
+    wait_for_screen_change(hwnd_main, min_wait=0.3, max_wait=delay_hinban, stop_check=stop_check)
+    check_error_dialog(hwnd_main)   # エラーダイアログが出ていればここでRuntimeError
 
-    # 工程順位 → 生産数(完成)
-    next_field(cfg["tabs_to_seisansu"])
+    if tabs_after_hinban >= 2:
+        # 工程順位まで追加Enter → 工順入力
+        next_field(tabs_after_hinban - 1)
+        clear_input(koukei)
+        # 工程順位から生産数へ
+        next_field(cfg["tabs_to_seisansu"])
+    else:
+        # Enter1回製品: 工程順位は自動設定 → cursor は加工先にある → 生産数へ
+        next_field(cfg["tabs_to_seisansu"] - 1)
+
     clear_input(seisansu)
 
     # 生産数 → 加工時間1 開始
@@ -210,9 +273,9 @@ def input_one_record(record, cfg, stop_check=None):
     # F12 登録 → 「入力しますか？」確認ダイアログ → Enter（はい）
     check_stop()
     pyautogui.press('f12')
-    time.sleep(0.6)               # 確認ダイアログが表示されるまで待機
+    wait_for_screen_change(hwnd_main, min_wait=0.3, max_wait=3.0, stop_check=stop_check)   # ダイアログ表示待ち
     pyautogui.press('enter')      # 「はい」を選択
-    time.sleep(cfg["delay_register"])  # 登録処理完了まで待機
+    wait_for_screen_change(hwnd_main, min_wait=0.3, max_wait=cfg["delay_register"], stop_check=stop_check)  # 登録完了待ち
 
     return seisanbi, hinban, koukei, seisansu
 
@@ -224,7 +287,7 @@ def input_one_record(record, cfg, stop_check=None):
 class KikanInputApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("基幹システム自動入力  -  SSE0040")
+        self.root.title("基幹システム自動入力")
         self.root.resizable(False, False)
 
         self.cfg = self._load_config()
@@ -234,6 +297,7 @@ class KikanInputApp:
         self._hotkey_handle = None
         self._mouse_locked = False
         self._right_button_prev = False
+        self._right_click_last_time = 0.0
 
         self._build_ui()
 
@@ -346,9 +410,9 @@ class KikanInputApp:
         frm_prev = ttk.LabelFrame(self.root, text="  入力対象レコード  ")
         frm_prev.grid(row=4, column=0, sticky="ew", padx=10, pady=4)
 
-        cols = ("生産日", "基幹品番", "工順", "生産数量", "開始時間", "終了時間")
+        cols = ("生産日", "基幹品番", "工順", "生産数量", "Enter回数", "開始時間", "終了時間")
         self.tree = ttk.Treeview(frm_prev, columns=cols, show="headings", height=6)
-        widths = (90, 120, 50, 70, 70, 70)
+        widths = (90, 120, 50, 70, 60, 70, 70)
         for col, w in zip(cols, widths):
             self.tree.heading(col, text=col)
             self.tree.column(col, width=w, anchor="center")
@@ -402,6 +466,133 @@ class KikanInputApp:
         self.lbl_status = ttk.Label(frm_btn, text="待機中", foreground="gray")
         self.lbl_status.grid(row=0, column=2, padx=16)
 
+        ttk.Button(frm_btn, text="？  ヘルプ", command=self._show_help,
+                   width=12).grid(row=0, column=3, padx=8)
+
+    # ----------------------------------------------------------
+    # ヘルプ
+    # ----------------------------------------------------------
+    def _show_help(self):
+        """ヘルプウィンドウを表示"""
+        win = tk.Toplevel(self.root)
+        win.title("使い方・マニュアル")
+        win.resizable(True, True)
+        win.attributes("-topmost", True)
+
+        # 画面中央
+        win.update_idletasks()
+        w, h = 700, 600
+        sx = self.root.winfo_screenwidth()
+        sy = self.root.winfo_screenheight()
+        win.geometry(f"{w}x{h}+{(sx-w)//2}+{(sy-h)//2}")
+
+        txt = tk.Text(win, wrap="word", font=("Yu Gothic UI", 10),
+                      bg="#fafafa", fg="#222", padx=12, pady=8,
+                      spacing1=2, spacing3=4)
+        sb = ttk.Scrollbar(win, command=txt.yview)
+        txt.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        txt.pack(side="left", fill="both", expand=True)
+
+        # タグ定義
+        txt.tag_configure("h1",  font=("Yu Gothic UI", 16, "bold"), foreground="#1a1a6e", spacing1=8, spacing3=4)
+        txt.tag_configure("h2",  font=("Yu Gothic UI", 13, "bold"), foreground="#1a5276", spacing1=10, spacing3=2)
+        txt.tag_configure("h3",  font=("Yu Gothic UI", 11, "bold"), foreground="#1f618d", spacing1=6, spacing3=2)
+        txt.tag_configure("th",  font=("Yu Gothic UI", 10, "bold"), foreground="#555", background="#e8eaf6")
+        txt.tag_configure("td",  font=("Yu Gothic UI", 10))
+        txt.tag_configure("sep", foreground="#cccccc")
+        txt.tag_configure("key", font=("Consolas", 10, "bold"), foreground="#c0392b", background="#fdf2f8")
+        txt.tag_configure("note", foreground="#7d6608", background="#fef9e7")
+
+        def ins(text, tag=None):
+            if tag:
+                txt.insert("end", text, tag)
+            else:
+                txt.insert("end", text)
+
+        ins("基幹システム自動入力ツール  使い方\n", "h1")
+        ins("─" * 60 + "\n", "sep")
+
+        ins("\n【概要】\n", "h2")
+        ins("生産実績照会の「Excel出力2」を読み込み、\n基幹システム（SSE0040）へ自動でキー入力するツールです。\n\n")
+
+        ins("【事前準備】\n", "h2")
+        ins("1. SSE0040（生産実績入力）を開く\n")
+        ins("2. 入力したい日付・ラインの画面を表示する\n")
+        ins("3. 生産日フィールドにカーソルを置いた状態にしておく\n\n")
+
+        ins("【操作手順】\n", "h2")
+        ins("① ", "th"); ins("Excelファイル（出力2）を「参照...」で選択して「読み込み」\n")
+        ins("② ", "th"); ins("プレビューで入力対象レコード・Enter回数を確認\n")
+        ins("③ ", "th"); ins("Tab数設定・待機時間を確認し「設定保存」\n")
+        ins("④ ", "th"); ins("基幹システムの生産日にカーソルを置く\n")
+        ins("⑤ ", "th"); ins("「▶ 入力開始」をクリック\n")
+        ins("⑥ ", "th"); ins("カウントダウン中に基幹システムへ切り替える\n")
+        ins("⑦ ", "th"); ins("自動入力開始 → マウスが固定される\n\n")
+
+        ins("【入力中の操作】\n", "h2")
+        ins("  右クリック 1回  ", "key"); ins(" … マウス固定を解除（入力は継続）\n")
+        ins("  右ダブルクリック", "key"); ins(" … 即座に停止\n")
+        ins("  Ctrl + P        ", "key"); ins(" … 停止リクエスト\n")
+        ins("  マウスを左上角  ", "key"); ins(" … フェイルセーフ緊急停止\n\n")
+
+        ins("【Tab数設定】  ※通常は変更不要（デフォルト値で動作します）\n", "h2")
+        ins("  デフォルト値は以下のとおりです。基幹画面のレイアウトが変わった場合のみ変更してください。\n\n", "note")
+        rows = [
+            ("生産日 → 品番",         "1",  "生産日入力後、品番フィールドまでのEnter回数"),
+            ("品番確定後 → 工程順位", "1",  "Excelの「工程順行きエンター回数」列の値が優先される"),
+            ("工程順位 → 生産数",     "3",  "工程順位入力後、生産数フィールドまでのEnter回数"),
+            ("生産数 → 加工時間開始", "8",  "生産数入力後、加工時間開始フィールドまでのEnter回数"),
+            ("加工時間開始 → 終了",   "1",  "加工時間開始後、終了フィールドまでのEnter回数"),
+        ]
+        for label, default, desc in rows:
+            ins(f"  {label:<18}", "th")
+            ins(f"  デフォルト:", "td")
+            ins(f" {default} ", "key")
+            ins(f"  {desc}\n", "td")
+        ins("\n")
+
+        ins("【Enter回数（品番確定後）の仕様】\n", "h3")
+        ins("  2回以上 → 品番確定 → Enter追加 → 工程順位入力 → 生産数へ\n")
+        ins("  1回     → 品番確定後カーソルは「加工先」へ移動（工程順位は自動）→ 生産数へ\n\n")
+
+        ins("【待機時間】  ※通常は変更不要（デフォルト値で動作します）\n", "h2")
+        ins("  基幹システムが重い場合は「品番確定後」「登録後」を大きくしてください。\n\n", "note")
+        rows2 = [
+            ("キー間",      "1.0秒",  "各キー入力間の待機時間"),
+            ("品番確定後",  "2.0秒",  "品番確定後の画面変化最大待機時間"),
+            ("登録後",      "1.0秒",  "F12登録後の完了最大待機時間"),
+            ("開始前",      "10秒",   "入力開始前カウントダウン秒数"),
+        ]
+        for name, default, desc in rows2:
+            ins(f"  {name:<10}", "th")
+            ins(f"  デフォルト:", "td")
+            ins(f" {default} ", "key")
+            ins(f"  {desc}\n", "td")
+        ins("\n")
+
+        ins("【注意事項】\n", "h2")
+        ins("  ⚠ 入力中はキーボード・マウス操作をしないこと\n", "note")
+        ins("  ⚠ 入力中に別のウィンドウを前面に出さないこと\n", "note")
+        ins("  ⚠ 入力結果は必ず基幹システム側で確認すること\n", "note")
+        ins("  ⚠ 設定は kikan_input_config.json に保存されます\n", "note")
+        ins("\n")
+
+        ins("【トラブルシューティング】\n", "h2")
+        troubles = [
+            ("基幹ウィンドウが見つからない", "SSE0040を開いてから再実行。ウィンドウタイトルを確認"),
+            ("入力がズレる",                 "Tab数設定を見直す。手動で同品番を入力してEnter回数を数える"),
+            ("品番確定後にエラー",           "品番が正しくない or 基幹に登録されていない品番"),
+            ("動作が遅い",                   "「品番確定後」「登録後」の待機時間を増やす"),
+            ("途中で止まる",                 "ログを確認。エラーダイアログが出た可能性あり"),
+        ]
+        for symptom, solution in troubles:
+            ins(f"  症状: {symptom}\n", "th")
+            ins(f"         → {solution}\n\n", "td")
+
+        txt.config(state="disabled")
+        ttk.Button(win, text="閉じる", command=win.destroy).pack(pady=6)
+
     # ----------------------------------------------------------
     # ファイル操作
     # ----------------------------------------------------------
@@ -427,11 +618,14 @@ class KikanInputApp:
             for row in self.tree.get_children():
                 self.tree.delete(row)
             for r in records:
+                ec_raw = r.get('工程順行きエンター回数')
+                ec = parse_enter_count(ec_raw, self.cfg["tabs_after_hinban"])
                 self.tree.insert("", "end", values=(
                     format_seisanbi(r['生産日']),
                     r['基幹品番'],
                     r['工順'],
                     int(r['生産数量']),
+                    ec,
                     format_time(r.get('開始時間')) or '',
                     format_time(r.get('終了時間')) or '',
                 ))
@@ -524,11 +718,31 @@ class KikanInputApp:
         self._mouse_locked = False
 
     def _poll_right_click_unlock(self):
-        """右クリック押下エッジでマウス固定解除"""
-        is_pressed = bool(win32api.GetAsyncKeyState(win32con.VK_RBUTTON) & 0x8000)
-        if self._mouse_locked and is_pressed and not self._right_button_prev:
-            self._unlock_mouse_cursor()
-            self._log("★ 右クリックでマウス固定を解除しました")
+        """右クリック: マウス固定解除 / 右ダブルクリック: 停止
+        GetAsyncKeyStateの低ビット(前回呼び出し後に押された記録)も使い、
+        ポーリング間の短いクリックを確実に検出する。
+        """
+        state = win32api.GetAsyncKeyState(win32con.VK_RBUTTON)
+        is_pressed       = bool(state & 0x8000)  # 現在押下中
+        pressed_since_last = bool(state & 0x0001)  # 前回呼び出し後に押されたか
+
+        # 立ち上がりエッジ: 現在押下かつ前回未押下 or 前回呼び出し後に押した記録
+        rising_edge = (is_pressed and not self._right_button_prev) or \
+                      (pressed_since_last and not is_pressed)
+
+        if rising_edge:
+            now = time.monotonic()
+            if (now - self._right_click_last_time) < 0.4:
+                # ダブルクリック → 停止
+                self._stop_flag = True
+                self._unlock_mouse_cursor()
+                self._log("★ 右ダブルクリックで停止しました")
+            else:
+                # シングルクリック → マウス固定解除
+                if self._mouse_locked:
+                    self._unlock_mouse_cursor()
+                    self._log("★ 右クリックでマウス固定を解除しました")
+            self._right_click_last_time = now
         self._right_button_prev = is_pressed
 
     def _show_countdown_popup(self, seconds, cancel_event):
@@ -618,7 +832,7 @@ class KikanInputApp:
 
             try:
                 seisanbi, hinban, koukei, seisansu = input_one_record(
-                    record, self.cfg, stop_check=should_stop)
+                    record, self.cfg, hwnd_main=hwnd, stop_check=should_stop)
                 success += 1
                 self._log(f"  → 登録OK  生産日={seisanbi}")
             except InterruptedError:
