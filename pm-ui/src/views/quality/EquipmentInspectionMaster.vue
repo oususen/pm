@@ -3,8 +3,15 @@
     <div class="page-header">
       <h2 class="page-title">点検項目作成</h2>
       <div class="page-actions">
+        <button
+          class="btn-secondary"
+          @click="exportCurrentTemplateExcel"
+          :disabled="detailLoading || !form.items.length"
+        >
+          Excel出力
+        </button>
         <button class="btn-secondary" @click="printCurrentTemplate" :disabled="detailLoading">
-          印刷
+          PDF出力
         </button>
         <button class="btn-secondary" @click="loadTemplateList" :disabled="loadingList || detailLoading">
           更新
@@ -286,6 +293,7 @@
 
 <script setup>
 import { computed, nextTick, onMounted, ref } from "vue"
+import * as XLSX from "xlsx"
 import api from "@/api/client"
 import { authState } from "@/auth"
 import { hasPermission } from "@/router"
@@ -305,6 +313,12 @@ const ACTION_LABELS = {
   REVIEWED: "確認完了",
   APPROVED: "承認",
   REJECTED: "差戻し",
+}
+
+const RECORD_TYPE_LABELS = {
+  CHECK: "チェック",
+  NUMERIC: "数値",
+  TEXT: "文字",
 }
 
 const SM009_DAILY_ITEMS = [
@@ -347,6 +361,7 @@ const createEmptyForm = () => ({
   sheet_name: "M6ナット専用機",
   title: "設備始業点検表（SM-009：M6ナット専用機）",
   source_sheet_name: "SM-009",
+  created_at: "",
   revision_date: "",
   revision_notes: "",
   effective_from: "",
@@ -386,11 +401,13 @@ const canView = computed(() => {
 
 const canEdit = computed(() => hasPermission(authState.user, "quality", "edit"))
 const currentUserId = computed(() => Number(authState.user?.id || 0))
+const normalizeStatus = (status) => String(status || "").trim().toUpperCase()
+const normalizedFormStatus = computed(() => normalizeStatus(form.value.status) || "DRAFT")
 
 const canEditFields = computed(() => {
   if (!canEdit.value) return false
   if (!form.value.id) return true
-  return ["DRAFT", "REJECTED"].includes(form.value.status)
+  return ["DRAFT", "REJECTED"].includes(normalizedFormStatus.value)
 })
 
 const canSubmitForReview = computed(() => {
@@ -398,27 +415,31 @@ const canSubmitForReview = computed(() => {
 })
 
 const canReview = computed(() => {
-  if (!canEdit.value || form.value.status !== "REVIEW_PENDING") return false
+  if (!canEdit.value || normalizedFormStatus.value !== "REVIEW_PENDING") return false
   const reviewerUserId = Number(form.value.reviewer_user || 0)
   return reviewerUserId === 0 || reviewerUserId === currentUserId.value
 })
 
 const canApprove = computed(() => {
-  if (!canEdit.value || form.value.status !== "APPROVAL_PENDING") return false
+  if (!canEdit.value || normalizedFormStatus.value !== "APPROVAL_PENDING") return false
   const approverUserId = Number(form.value.approver_user || 0)
   return approverUserId === 0 || approverUserId === currentUserId.value
 })
 
 const canReject = computed(() => canReview.value || canApprove.value)
 
-const statusLabel = (status) => STATUS_LABELS[status] || status
+const statusLabel = (status) => {
+  const normalized = normalizeStatus(status)
+  return STATUS_LABELS[normalized] || status
+}
 const actionLabel = (action) => ACTION_LABELS[action] || action
 
 const statusClass = (status) => {
-  if (status === "APPROVED") return "ok"
-  if (status === "REJECTED") return "danger"
-  if (status === "APPROVAL_PENDING") return "approve"
-  if (status === "REVIEW_PENDING") return "review"
+  const normalized = normalizeStatus(status)
+  if (normalized === "APPROVED") return "ok"
+  if (normalized === "REJECTED") return "danger"
+  if (normalized === "APPROVAL_PENDING") return "approve"
+  if (normalized === "REVIEW_PENDING") return "review"
   return "draft"
 }
 
@@ -444,6 +465,103 @@ const toPrintCell = (value) => {
   return escapeHtml(String(value ?? "")).replace(/\n/g, "<br>")
 }
 
+const recordTypeLabel = (value) => RECORD_TYPE_LABELS[String(value || "").trim()] || (value || "")
+
+const resolveReviewerNames = () => {
+  const names = []
+  const pushName = (name) => {
+    const normalized = String(name || "").trim()
+    if (!normalized) return
+    if (names.includes(normalized)) return
+    names.push(normalized)
+  }
+  ;(form.value.workflow_logs || []).forEach((log) => {
+    if (String(log?.action || "") === "REVIEWED") {
+      pushName(log.actor_name)
+    }
+  })
+  pushName(form.value.reviewer_user_name)
+  return [names[0] || "-", names[1] || "-"]
+}
+
+const resolvePrintBaseDate = () => {
+  const candidates = [form.value.effective_from, form.value.revision_date]
+  for (const raw of candidates) {
+    if (!raw) continue
+    const date = new Date(raw)
+    if (!Number.isNaN(date.getTime())) return date
+  }
+  return new Date()
+}
+
+const exportCurrentTemplateExcel = () => {
+  if (!form.value.items.length) {
+    alert("出力対象の点検項目がありません。")
+    return
+  }
+
+  const statusText = statusLabel(form.value.status)
+  const exportedAt = new Date().toLocaleString("ja-JP")
+  const sheetName = String(form.value.sheet_code || "設備点検表").slice(0, 31)
+  const safeSheetCode = String(form.value.sheet_code || "template")
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .trim()
+  const safeStatus = String(statusText || "下書き").replace(/[\\/:*?"<>|]/g, "_").trim()
+  const datePart = new Date().toISOString().slice(0, 10)
+
+  const rows = [
+    [form.value.title || "設備点検表"],
+    [],
+    ["設備コード", form.value.sheet_code || ""],
+    ["設備名", form.value.sheet_name || ""],
+    ["版", form.value.version || ""],
+    ["状態", statusText],
+    ["改訂日", form.value.revision_date || ""],
+    ["運用開始日", form.value.effective_from || ""],
+    ["作成者", form.value.created_by_name || ""],
+    ["出力日時", exportedAt],
+    [],
+    ["日次点検項目"],
+    ["No", "点検項目", "規格", "確認頻度", "方法", "記録種別", "単位", "判定基準"],
+    ...dailyItems.value.map((item) => [
+      item.inspection_no || "",
+      item.item_name || "",
+      item.standard || "",
+      item.frequency || "",
+      item.method || "",
+      recordTypeLabel(item.record_type),
+      item.unit || "",
+      item.criteria || "",
+    ]),
+    [],
+    ["定期実測項目（3ヶ月）"],
+    ["項目", "規格（設定）", "参考値/単位", "判定基準", "記録種別", "単位"],
+    ...quarterlyItems.value.map((item) => [
+      item.item_name || "",
+      item.standard || "",
+      item.method || "",
+      item.criteria || "",
+      recordTypeLabel(item.record_type),
+      item.unit || "",
+    ]),
+  ]
+
+  const worksheet = XLSX.utils.aoa_to_sheet(rows)
+  worksheet["!cols"] = [
+    { wch: 8 },
+    { wch: 32 },
+    { wch: 28 },
+    { wch: 14 },
+    { wch: 34 },
+    { wch: 12 },
+    { wch: 12 },
+    { wch: 24 },
+  ]
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName || "設備点検表")
+  XLSX.writeFile(workbook, `設備点検表_${safeSheetCode}_${safeStatus}_${datePart}.xlsx`)
+}
+
 const printCurrentTemplate = () => {
   if (!form.value.items.length) {
     alert("印刷対象の点検項目がありません。")
@@ -452,21 +570,27 @@ const printCurrentTemplate = () => {
 
   const statusText = statusLabel(form.value.status)
   const revisionDate = form.value.revision_date || "-"
+  const createdDate = form.value.created_at || form.value.revision_date || "-"
   const effectiveFrom = form.value.effective_from || "-"
   const printedAt = new Date().toLocaleString("ja-JP")
+  const [reviewer1, reviewer2] = resolveReviewerNames()
+  const baseDate = resolvePrintBaseDate()
+  const targetYear = baseDate.getFullYear()
+  const targetMonth = baseDate.getMonth() + 1
+  const dayNumbers = Array.from({ length: 31 }, (_, idx) => idx + 1)
+  const dayHeaderHtml = dayNumbers.map((day) => `<th class="day-head">${day}</th>`).join("")
+  const emptyDayCellsHtml = dayNumbers.map(() => '<td class="check-cell"></td>').join("")
 
   const dailyRowsHtml = dailyItems.value
     .map(
       (item) => `
       <tr>
-        <td>${escapeHtml(item.inspection_no || "")}</td>
+        <td class="no-cell">${escapeHtml(item.inspection_no || "")}</td>
         <td>${toPrintCell(item.item_name)}</td>
         <td>${toPrintCell(item.standard)}</td>
         <td>${toPrintCell(item.frequency)}</td>
         <td>${toPrintCell(item.method)}</td>
-        <td>${escapeHtml(item.record_type || "")}</td>
-        <td>${escapeHtml(item.unit || "")}</td>
-        <td>${toPrintCell(item.criteria)}</td>
+        ${emptyDayCellsHtml}
       </tr>
     `
     )
@@ -480,7 +604,7 @@ const printCurrentTemplate = () => {
         <td>${toPrintCell(item.standard)}</td>
         <td>${toPrintCell(item.method)}</td>
         <td>${toPrintCell(item.criteria)}</td>
-        <td>${escapeHtml(item.record_type || "")}</td>
+        <td>${escapeHtml(recordTypeLabel(item.record_type))}</td>
         <td>${escapeHtml(item.unit || "")}</td>
       </tr>
     `
@@ -492,72 +616,92 @@ const printCurrentTemplate = () => {
   <html>
     <head>
       <meta charset="utf-8" />
-      <title>設備点検表 印刷</title>
+      <title>設備点検表 PDF出力</title>
       <style>
-        @page { size: A4 landscape; margin: 8mm; }
-        body { font-family: "Yu Gothic", "Meiryo", sans-serif; color: #111827; font-size: 11px; }
-        h1 { margin: 0 0 8px; font-size: 18px; }
-        .meta { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: 6px 12px; margin-bottom: 8px; }
-        .meta-item { border-bottom: 1px dashed #cbd5e1; padding-bottom: 2px; }
-        .meta-label { color: #475569; margin-right: 6px; }
-        h2 { margin: 12px 0 4px; font-size: 13px; }
+        @page { size: A4 landscape; margin: 7mm; }
+        body { font-family: "Yu Gothic", "Meiryo", sans-serif; color: #111827; font-size: 9px; margin: 0; }
+        .sheet { padding: 4px; }
+        .top-row { display: flex; justify-content: space-between; align-items: stretch; margin-bottom: 2px; }
+        .month-box { display: flex; align-items: center; gap: 8px; padding: 2px 0; font-size: 10px; }
+        .month-value { font-weight: 700; min-width: 30px; text-align: center; }
+        .confirm-box { padding: 2px 0; font-size: 10px; font-weight: 700; }
+        .title-row { font-size: 24px; line-height: 1.1; margin: 2px 0 3px; font-weight: 700; letter-spacing: 0.02em; }
+        .meta-row { display: flex; gap: 10px; margin-bottom: 3px; font-size: 9px; }
+        .meta-item { white-space: nowrap; }
         table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-        th, td { border: 1px solid #cbd5e1; padding: 4px 6px; vertical-align: top; word-break: break-word; }
-        th { background: #eef2ff; font-weight: 700; }
-        .narrow { width: 45px; text-align: center; }
-        .mid { width: 70px; }
-        .footer { margin-top: 8px; font-size: 10px; color: #64748b; text-align: right; }
+        th, td { border: 1px solid #111827; padding: 1px 2px; vertical-align: top; word-break: break-word; }
+        thead th { background: #f5f5f5; }
+        .inspection-table .no-head, .inspection-table .no-cell { width: 28px; text-align: center; }
+        .inspection-table .item-head { width: 118px; }
+        .inspection-table .std-head { width: 118px; }
+        .inspection-table .freq-head { width: 54px; text-align: center; }
+        .inspection-table .method-head { width: 138px; }
+        .inspection-table .day-head { width: 9px; padding: 0; text-align: center; font-size: 8px; font-weight: 700; }
+        .inspection-table .check-cell { width: 9px; padding: 0; height: 19px; }
+        .quarterly-title { margin: 4px 0 2px; font-size: 10px; font-weight: 700; }
+        .quarterly-table th, .quarterly-table td { padding: 2px 4px; }
+        .footer { margin-top: 3px; text-align: right; font-size: 8px; color: #334155; }
       </style>
     </head>
     <body>
-      <h1>${escapeHtml(form.value.title || "設備点検表")}</h1>
-      <div class="meta">
-        <div class="meta-item"><span class="meta-label">設備コード:</span>${escapeHtml(form.value.sheet_code || "-")}</div>
-        <div class="meta-item"><span class="meta-label">設備名:</span>${escapeHtml(form.value.sheet_name || "-")}</div>
-        <div class="meta-item"><span class="meta-label">版:</span>${escapeHtml(form.value.version || "-")}</div>
-        <div class="meta-item"><span class="meta-label">状態:</span>${escapeHtml(statusText)}</div>
-        <div class="meta-item"><span class="meta-label">改訂日:</span>${escapeHtml(revisionDate)}</div>
-        <div class="meta-item"><span class="meta-label">運用開始日:</span>${escapeHtml(effectiveFrom)}</div>
-        <div class="meta-item"><span class="meta-label">作成者:</span>${escapeHtml(form.value.created_by_name || "-")}</div>
-        <div class="meta-item"><span class="meta-label">印刷日時:</span>${escapeHtml(printedAt)}</div>
+      <div class="sheet">
+        <div class="top-row">
+          <div class="month-box">
+            <span class="month-value">${targetYear}</span><span>年</span>
+            <span class="month-value">${targetMonth}</span><span>月度</span>
+          </div>
+          <div class="confirm-box">月度確認</div>
+        </div>
+        <div class="title-row">${escapeHtml(form.value.title || "設備始業点検表")}</div>
+        <div class="meta-row">
+          <div class="meta-item">作成日: ${escapeHtml(createdDate)}</div>
+          <div class="meta-item">設備コード: ${escapeHtml(form.value.sheet_code || "-")}</div>
+          <div class="meta-item">設備名: ${escapeHtml(form.value.sheet_name || "-")}</div>
+          <div class="meta-item">版: ${escapeHtml(form.value.version || "-")}</div>
+          <div class="meta-item">状態: ${escapeHtml(statusText)}</div>
+          <div class="meta-item">出力日時: ${escapeHtml(printedAt)}</div>
+          <div class="meta-item">改訂日: ${escapeHtml(revisionDate)}</div>
+          <div class="meta-item">作成者: ${escapeHtml(form.value.created_by_name || "-")}</div>
+          <div class="meta-item">確認者1: ${escapeHtml(reviewer1)}</div>
+          <div class="meta-item">確認者2: ${escapeHtml(reviewer2)}</div>
+          <div class="meta-item">承認者: ${escapeHtml(form.value.approver_user_name || "-")}</div>
+          <div class="meta-item">運用開始日: ${escapeHtml(effectiveFrom)}</div>
+        </div>
+
+        <table class="inspection-table">
+          <thead>
+            <tr>
+              <th class="no-head">No</th>
+              <th class="item-head">点検項目</th>
+              <th class="std-head">規格</th>
+              <th class="freq-head">確認頻度</th>
+              <th class="method-head">方法</th>
+              ${dayHeaderHtml}
+            </tr>
+          </thead>
+          <tbody>
+            ${dailyRowsHtml || '<tr><td colspan="36">データなし</td></tr>'}
+          </tbody>
+        </table>
+
+        <div class="quarterly-title">定期実測項目（3ヶ月）</div>
+        <table class="quarterly-table">
+          <thead>
+            <tr>
+              <th>項目</th>
+              <th>規格（設定）</th>
+              <th>参考値/単位</th>
+              <th>判定基準</th>
+              <th>記録種別</th>
+              <th>単位</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${quarterlyRowsHtml || '<tr><td colspan="6">データなし</td></tr>'}
+          </tbody>
+        </table>
+        <div class="footer">PM 設備点検表</div>
       </div>
-
-      <h2>日次点検項目</h2>
-      <table>
-        <thead>
-          <tr>
-            <th class="narrow">No</th>
-            <th>点検項目</th>
-            <th>規格</th>
-            <th class="mid">確認頻度</th>
-            <th>方法</th>
-            <th class="mid">記録種別</th>
-            <th class="mid">単位</th>
-            <th>判定基準</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${dailyRowsHtml || '<tr><td colspan="8">データなし</td></tr>'}
-        </tbody>
-      </table>
-
-      <h2>定期実測項目（3ヶ月）</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>項目</th>
-            <th>規格（設定）</th>
-            <th>参考値/単位</th>
-            <th>判定基準</th>
-            <th class="mid">記録種別</th>
-            <th class="mid">単位</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${quarterlyRowsHtml || '<tr><td colspan="6">データなし</td></tr>'}
-        </tbody>
-      </table>
-      <div class="footer">PM 設備点検表</div>
     </body>
   </html>
   `
@@ -725,11 +869,12 @@ const toFormModel = (raw) => {
     sheet_name: raw.sheet_name || "",
     title: raw.title || "",
     source_sheet_name: raw.source_sheet_name || "",
+    created_at: raw.created_at || "",
     revision_date: raw.revision_date || "",
     revision_notes: raw.revision_notes || "",
     effective_from: raw.effective_from || "",
     version: Number(raw.version || 1),
-    status: raw.status || "DRAFT",
+    status: normalizeStatus(raw.status) || "DRAFT",
     is_active: Boolean(raw.is_active),
     created_by: raw.created_by || null,
     created_by_name: raw.created_by_name || "",
