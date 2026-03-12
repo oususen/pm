@@ -82,7 +82,7 @@
               class="input"
             >
               <option v-for="pos in positions" :key="pos" :value="pos">
-                {{ pos }}
+                {{ getPositionLabel(pos) }}
               </option>
             </select>
           </div>
@@ -251,6 +251,14 @@ const categoryOptions = [
   { value: "shipping_issue", label: "出荷トラブル" },
   { value: "other", label: "その他" },
 ];
+
+const positionLabelMap = {
+  manager: "事業部長・課長",
+  chief: "係長",
+  supervisor: "班長",
+  leader: "リーダー",
+  staff: "一般",
+};
 
 const sources = ref([]);
 const errorMessage = ref("");
@@ -517,13 +525,18 @@ const getCategoryLabel = (category) => {
   return found ? found.label : category;
 };
 
+const getPositionLabel = (position) => {
+  const key = String(position || "").trim();
+  return positionLabelMap[key] || key;
+};
+
 const getTargetLabel = (item) => {
   const deptNames = Array.isArray(item.target_department_names) ? item.target_department_names : [];
   const posList = Array.isArray(item.target_positions) ? item.target_positions : [];
   const userNames = Array.isArray(item.target_user_names) ? item.target_user_names : [];
   const parts = [];
   if (deptNames.length) parts.push(deptNames.join(' / '));
-  if (posList.length) parts.push(posList.join(' / '));
+  if (posList.length) parts.push(posList.map((pos) => getPositionLabel(pos)).join(' / '));
   if (userNames.length) parts.push(userNames.join(' / '));
   return parts.length ? parts.join(' / ') : '-';
 };

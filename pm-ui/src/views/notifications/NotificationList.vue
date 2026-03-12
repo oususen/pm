@@ -144,6 +144,14 @@ const categoryOptions = [
   { value: "other", label: "その他" },
 ];
 
+const positionLabelMap = {
+  manager: "事業部長・課長",
+  chief: "係長",
+  supervisor: "班長",
+  leader: "リーダー",
+  staff: "一般",
+};
+
 const toId = (value) => (value === null || value === undefined ? "" : String(value));
 
 const departmentLevelMap = computed(() => {
@@ -266,12 +274,17 @@ const getCategoryLabel = (category) => {
   return found ? found.label : category;
 };
 
+const getPositionLabel = (position) => {
+  const key = String(position || "").trim();
+  return positionLabelMap[key] || key;
+};
+
 const getTargetLabel = (item) => {
   const deptNames = Array.isArray(item.target_department_names) ? item.target_department_names : [];
   const posList = Array.isArray(item.target_positions) ? item.target_positions : [];
   const userNames = Array.isArray(item.target_user_names) ? item.target_user_names : [];
   const deptText = deptNames.length ? deptNames.join(" / ") : "";
-  const posText = posList.length ? posList.join(" / ") : "";
+  const posText = posList.length ? posList.map((pos) => getPositionLabel(pos)).join(" / ") : "";
   const userText = userNames.length ? userNames.join(" / ") : "";
   if (deptText && posText && userText) return `${deptText} / ${posText} / ${userText}`;
   if (deptText && posText) return `${deptText} / ${posText}`;
