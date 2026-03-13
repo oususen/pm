@@ -35,6 +35,7 @@ import { createLineBacklogAdjustmentsAPI } from './resources/lineBacklogAdjustme
 import { createNotificationsAPI } from './resources/notifications'
 import { createProductionPlanChangeLogsAPI } from './resources/productionPlanChangeLogs'
 import { createLaserPatternsAPI } from './resources/laserPatterns'
+import { createLaserActualsAPI } from './resources/laserActuals'
 import { createEngineeringChangesAPI } from './resources/engineeringChanges'
 import { createPurchaseActualsAPI } from './resources/purchaseActuals'
 import { createFujishojiDocumentAPI } from './resources/fujishojiDocument'
@@ -133,6 +134,7 @@ export default {
   notifications: createNotificationsAPI(client),
   productionPlanChangeLogs: createProductionPlanChangeLogsAPI(client),
   laserPatterns: createLaserPatternsAPI(client),
+  laserActuals: createLaserActualsAPI(client),
   engineeringChanges: createEngineeringChangesAPI(client),
   purchaseActuals: createPurchaseActualsAPI(client),
   fujishojiDocument: createFujishojiDocumentAPI(client),

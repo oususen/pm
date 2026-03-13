@@ -12,6 +12,7 @@ from .models_process_work_session import ProcessWorkSession
 from .models_schedule_config import ScheduleConfig
 from .models_routing_migration_log import RoutingMigrationLog
 from .models_laser_pattern import LaserPattern, LaserPatternComponent, LaserPatternFinishedProduct
+from .models_laser_actual import LaserActual, LaserActualDetail
 
 
 class LineDemand(models.Model):

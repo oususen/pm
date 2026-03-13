@@ -30,6 +30,7 @@ from .models_plan_lock_setting import ProductionPlanLockSetting
 from .models_record_inquiry_setting import ProductionRecordInquirySetting
 from .models_schedule_config import ScheduleConfig
 from .models_laser_pattern import LaserPattern
+from .models_laser_actual import LaserActual
 from .serializers import (
     LineDemandSerializer,
     LineBacklogSerializer,
@@ -46,6 +47,7 @@ from .serializers import (
     ProcessActualSerializer,
     LineBacklogAdjustmentSerializer,
     LaserPatternSerializer,
+    LaserActualSerializer,
 )
 from .services.order_expansion import OrderExpansionService
 from .services.gantt_planning import generate_line_gantt_plans
@@ -4042,6 +4044,50 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(copied)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class LaserActualFilter(django_filters.FilterSet):
+    work_date__gte = django_filters.DateFilter(field_name='work_date', lookup_expr='gte')
+    work_date__lte = django_filters.DateFilter(field_name='work_date', lookup_expr='lte')
+    equipment = django_filters.NumberFilter(field_name='equipment_id')
+    pattern_no = django_filters.CharFilter(method='filter_pattern_no')
+
+    class Meta:
+        model = LaserActual
+        fields = []
+
+    def filter_pattern_no(self, queryset, name, value):
+        keyword = str(value or '').strip()
+        if not keyword:
+            return queryset
+        return queryset.filter(pattern_no__icontains=keyword)
+
+
+class LaserActualViewSet(viewsets.ModelViewSet):
+    """レーザー実績（ヘッダ+明細）"""
+
+    queryset = (
+        LaserActual.objects.all()
+        .select_related('equipment', 'pattern', 'material', 'created_by', 'updated_by')
+        .prefetch_related('details')
+    )
+    serializer_class = LaserActualSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = LaserActualFilter
+    search_fields = ['pattern_no', 'equipment_code', 'equipment_name', 'material_code', 'material_name']
+    ordering_fields = ['work_date', 'created_at', 'pattern_no', 'shot_count', 'total_process_time']
+    ordering = ['-work_date', '-created_at', '-id']
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        try:
+            self.perform_destroy(instance)
+        except Exception as exc:
+            return Response(
+                {'detail': f'レーザー実績の削除に失敗しました: {str(exc)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ProductionPlanLockSettingView(APIView):

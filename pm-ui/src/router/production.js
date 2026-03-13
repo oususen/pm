@@ -145,6 +145,15 @@ const production = [
     },
   },
   {
+    path: "/production/laser-process-input",
+    name: "LaserProcessInput",
+    component: () => import("@/views/production/LaserProcessInput.vue"),
+    meta: {
+      pageTitle: "レーザー実績入力",
+      manualPath: "生産/レーザー実績入力.md",
+    },
+  },
+  {
     path: "/production/scrap-record",
     name: "ScrapRecordInput",
     component: () => import("@/views/production/MobileProcessInput.vue"),

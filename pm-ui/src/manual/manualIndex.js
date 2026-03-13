@@ -55,6 +55,7 @@ export const manualSections = [
       { title: "生産計画員業務手順書", path: "生産計画員業務手順書.md" },
       { title: "生産調達向け説明資料", path: "生産調達向け説明資料.md" },
       { title: "工程作業入力", path: "生産/工程作業入力.md" },
+      { title: "レーザー実績入力", path: "生産/レーザー実績入力.md" },
       { title: "仕損品記録", path: "生産/仕損品記録.md" },
       { title: "仕損履歴", path: "生産/仕損履歴.md" },
       { title: "進捗管理", path: "生産/進捗管理.md" },

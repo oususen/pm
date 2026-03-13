@@ -1,6 +1,7 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import math
 
+from django.db import transaction
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
 from rest_framework import serializers
@@ -17,6 +18,7 @@ from .models_plan_lock_setting import ProductionPlanLockSetting
 from .models_record_inquiry_setting import ProductionRecordInquirySetting
 from .models_schedule_config import ScheduleConfig
 from .models_laser_pattern import LaserPattern, LaserPatternComponent, LaserPatternFinishedProduct
+from .models_laser_actual import LaserActual, LaserActualDetail
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_production import ProcessActual, ProductionOrder, StockAllocation
 
@@ -425,6 +427,214 @@ class LaserPatternSerializer(serializers.ModelSerializer):
             )
             for item in finished_items
         ])
+
+
+class LaserActualDetailSerializer(serializers.ModelSerializer):
+    detail_type_display = serializers.CharField(source='get_detail_type_display', read_only=True)
+
+    class Meta:
+        model = LaserActualDetail
+        fields = [
+            'id',
+            'detail_type',
+            'detail_type_display',
+            'product',
+            'product_code',
+            'product_name',
+            'units_per_shot',
+            'total_qty',
+            'display_order',
+        ]
+        read_only_fields = fields
+
+
+class LaserActualSerializer(serializers.ModelSerializer):
+    equipment_code = serializers.CharField(read_only=True)
+    equipment_name = serializers.CharField(read_only=True)
+    material_code = serializers.CharField(read_only=True)
+    material_name = serializers.CharField(read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+    updated_by_name = serializers.SerializerMethodField()
+    details = LaserActualDetailSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = LaserActual
+        fields = [
+            'id',
+            'work_date',
+            'equipment',
+            'equipment_code',
+            'equipment_name',
+            'pattern',
+            'pattern_no',
+            'material',
+            'material_code',
+            'material_name',
+            'shot_count',
+            'process_time_per_shot',
+            'total_process_time',
+            'remarks',
+            'created_by',
+            'created_by_name',
+            'updated_by',
+            'updated_by_name',
+            'created_at',
+            'updated_at',
+            'details',
+        ]
+        read_only_fields = [
+            'id',
+            'pattern_no',
+            'equipment_code',
+            'equipment_name',
+            'material',
+            'material_code',
+            'material_name',
+            'process_time_per_shot',
+            'total_process_time',
+            'created_by',
+            'created_by_name',
+            'updated_by',
+            'updated_by_name',
+            'created_at',
+            'updated_at',
+            'details',
+        ]
+
+    @staticmethod
+    def _q1(value):
+        if not isinstance(value, Decimal):
+            value = Decimal(str(value if value is not None else 0))
+        return value.quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)
+
+    @staticmethod
+    def _q3(value):
+        if not isinstance(value, Decimal):
+            value = Decimal(str(value if value is not None else 0))
+        return value.quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+
+    @staticmethod
+    def _display_user_name(user):
+        if not user:
+            return ''
+        full_name = (getattr(user, 'get_full_name', lambda: '')() or '').strip()
+        if full_name:
+            return full_name
+        return getattr(user, 'username', '') or ''
+
+    def get_created_by_name(self, obj):
+        return self._display_user_name(getattr(obj, 'created_by', None))
+
+    def get_updated_by_name(self, obj):
+        return self._display_user_name(getattr(obj, 'updated_by', None))
+
+    def validate_shot_count(self, value):
+        if value is None or int(value) < 1:
+            raise serializers.ValidationError('回数は1以上の整数で入力してください。')
+        return int(value)
+
+    def validate(self, attrs):
+        pattern = attrs.get('pattern') or getattr(self.instance, 'pattern', None)
+        if not pattern:
+            raise serializers.ValidationError({'pattern': 'パターン番号を選択してください。'})
+        if not pattern.component_items.exists():
+            raise serializers.ValidationError({'pattern': '選択パターンに構成部品が登録されていません。'})
+        if not pattern.finished_items.exists():
+            raise serializers.ValidationError({'pattern': '選択パターンに完成品が登録されていません。'})
+        return attrs
+
+    def _apply_pattern_snapshot(self, instance):
+        pattern = instance.pattern
+        shot_count = int(instance.shot_count or 0)
+        process_time_per_shot = self._q1(pattern.process_time_min or Decimal('0'))
+        total_process_time = self._q1(process_time_per_shot * Decimal(shot_count))
+        material = pattern.material
+        equipment = instance.equipment
+
+        instance.pattern_no = pattern.pattern_no
+        instance.material = material
+        instance.material_code = material.product_code if material else ''
+        instance.material_name = material.product_name if material else ''
+        instance.equipment_code = equipment.equipment_code if equipment else ''
+        instance.equipment_name = equipment.equipment_name if equipment else ''
+        instance.process_time_per_shot = process_time_per_shot
+        instance.total_process_time = total_process_time
+        instance.save(
+            update_fields=[
+                'pattern_no',
+                'material',
+                'material_code',
+                'material_name',
+                'equipment_code',
+                'equipment_name',
+                'process_time_per_shot',
+                'total_process_time',
+                'updated_at',
+            ]
+        )
+
+        component_rows = []
+        for index, item in enumerate(pattern.component_items.select_related('component_product').all(), start=1):
+            units = self._q3(item.take_qty or Decimal('0'))
+            total_qty = self._q3(units * Decimal(shot_count))
+            product = item.component_product
+            component_rows.append(
+                LaserActualDetail(
+                    actual=instance,
+                    detail_type=LaserActualDetail.DETAIL_TYPE_COMPONENT,
+                    product=product,
+                    product_code=product.product_code if product else '',
+                    product_name=product.product_name if product else '',
+                    units_per_shot=units,
+                    total_qty=total_qty,
+                    display_order=index,
+                )
+            )
+
+        finished_rows = []
+        for index, item in enumerate(pattern.finished_items.select_related('finished_product').all(), start=1):
+            units = self._q3(item.units_per_shot or Decimal('0'))
+            total_qty = self._q3(units * Decimal(shot_count))
+            product = item.finished_product
+            finished_rows.append(
+                LaserActualDetail(
+                    actual=instance,
+                    detail_type=LaserActualDetail.DETAIL_TYPE_FINISHED,
+                    product=product,
+                    product_code=product.product_code if product else '',
+                    product_name=product.product_name if product else '',
+                    units_per_shot=units,
+                    total_qty=total_qty,
+                    display_order=index,
+                )
+            )
+
+        LaserActualDetail.objects.filter(actual=instance).delete()
+        LaserActualDetail.objects.bulk_create(component_rows + finished_rows)
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        user = request.user if request and request.user.is_authenticated else None
+        with transaction.atomic():
+            instance = LaserActual.objects.create(
+                created_by=user,
+                updated_by=user,
+                **validated_data,
+            )
+            self._apply_pattern_snapshot(instance)
+        return instance
+
+    def update(self, instance, validated_data):
+        request = self.context.get('request')
+        user = request.user if request and request.user.is_authenticated else None
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        if user:
+            instance.updated_by = user
+        with transaction.atomic():
+            instance.save()
+            self._apply_pattern_snapshot(instance)
+        return instance
 
 
 class StockAllocationSerializer(serializers.ModelSerializer):
