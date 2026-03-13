@@ -189,6 +189,7 @@ const filteredPatterns = computed(() => {
 const toProductLookupOption = (product) => ({
   value: product.id,
   code: product.product_code || '',
+  name: product.product_name || '',
   label: `${product.product_code || ''} - ${product.product_name || ''}`,
 })
 
@@ -198,6 +199,7 @@ const equipmentLookupOptions = computed(() =>
   equipmentOptions.value.map((equipment) => ({
     value: equipment.id,
     code: equipment.equipment_code || '',
+    name: equipment.equipment_name || '',
     label: `${equipment.equipment_code || ''} - ${equipment.equipment_name || ''}`,
   })),
 )
@@ -209,7 +211,9 @@ const loadMasterOptions = async () => {
   ])
   const products = normalizeList(productsRes?.data ?? productsRes)
   allProductOptions.value = products
-  materialProductOptions.value = products.filter((item) => item?.category === 'MATERIAL')
+  materialProductOptions.value = products.filter(
+    (item) => item?.category === 'MATERIAL' && Boolean(item?.is_active),
+  )
   equipmentOptions.value = normalizeList(equipmentsRes?.data)
 }
 
