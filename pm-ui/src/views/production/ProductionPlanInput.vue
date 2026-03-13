@@ -1,11 +1,25 @@
 <template>
   <div class="plan-container">
+    <div class="tab-bar">
+      <button
+        v-for="tab in planTabs"
+        :key="tab.key"
+        type="button"
+        class="tab-item"
+        :class="{ active: activePlanTab === tab.key }"
+        @click="activePlanTab = tab.key"
+      >
+        {{ tab.label }}
+      </button>
+    </div>
+
+    <template v-if="activePlanTab !== 'line-settings'">
     <div class="toolbar">
       <div class="toolbar-left">
         <div class="field">
           <label>ライン</label>
           <select v-model="selectedLine" @change="loadData">
-            <option v-for="line in lines" :key="line.id" :value="line.id">
+            <option v-for="line in availableLines" :key="line.id" :value="line.id">
               {{ line.line_code }} - {{ line.line_name }}
             </option>
           </select>
@@ -339,16 +353,65 @@
         <p class="processing-sub">少々お待ちください</p>
       </div>
     </div>
+    </template>
+
+    <div v-else class="settings-panel">
+      <h3 class="settings-title">ライン編集</h3>
+      <p class="settings-note">タブごとに表示対象のラインを選択して保存します。</p>
+      <div class="settings-selector">
+        <label>対象タブ</label>
+        <select v-model="settingsTargetTab">
+          <option v-for="tab in configurablePlanTabs" :key="`plan-line-setting-${tab.key}`" :value="tab.key">
+            {{ tab.label }}
+          </option>
+        </select>
+      </div>
+      <div class="settings-list">
+        <label v-for="line in lines" :key="`plan-target-${line.id}`" class="settings-check">
+          <input
+            type="checkbox"
+            :checked="isLineSelectedForTargetTab(line.line_code)"
+            @change="toggleLineForTargetTab(line.line_code)"
+          />
+          <span>{{ line.line_code }} - {{ line.line_name }}</span>
+        </label>
+      </div>
+      <div class="settings-actions">
+        <button class="btn" type="button" @click="saveLineSettings">保存</button>
+      </div>
+      <div v-if="lineSettingsMessage" class="settings-message">{{ lineSettingsMessage }}</div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import ProcessGanttView from './ProcessGanttView.vue'
 const router = useRouter()
 const selectedLine = ref('')
+const activePlanTab = ref('tank')
+const settingsTargetTab = ref('tank')
+const planTabs = [
+  { key: 'tank', label: 'タンク' },
+  { key: 'floor', label: 'フロア' },
+  { key: 'blade', label: 'ブレード' },
+  { key: 'laser', label: 'レーザ' },
+  { key: 'brake', label: 'ブレーキ' },
+  { key: 'spot', label: 'スポット' },
+  { key: 'line-settings', label: 'ライン編集' },
+]
+const operationalPlanTabs = ['tank', 'floor', 'blade', 'laser', 'brake', 'spot']
+const lineKeywordsByTab = {
+  tank: ['タンク', 'tank'],
+  floor: ['フロア', 'floor'],
+  blade: ['ブレード', 'blade'],
+  laser: ['レーザ', 'laser'],
+  brake: ['ブレーキ', 'brake', 'bend'],
+  spot: ['スポット', 'spot'],
+}
+const PLAN_TARGET_LINES_KEY = 'production_plan_input_target_line_codes_by_tab'
 const toDateInput = (dateObj) => {
   const y = dateObj.getFullYear()
   const m = String(dateObj.getMonth() + 1).padStart(2, '0')
@@ -378,6 +441,7 @@ const isEditUnlocked = ref(false)
 const changeReason = ref('')
 const changeReasonDraft = ref('')
 const showChangeReasonDialog = ref(false)
+const lineSettingsMessage = ref('')
 
 const lines = ref([])
 const products = ref([])
@@ -404,6 +468,106 @@ const coproductDisplayCache = new Map()
 const selectedLineObj = computed(() =>
   lines.value.find((l) => `${l.id}` === `${selectedLine.value}`)
 )
+const configurablePlanTabs = computed(() => planTabs.filter((tab) => operationalPlanTabs.includes(tab.key)))
+const normalizeLineCode = (value) => String(value || '').trim().toUpperCase()
+const normalizeLineCodes = (values) => Array.from(new Set(
+  (Array.isArray(values) ? values : []).map((value) => normalizeLineCode(value)).filter(Boolean),
+))
+const createDefaultLineCodesByTab = (lineList = []) => {
+  const result = {}
+  const allCodes = lineList.map((line) => normalizeLineCode(line?.line_code))
+  operationalPlanTabs.forEach((tabKey) => {
+    if (tabKey === 'tank') {
+      result[tabKey] = normalizeLineCodes(allCodes)
+      return
+    }
+    const keywords = lineKeywordsByTab[tabKey] || []
+    result[tabKey] = normalizeLineCodes(
+      lineList
+        .filter((line) => {
+          const code = String(line?.line_code || '').toLowerCase()
+          const name = String(line?.line_name || '').toLowerCase()
+          return keywords.some((kw) => code.includes(kw) || name.includes(kw))
+        })
+        .map((line) => line?.line_code),
+    )
+  })
+  return result
+}
+const lineCodesByTab = ref(createDefaultLineCodesByTab())
+const getLineCodesForTab = (tabKey) => normalizeLineCodes(lineCodesByTab.value?.[tabKey])
+const isOperationalPlanTab = (tabKey = activePlanTab.value) => operationalPlanTabs.includes(tabKey)
+const availableLines = computed(() => {
+  if (!isOperationalPlanTab(activePlanTab.value)) return []
+  const targetCodes = new Set(getLineCodesForTab(activePlanTab.value))
+  if (!targetCodes.size) return []
+  return lines.value.filter((line) => {
+    const code = normalizeLineCode(line?.line_code)
+    return targetCodes.has(code)
+  })
+})
+const saveLineCodesByTab = () => {
+  try {
+    window.localStorage.setItem(PLAN_TARGET_LINES_KEY, JSON.stringify(lineCodesByTab.value))
+  } catch (e) {
+    console.warn('ライン編集設定保存失敗', e)
+  }
+}
+const loadLineCodesByTab = () => {
+  const defaults = createDefaultLineCodesByTab(lines.value)
+  try {
+    const raw = window.localStorage.getItem(PLAN_TARGET_LINES_KEY)
+    if (!raw) {
+      lineCodesByTab.value = defaults
+      return
+    }
+    const parsed = JSON.parse(raw)
+    const next = {}
+    operationalPlanTabs.forEach((tabKey) => {
+      const source = parsed?.[tabKey]
+      const fallback = defaults[tabKey] || []
+      next[tabKey] = normalizeLineCodes(Array.isArray(source) ? source : fallback)
+    })
+    lineCodesByTab.value = next
+  } catch (_e) {
+    lineCodesByTab.value = defaults
+  }
+}
+const isLineSelectedForTargetTab = (lineCode) => {
+  const code = normalizeLineCode(lineCode)
+  return getLineCodesForTab(settingsTargetTab.value).includes(code)
+}
+const toggleLineForTargetTab = (lineCode) => {
+  const code = normalizeLineCode(lineCode)
+  if (!code) return
+  const tabKey = settingsTargetTab.value
+  const current = new Set(getLineCodesForTab(tabKey))
+  if (current.has(code)) current.delete(code)
+  else current.add(code)
+  lineCodesByTab.value = {
+    ...lineCodesByTab.value,
+    [tabKey]: Array.from(current),
+  }
+  lineSettingsMessage.value = ''
+}
+const saveLineSettings = async () => {
+  saveLineCodesByTab()
+  lineSettingsMessage.value = '対象ラインを保存しました。'
+  if (!isOperationalPlanTab(activePlanTab.value)) return
+  const availableIds = new Set(availableLines.value.map((line) => String(line.id)))
+  if (!selectedLine.value || !availableIds.has(String(selectedLine.value))) {
+    selectedLine.value = availableLines.value.length ? String(availableLines.value[0].id) : ''
+  }
+  await loadData()
+}
+const ensureSelectedLineForActiveTab = async (shouldReload = true) => {
+  if (!isOperationalPlanTab(activePlanTab.value)) return
+  const candidates = availableLines.value
+  const lineIds = new Set(candidates.map((line) => String(line.id)))
+  if (selectedLine.value && lineIds.has(String(selectedLine.value))) return
+  selectedLine.value = candidates.length ? String(candidates[0].id) : ''
+  if (shouldReload) await loadData()
+}
 const shouldLimitToCoproductParentAndDriver = computed(() => {
   const code = String(selectedLineObj.value?.line_code || '').trim().toUpperCase()
   return COPRODUCT_LIMITED_LINE_CODES.has(code)
@@ -1159,6 +1323,8 @@ const toggleProcessLoad = async () => {
 const fetchLines = async () => {
   const res = await api.lines.getProductionLines()
   lines.value = res.data.results || res.data || []
+  loadLineCodesByTab()
+  await ensureSelectedLineForActiveTab(false)
 }
 const fetchProducts = async () => {
   products.value = (await api.products.getAllProducts())
@@ -1169,10 +1335,18 @@ const fetchProducts = async () => {
 onMounted(async () => {
   try {
     await Promise.all([fetchLines(), fetchProducts(), fetchLockSetting()])
-    loadData()
+    await loadData()
   } catch (e) {
     console.error('初期データ取得エラー', e)
   }
+})
+
+watch(activePlanTab, async () => {
+  lineSettingsMessage.value = ''
+  await ensureSelectedLineForActiveTab()
+})
+watch(settingsTargetTab, () => {
+  lineSettingsMessage.value = ''
 })
 
 onMounted(() => {
@@ -2047,6 +2221,82 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+}
+.tab-bar {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid #cbd5e1;
+}
+.tab-item {
+  padding: 7px 14px;
+  border: 1px solid #cbd5e1;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.tab-item.active {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+.settings-panel {
+  margin-top: 8px;
+  padding: 14px;
+  border: 1px solid #c5cfde;
+  border-radius: 6px;
+  background: #fff;
+}
+.settings-title {
+  margin: 0;
+  font-size: 17px;
+}
+.settings-note {
+  margin: 6px 0 12px;
+  color: #64748b;
+  font-size: 13px;
+}
+.settings-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.settings-selector label {
+  font-size: 13px;
+  font-weight: 700;
+}
+.settings-selector select {
+  min-width: 160px;
+  padding: 7px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.settings-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+.settings-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.settings-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+}
+.settings-message {
+  margin-top: 8px;
+  color: #166534;
+  font-size: 13px;
+  font-weight: 700;
 }
 .toolbar {
   display: flex;
