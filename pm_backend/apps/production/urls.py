@@ -14,6 +14,7 @@ from production.views import (
     ScheduleConfigView,
     ScheduleRunNowView,
     LineBacklogAdjustmentView,
+    LaserPatternViewSet,
     ProcessActualViewSet,
     ProductionOrderViewSet,
     StockAllocationViewSet,
@@ -32,6 +33,7 @@ router.register(r'line-backlogs', LineBacklogViewSet, basename='linebacklog')
 router.register(r'line-gantt-plans', LineGanttPlanViewSet, basename='lineganttplan')
 router.register(r'line-daily-schedule-settings', LineDailyScheduleSettingViewSet, basename='linedailyschedulesetting')
 router.register(r'line-default-schedule-settings', LineDefaultScheduleSettingViewSet, basename='linedefaultschedulesetting')
+router.register(r'laser-patterns', LaserPatternViewSet, basename='laserpattern')
 
 # Execution endpoints
 router.register(r'stock-allocations', StockAllocationViewSet, basename='stockallocation')

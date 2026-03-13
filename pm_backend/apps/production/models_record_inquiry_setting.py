@@ -6,10 +6,16 @@ class ProductionRecordInquirySetting(models.Model):
     TAB_TANK = 'tank'
     TAB_FLOOR = 'floor'
     TAB_BLADE = 'blade'
+    TAB_LASER = 'laser'
+    TAB_BRAKE = 'brake'
+    TAB_SPOT = 'spot'
     TAB_CHOICES = (
         (TAB_TANK, 'タンク'),
         (TAB_FLOOR, 'フロア'),
         (TAB_BLADE, 'ブレード'),
+        (TAB_LASER, 'レーザ'),
+        (TAB_BRAKE, 'ブレーキ'),
+        (TAB_SPOT, 'スポット'),
     )
 
     tab_key = models.CharField(max_length=20, choices=TAB_CHOICES, unique=True, verbose_name='対象タブ')

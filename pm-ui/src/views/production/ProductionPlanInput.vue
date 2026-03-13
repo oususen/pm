@@ -14,6 +14,34 @@
     </div>
 
     <template v-if="activePlanTab !== 'line-settings'">
+    <div v-if="activePlanTab === 'laser'" class="laser-subtab-bar">
+      <button
+        type="button"
+        class="laser-subtab-item"
+        :class="{ active: activeLaserTab === 'normal-plan' }"
+        @click="activeLaserTab = 'normal-plan'"
+      >
+        通常計画
+      </button>
+      <button
+        type="button"
+        class="laser-subtab-item"
+        :class="{ active: activeLaserTab === 'pattern-editor' }"
+        @click="activeLaserTab = 'pattern-editor'"
+      >
+        パターン編集
+      </button>
+      <button
+        type="button"
+        class="laser-subtab-item"
+        :class="{ active: activeLaserTab === 'tab3' }"
+        @click="activeLaserTab = 'tab3'"
+      >
+        タブ3
+      </button>
+    </div>
+
+    <template v-if="activePlanTab !== 'laser' || activeLaserTab === 'normal-plan'">
     <div class="toolbar">
       <div class="toolbar-left">
         <div class="field">
@@ -354,6 +382,14 @@
       </div>
     </div>
     </template>
+    <LaserPatternEditor
+      v-else-if="activePlanTab === 'laser' && activeLaserTab === 'pattern-editor'"
+      class="laser-editor-section"
+    />
+    <div v-else class="laser-third-tab-panel">
+      第3タブは後続仕様で実装します。
+    </div>
+    </template>
 
     <div v-else class="settings-panel">
       <h3 class="settings-title">ライン編集</h3>
@@ -389,9 +425,11 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import ProcessGanttView from './ProcessGanttView.vue'
+import LaserPatternEditor from './LaserPatternEditor.vue'
 const router = useRouter()
 const selectedLine = ref('')
 const activePlanTab = ref('tank')
+const activeLaserTab = ref('normal-plan')
 const settingsTargetTab = ref('tank')
 const planTabs = [
   { key: 'tank', label: 'タンク' },
@@ -513,25 +551,66 @@ const saveLineCodesByTab = () => {
     console.warn('ライン編集設定保存失敗', e)
   }
 }
-const loadLineCodesByTab = () => {
+const loadLineCodesByTab = async () => {
   const defaults = createDefaultLineCodesByTab(lines.value)
+  const fromStorage = {}
   try {
     const raw = window.localStorage.getItem(PLAN_TARGET_LINES_KEY)
     if (!raw) {
-      lineCodesByTab.value = defaults
-      return
+      operationalPlanTabs.forEach((tabKey) => {
+        fromStorage[tabKey] = normalizeLineCodes(defaults[tabKey] || [])
+      })
+    } else {
+      const parsed = JSON.parse(raw)
+      operationalPlanTabs.forEach((tabKey) => {
+        const source = parsed?.[tabKey]
+        const fallback = defaults[tabKey] || []
+        fromStorage[tabKey] = normalizeLineCodes(Array.isArray(source) ? source : fallback)
+      })
     }
-    const parsed = JSON.parse(raw)
-    const next = {}
-    operationalPlanTabs.forEach((tabKey) => {
-      const source = parsed?.[tabKey]
-      const fallback = defaults[tabKey] || []
-      next[tabKey] = normalizeLineCodes(Array.isArray(source) ? source : fallback)
-    })
-    lineCodesByTab.value = next
   } catch (_e) {
-    lineCodesByTab.value = defaults
+    operationalPlanTabs.forEach((tabKey) => {
+      const fallback = defaults[tabKey] || []
+      fromStorage[tabKey] = normalizeLineCodes(fallback)
+    })
   }
+  lineCodesByTab.value = fromStorage
+
+  try {
+    const res = await api.productionRecordSettings.getSettings()
+    const dbSettings = res?.data?.target_line_codes_by_tab
+    if (!dbSettings || typeof dbSettings !== 'object' || Array.isArray(dbSettings)) return
+    const merged = {}
+    operationalPlanTabs.forEach((tabKey) => {
+      const hasDbValue = Object.prototype.hasOwnProperty.call(dbSettings, tabKey)
+      const fallback = fromStorage[tabKey] || defaults[tabKey] || []
+      const source = hasDbValue ? dbSettings[tabKey] : fallback
+      merged[tabKey] = normalizeLineCodes(Array.isArray(source) ? source : fallback)
+    })
+    lineCodesByTab.value = merged
+    saveLineCodesByTab()
+  } catch (e) {
+    console.warn('ライン編集設定DB取得失敗', e)
+  }
+}
+const syncLineCodesByTabToServer = async () => {
+  const payload = {
+    target_line_codes_by_tab: operationalPlanTabs.reduce((acc, tabKey) => {
+      acc[tabKey] = getLineCodesForTab(tabKey)
+      return acc
+    }, {}),
+  }
+  const res = await api.productionRecordSettings.saveSettings(payload)
+  const dbSettings = res?.data?.target_line_codes_by_tab
+  if (!dbSettings || typeof dbSettings !== 'object' || Array.isArray(dbSettings)) return
+  const normalized = {}
+  operationalPlanTabs.forEach((tabKey) => {
+    const source = dbSettings?.[tabKey]
+    const fallback = getLineCodesForTab(tabKey)
+    normalized[tabKey] = normalizeLineCodes(Array.isArray(source) ? source : fallback)
+  })
+  lineCodesByTab.value = normalized
+  saveLineCodesByTab()
 }
 const isLineSelectedForTargetTab = (lineCode) => {
   const code = normalizeLineCode(lineCode)
@@ -552,7 +631,16 @@ const toggleLineForTargetTab = (lineCode) => {
 }
 const saveLineSettings = async () => {
   saveLineCodesByTab()
-  lineSettingsMessage.value = '対象ラインを保存しました。'
+  let dbSyncFailed = false
+  try {
+    await syncLineCodesByTabToServer()
+  } catch (e) {
+    dbSyncFailed = true
+    console.warn('ライン編集設定DB保存失敗', e)
+  }
+  lineSettingsMessage.value = dbSyncFailed
+    ? '対象ラインを保存しました。（DB同期は失敗しました）'
+    : '対象ラインを保存しました。'
   if (!isOperationalPlanTab(activePlanTab.value)) return
   const availableIds = new Set(availableLines.value.map((line) => String(line.id)))
   if (!selectedLine.value || !availableIds.has(String(selectedLine.value))) {
@@ -1323,7 +1411,7 @@ const toggleProcessLoad = async () => {
 const fetchLines = async () => {
   const res = await api.lines.getProductionLines()
   lines.value = res.data.results || res.data || []
-  loadLineCodesByTab()
+  await loadLineCodesByTab()
   await ensureSelectedLineForActiveTab(false)
 }
 const fetchProducts = async () => {
@@ -2984,6 +3072,38 @@ thead .sticky-col {
   max-width: 180px;
   border-right: 2px solid #b5c1d2 !important;
   text-align: left;
+}
+.laser-subtab-bar {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0;
+}
+.laser-subtab-item {
+  border: 1px solid #b9c5d6;
+  background: #f8fafc;
+  color: #1f2937;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.laser-subtab-item.active {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+.laser-editor-section {
+  margin-top: 8px;
+}
+.laser-third-tab-panel {
+  margin-top: 8px;
+  border: 1px solid #d7dfe8;
+  border-radius: 8px;
+  background: #fff;
+  color: #475569;
+  padding: 16px;
+  font-size: 13px;
 }
 .processing-overlay {
   position: fixed;

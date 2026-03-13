@@ -11,6 +11,7 @@ from .models_record_inquiry_setting import ProductionRecordInquirySetting
 from .models_process_work_session import ProcessWorkSession
 from .models_schedule_config import ScheduleConfig
 from .models_routing_migration_log import RoutingMigrationLog
+from .models_laser_pattern import LaserPattern, LaserPatternComponent, LaserPatternFinishedProduct
 
 
 class LineDemand(models.Model):

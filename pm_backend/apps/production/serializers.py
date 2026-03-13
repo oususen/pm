@@ -16,6 +16,7 @@ from .models_plan_change_log import ProductionPlanChangeLog
 from .models_plan_lock_setting import ProductionPlanLockSetting
 from .models_record_inquiry_setting import ProductionRecordInquirySetting
 from .models_schedule_config import ScheduleConfig
+from .models_laser_pattern import LaserPattern, LaserPatternComponent, LaserPatternFinishedProduct
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_production import ProcessActual, ProductionOrder, StockAllocation
 
@@ -317,6 +318,113 @@ class LineGanttPlanSerializer(serializers.ModelSerializer):
             'end_datetime',
             'processes_plan',
         ]
+
+
+class LaserPatternComponentSerializer(serializers.ModelSerializer):
+    component_product_code = serializers.CharField(source='component_product.product_code', read_only=True)
+    component_product_name = serializers.CharField(source='component_product.product_name', read_only=True)
+
+    class Meta:
+        model = LaserPatternComponent
+        fields = [
+            'id',
+            'component_product',
+            'component_product_code',
+            'component_product_name',
+            'take_qty',
+        ]
+
+
+class LaserPatternFinishedProductSerializer(serializers.ModelSerializer):
+    finished_product_code = serializers.CharField(source='finished_product.product_code', read_only=True)
+    finished_product_name = serializers.CharField(source='finished_product.product_name', read_only=True)
+
+    class Meta:
+        model = LaserPatternFinishedProduct
+        fields = [
+            'id',
+            'finished_product',
+            'finished_product_code',
+            'finished_product_name',
+            'units_per_shot',
+        ]
+
+
+class LaserPatternSerializer(serializers.ModelSerializer):
+    material_code = serializers.CharField(source='material.product_code', read_only=True)
+    material_name = serializers.CharField(source='material.product_name', read_only=True)
+    equipment_code = serializers.CharField(source='equipment.equipment_code', read_only=True)
+    equipment_name = serializers.CharField(source='equipment.equipment_name', read_only=True)
+    component_items = LaserPatternComponentSerializer(many=True)
+    finished_items = LaserPatternFinishedProductSerializer(many=True)
+
+    class Meta:
+        model = LaserPattern
+        fields = [
+            'id',
+            'pattern_no',
+            'material',
+            'material_code',
+            'material_name',
+            'equipment',
+            'equipment_code',
+            'equipment_name',
+            'process_time_min',
+            'component_items',
+            'finished_items',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate_component_items(self, value):
+        if not value:
+            raise serializers.ValidationError('構成部品を1件以上入力してください。')
+        return value
+
+    def validate_finished_items(self, value):
+        if not value:
+            raise serializers.ValidationError('完成品を1件以上入力してください。')
+        return value
+
+    def create(self, validated_data):
+        component_items = validated_data.pop('component_items', [])
+        finished_items = validated_data.pop('finished_items', [])
+        pattern = LaserPattern.objects.create(**validated_data)
+        self._replace_children(pattern, component_items, finished_items)
+        return pattern
+
+    def update(self, instance, validated_data):
+        component_items = validated_data.pop('component_items', None)
+        finished_items = validated_data.pop('finished_items', None)
+
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        instance.save()
+
+        if component_items is not None and finished_items is not None:
+            self._replace_children(instance, component_items, finished_items)
+        return instance
+
+    def _replace_children(self, pattern, component_items, finished_items):
+        LaserPatternComponent.objects.filter(pattern=pattern).delete()
+        LaserPatternFinishedProduct.objects.filter(pattern=pattern).delete()
+        LaserPatternComponent.objects.bulk_create([
+            LaserPatternComponent(
+                pattern=pattern,
+                component_product=item['component_product'],
+                take_qty=item['take_qty'],
+            )
+            for item in component_items
+        ])
+        LaserPatternFinishedProduct.objects.bulk_create([
+            LaserPatternFinishedProduct(
+                pattern=pattern,
+                finished_product=item['finished_product'],
+                units_per_shot=item['units_per_shot'],
+            )
+            for item in finished_items
+        ])
 
 
 class StockAllocationSerializer(serializers.ModelSerializer):

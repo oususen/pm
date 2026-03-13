@@ -29,6 +29,7 @@ from .models_plan_change_log import ProductionPlanChangeLog
 from .models_plan_lock_setting import ProductionPlanLockSetting
 from .models_record_inquiry_setting import ProductionRecordInquirySetting
 from .models_schedule_config import ScheduleConfig
+from .models_laser_pattern import LaserPattern
 from .serializers import (
     LineDemandSerializer,
     LineBacklogSerializer,
@@ -44,6 +45,7 @@ from .serializers import (
     ProductionOrderListSerializer,
     ProcessActualSerializer,
     LineBacklogAdjustmentSerializer,
+    LaserPatternSerializer,
 )
 from .services.order_expansion import OrderExpansionService
 from .services.gantt_planning import generate_line_gantt_plans
@@ -3991,6 +3993,57 @@ class LineDefaultScheduleSettingViewSet(viewsets.ModelViewSet):
         )
 
 
+class LaserPatternViewSet(viewsets.ModelViewSet):
+    """レーザパターンマスタ編集用ViewSet"""
+
+    queryset = LaserPattern.objects.all().select_related('material', 'equipment').prefetch_related(
+        'component_items__component_product',
+        'finished_items__finished_product',
+    )
+    serializer_class = LaserPatternSerializer
+    filter_backends = [SearchFilter, OrderingFilter]
+    search_fields = ['pattern_no', 'material__product_code', 'material__product_name']
+    ordering_fields = ['pattern_no', 'updated_at', 'created_at']
+    ordering = ['pattern_no']
+
+    @action(detail=True, methods=['post'])
+    def copy(self, request, pk=None):
+        """既存パターンを複製（コピー先パターン番号は手入力）"""
+        source = self.get_object()
+        new_pattern_no = str(request.data.get('pattern_no') or '').strip()
+        if not new_pattern_no:
+            return Response({'detail': 'pattern_no is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if LaserPattern.objects.filter(pattern_no=new_pattern_no).exists():
+            return Response({'detail': 'pattern_no already exists'}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            copied = LaserPattern.objects.create(
+                pattern_no=new_pattern_no,
+                material=source.material,
+                equipment=source.equipment,
+                process_time_min=source.process_time_min,
+            )
+            copied.component_items.bulk_create([
+                item.__class__(
+                    pattern=copied,
+                    component_product=item.component_product,
+                    take_qty=item.take_qty,
+                )
+                for item in source.component_items.all()
+            ])
+            copied.finished_items.bulk_create([
+                item.__class__(
+                    pattern=copied,
+                    finished_product=item.finished_product,
+                    units_per_shot=item.units_per_shot,
+                )
+                for item in source.finished_items.all()
+            ])
+
+        serializer = self.get_serializer(copied)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
 class ProductionPlanLockSettingView(APIView):
     def get(self, request):
         setting = ProductionPlanLockSetting.objects.first()
@@ -4023,11 +4076,14 @@ class ProductionPlanLockSettingView(APIView):
 
 
 class ProductionRecordInquirySettingView(APIView):
-    TAB_KEYS = ['tank', 'floor', 'blade']
+    TAB_KEYS = ['tank', 'floor', 'blade', 'laser', 'brake', 'spot']
     DEFAULT_TARGET_LINE_CODES_BY_TAB = {
         'tank': ['L2200', 'L2201'],
         'floor': [],
         'blade': [],
+        'laser': [],
+        'brake': [],
+        'spot': [],
     }
 
     def _normalize(self, value):
@@ -4100,12 +4156,28 @@ class ProductionRecordInquirySettingView(APIView):
         raw_target = payload.get('target_line_codes_by_tab') if isinstance(payload.get('target_line_codes_by_tab'), dict) else {}
         raw_mappings = payload.get('mappings_by_tab') if isinstance(payload.get('mappings_by_tab'), dict) else {}
         user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+        existing_rows = {
+            row.tab_key: row
+            for row in ProductionRecordInquirySetting.objects.filter(tab_key__in=self.TAB_KEYS)
+        }
 
         for tab_key in self.TAB_KEYS:
-            target_line_codes = self._normalize_line_codes(
-                raw_target.get(tab_key, self.DEFAULT_TARGET_LINE_CODES_BY_TAB.get(tab_key, []))
-            )
-            product_mappings = self._normalize_mapping_rows(raw_mappings.get(tab_key, []))
+            existing = existing_rows.get(tab_key)
+            if tab_key in raw_target:
+                target_source = raw_target.get(tab_key, [])
+            elif existing:
+                target_source = existing.target_line_codes
+            else:
+                target_source = self.DEFAULT_TARGET_LINE_CODES_BY_TAB.get(tab_key, [])
+            target_line_codes = self._normalize_line_codes(target_source)
+
+            if tab_key in raw_mappings:
+                mapping_source = raw_mappings.get(tab_key, [])
+            elif existing:
+                mapping_source = existing.product_mappings
+            else:
+                mapping_source = []
+            product_mappings = self._normalize_mapping_rows(mapping_source)
             ProductionRecordInquirySetting.objects.update_or_create(
                 tab_key=tab_key,
                 defaults={
