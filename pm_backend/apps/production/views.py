@@ -4050,6 +4050,7 @@ class LaserActualFilter(django_filters.FilterSet):
     work_date__gte = django_filters.DateFilter(field_name='work_date', lookup_expr='gte')
     work_date__lte = django_filters.DateFilter(field_name='work_date', lookup_expr='lte')
     equipment = django_filters.NumberFilter(field_name='equipment_id')
+    pattern = django_filters.NumberFilter(field_name='pattern_id')
     pattern_no = django_filters.CharFilter(method='filter_pattern_no')
 
     class Meta:
@@ -4081,7 +4082,9 @@ class LaserActualViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         try:
-            self.perform_destroy(instance)
+            with transaction.atomic():
+                LaserActualSerializer.revert_backlog_for_instance(instance)
+                self.perform_destroy(instance)
         except Exception as exc:
             return Response(
                 {'detail': f'レーザー実績の削除に失敗しました: {str(exc)}'},

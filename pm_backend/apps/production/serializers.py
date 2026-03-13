@@ -2,9 +2,10 @@ from decimal import Decimal, ROUND_HALF_UP
 import math
 
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import F, Sum
 from django.db.models.functions import Coalesce
 from rest_framework import serializers
+from masters.models import RoutingStep
 
 from .models import LineDemand
 from .models_line_backlog import LineBacklog
@@ -443,12 +444,19 @@ class LaserActualDetailSerializer(serializers.ModelSerializer):
             'product_name',
             'units_per_shot',
             'total_qty',
+            'scrap_qty',
+            'scrap_reason',
             'display_order',
         ]
         read_only_fields = fields
 
 
 class LaserActualSerializer(serializers.ModelSerializer):
+    BACKLOG_COUNTABLE_ACTIONS = {
+        LaserActual.OPERATOR_ACTION_END,
+        LaserActual.OPERATOR_ACTION_PAUSE,
+    }
+
     equipment_code = serializers.CharField(read_only=True)
     equipment_name = serializers.CharField(read_only=True)
     material_code = serializers.CharField(read_only=True)
@@ -456,6 +464,7 @@ class LaserActualSerializer(serializers.ModelSerializer):
     created_by_name = serializers.SerializerMethodField()
     updated_by_name = serializers.SerializerMethodField()
     details = LaserActualDetailSerializer(many=True, read_only=True)
+    component_scraps = serializers.ListField(child=serializers.DictField(), write_only=True, required=False)
 
     class Meta:
         model = LaserActual
@@ -473,7 +482,10 @@ class LaserActualSerializer(serializers.ModelSerializer):
             'shot_count',
             'process_time_per_shot',
             'total_process_time',
+            'operator_action',
+            'operator_action_reason',
             'remarks',
+            'component_scraps',
             'created_by',
             'created_by_name',
             'updated_by',
@@ -529,8 +541,8 @@ class LaserActualSerializer(serializers.ModelSerializer):
         return self._display_user_name(getattr(obj, 'updated_by', None))
 
     def validate_shot_count(self, value):
-        if value is None or int(value) < 1:
-            raise serializers.ValidationError('回数は1以上の整数で入力してください。')
+        if value is None or int(value) < 0:
+            raise serializers.ValidationError('回数は0以上の整数で入力してください。')
         return int(value)
 
     def validate(self, attrs):
@@ -541,11 +553,104 @@ class LaserActualSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'pattern': '選択パターンに構成部品が登録されていません。'})
         if not pattern.finished_items.exists():
             raise serializers.ValidationError({'pattern': '選択パターンに完成品が登録されていません。'})
+
+        action = str(
+            attrs.get('operator_action')
+            or getattr(self.instance, 'operator_action', LaserActual.OPERATOR_ACTION_END)
+            or LaserActual.OPERATOR_ACTION_END
+        ).upper()
+        allowed_actions = {
+            LaserActual.OPERATOR_ACTION_START,
+            LaserActual.OPERATOR_ACTION_END,
+            LaserActual.OPERATOR_ACTION_PAUSE,
+            LaserActual.OPERATOR_ACTION_TEMP_END,
+            LaserActual.OPERATOR_ACTION_RESUME,
+        }
+        if action not in allowed_actions:
+            raise serializers.ValidationError({'operator_action': '作業時刻が不正です。'})
+
+        shot_count = attrs.get('shot_count')
+        if shot_count is None:
+            shot_count = getattr(self.instance, 'shot_count', 0)
+        shot_count = int(shot_count or 0)
+        if action in {LaserActual.OPERATOR_ACTION_END, LaserActual.OPERATOR_ACTION_PAUSE} and shot_count < 1:
+            raise serializers.ValidationError({'shot_count': '終了/中断時の回数は1以上で入力してください。'})
+
+        reason_required_actions = {
+            LaserActual.OPERATOR_ACTION_PAUSE,
+            LaserActual.OPERATOR_ACTION_TEMP_END,
+        }
+        reason_text = str(
+            attrs.get('operator_action_reason')
+            if 'operator_action_reason' in attrs
+            else getattr(self.instance, 'operator_action_reason', '')
+        ).strip()
+        if action in reason_required_actions and not reason_text:
+            raise serializers.ValidationError({'operator_action_reason': '中断/一時終了時は理由を入力してください。'})
+        if action not in reason_required_actions:
+            attrs['operator_action_reason'] = ''
+
+        component_scrap_map = self._normalize_component_scrap_map(
+            pattern=pattern,
+            shot_count=shot_count,
+            component_scraps=attrs.get('component_scraps'),
+        )
+        attrs['_component_scrap_map'] = component_scrap_map
         return attrs
 
-    def _apply_pattern_snapshot(self, instance):
+    def _normalize_component_scrap_map(self, pattern, shot_count, component_scraps):
+        pattern_components = list(
+            pattern.component_items.select_related('component_product').all()
+        ) if pattern else []
+        if not pattern_components:
+            return {}
+
+        gross_qty_by_product = {}
+        shot_decimal = Decimal(str(int(shot_count or 0)))
+        for item in pattern_components:
+            if not item.component_product_id:
+                continue
+            units = self._q3(item.take_qty or Decimal('0'))
+            gross_qty_by_product[item.component_product_id] = self._q3(units * shot_decimal)
+
+        rows = component_scraps if isinstance(component_scraps, list) else []
+        normalized = {}
+        for row in rows:
+            product_id_raw = (row or {}).get('product') or (row or {}).get('product_id')
+            if product_id_raw in (None, ''):
+                continue
+            try:
+                product_id = int(product_id_raw)
+            except (TypeError, ValueError):
+                raise serializers.ValidationError({'component_scraps': '仕損対象の品目が不正です。'})
+            if product_id not in gross_qty_by_product:
+                raise serializers.ValidationError({'component_scraps': '仕損対象にパターン外の品目が含まれています。'})
+
+            try:
+                scrap_qty = self._q3((row or {}).get('scrap_qty') or Decimal('0'))
+            except Exception:
+                raise serializers.ValidationError({'component_scraps': '仕損数量は数値で入力してください。'})
+            if scrap_qty < 0:
+                raise serializers.ValidationError({'component_scraps': '仕損数量は0以上で入力してください。'})
+
+            gross_qty = gross_qty_by_product[product_id]
+            if scrap_qty > gross_qty:
+                raise serializers.ValidationError({'component_scraps': '仕損数量は実績数を超えられません。'})
+
+            scrap_reason = str((row or {}).get('scrap_reason') or '').strip()
+            if scrap_qty > 0 and not scrap_reason:
+                raise serializers.ValidationError({'component_scraps': '仕損理由を入力してください。'})
+
+            normalized[product_id] = {
+                'scrap_qty': scrap_qty,
+                'scrap_reason': scrap_reason,
+            }
+        return normalized
+
+    def _apply_pattern_snapshot(self, instance, component_scrap_map=None):
         pattern = instance.pattern
         shot_count = int(instance.shot_count or 0)
+        component_scrap_map = component_scrap_map or {}
         process_time_per_shot = self._q1(pattern.process_time_min or Decimal('0'))
         total_process_time = self._q1(process_time_per_shot * Decimal(shot_count))
         material = pattern.material
@@ -576,8 +681,13 @@ class LaserActualSerializer(serializers.ModelSerializer):
         component_rows = []
         for index, item in enumerate(pattern.component_items.select_related('component_product').all(), start=1):
             units = self._q3(item.take_qty or Decimal('0'))
-            total_qty = self._q3(units * Decimal(shot_count))
             product = item.component_product
+            gross_qty = self._q3(units * Decimal(shot_count))
+            scrap_entry = component_scrap_map.get(getattr(product, 'id', None), {})
+            scrap_qty = self._q3(scrap_entry.get('scrap_qty') or Decimal('0'))
+            if scrap_qty > gross_qty:
+                scrap_qty = gross_qty
+            total_qty = self._q3(gross_qty - scrap_qty)
             component_rows.append(
                 LaserActualDetail(
                     actual=instance,
@@ -587,6 +697,8 @@ class LaserActualSerializer(serializers.ModelSerializer):
                     product_name=product.product_name if product else '',
                     units_per_shot=units,
                     total_qty=total_qty,
+                    scrap_qty=scrap_qty,
+                    scrap_reason=str(scrap_entry.get('scrap_reason') or '').strip(),
                     display_order=index,
                 )
             )
@@ -605,6 +717,8 @@ class LaserActualSerializer(serializers.ModelSerializer):
                     product_name=product.product_name if product else '',
                     units_per_shot=units,
                     total_qty=total_qty,
+                    scrap_qty=Decimal('0'),
+                    scrap_reason='',
                     display_order=index,
                 )
             )
@@ -612,28 +726,159 @@ class LaserActualSerializer(serializers.ModelSerializer):
         LaserActualDetail.objects.filter(actual=instance).delete()
         LaserActualDetail.objects.bulk_create(component_rows + finished_rows)
 
+    @classmethod
+    def _is_countable_action(cls, action):
+        return str(action or '').upper() in cls.BACKLOG_COUNTABLE_ACTIONS
+
+    @staticmethod
+    def _empty_backlog_defaults():
+        return {
+            'demand_qty_plan': 0,
+            'order_qty': 0,
+            'plan_qty': 0,
+            'actual_qty': 0,
+            'stock_qty': 0,
+            'planned_stock_qty': 0,
+            'adjust_qty': 0,
+            'scrap_adjust_qty': 0,
+            'scrap_qty': 0,
+            'actual_shipment_qty': 0,
+            'progress_qty': 0,
+            'planned_progress_qty': 0,
+        }
+
+    @staticmethod
+    def _to_backlog_qty(value):
+        try:
+            num = Decimal(str(value or 0))
+        except Exception:
+            return 0
+        return int(num.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+
+    @staticmethod
+    def _resolve_component_process_line(equipment, product):
+        process = getattr(equipment, 'process', None) if equipment else None
+        line = getattr(equipment, 'line', None) if equipment else None
+        if not line and process:
+            line = getattr(process, 'line', None)
+        if process and line:
+            return process, line
+
+        step = None
+        if product:
+            base_qs = RoutingStep.objects.filter(
+                output_product=product,
+                routing__is_active=True,
+            ).select_related('process', 'process__line', 'line').order_by('-routing__is_default', 'step_no', 'id')
+            if line:
+                step = base_qs.filter(line=line).first()
+            if not step and process:
+                step = base_qs.filter(process=process).first()
+            if not step:
+                step = base_qs.first()
+
+        if step:
+            process = process or step.process
+            line = line or step.line or getattr(step.process, 'line', None)
+
+        if process and not line:
+            line = getattr(process, 'line', None)
+        return process, line
+
+    @classmethod
+    def build_backlog_delta_map(cls, instance):
+        if not instance or not instance.work_date:
+            return {}
+        if not cls._is_countable_action(instance.operator_action):
+            return {}
+
+        details = list(
+            instance.details.filter(
+                detail_type=LaserActualDetail.DETAIL_TYPE_COMPONENT,
+            ).select_related('product')
+        )
+        if not details:
+            return {}
+
+        delta_map = {}
+        for detail in details:
+            if not detail.product_id:
+                continue
+            qty = cls._to_backlog_qty(detail.total_qty)
+            if qty == 0:
+                continue
+            process, line = cls._resolve_component_process_line(instance.equipment, detail.product)
+            if not process or not line:
+                continue
+            key = (instance.work_date, line.id, process.id, detail.product_id)
+            delta_map[key] = int(delta_map.get(key, 0)) + qty
+        return delta_map
+
+    @classmethod
+    def apply_backlog_delta_map(cls, delta_map):
+        if not delta_map:
+            return
+
+        for key, delta_qty in delta_map.items():
+            qty = int(delta_qty or 0)
+            if qty == 0:
+                continue
+            plan_date, line_id, process_id, product_id = key
+            backlog, _created = LineBacklog.objects.get_or_create(
+                plan_date=plan_date,
+                line_id=line_id,
+                process_id=process_id,
+                product_id=product_id,
+                sequence_no=0,
+                defaults=cls._empty_backlog_defaults(),
+            )
+            LineBacklog.objects.filter(id=backlog.id).update(actual_qty=F('actual_qty') + qty)
+
+    @classmethod
+    def revert_backlog_for_instance(cls, instance):
+        original_map = cls.build_backlog_delta_map(instance)
+        if not original_map:
+            return
+        rollback_map = {key: -int(value or 0) for key, value in original_map.items()}
+        cls.apply_backlog_delta_map(rollback_map)
+
     def create(self, validated_data):
         request = self.context.get('request')
         user = request.user if request and request.user.is_authenticated else None
+        component_scrap_map = validated_data.pop('_component_scrap_map', {})
+        validated_data.pop('component_scraps', None)
         with transaction.atomic():
             instance = LaserActual.objects.create(
                 created_by=user,
                 updated_by=user,
                 **validated_data,
             )
-            self._apply_pattern_snapshot(instance)
+            self._apply_pattern_snapshot(instance, component_scrap_map)
+            delta_map = self.build_backlog_delta_map(instance)
+            self.apply_backlog_delta_map(delta_map)
         return instance
 
     def update(self, instance, validated_data):
         request = self.context.get('request')
         user = request.user if request and request.user.is_authenticated else None
+        component_scrap_map = validated_data.pop('_component_scrap_map', {})
+        validated_data.pop('component_scraps', None)
+        before_map = self.build_backlog_delta_map(instance)
         for field, value in validated_data.items():
             setattr(instance, field, value)
         if user:
             instance.updated_by = user
         with transaction.atomic():
             instance.save()
-            self._apply_pattern_snapshot(instance)
+            self._apply_pattern_snapshot(instance, component_scrap_map)
+            after_map = self.build_backlog_delta_map(instance)
+
+            delta_map = {}
+            for key, value in after_map.items():
+                delta_map[key] = int(delta_map.get(key, 0)) + int(value or 0)
+            for key, value in before_map.items():
+                delta_map[key] = int(delta_map.get(key, 0)) - int(value or 0)
+            self.apply_backlog_delta_map(delta_map)
         return instance
 
 

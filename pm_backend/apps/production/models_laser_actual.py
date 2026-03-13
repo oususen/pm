@@ -9,6 +9,19 @@ from .models_laser_pattern import LaserPattern
 class LaserActual(models.Model):
     """レーザー実績ヘッダ（保存時スナップショット保持）"""
 
+    OPERATOR_ACTION_START = 'START'
+    OPERATOR_ACTION_END = 'END'
+    OPERATOR_ACTION_PAUSE = 'PAUSE'
+    OPERATOR_ACTION_TEMP_END = 'TEMP_END'
+    OPERATOR_ACTION_RESUME = 'RESUME'
+    OPERATOR_ACTION_CHOICES = [
+        (OPERATOR_ACTION_START, '開始'),
+        (OPERATOR_ACTION_END, '終了'),
+        (OPERATOR_ACTION_PAUSE, '中断'),
+        (OPERATOR_ACTION_TEMP_END, '一時終了'),
+        (OPERATOR_ACTION_RESUME, '再開'),
+    ]
+
     id = models.BigAutoField(primary_key=True)
     work_date = models.DateField(verbose_name='作業日')
     equipment = models.ForeignKey(
@@ -24,6 +37,18 @@ class LaserActual(models.Model):
         verbose_name='パターン',
     )
     shot_count = models.PositiveIntegerField(verbose_name='回数')
+    operator_action = models.CharField(
+        max_length=20,
+        choices=OPERATOR_ACTION_CHOICES,
+        default=OPERATOR_ACTION_END,
+        verbose_name='作業時刻',
+    )
+    operator_action_reason = models.CharField(
+        max_length=200,
+        blank=True,
+        default='',
+        verbose_name='作業時刻理由',
+    )
     remarks = models.TextField(blank=True, default='', verbose_name='備考')
 
     # スナップショット（登録時点の値を保持）
@@ -130,6 +155,18 @@ class LaserActualDetail(models.Model):
         decimal_places=3,
         default=0,
         verbose_name='換算数量',
+    )
+    scrap_qty = models.DecimalField(
+        max_digits=14,
+        decimal_places=3,
+        default=0,
+        verbose_name='仕損数量',
+    )
+    scrap_reason = models.CharField(
+        max_length=200,
+        blank=True,
+        default='',
+        verbose_name='仕損理由',
     )
     display_order = models.PositiveIntegerField(default=0, verbose_name='表示順')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')

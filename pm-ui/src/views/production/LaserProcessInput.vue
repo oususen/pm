@@ -1,52 +1,53 @@
 <template>
-  <div class="laser-actual-page">
-    <div class="page-header">
-      <h2>レーザー実績入力</h2>
-      <p class="page-note">タブレット向け画面（既存の工程作業入力とは別UI）</p>
-    </div>
+  <div class="laser-actual-page" :class="`mode-${activeTab}`">
 
     <div class="tab-bar">
-      <button
-        type="button"
-        class="tab-item"
-        :class="{ active: activeTab === 'entry' }"
-        @click="activeTab = 'entry'"
-      >
-        実績入力
-      </button>
-      <button
-        type="button"
-        class="tab-item"
-        :class="{ active: activeTab === 'list' }"
-        @click="activeTab = 'list'"
-      >
-        一覧
-      </button>
+      <div class="tab-buttons">
+        <button
+          type="button"
+          class="tab-item"
+          :class="{ active: activeTab === 'entry' }"
+          @click="activeTab = 'entry'"
+        >
+          実績入力
+        </button>
+        <button
+          type="button"
+          class="tab-item"
+          :class="{ active: activeTab === 'list' }"
+          @click="activeTab = 'list'"
+        >
+          一覧
+        </button>
+      </div>
+      <div v-if="activeTab === 'entry' && (form.pattern || currentProcessingMessages.length)" class="tab-operator-actions">
+        <div v-if="currentProcessingMessages.length" class="current-processing-list">
+          <div
+            v-for="message in currentProcessingMessages"
+            :key="`processing-${message.equipmentKey}`"
+            class="current-processing"
+          >
+            {{ message.label }}
+          </div>
+        </div>
+        <button
+          v-if="form.pattern"
+          v-for="action in operatorActionOptions"
+          :key="`tab-${action.value}`"
+          type="button"
+          class="operator-action-btn"
+          :class="{ active: form.operator_action === action.value }"
+          @click="form.operator_action = action.value"
+        >
+          {{ action.label }}
+        </button>
+      </div>
     </div>
 
-    <section v-show="activeTab === 'entry'" class="panel form-panel">
-        <div class="panel-head">
-          <h3>{{ isEditMode ? 'レーザー実績編集' : 'レーザー実績登録' }}</h3>
-        </div>
-
+    <div v-show="activeTab === 'entry'" class="entry-grid">
+      <section class="panel form-panel">
         <div v-if="formMessage" class="message" :class="`is-${formMessageType}`">
           {{ formMessage }}
-        </div>
-
-        <div class="form-grid two-col">
-          <div class="field">
-            <label class="required">作業日</label>
-            <input v-model="form.work_date" type="date" />
-          </div>
-          <div class="field">
-            <label class="required">使用設備</label>
-            <select v-model="form.equipment">
-              <option value="">-- 選択 --</option>
-              <option v-for="equipment in equipments" :key="equipment.id" :value="String(equipment.id)">
-                {{ equipment.equipment_code }} - {{ equipment.equipment_name }}
-              </option>
-            </select>
-          </div>
         </div>
 
         <div class="field">
@@ -64,63 +65,123 @@
           </select>
         </div>
 
-        <div class="form-grid two-col">
-          <div class="field">
-            <label class="required">回数</label>
-            <input
-              v-model.number="form.shot_count"
-              type="number"
-              min="1"
-              step="1"
-              inputmode="numeric"
-              placeholder="1以上の整数"
-            />
-          </div>
-          <div class="field">
-            <label>備考</label>
-            <input
-              v-model.trim="form.remarks"
-              type="text"
-              placeholder="任意"
-            />
-          </div>
+        <div v-if="requiresActionReason" class="field">
+          <label class="required">{{ form.operator_action === 'TEMP_END' ? '一時終了理由' : '中断理由' }}</label>
+          <select v-model="form.operator_action_reason">
+            <option value="">-- 選択 --</option>
+            <option v-for="reason in operatorActionReasonOptions" :key="reason" :value="reason">
+              {{ reason }}
+            </option>
+          </select>
         </div>
 
-        <div v-if="selectedPattern" class="snapshot">
-          <div class="snapshot-summary">
-            <div><span class="label">使用材料</span><span>{{ selectedPattern.material_code || '-' }}</span></div>
-            <div><span class="label">1回あたり加工時間</span><span>{{ formatNumber(processTimePerShot, 1) }} 分</span></div>
-            <div><span class="label">総加工時間</span><span>{{ formatNumber(totalProcessTime, 1) }} 分</span></div>
-          </div>
+        <div v-if="requiresShotCount" class="field">
+          <label class="required">回数</label>
+          <input
+            v-model.number="form.shot_count"
+            type="number"
+            min="1"
+            step="1"
+            inputmode="numeric"
+            placeholder="1以上の整数"
+          />
+        </div>
 
-          <div class="snapshot-block">
-            <h4>構成部品一覧</h4>
-            <div class="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>品番</th>
-                    <th>取り数</th>
-                    <th>実績数</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="row in componentRows" :key="row.product_id || row.product_code">
-                    <td>{{ row.product_code || '-' }}</td>
-                    <td class="num">{{ formatNumber(row.units_per_shot, 0) }}</td>
-                    <td class="num">{{ formatNumber(row.total_qty, 0) }}</td>
-                  </tr>
-                  <tr v-if="!componentRows.length">
-                    <td colspan="3">構成部品はありません。</td>
-                  </tr>
-                </tbody>
-              </table>
+        <div class="actions">
+          <button class="btn primary" :disabled="!canSave || formSubmitting" @click="saveActual">
+            {{ formSubmitting ? '処理中...' : '保存' }}
+          </button>
+          <button class="btn" :disabled="formSubmitting" @click="resetForm">クリア</button>
+        </div>
+      </section>
+
+      <section class="panel component-panel">
+        <div class="panel-head">
+          <h3>構成部品詳細</h3>
+        </div>
+
+        <div v-if="selectedPattern" class="table-scroll component-table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>品番</th>
+                <th>取り数</th>
+                <th>仕損</th>
+                <th>仕損理由</th>
+                <th>実績数</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in componentRows" :key="row.product_id || row.product_code">
+                <td>{{ row.product_code || '-' }}</td>
+                <td class="num">{{ formatNumber(row.units_per_shot, 0) }}</td>
+                <td class="num">
+                  <input
+                    class="table-input table-input-num"
+                    type="number"
+                    min="0"
+                    step="1"
+                    inputmode="numeric"
+                    :value="row.scrap_qty_input"
+                    @input="updateComponentScrapQty(row.product_id, $event.target.value)"
+                  />
+                </td>
+                <td>
+                  <select
+                    class="table-input"
+                    :value="row.scrap_reason"
+                    @change="updateComponentScrapReason(row.product_id, $event.target.value)"
+                  >
+                    <option value="">-- 選択 --</option>
+                    <option v-for="item in scrapReasonOptions" :key="item.value" :value="item.value">
+                      {{ item.label }}
+                    </option>
+                  </select>
+                </td>
+                <td class="num">{{ formatNumber(row.total_qty, 0) }}</td>
+              </tr>
+              <tr v-if="!componentRows.length">
+                <td colspan="5">構成部品はありません。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div v-else class="empty-pattern-message">
+          パターンを選択すると構成部品を表示します。
+        </div>
+      </section>
+
+      <section class="panel detail-panel">
+        <div class="panel-head">
+          <h3>加工情報</h3>
+        </div>
+
+        <div v-if="selectedPattern" class="detail-stack">
+          <div class="summary-card">
+            <div class="summary-grid">
+              <div class="summary-item">
+              <span class="summary-label">使用材料</span>
+                <span class="summary-value">{{ selectedPattern.material_code || '-' }}</span>
+              </div>
+              <div class="summary-item">
+              <span class="summary-label">1回あたり加工時間</span>
+                <span class="summary-value">{{ formatNumber(processTimePerShot, 1) }} 分</span>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">使用設備（追加情報）</span>
+                <span class="summary-value">{{ selectedEquipmentDisplay }}</span>
+              </div>
+              <div class="summary-item">
+              <span class="summary-label">総加工時間</span>
+                <span class="summary-value">{{ formatNumber(totalProcessTime, 1) }} 分</span>
+              </div>
             </div>
           </div>
 
           <div class="snapshot-block">
             <h4>完成品一覧</h4>
-            <div class="table-scroll">
+            <div class="table-scroll finished-table-scroll">
               <table>
                 <thead>
                   <tr>
@@ -144,21 +205,11 @@
           </div>
         </div>
 
-        <div class="actions">
-          <button class="btn primary" :disabled="!canSave || formSubmitting" @click="saveActual">
-            {{ formSubmitting ? '処理中...' : isEditMode ? '更新' : '保存' }}
-          </button>
-          <button class="btn" :disabled="formSubmitting" @click="resetForm">クリア</button>
-          <button
-            v-if="isEditMode"
-            class="btn danger"
-            :disabled="formSubmitting"
-            @click="deleteActual"
-          >
-            削除
-          </button>
+        <div v-else class="empty-pattern-message">
+          パターンを選択すると詳細を表示します。
         </div>
-    </section>
+      </section>
+    </div>
 
     <section v-show="activeTab === 'list'" class="panel list-panel">
         <div class="panel-head">
@@ -213,6 +264,7 @@
                 <th>日付</th>
                 <th>設備</th>
                 <th>パターン番号</th>
+                <th>作業時刻</th>
                 <th class="num">回数</th>
                 <th class="num">総加工時間</th>
                 <th>登録者</th>
@@ -223,19 +275,18 @@
               <tr
                 v-for="row in actuals"
                 :key="row.id"
-                :class="{ active: String(form.id || '') === String(row.id) }"
-                @click="setFormFromRecord(row)"
               >
                 <td>{{ row.work_date }}</td>
                 <td>{{ row.equipment_code || '-' }}</td>
                 <td>{{ row.pattern_no || '-' }}</td>
+                <td>{{ operatorActionLabel(row.operator_action) }}</td>
                 <td class="num">{{ formatNumber(row.shot_count, 0) }}</td>
                 <td class="num">{{ formatNumber(row.total_process_time, 1) }}</td>
                 <td>{{ row.created_by_name || '-' }}</td>
                 <td>{{ formatDateTime(row.created_at) }}</td>
               </tr>
               <tr v-if="!actuals.length">
-                <td colspan="7">データがありません。</td>
+                <td colspan="8">データがありません。</td>
               </tr>
             </tbody>
           </table>
@@ -274,29 +325,88 @@ const formatDateTime = (value) => {
   return `${d.toLocaleDateString(localeCode.value)} ${d.toLocaleTimeString(localeCode.value, { hour: '2-digit', minute: '2-digit' })}`
 }
 
-const todayYmd = () => {
-  const d = new Date()
+const toYmd = (date) => {
+  const d = new Date(date)
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
+}
+
+const todayYmd = () => {
+  const d = new Date()
+  return toYmd(d)
+}
+
+const businessDateYmd = () => {
+  // 日替わりは8:00基準
+  const d = new Date()
+  if (d.getHours() < 8) {
+    d.setDate(d.getDate() - 1)
+  }
+  return toYmd(d)
 }
 
 const shiftDateYmd = (offsetDays) => {
   const d = new Date()
   d.setDate(d.getDate() + offsetDays)
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
+  return toYmd(d)
 }
+
+const operatorActionLabels = {
+  START: '開始',
+  END: '終了',
+  PAUSE: '中断',
+  TEMP_END: '一時終了',
+  RESUME: '再開',
+}
+
+const notStartedOperatorActions = ['START']
+const startedOperatorActions = ['END', 'PAUSE']
+const pausedOperatorActions = ['RESUME', 'TEMP_END']
+const tempEndedOperatorActions = ['RESUME']
+
+const pauseReasonOptions = [
+  '設備トラブル',
+  '治具トラブル',
+  '品質トラブル',
+  'ティーチング',
+  'ワイヤ交換',
+  '部品ショート',
+  '班長/対応者待ち',
+  '工程指導',
+  '3S活動',
+  '改善活動',
+  'その他',
+]
+
+const tempEndReasonOptions = [
+  '本日設備復旧不可',
+  '本日治具使用不可',
+  '他へ製品切り替え',
+  'その他',
+]
+
+const scrapReasonOptions = [
+  { value: '未切断', label: '1 未切断' },
+  { value: 'ドロス', label: '2 ドロス' },
+  { value: '欠肉', label: '3 欠肉' },
+  { value: 'ズレ', label: '4 ズレ' },
+  { value: 'キズ', label: '5 キズ' },
+  { value: '錆', label: '6 錆' },
+  { value: '変形', label: '7 変形' },
+  { value: '穴無し', label: '8 穴無し' },
+  { value: 'その他', label: '9 その他' },
+]
 
 const createEmptyForm = () => ({
   id: null,
-  work_date: todayYmd(),
+  work_date: businessDateYmd(),
   equipment: '',
   pattern: '',
-  shot_count: 1,
+  operator_action: '',
+  operator_action_reason: '',
+  shot_count: 0,
   remarks: '',
 })
 
@@ -318,8 +428,11 @@ const filters = ref(createDefaultFilters())
 const equipments = ref([])
 const patterns = ref([])
 const actuals = ref([])
+const latestActionByPattern = ref({})
 const patternKeyword = ref('')
 const activeTab = ref('entry')
+const currentProcessingByEquipment = ref({})
+const componentScrapInputs = ref({})
 
 const formSubmitting = ref(false)
 const listLoading = ref(false)
@@ -360,9 +473,146 @@ const selectedPattern = computed(() => {
   )
 })
 
+const resolvedEquipmentId = computed(() => {
+  if (selectedPattern.value?.equipment) return String(selectedPattern.value.equipment)
+  return String(form.value.equipment || '')
+})
+
+const latestActionByPatternFromList = computed(() => {
+  const map = {}
+  const rows = Array.isArray(actuals.value) ? actuals.value : []
+  for (const row of rows) {
+    const patternId = String(row?.pattern || '')
+    if (!patternId || map[patternId]) continue
+    const action = String(row?.operator_action || '').toUpperCase()
+    if (!action) continue
+    map[patternId] = action
+  }
+  return map
+})
+
+const selectedPatternLatestOperatorAction = computed(() => {
+  const patternId = String(form.value.pattern || '')
+  if (!patternId) return ''
+  const cached = String(latestActionByPattern.value[patternId] || '').toUpperCase()
+  if (cached) return cached
+  return String(latestActionByPatternFromList.value[patternId] || '').toUpperCase()
+})
+
+const selectedPatternWorkState = computed(() => {
+  const latestAction = selectedPatternLatestOperatorAction.value
+  if (latestAction === 'PAUSE') return 'PAUSED'
+  if (latestAction === 'TEMP_END') return 'TEMP_ENDED'
+  if (latestAction === 'START' || latestAction === 'RESUME') return 'STARTED'
+  return 'NOT_STARTED'
+})
+
+const buildEquipmentKey = (equipmentId, equipmentCode, equipmentName) => {
+  const idKey = String(equipmentId || '').trim()
+  if (idKey) return `id:${idKey}`
+  const codeKey = String(equipmentCode || '').trim()
+  if (codeKey) return `code:${codeKey}`
+  const nameKey = String(equipmentName || '').trim()
+  if (nameKey) return `name:${nameKey}`
+  return ''
+}
+
+const buildEquipmentLabel = (equipmentName, equipmentId = '') => {
+  const name = String(equipmentName || '').trim()
+  if (name) return name
+
+  const idKey = String(equipmentId || '').trim()
+  if (!idKey) return ''
+  const equipment = (Array.isArray(equipments.value) ? equipments.value : []).find(
+    (row) => String(row.id) === idKey
+  )
+  return String(equipment?.equipment_name || '').trim()
+}
+
+const currentProcessingMessages = computed(() => {
+  const rows = Object.entries(currentProcessingByEquipment.value || {})
+    .map(([equipmentKey, item]) => ({
+      equipmentKey,
+      equipmentLabel: String(item?.equipmentLabel || '').trim(),
+      patternNo: String(item?.patternNo || '').trim(),
+    }))
+    .filter((item) => !!item.equipmentLabel)
+    .sort((a, b) => a.equipmentLabel.localeCompare(b.equipmentLabel))
+
+  return rows.map((item) => ({
+    equipmentKey: item.equipmentKey,
+    label: item.patternNo
+      ? `現在設備${item.equipmentLabel}はパターン${item.patternNo}加工中`
+      : `現在設備${item.equipmentLabel}は加工中`,
+  }))
+})
+
+const updateCurrentProcessingState = (actionValue, equipmentId, equipmentCode, equipmentName, patternNo) => {
+  const action = String(actionValue || '').toUpperCase()
+  const equipmentKey = buildEquipmentKey(equipmentId, equipmentCode, equipmentName)
+  if (!action || !equipmentKey) return
+  const label = buildEquipmentLabel(equipmentName, equipmentId)
+  const pno = String(patternNo || '').trim()
+
+  if (action === 'START' || action === 'RESUME') {
+    currentProcessingByEquipment.value = {
+      ...currentProcessingByEquipment.value,
+      [equipmentKey]: {
+        equipmentLabel: label,
+        patternNo: pno,
+      },
+    }
+    return
+  }
+
+  if (action === 'END' || action === 'PAUSE' || action === 'TEMP_END') {
+    const next = { ...currentProcessingByEquipment.value }
+    delete next[equipmentKey]
+    currentProcessingByEquipment.value = next
+  }
+}
+
+const operatorActionOptions = computed(() => {
+  const toOptions = (actions) =>
+    actions.map((value) => ({
+      value,
+      label: operatorActionLabels[value],
+    }))
+
+  if (!form.value.pattern) return []
+  if (selectedPatternWorkState.value === 'STARTED') return toOptions(startedOperatorActions)
+  if (selectedPatternWorkState.value === 'PAUSED') return toOptions(pausedOperatorActions)
+  if (selectedPatternWorkState.value === 'TEMP_ENDED') return toOptions(tempEndedOperatorActions)
+  return toOptions(notStartedOperatorActions)
+})
+
+const requiresShotCount = computed(() => {
+  const action = String(form.value.operator_action || '').toUpperCase()
+  return action === 'END' || action === 'PAUSE'
+})
+
+const requiresActionReason = computed(() => {
+  const action = String(form.value.operator_action || '').toUpperCase()
+  return action === 'PAUSE' || action === 'TEMP_END'
+})
+
+const operatorActionReasonOptions = computed(() => {
+  const action = String(form.value.operator_action || '').toUpperCase()
+  if (action === 'TEMP_END') return tempEndReasonOptions
+  return pauseReasonOptions
+})
+
+const effectiveShotCount = computed(() => {
+  const shots = Number(form.value.shot_count)
+  if (!Number.isInteger(shots) || shots < 0) return 0
+  return shots
+})
+
 const isValidShotCount = computed(() => {
   const shots = Number(form.value.shot_count)
-  return Number.isInteger(shots) && shots >= 1
+  if (!Number.isInteger(shots)) return false
+  if (requiresShotCount.value) return shots >= 1
+  return shots === 0
 })
 
 const processTimePerShot = computed(() => {
@@ -371,30 +621,121 @@ const processTimePerShot = computed(() => {
 })
 
 const totalProcessTime = computed(() => {
-  if (!selectedPattern.value || !isValidShotCount.value) return 0
-  return roundTo(processTimePerShot.value * Number(form.value.shot_count), 1)
+  if (!selectedPattern.value) return 0
+  return roundTo(processTimePerShot.value * effectiveShotCount.value, 1)
 })
+
+const selectedEquipmentDisplay = computed(() => {
+  const pattern = selectedPattern.value
+  if (!pattern) return '-'
+
+  const code = String(pattern.equipment_code || '').trim()
+  const name = String(pattern.equipment_name || '').trim()
+  if (code && name) return `${code} - ${name}`
+  if (code) return code
+  if (name) return name
+
+  const equipmentId = String(pattern.equipment || resolvedEquipmentId.value || '').trim()
+  if (!equipmentId) return '-'
+  const equipment = (Array.isArray(equipments.value) ? equipments.value : []).find(
+    (row) => String(row.id) === equipmentId
+  )
+  if (!equipment) return '-'
+  const eqCode = String(equipment.equipment_code || '').trim()
+  const eqName = String(equipment.equipment_name || '').trim()
+  if (eqCode && eqName) return `${eqCode} - ${eqName}`
+  if (eqCode) return eqCode
+  if (eqName) return eqName
+  return '-'
+})
+
+const buildScrapInputKey = (productId) => {
+  const patternId = String(form.value.pattern || '')
+  const pid = String(productId || '')
+  return `${patternId}:${pid}`
+}
+
+const normalizeScrapQtyInput = (value, grossQty) => {
+  const text = String(value ?? '').trim()
+  if (!text) {
+    return { qty: 0, input: '' }
+  }
+  const raw = Number(text)
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return { qty: 0, input: '' }
+  }
+  const max = Number(grossQty || 0)
+  if (!Number.isFinite(max) || max <= 0) {
+    return { qty: 0, input: '' }
+  }
+  const qty = Math.min(Math.floor(raw), Math.floor(max))
+  return { qty, input: String(qty) }
+}
+
+const getComponentScrapState = (productId) => {
+  const key = buildScrapInputKey(productId)
+  return componentScrapInputs.value[key] || { qtyInput: '', reason: '' }
+}
+
+const updateComponentScrapQty = (productId, value) => {
+  const target = componentRows.value.find((row) => String(row.product_id) === String(productId))
+  if (!target) return
+  const key = buildScrapInputKey(productId)
+  const current = getComponentScrapState(productId)
+  const normalized = normalizeScrapQtyInput(value, target.gross_qty)
+  componentScrapInputs.value = {
+    ...componentScrapInputs.value,
+    [key]: {
+      qtyInput: normalized.input,
+      reason: current.reason || '',
+    },
+  }
+}
+
+const updateComponentScrapReason = (productId, value) => {
+  const key = buildScrapInputKey(productId)
+  const current = getComponentScrapState(productId)
+  componentScrapInputs.value = {
+    ...componentScrapInputs.value,
+    [key]: {
+      qtyInput: current.qtyInput || '',
+      reason: String(value || ''),
+    },
+  }
+}
 
 const componentRows = computed(() => {
   if (!selectedPattern.value) return []
-  const shots = isValidShotCount.value ? Number(form.value.shot_count) : 0
+  const shots = effectiveShotCount.value
   const rows = Array.isArray(selectedPattern.value.component_items)
     ? selectedPattern.value.component_items
     : []
   return rows.map((row) => {
     const units = Number(row.take_qty || 0)
+    const grossQty = roundTo(units * shots, 0)
+    const scrapState = getComponentScrapState(row.component_product)
+    const normalizedScrap = normalizeScrapQtyInput(scrapState.qtyInput, grossQty)
+    const scrapQty = normalizedScrap.qty
     return {
       product_id: row.component_product,
       product_code: row.component_product_code || '',
       units_per_shot: units,
-      total_qty: roundTo(units * shots, 0),
+      gross_qty: grossQty,
+      scrap_qty_input: normalizedScrap.input,
+      scrap_qty: scrapQty,
+      scrap_reason: String(scrapState.reason || ''),
+      total_qty: roundTo(grossQty - scrapQty, 0),
     }
   })
 })
 
+const hasInvalidComponentScrap = computed(() => componentRows.value.some((row) => (
+  Number(row.scrap_qty || 0) > 0 && !String(row.scrap_reason || '').trim()
+)))
+
 const finishedRows = computed(() => {
   if (!selectedPattern.value) return []
-  const shots = isValidShotCount.value ? Number(form.value.shot_count) : 0
+  const shots = effectiveShotCount.value
   const rows = Array.isArray(selectedPattern.value.finished_items)
     ? selectedPattern.value.finished_items
     : []
@@ -409,15 +750,22 @@ const finishedRows = computed(() => {
   })
 })
 
-const isEditMode = computed(() => !!form.value.id)
-
 const canSave = computed(() => {
   if (!form.value.work_date) return false
-  if (!form.value.equipment) return false
+  if (!resolvedEquipmentId.value) return false
   if (!form.value.pattern) return false
+  if (!form.value.operator_action) return false
+  if (!operatorActionOptions.value.some((item) => item.value === form.value.operator_action)) return false
+  if (requiresActionReason.value && !String(form.value.operator_action_reason || '').trim()) return false
   if (!isValidShotCount.value) return false
+  if (hasInvalidComponentScrap.value) return false
   return true
 })
+
+const operatorActionLabel = (value) => {
+  const key = String(value || '').toUpperCase()
+  return operatorActionLabels[key] || '-'
+}
 
 const extractErrorMessage = (error, fallback) => {
   const payload = error?.response?.data
@@ -481,22 +829,65 @@ const loadActuals = async () => {
   }
 }
 
-const setFormFromRecord = (row) => {
-  form.value = {
-    id: row.id,
-    work_date: row.work_date || todayYmd(),
-    equipment: row.equipment ? String(row.equipment) : '',
-    pattern: row.pattern ? String(row.pattern) : '',
-    shot_count: row.shot_count ?? 1,
-    remarks: row.remarks || '',
+const loadLatestActionForPattern = async (patternId) => {
+  const pid = String(patternId || '').trim()
+  if (!pid) return
+  try {
+    const params = {
+      pattern: pid,
+      ordering: '-created_at',
+      page_size: 1,
+    }
+    if (resolvedEquipmentId.value) {
+      params.equipment = resolvedEquipmentId.value
+    }
+    const res = await api.laserActuals.getLaserActuals(params)
+    const rows = normalizeList(res.data)
+    const action = String(rows[0]?.operator_action || '').toUpperCase()
+    latestActionByPattern.value = {
+      ...latestActionByPattern.value,
+      [pid]: action,
+    }
+  } catch (error) {
+    // 最新アクション取得失敗時は一覧データからの推定にフォールバック
   }
-  patternKeyword.value = row.pattern_no || ''
-  activeTab.value = 'entry'
-  setFormMessage('', 'info')
+}
+
+const loadCurrentProcessingState = async () => {
+  try {
+    const res = await api.laserActuals.getLaserActuals({
+      ordering: '-created_at',
+      page_size: 500,
+    })
+    const rows = normalizeList(res.data)
+
+    const latestByEquipment = {}
+    for (const row of rows) {
+      const key = buildEquipmentKey(row?.equipment, row?.equipment_code, row?.equipment_name)
+      if (!key || latestByEquipment[key]) continue
+      latestByEquipment[key] = row
+    }
+
+    const nextState = {}
+    Object.values(latestByEquipment).forEach((row) => {
+      const action = String(row?.operator_action || '').toUpperCase()
+      if (!(action === 'START' || action === 'RESUME')) return
+      const key = buildEquipmentKey(row?.equipment, row?.equipment_code, row?.equipment_name)
+      if (!key) return
+      nextState[key] = {
+        equipmentLabel: buildEquipmentLabel(row?.equipment_name, row?.equipment),
+        patternNo: String(row?.pattern_no || '').trim(),
+      }
+    })
+    currentProcessingByEquipment.value = nextState
+  } catch (error) {
+    // 表示復元失敗時はそのまま入力を継続可能にする
+  }
 }
 
 const resetForm = () => {
   form.value = createEmptyForm()
+  componentScrapInputs.value = {}
   patternKeyword.value = ''
   setFormMessage('', 'info')
 }
@@ -513,26 +904,41 @@ const saveActual = async () => {
 
   const payload = {
     work_date: form.value.work_date,
-    equipment: Number(form.value.equipment),
+    equipment: Number(resolvedEquipmentId.value),
     pattern: Number(form.value.pattern),
+    operator_action: String(form.value.operator_action || 'END').toUpperCase(),
+    operator_action_reason: String(form.value.operator_action_reason || '').trim(),
     shot_count: Number(form.value.shot_count),
+    component_scraps: componentRows.value
+      .map((row) => ({
+        product: Number(row.product_id),
+        scrap_qty: Number(row.scrap_qty || 0),
+        scrap_reason: String(row.scrap_reason || '').trim(),
+      }))
+      .filter((row) => row.product > 0 && row.scrap_qty > 0),
     remarks: form.value.remarks || '',
   }
 
   try {
-    let res
-    if (isEditMode.value) {
-      res = await api.laserActuals.updateLaserActual(form.value.id, payload)
-    } else {
-      res = await api.laserActuals.createLaserActual(payload)
-    }
+    const res = await api.laserActuals.createLaserActual(payload)
     const saved = res?.data || null
-    setFormMessage(isEditMode.value ? '更新しました。' : '保存しました。', 'success')
-    if (saved?.id) {
-      setFormFromRecord(saved)
-    } else if (!isEditMode.value) {
-      resetForm()
+    const savedAction = String(saved?.operator_action || payload.operator_action || '').toUpperCase()
+    const savedPatternNo = String(saved?.pattern_no || selectedPattern.value?.pattern_no || '').trim()
+    setFormMessage('保存しました。', 'success')
+    if (saved?.pattern && saved?.operator_action) {
+      latestActionByPattern.value = {
+        ...latestActionByPattern.value,
+        [String(saved.pattern)]: String(saved.operator_action).toUpperCase(),
+      }
     }
+    updateCurrentProcessingState(
+      savedAction,
+      saved?.equipment || payload.equipment,
+      saved?.equipment_code || selectedPattern.value?.equipment_code || '',
+      saved?.equipment_name || selectedPattern.value?.equipment_name || '',
+      savedPatternNo,
+    )
+    resetForm()
     await loadActuals()
   } catch (error) {
     setFormMessage(extractErrorMessage(error, '保存に失敗しました。入力内容を確認してください。'), 'error')
@@ -541,43 +947,65 @@ const saveActual = async () => {
   }
 }
 
-const deleteActual = async () => {
-  if (!isEditMode.value || formSubmitting.value) return
-  const ok = window.confirm('このレーザー実績を削除します。よろしいですか？')
-  if (!ok) return
-
-  formSubmitting.value = true
-  setFormMessage('', 'info')
-  try {
-    await api.laserActuals.deleteLaserActual(form.value.id)
-    setFormMessage('削除しました。', 'success')
-    resetForm()
-    await loadActuals()
-  } catch (error) {
-    setFormMessage(extractErrorMessage(error, '削除に失敗しました。'), 'error')
-  } finally {
-    formSubmitting.value = false
-  }
-}
-
 watch(
   () => form.value.pattern,
-  (patternId) => {
-    if (!patternId) return
+  async (patternId) => {
+    if (!patternId) {
+      form.value.operator_action = ''
+      form.value.operator_action_reason = ''
+      form.value.shot_count = 0
+      return
+    }
     const selected = patterns.value.find((pattern) => String(pattern.id) === String(patternId))
     if (selected) {
       patternKeyword.value = selected.pattern_no || ''
-      if (!form.value.equipment && selected.equipment) {
-        form.value.equipment = String(selected.equipment)
-      }
+      form.value.equipment = selected.equipment ? String(selected.equipment) : ''
     }
+    await loadLatestActionForPattern(patternId)
   }
+)
+
+watch(
+  () => operatorActionOptions.value.map((item) => item.value).join('|'),
+  () => {
+    const options = operatorActionOptions.value
+    if (!options.length) {
+      form.value.operator_action = ''
+      return
+    }
+    if (!options.some((item) => item.value === form.value.operator_action)) {
+      form.value.operator_action = options[0].value
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  () => form.value.operator_action,
+  (action) => {
+    const key = String(action || '').toUpperCase()
+    if (!(key === 'PAUSE' || key === 'TEMP_END')) {
+      form.value.operator_action_reason = ''
+    }
+    const shots = Number(form.value.shot_count)
+    if (key === 'END' || key === 'PAUSE') {
+      if (!Number.isInteger(shots) || shots < 1) {
+        form.value.shot_count = 1
+      }
+      return
+    }
+    if (shots !== 0) {
+      form.value.shot_count = 0
+    }
+  },
+  { immediate: true }
 )
 
 onMounted(async () => {
   clearMessages()
   await Promise.all([loadEquipments(), loadPatterns()])
   await loadActuals()
+  await loadCurrentProcessingState()
 })
 </script>
 
@@ -588,21 +1016,59 @@ onMounted(async () => {
   gap: 12px;
 }
 
-.page-header h2 {
-  margin: 0;
-  font-size: 24px;
-  color: #0f172a;
+.laser-actual-page.mode-entry {
+  grid-template-columns: minmax(340px, 0.95fr) minmax(560px, 1.45fr);
+  grid-template-areas:
+    "tab component"
+    "form component"
+    "detail component";
+  align-items: start;
 }
 
-.page-note {
-  margin: 4px 0 0;
-  color: #475569;
-  font-size: 13px;
+.laser-actual-page.mode-list {
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "tab"
+    "list";
+  align-items: start;
 }
 
 .tab-bar {
+  grid-area: tab;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  justify-self: stretch;
+  width: 100%;
+}
+
+.tab-buttons {
   display: flex;
   gap: 8px;
+}
+
+.tab-operator-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.current-processing-list {
+  display: grid;
+  gap: 4px;
+}
+
+.current-processing {
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .tab-item {
@@ -620,6 +1086,27 @@ onMounted(async () => {
   background: #2563eb;
   border-color: #1d4ed8;
   color: #ffffff;
+}
+
+.entry-grid {
+  display: contents;
+}
+
+.form-panel {
+  grid-area: form;
+}
+
+.detail-panel {
+  grid-area: detail;
+}
+
+.component-panel {
+  grid-area: component;
+  min-height: 0;
+}
+
+.list-panel {
+  grid-area: list;
 }
 
 .panel {
@@ -670,6 +1157,24 @@ onMounted(async () => {
 .field {
   display: grid;
   gap: 6px;
+}
+
+.operator-action-btn {
+  min-width: 66px;
+  padding: 7px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.operator-action-btn.active {
+  border-color: #0ea5e9;
+  background: #e0f2fe;
+  color: #0c4a6e;
+  font-weight: 700;
 }
 
 label {
@@ -728,6 +1233,59 @@ select:focus {
 .snapshot-block h4 {
   margin: 0 0 6px;
   font-size: 14px;
+}
+
+.detail-stack {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.summary-card {
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+}
+
+.summary-item {
+  display: grid;
+  gap: 4px;
+}
+
+.summary-label {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.summary-value {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.component-table-scroll {
+  max-height: clamp(420px, 74vh, 920px);
+}
+
+.finished-table-scroll {
+  max-height: min(44vh, 430px);
+}
+
+.empty-pattern-message {
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  padding: 20px 12px;
+  text-align: center;
+  color: #64748b;
+  font-size: 13px;
 }
 
 .actions {
@@ -801,6 +1359,20 @@ td {
   white-space: nowrap;
 }
 
+.table-input {
+  width: 100%;
+  min-width: 120px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.table-input-num {
+  min-width: 72px;
+  text-align: right;
+}
+
 th {
   background: #f8fafc;
   position: sticky;
@@ -825,6 +1397,28 @@ th.num {
   background: #dbeafe;
 }
 
+@media (max-width: 1500px) {
+  .laser-actual-page.mode-entry {
+    grid-template-columns: minmax(320px, 1fr) minmax(420px, 1.25fr);
+  }
+}
+
+@media (max-width: 1180px) {
+  .laser-actual-page.mode-entry {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "tab"
+      "form"
+      "detail"
+      "component";
+  }
+
+  .component-table-scroll,
+  .finished-table-scroll {
+    max-height: none;
+  }
+}
+
 @media (max-width: 760px) {
   .laser-actual-page {
     padding: 8px;
@@ -832,15 +1426,27 @@ th.num {
 
   .tab-bar {
     width: 100%;
+    justify-self: stretch;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tab-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .tab-operator-actions {
+    justify-content: flex-start;
   }
 
   .tab-item {
-    flex: 1;
+    width: 100%;
   }
 
   .form-grid.two-col,
-  .search-grid,
-  .snapshot-summary {
+  .search-grid {
     grid-template-columns: 1fr;
   }
 }

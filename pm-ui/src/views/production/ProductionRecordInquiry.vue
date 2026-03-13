@@ -18,7 +18,7 @@
       </button>
     </div>
 
-    <div v-show="activeTab === 'tank'">
+    <div v-show="operationalTabKeys.includes(activeTab)">
       <div class="filters">
       <div class="filter-row filter-row-period">
         <label>期間</label>
@@ -338,17 +338,19 @@ const loading = ref(false)
 const error = ref('')
 const sessions = ref([])
 const activeTab = ref('tank')
-const operationalTabKeys = ['tank', 'floor', 'blade']
+const operationalTabKeys = ['tank', 'laser']
 const settingsTargetTab = ref('tank')
 const configurableTabs = [
   { key: 'tank', label: 'タンク' },
   { key: 'floor', label: 'フロア' },
   { key: 'blade', label: 'ブレード' },
+  { key: 'laser', label: '板金' },
 ]
 const baseRecordTabs = [
   { key: 'tank', label: 'タンク' },
   { key: 'floor', label: 'フロア' },
   { key: 'blade', label: 'ブレード' },
+  { key: 'laser', label: '板金' },
 ]
 const settingsTabs = [
   { key: 'line-settings', label: '対象ライン編集' },
@@ -446,9 +448,19 @@ const filteredMappingEditRows = computed(() => {
     .filter((item) => !filterCode || String(item.row?.processCode || '').trim() === filterCode)
 })
 
+const normalizeList = (payload) => {
+  if (Array.isArray(payload)) return payload
+  if (Array.isArray(payload?.results)) return payload.results
+  return []
+}
+
 const isCountableProductionRow = (row) => {
-  if (!row || row.session_type !== 'WORK') return false
+  if (!row) return false
   const endAction = String(row.end_action || '').toUpperCase()
+  if (String(row.record_source || '').toUpperCase() === 'LASER') {
+    return ['END', 'PAUSE'].includes(endAction)
+  }
+  if (row.session_type !== 'WORK') return false
   return ['END', 'PAUSE'].includes(endAction)
 }
 
@@ -583,6 +595,114 @@ const loadSessions = async () => {
   error.value = ''
   const wantsCancelOnly = sessionType.value === 'CANCEL'
   try {
+    if (activeTab.value === 'laser') {
+      const laserParams = {
+        page_size: 1000,
+        work_date__gte: startDate.value,
+        work_date__lte: endDate.value,
+        ordering: '-work_date,-created_at',
+      }
+
+      const laserRes = await api.laserActuals.getLaserActuals(laserParams)
+      let laserItems = normalizeList(laserRes.data).flatMap((row) => {
+        const action = String(row?.operator_action || '').toUpperCase()
+        const isOpen = action === 'START' || action === 'RESUME'
+        const totalMinutes = Number(row?.total_process_time || 0)
+        const effectiveSeconds = Math.max(0, Math.round(totalMinutes * 60))
+        const componentDetails = normalizeList(row?.details)
+          .filter((detail) => String(detail?.detail_type || '').toUpperCase() === 'COMPONENT')
+
+        const buildLaserRow = (detail) => {
+          const productionQty = Number(detail?.total_qty || 0)
+          const productivity = productionQty > 0 && effectiveSeconds > 0
+            ? (productionQty * 3600) / effectiveSeconds
+            : null
+          return {
+            id: row?.id,
+            started_at: row?.created_at || null,
+            ended_at: isOpen ? null : (row?.created_at || null),
+            session_type: 'WORK',
+            start_action: action || '—',
+            end_action: action || '—',
+            pause_reason: row?.operator_action_reason || '',
+            process_code: row?.equipment_code || '',
+            process_name: row?.equipment_name || '',
+            product_code: detail?.product_code || '',
+            product_name: detail?.product_name || '',
+            operator_name: row?.created_by_name || row?.updated_by_name || '—',
+            duration_seconds: effectiveSeconds,
+            effective_work_seconds: effectiveSeconds,
+            production_qty: productionQty,
+            productivity_per_hour: productivity,
+            issue_count: 0,
+            issue_flags: [],
+            record_source: 'LASER',
+          }
+        }
+
+        if (!componentDetails.length) {
+          return [buildLaserRow(null)]
+        }
+        return componentDetails.map((detail) => buildLaserRow(detail))
+      })
+
+      const keyword = String(productCode.value || '').trim().toLowerCase()
+      if (keyword) {
+        laserItems = laserItems.filter((row) => {
+          const code = String(row?.product_code || '').toLowerCase()
+          const name = String(row?.product_name || '').toLowerCase()
+          return code.includes(keyword) || name.includes(keyword)
+        })
+      }
+
+      if (lineId.value) {
+        const selectedLine = lines.value.find((line) => String(line.id) === String(lineId.value))
+        const lineCode = String(selectedLine?.line_code || '').trim().toLowerCase()
+        if (lineCode) {
+          laserItems = laserItems.filter((row) => {
+            const processLabel = `${row?.process_code || ''} ${row?.process_name || ''}`.toLowerCase()
+            return processLabel.includes(lineCode)
+          })
+        }
+      }
+
+      if (processId.value) {
+        const selectedProcess = processes.value.find((proc) => String(proc.id) === String(processId.value))
+        const processCode = String(selectedProcess?.process_code || '').trim().toLowerCase()
+        if (processCode) {
+          laserItems = laserItems.filter((row) => {
+            const processLabel = `${row?.process_code || ''} ${row?.process_name || ''}`.toLowerCase()
+            return processLabel.includes(processCode)
+          })
+        }
+      }
+
+      if (status.value === 'OPEN') {
+        laserItems = laserItems.filter((row) => !row.ended_at)
+      } else if (status.value === 'CLOSED') {
+        laserItems = laserItems.filter((row) => !!row.ended_at)
+      }
+
+      if (excludeZeroProduction.value === 'true') {
+        laserItems = laserItems.filter((row) => Number(row?.production_qty || 0) !== 0)
+      }
+
+      if (hasIssue.value === 'true') {
+        laserItems = []
+      }
+
+      if (wantsCancelOnly) {
+        laserItems = laserItems.filter((row) => isCanceledSession(row))
+      } else if (sessionType.value === 'WORK') {
+        laserItems = laserItems.filter((row) => row.session_type === 'WORK' && !isCanceledSession(row))
+      } else if (sessionType.value === 'PAUSE') {
+        laserItems = laserItems.filter((row) => String(row?.end_action || '').toUpperCase() === 'PAUSE')
+      }
+
+      sessions.value = laserItems
+      return
+    }
+
     const params = {
       limit: 1000,
       start_date: startDate.value,
