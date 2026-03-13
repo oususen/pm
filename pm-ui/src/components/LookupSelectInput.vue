@@ -10,9 +10,9 @@
       @blur="onBlur"
     />
     <div v-if="isOpen" class="dropdown">
-      <div class="dropdown-head">
+      <div class="dropdown-head" :class="{ 'code-only': codeOnly }">
         <span class="col-code">品番</span>
-        <span class="col-name">品名</span>
+        <span v-if="!codeOnly" class="col-name">品名</span>
       </div>
       <div class="dropdown-body">
         <button
@@ -20,12 +20,12 @@
           :key="`lookup-option-${option.value}`"
           type="button"
           class="option-row"
-          :class="{ active: idx === activeIndex }"
+          :class="{ active: idx === activeIndex, 'code-only': codeOnly }"
           @mousedown.prevent="selectOption(option)"
           @mousemove="activeIndex = idx"
         >
           <span class="col-code">{{ option.code || option.label }}</span>
-          <span class="col-name">{{ option.name || option.label }}</span>
+          <span v-if="!codeOnly" class="col-name">{{ option.name || option.label }}</span>
         </button>
         <div v-if="!filteredOptions.length" class="empty-row">候補がありません</div>
       </div>
@@ -57,19 +57,33 @@ const props = defineProps({
     type: Number,
     default: 200,
   },
+  codeOnly: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['update:modelValue'])
 
 const inputText = ref('')
+const searchText = ref('')
 const isOpen = ref(false)
 const activeIndex = ref(-1)
 
 const normalize = (value) => String(value ?? '').trim().toLowerCase()
 
+const selectedOption = computed(() =>
+  (props.options || []).find((option) => `${option.value}` === `${props.modelValue}`),
+)
+
+const displayText = (option) => {
+  if (!option) return ''
+  return props.codeOnly ? (option.code || option.label || '') : (option.label || '')
+}
+
 const filteredOptions = computed(() => {
   const source = Array.isArray(props.options) ? props.options : []
-  const query = normalize(inputText.value)
+  const query = normalize(searchText.value)
   if (!query) return source.slice(0, props.maxOptions)
   return source
     .filter((option) => {
@@ -81,12 +95,9 @@ const filteredOptions = computed(() => {
     .slice(0, props.maxOptions)
 })
 
-const selectedOption = computed(() =>
-  (props.options || []).find((option) => `${option.value}` === `${props.modelValue}`),
-)
-
 const syncInputByModelValue = () => {
-  inputText.value = selectedOption.value?.label || ''
+  inputText.value = displayText(selectedOption.value)
+  searchText.value = ''
 }
 
 watch(() => props.modelValue, syncInputByModelValue, { immediate: true })
@@ -118,6 +129,7 @@ const findMatch = (text, allowPartial = false) => {
 
 const onInput = (value) => {
   inputText.value = value
+  searchText.value = value
   isOpen.value = true
   activeIndex.value = filteredOptions.value.length ? 0 : -1
   if (!String(value || '').trim()) {
@@ -132,12 +144,14 @@ const onInput = (value) => {
 
 const selectOption = (option) => {
   emit('update:modelValue', option.value)
-  inputText.value = option.label
+  inputText.value = displayText(option)
+  searchText.value = ''
   isOpen.value = false
   activeIndex.value = -1
 }
 
 const onFocus = () => {
+  searchText.value = ''
   isOpen.value = true
   activeIndex.value = filteredOptions.value.length ? 0 : -1
 }
@@ -153,12 +167,12 @@ const finalizeInput = () => {
   const matched = findMatch(value, true)
   if (matched) {
     emit('update:modelValue', matched.value)
-    inputText.value = matched.label
+    inputText.value = displayText(matched)
     return
   }
 
   if (selectedOption.value) {
-    inputText.value = selectedOption.value.label
+    inputText.value = displayText(selectedOption.value)
     return
   }
 
@@ -201,6 +215,7 @@ const onKeydown = (event) => {
 const onBlur = () => {
   window.setTimeout(() => {
     finalizeInput()
+    searchText.value = ''
     isOpen.value = false
     activeIndex.value = -1
   }, 120)
@@ -240,6 +255,9 @@ const onBlur = () => {
   font-weight: 700;
   background: #f3f4f6;
 }
+.dropdown-head.code-only {
+  grid-template-columns: 1fr;
+}
 .dropdown-body {
   max-height: 240px;
   overflow-y: auto;
@@ -256,6 +274,9 @@ const onBlur = () => {
   padding: 6px 8px;
   cursor: pointer;
   font-size: 12px;
+}
+.option-row.code-only {
+  grid-template-columns: 1fr;
 }
 .option-row.active {
   background: #e0f2fe;

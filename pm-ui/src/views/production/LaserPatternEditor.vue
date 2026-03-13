@@ -18,10 +18,10 @@
         <table class="list-table">
           <thead>
             <tr>
-              <th>パターン番号</th>
+              <th class="col-pattern-no">Ｐ№</th>
               <th>材料</th>
               <th>設備</th>
-              <th>時間(分/回)</th>
+              <th class="col-time">時間(分/回)</th>
             </tr>
           </thead>
           <tbody>
@@ -31,10 +31,10 @@
               :class="{ active: form.id === pattern.id }"
               @click="selectPattern(pattern)"
             >
-              <td>{{ pattern.pattern_no }}</td>
+              <td class="col-pattern-no">{{ pattern.pattern_no }}</td>
               <td>{{ pattern.material_code }}</td>
               <td>{{ pattern.equipment_code }}</td>
-              <td class="num">{{ formatNumber(pattern.process_time_min) }}</td>
+              <td class="num col-time">{{ formatNumber(pattern.process_time_min) }}</td>
             </tr>
             <tr v-if="!filteredPatterns.length">
               <td colspan="4" class="empty">データがありません</td>
@@ -67,7 +67,7 @@
           </div>
           <div class="field">
             <label>加工時間(分/回)</label>
-            <input v-model="form.process_time_min" type="number" step="0.01" min="0" />
+            <input v-model="form.process_time_min" type="number" step="0.1" min="0" />
           </div>
         </div>
 
@@ -90,11 +90,12 @@
                   <LookupSelectInput
                     v-model="item.component_product"
                     :options="allProductLookupOptions"
+                    :code-only="true"
                     placeholder="部番/品名を入力"
                   />
                 </td>
                 <td>
-                  <input v-model="item.take_qty" type="number" step="0.001" min="0" />
+                  <input v-model="item.take_qty" type="number" step="1" min="1" />
                 </td>
                 <td class="remove-col">
                   <button class="btn danger small" type="button" @click="removeComponentRow(idx)">削除</button>
@@ -122,12 +123,12 @@
                 <td>
                   <LookupSelectInput
                     v-model="item.finished_product"
-                    :options="allProductLookupOptions"
+                    :options="finishedProductLookupOptions"
                     placeholder="完成品番/品名を入力"
                   />
                 </td>
                 <td>
-                  <input v-model="item.units_per_shot" type="number" step="0.001" min="0" />
+                  <input v-model="item.units_per_shot" type="number" step="0.1" min="0.1" />
                 </td>
                 <td class="remove-col">
                   <button class="btn danger small" type="button" @click="removeFinishedRow(idx)">削除</button>
@@ -177,7 +178,25 @@ const normalizeList = (payload) => {
 const formatNumber = (value) => {
   const num = Number(value)
   if (!Number.isFinite(num)) return ''
-  return Number.isInteger(num) ? `${num}` : `${num.toFixed(2)}`
+  return num.toFixed(1)
+}
+
+const formatIntegerInput = (value) => {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return `${value ?? ''}`
+  return `${Math.trunc(num)}`
+}
+
+const formatOneDecimalInput = (value) => {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return `${value ?? ''}`
+  return num.toFixed(1)
+}
+
+const isOneDecimal = (value) => {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return false
+  return Math.abs(num * 10 - Math.round(num * 10)) < 1e-9
 }
 
 const filteredPatterns = computed(() => {
@@ -195,6 +214,11 @@ const toProductLookupOption = (product) => ({
 
 const materialLookupOptions = computed(() => materialProductOptions.value.map(toProductLookupOption))
 const allProductLookupOptions = computed(() => allProductOptions.value.map(toProductLookupOption))
+const finishedProductLookupOptions = computed(() =>
+  allProductOptions.value
+    .filter((item) => Boolean(item?.is_final_product) && Boolean(item?.is_active))
+    .map(toProductLookupOption),
+)
 const equipmentLookupOptions = computed(() =>
   equipmentOptions.value.map((equipment) => ({
     value: equipment.id,
@@ -227,14 +251,14 @@ const hydrateForm = (pattern) => ({
   pattern_no: pattern.pattern_no || '',
   material: pattern.material ?? null,
   equipment: pattern.equipment ?? null,
-  process_time_min: `${pattern.process_time_min ?? 0}`,
+  process_time_min: formatOneDecimalInput(pattern.process_time_min ?? 0),
   component_items: (pattern.component_items || []).map((item) => ({
     component_product: item.component_product ?? null,
-    take_qty: `${item.take_qty ?? 0}`,
+    take_qty: formatIntegerInput(item.take_qty ?? 0),
   })),
   finished_items: (pattern.finished_items || []).map((item) => ({
     finished_product: item.finished_product ?? null,
-    units_per_shot: `${item.units_per_shot ?? 0}`,
+    units_per_shot: formatOneDecimalInput(item.units_per_shot ?? 0),
   })),
 })
 
@@ -268,14 +292,14 @@ const buildPayload = () => ({
   pattern_no: form.value.pattern_no,
   material: form.value.material,
   equipment: form.value.equipment,
-  process_time_min: form.value.process_time_min,
+  process_time_min: Number(Number(form.value.process_time_min).toFixed(1)),
   component_items: form.value.component_items.map((item) => ({
     component_product: item.component_product,
-    take_qty: item.take_qty,
+    take_qty: Number.parseInt(`${item.take_qty}`, 10),
   })),
   finished_items: form.value.finished_items.map((item) => ({
     finished_product: item.finished_product,
-    units_per_shot: item.units_per_shot,
+    units_per_shot: Number(Number(item.units_per_shot).toFixed(1)),
   })),
 })
 
@@ -283,17 +307,22 @@ const validateForm = () => {
   if (!form.value.pattern_no) return 'パターン番号を入力してください。'
   if (!form.value.material) return '使用材料を選択してください。'
   if (!form.value.equipment) return '使用設備を選択してください。'
-  if (Number(form.value.process_time_min) < 0) return '加工時間は0以上で入力してください。'
+  if (Number(form.value.process_time_min) < 0 || !isOneDecimal(form.value.process_time_min)) {
+    return '加工時間は0以上の小数1桁で入力してください。'
+  }
 
   const invalidComp = form.value.component_items.some(
-    (item) => !item.component_product || Number(item.take_qty) <= 0,
+    (item) => !item.component_product || Number(item.take_qty) <= 0 || !Number.isInteger(Number(item.take_qty)),
   )
-  if (invalidComp) return '構成部品の部番と取り数(0より大きい値)を入力してください。'
+  if (invalidComp) return '構成部品の部番と取り数(1以上の整数)を入力してください。'
 
   const invalidFinished = form.value.finished_items.some(
-    (item) => !item.finished_product || Number(item.units_per_shot) <= 0,
+    (item) =>
+      !item.finished_product ||
+      Number(item.units_per_shot) <= 0 ||
+      !isOneDecimal(item.units_per_shot),
   )
-  if (invalidFinished) return '完成品情報の品番と取り数(0より大きい値)を入力してください。'
+  if (invalidFinished) return '完成品情報の品番と取り数(0より大きい小数1桁)を入力してください。'
   return ''
 }
 
@@ -459,6 +488,16 @@ onMounted(async () => {
 }
 .list-table .num {
   text-align: right;
+}
+.list-table .col-pattern-no {
+  width: 56px;
+  min-width: 56px;
+  white-space: nowrap;
+}
+.list-table .col-time {
+  width: 72px;
+  min-width: 72px;
+  white-space: nowrap;
 }
 .list-table .empty {
   text-align: center;
