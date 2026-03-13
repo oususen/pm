@@ -1,0 +1,14 @@
+-- 4013既存22件の設定補正
+START TRANSACTION;
+
+UPDATE m_product p
+SET
+  p.standard_lt_days = 1,
+  p.line_id = (SELECT id FROM m_line WHERE line_code = 'L0013' LIMIT 1),
+  p.process_id = (SELECT id FROM m_process WHERE process_code = '4013' LIMIT 1),
+  p.management_unit = 'DAY',
+  p.is_line_final_product = 1,
+  p.updated_at = NOW()
+WHERE p.product_code IN ('9770345','YD40000396','YD40000406','YD40000419','YD40000420','YD40000426-00S','YD40000428-00S','YD40000432-00S','YD40000433-00S','YD40000437-00S','YD40000444-00S','YD40000447','YD40000451','YD40000470-00S','YD40000472','YD40000474-02S','YD40001005','YD40006243-00S','YD40006244','YD40006247-00S','YD40006248-05S','YD40007244-00S');
+
+COMMIT;
