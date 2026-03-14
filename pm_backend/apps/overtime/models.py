@@ -43,8 +43,8 @@ def calculate_overtime_hours(start_time, end_time):
 
     regular_wall = wall_minutes - midnight_wall
 
-    # 休憩控除後の実作業時間（按分）
-    work_minutes = apply_breaks(wall_minutes)
+    # 休憩控除後、30分単位で切り捨て
+    work_minutes = (apply_breaks(wall_minutes) // 30) * 30
     ratio = work_minutes / wall_minutes if wall_minutes > 0 else 1
     regular_minutes = round(regular_wall * ratio)
     midnight_minutes = work_minutes - regular_minutes

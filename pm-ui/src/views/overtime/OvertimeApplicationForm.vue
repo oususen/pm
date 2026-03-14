@@ -161,8 +161,8 @@ const previewHours = computed(() => {
   const midnightWall = Math.max(0, Math.min(endMin, midnightEnd) - Math.max(startMin, midnightStart))
   const regularWall = wallMin - midnightWall
 
-  // 休憩控除（2時間ごとに10分）
-  const workMin = applyBreaks(wallMin)
+  // 休憩控除（2時間ごとに10分）→ 30分単位で切り捨て
+  const workMin = Math.floor(applyBreaks(wallMin) / 30) * 30
   // 深夜・通常の比率で按分
   const ratio = wallMin > 0 ? workMin / wallMin : 1
   const regularMin = Math.round(regularWall * ratio)
