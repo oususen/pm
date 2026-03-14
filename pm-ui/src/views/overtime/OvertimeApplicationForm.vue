@@ -26,9 +26,9 @@
         <div class="form-row">
           <label class="form-label">勤務時間</label>
           <div class="time-range">
-            <input type="time" v-model="form.work_start_time" class="form-input time-input" placeholder="開始" />
+            <input type="text" v-model="form.work_start_time" class="form-input time-input" placeholder="08:00" maxlength="5" />
             <span class="tilde">〜</span>
-            <input type="time" v-model="form.scheduled_end_time" class="form-input time-input" placeholder="定時終了" />
+            <input type="text" v-model="form.scheduled_end_time" class="form-input time-input" placeholder="17:15" maxlength="5" />
             <span class="time-note">（定時）</span>
           </div>
         </div>
@@ -36,9 +36,9 @@
         <div class="form-row">
           <label class="form-label required">残業時間</label>
           <div class="time-range">
-            <input type="time" v-model="form.start_time" class="form-input time-input" required />
+            <input type="text" v-model="form.start_time" class="form-input time-input" placeholder="17:15" maxlength="5" required />
             <span class="tilde">〜</span>
-            <input type="time" v-model="form.end_time" class="form-input time-input" required />
+            <input type="text" v-model="form.end_time" class="form-input time-input" placeholder="19:00" maxlength="5" required />
           </div>
         </div>
 
