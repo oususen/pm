@@ -66,7 +66,7 @@
                 v-if="app.can_edit"
                 class="btn btn-sm btn-danger"
                 @click="deleteApp(app)"
-              >削除</button>
+              >{{ app.status === 'submitted' ? 'キャンセル' : '削除' }}</button>
               <button
                 class="btn btn-sm btn-ghost"
                 @click="openDetail(app)"
@@ -174,7 +174,10 @@ function openDetail(app) {
 }
 
 async function deleteApp(app) {
-  if (!confirm(`${app.work_date} の申請を削除しますか？`)) return
+  const msg = app.status === 'submitted'
+    ? `${app.work_date} の申請を取り消しますか？（承認依頼も取り消されます）`
+    : `${app.work_date} の申請を削除しますか？`
+  if (!confirm(msg)) return
   try {
     await api.overtime.deleteApplication(app.id)
     await fetchList()

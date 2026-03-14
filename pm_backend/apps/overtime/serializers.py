@@ -73,7 +73,7 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return False
-        return obj.applicant_id == request.user.id and obj.status in ('draft', 'rejected')
+        return obj.applicant_id == request.user.id and obj.status in ('draft', 'submitted', 'rejected')
 
     def get_can_approve(self, obj):
         request = self.context.get('request')

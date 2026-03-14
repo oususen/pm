@@ -183,25 +183,33 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         app = self.get_object()
-        if app.status not in ('draft', 'rejected'):
-            return Response(
-                {'detail': '下書きまたは却下された申請のみ編集できます。'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        # 申請者本人のみ
         if app.applicant != request.user:
             return Response({'detail': '権限がありません。'}, status=status.HTTP_403_FORBIDDEN)
+        if app.status not in ('draft', 'submitted', 'rejected'):
+            return Response(
+                {'detail': '承認済み申請は編集できません。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # 申請中だった場合は下書きに戻してpendingログをクリア
+        if app.status == 'submitted':
+            app.approval_logs.filter(status='pending').delete()
+            app.status = 'draft'
+            app.submitted_at = None
+            app.save(update_fields=['status', 'submitted_at', 'updated_at'])
         return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
         app = self.get_object()
-        if app.status not in ('draft', 'rejected'):
-            return Response(
-                {'detail': '下書きまたは却下された申請のみ削除できます。'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         if app.applicant != request.user:
             return Response({'detail': '権限がありません。'}, status=status.HTTP_403_FORBIDDEN)
+        if app.status not in ('draft', 'submitted', 'rejected'):
+            return Response(
+                {'detail': '承認済み申請は削除できません。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # 申請中の場合はpendingログもクリアして削除
+        if app.status == 'submitted':
+            app.approval_logs.filter(status='pending').delete()
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=['post'])
