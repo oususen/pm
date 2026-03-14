@@ -20,15 +20,15 @@
 
         <div class="form-row">
           <label class="form-label required">実施日</label>
-          <input type="date" v-model="form.work_date" class="form-input" required />
+          <input type="text" v-model="form.work_date" class="form-input" placeholder="2026/03/14" maxlength="10" @blur="formatDate" required />
         </div>
 
         <div class="form-row">
           <label class="form-label">勤務時間</label>
           <div class="time-range">
-            <input type="text" v-model="form.work_start_time" class="form-input time-input" placeholder="08:00" maxlength="5" />
+            <input type="text" v-model="form.work_start_time" class="form-input time-input" placeholder="08:00" maxlength="5" @blur="formatTime('work_start_time')" />
             <span class="tilde">〜</span>
-            <input type="text" v-model="form.scheduled_end_time" class="form-input time-input" placeholder="17:15" maxlength="5" />
+            <input type="text" v-model="form.scheduled_end_time" class="form-input time-input" placeholder="17:15" maxlength="5" @blur="formatTime('scheduled_end_time')" />
             <span class="time-note">（定時）</span>
           </div>
         </div>
@@ -36,9 +36,9 @@
         <div class="form-row">
           <label class="form-label required">残業時間</label>
           <div class="time-range">
-            <input type="text" v-model="form.start_time" class="form-input time-input" placeholder="17:15" maxlength="5" required />
+            <input type="text" v-model="form.start_time" class="form-input time-input" placeholder="17:15" maxlength="5" @blur="formatTime('start_time')" required />
             <span class="tilde">〜</span>
-            <input type="text" v-model="form.end_time" class="form-input time-input" placeholder="19:00" maxlength="5" required />
+            <input type="text" v-model="form.end_time" class="form-input time-input" placeholder="19:00" maxlength="5" @blur="formatTime('end_time')" required />
           </div>
         </div>
 
@@ -79,9 +79,40 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '@/api/client'
+
+// "800" "0800" "8:00" "08:00" → "08:00"、変換不能なら元の値を返す
+function toHHMM(val) {
+  if (!val) return val
+  const s = String(val).trim().replace('：', ':')
+  // すでに HH:MM 形式
+  if (/^\d{1,2}:\d{2}$/.test(s)) {
+    const [h, m] = s.split(':').map(Number)
+    if (h >= 0 && h <= 29 && m >= 0 && m <= 59) {
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+    }
+  }
+  // 3〜4桁の数字 "800" "1715"
+  if (/^\d{3,4}$/.test(s)) {
+    const h = s.length === 3 ? Number(s[0]) : Number(s.slice(0, 2))
+    const m = Number(s.slice(-2))
+    if (h >= 0 && h <= 29 && m >= 0 && m <= 59) {
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+    }
+  }
+  return val
+}
+
+// "20260314" "2026/03/14" "2026-03-14" → "2026-03-14"
+function toYYYYMMDD(val) {
+  if (!val) return val
+  const s = String(val).trim().replace(/\//g, '-')
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+  if (/^\d{8}$/.test(s)) return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`
+  return val
+}
 
 const router = useRouter()
 const route = useRoute()
@@ -106,9 +137,11 @@ const form = ref({
 
 // 時間数プレビュー（フロントエンドで計算）
 const previewHours = computed(() => {
-  if (!form.value.start_time || !form.value.end_time) return null
-  const [sh, sm] = form.value.start_time.split(':').map(Number)
-  const [eh, em] = form.value.end_time.split(':').map(Number)
+  const startRaw = toHHMM(form.value.start_time)
+  const endRaw = toHHMM(form.value.end_time)
+  if (!startRaw || !startRaw.includes(':') || !endRaw || !endRaw.includes(':')) return null
+  const [sh, sm] = startRaw.split(':').map(Number)
+  const [eh, em] = endRaw.split(':').map(Number)
   let startMin = sh * 60 + sm
   let endMin = eh * 60 + em
   if (endMin <= startMin) endMin += 24 * 60
@@ -128,6 +161,26 @@ const previewHours = computed(() => {
     midnight: Math.round(midnightMin / 60 * 10) / 10,
   }
 })
+
+// フォーカスが外れたとき自動整形
+function formatTime(field) {
+  form.value[field] = toHHMM(form.value[field])
+}
+function formatDate() {
+  form.value.work_date = toYYYYMMDD(form.value.work_date)
+}
+
+// 送信前に全フィールドを正規化した payload を返す
+function normalizedPayload() {
+  return {
+    ...form.value,
+    work_date: toYYYYMMDD(form.value.work_date),
+    work_start_time: toHHMM(form.value.work_start_time) || null,
+    scheduled_end_time: toHHMM(form.value.scheduled_end_time) || null,
+    start_time: toHHMM(form.value.start_time),
+    end_time: toHHMM(form.value.end_time),
+  }
+}
 
 onMounted(async () => {
   if (isEdit.value) {
@@ -157,10 +210,11 @@ async function saveDraft() {
   saving.value = true
   errorMsg.value = ''
   try {
+    const payload = normalizedPayload()
     if (isEdit.value) {
-      await api.overtime.updateApplication(props.id, form.value)
+      await api.overtime.updateApplication(props.id, payload)
     } else {
-      await api.overtime.createApplication(form.value)
+      await api.overtime.createApplication(payload)
     }
     router.push('/overtime/list')
   } catch (e) {
@@ -174,11 +228,12 @@ async function handleSubmit() {
   saving.value = true
   errorMsg.value = ''
   try {
+    const payload = normalizedPayload()
     let appId = props.id
     if (isEdit.value) {
-      await api.overtime.updateApplication(props.id, form.value)
+      await api.overtime.updateApplication(props.id, payload)
     } else {
-      const res = await api.overtime.createApplication(form.value)
+      const res = await api.overtime.createApplication(payload)
       appId = res.data.id
     }
     // 申請提出
