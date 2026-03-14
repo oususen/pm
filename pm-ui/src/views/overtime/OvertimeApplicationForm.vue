@@ -115,7 +115,6 @@ function toYYYYMMDD(val) {
 }
 
 const router = useRouter()
-const route = useRoute()
 
 const props = defineProps({
   id: { type: [String, Number], default: null },
