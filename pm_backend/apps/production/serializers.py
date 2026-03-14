@@ -20,6 +20,7 @@ from .models_record_inquiry_setting import ProductionRecordInquirySetting
 from .models_schedule_config import ScheduleConfig
 from .models_laser_pattern import LaserPattern, LaserPatternComponent, LaserPatternFinishedProduct
 from .models_laser_actual import LaserActual, LaserActualDetail
+from .models_laser_kadojiseki import LaserShiftRecord
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_production import ProcessActual, ProductionOrder, StockAllocation
 
@@ -1127,3 +1128,110 @@ class LineBacklogAdjustmentSerializer(serializers.ModelSerializer):
             'updated_by',
         ]
         read_only_fields = ['id', 'updated_at', 'updated_by']
+
+
+class LaserShiftRecordSerializer(serializers.ModelSerializer):
+    """レーザーシフト稼働記録シリアライザ（開始・終了2段階入力）"""
+
+    equipment_code = serializers.CharField(source='equipment.equipment_code', read_only=True)
+    equipment_name = serializers.CharField(source='equipment.equipment_name', read_only=True)
+    shift_no_display = serializers.CharField(source='get_shift_no_display', read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+    updated_by_name = serializers.SerializerMethodField()
+    process_hours = serializers.SerializerMethodField()
+    operating_rate = serializers.SerializerMethodField()
+    is_completed = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LaserShiftRecord
+        fields = [
+            'id',
+            'work_date',
+            'equipment',
+            'equipment_code',
+            'equipment_name',
+            'shift_no',
+            'shift_no_display',
+            'start_totalizer_hour',
+            'start_totalizer_min',
+            'end_totalizer_hour',
+            'end_totalizer_min',
+            'work_hours',
+            'process_hours',
+            'operating_rate',
+            'is_completed',
+            'created_by',
+            'created_by_name',
+            'updated_by',
+            'updated_by_name',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.get_full_name() or obj.created_by.username
+        return None
+
+    def get_updated_by_name(self, obj):
+        if obj.updated_by:
+            return obj.updated_by.get_full_name() or obj.updated_by.username
+        return None
+
+    def get_is_completed(self, obj):
+        """開始・終了両方入力済みかどうか"""
+        return (
+            obj.end_totalizer_hour is not None
+            and obj.end_totalizer_min is not None
+            and obj.work_hours is not None
+        )
+
+    def get_process_hours(self, obj):
+        """加工時間 = (終了積算 - 開始積算) ÷ 60"""
+        if obj.end_totalizer_hour is None or obj.end_totalizer_min is None:
+            return None
+        end_min = obj.end_totalizer_hour * 60 + obj.end_totalizer_min
+        start_min = obj.start_totalizer_hour * 60 + obj.start_totalizer_min
+        diff_min = end_min - start_min
+        if diff_min < 0:
+            return None  # 積算リセット等
+        return round(diff_min / 60, 1)
+
+    def get_operating_rate(self, obj):
+        """稼働率 = 加工時間 ÷ 仕事時間 × 100"""
+        process_hours = self.get_process_hours(obj)
+        if process_hours is None:
+            return None
+        work_hours = float(obj.work_hours or 0)
+        if work_hours <= 0:
+            return None
+        return round(process_hours / work_hours * 100, 1)
+
+    def validate_start_totalizer_min(self, value):
+        if value > 59:
+            raise serializers.ValidationError('分は0〜59で入力してください。')
+        return value
+
+    def validate_end_totalizer_min(self, value):
+        if value is not None and value > 59:
+            raise serializers.ValidationError('分は0〜59で入力してください。')
+        return value
+
+    def validate_work_hours(self, value):
+        if value is not None and value <= 0:
+            raise serializers.ValidationError('仕事時間は0より大きい値を入力してください。')
+        return value
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        if request and hasattr(request, 'user') and request.user.is_authenticated:
+            validated_data['created_by'] = request.user
+            validated_data['updated_by'] = request.user
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        request = self.context.get('request')
+        if request and hasattr(request, 'user') and request.user.is_authenticated:
+            validated_data['updated_by'] = request.user
+        return super().update(instance, validated_data)

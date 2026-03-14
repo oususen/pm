@@ -31,6 +31,7 @@ from .models_record_inquiry_setting import ProductionRecordInquirySetting
 from .models_schedule_config import ScheduleConfig
 from .models_laser_pattern import LaserPattern
 from .models_laser_actual import LaserActual
+from .models_laser_kadojiseki import LaserShiftRecord
 from .serializers import (
     LineDemandSerializer,
     LineBacklogSerializer,
@@ -48,6 +49,7 @@ from .serializers import (
     LineBacklogAdjustmentSerializer,
     LaserPatternSerializer,
     LaserActualSerializer,
+    LaserShiftRecordSerializer,
 )
 from .services.order_expansion import OrderExpansionService
 from .services.gantt_planning import generate_line_gantt_plans
@@ -4091,6 +4093,31 @@ class LaserActualViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class LaserShiftRecordFilter(django_filters.FilterSet):
+    work_date__gte = django_filters.DateFilter(field_name='work_date', lookup_expr='gte')
+    work_date__lte = django_filters.DateFilter(field_name='work_date', lookup_expr='lte')
+    equipment = django_filters.NumberFilter(field_name='equipment_id')
+    shift_no = django_filters.NumberFilter(field_name='shift_no')
+
+    class Meta:
+        model = LaserShiftRecord
+        fields = []
+
+
+class LaserShiftRecordViewSet(viewsets.ModelViewSet):
+    """レーザーシフト稼働記録（開始・終了の2段階入力）"""
+
+    queryset = (
+        LaserShiftRecord.objects.all()
+        .select_related('equipment', 'created_by', 'updated_by')
+    )
+    serializer_class = LaserShiftRecordSerializer
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_class = LaserShiftRecordFilter
+    ordering_fields = ['work_date', 'equipment', 'shift_no', 'created_at']
+    ordering = ['-work_date', 'equipment', 'shift_no']
 
 
 class ProductionPlanLockSettingView(APIView):

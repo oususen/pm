@@ -1,5 +1,5 @@
 <template>
-  <div class="laser-actual-page" :class="`mode-${activeTab}`">
+  <div class="laser-actual-page" :class="[`mode-${activeTab}`]">
 
     <div class="tab-bar">
       <div class="tab-buttons">
@@ -18,6 +18,14 @@
           @click="activeTab = 'list'"
         >
           一覧
+        </button>
+        <button
+          type="button"
+          class="tab-item"
+          :class="{ active: activeTab === 'kadojiseki' }"
+          @click="activeTab = 'kadojiseki'"
+        >
+          稼働記録
         </button>
       </div>
       <div v-if="activeTab === 'entry' && (form.pattern || currentProcessingMessages.length)" class="tab-operator-actions">
@@ -210,6 +218,273 @@
         </div>
       </section>
     </div>
+
+    <!-- 稼働記録タブ -->
+    <section v-show="activeTab === 'kadojiseki'" class="panel kadojiseki-panel">
+      <div class="panel-head">
+        <h3>稼働記録</h3>
+      </div>
+
+      <div v-if="kadoMessage" class="message" :class="`is-${kadoMessageType}`">
+        {{ kadoMessage }}
+      </div>
+
+      <!-- 開始/終了モード切り替え -->
+      <div class="kado-mode-bar">
+        <button
+          type="button"
+          class="btn"
+          :class="{ primary: kadoMode === 'start' }"
+          @click="switchKadoMode('start')"
+        >開始入力</button>
+        <button
+          type="button"
+          class="btn"
+          :class="{ primary: kadoMode === 'end' }"
+          @click="switchKadoMode('end')"
+        >終了入力</button>
+      </div>
+
+      <!-- 共通フィールド -->
+      <div class="kado-form-grid">
+        <div class="field">
+          <label class="required">日付</label>
+          <input v-model="kadoForm.work_date" type="date" @change="onKadoKeyChange" />
+        </div>
+        <div class="field">
+          <label class="required">設備</label>
+          <select v-model="kadoForm.equipment" @change="onKadoKeyChange">
+            <option value="">-- 選択 --</option>
+            <option v-for="eq in laserEquipments" :key="eq.id" :value="String(eq.id)">
+              {{ eq.equipment_code }} - {{ eq.equipment_name }}
+            </option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="required">シフト</label>
+          <select v-model="kadoForm.shift_no" @change="onKadoKeyChange">
+            <option value="">-- 選択 --</option>
+            <option value="1">1勤</option>
+            <option value="2">2勤</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 開始モード -->
+      <template v-if="kadoMode === 'start'">
+        <!-- 前シフト情報バー -->
+        <div v-if="kadoPrevShiftRecord" class="kado-prev-shift-bar">
+          <template v-if="kadoPrevShiftRecord.end_totalizer_hour != null">
+            <span class="kado-existing-label">前シフト終了積算から自動セット:</span>
+            <span class="kado-existing-value">
+              {{ formatNumber(kadoPrevShiftRecord.end_totalizer_hour, 0) }} H
+              {{ String(kadoPrevShiftRecord.end_totalizer_min).padStart(2,'0') }} M
+            </span>
+          </template>
+          <template v-else>
+            <span class="kado-existing-label">前シフト（{{ kadoPrevShiftRecord.shift_no_display }}）は未終了 →</span>
+            <span class="kado-existing-value">保存時に今回の開始積算を前シフトの終了積算として自動登録します</span>
+          </template>
+        </div>
+        <div class="kado-form-grid">
+          <div class="field">
+            <label class="required">開始積算 H</label>
+            <input
+              v-model.number="kadoForm.start_totalizer_hour"
+              type="number" min="0" step="1" inputmode="numeric"
+              placeholder="例: 15582"
+            />
+          </div>
+          <div class="field">
+            <label class="required">開始積算 M (0〜59)</label>
+            <input
+              v-model.number="kadoForm.start_totalizer_min"
+              type="number" min="0" max="59" step="1" inputmode="numeric"
+              placeholder="0〜59"
+            />
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn primary" :disabled="!canSaveKadoStart || kadoSubmitting" @click="saveKadoStart">
+            {{ kadoSubmitting ? '保存中...' : '開始を保存' }}
+          </button>
+          <button class="btn" :disabled="kadoSubmitting" @click="resetKadoForm">クリア</button>
+        </div>
+      </template>
+
+      <!-- 終了モード -->
+      <template v-if="kadoMode === 'end'">
+        <!-- 既存レコードの開始積算を表示 -->
+        <div v-if="kadoExistingRecord" class="kado-existing-info">
+          <span class="kado-existing-label">開始積算:</span>
+          <span class="kado-existing-value">
+            {{ formatNumber(kadoExistingRecord.start_totalizer_hour, 0) }} H
+            {{ kadoExistingRecord.start_totalizer_min }} M
+          </span>
+        </div>
+        <div v-else-if="kadoKeyFilled && !kadoKeyLoading" class="message is-error">
+          開始レコードが見つかりません。先に「開始入力」を行ってください。
+        </div>
+        <div v-if="kadoKeyLoading" class="message is-info">検索中...</div>
+
+        <div v-if="kadoExistingRecord" class="kado-form-grid">
+          <div class="field">
+            <label class="required">終了積算 H</label>
+            <input
+              v-model.number="kadoForm.end_totalizer_hour"
+              type="number" min="0" step="1" inputmode="numeric"
+              placeholder="例: 15599"
+            />
+          </div>
+          <div class="field">
+            <label class="required">終了積算 M (0〜59)</label>
+            <input
+              v-model.number="kadoForm.end_totalizer_min"
+              type="number" min="0" max="59" step="1" inputmode="numeric"
+              placeholder="0〜59"
+            />
+          </div>
+          <div class="field">
+            <label class="required">仕事時間 (H)</label>
+            <input
+              v-model.number="kadoForm.work_hours"
+              type="number" min="0.1" step="0.1" inputmode="decimal"
+              placeholder="例: 21.0"
+            />
+          </div>
+          <!-- 加工時間プレビュー -->
+          <div v-if="kadoEndPreviewHours != null" class="field kado-preview">
+            <label>加工時間（計算値）</label>
+            <span class="kado-preview-value">{{ kadoEndPreviewHours }} H</span>
+          </div>
+          <div v-if="kadoEndPreviewRate != null" class="field kado-preview">
+            <label>稼働率（計算値）</label>
+            <span class="kado-preview-value">{{ kadoEndPreviewRate }} %</span>
+          </div>
+        </div>
+        <div v-if="kadoExistingRecord" class="actions">
+          <button class="btn primary" :disabled="!canSaveKadoEnd || kadoSubmitting" @click="saveKadoEnd">
+            {{ kadoSubmitting ? '保存中...' : '終了を保存' }}
+          </button>
+          <button class="btn" :disabled="kadoSubmitting" @click="resetKadoForm">クリア</button>
+        </div>
+      </template>
+
+      <!-- 検索フィルタ -->
+      <div class="search-grid">
+        <div class="field">
+          <label>日付From</label>
+          <input v-model="kadoFilters.work_date_from" type="date" />
+        </div>
+        <div class="field">
+          <label>日付To</label>
+          <input v-model="kadoFilters.work_date_to" type="date" />
+        </div>
+        <div class="field">
+          <label>設備</label>
+          <select v-model="kadoFilters.equipment">
+            <option value="">すべて</option>
+            <option v-for="eq in laserEquipments" :key="`kf-${eq.id}`" :value="String(eq.id)">
+              {{ eq.equipment_code }} - {{ eq.equipment_name }}
+            </option>
+          </select>
+        </div>
+      </div>
+      <div class="search-actions">
+        <button class="btn primary" :disabled="kadoListLoading" @click="loadKadoRecords">
+          {{ kadoListLoading ? '検索中...' : '検索' }}
+        </button>
+        <button class="btn" @click="resetKadoFilters">条件クリア</button>
+      </div>
+
+      <div class="result-meta">{{ kadoRecords.length }} 件</div>
+
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>日付</th>
+              <th>設備</th>
+              <th>シフト</th>
+              <th class="num">開始積算 H:M</th>
+              <th class="num">終了積算 H:M</th>
+              <th class="num">仕事時間</th>
+              <th class="num">加工時間</th>
+              <th class="num">稼働率</th>
+              <th>状態</th>
+              <th>更新日時</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="row in kadoRecords" :key="row.id">
+              <!-- 通常表示行 -->
+              <tr v-if="editingKadoId !== row.id">
+                <td>{{ row.work_date }}</td>
+                <td>{{ row.equipment_code || '-' }}{{ row.equipment_name ? ' ' + row.equipment_name : '' }}</td>
+                <td>{{ row.shift_no_display || '-' }}</td>
+                <td class="num">{{ formatNumber(row.start_totalizer_hour, 0) }}:{{ String(row.start_totalizer_min).padStart(2,'0') }}</td>
+                <td class="num">
+                  {{ row.end_totalizer_hour != null
+                    ? `${formatNumber(row.end_totalizer_hour, 0)}:${String(row.end_totalizer_min).padStart(2,'0')}`
+                    : '-' }}
+                </td>
+                <td class="num">{{ row.work_hours != null ? formatNumber(row.work_hours, 1) : '-' }}</td>
+                <td class="num">{{ row.process_hours != null ? formatNumber(row.process_hours, 1) : '-' }}</td>
+                <td class="num">{{ row.operating_rate != null ? `${formatNumber(row.operating_rate, 1)} %` : '-' }}</td>
+                <td>
+                  <span class="kado-status" :class="row.is_completed ? 'completed' : 'started'">
+                    {{ row.is_completed ? '終了済み' : '開始済み' }}
+                  </span>
+                </td>
+                <td>{{ formatDateTime(row.updated_at) }}</td>
+                <td class="kado-row-actions">
+                  <button class="btn btn-sm" @click="startEditKado(row)">編集</button>
+                  <button class="btn danger btn-sm" @click="deleteKadoRecord(row)">削除</button>
+                </td>
+              </tr>
+              <!-- 編集行 -->
+              <tr v-else class="kado-editing-row">
+                <td>{{ row.work_date }}</td>
+                <td>{{ row.equipment_code || '-' }}{{ row.equipment_name ? ' ' + row.equipment_name : '' }}</td>
+                <td>{{ row.shift_no_display || '-' }}</td>
+                <td class="num">
+                  <input class="table-input table-input-num" type="number" min="0" step="1"
+                    v-model.number="editKadoForm.start_totalizer_hour" style="width:70px" />
+                  :
+                  <input class="table-input table-input-num" type="number" min="0" max="59" step="1"
+                    v-model.number="editKadoForm.start_totalizer_min" style="width:46px" />
+                </td>
+                <td class="num">
+                  <input class="table-input table-input-num" type="number" min="0" step="1"
+                    v-model.number="editKadoForm.end_totalizer_hour" placeholder="-" style="width:70px" />
+                  :
+                  <input class="table-input table-input-num" type="number" min="0" max="59" step="1"
+                    v-model.number="editKadoForm.end_totalizer_min" placeholder="-" style="width:46px" />
+                </td>
+                <td class="num">
+                  <input class="table-input table-input-num" type="number" min="0" step="0.1"
+                    v-model.number="editKadoForm.work_hours" placeholder="-" style="width:60px" />
+                </td>
+                <td class="num">-</td>
+                <td class="num">-</td>
+                <td></td>
+                <td></td>
+                <td class="kado-row-actions">
+                  <button class="btn primary btn-sm" :disabled="kadoEditSaving" @click="saveEditKado(row.id)">
+                    {{ kadoEditSaving ? '...' : '保存' }}
+                  </button>
+                  <button class="btn btn-sm" @click="cancelEditKado">キャンセル</button>
+                </td>
+              </tr>
+            </template>
+            <tr v-if="!kadoRecords.length">
+              <td colspan="11">データがありません。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
 
     <section v-show="activeTab === 'list'" class="panel list-panel">
         <div class="panel-head">
@@ -423,6 +698,303 @@ const normalizeList = (payload) => {
   return []
 }
 
+// --- 稼働記録フォーム ---
+const createEmptyKadoForm = () => ({
+  work_date: businessDateYmd(),
+  equipment: '',
+  shift_no: '',
+  start_totalizer_hour: '',
+  start_totalizer_min: '',
+  end_totalizer_hour: '',
+  end_totalizer_min: '',
+  work_hours: '',
+})
+
+const createDefaultKadoFilters = () => ({
+  work_date_from: shiftDateYmd(-14),
+  work_date_to: todayYmd(),
+  equipment: '',
+})
+
+const kadoMode = ref('start')       // 'start' | 'end'
+const kadoForm = ref(createEmptyKadoForm())
+const kadoFilters = ref(createDefaultKadoFilters())
+const kadoRecords = ref([])
+const kadoExistingRecord = ref(null)  // 終了モード時に取得した既存レコード
+const kadoKeyLoading = ref(false)
+const kadoSubmitting = ref(false)
+const kadoListLoading = ref(false)
+const kadoMessage = ref('')
+const kadoMessageType = ref('info')
+
+const setKadoMessage = (message, type = 'info') => {
+  kadoMessage.value = message
+  kadoMessageType.value = type
+}
+
+// 日付・設備・シフトが揃っているか
+const kadoKeyFilled = computed(() => (
+  !!kadoForm.value.work_date &&
+  !!kadoForm.value.equipment &&
+  !!kadoForm.value.shift_no
+))
+
+// 開始保存バリデーション
+const canSaveKadoStart = computed(() => {
+  if (!kadoKeyFilled.value) return false
+  const h = Number(kadoForm.value.start_totalizer_hour)
+  if (!Number.isInteger(h) || h < 0) return false
+  const m = Number(kadoForm.value.start_totalizer_min)
+  if (!Number.isInteger(m) || m < 0 || m > 59) return false
+  return true
+})
+
+// 終了保存バリデーション
+const canSaveKadoEnd = computed(() => {
+  if (!kadoExistingRecord.value) return false
+  const h = Number(kadoForm.value.end_totalizer_hour)
+  if (!Number.isInteger(h) || h < 0) return false
+  const m = Number(kadoForm.value.end_totalizer_min)
+  if (!Number.isInteger(m) || m < 0 || m > 59) return false
+  const wh = Number(kadoForm.value.work_hours)
+  if (!Number.isFinite(wh) || wh <= 0) return false
+  return true
+})
+
+// 終了入力時のリアルタイム計算プレビュー
+const kadoEndPreviewHours = computed(() => {
+  if (!kadoExistingRecord.value) return null
+  const endH = Number(kadoForm.value.end_totalizer_hour)
+  const endM = Number(kadoForm.value.end_totalizer_min)
+  if (!Number.isInteger(endH) || endH < 0) return null
+  if (!Number.isInteger(endM) || endM < 0 || endM > 59) return null
+  const rec = kadoExistingRecord.value
+  const startMin = rec.start_totalizer_hour * 60 + rec.start_totalizer_min
+  const endMin = endH * 60 + endM
+  const diff = endMin - startMin
+  if (diff < 0) return null
+  return round(diff / 60, 1)
+})
+
+const kadoEndPreviewRate = computed(() => {
+  const ph = kadoEndPreviewHours.value
+  if (ph === null) return null
+  const wh = Number(kadoForm.value.work_hours)
+  if (!Number.isFinite(wh) || wh <= 0) return null
+  return round(ph / wh * 100, 1)
+})
+
+const round = (v, d) => {
+  const f = Math.pow(10, d)
+  return Math.round(v * f) / f
+}
+
+// 前シフトの終了積算（開始入力モードで引き継ぎ用）
+const kadoPrevShiftRecord = ref(null)
+
+const switchKadoMode = (mode) => {
+  kadoMode.value = mode
+  kadoExistingRecord.value = null
+  kadoPrevShiftRecord.value = null
+  setKadoMessage('', 'info')
+  if (kadoKeyFilled.value) {
+    if (mode === 'end') fetchKadoExistingRecord()
+    if (mode === 'start') fetchKadoPrevShiftRecord()
+  }
+}
+
+// 終了モード・開始モード: 日付・設備・シフトが変わったら検索
+const onKadoKeyChange = () => {
+  kadoExistingRecord.value = null
+  kadoPrevShiftRecord.value = null
+  if (!kadoKeyFilled.value) return
+  if (kadoMode.value === 'end') fetchKadoExistingRecord()
+  if (kadoMode.value === 'start') fetchKadoPrevShiftRecord()
+}
+
+const fetchKadoExistingRecord = async () => {
+  kadoKeyLoading.value = true
+  try {
+    const params = {
+      work_date__gte: kadoForm.value.work_date,
+      work_date__lte: kadoForm.value.work_date,
+      equipment: kadoForm.value.equipment,
+      shift_no: kadoForm.value.shift_no,
+    }
+    const res = await api.laserShiftRecords.getLaserShiftRecords(params)
+    const rows = normalizeList(res.data)
+    kadoExistingRecord.value = rows[0] || null
+  } catch {
+    kadoExistingRecord.value = null
+  } finally {
+    kadoKeyLoading.value = false
+  }
+}
+
+// 開始入力モード: 直前シフト（終了済み）を取得して開始積算に自動セット
+const fetchKadoPrevShiftRecord = async () => {
+  if (!kadoForm.value.equipment || !kadoForm.value.work_date || !kadoForm.value.shift_no) return
+  try {
+    const res = await api.laserShiftRecords.getLaserShiftRecords({
+      equipment: kadoForm.value.equipment,
+      work_date__lte: kadoForm.value.work_date,
+      ordering: '-work_date,-shift_no',
+      page_size: 5,
+    })
+    const rows = normalizeList(res.data)
+    const currentDate = kadoForm.value.work_date
+    const currentShift = Number(kadoForm.value.shift_no)
+    // 終了済み・未終了問わず直前シフトを探す
+    const prev = rows.find((r) => {
+      if (r.work_date < currentDate) return true
+      if (r.work_date === currentDate && r.shift_no < currentShift) return true
+      return false
+    })
+    kadoPrevShiftRecord.value = prev || null
+    // 直前シフトが終了済みなら開始積算に自動セット
+    if (prev && prev.end_totalizer_hour != null) {
+      kadoForm.value.start_totalizer_hour = prev.end_totalizer_hour
+      kadoForm.value.start_totalizer_min = prev.end_totalizer_min
+    }
+  } catch {
+    kadoPrevShiftRecord.value = null
+  }
+}
+
+const resetKadoForm = () => {
+  kadoForm.value = createEmptyKadoForm()
+  kadoExistingRecord.value = null
+  setKadoMessage('', 'info')
+}
+
+const resetKadoFilters = async () => {
+  kadoFilters.value = createDefaultKadoFilters()
+  await loadKadoRecords()
+}
+
+const loadKadoRecords = async () => {
+  kadoListLoading.value = true
+  try {
+    const params = {}
+    if (kadoFilters.value.work_date_from) params.work_date__gte = kadoFilters.value.work_date_from
+    if (kadoFilters.value.work_date_to) params.work_date__lte = kadoFilters.value.work_date_to
+    if (kadoFilters.value.equipment) params.equipment = kadoFilters.value.equipment
+    const res = await api.laserShiftRecords.getLaserShiftRecords(params)
+    kadoRecords.value = normalizeList(res.data)
+  } catch (error) {
+    kadoRecords.value = []
+    setKadoMessage(extractErrorMessage(error, '稼働記録の取得に失敗しました。'), 'error')
+  } finally {
+    kadoListLoading.value = false
+  }
+}
+
+const saveKadoStart = async () => {
+  if (!canSaveKadoStart.value || kadoSubmitting.value) return
+  kadoSubmitting.value = true
+  setKadoMessage('', 'info')
+  try {
+    const startH = Number(kadoForm.value.start_totalizer_hour)
+    const startM = Number(kadoForm.value.start_totalizer_min)
+
+    // 前シフトが開始済み（終了未記録）なら、今回の開始積算を前シフトの終了積算として自動セット
+    const prev = kadoPrevShiftRecord.value
+    if (prev && prev.end_totalizer_hour == null) {
+      await api.laserShiftRecords.patchLaserShiftRecord(prev.id, {
+        end_totalizer_hour: startH,
+        end_totalizer_min: startM,
+      })
+    }
+
+    await api.laserShiftRecords.createLaserShiftRecord({
+      work_date: kadoForm.value.work_date,
+      equipment: Number(kadoForm.value.equipment),
+      shift_no: Number(kadoForm.value.shift_no),
+      start_totalizer_hour: startH,
+      start_totalizer_min: startM,
+    })
+    setKadoMessage('開始を保存しました。', 'success')
+    resetKadoForm()
+    await loadKadoRecords()
+  } catch (error) {
+    setKadoMessage(extractErrorMessage(error, '保存に失敗しました。入力内容を確認してください。'), 'error')
+  } finally {
+    kadoSubmitting.value = false
+  }
+}
+
+// --- 稼働記録 インライン編集 ---
+const editingKadoId = ref(null)
+const editKadoForm = ref({})
+const kadoEditSaving = ref(false)
+
+const startEditKado = (row) => {
+  editingKadoId.value = row.id
+  editKadoForm.value = {
+    start_totalizer_hour: row.start_totalizer_hour,
+    start_totalizer_min: row.start_totalizer_min,
+    end_totalizer_hour: row.end_totalizer_hour ?? '',
+    end_totalizer_min: row.end_totalizer_min ?? '',
+    work_hours: row.work_hours ?? '',
+  }
+}
+
+const cancelEditKado = () => {
+  editingKadoId.value = null
+  editKadoForm.value = {}
+}
+
+const saveEditKado = async (id) => {
+  kadoEditSaving.value = true
+  try {
+    const f = editKadoForm.value
+    const payload = {
+      start_totalizer_hour: Number(f.start_totalizer_hour),
+      start_totalizer_min: Number(f.start_totalizer_min),
+      end_totalizer_hour: f.end_totalizer_hour !== '' ? Number(f.end_totalizer_hour) : null,
+      end_totalizer_min: f.end_totalizer_min !== '' ? Number(f.end_totalizer_min) : null,
+      work_hours: f.work_hours !== '' ? Number(f.work_hours) : null,
+    }
+    await api.laserShiftRecords.patchLaserShiftRecord(id, payload)
+    cancelEditKado()
+    await loadKadoRecords()
+  } catch (error) {
+    setKadoMessage(extractErrorMessage(error, '更新に失敗しました。'), 'error')
+  } finally {
+    kadoEditSaving.value = false
+  }
+}
+
+const deleteKadoRecord = async (row) => {
+  if (!confirm(`${row.work_date} ${row.equipment_code} ${row.shift_no_display} の記録を削除しますか？`)) return
+  try {
+    await api.laserShiftRecords.deleteLaserShiftRecord(row.id)
+    await loadKadoRecords()
+  } catch (error) {
+    setKadoMessage(extractErrorMessage(error, '削除に失敗しました。'), 'error')
+  }
+}
+
+const saveKadoEnd = async () => {
+  if (!canSaveKadoEnd.value || kadoSubmitting.value) return
+  kadoSubmitting.value = true
+  setKadoMessage('', 'info')
+  try {
+    await api.laserShiftRecords.patchLaserShiftRecord(kadoExistingRecord.value.id, {
+      end_totalizer_hour: Number(kadoForm.value.end_totalizer_hour),
+      end_totalizer_min: Number(kadoForm.value.end_totalizer_min),
+      work_hours: Number(kadoForm.value.work_hours),
+    })
+    setKadoMessage('終了を保存しました。', 'success')
+    resetKadoForm()
+    await loadKadoRecords()
+  } catch (error) {
+    setKadoMessage(extractErrorMessage(error, '保存に失敗しました。入力内容を確認してください。'), 'error')
+  } finally {
+    kadoSubmitting.value = false
+  }
+}
+
 const form = ref(createEmptyForm())
 const filters = ref(createDefaultFilters())
 const equipments = ref([])
@@ -456,6 +1028,13 @@ const clearMessages = () => {
   formMessage.value = ''
   listMessage.value = ''
 }
+
+// レーザーライン（line_name に「レーザ」を含む）の設備のみ（稼働記録タブ用）
+const laserEquipments = computed(() => {
+  return (Array.isArray(equipments.value) ? equipments.value : []).filter(
+    (eq) => String(eq.line_name || '').includes('レーザ')
+  )
+})
 
 const filteredPatterns = computed(() => {
   const source = Array.isArray(patterns.value) ? patterns.value : []
@@ -1004,7 +1583,7 @@ watch(
 onMounted(async () => {
   clearMessages()
   await Promise.all([loadEquipments(), loadPatterns()])
-  await loadActuals()
+  await Promise.all([loadActuals(), loadKadoRecords()])
   await loadCurrentProcessingState()
 })
 </script>
@@ -1030,6 +1609,14 @@ onMounted(async () => {
   grid-template-areas:
     "tab"
     "list";
+  align-items: start;
+}
+
+.laser-actual-page.mode-kadojiseki {
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "tab"
+    "kadojiseki";
   align-items: start;
 }
 
@@ -1107,6 +1694,113 @@ onMounted(async () => {
 
 .list-panel {
   grid-area: list;
+}
+
+.kadojiseki-panel {
+  grid-area: kadojiseki;
+}
+
+.kado-mode-bar {
+  display: flex;
+  gap: 8px;
+}
+
+.kado-form-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.kado-preview {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.kado-preview-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #166534;
+}
+
+.kado-prev-shift-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  font-size: 14px;
+  flex-wrap: wrap;
+}
+
+
+.kado-existing-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.kado-existing-label {
+  color: #64748b;
+  font-weight: 600;
+}
+
+.kado-existing-value {
+  font-weight: 700;
+  color: #1e40af;
+}
+
+.btn-sm {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.kado-row-actions {
+  display: flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.kado-editing-row {
+  background: #fffbeb;
+}
+
+.kado-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.kado-status.completed {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.kado-status.started {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+@media (max-width: 900px) {
+  .kado-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .kado-form-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .panel {

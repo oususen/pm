@@ -36,6 +36,7 @@ import { createNotificationsAPI } from './resources/notifications'
 import { createProductionPlanChangeLogsAPI } from './resources/productionPlanChangeLogs'
 import { createLaserPatternsAPI } from './resources/laserPatterns'
 import { createLaserActualsAPI } from './resources/laserActuals'
+import { createLaserShiftRecordsAPI } from './resources/laserShiftRecords'
 import { createEngineeringChangesAPI } from './resources/engineeringChanges'
 import { createPurchaseActualsAPI } from './resources/purchaseActuals'
 import { createFujishojiDocumentAPI } from './resources/fujishojiDocument'
@@ -135,6 +136,7 @@ export default {
   productionPlanChangeLogs: createProductionPlanChangeLogsAPI(client),
   laserPatterns: createLaserPatternsAPI(client),
   laserActuals: createLaserActualsAPI(client),
+  laserShiftRecords: createLaserShiftRecordsAPI(client),
   engineeringChanges: createEngineeringChangesAPI(client),
   purchaseActuals: createPurchaseActualsAPI(client),
   fujishojiDocument: createFujishojiDocumentAPI(client),
