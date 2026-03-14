@@ -157,6 +157,7 @@ const mainTabs = computed(() => [
   { id: 'quality', label: t('nav.tabs.quality'), link: '/quality', resource: 'quality' },
   { id: 'notifications', label: t('nav.tabs.notifications'), link: '/notifications/sources', resource: 'notifications' },
   { id: 'engineeringChange', label: t('nav.tabs.engineeringChange'), link: '/engineering-change/menu', resource: 'engineering_change' },
+  { id: 'overtime', label: '勤務', link: '/overtime/menu', resource: null },
   { id: 'masters', label: t('nav.tabs.masters'), link: '/masters', resource: 'masters' },
   { id: 'settings', label: t('nav.tabs.settings'), link: '/settings', resource: 'settings' },
 ])
@@ -200,6 +201,7 @@ const isActiveTab = (tabId) => {
   if (tabId === 'quality' && path.startsWith('/quality')) return true
   if (tabId === 'notifications' && path.startsWith('/notifications')) return true
   if (tabId === 'engineeringChange' && path.startsWith('/engineering-change')) return true
+  if (tabId === 'overtime' && path.startsWith('/overtime')) return true
   if (tabId === 'masters' && path.startsWith('/masters')) return true
   if (tabId === 'settings' && path.startsWith('/settings')) return true
   return false

@@ -64,6 +64,7 @@ INSTALLED_APPS = [
     'accounts',
     'proposals',
     'notifications',
+    'overtime',
 ]
 
 MIDDLEWARE = [

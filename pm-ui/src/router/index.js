@@ -12,6 +12,7 @@ import settings from "./settings";
 import notifications from "./notifications";
 import engineeringChange from "./engineeringChange";
 import tasks from "./tasks";
+import overtime from "./overtime";
 import Login from "../views/auth/Login.vue";
 import { ensureAuth } from "../auth";
 
@@ -47,6 +48,7 @@ const router = createRouter({
     ...notifications,
     ...engineeringChange,
     ...tasks,
+    ...overtime,
     ...manual,
   ],
 });
