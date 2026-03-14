@@ -20,7 +20,7 @@
 
         <div class="form-row">
           <label class="form-label required">実施日</label>
-          <input type="text" v-model="form.work_date" class="form-input" placeholder="2026/03/14" maxlength="10" @blur="formatDate" required />
+          <input type="date" v-model="form.work_date" class="form-input" required />
         </div>
 
         <div class="form-row">
@@ -199,9 +199,12 @@ onMounted(async () => {
       errorMsg.value = '申請データの取得に失敗しました。'
     }
   } else {
-    // デフォルト: 今日
-    const today = new Date()
-    form.value.work_date = today.toISOString().slice(0, 10)
+    // デフォルト: 10時日替わり（10時未満は前日扱い）
+    const now = new Date()
+    if (now.getHours() < 10) {
+      now.setDate(now.getDate() - 1)
+    }
+    form.value.work_date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   }
 })
 
