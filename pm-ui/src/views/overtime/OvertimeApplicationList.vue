@@ -86,7 +86,11 @@
           <table class="detail-table">
             <tr><th>実施日</th><td>{{ detailApp.work_date }}</td></tr>
             <tr><th>種別</th><td>{{ detailApp.type_display }}</td></tr>
-            <tr><th>時間帯</th><td>{{ detailApp.start_time }} 〜 {{ detailApp.end_time }}</td></tr>
+            <tr v-if="detailApp.work_start_time || detailApp.scheduled_end_time">
+              <th>勤務時間</th>
+              <td>{{ detailApp.work_start_time || '-' }} 〜 {{ detailApp.scheduled_end_time || '-' }}（定時）</td>
+            </tr>
+            <tr><th>残業時間帯</th><td>{{ detailApp.start_time }} 〜 {{ detailApp.end_time }}</td></tr>
             <tr>
               <th>時間数</th>
               <td>{{ detailApp.hours }}H（深夜: {{ detailApp.midnight_hours }}H）</td>

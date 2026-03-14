@@ -64,8 +64,10 @@ class OvertimeApplication(models.Model):
     application_type = models.CharField(
         max_length=10, choices=TYPE_CHOICES, default='overtime', verbose_name='申請種別'
     )
-    start_time = models.TimeField(verbose_name='開始時刻')
-    end_time = models.TimeField(verbose_name='終了時刻')
+    work_start_time = models.TimeField(null=True, blank=True, verbose_name='勤務開始時刻')
+    scheduled_end_time = models.TimeField(null=True, blank=True, verbose_name='定時終了時刻')
+    start_time = models.TimeField(verbose_name='残業開始時刻')
+    end_time = models.TimeField(verbose_name='残業終了時刻')
     hours = models.DecimalField(
         max_digits=5, decimal_places=1, default=0, verbose_name='時間外時間(H)'
     )

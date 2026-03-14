@@ -24,7 +24,17 @@
         </div>
 
         <div class="form-row">
-          <label class="form-label required">実施時間</label>
+          <label class="form-label">勤務時間</label>
+          <div class="time-range">
+            <input type="time" v-model="form.work_start_time" class="form-input time-input" placeholder="開始" />
+            <span class="tilde">〜</span>
+            <input type="time" v-model="form.scheduled_end_time" class="form-input time-input" placeholder="定時終了" />
+            <span class="time-note">（定時）</span>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label class="form-label required">残業時間</label>
           <div class="time-range">
             <input type="time" v-model="form.start_time" class="form-input time-input" required />
             <span class="tilde">〜</span>
@@ -87,6 +97,8 @@ const errorMsg = ref('')
 const form = ref({
   application_type: 'overtime',
   work_date: '',
+  work_start_time: '',
+  scheduled_end_time: '',
   start_time: '',
   end_time: '',
   reason: '',
@@ -125,6 +137,8 @@ onMounted(async () => {
       form.value = {
         application_type: d.application_type,
         work_date: d.work_date,
+        work_start_time: d.work_start_time || '',
+        scheduled_end_time: d.scheduled_end_time || '',
         start_time: d.start_time,
         end_time: d.end_time,
         reason: d.reason,
@@ -239,6 +253,10 @@ async function handleSubmit() {
 .tilde {
   font-size: 16px;
   color: #6b7280;
+}
+.time-note {
+  font-size: 12px;
+  color: #9ca3af;
 }
 .form-textarea {
   flex: 1;

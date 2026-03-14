@@ -43,6 +43,7 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'applicant', 'applicant_name',
             'work_date', 'application_type', 'type_display',
+            'work_start_time', 'scheduled_end_time',
             'start_time', 'end_time', 'hours', 'midnight_hours',
             'reason', 'team', 'team_name',
             'status', 'status_display', 'rejection_reason',
