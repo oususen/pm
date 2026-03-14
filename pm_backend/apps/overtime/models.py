@@ -5,10 +5,18 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 
+def apply_breaks(wall_minutes):
+    """2時間ごとに10分休憩を控除（130分サイクル）"""
+    CYCLE = 130  # 2h work(120) + 10min break
+    full_cycles = wall_minutes // CYCLE
+    remainder = wall_minutes % CYCLE
+    return full_cycles * 120 + min(remainder, 120)
+
+
 def calculate_overtime_hours(start_time, end_time):
     """
     開始・終了時刻から通常残業時間・深夜残業時間を計算。
-    深夜帯: 22:00〜翌05:00
+    深夜帯: 22:00〜翌05:00 / 2時間ごとに10分休憩を控除
     Returns: (regular_hours, midnight_hours) as Decimal
     """
     base = datetime(2000, 1, 1)
@@ -24,19 +32,26 @@ def calculate_overtime_hours(start_time, end_time):
         (datetime(2000, 1, 2, 0, 0), datetime(2000, 1, 2, 5, 0)),   # 00:00-05:00
     ]
 
-    total_minutes = int((end_dt - start_dt).total_seconds() / 60)
-    midnight_minutes = 0
+    wall_minutes = int((end_dt - start_dt).total_seconds() / 60)
+    midnight_wall = 0
 
     for zone_start, zone_end in midnight_zones:
         overlap_start = max(start_dt, zone_start)
         overlap_end = min(end_dt, zone_end)
         if overlap_end > overlap_start:
-            midnight_minutes += int((overlap_end - overlap_start).total_seconds() / 60)
+            midnight_wall += int((overlap_end - overlap_start).total_seconds() / 60)
 
-    regular_minutes = total_minutes - midnight_minutes
+    regular_wall = wall_minutes - midnight_wall
+
+    # 休憩控除後の実作業時間（按分）
+    work_minutes = apply_breaks(wall_minutes)
+    ratio = work_minutes / wall_minutes if wall_minutes > 0 else 1
+    regular_minutes = round(regular_wall * ratio)
+    midnight_minutes = work_minutes - regular_minutes
+
     return (
         Decimal(str(round(regular_minutes / 60, 1))),
-        Decimal(str(round(midnight_minutes / 60, 1))),
+        Decimal(str(max(0, round(midnight_minutes / 60, 1)))),
     )
 
 

@@ -134,6 +134,14 @@ const form = ref({
   reason: '',
 })
 
+// 2時間ごとに10分休憩を控除（130分サイクル）
+function applyBreaks(wallMinutes) {
+  const CYCLE = 130 // 2h work(120) + 10min break
+  const fullCycles = Math.floor(wallMinutes / CYCLE)
+  const remainder = wallMinutes % CYCLE
+  return fullCycles * 120 + Math.min(remainder, 120)
+}
+
 // 時間数プレビュー（フロントエンドで計算）
 const previewHours = computed(() => {
   const startRaw = toHHMM(form.value.start_time)
@@ -145,19 +153,24 @@ const previewHours = computed(() => {
   let endMin = eh * 60 + em
   if (endMin <= startMin) endMin += 24 * 60
 
-  const totalMin = endMin - startMin
+  const wallMin = endMin - startMin
 
   // 深夜帯: 22:00(1320)〜29:00(1740=翌05:00)
   const midnightStart = 22 * 60
   const midnightEnd = 29 * 60
-  const mStart = Math.max(startMin, midnightStart)
-  const mEnd = Math.min(endMin, midnightEnd)
-  const midnightMin = Math.max(0, mEnd - mStart)
-  const regularMin = totalMin - midnightMin
+  const midnightWall = Math.max(0, Math.min(endMin, midnightEnd) - Math.max(startMin, midnightStart))
+  const regularWall = wallMin - midnightWall
+
+  // 休憩控除（2時間ごとに10分）
+  const workMin = applyBreaks(wallMin)
+  // 深夜・通常の比率で按分
+  const ratio = wallMin > 0 ? workMin / wallMin : 1
+  const regularMin = Math.round(regularWall * ratio)
+  const midnightMin = workMin - regularMin
 
   return {
     regular: Math.round(regularMin / 60 * 10) / 10,
-    midnight: Math.round(midnightMin / 60 * 10) / 10,
+    midnight: Math.max(0, Math.round(midnightMin / 60 * 10) / 10),
   }
 })
 
