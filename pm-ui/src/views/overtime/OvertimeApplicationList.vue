@@ -30,6 +30,7 @@
           <tr>
             <th>実施日</th>
             <th>種別</th>
+            <th>申請者</th>
             <th>時間帯</th>
             <th>時間数</th>
             <th>理由</th>
@@ -41,6 +42,7 @@
         <tbody>
           <tr v-for="app in applications" :key="app.id">
             <td>{{ app.work_date }}</td>
+            <td>{{ app.applicant_name }}</td>
             <td>{{ app.type_display }}</td>
             <td class="nowrap">{{ app.start_time }} 〜 {{ app.end_time }}</td>
             <td class="num">

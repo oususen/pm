@@ -1,5 +1,6 @@
 from django.utils import timezone
 from django.contrib.auth import get_user_model
+from django.db.models import Q
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -32,10 +33,11 @@ def find_approvers_for_role(applicant, role):
     if role == 'supervisor':
         if not profile.team:
             return User.objects.none()
+        # supervisor_teams に設定されている班長 OR 同じ班に所属する班長（どちらか）
         return User.objects.filter(
-            profile__role='supervisor',
-            profile__supervisor_teams=profile.team,
-        )
+            Q(profile__role='supervisor', profile__supervisor_teams=profile.team) |
+            Q(profile__role='supervisor', profile__team=profile.team)
+        ).distinct()
     elif role == 'chief':
         if not profile.group:
             return User.objects.none()
