@@ -31,4 +31,24 @@ export const createOvertimeAPI = (client) => ({
   getPendingApprovals() {
     return client.get('/overtime/applications/pending_approvals/')
   },
+
+  // サイン画像アップロード
+  uploadSignature(id, blob) {
+    const form = new FormData()
+    form.append('signature', blob, 'signature.png')
+    return client.post(`/overtime/applications/${id}/upload_signature/`, form)
+  },
+
+  // 一括承認（班長→係長へ確認依頼）
+  bulkApproveApplications(data) {
+    return client.post('/overtime/applications/bulk_approve/', data)
+  },
+
+  // PDF出力
+  exportPdf(params = {}) {
+    return client.get('/overtime/applications/export_pdf/', {
+      params,
+      responseType: 'blob',
+    })
+  },
 })

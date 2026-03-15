@@ -70,6 +70,15 @@ const client = axios.create({
 
 // CSRFトークンを自動的に付与
 client.interceptors.request.use((config) => {
+  // FormData の場合は Content-Type をブラウザに委譲し、boundary 付きで送る
+  if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+    if (config.headers && typeof config.headers.set === 'function') {
+      config.headers.set('Content-Type', undefined)
+    } else if (config.headers) {
+      delete config.headers['Content-Type']
+    }
+  }
+
   const csrfToken = getCookie('csrftoken')
   if (csrfToken) {
     config.headers['X-CSRFToken'] = csrfToken

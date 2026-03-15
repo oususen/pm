@@ -1,8 +1,12 @@
+from io import BytesIO
+
+from django.http import HttpResponse
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 import django_filters
@@ -161,6 +165,7 @@ class OvertimeApplicationFilter(django_filters.FilterSet):
 class OvertimeApplicationViewSet(viewsets.ModelViewSet):
     serializer_class = OvertimeApplicationSerializer
     permission_classes = [IsAuthenticated]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
     filterset_class = OvertimeApplicationFilter
     ordering_fields = ['work_date', 'created_at', 'status']
     ordering = ['-work_date', '-created_at']
@@ -211,6 +216,21 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
         if app.status == 'submitted':
             app.approval_logs.filter(status='pending').delete()
         return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post'], parser_classes=[MultiPartParser, FormParser])
+    def upload_signature(self, request, pk=None):
+        """サイン画像をアップロードする"""
+        app = self.get_object()
+        if app.applicant != request.user:
+            return Response({'detail': '権限がありません。'}, status=status.HTTP_403_FORBIDDEN)
+        sig = request.FILES.get('signature')
+        if not sig:
+            return Response({'detail': 'ファイルが見つかりません。'}, status=status.HTTP_400_BAD_REQUEST)
+        if app.signature:
+            app.signature.delete(save=False)
+        app.signature = sig
+        app.save(update_fields=['signature'])
+        return Response({'signature': request.build_absolute_uri(app.signature.url)})
 
     @action(detail=True, methods=['post'])
     def submit(self, request, pk=None):
@@ -319,6 +339,120 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(app)
         return Response(serializer.data)
+
+    @action(detail=False, methods=['post'])
+    def bulk_approve(self, request):
+        """班長が複数申請を一括承認し、係長へ一括確認依頼する"""
+        ids = request.data.get('ids', [])
+        comment = request.data.get('comment', '')
+        user = request.user
+
+        if not ids:
+            return Response({'detail': '申請IDが指定されていません。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        approved_apps = []
+        for app_id in ids:
+            try:
+                app = OvertimeApplication.objects.select_related('applicant').get(id=app_id)
+                log = app.approval_logs.get(approver=user, status='pending')
+            except (OvertimeApplication.DoesNotExist, OvertimeApprovalLog.DoesNotExist):
+                continue
+
+            log.status = 'approved'
+            log.comment = comment
+            log.acted_at = timezone.now()
+            log.save()
+
+            app.approval_logs.filter(role=log.role, status='pending').update(
+                status='approved', acted_at=timezone.now()
+            )
+            app.status = STATUS_AFTER_APPROVE.get(log.role, app.status)
+            app.save(update_fields=['status', 'updated_at'])
+            approved_apps.append(app)
+
+        if not approved_apps:
+            return Response({'detail': '処理できる申請がありませんでした。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 次の承認レベルへ進める（通知は一括でまとめて送る）
+        chief_approvers = {}  # approver_id -> User
+        auto_approved = []
+
+        for app in approved_apps:
+            current_level_idx = -1
+            if app.status == 'approved_supervisor':
+                current_level_idx = 0
+            elif app.status == 'approved_chief':
+                current_level_idx = 1
+
+            advanced = False
+            for i in range(current_level_idx + 1, len(APPROVAL_LEVELS)):
+                role = APPROVAL_LEVELS[i]
+                count = create_pending_logs(app, role)
+                if count > 0:
+                    for pending_log in app.approval_logs.filter(role=role, status='pending'):
+                        if pending_log.approver:
+                            chief_approvers[pending_log.approver.id] = pending_log.approver
+                    advanced = True
+                    break
+
+            if not advanced:
+                # 承認者なし → 最終承認
+                app.status = 'approved_manager'
+                app.save(update_fields=['status', 'updated_at'])
+                auto_approved.append(app)
+                create_approval_notification(
+                    app, [app.applicant],
+                    f"【残業申請 承認完了】{app.work_date} の申請が承認されました",
+                )
+
+        # 係長への一括通知（1通）
+        notify_apps = [a for a in approved_apps if a not in auto_approved]
+        if notify_apps and chief_approvers:
+            approver_name = f"{user.last_name} {user.first_name}".strip() or user.username
+            applicant_names = "、".join(dict.fromkeys(
+                f"{a.applicant.last_name}{a.applicant.first_name}".strip() or a.applicant.username
+                for a in notify_apps
+            ))
+            create_approval_notification(
+                notify_apps[0],
+                list(chief_approvers.values()),
+                f"【残業申請 一括確認依頼】{approver_name} より {len(notify_apps)}件（{applicant_names}）",
+            )
+
+        return Response({'approved': len(approved_apps)})
+
+    @action(detail=False, methods=['get'])
+    def export_pdf(self, request):
+        """フィルタ条件でPDFを出力する"""
+        from .pdf_generator import generate_overtime_pdf
+
+        ids_param = request.query_params.get('ids', '')
+        if ids_param:
+            try:
+                id_list = [int(i) for i in ids_param.split(',') if i.strip()]
+            except ValueError:
+                id_list = []
+            qs = self.get_queryset().filter(id__in=id_list).order_by('work_date', 'created_at')
+        else:
+            qs = self.filter_queryset(self.get_queryset())
+
+        filters = {
+            'team_name': request.query_params.get('team_name', ''),
+            'group_name': request.query_params.get('group_name', ''),
+            'date_from': request.query_params.get('work_date__gte', ''),
+            'date_to': request.query_params.get('work_date__lte', ''),
+        }
+
+        buf = generate_overtime_pdf(list(qs), filters)
+
+        import urllib.parse
+        team = filters['team_name'] or '全班'
+        filename = f"残業申請書-{team}.pdf"
+        encoded = urllib.parse.quote(filename)
+
+        response = HttpResponse(buf.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f"attachment; filename*=UTF-8''{encoded}"
+        return response
 
     @action(detail=False, methods=['get'])
     def pending_approvals(self, request):

@@ -1,5 +1,6 @@
 from collections import defaultdict
 from django.contrib.auth.models import User
+from django.db import models as db_models
 from rest_framework import serializers
 
 from .models import (
@@ -15,10 +16,49 @@ from .models import (
 
 class DepartmentSerializer(serializers.ModelSerializer):
     parent_name = serializers.CharField(source='parent.name', read_only=True)
+    head = serializers.SerializerMethodField()
 
     class Meta:
         model = Department
-        fields = ['id', 'name', 'level', 'parent', 'parent_name', 'display_id']
+        fields = ['id', 'name', 'level', 'parent', 'parent_name', 'display_id', 'head']
+
+    def get_head(self, obj):
+        """各部署の長（部長/係長/班長/リーダー）を返す"""
+        level = obj.level
+        if level == 'division':
+            # 事業部長: role='manager' かつ division=対象部署
+            profiles = UserProfile.objects.filter(
+                role='manager', division=obj
+            ).select_related('user')
+        elif level == 'group':
+            # 係長: role='chief' かつ group=対象部署
+            profiles = UserProfile.objects.filter(
+                role='chief', group=obj
+            ).select_related('user')
+        elif level == 'team':
+            # 班長: role='supervisor' かつ (team=対象班 または supervisor_teams に含まれる)
+            profiles = UserProfile.objects.filter(
+                role='supervisor'
+            ).filter(
+                db_models.Q(team=obj) | db_models.Q(supervisor_teams=obj)
+            ).distinct().select_related('user')
+        elif level == 'unit':
+            # リーダー: role='leader' かつ (unit=対象グループ または leader_units に含まれる)
+            profiles = UserProfile.objects.filter(
+                role='leader'
+            ).filter(
+                db_models.Q(unit=obj) | db_models.Q(leader_units=obj)
+            ).distinct().select_related('user')
+        else:
+            return []
+
+        result = []
+        for p in profiles:
+            last = p.user.last_name or ''
+            first = p.user.first_name or ''
+            name = (last + ' ' + first).strip() or p.user.username
+            result.append(name)
+        return result
 
 
 class UserProfileSerializer(serializers.ModelSerializer):

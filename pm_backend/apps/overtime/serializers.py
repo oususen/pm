@@ -31,8 +31,10 @@ class OvertimeApprovalLogSerializer(serializers.ModelSerializer):
 class OvertimeApplicationSerializer(serializers.ModelSerializer):
     applicant_name = serializers.SerializerMethodField()
     team_name = serializers.SerializerMethodField()
+    group_name = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
     type_display = serializers.SerializerMethodField()
+    signature = serializers.SerializerMethodField()
     approval_logs = OvertimeApprovalLogSerializer(many=True, read_only=True)
     can_edit = serializers.SerializerMethodField()
     can_approve = serializers.SerializerMethodField()
@@ -45,8 +47,8 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
             'work_date', 'application_type', 'type_display',
             'work_start_time', 'scheduled_end_time',
             'start_time', 'end_time', 'hours', 'midnight_hours',
-            'reason', 'team', 'team_name',
-            'status', 'status_display', 'rejection_reason',
+            'reason', 'team', 'team_name', 'group_name',
+            'status', 'status_display', 'rejection_reason', 'signature',
             'submitted_at', 'created_at', 'updated_at',
             'approval_logs', 'can_edit', 'can_approve', 'pending_role',
         ]
@@ -54,6 +56,13 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
             'applicant', 'hours', 'midnight_hours', 'team',
             'status', 'rejection_reason', 'submitted_at', 'created_at', 'updated_at',
         ]
+        extra_kwargs = {
+            'signature': {'required': False},
+            'work_start_time': {'format': '%H:%M'},
+            'scheduled_end_time': {'format': '%H:%M'},
+            'start_time': {'format': '%H:%M'},
+            'end_time': {'format': '%H:%M'},
+        }
 
     def get_applicant_name(self, obj):
         u = obj.applicant
@@ -63,11 +72,25 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
     def get_team_name(self, obj):
         return obj.team.name if obj.team else None
 
+    def get_group_name(self, obj):
+        try:
+            return obj.applicant.profile.unit.name if obj.applicant.profile.unit else None
+        except Exception:
+            return None
+
     def get_status_display(self, obj):
         return obj.get_status_display()
 
     def get_type_display(self, obj):
         return obj.get_application_type_display()
+
+    def get_signature(self, obj):
+        if not obj.signature:
+            return None
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(obj.signature.url)
+        return obj.signature.url
 
     def get_can_edit(self, obj):
         request = self.context.get('request')
@@ -97,6 +120,11 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
         if log:
             return log.role
         return None
+
+    def validate_work_start_time(self, value):
+        if not value:
+            raise serializers.ValidationError('勤務開始時間は必須です。')
+        return value
 
     def create(self, validated_data):
         request = self.context.get('request')

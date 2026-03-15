@@ -20,18 +20,38 @@
         <option value="rejected">却下</option>
       </select>
       <button class="btn btn-secondary" @click="fetchList">検索</button>
+      <button class="btn btn-pdf" @click="downloadPdf">PDF出力</button>
+    </div>
+    <div class="filters" v-if="applications.length">
+      <select v-model="filterTeam" class="filter-select">
+        <option value="">全班</option>
+        <option v-for="t in teamOptions" :key="t" :value="t">{{ t }}</option>
+      </select>
+      <select v-model="filterGroup" class="filter-select">
+        <option value="">全グループ</option>
+        <option v-for="g in groupOptions" :key="g" :value="g">{{ g }}</option>
+      </select>
+      <select v-model="filterName" class="filter-select">
+        <option value="">全員</option>
+        <option v-for="n in nameOptions" :key="n" :value="n">{{ n }}</option>
+      </select>
     </div>
 
     <div v-if="loading" class="loading">読み込み中...</div>
     <div v-else-if="!applications.length" class="empty">申請がありません</div>
+    <div v-else-if="!filteredApplications.length" class="empty">条件に一致する申請はありません</div>
     <template v-else>
+      <div class="table-wrap">
       <table class="ot-table">
         <thead>
           <tr>
             <th>実施日</th>
+            <th>班</th>
+            <th>グループ</th>
             <th>種別</th>
             <th>申請者</th>
-            <th>時間帯</th>
+            <th>勤務時間</th>
+            <th>残業時間帯</th>
             <th>時間数</th>
             <th>理由</th>
             <th>ステータス</th>
@@ -40,13 +60,16 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="app in applications" :key="app.id">
+          <tr v-for="app in filteredApplications" :key="app.id">
             <td>{{ app.work_date }}</td>
-            <td>{{ app.applicant_name }}</td>
+            <td>{{ app.team_name || '-' }}</td>
+            <td>{{ app.group_name || '-' }}</td>
             <td>{{ app.type_display }}</td>
+            <td>{{ app.applicant_name }}</td>
+            <td class="nowrap">{{ app.work_start_time || '-' }}{{ app.work_start_time ? ' 〜 ' + (app.scheduled_end_time || '-') : '' }}</td>
             <td class="nowrap">{{ app.start_time }} 〜 {{ app.end_time }}</td>
             <td class="num">
-              {{ app.hours }}H
+              {{ (Math.round((parseFloat(app.hours) + parseFloat(app.midnight_hours)) * 10) / 10) }}H
               <span v-if="app.midnight_hours > 0" class="midnight-tag">深夜{{ app.midnight_hours }}H</span>
             </td>
             <td class="reason-cell">{{ app.reason || '-' }}</td>
@@ -74,7 +97,18 @@
             </td>
           </tr>
         </tbody>
+        <tfoot>
+          <tr class="total-row">
+            <td colspan="7" class="total-label">合計（{{ filteredApplications.length }}件）</td>
+            <td class="num">
+              <span class="total-hours">{{ totalHours }}H</span>
+              <span v-if="totalMidnight > 0" class="midnight-tag">深夜{{ totalMidnight }}H</span>
+            </td>
+            <td colspan="3"></td>
+          </tr>
+        </tfoot>
       </table>
+      </div>
     </template>
 
     <!-- 詳細モーダル -->
@@ -86,27 +120,33 @@
         </div>
         <div class="modal-body">
           <table class="detail-table">
-            <tr><th>実施日</th><td>{{ detailApp.work_date }}</td></tr>
-            <tr><th>種別</th><td>{{ detailApp.type_display }}</td></tr>
-            <tr v-if="detailApp.work_start_time || detailApp.scheduled_end_time">
-              <th>勤務時間</th>
-              <td>{{ detailApp.work_start_time || '-' }} 〜 {{ detailApp.scheduled_end_time || '-' }}（定時）</td>
-            </tr>
-            <tr><th>残業時間帯</th><td>{{ detailApp.start_time }} 〜 {{ detailApp.end_time }}</td></tr>
-            <tr>
-              <th>時間数</th>
-              <td>{{ detailApp.hours }}H（深夜: {{ detailApp.midnight_hours }}H）</td>
-            </tr>
-            <tr><th>理由</th><td>{{ detailApp.reason || '-' }}</td></tr>
-            <tr><th>ステータス</th><td>
-              <span class="status-badge" :class="'status-' + detailApp.status">
-                {{ detailApp.status_display }}
-              </span>
-            </td></tr>
-            <tr v-if="detailApp.rejection_reason">
-              <th>却下理由</th>
-              <td class="rejection">{{ detailApp.rejection_reason }}</td>
-            </tr>
+            <tbody>
+              <tr><th>実施日</th><td>{{ detailApp.work_date }}</td></tr>
+              <tr><th>種別</th><td>{{ detailApp.type_display }}</td></tr>
+              <tr v-if="detailApp.work_start_time || detailApp.scheduled_end_time">
+                <th>勤務時間</th>
+                <td>{{ detailApp.work_start_time || '-' }} 〜 {{ detailApp.scheduled_end_time || '-' }}（定時）</td>
+              </tr>
+              <tr><th>残業時間帯</th><td>{{ detailApp.start_time }} 〜 {{ detailApp.end_time }}</td></tr>
+              <tr>
+                <th>時間数</th>
+                <td>{{ Math.round((parseFloat(detailApp.hours) + parseFloat(detailApp.midnight_hours)) * 10) / 10 }}H（深夜: {{ detailApp.midnight_hours }}H）</td>
+              </tr>
+              <tr><th>理由</th><td>{{ detailApp.reason || '-' }}</td></tr>
+              <tr><th>ステータス</th><td>
+                <span class="status-badge" :class="'status-' + detailApp.status">
+                  {{ detailApp.status_display }}
+                </span>
+              </td></tr>
+              <tr v-if="detailApp.rejection_reason">
+                <th>却下理由</th>
+                <td class="rejection">{{ detailApp.rejection_reason }}</td>
+              </tr>
+              <tr v-if="detailApp.signature">
+                <th>サイン</th>
+                <td><img :src="detailApp.signature" alt="サイン" class="sign-img" /></td>
+              </tr>
+            </tbody>
           </table>
 
           <div class="approval-log-section">
@@ -134,12 +174,46 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
 
 const applications = ref([])
 const loading = ref(false)
 const detailApp = ref(null)
+
+const filterTeam = ref('')
+const filterGroup = ref('')
+const filterName = ref('')
+
+const teamOptions = computed(() =>
+  [...new Set(applications.value.map(a => a.team_name).filter(Boolean))].sort()
+)
+const groupOptions = computed(() =>
+  [...new Set(applications.value.map(a => a.group_name).filter(Boolean))].sort()
+)
+const nameOptions = computed(() =>
+  [...new Set(applications.value.map(a => a.applicant_name).filter(Boolean))].sort()
+)
+const filteredApplications = computed(() =>
+  applications.value.filter(a =>
+    (!filters.value.status || a.status === filters.value.status) &&
+    (!filters.value.work_date__gte || a.work_date >= filters.value.work_date__gte) &&
+    (!filters.value.work_date__lte || a.work_date <= filters.value.work_date__lte) &&
+    (!filterTeam.value || a.team_name === filterTeam.value) &&
+    (!filterGroup.value || a.group_name === filterGroup.value) &&
+    (!filterName.value || a.applicant_name === filterName.value)
+  )
+)
+const totalHours = computed(() =>
+  Math.round(filteredApplications.value.reduce((sum, a) =>
+    sum + parseFloat(a.hours) + parseFloat(a.midnight_hours), 0
+  ) * 10) / 10
+)
+const totalMidnight = computed(() =>
+  Math.round(filteredApplications.value.reduce((sum, a) =>
+    sum + parseFloat(a.midnight_hours), 0
+  ) * 10) / 10
+)
 
 const filters = ref({
   work_date__gte: '',
@@ -156,11 +230,7 @@ function formatDateTime(val) {
 async function fetchList() {
   loading.value = true
   try {
-    const params = {}
-    if (filters.value.work_date__gte) params.work_date__gte = filters.value.work_date__gte
-    if (filters.value.work_date__lte) params.work_date__lte = filters.value.work_date__lte
-    if (filters.value.status) params.status = filters.value.status
-    const res = await api.overtime.getApplications(params)
+    const res = await api.overtime.getApplications()
     applications.value = res.data?.results || res.data || []
   } catch (e) {
     console.error(e)
@@ -186,13 +256,49 @@ async function deleteApp(app) {
   }
 }
 
+async function downloadPdf() {
+  try {
+    const ids = filteredApplications.value.map(a => a.id).join(',')
+    if (!ids) { alert('出力する申請がありません'); return }
+    const params = {
+      ids,
+      team_name: filterTeam.value || '全班',
+      group_name: filterGroup.value || '全グループ',
+    }
+
+    const res = await api.overtime.exportPdf(params)
+
+    // Content-Disposition からファイル名を取得
+    let filename = '残業申請書.pdf'
+    const disposition = res.headers?.['content-disposition'] || ''
+    const utf8Match = disposition.match(/filename\*=UTF-8''(.+)/)
+    if (utf8Match) {
+      filename = decodeURIComponent(utf8Match[1])
+    } else {
+      const plainMatch = disposition.match(/filename="?([^";\s]+)"?/)
+      if (plainMatch) filename = plainMatch[1]
+    }
+
+    const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    alert('PDF出力に失敗しました: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
 onMounted(fetchList)
 </script>
 
 <style scoped>
 .ot-list-page {
   padding: 24px;
-  max-width: 1200px;
+  max-width: 100%;
   margin: 0 auto;
 }
 .page-header {
@@ -213,6 +319,14 @@ onMounted(fetchList)
   margin-bottom: 16px;
   flex-wrap: wrap;
 }
+.total-row td {
+  background: #f0fdf4;
+  border-top: 2px solid #40916c;
+  padding: 8px 12px;
+  font-weight: 600;
+}
+.total-label { font-size: 13px; color: #374151; }
+.total-hours { font-size: 15px; color: #40916c; }
 .filter-input, .filter-select {
   border: 1px solid #d1d5db;
   border-radius: 6px;
@@ -224,28 +338,33 @@ onMounted(fetchList)
   color: #6b7280;
   padding: 40px;
 }
+.table-wrap {
+  overflow-x: auto;
+}
 .ot-table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 12px;
   background: white;
   border-radius: 8px;
-  overflow: hidden;
   border: 1px solid #e5e7eb;
 }
 .ot-table th {
   background: #f9fafb;
-  padding: 10px 12px;
-  text-align: left;
+  padding: 6px 8px;
+  text-align: center;
   font-weight: 600;
   color: #374151;
-  border-bottom: 1px solid #e5e7eb;
+  border: 1px solid #d1d5db;
   white-space: nowrap;
 }
 .ot-table td {
-  padding: 10px 12px;
-  border-bottom: 1px solid #f3f4f6;
+  padding: 6px 8px;
+  border: 1px solid #e5e7eb;
   vertical-align: middle;
+  white-space: nowrap;
+  text-align: center;
 }
 .ot-table tr:last-child td {
   border-bottom: none;
@@ -253,7 +372,7 @@ onMounted(fetchList)
 .num { text-align: right; }
 .nowrap { white-space: nowrap; }
 .reason-cell {
-  max-width: 200px;
+  max-width: 60px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -302,6 +421,8 @@ onMounted(fetchList)
 .btn-secondary { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
 .btn-danger { background: #fee2e2; color: #dc2626; }
 .btn-ghost { background: transparent; color: #6b7280; }
+.btn-pdf { background: #7c3aed; color: white; }
+.btn-pdf:hover { background: #6d28d9; }
 /* Modal */
 .modal-overlay {
   position: fixed;
@@ -347,6 +468,7 @@ onMounted(fetchList)
 }
 .detail-table td { padding: 8px 10px; border-bottom: 1px solid #f3f4f6; }
 .rejection { color: #dc2626; }
+.sign-img { max-width: 240px; border: 1px solid #e5e7eb; border-radius: 4px; }
 .approval-log-section h3 { font-size: 14px; font-weight: 700; margin-bottom: 10px; }
 .empty-log { color: #6b7280; font-size: 13px; }
 .log-table { width: 100%; border-collapse: collapse; font-size: 12px; }

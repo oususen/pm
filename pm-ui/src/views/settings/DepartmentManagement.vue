@@ -20,6 +20,7 @@
           <tr>
             <th>階層</th>
             <th>名前</th>
+            <th>担当者</th>
             <th>表示順</th>
             <th>操作</th>
           </tr>
@@ -30,6 +31,7 @@
             <tr class="row-division">
               <td><span class="level-badge level-division">事業部</span></td>
               <td>{{ div.name }}</td>
+              <td class="head-cell"><span class="head-label head-manager">部長</span><span v-if="div.head && div.head.length">{{ div.head.join('、') }}</span><span v-else class="head-empty">―</span></td>
               <td>{{ div.display_id }}</td>
               <td class="actions">
                 <button class="btn-sm" @click="showEdit(div)" :disabled="!canEdit">編集</button>
@@ -42,6 +44,7 @@
               <tr class="row-group">
                 <td><span class="level-badge level-group">係</span></td>
                 <td class="indent-1">{{ grp.name }}</td>
+                <td class="head-cell"><span class="head-label head-chief">係長</span><span v-if="grp.head && grp.head.length">{{ grp.head.join('、') }}</span><span v-else class="head-empty">―</span></td>
                 <td>{{ grp.display_id }}</td>
                 <td class="actions">
                   <button class="btn-sm" @click="showEdit(grp)" :disabled="!canEdit">編集</button>
@@ -54,6 +57,7 @@
                 <tr class="row-team">
                   <td><span class="level-badge level-team">班</span></td>
                   <td class="indent-2">{{ team.name }}</td>
+                  <td class="head-cell"><span class="head-label head-supervisor">班長</span><span v-if="team.head && team.head.length">{{ team.head.join('、') }}</span><span v-else class="head-empty">―</span></td>
                   <td>{{ team.display_id }}</td>
                   <td class="actions">
                     <button class="btn-sm" @click="showEdit(team)" :disabled="!canEdit">編集</button>
@@ -65,6 +69,7 @@
                 <tr v-for="unit in team.children" :key="unit.id" class="row-unit">
                   <td><span class="level-badge level-unit">グループ</span></td>
                   <td class="indent-3">{{ unit.name }}</td>
+                  <td class="head-cell"><span class="head-label head-leader">リーダ</span><span v-if="unit.head && unit.head.length">{{ unit.head.join('、') }}</span><span v-else class="head-empty">―</span></td>
                   <td>{{ unit.display_id }}</td>
                   <td class="actions">
                     <button class="btn-sm" @click="showEdit(unit)" :disabled="!canEdit">編集</button>
@@ -390,4 +395,25 @@ onMounted(loadAll)
   margin-top: 16px;
 }
 .required { color: #c00; }
+
+.head-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.head-label {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: bold;
+  white-space: nowrap;
+}
+.head-manager  { background: #dbeafe; color: #1d4ed8; }
+.head-chief    { background: #d1fae5; color: #065f46; }
+.head-supervisor { background: #fef9c3; color: #92400e; }
+.head-leader   { background: #ede9fe; color: #5b21b6; }
+.head-empty    { color: #bbb; }
 </style>

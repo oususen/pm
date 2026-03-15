@@ -46,12 +46,13 @@ def calculate_overtime_hours(start_time, end_time):
     # 休憩控除後、30分単位で切り捨て
     work_minutes = (apply_breaks(wall_minutes) // 30) * 30
     ratio = work_minutes / wall_minutes if wall_minutes > 0 else 1
-    regular_minutes = round(regular_wall * ratio)
-    midnight_minutes = work_minutes - regular_minutes
+    # 深夜も30分単位で切り捨て、通常 = 合計 - 深夜
+    midnight_minutes = (int(midnight_wall * ratio) // 30) * 30
+    regular_minutes = work_minutes - midnight_minutes
 
     return (
-        Decimal(str(round(regular_minutes / 60, 1))),
-        Decimal(str(max(0, round(midnight_minutes / 60, 1)))),
+        Decimal(str(regular_minutes / 60)),
+        Decimal(str(midnight_minutes / 60)),
     )
 
 
@@ -100,6 +101,9 @@ class OvertimeApplication(models.Model):
     )
     status = models.CharField(
         max_length=30, choices=STATUS_CHOICES, default='draft', verbose_name='ステータス'
+    )
+    signature = models.ImageField(
+        upload_to='overtime_signatures/', null=True, blank=True, verbose_name='サイン'
     )
     rejection_reason = models.TextField(blank=True, verbose_name='却下理由')
     submitted_at = models.DateTimeField(null=True, blank=True, verbose_name='申請日時')
