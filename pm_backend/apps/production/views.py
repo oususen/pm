@@ -4071,7 +4071,7 @@ class LaserActualViewSet(viewsets.ModelViewSet):
 
     queryset = (
         LaserActual.objects.all()
-        .select_related('equipment', 'pattern', 'material', 'created_by', 'updated_by')
+        .select_related('equipment', 'equipment__process', 'pattern', 'material', 'created_by', 'updated_by')
         .prefetch_related('details')
     )
     serializer_class = LaserActualSerializer

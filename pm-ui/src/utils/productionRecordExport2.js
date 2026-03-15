@@ -45,7 +45,7 @@ export const buildProductionSummaryRows = (
       const mapped = resolveCoreMapping(appProductCode, processCode, mappings)
       const qtyRaw = Number(row.production_qty)
       const productionQty = Number.isFinite(qtyRaw) ? Math.trunc(qtyRaw) : null
-      const planDateKey = toDateKey(row.plan_date)
+      const planDateKey = toDateKey(row.plan_date) || toDateKey(String(row.started_at || '').substring(0, 10))
       return { row, appProductCode, processCode, mapped, productionQty, planDateKey }
     })
     .filter(({ row, mapped, productionQty, planDateKey }) => {
@@ -66,7 +66,7 @@ export const buildProductionSummaryRows = (
     })
     .map(({ row, appProductCode, processCode, mapped, productionQty }) => {
       return [
-        formatDateCompact(row.plan_date),
+        formatDateCompact(row.plan_date || String(row.started_at || '').substring(0, 10)),
         appProductCode || '—',
         mapped.coreProductCode || '—',
         processCode || '—',

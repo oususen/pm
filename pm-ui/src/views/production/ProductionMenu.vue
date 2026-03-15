@@ -73,6 +73,13 @@ const tiles = computed(() => {
       resource: "production.process_input",
     },
     {
+      to: "/production/brake-line-input",
+      label: "ブレーキライン実績入力",
+      icon: "🔧",
+      required: "edit",
+      resource: "production.process_input",
+    },
+    {
       to: "/production/record-inquiry",
       label: t("productionMenu.tiles.productionRecordInquiry"),
       icon: "📑",

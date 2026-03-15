@@ -187,6 +187,12 @@ const production = [
     component: () => import("@/views/production/ScrapHistory.vue"),
     meta: { pageTitle: "仕損履歴", manualPath: "生産/仕損履歴.md" },
   },
+  {
+    path: "/production/brake-line-input",
+    name: "BrakeLineInput",
+    component: () => import("@/views/production/BrakeLineInput.vue"),
+    meta: { pageTitle: "ブレーキライン実績入力", manualPath: "生産/ブレーキライン実績入力.md" },
+  },
 ];
 
 export default production;

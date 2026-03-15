@@ -386,6 +386,7 @@ const mappingCandidateLoading = ref(false)
 const mappingCandidateError = ref('')
 const mappingProcessFilter = ref('')
 const ACTIVE_LINE_CODES = computed(() => getTargetLineCodesByTab(targetLineCodesByTab.value, activeTab.value))
+const BRAKE_LINE_CODES  = computed(() => getTargetLineCodesByTab(targetLineCodesByTab.value, 'brake'))
 const canEditRecordInquirySettings = computed(() => {
   const user = authState.user
   if (!user) return false
@@ -596,110 +597,141 @@ const loadSessions = async () => {
   const wantsCancelOnly = sessionType.value === 'CANCEL'
   try {
     if (activeTab.value === 'laser') {
-      const laserParams = {
-        page_size: 1000,
-        work_date__gte: startDate.value,
-        work_date__lte: endDate.value,
-        ordering: '-work_date,-created_at',
+      // 選択ラインがブレーキラインかどうかを判定
+      const selectedLineObj = lineId.value
+        ? lines.value.find((l) => String(l.id) === String(lineId.value))
+        : null
+      const selectedLineCode = String(selectedLineObj?.line_code || '').toUpperCase()
+      const brakeCodesSet = new Set(BRAKE_LINE_CODES.value.map((c) => String(c).toUpperCase()))
+      const isBrakeLine = selectedLineCode && brakeCodesSet.has(selectedLineCode)
+      const isLaserLine = selectedLineCode && !brakeCodesSet.has(selectedLineCode)
+      // ライン未選択 → 両方取得。ブレーキライン選択 → ブレーキのみ。レーザーライン選択 → レーザーのみ。
+      const fetchLaser = !selectedLineCode || isLaserLine
+      const fetchBrake = !selectedLineCode || isBrakeLine
+
+      // ── レーザーデータ取得 ──
+      let laserItems = []
+      if (fetchLaser) {
+        const laserParams = {
+          page_size: 1000,
+          work_date__gte: startDate.value,
+          work_date__lte: endDate.value,
+          ordering: '-work_date,-created_at',
+        }
+        const laserRes = await api.laserActuals.getLaserActuals(laserParams)
+        laserItems = normalizeList(laserRes.data).flatMap((row) => {
+          const action = String(row?.operator_action || '').toUpperCase()
+          const isOpen = action === 'START' || action === 'RESUME'
+          const totalMinutes = Number(row?.total_process_time || 0)
+          const effectiveSeconds = Math.max(0, Math.round(totalMinutes * 60))
+          const componentDetails = normalizeList(row?.details)
+            .filter((detail) => String(detail?.detail_type || '').toUpperCase() === 'COMPONENT')
+
+          const buildLaserRow = (detail) => {
+            const productionQty = Number(detail?.total_qty || 0)
+            const productivity = productionQty > 0 && effectiveSeconds > 0
+              ? (productionQty * 3600) / effectiveSeconds
+              : null
+            return {
+              id: row?.id,
+              started_at: row?.created_at || null,
+              ended_at: isOpen ? null : (row?.created_at || null),
+              session_type: 'WORK',
+              start_action: action || '—',
+              end_action: action || '—',
+              pause_reason: row?.operator_action_reason || '',
+              process_code: row?.equipment_process_code || row?.equipment_code || '',
+              process_name: row?.equipment_name || '',
+              equipment_code: row?.equipment_code || '',
+              product_code: detail?.product_code || '',
+              product_name: detail?.product_name || '',
+              operator_name: row?.created_by_name || row?.updated_by_name || '—',
+              duration_seconds: effectiveSeconds,
+              effective_work_seconds: effectiveSeconds,
+              production_qty: productionQty,
+              productivity_per_hour: productivity,
+              issue_count: 0,
+              issue_flags: [],
+              record_source: 'LASER',
+            }
+          }
+
+          if (!componentDetails.length) return [buildLaserRow(null)]
+          return componentDetails.map((detail) => buildLaserRow(detail))
+        })
+
       }
 
-      const laserRes = await api.laserActuals.getLaserActuals(laserParams)
-      let laserItems = normalizeList(laserRes.data).flatMap((row) => {
-        const action = String(row?.operator_action || '').toUpperCase()
-        const isOpen = action === 'START' || action === 'RESUME'
-        const totalMinutes = Number(row?.total_process_time || 0)
-        const effectiveSeconds = Math.max(0, Math.round(totalMinutes * 60))
-        const componentDetails = normalizeList(row?.details)
-          .filter((detail) => String(detail?.detail_type || '').toUpperCase() === 'COMPONENT')
-
-        const buildLaserRow = (detail) => {
-          const productionQty = Number(detail?.total_qty || 0)
-          const productivity = productionQty > 0 && effectiveSeconds > 0
-            ? (productionQty * 3600) / effectiveSeconds
-            : null
-          return {
-            id: row?.id,
-            started_at: row?.created_at || null,
-            ended_at: isOpen ? null : (row?.created_at || null),
-            session_type: 'WORK',
-            start_action: action || '—',
-            end_action: action || '—',
-            pause_reason: row?.operator_action_reason || '',
-            process_code: row?.equipment_code || '',
-            process_name: row?.equipment_name || '',
-            product_code: detail?.product_code || '',
-            product_name: detail?.product_name || '',
-            operator_name: row?.created_by_name || row?.updated_by_name || '—',
-            duration_seconds: effectiveSeconds,
-            effective_work_seconds: effectiveSeconds,
-            production_qty: productionQty,
-            productivity_per_hour: productivity,
-            issue_count: 0,
-            issue_flags: [],
-            record_source: 'LASER',
-          }
+      // ── ブレーキラインデータ取得 ──
+      let brakeItems = []
+      if (fetchBrake) {
+        const brakeParams = {
+          start_date: startDate.value,
+          end_date: endDate.value,
         }
+        if (lineId.value) brakeParams.line_id = lineId.value
+        if (processId.value) brakeParams.process_id = processId.value
+        if (productCode.value.trim()) brakeParams.product_code = productCode.value.trim()
+        const brakeRes = await api.brakeLineActuals.getSessions(brakeParams)
+        brakeItems = normalizeList(brakeRes.data)
+      }
 
-        if (!componentDetails.length) {
-          return [buildLaserRow(null)]
-        }
-        return componentDetails.map((detail) => buildLaserRow(detail))
-      })
+      // ── マージ＆共通フィルター ──
+      let allItems = [...laserItems, ...brakeItems]
 
       const keyword = String(productCode.value || '').trim().toLowerCase()
       if (keyword) {
-        laserItems = laserItems.filter((row) => {
+        allItems = allItems.filter((row) => {
           const code = String(row?.product_code || '').toLowerCase()
           const name = String(row?.product_name || '').toLowerCase()
           return code.includes(keyword) || name.includes(keyword)
         })
       }
 
-      if (lineId.value) {
-        const selectedLine = lines.value.find((line) => String(line.id) === String(lineId.value))
-        const lineCode = String(selectedLine?.line_code || '').trim().toLowerCase()
-        if (lineCode) {
-          laserItems = laserItems.filter((row) => {
-            const processLabel = `${row?.process_code || ''} ${row?.process_name || ''}`.toLowerCase()
-            return processLabel.includes(lineCode)
-          })
-        }
-      }
-
-      if (processId.value) {
-        const selectedProcess = processes.value.find((proc) => String(proc.id) === String(processId.value))
-        const processCode = String(selectedProcess?.process_code || '').trim().toLowerCase()
-        if (processCode) {
-          laserItems = laserItems.filter((row) => {
-            const processLabel = `${row?.process_code || ''} ${row?.process_name || ''}`.toLowerCase()
-            return processLabel.includes(processCode)
-          })
-        }
+      if (processId.value && fetchLaser) {
+        allItems = allItems.filter((row) => {
+          if (String(row?.record_source || '').toUpperCase() !== 'LASER') return true
+          // equipment_process_id が返っている場合はIDで直接比較
+          if (row?.equipment_process_id != null) {
+            return String(row.equipment_process_id) === String(processId.value)
+          }
+          // フォールバック: process_code 部分一致
+          const selectedProcess = processes.value.find((proc) => String(proc.id) === String(processId.value))
+          const pCode = String(selectedProcess?.process_code || '').trim().toLowerCase()
+          return pCode ? `${row?.process_code || ''} ${row?.process_name || ''}`.toLowerCase().includes(pCode) : true
+        })
       }
 
       if (status.value === 'OPEN') {
-        laserItems = laserItems.filter((row) => !row.ended_at)
+        allItems = allItems.filter((row) => !row.ended_at)
       } else if (status.value === 'CLOSED') {
-        laserItems = laserItems.filter((row) => !!row.ended_at)
+        allItems = allItems.filter((row) => !!row.ended_at)
       }
 
       if (excludeZeroProduction.value === 'true') {
-        laserItems = laserItems.filter((row) => Number(row?.production_qty || 0) !== 0)
+        allItems = allItems.filter((row) => Number(row?.production_qty || 0) !== 0)
       }
 
       if (hasIssue.value === 'true') {
-        laserItems = []
+        allItems = allItems.filter((row) => String(row?.record_source || '').toUpperCase() !== 'BRAKE')
       }
 
       if (wantsCancelOnly) {
-        laserItems = laserItems.filter((row) => isCanceledSession(row))
+        allItems = allItems.filter((row) => isCanceledSession(row))
       } else if (sessionType.value === 'WORK') {
-        laserItems = laserItems.filter((row) => row.session_type === 'WORK' && !isCanceledSession(row))
+        allItems = allItems.filter((row) => row.session_type === 'WORK' && !isCanceledSession(row))
       } else if (sessionType.value === 'PAUSE') {
-        laserItems = laserItems.filter((row) => String(row?.end_action || '').toUpperCase() === 'PAUSE')
+        allItems = allItems.filter((row) => String(row?.end_action || '').toUpperCase() === 'PAUSE')
       }
 
-      sessions.value = laserItems
+      // started_at 降順でソート
+      allItems.sort((a, b) => {
+        const ta = a.started_at || ''
+        const tb = b.started_at || ''
+        return ta < tb ? 1 : ta > tb ? -1 : 0
+      })
+
+      sessions.value = allItems
       return
     }
 

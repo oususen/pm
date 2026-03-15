@@ -460,6 +460,8 @@ class LaserActualSerializer(serializers.ModelSerializer):
 
     equipment_code = serializers.CharField(read_only=True)
     equipment_name = serializers.CharField(read_only=True)
+    equipment_process_code = serializers.CharField(source='equipment.process.process_code', read_only=True, default='')
+    equipment_process_id   = serializers.IntegerField(source='equipment.process.id', read_only=True, default=None)
     material_code = serializers.CharField(read_only=True)
     material_name = serializers.CharField(read_only=True)
     created_by_name = serializers.SerializerMethodField()
@@ -475,6 +477,8 @@ class LaserActualSerializer(serializers.ModelSerializer):
             'equipment',
             'equipment_code',
             'equipment_name',
+            'equipment_process_code',
+            'equipment_process_id',
             'pattern',
             'pattern_no',
             'material',

@@ -36,6 +36,7 @@ class ProductFilter(django_filters.FilterSet):
     is_line_final_product = django_filters.BooleanFilter(field_name='is_line_final_product')
     has_bom = django_filters.BooleanFilter(method='filter_has_bom')
     customer_code = django_filters.CharFilter(method='filter_customer_code')
+    product_code = django_filters.CharFilter(field_name='product_code', lookup_expr='exact')
 
     class Meta:
         model = Product
@@ -49,6 +50,7 @@ class ProductFilter(django_filters.FilterSet):
             'customer_code',
             'created_from',
             'created_to',
+            'product_code',
         ]
 
     def filter_has_bom(self, queryset, name, value):

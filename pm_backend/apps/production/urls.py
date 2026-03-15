@@ -26,6 +26,7 @@ from production.views import (
 from production.views_line_realtime import LineRealtimeRecordViewSet, LineStatusViewSet
 from production.views_process_realtime import ProcessRealtimeRecordViewSet
 from production.views_services import BOMServiceViewSet, CRPViewSet
+from production.views_brake_line import BrakeLinePlanView, BrakeLineProductsView, BrakeLineEquipmentsView, BrakeLineActualAddView, BrakeLineRecordView, BrakeLineSessionView
 
 router = DefaultRouter()
 router.register(r'line-demands', LineDemandViewSet, basename='linedemand')
@@ -64,4 +65,10 @@ urlpatterns = [
     path('line-backlog-adjustments/', LineBacklogAdjustmentView.as_view(), name='line-backlog-adjustments'),
     path('stock-migration/detect/', StockMigrationDetectView.as_view(), name='stock-migration-detect'),
     path('stock-migration/execute/', StockMigrationExecuteView.as_view(), name='stock-migration-execute'),
+    path('brake-line-plan/', BrakeLinePlanView.as_view(), name='brake-line-plan'),
+    path('brake-line-products/', BrakeLineProductsView.as_view(), name='brake-line-products'),
+    path('brake-line-equipments/', BrakeLineEquipmentsView.as_view(), name='brake-line-equipments'),
+    path('brake-line-actual/add/', BrakeLineActualAddView.as_view(), name='brake-line-actual-add'),
+    path('brake-line-record/', BrakeLineRecordView.as_view(), name='brake-line-record'),
+    path('brake-line-sessions/', BrakeLineSessionView.as_view(), name='brake-line-sessions'),
 ]
