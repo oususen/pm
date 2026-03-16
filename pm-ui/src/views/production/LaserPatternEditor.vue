@@ -308,10 +308,15 @@ const hydrateForm = (pattern) => ({
   equipment: pattern.equipment ?? null,
   process_time_min: formatOneDecimalInput(pattern.process_time_min ?? 0),
   is_budget_target: Boolean(pattern.is_budget_target),
-  component_items: (pattern.component_items || []).map((item) => ({
-    component_product: item.component_product ?? null,
-    take_qty: formatIntegerInput(item.take_qty ?? 0),
-  })),
+  component_items: [...(pattern.component_items || [])]
+    .sort((a, b) =>
+      String(a?.component_product_code || '')
+        .localeCompare(String(b?.component_product_code || ''), 'ja', { numeric: true, sensitivity: 'base' }),
+    )
+    .map((item) => ({
+      component_product: item.component_product ?? null,
+      take_qty: formatIntegerInput(item.take_qty ?? 0),
+    })),
   finished_items: (pattern.finished_items || []).map((item) => ({
     finished_product: item.finished_product ?? null,
     units_per_shot: formatOneDecimalInput(item.units_per_shot ?? 0),
