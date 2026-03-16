@@ -70,7 +70,28 @@ const searchText = ref('')
 const isOpen = ref(false)
 const activeIndex = ref(-1)
 
-const normalize = (value) => String(value ?? '').trim().toLowerCase()
+const toHalfWidth = (value) =>
+  String(value ?? '')
+    .replace(/[！-～]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/　/g, ' ')
+
+const normalize = (value) => toHalfWidth(value).trim().toLowerCase()
+
+const scoreOption = (option, query) => {
+  const code = normalize(option?.code)
+  const label = normalize(option?.label)
+  const name = normalize(option?.name)
+  if (!query) return 999
+  if (code === query) return 0
+  if (code.startsWith(query)) return 1
+  if (code.endsWith(query)) return 2
+  if (code.includes(query)) return 3
+  if (label.startsWith(query)) return 4
+  if (label.includes(query)) return 5
+  if (name.startsWith(query)) return 6
+  if (name.includes(query)) return 7
+  return 999
+}
 
 const selectedOption = computed(() =>
   (props.options || []).find((option) => `${option.value}` === `${props.modelValue}`),
@@ -86,12 +107,13 @@ const filteredOptions = computed(() => {
   const query = normalize(searchText.value)
   if (!query) return source.slice(0, props.maxOptions)
   return source
-    .filter((option) => {
-      const label = normalize(option?.label)
-      const code = normalize(option?.code)
-      const name = normalize(option?.name)
-      return label.includes(query) || code.includes(query) || name.includes(query)
+    .map((option) => ({ option, score: scoreOption(option, query) }))
+    .filter((row) => row.score < 999)
+    .sort((a, b) => {
+      if (a.score !== b.score) return a.score - b.score
+      return normalize(a.option?.code).localeCompare(normalize(b.option?.code))
     })
+    .map((row) => row.option)
     .slice(0, props.maxOptions)
 })
 
@@ -121,8 +143,15 @@ const findMatch = (text, allowPartial = false) => {
     const label = normalize(option?.label)
     const code = normalize(option?.code)
     const name = normalize(option?.name)
-    return code.startsWith(query) || label.includes(query) || name.includes(query)
+    return (
+      code.startsWith(query) ||
+      code.endsWith(query) ||
+      code.includes(query) ||
+      label.includes(query) ||
+      name.includes(query)
+    )
   })
+  partial.sort((a, b) => scoreOption(a, query) - scoreOption(b, query))
   if (partial.length === 1) return partial[0]
   return null
 }

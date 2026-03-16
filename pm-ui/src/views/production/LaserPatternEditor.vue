@@ -253,8 +253,18 @@ const toProductLookupOption = (product) => ({
   label: `${product.product_code || ''} - ${product.product_name || ''}`,
 })
 
+const compareByCode = (a, b) => {
+  const aCode = String(a?.product_code || '')
+  const bCode = String(b?.product_code || '')
+  return aCode.localeCompare(bCode, 'ja', { numeric: true, sensitivity: 'base' })
+}
+
 const materialLookupOptions = computed(() => materialProductOptions.value.map(toProductLookupOption))
-const allProductLookupOptions = computed(() => allProductOptions.value.map(toProductLookupOption))
+const allProductLookupOptions = computed(() =>
+  [...allProductOptions.value]
+    .sort(compareByCode)
+    .map(toProductLookupOption),
+)
 const finishedProductLookupOptions = computed(() =>
   allProductOptions.value
     .filter((item) => Boolean(item?.is_final_product) && Boolean(item?.is_active))
