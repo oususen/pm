@@ -859,7 +859,7 @@ async function save() {
       product_id:            item.product_id,
       product_code:          item.product_code,
       equipment_id:          selectedEquipmentId.value,
-      plan_date:             item.carryover_plan_date || planDateStr.value,
+      plan_date:             businessToday(),
       operator:              operator.value,
       operator_action:       selectedAction.value,
       operator_action_reason: actionReason.value,

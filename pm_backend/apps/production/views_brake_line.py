@@ -17,7 +17,6 @@ from rest_framework.views import APIView
 from masters.models import Calendar, Equipment, Line, Process, Product, RoutingStep
 from orders.utils.calendar_utils import get_business_today, WorkingDayCalculator
 from production.models_brake_line_record import BrakeLineRecord
-from production.models_laser_actual import LaserActualDetail
 from production.models_line_backlog import LineBacklog
 from production.models_record_inquiry_setting import ProductionRecordInquirySetting
 
@@ -80,16 +79,46 @@ class BrakeLinePlanView(APIView):
             .values('id', 'process_code', 'process_name')
             .order_by('process_code')
         )
+        process_ids = [p['id'] for p in processes]
 
-        # 昨日のレーザ実績（FINISHED）を品番ごとに集計
-        laser_qs = (
-            LaserActualDetail.objects
-            .filter(
-                actual__work_date=laser_date,
-                detail_type=LaserActualDetail.DETAIL_TYPE_FINISHED,
+        # 工程ごとの加工対象品（RoutingStep.output_product）を事前取得
+        process_product_ids: dict[int, set[int]] = {}
+        if process_ids:
+            for row in (
+                RoutingStep.objects
+                .filter(process_id__in=process_ids, output_product__isnull=False)
+                .values('process_id', 'output_product_id')
+                .distinct()
+            ):
+                pid = row['process_id']
+                process_product_ids.setdefault(pid, set()).add(row['output_product_id'])
+
+        # レーザライン設定取得（レーザ実績は LineBacklog.actual_qty から参照）
+        laser_line_codes = []
+        try:
+            laser_setting = ProductionRecordInquirySetting.objects.get(
+                tab_key=ProductionRecordInquirySetting.TAB_LASER
             )
-            .values('product_code', 'product_name', 'product_id')
-            .annotate(laser_qty=Sum(F('total_qty') - F('scrap_qty')))
+            laser_line_codes = laser_setting.target_line_codes or []
+        except ProductionRecordInquirySetting.DoesNotExist:
+            laser_line_codes = []
+
+        laser_line_ids = list(
+            Line.objects
+            .filter(line_code__in=laser_line_codes, is_active=True)
+            .values_list('id', flat=True)
+        )
+
+        # レーザ実績（line_backlog.actual_qty）を品番ごとに集計
+        laser_qs = (
+            LineBacklog.objects
+            .filter(
+                plan_date=laser_date,
+                line_id__in=laser_line_ids,
+                actual_qty__gt=0,
+            )
+            .values('product__product_code', 'product__product_name', 'product_id')
+            .annotate(laser_qty=Sum('actual_qty'))
         )
 
         # ブレーキ品番変換ルール: レーザ品番 + "B"
@@ -105,7 +134,7 @@ class BrakeLinePlanView(APIView):
         # {brake_product_code: {laser_qty, product_id}}
         brake_plan: dict[str, dict] = {}
         for row in laser_qs:
-            laser_code = row['product_code']
+            laser_code = row['product__product_code']
             laser_qty = float(row['laser_qty'] or 0)
             if laser_qty <= 0:
                 continue
@@ -143,12 +172,19 @@ class BrakeLinePlanView(APIView):
         ).select_related('product', 'process', 'line')
 
         # (line_id, process_id, product_id) → backlog
-        # 同じキーが複数ある場合は sequence_no=0（実績行）を優先
+        # 同じキーが複数ある場合は sequence_no>0 を優先（sequence_no=0 は需要専用行）
         backlog_map: dict[tuple, LineBacklog] = {}
         for lb in backlogs_qs:
             key = (lb.line_id, lb.process_id, lb.product_id)
             existing = backlog_map.get(key)
-            if existing is None or lb.sequence_no < existing.sequence_no:
+            if existing is None:
+                backlog_map[key] = lb
+                continue
+
+            # 優先度: sequence_no>0 を先、同条件なら小さい sequence_no を優先
+            cur_priority = (0 if lb.sequence_no > 0 else 1, lb.sequence_no)
+            old_priority = (0 if existing.sequence_no > 0 else 1, existing.sequence_no)
+            if cur_priority < old_priority:
                 backlog_map[key] = lb
 
         line_map = {line['id']: line for line in lines}
@@ -166,10 +202,16 @@ class BrakeLinePlanView(APIView):
                 line_id = line['id']
                 for proc in processes:
                     process_id = proc['id']
+                    allowed_products = process_product_ids.get(process_id)
+                    if product_id and allowed_products is not None and product_id not in allowed_products:
+                        continue
                     lb = backlog_map.get((line_id, process_id, product_id))
                     key = (line_id, process_id, product_id or f'code:{brake_code}')
                     if key in item_keys:
                         continue
+                    plan_qty = int(lb.plan_qty) if lb else 0
+                    if plan_qty <= 0:
+                        plan_qty = int(laser_qty)
                     items.append({
                         'product_id': product_id,
                         'product_code': brake_code,
@@ -181,7 +223,7 @@ class BrakeLinePlanView(APIView):
                         'process_code': proc['process_code'],
                         'process_name': proc['process_name'],
                         'laser_qty': laser_qty,
-                        'plan_qty': int(lb.plan_qty) if lb else int(laser_qty),
+                        'plan_qty': plan_qty,
                         'actual_qty': int(lb.actual_qty) if lb else 0,
                         'backlog_id': lb.id if lb else None,
                         'sequence_no': lb.sequence_no if lb else 1,
