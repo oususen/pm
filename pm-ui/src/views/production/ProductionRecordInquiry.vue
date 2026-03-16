@@ -260,6 +260,9 @@
           </option>
         </select>
       </div>
+      <datalist id="app-product-code-list">
+        <option v-for="code in appProductCodeSuggestions" :key="code" :value="code" />
+      </datalist>
       <div v-if="mappingCandidateLoading" class="settings-info">加工品一覧を読込中...</div>
       <div v-else-if="mappingCandidateError" class="settings-error">{{ mappingCandidateError }}</div>
       <div class="table-wrap settings-table-wrap">
@@ -277,7 +280,14 @@
           <tbody>
             <tr v-for="item in filteredMappingEditRows" :key="`map-${settingsTargetTab}-${item.index}`">
               <td>
-                <input v-model="item.row.appProductCode" type="text" class="map-input" placeholder="例: YD40000001" />
+                <input
+                  v-model="item.row.appProductCode"
+                  type="text"
+                  class="map-input"
+                  placeholder="例: YD40000001"
+                  :list="appProductCodeSuggestions.length ? 'app-product-code-list' : undefined"
+                  @change="autoFillFromCandidate(item.row)"
+                />
               </td>
               <td>
                 <input v-model="item.row.processCode" type="text" class="map-input" placeholder="例: 4010" />
@@ -387,6 +397,7 @@ const mappingSaveMessage = ref('')
 const mappingCandidateLoading = ref(false)
 const mappingCandidateError = ref('')
 const mappingProcessFilter = ref('')
+const allCandidates = ref([])
 const ACTIVE_LINE_CODES = computed(() => getTargetLineCodesByTab(targetLineCodesByTab.value, activeTab.value))
 const BRAKE_LINE_CODES  = computed(() => getTargetLineCodesByTab(targetLineCodesByTab.value, 'brake'))
 const canEditRecordInquirySettings = computed(() => {
@@ -442,6 +453,28 @@ const mappingProcessFilterOptions = computed(() => {
   })
   return Array.from(codes).sort((a, b) => a.localeCompare(b))
 })
+
+// 工程フィルター選択中の入力補助用品番リスト
+const appProductCodeSuggestions = computed(() => {
+  const filterCode = String(mappingProcessFilter.value || '').trim()
+  if (!filterCode) return []
+  return allCandidates.value
+    .filter((c) => String(c.processCode || '').trim() === filterCode)
+    .map((c) => c.appProductCode)
+})
+
+const autoFillFromCandidate = (row) => {
+  const code = String(row.appProductCode || '').trim()
+  const filterCode = String(mappingProcessFilter.value || '').trim()
+  const match = allCandidates.value.find(
+    (c) => String(c.appProductCode || '').trim() === code &&
+           (!filterCode || String(c.processCode || '').trim() === filterCode)
+  )
+  if (!match) return
+  if (!row.processCode) row.processCode = match.processCode
+  if (!row.coreProductCode) row.coreProductCode = match.coreProductCode || ''
+  if (!row.coreProcessOrder) row.coreProcessOrder = match.coreProcessOrder || ''
+}
 
 const filteredMappingEditRows = computed(() => {
   const rows = Array.isArray(mappingEditRows.value) ? mappingEditRows.value : []
@@ -920,11 +953,13 @@ const loadMappingCandidates = async (tabKey = settingsTargetTab.value) => {
       }
     })
 
-    mappingEditRows.value = Array.from(candidateMap.values()).sort((a, b) => {
+    const sorted = Array.from(candidateMap.values()).sort((a, b) => {
       const p = String(a.appProductCode || '').localeCompare(String(b.appProductCode || ''))
       if (p !== 0) return p
       return String(a.processCode || '').localeCompare(String(b.processCode || ''))
     })
+    allCandidates.value = sorted
+    mappingEditRows.value = sorted
   } catch (e) {
     console.error('加工品一覧取得失敗:', e)
     mappingCandidateError.value = '加工品一覧の取得に失敗しました。'
