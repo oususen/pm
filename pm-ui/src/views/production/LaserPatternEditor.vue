@@ -238,7 +238,11 @@ const loadMasterOptions = async () => {
   materialProductOptions.value = products.filter(
     (item) => item?.category === 'MATERIAL' && Boolean(item?.is_active),
   )
-  equipmentOptions.value = normalizeList(equipmentsRes?.data)
+  // レーザラインの設備のみ（line_name に「レーザ」を含む）
+  const allEquipments = normalizeList(equipmentsRes?.data)
+  equipmentOptions.value = allEquipments.filter((eq) =>
+    String(eq.line_name || '').includes('レーザ'),
+  )
 }
 
 const loadPatterns = async () => {
