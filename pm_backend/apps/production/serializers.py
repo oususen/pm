@@ -374,6 +374,7 @@ class LaserPatternSerializer(serializers.ModelSerializer):
             'equipment_code',
             'equipment_name',
             'process_time_min',
+            'is_budget_target',
             'component_items',
             'finished_items',
             'created_at',
@@ -386,10 +387,32 @@ class LaserPatternSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('構成部品を1件以上入力してください。')
         return value
 
-    def validate_finished_items(self, value):
-        if not value:
-            raise serializers.ValidationError('完成品を1件以上入力してください。')
-        return value
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+
+        # 新規/更新共通で、材料予算用フラグと完成品情報の整合性を強制する
+        if 'is_budget_target' in attrs:
+            is_budget_target = bool(attrs.get('is_budget_target'))
+        else:
+            is_budget_target = bool(getattr(self.instance, 'is_budget_target', False))
+
+        if 'finished_items' in attrs:
+            finished_items = attrs.get('finished_items') or []
+        else:
+            finished_items = []
+            if self.instance is not None:
+                finished_items = list(self.instance.finished_items.all())
+
+        if is_budget_target and not finished_items:
+            raise serializers.ValidationError({
+                'finished_items': '材料予算用パターンは完成品情報を1件以上入力してください。'
+            })
+        if not is_budget_target and finished_items:
+            raise serializers.ValidationError({
+                'finished_items': '材料予算用にしないパターンは完成品情報を入力できません。'
+            })
+
+        return attrs
 
     def create(self, validated_data):
         component_items = validated_data.pop('component_items', [])

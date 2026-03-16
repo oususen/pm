@@ -4026,6 +4026,7 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
                 material=source.material,
                 equipment=source.equipment,
                 process_time_min=source.process_time_min,
+                is_budget_target=source.is_budget_target,
             )
             copied.component_items.bulk_create([
                 item.__class__(

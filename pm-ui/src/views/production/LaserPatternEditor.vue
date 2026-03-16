@@ -5,6 +5,18 @@
         <label>パターン検索</label>
         <input v-model.trim="searchKeyword" type="text" placeholder="パターン番号で検索" />
       </div>
+      <div class="filter-block">
+        <select v-model="filterEquipment" class="filter-select">
+          <option value="">設備: すべて</option>
+          <option v-for="eq in equipmentOptions" :key="eq.id" :value="eq.equipment_code">
+            {{ eq.equipment_code }} - {{ eq.equipment_name }}
+          </option>
+        </select>
+        <select v-model="filterMaterial" class="filter-select">
+          <option value="">材料: すべて</option>
+          <option v-for="code in uniqueMaterialCodes" :key="code" :value="code">{{ code }}</option>
+        </select>
+      </div>
       <div class="action-block">
         <button class="btn" type="button" @click="createNewPattern">新規</button>
         <button class="btn primary" type="button" @click="savePattern" :disabled="saving">保存</button>
@@ -68,6 +80,21 @@
           <div class="field">
             <label>加工時間(分/回)</label>
             <input v-model="form.process_time_min" type="number" step="0.1" min="0" />
+          </div>
+          <div class="field field-full">
+            <label>材料予算用</label>
+            <label class="budget-toggle">
+              <input v-model="form.is_budget_target" type="checkbox" />
+              <span>材料予算計算に使用する</span>
+            </label>
+            <div class="budget-help" :class="{ on: form.is_budget_target, off: !form.is_budget_target }">
+              <template v-if="form.is_budget_target">
+                ON: 材料予算計算に使用します。完成品情報を1件以上入力してください。
+              </template>
+              <template v-else>
+                OFF: 一時パターン用です。材料予算計算には使用しません。完成品情報は入力しないでください。
+              </template>
+            </div>
           </div>
         </div>
 
@@ -152,6 +179,8 @@ import LookupSelectInput from '@/components/LookupSelectInput.vue'
 const loading = ref(false)
 const saving = ref(false)
 const searchKeyword = ref('')
+const filterEquipment = ref('')
+const filterMaterial = ref('')
 const patterns = ref([])
 const allProductOptions = ref([])
 const materialProductOptions = ref([])
@@ -163,6 +192,7 @@ const createEmptyForm = () => ({
   material: null,
   equipment: null,
   process_time_min: '0',
+  is_budget_target: false,
   component_items: [{ component_product: null, take_qty: '0' }],
   finished_items: [{ finished_product: null, units_per_shot: '0' }],
 })
@@ -199,10 +229,21 @@ const isOneDecimal = (value) => {
   return Math.abs(num * 10 - Math.round(num * 10)) < 1e-9
 }
 
+const uniqueMaterialCodes = computed(() => {
+  const codes = patterns.value.map((p) => String(p.material_code || '').trim()).filter(Boolean)
+  return [...new Set(codes)].sort()
+})
+
 const filteredPatterns = computed(() => {
-  if (!searchKeyword.value) return patterns.value
-  const q = searchKeyword.value.toLowerCase()
-  return patterns.value.filter((item) => String(item.pattern_no || '').toLowerCase().includes(q))
+  return patterns.value.filter((item) => {
+    if (searchKeyword.value) {
+      const q = searchKeyword.value.toLowerCase()
+      if (!String(item.pattern_no || '').toLowerCase().includes(q)) return false
+    }
+    if (filterEquipment.value && item.equipment_code !== filterEquipment.value) return false
+    if (filterMaterial.value && item.material_code !== filterMaterial.value) return false
+    return true
+  })
 })
 
 const toProductLookupOption = (product) => ({
@@ -256,6 +297,7 @@ const hydrateForm = (pattern) => ({
   material: pattern.material ?? null,
   equipment: pattern.equipment ?? null,
   process_time_min: formatOneDecimalInput(pattern.process_time_min ?? 0),
+  is_budget_target: Boolean(pattern.is_budget_target),
   component_items: (pattern.component_items || []).map((item) => ({
     component_product: item.component_product ?? null,
     take_qty: formatIntegerInput(item.take_qty ?? 0),
@@ -297,6 +339,7 @@ const buildPayload = () => ({
   material: form.value.material,
   equipment: form.value.equipment,
   process_time_min: Number(Number(form.value.process_time_min).toFixed(1)),
+  is_budget_target: Boolean(form.value.is_budget_target),
   component_items: form.value.component_items.map((item) => ({
     component_product: item.component_product,
     take_qty: Number.parseInt(`${item.take_qty}`, 10),
@@ -320,13 +363,20 @@ const validateForm = () => {
   )
   if (invalidComp) return '構成部品の部番と取り数(1以上の整数)を入力してください。'
 
-  const invalidFinished = form.value.finished_items.some(
-    (item) =>
-      !item.finished_product ||
-      Number(item.units_per_shot) <= 0 ||
-      !isOneDecimal(item.units_per_shot),
+  const hasFinishedInput = form.value.finished_items.some(
+    (item) => item.finished_product || Number(item.units_per_shot) > 0,
   )
-  if (invalidFinished) return '完成品情報の品番と取り数(0より大きい小数1桁)を入力してください。'
+  if (form.value.is_budget_target) {
+    const invalidFinished = form.value.finished_items.some(
+      (item) =>
+        !item.finished_product ||
+        Number(item.units_per_shot) <= 0 ||
+        !isOneDecimal(item.units_per_shot),
+    )
+    if (invalidFinished) return '材料予算用パターンは完成品情報の品番と取り数(0より大きい小数1桁)を入力してください。'
+  } else if (hasFinishedInput) {
+    return '材料予算用にしないパターンは完成品情報を入力できません。'
+  }
   return ''
 }
 
@@ -349,7 +399,12 @@ const savePattern = async () => {
     if (target) selectPattern(target)
     window.alert('保存しました。')
   } catch (error) {
-    const detail = error?.response?.data?.detail || '保存に失敗しました。'
+    const resData = error?.response?.data || {}
+    const firstFieldKey = Object.keys(resData).find((k) => k !== 'detail')
+    const fieldMessage = firstFieldKey
+      ? (Array.isArray(resData[firstFieldKey]) ? resData[firstFieldKey][0] : resData[firstFieldKey])
+      : ''
+    const detail = error?.response?.data?.detail || fieldMessage || '保存に失敗しました。'
     window.alert(detail)
   } finally {
     saving.value = false
@@ -426,6 +481,19 @@ onMounted(async () => {
   flex-direction: column;
   gap: 4px;
   min-width: 280px;
+}
+.filter-block {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+.filter-select {
+  height: 32px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0 8px;
+  font-size: 13px;
+  background: #fff;
 }
 .search-block input {
   height: 32px;
@@ -523,12 +591,31 @@ onMounted(async () => {
   flex-direction: column;
   gap: 4px;
 }
+.field-full {
+  grid-column: 1 / -1;
+}
 .field input,
 .field select {
   height: 32px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   padding: 0 8px;
+}
+.budget-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.budget-help {
+  margin-top: 4px;
+  font-size: 12px;
+}
+.budget-help.on {
+  color: #065f46;
+}
+.budget-help.off {
+  color: #334155;
 }
 .field :deep(.lookup-select-input input) {
   height: 32px;
