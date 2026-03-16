@@ -106,6 +106,7 @@
           <table class="child-table">
             <thead>
               <tr>
+                <th class="col-no">No</th>
                 <th>構成部品</th>
                 <th>取り数</th>
                 <th class="remove-col"></th>
@@ -113,6 +114,7 @@
             </thead>
             <tbody>
               <tr v-for="(item, idx) in form.component_items" :key="`comp-${idx}`">
+                <td class="col-no">{{ idx + 1 }}</td>
                 <td>
                   <LookupSelectInput
                     v-model="item.component_product"
@@ -140,6 +142,7 @@
           <table class="child-table">
             <thead>
               <tr>
+                <th class="col-no">No</th>
                 <th>完成品番号</th>
                 <th>完成品取り数</th>
                 <th class="remove-col"></th>
@@ -147,6 +150,7 @@
             </thead>
             <tbody>
               <tr v-for="(item, idx) in form.finished_items" :key="`fin-${idx}`">
+                <td class="col-no">{{ idx + 1 }}</td>
                 <td>
                   <LookupSelectInput
                     v-model="item.finished_product"
@@ -670,6 +674,13 @@ onMounted(async () => {
   height: 30px;
   border-radius: 4px;
   padding: 0 6px;
+}
+.col-no {
+  width: 36px;
+  min-width: 36px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 11px;
 }
 .remove-col {
   width: 64px;
