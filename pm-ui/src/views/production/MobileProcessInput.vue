@@ -2992,10 +2992,14 @@ const loadLines = async () => {
   }
 }
 
-onMounted(() => {
-  loadLines()
-  loadProcesses()
+onMounted(async () => {
+  await Promise.all([loadLines(), loadProcesses()])
   ensureAuth()
+  const queryProcessId = route.query.process_id
+  if (queryProcessId) {
+    selectedProcessId.value = String(queryProcessId)
+    onProcessChange()
+  }
 })
 </script>
 

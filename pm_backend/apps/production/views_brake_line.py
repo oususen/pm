@@ -259,6 +259,87 @@ class BrakeLinePlanView(APIView):
             })
             item_keys.add(key)
 
+        # 前日以前に中断（PAUSE/TEMP_END）したまま未解決のアイテムを carryover として追加
+        PAUSED_ACTIONS = {
+            BrakeLineRecord.OPERATOR_ACTION_PAUSE,
+            BrakeLineRecord.OPERATOR_ACTION_TEMP_END,
+        }
+        carryover_qs = (
+            BrakeLineRecord.objects
+            .filter(plan_date__lt=plan_date, line_id__in=line_ids)
+            .select_related('product')
+            .order_by('-recorded_at')
+        )
+        if process_map:
+            carryover_qs = carryover_qs.filter(process_id__in=list(process_map.keys()))
+
+        seen_carryover_keys: set = set()
+        carryover_manual_codes: set = set()
+        carryover_recs = []
+        for rec in carryover_qs:
+            product_code_raw = (rec.product.product_code if rec.product_id else rec.product_code) or ''
+            product_code_raw = product_code_raw.strip()
+            if not rec.product_id and not product_code_raw:
+                continue
+            rec_key = (rec.line_id, rec.process_id, rec.product_id or f'code:{product_code_raw}')
+            if rec_key in seen_carryover_keys:
+                continue
+            seen_carryover_keys.add(rec_key)
+            if rec.operator_action not in PAUSED_ACTIONS:
+                continue
+            if rec_key in item_keys:
+                continue
+            carryover_recs.append(rec)
+            if not rec.product_id and product_code_raw:
+                carryover_manual_codes.add(product_code_raw)
+
+        carryover_products_by_code = {
+            p.product_code: p for p in Product.objects.filter(product_code__in=list(carryover_manual_codes))
+        }
+
+        for rec in carryover_recs:
+            line_data = line_map.get(rec.line_id)
+            process_data = process_map.get(rec.process_id)
+            if not line_data or not process_data:
+                continue
+
+            product = rec.product
+            product_code = (product.product_code if product else rec.product_code or '').strip()
+            mapped_product = carryover_products_by_code.get(product_code) if not product else product
+            product_id = product.id if product else (mapped_product.id if mapped_product else None)
+            product_name = (
+                (product.product_name if product else '')
+                or (mapped_product.product_name if mapped_product else '')
+                or '（追加）'
+            )
+
+            key = (rec.line_id, rec.process_id, product_id or f'code:{product_code}')
+            if key in item_keys:
+                continue
+
+            lb = backlog_map.get((rec.line_id, rec.process_id, product_id)) if product_id else None
+            items.append({
+                'product_id': product_id,
+                'product_code': product_code,
+                'product_name': product_name,
+                'line_id': rec.line_id,
+                'line_code': line_data['line_code'],
+                'line_name': line_data['line_name'],
+                'process_id': rec.process_id,
+                'process_code': process_data['process_code'],
+                'process_name': process_data['process_name'],
+                'laser_qty': 0,
+                'plan_qty': int(lb.plan_qty) if lb else 0,
+                'actual_qty': int(lb.actual_qty) if lb else 0,
+                'backlog_id': lb.id if lb else None,
+                'sequence_no': lb.sequence_no if lb else (rec.sequence_no or 1),
+                'equipment_id': rec.equipment_id,
+                'is_manual': True,
+                'is_carryover': True,
+                'carryover_plan_date': str(rec.plan_date),
+            })
+            item_keys.add(key)
+
         return Response({
             'plan_date': str(plan_date),
             'laser_date': str(laser_date),
@@ -481,6 +562,33 @@ class BrakeLineRecordView(APIView):
             if rec.equipment_id:
                 equipment_key = f"id:{rec.equipment_id}"
                 if equipment_key not in latest_by_equipment:
+                    latest_by_equipment[equipment_key] = rec
+
+        # 前日以前に中断（PAUSE/TEMP_END）したまま未解決のレコードを carryover として追加
+        PAUSED_ACTIONS = {BrakeLineRecord.OPERATOR_ACTION_PAUSE, BrakeLineRecord.OPERATOR_ACTION_TEMP_END}
+        carryover_qs = BrakeLineRecord.objects.filter(
+            plan_date__lt=plan_date
+        ).select_related('equipment')
+        if process_id:
+            carryover_qs = carryover_qs.filter(process_id=process_id)
+
+        seen_carryover = set()
+        for rec in carryover_qs.order_by('-recorded_at'):
+            product_key = rec.product_id or rec.product_code
+            if not product_key:
+                continue
+            equipment_key = f"id:{rec.equipment_id}" if rec.equipment_id else 'none'
+            item_key = f"{rec.process_id}-{product_key}-{equipment_key}"
+            if item_key in seen_carryover:
+                continue
+            seen_carryover.add(item_key)
+            # 既に今日の記録で状態が確定している場合はスキップ
+            if item_key in item_state_map:
+                continue
+            # 最新アクションが PAUSE/TEMP_END の場合のみ carryover 追加
+            if rec.operator_action in PAUSED_ACTIONS:
+                item_state_map[item_key] = rec.operator_action
+                if rec.equipment_id and equipment_key not in latest_by_equipment:
                     latest_by_equipment[equipment_key] = rec
 
         processing_by_equipment = {}

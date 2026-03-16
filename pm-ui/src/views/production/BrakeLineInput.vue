@@ -2,18 +2,19 @@
   <div class="brake-line-input">
     <!-- ヘッダー -->
     <div class="header">
-      <h2 class="page-title">ブレーキライン実績入力</h2>
+      <h2 class="page-title">{{ t('brakeInput.pageTitle') }}</h2>
+      <button class="btn-scrap-nav" @click="router.push('/production/scrap-record')">{{ t('productionMenu.tiles.scrapRecord') }}</button>
       <div class="header-controls">
-        <label class="header-label">工程</label>
+        <label class="header-label">{{ t('brakeInput.process') }}</label>
         <select v-model="selectedProcessId" class="process-select" @change="onProcessChange">
-          <option value="">-- 工程選択 --</option>
+          <option value="">{{ t('brakeInput.selectProcess') }}</option>
           <option v-for="p in processes" :key="p.id" :value="p.id">
             {{ p.process_code }} {{ p.process_name }}
           </option>
         </select>
-        <label class="header-label">日付</label>
+        <label class="header-label">{{ t('brakeInput.date') }}</label>
         <input type="date" v-model="planDateStr" class="date-input" @change="loadPlan" />
-        <span class="laser-date-label">（レーザ実績: {{ laserDateStr }}）</span>
+        <span class="laser-date-label">{{ t('brakeInput.laserDate', { date: laserDateStr }) }}</span>
         <div class="header-processing" :class="{ empty: !currentProcessingMessages.length }">
           <template v-if="currentProcessingMessages.length">
             <span
@@ -23,7 +24,7 @@
               @click="jumpToProcessingItem(msg)"
             >{{ msg.label }}<template v-if="i < currentProcessingMessages.length - 1"> / </template></span>
           </template>
-          <template v-else>現在加工中の品番はありません</template>
+          <template v-else>{{ t('brakeInput.noProcessing') }}</template>
         </div>
       </div>
     </div>
@@ -34,52 +35,52 @@
       <!-- 列①: コントロール -->
       <div class="col-controls">
         <!-- フィルター -->
-        <div class="section-title">表示設定</div>
+        <div class="section-title">{{ t('brakeInput.displaySettings') }}</div>
         <div class="filter-area">
           <label class="filter-item">
-            <span class="toggle-label">加工済み表示</span>
+            <span class="toggle-label">{{ t('brakeInput.showDone') }}</span>
             <input type="checkbox" v-model="showDone" class="toggle-input" />
             <span class="toggle-track" :class="{ on: showDone }"></span>
           </label>
           <label class="filter-item">
-            <span class="toggle-label">明日の計画</span>
+            <span class="toggle-label">{{ t('brakeInput.showTomorrow') }}</span>
             <input type="checkbox" v-model="showTomorrow" class="toggle-input" @change="onTomorrowToggle" />
             <span class="toggle-track" :class="{ on: showTomorrow }"></span>
           </label>
           <label class="filter-item">
-            <span class="toggle-label">前日表示</span>
+            <span class="toggle-label">{{ t('brakeInput.showYesterday') }}</span>
             <input type="checkbox" v-model="showYesterday" class="toggle-input" @change="onYesterdayToggle" />
             <span class="toggle-track" :class="{ on: showYesterday }"></span>
           </label>
         </div>
 
         <!-- 作業者 -->
-        <div class="section-title" style="margin-top:12px">作業者</div>
+        <div class="section-title" style="margin-top:12px">{{ t('brakeInput.operator') }}</div>
         <div class="operator-area">
           <input
             type="text"
             v-model="operator"
             class="operator-input"
-            placeholder="作業者名"
+            :placeholder="t('brakeInput.operatorPlaceholder')"
           />
         </div>
 
         <!-- 新規追加ボタン -->
         <div class="add-btn-area">
-          <button class="btn-add-new" @click="openAddModal">＋ 新規 / 追加</button>
+          <button class="btn-add-new" @click="openAddModal">{{ t('brakeInput.addNew') }}</button>
         </div>
 
         <!-- 注意書き -->
         <div class="hint-box">
-          <p>・新規加工（DB未登録品）は<br>　「＋新規/追加 → 新規」</p>
-          <p style="margin-top:8px">・計画外加工は<br>　「＋新規/追加 → 追加」</p>
+          <p>{{ t('brakeInput.hintNewLine1') }}<br>　{{ t('brakeInput.hintNewLine2') }}</p>
+          <p style="margin-top:8px">{{ t('brakeInput.hintExtraLine1') }}<br>　{{ t('brakeInput.hintExtraLine2') }}</p>
         </div>
       </div>
 
       <!-- 列②: 製品リスト -->
       <div class="col-list">
         <div class="list-header">
-          <span class="list-count">{{ filteredItems.length }} 件</span>
+          <span class="list-count">{{ t('brakeInput.itemCount', { n: filteredItems.length }) }}</span>
         </div>
 
         <div class="plan-list" v-if="!loading">
@@ -102,14 +103,14 @@
               <div class="item-sub">{{ planDateStr }}</div>
             </div>
             <div v-if="isDone(item)" class="done-badge">✓{{ item.actual_qty }}</div>
-            <div v-if="item.is_manual" class="manual-badge">{{ item.product_id ? '追加' : '新規' }}</div>
+            <div v-if="item.is_manual" class="manual-badge">{{ item.product_id ? t('brakeInput.badgeExtra') : t('brakeInput.badgeNew') }}</div>
           </div>
           <div v-if="filteredItems.length === 0" class="empty-list">
-            表示するアイテムがありません
+            {{ t('brakeInput.emptyList') }}
           </div>
         </div>
         <div class="plan-list loading-list" v-else>
-          <div class="loading-text">読み込み中...</div>
+          <div class="loading-text">{{ t('brakeInput.loading') }}</div>
         </div>
 
         <!-- ページネーション -->
@@ -126,7 +127,7 @@
       <div class="col-form">
         <template v-if="!selectedItem">
           <div class="no-selection">
-            <span>品番を選択してください</span>
+            <span>{{ t('brakeInput.selectItem') }}</span>
           </div>
         </template>
 
@@ -143,15 +144,15 @@
             <div class="stats-and-actions">
               <div class="current-actual">
                 <div class="stat-block">
-                  <span class="stat-label">計画数</span>
+                  <span class="stat-label">{{ t('brakeInput.planQty') }}</span>
                   <span class="stat-value plan">{{ selectedItem.plan_qty }}</span>
                 </div>
                 <div class="stat-block">
-                  <span class="stat-label">現在実績</span>
+                  <span class="stat-label">{{ t('brakeInput.actualQty') }}</span>
                   <span class="stat-value actual">{{ currentActualQty }}</span>
                 </div>
                 <div class="stat-block">
-                  <span class="stat-label">残り</span>
+                  <span class="stat-label">{{ t('brakeInput.remaining') }}</span>
                   <span class="stat-value remain" :class="{ over: currentActualQty >= selectedItem.plan_qty }">
                     {{ Math.max(0, selectedItem.plan_qty - currentActualQty) }}
                   </span>
@@ -160,7 +161,7 @@
 
               <!-- 作業アクションボタン -->
               <div class="action-btns-area">
-                <label class="equip-label">作業アクション <span class="required-mark">*</span></label>
+                <label class="equip-label">{{ t('brakeInput.action') }} <span class="required-mark">*</span></label>
                 <div class="op-action-btns">
                   <button
                     v-for="act in operatorActionOptions"
@@ -170,19 +171,19 @@
                     @click="selectAction(act.value)"
                   >{{ act.label }}</button>
                 </div>
-                <div v-if="selectedItem && !selectedEquipmentId" class="equip-empty">設備を選択するとアクションが表示されます</div>
+                <div v-if="selectedItem && !selectedEquipmentId" class="equip-empty">{{ t('brakeInput.selectEquipFirst') }}</div>
               </div>
             </div>
 
             <!-- 加工中の開始者 -->
             <div v-if="currentWorkState === 'STARTED' && currentOperator" class="started-by-area">
-              <span class="started-by-label">加工開始者：</span>
+              <span class="started-by-label">{{ t('brakeInput.startedBy') }}</span>
               <span class="started-by-name">{{ currentOperator }}</span>
             </div>
 
             <!-- 使用設備（必須） -->
             <div class="equip-select-area">
-              <label class="equip-label">使用設備 <span class="required-mark">*</span></label>
+              <label class="equip-label">{{ t('brakeInput.equipment') }} <span class="required-mark">*</span></label>
               <div class="equip-btns">
                 <button
                   v-for="eq in equipments"
@@ -192,42 +193,63 @@
                   @click="selectedEquipmentId = eq.id"
                 >{{ eq.equipment_code }}<br><span class="equip-btn-name">{{ eq.equipment_name }}</span></button>
               </div>
-              <div v-if="equipments.length === 0" class="equip-empty">設備が登録されていません</div>
+              <div v-if="equipments.length === 0" class="equip-empty">{{ t('brakeInput.noEquipment') }}</div>
             </div>
 
-            <!-- 数量入力（END のみ） -->
+            <!-- 数量入力（END/PAUSE のみ） -->
             <div v-if="requiresQty" class="qty-input-area">
-              <label class="qty-label">加工数量（この作業分）</label>
-              <input
-                ref="qtyInputRef"
-                type="number"
-                v-model.number="inputQty"
-                min="1"
-                step="1"
-                inputmode="numeric"
-                class="qty-input"
-                placeholder="数量を入力"
-                @keyup.enter="save"
-              />
+              <div class="qty-row">
+                <div class="qty-col">
+                  <label class="qty-label">{{ t('brakeInput.processQty') }}</label>
+                  <input
+                    ref="qtyInputRef"
+                    type="number"
+                    v-model.number="inputQty"
+                    min="1"
+                    step="1"
+                    inputmode="numeric"
+                    class="qty-input qty-input-narrow"
+                    :placeholder="t('brakeInput.qtyPlaceholder')"
+                    @keyup.enter="save"
+                  />
+                </div>
+                <div class="qty-col scrap-col">
+                  <label class="qty-label scrap-label">{{ t('productionMenu.tiles.scrapRecord') }}</label>
+                  <div class="scrap-inline">
+                    <input
+                      type="number"
+                      v-model.number="scrapQty"
+                      min="0"
+                      step="1"
+                      inputmode="numeric"
+                      class="qty-input qty-input-narrow"
+                      :placeholder="t('brakeInput.qtyPlaceholder')"
+                    />
+                    <select v-model="scrapReason" class="scrap-reason-select">
+                      <option value="">{{ t('brakeInput.selectReason') }}</option>
+                      <option v-for="r in SCRAP_REASONS" :key="r.value" :value="r.value">{{ r.label }}</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <!-- 理由（中断・一時終了） -->
             <div v-if="requiresReason" class="reason-area">
               <label class="qty-label">
-                {{ selectedAction === 'TEMP_END' ? '一時終了理由' : '中断理由' }}
+                {{ selectedAction === 'TEMP_END' ? t('brakeInput.tempEndReasonLabel') : t('brakeInput.pauseReasonLabel') }}
                 <span class="required-mark">*</span>
               </label>
               <select v-model="actionReason" class="reason-select">
-                <option value="">-- 選択 --</option>
+                <option value="">{{ t('brakeInput.selectReason') }}</option>
                 <option v-for="r in reasonOptions" :key="r" :value="r">{{ r }}</option>
               </select>
             </div>
 
             <!-- アクションバー -->
             <div class="action-bar">
-              <button class="btn-save" :disabled="!canSave" @click="save">保存</button>
-              <button class="btn-change" :disabled="!selectedItem" @click="openCorrect">修正</button>
-              <button class="btn-cancel" @click="cancel">× キャンセル</button>
+              <button class="btn-save" :disabled="!canSave" @click="save">{{ t('brakeInput.save') }}</button>
+              <button class="btn-cancel" @click="cancel">{{ t('brakeInput.cancel') }}</button>
             </div>
           </div>
         </template>
@@ -254,24 +276,24 @@
     <!-- 新規/追加モーダル -->
     <div v-if="showAddModal" class="modal-overlay" @click.self="closeAddModal">
       <div class="modal">
-        <h3 class="modal-title">加工品追加</h3>
+        <h3 class="modal-title">{{ t('brakeInput.modalTitle') }}</h3>
 
         <div class="modal-field">
-          <label>種別</label>
+          <label>{{ t('brakeInput.typeLabel') }}</label>
           <div class="add-type-btns">
             <button class="type-btn" :class="{ active: addType === 'extra' }" @click="addType = 'extra'">
-              追加（計画外の既存品）
+              {{ t('brakeInput.typeExtra') }}
             </button>
             <button class="type-btn" :class="{ active: addType === 'new' }" @click="addType = 'new'">
-              新規（DB未登録品）
+              {{ t('brakeInput.typeNew') }}
             </button>
           </div>
         </div>
 
         <div v-if="addType === 'extra'" class="modal-field">
-          <label>品番</label>
+          <label>{{ t('brakeInput.productCode') }}</label>
           <select v-model="addProductId" class="modal-select" @change="onAddProductSelect">
-            <option value="">-- 品番を選択 --</option>
+            <option value="">{{ t('brakeInput.selectProduct') }}</option>
             <option v-for="p in brakeLineProducts" :key="p.id" :value="p.id">
               {{ p.product_code }}　{{ p.product_name }}
             </option>
@@ -282,19 +304,19 @@
         </div>
 
         <div v-if="addType === 'new'" class="modal-field">
-          <label>品番（手入力）</label>
+          <label>{{ t('brakeInput.productCodeManual') }}</label>
           <input
             type="text"
             v-model="addProductCodeManual"
             class="modal-input"
-            placeholder="例: YD00001234B"
+            :placeholder="t('brakeInput.productCodePlaceholder')"
             @input="addProductCodeManual = addProductCodeManual.toUpperCase()"
           />
-          <div class="modal-hint">DBに未登録の品番を直接入力します</div>
+          <div class="modal-hint">{{ t('brakeInput.newProductHint') }}</div>
         </div>
 
         <div class="modal-field">
-          <label>工程</label>
+          <label>{{ t('brakeInput.processLabel') }}</label>
           <select v-model="addProcessId" class="modal-select" disabled style="opacity:0.6;cursor:not-allowed;">
             <option v-for="p in processes" :key="p.id" :value="p.id">
               {{ p.process_code }} {{ p.process_name }}
@@ -304,7 +326,7 @@
 
         <!-- 設備（必須） -->
         <div class="modal-field">
-          <label>使用設備 <span class="required-mark">*</span></label>
+          <label>{{ t('brakeInput.equipmentLabel') }} <span class="required-mark">*</span></label>
           <div class="equip-btns equip-btns-modal">
             <button
               v-for="eq in addEquipments"
@@ -314,40 +336,18 @@
               @click="addEquipmentId = eq.id"
             >{{ eq.equipment_code }}<br><span class="equip-btn-name">{{ eq.equipment_name }}</span></button>
           </div>
-          <div v-if="addEquipments.length === 0" class="equip-empty">設備が登録されていません</div>
+          <div v-if="addEquipments.length === 0" class="equip-empty">{{ t('brakeInput.noEquipment') }}</div>
         </div>
 
         <div v-if="addError" class="modal-error">{{ addError }}</div>
 
         <div class="modal-actions">
-          <button class="btn-cancel" @click="closeAddModal">キャンセル</button>
-          <button class="btn-save" @click="confirmAdd" :disabled="!canConfirmAdd">リストに追加</button>
+          <button class="btn-cancel" @click="closeAddModal">{{ t('brakeInput.cancel') }}</button>
+          <button class="btn-save" @click="confirmAdd" :disabled="!canConfirmAdd">{{ t('brakeInput.confirmAdd') }}</button>
         </div>
       </div>
     </div>
 
-    <!-- 修正モーダル -->
-    <div v-if="showCorrect" class="modal-overlay" @click.self="showCorrect = false">
-      <div class="modal">
-        <h3 class="modal-title">実績修正</h3>
-        <p class="modal-desc">{{ selectedItem?.product_code }} の実績数を直接指定します</p>
-        <div class="modal-field">
-          <label>修正後の実績数</label>
-          <input
-            type="number"
-            v-model.number="correctQty"
-            min="0"
-            step="1"
-            inputmode="numeric"
-            class="qty-input"
-          />
-        </div>
-        <div class="modal-actions">
-          <button class="btn-cancel" @click="showCorrect = false">キャンセル</button>
-          <button class="btn-save" @click="saveCorrect">確定</button>
-        </div>
-      </div>
-    </div>
 
     <!-- トースト通知 -->
     <transition name="toast">
@@ -358,8 +358,17 @@
 
 <script setup>
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
+import { t } from '@/i18n'
+
+const SCRAP_REASONS = [
+  { value: '500:その他',          label: '500: その他' },
+  { value: '501:精度調整/試し曲げ', label: '501: 精度調整/試し曲げ' },
+  { value: '502:精度不良',         label: '502: 精度不良' },
+  { value: '503:変形/キズ',        label: '503: 変形/キズ' },
+]
 
 // ──────────────────────────────
 // 日付ユーティリティ（8時区切り）
@@ -384,6 +393,7 @@ const addDays = (ymd, n) => {
 // ──────────────────────────────
 // 状態
 // ──────────────────────────────
+const router = useRouter()
 const planDateStr = ref(businessToday())
 const laserDateStr = ref('')  // バックエンドが営業日計算した値を使用
 const processes = ref([])
@@ -405,9 +415,6 @@ const showYesterday = ref(false)
 const PAGE_SIZE = 25
 const currentPage = ref(1)
 
-// 修正
-const showCorrect = ref(false)
-const correctQty = ref(0)
 
 // 設備
 const equipments = ref([])            // メインフォーム用設備一覧
@@ -420,14 +427,36 @@ const workStateMap = ref({})          // {stateKey: lastAction}
 const workOperatorMap = ref({})       // {stateKey: 開始者名}
 const currentProcessingByEquipment = ref({}) // {equipmentKey: {equipmentLabel, productCode}}
 
-const PAUSE_REASONS = ['設備トラブル', '治具トラブル', '品質トラブル', '材料待ち', '段取り替え', '班長/対応者待ち', '3S活動', '改善活動', 'その他']
-const TEMP_END_REASONS = ['本日設備復旧不可', '本日治具使用不可', '他へ製品切り替え', '材料不足', 'その他']
+const pauseReasons = computed(() => [
+  t('brakeInput.pauseReason.equipmentTrouble'),
+  t('brakeInput.pauseReason.jigTrouble'),
+  t('brakeInput.pauseReason.qualityTrouble'),
+  t('brakeInput.pauseReason.materialWait'),
+  t('brakeInput.pauseReason.setup'),
+  t('brakeInput.pauseReason.leaderWait'),
+  t('brakeInput.pauseReason.activity3s'),
+  t('brakeInput.pauseReason.improvement'),
+  t('brakeInput.pauseReason.other'),
+])
+const tempEndReasons = computed(() => [
+  t('brakeInput.tempEndReason.noEquipment'),
+  t('brakeInput.tempEndReason.noJig'),
+  t('brakeInput.tempEndReason.switchProduct'),
+  t('brakeInput.tempEndReason.materialShortage'),
+  t('brakeInput.tempEndReason.other'),
+])
 
 const NOT_STARTED_ACTIONS = ['START']
 const STARTED_ACTIONS     = ['END', 'PAUSE']
 const PAUSED_ACTIONS      = ['RESUME', 'TEMP_END']
 const TEMP_ENDED_ACTIONS  = ['RESUME']
-const ACTION_LABELS = { START: '開始', END: '終了', PAUSE: '中断', RESUME: '再開', TEMP_END: '一時終了' }
+const actionLabels = computed(() => ({
+  START: t('brakeInput.actionStart'),
+  END: t('brakeInput.actionEnd'),
+  PAUSE: t('brakeInput.actionPause'),
+  RESUME: t('brakeInput.actionResume'),
+  TEMP_END: t('brakeInput.actionTempEnd'),
+}))
 
 const isSameId = (a, b) => String(a ?? '').trim() === String(b ?? '').trim()
 
@@ -481,7 +510,7 @@ const currentOperator = computed(() => {
 })
 
 const operatorActionOptions = computed(() => {
-  const toOpts = (actions) => actions.map(v => ({ value: v, label: ACTION_LABELS[v] }))
+  const toOpts = (actions) => actions.map(v => ({ value: v, label: actionLabels.value[v] }))
   if (!selectedItem.value || !selectedEquipmentId.value) return []
   if (currentWorkState.value === 'STARTED')    return toOpts(STARTED_ACTIONS)
   if (currentWorkState.value === 'PAUSED')     return toOpts(PAUSED_ACTIONS)
@@ -491,7 +520,7 @@ const operatorActionOptions = computed(() => {
 
 const requiresQty    = computed(() => selectedAction.value === 'END' || selectedAction.value === 'PAUSE')
 const requiresReason = computed(() => selectedAction.value === 'PAUSE' || selectedAction.value === 'TEMP_END')
-const reasonOptions  = computed(() => selectedAction.value === 'TEMP_END' ? TEMP_END_REASONS : PAUSE_REASONS)
+const reasonOptions  = computed(() => selectedAction.value === 'TEMP_END' ? tempEndReasons.value : pauseReasons.value)
 
 const currentProcessingMessages = computed(() => {
   const selectedProcessKey = String(selectedProcessId.value || '').trim()
@@ -507,8 +536,8 @@ const currentProcessingMessages = computed(() => {
         equipmentId: row?.equipment_id ?? null,
         productCode,
         label: productCode
-          ? `現在${equipmentLabel}設備で${productCode}加工中`
-          : `現在${equipmentLabel}設備で加工中`,
+          ? t('brakeInput.processingWithProduct', { equipment: equipmentLabel, product: productCode })
+          : t('brakeInput.processingNoProduct', { equipment: equipmentLabel }),
       }
     })
     .filter(Boolean)
@@ -533,6 +562,8 @@ const addEquipments = ref([])         // 追加モーダル用設備一覧
 const toast = ref({ show: false, message: '', type: 'success' })
 
 const qtyInputRef = ref(null)
+const scrapQty = ref(null)
+const scrapReason = ref('')
 
 watch(
   () => operatorActionOptions.value.map((item) => item.value).join('|'),
@@ -599,7 +630,7 @@ async function loadPlan() {
       currentProcessingByEquipment.value = {}
     }
   } catch (e) {
-    showToast(e?.response?.data?.detail || '計画の取得に失敗しました', 'error')
+    showToast(e?.response?.data?.detail || t('brakeInput.error.loadFailed'), 'error')
   } finally {
     loading.value = false
   }
@@ -676,7 +707,15 @@ const pageEnd = computed(() => Math.min(currentPage.value * PAGE_SIZE, filteredI
 // ──────────────────────────────
 // 計算プロパティ
 // ──────────────────────────────
-const isDone = (item) => item.actual_qty > 0
+const isDone = (item) => {
+  if (item.actual_qty <= 0) return false
+  // PAUSE/TEMP_END 中のアイテムは「加工済み」扱いしない（未完了のため常に表示）
+  const hasPause = equipments.value.concat([{ id: null }]).some(eq => {
+    const st = workStateMap.value[workStateKey(item, eq.id)]
+    return st === 'PAUSE' || st === 'TEMP_END'
+  })
+  return !hasPause
+}
 const isSelected = (item) => {
   if (!selectedItem.value) return false
   return itemKey(item) === itemKey(selectedItem.value)
@@ -746,6 +785,8 @@ function cancel() {
   inputQty.value = null
   selectedAction.value = ''
   actionReason.value = ''
+  scrapQty.value = null
+  scrapReason.value = ''
 }
 
 function jumpToProcessingItem(msg) {
@@ -818,7 +859,7 @@ async function save() {
       product_id:            item.product_id,
       product_code:          item.product_code,
       equipment_id:          selectedEquipmentId.value,
-      plan_date:             planDateStr.value,
+      plan_date:             item.carryover_plan_date || planDateStr.value,
       operator:              operator.value,
       operator_action:       selectedAction.value,
       operator_action_reason: actionReason.value,
@@ -855,8 +896,20 @@ async function save() {
       data.product_code || item.product_code || '',
       item.process_id,
     )
+    // 仕損登録（数量 > 0 かつ理由選択時）
+    if ((scrapQty.value ?? 0) > 0 && scrapReason.value) {
+      await saveScrap(item)
+    }
+
+    const wasEquipmentTroublePause = (
+      data.operator_action === 'PAUSE' &&
+      actionReason.value === t('brakeInput.pauseReason.equipmentTrouble')
+    )
+
     inputQty.value = null
     actionReason.value = ''
+    scrapQty.value = null
+    scrapReason.value = ''
     // END / TEMP_END の場合はフォームをリセット
     if (data.operator_action === 'END' || data.operator_action === 'TEMP_END') {
       selectedItem.value = null
@@ -866,14 +919,43 @@ async function save() {
       syncSelectedAction()
     }
 
-    const label = ACTION_LABELS[data.operator_action] || data.operator_action
-    const qtyMsg = data.operator_action === 'END' && data.backlog
-      ? `（累計: ${data.backlog.actual_qty}）`
-      : ''
-    showToast(`${label}を記録しました${qtyMsg}`)
+    const label = actionLabels.value[data.operator_action] || data.operator_action
+    if (data.operator_action === 'END' && data.backlog) {
+      showToast(t('brakeInput.toast.recordedWithQty', { action: label, qty: data.backlog.actual_qty }))
+    } else {
+      showToast(t('brakeInput.toast.recorded', { action: label }))
+    }
+
+    // 設備トラブルで中断した場合は設備状態入力画面へ遷移
+    if (wasEquipmentTroublePause) {
+      await nextTick()
+      router.push({ path: '/production/mobile-process-input', query: { process_id: item.process_id } })
+      return
+    }
+
     nextTick(() => qtyInputRef.value?.focus())
   } catch (e) {
-    showToast(e?.response?.data?.detail || '保存に失敗しました', 'error')
+    showToast(e?.response?.data?.detail || t('brakeInput.error.saveFailed'), 'error')
+  }
+}
+
+async function saveScrap(item) {
+  try {
+    await api.processRealtime.create({
+      process_id: item.process_id,
+      record_type: 'SCRAP',
+      qty: scrapQty.value,
+      operator_name: operator.value,
+      ...(item.product_id ? { product_id: item.product_id } : { product_code: item.product_code }),
+      event_data: {
+        reason: scrapReason.value,
+        disposition_status: 'REJECTED',
+        is_production_recorded: false,
+        relation_type: 'own_process',
+      },
+    })
+  } catch (e) {
+    showToast(e?.response?.data?.detail || '仕損登録に失敗しました', 'error')
   }
 }
 
@@ -912,41 +994,6 @@ function syncSelectedAction() {
   }
 }
 
-// ──────────────────────────────
-// 修正（上書き）
-// ──────────────────────────────
-function openCorrect() {
-  correctQty.value = currentActualQty.value
-  showCorrect.value = true
-}
-
-async function saveCorrect() {
-  const item = selectedItem.value
-  if (!item) return
-  const diff = correctQty.value - currentActualQty.value
-  if (diff === 0) {
-    showCorrect.value = false
-    return
-  }
-  // diff が正なら加算、負なら現在値を修正するため overwrite API が必要
-  // ここでは差分を加算で実現（diff < 0 も加算することで減算）
-  try {
-    const res = await api.brakeLineActuals.addActual({
-      line_id: item.line_id,
-      process_id: item.process_id,
-      product_id: item.product_id,
-      plan_date: planDateStr.value,
-      qty: diff,
-      sequence_no: item.sequence_no,
-    })
-    item.actual_qty = res.data.actual_qty
-    currentActualQty.value = res.data.actual_qty
-    showCorrect.value = false
-    showToast(`修正しました（実績: ${res.data.actual_qty}）`)
-  } catch (e) {
-    showToast(e?.response?.data?.detail || '修正に失敗しました', 'error')
-  }
-}
 
 // ──────────────────────────────
 // 新規/追加モーダル
@@ -1011,21 +1058,21 @@ async function confirmAdd() {
   const lineObj = lines.value[0]  // ブレーキラインは通常1ライン
 
   if (!lineObj) {
-    addError.value = 'ラインが取得できません'
+    addError.value = t('brakeInput.error.noLine')
     return
   }
 
   let newItem
   if (addType.value === 'extra') {
     const prod = brakeLineProducts.value.find(p => isSameId(p.id, addProductId.value))
-    if (!prod) { addError.value = '品番が見つかりません'; return }
+    if (!prod) { addError.value = t('brakeInput.error.productNotFound'); return }
 
     // 同じ品番・工程が既にリストにある場合はスキップ（設備違いは同一行で管理）
     const alreadyExists = allItems.value.some(
       i => isSameId(i.product_id, prod.id) && isSameId(i.process_id, addProcessId.value)
     )
     if (alreadyExists) {
-      addError.value = 'すでにリストに存在します'
+      addError.value = t('brakeInput.error.alreadyExists')
       return
     }
 
@@ -1056,7 +1103,7 @@ async function confirmAdd() {
       const results = res.data?.results ?? (Array.isArray(res.data) ? res.data : [])
       const found = results.length > 0
       if (found) {
-        addError.value = 'この品番はマスタに存在します。「追加」から選択してください。'
+        addError.value = t('brakeInput.error.productInMaster')
         return
       }
     } catch {
@@ -1065,7 +1112,7 @@ async function confirmAdd() {
     newItem = {
       product_id: null,
       product_code: code,
-      product_name: '（新規）',
+      product_name: t('brakeInput.newProductName'),
       line_id: lineObj.id,
       line_code: lineObj.line_code,
       line_name: lineObj.line_name,
@@ -1094,7 +1141,7 @@ async function confirmAdd() {
   await selectItem(newItem)
   selectedEquipmentId.value = newItem.equipment_id || ''
   syncSelectedAction()
-  showToast('リストに追加しました')
+  showToast(t('brakeInput.toast.added'))
 }
 
 // ──────────────────────────────
@@ -1144,6 +1191,20 @@ function showToast(message, type = 'success') {
   flex-shrink: 0;
   flex-wrap: wrap;
 }
+.btn-scrap-nav {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #c0714f;
+  background: #fff;
+  color: #c0714f;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.btn-scrap-nav:hover { background: #fff3ef; }
+
 .page-title {
   font-size: 15px;
   font-weight: 700;
@@ -1603,6 +1664,22 @@ function showToast(message, type = 'success') {
 }
 
 .qty-input-area { margin-bottom: 8px; }
+.qty-row { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.qty-col { display: flex; flex-direction: column; }
+.qty-input-narrow { width: 90px !important; }
+.scrap-col { flex: 1; min-width: 200px; }
+.scrap-label { color: #c0714f !important; font-weight: 600; }
+.scrap-inline { display: flex; gap: 8px; align-items: center; }
+.scrap-reason-select {
+  height: 48px;
+  flex: 1;
+  min-width: 120px;
+  padding: 0 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fff;
+}
 .qty-label { display: block; font-size: 12px; color: #666; margin-bottom: 6px; }
 .qty-input {
   width: 160px;
