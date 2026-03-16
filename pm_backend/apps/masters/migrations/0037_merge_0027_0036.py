@@ -3,8 +3,10 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     """
-    旧ブランチ由来の 0027_alter_capacity_nullable は現行系列に存在しないため、
-    実在ノード 0036_merge_0027_0035 のみへ依存させる。
+    0026から分岐した 0027_alter_capacity_nullable と
+    0036_merge_0027_0035 を統合するマージマイグレーション。
+    本番: 0027は適用済みのためスキップ、0037のみ適用される。
+    開発PC: 0027(nullable化)を適用後、0037が適用される。
     """
 
     dependencies = [
