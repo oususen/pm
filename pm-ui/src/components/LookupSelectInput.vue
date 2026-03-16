@@ -123,7 +123,6 @@ const syncInputByModelValue = () => {
 }
 
 watch(() => props.modelValue, syncInputByModelValue, { immediate: true })
-watch(() => props.options, syncInputByModelValue, { deep: true })
 
 const findMatch = (text, allowPartial = false) => {
   const query = normalize(text)
@@ -134,7 +133,7 @@ const findMatch = (text, allowPartial = false) => {
     const label = normalize(option?.label)
     const code = normalize(option?.code)
     const name = normalize(option?.name)
-    return label === query || code === query || name === query || `${option.value}` === query
+    return label === query || code === query || name === query
   })
   if (exact) return exact
   if (!allowPartial) return null
@@ -197,11 +196,6 @@ const finalizeInput = () => {
   if (matched) {
     emit('update:modelValue', matched.value)
     inputText.value = displayText(matched)
-    return
-  }
-
-  if (selectedOption.value) {
-    inputText.value = displayText(selectedOption.value)
     return
   }
 

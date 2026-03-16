@@ -385,6 +385,13 @@ class LaserPatternSerializer(serializers.ModelSerializer):
     def validate_component_items(self, value):
         if not value:
             raise serializers.ValidationError('構成部品を1件以上入力してください。')
+        seen = set()
+        for item in value:
+            pid = item.get('component_product')
+            pid_key = pid.pk if hasattr(pid, 'pk') else pid
+            if pid_key in seen:
+                raise serializers.ValidationError('同じ構成部品が重複しています。')
+            seen.add(pid_key)
         return value
 
     def validate(self, attrs):
