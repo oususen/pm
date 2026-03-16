@@ -586,8 +586,8 @@ class LaserActualSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'pattern': 'パターン番号を選択してください。'})
         if not pattern.component_items.exists():
             raise serializers.ValidationError({'pattern': '選択パターンに構成部品が登録されていません。'})
-        if not pattern.finished_items.exists():
-            raise serializers.ValidationError({'pattern': '選択パターンに完成品が登録されていません。'})
+        if bool(getattr(pattern, 'is_budget_target', False)) and not pattern.finished_items.exists():
+            raise serializers.ValidationError({'pattern': '材料予算用パターンには完成品情報が必要です。'})
 
         action = str(
             attrs.get('operator_action')
