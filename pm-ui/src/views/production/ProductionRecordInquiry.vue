@@ -448,7 +448,7 @@ const filteredMappingEditRows = computed(() => {
   const filterCode = String(mappingProcessFilter.value || '').trim()
   return rows
     .map((row, index) => ({ row, index }))
-    .filter((item) => !filterCode || String(item.row?.processCode || '').trim() === filterCode)
+    .filter((item) => !filterCode || String(item.row?.processCode || '').trim() === filterCode || String(item.row?.processCode || '').trim() === '')
 })
 
 const normalizeList = (payload) => {
