@@ -79,19 +79,21 @@
         </div>
         <div class="modal-body">
           <table class="detail-table">
-            <tr><th>申請者</th><td>{{ targetApp.applicant_name }}</td></tr>
-            <tr><th>実施日</th><td>{{ targetApp.work_date }}</td></tr>
-            <tr><th>種別</th><td>{{ targetApp.type_display }}</td></tr>
-            <tr v-if="targetApp.work_start_time || targetApp.scheduled_end_time">
-              <th>勤務時間</th>
-              <td>{{ targetApp.work_start_time || '-' }} 〜 {{ targetApp.scheduled_end_time || '-' }}（定時）</td>
-            </tr>
-            <tr><th>残業時間帯</th><td>{{ targetApp.start_time }} 〜 {{ targetApp.end_time }}</td></tr>
-            <tr>
-              <th>時間数</th>
-              <td>{{ Math.round((parseFloat(targetApp.hours) + parseFloat(targetApp.midnight_hours)) * 10) / 10 }}H（深夜: {{ targetApp.midnight_hours }}H）</td>
-            </tr>
-            <tr><th>理由</th><td>{{ targetApp.reason || '-' }}</td></tr>
+            <tbody>
+              <tr><th>申請者</th><td>{{ targetApp.applicant_name }}</td></tr>
+              <tr><th>実施日</th><td>{{ targetApp.work_date }}</td></tr>
+              <tr><th>種別</th><td>{{ targetApp.type_display }}</td></tr>
+              <tr v-if="targetApp.work_start_time || targetApp.scheduled_end_time">
+                <th>勤務時間</th>
+                <td>{{ targetApp.work_start_time || '-' }} 〜 {{ targetApp.scheduled_end_time || '-' }}（定時）</td>
+              </tr>
+              <tr><th>残業時間帯</th><td>{{ targetApp.start_time }} 〜 {{ targetApp.end_time }}</td></tr>
+              <tr>
+                <th>時間数</th>
+                <td>{{ Math.round((parseFloat(targetApp.hours) + parseFloat(targetApp.midnight_hours)) * 10) / 10 }}H（深夜: {{ targetApp.midnight_hours }}H）</td>
+              </tr>
+              <tr><th>理由</th><td>{{ targetApp.reason || '-' }}</td></tr>
+            </tbody>
           </table>
 
           <div class="comment-section">
