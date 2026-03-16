@@ -350,7 +350,7 @@ const addFinishedRow = () => {
 
 const removeFinishedRow = (idx) => {
   form.value.finished_items.splice(idx, 1)
-  if (!form.value.finished_items.length) addFinishedRow()
+  if (!form.value.finished_items.length && form.value.is_budget_target) addFinishedRow()
 }
 
 const buildPayload = () => ({
