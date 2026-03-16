@@ -153,6 +153,7 @@
             <th>品名</th>
             <th>作業者</th>
             <th class="num">継続時間</th>
+            <th class="num">理論時間</th>
             <th class="num">作業時間(休憩除き)</th>
             <th class="num">作業時間(休憩、中断除き)</th>
             <th class="num">生産数量</th>
@@ -184,6 +185,7 @@
               <td>{{ row.product_name || '' }}</td>
               <td>{{ row.operator_name || '—' }}</td>
               <td class="num">{{ formatDuration(row.duration_seconds, row.ended_at) }}</td>
+              <td class="num">{{ row.theoretical_seconds != null ? formatDuration(row.theoretical_seconds, true) : '—' }}</td>
               <td class="num">{{ formatDuration(row.effective_work_seconds, true) }}</td>
               <td class="num">{{ formatDuration(calcWorkSecondsExcludingPause(row), true) }}</td>
               <td class="num">{{ formatNumber(row.production_qty ?? '') }}</td>
@@ -619,22 +621,57 @@ const loadSessions = async () => {
           ordering: '-work_date,-created_at',
         }
         const laserRes = await api.laserActuals.getLaserActuals(laserParams)
-        laserItems = normalizeList(laserRes.data).flatMap((row) => {
+        const rawLaserRecords = normalizeList(laserRes.data)
+
+        // equipment_codeごとにSTART→ENDをペアリングして実経過時間を計算
+        // APIは降順なので昇順に並べ直してペアを探す
+        const byEquipment = {}
+        for (const row of rawLaserRecords) {
+          const key = row?.equipment_code || '__unknown__'
+          if (!byEquipment[key]) byEquipment[key] = []
+          byEquipment[key].push(row)
+        }
+        const enrichedMap = new Map() // id → { actualDurationSeconds, pairedStartedAt }
+        for (const rows of Object.values(byEquipment)) {
+          const sorted = [...rows].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+          let pendingStart = null
+          for (const row of sorted) {
+            const action = String(row?.operator_action || '').toUpperCase()
+            const isOpen = action === 'START' || action === 'RESUME'
+            if (isOpen) {
+              pendingStart = row
+            } else {
+              if (pendingStart) {
+                const diff = new Date(row.created_at) - new Date(pendingStart.created_at)
+                enrichedMap.set(row.id, {
+                  actualDurationSeconds: Math.max(0, Math.round(diff / 1000)),
+                  pairedStartedAt: pendingStart.created_at,
+                })
+                pendingStart = null
+              }
+            }
+          }
+        }
+
+        laserItems = rawLaserRecords.flatMap((row) => {
           const action = String(row?.operator_action || '').toUpperCase()
           const isOpen = action === 'START' || action === 'RESUME'
           const totalMinutes = Number(row?.total_process_time || 0)
-          const effectiveSeconds = Math.max(0, Math.round(totalMinutes * 60))
+          const theoreticalSeconds = Math.max(0, Math.round(totalMinutes * 60))
+          const enriched = enrichedMap.get(row?.id)
+          const actualDurationSeconds = enriched?.actualDurationSeconds ?? 0
+          const pairedStartedAt = enriched?.pairedStartedAt ?? row?.created_at
           const componentDetails = normalizeList(row?.details)
             .filter((detail) => String(detail?.detail_type || '').toUpperCase() === 'COMPONENT')
 
           const buildLaserRow = (detail) => {
             const productionQty = Number(detail?.total_qty || 0)
-            const productivity = productionQty > 0 && effectiveSeconds > 0
-              ? (productionQty * 3600) / effectiveSeconds
+            const productivity = productionQty > 0 && actualDurationSeconds > 0
+              ? (productionQty * 3600) / actualDurationSeconds
               : null
             return {
               id: row?.id,
-              started_at: row?.created_at || null,
+              started_at: isOpen ? (row?.created_at || null) : (pairedStartedAt || null),
               ended_at: isOpen ? null : (row?.created_at || null),
               session_type: 'WORK',
               start_action: action || '—',
@@ -646,8 +683,9 @@ const loadSessions = async () => {
               product_code: detail?.product_code || '',
               product_name: detail?.product_name || '',
               operator_name: row?.created_by_name || row?.updated_by_name || '—',
-              duration_seconds: effectiveSeconds,
-              effective_work_seconds: effectiveSeconds,
+              duration_seconds: actualDurationSeconds,
+              effective_work_seconds: actualDurationSeconds,
+              theoretical_seconds: theoreticalSeconds,
               production_qty: productionQty,
               productivity_per_hour: productivity,
               issue_count: 0,
