@@ -344,6 +344,60 @@ class LinePlanViewSet(viewsets.ModelViewSet):
     ordering_fields = ['plan_date', 'line', 'product']
     ordering = ['plan_date', 'line']
 
+    @action(detail=False, methods=['post'], url_path='bulk-delete')
+    def bulk_delete(self, request):
+        """
+        選択ライン・期間のLinePlan/LineGanttPlanを一括削除する
+        期待payload: { line_id, start_date, end_date }
+        """
+        line_id = request.data.get('line_id')
+        start_date_raw = request.data.get('start_date')
+        end_date_raw = request.data.get('end_date')
+
+        if not line_id:
+            return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not start_date_raw or not end_date_raw:
+            return Response({'detail': 'start_date and end_date are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            start_date = datetime.strptime(str(start_date_raw), '%Y-%m-%d').date()
+            end_date = datetime.strptime(str(end_date_raw), '%Y-%m-%d').date()
+        except Exception:
+            return Response({'detail': 'start_date/end_date must be YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if start_date > end_date:
+            return Response({'detail': 'start_date must be <= end_date'}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            deleted_plan_result = LinePlan.objects.filter(
+                line_id=line_id,
+                plan_date__gte=start_date,
+                plan_date__lte=end_date,
+            ).delete()
+            deleted_gantt_result = LineGanttPlan.objects.filter(
+                line_id=line_id,
+                plan_date__gte=start_date,
+                plan_date__lte=end_date,
+            ).delete()
+            deleted_backlog_result = LineBacklog.objects.filter(
+                line_id=line_id,
+                plan_date__gte=start_date,
+                plan_date__lte=end_date,
+            ).exclude(sequence_no=0).delete()
+
+        deleted_plan = deleted_plan_result[0] if deleted_plan_result else 0
+        deleted_gantt = deleted_gantt_result[0] if deleted_gantt_result else 0
+        deleted_backlog = deleted_backlog_result[0] if deleted_backlog_result else 0
+
+        return Response({
+            'deleted_plan': deleted_plan,
+            'deleted_gantt': deleted_gantt,
+            'deleted_backlog': deleted_backlog,
+            'line_id': line_id,
+            'start_date': str(start_date),
+            'end_date': str(end_date),
+        })
+
     @action(detail=False, methods=['post'])
     def save(self, request):
         """

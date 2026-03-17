@@ -59,6 +59,7 @@
         <div class="field">
           <label>期間</label>
           <select v-model.number="horizonDays" @change="refreshDates" class="select-narrow">
+            <option :value="7">7日</option>
             <option :value="14">14日</option>
             <option :value="30">30日</option>
             <option :value="60">60日</option>
@@ -91,6 +92,7 @@
           </label>
         </div>
         <button class="btn" @click="resetRows" :disabled="processing || !rows.length">クリア</button>
+        <button class="btn" @click="bulkDeletePlans" :disabled="processing || !selectedLine">計画一括削除</button>
         <button class="btn" @click="openChangeReasonDialog" :disabled="processing">計画変更</button>
         <button class="btn" @click="savePlan" :disabled="processing || !rows.length || !selectedLine">保存</button>
         <button class="btn" @click="doDisplayOnly" :disabled="processing || !selectedLine">表示のみ</button>
@@ -2174,6 +2176,39 @@ const doFetchOnly = async () => {
   } catch (e) {
     console.error('データ取得エラー', e)
     alert('データの取得に失敗しました。')
+  } finally {
+    processing.value = false
+  }
+}
+
+const bulkDeletePlans = async () => {
+  if (!selectedLine.value) return
+  const lineLabel = selectedLineLabel.value || `ID:${selectedLine.value}`
+  const confirmed = window.confirm(
+    `選択ラインの計画を一括削除します。\nライン: ${lineLabel}\n期間: ${startDate.value} ～ ${endDate.value}\n\n対象: plan / gantt / linebacklog( sequence_no != 0 )\n実行してよろしいですか？`
+  )
+  if (!confirmed) return
+
+  processing.value = true
+  try {
+    const res = await api.linePlans.bulkDelete({
+      line_id: selectedLine.value,
+      start_date: startDate.value,
+      end_date: endDate.value,
+    })
+    await fetchAndApplyData()
+    // 削除後に埋め込みガント/工程負荷の表示を最新化
+    ganttReloadKey.value += 1
+    if (showProcessLoad.value) {
+      await loadProcessLoad()
+    }
+    const deletedPlan = Number(res.data?.deleted_plan || 0)
+    const deletedGantt = Number(res.data?.deleted_gantt || 0)
+    const deletedBacklog = Number(res.data?.deleted_backlog || 0)
+    alert(`一括削除しました。\nplan: ${deletedPlan}件\ngantt: ${deletedGantt}件\nlinebacklog(sequence_no!=0): ${deletedBacklog}件`)
+  } catch (e) {
+    console.error('計画一括削除エラー', e)
+    alert('計画一括削除に失敗しました。')
   } finally {
     processing.value = false
   }

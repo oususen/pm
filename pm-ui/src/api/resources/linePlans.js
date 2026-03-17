@@ -12,4 +12,7 @@ export const createLinePlansAPI = (client) => ({
   save(payload) {
     return client.post('/line-plans/save/', payload)
   },
+  bulkDelete(payload) {
+    return client.post('/line-plans/bulk-delete/', payload)
+  },
 })
