@@ -65,6 +65,30 @@
           />
         </div>
 
+        <!-- 端末別印刷設定 -->
+        <div class="section-title" style="margin-top:12px">印刷設定</div>
+        <div class="print-setting-area">
+          <label class="filter-item">
+            <span class="toggle-label">自動印刷</span>
+            <input type="checkbox" v-model="printAutoEnabled" class="toggle-input" @change="savePrintSettings" />
+            <span class="toggle-track" :class="{ on: printAutoEnabled }"></span>
+          </label>
+          <input
+            type="text"
+            v-model.trim="printDeviceId"
+            class="operator-input"
+            placeholder="端末ID"
+            @change="savePrintSettings"
+          />
+          <input
+            type="text"
+            v-model.trim="printPrinterName"
+            class="operator-input"
+            placeholder="プリンタ名（表示用）"
+            @change="savePrintSettings"
+          />
+        </div>
+
         <!-- 新規追加ボタン -->
         <div class="add-btn-area">
           <button class="btn-add-new" @click="openAddModal">{{ t('brakeInput.addNew') }}</button>
@@ -359,6 +383,7 @@
 <script setup>
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import QRCode from 'qrcode'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { t } from '@/i18n'
@@ -405,6 +430,9 @@ const currentActualQty = ref(0)
 const inputQty = ref(null)
 const loading = ref(false)
 const operator = ref('')
+const printAutoEnabled = ref(false)
+const printDeviceId = ref('')
+const printPrinterName = ref('')
 
 // フィルター
 const showDone = ref(false)
@@ -560,6 +588,7 @@ const addEquipments = ref([])         // 追加モーダル用設備一覧
 
 // トースト
 const toast = ref({ show: false, message: '', type: 'success' })
+const PRINT_SETTINGS_KEY = 'brake_line_print_settings_v1'
 
 const qtyInputRef = ref(null)
 const scrapQty = ref(null)
@@ -590,6 +619,7 @@ watch(
 // 作業者初期化（ログインユーザー）
 // ──────────────────────────────
 onMounted(async () => {
+  loadPrintSettings()
   const user = authState.user
   if (user) {
     const last = user.last_name || ''
@@ -598,6 +628,115 @@ onMounted(async () => {
   }
   await loadPlan()
 })
+
+function inferDeviceId() {
+  const host = String(window?.location?.hostname || '').trim()
+  const ua = String(window?.navigator?.userAgent || '').trim()
+  const uaShort = ua.slice(0, 24).replace(/\s+/g, '_')
+  return [host, uaShort].filter(Boolean).join('_') || 'device-01'
+}
+
+function loadPrintSettings() {
+  try {
+    const raw = window.localStorage.getItem(PRINT_SETTINGS_KEY)
+    if (!raw) {
+      printDeviceId.value = inferDeviceId()
+      return
+    }
+    const parsed = JSON.parse(raw)
+    printAutoEnabled.value = !!parsed.autoEnabled
+    printDeviceId.value = String(parsed.deviceId || '').trim() || inferDeviceId()
+    printPrinterName.value = String(parsed.printerName || '').trim()
+  } catch {
+    printDeviceId.value = inferDeviceId()
+  }
+}
+
+function savePrintSettings() {
+  const payload = {
+    autoEnabled: !!printAutoEnabled.value,
+    deviceId: String(printDeviceId.value || '').trim(),
+    printerName: String(printPrinterName.value || '').trim(),
+  }
+  window.localStorage.setItem(PRINT_SETTINGS_KEY, JSON.stringify(payload))
+}
+
+async function buildPrintHtml(item, qty) {
+  const productCode = String(item?.product_code || '')
+  const productName = String(item?.product_name || '')
+  const processName = String(item?.process_name || '')
+  const nextProcessName = String(item?.next_process_name || '—')
+  const operatorName = String(operator.value || '')
+  const processDate = planDateStr.value || ''
+
+  // QRコード（製品番号のみ）をData URLとして生成
+  let qrDataUrl = ''
+  try {
+    qrDataUrl = await QRCode.toDataURL(productCode, { margin: 1, width: 120 })
+  } catch {
+    qrDataUrl = ''
+  }
+
+  return `<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>加工品ラベル</title>
+  <style>
+    @page { size: 50mm 80mm; margin: 0; }
+    html, body { width: 50mm; height: 80mm; margin: 0; padding: 0; }
+    body { font-family: "Yu Gothic", "Meiryo", sans-serif; box-sizing: border-box; }
+    .label { width: 50mm; height: 80mm; padding: 2.5mm; padding-top: 10mm; border: 1px solid #000; box-sizing: border-box; display: flex; flex-direction: column; gap: 0; }
+    .title { font-size: 8pt; font-weight: 700; text-align: center; border-bottom: 0.5px solid #000; padding-bottom: 1mm; margin-bottom: 1mm; }
+    .code { font-size: 13pt; font-weight: 900; letter-spacing: .2mm; line-height: 1.1; }
+    .name { font-size: 7.5pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 1mm; }
+    .row { display: flex; align-items: baseline; font-size: 7.5pt; line-height: 1.4; gap: 1.5mm; }
+    .row .lbl { color: #555; flex-shrink: 0; font-size: 6.5pt; }
+    .row .val { font-weight: 700; }
+    .qty-row { display: flex; align-items: baseline; margin-top: 1mm; gap: 1.5mm; }
+    .qty-lbl { font-size: 7pt; color: #555; flex-shrink: 0; }
+    .qty-val { font-size: 18pt; font-weight: 900; line-height: 1; }
+    .qr-area { margin-top: auto; display: flex; justify-content: flex-end; }
+    .qr-area img { width: 22mm; height: 22mm; }
+  </style>
+</head>
+<body>
+  <div class="label">
+    <div class="title">加工品ラベル</div>
+    <div class="code">${productCode}</div>
+    <div class="name">${productName}</div>
+    <div class="row"><span class="lbl">加工工程</span><span class="val">${processName}</span></div>
+    <div class="row"><span class="lbl">後工程</span><span class="val">${nextProcessName}</span></div>
+    <div class="row"><span class="lbl">加工日</span><span class="val">${processDate}</span></div>
+    <div class="row"><span class="lbl">加工者</span><span class="val">${operatorName}</span></div>
+    <div class="qty-row">
+      <span class="qty-lbl">加工数</span>
+      <span class="qty-val">${qty}</span>
+    </div>
+    <div class="qr-area">
+      ${qrDataUrl ? `<img src="${qrDataUrl}" alt="QR" />` : ''}
+    </div>
+  </div>
+</body>
+</html>`
+}
+
+async function printLabel(item, qty) {
+  const win = window.open('', '_blank')
+  if (!win) {
+    showToast('印刷ウィンドウを開けませんでした', 'error')
+    return
+  }
+  const html = await buildPrintHtml(item, qty)
+  win.document.open()
+  win.document.write(html)
+  win.document.close()
+  win.focus()
+  setTimeout(() => {
+    win.print()
+    win.onafterprint = () => win.close()
+  }, 200)
+}
 
 // ──────────────────────────────
 // 計画取得
@@ -887,6 +1026,11 @@ async function save() {
       item.actual_qty = data.backlog.actual_qty
       item.backlog_id = data.backlog.backlog_id
       currentActualQty.value = data.backlog.actual_qty
+    }
+    const shouldPrintByAction = data.operator_action === 'END' || data.operator_action === 'PAUSE'
+    const printQty = Number(inputQty.value || 0)
+    if (printAutoEnabled.value && shouldPrintByAction && printQty > 0) {
+      await printLabel(item, printQty)
     }
     updateCurrentProcessingState(
       data.operator_action,
@@ -1358,6 +1502,12 @@ function showToast(message, type = 'success') {
   border-radius: 4px;
   font-size: 13px;
   box-sizing: border-box;
+}
+.print-setting-area {
+  padding: 4px 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .add-btn-area { padding: 8px 12px; }

@@ -7,7 +7,7 @@ from django.db.models import Q
 import logging
 from rest_framework.exceptions import ValidationError
 
-from masters.models import RoutingStep, ProcessCycleTime, Line, Calendar, CalendarDay, WorkPattern, BreakTime, BOM, BOMItem, Product
+from masters.models import RoutingStep, Line, Calendar, CalendarDay, WorkPattern, BreakTime, BOM, BOMItem, Product
 from ..models_line_backlog import LineBacklog
 from ..models_line_plan import LinePlan
 
@@ -218,34 +218,7 @@ class LineWorkCalendar:
         return self._get_previous_working_end(target_date)
 
 
-def _pick_cycle_time(step: RoutingStep, product_id: int, plan_date) -> Optional[ProcessCycleTime]:
-    candidates = ProcessCycleTime.objects.filter(
-        process_id=step.process_id,
-        product_id=product_id,
-        is_active=True,
-    ).filter(Q(line_id=step.line_id) | Q(line__isnull=True))
-    best = None
-    for ct in candidates:
-        if ct.valid_from and plan_date < ct.valid_from:
-            continue
-        if ct.valid_to and plan_date > ct.valid_to:
-            continue
-        if best is None:
-            best = ct
-            continue
-        if best.line_id is None and ct.line_id == step.line_id:
-            best = ct
-    return best
-
-
 def _get_cycle_setup(step: RoutingStep, product_id: int, plan_date) -> Tuple[float, float]:
-    ct = _pick_cycle_time(step, product_id, plan_date)
-    if not ct and step.output_product_id and step.output_product_id != product_id:
-        ct = _pick_cycle_time(step, step.output_product_id, plan_date)
-    if not ct and step.routing_id and step.routing.product_id and step.routing.product_id != product_id:
-        ct = _pick_cycle_time(step, step.routing.product_id, plan_date)
-    if ct:
-        return float(ct.cycle_time_min or 0), float(ct.setup_time_min or 0)
     if step.time_unit == 'MINUTE' and step.duration_min is not None:
         return float(step.duration_min or 0), 0.0
     return 0.0, 0.0
