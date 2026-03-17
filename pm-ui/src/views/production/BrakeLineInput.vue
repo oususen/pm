@@ -683,21 +683,23 @@ async function buildPrintHtml(item, qty) {
   <meta charset="UTF-8" />
   <title>加工品ラベル</title>
   <style>
-    @page { size: 50mm 80mm; margin: 0; }
-    html, body { width: 50mm; height: 80mm; margin: 0; padding: 0; }
+    @page { size: 60mm 85mm; margin: 0; }
+    html, body { width: 60mm; height: 85mm; margin: 0; padding: 0; }
     body { font-family: "Yu Gothic", "Meiryo", sans-serif; box-sizing: border-box; }
-    .label { width: 50mm; height: 80mm; padding: 2.5mm; padding-top: 10mm; border: 1px solid #000; box-sizing: border-box; display: flex; flex-direction: column; gap: 0; }
+    .label { width: 60mm; height: 85mm; padding: 2.5mm; padding-top: 15mm; border: 1px solid #000; box-sizing: border-box; display: flex; flex-direction: column; gap: 0; }
     .title { font-size: 8pt; font-weight: 700; text-align: center; border-bottom: 0.5px solid #000; padding-bottom: 1mm; margin-bottom: 1mm; }
-    .code { font-size: 13pt; font-weight: 900; letter-spacing: .2mm; line-height: 1.1; }
-    .name { font-size: 7.5pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 1mm; }
-    .row { display: flex; align-items: baseline; font-size: 7.5pt; line-height: 1.4; gap: 1.5mm; }
-    .row .lbl { color: #555; flex-shrink: 0; font-size: 6.5pt; }
+    .code { font-size: 16pt; font-weight: 900; letter-spacing: .2mm; line-height: 1.1; }
+    .name { font-size: 11pt; line-height: 1.2; margin-bottom: 1mm; }
+    .row { display: flex; align-items: baseline; font-size: 11pt; line-height: 1.35; gap: 1.5mm; }
+    .row .lbl { color: #555; flex-shrink: 0; font-size: 7.5pt; }
     .row .val { font-weight: 700; }
-    .qty-row { display: flex; align-items: baseline; margin-top: 1mm; gap: 1.5mm; }
-    .qty-lbl { font-size: 7pt; color: #555; flex-shrink: 0; }
-    .qty-val { font-size: 18pt; font-weight: 900; line-height: 1; }
-    .qr-area { margin-top: auto; display: flex; justify-content: flex-end; }
-    .qr-area img { width: 22mm; height: 22mm; }
+    .row-lg .val { font-size: 16pt; font-weight: 900; }
+    .row-lg .lbl { font-size: 7.5pt; }
+    .qty-row { display: flex; align-items: baseline; gap: 1.5mm; margin-top: 1mm; }
+    .qty-lbl { font-size: 7.5pt; color: #555; flex-shrink: 0; }
+    .qty-val { font-size: 16pt; font-weight: 900; line-height: 1; }
+    .qr-area { display: flex; justify-content: flex-end; margin-top: 1.5mm; }
+    .qr-area img { width: 16mm; height: 16mm; display: block; }
   </style>
 </head>
 <body>
@@ -707,7 +709,7 @@ async function buildPrintHtml(item, qty) {
     <div class="name">${productName}</div>
     <div class="row"><span class="lbl">加工工程</span><span class="val">${processName}</span></div>
     <div class="row"><span class="lbl">後工程</span><span class="val">${nextProcessName}</span></div>
-    <div class="row"><span class="lbl">加工日</span><span class="val">${processDate}</span></div>
+    <div class="row row-lg"><span class="lbl">加工日</span><span class="val">${processDate}</span></div>
     <div class="row"><span class="lbl">加工者</span><span class="val">${operatorName}</span></div>
     <div class="qty-row">
       <span class="qty-lbl">加工数</span>

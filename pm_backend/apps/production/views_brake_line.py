@@ -398,8 +398,9 @@ class BrakeLinePlanView(APIView):
                     step_map[key] = (s['routing_id'], s['step_no'])
             for (prod_id, proc_id), (routing_id, step_no) in step_map.items():
                 next_step = (
-                    RoutingStep.objects.filter(routing_id=routing_id, step_no=step_no + 1)
+                    RoutingStep.objects.filter(routing_id=routing_id, step_no__gt=step_no)
                     .select_related('process')
+                    .order_by('step_no')
                     .first()
                 )
                 if next_step:
