@@ -5,8 +5,32 @@ from .models import (
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact
 )
 
+def build_media_absolute_url(request, raw_url):
+    """メディアURLを返す。相対パスはそのまま返してブラウザのオリジンで解決させる。
+    proxyやHTTPS環境でのMixed Content問題を避けるため絶対URLには変換しない。"""
+    if not raw_url:
+        return raw_url
+    path = str(raw_url)
+    if path.startswith(('http://', 'https://')):
+        return path
+    # /で始まる相対パス（例: /media/products/xxx.jpg）はそのまま返す
+    if path.startswith('/'):
+        return path
+    # 相対パスの場合はMEDIA_URLを付与
+    from django.conf import settings as django_settings
+    media_url = django_settings.MEDIA_URL.rstrip('/')
+    return f"{media_url}/{path}"
+
 
 class ProductSerializer(serializers.ModelSerializer):
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        raw_url = data.get('image_url')
+        request = self.context.get('request')
+        if raw_url and request:
+            data['image_url'] = build_media_absolute_url(request, raw_url)
+        return data
+
     class Meta:
         model = Product
         fields = '__all__'

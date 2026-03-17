@@ -29,6 +29,23 @@ class MastersPermissionMixin:
     # permission_resource = 'masters'  # フロントエンドで権限管理を行うため、バックエンドでは設定しない
 
 
+def build_media_absolute_url(request, raw_url):
+    """メディアURLを返す。相対パスはそのまま返してブラウザのオリジンで解決させる。
+    proxyやHTTPS環境でのMixed Content問題を避けるため絶対URLには変換しない。"""
+    if not raw_url:
+        return raw_url
+    path = str(raw_url)
+    if path.startswith(('http://', 'https://')):
+        return path
+    # /で始まる相対パス（例: /media/products/xxx.jpg）はそのまま返す
+    if path.startswith('/'):
+        return path
+    # 相対パスの場合はMEDIA_URLを付与
+    from django.conf import settings as django_settings
+    media_url = django_settings.MEDIA_URL.rstrip('/')
+    return f"{media_url}/{path}"
+
+
 class ProductFilter(django_filters.FilterSet):
     created_from = django_filters.DateFilter(field_name='created_at', lookup_expr='gte')
     created_to = django_filters.DateFilter(field_name='created_at', lookup_expr='lte')
@@ -95,7 +112,8 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         url = default_storage.url(saved_path)
         product.image_url = url
         product.save(update_fields=['image_url', 'updated_at'])
-        return Response({'image_url': url}, status=status.HTTP_200_OK)
+        absolute_url = build_media_absolute_url(request, url)
+        return Response({'image_url': absolute_url}, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'], url_path='line-final-candidates')
     def line_final_candidates(self, request):

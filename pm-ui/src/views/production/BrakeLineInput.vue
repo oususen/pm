@@ -285,8 +285,27 @@
         <div class="photo-placeholder">
           <template v-if="selectedItem">
             <div class="photo-product-code">{{ selectedItem.product_code }}</div>
-            <div class="photo-icon">📷</div>
-            <div class="photo-label">将来実装予定</div>
+            <img
+              v-if="photoPreviewUrl"
+              :src="photoPreviewUrl"
+              class="photo-preview"
+              alt="製品写真"
+            />
+            <div v-else class="photo-icon">📷</div>
+            <div class="photo-actions">
+              <button class="btn-save photo-save-btn" :disabled="!canCapturePhoto" @click="openCamera">
+                {{ photoUploading ? '保存中...' : '撮影して保存' }}
+              </button>
+              <input
+                ref="photoInputRef"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                class="photo-file-input"
+                @change="onPhotoSelected"
+              />
+            </div>
+            <div class="photo-label">{{ photoPreviewUrl ? '保存済み写真' : '未登録です。撮影して保存できます' }}</div>
           </template>
           <template v-else>
             <div class="photo-icon muted">📷</div>
@@ -591,8 +610,12 @@ const toast = ref({ show: false, message: '', type: 'success' })
 const PRINT_SETTINGS_KEY = 'brake_line_print_settings_v1'
 
 const qtyInputRef = ref(null)
+const photoInputRef = ref(null)
 const scrapQty = ref(null)
 const scrapReason = ref('')
+const photoPreviewUrl = ref('')
+const photoUploading = ref(false)
+const canCapturePhoto = computed(() => !!selectedItem.value?.product_id && !photoUploading.value)
 
 watch(
   () => operatorActionOptions.value.map((item) => item.value).join('|'),
@@ -889,10 +912,16 @@ async function selectItem(item) {
   currentActualQty.value = item.actual_qty
   inputQty.value = null
   actionReason.value = ''
+  photoPreviewUrl.value = ''
   // 設備が明示指定されているアイテム（手動追加）はその設備に切り替える
   // 設備未指定のアイテム（計画品）は設備選択を維持する
   if (item?.equipment_id) {
     selectedEquipmentId.value = item.equipment_id
+  }
+  if (item?.image_url) {
+    photoPreviewUrl.value = item.image_url
+  } else if (item?.product_id) {
+    await loadProductPhoto(item.product_id)
   }
   // 設備は工程単位でロード済み。計画品は設備選択を維持する
   syncSelectedAction()
@@ -928,6 +957,63 @@ function cancel() {
   actionReason.value = ''
   scrapQty.value = null
   scrapReason.value = ''
+  photoPreviewUrl.value = ''
+}
+
+function openCamera() {
+  if (!canCapturePhoto.value) {
+    showToast('マスタ登録品番のみ写真を保存できます', 'error')
+    return
+  }
+  photoInputRef.value?.click()
+}
+
+async function loadProductPhoto(productId) {
+  try {
+    const res = await api.products.getProduct(productId)
+    photoPreviewUrl.value = String(res?.data?.image_url || '').trim()
+  } catch {
+    photoPreviewUrl.value = ''
+  }
+}
+
+async function onPhotoSelected(event) {
+  const file = event?.target?.files?.[0]
+  if (!file || !selectedItem.value?.product_id) return
+
+  // 選択直後にローカルプレビューを表示（kaizen_pp方式）
+  let objectUrl = null
+  try {
+    objectUrl = URL.createObjectURL(file)
+    photoPreviewUrl.value = objectUrl
+  } catch {
+    // createObjectURL失敗時はプレビューなしで続行
+  }
+
+  const formData = new FormData()
+  formData.append('file', file)
+  photoUploading.value = true
+  try {
+    const res = await api.products.uploadProductImage(selectedItem.value.product_id, formData)
+    const imageUrl = String(res?.data?.image_url || '').trim()
+    // サーバー保存URLをitemに反映（次回選択時用）
+    selectedItem.value = { ...selectedItem.value, image_url: imageUrl }
+    // プレビューはobjectURLを維持（サーバーURLはnginx経由で正しく取得できない場合があるため）
+    if (!objectUrl) {
+      photoPreviewUrl.value = imageUrl
+    }
+    showToast('製品写真を保存しました')
+  } catch (e) {
+    // アップロード失敗時はプレビューを元に戻す
+    if (objectUrl) {
+      URL.revokeObjectURL(objectUrl)
+    }
+    photoPreviewUrl.value = selectedItem.value?.image_url || ''
+    showToast(e?.response?.data?.detail || '製品写真の保存に失敗しました', 'error')
+  } finally {
+    photoUploading.value = false
+    if (event?.target) event.target.value = ''
+  }
 }
 
 function jumpToProcessingItem(msg) {
@@ -1921,6 +2007,27 @@ function showToast(message, type = 'success') {
 .photo-icon.muted { opacity: .3; }
 .photo-label { font-size: 11px; color: #aaa; text-align: center; line-height: 1.6; }
 .photo-label.muted { opacity: .7; }
+.photo-preview {
+  width: 100%;
+  max-width: 300px;
+  max-height: 260px;
+  object-fit: contain;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fff;
+}
+.photo-actions {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+.photo-save-btn {
+  width: 100%;
+  max-width: 240px;
+}
+.photo-file-input {
+  display: none;
+}
 
 /* ═══════════════════════════════
    モーダル（全面オーバーレイ）
@@ -1994,28 +2101,23 @@ function showToast(message, type = 'success') {
 
 @media (max-width: 1366px) {
   .four-col-layout {
-    grid-template-columns: 180px 250px 1fr;
-    grid-template-areas: "controls list form";
-  }
-
-  .col-photo {
-    display: none;
+    grid-template-columns: 1.5fr 1.5fr 3.5fr 3.5fr;
+    grid-template-areas: "controls list form photo";
   }
 }
 
 @media (max-width: 1024px) {
   .four-col-layout {
-    grid-template-columns: 240px minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-    grid-template-areas:
-      "controls form"
-      "list form";
-    overflow: hidden;
+    grid-template-columns: 1.5fr 1.5fr 3.5fr 3.5fr;
+    grid-template-areas: "controls list form photo";
+    overflow-x: auto;
+    overflow-y: hidden;
   }
 
   .col-controls,
   .col-list,
-  .col-form {
+  .col-form,
+  .col-photo {
     border-right: 1px solid #e0e0e0;
   }
 
