@@ -184,5 +184,25 @@ export const resolveCoreMapping = (appProductCode, processCode, mappings = []) =
     }
   }
 
+  // マッピング未設定時のみ固定ルールを適用
+  // 工程4010/4040: 末尾B削除 / 工順020 / Enter回数2
+  if (proc === '4010' || proc === '4040') {
+    return {
+      coreProductCode: String(appProductCode || '').replace(/[BＢ]$/i, ''),
+      coreProcessOrder: '020',
+      enterCount: 2,
+      mapped: true,
+    }
+  }
+  // 工程4013: 品番そのまま / 工順010 / Enter回数1
+  if (proc === '4013') {
+    return {
+      coreProductCode: String(appProductCode || ''),
+      coreProcessOrder: '010',
+      enterCount: 1,
+      mapped: true,
+    }
+  }
+
   return { coreProductCode: appProductCode, coreProcessOrder: '', enterCount: DEFAULT_ENTER_COUNT, mapped: false }
 }
