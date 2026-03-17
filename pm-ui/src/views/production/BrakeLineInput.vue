@@ -106,6 +106,14 @@
         <div class="list-header">
           <span class="list-count">{{ t('brakeInput.itemCount', { n: filteredItems.length }) }}</span>
         </div>
+        <div class="list-filter">
+          <input
+            v-model.trim="productCodeFilter"
+            class="list-filter-input"
+            placeholder="部番検索"
+            @input="currentPage = 1"
+          />
+        </div>
 
         <div class="plan-list" v-if="!loading">
           <div
@@ -461,6 +469,7 @@ const showYesterday = ref(false)
 // ページネーション
 const PAGE_SIZE = 25
 const currentPage = ref(1)
+const productCodeFilter = ref('')
 
 
 // 設備
@@ -852,6 +861,10 @@ const filteredItems = computed(() => {
   let items = processFilteredItems.value
   if (!showDone.value) {
     items = items.filter(item => !isDone(item))
+  }
+  const keyword = String(productCodeFilter.value || '').trim().toUpperCase()
+  if (keyword) {
+    items = items.filter((item) => String(item.product_code || '').toUpperCase().includes(keyword))
   }
   return items
 })
@@ -1633,6 +1646,19 @@ function showToast(message, type = 'success') {
   align-items: center;
 }
 .list-count { font-size: 12px; color: #888; }
+.list-filter {
+  padding: 6px 10px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.list-filter-input {
+  width: 100%;
+  height: 30px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 0 8px;
+  font-size: 12px;
+  box-sizing: border-box;
+}
 
 .plan-list {
   flex: 1;

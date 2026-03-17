@@ -159,6 +159,17 @@ export const resolveCoreMapping = (appProductCode, processCode, mappings = []) =
   const proc = normalize(processCode)
   if (!app) return { coreProductCode: '', coreProcessOrder: '', enterCount: DEFAULT_ENTER_COUNT, mapped: false }
 
+  // 本番運用ルール:
+  // 工程4010は、末尾Bを除去した品番を基幹品番にし、工順は020、Enter回数は2固定
+  if (proc === '4010') {
+    return {
+      coreProductCode: String(appProductCode || '').replace(/B$/i, ''),
+      coreProcessOrder: '020',
+      enterCount: 2,
+      mapped: true,
+    }
+  }
+
   const exact = source.find(
     (row) => normalize(row.appProductCode) === app && normalize(row.processCode) === proc,
   )
