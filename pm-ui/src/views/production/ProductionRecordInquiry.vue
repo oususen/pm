@@ -493,7 +493,8 @@ const normalizeList = (payload) => {
 const isCountableProductionRow = (row) => {
   if (!row) return false
   const endAction = String(row.end_action || '').toUpperCase()
-  if (String(row.record_source || '').toUpperCase() === 'LASER') {
+  const source = String(row.record_source || '').toUpperCase()
+  if (source === 'LASER' || source === 'BRAKE') {
     return ['END', 'PAUSE'].includes(endAction)
   }
   if (row.session_type !== 'WORK') return false

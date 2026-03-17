@@ -711,7 +711,10 @@ class BrakeLineRecordView(APIView):
             return Response({'detail': '日付形式が不正です（YYYY-MM-DD）'}, status=400)
 
         qty = 0
-        if operator_action == BrakeLineRecord.OPERATOR_ACTION_END:
+        if operator_action in {
+            BrakeLineRecord.OPERATOR_ACTION_END,
+            BrakeLineRecord.OPERATOR_ACTION_PAUSE,
+        }:
             try:
                 qty = int(qty_raw)
             except (ValueError, TypeError):
@@ -734,9 +737,12 @@ class BrakeLineRecordView(APIView):
             sequence_no=sequence_no,
         )
 
-        # END の場合は LineBacklog に実績を加算
+        # END / PAUSE の場合は LineBacklog に実績を加算
         backlog_data = None
-        if operator_action == BrakeLineRecord.OPERATOR_ACTION_END and qty > 0 and product_id:
+        if operator_action in {
+            BrakeLineRecord.OPERATOR_ACTION_END,
+            BrakeLineRecord.OPERATOR_ACTION_PAUSE,
+        } and qty > 0 and product_id:
             obj, created = LineBacklog.objects.get_or_create(
                 plan_date=plan_date,
                 process_id=process_id,
@@ -855,7 +861,10 @@ class BrakeLineSessionView(APIView):
                         'operator_name':        (start_rec or rec).operator or '',
                         'duration_seconds':     duration,
                         'effective_work_seconds': duration,
-                        'production_qty':       int(rec.qty) if action == BrakeLineRecord.OPERATOR_ACTION_END else 0,
+                        'production_qty':       int(rec.qty) if action in {
+                            BrakeLineRecord.OPERATOR_ACTION_END,
+                            BrakeLineRecord.OPERATOR_ACTION_PAUSE,
+                        } else 0,
                         'issue_count':          0,
                         'issue_flags':          [],
                         'record_source':        'BRAKE',
