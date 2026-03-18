@@ -17,6 +17,7 @@ import time
 import ctypes
 import keyboard
 import pyautogui
+from PIL import ImageGrab
 import pyperclip
 import openpyxl
 import win32gui
@@ -47,6 +48,11 @@ DEFAULT_CONFIG = {
 # ============================================================
 # 入力ロジック（kikan_input.py から移植）
 # ============================================================
+
+class ErrorDialogDetected(Exception):
+    """基幹システムのエラーダイアログを検出した場合に送出する例外"""
+    pass
+
 
 def find_window(title_part):
     handles = []
@@ -145,11 +151,63 @@ def load_excel(filepath):
     return records, skipped, ws.title
 
 
-def wait_for_screen_change(hwnd_main, min_wait=0.3, max_wait=8.0, interval=0.15, stop_check=None):
+def wait_for_koukei_blue(hwnd_main, min_wait=0.3, max_wait=8.0, interval=0.1, stop_check=None,
+                         log_func=None):
+    """品番確定後、工程情報テーブルの青行出現を検知して次へ進む。"""
+    time.sleep(min_wait)
+    if not hwnd_main:
+        return
+    try:
+        rect = win32gui.GetWindowRect(hwnd_main)
+        x, y, x2, y2 = rect
+        w, h = x2 - x, y2 - y
+        # 工程情報データ行エリア（ヘッダー行より下、右側生産進度を含まない左側のみ）
+        region = (x + int(w * 0.03), y + int(h * 0.33), int(w * 0.41), int(h * 0.06))
+        if log_func:
+            log_func(f"[DEBUG] 工程青検知エリア: ウィンドウ({w}x{h}) 監視region={region}")
+        elapsed = min_wait
+        first_log = True
+        while elapsed < max_wait:
+            time.sleep(interval)
+            if stop_check:
+                stop_check()
+            img = ImageGrab.grab(bbox=(region[0], region[1], region[0]+region[2], region[1]+region[3]), all_screens=True)
+            pixels = list(img.getdata())
+            # 青系ピクセル：青チャンネルが赤より30以上高く、かつ青が80以上
+            blue_count = sum(1 for r, g, b in pixels if b > 80 and b > r + 30)
+            if log_func and first_log:
+                log_func(f"[DEBUG] 青ピクセル数={blue_count}（50超で検知）")
+                first_log = False
+            if blue_count > 1500:
+                # 閾値超え → 安定確認：0.3秒後に再測定して同じ値なら完了
+                time.sleep(0.3)
+                img2 = ImageGrab.grab(bbox=(region[0], region[1], region[0]+region[2], region[1]+region[3]), all_screens=True)
+                blue_count2 = sum(1 for r, g, b in img2.getdata() if b > 80 and b > r + 30)
+                if log_func:
+                    log_func(f"[DEBUG] 工程青行検知 blue={blue_count}→{blue_count2}")
+                if blue_count2 == blue_count:
+                    # 2回連続同じ値 → 安定、完了
+                    return
+                # まだ変化中 → 待機継続
+                blue_count = blue_count2
+            elapsed += interval
+        if log_func:
+            log_func(f"[DEBUG] 工程青検知タイムアウト（最終blue={blue_count}）")
+    except InterruptedError:
+        raise
+    except Exception as e:
+        if log_func:
+            log_func(f"[DEBUG] 工程青検知エラー: {e}")
+
+
+def wait_for_screen_change(hwnd_main, min_wait=0.3, max_wait=8.0, interval=0.15, stop_check=None,
+                           area=None):
     """画面変化を待つ（基幹システムの応答待ち）
     Enter後に基幹システムが応答するまで監視し、変化を検出したら戻る。
     min_wait後から監視開始。max_waitに達してもタイムアウトとして続行。
     stop_checkを渡すと待機中も右クリック解除・Ctrl+P停止が有効になる。
+    area: 監視エリアをウィンドウ比率で指定 (top, left, height, width) 例: (0.27, 0.03, 0.13, 0.41)
+          Noneの場合はウィンドウ上部全体を監視
     """
     time.sleep(min_wait)
     if not hwnd_main:
@@ -158,15 +216,20 @@ def wait_for_screen_change(hwnd_main, min_wait=0.3, max_wait=8.0, interval=0.15,
         rect = win32gui.GetWindowRect(hwnd_main)
         x, y, x2, y2 = rect
         w, h = x2 - x, y2 - y
-        # ウィンドウ内の品名・工程情報エリアを監視
-        region = (x + 5, y + 30, w - 10, min(250, h - 50))
-        before = pyautogui.screenshot(region=region)
+        if area:
+            top_r, left_r, h_r, w_r = area
+            region = (x + int(w * left_r), y + int(h * top_r), int(w * w_r), int(h * h_r))
+        else:
+            # デフォルト：ウィンドウ上部全体を監視
+            region = (x + 5, y + 30, w - 10, min(250, h - 50))
+        bbox = (region[0], region[1], region[0]+region[2], region[1]+region[3])
+        before = ImageGrab.grab(bbox=bbox, all_screens=True)
         elapsed = min_wait
         while elapsed < max_wait:
             time.sleep(interval)
             if stop_check:
                 stop_check()   # 右クリック解除・Ctrl+P・停止ボタンをここでも処理
-            after = pyautogui.screenshot(region=region)
+            after = ImageGrab.grab(bbox=bbox, all_screens=True)
             if before.tobytes() != after.tobytes():
                 time.sleep(0.1)  # 表示安定待ち
                 return
@@ -179,19 +242,28 @@ def wait_for_screen_change(hwnd_main, min_wait=0.3, max_wait=8.0, interval=0.15,
 
 
 def check_error_dialog(hwnd_main):
-    """エラーダイアログが前面に出ていないか確認。出ていればEnterで閉じてRuntimeError"""
+    """エラーダイアログが前面に出ていないか確認。出ていればEnterで閉じてErrorDialogDetectedを送出。
+    メインウィンドウのタイトルを含む子ウィンドウは誤検知として無視する。
+    """
     if not hwnd_main:
         return
     fg = win32gui.GetForegroundWindow()
     if fg != hwnd_main:
         title = win32gui.GetWindowText(fg)
+        main_title = win32gui.GetWindowText(hwnd_main)
+        # メインアプリのタイトルを含む場合は子ウィンドウ扱いでスキップ
+        if main_title and main_title in title:
+            return
+        # 自アプリ（基幹システム自動入力）がフォアグラウンドになった場合もスキップ
+        if '基幹システム自動入力' in title or '基幹自動入力' in title:
+            return
         # ダイアログをEnterで閉じる
         pyautogui.press('enter')
         time.sleep(0.3)
-        raise RuntimeError(f"エラーダイアログ検出: [{title}] → Enterで閉じてスキップ")
+        raise ErrorDialogDetected(title)
 
 
-def input_one_record(record, cfg, hwnd_main=None, stop_check=None):
+def input_one_record(record, cfg, hwnd_main=None, stop_check=None, log_func=None):
     delay_key    = cfg["delay_key"]
     delay_hinban = cfg["delay_hinban"]
 
@@ -216,7 +288,7 @@ def input_one_record(record, cfg, hwnd_main=None, stop_check=None):
         _poll_sleep(delay_key)
 
     def _poll_sleep(duration, poll_interval=0.1):
-        """待機中も0.1秒ごとに右クリック・停止をポーリングする"""
+        """待機中も0.1秒ごとに右クリック・停止・エラーダイアログをポーリングする"""
         deadline = time.monotonic() + duration
         while True:
             remaining = deadline - time.monotonic()
@@ -224,6 +296,7 @@ def input_one_record(record, cfg, hwnd_main=None, stop_check=None):
                 break
             time.sleep(min(poll_interval, remaining))
             check_stop()
+            check_error_dialog(hwnd_main)
 
     seisanbi  = format_seisanbi(record['生産日'])
     hinban    = str(record['基幹品番']).strip()
@@ -247,8 +320,11 @@ def input_one_record(record, cfg, hwnd_main=None, stop_check=None):
     # デバッグ: Enter回数の確認（動作確認後に削除可）
     print(f"[DEBUG] 品番={hinban} Excel列値={enter_count_raw!r} → Enter回数={tabs_after_hinban}")
     next_field(1)
-    wait_for_screen_change(hwnd_main, min_wait=0.3, max_wait=delay_hinban, stop_check=stop_check)
-    check_error_dialog(hwnd_main)   # エラーダイアログが出ていればここでRuntimeError
+    # ① 工程情報の青行出現を検知（最大10秒）
+    wait_for_koukei_blue(hwnd_main, min_wait=0.3, max_wait=10.0, stop_check=stop_check, log_func=log_func)
+    # ② 青行検知後、追加でdelay_hinban秒待機（工程情報の読み込み完全完了を待つ）
+    _poll_sleep(delay_hinban)
+    check_error_dialog(hwnd_main)
 
     if tabs_after_hinban >= 2:
         # 工程順位まで追加Enter → 工順入力
@@ -275,7 +351,12 @@ def input_one_record(record, cfg, hwnd_main=None, stop_check=None):
     pyautogui.press('f12')
     wait_for_screen_change(hwnd_main, min_wait=0.3, max_wait=3.0, stop_check=stop_check)   # ダイアログ表示待ち
     pyautogui.press('enter')      # 「はい」を選択
-    wait_for_screen_change(hwnd_main, min_wait=0.3, max_wait=cfg["delay_register"], stop_check=stop_check)  # 登録完了待ち
+    # ① ダイアログ消去＋ローディングゲージ出現を検知
+    wait_for_screen_change(hwnd_main, min_wait=0.2, max_wait=3.0, stop_check=stop_check)
+    check_error_dialog(hwnd_main)   # 登録直後にエラーダイアログが出た場合を検知
+    # ② ローディングゲージ消滅＝登録完了を検知
+    wait_for_screen_change(hwnd_main, min_wait=0.1, max_wait=cfg["delay_register"], stop_check=stop_check)
+    check_error_dialog(hwnd_main)   # 登録完了後にエラーダイアログが残っていないか確認
 
     return seisanbi, hinban, koukei, seisansu
 
@@ -533,6 +614,14 @@ class KikanInputApp:
         ins("  Ctrl + P        ", "key"); ins(" … 停止リクエスト\n")
         ins("  マウスを左上角  ", "key"); ins(" … フェイルセーフ緊急停止\n\n")
 
+        ins("【エラーダイアログ検出時の動作】\n", "h2")
+        ins("  登録後に基幹システムのエラーダイアログ（例:「日付の入力が不正です。」）を検出した場合、\n"
+            "  自動的に入力を中止します。ログに以下の情報を記録します：\n\n")
+        ins("  ★ エラーダイアログ検出により入力を中止しました\n", "key")
+        ins("    行=X/Y  品番=XXXX  工順=X\n"
+            "    ダイアログ内容: [エラーメッセージ]\n\n")
+        ins("  ※ 中止後は該当レコードの入力内容を基幹システム側で確認・手動入力してください。\n\n", "note")
+
         ins("【Enter回数設定】  ※通常は変更不要（デフォルト値で動作します）\n", "h2")
         ins("  デフォルト値は以下のとおりです。基幹画面のレイアウトが変わった場合のみ変更してください。\n\n", "note")
         rows = [
@@ -554,12 +643,13 @@ class KikanInputApp:
         ins("  1回     → 品番確定後カーソルは「加工先」へ移動（工程順位は自動）→ 生産数へ\n\n")
 
         ins("【待機時間】  ※通常は変更不要（デフォルト値で動作します）\n", "h2")
-        ins("  「品番確定後」「登録後」は画面変化を検知した瞬間に次へ進むタイムアウト上限値です。\n"
+        ins("  「品番確定後」は画面変化を検知した瞬間に次へ進むタイムアウト上限値です。\n"
+            "  「登録後」は「はい」押下後にローディングゲージが消えるまでの最大待機時間です。\n"
             "  基幹システムが極端に重い場合のみ値を大きくしてください。\n\n", "note")
         rows2 = [
             ("キー間",      "1.0秒",  "各キー入力間の待機時間"),
-            ("品番確定後",  "2.0秒",  "品番確定後の画面変化最大待機時間（タイムアウト上限）"),
-            ("登録後",      "1.0秒",  "F12登録後の完了最大待機時間（タイムアウト上限）"),
+            ("品番確定後",  "4.0秒",  "工程情報の青行検知後、さらに待機する秒数（読み込み完全完了を待つ）"),
+            ("登録後",      "1.0秒",  "「はい」後のローディングゲージ消滅（登録完了）までの最大待機時間"),
             ("開始前",      "10秒",   "入力開始前カウントダウン秒数"),
         ]
         for name, default, desc in rows2:
@@ -583,7 +673,7 @@ class KikanInputApp:
             ("品番確定後にエラー",           "品番が正しくない or 基幹に登録されていない品番"),
             ("動作が遅い / 入力が抜ける",    "「キー間」待機時間を増やす"),
             ("品番確定後・登録後に止まる",   "「品番確定後」「登録後」の待機時間を増やす"),
-            ("途中で止まる",                 "ログを確認。エラーダイアログが出た可能性あり"),
+            ("途中で止まる",                 "ログを確認。エラーダイアログ検出により中止した場合は行番号・品番がログに記録されている"),
         ]
         for symptom, solution in troubles:
             ins(f"  症状: {symptom}\n", "th")
@@ -831,13 +921,22 @@ class KikanInputApp:
 
             try:
                 seisanbi, hinban, koukei, seisansu = input_one_record(
-                    record, self.cfg, hwnd_main=hwnd, stop_check=should_stop)
+                    record, self.cfg, hwnd_main=hwnd, stop_check=should_stop, log_func=self._log)
                 success += 1
                 self._log(f"  → 登録OK  生産日={seisanbi}")
             except InterruptedError:
                 # 停止ボタン / Ctrl+P による中断
                 self._stop_flag = True
                 self._log("★ 入力中に停止しました")
+                break
+            except ErrorDialogDetected as e:
+                # 基幹エラーダイアログ検出 → 中止
+                self._stop_flag = True
+                self._log(
+                    f"★ エラーダイアログ検出により入力を中止しました\n"
+                    f"  行={i+1}/{total}  品番={record['基幹品番']}  工順={record['工順']}\n"
+                    f"  ダイアログ内容: [{e}]"
+                )
                 break
             except pyautogui.FailSafeException:
                 self._log("★★ フェイルセーフ発動 - 緊急停止 ★★")

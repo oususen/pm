@@ -6,7 +6,7 @@
   "tabs_to_jikan_start": 8,
   "tabs_to_jikan_end": 1,
   "delay_key": 1.0,
-  "delay_hinban": 2.0,
+  "delay_hinban": 4.0,
   "delay_register": 1.0,
   "countdown_sec": 10
 }
