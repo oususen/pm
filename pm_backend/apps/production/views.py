@@ -30,7 +30,7 @@ from .models_plan_lock_setting import ProductionPlanLockSetting
 from .models_record_inquiry_setting import ProductionRecordInquirySetting
 from .models_schedule_config import ScheduleConfig
 from .models_laser_pattern import LaserPattern
-from .models_laser_actual import LaserActual
+from .models_laser_actual import LaserActual, LaserActualDetail
 from .models_laser_kadojiseki import LaserShiftRecord
 from .serializers import (
     LineDemandSerializer,
@@ -4148,6 +4148,59 @@ class LaserActualViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class LaserActualDetailUpdateView(APIView):
+    """
+    レーザー実績明細（品番別）の数量個別更新
+    PATCH /laser-actual-details/{detail_id}/
+    COMPONENT 明細の total_qty を直接更新し、LineBacklog.actual_qty に差分反映する。
+    shot_count / total_process_time はヘッダ参考値として変更しない。
+    """
+
+    @transaction.atomic
+    def patch(self, request, detail_id):
+        detail = (
+            LaserActualDetail.objects
+            .select_related('actual__equipment__process__line', 'product')
+            .filter(id=detail_id, detail_type=LaserActualDetail.DETAIL_TYPE_COMPONENT)
+            .first()
+        )
+        if not detail:
+            return Response({'detail': '対象明細が存在しません（COMPONENTのみ更新可）。'}, status=404)
+
+        actual = detail.actual
+        if not LaserActualSerializer._is_countable_action(actual.operator_action):
+            return Response({'detail': 'この実績は数量変更できません（END/PAUSEのみ）。'}, status=400)
+
+        total_qty_raw = request.data.get('total_qty')
+        if total_qty_raw is None:
+            return Response({'detail': 'total_qty は必須です。'}, status=400)
+
+        try:
+            new_qty = Decimal(str(total_qty_raw)).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+        except (InvalidOperation, Exception):
+            return Response({'detail': 'total_qty は数値で入力してください。'}, status=400)
+
+        if new_qty < 0:
+            return Response({'detail': 'total_qty は0以上で入力してください。'}, status=400)
+
+        old_qty = detail.total_qty
+        delta = int((new_qty - old_qty).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+
+        detail.total_qty = new_qty
+        detail.save(update_fields=['total_qty'])
+
+        if delta != 0 and actual.work_date and detail.product_id:
+            process, line = LaserActualSerializer._resolve_component_process_line(
+                actual.equipment, detail.product
+            )
+            if process and line:
+                LaserActualSerializer.apply_backlog_delta_map({
+                    (actual.work_date, line.id, process.id, detail.product_id): delta
+                })
+
+        return Response({'detail': '更新しました。'})
 
 
 class LaserShiftRecordFilter(django_filters.FilterSet):

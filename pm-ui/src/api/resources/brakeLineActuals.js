@@ -33,4 +33,12 @@ export const createBrakeLineActualsAPI = (client) => ({
   getSessions(params) {
     return client.get('/brake-line-sessions/', { params: params || {} })
   },
+  /** 生産実績変更（レーザ/ブレーキ由来） PATCH /brake-line-sessions/{id}/ */
+  updateSession(sessionId, payload) {
+    return client.patch(`/brake-line-sessions/${sessionId}/`, payload || {})
+  },
+  /** 生産実績変更（レーザ/ブレーキ由来） DELETE /brake-line-sessions/{id}/ */
+  deleteSession(sessionId) {
+    return client.delete(`/brake-line-sessions/${sessionId}/`)
+  },
 })

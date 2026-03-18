@@ -4,7 +4,7 @@
 - BrakeLineActualAddView: 実績累積加算（後方互換用）
 - BrakeLineRecordView: 作業記録（開始/終了/中断/再開/一時終了）
 """
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from itertools import groupby
 
@@ -847,7 +847,9 @@ class BrakeLineSessionView(APIView):
                     pr_name = (proc.process_name if proc else '') or ''
 
                     sessions.append({
-                        'id':                   (start_rec or rec).id,
+                        'id':                   rec.id,
+                        'start_record_id':      start_rec.id if start_rec else None,
+                        'end_record_id':        rec.id,
                         'started_at':           started_at.isoformat(),
                         'ended_at':             ended_at.isoformat(),
                         'session_type':         'WORK' if action == BrakeLineRecord.OPERATOR_ACTION_END else 'PAUSE',
@@ -885,6 +887,8 @@ class BrakeLineSessionView(APIView):
                 pr_name = (proc.process_name if proc else '') or ''
                 sessions.append({
                     'id':                   open_rec.id,
+                    'start_record_id':      open_rec.id,
+                    'end_record_id':        None,
                     'started_at':           open_rec.recorded_at.isoformat(),
                     'ended_at':             None,
                     'session_type':         'WORK',
@@ -908,3 +912,136 @@ class BrakeLineSessionView(APIView):
 
         sessions.sort(key=lambda s: s.get('started_at') or '', reverse=True)
         return Response(sessions)
+
+
+class BrakeLineSessionDetailView(APIView):
+    """
+    ブレーキラインセッション更新/削除
+    PATCH  /brake-line-sessions/{session_id}/
+    DELETE /brake-line-sessions/{session_id}/
+    """
+
+    START_ACTIONS = {BrakeLineRecord.OPERATOR_ACTION_START, BrakeLineRecord.OPERATOR_ACTION_RESUME}
+    END_ACTIONS = {
+        BrakeLineRecord.OPERATOR_ACTION_END,
+        BrakeLineRecord.OPERATOR_ACTION_PAUSE,
+        BrakeLineRecord.OPERATOR_ACTION_TEMP_END,
+    }
+    BACKLOG_COUNTABLE_ACTIONS = {
+        BrakeLineRecord.OPERATOR_ACTION_END,
+        BrakeLineRecord.OPERATOR_ACTION_PAUSE,
+    }
+
+    @staticmethod
+    def _parse_dt(value):
+        if value in (None, ''):
+            return None
+        try:
+            dt = datetime.fromisoformat(str(value))
+        except ValueError:
+            return None
+        if timezone.is_naive(dt):
+            return timezone.make_aware(dt, timezone.get_current_timezone())
+        return dt
+
+    @classmethod
+    def _find_prev_start_record(cls, end_record):
+        if not end_record:
+            return None
+        qs = BrakeLineRecord.objects.filter(
+            line_id=end_record.line_id,
+            process_id=end_record.process_id,
+            equipment_id=end_record.equipment_id,
+            recorded_at__lte=end_record.recorded_at,
+            operator_action__in=list(cls.START_ACTIONS),
+        ).order_by('-recorded_at', '-id')
+        if end_record.product_id:
+            qs = qs.filter(product_id=end_record.product_id)
+        else:
+            qs = qs.filter(product_code=end_record.product_code)
+        return qs.first()
+
+    @staticmethod
+    def _apply_backlog_delta(record, delta_qty):
+        if not record or int(delta_qty or 0) == 0:
+            return
+        if not record.product_id:
+            return
+        obj, _created = LineBacklog.objects.get_or_create(
+            plan_date=record.plan_date,
+            process_id=record.process_id,
+            product_id=record.product_id,
+            line_id=record.line_id,
+            sequence_no=record.sequence_no,
+            defaults={'actual_qty': 0},
+        )
+        LineBacklog.objects.filter(pk=obj.pk).update(actual_qty=F('actual_qty') + int(delta_qty))
+
+    @transaction.atomic
+    def patch(self, request, session_id):
+        record = BrakeLineRecord.objects.filter(id=session_id).first()
+        if not record:
+            return Response({'detail': '対象セッションが存在しません。'}, status=404)
+
+        start_record = None
+        end_record = None
+        if record.operator_action in self.END_ACTIONS:
+            end_record = record
+            start_record = self._find_prev_start_record(record)
+        elif record.operator_action in self.START_ACTIONS:
+            start_record = record
+        else:
+            end_record = record
+
+        old_qty = int(end_record.qty or 0) if end_record and end_record.operator_action in self.BACKLOG_COUNTABLE_ACTIONS else 0
+
+        new_started_at = self._parse_dt(request.data.get('started_at'))
+        new_ended_at = self._parse_dt(request.data.get('ended_at'))
+        production_qty_raw = request.data.get('production_qty')
+
+        if new_started_at and start_record:
+            start_record.recorded_at = new_started_at
+            start_record.save(update_fields=['recorded_at'])
+        if new_ended_at and end_record:
+            end_record.recorded_at = new_ended_at
+            end_record.save(update_fields=['recorded_at'])
+
+        if end_record and end_record.operator_action in self.BACKLOG_COUNTABLE_ACTIONS and production_qty_raw is not None:
+            try:
+                new_qty = int(production_qty_raw)
+            except (TypeError, ValueError):
+                return Response({'detail': 'production_qty は整数で入力してください。'}, status=400)
+            if new_qty < 0:
+                return Response({'detail': 'production_qty は0以上で入力してください。'}, status=400)
+            end_record.qty = new_qty
+            end_record.save(update_fields=['qty'])
+            self._apply_backlog_delta(end_record, new_qty - old_qty)
+
+        return Response({'detail': '更新しました。'})
+
+    @transaction.atomic
+    def delete(self, request, session_id):
+        record = BrakeLineRecord.objects.filter(id=session_id).first()
+        if not record:
+            return Response(status=204)
+
+        if record.operator_action in self.END_ACTIONS:
+            end_record = record
+            start_record = self._find_prev_start_record(record)
+            rollback_qty = int(end_record.qty or 0) if end_record.operator_action in self.BACKLOG_COUNTABLE_ACTIONS else 0
+            if rollback_qty:
+                self._apply_backlog_delta(end_record, -rollback_qty)
+            end_record.delete()
+            if start_record:
+                start_record.delete()
+            return Response(status=204)
+
+        if record.operator_action in self.START_ACTIONS:
+            record.delete()
+            return Response(status=204)
+
+        rollback_qty = int(record.qty or 0) if record.operator_action in self.BACKLOG_COUNTABLE_ACTIONS else 0
+        if rollback_qty:
+            self._apply_backlog_delta(record, -rollback_qty)
+        record.delete()
+        return Response(status=204)

@@ -133,19 +133,19 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in sessions" :key="row.id">
+          <tr v-for="row in sessions" :key="row.row_key">
             <td>{{ row.id }}</td>
             <td>{{ row.process_code }} / {{ row.process_name }}</td>
             <td>{{ row.product_code || '—' }}</td>
             <td>
-              <input v-model="edits[row.id].started_at" type="datetime-local" :disabled="!canEdit" />
+              <input v-model="edits[row.row_key].started_at" type="datetime-local" :disabled="!canEdit || row.record_source === 'LASER'" />
             </td>
             <td>
-              <input v-model="edits[row.id].ended_at" type="datetime-local" :disabled="!canEdit" />
+              <input v-model="edits[row.row_key].ended_at" type="datetime-local" :disabled="!canEdit || row.record_source === 'LASER'" />
             </td>
             <td class="num">
               <input
-                v-model.number="edits[row.id].production_qty"
+                v-model.number="edits[row.row_key].production_qty"
                 type="number"
                 min="0"
                 step="1"
@@ -154,8 +154,8 @@
               />
             </td>
             <td class="action-cell">
-              <button class="btn btn-secondary" :disabled="savingId === row.id || !canEdit" @click="saveRow(row.id)">保存</button>
-              <button class="btn btn-danger" :disabled="savingId === row.id || !canEdit" @click="deleteRow(row.id)">削除</button>
+              <button class="btn btn-secondary" :disabled="savingId === row.row_key || !canEdit" @click="saveRow(row)">保存</button>
+              <button class="btn btn-danger" :disabled="savingId === row.row_key || !canEdit" @click="deleteRow(row)">削除</button>
             </td>
           </tr>
           <tr v-if="!sessions.length">
@@ -313,7 +313,7 @@ const loadMasters = async () => {
 const buildEditMap = (rows) => {
   const map = {}
   rows.forEach((row) => {
-    map[row.id] = {
+    map[row.row_key] = {
       started_at: toLocalDateTimeInput(row.started_at),
       ended_at: toLocalDateTimeInput(row.ended_at),
       production_qty: Number(row.production_qty || 0),
@@ -333,8 +333,79 @@ const loadSessions = async () => {
     }
     if (lineId.value) params.line_id = lineId.value
     if (processId.value) params.process_id = processId.value
-    const res = await api.processRealtime.getSessions(params)
-    const rows = Array.isArray(res.data) ? res.data : []
+    const laserParams = {
+      page_size: 1000,
+      work_date__gte: startDate.value,
+      work_date__lte: endDate.value,
+      ordering: '-work_date,-created_at',
+    }
+    const [processRes, brakeRes, laserRes] = await Promise.all([
+      api.processRealtime.getSessions(params),
+      api.brakeLineActuals.getSessions(params),
+      api.laserActuals.getLaserActuals(laserParams),
+    ])
+    const processRows = (Array.isArray(processRes.data) ? processRes.data : []).map((row) => ({
+      ...row,
+      record_source: 'PROCESS',
+      row_key: `PROCESS-${row.id}`,
+    }))
+    const brakeRows = (Array.isArray(brakeRes.data) ? brakeRes.data : []).map((row) => ({
+      ...row,
+      record_source: 'BRAKE',
+      row_key: `BRAKE-${row.id}-${row.started_at || ''}`,
+    }))
+    const laserRaw = Array.isArray(laserRes.data?.results) ? laserRes.data.results : (Array.isArray(laserRes.data) ? laserRes.data : [])
+    const laserRows = laserRaw.flatMap((row) => {
+      const details = Array.isArray(row?.details) ? row.details : []
+      const componentDetails = details.filter((detail) => String(detail?.detail_type || '').toUpperCase() === 'COMPONENT')
+      const base = {
+        id: row?.id,
+        started_at: row?.created_at || null,
+        ended_at: row?.created_at || null,
+        process_code: row?.equipment_process_code || row?.equipment_code || '',
+        process_name: row?.equipment_name || '',
+        product_code: '',
+        production_qty: 0,
+        record_source: 'LASER',
+        laser_operator_action: row?.operator_action || 'END',
+        laser_units_per_shot: 0,
+        laser_shot_count: Number(row?.shot_count || 0),
+        equipment_process_id: row?.equipment_process_id ?? null,
+      }
+      if (!componentDetails.length) {
+        return [{ ...base, row_key: `LASER-${row?.id}-none` }]
+      }
+      return componentDetails.map((detail, idx) => ({
+        ...base,
+        product_code: detail?.product_code || '',
+        production_qty: Number(detail?.total_qty || 0),
+        laser_units_per_shot: Number(detail?.units_per_shot || 0),
+        detail_id: detail?.id ?? null,
+        row_key: `LASER-${row?.id}-${idx}`,
+      }))
+    })
+    const selectedLineProcessIds = lineId.value
+      ? new Set(
+        processes.value
+          .filter((p) => String(p.line) === String(lineId.value))
+          .map((p) => String(p.id)),
+      )
+      : null
+    const filteredLaserRows = laserRows.filter((row) => {
+      if (selectedLineProcessIds && row.equipment_process_id != null && !selectedLineProcessIds.has(String(row.equipment_process_id))) {
+        return false
+      }
+      if (processId.value && row.equipment_process_id != null && String(row.equipment_process_id) !== String(processId.value)) {
+        return false
+      }
+      return true
+    })
+    const rows = [...processRows, ...brakeRows, ...filteredLaserRows]
+      .sort((a, b) => {
+        const ta = a.started_at || ''
+        const tb = b.started_at || ''
+        return ta < tb ? 1 : ta > tb ? -1 : 0
+      })
     const filtered = sessionId.value
       ? rows.filter((row) => String(row.id) === String(sessionId.value))
       : rows
@@ -350,19 +421,33 @@ const loadSessions = async () => {
   }
 }
 
-const saveRow = async (id) => {
+const saveRow = async (row) => {
   if (!canEdit.value) return
-  const edit = edits.value[id]
+  const id = row.id
+  const edit = edits.value[row.row_key]
   if (!edit) return
   if (!window.confirm(`レコードID ${id} を更新します。よろしいですか？`)) return
 
-  savingId.value = id
+  savingId.value = row.row_key
   try {
-    await api.processRealtime.updateSession(id, {
+    const payload = {
       started_at: edit.started_at || null,
       ended_at: edit.ended_at || null,
       production_qty: Number(edit.production_qty || 0),
-    })
+    }
+    if (String(row?.record_source || '').toUpperCase() === 'LASER') {
+      if (!row.detail_id) {
+        alert('この行は明細IDが取得できないため更新できません。')
+        return
+      }
+      await api.laserActuals.patchLaserActualDetail(row.detail_id, {
+        total_qty: Number(edit.production_qty || 0),
+      })
+    } else if (String(row?.record_source || '').toUpperCase() === 'BRAKE') {
+      await api.brakeLineActuals.updateSession(id, payload)
+    } else {
+      await api.processRealtime.updateSession(id, payload)
+    }
     await loadSessions()
     alert('更新しました。LineBacklog.actual_qty も差分反映済みです。')
   } catch (e) {
@@ -373,12 +458,19 @@ const saveRow = async (id) => {
   }
 }
 
-const deleteRow = async (id) => {
+const deleteRow = async (row) => {
   if (!canEdit.value) return
+  const id = row.id
   if (!window.confirm(`レコードID ${id} を削除します。よろしいですか？`)) return
-  savingId.value = id
+  savingId.value = row.row_key
   try {
-    await api.processRealtime.deleteSession(id)
+    if (String(row?.record_source || '').toUpperCase() === 'LASER') {
+      await api.laserActuals.deleteLaserActual(id)
+    } else if (String(row?.record_source || '').toUpperCase() === 'BRAKE') {
+      await api.brakeLineActuals.deleteSession(id)
+    } else {
+      await api.processRealtime.deleteSession(id)
+    }
     await loadSessions()
     alert('削除しました。LineBacklog.actual_qty も減算反映済みです。')
   } catch (e) {

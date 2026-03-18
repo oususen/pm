@@ -16,6 +16,7 @@ from production.views import (
     LineBacklogAdjustmentView,
     LaserPatternViewSet,
     LaserActualViewSet,
+    LaserActualDetailUpdateView,
     LaserShiftRecordViewSet,
     ProcessActualViewSet,
     ProductionOrderViewSet,
@@ -26,7 +27,7 @@ from production.views import (
 from production.views_line_realtime import LineRealtimeRecordViewSet, LineStatusViewSet
 from production.views_process_realtime import ProcessRealtimeRecordViewSet
 from production.views_services import BOMServiceViewSet, CRPViewSet
-from production.views_brake_line import BrakeLinePlanView, BrakeLineProductsView, BrakeLineEquipmentsView, BrakeLineActualAddView, BrakeLineRecordView, BrakeLineSessionView
+from production.views_brake_line import BrakeLinePlanView, BrakeLineProductsView, BrakeLineEquipmentsView, BrakeLineActualAddView, BrakeLineRecordView, BrakeLineSessionView, BrakeLineSessionDetailView
 
 router = DefaultRouter()
 router.register(r'line-demands', LineDemandViewSet, basename='linedemand')
@@ -71,4 +72,6 @@ urlpatterns = [
     path('brake-line-actual/add/', BrakeLineActualAddView.as_view(), name='brake-line-actual-add'),
     path('brake-line-record/', BrakeLineRecordView.as_view(), name='brake-line-record'),
     path('brake-line-sessions/', BrakeLineSessionView.as_view(), name='brake-line-sessions'),
+    path('brake-line-sessions/<int:session_id>/', BrakeLineSessionDetailView.as_view(), name='brake-line-session-detail'),
+    path('laser-actual-details/<int:detail_id>/', LaserActualDetailUpdateView.as_view(), name='laser-actual-detail-update'),
 ]
