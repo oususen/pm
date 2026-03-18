@@ -80,6 +80,15 @@ export const manualSections = [
     title: "設変管理",
     items: [{ title: "設変管理", path: "設変/設変管理.md" }],
   },
+  {
+    id: "settings",
+    title: "設定",
+    items: [
+      { title: "ユーザー管理", path: "設定/ユーザー管理.md" },
+      { title: "権限設定", path: "設定/権限設定.md" },
+      { title: "自動計画生成タスク", path: "設定/自動計画生成タスク.md" },
+    ],
+  },
 ];
 
 export const manualLookup = manualSections.reduce((acc, section) => {

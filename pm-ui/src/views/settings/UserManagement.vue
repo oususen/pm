@@ -55,6 +55,9 @@
         <button class="btn" @click="loadUsers" :disabled="loading">
           更新
         </button>
+        <button class="btn" type="button" @click="openManual">
+          マニュアル
+        </button>
         <button class="btn primary" @click="startCreate" :disabled="!canManageBasic">
           新規ユーザー
         </button>
@@ -257,9 +260,12 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+
+const router = useRouter()
 
 const users = ref([])
 const departments = ref([])
@@ -281,6 +287,10 @@ const filterActiveOnly = ref(false)
 const filterInactiveOnly = ref(false)
 const selectedUserId = ref(null)
 const isCreating = ref(false)
+
+const openManual = () => {
+  router.push({ path: '/manual', query: { path: '設定/ユーザー管理.md' } })
+}
 const roleOptions = [
   { value: 'manager', label: '事業部長・課長' },
   { value: 'chief', label: '係長' },

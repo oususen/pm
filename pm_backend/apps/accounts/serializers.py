@@ -199,11 +199,22 @@ class UserSerializer(serializers.ModelSerializer):
         permissions_data = validated_data.pop('permissions', None)
         password = validated_data.pop('password', None)
 
+        employee_code = None
+        if profile_data is not None:
+            employee_code = profile_data.get('employee_code')
+            if employee_code == '':
+                employee_code = None
+
         user = User(**validated_data)
         if password:
             user.set_password(password)
         else:
-            user.set_unusable_password()
+            # 新規作成時の初期パスワードは社員コード（未設定時はユーザー名）を使用
+            initial_password = employee_code or validated_data.get('username')
+            if initial_password:
+                user.set_password(initial_password)
+            else:
+                user.set_unusable_password()
         user.save()
 
         if profile_data is not None:
