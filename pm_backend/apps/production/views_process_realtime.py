@@ -111,6 +111,7 @@ def _apply_delta_to_inventory_and_progress(session, delta):
         parent_product_id=session.product_id,
         is_active=True
     ).prefetch_related('items')
+    child_product_ids = set()
 
     for bom in boms:
         for item in bom.items.all():
@@ -118,6 +119,7 @@ def _apply_delta_to_inventory_and_progress(session, delta):
             qty_per = item.quantity or 0
             if not child_id or qty_per == 0:
                 continue
+            child_product_ids.add(int(child_id))
             
             child_delta = int(Decimal(str(delta)) * qty_per)
             if child_delta == 0:
@@ -139,6 +141,107 @@ def _apply_delta_to_inventory_and_progress(session, delta):
                 sequence_no=0,
             ).update(
                 actual_shipment_qty=F('actual_shipment_qty') + child_delta
+            )
+
+    if child_product_ids:
+        _recalculate_child_stock_after_record_edit(
+            parent_plan_date=session.plan_date,
+            today=today,
+            child_product_ids=child_product_ids,
+        )
+
+
+def _recalculate_child_stock_after_record_edit(parent_plan_date, today, child_product_ids):
+    """
+    実績変更後、子部品の在庫/計画在庫を再計算する。
+    変更日を「基準日(today相当)」として開始日を算出し、
+    その開始日から実際の今日までを再計算する。
+    """
+    if not parent_plan_date or not today or parent_plan_date > today:
+        return
+    targets = sorted({int(pid) for pid in (child_product_ids or []) if pid})
+    if not targets:
+        return
+
+    from masters.models import Line, Calendar, CalendarDay
+    from .inventory.inventory_calculator import (
+        recalculate_stock_qty,
+        recalculate_planned_stock_qty,
+        _build_firm_order_map,
+        _get_max_parent_bom_lead_time,
+    )
+
+    for child_id in targets:
+        line_ids = list(
+            LineBacklog.objects.filter(
+                product_id=child_id,
+                plan_date__range=[parent_plan_date, today],
+                sequence_no=0,
+            ).values_list('line_id', flat=True).distinct()
+        )
+        for line_id in line_ids:
+            line_obj = Line.objects.filter(id=line_id).first()
+            calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
+                calendar_code='daiso'
+            ).values_list('id', flat=True).first()
+            workday_cache = {}
+
+            def is_working_day(target_date):
+                if not calendar_id:
+                    return target_date.weekday() < 5
+                if target_date in workday_cache:
+                    return workday_cache[target_date]
+                cal = CalendarDay.objects.filter(
+                    calendar_id=calendar_id,
+                    target_date=target_date
+                ).first()
+                is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
+                workday_cache[target_date] = is_work
+                return is_work
+
+            def get_prev_working_day(target_date):
+                prev_date = target_date - timedelta(days=1)
+                while not is_working_day(prev_date):
+                    prev_date = prev_date - timedelta(days=1)
+                return prev_date
+
+            def shift_working_days(target_date, days):
+                if not days:
+                    return target_date
+                if not calendar_id:
+                    return target_date + timedelta(days=days)
+                step = 1 if days > 0 else -1
+                remaining = abs(int(days))
+                current = target_date
+                while remaining > 0:
+                    current = current + timedelta(days=step)
+                    if is_working_day(current):
+                        remaining -= 1
+                return current
+
+            stock_start = get_prev_working_day(get_prev_working_day(parent_plan_date))
+            planned_start = shift_working_days(
+                parent_plan_date,
+                -(_get_max_parent_bom_lead_time(child_id) + 1),
+            )
+            firm_start = min(stock_start, planned_start)
+            firm_map = _build_firm_order_map(line_id, firm_start, today)
+
+            recalculate_stock_qty(
+                line_id,
+                child_id,
+                stock_start,
+                today,
+                firm_map=firm_map,
+                reference_today=parent_plan_date,
+            )
+            recalculate_planned_stock_qty(
+                line_id,
+                child_id,
+                planned_start,
+                today,
+                firm_map=firm_map,
+                reference_today=parent_plan_date,
             )
 
 

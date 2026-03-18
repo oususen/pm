@@ -656,7 +656,15 @@ def has_downstream_actual(backlog):
     return False
 
 
-def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=None, stock_adjust_map=None):
+def recalculate_stock_qty(
+    line_id,
+    product_id,
+    start_date,
+    end_date,
+    firm_map=None,
+    stock_adjust_map=None,
+    reference_today=None,
+):
     """
     実在庫を日次で再計算
 
@@ -796,7 +804,7 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
         base_rows = [r for r in rows if r.sequence_no == 0]
         return min(base_rows, key=lambda r: r.id)
 
-    today = get_business_today()
+    today = reference_today or get_business_today()
     day_before_yesterday = get_prev_working_day(get_prev_working_day(today))  # 前々営業日
     stock_by_date = {}
     firm_map = firm_map or {}
@@ -891,7 +899,15 @@ def recalculate_stock_qty(line_id, product_id, start_date, end_date, firm_map=No
         LineBacklog.objects.bulk_update(backlogs_to_update, ['stock_qty', 'actual_shipment_qty'])
 
 
-def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, firm_map=None, planned_stock_adjust_map=None):
+def recalculate_planned_stock_qty(
+    line_id,
+    product_id,
+    start_date,
+    end_date,
+    firm_map=None,
+    planned_stock_adjust_map=None,
+    reference_today=None,
+):
     """
     計画在庫を日次で再計算（時制考慮版）
     - 過去（plan_date < today）:
@@ -966,7 +982,7 @@ def recalculate_planned_stock_qty(line_id, product_id, start_date, end_date, fir
         base_rows = [r for r in rows if r.sequence_no == 0]
         return min(base_rows, key=lambda r: r.id)
 
-    today = get_business_today()
+    today = reference_today or get_business_today()
     # 製品のBOMの最大LTを取得し、LT+1日前から再計算
     # これにより、親製品の実績変更が子製品の過去の出庫に正しく反映される
     max_lt = _get_max_parent_bom_lead_time(product_id)
