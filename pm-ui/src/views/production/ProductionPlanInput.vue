@@ -282,6 +282,12 @@
           </div>
         </div>
         <div class="process-actions">
+          <div class="field checkbox-field gantt-toggle-field">
+            <label>
+              <input type="checkbox" v-model="showGanttAddAnchors" />
+              ＋表示
+            </label>
+          </div>
           <button
             class="btn gantt-save-btn"
             :class="{ 'gantt-save-dirty': ganttDirty }"
@@ -300,6 +306,7 @@
         :preset-base-date="startDate"
         :preset-start-date="startDate"
         :preset-end-date="endDate"
+        :show-add-anchors="showGanttAddAnchors"
         @dirty-change="onGanttDirtyChange"
       />
     </div>
@@ -461,7 +468,7 @@ const toDateInput = (dateObj) => {
 const defaultStart = new Date()
 defaultStart.setDate(defaultStart.getDate() - 1)
 const startDate = ref(toDateInput(defaultStart))
-const horizonDays = ref(14)
+const horizonDays = ref(7)
 const keyword = ref('')
 const TANK_LINE_CODE = 'L2200'
 const COPRODUCT_LIMITED_LINE_CODES = new Set(['L2201'])
@@ -488,6 +495,7 @@ const products = ref([])
 const rows = ref([])
 const showProcessGantt = ref(false)
 const showProcessLoad = ref(false)
+const showGanttAddAnchors = ref(false)
 const ganttReloadKey = ref(0)
 const ganttRef = ref(null)
 const ganttDirty = ref(false)

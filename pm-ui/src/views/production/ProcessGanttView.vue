@@ -154,6 +154,7 @@
                   </div>
                 </div>
                 <button
+                  v-if="props.showAddAnchors"
                   v-for="anchor in rowAddAnchors"
                   :key="`add-${idx}-${anchor.key}`"
                   type="button"
@@ -191,6 +192,7 @@ const props = defineProps({
   presetBaseDate: { type: String, default: '' },
   presetStartDate: { type: String, default: '' },
   presetEndDate: { type: String, default: '' },
+  showAddAnchors: { type: Boolean, default: true },
 })
 const emit = defineEmits(['dirty-change'])
 const TANK_LINE_CODE = 'L2200'

@@ -86,13 +86,13 @@
     <div class="filters" v-if="canView">
       <div class="filter-row">
         <label>レコードID</label>
-        <input v-model="sessionId" type="number" min="1" placeholder="例: 12345" />
+        <input v-model="sessionId" type="number" min="1" placeholder="例: 12345" class="record-id-input" />
       </div>
       <div class="filter-row">
         <label>期間</label>
-        <input v-model="startDate" type="date" />
+        <input v-model="startDate" type="text" inputmode="numeric" placeholder="例: 206 / 2026/2/6" class="period-date-input" />
         <span>〜</span>
-        <input v-model="endDate" type="date" />
+        <input v-model="endDate" type="text" inputmode="numeric" placeholder="例: 219 / 2026/2/19" class="period-date-input" />
       </div>
       <div class="filter-row">
         <label>ライン</label>
@@ -321,6 +321,70 @@ const toLocalDateTimeInput = (value) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+const pad2 = (n) => String(n).padStart(2, '0')
+const isValidYmd = (y, m, d) => {
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return false
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false
+  const dt = new Date(y, m - 1, d)
+  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d
+}
+const toYmd = (y, m, d) => `${y}-${pad2(m)}-${pad2(d)}`
+const toDisplayYmd = (ymd) => {
+  const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return String(ymd || '')
+  return `${Number(m[1])}/${Number(m[2])}/${Number(m[3])}`
+}
+const normalizeDateInput = (value) => {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const currentYear = new Date().getFullYear()
+
+  // YYYY/MM/DD, YYYY-MM-DD, YYYY.M.D
+  let m = raw.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/)
+  if (m) {
+    const y = Number(m[1]); const mm = Number(m[2]); const dd = Number(m[3])
+    return isValidYmd(y, mm, dd) ? toYmd(y, mm, dd) : null
+  }
+
+  // M/D, M-D, M.D (year is current year)
+  m = raw.match(/^(\d{1,2})[\/\-.](\d{1,2})$/)
+  if (m) {
+    const mm = Number(m[1]); const dd = Number(m[2])
+    return isValidYmd(currentYear, mm, dd) ? toYmd(currentYear, mm, dd) : null
+  }
+
+  // YYYYMMDD
+  m = raw.match(/^(\d{4})(\d{2})(\d{2})$/)
+  if (m) {
+    const y = Number(m[1]); const mm = Number(m[2]); const dd = Number(m[3])
+    return isValidYmd(y, mm, dd) ? toYmd(y, mm, dd) : null
+  }
+
+  // YYMMDD -> 20YY/MM/DD
+  m = raw.match(/^(\d{2})(\d{2})(\d{2})$/)
+  if (m) {
+    const y = 2000 + Number(m[1]); const mm = Number(m[2]); const dd = Number(m[3])
+    return isValidYmd(y, mm, dd) ? toYmd(y, mm, dd) : null
+  }
+
+  // 3 digits: MDD (example: 206 => 2/06), 4 digits: MMDD
+  m = raw.match(/^\d{3,4}$/)
+  if (m) {
+    let mm = 0
+    let dd = 0
+    if (raw.length === 3) {
+      mm = Number(raw.slice(0, 1))
+      dd = Number(raw.slice(1, 3))
+    } else {
+      mm = Number(raw.slice(0, 2))
+      dd = Number(raw.slice(2, 4))
+    }
+    return isValidYmd(currentYear, mm, dd) ? toYmd(currentYear, mm, dd) : null
+  }
+
+  return null
+}
+
 const loadMasters = async () => {
   try {
     const [lineRes, processRes] = await Promise.all([
@@ -350,17 +414,35 @@ const loadSessions = async () => {
   loading.value = true
   error.value = ''
   try {
+    const normalizedStartDate = normalizeDateInput(startDate.value)
+    const normalizedEndDate = normalizeDateInput(endDate.value)
+    if (!normalizedStartDate || !normalizedEndDate) {
+      error.value = '期間の日付形式が不正です。例: 206 / 2/6 / 2026-02-06'
+      sessions.value = []
+      edits.value = {}
+      return
+    }
+    if (normalizedStartDate > normalizedEndDate) {
+      error.value = '期間の開始日は終了日以前を指定してください。'
+      sessions.value = []
+      edits.value = {}
+      return
+    }
+
+    startDate.value = toDisplayYmd(normalizedStartDate)
+    endDate.value = toDisplayYmd(normalizedEndDate)
+
     const params = {
       limit: 1000,
-      start_date: startDate.value,
-      end_date: endDate.value,
+      start_date: normalizedStartDate,
+      end_date: normalizedEndDate,
     }
     if (lineId.value) params.line_id = lineId.value
     if (processId.value) params.process_id = processId.value
     const laserParams = {
       page_size: 1000,
-      work_date__gte: startDate.value,
-      work_date__lte: endDate.value,
+      work_date__gte: normalizedStartDate,
+      work_date__lte: normalizedEndDate,
       ordering: '-work_date,-created_at',
     }
     const [processRes, brakeRes, laserRes] = await Promise.all([
@@ -679,6 +761,16 @@ onMounted(async () => {
   padding: 7px 8px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
+}
+.record-id-input {
+  flex: 0 0 140px;
+  width: 140px;
+}
+.period-date-input {
+  flex: 0 0 130px;
+  min-width: 130px;
+  width: 130px;
+  padding: 6px 8px;
 }
 .actions {
   display: flex;

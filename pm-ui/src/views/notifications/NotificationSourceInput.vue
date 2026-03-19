@@ -438,7 +438,7 @@ const matchesUserDepartmentSelection = (user) => {
 const matchesUserPositionSelection = (user) => {
   const targetPositions = form.value.target_positions;
   if (!targetPositions.length) return true;
-  const userPosition = user?.profile?.position || "";
+  const userPosition = user?.profile?.role || user?.profile?.position || "";
   if (!userPosition) return false;
   return targetPositions.some((pos) => String(pos) === String(userPosition));
 };
@@ -489,7 +489,7 @@ const filteredSources = computed(() => {
   if (!user) return [];
   const userId = user.id;
   const { division, group, team } = getUserLevelIds(user);
-  const userPosition = user?.profile?.position || "";
+  const userPosition = user?.profile?.role || user?.profile?.position || "";
   return sources.value.filter((item) => {
     if (!item) return false;
     if (isOperator(item)) return true;
