@@ -140,6 +140,7 @@ class Line(models.Model):
         verbose_name='ライン種別'
     )
     is_active = models.BooleanField(default=True, verbose_name='有効')
+    use_direct_process = models.BooleanField(default=False, verbose_name='工程直接展開', help_text='ONにすると自動計画展開でルーティングを使わず指定工程に直接書き込む（スポット系ライン向け）')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
 

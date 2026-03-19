@@ -31,8 +31,8 @@ class ProcessAdmin(admin.ModelAdmin):
 
 @admin.register(Line)
 class LineAdmin(admin.ModelAdmin):
-    list_display = ['line_code', 'line_name', 'line_type', 'is_active']
-    list_filter = ['line_type', 'is_active']
+    list_display = ['line_code', 'line_name', 'line_type', 'is_active', 'use_direct_process']
+    list_filter = ['line_type', 'is_active', 'use_direct_process']
     search_fields = ['line_code', 'line_name']
 
 

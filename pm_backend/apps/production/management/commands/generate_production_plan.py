@@ -420,7 +420,7 @@ class Command(BaseCommand):
                         line.id,
                         line_start,
                         line_end,
-                        force_direct_process=(str(line.line_code or '').strip().upper() == 'L0013'),
+                        force_direct_process=bool(line.use_direct_process),
                     )
 
                     # Step5b: ガント生成（在庫計算は日次バッチに任せる）
