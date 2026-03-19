@@ -25,7 +25,7 @@ def expand_processes_for_auto_plan(line_id, start_date, end_date, force_direct_p
         'include_coproduct_children': True,
         'force_direct_process': force_direct_process,
         'auto_plan_mode': True,
-        'apply_bom_multiplier': False,
+        'apply_bom_multiplier': not force_direct_process,
     })
     viewset.request = req
     viewset.expand_processes(req)

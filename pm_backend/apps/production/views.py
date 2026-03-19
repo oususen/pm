@@ -2115,11 +2115,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             steps = list(steps_map.get(product_id, []))
             if not steps:
                 return []
-            # 計画対象製品に紐づくRouting（routing.product）を優先する。
-            # output_product一致のみで拾うと、同一出力品番を持つ他Routingまで加算されるため。
-            owned_steps = [step for step in steps if step.routing_id and step.routing.product_id == product_id]
-            if owned_steps:
-                return sort_steps_for_plan(owned_steps)
+            # L2201は従来どおり計画対象製品に紐づくRoutingを優先する。
+            # それ以外のラインでここを変えると、既存展開ロジックの対象stepが変わる。
+            if is_l2201_line:
+                owned_steps = [step for step in steps if step.routing_id and step.routing.product_id == product_id]
+                if owned_steps:
+                    return sort_steps_for_plan(owned_steps)
             return sort_steps_for_plan(steps)
 
         # サイクルタイムをまとめて取得（ライン特定優先、なければライン指定なしを使用）
