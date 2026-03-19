@@ -707,6 +707,7 @@ const loadSessions = async () => {
               id: row?.id,
               started_at: isOpen ? (row?.created_at || null) : (pairedStartedAt || null),
               ended_at: isOpen ? null : (row?.created_at || null),
+              plan_date: row?.work_date || null,
               session_type: 'WORK',
               start_action: action || '—',
               end_action: action || '—',
