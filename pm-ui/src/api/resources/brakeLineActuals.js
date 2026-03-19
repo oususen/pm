@@ -38,7 +38,7 @@ export const createBrakeLineActualsAPI = (client) => ({
     return client.patch(`/brake-line-sessions/${sessionId}/`, payload || {})
   },
   /** 生産実績変更（レーザ/ブレーキ由来） DELETE /brake-line-sessions/{id}/ */
-  deleteSession(sessionId) {
-    return client.delete(`/brake-line-sessions/${sessionId}/`)
+  deleteSession(sessionId, payload = null) {
+    return client.delete(`/brake-line-sessions/${sessionId}/`, payload ? { data: payload } : undefined)
   },
 })

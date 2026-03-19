@@ -719,8 +719,10 @@ class BrakeLineRecordView(APIView):
                 qty = int(qty_raw)
             except (ValueError, TypeError):
                 return Response({'detail': 'qty は整数で入力してください'}, status=400)
-            if qty <= 0:
+            if operator_action == BrakeLineRecord.OPERATOR_ACTION_END and qty <= 0:
                 return Response({'detail': 'qty は1以上で入力してください'}, status=400)
+            if operator_action == BrakeLineRecord.OPERATOR_ACTION_PAUSE and qty < 0:
+                return Response({'detail': 'qty は0以上で入力してください'}, status=400)
 
         # 作業記録を保存
         rec = BrakeLineRecord.objects.create(
@@ -962,6 +964,33 @@ class BrakeLineSessionDetailView(APIView):
         return qs.first()
 
     @staticmethod
+    def _to_int(value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _resolve_records(self, request, session_id):
+        record = BrakeLineRecord.objects.filter(id=session_id).first()
+        if not record:
+            return None, None, None
+
+        start_record_id = self._to_int(request.data.get('start_record_id'))
+        end_record_id = self._to_int(request.data.get('end_record_id'))
+        start_record = BrakeLineRecord.objects.filter(id=start_record_id).first() if start_record_id else None
+        end_record = BrakeLineRecord.objects.filter(id=end_record_id).first() if end_record_id else None
+
+        if start_record or end_record:
+            return record, start_record, end_record
+
+        # 後方互換: 旧クライアントはIDを送らないため推定ロジックを残す
+        if record.operator_action in self.END_ACTIONS:
+            return record, self._find_prev_start_record(record), record
+        if record.operator_action in self.START_ACTIONS:
+            return record, record, None
+        return record, None, record
+
+    @staticmethod
     def _apply_backlog_delta(record, delta_qty):
         if not record or int(delta_qty or 0) == 0:
             return
@@ -979,19 +1008,9 @@ class BrakeLineSessionDetailView(APIView):
 
     @transaction.atomic
     def patch(self, request, session_id):
-        record = BrakeLineRecord.objects.filter(id=session_id).first()
+        record, start_record, end_record = self._resolve_records(request, session_id)
         if not record:
             return Response({'detail': '対象セッションが存在しません。'}, status=404)
-
-        start_record = None
-        end_record = None
-        if record.operator_action in self.END_ACTIONS:
-            end_record = record
-            start_record = self._find_prev_start_record(record)
-        elif record.operator_action in self.START_ACTIONS:
-            start_record = record
-        else:
-            end_record = record
 
         old_qty = int(end_record.qty or 0) if end_record and end_record.operator_action in self.BACKLOG_COUNTABLE_ACTIONS else 0
 
@@ -1021,13 +1040,11 @@ class BrakeLineSessionDetailView(APIView):
 
     @transaction.atomic
     def delete(self, request, session_id):
-        record = BrakeLineRecord.objects.filter(id=session_id).first()
+        record, start_record, end_record = self._resolve_records(request, session_id)
         if not record:
             return Response(status=204)
 
-        if record.operator_action in self.END_ACTIONS:
-            end_record = record
-            start_record = self._find_prev_start_record(record)
+        if end_record and end_record.operator_action in self.END_ACTIONS:
             rollback_qty = int(end_record.qty or 0) if end_record.operator_action in self.BACKLOG_COUNTABLE_ACTIONS else 0
             if rollback_qty:
                 self._apply_backlog_delta(end_record, -rollback_qty)
@@ -1036,8 +1053,11 @@ class BrakeLineSessionDetailView(APIView):
                 start_record.delete()
             return Response(status=204)
 
-        if record.operator_action in self.START_ACTIONS:
-            record.delete()
+        if start_record and start_record.operator_action in self.START_ACTIONS:
+            if start_record.id == record.id:
+                record.delete()
+            else:
+                start_record.delete()
             return Response(status=204)
 
         rollback_qty = int(record.qty or 0) if record.operator_action in self.BACKLOG_COUNTABLE_ACTIONS else 0

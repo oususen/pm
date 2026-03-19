@@ -237,7 +237,7 @@
                     ref="qtyInputRef"
                     type="number"
                     v-model.number="inputQty"
-                    min="1"
+                    :min="selectedAction === 'PAUSE' ? 0 : 1"
                     step="1"
                     inputmode="numeric"
                     class="qty-input qty-input-narrow"
@@ -492,6 +492,7 @@ const pauseReasons = computed(() => [
   t('brakeInput.pauseReason.leaderWait'),
   t('brakeInput.pauseReason.activity3s'),
   t('brakeInput.pauseReason.improvement'),
+  t('brakeInput.pauseReason.wrongModel'),
   t('brakeInput.pauseReason.other'),
 ])
 const tempEndReasons = computed(() => [
@@ -902,7 +903,8 @@ const canSave = computed(() => {
   if (!selectedItem.value) return false
   if (!selectedEquipmentId.value) return false
   if (!selectedAction.value) return false
-  if (requiresQty.value && !(inputQty.value > 0)) return false
+  if (selectedAction.value === 'END' && !(inputQty.value > 0)) return false
+  if (selectedAction.value === 'PAUSE' && !(inputQty.value >= 0)) return false
   if (requiresReason.value && !actionReason.value) return false
   return true
 })

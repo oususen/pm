@@ -165,6 +165,29 @@
       </table>
     </div>
   </div>
+
+  <!-- レーザー全削除確認モーダル -->
+  <div v-if="laserDeleteModal.visible" class="modal-overlay" @click.self="laserDeleteModal.visible = false">
+    <div class="modal-box">
+      <p class="modal-warning-title">⚠️ 削除の確認</p>
+      <p class="modal-warning-body">
+        このレーザー実績（レコードID: <strong>{{ laserDeleteModal.recordId }}</strong>）を削除します。
+      </p>
+      <p class="modal-warning-alert">
+        同一パターンの全品番が一括削除されます。
+      </p>
+      <div class="modal-example">
+        <p class="modal-example-label">削除される品番一覧：</p>
+        <p v-for="r in laserDeleteModal.affectedRows" :key="r.row_key">
+          　{{ r.product_code || '（品番なし）' }}　{{ r.production_qty }}個
+        </p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" @click="laserDeleteModal.visible = false">キャンセル</button>
+        <button class="btn btn-danger" @click="laserDeleteModal.onConfirm">削除する</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -178,6 +201,7 @@ const error = ref('')
 const savingId = ref(null)
 const sessions = ref([])
 const edits = ref({})
+const laserDeleteModal = ref({ visible: false, recordId: null, affectedRows: [], onConfirm: null })
 
 const lines = ref([])
 const processes = ref([])
@@ -444,7 +468,11 @@ const saveRow = async (row) => {
         total_qty: Number(edit.production_qty || 0),
       })
     } else if (String(row?.record_source || '').toUpperCase() === 'BRAKE') {
-      await api.brakeLineActuals.updateSession(id, payload)
+      await api.brakeLineActuals.updateSession(id, {
+        ...payload,
+        start_record_id: row?.start_record_id ?? null,
+        end_record_id: row?.end_record_id ?? null,
+      })
     } else {
       await api.processRealtime.updateSession(id, payload)
     }
@@ -461,15 +489,40 @@ const saveRow = async (row) => {
 const deleteRow = async (row) => {
   if (!canEdit.value) return
   const id = row.id
+  const isLaser = String(row?.record_source || '').toUpperCase() === 'LASER'
+
+  if (isLaser) {
+    const affectedRows = sessions.value.filter(
+      (s) => String(s.record_source || '').toUpperCase() === 'LASER' && String(s.id) === String(id)
+    )
+    laserDeleteModal.value = {
+      visible: true,
+      recordId: id,
+      affectedRows,
+      onConfirm: () => {
+        laserDeleteModal.value.visible = false
+        _execDelete(row)
+      },
+    }
+    return
+  }
+
   if (!window.confirm(`レコードID ${id} を削除します。よろしいですか？`)) return
+  _execDelete(row)
+}
+
+const _execDelete = async (row) => {
   savingId.value = row.row_key
   try {
     if (String(row?.record_source || '').toUpperCase() === 'LASER') {
-      await api.laserActuals.deleteLaserActual(id)
+      await api.laserActuals.deleteLaserActual(row.id)
     } else if (String(row?.record_source || '').toUpperCase() === 'BRAKE') {
-      await api.brakeLineActuals.deleteSession(id)
+      await api.brakeLineActuals.deleteSession(row.id, {
+        start_record_id: row?.start_record_id ?? null,
+        end_record_id: row?.end_record_id ?? null,
+      })
     } else {
-      await api.processRealtime.deleteSession(id)
+      await api.processRealtime.deleteSession(row.id)
     }
     await loadSessions()
     alert('削除しました。LineBacklog.actual_qty も減算反映済みです。')
@@ -527,6 +580,63 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal-box {
+  background: #fff;
+  border-radius: 8px;
+  padding: 28px 32px;
+  min-width: 420px;
+  max-width: 560px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+.modal-warning-title {
+  color: #c0392b;
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin: 0 0 12px;
+}
+.modal-warning-body {
+  font-size: 1rem;
+  margin: 0 0 8px;
+}
+.modal-warning-alert {
+  color: #c0392b;
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 0 0 16px;
+}
+.modal-example {
+  background: #fff5f5;
+  border: 1px solid #f5c6c6;
+  border-radius: 4px;
+  padding: 12px 16px;
+  font-size: 0.9rem;
+  color: #555;
+  margin-bottom: 20px;
+  line-height: 1.8;
+}
+.modal-example-label {
+  font-weight: 700;
+  color: #333;
+  margin: 0 0 4px;
+}
+.modal-example p {
+  margin: 0;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
 .page {
   padding: 16px;
 }

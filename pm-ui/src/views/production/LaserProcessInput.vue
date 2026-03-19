@@ -34,21 +34,27 @@
             v-for="message in currentProcessingMessages"
             :key="`processing-${message.equipmentKey}`"
             class="current-processing"
+            :class="{
+              'current-processing--clickable': !!message.patternId,
+              'current-processing--active': message.patternId && message.patternId === String(form.pattern || ''),
+            }"
+            @click="jumpToPattern(message)"
           >
             {{ message.label }}
           </div>
         </div>
-        <button
-          v-if="form.pattern"
-          v-for="action in operatorActionOptions"
-          :key="`tab-${action.value}`"
-          type="button"
-          class="operator-action-btn"
-          :class="{ active: form.operator_action === action.value }"
-          @click="form.operator_action = action.value"
-        >
-          {{ action.label }}
-        </button>
+        <div v-if="form.pattern" class="operator-action-btn-group">
+          <button
+            v-for="action in operatorActionOptions"
+            :key="`tab-${action.value}`"
+            type="button"
+            class="operator-action-btn"
+            :class="{ active: form.operator_action === action.value }"
+            @click="form.operator_action = action.value"
+          >
+            {{ action.label }}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -681,7 +687,7 @@ const createEmptyForm = () => ({
   pattern: '',
   operator_action: '',
   operator_action_reason: '',
-  shot_count: 0,
+  shot_count: null,
   remarks: '',
 })
 
@@ -1114,24 +1120,28 @@ const currentProcessingMessages = computed(() => {
       equipmentKey,
       equipmentLabel: String(item?.equipmentLabel || '').trim(),
       patternNo: String(item?.patternNo || '').trim(),
+      patternId: String(item?.patternId || '').trim(),
     }))
     .filter((item) => !!item.equipmentLabel)
     .sort((a, b) => a.equipmentLabel.localeCompare(b.equipmentLabel))
 
   return rows.map((item) => ({
     equipmentKey: item.equipmentKey,
+    patternId: item.patternId,
+    patternNo: item.patternNo,
     label: item.patternNo
-      ? `現在設備${item.equipmentLabel}はパターン${item.patternNo}加工中`
-      : `現在設備${item.equipmentLabel}は加工中`,
+      ? `現在${item.equipmentLabel}はパターン${item.patternNo}加工中`
+      : `現在${item.equipmentLabel}は加工中`,
   }))
 })
 
-const updateCurrentProcessingState = (actionValue, equipmentId, equipmentCode, equipmentName, patternNo) => {
+const updateCurrentProcessingState = (actionValue, equipmentId, equipmentCode, equipmentName, patternNo, patternId) => {
   const action = String(actionValue || '').toUpperCase()
   const equipmentKey = buildEquipmentKey(equipmentId, equipmentCode, equipmentName)
   if (!action || !equipmentKey) return
   const label = buildEquipmentLabel(equipmentName, equipmentId)
   const pno = String(patternNo || '').trim()
+  const pid = String(patternId || '').trim()
 
   if (action === 'START' || action === 'RESUME') {
     currentProcessingByEquipment.value = {
@@ -1139,6 +1149,7 @@ const updateCurrentProcessingState = (actionValue, equipmentId, equipmentCode, e
       [equipmentKey]: {
         equipmentLabel: label,
         patternNo: pno,
+        patternId: pid,
       },
     }
     return
@@ -1456,12 +1467,19 @@ const loadCurrentProcessingState = async () => {
       nextState[key] = {
         equipmentLabel: buildEquipmentLabel(row?.equipment_name, row?.equipment),
         patternNo: String(row?.pattern_no || '').trim(),
+        patternId: String(row?.pattern || '').trim(),
       }
     })
     currentProcessingByEquipment.value = nextState
   } catch (error) {
     // 表示復元失敗時はそのまま入力を継続可能にする
   }
+}
+
+const jumpToPattern = (message) => {
+  if (!message.patternId) return
+  form.value.pattern = message.patternId
+  patternKeyword.value = message.patternNo
 }
 
 const resetForm = () => {
@@ -1516,6 +1534,7 @@ const saveActual = async () => {
       saved?.equipment_code || selectedPattern.value?.equipment_code || '',
       saved?.equipment_name || selectedPattern.value?.equipment_name || '',
       savedPatternNo,
+      saved?.pattern || payload.pattern,
     )
     resetForm()
     await loadActuals()
@@ -1532,7 +1551,7 @@ watch(
     if (!patternId) {
       form.value.operator_action = ''
       form.value.operator_action_reason = ''
-      form.value.shot_count = 0
+      form.value.shot_count = null
       return
     }
     const selected = patterns.value.find((pattern) => String(pattern.id) === String(patternId))
@@ -1566,15 +1585,8 @@ watch(
     if (!(key === 'PAUSE' || key === 'TEMP_END')) {
       form.value.operator_action_reason = ''
     }
-    const shots = Number(form.value.shot_count)
-    if (key === 'END' || key === 'PAUSE') {
-      if (!Number.isInteger(shots) || shots < 1) {
-        form.value.shot_count = 1
-      }
-      return
-    }
-    if (shots !== 0) {
-      form.value.shot_count = 0
+    if (!(key === 'END' || key === 'PAUSE')) {
+      form.value.shot_count = null
     }
   },
   { immediate: true }
@@ -1654,8 +1666,28 @@ onMounted(async () => {
   border: 1px solid #93c5fd;
   background: #eff6ff;
   color: #1d4ed8;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 700;
+}
+
+.current-processing--clickable {
+  cursor: pointer;
+}
+
+.current-processing--clickable:hover {
+  background: #dbeafe;
+  border-color: #3b82f6;
+}
+
+.current-processing--active {
+  background: #dcfce7;
+  border-color: #16a34a;
+  color: #15803d;
+}
+
+.current-processing--active:hover {
+  background: #bbf7d0;
+  border-color: #15803d;
 }
 
 .tab-item {
@@ -1853,7 +1885,15 @@ onMounted(async () => {
   gap: 6px;
 }
 
+.operator-action-btn-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-self: stretch;
+}
+
 .operator-action-btn {
+  flex: 1;
   min-width: 66px;
   padding: 7px 10px;
   border: 1px solid #cbd5e1;
