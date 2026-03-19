@@ -608,8 +608,10 @@ class LaserActualSerializer(serializers.ModelSerializer):
         if shot_count is None:
             shot_count = getattr(self.instance, 'shot_count', 0)
         shot_count = int(shot_count or 0)
-        if action in {LaserActual.OPERATOR_ACTION_END, LaserActual.OPERATOR_ACTION_PAUSE} and shot_count < 1:
-            raise serializers.ValidationError({'shot_count': '終了/中断時の回数は1以上で入力してください。'})
+        if action == LaserActual.OPERATOR_ACTION_END and shot_count < 1:
+            raise serializers.ValidationError({'shot_count': '終了時の回数は1以上で入力してください。'})
+        if action == LaserActual.OPERATOR_ACTION_PAUSE and shot_count < 0:
+            raise serializers.ValidationError({'shot_count': '中断時の回数は0以上で入力してください。'})
 
         reason_required_actions = {
             LaserActual.OPERATOR_ACTION_PAUSE,

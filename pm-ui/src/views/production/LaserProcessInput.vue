@@ -658,6 +658,7 @@ const pauseReasonOptions = [
   '工程指導',
   '3S活動',
   '改善活動',
+  'パターン違い',
   'その他',
 ]
 
@@ -1201,8 +1202,10 @@ const effectiveShotCount = computed(() => {
 const isValidShotCount = computed(() => {
   const shots = Number(form.value.shot_count)
   if (!Number.isInteger(shots)) return false
-  if (requiresShotCount.value) return shots >= 1
-  return shots === 0
+  if (!requiresShotCount.value) return shots === 0
+  const action = String(form.value.operator_action || '').toUpperCase()
+  if (action === 'PAUSE') return shots >= 0
+  return shots >= 1
 })
 
 const processTimePerShot = computed(() => {
