@@ -110,7 +110,7 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
             role = user.profile.role
         except Exception:
             return False
-        if role not in ('supervisor', 'chief', 'manager'):
+        if role not in ('leader', 'supervisor', 'chief', 'manager'):
             return False
         return pending_logs.filter(approver=user).exists()
 

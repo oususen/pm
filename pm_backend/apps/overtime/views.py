@@ -17,10 +17,11 @@ from .serializers import OvertimeApplicationSerializer
 User = get_user_model()
 
 # ロールの承認順序
-APPROVAL_LEVELS = ['supervisor', 'chief', 'manager']
+APPROVAL_LEVELS = ['leader', 'supervisor', 'chief', 'manager']
 
 # ステータスと承認済みロールの対応
 STATUS_AFTER_APPROVE = {
+    'leader': 'approved_leader',
     'supervisor': 'approved_supervisor',
     'chief': 'approved_chief',
     'manager': 'approved_manager',
@@ -34,7 +35,15 @@ def find_approvers_for_role(applicant, role):
     except Exception:
         return User.objects.none()
 
-    if role == 'supervisor':
+    if role == 'leader':
+        if not profile.unit:
+            return User.objects.none()
+        # leader_units に申請者のグループが含まれるリーダーを検索
+        return User.objects.filter(
+            profile__role='leader',
+            profile__leader_units=profile.unit,
+        ).distinct()
+    elif role == 'supervisor':
         if not profile.team:
             return User.objects.none()
         # supervisor_teams に設定されている班長 OR 同じ班に所属する班長（どちらか）
@@ -112,10 +121,12 @@ def advance_to_next_level(application):
     current_level_idx = -1
     if application.status == 'submitted':
         current_level_idx = -1
-    elif application.status == 'approved_supervisor':
+    elif application.status == 'approved_leader':
         current_level_idx = 0
-    elif application.status == 'approved_chief':
+    elif application.status == 'approved_supervisor':
         current_level_idx = 1
+    elif application.status == 'approved_chief':
+        current_level_idx = 2
 
     applicant = application.applicant
 
@@ -184,6 +195,11 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
 
         if role in ('manager', 'chief', 'supervisor'):
             return qs
+        if role == 'leader':
+            # 担当グループ（leader_units）のメンバーの申請のみ閲覧可能
+            leader_units = user.profile.leader_units.all()
+            if leader_units.exists():
+                return qs.filter(applicant__profile__unit__in=leader_units)
         return qs.filter(applicant=user)
 
     def update(self, request, *args, **kwargs):
@@ -379,10 +395,12 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
 
         for app in approved_apps:
             current_level_idx = -1
-            if app.status == 'approved_supervisor':
+            if app.status == 'approved_leader':
                 current_level_idx = 0
-            elif app.status == 'approved_chief':
+            elif app.status == 'approved_supervisor':
                 current_level_idx = 1
+            elif app.status == 'approved_chief':
+                current_level_idx = 2
 
             advanced = False
             for i in range(current_level_idx + 1, len(APPROVAL_LEVELS)):

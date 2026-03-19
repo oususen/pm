@@ -60,6 +60,7 @@ class OvertimeApplication(models.Model):
     STATUS_CHOICES = [
         ('draft', '下書き'),
         ('submitted', '申請中'),
+        ('approved_leader', 'リーダー承認済み'),
         ('approved_supervisor', '班長承認済み'),
         ('approved_chief', '係長承認済み'),
         ('approved_manager', '最終承認済み'),
@@ -129,6 +130,7 @@ class OvertimeApplication(models.Model):
 
 class OvertimeApprovalLog(models.Model):
     ROLE_CHOICES = [
+        ('leader', 'リーダー'),
         ('supervisor', '班長'),
         ('chief', '係長'),
         ('manager', '課長/部長'),
