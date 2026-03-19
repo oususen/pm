@@ -525,6 +525,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import * as XLSX from 'xlsx'
 import api from '@/api/client'
+import { authState, ensureAuth } from '@/auth'
 import ProcessGanttView from './ProcessGanttView.vue'
 import LaserPatternEditor from './LaserPatternEditor.vue'
 const router = useRouter()
@@ -621,6 +622,31 @@ const normalizeLineCode = (value) => String(value || '').trim().toUpperCase()
 const normalizeLineCodes = (values) => Array.from(new Set(
   (Array.isArray(values) ? values : []).map((value) => normalizeLineCode(value)).filter(Boolean),
 ))
+const userUnitLines = computed(() => {
+  const unitLines = authState.user?.profile?.unit_lines
+  return Array.isArray(unitLines) ? unitLines : []
+})
+const userAllowedLineIdSet = computed(() => new Set(
+  userUnitLines.value
+    .map((item) => String(item?.line_id || '').trim())
+    .filter(Boolean),
+))
+const preferredUserLineId = computed(() => {
+  const mappings = userUnitLines.value
+  if (!mappings.length) return ''
+  const defaultMapping = mappings.find((item) => item?.is_default)
+  const target = defaultMapping || mappings[0]
+  return target?.line_id ? String(target.line_id) : ''
+})
+const pickPreferredLineId = (candidates) => {
+  const candidateList = Array.isArray(candidates) ? candidates : []
+  if (!candidateList.length) return ''
+  const preferredId = preferredUserLineId.value
+  if (preferredId && candidateList.some((line) => String(line.id) === preferredId)) {
+    return preferredId
+  }
+  return String(candidateList[0].id)
+}
 const createDefaultLineCodesByTab = (lineList = []) => {
   const result = {}
   const allCodes = lineList.map((line) => normalizeLineCode(line?.line_code))
@@ -649,9 +675,12 @@ const availableLines = computed(() => {
   if (!isOperationalPlanTab(activePlanTab.value)) return []
   const targetCodes = new Set(getLineCodesForTab(activePlanTab.value))
   if (!targetCodes.size) return []
+  const allowedIds = userAllowedLineIdSet.value
   return lines.value.filter((line) => {
     const code = normalizeLineCode(line?.line_code)
-    return targetCodes.has(code)
+    if (!targetCodes.has(code)) return false
+    if (!allowedIds.size) return true
+    return allowedIds.has(String(line.id))
   })
 })
 const saveLineCodesByTab = () => {
@@ -754,7 +783,7 @@ const saveLineSettings = async () => {
   if (!isOperationalPlanTab(activePlanTab.value)) return
   const availableIds = new Set(availableLines.value.map((line) => String(line.id)))
   if (!selectedLine.value || !availableIds.has(String(selectedLine.value))) {
-    selectedLine.value = availableLines.value.length ? String(availableLines.value[0].id) : ''
+    selectedLine.value = pickPreferredLineId(availableLines.value)
   }
   await loadData()
 }
@@ -763,7 +792,7 @@ const ensureSelectedLineForActiveTab = async (shouldReload = true) => {
   const candidates = availableLines.value
   const lineIds = new Set(candidates.map((line) => String(line.id)))
   if (selectedLine.value && lineIds.has(String(selectedLine.value))) return
-  selectedLine.value = candidates.length ? String(candidates[0].id) : ''
+  selectedLine.value = pickPreferredLineId(candidates)
   if (shouldReload) await loadData()
 }
 const shouldLimitToCoproductParentAndDriver = computed(() => {
@@ -1683,12 +1712,20 @@ const fetchProducts = async () => {
 
 onMounted(async () => {
   try {
+    await ensureAuth()
     await Promise.all([fetchLines(), fetchProducts(), fetchLockSetting()])
     await loadData()
   } catch (e) {
     console.error('初期データ取得エラー', e)
   }
 })
+
+watch(
+  () => userUnitLines.value.map((item) => `${item?.line_id || ''}:${item?.is_default ? 1 : 0}:${item?.sort_order || 0}`).join('|'),
+  async () => {
+    await ensureSelectedLineForActiveTab()
+  }
+)
 
 watch(activePlanTab, async () => {
   lineSettingsMessage.value = ''

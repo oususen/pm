@@ -142,6 +142,38 @@ class UserProfile(models.Model):
         return f"{self.user.username} - {self.user.get_full_name() or self.user.email}"
 
 
+class UnitLineMapping(models.Model):
+    """グループと利用ラインの紐付"""
+
+    unit = models.ForeignKey(
+        Department,
+        on_delete=models.CASCADE,
+        related_name='line_mappings',
+        verbose_name='グループ',
+        limit_choices_to={'level': 'unit'},
+    )
+    line = models.ForeignKey(
+        'masters.Line',
+        on_delete=models.CASCADE,
+        related_name='unit_mappings',
+        verbose_name='ライン',
+    )
+    sort_order = models.IntegerField(default=0, verbose_name='表示順')
+    is_default = models.BooleanField(default=False, verbose_name='初期ライン')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'accounts_unit_line_mapping'
+        verbose_name = 'グループライン紐付'
+        verbose_name_plural = 'グループライン紐付'
+        unique_together = [['unit', 'line']]
+        ordering = ['unit_id', '-is_default', 'sort_order', 'id']
+
+    def __str__(self):
+        return f"{self.unit.name} - {self.line.line_code}"
+
+
 class UserSmtpConfig(models.Model):
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,

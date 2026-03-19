@@ -12,7 +12,7 @@
         <label class="label-required inline-label">{{ t('processInput.line') }}</label>
         <select v-model="selectedLineId" @change="onLineChange" class="input-large flex-input">
           <option value="">{{ t('processInput.selectLine') }}</option>
-          <option v-for="line in lines" :key="line.id" :value="String(line.id)">
+          <option v-for="line in availableLines" :key="line.id" :value="String(line.id)">
             {{ line.line_code }} - {{ line.line_name }}
           </option>
         </select>
@@ -677,6 +677,27 @@ const filteredProcesses = computed(() => {
   if (!selectedLineId.value) return processes.value
   return processes.value.filter((p) => String(p.line) === String(selectedLineId.value))
 })
+const userUnitLines = computed(() => {
+  const unitLines = authState.user?.profile?.unit_lines
+  return Array.isArray(unitLines) ? unitLines : []
+})
+const userAllowedLineIdSet = computed(() => new Set(
+  userUnitLines.value
+    .map((item) => String(item?.line_id || '').trim())
+    .filter(Boolean),
+))
+const preferredUserLineId = computed(() => {
+  const mappings = userUnitLines.value
+  if (!mappings.length) return ''
+  const defaultMapping = mappings.find((item) => item?.is_default)
+  const target = defaultMapping || mappings[0]
+  return target?.line_id ? String(target.line_id) : ''
+})
+const availableLines = computed(() => {
+  const allowedIds = userAllowedLineIdSet.value
+  if (!allowedIds.size) return lines.value
+  return lines.value.filter((line) => allowedIds.has(String(line.id)))
+})
 
 const isScrapOnlyPage = computed(() => route.name === 'ScrapRecordInput')
 const isScrapRecord = computed(() => record.value.record_type === 'SCRAP')
@@ -969,6 +990,21 @@ watch(
       record.value.operator_name = resolved
     }
   }
+)
+
+watch(
+  [availableLines, preferredUserLineId],
+  ([nextLines, nextPreferred]) => {
+    const candidateList = Array.isArray(nextLines) ? nextLines : []
+    const exists = candidateList.some((line) => String(line.id) === String(selectedLineId.value))
+    if (exists) return
+    if (nextPreferred && candidateList.some((line) => String(line.id) === String(nextPreferred))) {
+      selectedLineId.value = String(nextPreferred)
+      return
+    }
+    selectedLineId.value = candidateList.length ? String(candidateList[0].id) : ''
+  },
+  { immediate: true }
 )
 
 watch(
@@ -2993,8 +3029,8 @@ const loadLines = async () => {
 }
 
 onMounted(async () => {
+  await ensureAuth()
   await Promise.all([loadLines(), loadProcesses()])
-  ensureAuth()
   const queryProcessId = route.query.process_id
   if (queryProcessId) {
     selectedProcessId.value = String(queryProcessId)

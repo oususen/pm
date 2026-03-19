@@ -5,6 +5,7 @@ from rest_framework import serializers
 
 from .models import (
     Department,
+    UnitLineMapping,
     UserProfile,
     UserPermission,
     DepartmentPermission,
@@ -79,6 +80,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     )
     leader_unit_names = serializers.SerializerMethodField()
     unit_name = serializers.CharField(source='unit.name', read_only=True)
+    unit_lines = serializers.SerializerMethodField()
 
     class Meta:
         model = UserProfile
@@ -100,6 +102,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'leader_unit_names',
             'unit',
             'unit_name',
+            'unit_lines',
             'joined_on',
         ]
         extra_kwargs = {
@@ -111,6 +114,26 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     def get_leader_unit_names(self, obj):
         return [unit.name for unit in obj.leader_units.all()]
+
+    def get_unit_lines(self, obj):
+        if not obj.unit_id:
+            return []
+        mappings = (
+            UnitLineMapping.objects.select_related('line')
+            .filter(unit_id=obj.unit_id)
+            .order_by('-is_default', 'sort_order', 'id')
+        )
+        return [
+            {
+                'id': mapping.id,
+                'line_id': mapping.line_id,
+                'line_code': mapping.line.line_code if mapping.line_id else '',
+                'line_name': mapping.line.line_name if mapping.line_id else '',
+                'sort_order': mapping.sort_order,
+                'is_default': mapping.is_default,
+            }
+            for mapping in mappings
+        ]
 
 
 class UserPermissionSerializer(serializers.ModelSerializer):

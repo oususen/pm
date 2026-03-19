@@ -4,6 +4,7 @@ from django.contrib.auth.models import User
 
 from .models import (
     Department,
+    UnitLineMapping,
     UserProfile,
     UserSmtpConfig,
     UserPermission,
@@ -52,6 +53,14 @@ class UserProfileAdmin(admin.ModelAdmin):
     list_filter = ('role', 'employment_type', 'department')
     search_fields = ('user__username', 'user__email', 'user__first_name', 'user__last_name', 'employee_code')
     ordering = ('employee_code',)
+
+
+@admin.register(UnitLineMapping)
+class UnitLineMappingAdmin(admin.ModelAdmin):
+    list_display = ('unit', 'line', 'is_default', 'sort_order')
+    list_filter = ('unit', 'is_default', 'line__line_type')
+    search_fields = ('unit__name', 'line__line_code', 'line__line_name')
+    ordering = ('unit__display_id', 'unit__name', '-is_default', 'sort_order', 'line__line_code')
 
 
 @admin.register(UserSmtpConfig)

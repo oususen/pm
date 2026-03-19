@@ -7,6 +7,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from .models import (
+    UnitLineMapping,
     UserProfile,
     UserPermission,
     DepartmentPermission,
@@ -18,7 +19,7 @@ from .models import (
 def _profile_payload(user):
     try:
         profile = (
-            UserProfile.objects.select_related('department', 'division', 'group', 'team')
+            UserProfile.objects.select_related('department', 'division', 'group', 'team', 'unit')
             .prefetch_related('supervisor_teams', 'leader_units')
             .filter(user_id=user.id)
             .first()
@@ -31,6 +32,24 @@ def _profile_payload(user):
 
     supervisor_teams = list(profile.supervisor_teams.all())
     leader_units = list(profile.leader_units.all())
+    unit_lines = []
+    if profile.unit_id:
+        mappings = (
+            UnitLineMapping.objects.select_related('line')
+            .filter(unit_id=profile.unit_id)
+            .order_by('-is_default', 'sort_order', 'id')
+        )
+        unit_lines = [
+            {
+                'id': mapping.id,
+                'line_id': mapping.line_id,
+                'line_code': mapping.line.line_code if mapping.line_id else '',
+                'line_name': mapping.line.line_name if mapping.line_id else '',
+                'sort_order': mapping.sort_order,
+                'is_default': mapping.is_default,
+            }
+            for mapping in mappings
+        ]
 
     return {
         'employee_code': profile.employee_code,
@@ -52,6 +71,10 @@ def _profile_payload(user):
         'supervisor_team_names': [team.name for team in supervisor_teams],
         'leader_units': [unit.id for unit in leader_units],
         'leader_unit_names': [unit.name for unit in leader_units],
+        'unit': profile.unit_id,
+        'unit_id': profile.unit_id,
+        'unit_name': profile.unit.name if profile.unit_id else None,
+        'unit_lines': unit_lines,
         'joined_on': profile.joined_on.isoformat() if profile.joined_on else None,
     }
 
