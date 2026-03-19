@@ -40,8 +40,28 @@
         タブ3
       </button>
     </div>
+    <div v-else-if="activePlanTab === 'spot'" class="laser-subtab-bar">
+      <button
+        type="button"
+        class="laser-subtab-item"
+        :class="{ active: activeSpotTab === 'normal-plan' }"
+        @click="activeSpotTab = 'normal-plan'"
+      >
+        通常計画
+      </button>
+      <button
+        type="button"
+        class="laser-subtab-item"
+        :class="{ active: activeSpotTab === 'excel' }"
+        @click="activeSpotTab = 'excel'"
+      >
+        excel
+      </button>
+    </div>
 
-    <template v-if="activePlanTab !== 'laser' || activeLaserTab === 'normal-plan'">
+    <template
+      v-if="(activePlanTab !== 'laser' || activeLaserTab === 'normal-plan') && (activePlanTab !== 'spot' || activeSpotTab === 'normal-plan')"
+    >
     <div class="toolbar">
       <div class="toolbar-left">
         <div class="field">
@@ -395,6 +415,9 @@
       v-else-if="activePlanTab === 'laser' && activeLaserTab === 'pattern-editor'"
       class="laser-editor-section"
     />
+    <div v-else-if="activePlanTab === 'spot' && activeSpotTab === 'excel'" class="laser-third-tab-panel">
+      excelタブは後続仕様で実装します。
+    </div>
     <div v-else class="laser-third-tab-panel">
       第3タブは後続仕様で実装します。
     </div>
@@ -439,6 +462,7 @@ const router = useRouter()
 const selectedLine = ref('')
 const activePlanTab = ref('tank')
 const activeLaserTab = ref('normal-plan')
+const activeSpotTab = ref('normal-plan')
 const settingsTargetTab = ref('tank')
 const planTabs = [
   { key: 'tank', label: 'タンク' },
