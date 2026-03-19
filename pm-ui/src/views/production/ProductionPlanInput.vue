@@ -416,7 +416,75 @@
       class="laser-editor-section"
     />
     <div v-else-if="activePlanTab === 'spot' && activeSpotTab === 'excel'" class="laser-third-tab-panel">
-      excelタブは後続仕様で実装します。
+      <div class="spot-excel-toolbar">
+        <div class="field">
+          <label>ライン</label>
+          <select v-model="selectedLine">
+            <option v-for="line in availableLines" :key="line.id" :value="line.id">
+              {{ line.line_code }} - {{ line.line_name }}
+            </option>
+          </select>
+        </div>
+        <label class="btn spot-file-btn">
+          Excel選択
+          <input type="file" accept=".xlsx,.xls" @change="onSpotExcelFileChange" />
+        </label>
+        <button
+          class="btn primary"
+          @click="saveSpotExcelPlan"
+          :disabled="processing || spotExcelLoading || !spotExcelRows.length || !selectedLine"
+        >
+          forup取込保存
+        </button>
+      </div>
+      <div class="spot-excel-note">
+        取込対象: forupシートの「部番 / 計画日 / 計画数」。sequence_no は 1 固定で保存します。
+      </div>
+      <div class="spot-excel-meta">
+        <span v-if="spotExcelFileName">ファイル: {{ spotExcelFileName }}</span>
+        <span v-if="spotExcelMessage">{{ spotExcelMessage }}</span>
+      </div>
+      <div v-if="spotExcelMissingProducts.length || spotExcelMissingProcesses.length" class="spot-excel-errors">
+        <div v-if="spotExcelMissingProducts.length" class="spot-excel-error-card">
+          <div class="spot-excel-error-title">未登録品番（{{ spotExcelMissingProducts.length }}件）</div>
+          <ul>
+            <li v-for="item in spotExcelMissingProducts" :key="`miss-prod-${item.row_no}-${item.product_code}`">
+              行{{ item.row_no }}: {{ item.product_code }}
+            </li>
+          </ul>
+        </div>
+        <div v-if="spotExcelMissingProcesses.length" class="spot-excel-error-card">
+          <div class="spot-excel-error-title">工程未設定（{{ spotExcelMissingProcesses.length }}件）</div>
+          <ul>
+            <li v-for="item in spotExcelMissingProcesses" :key="`miss-proc-${item.row_no}-${item.product_code}`">
+              行{{ item.row_no }}: {{ item.product_code }}
+            </li>
+          </ul>
+        </div>
+      </div>
+      <div class="spot-excel-table-wrap">
+        <table class="spot-excel-table">
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>部番</th>
+              <th>計画日</th>
+              <th>計画数</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(r, idx) in spotExcelRows" :key="`spot-excel-${idx}`">
+              <td>{{ idx + 1 }}</td>
+              <td>{{ r.product_code }}</td>
+              <td>{{ r.plan_date }}</td>
+              <td class="num">{{ r.plan_qty }}</td>
+            </tr>
+            <tr v-if="!spotExcelRows.length">
+              <td colspan="4" class="no-data">Excelを選択してください。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
     <div v-else class="laser-third-tab-panel">
       第3タブは後続仕様で実装します。
@@ -455,6 +523,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import * as XLSX from 'xlsx'
 import api from '@/api/client'
 import ProcessGanttView from './ProcessGanttView.vue'
 import LaserPatternEditor from './LaserPatternEditor.vue'
@@ -463,6 +532,13 @@ const selectedLine = ref('')
 const activePlanTab = ref('tank')
 const activeLaserTab = ref('normal-plan')
 const activeSpotTab = ref('normal-plan')
+const spotExcelRows = ref([])
+const spotExcelFileName = ref('')
+const spotExcelMessage = ref('')
+const spotExcelLoading = ref(false)
+const spotExcelProcess4013Id = ref(null)
+const spotExcelMissingProducts = ref([])
+const spotExcelMissingProcesses = ref([])
 const settingsTargetTab = ref('tank')
 const planTabs = [
   { key: 'tank', label: 'タンク' },
@@ -833,6 +909,157 @@ const goBack = () => {
 
 const goForward = () => {
   router.forward()
+}
+
+const normalizeExcelDate = (value) => {
+  if (!value) return ''
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const y = value.getFullYear()
+    const m = String(value.getMonth() + 1).padStart(2, '0')
+    const d = String(value.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+  const s = String(value).trim()
+  if (!s) return ''
+  const matched = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/)
+  if (!matched) return ''
+  return `${matched[1]}-${String(matched[2]).padStart(2, '0')}-${String(matched[3]).padStart(2, '0')}`
+}
+
+const parseSpotExcelFile = async (file) => {
+  const buffer = await file.arrayBuffer()
+  const wb = XLSX.read(buffer, { type: 'array', cellDates: true })
+  const sheetName = wb.SheetNames.includes('forup') ? 'forup' : wb.SheetNames[0]
+  if (!sheetName) return []
+  const ws = wb.Sheets[sheetName]
+  return XLSX.utils.sheet_to_json(ws, {
+    defval: '',
+    raw: false,
+    blankrows: false,
+  })
+}
+
+const onSpotExcelFileChange = async (event) => {
+  const file = event?.target?.files?.[0]
+  spotExcelRows.value = []
+  spotExcelFileName.value = ''
+  spotExcelMessage.value = ''
+  spotExcelMissingProducts.value = []
+  spotExcelMissingProcesses.value = []
+  if (!file) return
+  spotExcelLoading.value = true
+  try {
+    const parsedRows = await parseSpotExcelFile(file)
+    const normalized = parsedRows
+      .map((row, idx) => ({
+        row_no: idx + 2,
+        product_code: String(row?.部番 || '').trim(),
+        plan_date: normalizeExcelDate(row?.計画日),
+        plan_qty:
+          row?.計画数 === '' || row?.計画数 === null || row?.計画数 === undefined
+            ? NaN
+            : Number(row?.計画数),
+      }))
+      .filter((row) => row.product_code && row.plan_date && Number.isFinite(row.plan_qty) && row.plan_qty > 0)
+
+    spotExcelRows.value = normalized
+    spotExcelFileName.value = file.name
+    spotExcelMessage.value = `${normalized.length}件を読込しました。`
+  } catch (e) {
+    console.error('スポットExcel読込エラー', e)
+    spotExcelMessage.value = 'Excel読込に失敗しました。forupシートを確認してください。'
+  } finally {
+    spotExcelLoading.value = false
+    if (event?.target) event.target.value = ''
+  }
+}
+
+const saveSpotExcelPlan = async () => {
+  if (!selectedLine.value) {
+    alert('ラインを選択してください。')
+    return
+  }
+  if (!spotExcelRows.value.length) {
+    alert('取込対象がありません。')
+    return
+  }
+
+  const productByCode = new Map(
+    (Array.isArray(products.value) ? products.value : []).map((p) => [String(p.product_code || '').trim(), p]),
+  )
+  const resolveProcess4013 = async () => {
+    if (spotExcelProcess4013Id.value) return spotExcelProcess4013Id.value
+    const res = await api.processes.getProcesses({ page_size: 5000 })
+    const processList = res?.data?.results || res?.data || []
+    const process4013 = (Array.isArray(processList) ? processList : []).find(
+      (p) => String(p?.process_code || '').trim() === '4013',
+    )
+    if (!process4013?.id) return null
+    spotExcelProcess4013Id.value = process4013.id
+    return process4013.id
+  }
+
+  const fixedProcessId = await resolveProcess4013()
+  if (!fixedProcessId) {
+    alert('工程コード4013が見つかりません。工程マスタを確認してください。')
+    return
+  }
+
+  const items = []
+  const missingProducts = []
+  const missingProcesses = []
+
+  spotExcelRows.value.forEach((row) => {
+    const prod = productByCode.get(row.product_code)
+    if (!prod) {
+      missingProducts.push({ row_no: row.row_no, product_code: row.product_code })
+      return
+    }
+    items.push({
+      product_id: prod.id,
+      process_id: fixedProcessId,
+      plan_date: row.plan_date,
+      plan_qty: Number(row.plan_qty),
+      sequence_no: 1,
+    })
+  })
+
+  if (!items.length) {
+    alert('保存対象がありません。品番マスタまたは工程設定を確認してください。')
+    return
+  }
+
+  processing.value = true
+  try {
+    spotExcelMissingProducts.value = missingProducts
+    spotExcelMissingProcesses.value = missingProcesses
+    const uniqueDates = [...new Set(items.map((x) => x.plan_date))].sort()
+    const res = await api.linePlans.save({
+      line_id: selectedLine.value,
+      items,
+    })
+    if (uniqueDates.length > 0) {
+      await api.lineBacklogs.expandProcesses({
+        line_id: selectedLine.value,
+        start_date: uniqueDates[0],
+        end_date: uniqueDates[uniqueDates.length - 1],
+        read_only: false,
+        include_coproduct_children: true,
+        force_direct_process: true,
+        apply_bom_multiplier: false,
+      })
+    }
+    spotExcelMessage.value = `保存完了: 作成${res.data?.created ?? 0}件 / 更新${res.data?.updated ?? 0}件`
+    if (missingProducts.length > 0 || missingProcesses.length > 0) {
+      spotExcelMessage.value += `（未登録品番:${missingProducts.length}件, 工程未設定:${missingProcesses.length}件）`
+    }
+    await loadData()
+  } catch (e) {
+    console.error('スポットExcel保存エラー', e)
+    alert('Excel取込保存に失敗しました。')
+  } finally {
+    processing.value = false
+  }
 }
 
 const savePlan = async () => {
@@ -3171,6 +3398,76 @@ thead .sticky-col {
   color: #475569;
   padding: 16px;
   font-size: 13px;
+}
+.spot-excel-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.spot-file-btn {
+  position: relative;
+  overflow: hidden;
+}
+.spot-file-btn input[type='file'] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.spot-excel-note {
+  margin-top: 8px;
+}
+.spot-excel-meta {
+  margin-top: 8px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.spot-excel-errors {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 8px;
+}
+.spot-excel-error-card {
+  border: 1px solid #fecaca;
+  background: #fff1f2;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.spot-excel-error-title {
+  font-weight: 700;
+  color: #991b1b;
+  margin-bottom: 4px;
+}
+.spot-excel-error-card ul {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 120px;
+  overflow: auto;
+}
+.spot-excel-table-wrap {
+  margin-top: 8px;
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid #d7dfe8;
+}
+.spot-excel-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.spot-excel-table th,
+.spot-excel-table td {
+  border: 1px solid #d7dfe8;
+  padding: 6px 8px;
+  white-space: nowrap;
+}
+.spot-excel-table thead th {
+  position: sticky;
+  top: 0;
+  background: #e7edf7;
+  z-index: 2;
 }
 .processing-overlay {
   position: fixed;

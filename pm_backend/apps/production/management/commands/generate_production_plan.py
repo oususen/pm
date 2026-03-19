@@ -416,7 +416,12 @@ class Command(BaseCommand):
                     summary['created'] += created_count
 
                     # Step5a: 工程展開
-                    expand_processes_for_auto_plan(line.id, line_start, line_end)
+                    expand_processes_for_auto_plan(
+                        line.id,
+                        line_start,
+                        line_end,
+                        force_direct_process=(str(line.line_code or '').strip().upper() == 'L0013'),
+                    )
 
                     # Step5b: ガント生成（在庫計算は日次バッチに任せる）
                     generate_gantt(line.id, line_start, line_end)

@@ -1847,6 +1847,16 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             include_coproduct_children = include_coproduct_children.lower() in ['true', '1', 'yes']
         else:
             include_coproduct_children = bool(include_coproduct_children)
+        force_direct_process = request.data.get('force_direct_process', False)
+        if isinstance(force_direct_process, str):
+            force_direct_process = force_direct_process.lower() in ['true', '1', 'yes']
+        else:
+            force_direct_process = bool(force_direct_process)
+        apply_bom_multiplier = request.data.get('apply_bom_multiplier', True)
+        if isinstance(apply_bom_multiplier, str):
+            apply_bom_multiplier = apply_bom_multiplier.lower() in ['true', '1', 'yes']
+        else:
+            apply_bom_multiplier = bool(apply_bom_multiplier)
 
         if not line_id:
             return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2105,11 +2115,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             steps = list(steps_map.get(product_id, []))
             if not steps:
                 return []
-            if not is_l2201_line:
-                return sort_steps_for_plan(steps)
-
+            # 計画対象製品に紐づくRouting（routing.product）を優先する。
+            # output_product一致のみで拾うと、同一出力品番を持つ他Routingまで加算されるため。
             owned_steps = [step for step in steps if step.routing_id and step.routing.product_id == product_id]
-            return sort_steps_for_plan(owned_steps)
+            if owned_steps:
+                return sort_steps_for_plan(owned_steps)
+            return sort_steps_for_plan(steps)
 
         # サイクルタイムをまとめて取得（ライン特定優先、なければライン指定なしを使用）
         cycle_time_map = defaultdict(list)
@@ -2152,6 +2163,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 sequence_no = plan.get('sequence_no')
                 seq_key = sequence_no if sequence_no is not None else 1
                 plan_process_id = plan.get('process_id')
+                if force_direct_process and plan_process_id:
+                    affected_keys.add((product_id, plan_process_id, plan_date, seq_key))
+                    continue
                 steps = select_steps_for_plan_product(product_id)
                 if not steps:
                     if is_l2201_line and product_id in line_final_plan_product_ids and plan_process_id:
@@ -2199,6 +2213,44 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             seq_key = sequence_no if sequence_no is not None else 1
             seen_target_keys = set() if auto_plan_mode else None
             plan_process_id = plan.get('process_id')
+
+            if force_direct_process and plan_process_id:
+                computed_time_min = None
+                ct = pick_cycle_time(product_id, plan_process_id, plan_date)
+                process_obj = plan_process_map.get(int(plan_process_id)) if plan_process_id else None
+                if process_obj and process_obj.management_unit == 'MINUTE':
+                    if ct:
+                        try:
+                            computed_time_min = float(
+                                (Decimal(plan_qty) * Decimal(ct.cycle_time_min or 0)) + Decimal(ct.setup_time_min or 0)
+                            )
+                        except Exception:
+                            computed_time_min = None
+
+                key = (product_id, plan_process_id, plan_date, seq_key)
+                entry = aggregated.get(key)
+                if not entry:
+                    entry = {
+                        'plan_qty': Decimal('0'),
+                        'order_qty': Decimal('0'),
+                        'demand_qty_plan': Decimal('0'),
+                        'time_min': Decimal('0'),
+                        'plan_ids': set(),
+                        'step': None,
+                        'cycle_time': ct,
+                        'routing_product_id': None,
+                        'source_routing_step_id': None,
+                        'step_no': None,
+                    }
+                    aggregated[key] = entry
+                entry['plan_qty'] += Decimal(plan_qty or 0)
+                entry['order_qty'] += Decimal(order_qty or 0)
+                entry['demand_qty_plan'] += Decimal(demand_qty_plan or 0)
+                if computed_time_min is not None:
+                    entry['time_min'] += Decimal(str(computed_time_min))
+                if parent_plan_id:
+                    entry['plan_ids'].add(parent_plan_id)
+                continue
 
             steps = select_steps_for_plan_product(product_id)
             if not steps:
@@ -2280,7 +2332,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 # 標準BOMの数量を掛けて「二個使い」などを反映
                 # 連産品置き換え時（copro）は別ロジックで処理するため除外
                 qty_multiplier = Decimal('1')
-                if not copro_info_target and target_product_id != product_id:
+                if apply_bom_multiplier and (not copro_info_target) and target_product_id != product_id:
                     # 多段BOMを遡って数量を算出（親=ライン最終品）
                     multiplier = find_bom_multiplier(product_id, target_product_id, plan_date)
                     if multiplier is not None:
