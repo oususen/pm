@@ -1,31 +1,31 @@
 <template>
   <div class="ot-approval-page">
     <div class="page-header">
-      <h1 class="page-title">承認待ち一覧</h1>
+      <h1 class="page-title">{{ t('approvalList.pageTitle') }}</h1>
       <button
         v-if="selectedIds.length > 0"
         class="btn btn-bulk"
         @click="openBulk"
       >
-        一括確認依頼（{{ selectedIds.length }}件）
+        {{ t('approvalList.bulkBtn', { count: selectedIds.length }) }}
       </button>
     </div>
 
     <!-- フィルター -->
     <div v-if="applications.length" class="filters">
       <select v-model="filterTeam" class="filter-select">
-        <option value="">全班</option>
-        <option v-for="t in teamOptions" :key="t" :value="t">{{ t }}</option>
+        <option value="">{{ t('approvalList.allTeams') }}</option>
+        <option v-for="tm in teamOptions" :key="tm" :value="tm">{{ tm }}</option>
       </select>
       <select v-model="filterGroup" class="filter-select">
-        <option value="">全グループ</option>
+        <option value="">{{ t('approvalList.allGroups') }}</option>
         <option v-for="g in groupOptions" :key="g" :value="g">{{ g }}</option>
       </select>
     </div>
 
-    <div v-if="loading" class="loading">読み込み中...</div>
-    <div v-else-if="!applications.length" class="empty">承認待ちの申請はありません</div>
-    <div v-else-if="!filteredApplications.length" class="empty">条件に一致する申請はありません</div>
+    <div v-if="loading" class="loading">{{ t('approvalList.loading') }}</div>
+    <div v-else-if="!applications.length" class="empty">{{ t('approvalList.empty') }}</div>
+    <div v-else-if="!filteredApplications.length" class="empty">{{ t('approvalList.emptyFilter') }}</div>
     <template v-else>
       <table class="ot-table">
         <thead>
@@ -33,16 +33,16 @@
             <th class="check-col">
               <input type="checkbox" :checked="allSelected" @change="toggleAll" />
             </th>
-            <th>実施日</th>
-            <th>班</th>
-            <th>グループ</th>
-            <th>申請者</th>
-            <th>種別</th>
-            <th>時間帯</th>
-            <th>時間数</th>
-            <th>理由</th>
-            <th>申請日時</th>
-            <th>操作</th>
+            <th>{{ t('approvalList.col.date') }}</th>
+            <th>{{ t('approvalList.col.team') }}</th>
+            <th>{{ t('approvalList.col.group') }}</th>
+            <th>{{ t('approvalList.col.applicant') }}</th>
+            <th>{{ t('approvalList.col.type') }}</th>
+            <th>{{ t('approvalList.col.timeRange') }}</th>
+            <th>{{ t('approvalList.col.hours') }}</th>
+            <th>{{ t('approvalList.col.reason') }}</th>
+            <th>{{ t('approvalList.col.submittedAt') }}</th>
+            <th>{{ t('approvalList.col.actions') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -58,12 +58,12 @@
             <td class="nowrap time-cell">{{ app.start_time }} 〜 {{ app.end_time }}</td>
             <td class="num">
               {{ Math.round((parseFloat(app.hours) + parseFloat(app.midnight_hours)) * 10) / 10 }}H
-              <span v-if="app.midnight_hours > 0" class="midnight-tag">深夜{{ app.midnight_hours }}H</span>
+              <span v-if="app.midnight_hours > 0" class="midnight-tag">{{ t('approvalList.midnight') }}{{ app.midnight_hours }}H</span>
             </td>
             <td class="reason-cell">{{ app.reason || '-' }}</td>
             <td class="nowrap">{{ app.submitted_at ? formatDateTime(app.submitted_at) : '-' }}</td>
             <td class="actions">
-              <button class="btn btn-sm btn-detail" @click="openApprove(app)">確認・承認</button>
+              <button class="btn btn-sm btn-detail" @click="openApprove(app)">{{ t('approvalList.btnDetail') }}</button>
             </td>
           </tr>
         </tbody>
@@ -74,49 +74,49 @@
     <div v-if="targetApp" class="modal-overlay" @click.self="targetApp = null">
       <div class="modal">
         <div class="modal-header">
-          <h2>承認確認</h2>
+          <h2>{{ t('approvalList.modal.title') }}</h2>
           <button class="modal-close" @click="targetApp = null">×</button>
         </div>
         <div class="modal-body">
           <table class="detail-table">
             <tbody>
-              <tr><th>申請者</th><td>{{ targetApp.applicant_name }}</td></tr>
-              <tr><th>実施日</th><td>{{ targetApp.work_date }}</td></tr>
-              <tr><th>種別</th><td>{{ targetApp.type_display }}</td></tr>
+              <tr><th>{{ t('approvalList.col.applicant') }}</th><td>{{ targetApp.applicant_name }}</td></tr>
+              <tr><th>{{ t('approvalList.col.date') }}</th><td>{{ targetApp.work_date }}</td></tr>
+              <tr><th>{{ t('approvalList.col.type') }}</th><td>{{ targetApp.type_display }}</td></tr>
               <tr v-if="targetApp.work_start_time || targetApp.scheduled_end_time">
-                <th>勤務時間</th>
-                <td>{{ targetApp.work_start_time || '-' }} 〜 {{ targetApp.scheduled_end_time || '-' }}（定時）</td>
+                <th>{{ t('approvalList.modal.workTime') }}</th>
+                <td>{{ targetApp.work_start_time || '-' }} 〜 {{ targetApp.scheduled_end_time || '-' }}（{{ t('approvalList.modal.scheduled') }}）</td>
               </tr>
-              <tr><th>残業時間帯</th><td>{{ targetApp.start_time }} 〜 {{ targetApp.end_time }}</td></tr>
+              <tr><th>{{ t('approvalList.modal.overtimeRange') }}</th><td>{{ targetApp.start_time }} 〜 {{ targetApp.end_time }}</td></tr>
               <tr>
-                <th>時間数</th>
-                <td>{{ Math.round((parseFloat(targetApp.hours) + parseFloat(targetApp.midnight_hours)) * 10) / 10 }}H（深夜: {{ targetApp.midnight_hours }}H）</td>
+                <th>{{ t('approvalList.modal.hours') }}</th>
+                <td>{{ Math.round((parseFloat(targetApp.hours) + parseFloat(targetApp.midnight_hours)) * 10) / 10 }}H（{{ t('approvalList.modal.midnight') }}: {{ targetApp.midnight_hours }}H）</td>
               </tr>
-              <tr><th>理由</th><td>{{ targetApp.reason || '-' }}</td></tr>
+              <tr><th>{{ t('approvalList.col.reason') }}</th><td>{{ targetApp.reason || '-' }}</td></tr>
             </tbody>
           </table>
 
           <div class="comment-section">
-            <label class="comment-label">コメント（任意）</label>
-            <textarea v-model="actionComment" class="comment-input" rows="2" placeholder="承認・却下のコメントを入力（省略可）"></textarea>
+            <label class="comment-label">{{ t('approvalList.modal.comment') }}</label>
+            <textarea v-model="actionComment" class="comment-input" rows="2" :placeholder="t('approvalList.modal.commentPlaceholder')"></textarea>
           </div>
 
           <div v-if="actionMode === 'reject'" class="reject-section">
-            <label class="comment-label required">却下理由</label>
-            <textarea v-model="rejectReason" class="comment-input" rows="2" placeholder="却下理由を入力してください" required></textarea>
+            <label class="comment-label required">{{ t('approvalList.modal.rejectReason') }}</label>
+            <textarea v-model="rejectReason" class="comment-input" rows="2" :placeholder="t('approvalList.modal.rejectPlaceholder')" required></textarea>
           </div>
 
           <div v-if="actionError" class="error-msg">{{ actionError }}</div>
 
           <div class="modal-actions">
             <template v-if="actionMode === 'confirm'">
-              <button class="btn btn-primary" @click="doApprove" :disabled="acting">承認する</button>
-              <button class="btn btn-danger" @click="actionMode = 'reject'">却下する</button>
-              <button class="btn btn-ghost" @click="targetApp = null">キャンセル</button>
+              <button class="btn btn-primary" @click="doApprove" :disabled="acting">{{ t('approvalList.modal.approve') }}</button>
+              <button class="btn btn-danger" @click="actionMode = 'reject'">{{ t('approvalList.modal.reject') }}</button>
+              <button class="btn btn-ghost" @click="targetApp = null">{{ t('approvalList.modal.cancel') }}</button>
             </template>
             <template v-else>
-              <button class="btn btn-danger" @click="doReject" :disabled="acting || !rejectReason">却下する</button>
-              <button class="btn btn-ghost" @click="actionMode = 'confirm'">戻る</button>
+              <button class="btn btn-danger" @click="doReject" :disabled="acting || !rejectReason">{{ t('approvalList.modal.reject') }}</button>
+              <button class="btn btn-ghost" @click="actionMode = 'confirm'">{{ t('approvalList.modal.back') }}</button>
             </template>
           </div>
         </div>
@@ -127,15 +127,13 @@
     <div v-if="showBulkModal" class="modal-overlay" @click.self="showBulkModal = false">
       <div class="modal">
         <div class="modal-header">
-          <h2>一括確認依頼</h2>
+          <h2>{{ t('approvalList.bulk.title') }}</h2>
           <button class="modal-close" @click="showBulkModal = false">×</button>
         </div>
         <div class="modal-body">
-          <p class="bulk-desc">
-            選択した <strong>{{ selectedIds.length }}件</strong> の申請を{{ nextRoleLabel }}へ一括で確認依頼します。
-          </p>
+          <p class="bulk-desc" v-html="t('approvalList.bulk.desc', { count: `<strong>${selectedIds.length}</strong>`, role: nextRoleLabel })"></p>
           <table class="bulk-list-table">
-            <thead><tr><th>実施日</th><th>申請者</th><th>時間帯</th></tr></thead>
+            <thead><tr><th>{{ t('approvalList.col.date') }}</th><th>{{ t('approvalList.col.applicant') }}</th><th>{{ t('approvalList.col.timeRange') }}</th></tr></thead>
             <tbody>
               <tr v-for="app in selectedApps" :key="app.id">
                 <td>{{ app.work_date }}</td>
@@ -146,17 +144,17 @@
           </table>
 
           <div class="comment-section">
-            <label class="comment-label">コメント（任意）</label>
-            <textarea v-model="bulkComment" class="comment-input" rows="2" :placeholder="`${nextRoleLabel}へのコメントを入力（省略可）`"></textarea>
+            <label class="comment-label">{{ t('approvalList.modal.comment') }}</label>
+            <textarea v-model="bulkComment" class="comment-input" rows="2" :placeholder="t('approvalList.bulk.commentPlaceholder', { role: nextRoleLabel })"></textarea>
           </div>
 
           <div v-if="bulkError" class="error-msg">{{ bulkError }}</div>
 
           <div class="modal-actions">
             <button class="btn btn-bulk" @click="doBulkApprove" :disabled="bulkActing">
-              {{ bulkActing ? '送信中...' : `${selectedIds.length}件を${nextRoleLabel}へ依頼する` }}
+              {{ bulkActing ? t('approvalList.bulk.sending') : t('approvalList.bulk.btn', { count: selectedIds.length, role: nextRoleLabel }) }}
             </button>
-            <button class="btn btn-ghost" @click="showBulkModal = false">キャンセル</button>
+            <button class="btn btn-ghost" @click="showBulkModal = false">{{ t('approvalList.bulk.cancel') }}</button>
           </div>
         </div>
       </div>
@@ -168,15 +166,15 @@
 import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
+import { t } from '@/i18n'
 
 // ロール別の次承認者ラベル
-const NEXT_ROLE_LABEL = {
-  leader: '班長',
-  supervisor: '係長',
-  chief: '課長/部長',
-}
 const myRole = computed(() => authState.user?.profile?.role || 'supervisor')
-const nextRoleLabel = computed(() => NEXT_ROLE_LABEL[myRole.value] || '上長')
+const nextRoleLabel = computed(() => {
+  const map = { leader: 'supervisor', supervisor: 'chief', chief: 'manager' }
+  const key = map[myRole.value]
+  return key ? t(`approvalList.role.${key}`) : t('approvalList.role.default')
+})
 
 const applications = ref([])
 const loading = ref(false)
@@ -264,7 +262,7 @@ async function doApprove() {
     targetApp.value = null
     await fetchList()
   } catch (e) {
-    actionError.value = '承認に失敗しました: ' + (e.response?.data?.detail || e.message)
+    actionError.value = t('approvalList.error.approve') + (e.response?.data?.detail || e.message)
   } finally {
     acting.value = false
   }
@@ -282,7 +280,7 @@ async function doReject() {
     targetApp.value = null
     await fetchList()
   } catch (e) {
-    actionError.value = '却下に失敗しました: ' + (e.response?.data?.detail || e.message)
+    actionError.value = t('approvalList.error.reject') + (e.response?.data?.detail || e.message)
   } finally {
     acting.value = false
   }
@@ -299,7 +297,7 @@ async function doBulkApprove() {
     showBulkModal.value = false
     await fetchList()
   } catch (e) {
-    bulkError.value = '一括確認依頼に失敗しました: ' + (e.response?.data?.detail || e.message)
+    bulkError.value = t('approvalList.error.bulk') + (e.response?.data?.detail || e.message)
   } finally {
     bulkActing.value = false
   }

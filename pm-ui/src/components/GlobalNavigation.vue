@@ -157,7 +157,7 @@ const mainTabs = computed(() => [
   { id: 'quality', label: t('nav.tabs.quality'), link: '/quality', resource: 'quality' },
   { id: 'notifications', label: t('nav.tabs.notifications'), link: '/notifications/sources', resource: 'notifications' },
   { id: 'engineeringChange', label: t('nav.tabs.engineeringChange'), link: '/engineering-change/menu', resource: 'engineering_change' },
-  { id: 'overtime', label: '勤務', link: '/overtime/menu', resource: null },
+  { id: 'overtime', label: t('nav.tabs.overtime'), link: '/overtime/menu', resource: null },
   { id: 'masters', label: t('nav.tabs.masters'), link: '/masters', resource: 'masters' },
   { id: 'settings', label: t('nav.tabs.settings'), link: '/settings', resource: 'settings' },
 ])
