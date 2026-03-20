@@ -71,7 +71,7 @@ class OvertimeApplication(models.Model):
         ('holiday', '休日出勤'),
         ('half_day_am', '午前半休'),
         ('half_day_pm', '午後半休'),
-        ('paid_leave', '前日有給'),
+        ('paid_leave', '有給'),
         ('paid_leave_consec', '連続有給'),
     ]
     # 承認フローが必要な種別（時間外労働を伴う）

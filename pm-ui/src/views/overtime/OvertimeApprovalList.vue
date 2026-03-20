@@ -55,7 +55,7 @@
             <td>{{ app.group_name || '-' }}</td>
             <td>{{ app.applicant_name }}</td>
             <td>{{ app.type_display }}</td>
-            <td class="nowrap">{{ app.start_time }} 〜 {{ app.end_time }}</td>
+            <td class="nowrap time-cell">{{ app.start_time }} 〜 {{ app.end_time }}</td>
             <td class="num">
               {{ Math.round((parseFloat(app.hours) + parseFloat(app.midnight_hours)) * 10) / 10 }}H
               <span v-if="app.midnight_hours > 0" class="midnight-tag">深夜{{ app.midnight_hours }}H</span>
@@ -132,7 +132,7 @@
         </div>
         <div class="modal-body">
           <p class="bulk-desc">
-            選択した <strong>{{ selectedIds.length }}件</strong> の申請を係長へ一括で確認依頼します。
+            選択した <strong>{{ selectedIds.length }}件</strong> の申請を{{ nextRoleLabel }}へ一括で確認依頼します。
           </p>
           <table class="bulk-list-table">
             <thead><tr><th>実施日</th><th>申請者</th><th>時間帯</th></tr></thead>
@@ -147,14 +147,14 @@
 
           <div class="comment-section">
             <label class="comment-label">コメント（任意）</label>
-            <textarea v-model="bulkComment" class="comment-input" rows="2" placeholder="係長へのコメントを入力（省略可）"></textarea>
+            <textarea v-model="bulkComment" class="comment-input" rows="2" :placeholder="`${nextRoleLabel}へのコメントを入力（省略可）`"></textarea>
           </div>
 
           <div v-if="bulkError" class="error-msg">{{ bulkError }}</div>
 
           <div class="modal-actions">
             <button class="btn btn-bulk" @click="doBulkApprove" :disabled="bulkActing">
-              {{ bulkActing ? '送信中...' : `${selectedIds.length}件を係長へ依頼する` }}
+              {{ bulkActing ? '送信中...' : `${selectedIds.length}件を${nextRoleLabel}へ依頼する` }}
             </button>
             <button class="btn btn-ghost" @click="showBulkModal = false">キャンセル</button>
           </div>
@@ -167,6 +167,16 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+
+// ロール別の次承認者ラベル
+const NEXT_ROLE_LABEL = {
+  leader: '班長',
+  supervisor: '係長',
+  chief: '課長/部長',
+}
+const myRole = computed(() => authState.user?.profile?.role || 'supervisor')
+const nextRoleLabel = computed(() => NEXT_ROLE_LABEL[myRole.value] || '上長')
 
 const applications = ref([])
 const loading = ref(false)
@@ -360,6 +370,7 @@ onMounted(fetchList)
 .check-col { width: 36px; text-align: center; }
 .num { text-align: right; }
 .nowrap { white-space: nowrap; }
+.time-cell { color: #1f2a44; }
 .reason-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .midnight-tag {
   display: inline-block;
