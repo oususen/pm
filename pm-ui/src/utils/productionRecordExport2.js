@@ -5,6 +5,15 @@ import {
   resolveCoreMapping,
 } from '@/config/productionRecordSettings'
 
+const TAB_FILE_LABELS = {
+  tank: 'タンク',
+  floor: 'フロア',
+  blade: 'ブレード',
+  laser: '板金',
+  brake: 'ブレーキ',
+  spot: '板金スポット',
+}
+
 const formatDateCompact = (value) => {
   if (!value) return '—'
   // "2026-02-24" → "20260224"
@@ -106,7 +115,8 @@ export const exportProductionSummaryExcel = (sessions, startDate, endDate, optio
   link.href = url
   const compactStart = formatDateCompact(startDate)
   const compactEnd   = formatDateCompact(endDate)
-  link.download = `${tabKey}_${compactStart}_${compactEnd}.xlsx`
+  const fileLabel = String(options?.fileLabel || TAB_FILE_LABELS[tabKey] || tabKey).trim()
+  link.download = `${fileLabel}_${compactStart}_${compactEnd}.xlsx`
   link.click()
   URL.revokeObjectURL(url)
 }
