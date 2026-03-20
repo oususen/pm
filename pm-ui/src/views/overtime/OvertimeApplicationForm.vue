@@ -1,62 +1,67 @@
 <template>
   <div class="ot-form-page">
-    <h1 class="page-title">{{ isEdit ? '残業申請 編集' : '残業申請' }}</h1>
+    <h1 class="page-title">{{ isEdit ? t('overtime.pageTitleEdit') : t('overtime.pageTitle') }}</h1>
+    <p class="company-note-top">{{ t('overtime.companyNote') }}</p>
 
     <form class="ot-form" @submit.prevent="handleSubmit">
       <div class="form-section">
         <div class="form-row">
-          <label class="form-label required">申請種別</label>
+          <label class="form-label required">{{ t('overtime.type') }}</label>
           <div class="radio-group">
             <label class="radio-item">
               <input type="radio" v-model="form.application_type" value="overtime" />
-              時間外
+              {{ t('overtime.type.overtime') }}
             </label>
             <label class="radio-item">
               <input type="radio" v-model="form.application_type" value="holiday" />
-              休日出勤
+              {{ t('overtime.type.holiday') }}
             </label>
             <label class="radio-item">
               <input type="radio" v-model="form.application_type" value="half_day_am" />
-              午前半休
+              {{ t('overtime.type.halfDayAm') }}
             </label>
             <label class="radio-item">
               <input type="radio" v-model="form.application_type" value="half_day_pm" />
-              午後半休
+              {{ t('overtime.type.halfDayPm') }}
             </label>
             <label class="radio-item">
               <input type="radio" v-model="form.application_type" value="paid_leave" />
-              前日有給
+              {{ t('overtime.type.paidLeave') }}
             </label>
             <label class="radio-item">
               <input type="radio" v-model="form.application_type" value="paid_leave_consec" />
-              連続有給
+              {{ t('overtime.type.paidLeaveConsec') }}
             </label>
           </div>
         </div>
 
         <div class="form-row">
-          <label class="form-label required">{{ isConsecutive ? '開始日' : '実施日' }}</label>
+          <label class="form-label required">{{ isConsecutive ? t('overtime.startDate') : t('overtime.workDate') }}</label>
           <input type="date" v-model="form.work_date" class="form-input" required />
         </div>
 
         <div v-if="isConsecutive" class="form-row">
-          <label class="form-label required">終了日</label>
+          <label class="form-label required">{{ t('overtime.endDate') }}</label>
           <input type="date" v-model="form.end_date" class="form-input" required />
         </div>
 
+        <p v-if="form.application_type === 'half_day_am'" class="half-day-note">
+          {{ t('overtime.halfDayNote') }}
+        </p>
+
         <template v-if="needsTimeInput">
           <div class="form-row">
-            <label class="form-label required">勤務時間</label>
+            <label class="form-label required">{{ t('overtime.workTime') }}</label>
             <div class="time-range">
               <input type="text" v-model="form.work_start_time" class="form-input time-input" placeholder="08:00" maxlength="5" @blur="onWorkStartBlur" />
               <span class="tilde">〜</span>
               <input type="text" v-model="form.scheduled_end_time" class="form-input time-input" placeholder="17:05" maxlength="5" @blur="formatTime('scheduled_end_time')" />
-              <span class="time-note">（定時）</span>
+              <span class="time-note">（{{ t('overtime.scheduled') }}）</span>
             </div>
           </div>
 
           <div class="form-row">
-            <label class="form-label required">残業時間</label>
+            <label class="form-label required">{{ t('overtime.overtimeTime') }}</label>
             <div class="time-range">
               <input type="text" v-model="form.start_time" class="form-input time-input" placeholder="17:15" maxlength="5" @blur="formatTime('start_time')" required />
               <span class="tilde">〜</span>
@@ -67,35 +72,35 @@
 
         <div v-if="!needsApproval" class="form-row">
           <label class="form-label"></label>
-          <span class="record-only-badge">記録のみ（承認不要）</span>
+          <span class="record-only-badge">{{ t('overtime.recordOnly') }}</span>
         </div>
 
         <div v-if="needsTimeInput && previewHours !== null" class="form-row">
-          <label class="form-label">時間数（自動計算）</label>
+          <label class="form-label">{{ t('overtime.hoursPreview') }}</label>
           <div class="hours-preview">
             <span class="hours-val">{{ previewHours.total }}H</span>
             <span v-if="previewHours.midnight > 0" class="hours-midnight">
-              うち深夜 {{ previewHours.midnight }}H
+              {{ t('overtime.midnight') }} {{ previewHours.midnight }}H
             </span>
           </div>
         </div>
 
         <div class="form-row">
-          <label class="form-label" :class="{ required: needsApproval }">発生理由</label>
+          <label class="form-label" :class="{ required: needsApproval }">{{ t('overtime.reason') }}</label>
           <textarea
             v-model="form.reason"
             class="form-textarea"
             rows="5"
-            :placeholder="needsApproval ? '残業・休日出勤が発生した理由を入力してください' : '備考があれば入力してください'"
+            :placeholder="needsApproval ? t('overtime.reasonPlaceholder') : t('overtime.remarkPlaceholder')"
             :required="needsApproval"
           ></textarea>
         </div>
 
         <div v-if="needsApproval" class="form-row sign-row">
-          <label class="form-label required">サイン</label>
+          <label class="form-label required">{{ t('overtime.sign') }}</label>
           <div class="sign-wrap">
             <canvas ref="signCanvas" class="sign-canvas" width="420" height="200"></canvas>
-            <button type="button" class="btn-clear-sign" @click="clearSign">クリア</button>
+            <button type="button" class="btn-clear-sign" @click="clearSign">{{ t('overtime.signClear') }}</button>
           </div>
         </div>
       </div>
@@ -104,12 +109,12 @@
 
       <div class="form-actions">
         <button type="button" class="btn btn-secondary" @click="saveDraft" :disabled="saving">
-          下書き保存
+          {{ t('overtime.saveDraft') }}
         </button>
         <button type="submit" class="btn btn-primary" :disabled="saving">
-          {{ isEdit ? '更新して申請する' : '申請する' }}
+          {{ isEdit ? t('overtime.submitEdit') : t('overtime.submit') }}
         </button>
-        <RouterLink to="/overtime/list" class="btn btn-ghost">キャンセル</RouterLink>
+        <RouterLink to="/overtime/list" class="btn btn-ghost">{{ t('overtime.cancel') }}</RouterLink>
       </div>
     </form>
   </div>
@@ -120,6 +125,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import SignaturePad from 'signature_pad'
 import api from '@/api/client'
+import { t } from '@/i18n'
 
 // "800" "0800" "8:00" "08:00" → "08:00"、変換不能なら元の値を返す
 function toHHMM(val) {
@@ -340,7 +346,7 @@ async function saveDraft() {
     await uploadSignIfNeeded(appId)
     router.push('/overtime/list')
   } catch (e) {
-    errorMsg.value = '保存に失敗しました: ' + (e.response?.data?.detail || e.message)
+    errorMsg.value = t('overtime.error.saveFailed') + (e.response?.data?.detail || e.message)
   } finally {
     saving.value = false
   }
@@ -348,7 +354,7 @@ async function saveDraft() {
 
 async function handleSubmit() {
   if (needsApproval.value && (!signaturePad || signaturePad.isEmpty())) {
-    errorMsg.value = 'サインは必須です。サイン欄に署名してください。'
+    errorMsg.value = t('overtime.error.signRequired')
     return
   }
   saving.value = true
@@ -367,7 +373,7 @@ async function handleSubmit() {
     await api.overtime.submitApplication(appId)
     router.push('/overtime/list')
   } catch (e) {
-    errorMsg.value = '申請に失敗しました: ' + (e.response?.data?.detail || e.message)
+    errorMsg.value = t('overtime.error.submitFailed') + (e.response?.data?.detail || e.message)
   } finally {
     saving.value = false
   }
@@ -489,6 +495,26 @@ async function handleSubmit() {
   padding: 10px 12px;
   background: #fef2f2;
   border-radius: 6px;
+}
+.half-day-note {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: #1e40af;
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  border-radius: 6px;
+  padding: 8px 12px;
+  line-height: 1.6;
+}
+.company-note-top {
+  margin: 0 0 16px;
+  font-size: 12px;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+  padding: 8px 12px;
+  line-height: 1.6;
 }
 .record-only-badge {
   display: inline-block;
