@@ -15,34 +15,62 @@
               <input type="radio" v-model="form.application_type" value="holiday" />
               休日出勤
             </label>
+            <label class="radio-item">
+              <input type="radio" v-model="form.application_type" value="half_day_am" />
+              午前半休
+            </label>
+            <label class="radio-item">
+              <input type="radio" v-model="form.application_type" value="half_day_pm" />
+              午後半休
+            </label>
+            <label class="radio-item">
+              <input type="radio" v-model="form.application_type" value="paid_leave" />
+              前日有給
+            </label>
+            <label class="radio-item">
+              <input type="radio" v-model="form.application_type" value="paid_leave_consec" />
+              連続有給
+            </label>
           </div>
         </div>
 
         <div class="form-row">
-          <label class="form-label required">実施日</label>
+          <label class="form-label required">{{ isConsecutive ? '開始日' : '実施日' }}</label>
           <input type="date" v-model="form.work_date" class="form-input" required />
         </div>
 
-        <div class="form-row">
-          <label class="form-label required">勤務時間</label>
-          <div class="time-range">
-            <input type="text" v-model="form.work_start_time" class="form-input time-input" placeholder="08:00" maxlength="5" @blur="onWorkStartBlur" />
-            <span class="tilde">〜</span>
-            <input type="text" v-model="form.scheduled_end_time" class="form-input time-input" placeholder="17:05" maxlength="5" @blur="formatTime('scheduled_end_time')" />
-            <span class="time-note">（定時）</span>
-          </div>
+        <div v-if="isConsecutive" class="form-row">
+          <label class="form-label required">終了日</label>
+          <input type="date" v-model="form.end_date" class="form-input" required />
         </div>
 
-        <div class="form-row">
-          <label class="form-label required">残業時間</label>
-          <div class="time-range">
-            <input type="text" v-model="form.start_time" class="form-input time-input" placeholder="17:15" maxlength="5" @blur="formatTime('start_time')" required />
-            <span class="tilde">〜</span>
-            <input type="text" v-model="form.end_time" class="form-input time-input" placeholder="19:00" maxlength="5" @blur="formatTime('end_time')" required />
+        <template v-if="needsTimeInput">
+          <div class="form-row">
+            <label class="form-label required">勤務時間</label>
+            <div class="time-range">
+              <input type="text" v-model="form.work_start_time" class="form-input time-input" placeholder="08:00" maxlength="5" @blur="onWorkStartBlur" />
+              <span class="tilde">〜</span>
+              <input type="text" v-model="form.scheduled_end_time" class="form-input time-input" placeholder="17:05" maxlength="5" @blur="formatTime('scheduled_end_time')" />
+              <span class="time-note">（定時）</span>
+            </div>
           </div>
+
+          <div class="form-row">
+            <label class="form-label required">残業時間</label>
+            <div class="time-range">
+              <input type="text" v-model="form.start_time" class="form-input time-input" placeholder="17:15" maxlength="5" @blur="formatTime('start_time')" required />
+              <span class="tilde">〜</span>
+              <input type="text" v-model="form.end_time" class="form-input time-input" placeholder="19:00" maxlength="5" @blur="formatTime('end_time')" required />
+            </div>
+          </div>
+        </template>
+
+        <div v-if="!needsApproval" class="form-row">
+          <label class="form-label"></label>
+          <span class="record-only-badge">記録のみ（承認不要）</span>
         </div>
 
-        <div v-if="previewHours !== null" class="form-row">
+        <div v-if="needsTimeInput && previewHours !== null" class="form-row">
           <label class="form-label">時間数（自動計算）</label>
           <div class="hours-preview">
             <span class="hours-val">{{ previewHours.total }}H</span>
@@ -53,19 +81,20 @@
         </div>
 
         <div class="form-row">
-          <label class="form-label">発生理由</label>
+          <label class="form-label" :class="{ required: needsApproval }">発生理由</label>
           <textarea
             v-model="form.reason"
             class="form-textarea"
-            rows="3"
-            placeholder="残業・休日出勤が発生した理由を入力してください"
+            rows="5"
+            :placeholder="needsApproval ? '残業・休日出勤が発生した理由を入力してください' : '備考があれば入力してください'"
+            :required="needsApproval"
           ></textarea>
         </div>
 
-        <div class="form-row sign-row">
-          <label class="form-label">サイン（任意）</label>
+        <div v-if="needsApproval" class="form-row sign-row">
+          <label class="form-label required">サイン</label>
           <div class="sign-wrap">
-            <canvas ref="signCanvas" class="sign-canvas" width="320" height="120"></canvas>
+            <canvas ref="signCanvas" class="sign-canvas" width="420" height="200"></canvas>
             <button type="button" class="btn-clear-sign" @click="clearSign">クリア</button>
           </div>
         </div>
@@ -151,12 +180,19 @@ const props = defineProps({
 })
 
 const isEdit = computed(() => !!props.id)
+
+// 種別に関するcomputed
+const NEEDS_APPROVAL_TYPES = new Set(['overtime', 'holiday', 'half_day_am'])
+const needsApproval = computed(() => NEEDS_APPROVAL_TYPES.has(form.value.application_type))
+const needsTimeInput = computed(() => NEEDS_APPROVAL_TYPES.has(form.value.application_type))
+const isConsecutive = computed(() => form.value.application_type === 'paid_leave_consec')
 const saving = ref(false)
 const errorMsg = ref('')
 
 const form = ref({
   application_type: 'overtime',
   work_date: '',
+  end_date: '',
   work_start_time: '',
   scheduled_end_time: '',
   start_time: '',
@@ -244,13 +280,15 @@ function wrapTime(hhmm) {
 
 // 送信前に全フィールドを正規化した payload を返す
 function normalizedPayload() {
+  const hasTime = NEEDS_APPROVAL_TYPES.has(form.value.application_type)
   return {
     ...form.value,
     work_date: toYYYYMMDD(form.value.work_date),
-    work_start_time: toHHMM(form.value.work_start_time) || null,
-    scheduled_end_time: wrapTime(toHHMM(form.value.scheduled_end_time)) || null,
-    start_time: wrapTime(toHHMM(form.value.start_time)),
-    end_time: wrapTime(toHHMM(form.value.end_time)),
+    end_date: form.value.end_date ? toYYYYMMDD(form.value.end_date) : null,
+    work_start_time: hasTime ? (toHHMM(form.value.work_start_time) || null) : null,
+    scheduled_end_time: hasTime ? (wrapTime(toHHMM(form.value.scheduled_end_time)) || null) : null,
+    start_time: hasTime ? (wrapTime(toHHMM(form.value.start_time)) || null) : null,
+    end_time: hasTime ? (wrapTime(toHHMM(form.value.end_time)) || null) : null,
   }
 }
 
@@ -267,10 +305,11 @@ onMounted(async () => {
       form.value = {
         application_type: d.application_type,
         work_date: d.work_date,
+        end_date: d.end_date || '',
         work_start_time: d.work_start_time || '',
         scheduled_end_time: d.scheduled_end_time || '',
-        start_time: d.start_time,
-        end_time: d.end_time,
+        start_time: d.start_time || '',
+        end_time: d.end_time || '',
         reason: d.reason,
       }
     } catch (e) {
@@ -308,6 +347,10 @@ async function saveDraft() {
 }
 
 async function handleSubmit() {
+  if (needsApproval.value && (!signaturePad || signaturePad.isEmpty())) {
+    errorMsg.value = 'サインは必須です。サイン欄に署名してください。'
+    return
+  }
   saving.value = true
   errorMsg.value = ''
   try {
@@ -446,6 +489,16 @@ async function handleSubmit() {
   padding: 10px 12px;
   background: #fef2f2;
   border-radius: 6px;
+}
+.record-only-badge {
+  display: inline-block;
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #86efac;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
 }
 .sign-row { align-items: flex-start; }
 .sign-wrap { display: flex; flex-direction: column; gap: 6px; }

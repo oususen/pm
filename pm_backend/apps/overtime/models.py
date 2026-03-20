@@ -69,7 +69,13 @@ class OvertimeApplication(models.Model):
     TYPE_CHOICES = [
         ('overtime', '時間外'),
         ('holiday', '休日出勤'),
+        ('half_day_am', '午前半休'),
+        ('half_day_pm', '午後半休'),
+        ('paid_leave', '前日有給'),
+        ('paid_leave_consec', '連続有給'),
     ]
+    # 承認フローが必要な種別（時間外労働を伴う）
+    NEEDS_APPROVAL_TYPES = {'overtime', 'holiday', 'half_day_am'}
 
     applicant = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -79,12 +85,13 @@ class OvertimeApplication(models.Model):
     )
     work_date = models.DateField(verbose_name='実施日')
     application_type = models.CharField(
-        max_length=10, choices=TYPE_CHOICES, default='overtime', verbose_name='申請種別'
+        max_length=20, choices=TYPE_CHOICES, default='overtime', verbose_name='申請種別'
     )
     work_start_time = models.TimeField(null=True, blank=True, verbose_name='勤務開始時刻')
     scheduled_end_time = models.TimeField(null=True, blank=True, verbose_name='定時終了時刻')
-    start_time = models.TimeField(verbose_name='残業開始時刻')
-    end_time = models.TimeField(verbose_name='残業終了時刻')
+    start_time = models.TimeField(null=True, blank=True, verbose_name='残業開始時刻')
+    end_time = models.TimeField(null=True, blank=True, verbose_name='残業終了時刻')
+    end_date = models.DateField(null=True, blank=True, verbose_name='終了日（連続有給用）')
     hours = models.DecimalField(
         max_digits=5, decimal_places=1, default=0, verbose_name='時間外時間(H)'
     )
@@ -121,10 +128,14 @@ class OvertimeApplication(models.Model):
         return f"{self.work_date} {self.applicant} ({self.get_status_display()})"
 
     def save(self, *args, **kwargs):
-        # 開始・終了時刻から時間数を自動計算
-        self.hours, self.midnight_hours = calculate_overtime_hours(
-            self.start_time, self.end_time
-        )
+        # 残業時間がある種別のみ時間数を自動計算
+        if self.start_time and self.end_time:
+            self.hours, self.midnight_hours = calculate_overtime_hours(
+                self.start_time, self.end_time
+            )
+        else:
+            self.hours = 0
+            self.midnight_hours = 0
         super().save(*args, **kwargs)
 
 

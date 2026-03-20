@@ -92,6 +92,13 @@ def create_approval_notification(application, target_users, message):
         import datetime
         applicant = application.applicant
         name = f"{applicant.last_name} {applicant.first_name}".strip() or applicant.username
+        if application.start_time and application.end_time:
+            time_str = f"{application.start_time.strftime('%H:%M')}〜{application.end_time.strftime('%H:%M')}"
+            hours_str = f"時間数: {application.hours}H（深夜: {application.midnight_hours}H）\n"
+        else:
+            time_str = application.get_application_type_display()
+            hours_str = ""
+        end_date_str = f"〜{application.end_date}" if application.end_date else ""
         notif = Notification.objects.create(
             title=message,
             category='overtime',
@@ -100,9 +107,9 @@ def create_approval_notification(application, target_users, message):
             valid_to=application.work_date + datetime.timedelta(days=14),
             description=(
                 f"申請者: {name}\n"
-                f"実施日: {application.work_date}\n"
-                f"時間帯: {application.start_time.strftime('%H:%M')}〜{application.end_time.strftime('%H:%M')}\n"
-                f"時間数: {application.hours}H（深夜: {application.midnight_hours}H）\n"
+                f"実施日: {application.work_date}{end_date_str}\n"
+                f"種別: {time_str}\n"
+                f"{hours_str}"
                 f"理由: {application.reason}"
             ),
             operator_name=name,
@@ -263,13 +270,25 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
         # 既存のpendingログをクリア（再申請の場合）
         app.approval_logs.filter(status='pending').delete()
 
-        app.status = 'submitted'
         app.submitted_at = timezone.now()
         app.rejection_reason = ''
-        app.save(update_fields=['status', 'submitted_at', 'rejection_reason', 'updated_at'])
 
-        # 最初の承認レベルへ
-        advance_to_next_level(app)
+        # 記録のみ種別（午後半休・前日有給・連続有給）は承認フロー不要で自動承認
+        if app.application_type not in OvertimeApplication.NEEDS_APPROVAL_TYPES:
+            app.status = 'approved_manager'
+            app.save(update_fields=['status', 'submitted_at', 'rejection_reason', 'updated_at'])
+            applicant_name = (
+                f"{app.applicant.last_name} {app.applicant.first_name}".strip() or app.applicant.username
+            )
+            create_approval_notification(
+                app, [app.applicant],
+                f"【{app.get_application_type_display()} 記録完了】{app.work_date}",
+            )
+        else:
+            app.status = 'submitted'
+            app.save(update_fields=['status', 'submitted_at', 'rejection_reason', 'updated_at'])
+            # 最初の承認レベルへ
+            advance_to_next_level(app)
 
         serializer = self.get_serializer(app)
         return Response(serializer.data)

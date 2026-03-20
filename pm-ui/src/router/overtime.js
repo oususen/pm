@@ -34,6 +34,12 @@ const overtime = [
     component: () => import('@/views/overtime/OvertimeApprovalList.vue'),
     meta: { pageTitle: '承認待ち一覧' },
   },
+  {
+    path: '/overtime/stats',
+    name: 'OvertimeStats',
+    component: () => import('@/views/overtime/OvertimeMonthlyStats.vue'),
+    meta: { pageTitle: '月次労働時間統計' },
+  },
 ]
 
 export default overtime

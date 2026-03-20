@@ -44,7 +44,7 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
         model = OvertimeApplication
         fields = [
             'id', 'applicant', 'applicant_name',
-            'work_date', 'application_type', 'type_display',
+            'work_date', 'end_date', 'application_type', 'type_display',
             'work_start_time', 'scheduled_end_time',
             'start_time', 'end_time', 'hours', 'midnight_hours',
             'reason', 'team', 'team_name', 'group_name',
@@ -121,10 +121,19 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
             return log.role
         return None
 
-    def validate_work_start_time(self, value):
-        if not value:
-            raise serializers.ValidationError('勤務開始時間は必須です。')
-        return value
+    def validate(self, data):
+        # 承認フロー必要種別のみ start_time/end_time を必須チェック
+        app_type = data.get('application_type', 'overtime')
+        needs_time = app_type in OvertimeApplication.NEEDS_APPROVAL_TYPES
+        if needs_time:
+            if not data.get('start_time'):
+                raise serializers.ValidationError({'start_time': '残業開始時間は必須です。'})
+            if not data.get('end_time'):
+                raise serializers.ValidationError({'end_time': '残業終了時間は必須です。'})
+        # 連続有給は end_date 必須
+        if app_type == 'paid_leave_consec' and not data.get('end_date'):
+            raise serializers.ValidationError({'end_date': '連続有給は終了日が必須です。'})
+        return data
 
     def create(self, validated_data):
         request = self.context.get('request')

@@ -18,6 +18,11 @@
         <div class="menu-desc">承認が必要な申請を確認する</div>
         <span v-if="pendingCount" class="badge">{{ pendingCount }}</span>
       </RouterLink>
+      <RouterLink v-if="isApprover" to="/overtime/stats" class="menu-card stats-card">
+        <div class="menu-icon">📊</div>
+        <div class="menu-label">月次統計</div>
+        <div class="menu-desc">メンバーの月次労働時間を確認する</div>
+      </RouterLink>
     </div>
   </div>
 </template>
@@ -31,7 +36,7 @@ const pendingCount = ref(0)
 
 const isApprover = computed(() => {
   const role = authState.user?.profile?.role
-  return ['supervisor', 'chief', 'manager'].includes(role)
+  return ['leader', 'supervisor', 'chief', 'manager'].includes(role)
 })
 
 onMounted(async () => {
@@ -88,6 +93,13 @@ onMounted(async () => {
 .approver-card:hover {
   border-color: #1d4ed8;
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+}
+.stats-card {
+  border-color: #8b5cf6;
+}
+.stats-card:hover {
+  border-color: #6d28d9;
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.15);
 }
 .menu-icon {
   font-size: 40px;
