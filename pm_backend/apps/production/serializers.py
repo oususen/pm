@@ -463,6 +463,10 @@ class LaserPatternSerializer(serializers.ModelSerializer):
 
 class LaserActualDetailSerializer(serializers.ModelSerializer):
     detail_type_display = serializers.CharField(source='get_detail_type_display', read_only=True)
+    resolved_process_id = serializers.SerializerMethodField()
+    resolved_process_code = serializers.SerializerMethodField()
+    resolved_process_name = serializers.SerializerMethodField()
+    resolved_line_id = serializers.SerializerMethodField()
 
     class Meta:
         model = LaserActualDetail
@@ -478,8 +482,44 @@ class LaserActualDetailSerializer(serializers.ModelSerializer):
             'scrap_qty',
             'scrap_reason',
             'display_order',
+            'resolved_process_id',
+            'resolved_process_code',
+            'resolved_process_name',
+            'resolved_line_id',
         ]
         read_only_fields = fields
+
+    def _resolve_process_line(self, obj):
+        actual = getattr(obj, 'actual', None)
+        equipment = getattr(actual, 'equipment', None)
+        product = getattr(obj, 'product', None)
+        cache_key = (
+            getattr(equipment, 'id', None),
+            getattr(product, 'id', None),
+        )
+        cache = self.context.setdefault('laser_detail_process_cache', {})
+        if cache_key not in cache:
+            cache[cache_key] = LaserActualSerializer._resolve_component_process_line(
+                equipment,
+                product,
+            )
+        return cache[cache_key]
+
+    def get_resolved_process_id(self, obj):
+        process, _line = self._resolve_process_line(obj)
+        return getattr(process, 'id', None)
+
+    def get_resolved_process_code(self, obj):
+        process, _line = self._resolve_process_line(obj)
+        return getattr(process, 'process_code', '')
+
+    def get_resolved_process_name(self, obj):
+        process, _line = self._resolve_process_line(obj)
+        return getattr(process, 'process_name', '')
+
+    def get_resolved_line_id(self, obj):
+        _process, line = self._resolve_process_line(obj)
+        return getattr(line, 'id', None)
 
 
 class LaserActualSerializer(serializers.ModelSerializer):
@@ -794,12 +834,10 @@ class LaserActualSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def _resolve_component_process_line(equipment, product):
-        process = getattr(equipment, 'process', None) if equipment else None
-        line = getattr(equipment, 'line', None) if equipment else None
-        if not line and process:
-            line = getattr(process, 'line', None)
-        if process and line:
-            return process, line
+        preferred_process = getattr(equipment, 'process', None) if equipment else None
+        preferred_line = getattr(equipment, 'line', None) if equipment else None
+        if not preferred_line and preferred_process:
+            preferred_line = getattr(preferred_process, 'line', None)
 
         step = None
         if product:
@@ -807,17 +845,21 @@ class LaserActualSerializer(serializers.ModelSerializer):
                 output_product=product,
                 routing__is_active=True,
             ).select_related('process', 'process__line', 'line').order_by('-routing__is_default', 'step_no', 'id')
-            if line:
-                step = base_qs.filter(line=line).first()
-            if not step and process:
-                step = base_qs.filter(process=process).first()
+            if preferred_line:
+                step = base_qs.filter(line=preferred_line).first()
+            if not step and preferred_process:
+                step = base_qs.filter(process=preferred_process).first()
             if not step:
                 step = base_qs.first()
 
         if step:
-            process = process or step.process
-            line = line or step.line or getattr(step.process, 'line', None)
+            process = step.process
+            line = step.line or getattr(step.process, 'line', None)
+            if process and line:
+                return process, line
 
+        process = preferred_process
+        line = preferred_line
         if process and not line:
             line = getattr(process, 'line', None)
         return process, line

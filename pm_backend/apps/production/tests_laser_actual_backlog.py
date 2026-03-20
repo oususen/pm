@@ -4,7 +4,7 @@ from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIRequestFactory
 
-from masters.models import Equipment, Line, Process, Product
+from masters.models import Equipment, Line, Process, Product, Routing, RoutingStep
 from production.models_laser_actual import LaserActual
 from production.models_laser_pattern import (
     LaserPattern,
@@ -28,11 +28,20 @@ class LaserActualBacklogSyncTest(TestCase):
             process_name='レーザ試験工程',
             line=self.line,
         )
+        self.nut_line = Line.objects.create(
+            line_code='L-NUT-T',
+            line_name='ナット試験ライン',
+        )
+        self.nut_process = Process.objects.create(
+            process_code='4013',
+            process_name='ナット',
+            line=self.nut_line,
+        )
         self.equipment = Equipment.objects.create(
             equipment_code='EQ-LASER-T',
             equipment_name='レーザ設備試験',
-            line=self.line,
-            process=self.process,
+            line=self.nut_line,
+            process=self.nut_process,
         )
         self.material = Product.objects.create(
             product_code='MAT-LASER-T',
@@ -62,6 +71,19 @@ class LaserActualBacklogSyncTest(TestCase):
             pattern=self.pattern,
             finished_product=self.finished,
             units_per_shot=1,
+        )
+        self.routing = Routing.objects.create(
+            product=self.component,
+            routing_code='ROUTE-LASER-T',
+            is_default=True,
+            is_active=True,
+        )
+        RoutingStep.objects.create(
+            routing=self.routing,
+            step_no=10,
+            process=self.process,
+            line=self.line,
+            output_product=self.component,
         )
 
     def _create_actual(self, shot_count=2, action='END', component_scraps=None):
@@ -93,6 +115,13 @@ class LaserActualBacklogSyncTest(TestCase):
         self._create_actual(shot_count=2, action='END')
         backlog = self._get_backlog()
         self.assertEqual(backlog.actual_qty, 6)
+        self.assertFalse(LineBacklog.objects.filter(
+            plan_date=date(2026, 3, 14),
+            line=self.nut_line,
+            process=self.nut_process,
+            product=self.component,
+            sequence_no=0,
+        ).exists())
 
     def test_update_replaces_backlog_qty_with_delta(self):
         actual = self._create_actual(shot_count=2, action='END')
