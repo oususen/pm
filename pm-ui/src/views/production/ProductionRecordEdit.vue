@@ -483,6 +483,10 @@ const loadSessions = async () => {
       }
       return componentDetails.map((detail, idx) => ({
         ...base,
+        process_code: detail?.resolved_process_code || base.process_code,
+        process_name: detail?.resolved_process_name || base.process_name,
+        equipment_process_id: detail?.resolved_process_id ?? base.equipment_process_id,
+        line_id: detail?.resolved_line_id ?? null,
         product_code: detail?.product_code || '',
         production_qty: Number(detail?.total_qty || 0),
         laser_units_per_shot: Number(detail?.units_per_shot || 0),

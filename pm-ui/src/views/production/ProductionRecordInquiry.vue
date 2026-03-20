@@ -712,8 +712,10 @@ const loadSessions = async () => {
               start_action: action || '—',
               end_action: action || '—',
               pause_reason: row?.operator_action_reason || '',
-              process_code: row?.equipment_process_code || row?.equipment_code || '',
-              process_name: row?.equipment_name || '',
+              process_code: detail?.resolved_process_code || row?.equipment_process_code || row?.equipment_code || '',
+              process_name: detail?.resolved_process_name || row?.equipment_name || '',
+              process: detail?.resolved_process_id ?? row?.equipment_process_id ?? null,
+              line_id: detail?.resolved_line_id ?? null,
               equipment_code: row?.equipment_code || '',
               product_code: detail?.product_code || '',
               product_name: detail?.product_name || '',
@@ -761,14 +763,25 @@ const loadSessions = async () => {
         })
       }
 
+      if (lineId.value && fetchLaser) {
+        allItems = allItems.filter((row) => {
+          if (String(row?.record_source || '').toUpperCase() !== 'LASER') return true
+          if (row?.line_id != null) {
+            return String(row.line_id) === String(lineId.value)
+          }
+          return true
+        })
+      }
+
       if (processId.value && fetchLaser) {
         allItems = allItems.filter((row) => {
           if (String(row?.record_source || '').toUpperCase() !== 'LASER') return true
-          // equipment_process_id が返っている場合はIDで直接比較
+          if (row?.process != null) {
+            return String(row.process) === String(processId.value)
+          }
           if (row?.equipment_process_id != null) {
             return String(row.equipment_process_id) === String(processId.value)
           }
-          // フォールバック: process_code 部分一致
           const selectedProcess = processes.value.find((proc) => String(proc.id) === String(processId.value))
           const pCode = String(selectedProcess?.process_code || '').trim().toLowerCase()
           return pCode ? `${row?.process_code || ''} ${row?.process_name || ''}`.toLowerCase().includes(pCode) : true
