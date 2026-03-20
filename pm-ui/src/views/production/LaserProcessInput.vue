@@ -66,11 +66,23 @@
 
         <div class="field">
           <label class="required">パターン番号（検索選択）</label>
-          <input
-            v-model.trim="patternKeyword"
-            type="text"
-            placeholder="パターン番号で絞り込み"
-          />
+          <div class="pattern-filters">
+            <input
+              v-model.trim="patternKeyword"
+              type="text"
+              placeholder="パターン番号で絞り込み"
+            />
+            <select v-model="patternMaterialFilter">
+              <option value="">材料: すべて</option>
+              <option v-for="mat in patternMaterialOptions" :key="mat" :value="mat">{{ mat }}</option>
+            </select>
+            <select v-model="patternEquipmentFilter">
+              <option value="">設備: すべて</option>
+              <option v-for="eq in laserEquipments" :key="eq.id" :value="String(eq.id)">
+                {{ eq.equipment_code }} - {{ eq.equipment_name }}
+              </option>
+            </select>
+          </div>
           <select v-model="form.pattern" class="pattern-select">
             <option value="">-- パターン選択 --</option>
             <option v-for="pattern in filteredPatterns" :key="pattern.id" :value="String(pattern.id)">
@@ -1009,6 +1021,8 @@ const patterns = ref([])
 const actuals = ref([])
 const latestActionByPattern = ref({})
 const patternKeyword = ref('')
+const patternMaterialFilter = ref('')
+const patternEquipmentFilter = ref('')
 const activeTab = ref('entry')
 const currentProcessingByEquipment = ref({})
 const componentScrapInputs = ref({})
@@ -1043,11 +1057,23 @@ const laserEquipments = computed(() => {
   )
 })
 
+const patternMaterialOptions = computed(() => {
+  const source = Array.isArray(patterns.value) ? patterns.value : []
+  const codes = [...new Set(source.map((p) => String(p.material_code || '')).filter(Boolean))]
+  return codes.sort()
+})
+
 const filteredPatterns = computed(() => {
   const source = Array.isArray(patterns.value) ? patterns.value : []
   const keyword = String(patternKeyword.value || '').trim().toLowerCase()
-  if (!keyword) return source
-  return source.filter((pattern) => String(pattern.pattern_no || '').toLowerCase().includes(keyword))
+  const matFilter = String(patternMaterialFilter.value || '').trim()
+  const eqFilter = String(patternEquipmentFilter.value || '').trim()
+  return source.filter((pattern) => {
+    if (keyword && !String(pattern.pattern_no || '').toLowerCase().includes(keyword)) return false
+    if (matFilter && String(pattern.material_code || '') !== matFilter) return false
+    if (eqFilter && String(pattern.equipment || '') !== eqFilter) return false
+    return true
+  })
 })
 
 const selectedPattern = computed(() => {
@@ -1939,6 +1965,12 @@ input:focus,
 select:focus {
   outline: none;
   border-color: #2563eb;
+}
+
+.pattern-filters {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 1fr 1fr 1fr;
 }
 
 .pattern-select {

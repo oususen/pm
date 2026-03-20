@@ -7,13 +7,14 @@
         type="button"
         class="tab-item"
         :class="{ active: activePlanTab === tab.key }"
-        @click="activePlanTab = tab.key"
+        @click="selectPlanTab(tab)"
       >
         {{ tab.label }}
       </button>
     </div>
 
-    <template v-if="activePlanTab !== 'line-settings'">
+    <div v-if="!activePlanTab" class="no-tab-placeholder">タブを選択してください</div>
+    <template v-else-if="activePlanTab !== 'line-settings'">
     <div v-if="activePlanTab === 'laser'" class="laser-subtab-bar">
       <button
         type="button"
@@ -530,8 +531,13 @@ import ProcessGanttView from './ProcessGanttView.vue'
 import LaserPatternEditor from './LaserPatternEditor.vue'
 const router = useRouter()
 const selectedLine = ref('')
-const activePlanTab = ref('tank')
+const activePlanTab = ref('')
 const activeLaserTab = ref('normal-plan')
+const selectPlanTab = (tab) => {
+  if (activePlanTab.value === tab.key) return
+  if (tab.key !== 'line-settings' && !confirm(`${tab.label}の計画作成ですか？`)) return
+  activePlanTab.value = tab.key
+}
 const activeSpotTab = ref('normal-plan')
 const spotExcelRows = ref([])
 const spotExcelFileName = ref('')
@@ -2661,6 +2667,12 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
   background: #1d4ed8;
   border-color: #1d4ed8;
   color: #fff;
+}
+.no-tab-placeholder {
+  margin-top: 40px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 15px;
 }
 .settings-panel {
   margin-top: 8px;

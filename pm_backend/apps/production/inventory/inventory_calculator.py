@@ -458,6 +458,63 @@ def _calculate_parent_actual_shipment(backlog, shift_fn=None):
     return total_shipment
 
 
+def _compute_planned_stock_lt_adjustment(product_id, initial_date, max_lt, shift_fn):
+    """
+    計画在庫初期値のLT調整量を計算する。
+
+    実在庫はLTシフトなしで計算されるが、計画在庫はLTシフトあり。
+    そのため、initial_dateの実在庫を計画在庫の初期値として使う際は、
+    「initial_date+1 ～ initial_date+LT」の親製品実績（LTシフト分の出庫）を差し引く必要がある。
+
+    ※ initial_date+LT ≤ today-1 の条件下では全て親の実績が確定しているため値が安定する。
+    """
+    from masters.models import BOMItem
+    from django.db.models import Sum
+
+    parent_bom_items = BOMItem.objects.filter(
+        child_product_id=product_id,
+        bom__is_active=True,
+        bom__is_coproduct=False,
+    ).select_related('bom__parent_product')
+
+    if not parent_bom_items.exists():
+        return 0
+
+    total_adjustment = Decimal('0')
+    for bom_item in parent_bom_items:
+        parent_product = bom_item.bom.parent_product
+        if not parent_product:
+            continue
+        qty_per = bom_item.quantity or Decimal('0')
+        if qty_per == 0:
+            continue
+        lead_days = bom_item.lead_time_days or 0
+        if lead_days == 0:
+            continue
+
+        for offset in range(1, lead_days + 1):
+            adj_date = shift_fn(initial_date, offset)
+            downstream_groups = LineBacklog.objects.filter(
+                product=parent_product,
+                plan_date=adj_date,
+            ).values('product_id', 'line_id', 'process_id', 'plan_date').annotate(
+                actual_total=Sum('actual_qty'),
+            )
+            for downstream in downstream_groups:
+                actual = int(downstream.get('actual_total') or 0)
+                scrap = _get_shipment_scrap_qty(
+                    downstream['product_id'],
+                    downstream['line_id'],
+                    downstream['process_id'],
+                    downstream['plan_date'],
+                )
+                use_qty = Decimal(str(actual)) + scrap
+                if use_qty:
+                    total_adjustment += use_qty * Decimal(str(qty_per))
+
+    return int(total_adjustment)
+
+
 def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None):
     """
     計画在庫用の出庫計算（実績優先、なければ計画を使用）+ 仕損
@@ -999,7 +1056,13 @@ def recalculate_planned_stock_qty(
     ).order_by('-plan_date', 'sequence_no', 'id').first()
 
     if initial_backlog:
-        last_planned = initial_backlog.stock_qty or 0
+        # 実在庫はLTシフトなし、計画在庫はLTシフトありで計算するため、
+        # initial_date+1 ～ initial_date+LT の親実績分（LTシフト出庫）を差し引く。
+        # initial_date+LT ≤ today-1 の条件を満たすため、この期間の親は全て実績確定。
+        lt_adjustment = _compute_planned_stock_lt_adjustment(
+            product_id, initial_backlog.plan_date, max_lt, shift_working_days
+        )
+        last_planned = (initial_backlog.stock_qty or 0) - lt_adjustment
         planned_by_date[initial_backlog.plan_date] = last_planned
     else:
         # calc_start_date以前にデータがない場合（初回投入時など）、
