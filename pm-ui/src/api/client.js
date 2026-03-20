@@ -46,6 +46,7 @@ import { createPurchaseOrderApprovalConfigAPI } from './resources/purchaseOrderA
 import { createQualityEquipmentInspectionsAPI } from './resources/qualityEquipmentInspections'
 import { createOvertimeAPI } from './resources/overtime'
 import { createBrakeLineActualsAPI } from './resources/brakeLineActuals'
+import { createSpotLineActualsAPI } from './resources/spotLineActuals'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
@@ -157,4 +158,5 @@ export default {
   qualityEquipmentInspections: createQualityEquipmentInspectionsAPI(client),
   overtime: createOvertimeAPI(client),
   brakeLineActuals: createBrakeLineActualsAPI(client),
+  spotLineActuals: createSpotLineActualsAPI(client),
 }

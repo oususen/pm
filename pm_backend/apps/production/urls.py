@@ -28,6 +28,7 @@ from production.views_line_realtime import LineRealtimeRecordViewSet, LineStatus
 from production.views_process_realtime import ProcessRealtimeRecordViewSet
 from production.views_services import BOMServiceViewSet, CRPViewSet
 from production.views_brake_line import BrakeLinePlanView, BrakeLineProductsView, BrakeLineEquipmentsView, BrakeLineActualAddView, BrakeLineRecordView, BrakeLineSessionView, BrakeLineSessionDetailView
+from production.views_spot_line import SpotLinePlanView, SpotLineEquipmentsView, SpotLineProductsView, SpotLineRecordView
 
 router = DefaultRouter()
 router.register(r'line-demands', LineDemandViewSet, basename='linedemand')
@@ -74,4 +75,8 @@ urlpatterns = [
     path('brake-line-sessions/', BrakeLineSessionView.as_view(), name='brake-line-sessions'),
     path('brake-line-sessions/<int:session_id>/', BrakeLineSessionDetailView.as_view(), name='brake-line-session-detail'),
     path('laser-actual-details/<int:detail_id>/', LaserActualDetailUpdateView.as_view(), name='laser-actual-detail-update'),
+    path('spot-line-plan/', SpotLinePlanView.as_view(), name='spot-line-plan'),
+    path('spot-line-products/', SpotLineProductsView.as_view(), name='spot-line-products'),
+    path('spot-line-equipments/', SpotLineEquipmentsView.as_view(), name='spot-line-equipments'),
+    path('spot-line-record/', SpotLineRecordView.as_view(), name='spot-line-record'),
 ]

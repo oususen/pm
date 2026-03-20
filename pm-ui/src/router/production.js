@@ -193,6 +193,12 @@ const production = [
     component: () => import("@/views/production/BrakeLineInput.vue"),
     meta: { pageTitle: "ブレーキライン実績入力", manualPath: "生産/ブレーキライン実績入力.md" },
   },
+  {
+    path: "/production/spot-line-input",
+    name: "SpotLineInput",
+    component: () => import("@/views/production/SpotLineInput.vue"),
+    meta: { pageTitle: "スポット実績入力", manualPath: "生産/スポット実績入力.md" },
+  },
 ];
 
 export default production;
