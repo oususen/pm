@@ -161,7 +161,7 @@
                     @click="selectAction(act.value)"
                   >{{ act.label }}</button>
                 </div>
-                <div v-if="selectedItem && !selectedEquipmentId" class="equip-empty">設備を先に選択してください</div>
+                <div v-if="selectedItem && selectedEquipmentIds.length === 0" class="equip-empty">設備を先に選択してください</div>
               </div>
             </div>
 
@@ -177,8 +177,8 @@
                   v-for="eq in equipments"
                   :key="eq.id"
                   class="equip-btn"
-                  :class="{ active: selectedEquipmentId === eq.id }"
-                  @click="selectedEquipmentId = eq.id"
+                  :class="{ active: selectedEquipmentIds.includes(eq.id) }"
+                  @click="selectedEquipmentIds.includes(eq.id) ? selectedEquipmentIds = selectedEquipmentIds.filter(id => id !== eq.id) : selectedEquipmentIds.push(eq.id)"
                 >{{ eq.equipment_code }}<br><span class="equip-btn-name">{{ eq.equipment_name }}</span></button>
               </div>
               <div v-if="equipments.length === 0" class="equip-empty">設備が登録されていません</div>
@@ -413,7 +413,7 @@ const currentPage = ref(1)
 const productCodeFilter = ref('')
 
 const equipments = ref([])
-const selectedEquipmentId = ref('')
+const selectedEquipmentIds = ref([])
 
 const selectedAction = ref('')
 const actionReason = ref('')
@@ -453,8 +453,9 @@ const workStateKey = (item, equipmentId) => {
 }
 
 const currentWorkState = computed(() => {
-  if (!selectedItem.value || !selectedEquipmentId.value) return 'NOT_STARTED'
-  const last = workStateMap.value[workStateKey(selectedItem.value, selectedEquipmentId.value)]
+  if (!selectedItem.value || selectedEquipmentIds.value.length === 0) return 'NOT_STARTED'
+  // 最初の選択設備の状態で判定（複数設備は同じアクションで操作するため）
+  const last = workStateMap.value[workStateKey(selectedItem.value, selectedEquipmentIds.value[0])]
   if (last === 'PAUSE')                      return 'PAUSED'
   if (last === 'TEMP_END')                   return 'TEMP_ENDED'
   if (last === 'START' || last === 'RESUME') return 'STARTED'
@@ -463,8 +464,8 @@ const currentWorkState = computed(() => {
 
 const currentOperator = computed(() => {
   if (!selectedItem.value) return ''
-  if (selectedEquipmentId.value) {
-    return workOperatorMap.value[workStateKey(selectedItem.value, selectedEquipmentId.value)] || ''
+  if (selectedEquipmentIds.value.length > 0) {
+    return workOperatorMap.value[workStateKey(selectedItem.value, selectedEquipmentIds.value[0])] || ''
   }
   const productKey = selectedItem.value.product_id || selectedItem.value.product_code
   const prefix = `${selectedItem.value.process_id}-${productKey}-`
@@ -476,7 +477,7 @@ const currentOperator = computed(() => {
 
 const operatorActionOptions = computed(() => {
   const toOpts = (actions) => actions.map(v => ({ value: v, label: ACTION_LABELS[v] }))
-  if (!selectedItem.value || !selectedEquipmentId.value) return []
+  if (!selectedItem.value || selectedEquipmentIds.value.length === 0) return []
   if (currentWorkState.value === 'STARTED')    return toOpts(STARTED_ACTIONS)
   if (currentWorkState.value === 'PAUSED')     return toOpts(PAUSED_ACTIONS)
   if (currentWorkState.value === 'TEMP_ENDED') return toOpts(TEMP_ENDED_ACTIONS)
@@ -749,7 +750,7 @@ const isDone = (item) => {
 const isSelected = (item) => selectedItem.value && itemKey(item) === itemKey(selectedItem.value)
 const itemKey = (item) => `${item.line_id}-${item.process_id}-${item.product_id || `code:${item.product_code || ''}`}`
 const canSave = computed(() => {
-  if (!selectedItem.value || !selectedEquipmentId.value || !selectedAction.value) return false
+  if (!selectedItem.value || selectedEquipmentIds.value.length === 0 || !selectedAction.value) return false
   if (selectedAction.value === 'END' && !(inputQty.value > 0)) return false
   if (selectedAction.value === 'PAUSE' && !(inputQty.value >= 0)) return false
   if (requiresReason.value && !actionReason.value) return false
@@ -772,7 +773,7 @@ async function selectItem(item) {
   inputQty.value = null
   actionReason.value = ''
   photoPreviewUrl.value = ''
-  if (item?.equipment_id) selectedEquipmentId.value = item.equipment_id
+  if (item?.equipment_id) selectedEquipmentIds.value = [item.equipment_id]
   if (item?.image_url) {
     photoPreviewUrl.value = item.image_url
   } else if (item?.product_id) {
@@ -792,13 +793,14 @@ async function fetchEquipments() {
   try {
     const res = await api.spotLineActuals.getEquipments()
     equipments.value = res.data || []
-    if (selectedEquipmentId.value) {
-      const exists = equipments.value.some((eq) => isSameId(eq.id, selectedEquipmentId.value))
-      if (!exists) selectedEquipmentId.value = ''
+    if (selectedEquipmentIds.value.length > 0) {
+      selectedEquipmentIds.value = selectedEquipmentIds.value.filter(
+        id => equipments.value.some((eq) => isSameId(eq.id, id))
+      )
     }
   } catch {
     equipments.value = []
-    selectedEquipmentId.value = ''
+    selectedEquipmentIds.value = []
   }
 }
 
@@ -860,7 +862,7 @@ function jumpToProcessingItem(msg) {
   )
   if (!item) return
   selectedItem.value = item
-  if (msg.equipmentId) selectedEquipmentId.value = msg.equipmentId
+  if (msg.equipmentId) selectedEquipmentIds.value = [msg.equipmentId]
   selectedAction.value = ''
   inputQty.value = null
   actionReason.value = ''
@@ -896,30 +898,42 @@ async function save() {
   if (!canSave.value) return
   const item = selectedItem.value
   try {
-    const res = await api.spotLineActuals.saveRecord({
-      line_id:               item.line_id,
-      process_id:            item.process_id,
-      product_id:            item.product_id,
-      product_code:          item.product_code,
-      equipment_id:          selectedEquipmentId.value,
-      plan_date:             planDateStr.value,
-      operator:              operator.value,
-      operator_action:       selectedAction.value,
-      operator_action_reason: actionReason.value,
-      qty:                   requiresQty.value ? inputQty.value : 0,
-      sequence_no:           item.sequence_no,
-    })
-    const data = res.data
-    const equipmentId = data.equipment || selectedEquipmentId.value
-    const stateKey = workStateKey(item, equipmentId)
-    workStateMap.value = { ...workStateMap.value, [stateKey]: data.operator_action }
-    if (data.operator_action === 'START' || data.operator_action === 'RESUME') {
-      workOperatorMap.value = { ...workOperatorMap.value, [stateKey]: data.operator || operator.value }
-    } else {
-      const next = { ...workOperatorMap.value }
-      delete next[stateKey]
-      workOperatorMap.value = next
+    let lastData = null
+    // 複数設備対応: 設備ごとにレコードを作成
+    // 数量加算（actual_qty への反映）は最初の設備のみ行い、二重カウントを防ぐ
+    for (let i = 0; i < selectedEquipmentIds.value.length; i++) {
+      const eqId = selectedEquipmentIds.value[i]
+      const isFirst = i === 0
+      const res = await api.spotLineActuals.saveRecord({
+        line_id:               item.line_id,
+        process_id:            item.process_id,
+        product_id:            item.product_id,
+        product_code:          item.product_code,
+        equipment_id:          eqId,
+        plan_date:             planDateStr.value,
+        operator:              operator.value,
+        operator_action:       selectedAction.value,
+        operator_action_reason: actionReason.value,
+        qty:                   (requiresQty.value && isFirst) ? inputQty.value : 0,
+        // 2台目以降はqty検証・actual_qty加算をスキップ（二重カウント防止）
+        skip_qty_update:       !isFirst,
+        sequence_no:           item.sequence_no,
+      })
+      const data = res.data
+      const equipmentId = data.equipment || eqId
+      const stateKey = workStateKey(item, equipmentId)
+      workStateMap.value = { ...workStateMap.value, [stateKey]: data.operator_action }
+      if (data.operator_action === 'START' || data.operator_action === 'RESUME') {
+        workOperatorMap.value = { ...workOperatorMap.value, [stateKey]: data.operator || operator.value }
+      } else {
+        const next = { ...workOperatorMap.value }
+        delete next[stateKey]
+        workOperatorMap.value = next
+      }
+      updateCurrentProcessingState(data.operator_action, equipmentId, data.equipment_code || '', data.equipment_name || '', data.product_code || item.product_code || '', item.process_id)
+      if (isFirst) lastData = data
     }
+    const data = lastData
     if (data.operator_action === 'END' && data.backlog) {
       item.actual_qty = data.backlog.actual_qty
       currentActualQty.value = data.backlog.actual_qty
@@ -929,7 +943,6 @@ async function save() {
     if (printAutoEnabled.value && shouldPrint && printQty > 0) {
       await printLabel(item, printQty)
     }
-    updateCurrentProcessingState(data.operator_action, equipmentId, data.equipment_code || '', data.equipment_name || '', data.product_code || item.product_code || '', item.process_id)
     if ((scrapQty.value ?? 0) > 0 && scrapReason.value) {
       await saveScrap(item)
     }
@@ -939,7 +952,7 @@ async function save() {
     scrapReason.value = ''
     if (data.operator_action === 'END' || data.operator_action === 'TEMP_END') {
       selectedItem.value = null
-      selectedEquipmentId.value = ''
+      selectedEquipmentIds.value = []
       selectedAction.value = ''
     } else {
       syncSelectedAction()
@@ -1101,7 +1114,7 @@ async function confirmAdd() {
   }
   showAddModal.value = false
   await selectItem(newItem)
-  selectedEquipmentId.value = newItem.equipment_id || ''
+  selectedEquipmentIds.value = newItem.equipment_id ? [newItem.equipment_id] : []
   syncSelectedAction()
   showToast('追加しました')
 }

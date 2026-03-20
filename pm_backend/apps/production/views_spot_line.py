@@ -379,6 +379,9 @@ class SpotLineRecordView(APIView):
         operator_action_reason = request.data.get('operator_action_reason', '')
         qty_raw        = request.data.get('qty', 0)
         sequence_no    = int(request.data.get('sequence_no', 1))
+        # 複数設備同時使用時、2台目以降は actual_qty 加算をスキップする
+        # （qty検証も不要。数量は1台目のみカウント）
+        skip_qty_update = str(request.data.get('skip_qty_update', 'false')).lower() in ('true', '1')
 
         if not all([line_id, process_id, plan_date_str, operator_action]):
             return Response(
@@ -394,7 +397,7 @@ class SpotLineRecordView(APIView):
             return Response({'detail': '日付形式が不正です（YYYY-MM-DD）'}, status=400)
 
         qty = 0
-        if operator_action in {BrakeLineRecord.OPERATOR_ACTION_END, BrakeLineRecord.OPERATOR_ACTION_PAUSE}:
+        if not skip_qty_update and operator_action in {BrakeLineRecord.OPERATOR_ACTION_END, BrakeLineRecord.OPERATOR_ACTION_PAUSE}:
             try:
                 qty = int(qty_raw)
             except (ValueError, TypeError):

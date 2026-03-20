@@ -26,7 +26,14 @@
         <span>〜</span>
         <input v-model="endDate" type="date" />
       </div>
-      <div class="filter-row">
+      <!--
+        板金タブではライン絞り込みを非表示にしている。
+        理由: ブレーキライン(ProcessWorkSession)とスポットライン(BrakeLineRecord)で
+        データソースが異なり、スポットラインを選択すると fetchBrake=false になって
+        スポットデータが取得されなくなるため。
+        将来的にはデータソース判定ロジックをスポット対応させること。
+      -->
+      <div v-if="activeTab !== 'laser'" class="filter-row">
         <label>ライン</label>
         <select v-model="lineId">
           <option value="">-- すべて --</option>
@@ -883,6 +890,10 @@ watch(activeTab, async (nextTab) => {
     return
   }
   if (!operationalTabKeys.includes(nextTab)) return
+  // 板金タブはライン絞り込みを非表示にしているため、残留値をリセットする
+  if (nextTab === 'laser') {
+    lineId.value = ''
+  }
   const visibleLineIds = new Set(visibleLines.value.map((line) => String(line.id)))
   if (lineId.value && !visibleLineIds.has(String(lineId.value))) {
     lineId.value = ''
