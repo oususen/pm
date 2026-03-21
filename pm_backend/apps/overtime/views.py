@@ -122,30 +122,49 @@ def create_approval_notification(application, target_users, message):
 def advance_to_next_level(application):
     """
     現在のステータスから次の承認レベルへ進める。
-    次の承認者が見つからない場合はスキップして最終承認まで進める。
+    リーダーと班長は並列: 提出時に両方にpendingログを同時作成。
+    班長が承認すれば係長へ進む（リーダー未承認でも可）。
     """
-    # 現在承認済みレベルのインデックスを特定
-    current_level_idx = -1
-    if application.status == 'submitted':
-        current_level_idx = -1
-    elif application.status == 'approved_leader':
-        current_level_idx = 0
-    elif application.status == 'approved_supervisor':
-        current_level_idx = 1
-    elif application.status == 'approved_chief':
-        current_level_idx = 2
-
     applicant = application.applicant
+    applicant_name = f"{applicant.last_name} {applicant.first_name}".strip() or applicant.username
 
-    # 次のレベルを探す
-    for i in range(current_level_idx + 1, len(APPROVAL_LEVELS)):
+    if application.status == 'submitted':
+        # リーダーと班長に同時にpendingログを作成（並列フロー）
+        leader_count = create_pending_logs(application, 'leader')
+        supervisor_count = create_pending_logs(application, 'supervisor')
+
+        if leader_count > 0 or supervisor_count > 0:
+            pending_users = [
+                log.approver
+                for log in application.approval_logs.filter(
+                    role__in=['leader', 'supervisor'], status='pending'
+                )
+                if log.approver
+            ]
+            create_approval_notification(
+                application,
+                pending_users,
+                f"【残業申請 承認依頼】{applicant_name} / {application.work_date}",
+            )
+            return
+
+        # リーダーも班長もいない場合は係長以降へ
+        start_idx = 2  # chief から
+    elif application.status == 'approved_leader':
+        # リーダーのみ承認済み: 班長はすでにpendingなので何もしない
+        return
+    elif application.status == 'approved_supervisor':
+        start_idx = 2  # chief から
+    elif application.status == 'approved_chief':
+        start_idx = 3  # manager から
+    else:
+        return
+
+    # 係長・課長レベルへ進める
+    for i in range(start_idx, len(APPROVAL_LEVELS)):
         role = APPROVAL_LEVELS[i]
         count = create_pending_logs(application, role)
         if count > 0:
-            # 通知作成
-            applicant_name = (
-                f"{applicant.last_name} {applicant.first_name}".strip() or applicant.username
-            )
             pending_users = [
                 log.approver
                 for log in application.approval_logs.filter(role=role, status='pending')
@@ -156,12 +175,11 @@ def advance_to_next_level(application):
                 pending_users,
                 f"【残業申請 承認依頼】{applicant_name} / {application.work_date}",
             )
-            return  # 次のレベルのpendingログ作成完了
+            return
 
-    # 承認者が誰もいない or 全レベル完了 → 最終承認
+    # 全レベル完了 → 最終承認
     application.status = 'approved_manager'
     application.save(update_fields=['status', 'updated_at'])
-    # 申請者に通知
     create_approval_notification(
         application,
         [applicant],
@@ -320,14 +338,21 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
             status='approved', acted_at=timezone.now()
         )
 
-        # アプリケーションのステータスを更新
-        app.status = STATUS_AFTER_APPROVE.get(log.role, app.status)
-        app.save(update_fields=['status', 'updated_at'])
-
-        # 次のレベルへ進む
-        advance_to_next_level(app)
-
-        # approvedになった場合は申請者へ通知済み（advance_to_next_level内）
+        if log.role == 'leader':
+            # リーダー承認: 班長はすでにpendingなので次レベルへは進めない
+            # ステータスがまだ submitted の場合のみ approved_leader に更新
+            if app.status == 'submitted':
+                app.status = 'approved_leader'
+                app.save(update_fields=['status', 'updated_at'])
+        else:
+            if log.role == 'supervisor':
+                # 班長承認: 残っているリーダーpendingログを削除（不要になったため）
+                app.approval_logs.filter(role='leader', status='pending').delete()
+            # アプリケーションのステータスを更新
+            app.status = STATUS_AFTER_APPROVE.get(log.role, app.status)
+            app.save(update_fields=['status', 'updated_at'])
+            # 次のレベルへ進む
+            advance_to_next_level(app)
 
         serializer = self.get_serializer(app)
         return Response(serializer.data)
@@ -401,6 +426,9 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
             app.approval_logs.filter(role=log.role, status='pending').update(
                 status='approved', acted_at=timezone.now()
             )
+            if log.role == 'supervisor':
+                # 班長一括承認: 残っているリーダーpendingログを削除
+                app.approval_logs.filter(role='leader', status='pending').delete()
             app.status = STATUS_AFTER_APPROVE.get(log.role, app.status)
             app.save(update_fields=['status', 'updated_at'])
             approved_apps.append(app)
@@ -413,16 +441,17 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
         auto_approved = []
 
         for app in approved_apps:
-            current_level_idx = -1
-            if app.status == 'approved_leader':
-                current_level_idx = 0
-            elif app.status == 'approved_supervisor':
-                current_level_idx = 1
+            # approved_supervisor 以降から次レベルを探す（リーダーは並列なのでスキップ）
+            if app.status == 'approved_supervisor':
+                start_idx = 2
             elif app.status == 'approved_chief':
-                current_level_idx = 2
+                start_idx = 3
+            else:
+                # approved_leader または想定外: 班長がすでにpendingなので何もしない
+                continue
 
             advanced = False
-            for i in range(current_level_idx + 1, len(APPROVAL_LEVELS)):
+            for i in range(start_idx, len(APPROVAL_LEVELS)):
                 role = APPROVAL_LEVELS[i]
                 count = create_pending_logs(app, role)
                 if count > 0:
