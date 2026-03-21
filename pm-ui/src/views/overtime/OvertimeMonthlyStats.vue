@@ -127,8 +127,8 @@ const TYPE_LABELS = {
   paid_leave_consec: '連続有給',
 }
 
-// 連続有給を日ごとに分解してすべての日付リストを返す
-function expandDays(app) {
+// 連続有給を日ごとに分解（daisoカレンダーの非稼働日を除外）
+function expandDays(app, nonWorkingDates = new Set()) {
   if (app.application_type !== 'paid_leave_consec' || !app.end_date) {
     return [app.work_date]
   }
@@ -136,7 +136,10 @@ function expandDays(app) {
   const cur = new Date(app.work_date)
   const end = new Date(app.end_date)
   while (cur <= end) {
-    dates.push(`${cur.getFullYear()}-${pad(cur.getMonth() + 1)}-${pad(cur.getDate())}`)
+    const dateStr = `${cur.getFullYear()}-${pad(cur.getMonth() + 1)}-${pad(cur.getDate())}`
+    if (!nonWorkingDates.has(dateStr)) {
+      dates.push(dateStr)
+    }
     cur.setDate(cur.getDate() + 1)
   }
   return dates
@@ -162,6 +165,23 @@ async function load() {
   loading.value = true
   rows.value = []
   try {
+    // daisoカレンダーの非稼働日セット
+    const nonWorkingDates = new Set()
+    try {
+      const calRes = await api.calendars.getCalendars({ search: 'daiso', page_size: 10 })
+      const calList = calRes.data?.results ?? calRes.data ?? []
+      const daisoCal = calList.find(c =>
+        c.calendar_code?.toLowerCase() === 'daiso' || c.calendar_name?.includes('ダイソウ')
+      )
+      if (daisoCal) {
+        const dayRes = await api.calendars.getCalendarDays(daisoCal.id, { is_working_day: false })
+        const days = dayRes.data?.results ?? dayRes.data ?? []
+        for (const d of days) nonWorkingDates.add(d.target_date)
+      }
+    } catch (e) {
+      console.warn('カレンダー取得失敗:', e)
+    }
+
     const res = await api.overtime.getApplications({
       work_date__gte: dateFrom.value,
       work_date__lte: dateTo.value,
@@ -180,7 +200,7 @@ async function load() {
       const h = parseFloat(app.hours ?? 0)
       const typeLabel = TYPE_LABELS[app.application_type] || app.application_type
 
-      const dates = expandDays(app)
+      const dates = expandDays(app, nonWorkingDates)
       for (const date of dates) {
         const row = {
           name,
