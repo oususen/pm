@@ -42,6 +42,7 @@
             <th>{{ t('approvalList.col.hours') }}</th>
             <th>{{ t('approvalList.col.reason') }}</th>
             <th>{{ t('approvalList.col.submittedAt') }}</th>
+            <th>状態</th>
             <th>{{ t('approvalList.col.actions') }}</th>
           </tr>
         </thead>
@@ -62,6 +63,11 @@
             </td>
             <td class="reason-cell">{{ app.reason || '-' }}</td>
             <td class="nowrap">{{ app.submitted_at ? formatDateTime(app.submitted_at) : '-' }}</td>
+            <td class="nowrap">
+              <span class="status-badge" :style="{ color: statusMeta(app.status).color }">
+                {{ statusMeta(app.status).label }}
+              </span>
+            </td>
             <td class="actions">
               <button class="btn btn-sm btn-detail" @click="openApprove(app)">{{ t('approvalList.btnDetail') }}</button>
             </td>
@@ -167,6 +173,19 @@ import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { t } from '@/i18n'
+
+// ステータス表示ラベル・色
+const STATUS_META = {
+  submitted:          { label: '提出済み',        color: '#6b7280' },
+  approved_leader:    { label: 'リーダー確認済み', color: '#2563eb' },
+  approved_supervisor:{ label: '班長確認済み',     color: '#0891b2' },
+  approved_chief:     { label: '係長確認済み',     color: '#059669' },
+  approved_manager:   { label: '承認完了',         color: '#16a34a' },
+  rejected:           { label: '却下',             color: '#dc2626' },
+}
+function statusMeta(status) {
+  return STATUS_META[status] || { label: status, color: '#6b7280' }
+}
 
 // ロール別の次承認者ラベル
 const myRole = computed(() => authState.user?.profile?.role || 'supervisor')
@@ -370,6 +389,7 @@ onMounted(fetchList)
 .nowrap { white-space: nowrap; }
 .time-cell { color: #1f2a44; }
 .reason-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-badge { font-size: 12px; font-weight: 600; white-space: nowrap; }
 .midnight-tag {
   display: inline-block;
   margin-left: 4px;
