@@ -225,7 +225,7 @@ async function load() {
           row.halfDayAm = true
         } else if (app.application_type === 'holiday') {
           row.workH = Math.round((8 + h) * 10) / 10
-          row.holidayH = h
+          row.holidayH = row.workH  // 休日出勤は全時間が休日出勤時間
         } else if (app.application_type === 'half_day_pm') {
           row.halfDayPm = true
         } else if (app.application_type === 'paid_leave') {
