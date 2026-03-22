@@ -91,10 +91,22 @@
           <span class="status-chip" :class="statusClass(form.status)">
             {{ statusLabel(form.status) }}
           </span>
-          <span class="status-meta">作成者: {{ form.created_by_name || "-" }}</span>
-          <span class="status-meta">班長担当: {{ form.reviewer_user_name || "-" }}</span>
-          <span class="status-meta">係長担当: {{ form.chief_user_name || "-" }}</span>
-          <span class="status-meta">部長担当: {{ form.approver_user_name || "-" }}</span>
+          <span class="status-meta">
+            作成者: {{ form.created_by_name || "-" }}
+            <span v-if="form.created_at" class="status-date">（{{ formatDate(form.created_at) }}）</span>
+          </span>
+          <span class="status-meta">
+            班長担当: {{ form.reviewer_user_name || "-" }}
+            <span v-if="form.reviewed_at" class="status-date">（{{ formatDate(form.reviewed_at) }}）</span>
+          </span>
+          <span class="status-meta">
+            係長担当: {{ form.chief_user_name || "-" }}
+            <span v-if="form.chief_reviewed_at" class="status-date">（{{ formatDate(form.chief_reviewed_at) }}）</span>
+          </span>
+          <span class="status-meta">
+            部長担当: {{ form.approver_user_name || "-" }}
+            <span v-if="form.approved_at" class="status-date">（{{ formatDate(form.approved_at) }}）</span>
+          </span>
         </div>
 
         <div class="form-grid">
@@ -594,6 +606,9 @@ const createEmptyForm = () => ({
   approver_user: null,
   approver_user_name: "",
   rejection_comment: "",
+  reviewed_at: "",
+  chief_reviewed_at: "",
+  approved_at: "",
   processes: [],
   lines: [],
   items: [],
@@ -678,16 +693,9 @@ const filteredTemplates = computed(() => {
 })
 // 差分表示: 前版との比較
 const DIFF_FIELDS = ["item_name", "standard", "frequency", "method", "record_type", "unit", "criteria", "is_required", "is_active"]
-const showDiff = computed(() =>
-  prevVersionItems.value.length > 0 && ["DRAFT", "REJECTED"].includes(normalizedFormStatus.value)
-)
+const showDiff = computed(() => prevVersionItems.value.length > 0)
 const findPrevItem = (item) => {
-  if (item.section_type === "DAILY" && item.inspection_no != null) {
-    return prevVersionItems.value.find(
-      (p) => p.section_type === "DAILY" && Number(p.inspection_no) === Number(item.inspection_no)
-    ) || null
-  }
-  // QUARTERLY: item_nameで照合
+  // item_nameで照合（番号は表示用で再採番されるため識別子として使わない）
   return prevVersionItems.value.find(
     (p) => p.section_type === item.section_type && p.item_name === item.item_name
   ) || null
@@ -703,16 +711,11 @@ const itemDiffStatus = (item) => {
 }
 const deletedItems = computed(() => {
   if (!showDiff.value) return []
-  return prevVersionItems.value.filter((prev) => {
-    if (prev.section_type === "DAILY" && prev.inspection_no != null) {
-      return !form.value.items.some(
-        (cur) => cur.section_type === "DAILY" && Number(cur.inspection_no) === Number(prev.inspection_no)
-      )
-    }
-    return !form.value.items.some(
+  return prevVersionItems.value.filter((prev) =>
+    !form.value.items.some(
       (cur) => cur.section_type === prev.section_type && cur.item_name === prev.item_name
     )
-  })
+  )
 })
 
 const removeProcess = (id) => {
@@ -1123,6 +1126,13 @@ const formatDateTime = (value) => {
   return date.toLocaleString("ja-JP")
 }
 
+const formatDate = (value) => {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleDateString("ja-JP")
+}
+
 const resizeTextarea = (eventOrElement) => {
   const element = eventOrElement?.target || eventOrElement
   if (!(element instanceof HTMLTextAreaElement)) return
@@ -1365,6 +1375,9 @@ const toFormModel = (raw) => {
     approver_user: raw.approver_user || null,
     approver_user_name: raw.approver_user_name || "",
     rejection_comment: raw.rejection_comment || "",
+    reviewed_at: raw.reviewed_at || "",
+    chief_reviewed_at: raw.chief_reviewed_at || "",
+    approved_at: raw.approved_at || "",
     processes: Array.isArray(raw.processes) ? raw.processes : [],
     lines: Array.isArray(raw.lines) ? raw.lines : [],
     workflow_logs: Array.isArray(raw.workflow_logs) ? raw.workflow_logs : [],
@@ -1944,6 +1957,11 @@ tr.diff-deleted td {
   font-size: 14px;
   font-weight: 500;
   color: #334155;
+}
+.status-date {
+  font-size: 12px;
+  font-weight: 400;
+  color: #64748b;
 }
 .form-grid {
   display: grid;
