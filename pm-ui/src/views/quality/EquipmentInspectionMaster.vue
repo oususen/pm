@@ -240,7 +240,7 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="item in dailyItems" :key="item.local_key">
+                <tr v-for="item in dailyItems" :key="item.local_key" :class="{ 'diff-new': itemDiffStatus(item) === 'new', 'diff-changed': itemDiffStatus(item) === 'changed' }">
                   <td class="col-no">
                     <input
                       class="no-input"
@@ -250,7 +250,11 @@
                       :disabled="!canEditFields"
                     />
                   </td>
-                  <td><textarea class="auto-grow-textarea" v-model="item.item_name" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
+                  <td>
+                    <span v-if="itemDiffStatus(item) === 'new'" class="diff-badge diff-badge-new">新規</span>
+                    <span v-else-if="itemDiffStatus(item) === 'changed'" class="diff-badge diff-badge-changed">改訂</span>
+                    <textarea class="auto-grow-textarea" v-model="item.item_name" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" />
+                  </td>
                   <td><textarea class="auto-grow-textarea" v-model="item.standard" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
                   <td><input v-model="item.frequency" :disabled="!canEditFields" /></td>
                   <td><textarea class="auto-grow-textarea" v-model="item.method" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
@@ -271,6 +275,24 @@
                     </button>
                     <button class="btn-danger btn-sm" @click="removeItem(item)" :disabled="!canEditFields">削除</button>
                   </td>
+                </tr>
+                <tr
+                  v-for="item in deletedItems.filter(i => i.section_type === 'DAILY')"
+                  :key="`deleted-${item.inspection_no}-${item.item_name}`"
+                  class="diff-deleted"
+                >
+                  <td class="col-no">{{ item.inspection_no }}</td>
+                  <td>
+                    <span class="diff-badge diff-badge-deleted">削除</span>
+                    {{ item.item_name }}
+                  </td>
+                  <td>{{ item.standard }}</td>
+                  <td>{{ item.frequency }}</td>
+                  <td>{{ item.method }}</td>
+                  <td>{{ recordTypeLabel(item.record_type) }}</td>
+                  <td>{{ item.unit }}</td>
+                  <td>{{ item.criteria }}</td>
+                  <td colspan="3"></td>
                 </tr>
               </tbody>
             </table>
@@ -298,8 +320,12 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="item in quarterlyItems" :key="item.local_key">
-                  <td><textarea class="auto-grow-textarea" v-model="item.item_name" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
+                <tr v-for="item in quarterlyItems" :key="item.local_key" :class="{ 'diff-new': itemDiffStatus(item) === 'new', 'diff-changed': itemDiffStatus(item) === 'changed' }">
+                  <td>
+                    <span v-if="itemDiffStatus(item) === 'new'" class="diff-badge diff-badge-new">新規</span>
+                    <span v-else-if="itemDiffStatus(item) === 'changed'" class="diff-badge diff-badge-changed">改訂</span>
+                    <textarea class="auto-grow-textarea" v-model="item.item_name" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" />
+                  </td>
                   <td><textarea class="auto-grow-textarea" v-model="item.standard" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
                   <td><textarea class="auto-grow-textarea" v-model="item.method" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
                   <td><textarea class="auto-grow-textarea" v-model="item.criteria" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
@@ -317,6 +343,21 @@
                     </button>
                     <button class="btn-danger btn-sm" @click="removeItem(item)" :disabled="!canEditFields">削除</button>
                   </td>
+                </tr>
+                <tr
+                  v-for="item in deletedItems.filter(i => i.section_type === 'QUARTERLY')"
+                  :key="`deleted-q-${item.item_name}`"
+                  class="diff-deleted"
+                >
+                  <td>
+                    <span class="diff-badge diff-badge-deleted">削除</span>
+                    {{ item.item_name }}
+                  </td>
+                  <td>{{ item.standard }}</td>
+                  <td>{{ item.method }}</td>
+                  <td>{{ item.criteria }}</td>
+                  <td>{{ recordTypeLabel(item.record_type) }}</td>
+                  <td colspan="2"></td>
                 </tr>
               </tbody>
             </table>
@@ -529,6 +570,7 @@ const attachmentTargetKey = ref("")
 const rejectDialogVisible = ref(false)
 const rejectComment = ref("")
 const listFilter = ref({ keyword: "", status: "" })
+const prevVersionItems = ref([])
 
 const createEmptyForm = () => ({
   id: null,
@@ -634,6 +676,45 @@ const filteredTemplates = computed(() => {
     return true
   })
 })
+// 差分表示: 前版との比較
+const DIFF_FIELDS = ["item_name", "standard", "frequency", "method", "record_type", "unit", "criteria", "is_required", "is_active"]
+const showDiff = computed(() =>
+  prevVersionItems.value.length > 0 && ["DRAFT", "REJECTED"].includes(normalizedFormStatus.value)
+)
+const findPrevItem = (item) => {
+  if (item.section_type === "DAILY" && item.inspection_no != null) {
+    return prevVersionItems.value.find(
+      (p) => p.section_type === "DAILY" && Number(p.inspection_no) === Number(item.inspection_no)
+    ) || null
+  }
+  // QUARTERLY: item_nameで照合
+  return prevVersionItems.value.find(
+    (p) => p.section_type === item.section_type && p.item_name === item.item_name
+  ) || null
+}
+const itemDiffStatus = (item) => {
+  if (!showDiff.value) return null
+  const prev = findPrevItem(item)
+  if (!prev) return "new"
+  for (const field of DIFF_FIELDS) {
+    if (String(item[field] ?? "") !== String(prev[field] ?? "")) return "changed"
+  }
+  return null
+}
+const deletedItems = computed(() => {
+  if (!showDiff.value) return []
+  return prevVersionItems.value.filter((prev) => {
+    if (prev.section_type === "DAILY" && prev.inspection_no != null) {
+      return !form.value.items.some(
+        (cur) => cur.section_type === "DAILY" && Number(cur.inspection_no) === Number(prev.inspection_no)
+      )
+    }
+    return !form.value.items.some(
+      (cur) => cur.section_type === prev.section_type && cur.item_name === prev.item_name
+    )
+  })
+})
+
 const removeProcess = (id) => {
   form.value.processes = (form.value.processes || []).filter((v) => Number(v) !== Number(id))
 }
@@ -1410,6 +1491,23 @@ const loadTemplateList = async () => {
   }
 }
 
+const loadPrevVersion = async (sheetCode, version) => {
+  prevVersionItems.value = []
+  if (!sheetCode || version <= 1) return
+  try {
+    const response = await api.qualityEquipmentInspections.list({
+      sheet_code: sheetCode,
+      version: version - 1,
+    })
+    const results = response.data?.results || response.data || []
+    if (results.length > 0) {
+      prevVersionItems.value = results[0].items || []
+    }
+  } catch (error) {
+    console.error("前版テンプレート取得に失敗:", error)
+  }
+}
+
 const loadTemplateDetail = async (id) => {
   if (!id) return
   detailLoading.value = true
@@ -1418,6 +1516,7 @@ const loadTemplateDetail = async (id) => {
     form.value = toFormModel(response.data)
     selectedTemplateId.value = id
     await resizeAllTextareas()
+    await loadPrevVersion(form.value.sheet_code, form.value.version)
   } catch (error) {
     console.error("設備点検テンプレート詳細取得に失敗:", error)
     alert("テンプレート詳細の取得に失敗しました。")
@@ -1441,6 +1540,7 @@ const startNewTemplate = async () => {
   isListHidden.value = true
   selectedTemplateId.value = null
   form.value = createEmptyForm()
+  prevVersionItems.value = []
   resizeAllTextareas()
 }
 
@@ -1720,6 +1820,45 @@ onMounted(async () => {
   color: #dc2626;
   font-size: 12px;
   margin-left: 2px;
+}
+/* 差分表示 */
+tr.diff-new td {
+  background: #f0fdf4;
+}
+tr.diff-changed td {
+  background: #fefce8;
+}
+tr.diff-deleted td {
+  background: #fef2f2;
+  color: #9ca3af;
+  text-decoration: line-through;
+  pointer-events: none;
+}
+.diff-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-right: 4px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.diff-badge-new {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #86efac;
+}
+.diff-badge-changed {
+  background: #fef9c3;
+  color: #854d0e;
+  border: 1px solid #fde047;
+}
+.diff-badge-deleted {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+  text-decoration: none;
 }
 .table-wrap {
   overflow: auto;

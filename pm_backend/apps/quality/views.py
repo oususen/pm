@@ -543,6 +543,9 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(status=status_value)
         if sheet_code:
             queryset = queryset.filter(sheet_code=sheet_code)
+        version_value = self.request.query_params.get("version")
+        if version_value:
+            queryset = queryset.filter(version=version_value)
         if for_operation in ("1", "true", "yes"):
             queryset = queryset.filter(
                 status=EquipmentInspectionTemplate.STATUS_APPROVED,
