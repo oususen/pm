@@ -789,8 +789,10 @@ class BrakeLineSessionView(APIView):
     def get(self, request):
         qs = BrakeLineRecord.objects.select_related('process', 'product', 'line', 'equipment')
 
-        start_date_str = request.query_params.get('start_date', '').strip()
-        end_date_str   = request.query_params.get('end_date', '').strip()
+        start_date_str        = request.query_params.get('start_date', '').strip()
+        end_date_str          = request.query_params.get('end_date', '').strip()
+        recorded_at_start_str = request.query_params.get('recorded_at_start', '').strip()
+        recorded_at_end_str   = request.query_params.get('recorded_at_end', '').strip()
         line_id        = request.query_params.get('line_id', '').strip()
         process_id     = request.query_params.get('process_id', '').strip()
         product_code_f = request.query_params.get('product_code', '').strip()
@@ -803,6 +805,17 @@ class BrakeLineSessionView(APIView):
         if end_date_str:
             try:
                 qs = qs.filter(plan_date__lte=date.fromisoformat(end_date_str))
+            except ValueError:
+                pass
+        # 実施日（recorded_at）での絞り込み（計画日と排他ではなく独立して適用）
+        if recorded_at_start_str:
+            try:
+                qs = qs.filter(recorded_at__date__gte=date.fromisoformat(recorded_at_start_str))
+            except ValueError:
+                pass
+        if recorded_at_end_str:
+            try:
+                qs = qs.filter(recorded_at__date__lte=date.fromisoformat(recorded_at_end_str))
             except ValueError:
                 pass
         if line_id:

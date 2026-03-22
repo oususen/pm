@@ -399,6 +399,19 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                     started_at__lt=_build_business_boundary_datetime(d, day_offset=1)
                 )
 
+        # 計画日（plan_date）での絞り込み
+        plan_date_start = request.query_params.get('plan_date_start')
+        if plan_date_start:
+            d = parse_date(plan_date_start)
+            if d:
+                queryset = queryset.filter(plan_date__gte=d)
+
+        plan_date_end = request.query_params.get('plan_date_end')
+        if plan_date_end:
+            d = parse_date(plan_date_end)
+            if d:
+                queryset = queryset.filter(plan_date__lte=d)
+
         has_issue = request.query_params.get('has_issue')
         if has_issue is not None:
             normalized = str(has_issue).strip().lower()

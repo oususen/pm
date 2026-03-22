@@ -408,7 +408,8 @@ const showDone = ref(false)
 const showTomorrow = ref(false)
 const showYesterday = ref(false)
 
-const PAGE_SIZE = 25
+// タブレット横向き想定: 1ページ8件でリスト内スクロールなし
+const PAGE_SIZE = 8
 const currentPage = ref(1)
 const productCodeFilter = ref('')
 
@@ -957,6 +958,8 @@ async function save() {
     } else {
       syncSelectedAction()
     }
+    // 複数設備の楽観的更新がズレる場合に備え、サーバー状態で加工中表示を確定同期する
+    await fetchWorkStates()
     const label = ACTION_LABELS[data.operator_action] || data.operator_action
     if (data.operator_action === 'END' && data.backlog) {
       showToast(`${label}（累計${data.backlog.actual_qty}個）`)
@@ -1226,8 +1229,14 @@ function showToast(message, type = 'success') {
   overflow: hidden;
   gap: 0;
 }
-.col-controls, .col-list, .col-form, .col-photo {
+.col-controls, .col-form, .col-photo {
   overflow-y: auto;
+  padding: 12px;
+  border-right: 1px solid #dde1e8;
+}
+/* リスト列はスクロールなし（タブレット横向き、8件/ページで画面内に収める） */
+.col-list {
+  overflow-y: visible;
   padding: 12px;
   border-right: 1px solid #dde1e8;
 }
@@ -1319,8 +1328,8 @@ function showToast(message, type = 'success') {
 .plan-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px;
+  gap: 6px;
+  padding: 5px 8px;
   border-radius: 8px;
   background: #fff;
   border: 2px solid transparent;
@@ -1332,19 +1341,19 @@ function showToast(message, type = 'success') {
 .plan-item.selected { border-color: #4e7cbf; background: #e8f0fb; }
 .plan-item.done { opacity: 0.5; }
 .item-avatar {
-  width: 36px; height: 36px;
+  width: 28px; height: 28px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   color: #fff;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
   flex-shrink: 0;
 }
 .item-info { flex: 1; min-width: 0; }
 .item-code { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.item-sub { font-size: 11px; color: #888; }
+.item-sub { display: none; }
 .done-badge {
   font-size: 11px;
   background: #e8f5e9;

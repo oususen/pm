@@ -26,6 +26,15 @@
         <span>〜</span>
         <input v-model="endDate" type="date" />
       </div>
+      <div class="filter-row filter-row-date-mode">
+        <label>検索基準</label>
+        <button class="date-mode-btn" :class="{ active: dateSearchMode === 'plan' }" @click="dateSearchMode = 'plan'">計画日</button>
+        <button class="date-mode-btn" :class="{ active: dateSearchMode === 'actual' }" @click="dateSearchMode = 'actual'">実施日</button>
+        <span class="date-mode-hint">
+          <template v-if="dateSearchMode === 'plan'">計画日：その日の計画として登録された実績を検索します。</template>
+          <template v-else>実施日：計画日に関わらず、実際にその日に作業した実績を検索します（例：3/20の計画を3/22に実施した場合、3/22で検索できます）。</template>
+        </span>
+      </div>
       <!--
         板金タブではライン絞り込みを非表示にしている。
         理由: ブレーキライン(ProcessWorkSession)とスポットライン(BrakeLineRecord)で
@@ -389,6 +398,7 @@ const buildDefaultDateRange = () => {
 const defaultDateRange = buildDefaultDateRange()
 const startDate = ref(defaultDateRange.start)
 const endDate = ref(defaultDateRange.end)
+const dateSearchMode = ref('plan') // 'plan'=計画日, 'actual'=実施日
 const lineId = ref('')
 const processId = ref('')
 const productCode = ref('')
@@ -747,10 +757,10 @@ const loadSessions = async () => {
       // ── ブレーキラインデータ取得 ──
       let brakeItems = []
       if (fetchBrake) {
-        const brakeParams = {
-          start_date: startDate.value,
-          end_date: endDate.value,
-        }
+        // 実施日モード時は recorded_at で絞り込む（計画日と実施日が異なるケース対応）
+        const brakeParams = dateSearchMode.value === 'actual'
+          ? { recorded_at_start: startDate.value, recorded_at_end: endDate.value }
+          : { start_date: startDate.value, end_date: endDate.value }
         if (lineId.value) brakeParams.line_id = lineId.value
         if (processId.value) brakeParams.process_id = processId.value
         if (productCode.value.trim()) brakeParams.product_code = productCode.value.trim()
@@ -828,10 +838,12 @@ const loadSessions = async () => {
       return
     }
 
+    // 計画日モード時は plan_date で絞り込む（実施日モード時は started_at で絞り込む既存動作）
     const params = {
       limit: 1000,
-      start_date: startDate.value,
-      end_date: endDate.value,
+      ...(dateSearchMode.value === 'plan'
+        ? { plan_date_start: startDate.value, plan_date_end: endDate.value }
+        : { start_date: startDate.value, end_date: endDate.value }),
     }
     if (lineId.value) params.line_id = lineId.value
     if (processId.value) params.process_id = processId.value
@@ -877,6 +889,7 @@ const resetFilters = async () => {
   excludeZeroProduction.value = ''
   startDate.value = nextDefaultDateRange.start
   endDate.value = nextDefaultDateRange.end
+  dateSearchMode.value = 'plan'
   await loadSessions()
 }
 
@@ -1239,6 +1252,30 @@ onMounted(async () => {
 }
 .filter-row-period {
   grid-column: span 2;
+}
+.filter-row-date-mode {
+  grid-column: span 2;
+}
+.date-mode-btn {
+  padding: 4px 12px;
+  font-size: 13px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #475569;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.date-mode-btn.active {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+  font-weight: 700;
+}
+.date-mode-hint {
+  font-size: 12px;
+  color: #64748b;
+  margin-left: 8px;
 }
 .filter-row label {
   min-width: 44px;
