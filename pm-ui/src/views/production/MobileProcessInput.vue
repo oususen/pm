@@ -4,6 +4,7 @@
       <h2>{{ pageTitle }}</h2>
       <div class="header-info">
         <span class="date">{{ currentDate }}</span>
+        <button class="btn-inspection-nav" @click="openEquipmentInspection">設備点検</button>
       </div>
     </div>
 
@@ -542,12 +543,13 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
 import { t, getLocaleCode } from '@/i18n'
 
 const route = useRoute()
+const router = useRouter()
 const localeCode = computed(() => getLocaleCode())
 
 const processes = ref([])
@@ -3028,6 +3030,18 @@ const loadLines = async () => {
   }
 }
 
+function openEquipmentInspection() {
+  const processId = selectedProcessId.value || undefined
+  const lineId = selectedLineId.value || undefined
+  router.push({
+    path: '/quality/equipment-inspection/operation',
+    query: {
+      ...(processId ? { process_id: String(processId) } : {}),
+      ...(lineId ? { line_id: String(lineId) } : {}),
+    },
+  })
+}
+
 onMounted(async () => {
   await ensureAuth()
   await Promise.all([loadLines(), loadProcesses()])
@@ -3083,6 +3097,18 @@ onMounted(async () => {
   margin: 0;
   font-size: 18px;
   color: #1f2a44;
+}
+.btn-inspection-nav {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #0e7490;
+  background: #fff;
+  color: #0e7490;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .header-info .date {

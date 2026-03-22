@@ -261,6 +261,12 @@ class EquipmentInspectionTemplateSerializer(serializers.ModelSerializer):
     reviewed_by_name = serializers.SerializerMethodField()
     chief_reviewed_by_name = serializers.SerializerMethodField()
     approved_by_name = serializers.SerializerMethodField()
+    process_ids = serializers.PrimaryKeyRelatedField(
+        source="processes", many=True, read_only=True
+    )
+    line_ids = serializers.PrimaryKeyRelatedField(
+        source="lines", many=True, read_only=True
+    )
 
     class Meta:
         model = EquipmentInspectionTemplate
@@ -276,6 +282,10 @@ class EquipmentInspectionTemplateSerializer(serializers.ModelSerializer):
             "version",
             "status",
             "is_active",
+            "processes",
+            "process_ids",
+            "lines",
+            "line_ids",
             "created_by",
             "created_by_name",
             "reviewer_user",

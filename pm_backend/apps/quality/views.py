@@ -548,7 +548,13 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
                 status=EquipmentInspectionTemplate.STATUS_APPROVED,
                 is_active=True,
             )
-        return queryset
+        process_id = self.request.query_params.get("process_id")
+        line_id = self.request.query_params.get("line_id")
+        if process_id:
+            queryset = queryset.filter(processes__id=process_id)
+        elif line_id:
+            queryset = queryset.filter(lines__id=line_id)
+        return queryset.distinct()
 
     def get_object(self):
         instance = super().get_object()
@@ -839,6 +845,70 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(template)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def revise(self, request, pk=None):
+        """承認済みテンプレートを改訂（新版作成）する。"""
+        template = self.get_object()
+        if template.status != EquipmentInspectionTemplate.STATUS_APPROVED:
+            return Response(
+                {"detail": "承認済みのテンプレートのみ改訂できます。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        new_version = (
+            EquipmentInspectionTemplate.objects.filter(sheet_code=template.sheet_code)
+            .order_by("-version")
+            .values_list("version", flat=True)
+            .first()
+            or template.version
+        ) + 1
+
+        with transaction.atomic():
+            new_template = EquipmentInspectionTemplate.objects.create(
+                sheet_code=template.sheet_code,
+                sheet_name=template.sheet_name,
+                title=template.title,
+                source_sheet_name=template.source_sheet_name,
+                revision_date=None,
+                revision_notes="",
+                effective_from=None,
+                version=new_version,
+                status=EquipmentInspectionTemplate.STATUS_DRAFT,
+                is_active=template.is_active,
+                created_by=request.user,
+                reviewer_user=template.reviewer_user,
+                chief_user=template.chief_user,
+                approver_user=template.approver_user,
+            )
+            # 工程・ライン引き継ぎ
+            new_template.processes.set(template.processes.all())
+            new_template.lines.set(template.lines.all())
+
+            # 点検項目と付表を複製
+            for item in template.items.all():
+                attachments = list(item.attachments.all())
+                item.pk = None
+                item.id = None
+                item.template = new_template
+                item.save()
+                for att in attachments:
+                    att.pk = None
+                    att.id = None
+                    att.item = item
+                    att.save()
+
+            _log_workflow(
+                template=new_template,
+                action=EquipmentInspectionWorkflowLog.ACTION_CREATED,
+                actor=request.user,
+                from_status="",
+                to_status=new_template.status,
+                comment=f"v{template.version} からの改訂",
+            )
+
+        serializer = self.get_serializer(new_template)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"])
     def workflow_logs(self, request, pk=None):

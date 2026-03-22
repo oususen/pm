@@ -224,6 +224,9 @@ const isLocked = ref(false)
 const selectedSheetCode = ref(String(route.query.sheet_code || ""))
 const selectedDate = ref(String(route.query.date || new Date().toISOString().slice(0, 10)))
 const sectionType = ref(String(route.query.section_type || "DAILY").toUpperCase())
+// 工程/ラインからの絞り込み用（実績入力画面から渡される）
+const filterProcessId = ref(route.query.process_id ? String(route.query.process_id) : null)
+const filterLineId = ref(route.query.line_id ? String(route.query.line_id) : null)
 
 const createAttachment = (raw = {}) => ({
   local_key: raw.local_key || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -485,8 +488,25 @@ const syncQuery = () => {
 const loadTemplates = async () => {
   loadingOptions.value = true
   try {
-    const response = await api.qualityEquipmentInspections.list({ for_operation: true })
-    const rows = response.data?.results || response.data || []
+    const fetchOptions = async (params) => {
+      const response = await api.qualityEquipmentInspections.list({ for_operation: true, ...params })
+      return response.data?.results || response.data || []
+    }
+
+    let rows = []
+    if (filterProcessId.value) {
+      // 工程に紐付く設備を優先
+      rows = await fetchOptions({ process_id: filterProcessId.value })
+      // 該当なければラインにフォールバック
+      if (!rows.length && filterLineId.value) {
+        rows = await fetchOptions({ line_id: filterLineId.value })
+      }
+    } else if (filterLineId.value) {
+      rows = await fetchOptions({ line_id: filterLineId.value })
+    } else {
+      rows = await fetchOptions({})
+    }
+
     templateOptions.value = [...rows].sort((a, b) => {
       return String(a.sheet_code || "").localeCompare(String(b.sheet_code || ""), "ja")
     })

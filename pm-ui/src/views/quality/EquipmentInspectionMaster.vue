@@ -127,6 +127,22 @@
             <input type="checkbox" v-model="form.is_active" :disabled="!canEditFields" />
             有効
           </label>
+          <label class="wide">
+            対象工程（複数選択可）
+            <select v-model="form.processes" multiple :disabled="!canEditFields" size="4" class="multi-select">
+              <option v-for="p in processOptions" :key="p.id" :value="p.id">
+                {{ p.process_code }} - {{ p.process_name }}
+              </option>
+            </select>
+          </label>
+          <label class="wide">
+            対象ライン（複数選択可）
+            <select v-model="form.lines" multiple :disabled="!canEditFields" size="4" class="multi-select">
+              <option v-for="l in lineOptions" :key="l.id" :value="l.id">
+                {{ l.line_code }} - {{ l.line_name }}
+              </option>
+            </select>
+          </label>
         </div>
 
         <div v-if="form.rejection_comment" class="rejection-box">
@@ -438,6 +454,8 @@ const selectedTemplateId = ref(null)
 const isListHidden = ref(false)
 const equipmentOptions = ref([])
 const equipmentLoading = ref(false)
+const processOptions = ref([])
+const lineOptions = ref([])
 const attachmentDialogVisible = ref(false)
 const attachmentTargetKey = ref("")
 
@@ -463,6 +481,8 @@ const createEmptyForm = () => ({
   approver_user: null,
   approver_user_name: "",
   rejection_comment: "",
+  processes: [],
+  lines: [],
   items: [],
   workflow_logs: [],
 })
@@ -523,6 +543,7 @@ const canApprove = computed(() => {
 })
 
 const canReject = computed(() => canReview.value || canApprove.value)
+const canRevise = computed(() => canEdit.value && normalizedFormStatus.value === "APPROVED")
 const reviewActionLabel = computed(() => {
   if (normalizedFormStatus.value === "CHIEF_PENDING") return "係長承認"
   return "班長確認完了"
@@ -1163,6 +1184,8 @@ const toFormModel = (raw) => {
     approver_user: raw.approver_user || null,
     approver_user_name: raw.approver_user_name || "",
     rejection_comment: raw.rejection_comment || "",
+    processes: Array.isArray(raw.processes) ? raw.processes : [],
+    lines: Array.isArray(raw.lines) ? raw.lines : [],
     workflow_logs: Array.isArray(raw.workflow_logs) ? raw.workflow_logs : [],
     items: Array.isArray(raw.items)
       ? raw.items.map((item) => ({
@@ -1238,6 +1261,8 @@ const buildPayload = () => {
     effective_from: form.value.effective_from || null,
     version: Number(form.value.version || 1),
     is_active: Boolean(form.value.is_active),
+    processes: Array.isArray(form.value.processes) ? form.value.processes.map(Number) : [],
+    lines: Array.isArray(form.value.lines) ? form.value.lines.map(Number) : [],
     items: normalizedItems,
   }
 }
@@ -1255,6 +1280,19 @@ const loadEquipmentOptions = async () => {
     equipmentOptions.value = []
   } finally {
     equipmentLoading.value = false
+  }
+}
+
+const loadProcessAndLineOptions = async () => {
+  try {
+    const [procRes, lineRes] = await Promise.all([
+      api.processes.getProcesses({ is_active: true }),
+      api.lines.getLines(),
+    ])
+    processOptions.value = procRes.data?.results || procRes.data || []
+    lineOptions.value = lineRes.data?.results || lineRes.data || []
+  } catch (error) {
+    console.error("工程/ライン取得に失敗:", error)
   }
 }
 
@@ -1427,6 +1465,30 @@ const rejectTemplate = async () => {
   }
 }
 
+const reviseTemplate = async () => {
+  if (!form.value.id || !canRevise.value) return
+  const ok = window.confirm(
+    `v${form.value.version} を基に改訂版（v${form.value.version + 1}）を作成します。よろしいですか？`
+  )
+  if (!ok) return
+
+  actionLoading.value = true
+  try {
+    const response = await api.qualityEquipmentInspections.revise(form.value.id)
+    const newId = response.data?.id
+    await loadTemplateList()
+    if (newId) {
+      await loadTemplateDetail(newId)
+    }
+    alert(`改訂版（v${response.data?.version}）を作成しました。`)
+  } catch (error) {
+    console.error("改訂に失敗:", error)
+    alert(error.response?.data?.detail || "改訂に失敗しました。")
+  } finally {
+    actionLoading.value = false
+  }
+}
+
 watch(
   () => route.query.id,
   async (nextId) => {
@@ -1440,7 +1502,7 @@ watch(
 
 onMounted(async () => {
   if (!canView.value) return
-  await loadEquipmentOptions()
+  await Promise.all([loadEquipmentOptions(), loadProcessAndLineOptions()])
   await loadTemplateList()
 
   const routeTemplateId = Number(route.query.id || 0)
@@ -1596,6 +1658,14 @@ onMounted(async () => {
   flex-direction: row !important;
   align-items: center;
   margin-top: 18px;
+}
+.multi-select {
+  width: 100%;
+  min-height: 80px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 13px;
+  padding: 2px;
 }
 .workflow-actions {
   display: flex;

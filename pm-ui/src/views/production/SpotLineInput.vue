@@ -4,6 +4,7 @@
     <div class="header">
       <h2 class="page-title">スポットライン実績入力</h2>
       <button class="btn-scrap-nav" @click="router.push('/production/scrap-record')">仕損記録</button>
+      <button class="btn-inspection-nav" @click="openEquipmentInspection">設備点検</button>
       <div class="header-controls">
         <label class="header-label">日付</label>
         <input type="date" v-model="planDateStr" class="date-input" @change="loadPlan" />
@@ -1130,6 +1131,18 @@ function nextPage() { if (currentPage.value < totalPages.value) currentPage.valu
 function goFirstPage() { currentPage.value = 1 }
 function goLastPage() { currentPage.value = totalPages.value }
 
+function openEquipmentInspection() {
+  const processId = selectedProcessId.value || undefined
+  const lineId = lines.value[0]?.id || undefined
+  router.push({
+    path: '/quality/equipment-inspection/operation',
+    query: {
+      ...(processId ? { process_id: String(processId) } : {}),
+      ...(lineId ? { line_id: String(lineId) } : {}),
+    },
+  })
+}
+
 // ──────────────────────────────
 // トースト
 // ──────────────────────────────
@@ -1168,6 +1181,18 @@ function showToast(message, type = 'success') {
   border: 1px solid #c0714f;
   background: #fff;
   color: #c0714f;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.btn-inspection-nav {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #0e7490;
+  background: #fff;
+  color: #0e7490;
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;

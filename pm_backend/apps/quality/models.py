@@ -95,6 +95,19 @@ class EquipmentInspectionTemplate(models.Model):
     approved_at = models.DateTimeField(null=True, blank=True, verbose_name="部長承認日時")
     rejection_comment = models.TextField(blank=True, default="", verbose_name="差戻しコメント")
 
+    processes = models.ManyToManyField(
+        "masters.Process",
+        blank=True,
+        verbose_name="対象工程",
+        related_name="inspection_templates",
+    )
+    lines = models.ManyToManyField(
+        "masters.Line",
+        blank=True,
+        verbose_name="対象ライン",
+        related_name="inspection_templates",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="作成日時")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新日時")
 

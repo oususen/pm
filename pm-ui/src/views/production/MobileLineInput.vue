@@ -5,6 +5,7 @@
       <h2>ライン作業記録</h2>
       <div class="header-info">
         <span class="date">{{ currentDate }}</span>
+        <button class="btn-inspection-nav" @click="openEquipmentInspection">設備点検</button>
       </div>
     </div>
 
@@ -197,8 +198,10 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '@/api/client'
 
+const router = useRouter()
 const lines = ref([])
 const selectedLineId = ref('')
 const recentRecords = ref([])
@@ -397,6 +400,14 @@ const loadLines = async () => {
   }
 }
 
+function openEquipmentInspection() {
+  const lineId = selectedLineId.value || undefined
+  router.push({
+    path: '/quality/equipment-inspection/operation',
+    query: lineId ? { line_id: String(lineId) } : {},
+  })
+}
+
 onMounted(() => {
   loadLines()
 })
@@ -438,9 +449,22 @@ watch(
 
 .header-info {
   display: flex;
+  align-items: center;
+  gap: 8px;
   justify-content: space-between;
   font-size: 13px;
   color: #64748b;
+}
+.btn-inspection-nav {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid #0e7490;
+  background: #fff;
+  color: #0e7490;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .section {

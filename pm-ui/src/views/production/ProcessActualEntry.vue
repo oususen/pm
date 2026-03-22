@@ -9,6 +9,7 @@
       </div>
       <div class="page-actions">
         <button class="btn-secondary" @click="goOrders">製造指示一覧へ</button>
+        <button class="btn-inspection" @click="openEquipmentInspection">設備点検</button>
       </div>
     </div>
 
@@ -305,6 +306,17 @@ export default {
     goOrders() {
       this.$router.push('/production/orders')
     },
+    openEquipmentInspection() {
+      const processId = this.form.process || undefined
+      const lineId = this.form.line || undefined
+      this.$router.push({
+        path: '/quality/equipment-inspection/operation',
+        query: {
+          ...(processId ? { process_id: String(processId) } : {}),
+          ...(lineId ? { line_id: String(lineId) } : {}),
+        },
+      })
+    },
     formatNumber(value) {
       return Number(value || 0).toLocaleString('ja-JP', { minimumFractionDigits: 0, maximumFractionDigits: 3 })
     },
@@ -330,6 +342,17 @@ export default {
   margin: 0;
   color: #5c6670;
   font-size: 0.9rem;
+}
+.btn-inspection {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #0e7490;
+  background: #fff;
+  color: #0e7490;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .summary {

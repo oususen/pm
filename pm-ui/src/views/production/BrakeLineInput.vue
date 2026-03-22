@@ -4,6 +4,7 @@
     <div class="header">
       <h2 class="page-title">{{ t('brakeInput.pageTitle') }}</h2>
       <button class="btn-scrap-nav" @click="router.push('/production/scrap-record')">{{ t('productionMenu.tiles.scrapRecord') }}</button>
+      <button class="btn-inspection-nav" @click="openEquipmentInspection">設備点検</button>
       <div class="header-controls">
         <label class="header-label">{{ t('brakeInput.process') }}</label>
         <select v-model="selectedProcessId" class="process-select" @change="onProcessChange">
@@ -1399,6 +1400,18 @@ function nextPage() { if (currentPage.value < totalPages.value) currentPage.valu
 function goFirstPage() { currentPage.value = 1 }
 function goLastPage() { currentPage.value = totalPages.value }
 
+function openEquipmentInspection() {
+  const processId = selectedProcessId.value || undefined
+  const lineId = lines.value[0]?.id || undefined
+  router.push({
+    path: '/quality/equipment-inspection/operation',
+    query: {
+      ...(processId ? { process_id: String(processId) } : {}),
+      ...(lineId ? { line_id: String(lineId) } : {}),
+    },
+  })
+}
+
 // ──────────────────────────────
 // トースト
 // ──────────────────────────────
@@ -1451,6 +1464,19 @@ function showToast(message, type = 'success') {
   flex-shrink: 0;
 }
 .btn-scrap-nav:hover { background: #fff3ef; }
+.btn-inspection-nav {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #0e7490;
+  background: #fff;
+  color: #0e7490;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.btn-inspection-nav:hover { background: #ecfeff; }
 
 .page-title {
   font-size: 15px;

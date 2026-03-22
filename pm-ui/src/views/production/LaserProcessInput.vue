@@ -2,6 +2,7 @@
   <div class="laser-actual-page" :class="[`mode-${activeTab}`]">
 
     <div class="tab-bar">
+      <button class="btn-inspection-nav" @click="openEquipmentInspection">設備点検</button>
       <div class="tab-buttons">
         <button
           type="button"
@@ -590,10 +591,16 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import { getLocaleCode } from '@/i18n'
 
+const router = useRouter()
 const localeCode = computed(() => getLocaleCode())
+
+function openEquipmentInspection() {
+  router.push({ path: '/quality/equipment-inspection/operation' })
+}
 
 const roundTo = (value, scale) => {
   const num = Number(value || 0)
@@ -1671,6 +1678,18 @@ onMounted(async () => {
   width: 100%;
 }
 
+.btn-inspection-nav {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #0e7490;
+  background: #fff;
+  color: #0e7490;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 .tab-buttons {
   display: flex;
   gap: 8px;
