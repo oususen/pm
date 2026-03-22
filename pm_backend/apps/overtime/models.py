@@ -13,6 +13,58 @@ def apply_breaks(wall_minutes):
     return full_cycles * 120 + min(remainder, 120)
 
 
+def calculate_hours_with_pattern_breaks(start_time, end_time, work_pattern):
+    """
+    勤務パターンの実際の休憩時間を使って労働時間を計算（休日出勤用）。
+    開始〜終了時刻内に含まれる休憩だけ控除する。
+    Returns: (regular_hours, midnight_hours) as Decimal
+    """
+    base = datetime(2000, 1, 1)
+    start_dt = datetime.combine(base.date(), start_time)
+    end_dt = datetime.combine(base.date(), end_time)
+    if end_dt <= start_dt:
+        end_dt += timedelta(days=1)
+
+    wall_minutes = int((end_dt - start_dt).total_seconds() / 60)
+
+    # 勤務パターンの休憩時間のうち、start〜endに含まれる分を控除
+    break_minutes = 0
+    for brk in work_pattern.break_times.all():
+        bs = datetime.combine(base.date(), brk.break_start)
+        be = datetime.combine(base.date(), brk.break_end)
+        if be <= bs:
+            be += timedelta(days=1)
+        overlap_start = max(start_dt, bs)
+        overlap_end = min(end_dt, be)
+        if overlap_end > overlap_start:
+            break_minutes += int((overlap_end - overlap_start).total_seconds() / 60)
+
+    net_minutes = wall_minutes - break_minutes
+
+    # 深夜帯計算
+    midnight_zones = [
+        (datetime(2000, 1, 1, 22, 0), datetime(2000, 1, 2, 0, 0)),
+        (datetime(2000, 1, 2, 0, 0), datetime(2000, 1, 2, 5, 0)),
+    ]
+    midnight_wall = 0
+    for zone_start, zone_end in midnight_zones:
+        ov_s = max(start_dt, zone_start)
+        ov_e = min(end_dt, zone_end)
+        if ov_e > ov_s:
+            midnight_wall += int((ov_e - ov_s).total_seconds() / 60)
+
+    # 30分単位で切り捨て
+    work_minutes = (net_minutes // 30) * 30
+    ratio = work_minutes / net_minutes if net_minutes > 0 else 1
+    midnight_minutes = (int(midnight_wall * ratio) // 30) * 30
+    regular_minutes = work_minutes - midnight_minutes
+
+    return (
+        Decimal(str(regular_minutes / 60)),
+        Decimal(str(midnight_minutes / 60)),
+    )
+
+
 def calculate_overtime_hours(start_time, end_time):
     """
     開始・終了時刻から通常残業時間・深夜残業時間を計算。
@@ -137,9 +189,15 @@ class OvertimeApplication(models.Model):
     def save(self, *args, **kwargs):
         # 残業時間がある種別のみ時間数を自動計算
         if self.start_time and self.end_time:
-            self.hours, self.midnight_hours = calculate_overtime_hours(
-                self.start_time, self.end_time
-            )
+            # 休日出勤かつ勤務パターン指定あり: パターンの実休憩時間で計算
+            if self.application_type == 'holiday' and self.work_pattern_id:
+                self.hours, self.midnight_hours = calculate_hours_with_pattern_breaks(
+                    self.start_time, self.end_time, self.work_pattern
+                )
+            else:
+                self.hours, self.midnight_hours = calculate_overtime_hours(
+                    self.start_time, self.end_time
+                )
         else:
             self.hours = 0
             self.midnight_hours = 0

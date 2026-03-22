@@ -143,7 +143,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import SignaturePad from 'signature_pad'
 import api from '@/api/client'
@@ -230,6 +230,18 @@ const form = ref({
 })
 
 const workPatterns = ref([])
+const selectedPatternBreaks = ref([])  // 選択中パターンの休憩時間リスト
+
+// 勤務パターン変更時に休憩時間を取得
+watch(() => form.value.work_pattern, async (newVal) => {
+  if (!newVal) { selectedPatternBreaks.value = []; return }
+  try {
+    const res = await api.workPatterns.getBreakTimes(newVal)
+    selectedPatternBreaks.value = res.data?.results ?? res.data ?? []
+  } catch (e) {
+    selectedPatternBreaks.value = []
+  }
+})
 
 // 2時間ごとに10分休憩を控除（130分サイクル）
 function applyBreaks(wallMinutes) {
@@ -237,6 +249,22 @@ function applyBreaks(wallMinutes) {
   const fullCycles = Math.floor(wallMinutes / CYCLE)
   const remainder = wallMinutes % CYCLE
   return fullCycles * 120 + Math.min(remainder, 120)
+}
+
+// 勤務パターンの実休憩時間を使った控除（分）
+function calcBreakMinutesFromPattern(startMin, endMin, breaks) {
+  let total = 0
+  for (const brk of breaks) {
+    const [bsh, bsm] = brk.break_start.split(':').map(Number)
+    const [beh, bem] = brk.break_end.split(':').map(Number)
+    let bs = bsh * 60 + bsm
+    let be = beh * 60 + bem
+    if (be <= bs) be += 24 * 60
+    const overlapS = Math.max(startMin, bs)
+    const overlapE = Math.min(endMin, be)
+    if (overlapE > overlapS) total += overlapE - overlapS
+  }
+  return total
 }
 
 // 時間数プレビュー（フロントエンドで計算）
@@ -256,10 +284,16 @@ const previewHours = computed(() => {
   const midnightStart = 22 * 60
   const midnightEnd = 29 * 60
   const midnightWall = Math.max(0, Math.min(endMin, midnightEnd) - Math.max(startMin, midnightStart))
-  const regularWall = wallMin - midnightWall
 
-  // 休憩控除（2時間ごとに10分）→ 30分単位で切り捨て
-  const workMin = Math.floor(applyBreaks(wallMin) / 30) * 30
+  // 休憩控除: 休日出勤かつパターン選択あり → 実休憩時間、それ以外 → 汎用計算
+  let workMin
+  if (form.value.application_type === 'holiday' && selectedPatternBreaks.value.length > 0) {
+    const breakMin = calcBreakMinutesFromPattern(startMin, endMin, selectedPatternBreaks.value)
+    workMin = Math.floor((wallMin - breakMin) / 30) * 30
+  } else {
+    workMin = Math.floor(applyBreaks(wallMin) / 30) * 30
+  }
+
   // 深夜も30分単位で切り捨て、通常 = 合計 - 深夜
   const ratio = wallMin > 0 ? workMin / wallMin : 1
   const midnightMin = Math.floor(midnightWall * ratio / 30) * 30
