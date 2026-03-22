@@ -50,7 +50,7 @@
           <label class="form-label">勤務パターン</label>
           <select v-model="form.work_pattern" class="form-input form-select">
             <option :value="null">-- 選択してください（未選択=通常8H）--</option>
-            <option v-for="wp in workPatterns" :key="wp.id" :value="wp.id">
+            <option v-for="wp in holidayWorkPatterns" :key="wp.id" :value="wp.id">
               {{ wp.pattern_name }}（{{ wp.start_time }} 〜 {{ wp.end_time }}）
             </option>
           </select>
@@ -230,6 +230,12 @@ const form = ref({
 })
 
 const workPatterns = ref([])
+// 休日出勤パターンのみ: コードがk***または名称に「休日」を含む
+const holidayWorkPatterns = computed(() =>
+  workPatterns.value.filter(wp =>
+    /^k/i.test(wp.pattern_code) || wp.pattern_name.includes('休日')
+  )
+)
 const selectedPatternBreaks = ref([])  // 選択中パターンの休憩時間リスト
 
 // 勤務パターン変更時に休憩時間を取得
