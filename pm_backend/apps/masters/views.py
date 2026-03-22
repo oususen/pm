@@ -404,6 +404,7 @@ class ProcessViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 class LineViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Line.objects.all()
     serializer_class = LineSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['is_active', 'line_type']
     search_fields = ['line_code', 'line_name']
     ordering_fields = ['line_code', 'created_at']

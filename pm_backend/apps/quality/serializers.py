@@ -381,18 +381,30 @@ class EquipmentInspectionTemplateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         items_data = validated_data.pop("items", [])
+        processes_data = validated_data.pop("processes", None)
+        lines_data = validated_data.pop("lines", None)
         request = self.context.get("request")
         if request and request.user and request.user.is_authenticated:
             validated_data["created_by"] = request.user
         template = EquipmentInspectionTemplate.objects.create(**validated_data)
+        if processes_data is not None:
+            template.processes.set(processes_data)
+        if lines_data is not None:
+            template.lines.set(lines_data)
         self._save_items(template, items_data)
         return template
 
     def update(self, instance, validated_data):
         items_data = validated_data.pop("items", None)
+        processes_data = validated_data.pop("processes", None)
+        lines_data = validated_data.pop("lines", None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
+        if processes_data is not None:
+            instance.processes.set(processes_data)
+        if lines_data is not None:
+            instance.lines.set(lines_data)
         if items_data is not None:
             self._save_items(instance, items_data)
         return instance

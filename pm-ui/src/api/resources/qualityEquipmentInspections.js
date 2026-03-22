@@ -26,6 +26,9 @@ export const createQualityEquipmentInspectionsAPI = (client) => ({
   reject(id, comment = "") {
     return client.post(`/equipment-inspection-templates/${id}/reject/`, { comment });
   },
+  revise(id) {
+    return client.post(`/equipment-inspection-templates/${id}/revise/`);
+  },
   workflowLogs(id) {
     return client.get(`/equipment-inspection-templates/${id}/workflow_logs/`);
   },

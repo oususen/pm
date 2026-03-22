@@ -32,6 +32,22 @@
     <div class="master-layout" :class="{ 'create-mode': isListHidden }">
       <section v-if="!isListHidden" class="panel list-panel">
         <h3 class="panel-title">テンプレート一覧</h3>
+        <div class="list-filter-bar">
+          <input
+            v-model="listFilter.keyword"
+            class="list-filter-input"
+            placeholder="設備コード・名称"
+          />
+          <select v-model="listFilter.status" class="list-filter-select">
+            <option value="">状態：すべて</option>
+            <option value="DRAFT">下書き</option>
+            <option value="SUPERVISOR_PENDING">班長確認待ち</option>
+            <option value="CHIEF_PENDING">係長承認待ち</option>
+            <option value="MANAGER_PENDING">部長承認待ち</option>
+            <option value="APPROVED">承認済み</option>
+            <option value="REJECTED">差戻し</option>
+          </select>
+        </div>
         <div class="table-wrap">
           <table class="data-table compact">
             <thead>
@@ -46,7 +62,7 @@
             </thead>
             <tbody>
               <tr
-                v-for="row in templates"
+                v-for="row in filteredTemplates"
                 :key="row.id"
                 :class="{ selected: Number(selectedTemplateId) === Number(row.id) }"
                 @click="selectTemplate(row.id)"
@@ -65,7 +81,7 @@
             </tbody>
           </table>
         </div>
-        <div v-if="!templates.length && !loadingList" class="no-data">データがありません</div>
+        <div v-if="!filteredTemplates.length && !loadingList" class="no-data">データがありません</div>
       </section>
 
       <section class="panel edit-panel">
@@ -83,7 +99,7 @@
 
         <div class="form-grid">
           <label>
-            設備コード
+            設備コード <span class="required-mark">*</span>
             <select v-model="form.sheet_code" :disabled="!canEditFields || equipmentLoading" @change="handleSheetCodeChange">
               <option value="">選択してください</option>
               <option
@@ -96,11 +112,11 @@
             </select>
           </label>
           <label>
-            設備名
+            設備名 <span class="required-mark">*</span>
             <input v-model.trim="form.sheet_name" :disabled="!canEditFields" />
           </label>
           <label class="wide">
-            帳票タイトル
+            帳票タイトル <span class="required-mark">*</span>
             <input v-model.trim="form.title" :disabled="!canEditFields" />
           </label>
           <label>
@@ -108,41 +124,67 @@
             <input v-model.trim="form.source_sheet_name" :disabled="!canEditFields" />
           </label>
           <label>
-            改訂日
+            改訂日 <span class="required-mark">*</span>
             <input type="date" v-model="form.revision_date" :disabled="!canEditFields" />
           </label>
           <label class="wide">
-            改訂内容
+            改訂内容 <span class="required-mark">*</span>
             <textarea v-model="form.revision_notes" :disabled="!canEditFields" rows="2" />
           </label>
           <label>
-            運用開始日
+            運用開始日 <span class="required-mark">*</span>
             <input type="date" v-model="form.effective_from" :disabled="!canEditFields" />
           </label>
           <label>
-            版
+            版 <span class="required-mark">*</span>
             <input type="number" min="1" v-model.number="form.version" :disabled="!canEditFields" />
           </label>
           <label class="check-line">
             <input type="checkbox" v-model="form.is_active" :disabled="!canEditFields" />
             有効
           </label>
-          <label class="wide">
-            対象工程（複数選択可）
-            <select v-model="form.processes" multiple :disabled="!canEditFields" size="4" class="multi-select">
-              <option v-for="p in processOptions" :key="p.id" :value="p.id">
-                {{ p.process_code }} - {{ p.process_name }}
-              </option>
-            </select>
-          </label>
-          <label class="wide">
-            対象ライン（複数選択可）
-            <select v-model="form.lines" multiple :disabled="!canEditFields" size="4" class="multi-select">
-              <option v-for="l in lineOptions" :key="l.id" :value="l.id">
-                {{ l.line_code }} - {{ l.line_name }}
-              </option>
-            </select>
-          </label>
+          <div class="wide multi-select-group">
+            <span class="multi-select-label">対象工程（複数選択可）</span>
+            <div class="multi-select-row">
+              <select v-model="form.processes" multiple :disabled="!canEditFields" size="4" class="multi-select">
+                <option v-for="p in processOptions" :key="p.id" :value="p.id">
+                  {{ p.process_code }} - {{ p.process_name }}
+                </option>
+              </select>
+              <div class="selected-tags">
+                <span v-if="!selectedProcessTags.length" class="no-selection">未選択</span>
+                <span
+                  v-for="p in selectedProcessTags"
+                  :key="p.id"
+                  class="selection-tag"
+                >
+                  {{ p.process_code }} - {{ p.process_name }}
+                  <button v-if="canEditFields" class="tag-remove" @click="removeProcess(p.id)">×</button>
+                </span>
+              </div>
+            </div>
+          </div>
+          <div class="wide multi-select-group">
+            <span class="multi-select-label">対象ライン（複数選択可）</span>
+            <div class="multi-select-row">
+              <select v-model="form.lines" multiple :disabled="!canEditFields" size="4" class="multi-select">
+                <option v-for="l in lineOptions" :key="l.id" :value="l.id">
+                  {{ l.line_code }} - {{ l.line_name }}
+                </option>
+              </select>
+              <div class="selected-tags">
+                <span v-if="!selectedLineTags.length" class="no-selection">未選択</span>
+                <span
+                  v-for="l in selectedLineTags"
+                  :key="l.id"
+                  class="selection-tag"
+                >
+                  {{ l.line_code }} - {{ l.line_name }}
+                  <button v-if="canEditFields" class="tag-remove" @click="removeLine(l.id)">×</button>
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div v-if="form.rejection_comment" class="rejection-box">
@@ -167,6 +209,9 @@
           </button>
           <button class="btn-danger" @click="rejectTemplate" :disabled="!canReject || actionLoading">
             差戻し
+          </button>
+          <button class="btn-revise" @click="reviseTemplate" :disabled="!canRevise || actionLoading">
+            改訂
           </button>
         </div>
 
@@ -305,6 +350,29 @@
           <div v-if="!form.workflow_logs.length" class="no-data">履歴はありません</div>
         </div>
       </section>
+    </div>
+
+    <!-- 差戻しコメントモーダル -->
+    <div v-if="rejectDialogVisible" class="modal-backdrop" @click.self="cancelReject">
+      <div class="modal-panel reject-modal">
+        <div class="modal-header">
+          <h3 class="panel-title">差戻し</h3>
+        </div>
+        <div class="reject-modal-body">
+          <label class="reject-label">差戻しコメント</label>
+          <textarea
+            v-model="rejectComment"
+            class="reject-textarea"
+            rows="8"
+            placeholder="差戻しの理由や修正指示を入力してください。"
+            autofocus
+          />
+        </div>
+        <div class="reject-modal-footer">
+          <button class="btn-secondary" @click="cancelReject">キャンセル</button>
+          <button class="btn-danger" @click="confirmReject">差戻し実行</button>
+        </div>
+      </div>
     </div>
 
     <div v-if="attachmentDialogVisible" class="modal-backdrop" @click.self="closeAttachmentDialog">
@@ -458,13 +526,16 @@ const processOptions = ref([])
 const lineOptions = ref([])
 const attachmentDialogVisible = ref(false)
 const attachmentTargetKey = ref("")
+const rejectDialogVisible = ref(false)
+const rejectComment = ref("")
+const listFilter = ref({ keyword: "", status: "" })
 
 const createEmptyForm = () => ({
   id: null,
-  sheet_code: "SM-009",
-  sheet_name: "M6ナット専用機",
-  title: "設備始業点検表（SM-009：M6ナット専用機）",
-  source_sheet_name: "SM-009",
+  sheet_code: "",
+  sheet_name: "",
+  title: "",
+  source_sheet_name: "",
   created_at: "",
   revision_date: "",
   revision_notes: "",
@@ -544,6 +615,31 @@ const canApprove = computed(() => {
 
 const canReject = computed(() => canReview.value || canApprove.value)
 const canRevise = computed(() => canEdit.value && normalizedFormStatus.value === "APPROVED")
+
+const selectedProcessTags = computed(() =>
+  processOptions.value.filter((p) => (form.value.processes || []).map(Number).includes(Number(p.id)))
+)
+const selectedLineTags = computed(() =>
+  lineOptions.value.filter((l) => (form.value.lines || []).map(Number).includes(Number(l.id)))
+)
+const filteredTemplates = computed(() => {
+  const kw = listFilter.value.keyword.trim().toLowerCase()
+  const st = listFilter.value.status
+  return templates.value.filter((row) => {
+    if (st && row.status !== st) return false
+    if (kw) {
+      const haystack = `${row.sheet_code || ""} ${row.sheet_name || ""}`.toLowerCase()
+      if (!haystack.includes(kw)) return false
+    }
+    return true
+  })
+})
+const removeProcess = (id) => {
+  form.value.processes = (form.value.processes || []).filter((v) => Number(v) !== Number(id))
+}
+const removeLine = (id) => {
+  form.value.lines = (form.value.lines || []).filter((v) => Number(v) !== Number(id))
+}
 const reviewActionLabel = computed(() => {
   if (normalizedFormStatus.value === "CHIEF_PENDING") return "係長承認"
   return "班長確認完了"
@@ -974,6 +1070,10 @@ const applyEquipmentToForm = (code) => {
   if (!equipment) return
   form.value.sheet_name = String(equipment.equipment_name || form.value.sheet_name || "")
   form.value.source_sheet_name = String(equipment.equipment_code || form.value.source_sheet_name || "")
+  // タイトルが未入力のときだけ自動生成
+  if (!form.value.title.trim()) {
+    form.value.title = `設備始業点検表（${equipment.equipment_code}：${equipment.equipment_name}）`
+  }
 }
 
 const handleSheetCodeChange = () => {
@@ -1287,7 +1387,7 @@ const loadProcessAndLineOptions = async () => {
   try {
     const [procRes, lineRes] = await Promise.all([
       api.processes.getProcesses({ is_active: true }),
-      api.lines.getLines(),
+      api.lines.getLines({ line_type: 'PROD', is_active: true }),
     ])
     processOptions.value = procRes.data?.results || procRes.data || []
     lineOptions.value = lineRes.data?.results || lineRes.data || []
@@ -1341,12 +1441,6 @@ const startNewTemplate = async () => {
   isListHidden.value = true
   selectedTemplateId.value = null
   form.value = createEmptyForm()
-  if (equipmentOptions.value.length) {
-    const defaultEquipment = findEquipmentByCode(form.value.sheet_code) || equipmentOptions.value[0]
-    form.value.sheet_code = String(defaultEquipment?.equipment_code || "")
-    applyEquipmentToForm(form.value.sheet_code)
-  }
-  form.value.items = buildSm009Defaults()
   resizeAllTextareas()
 }
 
@@ -1354,31 +1448,65 @@ const toggleTemplateList = () => {
   isListHidden.value = !isListHidden.value
 }
 
-const saveTemplate = async () => {
-  if (!canEditFields.value) return
-  if (!form.value.sheet_code || !form.value.sheet_name || !form.value.title) {
-    alert("設備コード・設備名・帳票タイトルは必須です。")
-    return
+// フォームバリデーション（保存前チェック）
+const validateForm = () => {
+  if (!form.value.sheet_code) {
+    alert("設備コードは必須です。")
+    return false
+  }
+  if (!form.value.sheet_name) {
+    alert("設備名は必須です。")
+    return false
+  }
+  if (!form.value.title) {
+    alert("帳票タイトルは必須です。")
+    return false
+  }
+  if (!form.value.revision_date) {
+    alert("改訂日は必須です。")
+    return false
+  }
+  if (!form.value.effective_from) {
+    alert("運用開始日は必須です。")
+    return false
+  }
+  if (!String(form.value.revision_notes || "").trim()) {
+    alert("改訂内容は必須です。")
+    return false
+  }
+  if (!form.value.version) {
+    alert("版は必須です。")
+    return false
   }
   if (!form.value.items.length) {
     alert("点検項目を1件以上入力してください。")
-    return
+    return false
   }
+  return true
+}
+
+// フォームを保存してIDを返す（成功時）
+const saveTemplateInternal = async () => {
+  const payload = buildPayload()
+  let response
+  if (form.value.id) {
+    response = await api.qualityEquipmentInspections.update(form.value.id, payload)
+  } else {
+    response = await api.qualityEquipmentInspections.create(payload)
+  }
+  const savedId = response.data?.id
+  await loadTemplateList()
+  if (savedId) await loadTemplateDetail(savedId)
+  return savedId
+}
+
+const saveTemplate = async () => {
+  if (!canEditFields.value) return
+  if (!validateForm()) return
 
   saving.value = true
   try {
-    const payload = buildPayload()
-    let response
-    if (form.value.id) {
-      response = await api.qualityEquipmentInspections.update(form.value.id, payload)
-    } else {
-      response = await api.qualityEquipmentInspections.create(payload)
-    }
-    const savedId = response.data?.id
-    await loadTemplateList()
-    if (savedId) {
-      await loadTemplateDetail(savedId)
-    }
+    await saveTemplateInternal()
     alert("保存しました。")
   } catch (error) {
     console.error("設備点検テンプレート保存に失敗:", error)
@@ -1390,14 +1518,18 @@ const saveTemplate = async () => {
 
 const submitForReview = async () => {
   if (!form.value.id || !canSubmitForReview.value) return
-  const ok = window.confirm("確認依頼に進めます。よろしいですか？")
+  if (!validateForm()) return
+  const ok = window.confirm("編集内容を保存して確認依頼に進めます。よろしいですか？")
   if (!ok) return
 
   actionLoading.value = true
   try {
-    await api.qualityEquipmentInspections.submitForReview(form.value.id)
+    // 未保存の編集内容を先に保存してから確認依頼
+    const savedId = await saveTemplateInternal()
+    const targetId = savedId || form.value.id
+    await api.qualityEquipmentInspections.submitForReview(targetId)
     await loadTemplateList()
-    await loadTemplateDetail(form.value.id)
+    await loadTemplateDetail(targetId)
     alert("確認依頼を登録しました。")
   } catch (error) {
     console.error("確認依頼に失敗:", error)
@@ -1446,16 +1578,26 @@ const approveTemplate = async () => {
   }
 }
 
-const rejectTemplate = async () => {
+const rejectTemplate = () => {
   if (!form.value.id || !canReject.value) return
-  const comment = window.prompt("差戻しコメントを入力してください。", form.value.rejection_comment || "")
-  if (comment === null) return
+  rejectComment.value = form.value.rejection_comment || ""
+  rejectDialogVisible.value = true
+}
 
+const cancelReject = () => {
+  rejectDialogVisible.value = false
+  rejectComment.value = ""
+}
+
+const confirmReject = async () => {
+  if (!form.value.id) return
+  rejectDialogVisible.value = false
   actionLoading.value = true
   try {
-    await api.qualityEquipmentInspections.reject(form.value.id, comment)
+    await api.qualityEquipmentInspections.reject(form.value.id, rejectComment.value)
     await loadTemplateList()
     await loadTemplateDetail(form.value.id)
+    rejectComment.value = ""
     alert("差戻ししました。")
   } catch (error) {
     console.error("差戻しに失敗:", error)
@@ -1552,6 +1694,32 @@ onMounted(async () => {
   font-size: 16px;
   font-weight: 700;
   color: #0f172a;
+}
+.list-filter-bar {
+  display: flex;
+  gap: 8px;
+  padding: 6px 0 8px;
+  flex-wrap: wrap;
+}
+.list-filter-input {
+  flex: 1 1 120px;
+  min-width: 100px;
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.list-filter-select {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.required-mark {
+  color: #dc2626;
+  font-size: 12px;
+  margin-left: 2px;
 }
 .table-wrap {
   overflow: auto;
@@ -1659,13 +1827,61 @@ onMounted(async () => {
   align-items: center;
   margin-top: 18px;
 }
+.multi-select-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.multi-select-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+}
+.multi-select-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
 .multi-select {
-  width: 100%;
+  width: 220px;
+  flex-shrink: 0;
   min-height: 80px;
   border: 1px solid #cbd5e1;
   border-radius: 4px;
   font-size: 13px;
   padding: 2px;
+}
+.selected-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-content: flex-start;
+  flex: 1;
+}
+.no-selection {
+  font-size: 12px;
+  color: #94a3b8;
+}
+.selection-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #7dd3fc;
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.tag-remove {
+  background: none;
+  border: none;
+  color: #0369a1;
+  cursor: pointer;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
 }
 .workflow-actions {
   display: flex;
@@ -1814,11 +2030,44 @@ textarea {
   padding: 8px;
   border-radius: 4px;
 }
+.reject-modal {
+  width: 520px;
+  max-width: 95vw;
+}
+.reject-modal-body {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.reject-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+}
+.reject-textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 160px;
+  font-size: 14px;
+  line-height: 1.6;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 8px;
+}
+.reject-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid #e2e8f0;
+}
 .btn-primary,
 .btn-secondary,
 .btn-review,
 .btn-approve,
-.btn-danger {
+.btn-danger,
+.btn-revise {
   border: 1px solid transparent;
   border-radius: 4px;
   padding: 5px 10px;
@@ -1844,6 +2093,10 @@ textarea {
 }
 .btn-danger {
   background: #dc2626;
+  color: #fff;
+}
+.btn-revise {
+  background: #0e7490;
   color: #fff;
 }
 .btn-sm {

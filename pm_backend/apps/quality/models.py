@@ -404,10 +404,12 @@ class EquipmentInspectionTask(models.Model):
     TASK_SUPERVISOR_REVIEW = "SUPERVISOR_REVIEW"
     TASK_CHIEF_REVIEW = "CHIEF_REVIEW"
     TASK_MANAGER_APPROVE = "MANAGER_APPROVE"
+    TASK_CREATOR_FIX = "CREATOR_FIX"
     TASK_TYPE_CHOICES = [
         (TASK_SUPERVISOR_REVIEW, "班長確認"),
         (TASK_CHIEF_REVIEW, "係長確認"),
         (TASK_MANAGER_APPROVE, "部長承認"),
+        (TASK_CREATOR_FIX, "差戻し修正"),
     ]
 
     STATUS_PENDING = "PENDING"

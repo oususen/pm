@@ -842,6 +842,12 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
                     users=[template.created_by],
                     operator_name=_display_name(request.user),
                 )
+                _create_tasks_for_users(
+                    template=template,
+                    task_type=EquipmentInspectionTask.TASK_CREATOR_FIX,
+                    users=[template.created_by],
+                    due_date=_task_due_date(template),
+                )
 
         serializer = self.get_serializer(template)
         return Response(serializer.data)

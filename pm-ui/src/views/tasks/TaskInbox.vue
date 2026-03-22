@@ -117,6 +117,7 @@ const qualityTaskTypeMap = {
   SUPERVISOR_REVIEW: "班長確認",
   CHIEF_REVIEW: "係長承認",
   MANAGER_APPROVE: "部長承認",
+  CREATOR_FIX: "差戻し修正",
 }
 
 const statusMap = {
