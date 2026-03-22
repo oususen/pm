@@ -35,6 +35,10 @@
         <option value="">全員</option>
         <option v-for="n in nameOptions" :key="n" :value="n">{{ n }}</option>
       </select>
+      <select v-model="filterDate" class="filter-select">
+        <option value="">全日付</option>
+        <option v-for="d in dateOptions" :key="d" :value="d">{{ d }}</option>
+      </select>
     </div>
 
     <div v-if="loading" class="loading">読み込み中...</div>
@@ -184,6 +188,7 @@ const detailApp = ref(null)
 const filterTeam = ref('')
 const filterGroup = ref('')
 const filterName = ref('')
+const filterDate = ref('')
 
 const teamOptions = computed(() =>
   [...new Set(applications.value.map(a => a.team_name).filter(Boolean))].sort()
@@ -194,6 +199,9 @@ const groupOptions = computed(() =>
 const nameOptions = computed(() =>
   [...new Set(applications.value.map(a => a.applicant_name).filter(Boolean))].sort()
 )
+const dateOptions = computed(() =>
+  [...new Set(applications.value.map(a => a.work_date).filter(Boolean))].sort().reverse()
+)
 const filteredApplications = computed(() =>
   applications.value.filter(a =>
     (!filters.value.status || a.status === filters.value.status) &&
@@ -201,7 +209,8 @@ const filteredApplications = computed(() =>
     (!filters.value.work_date__lte || a.work_date <= filters.value.work_date__lte) &&
     (!filterTeam.value || a.team_name === filterTeam.value) &&
     (!filterGroup.value || a.group_name === filterGroup.value) &&
-    (!filterName.value || a.applicant_name === filterName.value)
+    (!filterName.value || a.applicant_name === filterName.value) &&
+    (!filterDate.value || a.work_date === filterDate.value)
   )
 )
 const totalHours = computed(() =>

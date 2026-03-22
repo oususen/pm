@@ -21,6 +21,10 @@
         <option value="">{{ t('approvalList.allGroups') }}</option>
         <option v-for="g in groupOptions" :key="g" :value="g">{{ g }}</option>
       </select>
+      <select v-model="filterDate" class="filter-select">
+        <option value="">全日付</option>
+        <option v-for="d in dateOptions" :key="d" :value="d">{{ d }}</option>
+      </select>
     </div>
 
     <div v-if="loading" class="loading">{{ t('approvalList.loading') }}</div>
@@ -38,6 +42,7 @@
             <th>{{ t('approvalList.col.group') }}</th>
             <th>{{ t('approvalList.col.applicant') }}</th>
             <th>{{ t('approvalList.col.type') }}</th>
+            <th>勤務時間</th>
             <th>{{ t('approvalList.col.timeRange') }}</th>
             <th>{{ t('approvalList.col.hours') }}</th>
             <th>{{ t('approvalList.col.reason') }}</th>
@@ -56,6 +61,7 @@
             <td>{{ app.group_name || '-' }}</td>
             <td>{{ app.applicant_name }}</td>
             <td>{{ app.type_display }}</td>
+            <td class="nowrap time-cell">{{ app.work_start_time || '-' }}{{ app.work_start_time ? ' 〜 ' + (app.scheduled_end_time || '-') : '' }}</td>
             <td class="nowrap time-cell">{{ app.start_time }} 〜 {{ app.end_time }}</td>
             <td class="num">
               {{ Math.round((parseFloat(app.hours) + parseFloat(app.midnight_hours)) * 10) / 10 }}H
@@ -199,6 +205,7 @@ const applications = ref([])
 const loading = ref(false)
 const filterTeam = ref('')
 const filterGroup = ref('')
+const filterDate = ref('')
 
 const teamOptions = computed(() =>
   [...new Set(applications.value.map(a => a.team_name).filter(Boolean))].sort()
@@ -206,10 +213,14 @@ const teamOptions = computed(() =>
 const groupOptions = computed(() =>
   [...new Set(applications.value.map(a => a.group_name).filter(Boolean))].sort()
 )
+const dateOptions = computed(() =>
+  [...new Set(applications.value.map(a => a.work_date).filter(Boolean))].sort().reverse()
+)
 const filteredApplications = computed(() =>
   applications.value.filter(a =>
     (!filterTeam.value || a.team_name === filterTeam.value) &&
-    (!filterGroup.value || a.group_name === filterGroup.value)
+    (!filterGroup.value || a.group_name === filterGroup.value) &&
+    (!filterDate.value || a.work_date === filterDate.value)
   )
 )
 const targetApp = ref(null)
@@ -223,11 +234,18 @@ const acting = ref(false)
 const selectedIds = ref([])
 
 const allSelected = computed(() =>
-  applications.value.length > 0 && selectedIds.value.length === applications.value.length
+  filteredApplications.value.length > 0 &&
+  filteredApplications.value.every(a => selectedIds.value.includes(a.id))
 )
 
 function toggleAll(e) {
-  selectedIds.value = e.target.checked ? applications.value.map(a => a.id) : []
+  if (e.target.checked) {
+    const filteredIds = filteredApplications.value.map(a => a.id)
+    selectedIds.value = [...new Set([...selectedIds.value, ...filteredIds])]
+  } else {
+    const filteredIds = new Set(filteredApplications.value.map(a => a.id))
+    selectedIds.value = selectedIds.value.filter(id => !filteredIds.has(id))
+  }
 }
 
 const selectedApps = computed(() =>

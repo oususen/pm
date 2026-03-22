@@ -20,7 +20,15 @@
         <option value="">全グループ</option>
         <option v-for="g in groupOptions" :key="g" :value="g">{{ g }}</option>
       </select>
-      <input v-model="filterName" type="text" class="filter-input name-filter" placeholder="氏名で絞込" />
+      <select v-model="filterName" class="filter-select">
+        <option value="">全員</option>
+        <option v-for="n in nameOptions" :key="n" :value="n">{{ n }}</option>
+      </select>
+      <select v-model="filterPaidLeave" class="filter-select">
+        <option value="">有給：全て</option>
+        <option value="any">有給あり</option>
+        <option value="none">有給なし</option>
+      </select>
     </div>
 
     <div v-if="loading" class="loading">読み込み中...</div>
@@ -42,13 +50,17 @@
               <th>グループ</th>
               <th>日付</th>
               <th>種別</th>
+              <th>開始時間</th>
+              <th>終了時間</th>
               <th>労働時間(H)</th>
               <th>残業(H)</th>
               <th>休日出勤(H)</th>
+              <th>所定外(H)</th>
               <th>午前半休</th>
               <th>午後半休</th>
               <th>前日有給</th>
               <th>連続有給</th>
+              <th>有給数</th>
             </tr>
           </thead>
           <tbody>
@@ -58,25 +70,31 @@
               <td class="team-cell">{{ row.group }}</td>
               <td class="date-cell">{{ row.date }}</td>
               <td class="type-cell">{{ row.typeLabel }}</td>
+              <td class="time-cell nowrap">{{ row.startTime || '—' }}</td>
+              <td class="time-cell nowrap">{{ row.endTime || '—' }}</td>
               <td class="num-cell work">{{ row.workH > 0 ? row.workH : '—' }}</td>
               <td class="num-cell" :class="{ highlight: row.overtimeH > 0 }">{{ row.overtimeH > 0 ? row.overtimeH : '—' }}</td>
               <td class="num-cell" :class="{ highlight: row.holidayH > 0 }">{{ row.holidayH > 0 ? row.holidayH : '—' }}</td>
+              <td class="num-cell" :class="{ highlight: (row.overtimeH + row.holidayH) > 0 }">{{ (row.overtimeH + row.holidayH) > 0 ? Math.round((row.overtimeH + row.holidayH) * 10) / 10 : '—' }}</td>
               <td class="num-cell leave">{{ row.halfDayAm ? '○' : '—' }}</td>
               <td class="num-cell leave">{{ row.halfDayPm ? '○' : '—' }}</td>
               <td class="num-cell leave">{{ row.paidLeave ? '○' : '—' }}</td>
               <td class="num-cell leave">{{ row.paidLeaveConsec ? '○' : '—' }}</td>
+              <td class="num-cell leave">{{ row.paidLeaveCount > 0 ? row.paidLeaveCount : '—' }}</td>
             </tr>
           </tbody>
           <tfoot>
             <tr class="total-row">
-              <td class="total-label" colspan="5">合計</td>
+              <td class="total-label" colspan="7">合計</td>
               <td class="num-cell work">{{ totals.workH }}</td>
               <td class="num-cell highlight">{{ totals.overtimeH || '—' }}</td>
               <td class="num-cell highlight">{{ totals.holidayH || '—' }}</td>
+              <td class="num-cell highlight">{{ (totals.overtimeH + totals.holidayH) || '—' }}</td>
               <td class="num-cell leave">{{ totals.halfDayAm || '—' }}</td>
               <td class="num-cell leave">{{ totals.halfDayPm || '—' }}</td>
               <td class="num-cell leave">{{ totals.paidLeave || '—' }}</td>
               <td class="num-cell leave">{{ totals.paidLeaveConsec || '—' }}</td>
+              <td class="num-cell leave">{{ totals.paidLeaveCount || '—' }}</td>
             </tr>
           </tfoot>
         </table>
@@ -106,15 +124,20 @@ const rows = ref([])
 const filterTeam = ref('')
 const filterGroup = ref('')
 const filterName = ref('')
+const filterPaidLeave = ref('')
 
 const teamOptions = computed(() => [...new Set(rows.value.map(r => r.team).filter(Boolean))].sort())
 const groupOptions = computed(() => [...new Set(rows.value.map(r => r.group).filter(Boolean))].sort())
+const nameOptions = computed(() => [...new Set(rows.value.map(r => r.name).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ja')))
 
 const filteredRows = computed(() =>
   rows.value.filter(r =>
     (!filterTeam.value || r.team === filterTeam.value) &&
     (!filterGroup.value || r.group === filterGroup.value) &&
-    (!filterName.value || r.name.includes(filterName.value))
+    (!filterName.value || r.name === filterName.value) &&
+    (!filterPaidLeave.value ||
+      (filterPaidLeave.value === 'any' && r.paidLeaveCount > 0) ||
+      (filterPaidLeave.value === 'none' && !r.paidLeaveCount))
   )
 )
 
@@ -155,6 +178,7 @@ const totals = computed(() => {
     halfDayPm: filteredRows.value.filter(r => r.halfDayPm).length,
     paidLeave: filteredRows.value.filter(r => r.paidLeave).length,
     paidLeaveConsec: filteredRows.value.filter(r => r.paidLeaveConsec).length,
+    paidLeaveCount: Math.round(filteredRows.value.reduce((s, r) => s + (r.paidLeaveCount || 0), 0) * 10) / 10,
   }
 })
 
@@ -208,6 +232,8 @@ async function load() {
           group,
           date,
           typeLabel,
+          startTime: app.start_time || '',
+          endTime: app.end_time || '',
           workH: 0,
           overtimeH: 0,
           holidayH: 0,
@@ -215,6 +241,7 @@ async function load() {
           halfDayPm: false,
           paidLeave: false,
           paidLeaveConsec: false,
+          paidLeaveCount: 0,
         }
         if (app.application_type === 'overtime') {
           row.workH = Math.round((8 + h) * 10) / 10
@@ -223,17 +250,29 @@ async function load() {
           row.workH = Math.round((4 + h) * 10) / 10
           row.overtimeH = h
           row.halfDayAm = true
+          row.paidLeaveCount = 0.5
         } else if (app.application_type === 'holiday') {
-          // 勤務パターンが設定されていればその時間を基準、なければ8H
-          const baseH = app.work_pattern_hours != null ? parseFloat(app.work_pattern_hours) : 8
-          row.workH = Math.round((baseH + h) * 10) / 10
-          row.holidayH = row.workH  // 休日出勤は全時間が休日出勤時間
+          if (app.work_start_time) {
+            // 旧形式: work_start_timeあり → hoursは残業分のみ、パターン基準 + 残業
+            const baseH = app.work_pattern_hours != null ? parseFloat(app.work_pattern_hours) : 8
+            row.workH = Math.round((baseH + h) * 10) / 10
+          } else if (h > 0) {
+            // 新形式: 勤務時間帯入力あり → hoursがそのまま総勤務時間
+            row.workH = h
+          } else {
+            // 新形式: 勤務時間帯未入力 → パターン時間 or 8H
+            row.workH = app.work_pattern_hours != null ? parseFloat(app.work_pattern_hours) : 8
+          }
+          row.holidayH = row.workH
         } else if (app.application_type === 'half_day_pm') {
           row.halfDayPm = true
+          row.paidLeaveCount = 0.5
         } else if (app.application_type === 'paid_leave') {
           row.paidLeave = true
+          row.paidLeaveCount = 1
         } else if (app.application_type === 'paid_leave_consec') {
           row.paidLeaveConsec = true
+          row.paidLeaveCount = 1
         }
         result.push(row)
       }
@@ -253,24 +292,29 @@ async function load() {
 }
 
 function exportExcel() {
-  const headers = ['氏名', '班', 'グループ', '日付', '種別', '労働時間(H)', '残業(H)', '休日出勤(H)', '午前半休', '午後半休', '前日有給', '連続有給']
+  const headers = ['氏名', '班', 'グループ', '日付', '種別', '開始時間', '終了時間', '労働時間(H)', '残業(H)', '休日出勤(H)', '所定外(H)', '午前半休', '午後半休', '前日有給', '連続有給', '有給数']
   const data = filteredRows.value.map(r => [
     r.name, r.team, r.group, r.date, r.typeLabel,
+    r.startTime || '', r.endTime || '',
     r.workH || '', r.overtimeH || '', r.holidayH || '',
+    Math.round((r.overtimeH + r.holidayH) * 10) / 10 || '',
     r.halfDayAm ? '○' : '', r.halfDayPm ? '○' : '',
     r.paidLeave ? '○' : '', r.paidLeaveConsec ? '○' : '',
+    r.paidLeaveCount || '',
   ])
   // 合計行
   data.push([
-    '合計', '', '', '', '',
+    '合計', '', '', '', '', '', '',
     totals.value.workH, totals.value.overtimeH || '', totals.value.holidayH || '',
+    (totals.value.overtimeH + totals.value.holidayH) || '',
     totals.value.halfDayAm || '', totals.value.halfDayPm || '',
     totals.value.paidLeave || '', totals.value.paidLeaveConsec || '',
+    totals.value.paidLeaveCount || '',
   ])
 
   const ws = XLSX.utils.aoa_to_sheet([headers, ...data])
   // 列幅設定
-  ws['!cols'] = [18, 8, 10, 12, 10, 12, 10, 12, 8, 8, 8, 8].map(w => ({ wch: w }))
+  ws['!cols'] = [18, 8, 10, 12, 10, 8, 8, 12, 10, 12, 10, 8, 8, 8, 8, 8].map(w => ({ wch: w }))
 
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, '労働時間統計')

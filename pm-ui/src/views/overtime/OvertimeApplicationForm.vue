@@ -86,7 +86,7 @@
         <div v-if="form.application_type === 'holiday'" class="form-row">
           <label class="form-label">勤務時間帯</label>
           <div class="time-range">
-            <input type="text" v-model="form.start_time" class="form-input time-input" placeholder="08:00" maxlength="5" @blur="formatTime('start_time')" />
+            <input type="text" v-model="form.start_time" class="form-input time-input" placeholder="08:00" maxlength="5" @blur="onHolidayStartBlur" />
             <span class="tilde">〜</span>
             <input type="text" v-model="form.end_time" class="form-input time-input" placeholder="15:00" maxlength="5" @blur="formatTime('end_time')" />
           </div>
@@ -260,12 +260,18 @@ function applyBreaks(wallMinutes) {
 // 勤務パターンの実休憩時間を使った控除（分）
 function calcBreakMinutesFromPattern(startMin, endMin, breaks) {
   let total = 0
+  const crossesMidnight = endMin > 24 * 60
   for (const brk of breaks) {
     const [bsh, bsm] = brk.break_start.split(':').map(Number)
     const [beh, bem] = brk.break_end.split(':').map(Number)
     let bs = bsh * 60 + bsm
     let be = beh * 60 + bem
     if (be <= bs) be += 24 * 60
+    // 日をまたぐシフトで深夜後の早朝休憩（00:00台など）を翌日扱いに補正
+    if (crossesMidnight && bs < 12 * 60 && bs < startMin) {
+      bs += 24 * 60
+      be += 24 * 60
+    }
     const overlapS = Math.max(startMin, bs)
     const overlapE = Math.min(endMin, be)
     if (overlapE > overlapS) total += overlapE - overlapS
@@ -327,6 +333,24 @@ function addMinutes(hhmm, minutes) {
 // フォーカスが外れたとき自動整形
 function formatTime(field) {
   form.value[field] = toHHMM(form.value[field])
+}
+
+// 休日出勤の勤務時間帯開始blur: 整形 + パターン開始時間より早ければ補正
+function onHolidayStartBlur() {
+  formatTime('start_time')
+  const selected = workPatterns.value.find(wp => wp.id === form.value.work_pattern)
+  if (!selected || !selected.start_time) return
+  const patternStart = toHHMM(selected.start_time)
+  if (!patternStart) return
+  const [ph, pm] = patternStart.split(':').map(Number)
+  const patternMin = ph * 60 + pm
+  const entered = toHHMM(form.value.start_time)
+  if (!entered || !entered.includes(':')) return
+  const [eh, em] = entered.split(':').map(Number)
+  const enteredMin = eh * 60 + em
+  if (enteredMin < patternMin) {
+    form.value.start_time = patternStart
+  }
 }
 
 // 勤務開始時間のblur: 整形 + 定時終了・残業開始を自動セット

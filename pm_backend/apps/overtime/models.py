@@ -29,10 +29,15 @@ def calculate_hours_with_pattern_breaks(start_time, end_time, work_pattern):
 
     # 勤務パターンの休憩時間のうち、start〜endに含まれる分を控除
     break_minutes = 0
+    crosses_midnight = end_dt.date() > base.date()
     for brk in work_pattern.break_times.all():
         bs = datetime.combine(base.date(), brk.break_start)
         be = datetime.combine(base.date(), brk.break_end)
         if be <= bs:
+            be += timedelta(days=1)
+        # 日をまたぐシフトで深夜後の早朝休憩（00:xx台など）を翌日扱いに補正
+        if crosses_midnight and bs.hour < 12 and bs < start_dt:
+            bs += timedelta(days=1)
             be += timedelta(days=1)
         overlap_start = max(start_dt, bs)
         overlap_end = min(end_dt, be)
