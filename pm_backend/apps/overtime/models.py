@@ -92,6 +92,13 @@ class OvertimeApplication(models.Model):
     start_time = models.TimeField(null=True, blank=True, verbose_name='残業開始時刻')
     end_time = models.TimeField(null=True, blank=True, verbose_name='残業終了時刻')
     end_date = models.DateField(null=True, blank=True, verbose_name='終了日（連続有給用）')
+    work_pattern = models.ForeignKey(
+        'masters.WorkPattern',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='overtime_applications',
+        verbose_name='勤務パターン（休日出勤用）',
+    )
     hours = models.DecimalField(
         max_digits=5, decimal_places=1, default=0, verbose_name='時間外時間(H)'
     )

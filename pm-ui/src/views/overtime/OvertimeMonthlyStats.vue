@@ -224,7 +224,9 @@ async function load() {
           row.overtimeH = h
           row.halfDayAm = true
         } else if (app.application_type === 'holiday') {
-          row.workH = Math.round((8 + h) * 10) / 10
+          // 勤務パターンが設定されていればその時間を基準、なければ8H
+          const baseH = app.work_pattern_hours != null ? parseFloat(app.work_pattern_hours) : 8
+          row.workH = Math.round((baseH + h) * 10) / 10
           row.holidayH = row.workH  // 休日出勤は全時間が休日出勤時間
         } else if (app.application_type === 'half_day_pm') {
           row.halfDayPm = true

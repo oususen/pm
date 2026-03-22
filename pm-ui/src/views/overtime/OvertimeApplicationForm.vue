@@ -45,6 +45,17 @@
           <input type="date" v-model="form.end_date" class="form-input" required />
         </div>
 
+        <!-- 休日出勤: 勤務パターン選択 -->
+        <div v-if="form.application_type === 'holiday'" class="form-row">
+          <label class="form-label">勤務パターン</label>
+          <select v-model="form.work_pattern" class="form-input form-select">
+            <option :value="null">-- 選択してください（未選択=通常8H）--</option>
+            <option v-for="wp in workPatterns" :key="wp.id" :value="wp.id">
+              {{ wp.pattern_name }}（{{ wp.start_time }} 〜 {{ wp.end_time }}）
+            </option>
+          </select>
+        </div>
+
         <p v-if="form.application_type === 'half_day_am'" class="half-day-note">
           {{ t('overtime.halfDayNote') }}
         </p>
@@ -204,7 +215,10 @@ const form = ref({
   start_time: '',
   end_time: '',
   reason: '',
+  work_pattern: null,
 })
+
+const workPatterns = ref([])
 
 // 2時間ごとに10分休憩を控除（130分サイクル）
 function applyBreaks(wallMinutes) {
@@ -304,6 +318,14 @@ onMounted(async () => {
     signaturePad = new SignaturePad(signCanvas.value, { penColor: '#1f2a44' })
   }
 
+  // 勤務パターン取得
+  try {
+    const res = await api.workPatterns.getWorkPatterns()
+    workPatterns.value = res.data?.results ?? res.data ?? []
+  } catch (e) {
+    console.warn('勤務パターン取得失敗:', e)
+  }
+
   if (isEdit.value) {
     try {
       const res = await api.overtime.getApplication(props.id)
@@ -317,6 +339,7 @@ onMounted(async () => {
         start_time: d.start_time || '',
         end_time: d.end_time || '',
         reason: d.reason,
+        work_pattern: d.work_pattern || null,
       }
     } catch (e) {
       errorMsg.value = '申請データの取得に失敗しました。'
