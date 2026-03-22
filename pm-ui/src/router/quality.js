@@ -17,6 +17,18 @@ const quality = [
     component: () => import("@/views/quality/EquipmentInspectionMaster.vue"),
     meta: { pageTitle: "点検項目作成" },
   },
+  {
+    path: "/quality/equipment-inspection/operation",
+    name: "EquipmentInspectionOperation",
+    component: () => import("@/views/quality/EquipmentInspectionOperation.vue"),
+    meta: { pageTitle: "点検実施" },
+  },
+  {
+    path: "/quality/equipment-inspection/monthly-review",
+    name: "EquipmentInspectionMonthlyReview",
+    component: () => import("@/views/quality/EquipmentInspectionMonthlyReview.vue"),
+    meta: { pageTitle: "月間確認" },
+  },
 ];
 
 export default quality;

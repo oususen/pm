@@ -7,10 +7,18 @@
         <div class="icon-box">📝</div>
         <div class="label">点検項目作成</div>
       </RouterLink>
+      <RouterLink to="/quality/equipment-inspection/operation" class="master-tile">
+        <div class="icon-box">🛠</div>
+        <div class="label">点検実施</div>
+      </RouterLink>
+      <RouterLink to="/quality/equipment-inspection/monthly-review" class="master-tile">
+        <div class="icon-box">📅</div>
+        <div class="label">月間確認</div>
+      </RouterLink>
     </div>
 
     <p class="helper-text">
-      将来的に作業標準書も同じ品質メニュー配下に追加予定です。
+      点検項目作成・日次実施・週次/月次確認を同じ設備点検表メニューで運用します。
     </p>
   </div>
 </template>

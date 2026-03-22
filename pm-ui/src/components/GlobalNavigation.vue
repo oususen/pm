@@ -383,12 +383,19 @@ const loadPendingTaskCount = async () => {
     return
   }
   try {
-    const response = await api.purchaseOrderProposals.listTasks({
-      assigned_to_me: true,
-      status: 'PENDING',
-    })
-    const rows = response.data || []
-    pendingTaskCount.value = Array.isArray(rows) ? rows.length : 0
+    const [purchaseResponse, qualityResponse] = await Promise.all([
+      api.purchaseOrderProposals.listTasks({
+        assigned_to_me: true,
+        status: 'PENDING',
+      }),
+      api.qualityEquipmentInspections.listTasks({
+        assigned_to_me: true,
+        status: 'PENDING',
+      }),
+    ])
+    const purchaseRows = Array.isArray(purchaseResponse.data) ? purchaseResponse.data : []
+    const qualityRows = Array.isArray(qualityResponse.data) ? qualityResponse.data : []
+    pendingTaskCount.value = purchaseRows.length + qualityRows.length
   } catch (error) {
     console.error('タスク件数の取得に失敗しました:', error)
     pendingTaskCount.value = 0
@@ -1061,4 +1068,3 @@ const handleLogout = async () => {
   }
 }
 </style>
-

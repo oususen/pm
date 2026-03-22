@@ -1,13 +1,33 @@
+import os
+import uuid
+from datetime import date, datetime, timedelta
+
 from django.contrib.auth import get_user_model
+from django.core.files.storage import default_storage
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
-from rest_framework import status, viewsets
+from rest_framework import parsers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
-from .models import EquipmentInspectionTemplate, EquipmentInspectionWorkflowLog
+from notifications.models import Notification
+
+from .models import (
+    EquipmentInspectionConfirmation,
+    EquipmentInspectionItem,
+    EquipmentInspectionRecord,
+    EquipmentInspectionTask,
+    EquipmentInspectionTemplate,
+    EquipmentInspectionWorkflowLog,
+)
 from .serializers import (
+    EquipmentInspectionConfirmationSerializer,
+    EquipmentInspectionItemAttachmentSerializer,
+    EquipmentInspectionRecordSerializer,
+    EquipmentInspectionTaskSerializer,
     EquipmentInspectionTemplateSerializer,
     EquipmentInspectionWorkflowLogSerializer,
 )
@@ -25,6 +45,13 @@ def _role_rank(role_value):
     return ROLE_RANK.get(str(role_value or "").strip(), 0)
 
 
+def _reviewer_sort_key(user):
+    return (
+        _role_rank(getattr(getattr(user, "profile", None), "role", "")),
+        user.id,
+    )
+
+
 def _display_name(user):
     if not user:
         return ""
@@ -32,6 +59,199 @@ def _display_name(user):
     if full_name:
         return full_name
     return (user.username or user.email or "").strip()
+
+
+def _section_type_label(value):
+    if value == EquipmentInspectionItem.SECTION_QUARTERLY:
+        return "定期実測"
+    return "日次点検"
+
+
+def _build_media_url(raw_url):
+    if not raw_url:
+        return raw_url
+    path = str(raw_url)
+    if path.startswith(("http://", "https://")):
+        return path
+    if path.startswith("/"):
+        return path
+    return f"/media/{path.lstrip('/')}"
+
+
+def _template_summary(template):
+    if not template:
+        return None
+    return {
+        "id": template.id,
+        "sheet_code": template.sheet_code,
+        "sheet_name": template.sheet_name,
+        "title": template.title,
+        "version": template.version,
+        "status": template.status,
+        "effective_from": template.effective_from.isoformat() if template.effective_from else None,
+    }
+
+
+def _month_start(target_value):
+    return date(target_value.year, target_value.month, 1)
+
+
+def _month_end(target_value):
+    month_first = _month_start(target_value)
+    if month_first.month == 12:
+        next_month = date(month_first.year + 1, 1, 1)
+    else:
+        next_month = date(month_first.year, month_first.month + 1, 1)
+    return next_month - timedelta(days=1)
+
+
+def _parse_date(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_month(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if len(raw) == 7:
+        raw = f"{raw}-01"
+    return _parse_date(raw)
+
+
+def _build_month_weeks(target_month):
+    month_first = _month_start(target_month)
+    month_last = _month_end(target_month)
+    cursor = month_first - timedelta(days=month_first.weekday())
+    weeks = []
+    index = 1
+    while cursor <= month_last:
+        week_start = cursor
+        week_end = cursor + timedelta(days=6)
+        display_start = max(week_start, month_first)
+        display_end = min(week_end, month_last)
+        weeks.append(
+            {
+                "week_index": index,
+                "start_date": display_start.isoformat(),
+                "end_date": display_end.isoformat(),
+                "label": f"{display_start.month}/{display_start.day} - {display_end.month}/{display_end.day}",
+            }
+        )
+        cursor += timedelta(days=7)
+        index += 1
+    return weeks
+
+
+def _monthly_confirmation_exists(sheet_code, target_month):
+    return EquipmentInspectionConfirmation.objects.filter(
+        sheet_code=sheet_code,
+        target_month=_month_start(target_month),
+        confirm_type=EquipmentInspectionConfirmation.TYPE_MONTHLY_CHIEF,
+        week_index=0,
+    ).exists()
+
+
+def _active_operation_template(sheet_code):
+    return (
+        EquipmentInspectionTemplate.objects.filter(
+            sheet_code=sheet_code,
+            status=EquipmentInspectionTemplate.STATUS_APPROVED,
+            is_active=True,
+        )
+        .prefetch_related("items__attachments")
+        .order_by("-version", "-id")
+        .first()
+    )
+
+
+def _record_missing_required_count(record):
+    count = 0
+    for result in record.results.all():
+        if not result.is_required:
+            continue
+        if result.record_type == EquipmentInspectionItem.RECORD_NUMERIC:
+            if result.numeric_value is None:
+                count += 1
+                continue
+        elif result.record_type == EquipmentInspectionItem.RECORD_TEXT:
+            if not str(result.text_value or "").strip():
+                count += 1
+                continue
+        elif not str(result.judgement or "").strip():
+            count += 1
+            continue
+
+        if not str(result.judgement or "").strip():
+            count += 1
+    return count
+
+
+def _build_default_record_payload(template, operation_date, section_type, user, request):
+    items = (
+        template.items.filter(section_type=section_type, is_active=True)
+        .prefetch_related("attachments")
+        .order_by("display_order", "id")
+    )
+    results = []
+    for index, item in enumerate(items, start=1):
+        attachment_serializer = EquipmentInspectionItemAttachmentSerializer(
+            item.attachments.all(),
+            many=True,
+            context={"request": request},
+        )
+        results.append(
+            {
+                "id": None,
+                "item": item.id,
+                "display_order": item.display_order or index,
+                "inspection_no": item.inspection_no,
+                "item_name": item.item_name,
+                "standard": item.standard,
+                "frequency": item.frequency,
+                "method": item.method,
+                "record_type": item.record_type,
+                "unit": item.unit,
+                "criteria": item.criteria,
+                "is_required": item.is_required,
+                "numeric_value": None,
+                "text_value": "",
+                "judgement": "",
+                "comment": "",
+                "measured_at": None,
+                "reference_attachments": attachment_serializer.data,
+            }
+        )
+
+    return {
+        "id": None,
+        "template": template.id,
+        "sheet_code": template.sheet_code,
+        "sheet_name": template.sheet_name,
+        "template_title": template.title,
+        "template_version": template.version,
+        "operation_date": operation_date.isoformat(),
+        "section_type": section_type,
+        "operator": getattr(user, "id", None),
+        "operator_name": _display_name(user),
+        "status": EquipmentInspectionRecord.STATUS_DRAFT,
+        "overall_result": "",
+        "memo": "",
+        "completed_at": None,
+        "created_at": None,
+        "updated_at": None,
+        "result_count": len(results),
+        "ng_count": 0,
+        "missing_required_count": sum(1 for item in results if item["is_required"]),
+        "results": results,
+    }
 
 
 def _log_workflow(template, action, actor=None, from_status="", to_status="", comment=""):
@@ -45,21 +265,119 @@ def _log_workflow(template, action, actor=None, from_status="", to_status="", co
     )
 
 
-def _auto_assign_review_and_approver(creator):
+def _current_local_date():
+    now = timezone.now()
+    if timezone.is_naive(now):
+        return now.date()
+    return timezone.localtime(now).date()
+
+
+def _task_due_date(template):
+    return template.effective_from or _current_local_date()
+
+
+def _create_notification(title, description, users, operator_name=""):
+    user_ids = sorted({user.id for user in users if getattr(user, "id", None)})
+    if not user_ids:
+        return
+
+    today = _current_local_date()
+    notification = Notification.objects.create(
+        title=str(title or "")[:200],
+        category="品質",
+        domain="QUALITY_EQUIPMENT_INSPECTION",
+        valid_from=today,
+        valid_to=today + timedelta(days=14),
+        display_order=0,
+        description=str(description or ""),
+        operator_name=str(operator_name or "").strip() or "system",
+    )
+    notification.target_users.set(user_ids)
+
+
+def _find_record_leaders(user):
+    if not user or not getattr(user, "id", None):
+        return []
+
+    profile = getattr(user, "profile", None)
+    unit_id = getattr(profile, "unit_id", None) if profile else None
+    if not unit_id:
+        return []
+
+    user_model = get_user_model()
+    return list(
+        user_model.objects.filter(is_active=True)
+        .filter(
+            Q(profile__role="leader", profile__leader_units=unit_id)
+            | Q(profile__role="leader", profile__unit_id=unit_id)
+        )
+        .exclude(id=user.id)
+        .select_related("profile")
+        .distinct()
+        .order_by("id")
+    )
+
+
+def _create_tasks_for_users(template, task_type, users, due_date=None):
+    created_count = 0
+    for user in users:
+        if not getattr(user, "id", None):
+            continue
+        exists = EquipmentInspectionTask.objects.filter(
+            template=template,
+            task_type=task_type,
+            assigned_to=user,
+            status=EquipmentInspectionTask.STATUS_PENDING,
+        ).exists()
+        if exists:
+            continue
+        EquipmentInspectionTask.objects.create(
+            template=template,
+            task_type=task_type,
+            assigned_to=user,
+            status=EquipmentInspectionTask.STATUS_PENDING,
+            due_date=due_date,
+        )
+        created_count += 1
+    return created_count
+
+
+def _mark_tasks_done(template, task_type):
+    now = timezone.now()
+    EquipmentInspectionTask.objects.filter(
+        template=template,
+        task_type=task_type,
+        status=EquipmentInspectionTask.STATUS_PENDING,
+    ).update(status=EquipmentInspectionTask.STATUS_DONE, done_at=now)
+
+
+def _mark_all_pending_tasks_skipped(template):
+    now = timezone.now()
+    EquipmentInspectionTask.objects.filter(
+        template=template,
+        status=EquipmentInspectionTask.STATUS_PENDING,
+    ).update(status=EquipmentInspectionTask.STATUS_SKIPPED, done_at=now)
+
+
+def _auto_assign_workflow_users(creator):
     """
-    自動判定ルール（暫定）:
-    - 確認者: 作成者と同部署で、作成者より上位役割の最小ランク
-    - 承認者: 作成者と同部署で、chief/manager の最大ランク（部課長想定）
+    自動判定ルール:
+    - 班長: 作成者の所属班を担当している班長を優先し、いなければ同事業部の班長
+    - 係長: 作成者と同じ係の係長を優先し、いなければ同事業部の係長
+    - 部長: 同事業部の部長
     """
     if not creator or not getattr(creator, "id", None):
-        return None, None
+        return None, None, None
 
     profile = getattr(creator, "profile", None)
     department_id = getattr(profile, "department_id", None) if profile else None
     if not department_id:
-        return None, None
+        return None, None, None
 
     creator_rank = _role_rank(getattr(profile, "role", ""))
+    creator_team_id = getattr(profile, "team_id", None) if profile else None
+    creator_group_id = getattr(profile, "group_id", None) if profile else None
+
     user_model = get_user_model()
     candidates = list(
         user_model.objects.filter(
@@ -68,47 +386,134 @@ def _auto_assign_review_and_approver(creator):
         )
         .exclude(id=creator.id)
         .select_related("profile")
+        .prefetch_related("profile__supervisor_teams")
     )
 
     if not candidates:
-        return None, None
+        return None, None, None
 
-    reviewer_candidates = [
-        u
-        for u in candidates
-        if _role_rank(getattr(getattr(u, "profile", None), "role", "")) > creator_rank
-        and getattr(getattr(u, "profile", None), "role", "") in ("supervisor", "chief", "manager")
+    supervisor_candidates = [
+        user
+        for user in candidates
+        if getattr(getattr(user, "profile", None), "role", "") == "supervisor"
+        and _role_rank(getattr(getattr(user, "profile", None), "role", "")) > creator_rank
     ]
-    reviewer_candidates.sort(
-        key=lambda u: (
-            _role_rank(getattr(getattr(u, "profile", None), "role", "")),
-            u.id,
-        )
-    )
-    reviewer_user = reviewer_candidates[0] if reviewer_candidates else None
-
-    approver_candidates = [
-        u
-        for u in candidates
-        if getattr(getattr(u, "profile", None), "role", "") in ("chief", "manager")
+    same_team_supervisors = [
+        user
+        for user in supervisor_candidates
+        if creator_team_id
+        and getattr(user, "profile", None)
+        and any(team.id == creator_team_id for team in user.profile.supervisor_teams.all())
     ]
-    approver_candidates.sort(
-        key=lambda u: (
-            -_role_rank(getattr(getattr(u, "profile", None), "role", "")),
-            u.id,
-        )
+    same_team_supervisors.sort(key=_reviewer_sort_key)
+    supervisor_candidates.sort(key=_reviewer_sort_key)
+    reviewer_user = (
+        same_team_supervisors[0]
+        if same_team_supervisors
+        else (supervisor_candidates[0] if supervisor_candidates else None)
     )
-    approver_user = approver_candidates[0] if approver_candidates else None
 
-    if reviewer_user and approver_user and reviewer_user.id == approver_user.id:
-        alt = [u for u in approver_candidates if u.id != reviewer_user.id]
-        if alt:
-            approver_user = alt[0]
+    chief_candidates = [
+        user
+        for user in candidates
+        if getattr(getattr(user, "profile", None), "role", "") == "chief"
+        and _role_rank(getattr(getattr(user, "profile", None), "role", "")) > creator_rank
+    ]
+    same_group_chiefs = [
+        user
+        for user in chief_candidates
+        if creator_group_id and getattr(getattr(user, "profile", None), "group_id", None) == creator_group_id
+    ]
+    same_group_chiefs.sort(key=_reviewer_sort_key)
+    chief_candidates.sort(key=_reviewer_sort_key)
+    chief_user = same_group_chiefs[0] if same_group_chiefs else (chief_candidates[0] if chief_candidates else None)
 
-    if approver_user is None and reviewer_user is not None:
-        approver_user = reviewer_user
+    manager_candidates = [
+        user
+        for user in candidates
+        if getattr(getattr(user, "profile", None), "role", "") == "manager"
+        and _role_rank(getattr(getattr(user, "profile", None), "role", "")) > creator_rank
+    ]
+    manager_candidates.sort(key=_reviewer_sort_key)
+    approver_user = manager_candidates[0] if manager_candidates else None
 
-    return reviewer_user, approver_user
+    return reviewer_user, chief_user, approver_user
+
+
+def _workflow_stage_sequence(template):
+    stages = []
+    if template.reviewer_user_id:
+        stages.append(
+            (
+                EquipmentInspectionTemplate.STATUS_SUPERVISOR_PENDING,
+                EquipmentInspectionTask.TASK_SUPERVISOR_REVIEW,
+                template.reviewer_user,
+                "班長確認",
+            )
+        )
+    if template.chief_user_id:
+        stages.append(
+            (
+                EquipmentInspectionTemplate.STATUS_CHIEF_PENDING,
+                EquipmentInspectionTask.TASK_CHIEF_REVIEW,
+                template.chief_user,
+                "係長承認",
+            )
+        )
+    if template.approver_user_id:
+        stages.append(
+            (
+                EquipmentInspectionTemplate.STATUS_MANAGER_PENDING,
+                EquipmentInspectionTask.TASK_MANAGER_APPROVE,
+                template.approver_user,
+                "部長承認",
+            )
+        )
+    return stages
+
+
+def _find_stage(template, current_status=""):
+    for stage in _workflow_stage_sequence(template):
+        if stage[0] == current_status:
+            return stage
+    return None
+
+
+def _next_stage(template, current_status=None):
+    stages = _workflow_stage_sequence(template)
+    if not stages:
+        return None
+    if not current_status:
+        return stages[0]
+    for index, stage in enumerate(stages):
+        if stage[0] == current_status:
+            if index + 1 < len(stages):
+                return stages[index + 1]
+            return None
+    return None
+
+
+def _ensure_workflow_users(template, persist=False):
+    if not template or not template.created_by_id:
+        return template
+    if template.status == EquipmentInspectionTemplate.STATUS_DRAFT:
+        return template
+
+    reviewer_user, chief_user, approver_user = _auto_assign_workflow_users(template.created_by)
+    update_fields = []
+    if not template.reviewer_user_id and reviewer_user:
+        template.reviewer_user = reviewer_user
+        update_fields.append("reviewer_user")
+    if not template.chief_user_id and chief_user:
+        template.chief_user = chief_user
+        update_fields.append("chief_user")
+    if not template.approver_user_id and approver_user:
+        template.approver_user = approver_user
+        update_fields.append("approver_user")
+
+    if persist and update_fields:
+        template.save(update_fields=update_fields + ["updated_at"])
+    return template
 
 
 class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
@@ -117,11 +522,13 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
         .select_related(
             "created_by",
             "reviewer_user",
+            "chief_user",
             "approver_user",
             "reviewed_by",
+            "chief_reviewed_by",
             "approved_by",
         )
-        .prefetch_related("items", "workflow_logs__actor")
+        .prefetch_related("items__attachments", "workflow_logs__actor")
     )
     serializer_class = EquipmentInspectionTemplateSerializer
     permission_classes = [IsAuthenticated]
@@ -143,6 +550,10 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
             )
         return queryset
 
+    def get_object(self):
+        instance = super().get_object()
+        return _ensure_workflow_users(instance, persist=True)
+
     def create(self, request, *args, **kwargs):
         response = super().create(request, *args, **kwargs)
         template_id = response.data.get("id")
@@ -162,8 +573,9 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         if instance.status in (
-            EquipmentInspectionTemplate.STATUS_REVIEW_PENDING,
-            EquipmentInspectionTemplate.STATUS_APPROVAL_PENDING,
+            EquipmentInspectionTemplate.STATUS_SUPERVISOR_PENDING,
+            EquipmentInspectionTemplate.STATUS_CHIEF_PENDING,
+            EquipmentInspectionTemplate.STATUS_MANAGER_PENDING,
             EquipmentInspectionTemplate.STATUS_APPROVED,
         ):
             return Response(
@@ -183,6 +595,22 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
         )
         return response
 
+    @action(
+        detail=False,
+        methods=["post"],
+        parser_classes=[parsers.MultiPartParser, parsers.FormParser],
+    )
+    def upload_attachment_image(self, request):
+        file_obj = request.FILES.get("file")
+        if not file_obj:
+            return Response({"detail": "ファイルがありません。"}, status=status.HTTP_400_BAD_REQUEST)
+
+        ext = os.path.splitext(file_obj.name)[1] or ""
+        filename = f"equipment_inspection_attachments/{uuid.uuid4().hex}{ext}"
+        saved_path = default_storage.save(filename, file_obj)
+        image_url = _build_media_url(default_storage.url(saved_path))
+        return Response({"image_url": image_url}, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=["post"])
     def submit_for_review(self, request, pk=None):
         template = self.get_object()
@@ -195,25 +623,50 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        creator_user = template.created_by or request.user
+        reviewer_user, chief_user, approver_user = _auto_assign_workflow_users(creator_user)
+        if not approver_user:
+            return Response(
+                {"detail": "部長担当が見つかりません。組織設定を確認してください。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         with transaction.atomic():
             prev_status = template.status
             if not template.created_by_id:
                 template.created_by = request.user
 
-            reviewer_user, approver_user = _auto_assign_review_and_approver(template.created_by or request.user)
             template.reviewer_user = reviewer_user
+            template.chief_user = chief_user
             template.approver_user = approver_user
-            template.status = EquipmentInspectionTemplate.STATUS_REVIEW_PENDING
+            first_stage = _next_stage(template)
+            if not first_stage:
+                return Response(
+                    {"detail": "承認経路が見つかりません。組織設定を確認してください。"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            template.status = first_stage[0]
             template.rejection_comment = ""
             template.reviewed_by = None
+            template.chief_reviewed_by = None
             template.reviewed_at = None
+            template.chief_reviewed_at = None
             template.approved_by = None
             template.approved_at = None
             template.save()
+            _mark_all_pending_tasks_skipped(template)
+            _create_tasks_for_users(
+                template=template,
+                task_type=first_stage[1],
+                users=[first_stage[2]],
+                due_date=_task_due_date(template),
+            )
 
             comment = (
-                f"確認担当: {_display_name(reviewer_user) or '未判定'} / "
-                f"承認担当: {_display_name(approver_user) or '未判定'}"
+                f"班長: {_display_name(reviewer_user) or '未判定'} / "
+                f"係長: {_display_name(chief_user) or '未判定'} / "
+                f"部長: {_display_name(approver_user) or '未判定'}"
             )
             _log_workflow(
                 template=template,
@@ -223,6 +676,12 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
                 to_status=template.status,
                 comment=comment,
             )
+            _create_notification(
+                title=f"設備点検表 確認依頼: {template.sheet_code} v{template.version}",
+                description=f"{first_stage[3]}待ちです。",
+                users=[first_stage[2]],
+                operator_name=_display_name(request.user),
+            )
 
         serializer = self.get_serializer(template)
         return Response(serializer.data)
@@ -230,28 +689,72 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def review(self, request, pk=None):
         template = self.get_object()
-        if template.status != EquipmentInspectionTemplate.STATUS_REVIEW_PENDING:
+        if template.status not in (
+            EquipmentInspectionTemplate.STATUS_SUPERVISOR_PENDING,
+            EquipmentInspectionTemplate.STATUS_CHIEF_PENDING,
+        ):
             return Response(
-                {"detail": "確認待ちのテンプレートのみ確認完了できます。"},
+                {"detail": "班長確認待ち/係長承認待ちのテンプレートのみ確認完了できます。"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         with transaction.atomic():
             prev_status = template.status
-            template.status = EquipmentInspectionTemplate.STATUS_APPROVAL_PENDING
-            template.reviewed_by = request.user
-            template.reviewed_at = timezone.now()
-            if not template.approver_user_id:
-                _, approver_user = _auto_assign_review_and_approver(template.created_by or request.user)
-                template.approver_user = approver_user
+            current_stage = _find_stage(template, prev_status)
+            if not current_stage:
+                return Response(
+                    {"detail": "現在の確認段階に対応するタスクが見つかりません。"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            now = timezone.now()
+            action_name = EquipmentInspectionWorkflowLog.ACTION_SUPERVISOR_REVIEWED
+            comment = "班長確認完了"
+            if prev_status == EquipmentInspectionTemplate.STATUS_SUPERVISOR_PENDING:
+                template.reviewed_by = request.user
+                template.reviewed_at = now
+            else:
+                template.chief_reviewed_by = request.user
+                template.chief_reviewed_at = now
+                action_name = EquipmentInspectionWorkflowLog.ACTION_CHIEF_REVIEWED
+                comment = "係長承認完了"
+
+            next_stage = _next_stage(template, prev_status)
+            if not next_stage:
+                _, chief_user, approver_user = _auto_assign_workflow_users(template.created_by or request.user)
+                if not template.chief_user_id and chief_user:
+                    template.chief_user = chief_user
+                if not template.approver_user_id and approver_user:
+                    template.approver_user = approver_user
+                next_stage = _next_stage(template, prev_status)
+            if not next_stage:
+                return Response(
+                    {"detail": "次の承認経路が見つかりません。組織設定を確認してください。"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            template.status = next_stage[0]
             template.save()
+            _mark_tasks_done(template, current_stage[1])
+            _create_tasks_for_users(
+                template=template,
+                task_type=next_stage[1],
+                users=[next_stage[2]],
+                due_date=_task_due_date(template),
+            )
             _log_workflow(
                 template=template,
-                action=EquipmentInspectionWorkflowLog.ACTION_REVIEWED,
+                action=action_name,
                 actor=request.user,
                 from_status=prev_status,
                 to_status=template.status,
-                comment="確認完了",
+                comment=comment,
+            )
+            _create_notification(
+                title=f"設備点検表 承認依頼: {template.sheet_code} v{template.version}",
+                description=f"{comment}。{next_stage[3]}待ちです。",
+                users=[next_stage[2]],
+                operator_name=_display_name(request.user),
             )
 
         serializer = self.get_serializer(template)
@@ -260,9 +763,9 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
         template = self.get_object()
-        if template.status != EquipmentInspectionTemplate.STATUS_APPROVAL_PENDING:
+        if template.status != EquipmentInspectionTemplate.STATUS_MANAGER_PENDING:
             return Response(
-                {"detail": "承認待ちのテンプレートのみ承認できます。"},
+                {"detail": "部長承認待ちのテンプレートのみ承認できます。"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -278,14 +781,22 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
             template.approved_at = timezone.now()
             template.is_active = True
             template.save()
+            _mark_tasks_done(template, EquipmentInspectionTask.TASK_MANAGER_APPROVE)
             _log_workflow(
                 template=template,
                 action=EquipmentInspectionWorkflowLog.ACTION_APPROVED,
                 actor=request.user,
                 from_status=prev_status,
                 to_status=template.status,
-                comment="承認完了",
+                comment="部長承認完了",
             )
+            if template.created_by_id:
+                _create_notification(
+                    title=f"設備点検表 承認完了: {template.sheet_code} v{template.version}",
+                    description="設備点検表が承認されました。",
+                    users=[template.created_by],
+                    operator_name=_display_name(request.user),
+                )
 
         serializer = self.get_serializer(template)
         return Response(serializer.data)
@@ -294,11 +805,12 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
     def reject(self, request, pk=None):
         template = self.get_object()
         if template.status not in (
-            EquipmentInspectionTemplate.STATUS_REVIEW_PENDING,
-            EquipmentInspectionTemplate.STATUS_APPROVAL_PENDING,
+            EquipmentInspectionTemplate.STATUS_SUPERVISOR_PENDING,
+            EquipmentInspectionTemplate.STATUS_CHIEF_PENDING,
+            EquipmentInspectionTemplate.STATUS_MANAGER_PENDING,
         ):
             return Response(
-                {"detail": "確認待ち/承認待ちのテンプレートのみ差戻しできます。"},
+                {"detail": "班長確認待ち/係長承認待ち/部長承認待ちのテンプレートのみ差戻しできます。"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -308,6 +820,7 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
             template.status = EquipmentInspectionTemplate.STATUS_REJECTED
             template.rejection_comment = comment
             template.save()
+            _mark_all_pending_tasks_skipped(template)
             _log_workflow(
                 template=template,
                 action=EquipmentInspectionWorkflowLog.ACTION_REJECTED,
@@ -316,6 +829,13 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
                 to_status=template.status,
                 comment=comment,
             )
+            if template.created_by_id:
+                _create_notification(
+                    title=f"設備点検表 差戻し: {template.sheet_code} v{template.version}",
+                    description=comment or "設備点検表が差戻しされました。",
+                    users=[template.created_by],
+                    operator_name=_display_name(request.user),
+                )
 
         serializer = self.get_serializer(template)
         return Response(serializer.data)
@@ -325,4 +845,345 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
         template = self.get_object()
         logs = template.workflow_logs.select_related("actor").all()
         serializer = EquipmentInspectionWorkflowLogSerializer(logs, many=True)
+        return Response(serializer.data)
+
+
+class EquipmentInspectionTaskListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        queryset = EquipmentInspectionTask.objects.select_related("template", "assigned_to").order_by(
+            "status",
+            "due_date",
+            "-created_at",
+        )
+
+        assigned_to_me = request.query_params.get("assigned_to_me", "true")
+        if str(assigned_to_me).lower() in ("true", "1", "yes"):
+            queryset = queryset.filter(assigned_to=request.user)
+
+        task_type = request.query_params.get("task_type")
+        status_code = request.query_params.get("status")
+        if task_type:
+            queryset = queryset.filter(task_type=task_type)
+        if status_code:
+            queryset = queryset.filter(status=status_code)
+
+        serializer = EquipmentInspectionTaskSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+
+class EquipmentInspectionRecordViewSet(viewsets.ModelViewSet):
+    queryset = (
+        EquipmentInspectionRecord.objects.all()
+        .select_related("template", "operator")
+        .prefetch_related("results__item__attachments")
+    )
+    serializer_class = EquipmentInspectionRecordSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        sheet_code = self.request.query_params.get("sheet_code")
+        operation_date = _parse_date(self.request.query_params.get("operation_date"))
+        month_value = _parse_month(self.request.query_params.get("month"))
+        section_type = str(self.request.query_params.get("section_type") or "").strip().upper()
+        status_value = str(self.request.query_params.get("status") or "").strip().upper()
+
+        if sheet_code:
+            queryset = queryset.filter(sheet_code=sheet_code)
+        if operation_date:
+            queryset = queryset.filter(operation_date=operation_date)
+        if month_value:
+            queryset = queryset.filter(
+                operation_date__gte=_month_start(month_value),
+                operation_date__lte=_month_end(month_value),
+            )
+        if section_type:
+            queryset = queryset.filter(section_type=section_type)
+        if status_value:
+            queryset = queryset.filter(status=status_value)
+        return queryset
+
+    def _ng_result_items_from_record(self, record):
+        items = []
+        for result in record.results.all():
+            if str(result.judgement or "").strip().upper() != "NG":
+                continue
+            key = f"{result.display_order}:{str(result.item_name or '').strip()}"
+            items.append((key, str(result.item_name or "").strip() or f"{result.display_order}行目"))
+        return items
+
+    def _reload_record(self, record):
+        return (
+            EquipmentInspectionRecord.objects.select_related("template", "operator")
+            .prefetch_related("results__item__attachments")
+            .get(pk=record.pk)
+        )
+
+    def _notify_leader_if_needed(self, record, previous_status="", previous_ng_keys=None):
+        if record.status != EquipmentInspectionRecord.STATUS_COMPLETED:
+            return
+
+        current_ng_items = self._ng_result_items_from_record(record)
+        if not current_ng_items:
+            return
+
+        previous_ng_keys = set(previous_ng_keys or [])
+        if previous_status == EquipmentInspectionRecord.STATUS_COMPLETED:
+            notify_items = [name for key, name in current_ng_items if key not in previous_ng_keys]
+            if not notify_items:
+                return
+        else:
+            notify_items = [name for _, name in current_ng_items]
+
+        leaders = _find_record_leaders(record.operator)
+        if not leaders:
+            return
+
+        item_names = " / ".join(notify_items[:5])
+        if len(notify_items) > 5:
+            item_names = f"{item_names} ほか{len(notify_items) - 5}件"
+
+        _create_notification(
+            title=f"設備点検 NG通知: {record.sheet_code} {record.operation_date:%Y-%m-%d}",
+            description=(
+                f"{_section_type_label(record.section_type)}でNGが登録されました。"
+                f"設備: {record.sheet_code} {record.sheet_name} / "
+                f"実施者: {_display_name(record.operator) or '-'} / "
+                f"対象: {item_names}"
+            ),
+            users=leaders,
+            operator_name=_display_name(record.operator),
+        )
+
+    def create(self, request, *args, **kwargs):
+        sheet_code = str(request.data.get("sheet_code") or "").strip()
+        operation_date = _parse_date(request.data.get("operation_date"))
+        if not sheet_code or not operation_date:
+            return Response(
+                {"detail": "設備コードと点検日が必要です。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if _monthly_confirmation_exists(sheet_code, operation_date):
+            return Response(
+                {"detail": "月間班長確認済みのため更新できません。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        record = serializer.save()
+        record = self._reload_record(record)
+        self._notify_leader_if_needed(record, previous_status="", previous_ng_keys=set())
+        headers = self.get_success_headers(serializer.data)
+        response_serializer = self.get_serializer(record)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if _monthly_confirmation_exists(instance.sheet_code, instance.operation_date):
+            return Response(
+                {"detail": "月間班長確認済みのため更新できません。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        previous_status = instance.status
+        previous_ng_keys = {key for key, _ in self._ng_result_items_from_record(instance)}
+        partial = kwargs.pop("partial", False)
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        record = serializer.save()
+        record = self._reload_record(record)
+        self._notify_leader_if_needed(record, previous_status=previous_status, previous_ng_keys=previous_ng_keys)
+        response_serializer = self.get_serializer(record)
+        return Response(response_serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def prepare(self, request):
+        sheet_code = str(request.query_params.get("sheet_code") or "").strip()
+        operation_date = _parse_date(request.query_params.get("operation_date"))
+        section_type = str(
+            request.query_params.get("section_type") or EquipmentInspectionItem.SECTION_DAILY
+        ).strip().upper()
+
+        if not sheet_code or not operation_date:
+            return Response(
+                {"detail": "設備コードと点検日を指定してください。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        record = (
+            EquipmentInspectionRecord.objects.filter(
+                sheet_code=sheet_code,
+                operation_date=operation_date,
+                section_type=section_type,
+            )
+            .select_related("template", "operator")
+            .prefetch_related("results__item__attachments")
+            .first()
+        )
+        current_template = _active_operation_template(sheet_code)
+        locked = _monthly_confirmation_exists(sheet_code, operation_date)
+
+        if record:
+            serializer = self.get_serializer(record)
+            return Response(
+                {
+                    "is_locked": locked,
+                    "current_template": _template_summary(current_template or record.template),
+                    "record": serializer.data,
+                }
+            )
+
+        if not current_template:
+            return Response(
+                {"detail": "承認済みテンプレートが見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        payload = _build_default_record_payload(
+            current_template,
+            operation_date,
+            section_type,
+            request.user,
+            request,
+        )
+        return Response(
+            {
+                "is_locked": locked,
+                "current_template": _template_summary(current_template),
+                "record": payload,
+            }
+        )
+
+    @action(detail=False, methods=["get"])
+    def monthly_overview(self, request):
+        sheet_code = str(request.query_params.get("sheet_code") or "").strip()
+        month_value = _parse_month(request.query_params.get("month"))
+        if not sheet_code or not month_value:
+            return Response(
+                {"detail": "設備コードと対象月を指定してください。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        month_first = _month_start(month_value)
+        month_last = _month_end(month_value)
+        records = list(
+            EquipmentInspectionRecord.objects.filter(
+                sheet_code=sheet_code,
+                operation_date__gte=month_first,
+                operation_date__lte=month_last,
+            )
+            .select_related("template", "operator")
+            .prefetch_related("results__item__attachments")
+            .order_by("operation_date", "section_type", "id")
+        )
+        confirmations = list(
+            EquipmentInspectionConfirmation.objects.filter(
+                sheet_code=sheet_code,
+                target_month=month_first,
+            )
+            .select_related("confirmed_by")
+            .order_by("confirm_type", "week_index", "id")
+        )
+        current_template = _active_operation_template(sheet_code)
+        record_serializer = self.get_serializer(records, many=True)
+        confirmation_serializer = EquipmentInspectionConfirmationSerializer(confirmations, many=True)
+        sheet_name = (
+            (current_template.sheet_name if current_template else "")
+            or (records[0].sheet_name if records else "")
+            or str(request.query_params.get("sheet_name") or "")
+        )
+
+        daily_records = [item for item in record_serializer.data if item["section_type"] == EquipmentInspectionItem.SECTION_DAILY]
+        quarterly_records = [
+            item for item in record_serializer.data if item["section_type"] == EquipmentInspectionItem.SECTION_QUARTERLY
+        ]
+        return Response(
+            {
+                "sheet_code": sheet_code,
+                "sheet_name": sheet_name,
+                "month": month_first.strftime("%Y-%m"),
+                "is_locked": _monthly_confirmation_exists(sheet_code, month_first),
+                "current_template": _template_summary(current_template),
+                "weeks": _build_month_weeks(month_first),
+                "daily_records": daily_records,
+                "quarterly_records": quarterly_records,
+                "confirmations": confirmation_serializer.data,
+            }
+        )
+
+
+class EquipmentInspectionConfirmationViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = EquipmentInspectionConfirmation.objects.all().select_related("confirmed_by")
+    serializer_class = EquipmentInspectionConfirmationSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        sheet_code = self.request.query_params.get("sheet_code")
+        month_value = _parse_month(self.request.query_params.get("month"))
+        confirm_type = str(self.request.query_params.get("confirm_type") or "").strip().upper()
+
+        if sheet_code:
+            queryset = queryset.filter(sheet_code=sheet_code)
+        if month_value:
+            queryset = queryset.filter(target_month=_month_start(month_value))
+        if confirm_type:
+            queryset = queryset.filter(confirm_type=confirm_type)
+        return queryset
+
+    @action(detail=False, methods=["post"])
+    def upsert(self, request):
+        sheet_code = str(request.data.get("sheet_code") or "").strip()
+        sheet_name = str(request.data.get("sheet_name") or "").strip()
+        target_month = _parse_month(request.data.get("target_month"))
+        confirm_type = str(request.data.get("confirm_type") or "").strip().upper()
+        week_index = int(request.data.get("week_index") or 0)
+        comment = str(request.data.get("comment") or "").strip()
+
+        if not sheet_code or not target_month or confirm_type not in {
+            EquipmentInspectionConfirmation.TYPE_WEEKLY_LEADER,
+            EquipmentInspectionConfirmation.TYPE_MONTHLY_CHIEF,
+        }:
+            return Response(
+                {"detail": "設備コード・対象月・確認種別は必須です。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        target_month = _month_start(target_month)
+        if confirm_type == EquipmentInspectionConfirmation.TYPE_MONTHLY_CHIEF:
+            week_index = 0
+        elif week_index <= 0:
+            return Response(
+                {"detail": "週間リーダ確認は週番号が必要です。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        is_locked = _monthly_confirmation_exists(sheet_code, target_month)
+        if is_locked and confirm_type != EquipmentInspectionConfirmation.TYPE_MONTHLY_CHIEF:
+            return Response(
+                {"detail": "月間班長確認済みのため週間リーダ確認は更新できません。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        defaults = {
+            "sheet_name": sheet_name,
+            "comment": comment,
+            "confirmed_by": request.user,
+            "confirmed_at": timezone.now(),
+        }
+        confirmation, _ = EquipmentInspectionConfirmation.objects.get_or_create(
+            sheet_code=sheet_code,
+            target_month=target_month,
+            confirm_type=confirm_type,
+            week_index=week_index,
+            defaults=defaults,
+        )
+        confirmation.sheet_name = sheet_name or confirmation.sheet_name
+        confirmation.comment = comment
+        confirmation.confirmed_by = request.user
+        confirmation.confirmed_at = timezone.now()
+        confirmation.save()
+
+        serializer = self.get_serializer(confirmation)
         return Response(serializer.data)

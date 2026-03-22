@@ -76,8 +76,9 @@
             {{ statusLabel(form.status) }}
           </span>
           <span class="status-meta">作成者: {{ form.created_by_name || "-" }}</span>
-          <span class="status-meta">確認担当: {{ form.reviewer_user_name || "-" }}</span>
-          <span class="status-meta">承認担当: {{ form.approver_user_name || "-" }}</span>
+          <span class="status-meta">班長担当: {{ form.reviewer_user_name || "-" }}</span>
+          <span class="status-meta">係長担当: {{ form.chief_user_name || "-" }}</span>
+          <span class="status-meta">部長担当: {{ form.approver_user_name || "-" }}</span>
         </div>
 
         <div class="form-grid">
@@ -143,10 +144,10 @@
             確認依頼
           </button>
           <button class="btn-review" @click="completeReview" :disabled="!canReview || actionLoading">
-            確認完了
+            {{ reviewActionLabel }}
           </button>
           <button class="btn-approve" @click="approveTemplate" :disabled="!canApprove || actionLoading">
-            承認
+            部長承認
           </button>
           <button class="btn-danger" @click="rejectTemplate" :disabled="!canReject || actionLoading">
             差戻し
@@ -204,6 +205,9 @@
                   <td class="center"><input type="checkbox" v-model="item.is_required" :disabled="!canEditFields" /></td>
                   <td class="center"><input type="checkbox" v-model="item.is_active" :disabled="!canEditFields" /></td>
                   <td>
+                    <button class="btn-secondary btn-sm" @click="openAttachmentDialog(item)">
+                      付表{{ attachmentCountLabel(item) ? `(${attachmentCountLabel(item)})` : "" }}
+                    </button>
                     <button class="btn-danger btn-sm" @click="removeItem(item)" :disabled="!canEditFields">削除</button>
                   </td>
                 </tr>
@@ -247,6 +251,9 @@
                   </td>
                   <td class="center"><input type="checkbox" v-model="item.is_active" :disabled="!canEditFields" /></td>
                   <td>
+                    <button class="btn-secondary btn-sm" @click="openAttachmentDialog(item)">
+                      付表{{ attachmentCountLabel(item) ? `(${attachmentCountLabel(item)})` : "" }}
+                    </button>
                     <button class="btn-danger btn-sm" @click="removeItem(item)" :disabled="!canEditFields">削除</button>
                   </td>
                 </tr>
@@ -283,6 +290,74 @@
         </div>
       </section>
     </div>
+
+    <div v-if="attachmentDialogVisible" class="modal-backdrop" @click.self="closeAttachmentDialog">
+      <div class="modal-panel attachment-modal">
+        <div class="modal-header">
+          <div>
+            <h3 class="panel-title">付表編集</h3>
+            <div class="attachment-target-name">{{ attachmentTargetItem?.item_name || "未選択" }}</div>
+          </div>
+          <button class="btn-secondary btn-sm" @click="closeAttachmentDialog">閉じる</button>
+        </div>
+
+        <div v-if="attachmentTargetItem" class="attachment-body">
+          <div class="attachment-actions">
+            <button class="btn-primary btn-sm" @click="addAttachment" :disabled="!canEditFields">
+              付表追加
+            </button>
+          </div>
+
+          <div v-if="!attachmentTargetItem.attachments.length" class="no-data">
+            付表はまだありません。
+          </div>
+
+          <div
+            v-for="attachment in attachmentTargetItem.attachments"
+            :key="attachment.local_key"
+            class="attachment-card"
+          >
+            <div class="attachment-card-header">
+              <strong>付表 {{ attachment.display_order }}</strong>
+              <button class="btn-danger btn-sm" @click="removeAttachment(attachment)" :disabled="!canEditFields">
+                削除
+              </button>
+            </div>
+
+            <div class="attachment-form-grid">
+              <label>
+                タイトル
+                <input v-model.trim="attachment.title" :disabled="!canEditFields" />
+              </label>
+              <label>
+                画像
+                <input type="file" accept="image/*" :disabled="!canEditFields" @change="uploadAttachmentImage($event, attachment)" />
+              </label>
+              <label class="wide">
+                補足説明
+                <textarea v-model="attachment.description" rows="2" :disabled="!canEditFields" />
+              </label>
+              <label class="wide">
+                確認ポイント
+                <textarea v-model="attachment.check_point" rows="2" :disabled="!canEditFields" />
+              </label>
+              <label class="wide">
+                OK例
+                <textarea v-model="attachment.ok_example" rows="2" :disabled="!canEditFields" />
+              </label>
+              <label class="wide">
+                NG例
+                <textarea v-model="attachment.ng_example" rows="2" :disabled="!canEditFields" />
+              </label>
+            </div>
+
+            <div v-if="attachment.image_url" class="attachment-preview">
+              <img :src="attachment.image_url" :alt="attachment.title || attachmentTargetItem.item_name" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="page-container" v-else>
@@ -292,7 +367,8 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref } from "vue"
+import { computed, nextTick, onMounted, ref, watch } from "vue"
+import { useRoute, useRouter } from "vue-router"
 import * as XLSX from "xlsx"
 import api from "@/api/client"
 import { authState } from "@/auth"
@@ -300,8 +376,11 @@ import { hasPermission } from "@/router"
 
 const STATUS_LABELS = {
   DRAFT: "下書き",
-  REVIEW_PENDING: "確認待ち",
-  APPROVAL_PENDING: "承認待ち",
+  REVIEW_PENDING: "班長確認待ち",
+  APPROVAL_PENDING: "部長承認待ち",
+  SUPERVISOR_PENDING: "班長確認待ち",
+  CHIEF_PENDING: "係長承認待ち",
+  MANAGER_PENDING: "部長承認待ち",
   APPROVED: "承認済み",
   REJECTED: "差戻し",
 }
@@ -311,7 +390,9 @@ const ACTION_LABELS = {
   UPDATED: "更新",
   SUBMITTED: "確認依頼",
   REVIEWED: "確認完了",
-  APPROVED: "承認",
+  SUPERVISOR_REVIEWED: "班長確認完了",
+  CHIEF_REVIEWED: "係長承認",
+  APPROVED: "部長承認",
   REJECTED: "差戻し",
 }
 
@@ -345,6 +426,9 @@ const SM009_QUARTERLY_ITEMS = [
   { item_name: "通電時間", standard: "5サイクル", method: "参考値: ――", criteria: "設定と同じこと", record_type: "NUMERIC", unit: "サイクル" },
 ]
 
+const route = useRoute()
+const router = useRouter()
+
 const templates = ref([])
 const loadingList = ref(false)
 const detailLoading = ref(false)
@@ -354,6 +438,8 @@ const selectedTemplateId = ref(null)
 const isListHidden = ref(false)
 const equipmentOptions = ref([])
 const equipmentLoading = ref(false)
+const attachmentDialogVisible = ref(false)
+const attachmentTargetKey = ref("")
 
 const createEmptyForm = () => ({
   id: null,
@@ -372,6 +458,8 @@ const createEmptyForm = () => ({
   created_by_name: "",
   reviewer_user: null,
   reviewer_user_name: "",
+  chief_user: null,
+  chief_user_name: "",
   approver_user: null,
   approver_user_name: "",
   rejection_comment: "",
@@ -415,18 +503,30 @@ const canSubmitForReview = computed(() => {
 })
 
 const canReview = computed(() => {
-  if (!canEdit.value || normalizedFormStatus.value !== "REVIEW_PENDING") return false
-  const reviewerUserId = Number(form.value.reviewer_user || 0)
-  return reviewerUserId === 0 || reviewerUserId === currentUserId.value
+  if (!canEdit.value) return false
+  if (normalizedFormStatus.value === "SUPERVISOR_PENDING" || normalizedFormStatus.value === "REVIEW_PENDING") {
+    const reviewerUserId = Number(form.value.reviewer_user || 0)
+    return reviewerUserId === 0 || reviewerUserId === currentUserId.value
+  }
+  if (normalizedFormStatus.value === "CHIEF_PENDING") {
+    const chiefUserId = Number(form.value.chief_user || 0)
+    return chiefUserId === 0 || chiefUserId === currentUserId.value
+  }
+  return false
 })
 
 const canApprove = computed(() => {
-  if (!canEdit.value || normalizedFormStatus.value !== "APPROVAL_PENDING") return false
+  if (!canEdit.value) return false
+  if (!["MANAGER_PENDING", "APPROVAL_PENDING"].includes(normalizedFormStatus.value)) return false
   const approverUserId = Number(form.value.approver_user || 0)
   return approverUserId === 0 || approverUserId === currentUserId.value
 })
 
 const canReject = computed(() => canReview.value || canApprove.value)
+const reviewActionLabel = computed(() => {
+  if (normalizedFormStatus.value === "CHIEF_PENDING") return "係長承認"
+  return "班長確認完了"
+})
 
 const statusLabel = (status) => {
   const normalized = normalizeStatus(status)
@@ -438,8 +538,9 @@ const statusClass = (status) => {
   const normalized = normalizeStatus(status)
   if (normalized === "APPROVED") return "ok"
   if (normalized === "REJECTED") return "danger"
-  if (normalized === "APPROVAL_PENDING") return "approve"
-  if (normalized === "REVIEW_PENDING") return "review"
+  if (["MANAGER_PENDING", "APPROVAL_PENDING"].includes(normalized)) return "approve"
+  if (["SUPERVISOR_PENDING", "REVIEW_PENDING"].includes(normalized)) return "review"
+  if (normalized === "CHIEF_PENDING") return "approve"
   return "draft"
 }
 
@@ -467,21 +568,33 @@ const toPrintCell = (value) => {
 
 const recordTypeLabel = (value) => RECORD_TYPE_LABELS[String(value || "").trim()] || (value || "")
 
-const resolveReviewerNames = () => {
-  const names = []
-  const pushName = (name) => {
-    const normalized = String(name || "").trim()
-    if (!normalized) return
-    if (names.includes(normalized)) return
-    names.push(normalized)
+const resolveApprovalNames = () => {
+  const normalizedSupervisor = String(form.value.reviewer_user_name || "").trim()
+  const normalizedChief = String(form.value.chief_user_name || "").trim()
+  const normalizedManager = String(form.value.approver_user_name || "").trim()
+  const names = {
+    supervisor: normalizedSupervisor || "-",
+    chief: normalizedChief || "-",
+    manager: normalizedManager || "-",
   }
+
   ;(form.value.workflow_logs || []).forEach((log) => {
-    if (String(log?.action || "") === "REVIEWED") {
-      pushName(log.actor_name)
+    const actorName = String(log?.actor_name || "").trim()
+    if (!actorName) return
+    const action = String(log?.action || "").trim()
+    if (["REVIEWED", "SUPERVISOR_REVIEWED"].includes(action)) {
+      names.supervisor = actorName
+      return
+    }
+    if (action === "CHIEF_REVIEWED") {
+      names.chief = actorName
+      return
+    }
+    if (action === "APPROVED") {
+      names.manager = actorName
     }
   })
-  pushName(form.value.reviewer_user_name)
-  return [names[0] || "-", names[1] || "-"]
+  return names
 }
 
 const resolvePrintBaseDate = () => {
@@ -492,6 +605,73 @@ const resolvePrintBaseDate = () => {
     if (!Number.isNaN(date.getTime())) return date
   }
   return new Date()
+}
+
+const buildAttachmentAppendixRows = () => {
+  const rows = []
+  const targetItems = [...dailyItems.value, ...quarterlyItems.value]
+  targetItems.forEach((item) => {
+    const attachments = Array.isArray(item.attachments) ? item.attachments : []
+    attachments.forEach((attachment, index) => {
+      rows.push(["点検項目", item.item_name || ""])
+      rows.push(["付表No", index + 1])
+      rows.push(["タイトル", attachment.title || ""])
+      rows.push(["画像URL", attachment.image_url || ""])
+      rows.push(["補足説明", attachment.description || ""])
+      rows.push(["確認ポイント", attachment.check_point || ""])
+      rows.push(["OK例", attachment.ok_example || ""])
+      rows.push(["NG例", attachment.ng_example || ""])
+      rows.push([])
+    })
+  })
+  return rows
+}
+
+const buildAttachmentPrintHtml = () => {
+  const targetItems = [...dailyItems.value, ...quarterlyItems.value]
+  const sections = targetItems
+    .map((item) => {
+      const attachments = Array.isArray(item.attachments) ? item.attachments : []
+      if (!attachments.length) return ""
+      const cards = attachments
+        .map(
+          (attachment, index) => `
+          <div class="appendix-card">
+            <div class="appendix-card-title">付表 ${index + 1} ${escapeHtml(attachment.title || "")}</div>
+            ${
+              attachment.image_url
+                ? `<div class="appendix-image-wrap"><img class="appendix-image" src="${escapeHtml(
+                    attachment.image_url
+                  )}" alt="${escapeHtml(attachment.title || item.item_name || "付表画像")}" /></div>`
+                : ""
+            }
+            <div class="appendix-text-row"><strong>補足説明:</strong> ${toPrintCell(attachment.description)}</div>
+            <div class="appendix-text-row"><strong>確認ポイント:</strong> ${toPrintCell(attachment.check_point)}</div>
+            <div class="appendix-text-row"><strong>OK例:</strong> ${toPrintCell(attachment.ok_example)}</div>
+            <div class="appendix-text-row"><strong>NG例:</strong> ${toPrintCell(attachment.ng_example)}</div>
+          </div>
+        `
+        )
+        .join("")
+      return `
+        <section class="appendix-section">
+          <div class="appendix-item-title">${escapeHtml(item.item_name || "点検項目")}</div>
+          ${cards}
+        </section>
+      `
+    })
+    .filter(Boolean)
+    .join("")
+
+  if (!sections) return ""
+
+  return `
+    <div class="appendix-page-break"></div>
+    <div class="appendix-root">
+      <div class="appendix-root-title">付表</div>
+      ${sections}
+    </div>
+  `
 }
 
 const exportCurrentTemplateExcel = () => {
@@ -519,6 +699,9 @@ const exportCurrentTemplateExcel = () => {
     ["改訂日", form.value.revision_date || ""],
     ["運用開始日", form.value.effective_from || ""],
     ["作成者", form.value.created_by_name || ""],
+    ["班長担当", form.value.reviewer_user_name || ""],
+    ["係長担当", form.value.chief_user_name || ""],
+    ["部長担当", form.value.approver_user_name || ""],
     ["出力日時", exportedAt],
     [],
     ["日次点検項目"],
@@ -544,6 +727,8 @@ const exportCurrentTemplateExcel = () => {
       recordTypeLabel(item.record_type),
       item.unit || "",
     ]),
+    ...(buildAttachmentAppendixRows().length ? [[], ["付表"]] : []),
+    ...buildAttachmentAppendixRows(),
   ]
 
   const worksheet = XLSX.utils.aoa_to_sheet(rows)
@@ -573,7 +758,7 @@ const printCurrentTemplate = () => {
   const createdDate = form.value.created_at || form.value.revision_date || "-"
   const effectiveFrom = form.value.effective_from || "-"
   const printedAt = new Date().toLocaleString("ja-JP")
-  const [reviewer1, reviewer2] = resolveReviewerNames()
+  const approvalNames = resolveApprovalNames()
   const baseDate = resolvePrintBaseDate()
   const targetYear = baseDate.getFullYear()
   const targetMonth = baseDate.getMonth() + 1
@@ -610,6 +795,7 @@ const printCurrentTemplate = () => {
     `
     )
     .join("")
+  const attachmentAppendixHtml = buildAttachmentPrintHtml()
 
   const html = `
   <!doctype html>
@@ -641,6 +827,16 @@ const printCurrentTemplate = () => {
         .quarterly-title { margin: 4px 0 2px; font-size: 10px; font-weight: 700; }
         .quarterly-table th, .quarterly-table td { padding: 2px 4px; }
         .footer { margin-top: 3px; text-align: right; font-size: 8px; color: #334155; }
+        .appendix-page-break { page-break-before: always; }
+        .appendix-root { padding: 4px; }
+        .appendix-root-title { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+        .appendix-section { margin-bottom: 12px; page-break-inside: avoid; }
+        .appendix-item-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+        .appendix-card { border: 1px solid #cbd5e1; padding: 8px; margin-bottom: 8px; }
+        .appendix-card-title { font-size: 11px; font-weight: 700; margin-bottom: 4px; }
+        .appendix-image-wrap { margin-bottom: 6px; }
+        .appendix-image { max-width: 100%; max-height: 260px; border: 1px solid #cbd5e1; object-fit: contain; }
+        .appendix-text-row { margin-bottom: 4px; line-height: 1.5; }
       </style>
     </head>
     <body>
@@ -662,9 +858,9 @@ const printCurrentTemplate = () => {
           <div class="meta-item">出力日時: ${escapeHtml(printedAt)}</div>
           <div class="meta-item">改訂日: ${escapeHtml(revisionDate)}</div>
           <div class="meta-item">作成者: ${escapeHtml(form.value.created_by_name || "-")}</div>
-          <div class="meta-item">確認者1: ${escapeHtml(reviewer1)}</div>
-          <div class="meta-item">確認者2: ${escapeHtml(reviewer2)}</div>
-          <div class="meta-item">承認者: ${escapeHtml(form.value.approver_user_name || "-")}</div>
+          <div class="meta-item">班長: ${escapeHtml(approvalNames.supervisor)}</div>
+          <div class="meta-item">係長: ${escapeHtml(approvalNames.chief)}</div>
+          <div class="meta-item">部長: ${escapeHtml(approvalNames.manager)}</div>
           <div class="meta-item">運用開始日: ${escapeHtml(effectiveFrom)}</div>
         </div>
 
@@ -702,6 +898,7 @@ const printCurrentTemplate = () => {
         </table>
         <div class="footer">PM 設備点検表</div>
       </div>
+      ${attachmentAppendixHtml}
     </body>
   </html>
   `
@@ -764,6 +961,26 @@ const handleSheetCodeChange = () => {
 
 const createLocalKey = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 
+const createAttachment = (raw = {}) => ({
+  local_key: raw.local_key || createLocalKey(),
+  id: raw.id || null,
+  display_order: Number(raw.display_order || 1),
+  title: raw.title || "",
+  description: raw.description || "",
+  check_point: raw.check_point || "",
+  ok_example: raw.ok_example || "",
+  ng_example: raw.ng_example || "",
+  image_url: raw.image_url || "",
+})
+
+const attachmentTargetItem = computed(() => {
+  return form.value.items.find((item) => item.local_key === attachmentTargetKey.value) || null
+})
+
+const attachmentCountLabel = (item) => {
+  return Array.isArray(item?.attachments) ? item.attachments.length : 0
+}
+
 const buildSm009Defaults = () => {
   const daily = SM009_DAILY_ITEMS.map((item, index) => ({
     local_key: createLocalKey(),
@@ -779,6 +996,7 @@ const buildSm009Defaults = () => {
     criteria: item.criteria,
     is_required: true,
     is_active: true,
+    attachments: [],
   }))
 
   const quarterly = SM009_QUARTERLY_ITEMS.map((item, index) => ({
@@ -795,6 +1013,7 @@ const buildSm009Defaults = () => {
     criteria: item.criteria,
     is_required: true,
     is_active: true,
+    attachments: [],
   }))
   return [...daily, ...quarterly]
 }
@@ -843,6 +1062,7 @@ const addItem = (sectionType) => {
     criteria: "",
     is_required: true,
     is_active: true,
+    attachments: [],
   })
   resizeAllTextareas()
 }
@@ -851,6 +1071,64 @@ const removeItem = (targetItem) => {
   form.value.items = form.value.items.filter((item) => item.local_key !== targetItem.local_key)
   resequenceSection(targetItem.section_type)
   resizeAllTextareas()
+}
+
+const resequenceAttachments = (item) => {
+  if (!item || !Array.isArray(item.attachments)) return
+  item.attachments.forEach((attachment, index) => {
+    attachment.display_order = index + 1
+  })
+}
+
+const openAttachmentDialog = (item) => {
+  if (!Array.isArray(item.attachments)) {
+    item.attachments = []
+  }
+  resequenceAttachments(item)
+  attachmentTargetKey.value = item.local_key
+  attachmentDialogVisible.value = true
+}
+
+const closeAttachmentDialog = () => {
+  attachmentDialogVisible.value = false
+  attachmentTargetKey.value = ""
+}
+
+const addAttachment = () => {
+  if (!attachmentTargetItem.value) return
+  if (!Array.isArray(attachmentTargetItem.value.attachments)) {
+    attachmentTargetItem.value.attachments = []
+  }
+  attachmentTargetItem.value.attachments.push(
+    createAttachment({ display_order: attachmentTargetItem.value.attachments.length + 1 })
+  )
+}
+
+const removeAttachment = (targetAttachment) => {
+  if (!attachmentTargetItem.value) return
+  attachmentTargetItem.value.attachments = attachmentTargetItem.value.attachments.filter(
+    (attachment) => attachment.local_key !== targetAttachment.local_key
+  )
+  resequenceAttachments(attachmentTargetItem.value)
+}
+
+const uploadAttachmentImage = async (event, attachment) => {
+  const file = event?.target?.files?.[0]
+  if (!file) return
+  try {
+    const formData = new FormData()
+    formData.append("file", file)
+    const response = await api.qualityEquipmentInspections.uploadAttachmentImage(formData)
+    attachment.image_url = response.data?.image_url || ""
+    alert("付表画像をアップロードしました。")
+  } catch (error) {
+    console.error("付表画像アップロードに失敗:", error)
+    alert("付表画像のアップロードに失敗しました。")
+  } finally {
+    if (event?.target) {
+      event.target.value = ""
+    }
+  }
 }
 
 const loadSm009Defaults = () => {
@@ -880,6 +1158,8 @@ const toFormModel = (raw) => {
     created_by_name: raw.created_by_name || "",
     reviewer_user: raw.reviewer_user || null,
     reviewer_user_name: raw.reviewer_user_name || "",
+    chief_user: raw.chief_user || null,
+    chief_user_name: raw.chief_user_name || "",
     approver_user: raw.approver_user || null,
     approver_user_name: raw.approver_user_name || "",
     rejection_comment: raw.rejection_comment || "",
@@ -900,6 +1180,20 @@ const toFormModel = (raw) => {
           criteria: item.criteria || "",
           is_required: Boolean(item.is_required),
           is_active: Boolean(item.is_active),
+          attachments: Array.isArray(item.attachments)
+            ? item.attachments.map((attachment) =>
+                createAttachment({
+                  id: attachment.id || null,
+                  display_order: Number(attachment.display_order || 1),
+                  title: attachment.title || "",
+                  description: attachment.description || "",
+                  check_point: attachment.check_point || "",
+                  ok_example: attachment.ok_example || "",
+                  ng_example: attachment.ng_example || "",
+                  image_url: attachment.image_url || "",
+                })
+              )
+            : [],
         }))
       : [],
   }
@@ -921,6 +1215,17 @@ const buildPayload = () => {
       criteria: String(item.criteria || "").trim(),
       is_required: Boolean(item.is_required),
       is_active: Boolean(item.is_active),
+      attachments: Array.isArray(item.attachments)
+        ? item.attachments.map((attachment, index) => ({
+            display_order: Number(attachment.display_order || index + 1),
+            title: String(attachment.title || "").trim(),
+            description: String(attachment.description || "").trim(),
+            check_point: String(attachment.check_point || "").trim(),
+            ok_example: String(attachment.ok_example || "").trim(),
+            ng_example: String(attachment.ng_example || "").trim(),
+            image_url: String(attachment.image_url || "").trim(),
+          }))
+        : [],
     }))
 
   return {
@@ -984,10 +1289,17 @@ const loadTemplateDetail = async (id) => {
 }
 
 const selectTemplate = async (id) => {
+  await router.replace({
+    path: route.path,
+    query: { ...route.query, id: String(id) },
+  })
   await loadTemplateDetail(id)
 }
 
-const startNewTemplate = () => {
+const startNewTemplate = async () => {
+  if (route.query.id) {
+    await router.replace({ path: route.path, query: {} })
+  }
   isListHidden.value = true
   selectedTemplateId.value = null
   form.value = createEmptyForm()
@@ -1059,7 +1371,8 @@ const submitForReview = async () => {
 
 const completeReview = async () => {
   if (!form.value.id || !canReview.value) return
-  const ok = window.confirm("確認完了にします。よろしいですか？")
+  const actionLabelText = reviewActionLabel.value
+  const ok = window.confirm(`${actionLabelText}にします。よろしいですか？`)
   if (!ok) return
 
   actionLoading.value = true
@@ -1067,7 +1380,7 @@ const completeReview = async () => {
     await api.qualityEquipmentInspections.review(form.value.id)
     await loadTemplateList()
     await loadTemplateDetail(form.value.id)
-    alert("確認完了を登録しました。")
+    alert(`${actionLabelText}を登録しました。`)
   } catch (error) {
     console.error("確認完了に失敗:", error)
     alert("確認完了に失敗しました。")
@@ -1078,7 +1391,7 @@ const completeReview = async () => {
 
 const approveTemplate = async () => {
   if (!form.value.id || !canApprove.value) return
-  const ok = window.confirm("承認します。よろしいですか？")
+  const ok = window.confirm("部長承認します。よろしいですか？")
   if (!ok) return
 
   actionLoading.value = true
@@ -1086,7 +1399,7 @@ const approveTemplate = async () => {
     await api.qualityEquipmentInspections.approve(form.value.id)
     await loadTemplateList()
     await loadTemplateDetail(form.value.id)
-    alert("承認しました。")
+    alert("部長承認しました。")
   } catch (error) {
     console.error("承認に失敗:", error)
     alert("承認に失敗しました。")
@@ -1114,14 +1427,29 @@ const rejectTemplate = async () => {
   }
 }
 
+watch(
+  () => route.query.id,
+  async (nextId) => {
+    const numericId = Number(nextId || 0)
+    if (!numericId || numericId === Number(selectedTemplateId.value || 0)) return
+    const exists = templates.value.some((item) => Number(item.id) === numericId)
+    if (!exists) return
+    await loadTemplateDetail(numericId)
+  }
+)
+
 onMounted(async () => {
   if (!canView.value) return
   await loadEquipmentOptions()
   await loadTemplateList()
-  if (templates.value.length) {
+
+  const routeTemplateId = Number(route.query.id || 0)
+  if (routeTemplateId && templates.value.some((item) => Number(item.id) === routeTemplateId)) {
+    await loadTemplateDetail(routeTemplateId)
+  } else if (templates.value.length) {
     await loadTemplateDetail(templates.value[0].id)
   } else {
-    startNewTemplate()
+    await startNewTemplate()
   }
   await resizeAllTextareas()
 })
@@ -1274,6 +1602,88 @@ onMounted(async () => {
   flex-wrap: wrap;
   gap: 8px;
 }
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.44);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 30;
+}
+.modal-panel {
+  width: min(1100px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #d7dde7;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+  padding: 16px;
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.attachment-target-name {
+  margin-top: 4px;
+  color: #475569;
+  font-size: 13px;
+}
+.attachment-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.attachment-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.attachment-card {
+  border: 1px solid #d7dde7;
+  border-radius: 6px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.attachment-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.attachment-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 8px;
+}
+.attachment-form-grid .wide {
+  grid-column: span 2;
+}
+.attachment-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #334155;
+}
+.attachment-preview {
+  display: flex;
+  justify-content: flex-start;
+}
+.attachment-preview img {
+  max-width: 100%;
+  max-height: 280px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  object-fit: contain;
+  background: #f8fafc;
+}
 .item-section {
   display: flex;
   flex-direction: column;
@@ -1380,6 +1790,12 @@ button:disabled {
   .form-grid {
     grid-template-columns: repeat(2, minmax(140px, 1fr));
   }
+  .attachment-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .attachment-form-grid .wide {
+    grid-column: span 1;
+  }
 }
 @media (max-width: 700px) {
   .form-grid {
@@ -1387,6 +1803,12 @@ button:disabled {
   }
   .form-grid .wide {
     grid-column: span 1;
+  }
+  .modal-backdrop {
+    padding: 10px;
+  }
+  .modal-panel {
+    padding: 12px;
   }
 }
 </style>
