@@ -2,6 +2,9 @@ export const createLaserPatternsAPI = (client) => ({
   getLaserPatterns(params = {}) {
     return client.get('/laser-patterns/', { params })
   },
+  getMonthlyMaterialSummary(params = {}) {
+    return client.get('/laser-patterns/monthly-material-summary/', { params })
+  },
   createLaserPattern(data) {
     return client.post('/laser-patterns/', data)
   },

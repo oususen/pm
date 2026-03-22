@@ -16,6 +16,22 @@
           <option value="">材料: すべて</option>
           <option v-for="code in uniqueMaterialCodes" :key="code" :value="code">{{ code }}</option>
         </select>
+        <input
+          v-model="filterProcessTimeMin"
+          type="number"
+          step="0.1"
+          min="0"
+          class="filter-input"
+          placeholder="加工時間: 以上"
+        />
+        <input
+          v-model="filterProcessTimeMax"
+          type="number"
+          step="0.1"
+          min="0"
+          class="filter-input"
+          placeholder="加工時間: 以下"
+        />
       </div>
       <div class="action-block">
         <button class="btn" type="button" @click="createNewPattern">新規</button>
@@ -185,6 +201,8 @@ const saving = ref(false)
 const searchKeyword = ref('')
 const filterEquipment = ref('')
 const filterMaterial = ref('')
+const filterProcessTimeMin = ref('')
+const filterProcessTimeMax = ref('')
 const patterns = ref([])
 const allProductOptions = ref([])
 const materialProductOptions = ref([])
@@ -246,6 +264,11 @@ const filteredPatterns = computed(() => {
     }
     if (filterEquipment.value && item.equipment_code !== filterEquipment.value) return false
     if (filterMaterial.value && item.material_code !== filterMaterial.value) return false
+    const processTime = Number(item.process_time_min ?? 0)
+    const minTime = Number(filterProcessTimeMin.value)
+    const maxTime = Number(filterProcessTimeMax.value)
+    if (filterProcessTimeMin.value !== '' && Number.isFinite(minTime) && processTime < minTime) return false
+    if (filterProcessTimeMax.value !== '' && Number.isFinite(maxTime) && processTime > maxTime) return false
     return true
   })
 })
@@ -492,6 +515,7 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: end;
+  flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 8px;
 }
@@ -505,8 +529,18 @@ onMounted(async () => {
   display: flex;
   gap: 6px;
   align-items: flex-end;
+  flex-wrap: wrap;
 }
 .filter-select {
+  height: 32px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0 8px;
+  font-size: 13px;
+  background: #fff;
+}
+.filter-input {
+  width: 132px;
   height: 32px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;

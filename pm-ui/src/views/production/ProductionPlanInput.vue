@@ -38,7 +38,7 @@
         :class="{ active: activeLaserTab === 'tab3' }"
         @click="activeLaserTab = 'tab3'"
       >
-        タブ3
+        月所要材料集計
       </button>
     </div>
     <div v-else-if="activePlanTab === 'spot'" class="laser-subtab-bar">
@@ -487,9 +487,7 @@
         </table>
       </div>
     </div>
-    <div v-else class="laser-third-tab-panel">
-      第3タブは後続仕様で実装します。
-    </div>
+    <LaserMonthlyMaterialSummary v-else class="laser-summary-section" />
     </template>
 
     <div v-else class="settings-panel">
@@ -529,6 +527,7 @@ import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
 import ProcessGanttView from './ProcessGanttView.vue'
 import LaserPatternEditor from './LaserPatternEditor.vue'
+import LaserMonthlyMaterialSummary from './LaserMonthlyMaterialSummary.vue'
 const router = useRouter()
 const selectedLine = ref('')
 const activePlanTab = ref('')
@@ -3447,6 +3446,9 @@ thead .sticky-col {
   color: #475569;
   padding: 16px;
   font-size: 13px;
+}
+.laser-summary-section {
+  margin-top: 8px;
 }
 .spot-excel-toolbar {
   display: flex;

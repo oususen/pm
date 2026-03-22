@@ -9,7 +9,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 import django_filters
-from django.db.models import Q, Max, Prefetch
+from django.db.models import Q, Max, Prefetch, Sum
 from django.db import transaction
 import logging
 import csv
@@ -4116,6 +4116,302 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
     search_fields = ['pattern_no', 'material__product_code', 'material__product_name']
     ordering_fields = ['pattern_no', 'updated_at', 'created_at']
     ordering = ['pattern_no']
+
+    @staticmethod
+    def _parse_target_month(month_value):
+        month_text = str(month_value or '').strip()
+        if not month_text:
+            today = get_business_today()
+            month_start = today.replace(day=1)
+        else:
+            try:
+                month_start = datetime.strptime(f'{month_text}-01', '%Y-%m-%d').date()
+            except ValueError:
+                return None, None, 'month must be YYYY-MM'
+
+        if month_start.month == 12:
+            next_month = month_start.replace(year=month_start.year + 1, month=1, day=1)
+        else:
+            next_month = month_start.replace(month=month_start.month + 1, day=1)
+        month_end = next_month - timedelta(days=1)
+        return month_start, month_end, None
+
+    @staticmethod
+    def _decimal_to_float(value, digits='0.001'):
+        decimal_value = Decimal(str(value or 0)).quantize(Decimal(digits), rounding=ROUND_HALF_UP)
+        return float(decimal_value)
+
+    @action(detail=False, methods=['get'], url_path='monthly-material-summary')
+    def monthly_material_summary(self, request):
+        """材料予算用パターンを対象に、受注明細から完成品ごとの必要材料数を合算して月所要材料を集計する。"""
+        month_start, month_end, error_message = self._parse_target_month(request.query_params.get('month'))
+        if error_message:
+            return Response({'detail': error_message}, status=status.HTTP_400_BAD_REQUEST)
+
+        patterns = list(
+            self.get_queryset().filter(is_budget_target=True).order_by('pattern_no')
+        )
+        if not patterns:
+            return Response({
+                'month': month_start.strftime('%Y-%m'),
+                'start_date': str(month_start),
+                'end_date': str(month_end),
+                'material_totals': [],
+                'equipment_totals': [],
+                'pattern_rows': [],
+                'warnings': ['材料予算用パターンが登録されていません。'],
+                'totals': {
+                    'material_type_count': 0,
+                    'pattern_count': 0,
+                    'required_shots': 0,
+                    'required_material_qty': 0,
+                    'total_process_time_min': 0,
+                },
+            })
+
+        finished_meta_by_code = {}
+        product_pattern_map = {}
+        warnings = []
+        for pattern in patterns:
+            for item in pattern.finished_items.all():
+                product = item.finished_product
+                if not product:
+                    continue
+                product_code = str(product.product_code or '').strip()
+                if not product_code:
+                    continue
+                finished_meta_by_code.setdefault(product_code, {
+                    'product_id': product.id,
+                    'product_code': product_code,
+                    'product_name': product.product_name or '',
+                })
+                product_pattern_map.setdefault(product_code, []).append(pattern.pattern_no)
+
+        duplicate_codes = {
+            code: pattern_nos
+            for code, pattern_nos in product_pattern_map.items()
+            if len(pattern_nos) > 1
+        }
+        for code, pattern_nos in sorted(duplicate_codes.items()):
+            meta = finished_meta_by_code.get(code, {})
+            warnings.append(
+                f"完成品 {code} {meta.get('product_name', '')} が複数パターンに登録されています: {', '.join(pattern_nos)}"
+            )
+
+        if not finished_meta_by_code:
+            return Response({
+                'month': month_start.strftime('%Y-%m'),
+                'start_date': str(month_start),
+                'end_date': str(month_end),
+                'material_totals': [],
+                'equipment_totals': [],
+                'pattern_rows': [],
+                'warnings': ['材料予算用パターンに完成品情報がありません。'],
+                'totals': {
+                    'material_type_count': 0,
+                    'pattern_count': 0,
+                    'required_shots': 0,
+                    'required_material_qty': 0,
+                    'total_process_time_min': 0,
+                },
+            })
+
+        order_rows = list(
+            OrderLine.objects.filter(
+                order__status='OPEN',
+                product_code__in=list(finished_meta_by_code.keys()),
+                due_date__gte=month_start,
+                due_date__lte=month_end,
+            )
+            .values('product_code', 'due_date', 'order__order_type')
+            .annotate(total_qty=Sum('quantity'))
+            .order_by('product_code', 'due_date', 'order__order_type')
+        )
+
+        daily_order_map = {}
+        for row in order_rows:
+            product_code = str(row.get('product_code') or '').strip()
+            due_date = row.get('due_date')
+            if not product_code or not due_date:
+                continue
+            key = (product_code, due_date)
+            bucket = daily_order_map.setdefault(key, {
+                'firm_qty': Decimal('0'),
+                'forecast_qty': Decimal('0'),
+            })
+            qty = Decimal(str(row.get('total_qty') or 0))
+            order_type = str(row.get('order__order_type') or '').upper()
+            if order_type == 'FIRM':
+                bucket['firm_qty'] += qty
+            else:
+                bucket['forecast_qty'] += qty
+
+        monthly_order_map = {}
+        for (product_code, _due_date), qty_map in daily_order_map.items():
+            item = monthly_order_map.setdefault(product_code, {
+                'firm_qty': Decimal('0'),
+                'forecast_qty': Decimal('0'),
+                'selected_qty': Decimal('0'),
+                'firm_days': 0,
+                'forecast_only_days': 0,
+            })
+            firm_qty = qty_map['firm_qty']
+            forecast_qty = qty_map['forecast_qty']
+            selected_qty = firm_qty if firm_qty > 0 else forecast_qty
+            item['firm_qty'] += firm_qty
+            item['forecast_qty'] += forecast_qty
+            item['selected_qty'] += selected_qty
+            if firm_qty > 0:
+                item['firm_days'] += 1
+            elif forecast_qty > 0:
+                item['forecast_only_days'] += 1
+
+        material_totals_map = {}
+        equipment_totals_map = {}
+        pattern_rows = []
+        total_required_material_qty = Decimal('0')
+        total_process_time_min = Decimal('0')
+
+        for pattern in patterns:
+            finished_items = list(pattern.finished_items.all())
+            if not finished_items:
+                continue
+
+            finished_rows = []
+            selected_order_total = Decimal('0')
+            pattern_required_material_qty = Decimal('0')
+
+            for item in finished_items:
+                product = item.finished_product
+                product_code = str(getattr(product, 'product_code', '') or '').strip()
+                units_per_shot = Decimal(str(item.units_per_shot or 0))
+                order_summary = monthly_order_map.get(product_code, {})
+                selected_qty = Decimal(str(order_summary.get('selected_qty') or 0))
+                firm_qty = Decimal(str(order_summary.get('firm_qty') or 0))
+                forecast_qty = Decimal(str(order_summary.get('forecast_qty') or 0))
+                material_per_unit = (Decimal('1') / units_per_shot) if units_per_shot > 0 else Decimal('0')
+                required_material_qty = (selected_qty / units_per_shot) if units_per_shot > 0 else Decimal('0')
+                selected_order_total += selected_qty
+                pattern_required_material_qty += required_material_qty
+
+                if order_summary.get('firm_days') and order_summary.get('forecast_only_days'):
+                    selected_basis = 'MIXED'
+                elif order_summary.get('firm_days'):
+                    selected_basis = 'FIRM'
+                elif order_summary.get('forecast_only_days'):
+                    selected_basis = 'FORECAST'
+                else:
+                    selected_basis = 'NONE'
+
+                finished_rows.append({
+                    'finished_product_id': getattr(product, 'id', None),
+                    'finished_product_code': product_code,
+                    'finished_product_name': getattr(product, 'product_name', '') or '',
+                    'units_per_shot': self._decimal_to_float(units_per_shot),
+                    'material_per_unit': self._decimal_to_float(material_per_unit),
+                    'firm_qty': self._decimal_to_float(firm_qty),
+                    'forecast_qty': self._decimal_to_float(forecast_qty),
+                    'selected_qty': self._decimal_to_float(selected_qty),
+                    'selected_basis': selected_basis,
+                    'required_material_qty': self._decimal_to_float(required_material_qty),
+                })
+
+            if pattern_required_material_qty <= 0:
+                continue
+
+            process_time_min = Decimal(str(pattern.process_time_min or 0))
+            total_process_time = process_time_min * pattern_required_material_qty
+            material = pattern.material
+            material_unit = getattr(material, 'unit', '') or ''
+            equipment = pattern.equipment
+
+            pattern_rows.append({
+                'pattern_id': pattern.id,
+                'pattern_no': pattern.pattern_no,
+                'material_id': getattr(material, 'id', None),
+                'material_code': getattr(material, 'product_code', '') or '',
+                'material_name': getattr(material, 'product_name', '') or '',
+                'material_unit': material_unit,
+                'equipment_id': getattr(pattern.equipment, 'id', None),
+                'equipment_code': getattr(pattern.equipment, 'equipment_code', '') or '',
+                'equipment_name': getattr(pattern.equipment, 'equipment_name', '') or '',
+                'process_time_min': self._decimal_to_float(process_time_min),
+                'selected_order_qty_total': self._decimal_to_float(selected_order_total),
+                'required_shots': self._decimal_to_float(pattern_required_material_qty),
+                'required_material_qty': self._decimal_to_float(pattern_required_material_qty),
+                'total_process_time_min': self._decimal_to_float(total_process_time),
+                'finished_items': finished_rows,
+            })
+
+            material_key = getattr(material, 'id', None) or f'code:{getattr(material, "product_code", "")}'
+            material_row = material_totals_map.setdefault(material_key, {
+                'material_id': getattr(material, 'id', None),
+                'material_code': getattr(material, 'product_code', '') or '',
+                'material_name': getattr(material, 'product_name', '') or '',
+                'material_unit': material_unit,
+                'pattern_count': 0,
+                'required_material_qty': Decimal('0'),
+                'required_shots': Decimal('0'),
+                'total_process_time_min': Decimal('0'),
+            })
+            material_row['pattern_count'] += 1
+            material_row['required_material_qty'] += pattern_required_material_qty
+            material_row['required_shots'] += pattern_required_material_qty
+            material_row['total_process_time_min'] += total_process_time
+
+            equipment_key = getattr(equipment, 'id', None) or f'code:{getattr(equipment, "equipment_code", "")}'
+            equipment_row = equipment_totals_map.setdefault(equipment_key, {
+                'equipment_id': getattr(equipment, 'id', None),
+                'equipment_code': getattr(equipment, 'equipment_code', '') or '',
+                'equipment_name': getattr(equipment, 'equipment_name', '') or '',
+                'pattern_count': 0,
+                'total_process_time_min': Decimal('0'),
+            })
+            equipment_row['pattern_count'] += 1
+            equipment_row['total_process_time_min'] += total_process_time
+
+            total_required_material_qty += pattern_required_material_qty
+            total_process_time_min += total_process_time
+
+        material_totals = []
+        for item in sorted(material_totals_map.values(), key=lambda x: (x['material_code'], x['material_name'])):
+            material_totals.append({
+                'material_id': item['material_id'],
+                'material_code': item['material_code'],
+                'material_name': item['material_name'],
+                'material_unit': item['material_unit'],
+                'pattern_count': item['pattern_count'],
+                'required_material_qty': self._decimal_to_float(item['required_material_qty']),
+                'required_shots': self._decimal_to_float(item['required_shots']),
+                'total_process_time_min': self._decimal_to_float(item['total_process_time_min']),
+            })
+
+        equipment_totals = []
+        for item in sorted(equipment_totals_map.values(), key=lambda x: (x['equipment_code'], x['equipment_name'])):
+            equipment_totals.append({
+                'equipment_id': item['equipment_id'],
+                'equipment_code': item['equipment_code'],
+                'equipment_name': item['equipment_name'],
+                'pattern_count': item['pattern_count'],
+                'total_process_time_min': self._decimal_to_float(item['total_process_time_min']),
+            })
+
+        return Response({
+            'month': month_start.strftime('%Y-%m'),
+            'start_date': str(month_start),
+            'end_date': str(month_end),
+            'material_totals': material_totals,
+            'equipment_totals': equipment_totals,
+            'pattern_rows': pattern_rows,
+            'warnings': warnings,
+            'totals': {
+                'material_type_count': len(material_totals),
+                'pattern_count': len(pattern_rows),
+                'required_shots': self._decimal_to_float(total_required_material_qty),
+                'required_material_qty': self._decimal_to_float(total_required_material_qty),
+                'total_process_time_min': self._decimal_to_float(total_process_time_min),
+            },
+        })
 
     @action(detail=True, methods=['post'])
     def copy(self, request, pk=None):
