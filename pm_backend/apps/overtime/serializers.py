@@ -148,9 +148,9 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
         return round(total_minutes / 60, 1)
 
     def validate(self, data):
-        # 承認フロー必要種別のみ start_time/end_time を必須チェック
+        # 時間外・午前半休のみ start_time/end_time を必須チェック（休日出勤は任意）
         app_type = data.get('application_type', 'overtime')
-        needs_time = app_type in OvertimeApplication.NEEDS_APPROVAL_TYPES
+        needs_time = app_type in ('overtime', 'half_day_am')
         if needs_time:
             if not data.get('start_time'):
                 raise serializers.ValidationError({'start_time': '残業開始時間は必須です。'})

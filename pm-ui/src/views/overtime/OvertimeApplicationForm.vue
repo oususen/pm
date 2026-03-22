@@ -60,7 +60,8 @@
           {{ t('overtime.halfDayNote') }}
         </p>
 
-        <template v-if="needsTimeInput">
+        <!-- 時間外・午前半休: 勤務時間 + 残業時間（両方必須） -->
+        <template v-if="needsTimeInput && form.application_type !== 'holiday'">
           <div class="form-row">
             <label class="form-label required">{{ t('overtime.workTime') }}</label>
             <div class="time-range">
@@ -80,6 +81,16 @@
             </div>
           </div>
         </template>
+
+        <!-- 休日出勤: 勤務時間帯（任意） -->
+        <div v-if="form.application_type === 'holiday'" class="form-row">
+          <label class="form-label">勤務時間帯</label>
+          <div class="time-range">
+            <input type="text" v-model="form.start_time" class="form-input time-input" placeholder="08:00" maxlength="5" @blur="formatTime('start_time')" />
+            <span class="tilde">〜</span>
+            <input type="text" v-model="form.end_time" class="form-input time-input" placeholder="15:00" maxlength="5" @blur="formatTime('end_time')" />
+          </div>
+        </div>
 
         <div v-if="!needsApproval" class="form-row">
           <label class="form-label"></label>
@@ -300,13 +311,17 @@ function wrapTime(hhmm) {
 
 // 送信前に全フィールドを正規化した payload を返す
 function normalizedPayload() {
-  const hasTime = NEEDS_APPROVAL_TYPES.has(form.value.application_type)
+  const type = form.value.application_type
+  const hasTime = NEEDS_APPROVAL_TYPES.has(type)
+  const isHoliday = type === 'holiday'
   return {
     ...form.value,
     work_date: toYYYYMMDD(form.value.work_date),
     end_date: form.value.end_date ? toYYYYMMDD(form.value.end_date) : null,
-    work_start_time: hasTime ? (toHHMM(form.value.work_start_time) || null) : null,
-    scheduled_end_time: hasTime ? (wrapTime(toHHMM(form.value.scheduled_end_time)) || null) : null,
+    // 休日出勤は標準勤務時間なし（勤務パターンで管理）
+    work_start_time: (hasTime && !isHoliday) ? (toHHMM(form.value.work_start_time) || null) : null,
+    scheduled_end_time: (hasTime && !isHoliday) ? (wrapTime(toHHMM(form.value.scheduled_end_time)) || null) : null,
+    // 休日出勤は任意、他の承認種別は必須
     start_time: hasTime ? (wrapTime(toHHMM(form.value.start_time)) || null) : null,
     end_time: hasTime ? (wrapTime(toHHMM(form.value.end_time)) || null) : null,
   }
