@@ -36,6 +36,25 @@
         </div>
 
         <div class="form-row">
+          <label class="form-label required">対象者</label>
+          <div class="applicant-field">
+            <select
+              v-if="canSelectApplicant"
+              v-model="form.applicant"
+              class="form-input form-select"
+            >
+              <option v-for="user in applicantOptions" :key="user.id" :value="user.id">
+                {{ user.label }}
+              </option>
+            </select>
+            <div v-else class="applicant-fixed">{{ currentUserName }}</div>
+            <p v-if="canSelectApplicant" class="applicant-note">
+              午前半休・午後半休・有給・連続有給は、リーダーまたは班長が管理目的で登録できます。
+            </p>
+          </div>
+        </div>
+
+        <div class="form-row">
           <label class="form-label required">{{ isConsecutive ? t('overtime.startDate') : t('overtime.workDate') }}</label>
           <input type="date" v-model="form.work_date" class="form-input" required />
         </div>
@@ -147,6 +166,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import SignaturePad from 'signature_pad'
 import api from '@/api/client'
+import { authState, ensureAuth } from '@/auth'
 import { t } from '@/i18n'
 
 // "800" "0800" "8:00" "08:00" → "08:00"、変換不能なら元の値を返す
@@ -181,6 +201,13 @@ function toYYYYMMDD(val) {
 }
 
 const router = useRouter()
+const currentUserId = computed(() => Number(authState.user?.id || 0))
+const currentUserName = computed(() => {
+  const user = authState.user
+  if (!user) return ''
+  return `${user.last_name || ''} ${user.first_name || ''}`.trim() || user.username || ''
+})
+const canProxyRole = computed(() => ['leader', 'supervisor'].includes(authState.user?.profile?.role || ''))
 
 // サインパッド
 const signCanvas = ref(null)
@@ -211,13 +238,17 @@ const isEdit = computed(() => !!props.id)
 
 // 種別に関するcomputed
 const NEEDS_APPROVAL_TYPES = new Set(['overtime', 'holiday', 'half_day_am'])
+const SELF_ONLY_TYPES = new Set(['overtime', 'holiday'])
 const needsApproval = computed(() => NEEDS_APPROVAL_TYPES.has(form.value.application_type))
 const needsTimeInput = computed(() => NEEDS_APPROVAL_TYPES.has(form.value.application_type))
 const isConsecutive = computed(() => form.value.application_type === 'paid_leave_consec')
+const canSelectApplicant = computed(() => canProxyRole.value && !SELF_ONLY_TYPES.has(form.value.application_type))
 const saving = ref(false)
 const errorMsg = ref('')
+const applicantOptions = ref([])
 
 const form = ref({
+  applicant: null,
   application_type: 'overtime',
   work_date: '',
   end_date: '',
@@ -238,6 +269,65 @@ const holidayWorkPatterns = computed(() =>
 )
 const selectedPatternBreaks = ref([])  // 選択中パターンの休憩時間リスト
 
+function buildApplicantLabel(user) {
+  const fullName = `${user.last_name || ''} ${user.first_name || ''}`.trim() || user.username || `ID:${user.id}`
+  const teamName = user.profile?.team_name || ''
+  const unitName = user.profile?.unit_name || ''
+  const org = [teamName, unitName].filter(Boolean).join(' / ')
+  return org ? `${fullName}（${org}）` : fullName
+}
+
+async function loadApplicantOptions() {
+  if (!canProxyRole.value) {
+    applicantOptions.value = currentUserId.value
+      ? [{ id: currentUserId.value, label: currentUserName.value }]
+      : []
+    return
+  }
+
+  try {
+    const res = await api.accounts.getUsers({ page_size: 1000, is_active: true })
+    const users = res.data?.results ?? res.data ?? []
+    const myProfile = authState.user?.profile || {}
+    const teamIds = new Set(
+      [myProfile.team_id, ...(Array.isArray(myProfile.supervisor_teams) ? myProfile.supervisor_teams : [])]
+        .filter(Boolean)
+        .map(Number)
+    )
+    const unitIds = new Set(
+      [myProfile.unit_id, ...(Array.isArray(myProfile.leader_units) ? myProfile.leader_units : [])]
+        .filter(Boolean)
+        .map(Number)
+    )
+
+    const filtered = users.filter((user) => {
+      if (Number(user.id) === currentUserId.value) return true
+      if ((authState.user?.profile?.role || '') === 'supervisor') {
+        return teamIds.has(Number(user.profile?.team))
+      }
+      if ((authState.user?.profile?.role || '') === 'leader') {
+        return unitIds.has(Number(user.profile?.unit))
+      }
+      return false
+    })
+
+    applicantOptions.value = filtered
+      .map((user) => ({ id: Number(user.id), label: buildApplicantLabel(user) }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'ja'))
+  } catch (e) {
+    applicantOptions.value = currentUserId.value
+      ? [{ id: currentUserId.value, label: currentUserName.value }]
+      : []
+  }
+}
+
+function ensureApplicantOption(userId, label) {
+  const numericId = Number(userId || 0)
+  if (!numericId || applicantOptions.value.some((user) => user.id === numericId)) return
+  applicantOptions.value.push({ id: numericId, label: label || `ID:${numericId}` })
+  applicantOptions.value.sort((a, b) => a.label.localeCompare(b.label, 'ja'))
+}
+
 // 勤務パターン変更時に休憩時間を取得
 watch(() => form.value.work_pattern, async (newVal) => {
   if (!newVal) { selectedPatternBreaks.value = []; return }
@@ -248,6 +338,17 @@ watch(() => form.value.work_pattern, async (newVal) => {
     selectedPatternBreaks.value = []
   }
 })
+
+watch(
+  () => form.value.application_type,
+  (newType) => {
+    if (SELF_ONLY_TYPES.has(newType)) {
+      form.value.applicant = currentUserId.value || null
+    } else if (!form.value.applicant) {
+      form.value.applicant = currentUserId.value || null
+    }
+  }
+)
 
 // 2時間ごとに10分休憩を控除（130分サイクル）
 function applyBreaks(wallMinutes) {
@@ -380,6 +481,7 @@ function normalizedPayload() {
   const isHoliday = type === 'holiday'
   return {
     ...form.value,
+    applicant: Number(form.value.applicant || currentUserId.value || 0) || null,
     work_date: toYYYYMMDD(form.value.work_date),
     end_date: form.value.end_date ? toYYYYMMDD(form.value.end_date) : null,
     // 休日出勤は標準勤務時間なし（勤務パターンで管理）
@@ -392,6 +494,8 @@ function normalizedPayload() {
 }
 
 onMounted(async () => {
+  await ensureAuth()
+
   // サインパッド初期化
   if (signCanvas.value) {
     signaturePad = new SignaturePad(signCanvas.value, { penColor: '#1f2a44' })
@@ -405,11 +509,15 @@ onMounted(async () => {
     console.warn('勤務パターン取得失敗:', e)
   }
 
+  await loadApplicantOptions()
+
   if (isEdit.value) {
     try {
       const res = await api.overtime.getApplication(props.id)
       const d = res.data
+      ensureApplicantOption(d.applicant, d.applicant_name)
       form.value = {
+        applicant: d.applicant || currentUserId.value || null,
         application_type: d.application_type,
         work_date: d.work_date,
         end_date: d.end_date || '',
@@ -429,6 +537,7 @@ onMounted(async () => {
     if (now.getHours() < 10) {
       now.setDate(now.getDate() - 1)
     }
+    form.value.applicant = currentUserId.value || null
     form.value.work_date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   }
 })
@@ -531,6 +640,25 @@ async function handleSubmit() {
 }
 .form-input:focus {
   border-color: #40916c;
+}
+.applicant-field {
+  flex: 1;
+}
+.applicant-fixed {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #f9fafb;
+  color: #374151;
+  font-size: 14px;
+}
+.applicant-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #6b7280;
 }
 .time-range {
   display: flex;

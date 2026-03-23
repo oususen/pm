@@ -1,5 +1,11 @@
+from django.contrib.auth import get_user_model
 from rest_framework import serializers
+
+from .access import can_apply_for, can_manage_application
 from .models import OvertimeApplication, OvertimeApprovalLog
+
+
+User = get_user_model()
 
 
 class OvertimeApprovalLogSerializer(serializers.ModelSerializer):
@@ -29,7 +35,9 @@ class OvertimeApprovalLogSerializer(serializers.ModelSerializer):
 
 
 class OvertimeApplicationSerializer(serializers.ModelSerializer):
+    applicant = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(is_active=True), required=False)
     applicant_name = serializers.SerializerMethodField()
+    created_by_name = serializers.SerializerMethodField()
     team_name = serializers.SerializerMethodField()
     group_name = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
@@ -41,11 +49,12 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
     pending_role = serializers.SerializerMethodField()
     work_pattern_name = serializers.SerializerMethodField()
     work_pattern_hours = serializers.SerializerMethodField()
+    is_proxy_application = serializers.SerializerMethodField()
 
     class Meta:
         model = OvertimeApplication
         fields = [
-            'id', 'applicant', 'applicant_name',
+            'id', 'applicant', 'applicant_name', 'created_by', 'created_by_name',
             'work_date', 'end_date', 'application_type', 'type_display',
             'work_start_time', 'scheduled_end_time',
             'start_time', 'end_time', 'hours', 'midnight_hours',
@@ -53,10 +62,10 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
             'reason', 'team', 'team_name', 'group_name',
             'status', 'status_display', 'rejection_reason', 'signature',
             'submitted_at', 'created_at', 'updated_at',
-            'approval_logs', 'can_edit', 'can_approve', 'pending_role',
+            'approval_logs', 'can_edit', 'can_approve', 'pending_role', 'is_proxy_application',
         ]
         read_only_fields = [
-            'applicant', 'hours', 'midnight_hours', 'team',
+            'created_by', 'hours', 'midnight_hours', 'team',
             'status', 'rejection_reason', 'submitted_at', 'created_at', 'updated_at',
         ]
         extra_kwargs = {
@@ -69,6 +78,13 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
 
     def get_applicant_name(self, obj):
         u = obj.applicant
+        name = f"{u.last_name} {u.first_name}".strip()
+        return name or u.username
+
+    def get_created_by_name(self, obj):
+        if not obj.created_by:
+            return None
+        u = obj.created_by
         name = f"{u.last_name} {u.first_name}".strip()
         return name or u.username
 
@@ -99,7 +115,7 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return False
-        return obj.applicant_id == request.user.id and obj.status in ('draft', 'submitted', 'rejected')
+        return can_manage_application(request.user, obj) and obj.status in ('draft', 'submitted', 'rejected')
 
     def get_can_approve(self, obj):
         request = self.context.get('request')
@@ -147,26 +163,49 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
             total_minutes -= int((be - bs).total_seconds() / 60)
         return round(total_minutes / 60, 1)
 
+    def get_is_proxy_application(self, obj):
+        return bool(obj.created_by_id and obj.created_by_id != obj.applicant_id)
+
     def validate(self, data):
+        request = self.context.get('request')
+        user = request.user if request else None
+
         # 時間外・午前半休のみ start_time/end_time を必須チェック（休日出勤は任意）
-        app_type = data.get('application_type', 'overtime')
+        app_type = data.get('application_type', getattr(self.instance, 'application_type', 'overtime'))
         needs_time = app_type in ('overtime', 'half_day_am')
+        start_time = data.get('start_time', getattr(self.instance, 'start_time', None))
+        end_time = data.get('end_time', getattr(self.instance, 'end_time', None))
         if needs_time:
-            if not data.get('start_time'):
+            if not start_time:
                 raise serializers.ValidationError({'start_time': '残業開始時間は必須です。'})
-            if not data.get('end_time'):
+            if not end_time:
                 raise serializers.ValidationError({'end_time': '残業終了時間は必須です。'})
         # 連続有給は end_date 必須
-        if app_type == 'paid_leave_consec' and not data.get('end_date'):
+        end_date = data.get('end_date', getattr(self.instance, 'end_date', None))
+        if app_type == 'paid_leave_consec' and not end_date:
             raise serializers.ValidationError({'end_date': '連続有給は終了日が必須です。'})
+
+        applicant = data.get('applicant') or getattr(self.instance, 'applicant', user)
+        if user and applicant and not can_apply_for(user, applicant, app_type):
+            raise serializers.ValidationError({'applicant': 'この対象者では申請できません。'})
         return data
 
     def create(self, validated_data):
         request = self.context.get('request')
         user = request.user
-        validated_data['applicant'] = user
+        applicant = validated_data.get('applicant') or user
+        validated_data['applicant'] = applicant
+        validated_data['created_by'] = user
         try:
-            validated_data['team'] = user.profile.team
+            validated_data['team'] = applicant.profile.team
         except Exception:
             pass
         return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        applicant = validated_data.get('applicant', instance.applicant)
+        try:
+            validated_data['team'] = applicant.profile.team
+        except Exception:
+            validated_data['team'] = None
+        return super().update(instance, validated_data)

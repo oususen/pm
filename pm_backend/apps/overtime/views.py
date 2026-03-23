@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 import django_filters
 
+from .access import can_manage_application
 from .models import OvertimeApplication, OvertimeApprovalLog
 from .serializers import OvertimeApplicationSerializer
 
@@ -215,7 +216,7 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
 
         # 管理職は全申請を閲覧可能、それ以外は自分の申請のみ
         qs = OvertimeApplication.objects.select_related(
-            'applicant', 'team'
+            'applicant', 'created_by', 'team'
         ).prefetch_related('approval_logs__approver')
 
         if role in ('manager', 'chief', 'supervisor'):
@@ -229,7 +230,7 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         app = self.get_object()
-        if app.applicant != request.user:
+        if not can_manage_application(request.user, app):
             return Response({'detail': '権限がありません。'}, status=status.HTTP_403_FORBIDDEN)
         if app.status not in ('draft', 'submitted', 'rejected'):
             return Response(
@@ -246,7 +247,7 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         app = self.get_object()
-        if app.applicant != request.user:
+        if not can_manage_application(request.user, app):
             return Response({'detail': '権限がありません。'}, status=status.HTTP_403_FORBIDDEN)
         if app.status not in ('draft', 'submitted', 'rejected'):
             return Response(
@@ -262,7 +263,7 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
     def upload_signature(self, request, pk=None):
         """サイン画像をアップロードする"""
         app = self.get_object()
-        if app.applicant != request.user:
+        if not can_manage_application(request.user, app):
             return Response({'detail': '権限がありません。'}, status=status.HTTP_403_FORBIDDEN)
         sig = request.FILES.get('signature')
         if not sig:
@@ -277,7 +278,7 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
     def submit(self, request, pk=None):
         """申請を提出する"""
         app = self.get_object()
-        if app.applicant != request.user:
+        if not can_manage_application(request.user, app):
             return Response({'detail': '権限がありません。'}, status=status.HTTP_403_FORBIDDEN)
         if app.status not in ('draft', 'rejected'):
             return Response(
@@ -527,7 +528,7 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
         apps = OvertimeApplication.objects.filter(
             approval_logs__approver=user,
             approval_logs__status='pending',
-        ).select_related('applicant', 'team').prefetch_related(
+        ).select_related('applicant', 'created_by', 'team').prefetch_related(
             'approval_logs__approver'
         ).distinct().order_by('work_date', 'created_at')
 

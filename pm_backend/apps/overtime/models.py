@@ -140,6 +140,14 @@ class OvertimeApplication(models.Model):
         related_name='overtime_applications',
         verbose_name='申請者',
     )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_overtime_applications',
+        verbose_name='登録者',
+    )
     work_date = models.DateField(verbose_name='実施日')
     application_type = models.CharField(
         max_length=20, choices=TYPE_CHOICES, default='overtime', verbose_name='申請種別'

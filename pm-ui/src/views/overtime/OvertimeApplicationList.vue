@@ -69,7 +69,10 @@
             <td>{{ app.team_name || '-' }}</td>
             <td>{{ app.group_name || '-' }}</td>
             <td>{{ app.type_display }}</td>
-            <td>{{ app.applicant_name }}</td>
+            <td>
+              <div>{{ app.applicant_name }}</div>
+              <div v-if="app.is_proxy_application" class="proxy-note">管理登録: {{ app.created_by_name }}</div>
+            </td>
             <td class="nowrap">{{ app.work_start_time || '-' }}{{ app.work_start_time ? ' 〜 ' + (app.scheduled_end_time || '-') : '' }}</td>
             <td class="nowrap">{{ app.start_time }} 〜 {{ app.end_time }}</td>
             <td class="num">
@@ -127,6 +130,7 @@
             <tbody>
               <tr><th>実施日</th><td>{{ detailApp.work_date }}</td></tr>
               <tr><th>種別</th><td>{{ detailApp.type_display }}</td></tr>
+              <tr v-if="detailApp.is_proxy_application"><th>管理登録者</th><td>{{ detailApp.created_by_name }}</td></tr>
               <tr v-if="detailApp.work_start_time || detailApp.scheduled_end_time">
                 <th>勤務時間</th>
                 <td>{{ detailApp.work_start_time || '-' }} 〜 {{ detailApp.scheduled_end_time || '-' }}（定時）</td>
@@ -385,6 +389,10 @@ onMounted(fetchList)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.proxy-note {
+  font-size: 11px;
+  color: #6b7280;
 }
 .midnight-tag {
   display: inline-block;
