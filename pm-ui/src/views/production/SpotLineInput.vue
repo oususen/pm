@@ -130,7 +130,22 @@
             <div class="product-header">
               <div class="product-code-large">{{ selectedItem.product_code }}</div>
               <div class="product-name">{{ selectedItem.product_name }}</div>
-              <div class="process-badge">{{ selectedItem.process_name }}</div>
+              <div class="product-meta-row">
+                <div class="process-badge">{{ selectedItem.process_name }}</div>
+                <div class="action-btns-area action-btns-area-inline">
+                  <label class="equip-label action-label">アクション <span class="required-mark">*</span></label>
+                  <div class="op-action-btns op-action-btns-compact">
+                    <button
+                      v-for="act in operatorActionOptions"
+                      :key="act.value"
+                      class="op-action-btn"
+                      :class="[`action-${act.value.toLowerCase()}`, { active: selectedAction === act.value }]"
+                      @click="selectAction(act.value)"
+                    >{{ act.label }}</button>
+                  </div>
+                </div>
+              </div>
+              <div v-if="selectedItem && selectedEquipmentIds.length === 0" class="equip-empty action-hint">設備を先に選択してください</div>
             </div>
 
             <div class="stats-and-actions">
@@ -150,20 +165,6 @@
                   </span>
                 </div>
               </div>
-
-              <div class="action-btns-area">
-                <label class="equip-label">アクション <span class="required-mark">*</span></label>
-                <div class="op-action-btns">
-                  <button
-                    v-for="act in operatorActionOptions"
-                    :key="act.value"
-                    class="op-action-btn"
-                    :class="[`action-${act.value.toLowerCase()}`, { active: selectedAction === act.value }]"
-                    @click="selectAction(act.value)"
-                  >{{ act.label }}</button>
-                </div>
-                <div v-if="selectedItem && selectedEquipmentIds.length === 0" class="equip-empty">設備を先に選択してください</div>
-              </div>
             </div>
 
             <div v-if="currentWorkState === 'STARTED' && currentOperator" class="started-by-area">
@@ -180,7 +181,7 @@
                   class="equip-btn"
                   :class="{ active: selectedEquipmentIds.includes(eq.id) }"
                   @click="selectedEquipmentIds.includes(eq.id) ? selectedEquipmentIds = selectedEquipmentIds.filter(id => id !== eq.id) : selectedEquipmentIds.push(eq.id)"
-                >{{ eq.equipment_code }}<br><span class="equip-btn-name">{{ eq.equipment_name }}</span></button>
+                >{{ compactEquipmentButtonLabel(eq) }}</button>
               </div>
               <div v-if="equipments.length === 0" class="equip-empty">設備が登録されていません</div>
             </div>
@@ -329,7 +330,7 @@
               class="equip-btn"
               :class="{ active: addEquipmentId === eq.id }"
               @click="addEquipmentId = eq.id"
-            >{{ eq.equipment_code }}<br><span class="equip-btn-name">{{ eq.equipment_name }}</span></button>
+            >{{ compactEquipmentButtonLabel(eq) }}</button>
           </div>
           <div v-if="addEquipments.length === 0" class="equip-empty">設備が登録されていません</div>
         </div>
@@ -445,6 +446,13 @@ const buildEquipmentLabel = (equipmentId, equipmentCode = '', equipmentName = ''
   if (!id) return ''
   const eq = equipments.value.find((row) => String(row.id) === id)
   return String(eq?.equipment_name || eq?.equipment_code || '').trim()
+}
+
+const compactEquipmentButtonLabel = (equipment) => {
+  const name = String(equipment?.equipment_name || '').trim()
+  const match = name.match(/m\s*\d+/i)
+  if (match) return match[0].replace(/\s+/g, '').toUpperCase()
+  return name || String(equipment?.equipment_code || '').trim()
 }
 
 const workStateKey = (item, equipmentId) => {
@@ -1211,6 +1219,7 @@ function showToast(message, type = 'success') {
   gap: 10px;
   flex-wrap: wrap;
   flex: 1;
+  min-width: 0;
 }
 .header-label {
   font-size: 12px;
@@ -1235,6 +1244,8 @@ function showToast(message, type = 'success') {
   font-size: 12px;
   color: #e65100;
   flex-wrap: wrap;
+  flex: 1 1 240px;
+  min-width: 0;
 }
 .header-processing.empty {
   background: #f5f5f5;
@@ -1249,21 +1260,29 @@ function showToast(message, type = 'success') {
 /* 4列レイアウト */
 .four-col-layout {
   display: grid;
-  grid-template-columns: 180px 260px 1fr 200px;
+  grid-template-columns: 180px 260px minmax(0, 1fr) 200px;
+  grid-template-areas: "controls list form photo";
   flex: 1;
   overflow: hidden;
   gap: 0;
+  min-height: 0;
 }
+.col-controls { grid-area: controls; }
+.col-list { grid-area: list; }
+.col-form { grid-area: form; }
+.col-photo { grid-area: photo; }
 .col-controls, .col-form, .col-photo {
   overflow-y: auto;
   padding: 12px;
   border-right: 1px solid #dde1e8;
+  min-width: 0;
 }
 /* リスト列はスクロールなし（タブレット横向き、8件/ページで画面内に収める） */
 .col-list {
   overflow-y: visible;
   padding: 12px;
   border-right: 1px solid #dde1e8;
+  min-width: 0;
 }
 .col-photo { border-right: none; }
 .section-title {
@@ -1426,16 +1445,29 @@ function showToast(message, type = 'success') {
 }
 .form-area { display: flex; flex-direction: column; gap: 16px; }
 .product-header { padding-bottom: 12px; border-bottom: 1px solid #e8e8e8; }
-.product-code-large { font-size: 22px; font-weight: 900; letter-spacing: 0.5px; }
+.product-code-large {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  overflow-wrap: anywhere;
+}
 .product-name { font-size: 14px; color: #555; margin-top: 2px; }
+.product-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
 .process-badge {
   display: inline-block;
-  margin-top: 4px;
   padding: 2px 8px;
   background: #e3ecfa;
   color: #3558a0;
   border-radius: 4px;
   font-size: 12px;
+  flex-shrink: 0;
 }
 .stats-and-actions { display: flex; flex-direction: column; gap: 12px; }
 .current-actual { display: flex; gap: 16px; }
@@ -1447,9 +1479,29 @@ function showToast(message, type = 'success') {
 .stat-value.remain { color: #c0714f; }
 .stat-value.remain.over { color: #388e3c; }
 .action-btns-area { display: flex; flex-direction: column; gap: 6px; }
+.action-btns-area-inline {
+  margin-left: auto;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.action-label {
+  font-size: 11px;
+  white-space: nowrap;
+}
+.action-hint {
+  margin-top: 6px;
+  text-align: right;
+}
 .equip-label { font-size: 12px; color: #555; }
 .required-mark { color: #e53935; margin-left: 2px; }
 .op-action-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.op-action-btns-compact {
+  gap: 6px;
+  justify-content: flex-end;
+}
 .op-action-btn {
   height: 40px;
   padding: 0 16px;
@@ -1460,6 +1512,13 @@ function showToast(message, type = 'success') {
   font-size: 14px;
   font-weight: 600;
   transition: all 0.15s;
+}
+.op-action-btns-compact .op-action-btn {
+  height: 28px;
+  padding: 0 10px;
+  border-width: 1px;
+  border-radius: 5px;
+  font-size: 12px;
 }
 .op-action-btn.active { border-color: currentColor; }
 .action-start { color: #4e7cbf; }
@@ -1506,7 +1565,7 @@ function showToast(message, type = 'success') {
   font-weight: 700;
   text-align: center;
 }
-.qty-input-narrow { width: 100px; }
+.qty-input-narrow { width: 68px; }
 .scrap-inline { display: flex; gap: 6px; align-items: center; }
 .scrap-reason-select {
   height: 44px;
@@ -1627,4 +1686,111 @@ function showToast(message, type = 'success') {
 .toast.error { background: #e53935; }
 .toast-enter-active, .toast-leave-active { transition: opacity 0.3s; }
 .toast-enter-from, .toast-leave-to { opacity: 0; }
+
+@media (max-width: 1180px) {
+  .header {
+    padding: 8px 12px;
+    gap: 8px;
+  }
+  .four-col-layout {
+    grid-template-columns: 160px 220px minmax(0, 1fr) 176px;
+  }
+  .col-controls, .col-list, .col-form, .col-photo {
+    padding: 10px;
+  }
+  .current-actual {
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .op-action-btn {
+    height: 38px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+  .op-action-btns-compact .op-action-btn {
+    height: 26px;
+    padding: 0 8px;
+    font-size: 11px;
+  }
+  .equip-btn {
+    min-width: 72px;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+  .scrap-inline {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 1024px) {
+  .four-col-layout {
+    grid-template-columns: 150px 220px minmax(0, 1fr);
+    grid-template-areas:
+      "controls list form"
+      "controls list photo";
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .col-form {
+    border-right: none;
+  }
+  .col-photo {
+    border-top: 1px solid #dde1e8;
+    padding-top: 10px;
+  }
+  .photo-preview {
+    max-width: 120px;
+  }
+}
+
+@media (max-width: 860px) {
+  .spot-line-input {
+    overflow: hidden;
+  }
+  .header {
+    padding: 8px 10px;
+  }
+  .page-title {
+    width: 100%;
+  }
+  .header-controls {
+    width: 100%;
+  }
+  .product-meta-row {
+    align-items: flex-start;
+  }
+  .action-btns-area-inline {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+  .action-hint {
+    text-align: left;
+  }
+  .four-col-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "controls"
+      "list"
+      "form"
+      "photo";
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    overflow-y: auto;
+  }
+  .col-controls, .col-list, .col-form, .col-photo {
+    overflow: visible;
+    border-right: none;
+    border-bottom: 1px solid #dde1e8;
+    padding: 10px;
+  }
+  .col-photo {
+    border-bottom: none;
+    border-top: none;
+  }
+  .action-bar {
+    flex-wrap: wrap;
+  }
+  .btn-save, .btn-cancel {
+    flex: 1 1 140px;
+  }
+}
 </style>
