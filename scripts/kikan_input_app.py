@@ -29,7 +29,8 @@ from pathlib import Path
 # ============================================================
 # 設定ファイルパス
 # ============================================================
-CONFIG_FILE = Path(__file__).parent / "kikan_input_config.json"
+CONFIG_FILE  = Path(__file__).parent / "kikan_input_config.json"
+LOG_FILE = Path(__file__).parent / "kikan_input_log.txt"
 
 DEFAULT_CONFIG = {
     "window_title":        "SSE0040",
@@ -373,6 +374,7 @@ class KikanInputApp:
 
         self.cfg = self._load_config()
         self.records = []
+        self.history_set   = self._load_history()
         self._stop_flag    = False
         self._running      = False
         self._hotkey_handle = None
@@ -486,6 +488,8 @@ class KikanInputApp:
         ttk.Entry(frm_win, textvariable=self.v_window_title, width=20).grid(row=0, column=1)
         ttk.Button(frm_win, text="設定保存", command=self._save_config_ui).grid(
             row=0, column=2, padx=(12,0))
+        ttk.Button(frm_win, text="ログ表示", command=self._open_log).grid(
+            row=0, column=3, padx=(8,0))
 
         # ====== レコードプレビュー ======
         frm_prev = ttk.LabelFrame(self.root, text="  入力対象レコード  ")
@@ -703,13 +707,23 @@ class KikanInputApp:
             records, skipped, sheet = load_excel(path)
             self.records = records
 
+            # ログとの重複チェック（ファイル内重複は無視、ログ既存分のみ）
+            dup_keys = set()
+            for r in records:
+                key = (format_seisanbi(r['生産日']), str(r.get('工程コード', '')).strip())
+                if key in self.history_set:
+                    dup_keys.add(key)
+
             # ツリー更新
             for row in self.tree.get_children():
                 self.tree.delete(row)
+            self.tree.tag_configure("duplicate", background="#ffe0b2")
             for r in records:
                 ec_raw = r.get('工程順行きエンター回数')
                 ec = parse_enter_count(ec_raw, self.cfg["tabs_after_hinban"])
-                self.tree.insert("", "end", values=(
+                key = (format_seisanbi(r['生産日']), str(r.get('工程コード', '')).strip())
+                tags = ("duplicate",) if key in dup_keys else ()
+                self.tree.insert("", "end", tags=tags, values=(
                     format_seisanbi(r['生産日']),
                     r['基幹品番'],
                     r['工順'],
@@ -722,15 +736,34 @@ class KikanInputApp:
             msg = f"{len(records)} 件"
             if skipped:
                 msg += f"  （スキップ {len(skipped)} 件）"
+            if dup_keys:
+                msg += f"  （入力済み {len(dup_keys)} 組み合わせあり）"
             self.lbl_count.config(text=msg)
             self._log(f"読み込み完了: {len(records)} 件  シート={sheet}")
             if skipped:
                 self._log(f"スキップ: {', '.join(skipped[:5])}" +
                           (" ..." if len(skipped) > 5 else ""))
+            if dup_keys:
+                lines = "\n".join(f"  生産日: {k[0]}  工程コード: {k[1]}" for k in sorted(dup_keys))
+                messagebox.showwarning(
+                    "入力済み確認",
+                    f"以下の組み合わせはすでにログに記録されています。\n\n{lines}\n\n"
+                    f"重複入力の可能性があります。確認してください。"
+                )
 
         except Exception as e:
             messagebox.showerror("読み込みエラー", str(e))
             self._log(f"エラー: {e}")
+
+    # ----------------------------------------------------------
+    # ログ表示
+    # ----------------------------------------------------------
+    def _open_log(self):
+        if not LOG_FILE.exists():
+            messagebox.showinfo("ログ", "まだログファイルがありません")
+            return
+        import os
+        os.startfile(LOG_FILE)
 
     # ----------------------------------------------------------
     # 設定保存
@@ -916,13 +949,16 @@ class KikanInputApp:
                 break
 
             self._set_status(f"入力中 {i+1}/{total}", "blue")
+            process_code_check = str(record.get('工程コード', '')).strip()
+
             self._log(f"[{i+1}/{total}] 品番={record['基幹品番']}  "
                       f"工順={record['工順']}  生産数={int(record['生産数量'])}")
 
             try:
-                seisanbi, hinban, koukei, seisansu = input_one_record(
+                seisanbi, _, _, _ = input_one_record(
                     record, self.cfg, hwnd_main=hwnd, stop_check=should_stop, log_func=self._log)
                 success += 1
+                self._record_history(seisanbi, process_code_check)
                 self._log(f"  → 登録OK  生産日={seisanbi}")
             except InterruptedError:
                 # 停止ボタン / Ctrl+P による中断
@@ -969,6 +1005,58 @@ class KikanInputApp:
             self._log(f"===== {msg} =====")
             self._set_status(msg, "green" if errors == 0 else "orange")
             self.root.after(0, lambda: messagebox.showinfo("完了", msg))
+
+    # ----------------------------------------------------------
+    # 入力履歴記録
+    # ----------------------------------------------------------
+    def _ask_duplicate(self, seisanbi, process_code):
+        """重複確認ダイアログをメインスレッドで表示し、スキップするか否かを返す"""
+        result = [None]
+        event  = threading.Event()
+
+        def show():
+            answer = messagebox.askyesno(
+                "入力済み確認",
+                f"この組み合わせはすでに入力済みです。\n\n"
+                f"  生産日　　: {seisanbi}\n"
+                f"  工程コード: {process_code}\n\n"
+                f"スキップしますか？\n（「いいえ」を選ぶと入力を続行します）"
+            )
+            result[0] = answer  # True=スキップ / False=入力する
+            event.set()
+
+        self.root.after(0, show)
+        event.wait()
+        return result[0]
+
+    def _load_history(self):
+        """ログファイルから処理済み (生産日, 工程コード) をセットとして読み込む"""
+        result = set()
+        if not LOG_FILE.exists():
+            return result
+        try:
+            with open(LOG_FILE, encoding='utf-8') as f:
+                for line in f:
+                    parts = line.strip().split(',')
+                    if len(parts) >= 2 and parts[0] != '生産日':
+                        result.add((parts[0], parts[1]))
+        except Exception:
+            pass
+        return result
+
+    def _record_history(self, seisanbi, process_code):
+        """入力済み履歴をログファイルに追記し、メモリ上のセットにも追加する"""
+        from datetime import datetime
+        input_dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            write_header = not LOG_FILE.exists()
+            with open(LOG_FILE, 'a', encoding='utf-8') as f:
+                if write_header:
+                    f.write('生産日,工程コード,入力日時\n')
+                f.write(f'{seisanbi},{process_code},{input_dt}\n')
+            self.history_set.add((seisanbi, process_code))
+        except Exception as e:
+            self._log(f"履歴保存エラー: {e}")
 
     # ----------------------------------------------------------
     # UI更新ヘルパー（スレッドセーフ）

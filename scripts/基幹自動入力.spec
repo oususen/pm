@@ -5,7 +5,7 @@ a = Analysis(
     ['kikan_input_app.py'],
     pathex=[],
     binaries=[],
-    datas=[('C:/Program Files/WindowsApps/PythonSoftwareFoundation.Python.3.13_3.13.3312.0_x64__qbz5n2kfra8p0/tcl/tcl8.6', 'tcl8.6'), ('C:/Program Files/WindowsApps/PythonSoftwareFoundation.Python.3.13_3.13.3312.0_x64__qbz5n2kfra8p0/tcl/tk8.6', 'tk8.6')],
+    datas=[],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
