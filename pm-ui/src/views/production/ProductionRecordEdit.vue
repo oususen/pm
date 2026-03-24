@@ -566,7 +566,9 @@ const saveRow = async (row) => {
     alert('更新しました。LineBacklog.actual_qty も差分反映済みです。')
   } catch (e) {
     console.error('更新失敗:', e)
-    alert('更新に失敗しました。入力形式を確認してください。')
+    const detail = e?.response?.data?.detail || e?.response?.data || e?.message || ''
+    const status = e?.response?.status || ''
+    alert(`更新に失敗しました。\nHTTP ${status}: ${detail || '詳細不明'}`)
   } finally {
     savingId.value = null
   }

@@ -462,9 +462,9 @@ class BrakeLineProductsView(APIView):
                 ).values_list('output_product_id', flat=True).distinct()
             )
 
+            # process_id指定時はRoutingStep.output_productのみで絞る（スポットラインと同方式）
             products = (
                 Product.objects.filter(
-                    Q(product_code__endswith='B') | Q(product_code__in=override_codes),
                     is_active=True,
                     id__in=routing_product_ids,
                 )
@@ -1026,8 +1026,9 @@ class BrakeLineSessionDetailView(APIView):
             dt = datetime.fromisoformat(str(value))
         except ValueError:
             return None
-        if timezone.is_naive(dt):
-            return timezone.make_aware(dt, timezone.get_current_timezone())
+        # USE_TZ=False のため naive datetime で返す（settings.py に合わせる）
+        if timezone.is_aware(dt):
+            return timezone.localtime(dt).replace(tzinfo=None)
         return dt
 
     @classmethod
