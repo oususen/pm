@@ -8,6 +8,20 @@ from .models import OvertimeApplication, OvertimeApprovalLog
 User = get_user_model()
 
 
+def build_media_absolute_url(request, raw_url):
+    """メディアURLを返す。相対パスはそのまま返してブラウザのオリジンで解決させる。"""
+    if not raw_url:
+        return raw_url
+    path = str(raw_url)
+    if path.startswith(('http://', 'https://')):
+        return path
+    if path.startswith('/'):
+        return path
+    from django.conf import settings as django_settings
+    media_url = django_settings.MEDIA_URL.rstrip('/')
+    return f"{media_url}/{path}"
+
+
 class OvertimeApprovalLogSerializer(serializers.ModelSerializer):
     approver_name = serializers.SerializerMethodField()
     role_display = serializers.SerializerMethodField()
@@ -107,9 +121,7 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
         if not obj.signature:
             return None
         request = self.context.get('request')
-        if request:
-            return request.build_absolute_uri(obj.signature.url)
-        return obj.signature.url
+        return build_media_absolute_url(request, obj.signature.url)
 
     def get_can_edit(self, obj):
         request = self.context.get('request')

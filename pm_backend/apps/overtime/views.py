@@ -13,7 +13,7 @@ import django_filters
 
 from .access import can_manage_application
 from .models import OvertimeApplication, OvertimeApprovalLog
-from .serializers import OvertimeApplicationSerializer
+from .serializers import OvertimeApplicationSerializer, build_media_absolute_url
 
 User = get_user_model()
 
@@ -272,7 +272,7 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
             app.signature.delete(save=False)
         app.signature = sig
         app.save(update_fields=['signature'])
-        return Response({'signature': request.build_absolute_uri(app.signature.url)})
+        return Response({'signature': build_media_absolute_url(request, app.signature.url)})
 
     @action(detail=True, methods=['post'])
     def submit(self, request, pk=None):
