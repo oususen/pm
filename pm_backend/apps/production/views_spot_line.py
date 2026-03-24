@@ -8,12 +8,12 @@ BrakeLineRecord モデルを流用（line FK で区別）。
 """
 from datetime import date
 
-from django.db import transaction
+from django.db import models, transaction
 from django.db.models import F
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from masters.models import Equipment, Line, Process, Product
+from masters.models import Equipment, Line, Process, Product, RoutingStep
 from orders.utils.calendar_utils import get_business_today
 from production.models_brake_line_record import BrakeLineRecord
 from production.models_line_backlog import LineBacklog
@@ -97,6 +97,16 @@ class SpotLinePlanView(APIView):
         if process_ids:
             backlogs_qs = backlogs_qs.filter(process_id__in=process_ids)
 
+        # 実績は seq_no=0 行に保存されるため、対象品番の seq_no=0 行を先に取得してマップ化
+        actual_map = {
+            (a.line_id, a.process_id, a.product_id): int(a.actual_qty or 0)
+            for a in LineBacklog.objects.filter(
+                plan_date=plan_date,
+                line_id__in=line_ids,
+                sequence_no=0,
+            )
+        }
+
         items = []
         seen_keys = set()
 
@@ -114,6 +124,7 @@ class SpotLinePlanView(APIView):
             if key in seen_keys:
                 continue
             seen_keys.add(key)
+            actual_qty = actual_map.get((lb.line_id, lb.process_id, lb.product_id), 0)
             items.append({
                 'product_id':   lb.product_id,
                 'product_code': lb.product.product_code,
@@ -125,7 +136,7 @@ class SpotLinePlanView(APIView):
                 'process_code': process_data['process_code'],
                 'process_name': process_data['process_name'],
                 'plan_qty':     plan_qty,
-                'actual_qty':   int(lb.actual_qty or 0),
+                'actual_qty':   actual_qty,
                 'backlog_id':   lb.id,
                 'sequence_no':  lb.sequence_no,
                 'equipment_id': None,
@@ -183,7 +194,7 @@ class SpotLinePlanView(APIView):
                 'process_code': process_data['process_code'],
                 'process_name': process_data['process_name'],
                 'plan_qty':     int(lb.plan_qty) if lb else 0,
-                'actual_qty':   int(lb.actual_qty) if lb else 0,
+                'actual_qty':   actual_map.get((rec.line_id, rec.process_id, rec.product_id), 0),
                 'backlog_id':   lb.id if lb else None,
                 'sequence_no':  lb.sequence_no if lb else 1,
                 'equipment_id': None,
@@ -234,41 +245,36 @@ class SpotLineProductsView(APIView):
 
     def get(self, request):
         process_id = request.query_params.get('process_id')
-        date_str = request.query_params.get('date')
+        search = request.query_params.get('search', '').strip()
 
-        setting = _get_spot_setting()
-        if not setting:
+        if not process_id:
             return Response([], status=200)
 
-        line_ids = _get_spot_line_ids(setting)
-        if not line_ids:
-            return Response([], status=200)
-
-        try:
-            plan_date = date.fromisoformat(date_str) if date_str else get_business_today()
-        except ValueError:
-            plan_date = get_business_today()
-
-        qs = (
-            LineBacklog.objects
-            .filter(line_id__in=line_ids, plan_date=plan_date, sequence_no__gt=0)
-            .select_related('product')
+        # 指定工程の output_product に設定されている品番をルーティングから取得（有効品番のみ）
+        product_ids = (
+            RoutingStep.objects
+            .filter(process_id=process_id, output_product__isnull=False)
+            .values_list('output_product_id', flat=True)
+            .distinct()
         )
-        if process_id:
-            qs = qs.filter(process_id=process_id)
 
-        products = []
-        seen: set = set()
-        for lb in qs:
-            if lb.product_id and lb.product_id not in seen:
-                seen.add(lb.product_id)
-                products.append({
-                    'id':           lb.product_id,
-                    'product_code': lb.product.product_code if lb.product else '',
-                    'product_name': lb.product.product_name if lb.product else '',
-                })
+        qs = Product.objects.filter(id__in=product_ids, is_active=True).order_by('product_code')
 
-        return Response(sorted(products, key=lambda x: x.get('product_code', '')))
+        if search:
+            qs = qs.filter(
+                models.Q(product_code__icontains=search) |
+                models.Q(product_name__icontains=search)
+            )
+
+        products = [
+            {
+                'id':           p.id,
+                'product_code': p.product_code,
+                'product_name': p.product_name,
+            }
+            for p in qs
+        ]
+        return Response(products)
 
 
 class SpotLineRecordView(APIView):
@@ -427,12 +433,13 @@ class SpotLineRecordView(APIView):
             BrakeLineRecord.OPERATOR_ACTION_END,
             BrakeLineRecord.OPERATOR_ACTION_PAUSE,
         } and qty > 0 and product_id:
+            # 実績は sequence_no=0 行に積む（計画行 sequence_no>0 とは分離）
             obj, created = LineBacklog.objects.get_or_create(
                 plan_date=plan_date,
                 process_id=process_id,
                 product_id=product_id,
                 line_id=line_id,
-                sequence_no=sequence_no,
+                sequence_no=0,
                 defaults={'actual_qty': qty},
             )
             if not created:

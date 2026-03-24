@@ -6,6 +6,13 @@
       <button class="btn-scrap-nav" @click="router.push('/production/scrap-record')">仕損記録</button>
       <button class="btn-inspection-nav" @click="openEquipmentInspection">設備点検</button>
       <div class="header-controls">
+        <label class="header-label">工程</label>
+        <select v-model="selectedProcessId" class="process-select" @change="onProcessChange">
+          <option value="">-- 工程を選択 --</option>
+          <option v-for="p in processes" :key="p.id" :value="p.id">
+            {{ p.process_code }} {{ p.process_name }}
+          </option>
+        </select>
         <label class="header-label">日付</label>
         <input type="date" v-model="planDateStr" class="date-input" @change="loadPlan" />
         <div class="header-processing" :class="{ empty: !currentProcessingMessages.length }">
@@ -99,7 +106,7 @@
             </div>
             <div class="item-info">
               <div class="item-code">{{ item.product_code }}</div>
-              <div class="item-sub">{{ planDateStr }}</div>
+              <div class="item-sub">{{ planDateStr }}　計画: {{ item.plan_qty ?? 0 }}</div>
             </div>
             <div v-if="isDone(item)" class="done-badge">✓{{ item.actual_qty }}</div>
             <div v-if="item.is_manual" class="manual-badge">{{ item.product_id ? '追加' : '新規' }}</div>
@@ -289,9 +296,16 @@
 
         <div v-if="addType === 'extra'" class="modal-field">
           <label>品番</label>
+          <input
+            type="text"
+            v-model="productSearch"
+            class="modal-input"
+            placeholder="品番・品名で絞り込み"
+            @input="addProductId = ''"
+          />
           <select v-model="addProductId" class="modal-select" @change="onAddProductSelect">
             <option value="">品番を選択</option>
-            <option v-for="p in spotLineProducts" :key="p.id" :value="p.id">
+            <option v-for="p in filteredSpotLineProducts" :key="p.id" :value="p.id">
               {{ p.product_code }}　{{ p.product_name }}
             </option>
           </select>
@@ -526,6 +540,14 @@ const addProcessId = ref('')
 const addEquipmentId = ref('')
 const addError = ref('')
 const spotLineProducts = ref([])
+const productSearch = ref('')
+const filteredSpotLineProducts = computed(() => {
+  const kw = productSearch.value.trim().toLowerCase()
+  if (!kw) return spotLineProducts.value
+  return spotLineProducts.value.filter(
+    p => p.product_code.toLowerCase().includes(kw) || p.product_name.toLowerCase().includes(kw)
+  )
+})
 const addEquipments = ref([])
 
 const toast = ref({ show: false, message: '', type: 'success' })
@@ -799,6 +821,20 @@ function selectAction(action) {
   if (action === 'END') nextTick(() => qtyInputRef.value?.focus())
 }
 
+async function onProcessChange() {
+  selectedItem.value = null
+  currentPage.value = 1
+  selectedEquipmentIds.value = []
+  selectedAction.value = ''
+  actionReason.value = ''
+  if (selectedProcessId.value) {
+    await Promise.all([fetchEquipments(), fetchWorkStates()])
+  } else {
+    workStateMap.value = {}
+    currentProcessingByEquipment.value = {}
+  }
+}
+
 async function fetchEquipments() {
   try {
     const res = await api.spotLineActuals.getEquipments()
@@ -1038,6 +1074,7 @@ async function openAddModal() {
   addType.value = 'extra'
   addProductId.value = ''
   addProductCodeManual.value = ''
+  productSearch.value = ''
   addProcessId.value = selectedProcessId.value || (processes.value[0]?.id ?? '')
   addEquipmentId.value = ''
   addError.value = ''
@@ -1226,6 +1263,14 @@ function showToast(message, type = 'success') {
   color: #666;
   white-space: nowrap;
 }
+.process-select {
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+  min-width: 180px;
+}
 .date-input {
   height: 30px;
   padding: 0 6px;
@@ -1397,7 +1442,7 @@ function showToast(message, type = 'success') {
 }
 .item-info { flex: 1; min-width: 0; }
 .item-code { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.item-sub { display: none; }
+.item-sub { font-size: 11px; color: #666; margin-top: 2px; }
 .done-badge {
   font-size: 11px;
   background: #e8f5e9;

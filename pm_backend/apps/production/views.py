@@ -509,17 +509,17 @@ class LinePlanViewSet(viewsets.ModelViewSet):
                 ).delete()
                 deleted_gantt = deleted_gantt_result[0] if deleted_gantt_result else 0
 
-                # 4. 該当LinePlanのplan_idに紐づくLineBacklogを削除（計画レコードのみ）
-                # ルール: sequence_no > 0 のレコードは計画レコードとして削除
+                # 4. 該当ライン・日付・製品のLineBacklogを削除（計画レコードのみ）
+                # ルール: sequence_no > 0 のレコードは計画レコードとして削除（自動計画・手動計画問わず）
                 #        sequence_no = 0 は在庫・需要・仕損などの基礎データとして保持
                 #        sequence_no = NULL は実績レコードとして保持
-                deleted_backlog = 0
-                if existing_plan_ids:
-                    deleted_backlog_result = LineBacklog.objects.filter(
-                        plan_id__in=existing_plan_ids,
-                        sequence_no__gt=0
-                    ).delete()
-                    deleted_backlog = deleted_backlog_result[0] if deleted_backlog_result else 0
+                deleted_backlog_result = LineBacklog.objects.filter(
+                    line_id=line_id,
+                    plan_date__in=affected_dates,
+                    product_id__in=affected_products,
+                    sequence_no__gt=0,
+                ).delete()
+                deleted_backlog = deleted_backlog_result[0] if deleted_backlog_result else 0
 
             # 4. 新規作成
             for it in items:
@@ -586,6 +586,17 @@ class LinePlanViewSet(viewsets.ModelViewSet):
 
                     # 新規作成
                     LinePlan.objects.create(
+                        plan_date=plan_date_obj,
+                        process_id=process_id,
+                        product_id=product_id,
+                        line_id=line_id,
+                        plan_qty=int(plan_qty_value),
+                        plan_id=plan_id,
+                        sequence_no=sequence_no,
+                    )
+                    # LineBacklogにも計画レコードを作成（sequence_no > 0）
+                    # 既存の sequence_no=0 行（需要・在庫基礎データ）はそのまま保持
+                    LineBacklog.objects.create(
                         plan_date=plan_date_obj,
                         process_id=process_id,
                         product_id=product_id,
