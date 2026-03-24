@@ -15,6 +15,8 @@ from io import BytesIO
 import os
 import math
 import pandas as pd
+from masters.models import Calendar
+from orders.utils.calendar_utils import WorkingDayCalculator
 
 
 class HirakataPickupPDFService:
@@ -30,6 +32,7 @@ class HirakataPickupPDFService:
     DESTINATION = "枚方製造所行き"
     TARGET_GROUP_NAME_KEYWORD = "枚方"
     TARGET_GROUP_CODE_KEYWORD = "HIRAKATA"
+    WORKING_CALENDAR_CODE = "kubota_muke"
 
     def __init__(self):
         self._register_font()
@@ -347,26 +350,28 @@ class HirakataPickupPDFService:
 
     def _get_working_dates(self, start_date: date, end_date: date) -> Tuple[List[date], set]:
         """
-        m_calendar_day の稼働日のみ取得（is_working_day=1）。該当なしなら空リストを返す。
+        クボタ向けカレンダを基準に稼働日を取得する。
+
+        カレンダ未設定時や日別設定が無い日は、既存のクボタ系処理と同様に
+        平日（月〜金）を稼働日として扱う。
         """
         buffer_days = 14  # リードタイムさかのぼり用に少し前から取得
         start_buf = start_date - timedelta(days=buffer_days)
+        kubota_calendar = Calendar.objects.filter(
+            calendar_code=self.WORKING_CALENDAR_CODE
+        ).first()
+        calculator = WorkingDayCalculator(kubota_calendar)
 
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT DISTINCT target_date
-                FROM m_calendar_day
-                WHERE target_date BETWEEN %s AND %s
-                  AND is_working_day = 1
-                ORDER BY target_date
-            """, [start_buf, end_date])
-            rows = cursor.fetchall()
+        working_set = set()
+        dates: List[date] = []
+        current = start_buf
+        while current <= end_date:
+            if calculator.is_working_day(current):
+                working_set.add(current)
+                if start_date <= current <= end_date:
+                    dates.append(current)
+            current += timedelta(days=1)
 
-        if not rows:
-            return [], set()
-
-        working_set = {r[0] for r in rows}
-        dates = [d for d in (r[0] for r in rows) if start_date <= d <= end_date]
         return dates, working_set
 
     def _subtract_working_days(self, base_date: date, days: int, working_set: set) -> date:
