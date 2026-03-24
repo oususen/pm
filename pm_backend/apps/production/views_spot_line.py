@@ -9,7 +9,7 @@ BrakeLineRecord モデルを流用（line FK で区別）。
 from datetime import date
 
 from django.db import models, transaction
-from django.db.models import F
+from django.db.models import F, Sum
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -97,14 +97,14 @@ class SpotLinePlanView(APIView):
         if process_ids:
             backlogs_qs = backlogs_qs.filter(process_id__in=process_ids)
 
-        # 実績は seq_no=0 行に保存されるため、対象品番の seq_no=0 行を先に取得してマップ化
+        # actual_qty を (line, process, product) 単位で集計
+        # seq_no=0（新方式）・seq_no>0（旧方式）どちらに入っていても正しく取得できるよう全行を合算
         actual_map = {
-            (a.line_id, a.process_id, a.product_id): int(a.actual_qty or 0)
-            for a in LineBacklog.objects.filter(
-                plan_date=plan_date,
-                line_id__in=line_ids,
-                sequence_no=0,
-            )
+            (a['line_id'], a['process_id'], a['product_id']): a['total'] or 0
+            for a in LineBacklog.objects
+            .filter(plan_date=plan_date, line_id__in=line_ids)
+            .values('line_id', 'process_id', 'product_id')
+            .annotate(total=Sum('actual_qty'))
         }
 
         items = []
