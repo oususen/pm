@@ -69,7 +69,7 @@
         <select v-model="sessionType">
           <option value="">-- すべて --</option>
           <option value="WORK">作業セッション</option>
-          <option value="PAUSE">中断セッション</option>
+          <option value="PAUSE">中断待機セッション</option>
           <option value="CANCEL">中止セッション</option>
         </select>
       </div>
@@ -172,6 +172,7 @@
             <th class="num">理論時間</th>
             <th class="num">作業時間(休憩除き)</th>
             <th class="num">作業時間(休憩、中断除き)</th>
+            <th class="num">中断待機時間</th>
             <th class="num">生産数量</th>
             <th class="num">実績数量</th>
             <th class="num">出来高(台/h)</th>
@@ -183,7 +184,7 @@
             <tr
               v-for="(row, rowIndex) in sessions"
               :key="`${row.id}-${row.product || row.product_code || 'none'}-${rowIndex}`"
-              :class="{ 'row-pause': row.session_type === 'PAUSE' }"
+              :class="{ 'row-pause': String(row.start_action || '').toUpperCase() === 'PAUSE' }"
             >
               <td>{{ row.id ?? '—' }}</td>
               <td>{{ formatDateTime(row.started_at) }}</td>
@@ -204,6 +205,7 @@
               <td class="num">{{ row.theoretical_seconds != null ? formatDuration(row.theoretical_seconds, true) : '—' }}</td>
               <td class="num">{{ formatDuration(row.effective_work_seconds, true) }}</td>
               <td class="num">{{ formatDuration(calcWorkSecondsExcludingPause(row), true) }}</td>
+              <td class="num">{{ getPauseWaitSeconds(row) != null ? formatDuration(getPauseWaitSeconds(row), true) : '—' }}</td>
               <td class="num">{{ formatNumber(row.production_qty ?? '') }}</td>
               <td class="num">{{ formatProductionQty(row) }}</td>
               <td class="num">{{ formatProductivity(row.productivity_per_hour, row) }}</td>
@@ -216,7 +218,7 @@
               </td>
             </tr>
             <tr v-if="!sessions.length">
-              <td colspan="19" class="no-data">データがありません</td>
+              <td colspan="20" class="no-data">データがありません</td>
             </tr>
           </tbody>
         </table>
@@ -365,6 +367,7 @@ import {
 const loading = ref(false)
 const error = ref('')
 const sessions = ref([])
+
 const activeTab = ref('tank')
 const operationalTabKeys = ['tank', 'laser']
 const settingsTargetTab = ref('tank')
@@ -525,12 +528,14 @@ const isCanceledSession = (row) => {
 
 const getSessionTypeLabel = (row) => {
   if (isCanceledSession(row)) return '中止'
-  return row.session_type === 'PAUSE' ? '中断' : '作業'
+  if (String(row.start_action || '').toUpperCase() === 'PAUSE') return '中断待機'
+  return '作業'
 }
 
 const getSessionTypeClass = (row) => {
   if (isCanceledSession(row)) return 'badge-cancel'
-  return row.session_type === 'PAUSE' ? 'badge-pause' : 'badge-work'
+  if (String(row.start_action || '').toUpperCase() === 'PAUSE') return 'badge-pause-wait'
+  return 'badge-work'
 }
 
 const totalProductionQty = computed(() => {
@@ -588,7 +593,7 @@ const totalPauseSeconds = computed(() => {
       if (countedSessionIds.has(sessionId)) return sum
       countedSessionIds.add(sessionId)
     }
-    return String(row?.session_type || '').toUpperCase() === 'PAUSE'
+    return String(row?.start_action || '').toUpperCase() === 'PAUSE'
       ? sum + Number(row?.duration_seconds || 0)
       : sum
   }, 0)
@@ -824,7 +829,7 @@ const loadSessions = async () => {
       } else if (sessionType.value === 'WORK') {
         allItems = allItems.filter((row) => row.session_type === 'WORK' && !isCanceledSession(row))
       } else if (sessionType.value === 'PAUSE') {
-        allItems = allItems.filter((row) => String(row?.end_action || '').toUpperCase() === 'PAUSE')
+        allItems = allItems.filter((row) => String(row?.start_action || '').toUpperCase() === 'PAUSE')
       }
 
       // started_at 降順でソート
@@ -848,7 +853,8 @@ const loadSessions = async () => {
     if (lineId.value) params.line_id = lineId.value
     if (processId.value) params.process_id = processId.value
     if (productCode.value.trim()) params.product_code = productCode.value.trim()
-    if (sessionType.value && sessionType.value !== 'CANCEL') params.session_type = sessionType.value
+    if (sessionType.value === 'WORK') params.session_type = 'WORK'
+    // PAUSE フィルターは start_action でフロント判定するため API には渡さない
     if (status.value) params.status = status.value
     if (hasIssue.value) params.has_issue = hasIssue.value
 
@@ -864,6 +870,8 @@ const loadSessions = async () => {
 
     if (wantsCancelOnly) {
       sessions.value = filteredByProduction.filter((row) => isCanceledSession(row))
+    } else if (sessionType.value === 'PAUSE') {
+      sessions.value = filteredByProduction.filter((row) => String(row?.start_action || '').toUpperCase() === 'PAUSE')
     } else if (sessionType.value === 'WORK') {
       sessions.value = filteredByProduction.filter((row) => row.session_type === 'WORK' && !isCanceledSession(row))
     } else {
@@ -912,7 +920,7 @@ watch(activeTab, async (nextTab) => {
     lineId.value = ''
     processId.value = ''
   }
-  await loadSessions()
+  sessions.value = []
 })
 
 watch(settingsTargetTab, (nextTab) => {
@@ -1048,7 +1056,6 @@ const saveTargetLines = async () => {
       lineId.value = ''
       processId.value = ''
     }
-    await loadSessions()
   }
   if (activeTab.value === 'mapping-settings') {
     await loadMappingCandidates(settingsTargetTab.value)
@@ -1130,9 +1137,16 @@ const formatProductionQty = (row) => {
   return formatNumber(row.production_qty || 0)
 }
 
+// PAUSEセッションの中断待機時間: duration_secondsを直接使用（PAUSE.started_at〜RESUME時のclose_sessionで計算済み）
+// ended_atがない（まだ中断中）は null を返す
+const getPauseWaitSeconds = (row) => {
+  if (!row || String(row.start_action || '').toUpperCase() !== 'PAUSE' || !row.ended_at) return null
+  return Number(row.duration_seconds || 0)
+}
+
 const calcWorkSecondsExcludingPause = (row) => {
   if (!row) return 0
-  return String(row.session_type || '').toUpperCase() === 'PAUSE'
+  return String(row.start_action || '').toUpperCase() === 'PAUSE'
     ? 0
     : Math.max(Number(row.effective_work_seconds || 0), 0)
 }
@@ -1193,7 +1207,6 @@ onMounted(async () => {
   await loadMasters()
   await loadProductionRecordSettings()
   await loadMappingCandidates(settingsTargetTab.value)
-  await loadSessions()
 })
 </script>
 
@@ -1445,6 +1458,10 @@ onMounted(async () => {
 .badge-pause {
   background: #ffedd5;
   color: #c2410c;
+}
+.badge-pause-wait {
+  background: #fef3c7;
+  color: #92400e;
 }
 .badge-cancel {
   background: #e2e8f0;

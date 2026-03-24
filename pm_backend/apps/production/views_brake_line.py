@@ -844,9 +844,46 @@ class BrakeLineSessionView(APIView):
         for _key, grp in groupby(records, key=group_key):
             group = list(grp)
             open_rec = None
+            pause_rec = None  # 中断待機セッション用：直前のPAUSE/TEMP_ENDレコード
             for rec in group:
                 action = rec.operator_action
                 if action in START_ACTIONS:
+                    # PAUSE→RESUME の待機セッションを生成
+                    if action == BrakeLineRecord.OPERATOR_ACTION_RESUME and pause_rec is not None:
+                        wait_started_at = pause_rec.recorded_at
+                        wait_ended_at   = rec.recorded_at
+                        wait_duration   = int((wait_ended_at - wait_started_at).total_seconds())
+                        w_proc    = pause_rec.process
+                        w_product = pause_rec.product
+                        w_p_code  = (w_product.product_code if w_product else '') or pause_rec.product_code or ''
+                        w_p_name  = (w_product.product_name if w_product else '') or ''
+                        w_pr_code = (w_proc.process_code if w_proc else '') or ''
+                        w_pr_name = (w_proc.process_name if w_proc else '') or ''
+                        sessions.append({
+                            'id':                   f'wait_{pause_rec.id}',
+                            'start_record_id':      pause_rec.id,
+                            'end_record_id':        rec.id,
+                            'started_at':           wait_started_at.isoformat(),
+                            'ended_at':             wait_ended_at.isoformat(),
+                            'session_type':         'PAUSE',
+                            'start_action':         'PAUSE',
+                            'end_action':           'RESUME',
+                            'pause_reason':         pause_rec.operator_action_reason or '',
+                            'process_code':         w_pr_code,
+                            'process_name':         w_pr_name,
+                            'product_code':         w_p_code,
+                            'product_name':         w_p_name,
+                            'operator_name':        pause_rec.operator or '',
+                            'duration_seconds':     wait_duration,
+                            'effective_work_seconds': 0,
+                            'production_qty':       0,
+                            'issue_count':          0,
+                            'issue_flags':          [],
+                            'record_source':        'BRAKE',
+                            'line_id':              pause_rec.line_id,
+                            'plan_date':            str(pause_rec.plan_date),
+                        })
+                        pause_rec = None
                     open_rec = rec
                 elif action in END_ACTIONS:
                     start_rec = open_rec
@@ -867,7 +904,7 @@ class BrakeLineSessionView(APIView):
                         'end_record_id':        rec.id,
                         'started_at':           started_at.isoformat(),
                         'ended_at':             ended_at.isoformat(),
-                        'session_type':         'WORK' if action == BrakeLineRecord.OPERATOR_ACTION_END else 'PAUSE',
+                        'session_type':         'WORK',
                         'start_action':         start_rec.operator_action if start_rec else '',
                         'end_action':           action,
                         'pause_reason':         rec.operator_action_reason or '',
@@ -890,6 +927,40 @@ class BrakeLineSessionView(APIView):
                     })
                     if action == BrakeLineRecord.OPERATOR_ACTION_END:
                         open_rec = None
+                        pause_rec = None
+                    elif action in {BrakeLineRecord.OPERATOR_ACTION_PAUSE, BrakeLineRecord.OPERATOR_ACTION_TEMP_END}:
+                        pause_rec = rec
+                        open_rec = None
+
+            # 未終了・未復帰の中断待機セッション（PAUSE後まだRESUMEしていない）
+            if pause_rec and not open_rec:
+                now = timezone.now()
+                w_proc    = pause_rec.process
+                w_product = pause_rec.product
+                sessions.append({
+                    'id':                   f'wait_{pause_rec.id}',
+                    'start_record_id':      pause_rec.id,
+                    'end_record_id':        None,
+                    'started_at':           pause_rec.recorded_at.isoformat(),
+                    'ended_at':             None,
+                    'session_type':         'PAUSE',
+                    'start_action':         'PAUSE',
+                    'end_action':           '',
+                    'pause_reason':         pause_rec.operator_action_reason or '',
+                    'process_code':         (w_proc.process_code if w_proc else '') or '',
+                    'process_name':         (w_proc.process_name if w_proc else '') or '',
+                    'product_code':         (w_product.product_code if w_product else '') or pause_rec.product_code or '',
+                    'product_name':         (w_product.product_name if w_product else '') or '',
+                    'operator_name':        pause_rec.operator or '',
+                    'duration_seconds':     int((now - pause_rec.recorded_at).total_seconds()),
+                    'effective_work_seconds': 0,
+                    'production_qty':       0,
+                    'issue_count':          0,
+                    'issue_flags':          [],
+                    'record_source':        'BRAKE',
+                    'line_id':              pause_rec.line_id,
+                    'plan_date':            str(pause_rec.plan_date),
+                })
 
             # 未終了（加工中）セッション
             if open_rec:

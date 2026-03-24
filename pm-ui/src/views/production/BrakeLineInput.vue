@@ -74,20 +74,11 @@
             <input type="checkbox" v-model="printAutoEnabled" class="toggle-input" @change="savePrintSettings" />
             <span class="toggle-track" :class="{ on: printAutoEnabled }"></span>
           </label>
-          <input
-            type="text"
-            v-model.trim="printDeviceId"
-            class="operator-input"
-            placeholder="端末ID"
-            @change="savePrintSettings"
-          />
-          <input
-            type="text"
-            v-model.trim="printPrinterName"
-            class="operator-input"
-            placeholder="プリンタ名（表示用）"
-            @change="savePrintSettings"
-          />
+          <div class="print-setting-hint">実績保存時にLuck Jingle用ラベルを保存します</div>
+          <div v-if="savedLabel" class="print-setting-status">
+            保存済み: {{ savedLabel.productCode }} / {{ savedLabel.qty }}個 / {{ savedLabel.processDate }}
+          </div>
+          <button class="btn-luck-jingle" :disabled="!savedLabel" @click="printSavedLabel">印刷（Luck Jingle）</button>
         </div>
 
         <!-- 新規追加ボタン -->
@@ -411,10 +402,10 @@
 <script setup>
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import QRCode from 'qrcode'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { t } from '@/i18n'
+import { buildLuckJingleLabelDataUrl, createLuckJingleFileName, openLuckJinglePreview, shareLuckJingleLabel } from '@/utils/luckJingleLabel'
 
 const SCRAP_REASONS = [
   { value: '500:その他',          label: '500: その他' },
@@ -459,8 +450,7 @@ const inputQty = ref(null)
 const loading = ref(false)
 const operator = ref('')
 const printAutoEnabled = ref(false)
-const printDeviceId = ref('')
-const printPrinterName = ref('')
+const savedLabel = ref(null)
 
 // フィルター
 const showDone = ref(false)
@@ -619,6 +609,7 @@ const addEquipments = ref([])         // 追加モーダル用設備一覧
 // トースト
 const toast = ref({ show: false, message: '', type: 'success' })
 const PRINT_SETTINGS_KEY = 'brake_line_print_settings_v1'
+const LABEL_CACHE_KEY = 'brake_line_luck_jingle_label_v1'
 
 const qtyInputRef = ref(null)
 const photoInputRef = ref(null)
@@ -654,6 +645,7 @@ watch(
 // ──────────────────────────────
 onMounted(async () => {
   loadPrintSettings()
+  loadSavedLabel()
   const user = authState.user
   if (user) {
     const last = user.last_name || ''
@@ -663,115 +655,90 @@ onMounted(async () => {
   await loadPlan()
 })
 
-function inferDeviceId() {
-  const host = String(window?.location?.hostname || '').trim()
-  const ua = String(window?.navigator?.userAgent || '').trim()
-  const uaShort = ua.slice(0, 24).replace(/\s+/g, '_')
-  return [host, uaShort].filter(Boolean).join('_') || 'device-01'
-}
-
 function loadPrintSettings() {
   try {
     const raw = window.localStorage.getItem(PRINT_SETTINGS_KEY)
-    if (!raw) {
-      printDeviceId.value = inferDeviceId()
-      return
-    }
+    if (!raw) return
     const parsed = JSON.parse(raw)
     printAutoEnabled.value = !!parsed.autoEnabled
-    printDeviceId.value = String(parsed.deviceId || '').trim() || inferDeviceId()
-    printPrinterName.value = String(parsed.printerName || '').trim()
-  } catch {
-    printDeviceId.value = inferDeviceId()
-  }
+  } catch {}
 }
 
 function savePrintSettings() {
-  const payload = {
+  window.localStorage.setItem(PRINT_SETTINGS_KEY, JSON.stringify({
     autoEnabled: !!printAutoEnabled.value,
-    deviceId: String(printDeviceId.value || '').trim(),
-    printerName: String(printPrinterName.value || '').trim(),
-  }
-  window.localStorage.setItem(PRINT_SETTINGS_KEY, JSON.stringify(payload))
+  }))
 }
 
-async function buildPrintHtml(item, qty) {
-  const productCode = String(item?.product_code || '')
-  const productName = String(item?.product_name || '')
-  const processName = String(item?.process_name || '')
-  const nextProcessName = String(item?.next_process_name || '—')
-  const operatorName = String(operator.value || '')
-  const processDate = planDateStr.value || ''
-
-  // QRコード（製品番号のみ）をData URLとして生成
-  let qrDataUrl = ''
+function loadSavedLabel() {
   try {
-    qrDataUrl = await QRCode.toDataURL(productCode, { margin: 1, width: 120 })
-  } catch {
-    qrDataUrl = ''
-  }
-
-  return `<!doctype html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8" />
-  <title>加工品ラベル</title>
-  <style>
-    @page { size: 60mm 85mm; margin: 0; }
-    html, body { width: 60mm; height: 85mm; margin: 0; padding: 0; }
-    body { font-family: "Yu Gothic", "Meiryo", sans-serif; box-sizing: border-box; }
-    .label { width: 60mm; height: 85mm; padding: 2.5mm; padding-top: 15mm; border: 1px solid #000; box-sizing: border-box; display: flex; flex-direction: column; gap: 0; }
-    .title { font-size: 8pt; font-weight: 700; text-align: center; border-bottom: 0.5px solid #000; padding-bottom: 1mm; margin-bottom: 1mm; }
-    .code { font-size: 16pt; font-weight: 900; letter-spacing: .2mm; line-height: 1.1; }
-    .name { font-size: 11pt; line-height: 1.2; margin-bottom: 1mm; }
-    .row { display: flex; align-items: baseline; font-size: 11pt; line-height: 1.35; gap: 1.5mm; }
-    .row .lbl { color: #555; flex-shrink: 0; font-size: 7.5pt; }
-    .row .val { font-weight: 700; }
-    .row-lg .val { font-size: 16pt; font-weight: 900; }
-    .row-lg .lbl { font-size: 7.5pt; }
-    .qty-row { display: flex; align-items: baseline; gap: 1.5mm; margin-top: 1mm; }
-    .qty-lbl { font-size: 7.5pt; color: #555; flex-shrink: 0; }
-    .qty-val { font-size: 16pt; font-weight: 900; line-height: 1; }
-    .qr-area { display: flex; justify-content: flex-end; margin-top: 1.5mm; }
-    .qr-area img { width: 16mm; height: 16mm; display: block; }
-  </style>
-</head>
-<body>
-  <div class="label">
-    <div class="title">加工品ラベル</div>
-    <div class="code">${productCode}</div>
-    <div class="name">${productName}</div>
-    <div class="row"><span class="lbl">加工工程</span><span class="val">${processName}</span></div>
-    <div class="row"><span class="lbl">後工程</span><span class="val">${nextProcessName}</span></div>
-    <div class="row row-lg"><span class="lbl">加工日</span><span class="val">${processDate}</span></div>
-    <div class="row"><span class="lbl">加工者</span><span class="val">${operatorName}</span></div>
-    <div class="qty-row">
-      <span class="qty-lbl">加工数</span>
-      <span class="qty-val">${qty}</span>
-    </div>
-    <div class="qr-area">
-      ${qrDataUrl ? `<img src="${qrDataUrl}" alt="QR" />` : ''}
-    </div>
-  </div>
-</body>
-</html>`
+    const raw = window.localStorage.getItem(LABEL_CACHE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    if (parsed?.imageDataUrl) {
+      savedLabel.value = parsed
+    }
+  } catch {}
 }
 
-async function printLabel(item, qty) {
-  const win = window.open('', '_blank')
-  if (!win) {
-    showToast('印刷ウィンドウを開けませんでした', 'error')
+function storeSavedLabel(payload) {
+  savedLabel.value = payload
+  window.localStorage.setItem(LABEL_CACHE_KEY, JSON.stringify(payload))
+}
+
+async function saveLabelForLuckJingle(item, qty) {
+  const processDate = String(planDateStr.value || '')
+  const fileName = createLuckJingleFileName({
+    productCode: item?.product_code,
+    processDate,
+    qty,
+  })
+  const imageDataUrl = await buildLuckJingleLabelDataUrl({
+    productCode: item?.product_code,
+    productName: item?.product_name,
+    processName: item?.process_name,
+    nextProcessName: item?.next_process_name || '—',
+    operatorName: operator.value,
+    processDate,
+    qty,
+    footerText: 'Luck Jingle用',
+  })
+  const payload = {
+    title: 'Luck Jingle用ラベル',
+    fileName,
+    imageDataUrl,
+    productCode: String(item?.product_code || ''),
+    qty: Number(qty || 0),
+    processDate,
+    savedAt: new Date().toISOString(),
+  }
+  storeSavedLabel(payload)
+  return payload
+}
+
+async function printSavedLabel() {
+  if (!savedLabel.value?.imageDataUrl) {
+    showToast('保存済みラベルがありません', 'error')
     return
   }
-  const html = await buildPrintHtml(item, qty)
-  win.document.open()
-  win.document.write(html)
-  win.document.close()
-  win.focus()
-  setTimeout(() => {
-    win.print()
-    win.onafterprint = () => win.close()
-  }, 200)
+
+  try {
+    const shared = await shareLuckJingleLabel(savedLabel.value)
+    if (!shared) {
+      const opened = openLuckJinglePreview(savedLabel.value)
+      if (!opened) {
+        showToast('Luck Jingle用ラベルを開けませんでした', 'error')
+      }
+    }
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      return
+    }
+    const opened = openLuckJinglePreview(savedLabel.value)
+    if (!opened) {
+      showToast('Luck Jingle用ラベルを開けませんでした', 'error')
+    }
+  }
 }
 
 // ──────────────────────────────
@@ -1133,8 +1100,16 @@ async function save() {
     }
     const shouldPrintByAction = data.operator_action === 'END' || data.operator_action === 'PAUSE'
     const printQty = Number(inputQty.value || 0)
+    let labelStatusMessage = ''
+    let labelStatusType = 'success'
     if (printAutoEnabled.value && shouldPrintByAction && printQty > 0) {
-      await printLabel(item, printQty)
+      try {
+        await saveLabelForLuckJingle(item, printQty)
+        labelStatusMessage = ' / ラベル保存済み'
+      } catch {
+        labelStatusMessage = ' / ラベル保存失敗'
+        labelStatusType = 'error'
+      }
     }
     updateCurrentProcessingState(
       data.operator_action,
@@ -1169,9 +1144,9 @@ async function save() {
 
     const label = actionLabels.value[data.operator_action] || data.operator_action
     if (data.operator_action === 'END' && data.backlog) {
-      showToast(t('brakeInput.toast.recordedWithQty', { action: label, qty: data.backlog.actual_qty }))
+      showToast(`${t('brakeInput.toast.recordedWithQty', { action: label, qty: data.backlog.actual_qty })}${labelStatusMessage}`, labelStatusType)
     } else {
-      showToast(t('brakeInput.toast.recorded', { action: label }))
+      showToast(`${t('brakeInput.toast.recorded', { action: label })}${labelStatusMessage}`, labelStatusType)
     }
 
     // 設備トラブルで中断した場合は設備状態入力画面へ遷移
@@ -1637,6 +1612,33 @@ function showToast(message, type = 'success') {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+.print-setting-hint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #6b7280;
+}
+.print-setting-status {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #2f7d61;
+}
+.btn-luck-jingle {
+  width: 100%;
+  height: 30px;
+  border: 1px solid #2f7d61;
+  background: #edf7f1;
+  color: #2f7d61;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+.btn-luck-jingle:disabled {
+  border-color: #cbd5d1;
+  background: #f4f6f5;
+  color: #9aa5a0;
+  cursor: default;
 }
 
 .add-btn-area { padding: 8px 12px; }
