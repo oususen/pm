@@ -37,6 +37,7 @@
         <button class="btn" type="button" @click="createNewPattern">新規</button>
         <button class="btn primary" type="button" @click="savePattern" :disabled="saving">保存</button>
         <button class="btn" type="button" @click="copyPattern" :disabled="!form.id || saving">コピー</button>
+        <button class="btn warn" type="button" @click="deactivatePattern" :disabled="!form.id || saving">無効化</button>
         <button class="btn danger" type="button" @click="deletePattern" :disabled="!form.id || saving">削除</button>
       </div>
     </div>
@@ -472,6 +473,24 @@ const copyPattern = async () => {
   }
 }
 
+const deactivatePattern = async () => {
+  if (!form.value.id) return
+  const ok = window.confirm(`パターン ${form.value.pattern_no} を無効化します。一覧から非表示になります。よろしいですか？`)
+  if (!ok) return
+  saving.value = true
+  try {
+    await api.laserPatterns.deactivateLaserPattern(form.value.id)
+    await loadPatterns()
+    createNewPattern()
+    window.alert('無効化しました。')
+  } catch (error) {
+    const detail = error?.response?.data?.detail || '無効化に失敗しました。'
+    window.alert(detail)
+  } finally {
+    saving.value = false
+  }
+}
+
 const deletePattern = async () => {
   if (!form.value.id) return
   const ok = window.confirm(`パターン ${form.value.pattern_no} を削除します。よろしいですか？`)
@@ -570,6 +589,10 @@ onMounted(async () => {
   background: #0f766e;
   border-color: #0f766e;
   color: #fff;
+}
+.btn.warn {
+  border-color: #b45309;
+  color: #b45309;
 }
 .btn.danger {
   border-color: #b91c1c;

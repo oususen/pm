@@ -17,4 +17,7 @@ export const createLaserPatternsAPI = (client) => ({
   copyLaserPattern(id, patternNo) {
     return client.post(`/laser-patterns/${id}/copy/`, { pattern_no: patternNo })
   },
+  deactivateLaserPattern(id) {
+    return client.post(`/laser-patterns/${id}/deactivate/`)
+  },
 })

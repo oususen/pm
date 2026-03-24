@@ -27,6 +27,7 @@ class LaserPattern(models.Model):
         verbose_name='加工時間(分/回)',
     )
     is_budget_target = models.BooleanField(default=False, verbose_name='材料予算用')
+    is_active = models.BooleanField(default=True, verbose_name='有効')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
 

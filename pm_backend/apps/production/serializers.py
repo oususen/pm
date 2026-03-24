@@ -375,6 +375,7 @@ class LaserPatternSerializer(serializers.ModelSerializer):
             'equipment_name',
             'process_time_min',
             'is_budget_target',
+            'is_active',
             'component_items',
             'finished_items',
             'created_at',

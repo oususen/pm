@@ -4117,6 +4117,30 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
     ordering_fields = ['pattern_no', 'updated_at', 'created_at']
     ordering = ['pattern_no']
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.request.query_params.get('show_inactive') != 'true':
+            qs = qs.filter(is_active=True)
+        return qs
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        actual_count = instance.laser_actuals.count()
+        if actual_count > 0:
+            return Response(
+                {'detail': f'このパターンには実績が {actual_count} 件あるため削除できません。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post'], url_path='deactivate')
+    def deactivate(self, request, *args, **kwargs):
+        instance = self.get_object()
+        instance.is_active = False
+        instance.save(update_fields=['is_active'])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     @staticmethod
     def _parse_target_month(month_value):
         month_text = str(month_value or '').strip()
