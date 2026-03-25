@@ -176,6 +176,13 @@
                 <span v-if="getWorkTimeLabel(c.key)" class="work-time-label">
                   {{ getWorkTimeLabel(c.key) }}
                 </span>
+                <button
+                  type="button"
+                  class="btn-day-clear"
+                  :disabled="processing || !selectedLine"
+                  @click="clearDayPlan(c.key)"
+                  title="この日の計画をクリアして順番を振り直す"
+                >×</button>
               </div>
             </th>
           </tr>
@@ -1588,10 +1595,67 @@ const ensureL2201LineFinalRows = (grouped, productInfoByProdKey) => {
   })
 }
 
+// その日の全行のsequence_noの最大値+1を返す
+const getNextSequenceForDate = (dateKey) => {
+  let max = 0
+  rows.value.forEach((row) => {
+    const daily = row.daily?.[dateKey]
+    if (!daily) return
+    const seq = parseInt(daily.sequence_no)
+    if (!isNaN(seq) && seq > max) max = seq
+    if (daily.extraLots) {
+      daily.extraLots.forEach((lot) => {
+        const lotSeq = parseInt(lot.sequence_no)
+        if (!isNaN(lotSeq) && lotSeq > max) max = lotSeq
+      })
+    }
+  })
+  return max + 1
+}
+
+// 日付ヘッダーの×ボタン: その日の計画(LinePlan/LineGanttPlan/LineBacklog)をクリア
+const clearDayPlan = async (dateKey) => {
+  if (!selectedLine.value) return
+  if (!confirm(`${dateKey} の計画をクリアします。よろしいですか？`)) return
+  processing.value = true
+  try {
+    await api.linePlans.bulkDelete({
+      line_id: selectedLine.value,
+      start_date: dateKey,
+      end_date: dateKey,
+    })
+    // フロントエンドのデータもクリア（計画・順のみ。需要・実績・在庫は維持）
+    rows.value.forEach((row) => {
+      const daily = row.daily?.[dateKey]
+      if (!daily) return
+      daily.plan = ''
+      daily.sequence_no = ''
+      daily.extraLots = []
+      daily.plan_stock = 0
+    })
+  } catch (e) {
+    console.error('計画クリアエラー', e)
+    alert('クリアに失敗しました。')
+  } finally {
+    processing.value = false
+  }
+}
+
 const onPlanInput = (row, dateKey, value) => {
   if (isPlanCellLocked(dateKey)) return
   const daily = ensureDailyCell(row, dateKey)
   daily.plan = value === '' ? '' : value
+  // 数量 > 0 かつ順が未設定の場合、入力順で自動採番
+  const numVal = parseFloat(value)
+  if (!isNaN(numVal) && numVal > 0) {
+    const seq = daily.sequence_no
+    if (seq === '' || seq === null || seq === undefined) {
+      daily.sequence_no = getNextSequenceForDate(dateKey)
+    }
+  } else {
+    // 数量クリア時は順もクリア
+    daily.sequence_no = ''
+  }
 }
 
 const onSequenceInput = (row, dateKey, value) => {
@@ -2924,6 +2988,24 @@ thead tr.head-level2 th.sticky-col {
 .time-input-inline::placeholder {
   color: #15803d;
   opacity: 1;
+}
+.btn-day-clear {
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  border: 1px solid #f87171;
+  border-radius: 3px;
+  background: #fff;
+  color: #dc2626;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.btn-day-clear:hover:not(:disabled) {
+  background: #fee2e2;
+}
+.btn-day-clear:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .mini {
   text-align: center;
