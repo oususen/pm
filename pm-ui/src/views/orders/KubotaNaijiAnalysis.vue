@@ -351,7 +351,10 @@
 
         <!-- 詳細テーブル -->
         <div class="detail-section">
-          <h3 class="section-title">スナップショット一覧（全納期）</h3>
+          <div class="section-title-row">
+            <h3 class="section-title">スナップショット一覧（全納期）</h3>
+            <button class="btn-export-small" @click="exportSnapshotExcel">📥 Excel出力</button>
+          </div>
           <div class="table-scroll">
             <table class="detail-table">
               <thead>
@@ -377,6 +380,17 @@
                     class="firm-cell"
                   >{{ analysisData.firm_quantities[dd] !== undefined ? analysisData.firm_quantities[dd] : '—' }}</td>
                 </tr>
+                <!-- 確定一致日行 -->
+                <tr class="converge-row">
+                  <th class="sticky-col converge-header">確定一致日</th>
+                  <th class="sticky-col2">—</th>
+                  <td
+                    v-for="dd in analysisData.due_dates"
+                    :key="'converge-' + dd"
+                    :class="{ 'active-col': dd === selectedDueDate }"
+                    class="converge-cell"
+                  >{{ firmConvergeDates[dd] ? firmConvergeDates[dd].slice(5).replace('-', '/') : '—' }}</td>
+                </tr>
               </thead>
               <tbody>
                 <tr v-for="snap in analysisData.snapshots" :key="snap.source_file">
@@ -385,7 +399,7 @@
                   <td
                     v-for="dd in analysisData.due_dates"
                     :key="dd"
-                    :class="['qty-cell', { 'active-col': dd === selectedDueDate }, deltaCellClass(snap, dd)]"
+                    :class="['qty-cell', { 'active-col': dd === selectedDueDate }, deltaCellClass(snap, dd), { 'cell-converge': firmConvergeDates[dd] === snap.snapshot_date }]"
                   >
                     <span v-if="snap.quantities[dd] !== undefined">{{ snap.quantities[dd] }}</span>
                     <span v-else class="empty-cell">—</span>
@@ -463,6 +477,7 @@
                 <th colspan="5" class="cat-shortage">欠品リスク</th>
                 <th colspan="3" class="cat-safety">推奨安全在庫</th>
                 <th colspan="4" class="cat-stable">収束安定期間</th>
+                <th colspan="5" class="cat-firm-stable">安定日数</th>
               </tr>
               <tr>
                 <th class="cat-error">最大差</th>
@@ -484,6 +499,11 @@
                 <th class="cat-stable">最短日</th>
                 <th class="cat-stable">最長日</th>
                 <th class="cat-stable">件数</th>
+                <th class="cat-firm-stable">平均日</th>
+                <th class="cat-firm-stable">最短日</th>
+                <th class="cat-firm-stable">最長日</th>
+                <th class="cat-firm-stable">件数</th>
+                <th class="cat-firm-stable">マイナス率%</th>
               </tr>
             </thead>
             <tbody>
@@ -509,6 +529,79 @@
                 <td>{{ r.stable_days_min != null ? r.stable_days_min + '日' : '—' }}</td>
                 <td>{{ r.stable_days_max != null ? r.stable_days_max + '日' : '—' }}</td>
                 <td>{{ r.stable_days_count ?? '—' }}</td>
+                <td class="cat-firm-stable-cell">{{ r.firm_stable_days_mean != null ? r.firm_stable_days_mean + '日' : '—' }}</td>
+                <td class="cat-firm-stable-cell">
+                  {{ r.firm_stable_days_min != null ? r.firm_stable_days_min + '日' : '—' }}
+                  <small v-if="r.firm_stable_days_min_date" class="diff-date">（{{ r.firm_stable_days_min_date }}）</small>
+                </td>
+                <td class="cat-firm-stable-cell">
+                  {{ r.firm_stable_days_max != null ? r.firm_stable_days_max + '日' : '—' }}
+                  <small v-if="r.firm_stable_days_max_date" class="diff-date">（{{ r.firm_stable_days_max_date }}）</small>
+                </td>
+                <td class="cat-firm-stable-cell">{{ r.firm_stable_days_count ?? '—' }}</td>
+                <td class="cat-firm-stable-cell">{{ r.firm_stable_days_negative_rate != null ? r.firm_stable_days_negative_rate + '%' : '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ===== 信憑性分析チャート ===== -->
+      <div v-if="previewRows.length" class="credibility-section">
+        <h3 class="cred-title">📈 内示信憑性分析</h3>
+        <p class="cred-note">各指標を0〜100にスコア化（高いほど良い）。スコアは選択製品内の相対評価です。</p>
+
+        <div class="cred-charts-row">
+          <!-- レーダーチャート -->
+          <div class="cred-chart-card">
+            <h4 class="cred-chart-title">① 総合信憑性レーダー</h4>
+            <p class="cred-chart-note">面積が大きい ＝ 総合的に信頼できる内示</p>
+            <canvas ref="radarChartRef"></canvas>
+          </div>
+          <!-- スコアランキング横棒 -->
+          <div class="cred-chart-card">
+            <h4 class="cred-chart-title">② 信憑性スコアランキング</h4>
+            <p class="cred-chart-note">5指標のスタック表示（合計500点満点）</p>
+            <canvas ref="barChartRef"></canvas>
+          </div>
+        </div>
+
+        <div class="cred-charts-row">
+          <!-- バブルチャート -->
+          <div class="cred-chart-card cred-chart-full">
+            <h4 class="cred-chart-title">③ リスクマップ（バブルチャート）</h4>
+            <p class="cred-chart-note">右下・小バブルが理想　｜　X軸：収束安定期間 平均日（大きいほど良）　Y軸：過小率%（低いほど良）　バブルサイズ：MAE</p>
+            <canvas ref="bubbleChartRef" style="max-height:320px"></canvas>
+          </div>
+        </div>
+
+        <!-- スコアテーブル -->
+        <div class="cred-score-wrap">
+          <table class="cred-score-table">
+            <thead>
+              <tr>
+                <th>順位</th>
+                <th>品番</th>
+                <th>品名</th>
+                <th class="score-th">精度<br><small>MAE低</small></th>
+                <th class="score-th">偏り少<br><small>平均差低</small></th>
+                <th class="score-th">低リスク<br><small>過小率低</small></th>
+                <th class="score-th">収束速度<br><small>安定期間長</small></th>
+                <th class="score-th">予見性<br><small>マイナス率低</small></th>
+                <th class="score-th total-th">総合スコア</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(s, i) in sortedScores" :key="s.product_code">
+                <td class="rank-cell">{{ i + 1 }}</td>
+                <td class="code-cell">{{ s.product_code }}</td>
+                <td class="name-cell">{{ s.product_name }}</td>
+                <td :class="['score-td', scoreClass(s.accuracy)]">{{ s.accuracy }}</td>
+                <td :class="['score-td', scoreClass(s.bias)]">{{ s.bias }}</td>
+                <td :class="['score-td', scoreClass(s.risk)]">{{ s.risk }}</td>
+                <td :class="['score-td', scoreClass(s.convergence)]">{{ s.convergence }}</td>
+                <td :class="['score-td', scoreClass(s.predictability)]">{{ s.predictability }}</td>
+                <td :class="['score-td', 'total-td', scoreClass(s.composite)]"><strong>{{ s.composite }}</strong></td>
               </tr>
             </tbody>
           </table>
@@ -520,8 +613,22 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import api from '@/api/client'
+import * as XLSX from 'xlsx'
+import {
+  Chart,
+  RadarController, LineElement, PointElement, RadialLinearScale, Filler,
+  BubbleController, LinearScale,
+  BarController, BarElement, CategoryScale,
+  Tooltip, Legend,
+} from 'chart.js'
+Chart.register(
+  RadarController, LineElement, PointElement, RadialLinearScale, Filler,
+  BubbleController, LinearScale,
+  BarController, BarElement, CategoryScale,
+  Tooltip, Legend,
+)
 
 // ---- 共通 ----
 const activeTab = ref('analysis')
@@ -667,6 +774,10 @@ const shortFileName = (name) => {
 }
 const sign = (v) => { if (v === null || v === undefined) return '—'; return v > 0 ? `+${v}` : `${v}` }
 const changeClass = (v) => { if (!v) return ''; return v > 0 ? 'up' : v < 0 ? 'down' : '' }
+
+// 各納期列ごとの確定登録日（APIから取得）
+const firmConvergeDates = computed(() => analysisData.value?.firm_dates || {})
+
 const deltaCellClass = (snap, dd) => {
   if (!analysisData.value || snap.quantities[dd] === undefined) return ''
   const snaps = analysisData.value.snapshots
@@ -690,6 +801,36 @@ const previewRows = ref([])
 
 const selectAll = () => { selectedCodes.value = products.value.map(p => p.product_code) }
 const clearAll  = () => { selectedCodes.value = [] }
+
+const exportSnapshotExcel = () => {
+  const data = analysisData.value
+  if (!data) return
+
+  const dueDates = data.due_dates || []
+
+  // ヘッダ行
+  const header = ['取込日', 'ソースファイル', ...dueDates]
+
+  // 確定行
+  const firmRow = ['確定', '—', ...dueDates.map(dd =>
+    data.firm_quantities[dd] !== undefined ? data.firm_quantities[dd] : ''
+  )]
+
+  // スナップショット行
+  const snapRows = (data.snapshots || []).map(snap => [
+    snap.snapshot_date,
+    snap.source_file,
+    ...dueDates.map(dd => snap.quantities[dd] !== undefined ? snap.quantities[dd] : ''),
+  ])
+
+  const wsData = [header, firmRow, ...snapRows]
+  const ws = XLSX.utils.aoa_to_sheet(wsData)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'スナップショット一覧')
+
+  const filename = `クボタ内示_${selectedProduct.value}_スナップショット.xlsx`
+  XLSX.writeFile(wb, filename)
+}
 
 const exportExcel = async () => {
   if (selectedCodes.value.length === 0) return
@@ -722,9 +863,216 @@ const exportExcel = async () => {
     exporting.value = false
   }
 }
+
+// ===== 信憑性分析チャート =====
+const CHART_COLORS = [
+  '#2563eb','#dc2626','#16a34a','#d97706','#7c3aed',
+  '#0891b2','#db2777','#65a30d','#ea580c','#6b7280',
+]
+
+const radarChartRef  = ref(null)
+const barChartRef    = ref(null)
+const bubbleChartRef = ref(null)
+let radarChart = null, barChartInst = null, bubbleChart = null
+
+// スコア計算（0〜100、高いほど良い）
+const credibilityScores = computed(() => {
+  const rows = previewRows.value.filter(r => r.mae != null)
+  if (!rows.length) return []
+
+  const maes      = rows.map(r => r.mae || 0)
+  const meanErrs  = rows.map(r => Math.abs(r.mean_error || 0))
+  const stables   = rows.map(r => r.stable_days_mean || 0)
+  const maxMAE      = Math.max(...maes) || 1
+  const maxMeanErr  = Math.max(...meanErrs) || 1
+  const maxStable   = Math.max(...stables) || 1
+
+  return rows.map(r => {
+    const accuracy      = Math.round(Math.max(0, (1 - (r.mae || 0) / maxMAE) * 100))
+    const bias          = Math.round(Math.max(0, (1 - Math.abs(r.mean_error || 0) / maxMeanErr) * 100))
+    const risk          = Math.round(Math.max(0, 100 - (r.shortage_rate || 0)))
+    const convergence   = Math.round(Math.max(0, ((r.stable_days_mean || 0) / maxStable) * 100))
+    const predictability = Math.round(Math.max(0, 100 - (r.firm_stable_days_negative_rate || 0)))
+    const composite     = Math.round((accuracy + bias + risk + convergence + predictability) / 5)
+    return { product_code: r.product_code, product_name: r.product_name,
+             accuracy, bias, risk, convergence, predictability, composite, _raw: r }
+  })
+})
+
+const sortedScores = computed(() =>
+  [...credibilityScores.value].sort((a, b) => b.composite - a.composite)
+)
+
+function scoreClass(val) {
+  if (val >= 75) return 'score-high'
+  if (val >= 45) return 'score-mid'
+  return 'score-low'
+}
+
+async function updateCharts() {
+  await nextTick()
+  const scores = credibilityScores.value
+  if (!scores.length) return
+  buildRadarChart(scores)
+  buildBarChart(scores)
+  buildBubbleChart(scores)
+}
+
+function buildRadarChart(scores) {
+  if (!radarChartRef.value) return
+  if (radarChart) { radarChart.destroy(); radarChart = null }
+  radarChart = new Chart(radarChartRef.value, {
+    type: 'radar',
+    data: {
+      labels: ['精度', '偏り少', '低リスク', '収束速度', '予見性'],
+      datasets: scores.map((s, i) => ({
+        label: s.product_code,
+        data: [s.accuracy, s.bias, s.risk, s.convergence, s.predictability],
+        borderColor: CHART_COLORS[i % CHART_COLORS.length],
+        backgroundColor: CHART_COLORS[i % CHART_COLORS.length] + '22',
+        borderWidth: 2, pointRadius: 3,
+      })),
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true,
+      scales: { r: { min: 0, max: 100, ticks: { stepSize: 25, font: { size: 10 } }, pointLabels: { font: { size: 12 } } } },
+      plugins: { legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 12 } } },
+    },
+  })
+}
+
+function buildBarChart(scores) {
+  if (!barChartRef.value) return
+  if (barChartInst) { barChartInst.destroy(); barChartInst = null }
+  const sorted = [...scores].sort((a, b) => b.composite - a.composite)
+  const defs = [
+    { key: 'accuracy',      label: '精度',    color: '#2563eb' },
+    { key: 'bias',          label: '偏り少',  color: '#16a34a' },
+    { key: 'risk',          label: '低リスク', color: '#dc2626' },
+    { key: 'convergence',   label: '収束速度', color: '#7c3aed' },
+    { key: 'predictability',label: '予見性',  color: '#d97706' },
+  ]
+  barChartInst = new Chart(barChartRef.value, {
+    type: 'bar',
+    data: {
+      labels: sorted.map(s => s.product_code),
+      datasets: defs.map(d => ({
+        label: d.label,
+        data: sorted.map(s => s[d.key]),
+        backgroundColor: d.color + 'cc',
+        borderColor: d.color,
+        borderWidth: 1,
+      })),
+    },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: true,
+      scales: {
+        x: { stacked: true, max: 500, ticks: { font: { size: 10 } } },
+        y: { stacked: true, ticks: { font: { size: 10 } } },
+      },
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 12 } },
+        tooltip: {
+          callbacks: {
+            footer: items => `総合スコア: ${Math.round(items.reduce((s, i) => s + i.raw, 0) / 5)}`,
+          },
+        },
+      },
+    },
+  })
+}
+
+function buildBubbleChart(scores) {
+  if (!bubbleChartRef.value) return
+  if (bubbleChart) { bubbleChart.destroy(); bubbleChart = null }
+  const maxMAE = Math.max(...scores.map(s => s._raw.mae || 0)) || 1
+  bubbleChart = new Chart(bubbleChartRef.value, {
+    type: 'bubble',
+    data: {
+      datasets: scores.map((s, i) => ({
+        label: s.product_code,
+        data: [{
+          x: s._raw.stable_days_mean || 0,
+          y: s._raw.shortage_rate || 0,
+          r: Math.max(6, ((s._raw.mae || 0) / maxMAE) * 28),
+        }],
+        backgroundColor: CHART_COLORS[i % CHART_COLORS.length] + '99',
+        borderColor:     CHART_COLORS[i % CHART_COLORS.length],
+        borderWidth: 2,
+      })),
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true,
+      scales: {
+        x: { title: { display: true, text: '収束安定期間 平均日（大きいほど良）', font: { size: 11 } }, ticks: { font: { size: 10 } } },
+        y: { title: { display: true, text: '過小率%（小さいほど良）', font: { size: 11 } }, ticks: { font: { size: 10 } } },
+      },
+      plugins: {
+        legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 12 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const s = scores[ctx.datasetIndex]
+              return [`${s.product_code}  ${s.product_name}`,
+                      `収束: ${ctx.raw.x}日  過小率: ${ctx.raw.y}%  MAE: ${s._raw.mae}`]
+            },
+          },
+        },
+      },
+    },
+  })
+}
+
+watch(previewRows, val => { if (val.length) updateCharts() })
+
+onUnmounted(() => {
+  if (radarChart)    radarChart.destroy()
+  if (barChartInst)  barChartInst.destroy()
+  if (bubbleChart)   bubbleChart.destroy()
+})
 </script>
 
 <style scoped>
+.section-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.section-title-row .section-title {
+  margin-bottom: 0;
+}
+.converge-row {
+  background: #f0fdf4;
+}
+.converge-header {
+  font-size: 11px;
+  color: #166534;
+  white-space: nowrap;
+}
+.converge-cell {
+  font-size: 11px;
+  color: #166534;
+  font-weight: 600;
+  text-align: center;
+}
+.cell-converge {
+  background: #bbf7d0 !important;
+  font-weight: 700;
+  outline: 2px solid #16a34a;
+}
+.btn-export-small {
+  padding: 4px 10px;
+  font-size: 12px;
+  background: #217346;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-export-small:hover {
+  background: #1a5c38;
+}
 .naiji-analysis {
   padding: 16px;
   font-size: 13px;
@@ -1032,8 +1380,52 @@ const exportExcel = async () => {
 .cat-shortage { background: #c00000 !important; }
 .cat-safety   { background: #375623 !important; }
 .cat-stable   { background: #7030a0 !important; }
+.cat-firm-stable { background: #bf8f00 !important; }
+.cat-firm-stable-cell { background: #fff8e1; }
 .preview-table tbody tr:nth-child(even) { background: #ebf3fb; }
 .preview-table tbody tr:hover { background: #d0e4f7; }
 .code-cell { text-align: left; font-weight: bold; color: #1a3a7a; }
 .name-cell { text-align: left; }
+
+/* 信憑性分析セクション */
+.credibility-section {
+  margin-top: 24px;
+  padding: 16px;
+  background: #f8faff;
+  border: 1px solid #dde3ee;
+  border-radius: 8px;
+}
+.cred-title { font-size: 16px; font-weight: 700; color: #1a3a7a; margin: 0 0 4px; }
+.cred-note  { font-size: 12px; color: #666; margin: 0 0 16px; }
+.cred-charts-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.cred-chart-card {
+  flex: 1;
+  min-width: 320px;
+  background: #fff;
+  border: 1px solid #e0e7f0;
+  border-radius: 6px;
+  padding: 12px;
+}
+.cred-chart-full { flex: 1 1 100%; }
+.cred-chart-title { font-size: 13px; font-weight: 700; color: #1a3a7a; margin: 0 0 2px; }
+.cred-chart-note  { font-size: 11px; color: #888; margin: 0 0 10px; }
+
+/* スコアテーブル */
+.cred-score-wrap { overflow-x: auto; }
+.cred-score-table { border-collapse: collapse; font-size: 12px; width: 100%; white-space: nowrap; }
+.cred-score-table th, .cred-score-table td { border: 1px solid #dde3ee; padding: 5px 10px; text-align: center; }
+.cred-score-table thead th { background: #1f4e79; color: #fff; font-size: 11px; }
+.score-th { min-width: 70px; }
+.total-th { background: #0d3561 !important; }
+.rank-cell { font-weight: 700; color: #555; }
+.score-td { font-weight: 600; font-size: 13px; }
+.total-td { font-size: 14px; }
+.score-high { background: #d4edda; color: #155724; }
+.score-mid  { background: #fff3cd; color: #856404; }
+.score-low  { background: #f8d7da; color: #721c24; }
 </style>

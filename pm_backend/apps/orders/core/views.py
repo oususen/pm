@@ -376,6 +376,35 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         for row in firm_qs.values('due_date').annotate(total_qty=_Sum('quantity')):
             firm_quantities[row['due_date'].isoformat()] = float(row['total_qty'])
 
+        # StgOrderRawKubotaのFIRMレコードから発行日（raw_payload['issue_date']）を取得
+        def _parse_yymmdd(s):
+            s = str(s).strip()
+            if len(s) == 6 and s.isdigit():
+                try:
+                    return date(2000 + int(s[:2]), int(s[2:4]), int(s[4:6]))
+                except ValueError:
+                    pass
+            return None
+
+        firm_dates = {}
+        firm_stg_qs = StgOrderRawKubota.objects.filter(
+            product_code=product_code, order_type='FIRM', parse_status='PARSED'
+        ).exclude(delivery_date=None)
+        if start_date:
+            firm_stg_qs = firm_stg_qs.filter(delivery_date__gte=start_date)
+        if end_date:
+            firm_stg_qs = firm_stg_qs.filter(delivery_date__lte=end_date)
+        for stg in firm_stg_qs.values('delivery_date', 'raw_payload'):
+            ds = stg['delivery_date'].isoformat()
+            issue_date_str = (stg['raw_payload'] or {}).get('issue_date', '')
+            if not issue_date_str:
+                continue
+            issue_date_obj = _parse_yymmdd(issue_date_str)
+            if issue_date_obj is None:
+                continue
+            if ds not in firm_dates or issue_date_obj < firm_dates[ds]:
+                firm_dates[ds] = issue_date_obj
+
         all_errors = []
         date_max_shortages = []  # 各納期の最大過小量（ワースト集計用）
         n_dates_with_firm = 0
@@ -412,7 +441,23 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             if has_shortage:
                 n_dates_shortage += 1
 
+        from datetime import timedelta as _timedelta
+
+        def _count_working_days(d_from, d_to):
+            """d_from → d_to の営業日数（正負あり、kubota_mukeカレンダー参照）"""
+            if d_from == d_to:
+                return 0
+            step = 1 if d_to > d_from else -1
+            count = 0
+            cur = d_from + _timedelta(days=step)
+            while cur != d_to + _timedelta(days=step):
+                if _wdc.is_working_day(cur):
+                    count += step
+                cur += _timedelta(days=step)
+            return count
+
         stable_days_list = []
+        firm_stable_days_list = []
         for ds in all_due_dates:
             firm_qty = firm_quantities.get(ds)
             if firm_qty is None:
@@ -439,6 +484,10 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 days = (due_date_obj - current_streak_start).days
                 if days >= 0:
                     stable_days_list.append((days, ds))
+                firm_date_obj = firm_dates.get(ds)
+                if firm_date_obj is not None:
+                    fdays = _count_working_days(current_streak_start, firm_date_obj)
+                    firm_stable_days_list.append((fdays, ds))
 
         if stable_days_list:
             days_vals = [d for d, _ in stable_days_list]
@@ -451,6 +500,21 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         else:
             stable_days_mean = stable_days_min = stable_days_min_date = None
             stable_days_max = stable_days_max_date = stable_days_count = None
+
+        if firm_stable_days_list:
+            fdays_vals = [d for d, _ in firm_stable_days_list]
+            firm_stable_days_mean = round(sum(fdays_vals) / len(fdays_vals), 1)
+            _fmin_e = min(firm_stable_days_list, key=lambda x: x[0])
+            _fmax_e = max(firm_stable_days_list, key=lambda x: x[0])
+            firm_stable_days_min, firm_stable_days_min_date = _fmin_e
+            firm_stable_days_max, firm_stable_days_max_date = _fmax_e
+            firm_stable_days_count = len(firm_stable_days_list)
+            _neg_count = sum(1 for d in fdays_vals if d < 0)
+            firm_stable_days_negative_rate = round(_neg_count / firm_stable_days_count * 100, 1)
+        else:
+            firm_stable_days_mean = firm_stable_days_min = firm_stable_days_min_date = None
+            firm_stable_days_max = firm_stable_days_max_date = firm_stable_days_count = None
+            firm_stable_days_negative_rate = None
 
         n = len(all_errors)
         total_dates = len(all_due_dates)
@@ -515,6 +579,13 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             'stable_days_max': stable_days_max,
             'stable_days_max_date': stable_days_max_date,
             'stable_days_count': stable_days_count,
+            'firm_stable_days_mean': firm_stable_days_mean,
+            'firm_stable_days_min': firm_stable_days_min,
+            'firm_stable_days_min_date': firm_stable_days_min_date,
+            'firm_stable_days_max': firm_stable_days_max,
+            'firm_stable_days_max_date': firm_stable_days_max_date,
+            'firm_stable_days_count': firm_stable_days_count,
+            'firm_stable_days_negative_rate': firm_stable_days_negative_rate,
         }
 
     @action(detail=False, methods=['get'])
@@ -670,6 +741,35 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         firm_quantities = {}
         for row in firm_qs.values('due_date').annotate(total_qty=_Sum('quantity')):
             firm_quantities[row['due_date'].isoformat()] = float(row['total_qty'])
+
+        # StgOrderRawKubotaのFIRMレコードから発行日（raw_payload['issue_date']）を取得
+        def _parse_yymmdd_str(s):
+            s = str(s).strip()
+            if len(s) == 6 and s.isdigit():
+                try:
+                    return date(2000 + int(s[:2]), int(s[2:4]), int(s[4:6]))
+                except ValueError:
+                    pass
+            return None
+
+        firm_dates = {}
+        firm_stg_qs2 = StgOrderRawKubota.objects.filter(
+            product_code=product_code, order_type='FIRM', parse_status='PARSED'
+        ).exclude(delivery_date=None)
+        if start_date:
+            firm_stg_qs2 = firm_stg_qs2.filter(delivery_date__gte=start_date)
+        if end_date:
+            firm_stg_qs2 = firm_stg_qs2.filter(delivery_date__lte=end_date)
+        for stg in firm_stg_qs2.values('delivery_date', 'raw_payload'):
+            ds = stg['delivery_date'].isoformat()
+            issue_date_str = (stg['raw_payload'] or {}).get('issue_date', '')
+            if not issue_date_str:
+                continue
+            issue_date_obj = _parse_yymmdd_str(issue_date_str)
+            if issue_date_obj is None:
+                continue
+            if ds not in firm_dates or issue_date_obj < date.fromisoformat(firm_dates[ds]):
+                firm_dates[ds] = issue_date_obj.isoformat()
 
         # 統計計算（納期ごと）
         stat_results = {}
@@ -873,6 +973,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             'due_dates': all_due_dates,
             'snapshots': snapshots,
             'firm_quantities': firm_quantities,
+            'firm_dates': firm_dates,
             'statistics': stat_results,
             'period_summary': period_summary,
         })
@@ -934,12 +1035,12 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         ws.row_dimensions[1].height = 22
 
         # カテゴリヘッダー行
-        ws.append(['', '', '', '予測誤差（全スナップショット − 確定）', '', '', '', '', '', '', '欠品リスク', '', '', '', '', '推奨安全在庫量', '', '', '収束安定期間（日数）', '', '', '', '', '', ''])
+        ws.append(['', '', '', '予測誤差（全スナップショット − 確定）', '', '', '', '', '', '', '欠品リスク', '', '', '', '', '推奨安全在庫量', '', '', '収束安定期間（日数）', '', '', '', '', '', '', '安定日数（確定登録まで）', '', '', '', ''])
         cat_row = 2
         # カテゴリセル結合とスタイル
-        cat_ranges = [(4, 10), (11, 15), (16, 18), (19, 25)]
-        cat_labels = ['予測誤差（全スナップショット − 確定）', '欠品リスク（内示＜確定）', '推奨安全在庫量（Z×σ）', '収束安定期間（内示＝確定が続いた日数）']
-        cat_fills = ['2E75B6', 'C00000', '375623', '7030A0']
+        cat_ranges = [(4, 10), (11, 15), (16, 18), (19, 25), (26, 31)]
+        cat_labels = ['予測誤差（全スナップショット − 確定）', '欠品リスク（内示＜確定）', '推奨安全在庫量（Z×σ）', '収束安定期間（内示＝確定が続いた日数）', '安定日数（収束開始→確定登録日）']
+        cat_fills = ['2E75B6', 'C00000', '375623', '7030A0', 'BF8F00']
         for (start_col, end_col), label, fill_color in zip(cat_ranges, cat_labels, cat_fills):
             ws.merge_cells(start_row=cat_row, start_column=start_col, end_row=cat_row, end_column=end_col)
             cell = ws.cell(row=cat_row, column=start_col)
@@ -962,6 +1063,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             '内示過小率(%)', 'ワースト1\n過小量', 'ワースト1\n出現率(%)', 'ワースト2\n過小量', 'ワースト2\n出現率(%)',
             '安全在庫\n90%', '安全在庫\n95%', '安全在庫\n99%',
             '収束\n平均日', '収束\n最短日', '収束最短日', '収束\n最長日', '収束最長日', '収束\n対象件数', '分析\n納期数',
+            '安定\n平均日', '安定\n最短日', '安定最短日', '安定\n最長日', '安定\n対象件数', '安定\nマイナス率%',
         ]
         ws.append(headers)
         header_row = 3
@@ -970,7 +1072,8 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             ['2E75B6'] * 7 +
             ['C00000'] * 5 +
             ['375623'] * 3 +
-            ['7030A0'] * 7
+            ['7030A0'] * 7 +
+            ['BF8F00'] * 6
         )
         for col_idx, (hdr, fill_color) in enumerate(zip(headers, header_col_fills), start=1):
             cell = ws.cell(row=header_row, column=col_idx)
@@ -1013,11 +1116,17 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 _v(summary['stable_days_max_date']),
                 _v(summary['stable_days_count']),
                 _v(summary['analyzed_dates']),
+                _v(summary['firm_stable_days_mean']),
+                _v(summary['firm_stable_days_min']),
+                _v(summary['firm_stable_days_min_date']),
+                _v(summary['firm_stable_days_max']),
+                _v(summary['firm_stable_days_count']),
+                _v(summary['firm_stable_days_negative_rate']),
             ]
             ws.append(row_data)
             # 行スタイル
             row_fill = 'EBF3FB' if row_idx % 2 == 0 else 'FFFFFF'
-            for col_idx in range(1, 26):
+            for col_idx in range(1, 32):
                 cell = ws.cell(row=row_idx, column=col_idx)
                 cell.border = border
                 cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -1026,7 +1135,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 cell.fill = PatternFill(start_color=row_fill, end_color=row_fill, fill_type='solid')
 
         # 列幅設定
-        col_widths = [18, 20, 8, 7, 12, 7, 12, 7, 7, 7, 10, 10, 9, 10, 9, 9, 9, 9, 8, 8, 12, 8, 12, 8, 8]
+        col_widths = [18, 20, 8, 7, 12, 7, 12, 7, 7, 7, 10, 10, 9, 10, 9, 9, 9, 9, 8, 8, 12, 8, 12, 8, 8, 8, 8, 12, 8, 8, 10]
         for i, w in enumerate(col_widths, start=1):
             ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
 
