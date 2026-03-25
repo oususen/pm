@@ -53,6 +53,7 @@ class ProductFilter(django_filters.FilterSet):
     is_line_final_product = django_filters.BooleanFilter(field_name='is_line_final_product')
     has_bom = django_filters.BooleanFilter(method='filter_has_bom')
     has_image = django_filters.BooleanFilter(method='filter_has_image')
+    next_process_unset = django_filters.BooleanFilter(method='filter_next_process_unset')
     customer_code = django_filters.CharFilter(method='filter_customer_code')
     supplier_code = django_filters.CharFilter(method='filter_supplier_code')
     product_code = django_filters.CharFilter(field_name='product_code', lookup_expr='exact')
@@ -72,6 +73,7 @@ class ProductFilter(django_filters.FilterSet):
             'line',
             'process',
             'next_process',
+            'next_process_unset',
             'created_from',
             'created_to',
             'product_code',
@@ -111,6 +113,13 @@ class ProductFilter(django_filters.FilterSet):
             supplier__supplier_code=value,
         )
         return queryset.annotate(_has_supplier=Exists(supplier_items)).filter(_has_supplier=True)
+
+    def filter_next_process_unset(self, queryset, name, value):
+        if value is None:
+            return queryset
+        if value:
+            return queryset.filter(next_process__isnull=True)
+        return queryset.filter(next_process__isnull=False)
 
 
 class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):

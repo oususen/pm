@@ -91,6 +91,7 @@
           <label>後工程</label>
           <select v-model="filters.next_process">
             <option value="">すべて</option>
+            <option value="__none__">未設定</option>
             <option v-for="proc in processes" :key="proc.id" :value="proc.id">
               {{ proc.process_code }} - {{ proc.process_name }}
             </option>
@@ -569,7 +570,9 @@ const buildQueryParams = () => {
   if (filters.value.process) {
     params.process = filters.value.process
   }
-  if (filters.value.next_process) {
+  if (filters.value.next_process === '__none__') {
+    params.next_process_unset = true
+  } else if (filters.value.next_process) {
     params.next_process = filters.value.next_process
   }
   if (filters.value.created_from) {
