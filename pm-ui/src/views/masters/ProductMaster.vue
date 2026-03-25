@@ -79,6 +79,15 @@
           </select>
         </div>
         <div class="filter-field">
+          <label>工程</label>
+          <select v-model="filters.process">
+            <option value="">すべて</option>
+            <option v-for="proc in processes" :key="proc.id" :value="proc.id">
+              {{ proc.process_code }} - {{ proc.process_name }}
+            </option>
+          </select>
+        </div>
+        <div class="filter-field">
           <label>作成日 From</label>
           <input type="date" v-model="filters.created_from" />
         </div>
@@ -548,6 +557,9 @@ const buildQueryParams = () => {
   if (filters.value.is_active !== '') {
     params.is_active = filters.value.is_active === 'true'
   }
+  if (filters.value.process) {
+    params.process = filters.value.process
+  }
   if (filters.value.created_from) {
     params.created_from = filters.value.created_from
   }
@@ -691,6 +703,7 @@ const resetFilters = async () => {
     has_bom: '',
     customer_code: '',
     is_active: '',
+    process: '',
     created_from: '',
     created_to: ''
   }
