@@ -382,33 +382,16 @@ class BrakeLinePlanView(APIView):
             })
             item_keys.add(key)
 
-        # 後工程の取得（ブレーキ品はRoutingStep.output_productとして登録されている）
+        # 後工程の取得（製品マスタの next_process フィールドから）
         product_ids = [item['product_id'] for item in items if item.get('product_id')]
         next_process_map = {}
         if product_ids:
-            current_steps = list(
-                RoutingStep.objects.filter(
-                    output_product_id__in=product_ids,
-                ).values('routing_id', 'output_product_id', 'process_id', 'step_no')
-            )
-            step_map = {}
-            for s in current_steps:
-                key = (s['output_product_id'], s['process_id'])
-                if key not in step_map:
-                    step_map[key] = (s['routing_id'], s['step_no'])
-            for (prod_id, proc_id), (routing_id, step_no) in step_map.items():
-                next_step = (
-                    RoutingStep.objects.filter(routing_id=routing_id, step_no__gt=step_no)
-                    .select_related('process')
-                    .order_by('step_no')
-                    .first()
-                )
-                if next_step:
-                    next_process_map[(prod_id, proc_id)] = next_step.process.process_name
+            for p in Product.objects.filter(id__in=product_ids).select_related('next_process'):
+                if p.next_process_id:
+                    next_process_map[p.id] = p.next_process.process_name
         for item in items:
             pid = item.get('product_id')
-            proc_id = item.get('process_id')
-            item['next_process_name'] = next_process_map.get((pid, proc_id), '') if pid else ''
+            item['next_process_name'] = next_process_map.get(pid, '') if pid else ''
 
         return Response({
             'plan_date': str(plan_date),

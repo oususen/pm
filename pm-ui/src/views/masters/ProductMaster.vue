@@ -257,6 +257,15 @@
             </select>
           </div>
           <div class="form-group">
+            <label>後工程</label>
+            <select v-model="formData.next_process">
+              <option :value="null">未設定</option>
+              <option v-for="proc in processes" :key="proc.id" :value="proc.id">
+                {{ proc.process_code }} - {{ proc.process_name }}
+              </option>
+            </select>
+          </div>
+          <div class="form-group">
             <label>管理区分（日/分）</label>
             <select v-model="formData.management_unit">
               <option :value="null">未設定</option>
@@ -632,6 +641,7 @@ const showNewDialog = () => {
     capacity: null,
     line: null,
     process: null,
+    next_process: null,
     management_unit: null,
     is_active: true,
     is_line_final_product: false,
@@ -652,6 +662,7 @@ const editProduct = (product) => {
     order_lot_multiple: product.order_lot_multiple ?? 1,
     line: product.line ?? null,
     process: product.process ?? null,
+    next_process: product.next_process ?? null,
     management_unit: product.management_unit ?? null,
     product_group: product.product_group ?? null,
     used_container: product.used_container ?? null,

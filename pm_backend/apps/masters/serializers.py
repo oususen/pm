@@ -23,6 +23,8 @@ def build_media_absolute_url(request, raw_url):
 
 
 class ProductSerializer(serializers.ModelSerializer):
+    next_process_name = serializers.CharField(source='next_process.process_name', read_only=True)
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         raw_url = data.get('image_url')

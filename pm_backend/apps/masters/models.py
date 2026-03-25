@@ -25,6 +25,7 @@ class Product(models.Model):
     image_url = models.CharField(max_length=255, null=True, blank=True, verbose_name='画像URL')
     line = models.ForeignKey('Line', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='ライン情報')
     process = models.ForeignKey('Process', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='工程情報')
+    next_process = models.ForeignKey('Process', on_delete=models.SET_NULL, null=True, blank=True, related_name='next_process_products', verbose_name='後工程')
     management_unit = models.CharField(
         max_length=10,
         choices=MANAGEMENT_UNIT_CHOICES,
