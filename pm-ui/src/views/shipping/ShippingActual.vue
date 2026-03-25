@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2 class="page-title">出荷実績</h2>
-        <p class="subtitle">出荷実績の検索・登録・修正・削除ができます。</p>
+        <p class="subtitle">{{ canEdit ? '出荷実績の検索・登録・修正・削除ができます。' : '出荷実績の検索・閲覧ができます。' }}</p>
       </div>
       <div class="page-actions">
         <input v-model="filters.productCode" type="text" placeholder="品番で検索" />
@@ -17,7 +17,7 @@
     </div>
 
     <div class="page-body">
-      <div class="form-card">
+      <div v-if="canEdit" class="form-card">
         <h3 class="card-title">{{ editingId ? '実績編集' : '実績登録' }}</h3>
         <div class="form-grid">
           <label>
@@ -84,9 +84,9 @@
                 <td class="num">{{ formatQty(item.quantity) }}</td>
                 <td>{{ item.remark || '-' }}</td>
                 <td class="actions">
-                  <button class="btn-sm" @click="startEdit(item)">編集</button>
+                  <button v-if="canEdit" class="btn-sm" @click="startEdit(item)">編集</button>
                   <button class="btn-sm btn-secondary" @click="loadHistory(item)">履歴</button>
-                  <button class="btn-sm btn-danger" @click="deleteActual(item)">削除</button>
+                  <button v-if="canEdit" class="btn-sm btn-danger" @click="deleteActual(item)">削除</button>
                 </td>
               </tr>
               <tr v-if="!shipmentActuals.length">
@@ -137,8 +137,20 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from "vue";
+import { onMounted, reactive, ref, computed } from "vue";
 import api from "@/api/client";
+import { authState } from "@/auth";
+import { hasPermission } from "@/router";
+
+const canEdit = computed(() => {
+  const user = authState.user;
+  if (!user) return false;
+  if (user.is_superuser) return true;
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : [];
+  const entry = permissions.find((item) => item.resource === "shipping");
+  if (entry) return Boolean(entry.can_edit);
+  return hasPermission(user, "shipping", "edit");
+});
 
 const loading = ref(false);
 const error = ref("");
