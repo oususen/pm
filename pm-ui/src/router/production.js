@@ -199,6 +199,12 @@ const production = [
     component: () => import("@/views/production/SpotLineInput.vue"),
     meta: { pageTitle: "スポット実績入力", manualPath: "生産/スポット実績入力.md" },
   },
+  {
+    path: "/production/product-photo-upload",
+    name: "ProductPhotoUpload",
+    component: () => import("@/views/production/ProductPhotoUpload.vue"),
+    meta: { pageTitle: "製品写真アップロード", manualPath: "README.md" },
+  },
 ];
 
 export default production;

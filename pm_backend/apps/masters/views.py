@@ -52,7 +52,9 @@ class ProductFilter(django_filters.FilterSet):
     is_final_product = django_filters.BooleanFilter(field_name='is_final_product')
     is_line_final_product = django_filters.BooleanFilter(field_name='is_line_final_product')
     has_bom = django_filters.BooleanFilter(method='filter_has_bom')
+    has_image = django_filters.BooleanFilter(method='filter_has_image')
     customer_code = django_filters.CharFilter(method='filter_customer_code')
+    supplier_code = django_filters.CharFilter(method='filter_supplier_code')
     product_code = django_filters.CharFilter(field_name='product_code', lookup_expr='exact')
 
     class Meta:
@@ -64,7 +66,11 @@ class ProductFilter(django_filters.FilterSet):
             'is_final_product',
             'is_line_final_product',
             'has_bom',
+            'has_image',
             'customer_code',
+            'supplier_code',
+            'line',
+            'process',
             'created_from',
             'created_to',
             'product_code',
@@ -79,6 +85,13 @@ class ProductFilter(django_filters.FilterSet):
             return queryset.filter(_has_bom=True)
         return queryset.filter(_has_bom=False)
 
+    def filter_has_image(self, queryset, name, value):
+        if value is None:
+            return queryset
+        if value:
+            return queryset.exclude(image_url__isnull=True).exclude(image_url__exact='')
+        return queryset.filter(Q(image_url__isnull=True) | Q(image_url__exact=''))
+
     def filter_customer_code(self, queryset, name, value):
         if not value:
             return queryset
@@ -88,6 +101,15 @@ class ProductFilter(django_filters.FilterSet):
         product_ids = order_lines.values_list('product_id', flat=True)
         product_codes = order_lines.values_list('product_code', flat=True)
         return queryset.filter(Q(id__in=product_ids) | Q(product_code__in=product_codes))
+
+    def filter_supplier_code(self, queryset, name, value):
+        if not value:
+            return queryset
+        supplier_items = BOMItem.objects.filter(
+            child_product_id=OuterRef('pk'),
+            supplier__supplier_code=value,
+        )
+        return queryset.annotate(_has_supplier=Exists(supplier_items)).filter(_has_supplier=True)
 
 
 class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
