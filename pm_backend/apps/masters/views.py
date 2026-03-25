@@ -71,6 +71,7 @@ class ProductFilter(django_filters.FilterSet):
             'supplier_code',
             'line',
             'process',
+            'next_process',
             'created_from',
             'created_to',
             'product_code',
