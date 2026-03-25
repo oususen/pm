@@ -993,14 +993,12 @@ def recalculate_planned_stock_qty(
 
     calendar_id = None
     workday_cache = {}
-    is_purchase_line = False
     if line_id:
         from masters.models import Line, Calendar, CalendarDay
         line_obj = Line.objects.filter(id=line_id).first()
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
             calendar_code='daiso'
         ).values_list('id', flat=True).first()
-        is_purchase_line = getattr(line_obj, 'line_type', None) == 'PURCHASE'
 
     def is_working_day(target_date):
         if not calendar_id:
@@ -1084,16 +1082,11 @@ def recalculate_planned_stock_qty(
             last_planned = planned_stock
             continue
 
-        # 計算開始日以前は実在庫の値を使用し、更新しない
+        # 計算開始日以前は表示値を更新しない。
+        # ここで last_planned を実在庫で上書きすると、
+        # LT補正済みの初期値が失われ、calc_start_date 当日の計画在庫がずれる。
         if plan_date < calc_start_date:
-            # 既存の実在庫値を取得してplanned_by_dateに保持（後続の計算用）
-            existing_stock = 0
-            for row in rows:
-                if row.stock_qty:
-                    existing_stock = row.stock_qty
-                    break
-            planned_by_date[plan_date] = existing_stock
-            last_planned = existing_stock
+            planned_by_date[plan_date] = last_planned
             continue
 
         plan_total = sum(r.plan_qty or 0 for r in rows)
@@ -1104,19 +1097,21 @@ def recalculate_planned_stock_qty(
 
         is_final = bool(getattr(sample.product, 'is_final_product', False))
         is_line_final = bool(getattr(sample.product, 'is_line_final_product', False))
-        if is_purchase_line:
-            # 購買ラインは order_qty（需要）を出庫量として使用する。
-            # 計画在庫 = 前日計画在庫 + 入庫計画 - 需要 となり、
-            # 入庫計画 = 需要のとき計画在庫が変化しないことが保証される。
-            planned_shipment = Decimal(str(order_total))
-        elif is_final:
+        if is_final:
             firm_qty = firm_map.get((sample.product_id, plan_date), Decimal('0'))
             if plan_date <= today:
                 planned_shipment = firm_qty
             else:
                 planned_shipment = firm_qty if firm_qty > 0 else Decimal(str(order_total))
         elif is_line_final:
-            planned_shipment = Decimal(str(order_total))
+            if plan_date < today:
+                # ライン最終品でも過去日は実績優先で整合を取る。
+                # 親参照がない（BOM未設定）場合のみ需要(order_qty)にフォールバック。
+                planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days)
+                if not planned_shipment:
+                    planned_shipment = Decimal(str(order_total))
+            else:
+                planned_shipment = Decimal(str(order_total))
         else:
             if plan_date < today:
                 planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days)
