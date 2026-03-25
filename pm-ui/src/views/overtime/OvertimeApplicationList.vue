@@ -31,6 +31,12 @@
         <option value="">全グループ</option>
         <option v-for="g in groupOptions" :key="g" :value="g">{{ g }}</option>
       </select>
+      <span class="type-checkboxes">
+        <label v-for="t in TYPE_OPTIONS" :key="t.value" class="type-check-label">
+          <input type="checkbox" :value="t.value" v-model="filterTypes" />
+          {{ t.label }}
+        </label>
+      </span>
       <select v-model="filterName" class="filter-select">
         <option value="">全員</option>
         <option v-for="n in nameOptions" :key="n" :value="n">{{ n }}</option>
@@ -191,8 +197,18 @@ const detailApp = ref(null)
 
 const filterTeam = ref('')
 const filterGroup = ref('')
+const filterTypes = ref([])
 const filterName = ref('')
 const filterDate = ref('')
+
+const TYPE_OPTIONS = [
+  { value: 'overtime', label: '時間外' },
+  { value: 'holiday', label: '休日出勤' },
+  { value: 'half_day_am', label: '午前半休' },
+  { value: 'half_day_pm', label: '午後半休' },
+  { value: 'paid_leave', label: '有給' },
+  { value: 'paid_leave_consec', label: '連続有給' },
+]
 
 const teamOptions = computed(() =>
   [...new Set(applications.value.map(a => a.team_name).filter(Boolean))].sort()
@@ -213,6 +229,7 @@ const filteredApplications = computed(() =>
     (!filters.value.work_date__lte || a.work_date <= filters.value.work_date__lte) &&
     (!filterTeam.value || a.team_name === filterTeam.value) &&
     (!filterGroup.value || a.group_name === filterGroup.value) &&
+    (!filterTypes.value.length || filterTypes.value.includes(a.application_type)) &&
     (!filterName.value || a.applicant_name === filterName.value) &&
     (!filterDate.value || a.work_date === filterDate.value)
   )
@@ -345,6 +362,20 @@ onMounted(fetchList)
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 13px;
+}
+.type-checkboxes {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.type-check-label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
 }
 .loading, .empty {
   text-align: center;

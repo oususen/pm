@@ -166,14 +166,23 @@ def generate_overtime_pdf(applications, filters=None):
         filters = {}
 
     team_name = filters.get("team_name", "") or "全班"
+    group_name = filters.get("group_name", "") or ""
     date_from = filters.get("date_from", "")
     date_to = filters.get("date_to", "")
 
-    # 事業部名を申請データから取得
+    # グループ選択有無（'全グループ' でない場合はグループ指定あり）
+    is_group_selected = bool(group_name) and group_name != "全グループ"
+
+    # 事業部名・係名を申請データから取得
     division_name = ""
+    section_name = ""  # 係
     if applications:
         try:
             division_name = applications[0].applicant.profile.division.name or ""
+        except Exception:
+            pass
+        try:
+            section_name = applications[0].applicant.profile.group.name or ""
         except Exception:
             pass
     if not division_name:
@@ -206,10 +215,23 @@ def generate_overtime_pdf(applications, filters=None):
     date_str = f"出力日: {today.year}年{today.month}月{today.day}日"
 
     c.setFont("MSGothic", 9)
-    # 左：部門（2行: 事業部名 / ***班）
+    # 左：部門
     team_disp = f"{team_name}班" if team_name and not team_name.endswith("班") else (team_name or "全班")
-    c.drawString(MARGIN_L, info_y, f"実施部門: {division_name}")
-    c.drawString(MARGIN_L, info_y - 5 * mm, f"　　　　　{team_disp}")
+    if is_group_selected:
+        # グループ選択時: 事業部 / 係 / 班 / グループ の4行表示
+        dept_lines = [
+            f"実施部門: {division_name}",
+            f"　　　　　{section_name}" if section_name else None,
+            f"　　　　　{team_disp}",
+            f"　　　　　{group_name}",
+        ]
+        dept_lines = [l for l in dept_lines if l is not None]
+        for i, line in enumerate(dept_lines):
+            c.drawString(MARGIN_L, info_y - i * 4.5 * mm, line)
+    else:
+        # グループ未選択時: 事業部 / 班 の2行表示（従来通り）
+        c.drawString(MARGIN_L, info_y, f"実施部門: {division_name}")
+        c.drawString(MARGIN_L, info_y - 5 * mm, f"　　　　　{team_disp}")
     # 右：出力日
     c.drawRightString(PAGE_W - MARGIN_R, info_y, date_str)
 

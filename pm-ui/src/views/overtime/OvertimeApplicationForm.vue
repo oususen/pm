@@ -543,6 +543,10 @@ onMounted(async () => {
 })
 
 async function saveDraft() {
+  if (needsApproval.value && !form.value.reason.trim()) {
+    errorMsg.value = '発生理由を入力してください'
+    return
+  }
   saving.value = true
   errorMsg.value = ''
   try {
@@ -564,6 +568,10 @@ async function saveDraft() {
 }
 
 async function handleSubmit() {
+  if (needsApproval.value && !form.value.reason.trim()) {
+    errorMsg.value = '発生理由を入力してください'
+    return
+  }
   if (needsApproval.value && (!signaturePad || signaturePad.isEmpty())) {
     errorMsg.value = t('overtime.error.signRequired')
     return
