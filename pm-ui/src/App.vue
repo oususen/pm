@@ -11,19 +11,13 @@
       </main>
     </div>
 
-    <footer v-if="showLayout" class="app-footer">
-      <span>ダイウン工業株式会社 / 王 崇栓</span>
-      <span>データベース: mysql</span>
-      <button class="logout-btn" @click="handleLogout">未定</button>
-    </footer>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref } from "vue";
-import { RouterView, useRoute, useRouter } from "vue-router";
+import { RouterView, useRoute } from "vue-router";
 import GlobalNavigation from "./components/GlobalNavigation.vue";
-import { logout } from "./auth";
 
 const todayText = computed(() => {
   const d = new Date();
@@ -35,8 +29,6 @@ const isMobile = ref(false);
 let mediaQuery = null;
 
 const route = useRoute();
-const router = useRouter();
-
 const showLayout = computed(() => !route.meta?.hideLayout);
 
 // 開発環境かどうか判定（本番IP以外は全て開発環境）
@@ -48,11 +40,6 @@ const isDev = computed(() => {
 const syncMobileState = () => {
   if (!mediaQuery) return;
   isMobile.value = mediaQuery.matches;
-};
-
-const handleLogout = async () => {
-  await logout();
-  router.replace("/login");
 };
 
 onMounted(() => {
