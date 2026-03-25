@@ -123,18 +123,24 @@ export async function buildLuckJingleLabelDataUrl({
   const qtyLabelY = Math.max(rowY + 44, 598)
   const qtyValueY = qtyLabelY + 10
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="850" viewBox="0 0 600 850">
-    <rect x="4" y="4" width="592" height="842" fill="#ffffff" stroke="#111111" stroke-width="3"/>
-    <text x="300" y="76" font-size="32" text-anchor="middle" font-family="Yu Gothic, Meiryo, sans-serif" font-weight="700">加工品ラベル</text>
-    <line x1="40" y1="96" x2="560" y2="96" stroke="#111111" stroke-width="1"/>
-    <text x="40" y="165" font-size="44" font-family="Yu Gothic, Meiryo, sans-serif" font-weight="900">${escapeXml(productCode)}</text>
-    <text x="40" y="218" font-size="28" font-family="Yu Gothic, Meiryo, sans-serif">${escapeXml(nameLines[0] || '')}</text>
-    <text x="40" y="254" font-size="28" font-family="Yu Gothic, Meiryo, sans-serif">${escapeXml(nameLines[1] || '')}</text>
-    ${rowSvg}
-    <text x="40" y="${qtyLabelY}" font-size="22" fill="#666666" font-family="Yu Gothic, Meiryo, sans-serif">加工数</text>
-    <text x="180" y="${qtyValueY}" font-size="78" font-family="Yu Gothic, Meiryo, sans-serif" font-weight="900">${escapeXml(qty)}</text>
-    <text x="40" y="760" font-size="16" fill="#666666" font-family="Yu Gothic, Meiryo, sans-serif">${escapeXml(footerText)}</text>
-    ${qrDataUrl ? `<image href="${qrDataUrl}" x="390" y="560" width="150" height="150"/>` : ''}
+  // 上部テープ止め用余白: 7.5cm (96dpi換算 283px)
+  const TOP_MARGIN = 283
+  const svgHeight = 850 + TOP_MARGIN
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="${svgHeight}" viewBox="0 0 600 ${svgHeight}">
+    <rect x="4" y="4" width="592" height="${svgHeight - 8}" fill="#ffffff" stroke="#111111" stroke-width="3"/>
+    <g transform="translate(0, ${TOP_MARGIN})">
+      <text x="300" y="76" font-size="32" text-anchor="middle" font-family="Yu Gothic, Meiryo, sans-serif" font-weight="700">加工品ラベル</text>
+      <line x1="40" y1="96" x2="560" y2="96" stroke="#111111" stroke-width="1"/>
+      <text x="40" y="165" font-size="44" font-family="Yu Gothic, Meiryo, sans-serif" font-weight="900">${escapeXml(productCode)}</text>
+      <text x="40" y="218" font-size="28" font-family="Yu Gothic, Meiryo, sans-serif">${escapeXml(nameLines[0] || '')}</text>
+      <text x="40" y="254" font-size="28" font-family="Yu Gothic, Meiryo, sans-serif">${escapeXml(nameLines[1] || '')}</text>
+      ${rowSvg}
+      <text x="40" y="${qtyLabelY}" font-size="22" fill="#666666" font-family="Yu Gothic, Meiryo, sans-serif">加工数</text>
+      <text x="180" y="${qtyValueY}" font-size="78" font-family="Yu Gothic, Meiryo, sans-serif" font-weight="900">${escapeXml(qty)}</text>
+      <text x="40" y="760" font-size="16" fill="#666666" font-family="Yu Gothic, Meiryo, sans-serif">${escapeXml(footerText)}</text>
+      ${qrDataUrl ? `<image href="${qrDataUrl}" x="390" y="560" width="150" height="150"/>` : ''}
+    </g>
   </svg>`
 
   return new Promise((resolve, reject) => {
@@ -142,7 +148,7 @@ export async function buildLuckJingleLabelDataUrl({
     image.onload = () => {
       const canvas = document.createElement('canvas')
       canvas.width = 600
-      canvas.height = 850
+      canvas.height = svgHeight
       const context = canvas.getContext('2d')
       if (!context) {
         reject(new Error('canvas unavailable'))
