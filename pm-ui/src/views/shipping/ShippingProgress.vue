@@ -35,6 +35,7 @@
       <div class="list-area">
         <div v-if="loading" class="loading">読込中...</div>
         <div v-else-if="error" class="no-data">エラー: {{ error }}</div>
+        <div v-else-if="!searched"></div>
         <div v-else>
           <div v-if="groups.length" class="group-list">
             <div v-for="g in pagedGroups" :key="g.key" class="group-card">
@@ -200,7 +201,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import api from "@/api/client";
 import {
   compareBySpecialOrderThenProductCode,
@@ -217,6 +218,7 @@ const startDate = ref(formatISODate(defaultStart));
 const horizon = ref(30);
 const loading = ref(false);
 const error = ref("");
+const searched = ref(false);
 const orderLines = ref([]);
 const shipmentActuals = ref([]);
 const holidays = ref(new Set());
@@ -233,11 +235,16 @@ const ORDER_LINES_PAGE_SIZE = 20000;
 const fetchAllOpenOrderLines = async () => {
   const rows = [];
   let page = 1;
+  const filterParams = {};
+  if (productFilter.value) filterParams.product_code = productFilter.value;
+  if (customerFilter.value) filterParams.customer_code = customerFilter.value;
+  if (shipToFilter.value) filterParams.ship_to_code = shipToFilter.value;
 
   while (true) {
     const res = await api.orders.listOrderLines({
       page_size: ORDER_LINES_PAGE_SIZE,
       page,
+      ...filterParams,
     });
     const payload = res.data || {};
     const pageRows = normalizeList(payload);
@@ -371,8 +378,10 @@ const groups = computed(() => {
 
     if (customerFilter.value) {
       const filter = customerFilter.value.toLowerCase();
-      const text = `${customerCode}${customerName}`.toLowerCase();
-      if (!text.includes(filter)) {
+      // コードは末尾一致（"1"→000001, "196"→000196）、名称は部分一致
+      const codeMatch = customerCode.toLowerCase().endsWith(filter);
+      const nameMatch = customerName.toLowerCase().includes(filter);
+      if (!codeMatch && !nameMatch) {
         skippedCount++;
         continue;
       }
@@ -589,6 +598,7 @@ const getProgressRate = (group, date) => {
 const load = async () => {
   loading.value = true;
   error.value = "";
+  searched.value = true;
   try {
     orderLines.value = await fetchAllOpenOrderLines();
     const shipmentActualsRes = await api.shipmentActuals.getShipmentActuals({
@@ -641,7 +651,6 @@ watch(groups, () => {
   }
 });
 
-onMounted(load);
 </script>
 
 <style scoped>

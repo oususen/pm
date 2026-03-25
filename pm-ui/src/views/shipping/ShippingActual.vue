@@ -147,7 +147,9 @@ const canEdit = computed(() => {
   if (!user) return false;
   if (user.is_superuser) return true;
   const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : [];
-  const entry = permissions.find((item) => item.resource === "shipping");
+  // サブリソース shipping.actual を優先、なければ親 shipping にフォールバック
+  const entry = permissions.find((item) => item.resource === "shipping.actual")
+    ?? permissions.find((item) => item.resource === "shipping");
   if (entry) return Boolean(entry.can_edit);
   return hasPermission(user, "shipping", "edit");
 });

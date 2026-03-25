@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+import django_filters
 
 from .models import (
     Order,
@@ -66,12 +67,28 @@ class OrderViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class OrderLineFilter(django_filters.FilterSet):
+    customer_code = django_filters.CharFilter(
+        field_name='order__customer__customer_code', lookup_expr='endswith'
+    )
+    product_code = django_filters.CharFilter(
+        field_name='product_code', lookup_expr='icontains'
+    )
+    ship_to_code = django_filters.CharFilter(
+        field_name='ship_to_code', lookup_expr='icontains'
+    )
+
+    class Meta:
+        model = OrderLine
+        fields = ['order', 'product', 'due_date', 'customer_code', 'product_code', 'ship_to_code']
+
+
 class OrderLineViewSet(viewsets.ModelViewSet):
     """受注明細ViewSet"""
     queryset = OrderLine.objects.filter(order__status='OPEN').select_related('order', 'order__customer', 'product')
     serializer_class = OrderLineSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['order', 'product', 'due_date']
+    filterset_class = OrderLineFilter
     search_fields = ['product_code']
     ordering_fields = ['due_date', 'line_no']
     ordering = ['line_no']
