@@ -151,6 +151,12 @@
                       <span class="end-time">{{ bar.endLabel }}</span>
                       <span v-if="bar.durationLabel" class="duration">({{ bar.durationLabel }})</span>
                     </span>
+                    <button
+                      class="gantt-bar-delete-btn"
+                      title="このバーを削除"
+                      @mousedown.stop
+                      @click.stop="deleteBar(bar)"
+                    >×</button>
                   </div>
                 </div>
                 <button
@@ -809,7 +815,7 @@ const saveSchedule = async () => {
       quantityRaw !== null &&
       quantityRaw !== '' &&
       Number.isFinite(quantityValue) &&
-      quantityValue > 0
+      quantityValue >= 0
     ) {
       payload.quantity = Math.round(quantityValue * 1000) / 1000
     }
@@ -1064,7 +1070,7 @@ function parseQuantityInput(value) {
   if (!normalized) return null
   if (!/^\d+(\.\d+)?$/.test(normalized)) return null
   const parsed = Number(normalized)
-  if (!Number.isFinite(parsed) || parsed <= 0) return null
+  if (!Number.isFinite(parsed) || parsed < 0) return null
   return Math.round(parsed * 1000) / 1000
 }
 
@@ -1229,11 +1235,11 @@ function openQuantityEdit(bar) {
     alert('連結表示中は数量を編集できません。分解表示に切り替えてください。')
     return
   }
-  const input = window.prompt('数量を入力してください（0より大きい数値）', formatQuantity(bar.planQty))
+  const input = window.prompt('数量を入力してください（0以上）', formatQuantity(bar.planQty))
   if (input === null) return
   const parsed = parseQuantityInput(input)
   if (parsed === null) {
-    alert('数量の形式が正しくありません。例: 18 または 18.5')
+    alert('数量の形式が正しくありません。例: 0 / 18 / 18.5')
     return
   }
   bar.planQty = parsed
@@ -1241,6 +1247,29 @@ function openQuantityEdit(bar) {
   updateBarDisplay(bar)
   setUnsavedChanges(true)
   alert('数量を変更しました。保存ボタンで確定してください。')
+}
+
+async function deleteBar(bar) {
+  if (!bar) return
+  if (mergeConsecutive.value) {
+    alert('連結表示中は削除できません。分解表示に切り替えてください。')
+    return
+  }
+  if (hasUnsavedChanges.value) {
+    alert('未保存の変更があります。先に工程ガント保存を実行してください。')
+    return
+  }
+  if (!confirm('このプロセスのバーを削除しますか？')) return
+  try {
+    await api.lineGanttPlans.deleteProcess({
+      plan_id: bar.planId,
+      process_id: bar.processId,
+      output_product_id: bar.outputProductId || null,
+    })
+    await loadData()
+  } catch (e) {
+    alert('削除に失敗しました: ' + (e?.response?.data?.detail || e.message || '不明なエラー'))
+  }
 }
 
 async function openManualAdd(proc, item, anchor) {
@@ -1908,6 +1937,31 @@ onMounted(async () => {
 }
 .plan-qty:hover {
   background: rgba(0, 0, 0, 0.8);
+}
+.gantt-bar-delete-btn {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: none;
+  background: #dc2626;
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  z-index: 10;
+}
+.gantt-bar-wrapper:hover .gantt-bar-delete-btn {
+  display: flex;
+}
+.gantt-bar-delete-btn:hover {
+  background: #991b1b;
 }
 .qty-separator {
   margin: 0 4px 0 2px;

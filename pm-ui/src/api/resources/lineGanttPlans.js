@@ -18,4 +18,7 @@ export const createLineGanttPlansAPI = (client) => ({
   manualAdd(payload) {
     return client.post('/line-gantt-plans/manual-add/', payload)
   },
+  deleteProcess(payload) {
+    return client.post('/line-gantt-plans/remove-process/', payload)
+  },
 })
