@@ -171,7 +171,7 @@ LineBacklog の `order_qty` や `demand_qty_plan` をフォールバックとし
    - 1,2で原因が生成側と確定するまで、需要生成・計画生成・再計算ロジックは変更しない。
 
 補足:
-- 社内ラインでは `sequence_no=0` は需要専用行であり、`plan_qty` は常に `0` とする。
+- 社内ラインでは、`sequence_no=0` の行を需要専用行として扱う。この行の `plan_qty` の数量値は必ず `0` とし、計画数を入れてはならない。`sequence_no>0` の行は計画値専用行として扱い、実績値を入れてはならない。`仕様書/LineBacklog_sequence_no仕様.md` の `LineBacklog_sequence_no` 仕様を必ず守ること。
 
 ## Docker本番環境
 

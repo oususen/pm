@@ -65,6 +65,13 @@
         <input v-model="productCode" type="text" placeholder="部分一致" />
       </div>
       <div class="filter-row">
+        <label>作業者</label>
+        <select v-model="operatorName">
+          <option value="">-- すべて --</option>
+          <option v-for="name in availableOperators" :key="name" :value="name">{{ name }}</option>
+        </select>
+      </div>
+      <div class="filter-row">
         <label>区分</label>
         <select v-model="sessionType">
           <option value="">-- すべて --</option>
@@ -366,7 +373,20 @@ import {
 
 const loading = ref(false)
 const error = ref('')
-const sessions = ref([])
+const rawSessions = ref([])
+const sessions = computed(() => {
+  if (!operatorName.value.trim()) return rawSessions.value
+  const kw = operatorName.value.trim().toLowerCase()
+  return rawSessions.value.filter((row) =>
+    String(row?.operator_name || '').toLowerCase().includes(kw)
+  )
+})
+const availableOperators = computed(() => {
+  const names = rawSessions.value
+    .map((row) => String(row?.operator_name || '').trim())
+    .filter((n) => n && n !== '—')
+  return [...new Set(names)].sort()
+})
 
 const activeTab = ref('tank')
 const operationalTabKeys = ['tank', 'laser']
@@ -405,6 +425,7 @@ const dateSearchMode = ref('plan') // 'plan'=計画日, 'actual'=実施日
 const lineId = ref('')
 const processId = ref('')
 const productCode = ref('')
+const operatorName = ref('')
 const sessionType = ref('')
 const status = ref('')
 const hasIssue = ref('')
@@ -839,7 +860,7 @@ const loadSessions = async () => {
         return ta < tb ? 1 : ta > tb ? -1 : 0
       })
 
-      sessions.value = allItems
+      rawSessions.value = allItems
       return
     }
 
@@ -869,18 +890,18 @@ const loadSessions = async () => {
       : filteredByTab
 
     if (wantsCancelOnly) {
-      sessions.value = filteredByProduction.filter((row) => isCanceledSession(row))
+      rawSessions.value = filteredByProduction.filter((row) => isCanceledSession(row))
     } else if (sessionType.value === 'PAUSE') {
-      sessions.value = filteredByProduction.filter((row) => String(row?.start_action || '').toUpperCase() === 'PAUSE')
+      rawSessions.value = filteredByProduction.filter((row) => String(row?.start_action || '').toUpperCase() === 'PAUSE')
     } else if (sessionType.value === 'WORK') {
-      sessions.value = filteredByProduction.filter((row) => row.session_type === 'WORK' && !isCanceledSession(row))
+      rawSessions.value = filteredByProduction.filter((row) => row.session_type === 'WORK' && !isCanceledSession(row))
     } else {
-      sessions.value = filteredByProduction
+      rawSessions.value = filteredByProduction
     }
   } catch (e) {
     console.error('セッション読込失敗:', e)
     error.value = '生産実績の取得に失敗しました。'
-    sessions.value = []
+    rawSessions.value = []
   } finally {
     loading.value = false
   }
@@ -891,6 +912,7 @@ const resetFilters = async () => {
   lineId.value = ''
   processId.value = ''
   productCode.value = ''
+  operatorName.value = ''
   sessionType.value = ''
   status.value = ''
   hasIssue.value = ''
@@ -920,7 +942,7 @@ watch(activeTab, async (nextTab) => {
     lineId.value = ''
     processId.value = ''
   }
-  sessions.value = []
+  rawSessions.value = []
 })
 
 watch(settingsTargetTab, (nextTab) => {
