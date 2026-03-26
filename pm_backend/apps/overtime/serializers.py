@@ -184,6 +184,23 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
 
         # 時間外・午前半休のみ start_time/end_time を必須チェック（休日出勤は任意）
         app_type = data.get('application_type', getattr(self.instance, 'application_type', 'overtime'))
+        work_date = data.get('work_date', getattr(self.instance, 'work_date', None))
+        applicant = data.get('applicant') or getattr(self.instance, 'applicant', user)
+
+        # 同一申請者・同一日・同一種別の重複チェック（却下済みは除外）
+        if applicant and work_date and app_type:
+            dup_qs = OvertimeApplication.objects.filter(
+                applicant=applicant,
+                work_date=work_date,
+                application_type=app_type,
+            ).exclude(status='rejected')
+            if self.instance:
+                dup_qs = dup_qs.exclude(pk=self.instance.pk)
+            if dup_qs.exists():
+                type_display = dict(OvertimeApplication.TYPE_CHOICES).get(app_type, app_type)
+                raise serializers.ValidationError(
+                    {'non_field_errors': [f'{work_date} に同じ種別（{type_display}）の申請がすでに存在します。']}
+                )
         needs_time = app_type in ('overtime', 'half_day_am')
         start_time = data.get('start_time', getattr(self.instance, 'start_time', None))
         end_time = data.get('end_time', getattr(self.instance, 'end_time', None))

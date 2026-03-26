@@ -561,7 +561,9 @@ async function saveDraft() {
     await uploadSignIfNeeded(appId)
     router.push('/overtime/list')
   } catch (e) {
-    errorMsg.value = t('overtime.error.saveFailed') + (e.response?.data?.detail || e.message)
+    const data = e.response?.data
+    const apiMsg = data?.detail || data?.non_field_errors?.[0] || e.message
+    errorMsg.value = t('overtime.error.saveFailed') + apiMsg
   } finally {
     saving.value = false
   }
@@ -592,7 +594,9 @@ async function handleSubmit() {
     await api.overtime.submitApplication(appId)
     router.push('/overtime/list')
   } catch (e) {
-    errorMsg.value = t('overtime.error.submitFailed') + (e.response?.data?.detail || e.message)
+    const data = e.response?.data
+    const apiMsg = data?.detail || data?.non_field_errors?.[0] || e.message
+    errorMsg.value = t('overtime.error.submitFailed') + apiMsg
   } finally {
     saving.value = false
   }
