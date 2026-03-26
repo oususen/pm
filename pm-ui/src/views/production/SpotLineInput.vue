@@ -622,8 +622,53 @@ function storeSavedLabel(payload) {
   window.localStorage.setItem(LABEL_CACHE_KEY, JSON.stringify(payload))
 }
 
+async function resolveNextProcessName(item) {
+  const current = String(item?.next_process_name || '').trim()
+  if (current) {
+    return current
+  }
+
+  const productId = item?.product_id
+  if (productId) {
+    try {
+      const res = await api.products.getProduct(productId)
+      const nextProcessName = String(res.data?.next_process_name || '').trim()
+      if (nextProcessName) {
+        item.next_process_name = nextProcessName
+        return nextProcessName
+      }
+    } catch {
+      // ラベル補完失敗時も実績保存は止めない
+    }
+  }
+
+  const productCode = String(item?.product_code || '').trim()
+  if (!productCode) {
+    return ''
+  }
+
+  try {
+    const res = await api.products.getProducts({ product_code: productCode, page_size: 1 })
+    const results = res.data?.results ?? (Array.isArray(res.data) ? res.data : [])
+    const product = results[0]
+    const nextProcessName = String(product?.next_process_name || '').trim()
+    if (nextProcessName) {
+      item.next_process_name = nextProcessName
+      if (!item.product_id && product?.id) {
+        item.product_id = product.id
+      }
+      return nextProcessName
+    }
+  } catch {
+    // ラベル補完失敗時も実績保存は止めない
+  }
+
+  return ''
+}
+
 async function saveLabelForLuckJingle(item, qty) {
   const processDate = String(planDateStr.value || '')
+  const nextProcessName = await resolveNextProcessName(item)
   const fileName = createLuckJingleFileName({
     productCode: item?.product_code,
     processDate,
@@ -633,6 +678,7 @@ async function saveLabelForLuckJingle(item, qty) {
     productCode: item?.product_code,
     productName: item?.product_name,
     processName: item?.process_name,
+    nextProcessName,
     operatorName: operator.value,
     processDate,
     qty,

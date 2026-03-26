@@ -104,13 +104,14 @@
               <th>{{ inboundHeaderLabel }}</th>
               <th v-if="showPlanColumn">{{ planHeaderLabel }}</th>
               <th>{{ adjustHeaderLabel }}</th>
+              <th v-if="showStockColumn">在庫</th>
               <th>{{ currentAdjustHeaderLabel }}</th>
               <th>{{ metricHeaderLabel }}</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="loading">
-              <td :colspan="showPlanColumn ? 8 : 7" class="center">読込中...</td>
+              <td :colspan="showPlanColumn ? (showStockColumn ? 9 : 8) : (showStockColumn ? 8 : 7)" class="center">読込中...</td>
             </tr>
             <tr v-for="row in dateRows" :key="row.date" :class="{ holiday: isHoliday(row.date) }">
               <td :class="{ holidayText: isHoliday(row.date) }">{{ row.date }}</td>
@@ -119,6 +120,7 @@
               <td>{{ row.inbound }}</td>
               <td v-if="showPlanColumn">{{ row.planQty }}</td>
               <td>{{ row.adjust }}</td>
+              <td v-if="showStockColumn">{{ row.stock != null ? row.stock : '-' }}</td>
               <td>
                 <input
                   class="qty-input"
@@ -256,6 +258,7 @@ const buildRows = () => {
       currentAdjust: saved,
       progress: Number(metrics.progress || 0),
       baseProgress: Number(metrics.progress || 0),
+      stock: metrics.stock != null ? Number(metrics.stock) : null,
     });
   }
   dateRows.value = rows;
@@ -530,6 +533,7 @@ const getMetricValueForType = (item) => {
 };
 
 const isStockType = props.adjustType === "STOCK" || props.adjustType === "PLANNED_STOCK";
+const showStockColumn = props.adjustType === "PLANNED_STOCK";
 const isPlannedProgressType = props.adjustType === "PLANNED_PROGRESS";
 const isProgressType = props.adjustType === "PROGRESS";
 const showPlanColumn = isStockType || isPlannedProgressType || isProgressType;
@@ -607,6 +611,7 @@ const reload = async () => {
         metricMap[key].inbound += Number(item.actual_qty || 0);
         metricMap[key].planQty += Number(item.plan_qty || 0);
         metricMap[key].progress += getMetricValueForType(item);
+        metricMap[key].stock = Number(item.stock_qty || 0);
       });
       metricsByDate.value = metricMap;
     } else {

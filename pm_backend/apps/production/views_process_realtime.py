@@ -75,6 +75,38 @@ def _adjust_backlog_actual_for_session(session_obj, delta_qty):
     backlog.save(update_fields=['actual_qty'])
 
 
+def _adjust_backlog_scrap_for_session(session_obj, delta_qty):
+    """LineBacklog.scrap_qty にデルタを反映する（仕損数量変更用）。"""
+    if not session_obj or not delta_qty:
+        return
+    if not session_obj.product_id or not session_obj.process_id or not session_obj.plan_date:
+        return
+
+    line = getattr(session_obj.process, 'line', None)
+    if not line:
+        return
+
+    backlog, _created = LineBacklog.objects.get_or_create(
+        line=line,
+        process_id=session_obj.process_id,
+        product_id=session_obj.product_id,
+        plan_date=session_obj.plan_date,
+        sequence_no=0,
+        defaults={
+            'order_qty': 0,
+            'plan_qty': 0,
+            'actual_qty': 0,
+            'stock_qty': 0,
+            'planned_stock_qty': 0,
+            'adjust_qty': 0,
+            'scrap_qty': 0,
+            'actual_shipment_qty': 0,
+        }
+    )
+    backlog.scrap_qty = (backlog.scrap_qty or 0) + int(delta_qty)
+    backlog.save(update_fields=['scrap_qty'])
+
+
 def _apply_delta_to_inventory_and_progress(session, delta):
     """
     実績変更に伴い、当日以降の在庫・進度・計画在庫・計進に差分を反映する。
@@ -709,6 +741,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         started_at = session.started_at
         ended_at = session.ended_at
         production_qty = session.production_qty
+        defect_qty = session.defect_qty
 
         if 'started_at' in payload:
             next_started = payload.get('started_at')
@@ -732,6 +765,14 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             if production_qty < 0:
                 return Response({'detail': 'production_qty は0以上で入力してください。'}, status=status.HTTP_400_BAD_REQUEST)
 
+        if 'defect_qty' in payload:
+            try:
+                defect_qty = int(payload.get('defect_qty') or 0)
+            except (TypeError, ValueError):
+                return Response({'detail': 'defect_qty の形式が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+            if defect_qty < 0:
+                return Response({'detail': 'defect_qty は0以上で入力してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
         if started_at and ended_at and ended_at < started_at:
             return Response({'detail': '終了時刻は開始時刻以降にしてください。'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -739,10 +780,14 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         new_qty = int(production_qty or 0) if _is_countable_session_for_actual(session.session_type, session.end_action) else 0
         delta = new_qty - old_qty
 
+        old_defect = int(session.defect_qty or 0)
+        defect_delta = defect_qty - old_defect
+
         with transaction.atomic():
             session.started_at = started_at
             session.ended_at = ended_at
             session.production_qty = production_qty
+            session.defect_qty = defect_qty
             session.status = 'CLOSED' if ended_at else 'OPEN'
             if started_at and ended_at and ended_at >= started_at:
                 session.duration_seconds = int((ended_at - started_at).total_seconds())
@@ -752,6 +797,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 'started_at',
                 'ended_at',
                 'production_qty',
+                'defect_qty',
                 'status',
                 'duration_seconds',
                 'updated_at',
@@ -760,6 +806,9 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             if delta:
                 _adjust_backlog_actual_for_session(session, delta)
                 _apply_delta_to_inventory_and_progress(session, delta)
+
+            if defect_delta:
+                _adjust_backlog_scrap_for_session(session, defect_delta)
 
         serializer = ProcessWorkSessionSerializer(session)
         return Response(serializer.data)

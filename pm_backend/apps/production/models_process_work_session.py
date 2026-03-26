@@ -54,6 +54,10 @@ class ProcessWorkSession(models.Model):
         default=0,
         verbose_name='実績数量',
     )
+    defect_qty = models.IntegerField(
+        default=0,
+        verbose_name='仕損数量',
+    )
 
     start_record = models.ForeignKey(
         ProcessRealtimeRecord,

@@ -1074,6 +1074,7 @@ class ProcessWorkSessionSerializer(serializers.ModelSerializer):
             'status',
             'duration_seconds',
             'production_qty',
+            'defect_qty',
             'issue_count',
             'issue_flags',
             'start_record',

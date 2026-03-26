@@ -119,6 +119,7 @@
 
     <div v-if="loading" class="loading">読込中...</div>
     <div v-else-if="error" class="error">{{ error }}</div>
+    <div v-else-if="!searched"></div>
     <div v-else class="table-wrap">
       <table class="list-table">
         <thead>
@@ -129,6 +130,7 @@
             <th>開始時刻</th>
             <th>終了時刻</th>
             <th class="num">実績数量</th>
+            <th class="num">仕損</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -153,13 +155,25 @@
                 :disabled="!canEdit"
               />
             </td>
+            <td class="num">
+              <input
+                v-if="row.record_source === 'PROCESS'"
+                v-model.number="edits[row.row_key].defect_qty"
+                type="number"
+                min="0"
+                step="1"
+                class="qty-input"
+                :disabled="!canEdit"
+              />
+              <span v-else>—</span>
+            </td>
             <td class="action-cell">
               <button class="btn btn-secondary" :disabled="savingId === row.row_key || !canEdit" @click="saveRow(row)">保存</button>
               <button class="btn btn-danger" :disabled="savingId === row.row_key || !canEdit" @click="deleteRow(row)">削除</button>
             </td>
           </tr>
           <tr v-if="!sessions.length">
-            <td colspan="7" class="no-data">データがありません</td>
+            <td colspan="8" class="no-data">データがありません</td>
           </tr>
         </tbody>
       </table>
@@ -201,6 +215,7 @@ const error = ref('')
 const savingId = ref(null)
 const sessions = ref([])
 const edits = ref({})
+const searched = ref(false)
 const laserDeleteModal = ref({ visible: false, recordId: null, affectedRows: [], onConfirm: null })
 
 const lines = ref([])
@@ -405,6 +420,7 @@ const buildEditMap = (rows) => {
       started_at: toLocalDateTimeInput(row.started_at),
       ended_at: toLocalDateTimeInput(row.ended_at),
       production_qty: Number(row.production_qty || 0),
+      defect_qty: Number(row.defect_qty || 0),
     }
   })
   edits.value = map
@@ -521,11 +537,13 @@ const loadSessions = async () => {
       : rows
     sessions.value = filtered
     buildEditMap(filtered)
+    searched.value = true
   } catch (e) {
     console.error('セッション読込失敗:', e)
     error.value = '実績の取得に失敗しました。'
     sessions.value = []
     edits.value = {}
+    searched.value = true
   } finally {
     loading.value = false
   }
@@ -544,6 +562,9 @@ const saveRow = async (row) => {
       started_at: edit.started_at || null,
       ended_at: edit.ended_at || null,
       production_qty: Number(edit.production_qty || 0),
+    }
+    if (String(row?.record_source || '').toUpperCase() === 'PROCESS') {
+      payload.defect_qty = Number(edit.defect_qty || 0)
     }
     if (String(row?.record_source || '').toUpperCase() === 'LASER') {
       if (!row.detail_id) {
@@ -663,7 +684,6 @@ const addSession = async () => {
 onMounted(async () => {
   if (!canView.value) return
   await loadMasters()
-  await loadSessions()
 })
 </script>
 
