@@ -293,7 +293,7 @@
       <template v-if="kadoMode === 'start'">
         <!-- 前シフト情報バー -->
         <div v-if="kadoPrevShiftRecord" class="kado-prev-shift-bar">
-          <template v-if="kadoPrevShiftRecord.end_totalizer_hour != null">
+          <template v-if="kadoPrevShiftRecord.end_totalizer_hour != null && !(kadoPrevShiftRecord.end_totalizer_hour === 0 && kadoPrevShiftRecord.end_totalizer_min === 0)">
             <span class="kado-existing-label">前シフト終了積算から自動セット:</span>
             <span class="kado-existing-value">
               {{ formatNumber(kadoPrevShiftRecord.end_totalizer_hour, 0) }} H
@@ -414,6 +414,16 @@
           {{ kadoListLoading ? '検索中...' : '検索' }}
         </button>
         <button class="btn" @click="resetKadoFilters">条件クリア</button>
+        <button class="btn" :disabled="overtimeFetching" @click="fetchOvertimeWorkHoursBatch">
+          {{ overtimeFetching ? '取得中...' : '取得' }}
+        </button>
+        <button class="btn" :disabled="Object.keys(pendingWorkHours).length === 0" @click="setOvertimeWorkHours">
+          セット
+        </button>
+        <button class="btn primary" :disabled="!overtimeSetDone || overtimeSaving" @click="saveOvertimeWorkHours">
+          {{ overtimeSaving ? '保存中...' : '保存' }}
+        </button>
+        <span v-if="overtimeMessage" class="kado-overtime-msg">{{ overtimeMessage }}</span>
       </div>
 
       <div class="result-meta">{{ kadoRecords.length }} 件</div>
@@ -448,7 +458,11 @@
                     ? `${formatNumber(row.end_totalizer_hour, 0)}:${String(row.end_totalizer_min).padStart(2,'0')}`
                     : '-' }}
                 </td>
-                <td class="num">{{ row.work_hours != null ? formatNumber(row.work_hours, 1) : '-' }}</td>
+                <td class="num" :class="{ 'kado-pending-cell': overtimeSetDone && pendingWorkHours[row.id] != null }">
+                  {{ overtimeSetDone && pendingWorkHours[row.id] != null
+                    ? formatNumber(pendingWorkHours[row.id], 1)
+                    : (row.work_hours != null ? formatNumber(row.work_hours, 1) : '-') }}
+                </td>
                 <td class="num">{{ row.process_hours != null ? formatNumber(row.process_hours, 1) : '-' }}</td>
                 <td class="num">{{ row.operating_rate != null ? `${formatNumber(row.operating_rate, 1)} %` : '-' }}</td>
                 <td>
@@ -877,8 +891,8 @@ const fetchKadoPrevShiftRecord = async () => {
       return false
     })
     kadoPrevShiftRecord.value = prev || null
-    // 直前シフトが終了済みなら開始積算に自動セット
-    if (prev && prev.end_totalizer_hour != null) {
+    // 直前シフトが終了済み（0:00以外）なら開始積算に自動セット
+    if (prev && prev.end_totalizer_hour != null && !(prev.end_totalizer_hour === 0 && prev.end_totalizer_min === 0)) {
       kadoForm.value.start_totalizer_hour = prev.end_totalizer_hour
       kadoForm.value.start_totalizer_min = prev.end_totalizer_min
     }
@@ -923,9 +937,9 @@ const saveKadoStart = async () => {
     const startH = Number(kadoForm.value.start_totalizer_hour)
     const startM = Number(kadoForm.value.start_totalizer_min)
 
-    // 前シフトが開始済み（終了未記録）なら、今回の開始積算を前シフトの終了積算として自動セット
+    // 前シフトが終了未記録 or 0:00（仮置き）なら、今回の開始積算を前シフトの終了積算として自動セット
     const prev = kadoPrevShiftRecord.value
-    if (prev && prev.end_totalizer_hour == null) {
+    if (prev && (prev.end_totalizer_hour == null || (prev.end_totalizer_hour === 0 && prev.end_totalizer_min === 0))) {
       await api.laserShiftRecords.patchLaserShiftRecord(prev.id, {
         end_totalizer_hour: startH,
         end_totalizer_min: startM,
@@ -946,6 +960,99 @@ const saveKadoStart = async () => {
     setKadoMessage(extractErrorMessage(error, '保存に失敗しました。入力内容を確認してください。'), 'error')
   } finally {
     kadoSubmitting.value = false
+  }
+}
+
+// --- 残業申請から仕事時間を一括取得・セット・保存 ---
+const overtimeFetching = ref(false)
+const overtimeSaving = ref(false)
+const overtimeSetDone = ref(false)
+const overtimeMessage = ref('')
+const pendingWorkHours = ref({})  // { record_id: calculated_hours }
+
+const calcWorkHoursFromApp = (app) => {
+  const h = parseFloat(app.hours ?? 0)
+  if (app.application_type === 'overtime') return Math.round((8 + h) * 10) / 10
+  if (app.application_type === 'half_day_am') return Math.round((4 + h) * 10) / 10
+  return h
+}
+
+// ① 取得: 残業申請を取得してpendingWorkHoursに格納（DBは変更しない）
+const fetchOvertimeWorkHoursBatch = async () => {
+  const from = kadoFilters.value.work_date_from
+  const to = kadoFilters.value.work_date_to
+  if (!from || !to) {
+    overtimeMessage.value = '日付Fromと日付Toを指定してください'
+    return
+  }
+  const targets = kadoRecords.value.filter(r => r.work_hours == null)
+  if (targets.length === 0) {
+    overtimeMessage.value = '対象レコードがありません（仕事時間未設定）'
+    return
+  }
+  overtimeFetching.value = true
+  overtimeMessage.value = ''
+  pendingWorkHours.value = {}
+  overtimeSetDone.value = false
+  try {
+    const userIds = [...new Set(targets.map(r => r.created_by).filter(Boolean))]
+    const appMap = {}
+    for (const userId of userIds) {
+      const res = await api.overtime.getApplications({
+        work_date__gte: from,
+        work_date__lte: to,
+        applicant: userId,
+        page_size: 200,
+      })
+      for (const app of normalizeList(res.data)) {
+        const key = `${app.applicant}_${app.work_date}`
+        if (!appMap[key]) appMap[key] = app
+      }
+    }
+    const pending = {}
+    for (const record of targets) {
+      const key = `${record.created_by}_${record.work_date}`
+      const app = appMap[key]
+      if (!app) continue
+      pending[record.id] = calcWorkHoursFromApp(app)
+    }
+    pendingWorkHours.value = pending
+    const count = Object.keys(pending).length
+    overtimeMessage.value = count > 0
+      ? `${count}件 取得しました。内容を確認してセットしてください。`
+      : '対象日の残業申請が見つかりませんでした'
+  } catch {
+    overtimeMessage.value = '取得に失敗しました'
+  } finally {
+    overtimeFetching.value = false
+  }
+}
+
+// ② セット: pendingWorkHoursを一覧上に反映（黄色表示、DBは変更しない）
+const setOvertimeWorkHours = () => {
+  overtimeSetDone.value = true
+  const count = Object.keys(pendingWorkHours.value).length
+  overtimeMessage.value = `${count}件 セットしました。内容を確認して保存してください。`
+}
+
+// ③ 保存: pendingWorkHoursをDBにパッチ保存
+const saveOvertimeWorkHours = async () => {
+  const entries = Object.entries(pendingWorkHours.value)
+  if (entries.length === 0) return
+  overtimeSaving.value = true
+  overtimeMessage.value = ''
+  try {
+    for (const [recordId, hours] of entries) {
+      await api.laserShiftRecords.patchLaserShiftRecord(Number(recordId), { work_hours: hours })
+    }
+    overtimeMessage.value = `${entries.length}件 保存しました`
+    pendingWorkHours.value = {}
+    overtimeSetDone.value = false
+    await loadKadoRecords()
+  } catch {
+    overtimeMessage.value = '保存に失敗しました'
+  } finally {
+    overtimeSaving.value = false
   }
 }
 
@@ -1826,6 +1933,17 @@ onMounted(async () => {
   border: 1px solid #bfdbfe;
   border-radius: 8px;
   font-size: 14px;
+}
+
+.kado-pending-cell {
+  background: #fef9c3;
+  font-weight: 700;
+  color: #92400e;
+}
+
+.kado-overtime-msg {
+  font-size: 13px;
+  color: #1e40af;
 }
 
 .kado-existing-label {
