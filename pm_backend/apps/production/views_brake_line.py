@@ -165,14 +165,29 @@ class BrakeLinePlanView(APIView):
                 # 品番マスタに存在しない = ブレーキライン加工対象外 → スキップ
                 del brake_plan[code]
 
-        # 今日のLineBacklogを取得（実績参照用）
+        # 計画行は sequence_no>0 から取得
         backlogs_qs = LineBacklog.objects.filter(
             plan_date=plan_date,
             line_id__in=line_ids,
+            sequence_no__gt=0,
         ).select_related('product', 'process', 'line')
 
-        # (line_id, process_id, product_id) → backlog
-        # 同じキーが複数ある場合は sequence_no>0 を優先（sequence_no=0 は需要専用行）
+        # 実績は sequence_no=0 行から取得
+        actual_map = {
+            (row['line_id'], row['process_id'], row['product_id']): int(row['total'] or 0)
+            for row in (
+                LineBacklog.objects
+                .filter(
+                    plan_date=plan_date,
+                    line_id__in=line_ids,
+                    sequence_no=0,
+                )
+                .values('line_id', 'process_id', 'product_id')
+                .annotate(total=Sum('actual_qty'))
+            )
+        }
+
+        # (line_id, process_id, product_id) → 計画backlog
         backlog_map: dict[tuple, LineBacklog] = {}
         for lb in backlogs_qs:
             key = (lb.line_id, lb.process_id, lb.product_id)
@@ -181,10 +196,8 @@ class BrakeLinePlanView(APIView):
                 backlog_map[key] = lb
                 continue
 
-            # 優先度: sequence_no>0 を先、同条件なら小さい sequence_no を優先
-            cur_priority = (0 if lb.sequence_no > 0 else 1, lb.sequence_no)
-            old_priority = (0 if existing.sequence_no > 0 else 1, existing.sequence_no)
-            if cur_priority < old_priority:
+            # 同じ品番の複数計画行がある場合は小さい sequence_no を優先
+            if lb.sequence_no < existing.sequence_no:
                 backlog_map[key] = lb
 
         line_map = {line['id']: line for line in lines}
@@ -224,7 +237,7 @@ class BrakeLinePlanView(APIView):
                         'process_name': proc['process_name'],
                         'laser_qty': laser_qty,
                         'plan_qty': plan_qty,
-                        'actual_qty': int(lb.actual_qty) if lb else 0,
+                        'actual_qty': actual_map.get((line_id, process_id, product_id), 0),
                         'backlog_id': lb.id if lb else None,
                         'sequence_no': lb.sequence_no if lb else 1,
                         'equipment_id': None,
@@ -293,7 +306,7 @@ class BrakeLinePlanView(APIView):
                 'process_name': process_data['process_name'],
                 'laser_qty': 0,
                 'plan_qty': int(lb.plan_qty) if lb else 0,
-                'actual_qty': int(lb.actual_qty) if lb else 0,
+                'actual_qty': actual_map.get((rec.line_id, rec.process_id, product_id), 0),
                 'backlog_id': lb.id if lb else None,
                 'sequence_no': lb.sequence_no if lb else (rec.sequence_no or 1),
                 'equipment_id': rec.equipment_id,
@@ -372,7 +385,7 @@ class BrakeLinePlanView(APIView):
                 'process_name': process_data['process_name'],
                 'laser_qty': 0,
                 'plan_qty': int(lb.plan_qty) if lb else 0,
-                'actual_qty': int(lb.actual_qty) if lb else 0,
+                'actual_qty': actual_map.get((rec.line_id, rec.process_id, product_id), 0),
                 'backlog_id': lb.id if lb else None,
                 'sequence_no': lb.sequence_no if lb else (rec.sequence_no or 1),
                 'equipment_id': rec.equipment_id,
@@ -514,9 +527,9 @@ class BrakeLineActualAddView(APIView):
 
     payload: {
         line_id, process_id, product_id, plan_date, qty,
-        sequence_no (default: 1)
+        sequence_no (互換用。実績保存先には使用しない)
     }
-    LineBacklog.actual_qty を原子的に加算する。
+    LineBacklog(sequence_no=0).actual_qty を原子的に加算する。
     レコードが存在しない場合は新規作成。
     """
 
@@ -527,8 +540,6 @@ class BrakeLineActualAddView(APIView):
         product_id = request.data.get('product_id')
         plan_date_str = request.data.get('plan_date')
         qty_raw = request.data.get('qty', 0)
-        sequence_no = int(request.data.get('sequence_no', 1))
-
         # バリデーション
         if not all([line_id, process_id, product_id, plan_date_str]):
             return Response(
@@ -546,13 +557,13 @@ class BrakeLineActualAddView(APIView):
         except ValueError:
             return Response({'detail': '日付形式が不正です（YYYY-MM-DD）'}, status=400)
 
-        # LineBacklog を get_or_create してから原子的に加算
+        # 実績は sequence_no=0 の基礎行に加算
         obj, created = LineBacklog.objects.get_or_create(
             plan_date=plan_date,
             process_id=process_id,
             product_id=product_id,
             line_id=line_id,
-            sequence_no=sequence_no,
+            sequence_no=0,
             defaults={'actual_qty': qty},
         )
         if not created:
@@ -677,7 +688,7 @@ class BrakeLineRecordView(APIView):
         operator_action        = str(request.data.get('operator_action', '')).upper()
         operator_action_reason = request.data.get('operator_action_reason', '')
         qty_raw        = request.data.get('qty', 0)
-        sequence_no    = int(request.data.get('sequence_no', 1))
+        record_sequence_no = int(request.data.get('sequence_no', 1))
 
         # バリデーション
         if not all([line_id, process_id, plan_date_str, operator_action]):
@@ -719,10 +730,10 @@ class BrakeLineRecordView(APIView):
             operator_action=operator_action,
             operator_action_reason=operator_action_reason,
             qty=qty,
-            sequence_no=sequence_no,
+            sequence_no=record_sequence_no,
         )
 
-        # END / PAUSE の場合は LineBacklog に実績を加算
+        # END / PAUSE の場合は LineBacklog(sequence_no=0) に実績を加算
         backlog_data = None
         if operator_action in {
             BrakeLineRecord.OPERATOR_ACTION_END,
@@ -733,7 +744,7 @@ class BrakeLineRecordView(APIView):
                 process_id=process_id,
                 product_id=product_id,
                 line_id=line_id,
-                sequence_no=sequence_no,
+                sequence_no=0,
                 defaults={'actual_qty': qty},
             )
             if not created:
@@ -1069,7 +1080,7 @@ class BrakeLineSessionDetailView(APIView):
             process_id=record.process_id,
             product_id=record.product_id,
             line_id=record.line_id,
-            sequence_no=record.sequence_no,
+            sequence_no=0,
             defaults={'actual_qty': 0},
         )
         LineBacklog.objects.filter(pk=obj.pk).update(actual_qty=F('actual_qty') + int(delta_qty))
