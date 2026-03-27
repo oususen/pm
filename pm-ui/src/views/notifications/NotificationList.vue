@@ -225,7 +225,7 @@ const filteredNotifications = computed(() => {
   const userDivisionId = authState.user?.profile?.division_id ?? authState.user?.profile?.division ?? null;
   const userGroupId = authState.user?.profile?.group_id ?? authState.user?.profile?.group ?? null;
   const userTeamId = authState.user?.profile?.team_id ?? authState.user?.profile?.team ?? null;
-  const userPosition = authState.user?.profile?.position || "";
+  const userPosition = authState.user?.profile?.role || "";
   return notifications.value.filter((item) => {
     if (!item) return false;
     if (!isWithinRange(item)) return false;
