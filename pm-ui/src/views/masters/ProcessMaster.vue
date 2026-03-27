@@ -4,7 +4,7 @@
       <h1 class="page-title">工程マスタ</h1>
       <div class="page-actions">
         <button @click="fetchProcesses" class="btn-primary">更新</button>
-        <button @click="showNewDialog" class="btn-success">新規</button>
+        <button v-if="canEdit" @click="showNewDialog" class="btn-success">新規</button>
       </div>
     </div>
 
@@ -31,8 +31,8 @@
               <span v-else>-</span>
             </td>
             <td>
-              <button @click="editProcess(process)" class="btn-sm">編集</button>
-              <button @click="deleteProcess(process.id)" class="btn-sm btn-danger">削除</button>
+              <button v-if="canEdit" @click="editProcess(process)" class="btn-sm">編集</button>
+              <button v-if="canEdit" @click="deleteProcess(process.id)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
         </tbody>
@@ -54,23 +54,23 @@
           </div>
           <div class="form-group">
             <label>工程名 *</label>
-            <input v-model="formData.process_name" required />
+            <input v-model="formData.process_name" required :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>
-              <input type="checkbox" v-model="formData.is_outsource" />
+              <input type="checkbox" v-model="formData.is_outsource" :disabled="!canEdit" />
               外注工程
             </label>
           </div>
           <div class="form-group">
             <label>
-              <input type="checkbox" v-model="formData.is_active" />
+              <input type="checkbox" v-model="formData.is_active" :disabled="!canEdit" />
               有効
             </label>
           </div>
           <div v-if="isEdit" class="form-group">
             <label>使用ライン</label>
-            <select v-model="formData.line" class="select-line">
+            <select v-model="formData.line" class="select-line" :disabled="!canEdit">
               <option :value="null">未設定</option>
               <option v-for="line in lines" :key="line.id" :value="line.id">
                 {{ line.line_code }} - {{ line.line_name }}
@@ -78,7 +78,7 @@
             </select>
           </div>
           <div class="form-actions">
-            <button type="submit" class="btn-primary">保存</button>
+            <button type="submit" class="btn-primary" :disabled="!canEdit">保存</button>
             <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
           </div>
         </form>
@@ -88,8 +88,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import api from '@/api/client'
+import { canAccessMasterResource } from '@/utils/masterPermissions'
 
 const processes = ref([])
 const lines = ref([])
@@ -101,6 +102,7 @@ const formData = ref({
   is_outsource: false,
   is_active: true
 })
+const canEdit = computed(() => canAccessMasterResource('masters.process', 'edit'))
 
 const fetchProcesses = async () => {
   try {
@@ -122,6 +124,7 @@ const fetchLines = async () => {
 }
 
 const showNewDialog = () => {
+  if (!canEdit.value) return
   isEdit.value = false
   formData.value = {
     process_code: '',
@@ -133,6 +136,7 @@ const showNewDialog = () => {
 }
 
 const editProcess = (process) => {
+  if (!canEdit.value) return
   isEdit.value = true
   formData.value = { ...process }
   showDialog.value = true
@@ -143,6 +147,7 @@ const closeDialog = () => {
 }
 
 const saveProcess = async () => {
+  if (!canEdit.value) return
   try {
     if (isEdit.value) {
       await api.processes.updateProcess(formData.value.id, formData.value)
@@ -161,6 +166,7 @@ const saveProcess = async () => {
 }
 
 const deleteProcess = async (id) => {
+  if (!canEdit.value) return
   if (!confirm('本当に削除しますか？')) return
 
   try {

@@ -4,7 +4,7 @@
       <h1 class="page-title">構成マスタ（BOM）</h1>
       <div class="page-actions">
         <button @click="fetchBOMs" class="btn-primary">更新</button>
-        <button @click="showNewDialog" class="btn-success">新規</button>
+        <button v-if="canEdit" @click="showNewDialog" class="btn-success">新規</button>
         <button @click="openWhereUsedDialog" class="btn-info">逆展開</button>
       </div>
     </div>
@@ -105,8 +105,8 @@
                 <button @click="downloadBOMExcel(bom)" class="btn-sm btn-excel">Excel出力</button>
                 <button @click="openDetailsInNewTab(bom)" class="btn-sm">別タブ</button>
                 <button @click="viewTreeOnly(bom)" class="btn-sm">階層図</button>
-                <button @click="goToDetailPage(bom)" class="btn-sm">編集</button>
-                <button @click="deleteBOM(bom.id)" class="btn-sm btn-danger">削除</button>
+                <button v-if="canEdit" @click="goToDetailPage(bom)" class="btn-sm">編集</button>
+                <button v-if="canEdit" @click="deleteBOM(bom.id)" class="btn-sm btn-danger">削除</button>
               </td>
             </tr>
           </tbody>
@@ -185,7 +185,7 @@
             </label>
           </div>
           <div class="form-actions">
-            <button type="submit" class="btn-primary">保存</button>
+            <button type="submit" class="btn-primary" :disabled="!canEdit">保存</button>
             <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
           </div>
         </form>
@@ -218,7 +218,7 @@
             <span class="summary-value">{{ selectedBOM.valid_from }} ～ {{ selectedBOM.valid_to || '無期限' }}</span>
           </div>
           <div class="summary-item">
-            <button type="button" class="btn-primary" @click="openCopyDialog">BOMをコピー</button>
+            <button v-if="canEdit" type="button" class="btn-primary" @click="openCopyDialog">BOMをコピー</button>
           </div>
         </div>
         <p v-if="isPhantom(selectedBOM.parent_product)" class="phantom-info">
@@ -389,7 +389,7 @@
             </div>
           </div>
           <div class="form-actions">
-            <button type="button" class="btn-primary" @click="saveBOMItem">
+            <button type="button" class="btn-primary" @click="saveBOMItem" :disabled="!canEdit">
               {{ editingItemId ? '明細を更新' : '明細を追加' }}
             </button>
             <button type="button" class="btn-secondary" @click="resetItemForm" :disabled="!editingItemId">
@@ -427,8 +427,8 @@
               </td>
               <td v-if="selectedBOM.is_coproduct">{{ item.is_coproduct_driver ? '✓' : '' }}</td>
               <td>
-                <button type="button" class="btn-sm" @click="startEditItem(item)">編集</button>
-                <button type="button" class="btn-sm btn-danger" @click="deleteBOMItem(item.id)">削除</button>
+                <button v-if="canEdit" type="button" class="btn-sm" @click="startEditItem(item)">編集</button>
+                <button v-if="canEdit" type="button" class="btn-sm btn-danger" @click="deleteBOMItem(item.id)">削除</button>
               </td>
             </tr>
           </tbody>
@@ -678,6 +678,7 @@
 import { ref, onMounted, computed, h, defineComponent, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
+import { canAccessMasterResource } from '@/utils/masterPermissions'
 
 const route = useRoute()
 const router = useRouter()
@@ -736,6 +737,7 @@ const whereUsedLoading = ref(false)
 const showCopyDialog = ref(false)
 const copyNewParentProductId = ref('')
 const copyProductFilter = ref('')
+const canEdit = computed(() => canAccessMasterResource('masters.bom', 'edit'))
 
 const routingGenForm = ref({
   routing_code: '',
@@ -1235,6 +1237,7 @@ const goToDetailPage = (bom) => {
 }
 
 const showNewDialog = () => {
+  if (!canEdit.value) return
   isEdit.value = false
   parentProductFilter.value = ''
   const today = new Date().toISOString().split('T')[0]
@@ -1267,6 +1270,7 @@ const closeDialog = () => {
 }
 
 const saveBOM = async () => {
+  if (!canEdit.value) return
   try {
     const dataToSend = {
       parent_product: formData.value.parent_product,
@@ -1298,6 +1302,7 @@ const saveBOM = async () => {
 }
 
 const deleteBOM = async (id) => {
+  if (!canEdit.value) return
   if (!confirm('本当に削除しますか？')) return
 
   try {
@@ -1500,6 +1505,7 @@ const closeWhereUsedDialog = () => {
 
 // BOMコピー
 const openCopyDialog = () => {
+  if (!canEdit.value) return
   copyNewParentProductId.value = ''
   copyProductFilter.value = ''
   showCopyDialog.value = true
@@ -1512,6 +1518,7 @@ const closeCopyDialog = () => {
 }
 
 const doCopyBOM = async () => {
+  if (!canEdit.value) return
   if (!selectedBOM.value?.id || !copyNewParentProductId.value) return
   let newBomId = null
   try {
@@ -1598,6 +1605,7 @@ const downloadTreeExcel = async () => {
 }
 
 const startEditItem = (item) => {
+  if (!canEdit.value) return
   editingItemId.value = item.id
   itemForm.value = {
     child_product: item.child_product,
@@ -1617,6 +1625,7 @@ const startEditItem = (item) => {
 }
 
 const saveBOMItem = async () => {
+  if (!canEdit.value) return
   if (!selectedBOM.value?.id) return
   if (!itemForm.value.child_product) {
     alert('子製品は必須です')
@@ -1699,6 +1708,7 @@ const saveBOMItem = async () => {
 }
 
 const deleteBOMItem = async (id) => {
+  if (!canEdit.value) return
   if (!confirm('この明細を削除しますか？')) return
   try {
     await api.boms.deleteBOMItem(id)

@@ -4,7 +4,7 @@
       <h1 class="page-title">連絡先マスタ</h1>
       <div class="page-actions">
         <button @click="fetchContacts" class="btn-primary" :disabled="loading">更新</button>
-        <button @click="showNewDialog" class="btn-success">新規</button>
+        <button v-if="canEdit" @click="showNewDialog" class="btn-success">新規</button>
       </div>
     </div>
 
@@ -69,8 +69,8 @@
             <td>{{ contact.display_order }}</td>
             <td>{{ contact.is_active ? '有効' : '無効' }}</td>
             <td>
-              <button @click="editContact(contact)" class="btn-sm">編集</button>
-              <button @click="deleteContact(contact.id)" class="btn-sm btn-danger">削除</button>
+              <button v-if="canEdit" @click="editContact(contact)" class="btn-sm">編集</button>
+              <button v-if="canEdit" @click="deleteContact(contact.id)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
         </tbody>
@@ -89,44 +89,44 @@
         <form @submit.prevent="saveContact">
           <div class="form-group">
             <label>種別 *</label>
-            <input v-model="formData.contact_type" required placeholder="例: 枚方集荷依頼" />
+            <input v-model="formData.contact_type" required placeholder="例: 枚方集荷依頼" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>会社名 *</label>
-            <input v-model="formData.company_name" required />
+            <input v-model="formData.company_name" required :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>部署名</label>
-            <input v-model="formData.department" />
+            <input v-model="formData.department" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>担当者名</label>
-            <input v-model="formData.contact_person" />
+            <input v-model="formData.contact_person" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>Email *</label>
-            <input type="email" v-model="formData.email" required />
+            <input type="email" v-model="formData.email" required :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>電話番号</label>
-            <input v-model="formData.phone" />
+            <input v-model="formData.phone" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>表示順</label>
-            <input type="number" v-model.number="formData.display_order" />
+            <input type="number" v-model.number="formData.display_order" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>備考</label>
-            <textarea v-model="formData.note" rows="3"></textarea>
+            <textarea v-model="formData.note" rows="3" :disabled="!canEdit"></textarea>
           </div>
           <div class="form-group">
             <label>
-              <input type="checkbox" v-model="formData.is_active" />
+              <input type="checkbox" v-model="formData.is_active" :disabled="!canEdit" />
               有効
             </label>
           </div>
           <div class="form-actions">
-            <button type="submit" class="btn-primary">保存</button>
+            <button type="submit" class="btn-primary" :disabled="!canEdit">保存</button>
             <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
           </div>
         </form>
@@ -136,8 +136,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import api from '@/api/client'
+import { canAccessMasterResource } from '@/utils/masterPermissions'
 
 const contacts = ref([])
 const loading = ref(false)
@@ -154,6 +155,7 @@ const formData = ref({
   note: '',
   is_active: true
 })
+const canEdit = computed(() => canAccessMasterResource('masters.contact', 'edit'))
 
 const filters = ref({
   search: '',
@@ -193,6 +195,7 @@ const fetchContacts = async () => {
 }
 
 const showNewDialog = () => {
+  if (!canEdit.value) return
   isEdit.value = false
   formData.value = {
     contact_type: '',
@@ -209,6 +212,7 @@ const showNewDialog = () => {
 }
 
 const editContact = (contact) => {
+  if (!canEdit.value) return
   isEdit.value = true
   formData.value = { ...contact }
   showDialog.value = true
@@ -219,6 +223,7 @@ const closeDialog = () => {
 }
 
 const saveContact = async () => {
+  if (!canEdit.value) return
   try {
     if (isEdit.value) {
       await api.contacts.updateContact(formData.value.id, formData.value)
@@ -236,6 +241,7 @@ const saveContact = async () => {
 }
 
 const deleteContact = async (id) => {
+  if (!canEdit.value) return
   if (!confirm('本当に削除しますか？')) return
 
   try {

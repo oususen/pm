@@ -4,7 +4,7 @@
       <h1 class="page-title">容器マスタ</h1>
       <div class="page-actions">
         <button @click="fetchContainers" class="btn-primary">更新</button>
-        <button @click="showNewDialog" class="btn-success">新規</button>
+        <button v-if="canEdit" @click="showNewDialog" class="btn-success">新規</button>
       </div>
     </div>
 
@@ -32,8 +32,8 @@
             <td>{{ container.can_mix ? '可' : '不可' }}</td>
             <td>{{ container.stackable ? '可' : '不可' }}</td>
             <td>
-              <button @click="editContainer(container)" class="btn-sm">編集</button>
-              <button @click="deleteContainer(container.id)" class="btn-sm btn-danger">削除</button>
+              <button v-if="canEdit" @click="editContainer(container)" class="btn-sm">編集</button>
+              <button v-if="canEdit" @click="deleteContainer(container.id)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
         </tbody>
@@ -50,50 +50,50 @@
         <form @submit.prevent="saveContainer">
           <div class="form-group">
             <label>容器名 *</label>
-            <input v-model="formData.name" required />
+            <input v-model="formData.name" required :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>容器コード</label>
-            <input v-model="formData.container_code" />
+            <input v-model="formData.container_code" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>入り数</label>
-            <input v-model.number="formData.capacity" type="number" min="0" />
+            <input v-model.number="formData.capacity" type="number" min="0" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>幅</label>
-            <input v-model.number="formData.width" type="number" min="0" />
+            <input v-model.number="formData.width" type="number" min="0" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>奥行</label>
-            <input v-model.number="formData.depth" type="number" min="0" />
+            <input v-model.number="formData.depth" type="number" min="0" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>高さ</label>
-            <input v-model.number="formData.height" type="number" min="0" />
+            <input v-model.number="formData.height" type="number" min="0" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>最大重量</label>
-            <input v-model.number="formData.max_weight" type="number" min="0" />
+            <input v-model.number="formData.max_weight" type="number" min="0" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>
-              <input type="checkbox" v-model="formData.can_mix" />
+              <input type="checkbox" v-model="formData.can_mix" :disabled="!canEdit" />
               混載可能
             </label>
           </div>
           <div class="form-group">
             <label>
-              <input type="checkbox" v-model="formData.stackable" />
+              <input type="checkbox" v-model="formData.stackable" :disabled="!canEdit" />
               積み重ね可能
             </label>
           </div>
           <div class="form-group">
             <label>最大積み重ね段数</label>
-            <input v-model.number="formData.max_stack" type="number" min="0" />
+            <input v-model.number="formData.max_stack" type="number" min="0" :disabled="!canEdit" />
           </div>
           <div class="form-actions">
-            <button type="submit" class="btn-primary">保存</button>
+            <button type="submit" class="btn-primary" :disabled="!canEdit">保存</button>
             <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
           </div>
         </form>
@@ -103,8 +103,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import api from '@/api/client'
+import { canAccessMasterResource } from '@/utils/masterPermissions'
 
 const containers = ref([])
 const showDialog = ref(false)
@@ -121,6 +122,7 @@ const formData = ref({
   max_stack: 1,
   capacity: null,
 })
+const canEdit = computed(() => canAccessMasterResource('masters.container_capacity', 'edit'))
 
 const fetchContainers = async () => {
   try {
@@ -133,6 +135,7 @@ const fetchContainers = async () => {
 }
 
 const showNewDialog = () => {
+  if (!canEdit.value) return
   isEdit.value = false
   formData.value = {
     name: '',
@@ -150,6 +153,7 @@ const showNewDialog = () => {
 }
 
 const editContainer = (container) => {
+  if (!canEdit.value) return
   isEdit.value = true
   formData.value = {
     ...container,
@@ -171,6 +175,7 @@ const normalizeNumber = (value) => {
 }
 
 const saveContainer = async () => {
+  if (!canEdit.value) return
   try {
     const payload = {
       ...formData.value,
@@ -198,6 +203,7 @@ const saveContainer = async () => {
 }
 
 const deleteContainer = async (id) => {
+  if (!canEdit.value) return
   if (!confirm('本当に削除しますか？')) return
 
   try {

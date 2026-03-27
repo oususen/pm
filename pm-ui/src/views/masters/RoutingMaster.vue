@@ -297,7 +297,15 @@ const productName = (routing) => {
 }
 
 const selectedRouting = computed(() => routings.value.find((r) => r.id === selectedRoutingId.value) || null)
-const canEdit = computed(() => hasPermission(authState.user, 'masters', 'edit'))
+const canEdit = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  if (permissions.some((item) => item.resource === 'masters.routing')) {
+    return hasPermission(user, 'masters.routing', 'edit')
+  }
+  return hasPermission(user, 'masters', 'edit')
+})
 
 const filteredRoutings = computed(() => {
   const q = searchText.value.toLowerCase()

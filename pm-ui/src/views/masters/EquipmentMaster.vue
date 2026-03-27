@@ -4,7 +4,7 @@
       <h1 class="page-title">設備マスタ</h1>
       <div class="page-actions">
         <button @click="fetchEquipments" class="btn-primary" :disabled="loading">更新</button>
-        <button @click="showNewDialog" class="btn-success">新規</button>
+        <button v-if="canEdit" @click="showNewDialog" class="btn-success">新規</button>
       </div>
     </div>
 
@@ -30,8 +30,8 @@
             <td>{{ equipment.display_order }}</td>
             <td>{{ equipment.is_active ? '有効' : '無効' }}</td>
             <td>
-              <button @click="editEquipment(equipment)" class="btn-sm">編集</button>
-              <button @click="deleteEquipment(equipment.id)" class="btn-sm btn-danger">削除</button>
+              <button v-if="canEdit" @click="editEquipment(equipment)" class="btn-sm">編集</button>
+              <button v-if="canEdit" @click="deleteEquipment(equipment.id)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
         </tbody>
@@ -52,11 +52,11 @@
           </div>
           <div class="form-group">
             <label>設備名 *</label>
-            <input v-model.trim="formData.equipment_name" required />
+            <input v-model.trim="formData.equipment_name" required :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>ライン</label>
-            <select v-model="formData.line" class="select-line">
+            <select v-model="formData.line" class="select-line" :disabled="!canEdit">
               <option :value="null">未設定</option>
               <option v-for="line in lines" :key="line.id" :value="line.id">
                 {{ line.line_code }} - {{ line.line_name }}
@@ -65,7 +65,7 @@
           </div>
           <div class="form-group">
             <label>工程</label>
-            <select v-model="formData.process" class="select-line">
+            <select v-model="formData.process" class="select-line" :disabled="!canEdit">
               <option :value="null">未設定</option>
               <option v-for="process in filteredProcesses" :key="process.id" :value="process.id">
                 {{ process.process_code }} - {{ process.process_name }}
@@ -74,20 +74,20 @@
           </div>
           <div class="form-group">
             <label>表示順</label>
-            <input type="number" min="0" v-model.number="formData.display_order" />
+            <input type="number" min="0" v-model.number="formData.display_order" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>備考</label>
-            <textarea v-model.trim="formData.notes" rows="3" />
+            <textarea v-model.trim="formData.notes" rows="3" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>
-              <input type="checkbox" v-model="formData.is_active" />
+              <input type="checkbox" v-model="formData.is_active" :disabled="!canEdit" />
               有効
             </label>
           </div>
           <div class="form-actions">
-            <button type="submit" class="btn-primary">保存</button>
+            <button type="submit" class="btn-primary" :disabled="!canEdit">保存</button>
             <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
           </div>
         </form>
@@ -99,6 +99,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import api from '@/api/client'
+import { canAccessMasterResource } from '@/utils/masterPermissions'
 
 const equipments = ref([])
 const lines = ref([])
@@ -106,6 +107,7 @@ const processes = ref([])
 const loading = ref(false)
 const showDialog = ref(false)
 const isEdit = ref(false)
+const canEdit = computed(() => canAccessMasterResource('masters.equipment', 'edit'))
 
 const createEmptyForm = () => ({
   id: null,
@@ -178,12 +180,14 @@ const fetchProcesses = async () => {
 }
 
 const showNewDialog = () => {
+  if (!canEdit.value) return
   isEdit.value = false
   formData.value = createEmptyForm()
   showDialog.value = true
 }
 
 const editEquipment = (equipment) => {
+  if (!canEdit.value) return
   isEdit.value = true
   formData.value = {
     ...equipment,
@@ -199,6 +203,7 @@ const closeDialog = () => {
 }
 
 const saveEquipment = async () => {
+  if (!canEdit.value) return
   const payload = {
     ...formData.value,
     line: formData.value.line || null,
@@ -224,6 +229,7 @@ const saveEquipment = async () => {
 }
 
 const deleteEquipment = async (id) => {
+  if (!canEdit.value) return
   if (!confirm('本当に削除しますか？')) return
   try {
     await api.equipments.deleteEquipment(id)

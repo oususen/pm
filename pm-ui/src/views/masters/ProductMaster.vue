@@ -3,9 +3,9 @@
     <div class="page-header">
       <h1 class="page-title">製品マスタ</h1>
       <div class="page-actions">
-        <button @click="openLineFinalDialog" class="btn-secondary">ライン最終品 一括設定</button>
+        <button v-if="canEdit" @click="openLineFinalDialog" class="btn-secondary">ライン最終品 一括設定</button>
         <button @click="fetchProducts(1)" class="btn-primary">更新</button>
-        <button @click="showNewDialog" class="btn-success">新規</button>
+        <button v-if="canEdit" @click="showNewDialog" class="btn-success">新規</button>
       </div>
     </div>
 
@@ -153,8 +153,8 @@
               <td>{{ product.is_virtual_set ? 'はい' : 'いいえ' }}</td>
               <td>{{ product.is_active ? '有効' : '無効' }}</td>
               <td>
-                <button @click="editProduct(product)" class="btn-sm">編集</button>
-                <button @click="deleteProduct(product.id)" class="btn-sm btn-danger">削除</button>
+                <button v-if="canEdit" @click="editProduct(product)" class="btn-sm">編集</button>
+                <button v-if="canEdit" @click="deleteProduct(product.id)" class="btn-sm btn-danger">削除</button>
               </td>
             </tr>
           </tbody>
@@ -198,6 +198,7 @@
       <div class="modal-content">
         <h2>{{ isEdit ? '製品編集' : '製品新規作成' }}</h2>
         <form @submit.prevent="saveProduct">
+          <fieldset class="form-fieldset" :disabled="!canEdit">
           <div class="form-group">
             <label>品番コード *</label>
             <input v-model="formData.product_code" required :disabled="isEdit" />
@@ -331,9 +332,10 @@
             </label>
           </div>
           <div class="form-actions">
-            <button type="submit" class="btn-primary">保存</button>
+            <button type="submit" class="btn-primary" :disabled="!canEdit">保存</button>
             <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
           </div>
+          </fieldset>
         </form>
       </div>
     </div>
@@ -373,6 +375,7 @@
                     <input
                       type="checkbox"
                       v-model="lfChanges[product.id]"
+                      :disabled="!canEdit"
                     />
                   </td>
                   <td>{{ product.product_code }}</td>
@@ -389,7 +392,7 @@
         </div>
 
         <div class="form-actions">
-          <button @click="saveLineFinal" class="btn-primary" :disabled="lfSaving">
+          <button @click="saveLineFinal" class="btn-primary" :disabled="lfSaving || !canEdit">
             {{ lfSaving ? '保存中...' : '保存' }}
           </button>
           <button @click="showLineFinalDialog = false" class="btn-secondary">キャンセル</button>
@@ -402,6 +405,7 @@
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
 import api from '@/api/client'
+import { canAccessMasterResource } from '@/utils/masterPermissions'
 
 // カテゴリマッピング (DB英語 ⇔ UI日本語)
 const categoryMap = {
@@ -469,6 +473,7 @@ const formData = ref({
   image_url: '',
 })
 const fileInput = ref(null)
+const canEdit = computed(() => canAccessMasterResource('masters.product', 'edit'))
 
 // ライン最終品一括設定
 const showLineFinalDialog = ref(false)
@@ -653,6 +658,7 @@ const fetchCustomers = async () => {
 
 // 新規ダイアログ表示
 const showNewDialog = () => {
+  if (!canEdit.value) return
   isEdit.value = false
   formData.value = {
     product_code: '',
@@ -681,6 +687,7 @@ const showNewDialog = () => {
 
 // 編集ダイアログ表示
 const editProduct = (product) => {
+  if (!canEdit.value) return
   isEdit.value = true
   formData.value = {
     ...product,
@@ -733,6 +740,7 @@ const normalizeNumber = (value) => {
 
 // 保存
 const saveProduct = async () => {
+  if (!canEdit.value) return
   try {
     const payload = {
       ...formData.value,
@@ -761,12 +769,14 @@ const saveProduct = async () => {
 }
 
 const triggerFileInput = () => {
+  if (!canEdit.value) return
   if (fileInput.value) {
     fileInput.value.click()
   }
 }
 
 const onFileSelected = async (e) => {
+  if (!canEdit.value) return
   const file = e.target.files && e.target.files[0]
   if (!file) return
   if (!formData.value.id) {
@@ -789,6 +799,7 @@ const onFileSelected = async (e) => {
 
 // 削除
 const deleteProduct = async (id) => {
+  if (!canEdit.value) return
   if (!confirm('本当に削除しますか？')) return
 
   try {
@@ -809,6 +820,7 @@ const changePage = async (page) => {
 
 // ライン最終品一括設定
 const openLineFinalDialog = async () => {
+  if (!canEdit.value) return
   lfSelectedLine.value = ''
   showLineFinalDialog.value = true
   await fetchLineFinalCandidates()
@@ -834,6 +846,7 @@ const fetchLineFinalCandidates = async () => {
 }
 
 const saveLineFinal = async () => {
+  if (!canEdit.value) return
   lfSaving.value = true
   try {
     const updates = Object.entries(lfChanges.value).map(([id, val]) => ({
@@ -881,6 +894,13 @@ watch(
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+}
+
+.form-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
 }
 
 .filter-bar {

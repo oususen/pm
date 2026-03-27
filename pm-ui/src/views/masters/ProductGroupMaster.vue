@@ -4,7 +4,7 @@
       <h1 class="page-title">製品グループマスタ</h1>
       <div class="page-actions">
         <button @click="fetchProductGroups" class="btn-primary">更新</button>
-        <button @click="showNewDialog" class="btn-success">新規</button>
+        <button v-if="canEdit" @click="showNewDialog" class="btn-success">新規</button>
       </div>
     </div>
 
@@ -26,8 +26,8 @@
             <td>{{ group.description || '-' }}</td>
             <td>{{ group.is_active ? '有効' : '無効' }}</td>
             <td>
-              <button @click="editProductGroup(group)" class="btn-sm">編集</button>
-              <button @click="deleteProductGroup(group.id)" class="btn-sm btn-danger">削除</button>
+              <button v-if="canEdit" @click="editProductGroup(group)" class="btn-sm">編集</button>
+              <button v-if="canEdit" @click="deleteProductGroup(group.id)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
         </tbody>
@@ -48,20 +48,20 @@
           </div>
           <div class="form-group">
             <label>グループ名 *</label>
-            <input v-model="formData.group_name" required />
+            <input v-model="formData.group_name" required :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>説明</label>
-            <textarea v-model="formData.description" rows="3" />
+            <textarea v-model="formData.description" rows="3" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>
-              <input type="checkbox" v-model="formData.is_active" />
+              <input type="checkbox" v-model="formData.is_active" :disabled="!canEdit" />
               有効
             </label>
           </div>
           <div class="form-actions">
-            <button type="submit" class="btn-primary">保存</button>
+            <button type="submit" class="btn-primary" :disabled="!canEdit">保存</button>
             <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
           </div>
         </form>
@@ -71,8 +71,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import api from '@/api/client'
+import { canAccessMasterResource } from '@/utils/masterPermissions'
 
 const productGroups = ref([])
 const showDialog = ref(false)
@@ -83,6 +84,7 @@ const formData = ref({
   description: '',
   is_active: true,
 })
+const canEdit = computed(() => canAccessMasterResource('masters.product_group', 'edit'))
 
 const fetchProductGroups = async () => {
   try {
@@ -95,6 +97,7 @@ const fetchProductGroups = async () => {
 }
 
 const showNewDialog = () => {
+  if (!canEdit.value) return
   isEdit.value = false
   formData.value = {
     group_code: '',
@@ -106,6 +109,7 @@ const showNewDialog = () => {
 }
 
 const editProductGroup = (group) => {
+  if (!canEdit.value) return
   isEdit.value = true
   formData.value = { ...group }
   showDialog.value = true
@@ -116,6 +120,7 @@ const closeDialog = () => {
 }
 
 const saveProductGroup = async () => {
+  if (!canEdit.value) return
   try {
     const payload = {
       ...formData.value,
@@ -137,6 +142,7 @@ const saveProductGroup = async () => {
 }
 
 const deleteProductGroup = async (id) => {
+  if (!canEdit.value) return
   if (!confirm('本当に削除しますか？')) return
 
   try {

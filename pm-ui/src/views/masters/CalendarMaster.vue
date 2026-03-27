@@ -4,7 +4,7 @@
       <h1 class="page-title">カレンダマスタ</h1>
       <div class="page-actions">
         <button class="btn" @click="fetchCalendars">更新</button>
-        <button class="btn btn-primary" @click="showNewDialog">新規</button>
+        <button v-if="canEdit" class="btn btn-primary" @click="showNewDialog">新規</button>
       </div>
     </div>
 
@@ -29,8 +29,8 @@
               <td>{{ calendar.calendar_code }}</td>
               <td>{{ calendar.calendar_name }}</td>
               <td class="actions-inline">
-                <button class="btn-sm" @click.stop="editCalendar(calendar)">編集</button>
-                <button class="btn-sm btn-danger" @click.stop="deleteCalendar(calendar.id)">削除</button>
+                <button v-if="canEdit" class="btn-sm" @click.stop="editCalendar(calendar)">編集</button>
+                <button v-if="canEdit" class="btn-sm btn-danger" @click.stop="deleteCalendar(calendar.id)">削除</button>
               </td>
             </tr>
           </tbody>
@@ -70,7 +70,7 @@
                       <input
                         type="checkbox"
                         :checked="day.is_working_day"
-                        :disabled="savingDateKey === day.date"
+                        :disabled="savingDateKey === day.date || !canEdit"
                         @change="toggleDay(day)"
                       />
                       {{ day.is_working_day ? '出' : '休み' }}
@@ -81,7 +81,7 @@
                       class="note-input"
                       :value="day.record?.note || ''"
                       placeholder="メモ"
-                      :disabled="savingNoteDateKey === day.date"
+                      :disabled="savingNoteDateKey === day.date || !canEdit"
                       @blur="saveDayNote(day, $event)"
                     ></textarea>
                   </div>
@@ -104,14 +104,14 @@
           </div>
           <div class="form-group">
             <label>カレンダ名 *</label>
-            <input v-model="formData.calendar_name" required />
+            <input v-model="formData.calendar_name" required :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>説明</label>
-            <textarea v-model="formData.description" rows="3"></textarea>
+            <textarea v-model="formData.description" rows="3" :disabled="!canEdit"></textarea>
           </div>
           <div class="form-actions">
-            <button type="submit" class="btn btn-primary">保存</button>
+            <button type="submit" class="btn btn-primary" :disabled="!canEdit">保存</button>
             <button type="button" class="btn" @click="closeDialog">キャンセル</button>
           </div>
         </form>
@@ -123,6 +123,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
+import { canAccessMasterResource } from '@/utils/masterPermissions'
 
 const calendars = ref([])
 const calendarDays = ref([])
@@ -134,6 +135,7 @@ const isEdit = ref(false)
 const savingDateKey = ref('')
 const savingNoteDateKey = ref('')
 const currentMonth = ref(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
+const canEdit = computed(() => canAccessMasterResource('masters.calendar', 'edit'))
 
 const formData = ref({
   calendar_code: '',
@@ -288,6 +290,7 @@ const moveMonth = async (delta) => {
 }
 
 const toggleDay = async (day) => {
+  if (!canEdit.value) return
   if (!day?.inMonth || !detailCalendar.value) return
   savingDateKey.value = day.date
   try {
@@ -321,6 +324,7 @@ const toggleDay = async (day) => {
 }
 
 const saveDayNote = async (day, event) => {
+  if (!canEdit.value) return
   if (!day?.inMonth || !detailCalendar.value) return
   const note = String(event?.target?.value || '').trim()
   const current = String(day.record?.note || '').trim()
@@ -357,6 +361,7 @@ const saveDayNote = async (day, event) => {
 }
 
 const showNewDialog = () => {
+  if (!canEdit.value) return
   isEdit.value = false
   formData.value = {
     calendar_code: '',
@@ -367,6 +372,7 @@ const showNewDialog = () => {
 }
 
 const editCalendar = (calendar) => {
+  if (!canEdit.value) return
   isEdit.value = true
   formData.value = { ...calendar }
   showDialog.value = true
@@ -377,6 +383,7 @@ const closeDialog = () => {
 }
 
 const saveCalendar = async () => {
+  if (!canEdit.value) return
   try {
     if (isEdit.value) {
       await api.calendars.updateCalendar(formData.value.id, formData.value)
@@ -394,6 +401,7 @@ const saveCalendar = async () => {
 }
 
 const deleteCalendar = async (id) => {
+  if (!canEdit.value) return
   if (!confirm('本当に削除しますか？')) return
   try {
     await api.calendars.deleteCalendar(id)

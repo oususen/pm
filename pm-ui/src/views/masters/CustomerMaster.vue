@@ -4,7 +4,7 @@
       <h1 class="page-title">得意先マスタ</h1>
       <div class="page-actions">
         <button @click="fetchCustomers" class="btn-primary">更新</button>
-        <button @click="showNewDialog" class="btn-success">新規</button>
+        <button v-if="canEdit" @click="showNewDialog" class="btn-success">新規</button>
       </div>
     </div>
 
@@ -26,8 +26,8 @@
             <td>{{ customer.short_name }}</td>
             <td>{{ customer.is_active ? '有効' : '無効' }}</td>
             <td>
-              <button @click="editCustomer(customer)" class="btn-sm">編集</button>
-              <button @click="deleteCustomer(customer.id)" class="btn-sm btn-danger">削除</button>
+              <button v-if="canEdit" @click="editCustomer(customer)" class="btn-sm">編集</button>
+              <button v-if="canEdit" @click="deleteCustomer(customer.id)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
         </tbody>
@@ -49,15 +49,15 @@
           </div>
           <div class="form-group">
             <label>得意先名 *</label>
-            <input v-model="formData.customer_name" required />
+            <input v-model="formData.customer_name" required :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>略称</label>
-            <input v-model="formData.short_name" />
+            <input v-model="formData.short_name" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>カレンダ</label>
-            <select v-model="formData.calendar_id">
+            <select v-model="formData.calendar_id" :disabled="!canEdit">
               <option :value="null">選択なし</option>
               <option v-for="cal in calendars" :key="cal.id" :value="cal.id">
                 {{ cal.calendar_name }}
@@ -66,12 +66,12 @@
           </div>
           <div class="form-group">
             <label>
-              <input type="checkbox" v-model="formData.is_active" />
+              <input type="checkbox" v-model="formData.is_active" :disabled="!canEdit" />
               有効
             </label>
           </div>
           <div class="form-actions">
-            <button type="submit" class="btn-primary">保存</button>
+            <button type="submit" class="btn-primary" :disabled="!canEdit">保存</button>
             <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
           </div>
         </form>
@@ -81,8 +81,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import api from '@/api/client'
+import { canAccessMasterResource } from '@/utils/masterPermissions'
 
 const customers = ref([])
 const calendars = ref([])
@@ -95,6 +96,7 @@ const formData = ref({
   calendar_id: null,
   is_active: true
 })
+const canEdit = computed(() => canAccessMasterResource('masters.customer', 'edit'))
 
 const fetchCustomers = async () => {
   try {
@@ -117,6 +119,7 @@ const fetchCalendars = async () => {
 }
 
 const showNewDialog = () => {
+  if (!canEdit.value) return
   isEdit.value = false
   formData.value = {
     customer_code: '',
@@ -129,6 +132,7 @@ const showNewDialog = () => {
 }
 
 const editCustomer = (customer) => {
+  if (!canEdit.value) return
   isEdit.value = true
   formData.value = { ...customer }
   showDialog.value = true
@@ -139,6 +143,7 @@ const closeDialog = () => {
 }
 
 const saveCustomer = async () => {
+  if (!canEdit.value) return
   try {
     // データの前処理：空文字列をnullに変換
     const dataToSend = {
@@ -168,6 +173,7 @@ const saveCustomer = async () => {
 }
 
 const deleteCustomer = async (id) => {
+  if (!canEdit.value) return
   if (!confirm('本当に削除しますか？')) return
 
   try {

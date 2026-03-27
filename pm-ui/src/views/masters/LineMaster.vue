@@ -4,7 +4,7 @@
       <h1 class="page-title">ラインマスタ</h1>
       <div class="page-actions">
         <button @click="fetchLines" class="btn-primary">更新</button>
-        <button @click="showNewDialog" class="btn-success">新規</button>
+        <button v-if="canEdit" @click="showNewDialog" class="btn-success">新規</button>
       </div>
     </div>
 
@@ -32,8 +32,8 @@
             <td>{{ formatDateTime(line.created_at) }}</td>
             <td>{{ formatDateTime(line.updated_at) }}</td>
             <td>
-              <button @click="editLine(line)" class="btn-sm">編集</button>
-              <button @click="deleteLine(line.id)" class="btn-sm btn-danger">削除</button>
+              <button v-if="canEdit" @click="editLine(line)" class="btn-sm">編集</button>
+              <button v-if="canEdit" @click="deleteLine(line.id)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
         </tbody>
@@ -55,11 +55,11 @@
           </div>
           <div class="form-group">
             <label>ライン名 *</label>
-            <input v-model="formData.line_name" required />
+            <input v-model="formData.line_name" required :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>日LT（リードタイム）</label>
-            <input v-model.number="formData.lead_time_days" type="number" min="0" />
+            <input v-model.number="formData.lead_time_days" type="number" min="0" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>このラインを使用する工程</label>
@@ -90,12 +90,12 @@
           </div>
           <div class="form-group">
             <label>
-              <input type="checkbox" v-model="formData.is_active" />
+              <input type="checkbox" v-model="formData.is_active" :disabled="!canEdit" />
               有効
             </label>
           </div>
           <div class="form-actions">
-            <button type="submit" class="btn-primary">保存</button>
+            <button type="submit" class="btn-primary" :disabled="!canEdit">保存</button>
             <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
           </div>
         </form>
@@ -105,8 +105,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import api from '@/api/client'
+import { canAccessMasterResource } from '@/utils/masterPermissions'
 
 const lines = ref([])
 const lineStepsMap = ref({})
@@ -117,6 +118,7 @@ const formData = ref({
   line_name: '',
   is_active: true
 })
+const canEdit = computed(() => canAccessMasterResource('masters.line', 'edit'))
 
 const fetchLines = async () => {
   try {
@@ -155,6 +157,7 @@ const fetchLineSteps = async () => {
 }
 
 const showNewDialog = () => {
+  if (!canEdit.value) return
   isEdit.value = false
   formData.value = {
     line_code: '',
@@ -165,6 +168,7 @@ const showNewDialog = () => {
 }
 
 const editLine = (line) => {
+  if (!canEdit.value) return
   isEdit.value = true
   formData.value = { ...line }
   showDialog.value = true
@@ -175,6 +179,7 @@ const closeDialog = () => {
 }
 
 const saveLine = async () => {
+  if (!canEdit.value) return
   try {
     if (isEdit.value) {
       await api.lines.updateLine(formData.value.id, formData.value)
@@ -193,6 +198,7 @@ const saveLine = async () => {
 }
 
 const deleteLine = async (id) => {
+  if (!canEdit.value) return
   if (!confirm('本当に削除しますか？')) return
 
   try {

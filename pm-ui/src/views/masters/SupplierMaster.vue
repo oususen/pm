@@ -4,7 +4,7 @@
       <h1 class="page-title">仕入先マスタ</h1>
       <div class="page-actions">
         <button @click="fetchSuppliers" class="btn-primary">更新</button>
-        <button @click="showNewDialog" class="btn-success">新規</button>
+        <button v-if="canEdit" @click="showNewDialog" class="btn-success">新規</button>
       </div>
     </div>
 
@@ -26,8 +26,8 @@
             <td>{{ supplier.order_email || '-' }}</td>
             <td>{{ getCalendarLabelBySupplier(supplier) }}</td>
             <td>
-              <button @click="editSupplier(supplier)" class="btn-sm">編集</button>
-              <button @click="deleteSupplier(supplier.id)" class="btn-sm btn-danger">削除</button>
+              <button v-if="canEdit" @click="editSupplier(supplier)" class="btn-sm">編集</button>
+              <button v-if="canEdit" @click="deleteSupplier(supplier.id)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
         </tbody>
@@ -49,15 +49,15 @@
           </div>
           <div class="form-group">
             <label>仕入先名 *</label>
-            <input v-model="formData.supplier_name" required />
+            <input v-model="formData.supplier_name" required :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>送信メールアドレス</label>
-            <input v-model="formData.order_email" type="email" placeholder="example@company.co.jp" />
+            <input v-model="formData.order_email" type="email" placeholder="example@company.co.jp" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>専用カレンダー</label>
-            <select v-model="formData.calendar">
+            <select v-model="formData.calendar" :disabled="!canEdit">
               <option :value="null">未設定</option>
               <option v-for="calendar in calendars" :key="calendar.id" :value="calendar.id">
                 {{ calendar.calendar_code }} - {{ calendar.calendar_name }}
@@ -65,7 +65,7 @@
             </select>
           </div>
           <div class="form-actions">
-            <button type="submit" class="btn-primary">保存</button>
+            <button type="submit" class="btn-primary" :disabled="!canEdit">保存</button>
             <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
           </div>
         </form>
@@ -75,8 +75,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import api from '@/api/client'
+import { canAccessMasterResource } from '@/utils/masterPermissions'
 
 const suppliers = ref([])
 const calendars = ref([])
@@ -89,6 +90,7 @@ const formData = ref({
   order_email: '',
   calendar: null,
 })
+const canEdit = computed(() => canAccessMasterResource('masters.supplier', 'edit'))
 
 const fetchSuppliers = async () => {
   try {
@@ -133,6 +135,7 @@ const getCalendarLabelBySupplier = (supplier) => {
 }
 
 const showNewDialog = () => {
+  if (!canEdit.value) return
   isEdit.value = false
   formData.value = {
     supplier_code: '',
@@ -144,6 +147,7 @@ const showNewDialog = () => {
 }
 
 const editSupplier = (supplier) => {
+  if (!canEdit.value) return
   isEdit.value = true
   formData.value = { ...supplier }
   showDialog.value = true
@@ -154,6 +158,7 @@ const closeDialog = () => {
 }
 
 const saveSupplier = async () => {
+  if (!canEdit.value) return
   try {
     const payload = {
       ...formData.value,
@@ -176,6 +181,7 @@ const saveSupplier = async () => {
 }
 
 const deleteSupplier = async (id) => {
+  if (!canEdit.value) return
   if (!confirm('本当に削除しますか？')) return
 
   try {

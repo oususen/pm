@@ -4,7 +4,7 @@
       <h1 class="page-title">勤務パターンマスタ</h1>
       <div class="page-actions">
         <button @click="fetchPatterns" class="btn-primary">更新</button>
-        <button @click="toggleForm" class="btn-success">{{ showForm ? 'フォームを閉じる' : '新規作成' }}</button>
+        <button v-if="canEdit" @click="toggleForm" class="btn-success">{{ showForm ? 'フォームを閉じる' : '新規作成' }}</button>
       </div>
     </div>
 
@@ -38,7 +38,7 @@
         <div class="break-section">
           <div class="break-header">
             <h3>休憩時間設定</h3>
-            <button type="button" @click="addBreak" class="btn-secondary btn-sm">休憩追加</button>
+            <button type="button" @click="addBreak" class="btn-secondary btn-sm" :disabled="!canEdit">休憩追加</button>
           </div>
           <div v-if="formData.break_times.length === 0" class="no-breaks">
             休憩時間が設定されていません
@@ -47,23 +47,23 @@
             <div class="break-row">
               <div class="form-group">
                 <label>休憩開始 *</label>
-                <input type="time" v-model="breakTime.break_start" required class="form-input" />
+                <input type="time" v-model="breakTime.break_start" required class="form-input" :disabled="!canEdit" />
               </div>
               <div class="form-group">
                 <label>休憩終了 *</label>
-                <input type="time" v-model="breakTime.break_end" required class="form-input" />
+                <input type="time" v-model="breakTime.break_end" required class="form-input" :disabled="!canEdit" />
               </div>
-              <button type="button" @click="removeBreak(index)" class="btn-danger btn-sm">削除</button>
+              <button type="button" @click="removeBreak(index)" class="btn-danger btn-sm" :disabled="!canEdit">削除</button>
             </div>
           </div>
         </div>
 
         <div class="form-group">
           <label>説明</label>
-          <textarea v-model="formData.description" rows="3" class="form-input"></textarea>
+          <textarea v-model="formData.description" rows="3" class="form-input" :disabled="!canEdit"></textarea>
         </div>
         <div class="form-actions">
-          <button type="submit" class="btn-primary">保存</button>
+          <button type="submit" class="btn-primary" :disabled="!canEdit">保存</button>
           <button type="button" @click="cancelEdit" class="btn-secondary">キャンセル</button>
         </div>
       </form>
@@ -91,8 +91,8 @@
             <td>{{ formatBreakTimes(pattern.break_times) }}</td>
             <td>{{ pattern.description }}</td>
             <td>
-              <button @click="editPattern(pattern)" class="btn-sm">編集</button>
-              <button @click="deletePattern(pattern.id)" class="btn-sm btn-danger">削除</button>
+              <button v-if="canEdit" @click="editPattern(pattern)" class="btn-sm">編集</button>
+              <button v-if="canEdit" @click="deletePattern(pattern.id)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
         </tbody>
@@ -106,8 +106,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import api from '@/api/client'
+import { canAccessMasterResource } from '@/utils/masterPermissions'
 
 const patterns = ref([])
 const showForm = ref(false)
@@ -120,6 +121,7 @@ const formData = ref({
   description: '',
   break_times: []
 })
+const canEdit = computed(() => canAccessMasterResource('masters.work_pattern', 'edit'))
 
 const formatBreakTimes = (breakTimes) => {
   if (!breakTimes || breakTimes.length === 0) return 'なし'
@@ -137,6 +139,7 @@ const fetchPatterns = async () => {
 }
 
 const toggleForm = () => {
+  if (!canEdit.value) return
   if (showForm.value) {
     showForm.value = false
     isEdit.value = false
@@ -155,6 +158,7 @@ const toggleForm = () => {
 }
 
 const addBreak = () => {
+  if (!canEdit.value) return
   formData.value.break_times.push({
     break_start: '',
     break_end: '',
@@ -163,6 +167,7 @@ const addBreak = () => {
 }
 
 const removeBreak = (index) => {
+  if (!canEdit.value) return
   formData.value.break_times.splice(index, 1)
   // 順序を再調整
   formData.value.break_times.forEach((bt, idx) => {
@@ -171,6 +176,7 @@ const removeBreak = (index) => {
 }
 
 const editPattern = async (pattern) => {
+  if (!canEdit.value) return
   isEdit.value = true
   formData.value = {
     ...pattern,
@@ -185,6 +191,7 @@ const cancelEdit = () => {
 }
 
 const savePattern = async () => {
+  if (!canEdit.value) return
   try {
     let patternId
 
@@ -238,6 +245,7 @@ const savePattern = async () => {
 }
 
 const deletePattern = async (id) => {
+  if (!canEdit.value) return
   if (!confirm('本当に削除しますか？')) return
 
   try {
