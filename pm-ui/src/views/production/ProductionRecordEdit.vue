@@ -117,6 +117,7 @@
         <select v-model="qtyFilter">
           <option value="">-- すべて --</option>
           <option value="0">0のみ</option>
+          <option value="0_work">実績なし（中断除く）</option>
           <option value="nonzero">1以上</option>
         </select>
       </div>
@@ -544,6 +545,7 @@ const loadSessions = async () => {
     const filtered = rows.filter((row) => {
       if (sessionId.value && String(row.id) !== String(sessionId.value)) return false
       if (qtyFilter.value === '0' && Number(row.production_qty || 0) !== 0) return false
+      if (qtyFilter.value === '0_work' && (Number(row.production_qty || 0) !== 0 || row.session_type === 'PAUSE')) return false
       if (qtyFilter.value === 'nonzero' && Number(row.production_qty || 0) === 0) return false
       return true
     })
