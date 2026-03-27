@@ -1037,7 +1037,7 @@ async function save() {
       if (isFirst) lastData = data
     }
     const data = lastData
-    if (data.operator_action === 'END' && data.backlog) {
+    if ((data.operator_action === 'END' || data.operator_action === 'PAUSE') && data.backlog) {
       item.actual_qty = data.backlog.actual_qty
       currentActualQty.value = data.backlog.actual_qty
     }
