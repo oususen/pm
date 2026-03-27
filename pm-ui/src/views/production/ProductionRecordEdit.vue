@@ -112,6 +112,14 @@
           </option>
         </select>
       </div>
+      <div class="filter-row">
+        <label>実績数</label>
+        <select v-model="qtyFilter">
+          <option value="">-- すべて --</option>
+          <option value="0">0のみ</option>
+          <option value="nonzero">1以上</option>
+        </select>
+      </div>
       <div class="actions">
         <button class="btn" :disabled="loading" @click="loadSessions">検索</button>
       </div>
@@ -304,6 +312,7 @@ const startDate = ref(toISODate(new Date(today.getTime() - 7 * 24 * 60 * 60 * 10
 const endDate = ref(toISODate(new Date(today.getTime() + 24 * 60 * 60 * 1000)))
 const lineId = ref('')
 const processId = ref('')
+const qtyFilter = ref('')  // '' = すべて / '0' = 0のみ / 'nonzero' = 1以上
 
 const canAccessRecordEdit = (level = 'view') => {
   const user = authState.user
@@ -532,9 +541,12 @@ const loadSessions = async () => {
         const tb = b.started_at || ''
         return ta < tb ? 1 : ta > tb ? -1 : 0
       })
-    const filtered = sessionId.value
-      ? rows.filter((row) => String(row.id) === String(sessionId.value))
-      : rows
+    const filtered = rows.filter((row) => {
+      if (sessionId.value && String(row.id) !== String(sessionId.value)) return false
+      if (qtyFilter.value === '0' && Number(row.production_qty || 0) !== 0) return false
+      if (qtyFilter.value === 'nonzero' && Number(row.production_qty || 0) === 0) return false
+      return true
+    })
     sessions.value = filtered
     buildEditMap(filtered)
     searched.value = true
