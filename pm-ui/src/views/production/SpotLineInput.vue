@@ -184,12 +184,14 @@
 
             <div class="equip-select-area">
               <label class="equip-label">使用設備 <span class="required-mark">*</span></label>
+              <div v-if="CLOSING_ACTIONS.has(selectedAction)" class="equip-all-hint">全設備に一括送信されます</div>
               <div class="equip-btns">
                 <button
                   v-for="eq in equipments"
                   :key="eq.id"
                   class="equip-btn"
-                  :class="{ active: selectedEquipmentIds.includes(eq.id) }"
+                  :class="{ active: (CLOSING_ACTIONS.has(selectedAction) ? ['START','RESUME','PAUSE'].includes(workStateMap[workStateKey(selectedItem, eq.id)]) : selectedEquipmentIds.includes(eq.id)) }"
+                  :disabled="CLOSING_ACTIONS.has(selectedAction)"
                   @click="selectedEquipmentIds.includes(eq.id) ? selectedEquipmentIds = selectedEquipmentIds.filter(id => id !== eq.id) : selectedEquipmentIds.push(eq.id)"
                 >{{ compactEquipmentButtonLabel(eq) }}</button>
               </div>
@@ -569,6 +571,9 @@ watch(
   () => { syncSelectedAction() },
   { immediate: true }
 )
+
+// セッションを閉じるアクション（終了・中断・一時終了）では全設備に一括送信する
+const CLOSING_ACTIONS = new Set(['END', 'PAUSE', 'TEMP_END'])
 
 watch(
   () => selectedAction.value,
@@ -987,10 +992,20 @@ async function save() {
   const item = selectedItem.value
   try {
     let lastData = null
-    // 複数設備対応: 設備ごとにレコードを作成
+    // 閉じるアクション（終了・中断・一時終了）はSTARTED/PAUSED状態の全設備に一括送信する（片方だけ外してENDするミス防止）
+    const actionKey = String(selectedAction.value || '').toUpperCase()
+    const targetEquipmentIds = CLOSING_ACTIONS.has(actionKey)
+      ? equipments.value
+          .filter((eq) => {
+            const state = workStateMap.value[workStateKey(item, eq.id)]
+            return state === 'START' || state === 'RESUME' || state === 'PAUSE'
+          })
+          .map((eq) => eq.id)
+      : selectedEquipmentIds.value
+    // 設備ごとにレコードを作成
     // 数量加算（actual_qty への反映）は最初の設備のみ行い、二重カウントを防ぐ
-    for (let i = 0; i < selectedEquipmentIds.value.length; i++) {
-      const eqId = selectedEquipmentIds.value[i]
+    for (let i = 0; i < targetEquipmentIds.length; i++) {
+      const eqId = targetEquipmentIds[i]
       const isFirst = i === 0
       const res = await api.spotLineActuals.saveRecord({
         line_id:               item.line_id,
@@ -1673,6 +1688,7 @@ function showToast(message, type = 'success') {
 .equip-btn.active { border-color: #4e7cbf; background: #e8f0fb; }
 .equip-btn-name { display: block; font-size: 10px; color: #888; font-weight: normal; }
 .equip-empty { font-size: 12px; color: #aaa; }
+.equip-all-hint { font-size: 11px; color: #888; margin-bottom: 4px; }
 .qty-input-area { display: flex; flex-direction: column; gap: 8px; }
 .qty-row { display: flex; gap: 16px; flex-wrap: wrap; }
 .qty-col { display: flex; flex-direction: column; gap: 4px; }

@@ -563,6 +563,15 @@ onUnmounted(() => {
 })
 
 // ユーザーのログイン状態を監視してポーリングを制御
+// ナビゲーション時にドロップダウンを閉じる
+watch(
+  () => route.path,
+  () => {
+    closeUserMenu()
+    closeNotificationMenu()
+  }
+)
+
 watch(
   () => authState.user,
   (newUser) => {
