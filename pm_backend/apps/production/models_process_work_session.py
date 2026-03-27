@@ -58,6 +58,7 @@ class ProcessWorkSession(models.Model):
         default=0,
         verbose_name='仕損数量',
     )
+    operator_name = models.CharField(max_length=100, blank=True, default='', verbose_name='作業者名')
 
     start_record = models.ForeignKey(
         ProcessRealtimeRecord,

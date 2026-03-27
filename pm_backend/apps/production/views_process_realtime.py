@@ -645,6 +645,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         started_at_raw = payload.get('started_at')
         ended_at_raw = payload.get('ended_at')
         production_qty_raw = payload.get('production_qty')
+        operator_name = str(payload.get('operator_name') or '').strip()
 
         if not process_id:
             return Response({'detail': 'process_id は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
@@ -707,6 +708,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 status='CLOSED',
                 duration_seconds=duration_seconds,
                 production_qty=production_qty,
+                operator_name=operator_name,
             )
             if production_qty:
                 _adjust_backlog_actual_for_session(session, int(production_qty))

@@ -1033,7 +1033,8 @@ class ProcessWorkSessionSerializer(serializers.ModelSerializer):
         start_name = (getattr(start_record, 'operator_name', '') or '').strip() if start_record else ''
         if start_name:
             return start_name
-        return ''
+        # 手動後入力セッション（start_record/end_record なし）はモデルフィールドから返す
+        return (getattr(obj, 'operator_name', '') or '').strip()
 
     def get_pause_reason(self, obj):
         session_type = str(getattr(obj, 'session_type', '') or '').upper()

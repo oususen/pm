@@ -74,6 +74,13 @@
           <label>実績数量 <span class="required">*</span></label>
           <input v-model.number="newProductionQty" type="number" min="0" step="1" class="qty-input" />
         </div>
+        <div class="add-form-row">
+          <label>作業者</label>
+          <select v-model="newOperatorName">
+            <option value="">-- 選択 --</option>
+            <option v-for="u in users" :key="u.id" :value="u.label">{{ u.label }}</option>
+          </select>
+        </div>
         <div class="add-form-actions">
           <button class="btn" :disabled="adding" @click="addSession">
             {{ adding ? '登録中...' : '追加登録' }}
@@ -229,6 +236,7 @@ const laserDeleteModal = ref({ visible: false, recordId: null, affectedRows: [],
 
 const lines = ref([])
 const processes = ref([])
+const users = ref([])
 
 // 新規セッション追加フォーム
 const showAddForm = ref(false)
@@ -240,6 +248,7 @@ const newProductCode = ref('')
 const newStartedAt = ref('')
 const newEndedAt = ref('')
 const newProductionQty = ref(0)
+const newOperatorName = ref('')
 
 // 品番オートコンプリート（工程のラインで絞り込み）
 const lineProducts = ref([])          // 選択工程のライン製品プール
@@ -412,12 +421,18 @@ const normalizeDateInput = (value) => {
 
 const loadMasters = async () => {
   try {
-    const [lineRes, processRes] = await Promise.all([
+    const [lineRes, processRes, userRes] = await Promise.all([
       api.lines.getProductionLines(),
       api.processes.getProcesses({ is_active: true }),
+      api.accounts.getUsers({ is_active: true, page_size: 500 }),
     ])
     lines.value = lineRes.data?.results || lineRes.data || []
     processes.value = processRes.data?.results || processRes.data || []
+    const rawUsers = userRes.data?.results || userRes.data || []
+    users.value = rawUsers
+      .map((u) => ({ id: u.id, label: ((u.last_name || '') + ' ' + (u.first_name || '')).trim() || u.username }))
+      .filter((u) => u.label)
+      .sort((a, b) => a.label.localeCompare(b.label, 'ja'))
   } catch (e) {
     console.error('マスタ読込失敗:', e)
   }
@@ -675,6 +690,7 @@ const addSession = async () => {
       started_at: newStartedAt.value,
       ended_at: newEndedAt.value,
       production_qty: newProductionQty.value,
+      operator_name: newOperatorName.value,
     })
     // フォームリセット
     newProcessId.value = ''
@@ -682,6 +698,7 @@ const addSession = async () => {
     newStartedAt.value = ''
     newEndedAt.value = ''
     newProductionQty.value = 0
+    newOperatorName.value = ''
     lineProducts.value = []
     showAddForm.value = false
     await loadSessions()
