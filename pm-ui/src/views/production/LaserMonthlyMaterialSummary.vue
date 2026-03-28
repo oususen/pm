@@ -2,10 +2,15 @@
   <div class="laser-material-summary">
     <div class="toolbar">
       <div class="field">
-        <label>対象月</label>
-        <input v-model="targetMonth" type="month" />
+        <label>開始日</label>
+        <input v-model="startDate" type="date" />
       </div>
-      <button class="btn primary" type="button" @click="loadSummary" :disabled="loading || !targetMonth">
+      <span class="range-sep">〜</span>
+      <div class="field">
+        <label>終了日</label>
+        <input v-model="endDate" type="date" />
+      </div>
+      <button class="btn primary" type="button" @click="loadSummary" :disabled="loading || !startDate || !endDate">
         集計
       </button>
       <button class="btn" type="button" @click="exportExcel" :disabled="loading || !materialTotals.length">
@@ -206,9 +211,12 @@ import * as XLSX from 'xlsx'
 import api from '@/api/client'
 
 const today = new Date()
-const initialMonth = `${today.getFullYear()}-${`${today.getMonth() + 1}`.padStart(2, '0')}`
+const toDateStr = (d) => d.toISOString().slice(0, 10)
+const firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
+const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0)
 
-const targetMonth = ref(initialMonth)
+const startDate = ref(toDateStr(firstDay))
+const endDate = ref(toDateStr(lastDay))
 const loading = ref(false)
 const message = ref('')
 const messageType = ref('info')
@@ -234,8 +242,10 @@ const messageTypeClass = computed(() => ({
 }))
 
 const periodLabel = computed(() => {
-  if (!period.value.start_date || !period.value.end_date) return ''
-  return `${period.value.start_date} ～ ${period.value.end_date}`
+  const s = period.value.start_date || startDate.value
+  const e = period.value.end_date || endDate.value
+  if (!s || !e) return ''
+  return `${s} ～ ${e}`
 })
 
 const formatNumber = (value, digits = 1) => {
@@ -304,12 +314,12 @@ const resetRows = () => {
 }
 
 const loadSummary = async () => {
-  if (!targetMonth.value) return
+  if (!startDate.value || !endDate.value) return
   loading.value = true
   message.value = ''
   messageType.value = 'info'
   try {
-    const res = await api.laserPatterns.getMonthlyMaterialSummary({ month: targetMonth.value })
+    const res = await api.laserPatterns.getMonthlyMaterialSummary({ start_date: startDate.value, end_date: endDate.value })
     const data = res?.data || {}
     warnings.value = Array.isArray(data.warnings) ? data.warnings : []
     materialTotals.value = Array.isArray(data.material_totals) ? data.material_totals : []
@@ -342,8 +352,7 @@ const exportExcel = () => {
   if (!materialTotals.value.length) return
 
   const materialRows = [
-    ['対象月', targetMonth.value || ''],
-    ['期間', periodLabel.value || ''],
+    ['対象期間', periodLabel.value || ''],
     [],
   ]
   if (warnings.value.length) {
@@ -379,8 +388,7 @@ const exportExcel = () => {
   })
 
   const equipmentRows = [
-    ['対象月', targetMonth.value || ''],
-    ['期間', periodLabel.value || ''],
+    ['対象期間', periodLabel.value || ''],
     [],
     ['設備コード', '設備名', '使用パターン数', '総加工時間(時間)'],
   ]
@@ -394,8 +402,7 @@ const exportExcel = () => {
   })
 
   const detailRows = [
-    ['対象月', targetMonth.value || ''],
-    ['期間', periodLabel.value || ''],
+    ['対象期間', periodLabel.value || ''],
     [],
     [
       'Ｐ№',
@@ -448,7 +455,7 @@ const exportExcel = () => {
   XLSX.utils.book_append_sheet(workbook, materialSheet, '材料別集計')
   XLSX.utils.book_append_sheet(workbook, equipmentSheet, '設備別加工時間')
   XLSX.utils.book_append_sheet(workbook, detailSheet, 'パターン別明細')
-  XLSX.writeFile(workbook, `レーザ月所要材料集計_${targetMonth.value || 'export'}.xlsx`)
+  XLSX.writeFile(workbook, `レーザ所要材料集計_${startDate.value || ''}_${endDate.value || ''}.xlsx`)
 }
 
 onMounted(() => {
@@ -479,6 +486,25 @@ onMounted(() => {
   border-radius: 6px;
   padding: 0 8px;
   background: #fff;
+}
+.range-sep {
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 4px;
+  font-size: 14px;
+  color: #475569;
+}
+.period-label {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 10px;
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #166534;
+  white-space: nowrap;
 }
 .btn {
   border: 1px solid #94a3b8;

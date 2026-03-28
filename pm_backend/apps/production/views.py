@@ -4519,9 +4519,21 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='monthly-material-summary')
     def monthly_material_summary(self, request):
         """材料予算用パターンを対象に、受注明細から完成品ごとの必要材料数を合算して月所要材料を集計する。"""
-        month_start, month_end, error_message = self._parse_target_month(request.query_params.get('month'))
-        if error_message:
-            return Response({'detail': error_message}, status=status.HTTP_400_BAD_REQUEST)
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+        if start_date_str and end_date_str:
+            try:
+                from datetime import date as date_cls
+                month_start = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                month_end = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+                if month_start > month_end:
+                    return Response({'detail': '開始日は終了日以前にしてください。'}, status=status.HTTP_400_BAD_REQUEST)
+            except ValueError:
+                return Response({'detail': 'start_date/end_date は YYYY-MM-DD 形式で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            month_start, month_end, error_message = self._parse_target_month(request.query_params.get('month'))
+            if error_message:
+                return Response({'detail': error_message}, status=status.HTTP_400_BAD_REQUEST)
 
         patterns = list(
             self.get_queryset().filter(is_budget_target=True).order_by('pattern_no')
