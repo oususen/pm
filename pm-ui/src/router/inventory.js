@@ -23,6 +23,12 @@ const inventory = [
     component: () => import("@/views/inventory/adjustments/StockAdjustment.vue"),
     meta: { pageTitle: "在庫調整", resource: "inventory" },
   },
+  {
+    path: "/inventory/adjustments/history",
+    name: "InventoryAdjustmentHistory",
+    component: () => import("@/views/inventory/adjustments/AdjustmentHistory.vue"),
+    meta: { pageTitle: "調整履歴", resource: "inventory" },
+  },
 ];
 
 export default inventory;

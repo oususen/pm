@@ -5101,7 +5101,7 @@ class LineBacklogAdjustmentView(APIView):
     """LineBacklog調整の保存/取得API"""
 
     def get(self, request):
-        qs = LineBacklogAdjustment.objects.select_related('line', 'product', 'process').all().order_by('-plan_date', '-id')
+        qs = LineBacklogAdjustment.objects.select_related('line', 'product', 'process', 'updated_by').all().order_by('-plan_date', '-id')
 
         line_code = (request.query_params.get('line_code') or '').strip()
         product_code = (request.query_params.get('product_code') or '').strip()

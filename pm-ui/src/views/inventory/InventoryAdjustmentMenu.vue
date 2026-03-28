@@ -12,6 +12,11 @@
         <div class="tile-title">在庫調整</div>
         <div class="tile-desc">在庫の補正値を登録します。</div>
       </RouterLink>
+      <RouterLink to="/inventory/adjustments/history" class="tile">
+        <div class="tile-icon">📋</div>
+        <div class="tile-title">調整履歴</div>
+        <div class="tile-desc">調整値の登録履歴を確認します。</div>
+      </RouterLink>
     </div>
     <p class="helper-text">在庫調整メニューから各調整画面へ遷移します。</p>
   </div>

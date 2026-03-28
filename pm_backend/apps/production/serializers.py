@@ -1188,6 +1188,14 @@ class LineBacklogAdjustmentSerializer(serializers.ModelSerializer):
     line_code = serializers.CharField(source='line.line_code', read_only=True)
     product_code = serializers.CharField(source='product.product_code', read_only=True)
     process_code = serializers.CharField(source='process.process_code', read_only=True)
+    updated_by_name = serializers.SerializerMethodField()
+
+    def get_updated_by_name(self, obj):
+        user = obj.updated_by
+        if not user:
+            return None
+        full_name = (user.get_full_name() or '').strip()
+        return full_name if full_name else user.username
 
     class Meta:
         model = LineBacklogAdjustment
@@ -1205,6 +1213,7 @@ class LineBacklogAdjustmentSerializer(serializers.ModelSerializer):
             'reason',
             'updated_at',
             'updated_by',
+            'updated_by_name',
         ]
         read_only_fields = ['id', 'updated_at', 'updated_by']
 
