@@ -12,16 +12,6 @@
         <div class="tile-title">在庫調整</div>
         <div class="tile-desc">在庫の補正値を登録します。</div>
       </RouterLink>
-      <RouterLink to="/inventory/adjustments/planned-stock" class="tile">
-        <div class="tile-icon">🧮</div>
-        <div class="tile-title">計画在庫調整</div>
-        <div class="tile-desc">計画在庫の補正値を登録します。</div>
-      </RouterLink>
-      <RouterLink to="/inventory/adjustments/planned-progress" class="tile">
-        <div class="tile-icon">🗂</div>
-        <div class="tile-title">計画進度調整</div>
-        <div class="tile-desc">計画進度の補正値を登録します。</div>
-      </RouterLink>
     </div>
     <p class="helper-text">在庫調整メニューから各調整画面へ遷移します。</p>
   </div>

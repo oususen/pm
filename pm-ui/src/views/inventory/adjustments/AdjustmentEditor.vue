@@ -6,13 +6,6 @@
         <span>実行日</span>
         <input v-model="adjustDate" type="date" />
       </label>
-      <label class="toolbar-field">
-        <span>処理方法</span>
-        <select v-model="processMode">
-          <option value="single">1:個別</option>
-          <option value="batch">2:一括</option>
-        </select>
-      </label>
     </div>
 
     <div class="tabs">
@@ -100,26 +93,26 @@
               :title="form.productId ? '品番から自動計算されます（today − (max LT + 1) 営業日）' : '調整可能な日付（グリッド上のこの日だけ入力できます）'"
             />
           </div>
-          <!-- 在庫タイプのみ：今日の差分から調整値を自動計算 -->
-          <div v-if="props.adjustType === 'STOCK' && form.productId && form.lineId" class="stock-helper">
-            <div class="sh-title">在庫補正ガイド</div>
+          <!-- 補正ガイド（STOCK / PROGRESS タイプ）-->
+          <div v-if="isGuideType && form.productId && form.lineId" class="stock-helper">
+            <div class="sh-title">{{ guideTitle }}</div>
             <ol class="sh-steps">
               <li>
-                <span>① 在庫を最新化</span>
+                <span>{{ guideStep1Label }}</span>
                 <button type="button" class="btn btn-step" @click="recalcThenReload" :disabled="adjustWorking">
-                  {{ adjustWorking ? '処理中...' : '在庫再計算して確認' }}
+                  {{ adjustWorking ? '処理中...' : guideStep1Btn }}
                 </button>
               </li>
               <li>
-                <span>② 実在庫を入力して差分を確認</span>
+                <span>{{ guideStep2Label }}</span>
                 <div class="sh-fields">
                   <div class="row">
-                    <label>システム在庫（今日）</label>
+                    <label>{{ guideSystemLabel }}</label>
                     <span class="sh-value">{{ systemStockToday !== null ? systemStockToday : '—' }}</span>
                   </div>
                   <div class="row">
-                    <label>実在庫（今日）</label>
-                    <input v-model.number="actualStockToday" type="number" placeholder="実測値を入力" />
+                    <label>{{ guideActualLabel }}</label>
+                    <input v-model.number="actualStockToday" type="number" :placeholder="guideActualPlaceholder" />
                   </div>
                   <div class="row">
                     <label>差分（調整値）</label>
@@ -130,9 +123,9 @@
                 </div>
               </li>
               <li>
-                <span>③ 差分を調整対象日に適用して再計算</span>
+                <span>{{ guideStep3Label }}</span>
                 <button type="button" class="btn btn-step btn-step-final" @click="applyAndRecalc" :disabled="stockDiff === null || adjustWorking">
-                  {{ adjustWorking ? '処理中...' : '調整を保存して再計算' }}
+                  {{ adjustWorking ? '処理中...' : guideApplyBtn }}
                 </button>
               </li>
             </ol>
@@ -140,9 +133,15 @@
 
           <div class="adjust-note">
             <p>※ 調整対象日は品番のリードタイムから自動計算されます（今日 − (最大LT + 1) 営業日）。</p>
-            <p>※ 在庫は日々累積で繰り越されるため、調整対象日に値を入れることで以降の全日に反映されます。</p>
-            <p>※ 在庫補正の正しい手順：<strong>在庫再計算 → 実在庫入力 → 調整保存 → 再計算</strong>（上記ガイドを使用）。</p>
-            <p>※ 調整値は「調整マスタ（production_line_backlog_adjustment）」に保存されます。在庫再計算のたびに読み込まれ、在庫に反映され続けます。</p>
+            <template v-if="props.adjustType === 'STOCK'">
+              <p>※ 在庫は日々累積で繰り越されるため、調整対象日に値を入れることで以降の全日に反映されます。</p>
+              <p>※ 在庫補正の正しい手順：<strong>在庫再計算 → 実在庫入力 → 調整保存 → 再計算</strong>（上記ガイドを使用）。</p>
+            </template>
+            <template v-else-if="props.adjustType === 'PROGRESS'">
+              <p>※ 進度は日々累積で繰り越されるため、調整対象日に値を入れることで以降の全日に反映されます。</p>
+              <p>※ 進度補正の正しい手順：<strong>進度再計算 → 実進度入力 → 調整保存 → 再計算</strong>（上記ガイドを使用）。</p>
+            </template>
+            <p>※ 調整値は「調整マスタ（production_line_backlog_adjustment）」に保存されます。再計算のたびに読み込まれ、{{ reflectionLabel }}に反映され続けます。</p>
           </div>
         </div>
       </section>
@@ -191,7 +190,7 @@
 
         <div class="actions">
           <button
-            v-if="!(props.adjustType === 'STOCK' && form.productId && form.lineId)"
+            v-if="!(isGuideType && form.productId && form.lineId)"
             class="btn primary" type="button" @click="saveCurrentDate"
           >登録</button>
           <button class="btn" type="button" @click="reload">再読込</button>
@@ -212,10 +211,10 @@
           />
         </div>
         <button class="btn" type="button" @click="batchRecalcThenReload" :disabled="batchWorking || !batchProcessCode">
-          ① 在庫再計算して確認
+          ① {{ guideStep1Btn }}
         </button>
         <button class="btn primary" type="button" @click="batchApplyAndRecalc" :disabled="batchWorking || !batchProducts.length || !hasBatchDiff">
-          ② 調整を保存して再計算
+          ② {{ guideApplyBtn }}
         </button>
       </div>
 
@@ -223,7 +222,7 @@
       <div v-else-if="batchError" class="center" style="color:#c00">{{ batchError }}</div>
       <div v-else-if="batchLineInfo">
         <p class="batch-line-name">{{ batchLineInfo.process_code }} — {{ batchLineInfo.process_name }}</p>
-        <p class="batch-guide">実在庫（今日）を入力すると差分が自動計算されます。② ボタンで一括保存・再計算されます。</p>
+        <p class="batch-guide">{{ guideActualLabel }}を入力すると差分が自動計算されます。② ボタンで一括保存・再計算されます。</p>
         <table class="grid">
           <thead>
             <tr>
@@ -232,8 +231,8 @@
               <th>ライン</th>
               <th>調整対象日</th>
               <th>現在調整値</th>
-              <th>システム在庫（今日）</th>
-              <th>実在庫（今日）</th>
+              <th>{{ guideSystemLabel }}</th>
+              <th>{{ guideActualLabel }}</th>
               <th>差分（調整値）</th>
             </tr>
           </thead>
@@ -247,13 +246,13 @@
               <td>{{ row.line_code }}</td>
               <td>{{ row.calc_start_date }}</td>
               <td>{{ row.adjust_qty }}</td>
-              <td>{{ row.stock_today !== null && row.stock_today !== undefined ? row.stock_today : '—' }}</td>
+              <td>{{ row.value_today !== null && row.value_today !== undefined ? row.value_today : '—' }}</td>
               <td>
                 <input
                   class="qty-input"
                   type="number"
                   v-model.number="batchActualInputs[idx]"
-                  placeholder="実測値"
+                  :placeholder="guideActualPlaceholder"
                 />
               </td>
               <td :class="{ negative: batchDiff(row, idx) < 0 }">
@@ -281,7 +280,6 @@ const today = new Date().toISOString().slice(0, 10);
 const adjustDate = ref(today);
 const displayStartDate = ref(today);
 const adjustmentDate = ref(today); // LTから自動計算される調整可能日（この行だけ入力可）
-const processMode = ref("single");
 const activeTab = ref("single");
 
 // 在庫差分ヘルパー（STOCKタイプのみ）
@@ -349,7 +347,7 @@ const applyAndRecalc = async () => {
       plan_date: adjustmentDate.value,
       adjust_type: props.adjustType,
       adjust_qty: totalAdjust,
-      reason: `${props.adjustType} 在庫補正（実在庫${actualStockToday.value} − システム${systemStockToday.value}、累計${totalAdjust}）`,
+      reason: `${props.adjustType} ${guideReasonPrefix}（${guideActualWord}${actualStockToday.value} − システム${systemStockToday.value}、累計${totalAdjust}）`,
     });
     // 再計算して反映
     const endDateObj = new Date(displayStartDate.value || today);
@@ -376,12 +374,12 @@ const batchActualInputs = ref({});  // 実在庫入力 {index: number}
 const batchWorking = ref(false);
 const batchError = ref("");
 
-// 行ごとの差分（実在庫 - システム在庫）。同一品番が複数ラインに存在しうるためindexで管理
+// 行ごとの差分（実測値 - システム値）。同一品番が複数ラインに存在しうるためindexで管理
 const batchDiff = (row, idx) => {
   const actual = batchActualInputs.value[idx];
   if (actual === null || actual === undefined || actual === '') return null;
-  if (row.stock_today === null || row.stock_today === undefined) return null;
-  return actual - row.stock_today;
+  if (row.value_today === null || row.value_today === undefined) return null;
+  return actual - row.value_today;
 };
 
 // 1件以上差分が入力されているか
@@ -815,6 +813,20 @@ const reflectionLabel =
     ? "計画進度"
     : "進度";
 
+// 補正ガイドを表示するタイプ（STOCK / PROGRESS）
+const isGuideType = props.adjustType === "STOCK" || props.adjustType === "PROGRESS";
+const guideTitle = props.adjustType === "STOCK" ? "在庫補正ガイド" : "進度補正ガイド";
+const guideStep1Label = props.adjustType === "STOCK" ? "① 在庫を最新化" : "① 進度を最新化";
+const guideStep1Btn = props.adjustType === "STOCK" ? "在庫再計算して確認" : "進度再計算して確認";
+const guideSystemLabel = props.adjustType === "STOCK" ? "システム在庫（今日）" : "システム進度（今日）";
+const guideActualLabel = props.adjustType === "STOCK" ? "実在庫（今日）" : "実進度（今日）";
+const guideActualPlaceholder = props.adjustType === "STOCK" ? "実測値を入力" : "実績値を入力";
+const guideStep2Label = props.adjustType === "STOCK" ? "② 実在庫を入力して差分を確認" : "② 実進度を入力して差分を確認";
+const guideStep3Label = "③ 差分を調整対象日に適用して再計算";
+const guideApplyBtn = "調整を保存して再計算";
+const guideReasonPrefix = props.adjustType === "STOCK" ? "在庫補正" : "進度補正";
+const guideActualWord = props.adjustType === "STOCK" ? "実在庫" : "実進度";
+
 const reload = async () => {
   loading.value = true;
   try {
@@ -868,10 +880,10 @@ const reload = async () => {
       });
       metricsByDate.value = metricMap;
 
-      // 今日の stock_qty を取得（グリッド範囲外の場合は別途フェッチ）
-      if (props.adjustType === 'STOCK') {
-        if (metricMap[today]?.stock !== undefined) {
-          systemStockToday.value = metricMap[today].stock;
+      // 今日のシステム値を取得（STOCK: stock_qty, PROGRESS: progress_qty）
+      if (isGuideType) {
+        if (metricMap[today]?.progress !== undefined) {
+          systemStockToday.value = metricMap[today].progress;
         } else {
           // 今日がグリッド範囲外 → 単独で取得
           try {
@@ -882,8 +894,8 @@ const reload = async () => {
               plan_date__lte: today,
             });
             const todayItems = Array.isArray(todayRes.data) ? todayRes.data : [];
-            const todayStock = todayItems.reduce((sum, item) => sum + Number(item.stock_qty || 0), 0);
-            systemStockToday.value = todayItems.length ? todayStock : null;
+            const todayVal = todayItems.reduce((sum, item) => sum + getMetricValueForType(item), 0);
+            systemStockToday.value = todayItems.length ? todayVal : null;
           } catch (_) {
             systemStockToday.value = null;
           }
@@ -1010,7 +1022,7 @@ const batchApplyAndRecalc = async () => {
           plan_date: row.calc_start_date,
           adjust_type: props.adjustType,
           adjust_qty: totalAdjust,
-          reason: `${props.adjustType} 一括補正（実在庫${batchActualInputs.value[idx]} − システム${row.stock_today}、累計${totalAdjust}）`,
+          reason: `${props.adjustType} 一括${guideReasonPrefix}（${guideActualWord}${batchActualInputs.value[idx]} − システム${row.value_today}、累計${totalAdjust}）`,
         }).catch((e) => console.error('一括保存エラー:', row.product_code, e));
       })
     );
@@ -1053,6 +1065,7 @@ onMounted(() => {
 }
 .toolbar {
   display: flex;
+  align-items: center;
   gap: 12px;
   margin-bottom: 8px;
 }

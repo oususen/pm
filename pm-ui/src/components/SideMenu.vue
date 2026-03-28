@@ -85,8 +85,6 @@ const sections = [
       { label: "調整メニュー", link: "/inventory/adjustments" },
       { label: "進度調整", link: "/inventory/adjustments/progress" },
       { label: "在庫調整", link: "/inventory/adjustments/stock" },
-      { label: "計画在庫調整", link: "/inventory/adjustments/planned-stock" },
-      { label: "計画進度調整", link: "/inventory/adjustments/planned-progress" },
     ],
   },
   {

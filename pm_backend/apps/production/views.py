@@ -3257,9 +3257,17 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             for a in LineBacklogAdjustment.objects.filter(process=process, adjust_type=adjust_type)
         }
 
-        # 今日の stock_qty を (product, line) ごとに取得
-        today_stocks = {
-            (lb.product_id, lb.line_id): lb.stock_qty
+        # adjust_type に応じた今日の値フィールドを決定
+        value_field_map = {
+            'STOCK': 'stock_qty',
+            'PLANNED_STOCK': 'planned_stock_qty',
+            'PROGRESS': 'progress_qty',
+            'PLANNED_PROGRESS': 'planned_progress_qty',
+        }
+        value_field = value_field_map.get(adjust_type, 'stock_qty')
+
+        today_values = {
+            (lb.product_id, lb.line_id): getattr(lb, value_field)
             for lb in LineBacklog.objects.filter(
                 process=process,
                 product_id__in=product_ids,
@@ -3287,7 +3295,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 'line_name': line.line_name,
                 'calc_start_date': target_date.isoformat(),
                 'adjust_qty': existing.get((pid, lid, target_date.isoformat()), 0),
-                'stock_today': today_stocks.get((pid, lid)),
+                'value_today': today_values.get((pid, lid)),
             })
 
         results.sort(key=lambda x: (x['product_code'], x['line_code']))
