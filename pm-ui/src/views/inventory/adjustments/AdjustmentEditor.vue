@@ -980,23 +980,62 @@ const loadBatchProducts = async () => {
   }
 };
 
-// ① 在庫再計算 → 品番リスト再取得（全関連ラインに対して実行）
+// 一括再計算の共通ロジック
+// - PROGRESS/PLANNED_PROGRESS: 工程の製品をline_idでグループ化して進度のみ再計算
+// - STOCK/PLANNED_STOCK: 全関連ラインを対象に在庫のみ再計算（進度スキップ）
+const executeBatchRecalc = async () => {
+  const endDateObj = new Date(today);
+  endDateObj.setDate(endDateObj.getDate() + 30);
+  const endDate = endDateObj.toISOString().slice(0, 10);
+
+  const isProgressType = props.adjustType === "PROGRESS" || props.adjustType === "PLANNED_PROGRESS";
+
+  if (isProgressType) {
+    // 工程の製品だけを line_id でグループ化して進度のみ再計算
+    const productsByLine = {};
+    for (const p of batchProducts.value) {
+      if (!productsByLine[p.line_id]) productsByLine[p.line_id] = [];
+      productsByLine[p.line_id].push(p.product_id);
+    }
+    await Promise.all(
+      Object.entries(productsByLine).map(([lid, pids]) =>
+        api.lineBacklogs.recalculateInventory({
+          line_id: Number(lid),
+          start_date: today,
+          end_date: endDate,
+          product_ids: pids,
+          progress_only: true,
+        })
+      )
+    );
+  } else {
+    // 在庫系: 工程の対象品のみ、line_idでグループ化して在庫のみ再計算（進度スキップ）
+    const productsByLine = {};
+    for (const p of batchProducts.value) {
+      if (!productsByLine[p.line_id]) productsByLine[p.line_id] = [];
+      productsByLine[p.line_id].push(p.product_id);
+    }
+    await Promise.all(
+      Object.entries(productsByLine).map(([lid, pids]) =>
+        api.lineBacklogs.recalculateInventory({
+          line_id: Number(lid),
+          start_date: today,
+          end_date: endDate,
+          product_ids: pids,
+          include_progress: false,
+        })
+      )
+    );
+  }
+};
+
+// ① 在庫/進度再計算 → 品番リスト再取得
 const batchRecalcThenReload = async () => {
   if (!batchProcessCode.value) return;
   batchWorking.value = true;
   batchError.value = "";
   try {
-    const lineIds = batchLineInfo.value?.line_ids || [];
-    if (lineIds.length) {
-      const endDateObj = new Date(today);
-      endDateObj.setDate(endDateObj.getDate() + 30);
-      const endDate = endDateObj.toISOString().slice(0, 10);
-      await Promise.all(
-        lineIds.map((lid) =>
-          api.lineBacklogs.recalculateInventory({ line_id: lid, start_date: today, end_date: endDate })
-        )
-      );
-    }
+    await executeBatchRecalc();
     await loadBatchProducts();
   } catch (e) {
     batchError.value = e?.response?.data?.detail || "再計算に失敗しました";
@@ -1026,18 +1065,7 @@ const batchApplyAndRecalc = async () => {
         }).catch((e) => console.error('一括保存エラー:', row.product_code, e));
       })
     );
-    // 全関連ラインを再計算
-    const lineIds = batchLineInfo.value?.line_ids || [];
-    if (lineIds.length) {
-      const endDateObj = new Date(today);
-      endDateObj.setDate(endDateObj.getDate() + 30);
-      const endDate = endDateObj.toISOString().slice(0, 10);
-      await Promise.all(
-        lineIds.map((lid) =>
-          api.lineBacklogs.recalculateInventory({ line_id: lid, start_date: today, end_date: endDate })
-        )
-      );
-    }
+    await executeBatchRecalc();
     batchActualInputs.value = {};
     await loadBatchProducts();
   } catch (e) {

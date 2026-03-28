@@ -177,7 +177,8 @@ def recalculate_progress_qty(
     if initial_backlog:
         last_progress = initial_backlog.progress_qty or 0
         progress_by_date[initial_backlog.plan_date] = last_progress
-        last_planned_progress = initial_backlog.planned_progress_qty or 0
+        # 計画進度の初期値は実進度（progress_qty）を使う（計画在庫が実在庫を初期値にするのと同じ思想）
+        last_planned_progress = initial_backlog.progress_qty or 0
         planned_progress_by_date[initial_backlog.plan_date] = last_planned_progress
 
     process_ids = {r.process_id for r in backlogs if r.process_id}
@@ -309,9 +310,11 @@ def recalculate_progress_qty(
             + scrap_adjust_total
             + progress_adjust
         )
+        # 計画在庫と同じ時制考慮: 過去日は実績、今日以降は計画
+        planned_production = actual_total if plan_date < today else plan_total
         planned_progress_qty = (
             prev_planned_progress
-            + plan_total
+            + planned_production
             - progress_shipment
             + adjust_total
             + scrap_adjust_total

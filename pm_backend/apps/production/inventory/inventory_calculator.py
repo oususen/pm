@@ -1140,8 +1140,7 @@ def recalculate_planned_stock_qty(
         # 最終品：self_lt_days 分先の firm 需要を差し引く
         lt_adjustment = _compute_planned_stock_lt_adjustment(
             product_id, initial_backlog.plan_date, max_lt, shift_working_days,
-            firm_map=firm_map,
-            final_delivery_lt=final_delivery_lt if is_final_product else None,
+            firm_map=firm_map,            final_delivery_lt=final_delivery_lt if is_final_product else None,
         )
         last_planned = (initial_backlog.stock_qty or 0) - lt_adjustment
         planned_by_date[initial_backlog.plan_date] = last_planned
@@ -1253,6 +1252,7 @@ def recalculate_inventory_for_line(
     include_progress=True,
     line_final_only=False,
     product_ids=None,
+    progress_only=False,
 ):
     """
     指定ラインの在庫を再計算
@@ -1264,35 +1264,45 @@ def recalculate_inventory_for_line(
         include_progress: 進度も再計算するか（デフォルト: True）
         line_final_only: ライン最終品のみ計算するか（デフォルト: False）
         product_ids: 対象製品ID配列（指定時はその製品のみ計算）
+        progress_only: Trueの場合は進度のみ再計算し、在庫・計画在庫をスキップ
     """
     import logging
     import time
     logger = logging.getLogger(__name__)
     target_product_ids = sorted({int(pid) for pid in (product_ids or []) if pid is not None})
 
+    # progress_only=True のとき進度は必ず計算する
+    if progress_only:
+        include_progress = True
+
     overall_start = time.perf_counter()
     logger.info(
-        "在庫再計算開始: line_id=%s, %s ~ %s, line_final_only=%s, product_count=%s",
+        "在庫再計算開始: line_id=%s, %s ~ %s, line_final_only=%s, progress_only=%s, product_count=%s",
         line_id,
         start_date,
         end_date,
         line_final_only,
+        progress_only,
         len(target_product_ids) if target_product_ids else "ALL",
     )
 
-    # まず仕損数を集計
-    scrap_start = time.perf_counter()
-    aggregate_scrap_to_backlog(
-        line_id,
-        start_date,
-        end_date,
-        product_ids=target_product_ids or None,
-    )
-    logger.info("仕損集計時間: %.3fs", time.perf_counter() - scrap_start)
+    if not progress_only:
+        # まず仕損数を集計
+        scrap_start = time.perf_counter()
+        aggregate_scrap_to_backlog(
+            line_id,
+            start_date,
+            end_date,
+            product_ids=target_product_ids or None,
+        )
+        logger.info("仕損集計時間: %.3fs", time.perf_counter() - scrap_start)
 
-    firm_start = time.perf_counter()
-    firm_map = _build_firm_order_map(line_id, start_date, end_date)
-    logger.info("確定受注マップ作成時間: %.3fs", time.perf_counter() - firm_start)
+        firm_start = time.perf_counter()
+        firm_map = _build_firm_order_map(line_id, start_date, end_date)
+        logger.info("確定受注マップ作成時間: %.3fs", time.perf_counter() - firm_start)
+    else:
+        firm_map = {}
+
     adjustment_maps = _build_adjustment_maps(
         line_id,
         start_date,
@@ -1323,35 +1333,36 @@ def recalculate_inventory_for_line(
     for product_id in product_ids:
         logger.info(f"製品ID {product_id} の在庫計算中...")
 
-        # 実在庫を計算
-        t0 = time.perf_counter()
-        recalculate_stock_qty(
-            line_id,
-            product_id,
-            start_date,
-            end_date,
-            firm_map=firm_map,
-            stock_adjust_map=adjustment_maps.get('STOCK'),
-        )
-        stock_elapsed = time.perf_counter() - t0
-        stock_total += stock_elapsed
-        if stock_elapsed > stock_max[0]:
-            stock_max = (stock_elapsed, product_id)
+        if not progress_only:
+            # 実在庫を計算
+            t0 = time.perf_counter()
+            recalculate_stock_qty(
+                line_id,
+                product_id,
+                start_date,
+                end_date,
+                firm_map=firm_map,
+                stock_adjust_map=adjustment_maps.get('STOCK'),
+            )
+            stock_elapsed = time.perf_counter() - t0
+            stock_total += stock_elapsed
+            if stock_elapsed > stock_max[0]:
+                stock_max = (stock_elapsed, product_id)
 
-        # 計画在庫を計算
-        t1 = time.perf_counter()
-        recalculate_planned_stock_qty(
-            line_id,
-            product_id,
-            start_date,
-            end_date,
-            firm_map=firm_map,
-            planned_stock_adjust_map=adjustment_maps.get('PLANNED_STOCK'),
-        )
-        planned_elapsed = time.perf_counter() - t1
-        planned_total += planned_elapsed
-        if planned_elapsed > planned_max[0]:
-            planned_max = (planned_elapsed, product_id)
+            # 計画在庫を計算
+            t1 = time.perf_counter()
+            recalculate_planned_stock_qty(
+                line_id,
+                product_id,
+                start_date,
+                end_date,
+                firm_map=firm_map,
+                planned_stock_adjust_map=adjustment_maps.get('PLANNED_STOCK'),
+            )
+            planned_elapsed = time.perf_counter() - t1
+            planned_total += planned_elapsed
+            if planned_elapsed > planned_max[0]:
+                planned_max = (planned_elapsed, product_id)
 
         if include_progress:
             from .progress_calculator import recalculate_progress_qty

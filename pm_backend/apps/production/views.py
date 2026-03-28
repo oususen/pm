@@ -3122,6 +3122,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             include_progress: bool (optional, default: True),
             line_final_only: bool (optional, default: False) - Trueの場合はライン最終品のみ計算
             final_only: bool (deprecated, line_final_only を使用) - 後方互換のため残存
+            progress_only: bool (optional, default: False) - Trueの場合は進度のみ再計算し在庫をスキップ
         }
         """
         from .inventory.inventory_calculator import recalculate_inventory_for_line
@@ -3147,6 +3148,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             line_final_only = line_final_only_raw.lower() in ['true', '1', 'yes']
         else:
             line_final_only = bool(line_final_only_raw)
+
+        progress_only_raw = request.data.get('progress_only', False)
+        if isinstance(progress_only_raw, str):
+            progress_only = progress_only_raw.lower() in ['true', '1', 'yes']
+        else:
+            progress_only = bool(progress_only_raw)
 
         if not line_id:
             return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -3174,6 +3181,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 include_progress=include_progress,
                 line_final_only=line_final_only,
                 product_ids=requested_product_ids or None,
+                progress_only=progress_only,
             )
             record_count = LineBacklog.objects.filter(
                 line_id=line_id,
