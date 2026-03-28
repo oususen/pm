@@ -3192,6 +3192,113 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         """表示中品番限定の在庫再計算。"""
         return self.recalculate_inventory(request)
 
+    @action(detail=False, methods=['get'], url_path='batch_adjust_info')
+    def batch_adjust_info(self, request):
+        """
+        工程上の全品番（ライン別）の調整対象日・現在調整値を返すAPI（一括調整用）。
+
+        クエリパラメータ:
+            process_code: str (required)
+            adjust_type: str (required) - STOCK / PLANNED_STOCK / PROGRESS / PLANNED_PROGRESS
+        """
+        from .inventory.inventory_calculator import _get_max_parent_bom_lead_time
+
+        process_code = (request.query_params.get('process_code') or '').strip()
+        adjust_type = (request.query_params.get('adjust_type') or '').strip().upper()
+
+        if not process_code:
+            return Response({'detail': 'process_code is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not adjust_type:
+            return Response({'detail': 'adjust_type is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        process = Process.objects.filter(process_code=process_code, is_active=True).first()
+        if not process:
+            return Response({'detail': f'工程が見つかりません: {process_code}'}, status=status.HTTP_404_NOT_FOUND)
+
+        # 工程上の (product, line) 組み合わせを取得（重複なし）
+        from masters.models import Product as ProductModel
+        pl_pairs = list(
+            LineBacklog.objects.filter(process=process)
+            .values('product_id', 'line_id')
+            .distinct()
+        )
+        product_ids = list({row['product_id'] for row in pl_pairs})
+        line_ids = list({row['line_id'] for row in pl_pairs})
+
+        products = {p.id: p for p in ProductModel.objects.filter(id__in=product_ids)}
+        lines = {l.id: l for l in Line.objects.filter(id__in=line_ids)}
+
+        today = get_business_today()
+        calendar_id = Calendar.objects.filter(calendar_code='daiso').values_list('id', flat=True).first()
+        workday_cache = {}
+
+        def is_working_day(d):
+            if not calendar_id:
+                return d.weekday() < 5
+            if d in workday_cache:
+                return workday_cache[d]
+            cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=d).first()
+            result = cal.is_working_day if cal is not None else d.weekday() < 5
+            workday_cache[d] = result
+            return result
+
+        def calc_start(max_lt):
+            remaining = max_lt + 1
+            current = today
+            while remaining > 0:
+                current = current - timedelta(days=1)
+                if is_working_day(current):
+                    remaining -= 1
+            return current
+
+        # 既存の調整値をまとめて取得（工程で絞る）
+        existing = {
+            (a.product_id, a.line_id, str(a.plan_date)): a.adjust_qty
+            for a in LineBacklogAdjustment.objects.filter(process=process, adjust_type=adjust_type)
+        }
+
+        # 今日の stock_qty を (product, line) ごとに取得
+        today_stocks = {
+            (lb.product_id, lb.line_id): lb.stock_qty
+            for lb in LineBacklog.objects.filter(
+                process=process,
+                product_id__in=product_ids,
+                plan_date=today,
+                sequence_no=0,
+            )
+        }
+
+        results = []
+        for row in pl_pairs:
+            pid = row['product_id']
+            lid = row['line_id']
+            product = products.get(pid)
+            line = lines.get(lid)
+            if not product or not line:
+                continue
+            max_lt = _get_max_parent_bom_lead_time(pid)
+            target_date = calc_start(max_lt)
+            results.append({
+                'product_id': pid,
+                'product_code': product.product_code,
+                'product_name': product.product_name,
+                'line_id': lid,
+                'line_code': line.line_code,
+                'line_name': line.line_name,
+                'calc_start_date': target_date.isoformat(),
+                'adjust_qty': existing.get((pid, lid, target_date.isoformat()), 0),
+                'stock_today': today_stocks.get((pid, lid)),
+            })
+
+        results.sort(key=lambda x: (x['product_code'], x['line_code']))
+        return Response({
+            'process_id': process.id,
+            'process_code': process.process_code,
+            'process_name': process.process_name,
+            'line_ids': line_ids,
+            'products': results,
+        })
+
     @action(detail=False, methods=['get'], url_path='calc_start_date')
     def get_calc_start_date(self, request):
         """

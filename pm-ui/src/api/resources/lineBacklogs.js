@@ -33,6 +33,9 @@ export const createLineBacklogsAPI = (client) => ({
   getCalcStartDate(params) {
     return client.get('/line-backlogs/calc_start_date/', { params })
   },
+  getBatchAdjustInfo(params) {
+    return client.get('/line-backlogs/batch_adjust_info/', { params })
+  },
   recalculateInventory(payload) {
     return client.post('/line-backlogs/recalculate_inventory/', payload)
   },

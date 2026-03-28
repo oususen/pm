@@ -3,7 +3,7 @@
     <div class="caption">[SSE0030] {{ title }}</div>
     <div class="toolbar">
       <label class="toolbar-field">
-        <span>調整日</span>
+        <span>実行日</span>
         <input v-model="adjustDate" type="date" />
       </label>
       <label class="toolbar-field">
@@ -16,11 +16,12 @@
     </div>
 
     <div class="tabs">
-      <button class="tab active" type="button">個別</button>
-      <button class="tab" type="button">一括</button>
+      <button class="tab" :class="{ active: activeTab === 'single' }" type="button" @click="activeTab = 'single'">個別</button>
+      <button class="tab" :class="{ active: activeTab === 'batch' }" type="button" @click="activeTab = 'batch'">一括</button>
     </div>
 
-    <div class="main">
+    <!-- 個別タブ -->
+    <div class="main" v-if="activeTab === 'single'">
       <section class="left-pane">
         <div class="panel">
           <div class="row">
@@ -28,7 +29,6 @@
             <input
               v-model="form.productCode"
               type="text"
-              @blur="resolveByProductCode"
               @keyup.enter="resolveByProductCode"
             />
           </div>
@@ -84,12 +84,65 @@
           </div>
           <div class="row">
             <label>表示開始日</label>
-            <input v-model="displayStartDate" type="date" @change="reload" />
+            <input
+              v-model="displayStartDate"
+              type="date"
+              :max="adjustmentDate"
+              @change="reload"
+            />
           </div>
+          <div class="row">
+            <label>調整対象日</label>
+            <input
+              v-model="adjustmentDate"
+              type="date"
+              readonly
+              :title="form.productId ? '品番から自動計算されます（today − (max LT + 1) 営業日）' : '調整可能な日付（グリッド上のこの日だけ入力できます）'"
+            />
+          </div>
+          <!-- 在庫タイプのみ：今日の差分から調整値を自動計算 -->
+          <div v-if="props.adjustType === 'STOCK' && form.productId && form.lineId" class="stock-helper">
+            <div class="sh-title">在庫補正ガイド</div>
+            <ol class="sh-steps">
+              <li>
+                <span>① 在庫を最新化</span>
+                <button type="button" class="btn btn-step" @click="recalcThenReload" :disabled="adjustWorking">
+                  {{ adjustWorking ? '処理中...' : '在庫再計算して確認' }}
+                </button>
+              </li>
+              <li>
+                <span>② 実在庫を入力して差分を確認</span>
+                <div class="sh-fields">
+                  <div class="row">
+                    <label>システム在庫（今日）</label>
+                    <span class="sh-value">{{ systemStockToday !== null ? systemStockToday : '—' }}</span>
+                  </div>
+                  <div class="row">
+                    <label>実在庫（今日）</label>
+                    <input v-model.number="actualStockToday" type="number" placeholder="実測値を入力" />
+                  </div>
+                  <div class="row">
+                    <label>差分（調整値）</label>
+                    <span class="sh-value" :class="{ negative: stockDiff < 0 }">
+                      {{ stockDiff !== null ? (stockDiff >= 0 ? '+' : '') + stockDiff : '—' }}
+                    </span>
+                  </div>
+                </div>
+              </li>
+              <li>
+                <span>③ 差分を調整対象日に適用して再計算</span>
+                <button type="button" class="btn btn-step btn-step-final" @click="applyAndRecalc" :disabled="stockDiff === null || adjustWorking">
+                  {{ adjustWorking ? '処理中...' : '調整を保存して再計算' }}
+                </button>
+              </li>
+            </ol>
+          </div>
+
           <div class="adjust-note">
-            <p>※ この画面の調整値は「調整マスタ（production_line_backlog_adjustment）」に保存されます。</p>
-            <p>※ 在庫残量一覧の「調整」（LineBacklog.adjust_qty）とは別管理です。</p>
-            <p>※ 調整値は {{ recalculationLabel }} 実行後に {{ reflectionLabel }} へ反映されます。</p>
+            <p>※ 調整対象日は品番のリードタイムから自動計算されます（今日 − (最大LT + 1) 営業日）。</p>
+            <p>※ 在庫は日々累積で繰り越されるため、調整対象日に値を入れることで以降の全日に反映されます。</p>
+            <p>※ 在庫補正の正しい手順：<strong>在庫再計算 → 実在庫入力 → 調整保存 → 再計算</strong>（上記ガイドを使用）。</p>
+            <p>※ 調整値は「調整マスタ（production_line_backlog_adjustment）」に保存されます。在庫再計算のたびに読み込まれ、在庫に反映され続けます。</p>
           </div>
         </div>
       </section>
@@ -126,7 +179,9 @@
                   class="qty-input"
                   type="number"
                   :value="row.currentAdjust"
-                  @input="onAdjustInput(row.date, $event)"
+                  :readonly="row.date !== adjustmentDate"
+                  :class="{ 'qty-input-locked': row.date !== adjustmentDate }"
+                  @input="row.date === adjustmentDate && onAdjustInput(row.date, $event)"
                 />
               </td>
               <td :class="{ negative: row.progress < 0 }">{{ row.progress }}</td>
@@ -135,16 +190,85 @@
         </table>
 
         <div class="actions">
-          <button class="btn primary" type="button" @click="saveCurrentDate">登録</button>
+          <button
+            v-if="!(props.adjustType === 'STOCK' && form.productId && form.lineId)"
+            class="btn primary" type="button" @click="saveCurrentDate"
+          >登録</button>
           <button class="btn" type="button" @click="reload">再読込</button>
         </div>
       </section>
+    </div>
+
+    <!-- 一括タブ -->
+    <div class="batch-pane" v-if="activeTab === 'batch'">
+      <div class="batch-toolbar">
+        <div class="row" style="max-width:400px">
+          <label>工程CD</label>
+          <input
+            v-model="batchProcessCode"
+            type="text"
+            placeholder="工程コードを入力"
+            @keyup.enter="loadBatchProducts"
+          />
+        </div>
+        <button class="btn" type="button" @click="batchRecalcThenReload" :disabled="batchWorking || !batchProcessCode">
+          ① 在庫再計算して確認
+        </button>
+        <button class="btn primary" type="button" @click="batchApplyAndRecalc" :disabled="batchWorking || !batchProducts.length || !hasBatchDiff">
+          ② 調整を保存して再計算
+        </button>
+      </div>
+
+      <div v-if="batchWorking" class="center">処理中...</div>
+      <div v-else-if="batchError" class="center" style="color:#c00">{{ batchError }}</div>
+      <div v-else-if="batchLineInfo">
+        <p class="batch-line-name">{{ batchLineInfo.process_code }} — {{ batchLineInfo.process_name }}</p>
+        <p class="batch-guide">実在庫（今日）を入力すると差分が自動計算されます。② ボタンで一括保存・再計算されます。</p>
+        <table class="grid">
+          <thead>
+            <tr>
+              <th>品番</th>
+              <th>品名</th>
+              <th>ライン</th>
+              <th>調整対象日</th>
+              <th>現在調整値</th>
+              <th>システム在庫（今日）</th>
+              <th>実在庫（今日）</th>
+              <th>差分（調整値）</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="!batchProducts.length">
+              <td colspan="8" class="center">品番が見つかりません</td>
+            </tr>
+            <tr v-for="(row, idx) in batchProducts" :key="`${row.product_id}-${row.line_id}`">
+              <td>{{ row.product_code }}</td>
+              <td>{{ row.product_name }}</td>
+              <td>{{ row.line_code }}</td>
+              <td>{{ row.calc_start_date }}</td>
+              <td>{{ row.adjust_qty }}</td>
+              <td>{{ row.stock_today !== null && row.stock_today !== undefined ? row.stock_today : '—' }}</td>
+              <td>
+                <input
+                  class="qty-input"
+                  type="number"
+                  v-model.number="batchActualInputs[idx]"
+                  placeholder="実測値"
+                />
+              </td>
+              <td :class="{ negative: batchDiff(row, idx) < 0 }">
+                {{ batchDiff(row, idx) !== null ? (batchDiff(row, idx) >= 0 ? '+' : '') + batchDiff(row, idx) : '—' }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from "vue";
+import { onMounted, reactive, ref, computed } from "vue";
 import api from "@/api/client";
 
 const props = defineProps({
@@ -156,7 +280,114 @@ const props = defineProps({
 const today = new Date().toISOString().slice(0, 10);
 const adjustDate = ref(today);
 const displayStartDate = ref(today);
+const adjustmentDate = ref(today); // LTから自動計算される調整可能日（この行だけ入力可）
 const processMode = ref("single");
+const activeTab = ref("single");
+
+// 在庫差分ヘルパー（STOCKタイプのみ）
+const systemStockToday = ref(null);
+const actualStockToday = ref(null);
+const adjustWorking = ref(false);
+const stockDiff = computed(() =>
+  actualStockToday.value !== null && systemStockToday.value !== null
+    ? actualStockToday.value - systemStockToday.value
+    : null
+);
+
+const previewDiff = () => {};
+
+const applyStockDiff = () => {
+  if (stockDiff.value === null) return;
+  dateRows.value = dateRows.value.map((row) =>
+    row.date === adjustmentDate.value
+      ? { ...row, currentAdjust: stockDiff.value }
+      : row
+  );
+  applyProgressPreview();
+};
+
+// ① 在庫再計算してリロード
+const recalcThenReload = async () => {
+  if (!form.lineId) return;
+  adjustWorking.value = true;
+  try {
+    const endDateObj = new Date(displayStartDate.value || today);
+    endDateObj.setDate(endDateObj.getDate() + 29);
+    await api.lineBacklogs.recalculateInventory({
+      line_id: form.lineId,
+      start_date: displayStartDate.value || today,
+      end_date: endDateObj.toISOString().slice(0, 10),
+    });
+    await reload();
+  } catch (e) {
+    alert(e?.response?.data?.detail || '在庫再計算に失敗しました');
+  } finally {
+    adjustWorking.value = false;
+  }
+};
+
+// ③ 差分を調整対象日に適用して保存 → 再計算 → リロード
+const applyAndRecalc = async () => {
+  if (stockDiff.value === null || !form.lineId) return;
+  adjustWorking.value = true;
+  try {
+    // 既存の調整値に今回の差分を加算（上書きではなく累積）
+    const existingAdjust = rowsByDate.value[adjustmentDate.value] || 0;
+    const totalAdjust = existingAdjust + stockDiff.value;
+    // グリッドに反映
+    dateRows.value = dateRows.value.map((row) =>
+      row.date === adjustmentDate.value
+        ? { ...row, currentAdjust: totalAdjust }
+        : row
+    );
+    applyProgressPreview();
+    // 調整マスタに保存（累積値で上書き）
+    await api.lineBacklogAdjustments.save({
+      line_code: form.lineCode,
+      product_code: form.productCode,
+      process_code: form.processCode || '',
+      plan_date: adjustmentDate.value,
+      adjust_type: props.adjustType,
+      adjust_qty: totalAdjust,
+      reason: `${props.adjustType} 在庫補正（実在庫${actualStockToday.value} − システム${systemStockToday.value}、累計${totalAdjust}）`,
+    });
+    // 再計算して反映
+    const endDateObj = new Date(displayStartDate.value || today);
+    endDateObj.setDate(endDateObj.getDate() + 29);
+    await api.lineBacklogs.recalculateInventory({
+      line_id: form.lineId,
+      start_date: displayStartDate.value || today,
+      end_date: endDateObj.toISOString().slice(0, 10),
+    });
+    actualStockToday.value = null;
+    await reload();
+  } catch (e) {
+    alert(e?.response?.data?.detail || '処理に失敗しました');
+  } finally {
+    adjustWorking.value = false;
+  }
+};
+
+// 一括タブ用
+const batchProcessCode = ref("");
+const batchLineInfo = ref(null);
+const batchProducts = ref([]);
+const batchActualInputs = ref({});  // 実在庫入力 {index: number}
+const batchWorking = ref(false);
+const batchError = ref("");
+
+// 行ごとの差分（実在庫 - システム在庫）。同一品番が複数ラインに存在しうるためindexで管理
+const batchDiff = (row, idx) => {
+  const actual = batchActualInputs.value[idx];
+  if (actual === null || actual === undefined || actual === '') return null;
+  if (row.stock_today === null || row.stock_today === undefined) return null;
+  return actual - row.stock_today;
+};
+
+// 1件以上差分が入力されているか
+const hasBatchDiff = computed(() =>
+  batchProducts.value.some((row, idx) => batchDiff(row, idx) !== null)
+);
 const loading = ref(false);
 const resolvingProduct = ref(false);
 const rowsByDate = ref({});
@@ -329,6 +560,14 @@ const resolveByProductCode = async () => {
 
     if (!product) {
       alert("品番に該当する製品が見つかりません。");
+      form.productId = null;
+      form.productName = "";
+      form.partNo = "";
+      processCandidates.value = [];
+      selectedProcessKey.value = "";
+      adjustmentDate.value = today;
+      systemStockToday.value = null;
+      actualStockToday.value = null;
       return;
     }
 
@@ -338,6 +577,20 @@ const resolveByProductCode = async () => {
     form.productId = product.id || null;
     processCandidates.value = [];
     selectedProcessKey.value = "";
+
+    // calc_start_date を自動取得して調整日にセット（開始日は調整日以前のままを維持）
+    try {
+      const calcRes = await api.lineBacklogs.getCalcStartDate({ product_id: product.id });
+      if (calcRes.data?.calc_start_date) {
+        adjustmentDate.value = calcRes.data.calc_start_date;
+        // 開始日が調整日より後になっていたら調整日に揃える
+        if (displayStartDate.value > adjustmentDate.value) {
+          displayStartDate.value = adjustmentDate.value;
+        }
+      }
+    } catch (_) {
+      // 取得失敗時は今日のまま
+    }
 
     // 購入品/外作部品はBOMの調達区分を優先して候補化する
     const allBomItemRes = await api.bomItems.getBOMItems({
@@ -614,8 +867,31 @@ const reload = async () => {
         metricMap[key].stock = Number(item.stock_qty || 0);
       });
       metricsByDate.value = metricMap;
+
+      // 今日の stock_qty を取得（グリッド範囲外の場合は別途フェッチ）
+      if (props.adjustType === 'STOCK') {
+        if (metricMap[today]?.stock !== undefined) {
+          systemStockToday.value = metricMap[today].stock;
+        } else {
+          // 今日がグリッド範囲外 → 単独で取得
+          try {
+            const todayRes = await api.lineBacklogs.getLineBacklogs({
+              line: form.lineId,
+              product: form.productId,
+              plan_date__gte: today,
+              plan_date__lte: today,
+            });
+            const todayItems = Array.isArray(todayRes.data) ? todayRes.data : [];
+            const todayStock = todayItems.reduce((sum, item) => sum + Number(item.stock_qty || 0), 0);
+            systemStockToday.value = todayItems.length ? todayStock : null;
+          } catch (_) {
+            systemStockToday.value = null;
+          }
+        }
+      }
     } else {
       metricsByDate.value = {};
+      systemStockToday.value = null;
     }
   } finally {
     buildRows();
@@ -649,18 +925,18 @@ const applyProgressPreview = () => {
 };
 
 const saveCurrentDate = async () => {
-  if (!form.lineCode || !form.productCode || !adjustDate.value) {
+  if (!form.lineCode || !form.productCode || !adjustmentDate.value) {
     alert("ラインCD・品番・調整日を入力してください。");
     return;
   }
-  const target = dateRows.value.find((row) => row.date === adjustDate.value);
+  const target = dateRows.value.find((row) => row.date === adjustmentDate.value);
   const adjustQty = Number(target?.currentAdjust || 0);
   try {
     await api.lineBacklogAdjustments.save({
       line_code: form.lineCode,
       product_code: form.productCode,
       process_code: form.processCode || "",
-      plan_date: adjustDate.value,
+      plan_date: adjustmentDate.value,
       adjust_type: props.adjustType,
       adjust_qty: adjustQty,
       reason: `${props.adjustType} UI入力`,
@@ -668,6 +944,93 @@ const saveCurrentDate = async () => {
     await reload();
   } catch (e) {
     alert(e?.response?.data?.detail || "保存に失敗しました。");
+  }
+};
+
+const loadBatchProducts = async () => {
+  if (!batchProcessCode.value) return;
+  batchWorking.value = true;
+  batchError.value = "";
+  batchLineInfo.value = null;
+  batchProducts.value = [];
+  batchActualInputs.value = {};
+  try {
+    const res = await api.lineBacklogs.getBatchAdjustInfo({
+      process_code: batchProcessCode.value,
+      adjust_type: props.adjustType,
+    });
+    batchLineInfo.value = res.data;
+    batchProducts.value = res.data.products || [];
+  } catch (e) {
+    batchError.value = e?.response?.data?.detail || "取得に失敗しました";
+  } finally {
+    batchWorking.value = false;
+  }
+};
+
+// ① 在庫再計算 → 品番リスト再取得（全関連ラインに対して実行）
+const batchRecalcThenReload = async () => {
+  if (!batchProcessCode.value) return;
+  batchWorking.value = true;
+  batchError.value = "";
+  try {
+    const lineIds = batchLineInfo.value?.line_ids || [];
+    if (lineIds.length) {
+      const endDateObj = new Date(today);
+      endDateObj.setDate(endDateObj.getDate() + 30);
+      const endDate = endDateObj.toISOString().slice(0, 10);
+      await Promise.all(
+        lineIds.map((lid) =>
+          api.lineBacklogs.recalculateInventory({ line_id: lid, start_date: today, end_date: endDate })
+        )
+      );
+    }
+    await loadBatchProducts();
+  } catch (e) {
+    batchError.value = e?.response?.data?.detail || "再計算に失敗しました";
+    batchWorking.value = false;
+  }
+};
+
+// ② 差分を累積保存 → 再計算 → 再取得
+const batchApplyAndRecalc = async () => {
+  if (!batchProducts.value.length) return;
+  batchWorking.value = true;
+  batchError.value = "";
+  try {
+    await Promise.all(
+      batchProducts.value.map((row, idx) => {
+        const diff = batchDiff(row, idx);
+        if (diff === null) return Promise.resolve();
+        const totalAdjust = (row.adjust_qty || 0) + diff;
+        return api.lineBacklogAdjustments.save({
+          line_code: row.line_code,
+          product_code: row.product_code,
+          process_code: batchProcessCode.value,
+          plan_date: row.calc_start_date,
+          adjust_type: props.adjustType,
+          adjust_qty: totalAdjust,
+          reason: `${props.adjustType} 一括補正（実在庫${batchActualInputs.value[idx]} − システム${row.stock_today}、累計${totalAdjust}）`,
+        }).catch((e) => console.error('一括保存エラー:', row.product_code, e));
+      })
+    );
+    // 全関連ラインを再計算
+    const lineIds = batchLineInfo.value?.line_ids || [];
+    if (lineIds.length) {
+      const endDateObj = new Date(today);
+      endDateObj.setDate(endDateObj.getDate() + 30);
+      const endDate = endDateObj.toISOString().slice(0, 10);
+      await Promise.all(
+        lineIds.map((lid) =>
+          api.lineBacklogs.recalculateInventory({ line_id: lid, start_date: today, end_date: endDate })
+        )
+      );
+    }
+    batchActualInputs.value = {};
+    await loadBatchProducts();
+  } catch (e) {
+    batchError.value = e?.response?.data?.detail || "処理に失敗しました";
+    batchWorking.value = false;
   }
 };
 
@@ -824,6 +1187,57 @@ onMounted(() => {
   border: 1px solid #7d868b;
   background: #d6f4f7;
 }
+.qty-input-locked {
+  background: #e8e8e8;
+  color: #888;
+  cursor: not-allowed;
+}
+.stock-helper {
+  margin-top: 8px;
+  border: 1px solid #5a8fa8;
+  background: #e8f4fb;
+  padding: 8px;
+}
+.sh-title {
+  font-weight: bold;
+  color: #1f3a4e;
+  margin-bottom: 6px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+.sh-steps {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 11px;
+}
+.sh-steps li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sh-fields {
+  padding-left: 4px;
+}
+.sh-value {
+  font-weight: bold;
+  padding: 2px 4px;
+}
+.btn-step {
+  align-self: flex-start;
+  background: #e5e5e5;
+  color: #111;
+  border: 1px solid #6d7478;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-size: 11px;
+  &:disabled { opacity: 0.4; cursor: not-allowed; }
+}
+.btn-step-final {
+  background: #d7f0ff;
+}
 .negative {
   color: #ff2d2d;
   font-weight: 700;
@@ -843,6 +1257,25 @@ onMounted(() => {
 }
 .center {
   text-align: center;
+}
+.batch-pane {
+  padding: 8px;
+}
+.batch-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.batch-line-name {
+  margin: 0 0 6px;
+  font-weight: bold;
+  color: #1f3a4e;
+}
+.batch-guide {
+  margin: 0 0 8px;
+  color: #444;
+  font-size: 11px;
 }
 @media (max-width: 900px) {
   .main {
