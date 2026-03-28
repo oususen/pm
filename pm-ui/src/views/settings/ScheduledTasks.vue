@@ -219,7 +219,9 @@
           />
           <span class="suffix">日後</span>
         </div>
-        <p class="helper">例: 今日から45日後まで。業務日付は8時境界です。</p>
+        <p class="helper">
+          終了日のみ指定。開始日は製品ごとのリードタイムから自動決定されます（今日 − (最大LT + 1)営業日）。業務日付は8時境界です。
+        </p>
       </div>
 
       <div class="field" style="margin-top: 12px">
@@ -570,7 +572,9 @@ const safetyStockTaskLabel = (taskName) => {
   return '自動安全在庫（社内）'
 }
 
-const showRangeBaseDay = (taskName) => taskName === 'INVENTORY_RECALC' || taskName === 'PICKUP_ONLY'
+// INVENTORY_RECALC は _resolve_effective_start_date が LT 基準で開始日を自動決定するため、
+// UI での開始日選択は意味を持たない。PICKUP_ONLY のみ開始日選択を表示する。
+const showRangeBaseDay = (taskName) => taskName === 'PICKUP_ONLY'
 
 const configKey = (cfg) => `${cfg.task_name}-${cfg.line || 'none'}-${cfg.id || 'new'}`
 

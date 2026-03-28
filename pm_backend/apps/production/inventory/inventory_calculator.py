@@ -918,19 +918,32 @@ def recalculate_stock_qty(
         return min(base_rows, key=lambda r: r.id)
 
     today = reference_today or get_business_today()
-    day_before_yesterday = get_prev_working_day(get_prev_working_day(today))  # 前々営業日
     stock_by_date = {}
     firm_map = firm_map or {}
 
-    # システム日付（8時区切り）の前々営業日の実在庫を初期値として取得
-    # 前日ではなく前々営業日を使う理由：
-    # - 7:59に実績入力（昨日の実績）→ 8:01に在庫計算の場合
-    # - 前日の在庫はまだ7:59の実績が反映されていない可能性がある
-    # - 前々営業日の在庫は確定しているので、そこから昨日・今日を再計算すれば正しい値になる
+    # 計画在庫は calc_start_date の stock_qty を初期値として参照するため、
+    # 在庫の再計算範囲を calc_start_date まで広げて stock_qty を常に最新に保つ。
+    # effective_start = min(start_date, calc_start_date)
+    max_lt = _get_max_parent_bom_lead_time(product_id)
+    calc_start_date = shift_working_days(today, -(max_lt + 1))
+    effective_start = min(start_date, calc_start_date)
+
+    # effective_start が start_date より古い場合、バックログを再取得して by_date を再構築
+    if effective_start < start_date:
+        backlogs = list(LineBacklog.objects.filter(
+            line_id=line_id,
+            product_id=product_id,
+            plan_date__range=[effective_start, end_date]
+        ).select_related('product').order_by('plan_date', 'sequence_no', 'id'))
+        by_date = {}
+        for backlog in backlogs:
+            by_date.setdefault(backlog.plan_date, []).append(backlog)
+
+    # effective_start より前の最新在庫を初期値として取得
     initial_backlog = LineBacklog.objects.filter(
         line_id=line_id,
         product_id=product_id,
-        plan_date__lte=day_before_yesterday,
+        plan_date__lt=effective_start,
         stock_qty__isnull=False
     ).order_by('-plan_date', 'sequence_no', 'id').first()
 
@@ -940,8 +953,7 @@ def recalculate_stock_qty(
     else:
         last_stock = 0
 
-    # 更新対象のbacklogを追跡（前々営業日以前は更新しない）
-    yesterday = today - timedelta(days=1)
+    # 更新対象のbacklogを追跡（effective_start以前は更新しない）
     backlogs_to_update = []
 
     for plan_date in sorted(by_date.keys()):
@@ -957,9 +969,8 @@ def recalculate_stock_qty(
             last_stock = stock_qty
             continue
 
-        # 前々営業日以前は既存の在庫値を使用し、更新しない
-        if plan_date <= day_before_yesterday:
-            # 既存の在庫値を取得してstock_by_dateに保持（後続の計算用）
+        # effective_start より前は既存の在庫値を使用し、更新しない（安全ガード）
+        if plan_date < effective_start:
             existing_stock = 0
             for row in rows:
                 if row.stock_qty:
@@ -1130,7 +1141,7 @@ def recalculate_planned_stock_qty(
         lt_adjustment = _compute_planned_stock_lt_adjustment(
             product_id, initial_backlog.plan_date, max_lt, shift_working_days,
             firm_map=firm_map,
-            final_delivery_lt=final_delivery_lt,
+            final_delivery_lt=final_delivery_lt if is_final_product else None,
         )
         last_planned = (initial_backlog.stock_qty or 0) - lt_adjustment
         planned_by_date[initial_backlog.plan_date] = last_planned

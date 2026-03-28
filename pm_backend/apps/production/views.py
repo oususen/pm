@@ -3192,6 +3192,97 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         """表示中品番限定の在庫再計算。"""
         return self.recalculate_inventory(request)
 
+    @action(detail=False, methods=['get'], url_path='calc_start_date')
+    def get_calc_start_date(self, request):
+        """
+        製品の calc_start_date（= today − (max親BOM LT + 1) 営業日）を返すAPI。
+        在庫調整画面の表示開始日の自動設定に使用する。
+
+        クエリパラメータ: product_id (required)
+        """
+        from .inventory.inventory_calculator import _get_max_parent_bom_lead_time
+
+        product_id = request.query_params.get('product_id')
+        if not product_id:
+            return Response({'detail': 'product_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            product_id = int(product_id)
+        except ValueError:
+            return Response({'detail': 'product_id must be numeric'}, status=status.HTTP_400_BAD_REQUEST)
+
+        today = get_business_today()
+        max_lt = _get_max_parent_bom_lead_time(product_id)
+
+        # daiso カレンダーで営業日シフト
+        calendar_id = Calendar.objects.filter(calendar_code='daiso').values_list('id', flat=True).first()
+        workday_cache = {}
+
+        def is_working_day(target_date):
+            if not calendar_id:
+                return target_date.weekday() < 5
+            if target_date in workday_cache:
+                return workday_cache[target_date]
+            cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=target_date).first()
+            is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
+            workday_cache[target_date] = is_work
+            return is_work
+
+        remaining = max_lt + 1
+        current = today
+        while remaining > 0:
+            current = current - timedelta(days=1)
+            if is_working_day(current):
+                remaining -= 1
+
+        return Response({
+            'calc_start_date': current.isoformat(),
+            'max_lt': max_lt,
+        })
+
+    @action(detail=False, methods=['post'], url_path='recalculate_inventory_deep')
+    def recalculate_inventory_deep(self, request):
+        """
+        過去から在庫・進度を深掘り再計算するAPI。
+        _resolve_effective_start_date によるLT展開を行わず、指定した start_date をそのまま使う。
+        棚卸初期化なしで古い実績データから在庫・進度を巻き直す場合に使用する。
+
+        期待payload: {
+            line_id: int (required),
+            start_date: str (YYYY-MM-DD, required) - 画面の表示開始日をそのまま渡す
+            end_date: str (YYYY-MM-DD, required),
+        }
+        """
+        from .inventory.inventory_calculator import recalculate_inventory_for_line
+
+        line_id = request.data.get('line_id')
+        start_date = request.data.get('start_date')
+        end_date = request.data.get('end_date')
+
+        if not line_id:
+            return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not start_date or not end_date:
+            return Response({'detail': 'start_date and end_date are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d').date()
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d').date()
+        except ValueError as e:
+            return Response({'detail': f'Invalid date format: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            result = recalculate_inventory_for_line(
+                line_id,
+                start_dt,
+                end_dt,
+                include_progress=True,
+            )
+            return Response({
+                'detail': '過去からの在庫・進度再計算が完了しました',
+                'product_count': result.get('product_count', 0),
+            })
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     @action(detail=False, methods=['post'])
     def initialize_progress(self, request):
         """

@@ -30,8 +30,14 @@ export const createLineBacklogsAPI = (client) => ({
   save(payload) {
     return client.post('/line-backlogs/save/', payload)
   },
+  getCalcStartDate(params) {
+    return client.get('/line-backlogs/calc_start_date/', { params })
+  },
   recalculateInventory(payload) {
     return client.post('/line-backlogs/recalculate_inventory/', payload)
+  },
+  recalculateInventoryDeep(payload) {
+    return client.post('/line-backlogs/recalculate_inventory_deep/', payload)
   },
   recalculateInventoryForProducts(payload) {
     return client.post('/line-backlogs/recalculate_inventory_for_products/', payload)

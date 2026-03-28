@@ -494,6 +494,30 @@ class PurchaseActualRegisterView(APIView):
             backlog.actual_qty = int(backlog.actual_qty or 0) + int(qty)
             backlog.save(update_fields=['actual_qty'])
 
+        # 子部品の在庫・出庫を再計算（生産実績変更と同様の処理）
+        # reference_today=target_date により凍結基準を入力した納入日基準にずらし、
+        # 遡及入力時も actual_shipment_qty（出庫/実需）が正しく計算される。
+        try:
+            from production.views_process_realtime import _recalculate_child_stock_after_record_edit
+            child_product_ids = {
+                int(cid)
+                for cid, qty_per in BOMItem.objects.filter(
+                    bom__parent_product_id=product.id,
+                    bom__is_active=True,
+                    bom__is_coproduct=False,
+                ).values_list('child_product_id', 'quantity')
+                if cid and (qty_per or 0) != 0
+            }
+            if child_product_ids:
+                _recalculate_child_stock_after_record_edit(
+                    parent_plan_date=target_date,
+                    today=get_business_today(),
+                    child_product_ids=child_product_ids,
+                )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("子部品の在庫再計算に失敗: %s", e)
+
         return Response({'id': record.id, 'detail': 'created'}, status=status.HTTP_201_CREATED)
 
 

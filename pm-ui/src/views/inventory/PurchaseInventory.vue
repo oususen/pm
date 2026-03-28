@@ -43,6 +43,38 @@
         >
           Excel出力
         </button>
+        <button
+          @click="openDeepRecalcDialog"
+          :disabled="loading || recalculating || !purchaseLineId || !groups.length"
+          class="btn-deep-recalc"
+        >
+          過去から再計算
+        </button>
+      </div>
+    </div>
+
+    <!-- 過去から再計算 確認ダイアログ -->
+    <div v-if="showDeepRecalcDialog" class="deep-recalc-overlay" @click.self="showDeepRecalcDialog = false">
+      <div class="deep-recalc-modal">
+        <div class="deep-recalc-header">
+          <h3>過去から在庫・進度を再計算</h3>
+          <button class="close-btn" type="button" @click="showDeepRecalcDialog = false">×</button>
+        </div>
+        <div class="deep-recalc-body">
+          <p>
+            表示開始日（<strong>{{ startDate }}</strong>）を起点に、在庫・進度を過去から巻き直します。
+          </p>
+          <ul>
+            <li>計算範囲: {{ startDate }} 〜 {{ columns[columns.length - 1] }}</li>
+            <li>在庫・進度を再計算した後、計画在庫・計画進度も自動的に更新されます。</li>
+            <li>データ量によっては完了まで時間がかかる場合があります。</li>
+          </ul>
+          <p class="deep-recalc-warn">※ 日付制限なしで過去データを上書きします。実行前に内容をご確認ください。</p>
+          <div class="deep-recalc-actions">
+            <button type="button" @click="showDeepRecalcDialog = false">キャンセル</button>
+            <button type="button" class="btn-confirm-deep" @click="confirmDeepRecalc">実行</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -875,6 +907,34 @@ const recalculateVisibleProducts = async () => {
   }
 };
 
+const showDeepRecalcDialog = ref(false);
+
+const openDeepRecalcDialog = () => {
+  showDeepRecalcDialog.value = true;
+};
+
+const confirmDeepRecalc = async () => {
+  showDeepRecalcDialog.value = false;
+  recalculating.value = true;
+  error.value = "";
+  try {
+    const start = startDate.value;
+    const end = columns.value[columns.value.length - 1];
+    await api.lineBacklogs.recalculateInventoryDeep({
+      line_id: purchaseLineId.value,
+      start_date: start,
+      end_date: end,
+    });
+    await reloadDemands();
+    await loadHolidayColumns();
+  } catch (e) {
+    error.value = e?.response?.data?.detail || e?.message || "過去から再計算に失敗しました";
+    alert("エラー: " + error.value);
+  } finally {
+    recalculating.value = false;
+  }
+};
+
 const escapeCsv = (val) => {
   if (val === null || val === undefined) return '';
   const str = String(val);
@@ -1240,5 +1300,91 @@ onUpdated(() => {
   margin: 6px 0 0;
   font-size: 13px;
   opacity: 0.9;
+}
+
+/* 過去から再計算 ボタン */
+.btn-deep-recalc {
+  background: #7c3aed;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  &:not(:disabled):hover {
+    background: #6d28d9;
+  }
+}
+
+/* 過去から再計算 ダイアログ */
+.deep-recalc-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3000;
+}
+.deep-recalc-modal {
+  background: #fff;
+  border-radius: 10px;
+  width: min(520px, 92vw);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+.deep-recalc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #7c3aed;
+  color: #fff;
+  h3 { margin: 0; font-size: 15px; }
+}
+.close-btn {
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+}
+.deep-recalc-body {
+  padding: 16px;
+  font-size: 14px;
+  line-height: 1.7;
+  p { margin: 0 0 8px; }
+  ul {
+    margin: 0 0 10px;
+    padding-left: 20px;
+    li { margin-bottom: 4px; }
+  }
+}
+.deep-recalc-warn {
+  color: #b45309;
+  font-size: 12px;
+}
+.deep-recalc-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+  button {
+    padding: 7px 18px;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    cursor: pointer;
+    font-size: 13px;
+  }
+}
+.btn-confirm-deep {
+  background: #7c3aed;
+  color: #fff;
+  border-color: #7c3aed !important;
+  &:hover { background: #6d28d9; }
 }
 </style>

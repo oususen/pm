@@ -52,6 +52,39 @@
         >
           Excel出力
         </button>
+        <button
+          @click="openDeepRecalcDialog"
+          :disabled="loading || recalculating || !hasFilter || !groups.length"
+          class="btn-deep-recalc"
+        >
+          過去から再計算
+        </button>
+      </div>
+    </div>
+
+    <!-- 過去から再計算 確認ダイアログ -->
+    <div v-if="showDeepRecalcDialog" class="code-modal-overlay" @click.self="showDeepRecalcDialog = false">
+      <div class="code-modal deep-recalc-modal">
+        <div class="code-modal-header">
+          <h3>過去から在庫・進度を再計算</h3>
+          <button class="close-btn" type="button" @click="showDeepRecalcDialog = false">×</button>
+        </div>
+        <div class="code-modal-body deep-recalc-body">
+          <p>
+            表示開始日（<strong>{{ startDate }}</strong>）を起点に、在庫・進度を過去から巻き直します。
+          </p>
+          <ul>
+            <li>対象ライン: <strong>{{ getDisplayedLineIds().join(', ') }}</strong></li>
+            <li>計算範囲: {{ startDate }} 〜 {{ columns[columns.length - 1] }}</li>
+            <li>在庫・進度を再計算した後、計画在庫・計画進度も自動的に更新されます。</li>
+            <li>データ量によっては完了まで時間がかかる場合があります。</li>
+          </ul>
+          <p class="deep-recalc-warn">※ 日付制限なしで過去データを上書きします。実行前に内容をご確認ください。</p>
+          <div class="deep-recalc-actions">
+            <button type="button" @click="showDeepRecalcDialog = false">キャンセル</button>
+            <button type="button" class="btn-confirm-deep" @click="confirmDeepRecalc">実行</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -441,6 +474,37 @@ const recalculateVisibleProducts = async () => {
   } catch (e) {
     console.error(e);
     error.value = e?.response?.data?.detail || e?.message || "表示品番の再計算に失敗しました";
+  } finally {
+    recalculating.value = false;
+  }
+};
+
+const showDeepRecalcDialog = ref(false);
+
+const openDeepRecalcDialog = () => {
+  showDeepRecalcDialog.value = true;
+};
+
+const confirmDeepRecalc = async () => {
+  showDeepRecalcDialog.value = false;
+  recalculating.value = true;
+  error.value = "";
+  try {
+    const lineIds = getDisplayedLineIds();
+    const start = startDate.value;
+    const end = columns.value[columns.value.length - 1];
+    await Promise.all(
+      lineIds.map((lineId) =>
+        api.lineBacklogs.recalculateInventoryDeep({
+          line_id: lineId,
+          start_date: start,
+          end_date: end,
+        }).catch((e) => console.error('過去から再計算に失敗:', lineId, e))
+      )
+    );
+    await load();
+  } catch (e) {
+    error.value = e?.response?.data?.detail || e?.message || "過去から再計算に失敗しました";
   } finally {
     recalculating.value = false;
   }
@@ -1045,5 +1109,61 @@ const getCellClass = (group, date, rowKey) => {
   .code-columns {
     grid-template-columns: 1fr;
   }
+}
+
+/* 過去から再計算 ボタン */
+.btn-deep-recalc {
+  background: #7c3aed;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  &:not(:disabled):hover {
+    background: #6d28d9;
+  }
+}
+
+/* 過去から再計算 ダイアログ */
+.deep-recalc-modal {
+  width: min(520px, 92vw);
+}
+.deep-recalc-body {
+  font-size: 14px;
+  line-height: 1.7;
+  p { margin: 0 0 8px; }
+  ul {
+    margin: 0 0 10px;
+    padding-left: 20px;
+    li { margin-bottom: 4px; }
+  }
+}
+.deep-recalc-warn {
+  color: #b45309;
+  font-size: 12px;
+}
+.deep-recalc-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+  button {
+    padding: 7px 18px;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    cursor: pointer;
+    font-size: 13px;
+  }
+}
+.btn-confirm-deep {
+  background: #7c3aed;
+  color: #fff;
+  border-color: #7c3aed !important;
+  &:hover { background: #6d28d9; }
 }
 </style>

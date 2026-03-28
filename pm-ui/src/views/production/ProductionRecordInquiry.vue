@@ -104,14 +104,14 @@
         </select>
       </div>
       <div class="actions">
-        <button class="btn" :disabled="loading" @click="loadSessions">検索</button>
+        <button class="btn" :disabled="loading || !needsSearch" @click="loadSessions">検索</button>
         <button class="btn btn-secondary" :disabled="loading" @click="resetFilters">リセット</button>
       </div>
       <div class="export-actions">
-        <button class="btn btn-secondary" :disabled="loading || !sessions.length" @click="exportCsv">CSV出力</button>
-        <button class="btn btn-secondary" :disabled="loading || !sessions.length" @click="exportExcel">Excel出力</button>
-        <button class="btn btn-secondary" :disabled="loading || !sessions.length" @click="exportExcel2">基幹システム入力用Excel</button>
-        <button class="btn btn-secondary" :disabled="loading || !sessions.length" @click="exportPdf">印刷(PDF)</button>
+        <button class="btn btn-secondary" :disabled="loading || !sessions.length || needsSearch" @click="exportCsv">CSV出力</button>
+        <button class="btn btn-secondary" :disabled="loading || !sessions.length || needsSearch" @click="exportExcel">Excel出力</button>
+        <button class="btn btn-secondary" :disabled="loading || !sessions.length || needsSearch" @click="exportExcel2">基幹システム入力用Excel</button>
+        <button class="btn btn-secondary" :disabled="loading || !sessions.length || needsSearch" @click="exportPdf">印刷(PDF)</button>
       </div>
     </div>
 
@@ -374,6 +374,8 @@ import {
 const loading = ref(false)
 const error = ref('')
 const rawSessions = ref([])
+// フィルタ変更後に検索が必要かどうかのフラグ
+const needsSearch = ref(true)
 const sessions = computed(() => {
   if (!operatorName.value.trim()) return rawSessions.value
   const kw = operatorName.value.trim().toLowerCase()
@@ -904,6 +906,7 @@ const loadSessions = async () => {
     rawSessions.value = []
   } finally {
     loading.value = false
+    needsSearch.value = false
   }
 }
 
@@ -922,6 +925,12 @@ const resetFilters = async () => {
   dateSearchMode.value = 'plan'
   await loadSessions()
 }
+
+// フィルタが変更されたら再検索が必要な状態にする
+watch(
+  [startDate, endDate, dateSearchMode, lineId, processId, productCode, sessionType, status, hasIssue, excludeZeroProduction],
+  () => { needsSearch.value = true }
+)
 
 watch(activeTab, async (nextTab) => {
   if ((nextTab === 'line-settings' || nextTab === 'mapping-settings') && !canEditRecordInquirySettings.value) {
