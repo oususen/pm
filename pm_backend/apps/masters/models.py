@@ -48,6 +48,11 @@ class Product(models.Model):
     )
     order_lot_min = models.PositiveIntegerField(null=True, blank=True, verbose_name='最小発注数')
     order_lot_multiple = models.PositiveIntegerField(default=1, verbose_name='発注倍数')
+    # レーザ材料用フィールド（重量計算: 比重 × 縦 × 横 × 厚さ / 1,000,000 = kg）
+    specific_gravity = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True, verbose_name='比重(g/cm³)')
+    size_length = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name='縦(mm)')
+    size_width = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name='横(mm)')
+    size_thickness = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True, verbose_name='厚さ(mm)')
 
     # 出荷指示書用フィールド
     model_name = models.CharField(max_length=50, null=True, blank=True, verbose_name='機種名')

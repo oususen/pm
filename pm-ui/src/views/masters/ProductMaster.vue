@@ -232,6 +232,27 @@
             <label>発注倍数</label>
             <input v-model.number="formData.order_lot_multiple" type="number" min="1" />
           </div>
+          <div class="form-group-section">レーザ材料情報（重量 = 比重×縦×横×厚さ / 1,000,000 kg）</div>
+          <div class="form-group">
+            <label>比重 (g/cm³)</label>
+            <input v-model.number="formData.specific_gravity" type="number" step="0.0001" min="0" placeholder="例: 7.85" />
+          </div>
+          <div class="form-group">
+            <label>縦 (mm)</label>
+            <input v-model.number="formData.size_length" type="number" step="0.01" min="0" placeholder="例: 1219" />
+          </div>
+          <div class="form-group">
+            <label>横 (mm)</label>
+            <input v-model.number="formData.size_width" type="number" step="0.01" min="0" placeholder="例: 2438" />
+          </div>
+          <div class="form-group">
+            <label>厚さ (mm)</label>
+            <input v-model.number="formData.size_thickness" type="number" step="0.001" min="0" placeholder="例: 4.5" />
+          </div>
+          <div v-if="computedUnitWeight != null" class="form-group">
+            <label>重量/枚 (kg) ※自動計算</label>
+            <div class="computed-value">{{ computedUnitWeight.toFixed(3) }} kg</div>
+          </div>
           <div class="form-group">
             <label>機種名</label>
             <input v-model="formData.model_name" placeholder="例: 17U" />
@@ -460,6 +481,10 @@ const formData = ref({
   standard_lt_days: 0,
   order_lot_min: null,
   order_lot_multiple: 1,
+  specific_gravity: 7.85,
+  size_length: null,
+  size_width: null,
+  size_thickness: null,
   product_group: null,
   used_container: null,
   capacity: null,
@@ -481,6 +506,36 @@ const lfSelectedLine = ref('')
 const lfLineGroups = ref([])
 const lfChanges = ref({})  // product_id -> boolean
 const lfSaving = ref(false)
+
+const computedUnitWeight = computed(() => {
+  const sg = formData.value.specific_gravity
+  const sl = formData.value.size_length
+  const sw = formData.value.size_width
+  const st = formData.value.size_thickness
+  if (sg && sl && sw && st) {
+    return (sg * sl * sw * st) / 1_000_000
+  }
+  return null
+})
+
+// 品名から T{厚さ}X{縦}X{横} を解析して自動入力
+const parseSizeFromName = (name) => {
+  if (!name) return
+  // T4.5X1219X2550 形式、または SPHC-P 1.6X1219X1219 のようなスペース区切り形式に対応
+  const match = String(name).match(/(?:T|[ ])(\d+(?:\.\d+)?)X(\d+(?:\.\d+)?)X(\d+(?:\.\d+)?)/i)
+  if (match) {
+    formData.value.size_thickness = parseFloat(match[1])
+    formData.value.size_length = parseFloat(match[2])
+    formData.value.size_width = parseFloat(match[3])
+  }
+}
+
+watch(() => formData.value.product_name, (newVal) => {
+  // 未入力のときのみ自動補完（手動入力を上書きしない）
+  if (!formData.value.size_thickness && !formData.value.size_length && !formData.value.size_width) {
+    parseSizeFromName(newVal)
+  }
+})
 
 const totalPages = computed(() => {
   if (totalCount.value === 0) return 1
@@ -669,6 +724,10 @@ const showNewDialog = () => {
     standard_lt_days: 0,
     order_lot_min: null,
     order_lot_multiple: 1,
+    specific_gravity: 7.85,
+    size_length: null,
+    size_width: null,
+    size_thickness: null,
     product_group: null,
     used_container: null,
     capacity: null,
@@ -698,6 +757,10 @@ const editProduct = (product) => {
     process: product.process ?? null,
     next_process: product.next_process ?? null,
     management_unit: product.management_unit ?? null,
+    specific_gravity: product.specific_gravity ?? 7.85,
+    size_length: product.size_length ?? null,
+    size_width: product.size_width ?? null,
+    size_thickness: product.size_thickness ?? null,
     product_group: product.product_group ?? null,
     used_container: product.used_container ?? null,
     capacity: product.capacity ?? null,
@@ -752,6 +815,10 @@ const saveProduct = async () => {
       order_lot_multiple: Math.max(1, Number(formData.value.order_lot_multiple || 1)),
       self_lt_days: normalizeNumber(formData.value.self_lt_days),
       capacity: normalizeNumber(formData.value.capacity),
+      specific_gravity: normalizeNumber(formData.value.specific_gravity),
+      size_length: normalizeNumber(formData.value.size_length),
+      size_width: normalizeNumber(formData.value.size_width),
+      size_thickness: normalizeNumber(formData.value.size_thickness),
     }
     if (isEdit.value) {
       await api.products.updateProduct(payload.id, payload)
@@ -1012,6 +1079,24 @@ watch(
 
 .form-group {
   margin-bottom: 1rem;
+}
+.form-group-section {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f766e;
+  background: #f0fdf4;
+  border-left: 3px solid #0f766e;
+  padding: 4px 8px;
+  margin-bottom: 8px;
+}
+.computed-value {
+  padding: 6px 8px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
 }
 .upload-row {
   display: flex;

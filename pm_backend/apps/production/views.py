@@ -14,6 +14,7 @@ from django.db import transaction
 import logging
 import csv
 import io
+import math
 from django.http import HttpResponse
 
 from .models import LineDemand
@@ -4645,6 +4646,7 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
         pattern_rows = []
         total_required_material_qty = Decimal('0')
         total_process_time_min = Decimal('0')
+        total_weight_kg = Decimal('0')
 
         for pattern in patterns:
             finished_items = list(pattern.finished_items.all())
@@ -4699,6 +4701,24 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
             material_unit = getattr(material, 'unit', '') or ''
             equipment = pattern.equipment
 
+            # 重量計算: 比重(g/cm³) × 縦(mm) × 横(mm) × 厚さ(mm) / 1,000,000 = kg/枚
+            sg = getattr(material, 'specific_gravity', None)
+            sl = getattr(material, 'size_length', None)
+            sw = getattr(material, 'size_width', None)
+            st = getattr(material, 'size_thickness', None)
+            if sg and sl and sw and st:
+                unit_weight_kg = Decimal(str(sg)) * Decimal(str(sl)) * Decimal(str(sw)) * Decimal(str(st)) / Decimal('1000000')
+            else:
+                unit_weight_kg = None
+            pattern_weight_kg = (unit_weight_kg * pattern_required_material_qty) if unit_weight_kg is not None else None
+
+            # 梱包数: order_lot_min を梱包入り数として使用
+            pack_qty = getattr(material, 'order_lot_min', None)
+            if pack_qty and pack_qty > 0 and pattern_required_material_qty > 0:
+                required_packages = math.ceil(float(pattern_required_material_qty) / float(pack_qty))
+            else:
+                required_packages = None
+
             pattern_rows.append({
                 'pattern_id': pattern.id,
                 'pattern_no': pattern.pattern_no,
@@ -4706,6 +4726,14 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
                 'material_code': getattr(material, 'product_code', '') or '',
                 'material_name': getattr(material, 'product_name', '') or '',
                 'material_unit': material_unit,
+                'specific_gravity': self._decimal_to_float(sg) if sg is not None else None,
+                'size_length': self._decimal_to_float(sl) if sl is not None else None,
+                'size_width': self._decimal_to_float(sw) if sw is not None else None,
+                'size_thickness': self._decimal_to_float(st) if st is not None else None,
+                'unit_weight_kg': self._decimal_to_float(unit_weight_kg) if unit_weight_kg is not None else None,
+                'total_weight_kg': self._decimal_to_float(pattern_weight_kg) if pattern_weight_kg is not None else None,
+                'pack_qty': pack_qty,
+                'required_packages': required_packages,
                 'equipment_id': getattr(pattern.equipment, 'id', None),
                 'equipment_code': getattr(pattern.equipment, 'equipment_code', '') or '',
                 'equipment_name': getattr(pattern.equipment, 'equipment_name', '') or '',
@@ -4723,15 +4751,24 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
                 'material_code': getattr(material, 'product_code', '') or '',
                 'material_name': getattr(material, 'product_name', '') or '',
                 'material_unit': material_unit,
+                'specific_gravity': self._decimal_to_float(sg) if sg is not None else None,
+                'size_length': self._decimal_to_float(sl) if sl is not None else None,
+                'size_width': self._decimal_to_float(sw) if sw is not None else None,
+                'size_thickness': self._decimal_to_float(st) if st is not None else None,
+                'unit_weight_kg': self._decimal_to_float(unit_weight_kg) if unit_weight_kg is not None else None,
+                'pack_qty': pack_qty,
                 'pattern_count': 0,
                 'required_material_qty': Decimal('0'),
                 'required_shots': Decimal('0'),
+                'total_weight_kg': Decimal('0') if unit_weight_kg is not None else None,
                 'total_process_time_min': Decimal('0'),
             })
             material_row['pattern_count'] += 1
             material_row['required_material_qty'] += pattern_required_material_qty
             material_row['required_shots'] += pattern_required_material_qty
             material_row['total_process_time_min'] += total_process_time
+            if material_row['total_weight_kg'] is not None and unit_weight_kg is not None:
+                material_row['total_weight_kg'] += unit_weight_kg * pattern_required_material_qty
 
             equipment_key = getattr(equipment, 'id', None) or f'code:{getattr(equipment, "equipment_code", "")}'
             equipment_row = equipment_totals_map.setdefault(equipment_key, {
@@ -4746,16 +4783,34 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
 
             total_required_material_qty += pattern_required_material_qty
             total_process_time_min += total_process_time
+            if pattern_weight_kg is not None:
+                total_weight_kg += pattern_weight_kg
 
         material_totals = []
         for item in sorted(material_totals_map.values(), key=lambda x: (x['material_code'], x['material_name'])):
+            req_mat = item['required_material_qty']
+            pack_qty_val = item.get('pack_qty')
+            required_packages = (
+                math.ceil(float(req_mat) / float(pack_qty_val))
+                if pack_qty_val and pack_qty_val > 0 and req_mat > 0
+                else None
+            )
+            tw = item.get('total_weight_kg')
             material_totals.append({
                 'material_id': item['material_id'],
                 'material_code': item['material_code'],
                 'material_name': item['material_name'],
                 'material_unit': item['material_unit'],
+                'specific_gravity': item.get('specific_gravity'),
+                'size_length': item.get('size_length'),
+                'size_width': item.get('size_width'),
+                'size_thickness': item.get('size_thickness'),
+                'unit_weight_kg': item.get('unit_weight_kg'),
+                'total_weight_kg': self._decimal_to_float(tw) if isinstance(tw, Decimal) else tw,
+                'pack_qty': pack_qty_val,
+                'required_packages': required_packages,
                 'pattern_count': item['pattern_count'],
-                'required_material_qty': self._decimal_to_float(item['required_material_qty']),
+                'required_material_qty': self._decimal_to_float(req_mat),
                 'required_shots': self._decimal_to_float(item['required_shots']),
                 'total_process_time_min': self._decimal_to_float(item['total_process_time_min']),
             })
@@ -4784,6 +4839,7 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
                 'required_shots': self._decimal_to_float(total_required_material_qty),
                 'required_material_qty': self._decimal_to_float(total_required_material_qty),
                 'total_process_time_min': self._decimal_to_float(total_process_time_min),
+                'total_weight_kg': self._decimal_to_float(total_weight_kg),
             },
         })
 

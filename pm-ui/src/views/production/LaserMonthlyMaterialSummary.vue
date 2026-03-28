@@ -43,8 +43,12 @@
         <div class="stat-value">{{ formatSheetQty(totals.required_material_qty) }}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">総加工時間(分)</div>
-        <div class="stat-value">{{ formatNumber(totals.total_process_time_min, 1) }}</div>
+        <div class="stat-label">総加工時間(時間)</div>
+        <div class="stat-value">{{ formatNumber(totals.total_process_time_min / 60, 1) }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">総重量(t)</div>
+        <div class="stat-value">{{ totals.total_weight_kg != null ? formatNumber(totals.total_weight_kg / 1000, 2) : '-' }}</div>
       </div>
     </div>
 
@@ -60,9 +64,17 @@
               <th>材料コード</th>
               <th>材料名</th>
               <th>単位</th>
+              <th>比重</th>
+              <th>縦(mm)</th>
+              <th>横(mm)</th>
+              <th>厚さ(mm)</th>
+              <th>重量/枚(kg)</th>
               <th>使用パターン数</th>
               <th>必要材料数</th>
-              <th>加工時間(分)</th>
+              <th>総重量(t)</th>
+              <th>梱包入り数</th>
+              <th>必要梱包数</th>
+              <th>加工時間(時間)</th>
             </tr>
           </thead>
           <tbody>
@@ -70,12 +82,20 @@
               <td>{{ row.material_code }}</td>
               <td>{{ row.material_name }}</td>
               <td>{{ row.material_unit || '-' }}</td>
+              <td class="num">{{ row.specific_gravity != null ? formatNumber(row.specific_gravity, 4) : '-' }}</td>
+              <td class="num">{{ row.size_length != null ? formatNumber(row.size_length, 1) : '-' }}</td>
+              <td class="num">{{ row.size_width != null ? formatNumber(row.size_width, 1) : '-' }}</td>
+              <td class="num">{{ row.size_thickness != null ? formatNumber(row.size_thickness, 3) : '-' }}</td>
+              <td class="num">{{ row.unit_weight_kg != null ? formatNumber(row.unit_weight_kg, 3) : '-' }}</td>
               <td class="num">{{ formatInteger(row.pattern_count) }}</td>
               <td class="num">{{ formatSheetQty(row.required_material_qty) }}</td>
-              <td class="num">{{ formatNumber(row.total_process_time_min, 1) }}</td>
+              <td class="num">{{ row.total_weight_kg != null ? formatNumber(row.total_weight_kg / 1000, 3) : '-' }}</td>
+              <td class="num">{{ row.pack_qty != null ? formatInteger(row.pack_qty) : '-' }}</td>
+              <td class="num">{{ row.required_packages != null ? formatInteger(row.required_packages) : '-' }}</td>
+              <td class="num">{{ formatNumber(row.total_process_time_min / 60, 2) }}</td>
             </tr>
             <tr v-if="!materialTotals.length">
-              <td colspan="6" class="empty">対象データがありません。</td>
+              <td colspan="14" class="empty">対象データがありません。</td>
             </tr>
           </tbody>
         </table>
@@ -94,7 +114,7 @@
               <th>設備コード</th>
               <th>設備名</th>
               <th>使用パターン数</th>
-              <th>総加工時間(分)</th>
+              <th>総加工時間(時間)</th>
             </tr>
           </thead>
           <tbody>
@@ -102,7 +122,7 @@
               <td>{{ row.equipment_code || '-' }}</td>
               <td>{{ row.equipment_name || '-' }}</td>
               <td class="num">{{ formatInteger(row.pattern_count) }}</td>
-              <td class="num">{{ formatNumber(row.total_process_time_min, 1) }}</td>
+              <td class="num">{{ formatNumber(row.total_process_time_min / 60, 2) }}</td>
             </tr>
             <tr v-if="!equipmentTotals.length">
               <td colspan="4" class="empty">対象データがありません。</td>
@@ -126,7 +146,9 @@
               <th>設備</th>
               <th>完成品内訳</th>
               <th>必要材料数</th>
-              <th>加工時間(分)</th>
+              <th>総重量(t)</th>
+              <th>必要梱包数</th>
+              <th>加工時間(時間)</th>
             </tr>
           </thead>
           <tbody>
@@ -164,10 +186,12 @@
                 {{ formatSheetQty(row.required_material_qty) }}
                 <span class="unit-text">{{ row.material_unit || '' }}</span>
               </td>
-              <td class="num">{{ formatNumber(row.total_process_time_min, 1) }}</td>
+              <td class="num">{{ row.total_weight_kg != null ? formatNumber(row.total_weight_kg / 1000, 3) : '-' }}</td>
+              <td class="num">{{ row.required_packages != null ? formatInteger(row.required_packages) : '-' }}</td>
+              <td class="num">{{ formatNumber(row.total_process_time_min / 60, 2) }}</td>
             </tr>
             <tr v-if="!patternRows.length">
-              <td colspan="6" class="empty">対象データがありません。</td>
+              <td colspan="8" class="empty">対象データがありません。</td>
             </tr>
           </tbody>
         </table>
@@ -197,6 +221,7 @@ const totals = ref({
   pattern_count: 0,
   required_material_qty: 0,
   total_process_time_min: 0,
+  total_weight_kg: null,
 })
 const period = ref({
   start_date: '',
@@ -270,6 +295,7 @@ const resetRows = () => {
     pattern_count: 0,
     required_material_qty: 0,
     total_process_time_min: 0,
+    total_weight_kg: null,
   }
   period.value = {
     start_date: '',
@@ -294,6 +320,7 @@ const loadSummary = async () => {
       pattern_count: Number(data?.totals?.pattern_count || 0),
       required_material_qty: Number(data?.totals?.required_material_qty || 0),
       total_process_time_min: Number(data?.totals?.total_process_time_min || 0),
+      total_weight_kg: data?.totals?.total_weight_kg != null ? Number(data.totals.total_weight_kg) : null,
     }
     period.value = {
       start_date: data.start_date || '',
@@ -326,15 +353,28 @@ const exportExcel = () => {
     })
     materialRows.push([])
   }
-  materialRows.push(['材料コード', '材料名', '単位', '使用パターン数', '必要材料数', '加工時間(分)'])
+  materialRows.push([
+    '材料コード', '材料名', '単位',
+    '比重', '縦(mm)', '横(mm)', '厚さ(mm)',
+    '重量/枚(kg)', '使用パターン数', '必要材料数',
+    '総重量(t)', '梱包入り数', '必要梱包数', '加工時間(時間)',
+  ])
   materialTotals.value.forEach((row) => {
     materialRows.push([
       row.material_code || '',
       row.material_name || '',
       row.material_unit || '',
+      row.specific_gravity != null ? Number(row.specific_gravity) : '',
+      row.size_length != null ? Number(row.size_length) : '',
+      row.size_width != null ? Number(row.size_width) : '',
+      row.size_thickness != null ? Number(row.size_thickness) : '',
+      row.unit_weight_kg != null ? Number(row.unit_weight_kg) : '',
       Number(row.pattern_count || 0),
       Number(row.required_material_qty || 0),
-      Number(row.total_process_time_min || 0),
+      row.total_weight_kg != null ? Number(row.total_weight_kg) / 1000 : '',
+      row.pack_qty != null ? Number(row.pack_qty) : '',
+      row.required_packages != null ? Number(row.required_packages) : '',
+      Number((row.total_process_time_min || 0) / 60),
     ])
   })
 
@@ -342,14 +382,14 @@ const exportExcel = () => {
     ['対象月', targetMonth.value || ''],
     ['期間', periodLabel.value || ''],
     [],
-    ['設備コード', '設備名', '使用パターン数', '総加工時間(分)'],
+    ['設備コード', '設備名', '使用パターン数', '総加工時間(時間)'],
   ]
   equipmentTotals.value.forEach((row) => {
     equipmentRows.push([
       row.equipment_code || '',
       row.equipment_name || '',
       Number(row.pattern_count || 0),
-      Number(row.total_process_time_min || 0),
+      Number((row.total_process_time_min || 0) / 60),
     ])
   })
 
@@ -372,7 +412,9 @@ const exportExcel = () => {
       '採用数',
       '完成品必要材料数',
       '必要材料数',
-      '加工時間(分)',
+      '総重量(t)',
+      '必要梱包数',
+      '加工時間(時間)',
     ],
   ]
   patternRows.value.forEach((row) => {
@@ -392,7 +434,9 @@ const exportExcel = () => {
         Number(item.selected_qty || 0),
         Number(item.required_material_qty || 0),
         Number(row.required_material_qty || 0),
-        Number(row.total_process_time_min || 0),
+        row.total_weight_kg != null ? Number(row.total_weight_kg) / 1000 : '',
+        row.required_packages != null ? Number(row.required_packages) : '',
+        Number((row.total_process_time_min || 0) / 60),
       ])
     })
   })
@@ -488,7 +532,7 @@ onMounted(() => {
 }
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
 }
 .stat-card {
@@ -594,7 +638,12 @@ onMounted(() => {
   color: #64748b;
   font-weight: 400;
 }
-@media (max-width: 1100px) {
+@media (max-width: 1300px) {
+  .stat-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 900px) {
   .stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
