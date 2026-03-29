@@ -4581,6 +4581,7 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
         finished_meta_by_code = {}
         product_pattern_map = {}
         warnings = []
+        warning_details = []  # 表形式: [{product_code, product_name, pattern_nos}]
         for pattern in patterns:
             for item in pattern.finished_items.all():
                 product = item.finished_product
@@ -4606,6 +4607,11 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
             warnings.append(
                 f"完成品 {code} {meta.get('product_name', '')} が複数パターンに登録されています: {', '.join(pattern_nos)}"
             )
+            warning_details.append({
+                'product_code': code,
+                'product_name': meta.get('product_name', ''),
+                'pattern_nos': pattern_nos,
+            })
 
         if not finished_meta_by_code:
             return Response({
@@ -4981,6 +4987,7 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
             'equipment_totals': equipment_totals,
             'pattern_rows': pattern_rows,
             'warnings': warnings,
+            'warning_details': warning_details,
             'totals': {
                 'material_type_count': len(material_totals),
                 'pattern_count': len(pattern_rows),

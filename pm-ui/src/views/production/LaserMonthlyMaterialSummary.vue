@@ -351,6 +351,7 @@ const loading = ref(false)
 const message = ref('')
 const messageType = ref('info')
 const warnings = ref([])
+const warningDetails = ref([])
 const warningOpen = ref(false)
 const materialTotals = ref([])
 const equipmentTotals = ref([])
@@ -431,6 +432,7 @@ const extractErrorMessage = (error) => {
 
 const resetRows = () => {
   warnings.value = []
+  warningDetails.value = []
   materialTotals.value = []
   equipmentTotals.value = []
   patternRows.value = []
@@ -465,6 +467,7 @@ const loadSummary = async () => {
     })
     const data = res?.data || {}
     warnings.value = Array.isArray(data.warnings) ? data.warnings : []
+    warningDetails.value = Array.isArray(data.warning_details) ? data.warning_details : []
     materialTotals.value = Array.isArray(data.material_totals) ? data.material_totals : []
     equipmentTotals.value = Array.isArray(data.equipment_totals) ? data.equipment_totals : []
     patternRows.value = Array.isArray(data.pattern_rows) ? data.pattern_rows : []
@@ -613,12 +616,18 @@ const exportExcel = () => {
     ])
   })
 
-  // ── 注意書き ──
-  const warningRows = [['注意事項']]
-  if (warnings.value.length) {
-    warnings.value.forEach((w) => warningRows.push([w]))
+  // ── 注意書き（表形式） ──
+  const warningRows = [['完成品番号', '完成品名', '使用パターン']]
+  if (warningDetails.value.length) {
+    warningDetails.value.forEach((d) => {
+      warningRows.push([
+        d.product_code || '',
+        d.product_name || '',
+        Array.isArray(d.pattern_nos) ? d.pattern_nos.join(', ') : '',
+      ])
+    })
   } else {
-    warningRows.push(['注意事項はありません。'])
+    warningRows.push(['', '注意事項はありません。', ''])
   }
 
   const workbook = XLSX.utils.book_new()
