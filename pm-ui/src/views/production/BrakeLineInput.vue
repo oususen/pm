@@ -270,6 +270,19 @@
               </select>
             </div>
 
+            <div class="work-date-area">
+              <label class="qty-label">
+                {{ t('brakeInput.workDate') }}
+                <span class="required-mark">*</span>
+              </label>
+              <input
+                type="date"
+                v-model="workDateStr"
+                class="work-date-input"
+              />
+              <div class="work-date-hint">{{ t('brakeInput.workDateHint') }}</div>
+            </div>
+
             <!-- アクションバー -->
             <div class="action-bar">
               <button class="btn-save" :disabled="!canSave" @click="save">{{ t('brakeInput.save') }}</button>
@@ -439,6 +452,7 @@ const addDays = (ymd, n) => {
 // ──────────────────────────────
 const router = useRouter()
 const planDateStr = ref(businessToday())
+const workDateStr = ref(businessToday())
 const laserDateStr = ref('')  // バックエンドが営業日計算した値を使用
 const processes = ref([])
 const lines = ref([])
@@ -916,6 +930,7 @@ const canSave = computed(() => {
   if (!selectedItem.value) return false
   if (!selectedEquipmentId.value) return false
   if (!selectedAction.value) return false
+  if (!String(workDateStr.value || '').trim()) return false
   if (selectedAction.value === 'END' && !(inputQty.value > 0)) return false
   if (selectedAction.value === 'PAUSE' && !(inputQty.value >= 0)) return false
   if (requiresReason.value && !actionReason.value) return false
@@ -1107,6 +1122,13 @@ function onYesterdayToggle() {
 async function save() {
   if (!canSave.value) return
   const item = selectedItem.value
+  const targetWorkDate = String(workDateStr.value || '').trim()
+  if (targetWorkDate !== planDateStr.value) {
+    const ok = window.confirm(
+      t('brakeInput.workDateMismatchConfirm', { displayDate: planDateStr.value, workDate: targetWorkDate })
+    )
+    if (!ok) return
+  }
   try {
     const res = await api.brakeLineActuals.saveRecord({
       line_id:               item.line_id,
@@ -1114,7 +1136,7 @@ async function save() {
       product_id:            item.product_id,
       product_code:          item.product_code,
       equipment_id:          selectedEquipmentId.value,
-      plan_date:             businessToday(),
+      plan_date:             targetWorkDate,
       operator:              operator.value,
       operator_action:       selectedAction.value,
       operator_action_reason: actionReason.value,
@@ -1929,6 +1951,23 @@ function showToast(message, type = 'success') {
   background: #fff;
   box-sizing: border-box;
   margin-top: 4px;
+}
+.work-date-area { margin-bottom: 12px; }
+.work-date-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+  background: #fff;
+  box-sizing: border-box;
+  margin-top: 4px;
+}
+.work-date-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #6b7280;
 }
 
 /* ── 使用設備選択 ── */
