@@ -4523,7 +4523,6 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
         end_date_str = request.query_params.get('end_date')
         if start_date_str and end_date_str:
             try:
-                from datetime import date as date_cls
                 month_start = datetime.strptime(start_date_str, '%Y-%m-%d').date()
                 month_end = datetime.strptime(end_date_str, '%Y-%m-%d').date()
                 if month_start > month_end:
@@ -4534,6 +4533,23 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
             month_start, month_end, error_message = self._parse_target_month(request.query_params.get('month'))
             if error_message:
                 return Response({'detail': error_message}, status=status.HTTP_400_BAD_REQUEST)
+
+        # シフト日数: 加工期間に対して受注納期をずらす（例: 5日後の注文を対象）
+        try:
+            shift_days = int(request.query_params.get('shift_days') or 0)
+        except (ValueError, TypeError):
+            shift_days = 0
+        order_start = month_start + timedelta(days=shift_days)
+        order_end = month_end + timedelta(days=shift_days)
+
+        # 実績期間（予算と独立）
+        actual_start_str = request.query_params.get('actual_start_date') or start_date_str
+        actual_end_str = request.query_params.get('actual_end_date') or end_date_str
+        try:
+            actual_start = datetime.strptime(actual_start_str, '%Y-%m-%d').date() if actual_start_str else month_start
+            actual_end = datetime.strptime(actual_end_str, '%Y-%m-%d').date() if actual_end_str else month_end
+        except ValueError:
+            actual_start, actual_end = month_start, month_end
 
         patterns = list(
             self.get_queryset().filter(is_budget_target=True).order_by('pattern_no')
@@ -4607,8 +4623,8 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
             OrderLine.objects.filter(
                 order__status='OPEN',
                 product_code__in=list(finished_meta_by_code.keys()),
-                due_date__gte=month_start,
-                due_date__lte=month_end,
+                due_date__gte=order_start,
+                due_date__lte=order_end,
             )
             .values('product_code', 'due_date', 'order__order_type')
             .annotate(total_qty=Sum('quantity'))
@@ -4837,10 +4853,124 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
                 'total_process_time_min': self._decimal_to_float(item['total_process_time_min']),
             })
 
+        # ── レーザ実績から材料別・設備別の実績集計 ──
+        # material（スナップショットFK）を優先し、未設定時はpattern__materialにフォールバック
+        actual_rows = (
+            LaserActual.objects
+            .filter(work_date__gte=actual_start, work_date__lte=actual_end)
+            .values(
+                'material_id',
+                'material__product_code',
+                'material__product_name',
+                'material__specific_gravity',
+                'material__size_length',
+                'material__size_width',
+                'material__size_thickness',
+                'pattern__material_id',
+                'pattern__material__product_code',
+                'pattern__material__product_name',
+                'pattern__material__specific_gravity',
+                'pattern__material__size_length',
+                'pattern__material__size_width',
+                'pattern__material__size_thickness',
+                'equipment_id', 'equipment_code', 'equipment_name',
+            )
+            .annotate(
+                actual_shot_count=Sum('shot_count'),
+                actual_process_time_min=Sum('total_process_time'),
+            )
+        )
+
+        # 材料別実績集計
+        actual_material_map = {}
+        for row in actual_rows:
+            # material（スナップショット）優先、未設定時はpattern__materialにフォールバック
+            mat_id = row['material_id'] or row['pattern__material_id']
+            mat_code = row['material__product_code'] or row['pattern__material__product_code'] or ''
+            mat_name = row['material__product_name'] or row['pattern__material__product_name'] or ''
+            mat_key = mat_id or f'code:{mat_code}'
+            if not mat_key:
+                continue
+
+            # 重量計算（material優先、フォールバックでpattern__material）
+            sg = row['material__specific_gravity'] or row['pattern__material__specific_gravity']
+            sl = row['material__size_length'] or row['pattern__material__size_length']
+            sw = row['material__size_width'] or row['pattern__material__size_width']
+            st = row['material__size_thickness'] or row['pattern__material__size_thickness']
+            if sg and sl and sw and st:
+                uwkg = float(
+                    Decimal(str(sg)) * Decimal(str(sl)) * Decimal(str(sw)) * Decimal(str(st)) / Decimal('1000000')
+                )
+            else:
+                uwkg = None
+
+            mat = actual_material_map.setdefault(mat_key, {
+                'material_id': mat_id,
+                'material_code': mat_code,
+                'material_name': mat_name,
+                'actual_shot_count': 0,
+                'actual_process_time_min': Decimal('0'),
+                'unit_weight_kg': uwkg,
+            })
+            mat['actual_shot_count'] += int(row['actual_shot_count'] or 0)
+            mat['actual_process_time_min'] += Decimal(str(row['actual_process_time_min'] or 0))
+
+        actual_material_totals = []
+        total_actual_shot_count = 0
+        total_actual_weight_kg = Decimal('0')
+        total_actual_process_time_min = Decimal('0')
+        for item in sorted(actual_material_map.values(), key=lambda x: x['material_code']):
+            shots = item['actual_shot_count']
+            uwkg = item['unit_weight_kg']
+            actual_weight_kg = float(Decimal(str(uwkg)) * shots) if uwkg else None
+            total_actual_shot_count += shots
+            total_actual_process_time_min += item['actual_process_time_min']
+            if actual_weight_kg is not None:
+                total_actual_weight_kg += Decimal(str(actual_weight_kg))
+            actual_material_totals.append({
+                'material_id': item['material_id'],
+                'material_code': item['material_code'],
+                'material_name': item['material_name'],
+                'unit_weight_kg': uwkg,
+                'actual_shot_count': shots,
+                'actual_weight_kg': actual_weight_kg,
+                'actual_process_time_min': self._decimal_to_float(item['actual_process_time_min']),
+            })
+
+        # 設備別実績集計
+        actual_equipment_map = {}
+        for row in actual_rows:
+            eq_key = row['equipment_id'] or f'code:{row["equipment_code"]}'
+            eq = actual_equipment_map.setdefault(eq_key, {
+                'equipment_id': row['equipment_id'],
+                'equipment_code': row.get('equipment_code') or '',
+                'equipment_name': row.get('equipment_name') or '',
+                'actual_shot_count': 0,
+                'actual_process_time_min': Decimal('0'),
+            })
+            eq['actual_shot_count'] += int(row['actual_shot_count'] or 0)
+            eq['actual_process_time_min'] += Decimal(str(row['actual_process_time_min'] or 0))
+
+        actual_equipment_totals = [
+            {
+                'equipment_id': v['equipment_id'],
+                'equipment_code': v['equipment_code'],
+                'equipment_name': v['equipment_name'],
+                'actual_shot_count': v['actual_shot_count'],
+                'actual_process_time_min': self._decimal_to_float(v['actual_process_time_min']),
+            }
+            for v in sorted(actual_equipment_map.values(), key=lambda x: x['equipment_code'])
+        ]
+
         return Response({
             'month': month_start.strftime('%Y-%m'),
             'start_date': str(month_start),
             'end_date': str(month_end),
+            'order_start_date': str(order_start),
+            'order_end_date': str(order_end),
+            'shift_days': shift_days,
+            'actual_start_date': str(actual_start),
+            'actual_end_date': str(actual_end),
             'material_totals': material_totals,
             'equipment_totals': equipment_totals,
             'pattern_rows': pattern_rows,
@@ -4852,6 +4982,13 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
                 'required_material_qty': self._decimal_to_float(total_required_material_qty),
                 'total_process_time_min': self._decimal_to_float(total_process_time_min),
                 'total_weight_kg': self._decimal_to_float(total_weight_kg),
+            },
+            'actual_material_totals': actual_material_totals,
+            'actual_equipment_totals': actual_equipment_totals,
+            'actual_totals': {
+                'total_shot_count': total_actual_shot_count,
+                'total_weight_kg': self._decimal_to_float(total_actual_weight_kg),
+                'total_process_time_min': self._decimal_to_float(total_actual_process_time_min),
             },
         })
 

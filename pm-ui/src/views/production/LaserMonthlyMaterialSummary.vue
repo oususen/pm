@@ -1,26 +1,49 @@
 <template>
   <div class="laser-material-summary">
-    <div class="toolbar">
-      <div class="field">
-        <label>開始日</label>
-        <input v-model="startDate" type="date" />
+    <div class="toolbar-block">
+      <div class="toolbar-row">
+        <span class="toolbar-label budget-label">予算（加工期間）</span>
+        <div class="field">
+          <label>開始日</label>
+          <input v-model="budgetStartDate" type="date" />
+        </div>
+        <span class="range-sep">〜</span>
+        <div class="field">
+          <label>終了日</label>
+          <input v-model="budgetEndDate" type="date" />
+        </div>
+        <div class="field">
+          <label>シフト日数</label>
+          <input v-model.number="shiftDays" type="number" min="0" max="30" style="width:60px;" />
+          <span class="field-hint">日後の注文を対象</span>
+        </div>
+        <div v-if="budgetOrderPeriod" class="period-label">受注納期: {{ budgetOrderPeriod }}</div>
       </div>
-      <span class="range-sep">〜</span>
-      <div class="field">
-        <label>終了日</label>
-        <input v-model="endDate" type="date" />
+      <div class="toolbar-row">
+        <span class="toolbar-label actual-label">実績（加工期間）</span>
+        <div class="field">
+          <label>開始日</label>
+          <input v-model="actualStartDate" type="date" />
+        </div>
+        <span class="range-sep">〜</span>
+        <div class="field">
+          <label>終了日</label>
+          <input v-model="actualEndDate" type="date" />
+        </div>
       </div>
-      <button class="btn primary" type="button" @click="loadSummary" :disabled="loading || !startDate || !endDate">
-        集計
-      </button>
-      <button class="btn" type="button" @click="exportExcel" :disabled="loading || !materialTotals.length">
-        Excel出力
-      </button>
+      <div class="toolbar-row">
+        <button class="btn primary" type="button" @click="loadSummary" :disabled="loading || !budgetStartDate || !budgetEndDate || !actualStartDate || !actualEndDate">
+          集計
+        </button>
+        <button class="btn" type="button" @click="exportExcel" :disabled="loading || !materialTotals.length">
+          Excel出力
+        </button>
+      </div>
     </div>
 
     <div class="summary-note">
-      完成品受注明細を月単位で集計し、確定がある納期は確定、ない納期は内示を採用します。
-      必要材料数は、各完成品の採用数量を完成品取り数で割った値を合計して算出します。
+      <span class="note-badge budget">予算</span> 顧客注文（確定優先/内示）× 完成品取り数から必要材料数を計算。
+      <span class="note-badge actual">実績</span> レーザ実績のパターン × ショット回数から実際使用材料を計算。
     </div>
 
     <div v-if="message" class="summary-message" :class="messageTypeClass">
@@ -28,32 +51,64 @@
     </div>
 
     <div v-if="warnings.length" class="warning-panel">
-      <div class="warning-title">注意</div>
-      <div v-for="(warning, idx) in warnings" :key="`warn-${idx}`" class="warning-item">
-        {{ warning }}
+      <div class="warning-title" @click="warningOpen = !warningOpen" style="cursor:pointer;user-select:none;">
+        <span>注意 ({{ warnings.length }}件)</span>
+        <span class="warning-toggle">{{ warningOpen ? '▲ 閉じる' : '▼ 展開' }}</span>
+      </div>
+      <template v-if="warningOpen">
+        <div v-for="(warning, idx) in warnings" :key="`warn-${idx}`" class="warning-item">
+          {{ warning }}
+        </div>
+      </template>
+    </div>
+
+    <div class="kpi-panel budget-panel">
+      <div class="kpi-panel-head">
+        <span class="kpi-panel-title">予算</span>
+        <span class="kpi-panel-desc">顧客注文 × 完成品取り数から計算</span>
+      </div>
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">材料種類数</div>
+          <div class="stat-value">{{ totals.material_type_count || 0 }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">対象パターン数</div>
+          <div class="stat-value">{{ totals.pattern_count || 0 }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">必要材料数(枚)</div>
+          <div class="stat-value">{{ formatSheetQty(totals.required_material_qty) }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">加工時間(時間)</div>
+          <div class="stat-value">{{ formatNumber(totals.total_process_time_min / 60, 1) }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">重量(t)</div>
+          <div class="stat-value">{{ totals.total_weight_kg != null ? formatNumber(totals.total_weight_kg / 1000, 2) : '-' }}</div>
+        </div>
       </div>
     </div>
 
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-label">材料種類数</div>
-        <div class="stat-value">{{ totals.material_type_count || 0 }}</div>
+    <div class="kpi-panel actual-panel">
+      <div class="kpi-panel-head">
+        <span class="kpi-panel-title">実績</span>
+        <span class="kpi-panel-desc">実績パターン × ショット回数から計算</span>
       </div>
-      <div class="stat-card">
-        <div class="stat-label">対象パターン数</div>
-        <div class="stat-value">{{ totals.pattern_count || 0 }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">必要材料数</div>
-        <div class="stat-value">{{ formatSheetQty(totals.required_material_qty) }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">総加工時間(時間)</div>
-        <div class="stat-value">{{ formatNumber(totals.total_process_time_min / 60, 1) }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">総重量(t)</div>
-        <div class="stat-value">{{ totals.total_weight_kg != null ? formatNumber(totals.total_weight_kg / 1000, 2) : '-' }}</div>
+      <div class="stat-grid stat-grid-3">
+        <div class="stat-card actual-card">
+          <div class="stat-label">使用枚数</div>
+          <div class="stat-value">{{ formatInteger(actualTotals.total_shot_count) }}</div>
+        </div>
+        <div class="stat-card actual-card">
+          <div class="stat-label">加工時間(時間)</div>
+          <div class="stat-value">{{ formatNumber(actualTotals.total_process_time_min / 60, 1) }}</div>
+        </div>
+        <div class="stat-card actual-card">
+          <div class="stat-label">重量(t)</div>
+          <div class="stat-value">{{ actualTotals.total_weight_kg != null ? formatNumber(actualTotals.total_weight_kg / 1000, 2) : '-' }}</div>
+        </div>
       </div>
     </div>
 
@@ -202,6 +257,68 @@
         </table>
       </div>
     </div>
+    <div class="panel">
+      <div class="panel-head">
+        <h3>実績材料使用集計</h3>
+        <div class="panel-caption">{{ periodLabel }}</div>
+      </div>
+      <div class="table-wrap">
+        <table class="summary-table">
+          <thead>
+            <tr>
+              <th>材料コード</th>
+              <th>材料名</th>
+              <th>重量/枚(kg)</th>
+              <th>実績枚数</th>
+              <th>実績重量(t)</th>
+              <th>実績加工時間(時間)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in actualMaterialTotals" :key="`act-mat-${row.material_id || row.material_code}`">
+              <td>{{ row.material_code }}</td>
+              <td>{{ row.material_name }}</td>
+              <td class="num">{{ row.unit_weight_kg != null ? formatNumber(row.unit_weight_kg, 3) : '-' }}</td>
+              <td class="num">{{ formatInteger(row.actual_shot_count) }}</td>
+              <td class="num">{{ row.actual_weight_kg != null ? formatNumber(row.actual_weight_kg / 1000, 3) : '-' }}</td>
+              <td class="num">{{ formatNumber(row.actual_process_time_min / 60, 2) }}</td>
+            </tr>
+            <tr v-if="!actualMaterialTotals.length">
+              <td colspan="6" class="empty">対象期間の実績データがありません。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h3>実績設備別加工時間</h3>
+      </div>
+      <div class="table-wrap">
+        <table class="summary-table">
+          <thead>
+            <tr>
+              <th>設備コード</th>
+              <th>設備名</th>
+              <th>実績ショット数</th>
+              <th>実績加工時間(時間)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in actualEquipmentTotals" :key="`act-eq-${row.equipment_id || row.equipment_code}`">
+              <td>{{ row.equipment_code || '-' }}</td>
+              <td>{{ row.equipment_name || '-' }}</td>
+              <td class="num">{{ formatInteger(row.actual_shot_count) }}</td>
+              <td class="num">{{ formatNumber(row.actual_process_time_min / 60, 2) }}</td>
+            </tr>
+            <tr v-if="!actualEquipmentTotals.length">
+              <td colspan="4" class="empty">対象期間の実績データがありません。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -212,18 +329,37 @@ import api from '@/api/client'
 
 const today = new Date()
 const toDateStr = (d) => d.toISOString().slice(0, 10)
+const addDays = (dateStr, days) => {
+  const d = new Date(dateStr)
+  d.setDate(d.getDate() + days)
+  return toDateStr(d)
+}
 const firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
 const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0)
 
-const startDate = ref(toDateStr(firstDay))
-const endDate = ref(toDateStr(lastDay))
+const budgetStartDate = ref(toDateStr(firstDay))
+const budgetEndDate = ref(toDateStr(lastDay))
+const shiftDays = ref(5)
+const actualStartDate = ref(toDateStr(firstDay))
+const actualEndDate = ref(toDateStr(lastDay))
+
+const budgetOrderPeriod = computed(() => {
+  if (!budgetStartDate.value || !budgetEndDate.value || shiftDays.value == null) return ''
+  const s = addDays(budgetStartDate.value, shiftDays.value)
+  const e = addDays(budgetEndDate.value, shiftDays.value)
+  return `${s} ～ ${e}`
+})
 const loading = ref(false)
 const message = ref('')
 const messageType = ref('info')
 const warnings = ref([])
+const warningOpen = ref(false)
 const materialTotals = ref([])
 const equipmentTotals = ref([])
 const patternRows = ref([])
+const actualMaterialTotals = ref([])
+const actualEquipmentTotals = ref([])
+const actualTotals = ref({ total_shot_count: 0, total_weight_kg: null, total_process_time_min: 0 })
 const totals = ref({
   material_type_count: 0,
   pattern_count: 0,
@@ -242,8 +378,8 @@ const messageTypeClass = computed(() => ({
 }))
 
 const periodLabel = computed(() => {
-  const s = period.value.start_date || startDate.value
-  const e = period.value.end_date || endDate.value
+  const s = period.value.start_date || budgetStartDate.value
+  const e = period.value.end_date || budgetEndDate.value
   if (!s || !e) return ''
   return `${s} ～ ${e}`
 })
@@ -300,6 +436,9 @@ const resetRows = () => {
   materialTotals.value = []
   equipmentTotals.value = []
   patternRows.value = []
+  actualMaterialTotals.value = []
+  actualEquipmentTotals.value = []
+  actualTotals.value = { total_shot_count: 0, total_weight_kg: null, total_process_time_min: 0 }
   totals.value = {
     material_type_count: 0,
     pattern_count: 0,
@@ -314,17 +453,26 @@ const resetRows = () => {
 }
 
 const loadSummary = async () => {
-  if (!startDate.value || !endDate.value) return
+  if (!budgetStartDate.value || !budgetEndDate.value || !actualStartDate.value || !actualEndDate.value) return
   loading.value = true
   message.value = ''
   messageType.value = 'info'
   try {
-    const res = await api.laserPatterns.getMonthlyMaterialSummary({ start_date: startDate.value, end_date: endDate.value })
+    const res = await api.laserPatterns.getMonthlyMaterialSummary({
+      start_date: budgetStartDate.value,
+      end_date: budgetEndDate.value,
+      shift_days: shiftDays.value ?? 0,
+      actual_start_date: actualStartDate.value,
+      actual_end_date: actualEndDate.value,
+    })
     const data = res?.data || {}
     warnings.value = Array.isArray(data.warnings) ? data.warnings : []
     materialTotals.value = Array.isArray(data.material_totals) ? data.material_totals : []
     equipmentTotals.value = Array.isArray(data.equipment_totals) ? data.equipment_totals : []
     patternRows.value = Array.isArray(data.pattern_rows) ? data.pattern_rows : []
+    actualMaterialTotals.value = Array.isArray(data.actual_material_totals) ? data.actual_material_totals : []
+    actualEquipmentTotals.value = Array.isArray(data.actual_equipment_totals) ? data.actual_equipment_totals : []
+    actualTotals.value = data.actual_totals || { total_shot_count: 0, total_weight_kg: null, total_process_time_min: 0 }
     totals.value = {
       material_type_count: Number(data?.totals?.material_type_count || 0),
       pattern_count: Number(data?.totals?.pattern_count || 0),
@@ -455,7 +603,7 @@ const exportExcel = () => {
   XLSX.utils.book_append_sheet(workbook, materialSheet, '材料別集計')
   XLSX.utils.book_append_sheet(workbook, equipmentSheet, '設備別加工時間')
   XLSX.utils.book_append_sheet(workbook, detailSheet, 'パターン別明細')
-  XLSX.writeFile(workbook, `レーザ所要材料集計_${startDate.value || ''}_${endDate.value || ''}.xlsx`)
+  XLSX.writeFile(workbook, `レーザ所要材料集計_${budgetStartDate.value || ''}_${budgetEndDate.value || ''}.xlsx`)
 }
 
 onMounted(() => {
@@ -486,6 +634,39 @@ onMounted(() => {
   border-radius: 6px;
   padding: 0 8px;
   background: #fff;
+}
+.toolbar-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.toolbar-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.toolbar-label {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  align-self: flex-end;
+  margin-bottom: 4px;
+}
+.toolbar-label.budget-label {
+  background: #1e40af;
+  color: #fff;
+}
+.toolbar-label.actual-label {
+  background: #166534;
+  color: #fff;
+}
+.field-hint {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
 }
 .range-sep {
   display: flex;
@@ -526,6 +707,24 @@ onMounted(() => {
 .summary-note {
   font-size: 12px;
   color: #475569;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.note-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.note-badge.budget {
+  background: #dbeafe;
+  color: #1e40af;
+}
+.note-badge.actual {
+  background: #dcfce7;
+  color: #166534;
 }
 .summary-message {
   border-radius: 8px;
@@ -549,12 +748,62 @@ onMounted(() => {
 .warning-title {
   font-weight: 700;
   color: #92400e;
-  margin-bottom: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.warning-toggle {
+  font-size: 11px;
+  font-weight: 400;
 }
 .warning-item {
   font-size: 12px;
   color: #92400e;
   line-height: 1.5;
+}
+.kpi-panel {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #d7dfe8;
+}
+.kpi-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+}
+.kpi-panel-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+.kpi-panel-desc {
+  font-size: 11px;
+  opacity: 0.8;
+}
+.budget-panel .kpi-panel-head {
+  background: #1e40af;
+  color: #fff;
+}
+.budget-panel {
+  border-color: #1e40af;
+}
+.actual-panel .kpi-panel-head {
+  background: #166534;
+  color: #fff;
+}
+.actual-panel {
+  border-color: #166534;
+}
+.kpi-panel .stat-grid {
+  padding: 10px;
+  background: #fff;
+}
+.actual-card {
+  background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%) !important;
+  border-color: #86efac !important;
+}
+.stat-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
 }
 .stat-grid {
   display: grid;
