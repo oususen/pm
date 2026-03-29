@@ -39,7 +39,7 @@
           <option :value="120">120日</option>
         </select>
         <button @click="load" :disabled="loading">更新</button>
-        <button @click="recalculate" :disabled="loading || recalculating">再計算</button>
+        <button @click="recalculate" :disabled="loading || recalculating">表示ライン全品番再計算</button>
         <button
           @click="recalculateVisibleProducts"
           :disabled="loading || recalculating || !groups.length"
@@ -49,7 +49,7 @@
         <button @click="exportToExcel" :disabled="!groups.length">Excel出力</button>
         <button
           @click="openDeepRecalcDialog"
-          :disabled="loading || recalculating || !lineFilter || !groups.length"
+          :disabled="loading || recalculating || !groups.length"
           class="btn-deep-recalc"
         >
           過去から再計算
@@ -69,7 +69,7 @@
             表示開始日（<strong>{{ startDate }}</strong>）を起点に、在庫・進度を過去から巻き直します。
           </p>
           <ul>
-            <li>対象ライン: <strong>{{ lineFilter }}</strong></li>
+            <li>対象: <strong>表示中の品番（{{ getDisplayedLineIds().length }}ライン）</strong></li>
             <li>計算範囲: {{ startDate }} 〜 {{ columns[columns.length - 1] }}</li>
             <li>在庫・進度を再計算した後、計画在庫・計画進度も自動的に更新されます。</li>
             <li>データ量によっては完了まで時間がかかる場合があります。</li>
@@ -898,10 +898,6 @@ const recalculate = async () => {
 const showDeepRecalcDialog = ref(false);
 
 const openDeepRecalcDialog = () => {
-  if (!lineFilter.value) {
-    alert("ラインを指定してください。");
-    return;
-  }
   showDeepRecalcDialog.value = true;
 };
 
@@ -912,16 +908,21 @@ const confirmDeepRecalc = async () => {
   try {
     const start = startDate.value;
     const end = columns.value[columns.value.length - 1];
-    const lineId = getDisplayedLineIds()[0];
-    if (!lineId) {
+    const targets = getDisplayedLineTargets();
+    if (targets.length === 0) {
       alert("ライン情報が見つかりません。先にデータを取得してください。");
       return;
     }
-    await api.lineBacklogs.recalculateInventoryDeep({
-      line_id: lineId,
-      start_date: start,
-      end_date: end,
-    });
+    await Promise.all(
+      targets.map((target) =>
+        api.lineBacklogs.recalculateInventoryDeep({
+          line_id: target.line_id,
+          start_date: start,
+          end_date: end,
+          product_ids: target.product_ids,
+        })
+      )
+    );
     const finalRes = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
     applyDemands(finalRes.data || []);
     await updateHolidays();

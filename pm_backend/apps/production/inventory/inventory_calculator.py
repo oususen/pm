@@ -918,6 +918,8 @@ def recalculate_stock_qty(
         return min(base_rows, key=lambda r: r.id)
 
     today = reference_today or get_business_today()
+    if reference_today is None and not is_working_day(today):
+        today = get_prev_working_day(today)
     stock_by_date = {}
     firm_map = firm_map or {}
 
@@ -1105,6 +1107,8 @@ def recalculate_planned_stock_qty(
         return min(base_rows, key=lambda r: r.id)
 
     today = reference_today or get_business_today()
+    if reference_today is None and not is_working_day(today):
+        today = get_prev_working_day(today)
     # 製品のBOMの最大LTを取得し、LT+1日前から再計算
     # これにより、親製品の実績変更が子製品の過去の出庫に正しく反映される
     max_lt = _get_max_parent_bom_lead_time(product_id)

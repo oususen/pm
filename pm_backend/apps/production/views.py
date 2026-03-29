@@ -133,6 +133,8 @@ def _resolve_inventory_effective_start_date(line_id, requested_start_date, end_d
         return current
 
     today = get_business_today()
+    if not is_working_day(today):
+        today = get_prev_working_day(today)
     stock_start_dt = get_prev_working_day(get_prev_working_day(today))
     target_product_ids = sorted({int(pid) for pid in (product_ids or []) if pid is not None})
     if target_product_ids:
@@ -153,6 +155,75 @@ def _resolve_inventory_effective_start_date(line_id, requested_start_date, end_d
         ).aggregate(v=Max('lead_time_days'))['v'] or 0
     planned_progress_start_dt = shift_working_days(today, -(int(max_lt) + 1))
     return min(requested_start_date, stock_start_dt, planned_progress_start_dt)
+
+
+def _resolve_product_recalc_start_date(line_id, end_date, product_ids=None):
+    """
+    表示品番だけ再計算用の内部開始日を返す。
+    画面の表示開始日は使わず、計算上必要な開始日だけを採用する。
+    """
+    line_obj = Line.objects.filter(id=line_id).first()
+    calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
+        calendar_code='daiso'
+    ).values_list('id', flat=True).first()
+    workday_cache = {}
+
+    def is_working_day(target_date):
+        if not calendar_id:
+            return target_date.weekday() < 5
+        if target_date in workday_cache:
+            return workday_cache[target_date]
+        cal = CalendarDay.objects.filter(
+            calendar_id=calendar_id,
+            target_date=target_date,
+        ).first()
+        is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
+        workday_cache[target_date] = is_work
+        return is_work
+
+    def get_prev_working_day(target_date):
+        prev_date = target_date - timedelta(days=1)
+        while not is_working_day(prev_date):
+            prev_date = prev_date - timedelta(days=1)
+        return prev_date
+
+    def shift_working_days(target_date, days):
+        if not days:
+            return target_date
+        if not calendar_id:
+            return target_date + timedelta(days=days)
+        step = 1 if days > 0 else -1
+        remaining = abs(int(days))
+        current = target_date
+        while remaining > 0:
+            current = current + timedelta(days=step)
+            if is_working_day(current):
+                remaining -= 1
+        return current
+
+    today = get_business_today()
+    if not is_working_day(today):
+        today = get_prev_working_day(today)
+    stock_start_dt = get_prev_working_day(get_prev_working_day(today))
+    target_product_ids = sorted({int(pid) for pid in (product_ids or []) if pid is not None})
+    if target_product_ids:
+        product_ids_for_line = target_product_ids
+    else:
+        product_ids_for_line = list(
+            LineBacklog.objects.filter(
+                line_id=line_id,
+                plan_date__lte=end_date,
+            ).values_list('product_id', flat=True).distinct()
+        )
+
+    max_lt = 0
+    if product_ids_for_line:
+        max_lt = BOMItem.objects.filter(
+            bom__is_active=True,
+            child_product_id__in=product_ids_for_line,
+        ).aggregate(v=Max('lead_time_days'))['v'] or 0
+    planned_progress_start_dt = shift_working_days(today, -(int(max_lt) + 1))
+    return min(stock_start_dt, planned_progress_start_dt)
 
 
 class LineDemandFilter(django_filters.FilterSet):
@@ -1538,7 +1609,27 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='pickup_for_products')
     def pickup_for_products(self, request):
-        """表示中品番限定の需要再計算。"""
+        """表示中品番限定の需要再計算。画面の表示開始日は使わない。"""
+        mutable_data = request.data.copy()
+        line_id = mutable_data.get('line_id')
+        end_date = mutable_data.get('end_date')
+        try:
+            requested_product_ids = _parse_product_ids(mutable_data.get('product_ids'))
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if line_id and end_date:
+            try:
+                end_dt = datetime.strptime(str(end_date), '%Y-%m-%d').date()
+                effective_start_dt = _resolve_product_recalc_start_date(
+                    int(line_id),
+                    end_dt,
+                    product_ids=requested_product_ids or None,
+                )
+                mutable_data['start_date'] = effective_start_dt.isoformat()
+            except (TypeError, ValueError):
+                pass
+        request._full_data = mutable_data
         return self.pickup(request)
 
     @action(detail=False, methods=['post'], url_path='pickup_purchase')
@@ -3198,7 +3289,27 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='recalculate_inventory_for_products')
     def recalculate_inventory_for_products(self, request):
-        """表示中品番限定の在庫再計算。"""
+        """表示中品番限定の在庫再計算。画面の表示開始日は使わない。"""
+        mutable_data = request.data.copy()
+        line_id = mutable_data.get('line_id')
+        end_date = mutable_data.get('end_date')
+        try:
+            requested_product_ids = _parse_product_ids(mutable_data.get('product_ids'))
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if line_id and end_date:
+            try:
+                end_dt = datetime.strptime(str(end_date), '%Y-%m-%d').date()
+                effective_start_dt = _resolve_product_recalc_start_date(
+                    int(line_id),
+                    end_dt,
+                    product_ids=requested_product_ids or None,
+                )
+                mutable_data['start_date'] = effective_start_dt.isoformat()
+            except (TypeError, ValueError):
+                pass
+        request._full_data = mutable_data
         return self.recalculate_inventory(request)
 
     @action(detail=False, methods=['get'], url_path='batch_adjust_info')
@@ -3381,6 +3492,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         line_id = request.data.get('line_id')
         start_date = request.data.get('start_date')
         end_date = request.data.get('end_date')
+        product_ids = request.data.get('product_ids') or None
 
         if not line_id:
             return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -3399,6 +3511,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 start_dt,
                 end_dt,
                 include_progress=True,
+                product_ids=product_ids,
             )
             return Response({
                 'detail': '過去からの在庫・進度再計算が完了しました',
@@ -3510,7 +3623,27 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='recalculate_scrap_for_products')
     def recalculate_scrap_for_products(self, request):
-        """表示中品番限定の仕損再計算。"""
+        """表示中品番限定の仕損再計算。画面の表示開始日は使わない。"""
+        mutable_data = request.data.copy()
+        line_id = mutable_data.get('line_id')
+        end_date = mutable_data.get('end_date')
+        try:
+            requested_product_ids = _parse_product_ids(mutable_data.get('product_ids'))
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if line_id and end_date:
+            try:
+                end_dt = datetime.strptime(str(end_date), '%Y-%m-%d').date()
+                effective_start_dt = _resolve_product_recalc_start_date(
+                    int(line_id),
+                    end_dt,
+                    product_ids=requested_product_ids or None,
+                )
+                mutable_data['start_date'] = effective_start_dt.isoformat()
+            except (TypeError, ValueError):
+                pass
+        request._full_data = mutable_data
         return self.recalculate_scrap(request)
 
 
