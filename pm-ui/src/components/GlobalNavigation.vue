@@ -247,7 +247,7 @@ const notifications = ref([])
 const pendingTaskCount = ref(0)
 const previousNotificationIds = ref(new Set())
 const pollingInterval = ref(null)
-const POLLING_INTERVAL_MS = 30000 // 30秒ごとにポーリング
+const POLLING_INTERVAL_MS = 60000 // 60秒ごとにポーリング
 const localeOptions = getLocaleOptions()
 const selectedLocale = computed({
   get: () => locale.value,
@@ -432,7 +432,7 @@ const toggleNotificationMenu = async () => {
   showNotificationMenu.value = !showNotificationMenu.value
   if (showNotificationMenu.value) {
     showUserMenu.value = false
-    await loadDepartments()
+    // departments は startPolling 時に取得済みのため再取得不要
     await loadNotifications()
   }
 }
@@ -495,13 +495,12 @@ const checkForNewNotifications = (currentIds) => {
   previousNotificationIds.value = currentIds
 }
 
-// ポーリングで通知を取得
+// ポーリングで通知を取得（departments は初回のみ取得済みのため除外）
 const pollNotifications = async () => {
   if (!authState.user) return
 
   try {
     if (canAccessNotifications.value) {
-      await loadDepartments()
       await loadNotifications()
     } else {
       notifications.value = []
@@ -517,9 +516,12 @@ const pollNotifications = async () => {
 }
 
 // ポーリング開始
-const startPolling = () => {
+const startPolling = async () => {
   if (!authState.user) return
   if (pollingInterval.value) return
+
+  // 部署は初回のみ取得
+  await loadDepartments()
 
   // 初回実行
   pollNotifications()
