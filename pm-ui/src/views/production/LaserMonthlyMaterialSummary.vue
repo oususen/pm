@@ -499,23 +499,19 @@ const loadSummary = async () => {
 const exportExcel = () => {
   if (!materialTotals.value.length) return
 
+  const r2 = (v) => (v != null && v !== '' ? Math.round(Number(v) * 100) / 100 : '')
+
+  // ── 予算: 材料別集計 ──
   const materialRows = [
     ['対象期間', periodLabel.value || ''],
     [],
+    [
+      '材料コード', '材料名', '単位',
+      '比重', '縦(mm)', '横(mm)', '厚さ(mm)',
+      '重量/枚(kg)', '使用パターン数', '必要材料数',
+      '総重量(t)', '梱包入り数', '必要梱包数', '加工時間(時間)',
+    ],
   ]
-  if (warnings.value.length) {
-    materialRows.push(['注意'])
-    warnings.value.forEach((warning) => {
-      materialRows.push([warning])
-    })
-    materialRows.push([])
-  }
-  materialRows.push([
-    '材料コード', '材料名', '単位',
-    '比重', '縦(mm)', '横(mm)', '厚さ(mm)',
-    '重量/枚(kg)', '使用パターン数', '必要材料数',
-    '総重量(t)', '梱包入り数', '必要梱包数', '加工時間(時間)',
-  ])
   materialTotals.value.forEach((row) => {
     materialRows.push([
       row.material_code || '',
@@ -525,16 +521,17 @@ const exportExcel = () => {
       row.size_length != null ? Number(row.size_length) : '',
       row.size_width != null ? Number(row.size_width) : '',
       row.size_thickness != null ? Number(row.size_thickness) : '',
-      row.unit_weight_kg != null ? Number(row.unit_weight_kg) : '',
+      r2(row.unit_weight_kg),
       Number(row.pattern_count || 0),
-      Number(row.required_material_qty || 0),
-      row.total_weight_kg != null ? Number(row.total_weight_kg) / 1000 : '',
+      r2(row.required_material_qty),
+      row.total_weight_kg != null ? r2(Number(row.total_weight_kg) / 1000) : '',
       row.pack_qty != null ? Number(row.pack_qty) : '',
       row.required_packages != null ? Number(row.required_packages) : '',
-      Number((row.total_process_time_min || 0) / 60),
+      r2((row.total_process_time_min || 0) / 60),
     ])
   })
 
+  // ── 予算: 設備別 ──
   const equipmentRows = [
     ['対象期間', periodLabel.value || ''],
     [],
@@ -545,31 +542,19 @@ const exportExcel = () => {
       row.equipment_code || '',
       row.equipment_name || '',
       Number(row.pattern_count || 0),
-      Number((row.total_process_time_min || 0) / 60),
+      r2((row.total_process_time_min || 0) / 60),
     ])
   })
 
+  // ── 予算: パターン別明細 ──
   const detailRows = [
     ['対象期間', periodLabel.value || ''],
     [],
     [
-      'Ｐ№',
-      '材料コード',
-      '材料名',
-      '設備コード',
-      '設備名',
-      '完成品コード',
-      '完成品名',
-      '採用区分',
-      '完成品1個あたり材料',
-      '確定数',
-      '内示数',
-      '採用数',
-      '完成品必要材料数',
-      '必要材料数',
-      '総重量(t)',
-      '必要梱包数',
-      '加工時間(時間)',
+      'Ｐ№', '材料コード', '材料名', '設備コード', '設備名',
+      '完成品コード', '完成品名', '採用区分',
+      '完成品1個あたり材料', '確定数', '内示数', '採用数',
+      '完成品必要材料数', '必要材料数', '総重量(t)', '必要梱包数', '加工時間(時間)',
     ],
   ]
   patternRows.value.forEach((row) => {
@@ -583,26 +568,66 @@ const exportExcel = () => {
         item.finished_product_code || '',
         item.finished_product_name || '',
         basisLabel(item.selected_basis),
-        Number(item.material_per_unit || 0),
-        Number(item.firm_qty || 0),
-        Number(item.forecast_qty || 0),
-        Number(item.selected_qty || 0),
-        Number(item.required_material_qty || 0),
-        Number(row.required_material_qty || 0),
-        row.total_weight_kg != null ? Number(row.total_weight_kg) / 1000 : '',
+        r2(item.material_per_unit),
+        r2(item.firm_qty),
+        r2(item.forecast_qty),
+        r2(item.selected_qty),
+        r2(item.required_material_qty),
+        r2(row.required_material_qty),
+        row.total_weight_kg != null ? r2(Number(row.total_weight_kg) / 1000) : '',
         row.required_packages != null ? Number(row.required_packages) : '',
-        Number((row.total_process_time_min || 0) / 60),
+        r2((row.total_process_time_min || 0) / 60),
       ])
     })
   })
 
+  // ── 実績: 材料別集計 ──
+  const actualMaterialRows = [
+    ['実績期間', `${actualStartDate.value || ''} ～ ${actualEndDate.value || ''}`],
+    [],
+    ['材料コード', '材料名', '重量/枚(kg)', '実績枚数', '実績重量(t)', '実績加工時間(時間)'],
+  ]
+  actualMaterialTotals.value.forEach((row) => {
+    actualMaterialRows.push([
+      row.material_code || '',
+      row.material_name || '',
+      r2(row.unit_weight_kg),
+      r2(row.actual_shot_count),
+      row.actual_weight_kg != null ? r2(Number(row.actual_weight_kg) / 1000) : '',
+      r2((row.actual_process_time_min || 0) / 60),
+    ])
+  })
+
+  // ── 実績: 設備別 ──
+  const actualEquipmentRows = [
+    ['実績期間', `${actualStartDate.value || ''} ～ ${actualEndDate.value || ''}`],
+    [],
+    ['設備コード', '設備名', '実績ショット数', '実績加工時間(時間)'],
+  ]
+  actualEquipmentTotals.value.forEach((row) => {
+    actualEquipmentRows.push([
+      row.equipment_code || '',
+      row.equipment_name || '',
+      r2(row.actual_shot_count),
+      r2((row.actual_process_time_min || 0) / 60),
+    ])
+  })
+
+  // ── 注意書き ──
+  const warningRows = [['注意事項']]
+  if (warnings.value.length) {
+    warnings.value.forEach((w) => warningRows.push([w]))
+  } else {
+    warningRows.push(['注意事項はありません。'])
+  }
+
   const workbook = XLSX.utils.book_new()
-  const materialSheet = XLSX.utils.aoa_to_sheet(materialRows)
-  const equipmentSheet = XLSX.utils.aoa_to_sheet(equipmentRows)
-  const detailSheet = XLSX.utils.aoa_to_sheet(detailRows)
-  XLSX.utils.book_append_sheet(workbook, materialSheet, '材料別集計')
-  XLSX.utils.book_append_sheet(workbook, equipmentSheet, '設備別加工時間')
-  XLSX.utils.book_append_sheet(workbook, detailSheet, 'パターン別明細')
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(materialRows), '予算_材料別集計')
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(equipmentRows), '予算_設備別加工時間')
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(detailRows), '予算_パターン別明細')
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(actualMaterialRows), '実績_材料別集計')
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(actualEquipmentRows), '実績_設備別加工時間')
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(warningRows), '注意書き')
   XLSX.writeFile(workbook, `レーザ所要材料集計_${budgetStartDate.value || ''}_${budgetEndDate.value || ''}.xlsx`)
 }
 
