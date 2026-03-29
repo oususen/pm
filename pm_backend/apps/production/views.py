@@ -55,7 +55,7 @@ from .serializers import (
 from .services.order_expansion import OrderExpansionService
 from .services.gantt_planning import generate_line_gantt_plans
 from masters.models import Routing, RoutingStep, ProcessCycleTime, Line, Supplier, Process, Calendar, CalendarDay, BOM, BOMItem, Product
-from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR, get_business_today
+from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR, get_business_today, add_working_days
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 
@@ -4534,13 +4534,19 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
             if error_message:
                 return Response({'detail': error_message}, status=status.HTTP_400_BAD_REQUEST)
 
-        # シフト日数: 加工期間に対して受注納期をずらす（例: 5日後の注文を対象）
+        # シフト日数: 加工期間に対して受注納期をずらす（daisoカレンダーの営業日を使用）
         try:
             shift_days = int(request.query_params.get('shift_days') or 0)
         except (ValueError, TypeError):
             shift_days = 0
-        order_start = month_start + timedelta(days=shift_days)
-        order_end = month_end + timedelta(days=shift_days)
+        from masters.models import Calendar
+        daiso_calendar = Calendar.objects.filter(calendar_code='daiso').first()
+        if shift_days > 0:
+            order_start = add_working_days(month_start, shift_days, daiso_calendar)
+            order_end = add_working_days(month_end, shift_days, daiso_calendar)
+        else:
+            order_start = month_start
+            order_end = month_end
 
         # 実績期間（予算と独立）
         actual_start_str = request.query_params.get('actual_start_date') or start_date_str
