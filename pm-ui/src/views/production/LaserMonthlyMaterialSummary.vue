@@ -518,7 +518,16 @@ const exportExcel = () => {
       '総重量(t)', '梱包入り数', '必要梱包数', '加工時間(時間)',
     ],
   ]
+  let sumMatQty = 0, sumMatWeightT = 0, sumMatPkg = 0, sumMatTimeH = 0
   materialTotals.value.forEach((row) => {
+    const qty = Number(row.required_material_qty || 0)
+    const weightT = row.total_weight_kg != null ? Number(row.total_weight_kg) / 1000 : 0
+    const pkg = row.required_packages != null ? Number(row.required_packages) : 0
+    const timeH = (row.total_process_time_min || 0) / 60
+    sumMatQty += qty
+    sumMatWeightT += weightT
+    sumMatPkg += pkg
+    sumMatTimeH += timeH
     materialRows.push([
       row.material_code || '',
       row.material_name || '',
@@ -529,13 +538,14 @@ const exportExcel = () => {
       row.size_thickness != null ? Number(row.size_thickness) : '',
       r2(row.unit_weight_kg),
       Number(row.pattern_count || 0),
-      r2(row.required_material_qty),
-      row.total_weight_kg != null ? r2(Number(row.total_weight_kg) / 1000) : '',
+      r2(qty),
+      row.total_weight_kg != null ? r2(weightT) : '',
       row.pack_qty != null ? Number(row.pack_qty) : '',
-      row.required_packages != null ? Number(row.required_packages) : '',
-      r2((row.total_process_time_min || 0) / 60),
+      row.required_packages != null ? Number(pkg) : '',
+      r2(timeH),
     ])
   })
+  materialRows.push(['合計', '', '', '', '', '', '', '', '', r2(sumMatQty), r2(sumMatWeightT), '', r2(sumMatPkg), r2(sumMatTimeH)])
 
   // ── 予算: 設備別 ──
   const equipmentRows = [
@@ -543,14 +553,20 @@ const exportExcel = () => {
     [],
     ['設備コード', '設備名', '使用パターン数', '総加工時間(時間)'],
   ]
+  let sumEqBudgetPat = 0, sumEqBudgetTimeH = 0
   equipmentTotals.value.forEach((row) => {
+    const pat = Number(row.pattern_count || 0)
+    const timeH = (row.total_process_time_min || 0) / 60
+    sumEqBudgetPat += pat
+    sumEqBudgetTimeH += timeH
     equipmentRows.push([
       row.equipment_code || '',
       row.equipment_name || '',
-      Number(row.pattern_count || 0),
-      r2((row.total_process_time_min || 0) / 60),
+      pat,
+      r2(timeH),
     ])
   })
+  equipmentRows.push(['合計', '', sumEqBudgetPat, r2(sumEqBudgetTimeH)])
 
   // ── 予算: パターン別明細 ──
   const detailRows = [
@@ -563,6 +579,9 @@ const exportExcel = () => {
       '完成品必要材料数', '必要材料数', '総重量(t)', '必要梱包数', '加工時間(時間)',
     ],
   ]
+  let sumDetMatQty = 0, sumDetWeightT = 0, sumDetPkg = 0, sumDetTimeH = 0
+  // パターン別明細は1パターン1行で集計（完成品複数でも重複加算しないよう pattern単位で集計）
+  const seenPatterns = new Set()
   patternRows.value.forEach((row) => {
     ;(row.finished_items || []).forEach((item) => {
       detailRows.push([
@@ -585,7 +604,15 @@ const exportExcel = () => {
         r2((row.total_process_time_min || 0) / 60),
       ])
     })
+    if (!seenPatterns.has(row.pattern_id)) {
+      seenPatterns.add(row.pattern_id)
+      sumDetMatQty += Number(row.required_material_qty || 0)
+      sumDetWeightT += row.total_weight_kg != null ? Number(row.total_weight_kg) / 1000 : 0
+      sumDetPkg += row.required_packages != null ? Number(row.required_packages) : 0
+      sumDetTimeH += (row.total_process_time_min || 0) / 60
+    }
   })
+  detailRows.push(['合計', '', '', '', '', '', '', '', '', '', '', '', '', r2(sumDetMatQty), r2(sumDetWeightT), r2(sumDetPkg), r2(sumDetTimeH)])
 
   // ── 実績: 材料別集計 ──
   const actualMaterialRows = [
