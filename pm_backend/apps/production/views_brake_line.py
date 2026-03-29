@@ -4,7 +4,7 @@
 - BrakeLineActualAddView: 実績累積加算（後方互換用）
 - BrakeLineRecordView: 作業記録（開始/終了/中断/再開/一時終了）
 """
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from itertools import groupby
 
@@ -15,7 +15,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from masters.models import Calendar, Equipment, Line, Process, Product, RoutingStep
-from orders.utils.calendar_utils import get_business_today, WorkingDayCalculator
+from django.conf import settings
+from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR, get_business_today, WorkingDayCalculator
 from production.models_brake_line_record import BrakeLineRecord
 from production.models_line_backlog import LineBacklog
 from production.models_record_inquiry_setting import ProductionRecordInquirySetting
@@ -801,15 +802,24 @@ class BrakeLineSessionView(APIView):
                 qs = qs.filter(plan_date__lte=date.fromisoformat(end_date_str))
             except ValueError:
                 pass
-        # 実施日（recorded_at）での絞り込み（計画日と排他ではなく独立して適用）
+        # 実施日（recorded_at）での絞り込み（日替わり時刻8:00を考慮）
+        # 例: end=3/23 → recorded_at < 3/24 08:00（3/24 06:08は3/23扱い）
         if recorded_at_start_str:
             try:
-                qs = qs.filter(recorded_at__date__gte=date.fromisoformat(recorded_at_start_str))
+                d = date.fromisoformat(recorded_at_start_str)
+                boundary = datetime.combine(d, time(DAY_BOUNDARY_HOUR, 0))
+                if settings.USE_TZ:
+                    boundary = timezone.make_aware(boundary, timezone.get_current_timezone())
+                qs = qs.filter(recorded_at__gte=boundary)
             except ValueError:
                 pass
         if recorded_at_end_str:
             try:
-                qs = qs.filter(recorded_at__date__lte=date.fromisoformat(recorded_at_end_str))
+                d = date.fromisoformat(recorded_at_end_str)
+                boundary = datetime.combine(d + timedelta(days=1), time(DAY_BOUNDARY_HOUR, 0))
+                if settings.USE_TZ:
+                    boundary = timezone.make_aware(boundary, timezone.get_current_timezone())
+                qs = qs.filter(recorded_at__lt=boundary)
             except ValueError:
                 pass
         if line_id:
