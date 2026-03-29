@@ -73,6 +73,7 @@ INSTALLED_APPS = [
     'proposals',
     'notifications',
     'overtime',
+    'system_settings',
 ]
 
 MIDDLEWARE = [

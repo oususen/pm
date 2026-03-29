@@ -107,6 +107,12 @@ const settings = [
     component: () => import("@/views/settings/KubotaImportSettings.vue"),
     meta: { pageTitle: "クボタ堺取り込み通知設定", resource: "settings" },
   },
+  {
+    path: "/settings/system",
+    name: "SystemSettings",
+    component: () => import("@/views/settings/SystemSettings.vue"),
+    meta: { pageTitle: "システム設定", resource: "settings" },
+  },
 ];
 
 export default settings;

@@ -247,7 +247,10 @@ const notifications = ref([])
 const pendingTaskCount = ref(0)
 const previousNotificationIds = ref(new Set())
 const pollingInterval = ref(null)
-const POLLING_INTERVAL_MS = 60000 // 60秒ごとにポーリング
+const taskPollingInterval = ref(null)
+// デフォルト値（サーバー設定取得前のフォールバック）
+let NOTIFICATION_POLLING_MS = 60000
+let TASK_POLLING_MS = 120000
 const localeOptions = getLocaleOptions()
 const selectedLocale = computed({
   get: () => locale.value,
@@ -495,23 +498,47 @@ const checkForNewNotifications = (currentIds) => {
   previousNotificationIds.value = currentIds
 }
 
-// ポーリングで通知を取得（departments は初回のみ取得済みのため除外）
+// 通知ポーリング（departments は初回のみ取得済みのため除外）
 const pollNotifications = async () => {
   if (!authState.user) return
-
   try {
     if (canAccessNotifications.value) {
       await loadNotifications()
     } else {
       notifications.value = []
     }
-    await loadPendingTaskCount()
-
-    // 未読通知のIDセットを作成（未読ベースで新着検出）
     const currentIds = new Set(unreadNotifications.value.map((n) => n.id))
     checkForNewNotifications(currentIds)
   } catch (error) {
     console.error('通知ポーリングエラー:', error)
+  }
+}
+
+// タスク件数ポーリング（通知とは独立した間隔）
+const pollTasks = async () => {
+  if (!authState.user) return
+  try {
+    await loadPendingTaskCount()
+  } catch (error) {
+    console.error('タスクポーリングエラー:', error)
+  }
+}
+
+// サーバーからポーリング間隔設定を取得して反映
+const loadPollingSettings = async () => {
+  try {
+    const res = await api.systemSettings.getAll()
+    const data = res.data || {}
+    if (data.notification_polling_sec?.value) {
+      const sec = parseInt(data.notification_polling_sec.value, 10)
+      if (sec > 0) NOTIFICATION_POLLING_MS = sec * 1000
+    }
+    if (data.task_polling_sec?.value) {
+      const sec = parseInt(data.task_polling_sec.value, 10)
+      if (sec > 0) TASK_POLLING_MS = sec * 1000
+    }
+  } catch (e) {
+    console.warn('ポーリング設定の取得に失敗しました。デフォルト値を使用します。', e)
   }
 }
 
@@ -520,14 +547,16 @@ const startPolling = async () => {
   if (!authState.user) return
   if (pollingInterval.value) return
 
-  // 部署は初回のみ取得
-  await loadDepartments()
+  // 設定・部署を初回取得
+  await Promise.all([loadPollingSettings(), loadDepartments()])
 
   // 初回実行
   pollNotifications()
+  loadPendingTaskCount()
 
-  // 定期実行
-  pollingInterval.value = setInterval(pollNotifications, POLLING_INTERVAL_MS)
+  // 定期実行（通知とタスクを別々の間隔で）
+  pollingInterval.value = setInterval(pollNotifications, NOTIFICATION_POLLING_MS)
+  taskPollingInterval.value = setInterval(pollTasks, TASK_POLLING_MS)
 }
 
 // ポーリング停止
@@ -535,6 +564,10 @@ const stopPolling = () => {
   if (pollingInterval.value) {
     clearInterval(pollingInterval.value)
     pollingInterval.value = null
+  }
+  if (taskPollingInterval.value) {
+    clearInterval(taskPollingInterval.value)
+    taskPollingInterval.value = null
   }
 }
 

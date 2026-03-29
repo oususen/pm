@@ -31,6 +31,7 @@ urlpatterns = [
     path('api/', include('quality.urls')),
     path('api/', include('notifications.urls')),
     path('api/', include('overtime.urls')),
+    path('api/', include('system_settings.urls')),
 ]
 
 if settings.DEBUG:
