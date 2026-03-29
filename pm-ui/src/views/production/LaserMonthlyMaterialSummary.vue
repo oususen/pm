@@ -20,18 +20,6 @@
         <div v-if="budgetOrderPeriod" class="period-label">受注納期: {{ budgetOrderPeriod }}</div>
       </div>
       <div class="toolbar-row">
-        <span class="toolbar-label actual-label">実績（加工期間）</span>
-        <div class="field">
-          <label>開始日</label>
-          <input v-model="actualStartDate" type="date" />
-        </div>
-        <span class="range-sep">〜</span>
-        <div class="field">
-          <label>終了日</label>
-          <input v-model="actualEndDate" type="date" />
-        </div>
-      </div>
-      <div class="toolbar-row">
         <button class="btn primary" type="button" @click="loadSummary" :disabled="loading || !budgetStartDate || !budgetEndDate || !actualStartDate || !actualEndDate">
           集計
         </button>
@@ -323,7 +311,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import * as XLSX from 'xlsx'
 import api from '@/api/client'
 
@@ -342,6 +330,10 @@ const budgetEndDate = ref(toDateStr(lastDay))
 const shiftDays = ref(5)
 const actualStartDate = ref(toDateStr(firstDay))
 const actualEndDate = ref(toDateStr(lastDay))
+
+// 予算加工期間を実績期間に同期
+watch(budgetStartDate, (v) => { actualStartDate.value = v })
+watch(budgetEndDate, (v) => { actualEndDate.value = v })
 
 const budgetOrderPeriod = computed(() => {
   if (!budgetStartDate.value || !budgetEndDate.value || shiftDays.value == null) return ''
