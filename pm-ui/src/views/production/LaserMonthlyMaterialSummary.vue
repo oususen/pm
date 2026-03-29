@@ -593,16 +593,24 @@ const exportExcel = () => {
     [],
     ['材料コード', '材料名', '重量/枚(kg)', '実績枚数', '実績重量(t)', '実績加工時間(時間)'],
   ]
+  let sumActualShots = 0, sumActualWeightT = 0, sumActualTimeH = 0
   actualMaterialTotals.value.forEach((row) => {
+    const shots = Number(row.actual_shot_count || 0)
+    const weightT = row.actual_weight_kg != null ? Number(row.actual_weight_kg) / 1000 : 0
+    const timeH = (row.actual_process_time_min || 0) / 60
+    sumActualShots += shots
+    sumActualWeightT += weightT
+    sumActualTimeH += timeH
     actualMaterialRows.push([
       row.material_code || '',
       row.material_name || '',
       r2(row.unit_weight_kg),
-      r2(row.actual_shot_count),
-      row.actual_weight_kg != null ? r2(Number(row.actual_weight_kg) / 1000) : '',
-      r2((row.actual_process_time_min || 0) / 60),
+      r2(shots),
+      row.actual_weight_kg != null ? r2(weightT) : '',
+      r2(timeH),
     ])
   })
+  actualMaterialRows.push(['合計', '', '', r2(sumActualShots), r2(sumActualWeightT), r2(sumActualTimeH)])
 
   // ── 実績: 設備別 ──
   const actualEquipmentRows = [
@@ -610,14 +618,20 @@ const exportExcel = () => {
     [],
     ['設備コード', '設備名', '実績ショット数', '実績加工時間(時間)'],
   ]
+  let sumEqShots = 0, sumEqTimeH = 0
   actualEquipmentTotals.value.forEach((row) => {
+    const shots = Number(row.actual_shot_count || 0)
+    const timeH = (row.actual_process_time_min || 0) / 60
+    sumEqShots += shots
+    sumEqTimeH += timeH
     actualEquipmentRows.push([
       row.equipment_code || '',
       row.equipment_name || '',
-      r2(row.actual_shot_count),
-      r2((row.actual_process_time_min || 0) / 60),
+      r2(shots),
+      r2(timeH),
     ])
   })
+  actualEquipmentRows.push(['合計', '', r2(sumEqShots), r2(sumEqTimeH)])
 
   // ── 完成品使用パターン一覧（全件） ──
   const productPatternRows = [['完成品番号', '完成品名', '使用パターン']]
