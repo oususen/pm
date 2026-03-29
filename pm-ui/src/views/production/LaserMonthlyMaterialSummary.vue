@@ -352,6 +352,7 @@ const message = ref('')
 const messageType = ref('info')
 const warnings = ref([])
 const warningDetails = ref([])
+const productPatternList = ref([])
 const warningOpen = ref(false)
 const materialTotals = ref([])
 const equipmentTotals = ref([])
@@ -433,6 +434,7 @@ const extractErrorMessage = (error) => {
 const resetRows = () => {
   warnings.value = []
   warningDetails.value = []
+  productPatternList.value = []
   materialTotals.value = []
   equipmentTotals.value = []
   patternRows.value = []
@@ -468,6 +470,7 @@ const loadSummary = async () => {
     const data = res?.data || {}
     warnings.value = Array.isArray(data.warnings) ? data.warnings : []
     warningDetails.value = Array.isArray(data.warning_details) ? data.warning_details : []
+    productPatternList.value = Array.isArray(data.product_pattern_list) ? data.product_pattern_list : []
     materialTotals.value = Array.isArray(data.material_totals) ? data.material_totals : []
     equipmentTotals.value = Array.isArray(data.equipment_totals) ? data.equipment_totals : []
     patternRows.value = Array.isArray(data.pattern_rows) ? data.pattern_rows : []
@@ -616,18 +619,17 @@ const exportExcel = () => {
     ])
   })
 
-  // ── 注意書き（表形式） ──
-  const warningRows = [['完成品番号', '完成品名', '使用パターン']]
-  if (warningDetails.value.length) {
-    warningDetails.value.forEach((d) => {
-      warningRows.push([
-        d.product_code || '',
-        d.product_name || '',
-        Array.isArray(d.pattern_nos) ? d.pattern_nos.join(', ') : '',
-      ])
-    })
-  } else {
-    warningRows.push(['', '注意事項はありません。', ''])
+  // ── 完成品使用パターン一覧（全件） ──
+  const productPatternRows = [['完成品番号', '完成品名', '使用パターン']]
+  productPatternList.value.forEach((d) => {
+    productPatternRows.push([
+      d.product_code || '',
+      d.product_name || '',
+      Array.isArray(d.pattern_nos) ? d.pattern_nos.join(', ') : '',
+    ])
+  })
+  if (!productPatternList.value.length) {
+    productPatternRows.push(['', 'データがありません。', ''])
   }
 
   const workbook = XLSX.utils.book_new()
@@ -636,7 +638,7 @@ const exportExcel = () => {
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(detailRows), '予算_パターン別明細')
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(actualMaterialRows), '実績_材料別集計')
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(actualEquipmentRows), '実績_設備別加工時間')
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(warningRows), '注意書き')
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(productPatternRows), '完成品使用パターン一覧')
   XLSX.writeFile(workbook, `レーザ所要材料集計_${budgetStartDate.value || ''}_${budgetEndDate.value || ''}.xlsx`)
 }
 

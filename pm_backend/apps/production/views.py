@@ -4613,6 +4613,16 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
                 'pattern_nos': pattern_nos,
             })
 
+        # 完成品使用パターン一覧（全件・単数パターンも含む）
+        product_pattern_list = [
+            {
+                'product_code': code,
+                'product_name': finished_meta_by_code.get(code, {}).get('product_name', ''),
+                'pattern_nos': pattern_nos,
+            }
+            for code, pattern_nos in sorted(product_pattern_map.items())
+        ]
+
         if not finished_meta_by_code:
             return Response({
                 'month': month_start.strftime('%Y-%m'),
@@ -4988,6 +4998,7 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
             'pattern_rows': pattern_rows,
             'warnings': warnings,
             'warning_details': warning_details,
+            'product_pattern_list': product_pattern_list,
             'totals': {
                 'material_type_count': len(material_totals),
                 'pattern_count': len(pattern_rows),
