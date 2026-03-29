@@ -335,11 +335,17 @@ const actualEndDate = ref(toDateStr(lastDay))
 watch(budgetStartDate, (v) => { actualStartDate.value = v })
 watch(budgetEndDate, (v) => { actualEndDate.value = v })
 
+// APIから返ってくる営業日計算済みの受注納期期間（集計後に更新）
+const orderStartDate = ref('')
+const orderEndDate = ref('')
 const budgetOrderPeriod = computed(() => {
-  if (!budgetStartDate.value || !budgetEndDate.value || shiftDays.value == null) return ''
-  const s = addDays(budgetStartDate.value, shiftDays.value)
-  const e = addDays(budgetEndDate.value, shiftDays.value)
-  return `${s} ～ ${e}`
+  if (!orderStartDate.value || !orderEndDate.value) return ''
+  return `${orderStartDate.value} ～ ${orderEndDate.value}`
+})
+// 入力変更時は表示をクリア（再集計が必要）
+watch([budgetStartDate, budgetEndDate, shiftDays], () => {
+  orderStartDate.value = ''
+  orderEndDate.value = ''
 })
 const loading = ref(false)
 const message = ref('')
@@ -476,6 +482,8 @@ const loadSummary = async () => {
       start_date: data.start_date || '',
       end_date: data.end_date || '',
     }
+    orderStartDate.value = data.order_start_date || ''
+    orderEndDate.value = data.order_end_date || ''
     message.value = patternRows.value.length
       ? '集計を更新しました。'
       : '対象月に材料予算用パターンの受注データがありません。'
