@@ -201,10 +201,10 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {'non_field_errors': [f'{work_date} に同じ種別（{type_display}）の申請がすでに存在します。']}
                 )
-        needs_time = app_type in ('overtime', 'half_day_am')
+        # 時間外のみ start_time/end_time を必須（半休は時間外が任意）
         start_time = data.get('start_time', getattr(self.instance, 'start_time', None))
         end_time = data.get('end_time', getattr(self.instance, 'end_time', None))
-        if needs_time:
+        if app_type == 'overtime':
             if not start_time:
                 raise serializers.ValidationError({'start_time': '残業開始時間は必須です。'})
             if not end_time:
@@ -229,6 +229,9 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
             validated_data['team'] = applicant.profile.team
         except Exception:
             pass
+        # 定時は承認フロー不要なので直接承認済みにする
+        if validated_data.get('application_type') == 'normal':
+            validated_data['status'] = 'approved_manager'
         return super().create(validated_data)
 
     def update(self, instance, validated_data):

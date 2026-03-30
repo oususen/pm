@@ -124,6 +124,7 @@ class OvertimeApplication(models.Model):
         ('rejected', '却下'),
     ]
     TYPE_CHOICES = [
+        ('normal', '定時'),
         ('overtime', '時間外'),
         ('holiday', '休日出勤'),
         ('half_day_am', '午前半休'),
