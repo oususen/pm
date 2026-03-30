@@ -5,6 +5,7 @@ from django.db import models
 class ProductionRecordInquirySetting(models.Model):
     TAB_TANK = 'tank'
     TAB_FLOOR = 'floor'
+    TAB_FLOOR_SHIPPING = 'floor-shipping'
     TAB_BLADE = 'blade'
     TAB_LASER = 'laser'
     TAB_BRAKE = 'brake'
@@ -12,6 +13,7 @@ class ProductionRecordInquirySetting(models.Model):
     TAB_CHOICES = (
         (TAB_TANK, 'タンク'),
         (TAB_FLOOR, 'フロア'),
+        (TAB_FLOOR_SHIPPING, 'フロア出荷'),
         (TAB_BLADE, 'ブレード'),
         (TAB_LASER, 'レーザ'),
         (TAB_BRAKE, 'ブレーキ'),

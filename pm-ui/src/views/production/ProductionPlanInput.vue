@@ -132,6 +132,9 @@
       注意: このラインでは、連産品は「親品番 + 代表部番（is_coproduct_driver）」のみ表示します。
       連産品の非代表子は表示しません。非連産品は通常どおり表示します。
     </div>
+    <div v-if="isFloorShippingDeliveryLine" class="line-rule-notice">
+      注意: フロア配送は同一日・同一品番を sequence_no 昇順で 1件目=AM、2件目=PM と解釈します。入力は 2件までです。
+    </div>
 
     <div class="grid-wrapper" ref="gridWrapperRef">
       <table class="plan-grid" :style="{ minWidth: tableMinWidth + 'px' }">
@@ -254,7 +257,7 @@
                       :class="{ locked: isPlanCellLocked(c.key) }"
                     />
                   </div>
-                  <button class="mini-btn lot-add" type="button" @click="addExtraLot(row, c.key)" :disabled="isPlanCellLocked(c.key) || isHolidayDate(c.key)">+</button>
+                  <button class="mini-btn lot-add" type="button" @click="addExtraLot(row, c.key)" :disabled="isPlanCellLocked(c.key) || isHolidayDate(c.key) || (isFloorShippingDeliveryLine && row.daily?.[c.key]?.extraLots?.length >= 1)">+</button>
                 </div>
               </td>
               <td class="num sequence" :class="c.dayClass">
@@ -556,16 +559,18 @@ const settingsTargetTab = ref('tank')
 const planTabs = [
   { key: 'tank', label: 'タンク' },
   { key: 'floor', label: 'フロア' },
+  { key: 'floor-shipping', label: 'フロア出荷' },
   { key: 'blade', label: 'ブレード' },
   { key: 'laser', label: 'レーザ' },
   { key: 'brake', label: 'ブレーキ' },
   { key: 'spot', label: 'スポット' },
   { key: 'line-settings', label: 'ライン編集' },
 ]
-const operationalPlanTabs = ['tank', 'floor', 'blade', 'laser', 'brake', 'spot']
+const operationalPlanTabs = ['tank', 'floor', 'floor-shipping', 'blade', 'laser', 'brake', 'spot']
 const lineKeywordsByTab = {
   tank: ['タンク', 'tank'],
   floor: ['フロア', 'floor'],
+  'floor-shipping': ['北進塗装', 'フロア配送'],
   blade: ['ブレード', 'blade'],
   laser: ['レーザ', 'laser'],
   brake: ['ブレーキ', 'brake', 'bend'],
@@ -629,6 +634,13 @@ const coproductDisplayCache = new Map()
 const selectedLineObj = computed(() =>
   lines.value.find((l) => `${l.id}` === `${selectedLine.value}`)
 )
+const isFloorShippingDeliveryLine = computed(() => {
+  if (activePlanTab.value !== 'floor-shipping') return false
+  const line = selectedLineObj.value
+  if (!line) return false
+  const text = `${String(line.line_code || '').trim()} ${String(line.line_name || '').trim()}`
+  return text.includes('フロア配送')
+})
 const configurablePlanTabs = computed(() => planTabs.filter((tab) => operationalPlanTabs.includes(tab.key)))
 const normalizeLineCode = (value) => String(value || '').trim().toUpperCase()
 const normalizeLineCodes = (values) => Array.from(new Set(
@@ -1110,6 +1122,11 @@ const savePlan = async () => {
   }
   if (isEditUnlocked.value && !changeReason.value) {
     alert('変更理由を入力してください。')
+    return
+  }
+  const floorShippingValidationError = validateFloorShippingLots()
+  if (floorShippingValidationError) {
+    alert(floorShippingValidationError)
     return
   }
 
@@ -1667,10 +1684,25 @@ const onSequenceInput = (row, dateKey, value) => {
 const addExtraLot = (row, dateKey) => {
   if (isPlanCellLocked(dateKey)) return
   const daily = ensureDailyCell(row, dateKey)
+  if (isFloorShippingDeliveryLine.value && Array.isArray(daily.extraLots) && daily.extraLots.length >= 1) {
+    alert('フロア配送は同一日・同一品番で2件までです。')
+    return
+  }
+  if (isFloorShippingDeliveryLine.value) {
+    const mainPlanQty = Number(daily.plan)
+    if (!Number.isFinite(mainPlanQty) || mainPlanQty <= 0) {
+      alert('フロア配送は先に1件目を入力してください。')
+      return
+    }
+    const mainSeq = parseInt(daily.sequence_no)
+    if (isNaN(mainSeq) || mainSeq <= 0) {
+      daily.sequence_no = getNextSequenceForDate(dateKey)
+    }
+  }
   daily.extraLots.push({
     id: `lot-${lotTempId++}`,
     plan_qty: '',
-    sequence_no: '',
+    sequence_no: isFloorShippingDeliveryLine.value ? getNextSequenceForDate(dateKey) : '',
   })
 }
 
@@ -1686,6 +1718,16 @@ const onExtraPlanInput = (row, dateKey, lot, value) => {
   const target = daily.extraLots.find((item) => item.id === lot.id)
   if (target) {
     target.plan_qty = value === '' ? '' : value
+    if (isFloorShippingDeliveryLine.value) {
+      const numVal = parseFloat(value)
+      if (!isNaN(numVal) && numVal > 0) {
+        if (target.sequence_no === '' || target.sequence_no === null || target.sequence_no === undefined) {
+          target.sequence_no = getNextSequenceForDate(dateKey)
+        }
+      } else {
+        target.sequence_no = ''
+      }
+    }
   }
 }
 
@@ -1696,6 +1738,32 @@ const onExtraSequenceInput = (row, dateKey, lot, value) => {
   if (target) {
     target.sequence_no = value === '' ? '' : value
   }
+}
+
+const validateFloorShippingLots = () => {
+  if (!isFloorShippingDeliveryLine.value) return ''
+  for (const row of rows.value) {
+    for (const c of dateColumns.value) {
+      const daily = ensureDailyCell(row, c.key)
+      const lots = []
+      const mainPlanQty = daily.plan === '' || daily.plan === null || daily.plan === undefined ? null : Number(daily.plan)
+      if (mainPlanQty !== null && mainPlanQty > 0) {
+        lots.push(mainPlanQty)
+      }
+      const extraLots = Array.isArray(daily.extraLots) ? daily.extraLots : []
+      extraLots.forEach((lot) => {
+        const lotPlanQty = lot.plan_qty === '' || lot.plan_qty === null || lot.plan_qty === undefined ? null : Number(lot.plan_qty)
+        if (lotPlanQty !== null && lotPlanQty > 0) {
+          lots.push(lotPlanQty)
+        }
+      })
+      if (lots.length > 2) {
+        const label = row.product_code || getProductCode(row.product_id) || row.product_id
+        return `${c.key} の ${label} は 2件までです。`
+      }
+    }
+  }
+  return ''
 }
 
 const toggleProcessGantt = async () => {

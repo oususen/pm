@@ -61,6 +61,9 @@ from django.db.models import Q
 
 logger = logging.getLogger(__name__)
 
+FLOOR_SHIPPING_TAB_KEY = 'floor-shipping'
+FLOOR_SHIPPING_DELIVERY_LABEL = 'フロア配送'
+
 
 def _parse_optional_date(value):
     if value is None:
@@ -90,6 +93,14 @@ def _parse_product_ids(value):
         except (TypeError, ValueError):
             raise ValueError('product_ids must be numeric')
     return sorted(set(result))
+
+
+def _is_floor_shipping_delivery_line(line_obj):
+    if not line_obj:
+        return False
+    line_code = str(getattr(line_obj, 'line_code', '') or '').strip()
+    line_name = str(getattr(line_obj, 'line_name', '') or '').strip()
+    return FLOOR_SHIPPING_DELIVERY_LABEL in f'{line_code} {line_name}'
 
 
 def _resolve_inventory_effective_start_date(line_id, requested_start_date, end_date, product_ids=None):
@@ -484,6 +495,9 @@ class LinePlanViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
         if not isinstance(items, list) or not items:
             return Response({'detail': 'items is required'}, status=status.HTTP_400_BAD_REQUEST)
+        line_obj = Line.objects.filter(id=line_id, is_active=True).only('id', 'line_code', 'line_name').first()
+        if not line_obj:
+            return Response({'detail': 'line not found'}, status=status.HTTP_400_BAD_REQUEST)
         raw_reason = request.data.get('change_reason')
         change_reason = None
         if raw_reason is not None:
@@ -502,12 +516,41 @@ class LinePlanViewSet(viewsets.ModelViewSet):
         # 対象となる日付と製品を抽出
         affected_dates = set()
         affected_products = set()
+        floor_shipping_plan_counts = {}
         for it in items:
             plan_date = it.get('plan_date')
             product_id = it.get('product_id')
             if plan_date and product_id:
-                affected_dates.add(parse_plan_date(plan_date))
+                plan_date_obj = parse_plan_date(plan_date)
+                affected_dates.add(plan_date_obj)
                 affected_products.add(product_id)
+                if _is_floor_shipping_delivery_line(line_obj):
+                    try:
+                        plan_qty_value = Decimal(str(it.get('plan_qty') or 0))
+                    except Exception:
+                        plan_qty_value = Decimal('0')
+                    if plan_qty_value > 0:
+                        count_key = (product_id, plan_date_obj)
+                        floor_shipping_plan_counts[count_key] = floor_shipping_plan_counts.get(count_key, 0) + 1
+
+        if _is_floor_shipping_delivery_line(line_obj):
+            invalid_keys = [
+                (product_id, plan_date_obj, count)
+                for (product_id, plan_date_obj), count in floor_shipping_plan_counts.items()
+                if count > 2
+            ]
+            if invalid_keys:
+                product_ids = {product_id for product_id, _, _ in invalid_keys}
+                product_code_map = {
+                    product.id: product.product_code
+                    for product in Product.objects.filter(id__in=product_ids).only('id', 'product_code')
+                }
+                first_product_id, first_plan_date, first_count = invalid_keys[0]
+                product_label = product_code_map.get(first_product_id, str(first_product_id))
+                return Response(
+                    {'detail': f'フロア配送は同一日・同一品番で2件までです: {product_label} {first_plan_date} ({first_count}件)'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         created = 0
         deleted_plan = 0
@@ -1164,9 +1207,16 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 qs = qs.filter(plan_date__gte=start_dt)
             if source_end_dt or end_dt:
                 qs = qs.filter(plan_date__lte=source_end_dt or end_dt)
-            rows = list(qs.values_list('product_id', 'plan_date', 'plan_qty', 'plan_id'))
+            rows = list(qs.values_list('product_id', 'plan_date', 'plan_qty', 'plan_id', 'sequence_no'))
             downstream_backlog_cache[cache_key] = rows
             return rows
+
+        def sort_sequence_value(value):
+            try:
+                seq = int(value or 0)
+            except (TypeError, ValueError):
+                seq = 0
+            return seq if seq > 0 else 10 ** 9
 
         def resolve_lead_time_days(current_product_id, bom_item=None):
             """現ラインのLTを優先して解決する。"""
@@ -1368,11 +1418,45 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     else:
                         total_qty_per = qty_per
 
+                    if _is_floor_shipping_delivery_line(getattr(d_step, 'line', None)):
+                        selected_rows_by_date = {}
+                        if len(target_ids) > 1:
+                            parent_rows = {}
+                            final_rows = {}
+                            for backlog_product_id, plan_date, plan_qty, _backlog_plan_id, sequence_no in backlog_rows:
+                                qty = Decimal(str(plan_qty or 0))
+                                if qty == 0:
+                                    continue
+                                target_map = parent_rows if backlog_product_id == parent_product.id else final_rows
+                                target_map.setdefault(plan_date, []).append((qty, sequence_no))
+
+                            for plan_date in set(parent_rows) | set(final_rows):
+                                if has_multiple_final_targets:
+                                    selected_rows_by_date[plan_date] = list(final_rows.get(plan_date, []))
+                                else:
+                                    selected_rows_by_date[plan_date] = list(parent_rows.get(plan_date) or final_rows.get(plan_date, []))
+                        else:
+                            for _, plan_date, plan_qty, _backlog_plan_id, sequence_no in backlog_rows:
+                                qty = Decimal(str(plan_qty or 0))
+                                if qty == 0:
+                                    continue
+                                selected_rows_by_date.setdefault(plan_date, []).append((qty, sequence_no))
+
+                        for plan_date, lots in selected_rows_by_date.items():
+                            ordered_lots = sorted(lots, key=lambda item: sort_sequence_value(item[1]))
+                            for lot_index, (qty, _sequence_no) in enumerate(ordered_lots):
+                                effective_lt_days = 0 if lot_index == 0 else 1
+                                shifted_date = shift_business_days(plan_date, effective_lt_days) if effective_lt_days else plan_date
+                                key = (current_output_product, shifted_date)
+                                demand_map[key] += qty * total_qty_per
+                                downstream_found = True
+                        continue
+
                     fallback_map = {}
                     if len(target_ids) > 1:
                         parent_map = {}
                         final_map = {}
-                        for backlog_product_id, plan_date, plan_qty, backlog_plan_id in backlog_rows:
+                        for backlog_product_id, plan_date, plan_qty, backlog_plan_id, _sequence_no in backlog_rows:
                             qty = Decimal(str(plan_qty or 0))
                             if qty == 0:
                                 continue
@@ -1393,7 +1477,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             if qty:
                                 fallback_map[plan_date] = qty
                     else:
-                        for _, plan_date, plan_qty, backlog_plan_id in backlog_rows:
+                        for _, plan_date, plan_qty, backlog_plan_id, _sequence_no in backlog_rows:
                             qty = Decimal(str(plan_qty or 0))
                             if qty == 0:
                                 continue
@@ -5345,10 +5429,11 @@ class ProductionPlanLockSettingView(APIView):
 
 
 class ProductionRecordInquirySettingView(APIView):
-    TAB_KEYS = ['tank', 'floor', 'blade', 'laser', 'brake', 'spot']
+    TAB_KEYS = ['tank', 'floor', FLOOR_SHIPPING_TAB_KEY, 'blade', 'laser', 'brake', 'spot']
     DEFAULT_TARGET_LINE_CODES_BY_TAB = {
         'tank': ['L2200', 'L2201'],
         'floor': [],
+        FLOOR_SHIPPING_TAB_KEY: [],
         'blade': [],
         'laser': [],
         'brake': [],
