@@ -105,6 +105,10 @@
                 <td>{{ Math.round((parseFloat(targetApp.hours) + parseFloat(targetApp.midnight_hours)) * 10) / 10 }}H（{{ t('approvalList.modal.midnight') }}: {{ targetApp.midnight_hours }}H）</td>
               </tr>
               <tr><th>{{ t('approvalList.col.reason') }}</th><td>{{ targetApp.reason || '-' }}</td></tr>
+              <tr v-if="targetApp.signature">
+                <th>サイン</th>
+                <td><img :src="targetApp.signature" alt="申請者サイン" class="sign-img" /></td>
+              </tr>
             </tbody>
           </table>
 
@@ -477,6 +481,7 @@ onMounted(fetchList)
   border-bottom: 1px solid #e5e7eb;
 }
 .detail-table td { padding: 7px 10px; border-bottom: 1px solid #f3f4f6; }
+.sign-img { max-width: 100%; max-height: 120px; border: 1px solid #e5e7eb; border-radius: 4px; background: #fff; display: block; }
 .bulk-desc { font-size: 14px; color: #374151; margin-bottom: 14px; }
 .bulk-list-table {
   width: 100%;
