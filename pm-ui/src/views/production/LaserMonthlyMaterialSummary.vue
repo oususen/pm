@@ -74,7 +74,7 @@
         </div>
         <div class="stat-card">
           <div class="stat-label">重量(t)</div>
-          <div class="stat-value">{{ totals.total_weight_kg != null ? formatNumber(totals.total_weight_kg / 1000, 2) : '-' }}</div>
+          <div class="stat-value">{{ totals.total_weight_kg != null ? formatNumber(totals.total_weight_kg / 1000, 1) : '-' }}</div>
         </div>
       </div>
     </div>
@@ -95,7 +95,7 @@
         </div>
         <div class="stat-card actual-card">
           <div class="stat-label">重量(t)</div>
-          <div class="stat-value">{{ actualTotals.total_weight_kg != null ? formatNumber(actualTotals.total_weight_kg / 1000, 2) : '-' }}</div>
+          <div class="stat-value">{{ actualTotals.total_weight_kg != null ? formatNumber(actualTotals.total_weight_kg / 1000, 1) : '-' }}</div>
         </div>
       </div>
     </div>
@@ -137,7 +137,7 @@
               <td class="num">{{ row.unit_weight_kg != null ? formatNumber(row.unit_weight_kg, 3) : '-' }}</td>
               <td class="num">{{ formatInteger(row.pattern_count) }}</td>
               <td class="num">{{ formatSheetQty(row.required_material_qty) }}</td>
-              <td class="num">{{ row.total_weight_kg != null ? formatNumber(row.total_weight_kg / 1000, 3) : '-' }}</td>
+              <td class="num">{{ row.total_weight_kg != null ? formatNumber(row.total_weight_kg / 1000, 1) : '-' }}</td>
               <td class="num">{{ row.pack_qty != null ? formatInteger(row.pack_qty) : '-' }}</td>
               <td class="num">{{ row.required_packages != null ? formatInteger(row.required_packages) : '-' }}</td>
               <td class="num">{{ formatNumber(row.total_process_time_min / 60, 2) }}</td>
@@ -234,7 +234,7 @@
                 {{ formatSheetQty(row.required_material_qty) }}
                 <span class="unit-text">{{ row.material_unit || '' }}</span>
               </td>
-              <td class="num">{{ row.total_weight_kg != null ? formatNumber(row.total_weight_kg / 1000, 3) : '-' }}</td>
+              <td class="num">{{ row.total_weight_kg != null ? formatNumber(row.total_weight_kg / 1000, 1) : '-' }}</td>
               <td class="num">{{ row.required_packages != null ? formatInteger(row.required_packages) : '-' }}</td>
               <td class="num">{{ formatNumber(row.total_process_time_min / 60, 2) }}</td>
             </tr>
@@ -404,7 +404,7 @@ const formatSheetQty = (value) => {
   if (!Number.isFinite(num)) return '0'
   return num.toLocaleString('ja-JP', {
     minimumFractionDigits: 0,
-    maximumFractionDigits: 3,
+    maximumFractionDigits: 0,
   })
 }
 
