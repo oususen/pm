@@ -101,11 +101,11 @@
               <td>{{ bom.valid_to || '-' }}</td>
               <td>{{ bom.is_active ? '有効' : '無効' }}</td>
               <td>
-                <button @click="goToDetailPage(bom)" class="btn-sm">詳細</button>
+                <button @click="viewDetails(bom)" class="btn-sm">詳細</button>
                 <button @click="downloadBOMExcel(bom)" class="btn-sm btn-excel">Excel出力</button>
                 <button @click="openDetailsInNewTab(bom)" class="btn-sm">別タブ</button>
                 <button @click="viewTreeOnly(bom)" class="btn-sm">階層図</button>
-                <button v-if="canEdit" @click="goToDetailPage(bom)" class="btn-sm">編集</button>
+                <button v-if="canEdit" @click="editBOM(bom)" class="btn-sm">編集</button>
                 <button v-if="canEdit" @click="deleteBOM(bom.id)" class="btn-sm btn-danger">削除</button>
               </td>
             </tr>
@@ -218,6 +218,7 @@
             <span class="summary-value">{{ selectedBOM.valid_from }} ～ {{ selectedBOM.valid_to || '無期限' }}</span>
           </div>
           <div class="summary-item">
+            <button v-if="canEdit" type="button" class="btn-secondary" @click="editBOM(selectedBOM)">基本情報を編集</button>
             <button v-if="canEdit" type="button" class="btn-primary" @click="openCopyDialog">BOMをコピー</button>
           </div>
         </div>
@@ -1238,6 +1239,7 @@ const goToDetailPage = (bom) => {
 
 const showNewDialog = () => {
   if (!canEdit.value) return
+  closeDetailsDialog()
   isEdit.value = false
   parentProductFilter.value = ''
   const today = new Date().toISOString().split('T')[0]
@@ -1651,8 +1653,8 @@ const saveBOMItem = async () => {
       alert('時間単位=分のときは所要時間(分)を1以上で入力してください')
       return
     }
-    if (itemForm.value.time_unit === 'DAY' && itemForm.value.lead_time_days <= 0) {
-      alert('時間単位=日 のときはリードタイム(日)を1以上で入力してください')
+    if (itemForm.value.time_unit === 'DAY' && itemForm.value.lead_time_days < 0) {
+      alert('時間単位=日 のときはリードタイム(日)を0以上で入力してください')
       return
     }
   } else if (itemForm.value.sourcing_type === 'BUY') {
