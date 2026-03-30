@@ -3596,6 +3596,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 end_dt,
                 include_progress=True,
                 product_ids=product_ids,
+                progress_calc_start_date=start_dt,
             )
             return Response({
                 'detail': '過去からの在庫・進度再計算が完了しました',

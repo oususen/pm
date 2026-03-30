@@ -1257,6 +1257,7 @@ def recalculate_inventory_for_line(
     line_final_only=False,
     product_ids=None,
     progress_only=False,
+    progress_calc_start_date=None,
 ):
     """
     指定ラインの在庫を再計算
@@ -1380,6 +1381,7 @@ def recalculate_inventory_for_line(
                 end_date,
                 progress_adjust_map=adjustment_maps.get('PROGRESS'),
                 planned_progress_adjust_map=adjustment_maps.get('PLANNED_PROGRESS'),
+                override_calc_start_date=progress_calc_start_date,
             )
             progress_elapsed = time.perf_counter() - t2
             progress_total += progress_elapsed

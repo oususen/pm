@@ -21,6 +21,7 @@ def recalculate_progress_qty(
     end_date,
     progress_adjust_map=None,
     planned_progress_adjust_map=None,
+    override_calc_start_date=None,
 ):
     """
     進度を日次で再計算
@@ -157,10 +158,14 @@ def recalculate_progress_qty(
         return int(total)
 
     today = get_business_today()
-    # 製品のBOMの最大LTを取得し、LT+1日前から再計算
-    # これにより、親製品の実績変更が子製品の過去の需要（LineDemand）に正しく反映される
-    max_lt = _get_max_parent_bom_lead_time(product_id)
-    calc_start_date = shift_working_days(today, -(max_lt + 1))
+    if override_calc_start_date is not None:
+        # 「過去から計算」など、表示開始日を起点に強制的に再計算する場合
+        calc_start_date = override_calc_start_date
+    else:
+        # 通常再計算: 製品のBOMの最大LTを取得し、LT+1日前から再計算
+        # これにより、親製品の実績変更が子製品の過去の需要（LineDemand）に正しく反映される
+        max_lt = _get_max_parent_bom_lead_time(product_id)
+        calc_start_date = shift_working_days(today, -(max_lt + 1))
     progress_by_date = {}
     last_progress = 0
     planned_progress_by_date = {}
