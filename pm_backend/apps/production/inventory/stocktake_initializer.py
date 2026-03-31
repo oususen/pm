@@ -13,6 +13,7 @@ from orders.utils.calendar_utils import get_business_today
 from production.models_line_backlog import LineBacklog
 from production.models_production import StockAllocation
 from masters.models import RoutingStep
+from masters.services.routing_service import build_effective_routing_q
 from django.db.models import Q, Sum
 from .inventory_calculator import (
     _calculate_parent_actual_shipment,
@@ -37,7 +38,7 @@ def _convert_minute_duration_to_lt_days(duration_min):
     return max(minutes // 480, 0)
 
 
-def _resolve_edge_lead_time_days(line_id, child_product_id, bom_item=None, step_cache=None):
+def _resolve_edge_lead_time_days(line_id, child_product_id, bom_item=None, step_cache=None, reference_date=None):
     """
     親子エッジ（子→直親）用のLT解決。
     進度基準日計算の親子エッジLT解決。
@@ -48,19 +49,20 @@ def _resolve_edge_lead_time_days(line_id, child_product_id, bom_item=None, step_
         child_product_id,
         bom_item=bom_item,
         step_cache=step_cache,
+        reference_date=reference_date,
     )
 
 
-def _resolve_final_product_lt_days(line_id, product_id):
+def _resolve_final_product_lt_days(line_id, product_id, reference_date=None):
     """
     最終品/ライン最終品向けLT解決。
     最終品はパイプライン需要控除の基準となるため、DAY工程優先・それ以外はラインLTを使用する。
     """
     step = (
         RoutingStep.objects.filter(
-            routing__is_active=True,
             line_id=line_id,
         )
+        .filter(build_effective_routing_q(reference_date, prefix='routing__'))
         .filter(
             Q(output_product_id=product_id)
             | Q(output_product_id__isnull=True, routing__product_id=product_id)
@@ -100,9 +102,9 @@ def _collect_stocktake_mapping_keys(stocktake_date, target_product_ids):
     mapped_product_ids = set()
 
     step_qs = RoutingStep.objects.filter(
-        routing__is_active=True,
         line_id__isnull=False,
     ).filter(
+        build_effective_routing_q(stocktake_date, prefix='routing__'),
         Q(output_product_id__in=target_product_ids) |
         Q(output_product_id__isnull=True, routing__product_id__in=target_product_ids)
     ).select_related('routing')
@@ -170,7 +172,7 @@ def _collect_stocktake_mapping_keys(stocktake_date, target_product_ids):
     return unique_keys, mapped_product_ids
 
 
-def _resolve_stocktake_lead_time_days(line_id, product_id, bom_item=None, step_cache=None):
+def _resolve_stocktake_lead_time_days(line_id, product_id, bom_item=None, step_cache=None, reference_date=None):
     """
     棚卸専用のLT解決。
 
@@ -185,15 +187,15 @@ def _resolve_stocktake_lead_time_days(line_id, product_id, bom_item=None, step_c
       4. 0
     """
     step = None
-    cache_key = (line_id, product_id)
+    cache_key = (line_id, product_id, reference_date)
     if step_cache is not None and cache_key in step_cache:
         step = step_cache[cache_key]
     else:
         step = (
             RoutingStep.objects.filter(
-                routing__is_active=True,
                 line_id=line_id,
             )
+            .filter(build_effective_routing_q(reference_date, prefix='routing__'))
             .filter(
                 Q(output_product_id=product_id)
                 | Q(output_product_id__isnull=True, routing__product_id=product_id)
@@ -227,7 +229,7 @@ def _resolve_stocktake_lead_time_days(line_id, product_id, bom_item=None, step_c
     return 0
 
 
-def _stocktake_sum_parent_shipments(backlog, pick_qty, shift_fn=None, step_cache=None):
+def _stocktake_sum_parent_shipments(backlog, pick_qty, shift_fn=None, step_cache=None, reference_date=None):
     """
     棚卸専用: 親出庫合算。
     LTは _resolve_stocktake_lead_time_days() で解決する。
@@ -258,6 +260,7 @@ def _stocktake_sum_parent_shipments(backlog, pick_qty, shift_fn=None, step_cache
             backlog.product_id,
             bom_item=bom_item,
             step_cache=step_cache,
+            reference_date=reference_date,
         )
         parent_date = backlog.plan_date
         if shift_fn:
@@ -279,7 +282,7 @@ def _stocktake_sum_parent_shipments(backlog, pick_qty, shift_fn=None, step_cache
     return total_shipment
 
 
-def _stocktake_calculate_parent_actual_shipment_only(backlog, shift_fn=None, step_cache=None):
+def _stocktake_calculate_parent_actual_shipment_only(backlog, shift_fn=None, step_cache=None, reference_date=None):
     """
     棚卸専用: 計画在庫の過去分計算用。
     親の実績のみを集計し、計画値へのフォールバックを行わない。
@@ -299,10 +302,11 @@ def _stocktake_calculate_parent_actual_shipment_only(backlog, shift_fn=None, ste
         pick_qty,
         shift_fn=shift_fn,
         step_cache=step_cache,
+        reference_date=reference_date,
     )
 
 
-def _stocktake_calculate_parent_planned_shipment(backlog, today, shift_fn, step_cache=None):
+def _stocktake_calculate_parent_planned_shipment(backlog, today, shift_fn, step_cache=None, reference_date=None):
     """
     棚卸専用: 計画在庫向け出庫（計画 + 仕損）。
     """
@@ -322,6 +326,7 @@ def _stocktake_calculate_parent_planned_shipment(backlog, today, shift_fn, step_
         pick_qty,
         shift_fn=shift_fn,
         step_cache=step_cache,
+        reference_date=reference_date,
     )
 
 
@@ -561,6 +566,7 @@ def recalculate_inventory_from_stocktake(line_id, baseline_date, end_date):
             line_id, product_id, baseline_date, end_date,
             firm_map, today, get_prev_working_day, shift_working_days,
             is_working_day=is_working_day,
+            reference_date=baseline_date,
         )
 
     return {
@@ -636,6 +642,7 @@ def _build_global_stocktake_baseline_progress_map(baseline_date, is_working_day)
             child_id,
             bom_item=item,
             step_cache=step_cache,
+            reference_date=baseline_date,
         )
         child_to_parents[child_id].append((parent_id, qty, lead_days))
         if lead_days > max_lt_days:
@@ -830,6 +837,7 @@ def recalculate_progress_from_stocktake(line_id, baseline_date, end_date):
             child_id,
             bom_item=item,
             step_cache=lt_step_cache,
+            reference_date=baseline_date,
         )
         parent_to_children[parent_id].append((child_id, qty))
         child_to_parents[child_id].append((parent_id, qty))
@@ -1181,7 +1189,7 @@ def _stocktake_recalc_stock(line_id, product_id, start_date, end_date,
 
 def _stocktake_recalc_planned_stock(line_id, product_id, start_date, end_date,
                                      firm_map, today, get_prev_working_day, shift_working_days,
-                                     is_working_day=None):
+                                     is_working_day=None, reference_date=None):
     """
     棚卸専用: 計画在庫を日次で再計算。
 
@@ -1196,6 +1204,8 @@ def _stocktake_recalc_planned_stock(line_id, product_id, start_date, end_date,
 
     if not backlogs:
         return
+
+    reference_date = reference_date or start_date
 
     by_date = {}
     for b in backlogs:
@@ -1254,7 +1264,12 @@ def _stocktake_recalc_planned_stock(line_id, product_id, start_date, end_date,
             # is_line_final または 購入品の場合
             # LT後の日付が過去なら親の実績(Planフォールバックなし)、そうでなければ計需（order_total）
             # LTは親BOMの最大LTを使用する（最も遅い消費に合わせる）
-            lt_days = _resolve_stocktake_lead_time_days(line_id, product_id, step_cache=step_cache)
+            lt_days = _resolve_stocktake_lead_time_days(
+                line_id,
+                product_id,
+                step_cache=step_cache,
+                reference_date=reference_date,
+            )
             if lt_days == 0:
                 lt_days = _get_max_parent_bom_lead_time(product_id)
             lt_shifted_date = shift_working_days(plan_date, lt_days)
@@ -1263,19 +1278,26 @@ def _stocktake_recalc_planned_stock(line_id, product_id, start_date, end_date,
                     sample,
                     shift_fn=shift_working_days,
                     step_cache=step_cache,
+                    reference_date=reference_date,
                 )
             else:
                 planned_shipment = Decimal(str(order_total))
         else:
             # その他（通常の中間品）: 従来通り
             # 過去は実績のみ(Planフォールバックなし)、未来は計画
-            lt_days = _resolve_stocktake_lead_time_days(line_id, product_id, step_cache=step_cache)
+            lt_days = _resolve_stocktake_lead_time_days(
+                line_id,
+                product_id,
+                step_cache=step_cache,
+                reference_date=reference_date,
+            )
             lt_shifted_date = shift_working_days(plan_date, lt_days)
             if lt_shifted_date < today:
                 planned_shipment = _stocktake_calculate_parent_actual_shipment_only(
                     sample,
                     shift_fn=shift_working_days,
                     step_cache=step_cache,
+                    reference_date=reference_date,
                 )
             else:
                 planned_shipment = _stocktake_calculate_parent_planned_shipment(
@@ -1283,6 +1305,7 @@ def _stocktake_recalc_planned_stock(line_id, product_id, start_date, end_date,
                     today,
                     shift_working_days,
                     step_cache=step_cache,
+                    reference_date=reference_date,
                 )
         planned_shipment = int(planned_shipment or 0)
 
@@ -1460,6 +1483,7 @@ def calculate_pipeline_demand(
     today=None,
     firm_map=None,
     final_flags=None,
+    reference_date=None,
 ):
     """
     計画在庫初期化用：パイプライン需要（LT期間中の親の需要）を計算する
@@ -1515,10 +1539,11 @@ def calculate_pipeline_demand(
     ).select_related('bom__parent_product')
     
     has_parents = parent_bom_items.exists()
+    reference_date = reference_date or baseline_date
 
     # 最終品、または (ライン最終品 かつ 親がいない場合): 基準日+1..+LT の自需要を積算
     if is_final or (is_line_final and not has_parents):
-        lt = _resolve_final_product_lt_days(line_id, product_id)
+        lt = _resolve_final_product_lt_days(line_id, product_id, reference_date=reference_date)
         if lt <= 0:
             return 0
 
@@ -1579,6 +1604,7 @@ def calculate_pipeline_demand(
             product_id,
             bom_item=bom_item,
             step_cache=step_cache,
+            reference_date=reference_date,
         )
         if lt == 0:
             continue
@@ -1653,6 +1679,7 @@ def initialize_planned_stock(line_ids, baseline_date):
                 line_id,
                 bl.product_id,
                 step_cache=lt_cache,
+                reference_date=baseline_date,
             )
             if lt_days > max_lt:
                 max_lt = lt_days
@@ -1677,6 +1704,7 @@ def initialize_planned_stock(line_ids, baseline_date):
             today=today,
             firm_map=line_firm_map.get(bl.line_id, {}),
             final_flags=final_flags,
+            reference_date=baseline_date,
         )
         # 計画在庫 = 実在庫 - パイプライン需要
         new_planned = (bl.stock_qty or 0) - pipeline
