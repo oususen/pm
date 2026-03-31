@@ -1516,12 +1516,21 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     parent_ids_for_backlog.add(bom_item.bom.parent_product_id)
 
             # 親製品のLineBacklogを一括取得
+            # RoutingStepで特定済みの後工程ラインのみ検索する（旧ルーティングのデータ混入防止）
             backlog_by_product = {}
             if parent_ids_for_backlog:
+                valid_downstream_line_ids = set()
+                for parent_id in parent_ids_for_backlog:
+                    for s in downstream_steps_by_product.get(parent_id, []):
+                        if s.line_id:
+                            valid_downstream_line_ids.add(s.line_id)
+
                 backlog_qs_parent = LineBacklog.objects.filter(
                     product_id__in=parent_ids_for_backlog,
                     plan_qty__gt=0,
                 )
+                if valid_downstream_line_ids:
+                    backlog_qs_parent = backlog_qs_parent.filter(line_id__in=valid_downstream_line_ids)
                 if start_date:
                     backlog_qs_parent = backlog_qs_parent.filter(plan_date__gte=start_date)
                 if source_end_dt or end_date:
