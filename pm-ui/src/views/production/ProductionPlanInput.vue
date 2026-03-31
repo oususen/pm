@@ -1086,22 +1086,10 @@ const saveSpotExcelPlan = async () => {
   try {
     spotExcelMissingProducts.value = missingProducts
     spotExcelMissingProcesses.value = missingProcesses
-    const uniqueDates = [...new Set(items.map((x) => x.plan_date))].sort()
     const res = await api.linePlans.save({
       line_id: selectedLine.value,
       items,
     })
-    if (uniqueDates.length > 0) {
-      await api.lineBacklogs.expandProcesses({
-        line_id: selectedLine.value,
-        start_date: uniqueDates[0],
-        end_date: uniqueDates[uniqueDates.length - 1],
-        read_only: false,
-        include_coproduct_children: true,
-        force_direct_process: true,
-        apply_bom_multiplier: false,
-      })
-    }
     spotExcelMessage.value = `保存完了: 作成${res.data?.created ?? 0}件 / 更新${res.data?.updated ?? 0}件`
     if (missingProducts.length > 0 || missingProcesses.length > 0) {
       spotExcelMessage.value += `（未登録品番:${missingProducts.length}件, 工程未設定:${missingProcesses.length}件）`
