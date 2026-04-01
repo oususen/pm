@@ -9,7 +9,7 @@ from django.core.files.storage import default_storage
 import django_filters
 import os
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact
@@ -17,10 +17,12 @@ from .models import (
 from .serializers import (
     ProductSerializer, CustomerSerializer, ProcessSerializer, LineSerializer,
     SupplierSerializer, CalendarSerializer, CalendarDaySerializer, WorkPatternSerializer, BreakTimeSerializer,
-    BOMSerializer, BOMItemSerializer, RoutingSerializer, RoutingStepSerializer,
+    BOMSerializer, BOMItemSerializer, RoutingSerializer, RoutingListSerializer, RoutingStepSerializer,
     RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer, EquipmentSerializer, ContactSerializer
 )
+from .services.routing_service import build_effective_routing_q, resolve_effective_routing
 from accounts.permissions import HasResourcePermissionOrReadOnly
+from django.utils.dateparse import parse_datetime
 
 
 class MastersPermissionMixin:
@@ -57,6 +59,7 @@ class ProductFilter(django_filters.FilterSet):
     customer_code = django_filters.CharFilter(method='filter_customer_code')
     supplier_code = django_filters.CharFilter(method='filter_supplier_code')
     product_code = django_filters.CharFilter(field_name='product_code', lookup_expr='exact')
+    product_codes_in = django_filters.CharFilter(method='filter_product_codes_in')
 
     class Meta:
         model = Product
@@ -77,7 +80,16 @@ class ProductFilter(django_filters.FilterSet):
             'created_from',
             'created_to',
             'product_code',
+            'product_codes_in',
         ]
+
+    def filter_product_codes_in(self, queryset, name, value):
+        if not value:
+            return queryset
+        codes = [c.strip() for c in value.split(',') if c.strip()]
+        if not codes:
+            return queryset
+        return queryset.filter(product_code__in=codes)
 
     def filter_has_bom(self, queryset, name, value):
         if value is None:
@@ -153,8 +165,9 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         line_id = request.query_params.get('line_id')
         process_id = request.query_params.get('process_id')
         steps_qs = RoutingStep.objects.filter(
-            routing__is_active=True,
             line__isnull=False,
+        ).filter(
+            build_effective_routing_q(prefix='routing__')
         ).select_related('output_product', 'routing__product', 'line', 'process')
 
         if line_id:
@@ -734,10 +747,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 process_display = ''
                 line_display = ''
                 if b.parent_product_id:
-                    default_routing = Routing.objects.filter(
-                        product_id=b.parent_product_id,
-                        is_default=True
-                    ).order_by('-id').first()
+                    default_routing = resolve_effective_routing(b.parent_product_id)
                     if default_routing:
                         last_step = default_routing.steps.order_by('step_no').last()
                         if last_step:
@@ -882,6 +892,18 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         )
         return line_obj, process_obj
 
+    def _resolve_generated_routing_valid_from(self, raw_value):
+        if isinstance(raw_value, datetime):
+            return raw_value
+        if isinstance(raw_value, str) and raw_value.strip():
+            parsed = parse_datetime(raw_value.strip())
+            if parsed:
+                return parsed
+            raise ValueError('有効開始日時の形式が不正です。')
+
+        default_dt = datetime.now() + timedelta(days=2)
+        return default_dt.replace(hour=8, minute=0, second=0, microsecond=0)
+
     @action(detail=True, methods=['post'])
     def generate_routing(self, request, pk=None):
         """Generate or replace routing steps from BOM MAKE/SUBCON/BUY items (recursive)."""
@@ -960,8 +982,12 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                         return Response({'detail': f'lead_time_days must be >0 (DAY) on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
 
         routing_code = request.data.get('routing_code') or f"AUTO-{bom.parent_product.product_code}-{bom.version}"
-        description = request.data.get('description') or f"Auto-generated from BOM {bom.id}"
+        description = request.data.get('description') or 'bomから自動生成した'
         set_default = request.data.get('is_default', True)
+        try:
+            valid_from_datetime = self._resolve_generated_routing_valid_from(request.data.get('valid_from_datetime'))
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         routing, created = Routing.objects.get_or_create(
             product=bom.parent_product,
@@ -970,11 +996,13 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 'description': description,
                 'is_default': set_default,
                 'is_active': True,
+                'valid_from_datetime': valid_from_datetime,
             }
         )
 
         routing.description = description
         routing.is_active = True
+        routing.valid_from_datetime = valid_from_datetime
         if set_default:
             Routing.objects.filter(product=bom.parent_product).exclude(id=routing.id).update(is_default=False)
             routing.is_default = True
@@ -1175,12 +1203,27 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
 
 class RoutingViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
-    queryset = Routing.objects.all()
+    queryset = Routing.objects.all().select_related('product')
     serializer_class = RoutingSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['product', 'is_active', 'is_default']
     ordering_fields = ['created_at']
     ordering = ['-created_at']
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return RoutingListSerializer
+        return RoutingSerializer
+
+    def perform_create(self, serializer):
+        routing = serializer.save()
+        if routing.is_default:
+            Routing.objects.filter(product_id=routing.product_id).exclude(id=routing.id).update(is_default=False)
+
+    def perform_update(self, serializer):
+        routing = serializer.save()
+        if routing.is_default:
+            Routing.objects.filter(product_id=routing.product_id).exclude(id=routing.id).update(is_default=False)
 
 
 class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):

@@ -337,6 +337,8 @@ class Routing(models.Model):
     description = models.TextField(null=True, blank=True, verbose_name='説明')
     is_default = models.BooleanField(default=False, verbose_name='既定')
     is_active = models.BooleanField(default=True, verbose_name='有効')
+    valid_from_datetime = models.DateTimeField(null=True, blank=True, verbose_name='有効開始日時')
+    valid_to_datetime = models.DateTimeField(null=True, blank=True, verbose_name='有効終了日時')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
 

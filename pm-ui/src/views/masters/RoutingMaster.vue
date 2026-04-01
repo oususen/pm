@@ -82,6 +82,43 @@
         </div>
 
         <div v-else>
+          <div class="routing-header-form">
+            <div class="routing-header-grid">
+              <label class="routing-header-field routing-header-field--check">
+                <span>既定</span>
+                <input v-model="routingHeaderDraft.is_default" type="checkbox" :disabled="!canEdit || savingRoutingHeader" />
+              </label>
+              <label class="routing-header-field routing-header-field--check">
+                <span>有効</span>
+                <input v-model="routingHeaderDraft.is_active" type="checkbox" :disabled="!canEdit || savingRoutingHeader" />
+              </label>
+              <label class="routing-header-field">
+                <span>有効開始日時</span>
+                <input
+                  v-model="routingHeaderDraft.valid_from_datetime"
+                  type="datetime-local"
+                  :disabled="!canEdit || savingRoutingHeader"
+                />
+              </label>
+              <label class="routing-header-field">
+                <span>有効終了日時</span>
+                <input
+                  v-model="routingHeaderDraft.valid_to_datetime"
+                  type="datetime-local"
+                  :disabled="!canEdit || savingRoutingHeader"
+                />
+              </label>
+            </div>
+            <div class="routing-header-actions">
+              <button
+                class="btn-primary"
+                @click="saveRoutingHeader"
+                :disabled="!canEdit || !selectedRouting || !isRoutingHeaderDirty || savingRoutingHeader"
+              >
+                {{ savingRoutingHeader ? '保存中...' : 'ヘッダ保存' }}
+              </button>
+            </div>
+          </div>
           <div class="step-filter-row">
             <label>工程</label>
             <select v-model="processFilter">
@@ -239,7 +276,6 @@ import { authState } from '@/auth'
 import { hasPermission } from '@/router'
 
 const routings = ref([])
-const productsById = ref({})
 const selectedRoutingId = ref(null)
 const steps = ref([])
 const materialsByStepId = ref({})
@@ -252,6 +288,13 @@ const errorMessage = ref('')
 const stepLoadToken = ref(0)
 const durationDraftByStepId = ref({})
 const savingDurationStepId = ref(null)
+const routingHeaderDraft = ref({
+  is_default: false,
+  is_active: true,
+  valid_from_datetime: '',
+  valid_to_datetime: '',
+})
+const savingRoutingHeader = ref(false)
 const processFilter = ref('')
 const representativeChildProductIds = ref(new Set())
 
@@ -290,13 +333,34 @@ const compareSteps = (a, b) => {
   return (a.parallel_group ?? 0) - (b.parallel_group ?? 0)
 }
 
-const productCode = (routing) => productsById.value[routing.product]?.product_code || ''
-const productName = (routing) => {
-  const product = productsById.value[routing.product]
-  return product?.product_name || routing.product_name || ''
-}
+const productCode = (routing) => routing?.product_code || ''
+const productName = (routing) => routing?.product_name || ''
 
 const selectedRouting = computed(() => routings.value.find((r) => r.id === selectedRoutingId.value) || null)
+const pad2 = (value) => String(value).padStart(2, '0')
+const formatDatetimeLocal = (value) => {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 16)
+  return [
+    date.getFullYear(),
+    pad2(date.getMonth() + 1),
+    pad2(date.getDate()),
+  ].join('-') + `T${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+const normalizeDatetimeLocal = (value) => {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  return raw.length === 16 ? `${raw}:00` : raw
+}
+const resetRoutingHeaderDraft = (routing) => {
+  routingHeaderDraft.value = {
+    is_default: Boolean(routing?.is_default),
+    is_active: routing?.is_active !== false,
+    valid_from_datetime: formatDatetimeLocal(routing?.valid_from_datetime),
+    valid_to_datetime: formatDatetimeLocal(routing?.valid_to_datetime),
+  }
+}
 const canEdit = computed(() => {
   const user = authState.user
   if (!user) return false
@@ -305,6 +369,16 @@ const canEdit = computed(() => {
     return hasPermission(user, 'masters.routing', 'edit')
   }
   return hasPermission(user, 'masters', 'edit')
+})
+const isRoutingHeaderDirty = computed(() => {
+  const routing = selectedRouting.value
+  if (!routing) return false
+  return (
+    Boolean(routingHeaderDraft.value.is_default) !== Boolean(routing.is_default) ||
+    Boolean(routingHeaderDraft.value.is_active) !== Boolean(routing.is_active) ||
+    normalizeDatetimeLocal(routingHeaderDraft.value.valid_from_datetime) !== normalizeDatetimeLocal(formatDatetimeLocal(routing.valid_from_datetime)) ||
+    normalizeDatetimeLocal(routingHeaderDraft.value.valid_to_datetime) !== normalizeDatetimeLocal(formatDatetimeLocal(routing.valid_to_datetime))
+  )
 })
 
 const filteredRoutings = computed(() => {
@@ -398,15 +472,7 @@ const isRepresentativePart = (step) => {
 const collectRepresentativeParentIds = (stepList, routing) => {
   const parentIds = new Set()
   const stepCodeToProductId = new Map()
-  const productCodeToProductId = new Map()
-
-  Object.values(productsById.value).forEach((product) => {
-    const pid = Number(product?.id)
-    const pcode = String(product?.product_code || '').trim()
-    if (Number.isFinite(pid) && pid > 0 && pcode) {
-      productCodeToProductId.set(pcode, pid)
-    }
-  })
+  const unresolvedCodes = []
 
   stepList.forEach((step) => {
     const pid = Number(step?.output_product)
@@ -424,13 +490,15 @@ const collectRepresentativeParentIds = (stepList, routing) => {
   stepList.forEach((step) => {
     const parentCode = String(step?.remark || '').trim()
     if (!parentCode) return
-    const parentId = stepCodeToProductId.get(parentCode) || productCodeToProductId.get(parentCode)
+    const parentId = stepCodeToProductId.get(parentCode)
     if (Number.isFinite(parentId) && parentId > 0) {
       parentIds.add(parentId)
+    } else {
+      unresolvedCodes.push(parentCode)
     }
   })
 
-  return Array.from(parentIds)
+  return { parentIds: Array.from(parentIds), unresolvedCodes }
 }
 
 const fetchRepresentativeChildSet = async (stepList, routing) => {
@@ -441,7 +509,25 @@ const fetchRepresentativeChildSet = async (stepList, routing) => {
   )
   if (!targetChildIds.size) return new Set()
 
-  const parentIds = collectRepresentativeParentIds(stepList, routing)
+  const { parentIds, unresolvedCodes } = collectRepresentativeParentIds(stepList, routing)
+
+  // remarkに書かれた親品番コードがstep内で解決できなかった場合、製品マスタから一括取得
+  if (unresolvedCodes.length > 0) {
+    const uniqueCodes = [...new Set(unresolvedCodes)]
+    try {
+      const res = await api.products.getProductsByCodesIn(uniqueCodes)
+      const products = res?.data?.results || res?.data || []
+      products.forEach((p) => {
+        const pid = Number(p?.id)
+        if (Number.isFinite(pid) && pid > 0) {
+          parentIds.push(pid)
+        }
+      })
+    } catch (e) {
+      console.warn('代表部番用の親品番一括取得エラー:', e)
+    }
+  }
+
   if (!parentIds.length) return new Set()
 
   const representativeSet = new Set()
@@ -535,25 +621,40 @@ const saveDuration = async (step) => {
   }
 }
 
-const fetchProducts = async () => {
-  const allProducts = await api.products.getAllProducts()
-  const map = {}
-  allProducts.forEach((product) => {
-    map[product.id] = product
-  })
-  productsById.value = map
+const saveRoutingHeader = async () => {
+  const routing = selectedRouting.value
+  if (!canEdit.value || !routing?.id || !isRoutingHeaderDirty.value) return
+
+  savingRoutingHeader.value = true
+  errorMessage.value = ''
+  try {
+    await api.routings.patchRouting(routing.id, {
+      is_default: Boolean(routingHeaderDraft.value.is_default),
+      is_active: Boolean(routingHeaderDraft.value.is_active),
+      valid_from_datetime: normalizeDatetimeLocal(routingHeaderDraft.value.valid_from_datetime),
+      valid_to_datetime: normalizeDatetimeLocal(routingHeaderDraft.value.valid_to_datetime),
+    })
+    await refreshAll()
+    resetRoutingHeaderDraft(selectedRouting.value)
+  } catch (error) {
+    console.error('ルーティングヘッダ更新エラー:', error)
+    const detail = error?.response?.data?.detail || error?.response?.data?.non_field_errors?.[0] || 'ルーティングヘッダの更新に失敗しました'
+    alert(detail)
+  } finally {
+    savingRoutingHeader.value = false
+  }
 }
 
 const fetchRoutings = async () => {
   loadingRoutings.value = true
   try {
-    const res = await api.routings.getRoutings({ page_size: 5000 })
-    const list = normalizeList(res.data)
-    routings.value = list
-
-    if (!selectedRoutingId.value && list.length > 0) {
-      selectedRoutingId.value = list[0].id
+    const params = {
     }
+    if (onlyActive.value) {
+      params.is_active = true
+    }
+    const list = await api.routings.getAllRoutings(params)
+    routings.value = list
   } finally {
     loadingRoutings.value = false
   }
@@ -645,7 +746,7 @@ const selectRouting = async (routingId) => {
 const refreshAll = async () => {
   errorMessage.value = ''
   try {
-    await Promise.all([fetchProducts(), fetchRoutings()])
+    await fetchRoutings()
   } catch (error) {
     console.error('ルーティングマスタ更新エラー:', error)
     errorMessage.value = 'データ更新に失敗しました'
@@ -665,14 +766,22 @@ watch(selectedRoutingId, async (routingId) => {
   await fetchStepsAndMaterials(routingId)
 })
 
+watch(selectedRouting, (routing) => {
+  resetRoutingHeaderDraft(routing)
+}, { immediate: true })
+
 watch(filteredRoutings, (list) => {
   if (!list.length) {
     selectedRoutingId.value = null
     return
   }
   if (!list.some((item) => item.id === selectedRoutingId.value)) {
-    selectedRoutingId.value = list[0].id
+    selectedRoutingId.value = null
   }
+})
+
+watch(onlyActive, async () => {
+  await fetchRoutings()
 })
 
 const fetchLines = async () => {
@@ -804,6 +913,48 @@ onMounted(async () => {
 .table-wrap {
   max-height: 72vh;
   overflow: auto;
+}
+
+.routing-header-form {
+  padding: 10px 12px;
+  border-bottom: 1px solid #eceff5;
+  background: #f8fafc;
+}
+
+.routing-header-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.routing-header-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #374151;
+}
+
+.routing-header-field input[type='datetime-local'] {
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.routing-header-field--check {
+  justify-content: center;
+}
+
+.routing-header-field--check input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+}
+
+.routing-header-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
 }
 
 .step-filter-row {

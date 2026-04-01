@@ -7,6 +7,7 @@ from typing import Dict, List, Tuple
 from django.db import transaction
 
 from masters.models import BOM, BOMItem, Line, Routing
+from masters.services.routing_service import resolve_effective_routing
 from orders.core.models import OrderLine
 from production.models import LineDemand
 
@@ -23,7 +24,7 @@ class OrderExpansionService:
     def __init__(self) -> None:
         self.errors: List[str] = []
         self.warnings: List[str] = []
-        self._routing_cache: Dict[int, List] = {}
+        self._routing_cache: Dict[Tuple[int, object], List] = {}
         self._child_bom_cache: Dict[int, BOM | None] = {}
         self._bom_multiplier_cache: Dict[int, Dict[int, Decimal]] = {}
         self._bom_path_multiplier_cache: Dict[int, Dict[str, Decimal]] = {}
@@ -112,7 +113,7 @@ class OrderExpansionService:
                 self.warnings.append(f"製品マスタ未登録のためスキップ: {ol.product_code}")
                 continue
 
-            steps = self._get_routing_steps(product_id=product.id)
+            steps = self._get_routing_steps(product_id=product.id, reference=ol.due_date)
             if not steps:
                 self.warnings.append(f"ルーティング未設定のためスキップ: {product.product_code}")
                 continue
@@ -301,24 +302,22 @@ class OrderExpansionService:
             'errors': self.errors,
         }
 
-    def _get_routing_steps(self, product_id: int):
-        """デフォルトルーティングの工程一覧をキャッシュして返す。"""
-        if product_id in self._routing_cache:
-            return self._routing_cache[product_id]
+    def _get_routing_steps(self, product_id: int, reference=None):
+        """有効日時を考慮したルーティング工程一覧をキャッシュして返す。"""
+        cache_key = (product_id, reference)
+        if cache_key in self._routing_cache:
+            return self._routing_cache[cache_key]
 
-        routing = Routing.objects.filter(
-            product_id=product_id,
-            is_active=True
-        ).order_by('-is_default', '-id').first()
+        routing = resolve_effective_routing(product_id, reference)
 
         if not routing:
-            self._routing_cache[product_id] = []
+            self._routing_cache[cache_key] = []
             return []
 
         steps = list(
             routing.steps.select_related('line', 'output_product').order_by('step_no')
         )
-        self._routing_cache[product_id] = steps
+        self._routing_cache[cache_key] = steps
         return steps
 
     def _pick_child_bom(self, product_id: int):

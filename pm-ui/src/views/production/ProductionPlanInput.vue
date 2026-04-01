@@ -132,6 +132,12 @@
       注意: このラインでは、連産品は「親品番 + 代表部番（is_coproduct_driver）」のみ表示します。
       連産品の非代表子は表示しません。非連産品は通常どおり表示します。
     </div>
+    <div v-if="currentLineRoutingFilterMode === 'fallback'" class="line-rule-notice">
+      注意: 現行ルーティング品番の取得に失敗したため、ルーティングフィルタを解除して既存データを表示しています。
+    </div>
+    <div v-else-if="currentLineRoutingFilterMode === 'empty'" class="line-rule-notice">
+      注意: このラインに有効な現行ルーティング品番がないため、表示対象はありません。
+    </div>
     <div v-if="isFloorShippingDeliveryLine" class="line-rule-notice">
       注意: フロア配送は同一日・同一品番を sequence_no 昇順で 1件目=AM、2件目=PM と解釈します。入力は 2件までです。
     </div>
@@ -629,6 +635,7 @@ const workPatternMap = ref({})
 const workStartFallback = { hour: 8, minute: 0 }
 const workMinutesFallback = 480
 const processing = ref(false)
+const currentLineRoutingFilterMode = ref('filtered')
 const coproductDisplayCache = new Map()
 
 const selectedLineObj = computed(() =>
@@ -1416,6 +1423,7 @@ const refreshDates = () => {
 const loadData = async () => {
   // 取り込み前は空表示（手動で「取り込み」を押す運用）
   rows.value = []
+  currentLineRoutingFilterMode.value = 'filtered'
   if (selectedLine.value) {
     await fetchLineDefaultSetting(selectedLine.value)
     await loadWorkPatternData(selectedLine.value, startDate.value, endDate.value)
@@ -1436,6 +1444,41 @@ const toApiRows = (payload) => {
   if (Array.isArray(payload.results)) return payload.results
   if (Array.isArray(payload)) return payload
   return []
+}
+
+const fetchCurrentLineProductIdSet = async (lineId) => {
+  const numericLineId = Number(lineId)
+  if (!Number.isFinite(numericLineId) || numericLineId <= 0) {
+    return {
+      mode: 'fallback',
+      productIdSet: null,
+    }
+  }
+
+  try {
+    const res = await api.products.getLineFinalCandidates(numericLineId)
+    const lineRows = toApiRows(res?.data)
+    const targetLine = lineRows.find((row) => Number(row?.line_id) === numericLineId)
+    const productIdSet = new Set()
+
+    ;(targetLine?.products || []).forEach((product) => {
+      const productId = Number(product?.id)
+      if (Number.isFinite(productId) && productId > 0) {
+        productIdSet.add(String(productId))
+      }
+    })
+
+    return {
+      mode: productIdSet.size === 0 ? 'empty' : 'filtered',
+      productIdSet,
+    }
+  } catch (error) {
+    console.warn('ライン現行ルーティング品番取得エラー:', { lineId: numericLineId, error })
+    return {
+      mode: 'fallback',
+      productIdSet: null,
+    }
+  }
 }
 
 const collectCoproductParentCandidates = (rows) => {
@@ -2378,7 +2421,8 @@ const onGlobalKeydown = (event) => {
 }
 
 const fetchAndApplyData = async () => {
-    const [backlogRes, planRes] = await Promise.all([
+    currentLineRoutingFilterMode.value = 'filtered'
+    const [backlogRes, planRes, lineRoutingFilter] = await Promise.all([
       api.lineBacklogs.getLineBacklogs({
         line: selectedLine.value,
         plan_date__gte: startDate.value,
@@ -2389,15 +2433,36 @@ const fetchAndApplyData = async () => {
         plan_date__gte: startDate.value,
         plan_date__lte: endDate.value,
       }),
+      fetchCurrentLineProductIdSet(selectedLine.value),
     ])
+    currentLineRoutingFilterMode.value = lineRoutingFilter?.mode || 'fallback'
     const backlogData = backlogRes.data?.results || backlogRes.data || []
     const planData = planRes.data?.results || planRes.data || []
-    let displayBacklogs = backlogData.filter(d => d.is_line_final_product === true)
-    let displayPlans = planData.filter(d => d.is_line_final_product !== false)
+    const filterRowsByCurrentLineRouting = (items) => {
+      const list = Array.isArray(items) ? items : []
+      if (lineRoutingFilter?.mode === 'fallback') {
+        return list
+      }
+      if (!(lineRoutingFilter?.productIdSet instanceof Set)) {
+        return list
+      }
+      return list.filter((item) => {
+        const productId = item?.product
+        if (productId === null || productId === undefined || productId === '') return false
+        return lineRoutingFilter.productIdSet.has(String(productId))
+      })
+    }
+
+    let displayBacklogs = filterRowsByCurrentLineRouting(
+      backlogData.filter(d => d.is_line_final_product === true)
+    )
+    let displayPlans = filterRowsByCurrentLineRouting(
+      planData.filter(d => d.is_line_final_product !== false)
+    )
     if (shouldLimitToCoproductParentAndDriver.value) {
       const filtered = await filterPlanRowsForCoproductDisplay(backlogData, planData)
-      displayBacklogs = filtered.backlogRows
-      displayPlans = filtered.planRows
+      displayBacklogs = filterRowsByCurrentLineRouting(filtered.backlogRows)
+      displayPlans = filterRowsByCurrentLineRouting(filtered.planRows)
     }
 
     const grouped = new Map()

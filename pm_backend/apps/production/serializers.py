@@ -6,6 +6,7 @@ from django.db.models import F, Sum
 from django.db.models.functions import Coalesce
 from rest_framework import serializers
 from masters.models import RoutingStep
+from masters.services.routing_service import build_effective_routing_q
 
 from .models import LineDemand
 from .models_line_backlog import LineBacklog
@@ -130,6 +131,10 @@ class LineBacklogSerializer(serializers.ModelSerializer):
         return getattr(obj, 'work_minutes', None)
 
     def _build_lt_cache(self):
+        # 既知の制限: ルーティング有効判定を「現在時刻」基準で一括計算している。
+        # 日付レンジをまたぐ応答では、ルーティング切替日前後の行に対し
+        # 誤ったルーティングでLT/工程情報を返す余地がある。
+        # 行ごとにplan_dateベースで解決するには構造変更が必要なため据え置き。
         if hasattr(self, '_lt_cache'):
             return
         self._lt_cache = {'step_lookup': {}, 'lt_by_step': {}}
@@ -146,13 +151,19 @@ class LineBacklogSerializer(serializers.ModelSerializer):
 
         from masters.models import RoutingStep
 
-        step_qs = RoutingStep.objects.filter(output_product_id__in=product_ids).select_related('line')
+        step_qs = RoutingStep.objects.filter(
+            output_product_id__in=product_ids
+        ).filter(
+            build_effective_routing_q(prefix='routing__')
+        ).select_related('line')
         routing_ids = set(step_qs.values_list('routing_id', flat=True))
         if not routing_ids:
             return
 
         steps = list(RoutingStep.objects.filter(
             routing_id__in=routing_ids
+        ).filter(
+            build_effective_routing_q(prefix='routing__')
         ).select_related('line', 'output_product'))
 
         minutes_per_day = 480
@@ -844,8 +855,14 @@ class LaserActualSerializer(serializers.ModelSerializer):
         if product:
             base_qs = RoutingStep.objects.filter(
                 output_product=product,
-                routing__is_active=True,
-            ).select_related('process', 'process__line', 'line').order_by('-routing__is_default', 'step_no', 'id')
+            ).filter(
+                build_effective_routing_q(prefix='routing__')
+            ).select_related('process', 'process__line', 'line').order_by(
+                '-routing__is_default',
+                '-routing__valid_from_datetime',
+                'step_no',
+                'id',
+            )
             if preferred_line:
                 step = base_qs.filter(line=preferred_line).first()
             if not step and preferred_process:

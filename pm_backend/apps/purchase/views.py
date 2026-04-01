@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from masters.models import BOMItem, Calendar, CalendarDay, Line, Process, Product, RoutingStep, Supplier
+from masters.services.routing_service import build_effective_routing_q
 from orders.utils.calendar_utils import get_business_today
 from production.models_process_realtime import ProcessRealtimeRecord
 from production.models_line_backlog import LineBacklog
@@ -216,10 +217,9 @@ def _resolve_engineering_change_component_lt_info(case, old_part, target_line_ty
         RoutingStep.objects
         .filter(
             output_product_id=old_part.id,
-            routing__is_default=True,
-            routing__is_active=True,
             routing__product__is_active=True,
         )
+        .filter(build_effective_routing_q(prefix='routing__'))
         .select_related('routing__product', 'line', 'output_product')
     )
 

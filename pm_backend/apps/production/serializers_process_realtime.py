@@ -9,6 +9,7 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 from masters.models import Process, Product, BOM, Line, Supplier, Routing, RoutingStep
+from masters.services.routing_service import build_effective_routing_q, resolve_effective_routing
 from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_process_work_session import ProcessWorkSession
@@ -25,14 +26,13 @@ def _resolve_product_process_line(product, fallback_process):
     # output_productから直接検索
     step = RoutingStep.objects.filter(
         output_product=product,
-        routing__is_active=True,
+    ).filter(
+        build_effective_routing_q(prefix='routing__')
     ).select_related('process', 'process__line', 'line').first()
 
     if not step:
         # Routingのproductとしてのルーティングの最終工程を検索
-        routing = Routing.objects.filter(
-            product=product, is_active=True, is_default=True,
-        ).first()
+        routing = resolve_effective_routing(product.id if product else None)
         if routing:
             step = routing.steps.select_related(
                 'process', 'process__line', 'line',

@@ -16,6 +16,7 @@ import csv
 import io
 import math
 from django.http import HttpResponse
+from django.utils import timezone
 
 from .models import LineDemand
 from orders.models import OrderLine
@@ -55,6 +56,7 @@ from .serializers import (
 from .services.order_expansion import OrderExpansionService
 from .services.gantt_planning import generate_line_gantt_plans
 from masters.models import Routing, RoutingStep, ProcessCycleTime, Line, Supplier, Process, Calendar, CalendarDay, BOM, BOMItem, Product
+from masters.services.routing_service import build_effective_routing_q, normalize_routing_reference_datetime, resolve_effective_routing
 from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR, get_business_today, add_working_days
 from django.contrib.auth import get_user_model
 from django.db.models import Q
@@ -808,11 +810,17 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             line_obj = line_map.get(line_id)
             calendar_id = getattr(line_obj, 'calendar_id', None) or default_calendar_id
 
+            unique_dates = sorted(set(dates))
+            routing_q = build_effective_routing_q(unique_dates[0], prefix='routing__')
+            for d in unique_dates[1:]:
+                routing_q = routing_q | build_effective_routing_q(d, prefix='routing__')
             steps_on_line = RoutingStep.objects.filter(
                 line_id=line_id
+            ).filter(
+                routing_q
             ).select_related('output_product', 'routing__product', 'line')
 
-            product_step_map = {}
+            product_steps_map = defaultdict(list)
             final_products = set()
             max_lead_days = 0
 
@@ -820,8 +828,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 product = step.output_product or (step.routing.product if step.routing_id else None)
                 if not product:
                     continue
-                if product.id not in product_step_map:
-                    product_step_map[product.id] = step
+                product_steps_map[product.id].append(step)
                 if product.is_final_product:
                     final_products.add(product.id)
                     # 最終品はラインLTを使用
@@ -882,9 +889,28 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         remaining -= 1
                 return current
 
-            def resolve_lead_time_days(product_id):
+            def _pick_effective_step(product_id, reference_date):
+                """plan_dateに有効なstepを選ぶ。有効期間内のstepがなければNone。"""
+                candidates = product_steps_map.get(product_id, [])
+                if not candidates:
+                    return None
+                ref_dt = normalize_routing_reference_datetime(reference_date)
+                for s in candidates:
+                    r = getattr(s, 'routing', None)
+                    if not r or not getattr(r, 'is_active', False):
+                        continue
+                    vf = getattr(r, 'valid_from_datetime', None)
+                    vt = getattr(r, 'valid_to_datetime', None)
+                    if vf and vf > ref_dt:
+                        continue
+                    if vt and vt < ref_dt:
+                        continue
+                    return s
+                return None
+
+            def resolve_lead_time_days(product_id, reference_date=None):
                 # 最終品はラインLTを使用
-                step = product_step_map.get(product_id)
+                step = _pick_effective_step(product_id, reference_date)
                 if step and step.line and step.line.lead_time_days:
                     return step.line.lead_time_days
                 return 0
@@ -892,7 +918,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             for ol in order_lines:
                 if not ol.product_id or not ol.due_date:
                     continue
-                lead_days = resolve_lead_time_days(ol.product_id)
+                lead_days = resolve_lead_time_days(ol.product_id, ol.due_date)
                 plan_date = shift_business_days(ol.due_date, lead_days)
                 if plan_date < min_date or plan_date > max_date:
                     continue
@@ -942,8 +968,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         routing_steps = RoutingStep.objects.filter(
             Q(output_product_id__in=child_ids) | Q(routing__product_id__in=child_ids),
             line_id__isnull=False,
-            routing__is_active=True,
-        )
+        ).filter(build_effective_routing_q(prefix='routing__'))
         line_ids = sorted(set(routing_steps.values_list('line_id', flat=True)))
 
         if line_id:
@@ -1005,6 +1030,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         from django.db.models import Q  # 安全側でローカルインポート（UnboundLocalError対策）
         steps_on_line = RoutingStep.objects.filter(
             Q(line_id=line_id) | Q(line__isnull=True, process__line_id=line_id)
+        ).filter(
+            build_effective_routing_q(start_dt, prefix='routing__')
         ).select_related('output_product', 'routing__product', 'process')
 
         steps_on_line_count = 0
@@ -1343,6 +1370,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         if parent_product_ids:
             all_downstream_steps = list(RoutingStep.objects.filter(
                 output_product_id__in=parent_product_ids
+            ).filter(
+                build_effective_routing_q(start_dt, prefix='routing__')
             ).select_related('routing', 'routing__product', 'line'))
             logger.info("pickup: downstream_steps=%s", len(all_downstream_steps))
             for d_step in all_downstream_steps:
@@ -1877,6 +1906,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         if parent_ids:
             steps_qs = RoutingStep.objects.filter(
                 output_product_id__in=parent_ids
+            ).filter(
+                build_effective_routing_q(start_dt, prefix='routing__')
             ).select_related('routing', 'routing__product')
             for step in steps_qs:
                 if step.routing and step.routing.product:
@@ -2277,7 +2308,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         # 対象ラインのRoutingStepを製品別にグルーピング
         steps_map = defaultdict(list)
-        steps_qs = RoutingStep.objects.filter(line_id=line_id).select_related('routing', 'output_product', 'process')
+        steps_qs = RoutingStep.objects.filter(
+            line_id=line_id,
+            routing__is_active=True,
+        ).select_related('routing', 'output_product', 'process')
         process_ids = set()
         cycle_product_ids = set(p['product_id'] for p in base_plans)
         for step in steps_qs:
@@ -2307,10 +2341,27 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         def sort_steps_for_plan(steps):
             return sorted(steps, key=lambda s: (s.step_no or 0, getattr(s, 'parallel_group', 1) or 1, s.id or 0))
 
-        def select_steps_for_plan_product(product_id):
+        def is_step_effective_for_reference(step, reference):
+            routing = getattr(step, 'routing', None)
+            if not routing or not getattr(routing, 'is_active', False):
+                return False
+            ref_dt = normalize_routing_reference_datetime(reference)
+            valid_from_dt = getattr(routing, 'valid_from_datetime', None)
+            valid_to_dt = getattr(routing, 'valid_to_datetime', None)
+            if valid_from_dt and normalize_routing_reference_datetime(valid_from_dt) > ref_dt:
+                return False
+            if valid_to_dt and normalize_routing_reference_datetime(valid_to_dt) < ref_dt:
+                return False
+            return True
+
+        def select_steps_for_plan_product(product_id, reference=None):
             steps = list(steps_map.get(product_id, []))
             if not steps:
                 return []
+            effective_steps = [step for step in steps if is_step_effective_for_reference(step, reference)]
+            if not effective_steps:
+                return []
+            steps = effective_steps
             # L2201は従来どおり計画対象製品に紐づくRoutingを優先する。
             # それ以外のラインでここを変えると、既存展開ロジックの対象stepが変わる。
             if is_l2201_line:
@@ -2363,7 +2414,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if force_direct_process and plan_process_id:
                     affected_keys.add((product_id, plan_process_id, plan_date, seq_key))
                     continue
-                steps = select_steps_for_plan_product(product_id)
+                steps = select_steps_for_plan_product(product_id, plan_date)
                 if not steps:
                     if is_l2201_line and product_id in line_final_plan_product_ids and plan_process_id:
                         affected_keys.add((product_id, plan_process_id, plan_date, seq_key))
@@ -2449,7 +2500,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     entry['plan_ids'].add(parent_plan_id)
                 continue
 
-            steps = select_steps_for_plan_product(product_id)
+            steps = select_steps_for_plan_product(product_id, plan_date)
             if not steps:
                 if is_l2201_line and product_id in line_final_plan_product_ids and plan_process_id:
                     computed_time_min = None
@@ -2926,7 +2977,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     )
 
                 if plan_qty_provided and plan_qty_value is not None and plan_qty_value > 0 and new_plan_id:
-                    routing = Routing.objects.filter(product_id=product_id, is_active=True).order_by('-is_default', 'id').first()
+                    routing = resolve_effective_routing(product_id, plan_date_obj)
                     ProductionOrder.objects.update_or_create(
                         order_no=new_plan_id,
                         defaults={
@@ -4405,7 +4456,7 @@ class ProductionOrderViewSet(viewsets.ModelViewSet):
 
             routing = routing_cache.get(product.id)
             if routing is None:
-                routing = Routing.objects.filter(product_id=product.id, is_active=True).order_by('-is_default', 'id').first()
+                routing = resolve_effective_routing(product.id, backlog.plan_date)
                 routing_cache[product.id] = routing
 
             defaults = {
@@ -6046,12 +6097,16 @@ class StockMigrationDetectView(APIView):
         if not line_id:
             return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 新ルーティングでこのラインに属する品番を取得
-        # is_default=True のルーティングを優先し、同一品番に複数有効ルーティングがあっても決定論的に選定
+        # 現在有効なルーティングでこのラインに属する品番を取得
         active_steps = RoutingStep.objects.filter(
             Q(line_id=line_id) | Q(line__isnull=True, process__line_id=line_id),
-            routing__is_active=True,
-        ).select_related('output_product', 'routing__product', 'process', 'line', 'process__line').order_by('-routing__is_default', 'step_no')
+        ).filter(
+            build_effective_routing_q(prefix='routing__')
+        ).select_related('output_product', 'routing__product', 'process', 'line', 'process__line').order_by(
+            '-routing__is_default',
+            '-routing__valid_from_datetime',
+            'step_no',
+        )
 
         product_new_info = {}
         for step in active_steps:

@@ -2,6 +2,7 @@
 import math
 from typing import Dict, Any, List, Optional
 from masters.models import Product, BOM, BOMItem, Routing
+from masters.services.routing_service import resolve_effective_routing
 
 
 class BOMService:
@@ -61,11 +62,7 @@ class BOMService:
             child_lt_max = max(child_lt_max, child_lt)
 
         # 2. 工程時間を日換算して合計
-        routing = Routing.objects.filter(
-            product=product,
-            is_default=True,
-            is_active=True
-        ).first()
+        routing = resolve_effective_routing(product.id if product else None)
 
         process_days = 0
         if routing:

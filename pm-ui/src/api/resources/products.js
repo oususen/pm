@@ -20,6 +20,12 @@ export const createProductsAPI = (client) => ({
     }
     return collected
   },
+  getProductsByCodesIn(codes) {
+    if (!codes.length) return Promise.resolve({ data: [] })
+    return client.get('/products/', {
+      params: { product_codes_in: codes.join(','), page_size: codes.length + 10 },
+    })
+  },
   getProduct(id) {
     return client.get(`/products/${id}/`)
   },

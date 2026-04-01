@@ -249,11 +249,48 @@ class RoutingStepSerializer(serializers.ModelSerializer):
 
 class RoutingSerializer(serializers.ModelSerializer):
     steps = RoutingStepSerializer(many=True, read_only=True)
+    product_code = serializers.CharField(source='product.product_code', read_only=True)
     product_name = serializers.CharField(source='product.product_name', read_only=True)
+
+    def validate(self, attrs):
+        valid_from = attrs.get('valid_from_datetime', getattr(self.instance, 'valid_from_datetime', None))
+        valid_to = attrs.get('valid_to_datetime', getattr(self.instance, 'valid_to_datetime', None))
+        if valid_from and valid_to and valid_from > valid_to:
+            raise serializers.ValidationError('有効終了日時は有効開始日時以降で入力してください。')
+        return attrs
 
     class Meta:
         model = Routing
         fields = '__all__'
+
+
+class RoutingListSerializer(serializers.ModelSerializer):
+    product_code = serializers.CharField(source='product.product_code', read_only=True)
+    product_name = serializers.CharField(source='product.product_name', read_only=True)
+
+    def validate(self, attrs):
+        valid_from = attrs.get('valid_from_datetime', getattr(self.instance, 'valid_from_datetime', None))
+        valid_to = attrs.get('valid_to_datetime', getattr(self.instance, 'valid_to_datetime', None))
+        if valid_from and valid_to and valid_from > valid_to:
+            raise serializers.ValidationError('有効終了日時は有効開始日時以降で入力してください。')
+        return attrs
+
+    class Meta:
+        model = Routing
+        fields = [
+            'id',
+            'product',
+            'routing_code',
+            'description',
+            'is_default',
+            'is_active',
+            'created_at',
+            'updated_at',
+            'valid_from_datetime',
+            'valid_to_datetime',
+            'product_code',
+            'product_name',
+        ]
 
 
 class RoutingStepMaterialSerializer(serializers.ModelSerializer):

@@ -489,12 +489,19 @@
           </div>
           <div class="form-row">
             <div class="form-group">
+              <label>有効開始日時</label>
+              <input
+                type="datetime-local"
+                v-model="routingGenForm.valid_from_datetime"
+              />
+            </div>
+            <div class="form-group">
               <label>ルーティングコード</label>
               <input type="text" v-model="routingGenForm.routing_code" placeholder="未指定なら自動採番" />
             </div>
             <div class="form-group full-width">
               <label>説明</label>
-              <input type="text" v-model="routingGenForm.description" placeholder="BOMから自動生成 のように記入" />
+              <input type="text" v-model="routingGenForm.description" placeholder="bomから自動生成した" />
             </div>
           </div>
           <div class="form-actions">
@@ -740,9 +747,27 @@ const copyNewParentProductId = ref('')
 const copyProductFilter = ref('')
 const canEdit = computed(() => canAccessMasterResource('masters.bom', 'edit'))
 
+const pad2 = (value) => String(value).padStart(2, '0')
+const buildDefaultRoutingValidFromLocal = () => {
+  const date = new Date()
+  date.setDate(date.getDate() + 2)
+  date.setHours(8, 0, 0, 0)
+  return [
+    date.getFullYear(),
+    pad2(date.getMonth() + 1),
+    pad2(date.getDate()),
+  ].join('-') + `T${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+const normalizeDatetimeLocal = (value) => {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  return raw.length === 16 ? `${raw}:00` : raw
+}
+
 const routingGenForm = ref({
+  valid_from_datetime: buildDefaultRoutingValidFromLocal(),
   routing_code: '',
-  description: '',
+  description: 'bomから自動生成した',
   final_process_id: '',
   final_line_id: '',
   final_time_unit: 'MINUTE',
@@ -1036,8 +1061,9 @@ const applySourcingSideEffects = () => {
 
 const resetRoutingGenForm = () => {
   routingGenForm.value = {
+    valid_from_datetime: buildDefaultRoutingValidFromLocal(),
     routing_code: '',
-    description: '',
+    description: 'bomから自動生成した',
     final_process_id: '',
     final_line_id: '',
     final_time_unit: 'MINUTE',
@@ -1324,6 +1350,7 @@ const generateRoutingFromBom = async () => {
   }
 
   const payload = {
+    valid_from_datetime: normalizeDatetimeLocal(routingGenForm.value.valid_from_datetime),
     description: routingGenForm.value.description || undefined,
     routing_code: routingGenForm.value.routing_code || undefined,
     is_default: true,

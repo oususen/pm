@@ -200,7 +200,7 @@ API の接続先は `src/api/client.js` の `API_BASE_URL` をバックエンド
 - `/api/calendar-days/` - カレンダ日マスタ
 - `/api/boms/` - BOMヘッダ
 - `/api/bom-items/` - BOM明細
-- `/api/routings/` - ルーティングヘッダ
+- `/api/routings/` - ルーティングヘッダ（一覧はヘッダのみ返却。工程は含めない）
 - `/api/routing-steps/` - ルーティング工程（`routing` パラメータで絞り込み可、`usage_quantity` を返却）
 - `/api/routing-step-materials/` - ルーティング工程部品
 
