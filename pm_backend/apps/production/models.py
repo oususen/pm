@@ -38,6 +38,8 @@ class LineDemand(models.Model):
     plan_date = models.DateField(verbose_name='必要日')
     lead_time_days = models.IntegerField(default=0, verbose_name='リードタイム(日)')
     is_shifted = models.BooleanField(default=False, verbose_name='前倒し需要フラグ')
+    firm_is_shifted = models.BooleanField(default=False, verbose_name='確定前倒し需要フラグ')
+    forecast_is_shifted = models.BooleanField(default=False, verbose_name='内示前倒し需要フラグ')
 
     forecast_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='内示数量')
     firm_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='確定数量')
@@ -51,6 +53,18 @@ class LineDemand(models.Model):
         default='',
         blank=True,
         verbose_name='展開元受注番号'
+    )
+    firm_order_numbers = models.CharField(
+        max_length=500,
+        default='',
+        blank=True,
+        verbose_name='展開元受注番号(確定)'
+    )
+    forecast_order_numbers = models.CharField(
+        max_length=500,
+        default='',
+        blank=True,
+        verbose_name='展開元受注番号(内示)'
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')

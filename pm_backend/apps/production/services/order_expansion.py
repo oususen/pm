@@ -1,14 +1,15 @@
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 import math
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Dict, List, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 from django.db import transaction
+from django.utils import timezone
 
-from masters.models import BOM, BOMItem, Line, Routing
-from masters.services.routing_service import resolve_effective_routing
+from masters.models import BOM, BOMItem, Line, Routing, RoutingStep
 from orders.core.models import OrderLine
+from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR
 from production.models import LineDemand
 
 
@@ -16,10 +17,27 @@ class OrderExpansionService:
     """
     受注をライン別の需要に展開するサービス。
 
-    - OPENステータスの受注明細を対象に、製品のデフォルトルーティングをたどってライン別に数量を積み上げる
-    - リードタイムは工程(time_unit='DAY')の lead_time_days を優先し、未設定の場合はラインの lead_time_days を使用
-    - plan_qty は初期値として (forecast + firm) をセットし、進捗率を計算する
+    - FORECAST は OPEN データを毎回全件再集計し、forecast_qty を置換する
+    - FIRM は未展開の OPEN データのみを増分反映し、展開後に is_expanded=True を立てる
+    - clear_existing=True の場合は全件再構築し、FIRM 展開フラグも初期化し直す
     """
+
+    LINE_DEMAND_UPDATE_FIELDS = [
+        'routing_step',
+        'product',
+        'lead_time_days',
+        'is_shifted',
+        'firm_is_shifted',
+        'forecast_is_shifted',
+        'forecast_qty',
+        'firm_qty',
+        'plan_qty',
+        'plan_progress',
+        'actual_progress',
+        'order_numbers',
+        'firm_order_numbers',
+        'forecast_order_numbers',
+    ]
 
     def __init__(self) -> None:
         self.errors: List[str] = []
@@ -28,324 +46,633 @@ class OrderExpansionService:
         self._child_bom_cache: Dict[int, BOM | None] = {}
         self._bom_multiplier_cache: Dict[int, Dict[int, Decimal]] = {}
         self._bom_path_multiplier_cache: Dict[int, Dict[str, Decimal]] = {}
-        self._supplier_line_cache: Dict[int, int | None] = {}  # product_id -> 仕入先ラインID
+        self._supplier_line_cache: Dict[int, int | None] = {}
 
-    def expand_open_orders(self, clear_existing: bool = True) -> Dict[str, object]:
-        """
-        OPEN受注明細をライン需要に展開し、t_line_demand を再生成する。
-        """
-        aggregated: Dict[Tuple[int, str, object], Dict[str, object]] = {}
-        workday_cache: Dict[int, Dict[object, bool]] = {}
-        calendar_cache: Dict[int, object] = {}
-        default_calendar_id = None
+        self._calendar_day_cache: Dict[Tuple[int, date], bool] = {}
+        self._line_cache: Dict[int, Line] = {}
+        self._line_calendar_cache: Dict[int, int | None] = {}
+        self._bom_items_by_bom: Dict[int, List[BOMItem]] = {}
+        self._supplier_bom_items: Dict[int, BOMItem | None] = {}
+        self._supplier_line_by_code: Dict[str, int | None] = {}
+        self._routing_by_product: Dict[int, List[Tuple[Routing, List[RoutingStep]]]] = {}
+        self._bom_by_parent: Dict[int, List[BOM]] = {}
+        self._default_calendar_id: int | None = None
+        self._routed_product_ids: set[int] = set()
 
-        order_lines = OrderLine.objects.filter(
-            order__status='OPEN'
-        ).select_related('order', 'product')
-
+    def _prefetch_all(self):
+        """全マスタデータをメモリにプリフェッチ（N+1クエリ解消）"""
         from masters.models import Calendar, CalendarDay
 
-        default_calendar_id = Calendar.objects.filter(
-            calendar_code='daiso'
-        ).values_list('id', flat=True).first()
+        for cd in CalendarDay.objects.all().only('calendar_id', 'target_date', 'is_working_day'):
+            self._calendar_day_cache[(cd.calendar_id, cd.target_date)] = cd.is_working_day
 
-        def is_working_day(calendar_id, target_date):
-            if not calendar_id:
-                return target_date.weekday() < 5
-            cache = workday_cache.setdefault(calendar_id, {})
-            if target_date in cache:
-                return cache[target_date]
-            cal = CalendarDay.objects.filter(
-                calendar_id=calendar_id,
-                target_date=target_date
-            ).first()
-            is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
-            cache[target_date] = is_work
-            return is_work
+        for line in Line.objects.all().select_related():
+            self._line_cache[line.id] = line
+            self._line_calendar_cache[line.id] = line.calendar_id
 
-        def shift_business_days(calendar_id, target_date, days):
-            if not days:
-                if not calendar_id:
-                    return target_date
-                if is_working_day(calendar_id, target_date):
-                    return target_date
-                current = target_date
-                while True:
-                    current = current - timedelta(days=1)
-                    if is_working_day(calendar_id, current):
-                        return current
-            step = -1 if days > 0 else 1
-            remaining = abs(int(days))
-            current = target_date
-            while remaining > 0:
-                current = current + timedelta(days=step)
-                if is_working_day(calendar_id, current):
-                    remaining -= 1
-            return current
+        all_items = list(
+            BOMItem.objects
+            .filter(bom__is_active=True, bom__is_coproduct=False)
+            .select_related('child_product', 'supplier')
+            .order_by('id')
+        )
+        for item in all_items:
+            self._bom_items_by_bom.setdefault(item.bom_id, []).append(item)
+            if item.child_product_id and item.supplier_id:
+                self._supplier_bom_items[item.child_product_id] = item
 
-        def resolve_calendar_id(line_id):
-            if line_id in calendar_cache:
-                return calendar_cache[line_id]
-            from masters.models import Line
-            line_obj = Line.objects.filter(id=line_id).first()
-            cal_id = getattr(line_obj, 'calendar_id', None) or default_calendar_id
-            calendar_cache[line_id] = cal_id
-            return cal_id
+        for line in self._line_cache.values():
+            self._supplier_line_by_code[line.line_code] = line.id
 
-        def path_key(path):
-            try:
-                return tuple(int(p) for p in str(path).split('.'))
-            except Exception:
-                return (str(path),)
-
-        minutes_per_day = 480
-
-        def calc_shift_days(prev_minutes, add_minutes):
-            # 480分未満は0日扱い（切り捨て）
-            prev_days = math.floor(prev_minutes / minutes_per_day) if prev_minutes > 0 else 0
-            total_minutes = prev_minutes + add_minutes
-            total_days = math.floor(total_minutes / minutes_per_day) if total_minutes > 0 else 0
-            return total_days - prev_days, total_minutes
-
-        for ol in order_lines:
-            product = ol.product
-            if not product:
-                self.warnings.append(f"製品マスタ未登録のためスキップ: {ol.product_code}")
-                continue
-
-            steps = self._get_routing_steps(product_id=product.id, reference=ol.due_date)
-            if not steps:
-                self.warnings.append(f"ルーティング未設定のためスキップ: {product.product_code}")
-                continue
-
-            # BOM倍率マップ（品番別合計・パス別）を取得
-            bom_multiplier, path_multiplier = self._get_bom_multiplier_maps(product.id)
-
-            # ルーティング上の按分倍率を集計し、BOM合計との補正係数を算出
-            routed_multiplier_by_product: Dict[int, Decimal] = defaultdict(Decimal)
-            for step in steps:
-                step_product = step.output_product if step.output_product_id else product
-                if not step_product:
-                    continue
-                if step.hierarchy_path == 'final':
-                    base_mult = Decimal('1')
-                else:
-                    base_mult = path_multiplier.get(step.hierarchy_path, Decimal('1'))
-                routed_multiplier_by_product[step_product.id] += base_mult
-
-            correction_by_product: Dict[int, Decimal] = {}
-            for pid, routed_mult in routed_multiplier_by_product.items():
-                expected_mult = bom_multiplier.get(pid)
-                if expected_mult is not None and routed_mult > 0:
-                    correction_by_product[pid] = expected_mult / routed_mult
-                else:
-                    correction_by_product[pid] = Decimal('1')
-
-            required_date = ol.due_date
-            final_required_date = required_date
-            final_minutes = 0
-
-            # hierarchy_pathに基づき、工程系統ごとにrequired_dateを計算
-            path_step_map = {
-                step.hierarchy_path: step
-                for step in steps
-                if step.hierarchy_path and step.hierarchy_path != 'final'
-            }
-            children_map = {}
-            for path in path_step_map.keys():
-                parent_path = path.rsplit('.', 1)[0] if '.' in path else None
-                children_map.setdefault(parent_path, []).append(path)
-
-            final_step = next((s for s in steps if s.hierarchy_path == 'final'), None)
-            if final_step:
-                final_calendar_id = resolve_calendar_id(final_step.line_id)
-                # 最終工程はproductを渡す（最終品判定）
-                lead_days = self._resolve_lead_time_days(final_step, product)
-                step_minutes = final_step.duration_min or 0 if final_step.time_unit == 'MINUTE' else 0
-                minute_shift, final_minutes = calc_shift_days(0, step_minutes)
-                final_required_date = shift_business_days(
-                    final_calendar_id,
-                    required_date,
-                    lead_days + minute_shift
-                )
-
-            required_by_path = {}
-
-            def compute_required_date(path, parent_date, parent_minutes):
-                step = path_step_map.get(path)
-                if not step:
-                    return
-                calendar_id = resolve_calendar_id(step.line_id)
-                # output_productまたはメイン製品を渡して最終品・ライン最終品を判定
-                lead_days = self._resolve_lead_time_days(step, product)
-                step_minutes = step.duration_min or 0 if step.time_unit == 'MINUTE' else 0
-                minute_shift, total_minutes = calc_shift_days(parent_minutes, step_minutes)
-                required_for_step = shift_business_days(
-                    calendar_id,
-                    parent_date,
-                    lead_days + minute_shift
-                )
-                required_by_path[path] = (required_for_step, total_minutes)
-                for child_path in sorted(children_map.get(path, []), key=path_key):
-                    compute_required_date(child_path, required_for_step, total_minutes)
-
-            for root_path in sorted(children_map.get(None, []), key=path_key):
-                compute_required_date(root_path, final_required_date, final_minutes)
-
-            for step in reversed(steps):
-                if not step.line_id:
-                    self.warnings.append(f"ライン未設定の工程をスキップ: routing_step_id={step.id}")
-                    continue
-
-                # OUTSOURCEラインの場合、BOMItemのsupplierから仕入先ラインに振り替える
-                effective_line_id = step.line_id
-                step_product = step.output_product if step.output_product_id else product
-                if step.line and step.line.line_type == 'OUTSOURCE' and step_product:
-                    supplier_line_id = self._get_supplier_line_id(step_product.id)
-                    if supplier_line_id:
-                        effective_line_id = supplier_line_id
-
-                calendar_id = resolve_calendar_id(effective_line_id)
-                # output_productまたはメイン製品を渡して最終品・ライン最終品を判定
-                lead_days = self._resolve_lead_time_days(step, product)
-                if step.hierarchy_path == 'final':
-                    target_date = final_required_date
-                elif step.hierarchy_path in required_by_path:
-                    target_date = required_by_path[step.hierarchy_path][0]
-                else:
-                    target_date = shift_business_days(calendar_id, required_date, lead_days)
-                is_shifted = bool(target_date != ol.due_date)
-                product_code = step_product.product_code if step_product else ol.product_code
-                product_id = step_product.id if step_product else (product.id if product else None)
-
-                # BOMパス倍率 × 補正係数 → 合計がBOM倍率と一致
-                if step.hierarchy_path == 'final':
-                    base_mult = Decimal('1')
-                else:
-                    base_mult = path_multiplier.get(step.hierarchy_path, Decimal('1'))
-                correction = correction_by_product.get(product_id, Decimal('1'))
-
-                key = (effective_line_id, product_code, target_date)
-                entry = aggregated.get(key)
-                if not entry:
-                    entry = {
-                        'line_id': effective_line_id,
-                        'routing_step_id': step.id,
-                        'product_id': product_id,
-                        'product_code': product_code,
-                        'plan_date': target_date,
-                        'lead_time_days': lead_days,
-                        'is_shifted': is_shifted,
-                        'forecast_qty': Decimal('0'),
-                        'firm_qty': Decimal('0'),
-                        'order_numbers': set(),
-                    }
-                    aggregated[key] = entry
-                else:
-                    entry['is_shifted'] = bool(entry.get('is_shifted') or is_shifted)
-
-                qty = (ol.quantity or Decimal('0')) * base_mult * correction
-                if ol.order.order_type == 'FIRM':
-                    entry['firm_qty'] += qty
-                else:
-                    entry['forecast_qty'] += qty
-                entry['order_numbers'].add(ol.order.order_no)
-
-                if step.hierarchy_path == 'final':
-                    required_date = target_date
-
-        objects_to_create: List[LineDemand] = []
-        for data in aggregated.values():
-            required_qty = (data['forecast_qty'] or Decimal('0')) + (data['firm_qty'] or Decimal('0'))
-            plan_qty = required_qty
-            actual_qty = Decimal('0')
-
-            plan_progress = self._calc_progress(plan_qty, required_qty)
-            actual_progress = self._calc_progress(actual_qty, required_qty)
-
-            order_numbers = sorted(list(data['order_numbers']))
-            order_numbers_str = ','.join(order_numbers)
-            if len(order_numbers_str) > 500:
-                order_numbers_str = order_numbers_str[:500]
-
-            objects_to_create.append(
-                LineDemand(
-                    line_id=data['line_id'],
-                    routing_step_id=data['routing_step_id'],
-                    product_id=data['product_id'],
-                    product_code=data['product_code'],
-                    plan_date=data['plan_date'],
-                    lead_time_days=data['lead_time_days'],
-                    is_shifted=bool(data.get('is_shifted')),
-                    forecast_qty=data['forecast_qty'],
-                    firm_qty=data['firm_qty'],
-                    plan_qty=plan_qty,
-                    actual_qty=actual_qty,
-                    plan_progress=plan_progress,
-                    actual_progress=actual_progress,
-                    order_numbers=order_numbers_str,
-                )
+        all_routings = list(
+            Routing.objects.filter(is_active=True)
+            .order_by('-is_default', '-valid_from_datetime', '-id')
+        )
+        all_steps = list(
+            RoutingStep.objects
+            .filter(routing__is_active=True)
+            .select_related('line', 'output_product')
+            .order_by('step_no')
+        )
+        steps_by_routing: Dict[int, List[RoutingStep]] = {}
+        for step in all_steps:
+            steps_by_routing.setdefault(step.routing_id, []).append(step)
+        for routing in all_routings:
+            self._routing_by_product.setdefault(routing.product_id, []).append(
+                (routing, steps_by_routing.get(routing.id, []))
             )
 
-        with transaction.atomic():
-            cleared = 0
-            if clear_existing:
-                cleared, _ = LineDemand.objects.all().delete()
+        all_boms = list(
+            BOM.objects.filter(is_active=True, is_coproduct=False)
+            .order_by('-valid_from', '-id')
+        )
+        for bom in all_boms:
+            self._bom_by_parent.setdefault(bom.parent_product_id, []).append(bom)
 
-            if objects_to_create:
-                LineDemand.objects.bulk_create(objects_to_create)
+        self._default_calendar_id = Calendar.objects.filter(
+            calendar_code='daiso'
+        ).values_list('id', flat=True).first()
+        self._routed_product_ids = set(self._routing_by_product.keys())
+
+    def expand_open_orders(self, clear_existing: bool = False) -> Dict[str, object]:
+        """OPEN受注明細をライン需要に展開する。"""
+        self._prefetch_all()
+        self._collect_unrouted_warnings()
+
+        forced_full_rebuild = bool(clear_existing or self._should_force_full_rebuild())
+        if forced_full_rebuild:
+            result = self._full_rebuild_open_orders()
+            result['forced_full_rebuild'] = True
+            return result
+
+        result = self._expand_incremental()
+        result['forced_full_rebuild'] = False
+        return result
+
+    def _should_force_full_rebuild(self) -> bool:
+        """
+        既存LineDemandがあり、OPEN FIRM が全件未展開の状態は
+        旧ロジックからの移行直後とみなして一度だけ全件再構築する。
+        """
+        if not LineDemand.objects.exists():
+            return False
+
+        open_firm_qs = OrderLine.objects.filter(order__status='OPEN', order__order_type='FIRM')
+        total_firm = open_firm_qs.count()
+        if total_firm == 0:
+            return False
+
+        unexpanded_firm = open_firm_qs.filter(is_expanded=False).count()
+        return unexpanded_firm == total_firm
+
+    def _collect_unrouted_warnings(self):
+        forecast_codes = list(
+            OrderLine.objects.filter(order__status='OPEN', order__order_type='FORECAST')
+            .exclude(product_id__in=self._routed_product_ids)
+            .values_list('product__product_code', flat=True)
+            .distinct()
+        )
+        firm_codes = list(
+            OrderLine.objects.filter(
+                order__status='OPEN',
+                order__order_type='FIRM',
+                is_expanded=False,
+            )
+            .exclude(product_id__in=self._routed_product_ids)
+            .values_list('product__product_code', flat=True)
+            .distinct()
+        )
+
+        for code in sorted({code for code in forecast_codes + firm_codes if code}):
+            self.warnings.append(f"ルーティング未設定のためスキップ: {code}")
+
+    def _get_open_order_lines_queryset(self, order_type: str | None = None, is_expanded: bool | None = None):
+        queryset = OrderLine.objects.filter(
+            order__status='OPEN',
+            product_id__in=self._routed_product_ids,
+        ).select_related('order', 'product')
+        if order_type:
+            queryset = queryset.filter(order__order_type=order_type)
+        if is_expanded is not None:
+            queryset = queryset.filter(is_expanded=is_expanded)
+        return queryset.order_by('id')
+
+    def _expand_incremental(self) -> Dict[str, object]:
+        forecast_aggregated, _ = self._aggregate_order_lines(
+            self._get_open_order_lines_queryset(order_type='FORECAST')
+        )
+        firm_aggregated, processed_firm_line_ids = self._aggregate_order_lines(
+            self._get_open_order_lines_queryset(order_type='FIRM', is_expanded=False)
+        )
+
+        existing_map = self._load_existing_demands()
+
+        with transaction.atomic():
+            forecast_result = self._sync_forecast_demands(forecast_aggregated, existing_map)
+            firm_result = self._apply_incremental_firm_demands(firm_aggregated, existing_map)
+
+            if processed_firm_line_ids:
+                OrderLine.objects.filter(id__in=processed_firm_line_ids).update(
+                    is_expanded=True,
+                    expanded_at=timezone.now(),
+                )
 
         return {
-            'cleared': cleared if clear_existing else 0,
-            'created': len(objects_to_create),
+            'cleared': 0,
+            'created': forecast_result['created'] + firm_result['created'],
+            'updated': forecast_result['updated'] + firm_result['updated'],
+            'deleted': forecast_result['deleted'],
+            'processed_order_lines': len(processed_firm_line_ids),
             'warnings': self.warnings,
             'errors': self.errors,
         }
 
+    def _full_rebuild_open_orders(self) -> Dict[str, object]:
+        order_lines = self._get_open_order_lines_queryset()
+        aggregated, _ = self._aggregate_order_lines(order_lines)
+        existing_map = self._load_existing_demands()
+
+        objects_to_create: List[LineDemand] = []
+        for key, entry in aggregated.items():
+            existing = existing_map.get(key)
+            objects_to_create.append(self._build_line_demand(entry, existing=existing))
+
+        routed_open_firm_qs = self._get_open_order_lines_queryset(order_type='FIRM').values_list('id', flat=True)
+
+        with transaction.atomic():
+            cleared = LineDemand.objects.count()
+            if cleared:
+                LineDemand.objects.all()._raw_delete(LineDemand.objects.db)
+
+            if objects_to_create:
+                LineDemand.objects.bulk_create(objects_to_create, batch_size=10000)
+
+            firm_ids = list(routed_open_firm_qs)
+            if firm_ids:
+                OrderLine.objects.filter(id__in=firm_ids).update(
+                    is_expanded=True,
+                    expanded_at=timezone.now(),
+                )
+
+        return {
+            'cleared': cleared,
+            'created': len(objects_to_create),
+            'updated': 0,
+            'deleted': cleared,
+            'processed_order_lines': len(firm_ids),
+            'warnings': self.warnings,
+            'errors': self.errors,
+        }
+
+    def _sync_forecast_demands(self, aggregated, existing_map):
+        existing_forecast_keys = {
+            key for key, demand in existing_map.items()
+            if (demand.forecast_qty or Decimal('0')) > 0
+        }
+        target_keys = set(aggregated.keys()) | existing_forecast_keys
+
+        to_create: List[LineDemand] = []
+        to_update: List[LineDemand] = []
+        delete_ids: List[int] = []
+
+        for key in target_keys:
+            entry = aggregated.get(key)
+            existing = existing_map.get(key)
+
+            if entry:
+                if existing is None:
+                    existing = self._build_line_demand(entry)
+                    existing_map[key] = existing
+                    to_create.append(existing)
+                    continue
+
+                self._apply_shared_entry_metadata(existing, entry)
+                existing.forecast_qty = entry['forecast_qty']
+                existing.forecast_is_shifted = bool(entry['forecast_is_shifted'])
+                existing.forecast_order_numbers = self._normalize_order_numbers(
+                    entry['forecast_order_numbers']
+                )
+                self._refresh_demand_fields(existing)
+                to_update.append(existing)
+                continue
+
+            if existing is None:
+                continue
+
+            existing.forecast_qty = Decimal('0')
+            existing.forecast_is_shifted = False
+            existing.forecast_order_numbers = ''
+            self._refresh_demand_fields(existing)
+
+            if self._is_empty_demand(existing):
+                if existing.pk:
+                    delete_ids.append(existing.pk)
+                existing_map.pop(key, None)
+            else:
+                to_update.append(existing)
+
+        if delete_ids:
+            LineDemand.objects.filter(id__in=delete_ids).delete()
+        if to_create:
+            LineDemand.objects.bulk_create(to_create, batch_size=10000)
+            self._refresh_created_demands(to_create, existing_map)
+        if to_update:
+            LineDemand.objects.bulk_update(
+                to_update,
+                self.LINE_DEMAND_UPDATE_FIELDS,
+                batch_size=1000,
+            )
+
+        return {
+            'created': len(to_create),
+            'updated': len(to_update),
+            'deleted': len(delete_ids),
+        }
+
+    def _apply_incremental_firm_demands(self, aggregated, existing_map):
+        to_create: List[LineDemand] = []
+        to_update: List[LineDemand] = []
+
+        for key, entry in aggregated.items():
+            existing = existing_map.get(key)
+            if existing is None:
+                existing = self._build_line_demand(entry)
+                existing_map[key] = existing
+                to_create.append(existing)
+                continue
+
+            existing.firm_qty = (existing.firm_qty or Decimal('0')) + entry['firm_qty']
+            existing.firm_is_shifted = bool(existing.firm_is_shifted or entry['firm_is_shifted'])
+            existing.firm_order_numbers = self._merge_order_number_strings(
+                existing.firm_order_numbers,
+                self._normalize_order_numbers(entry['firm_order_numbers']),
+            )
+            self._refresh_demand_fields(existing)
+            to_update.append(existing)
+
+        if to_create:
+            LineDemand.objects.bulk_create(to_create, batch_size=10000)
+        if to_update:
+            LineDemand.objects.bulk_update(
+                to_update,
+                self.LINE_DEMAND_UPDATE_FIELDS,
+                batch_size=1000,
+            )
+
+        for created in to_create:
+            existing_map[(created.line_id, created.product_code, created.plan_date)] = created
+
+        return {
+            'created': len(to_create),
+            'updated': len(to_update),
+        }
+
+    def _load_existing_demands(self):
+        return {
+            (demand.line_id, demand.product_code, demand.plan_date): demand
+            for demand in LineDemand.objects.all()
+        }
+
+    def _refresh_created_demands(self, created_demands: List[LineDemand], existing_map):
+        if not created_demands:
+            return
+
+        line_ids = {demand.line_id for demand in created_demands}
+        product_codes = {demand.product_code for demand in created_demands}
+        plan_dates = {demand.plan_date for demand in created_demands}
+
+        refreshed = LineDemand.objects.filter(
+            line_id__in=line_ids,
+            product_code__in=product_codes,
+            plan_date__in=plan_dates,
+        )
+        for demand in refreshed:
+            existing_map[(demand.line_id, demand.product_code, demand.plan_date)] = demand
+
+    def _aggregate_order_lines(self, order_lines: Iterable[OrderLine]):
+        aggregated: Dict[Tuple[int, str, object], Dict[str, object]] = {}
+        processed_ids: List[int] = []
+
+        for order_line in order_lines:
+            processed_ids.append(order_line.id)
+            self._accumulate_order_line(aggregated, order_line)
+
+        return aggregated, processed_ids
+
+    def _accumulate_order_line(self, aggregated, order_line: OrderLine):
+        product = order_line.product
+        if not product:
+            return
+
+        steps = self._get_routing_steps(product_id=product.id, reference=order_line.due_date)
+        if not steps:
+            return
+
+        bom_multiplier, path_multiplier = self._get_bom_multiplier_maps(product.id)
+        routed_multiplier_by_product: Dict[int, Decimal] = defaultdict(Decimal)
+        for step in steps:
+            step_product = step.output_product if step.output_product_id else product
+            if not step_product:
+                continue
+            if step.hierarchy_path == 'final':
+                base_mult = Decimal('1')
+            else:
+                base_mult = path_multiplier.get(step.hierarchy_path, Decimal('1'))
+            routed_multiplier_by_product[step_product.id] += base_mult
+
+        correction_by_product: Dict[int, Decimal] = {}
+        for product_id, routed_mult in routed_multiplier_by_product.items():
+            expected_mult = bom_multiplier.get(product_id)
+            if expected_mult is not None and routed_mult > 0:
+                correction_by_product[product_id] = expected_mult / routed_mult
+            else:
+                correction_by_product[product_id] = Decimal('1')
+
+        required_date = order_line.due_date
+        final_required_date = required_date
+        final_minutes = 0
+
+        path_step_map = {
+            step.hierarchy_path: step
+            for step in steps
+            if step.hierarchy_path and step.hierarchy_path != 'final'
+        }
+        children_map = {}
+        for path in path_step_map.keys():
+            parent_path = path.rsplit('.', 1)[0] if '.' in path else None
+            children_map.setdefault(parent_path, []).append(path)
+
+        final_step = next((step for step in steps if step.hierarchy_path == 'final'), None)
+        if final_step:
+            final_calendar_id = self._resolve_calendar_id(final_step.line_id)
+            lead_days = self._resolve_lead_time_days(final_step, product)
+            step_minutes = final_step.duration_min or 0 if final_step.time_unit == 'MINUTE' else 0
+            minute_shift, final_minutes = self._calc_shift_days(0, step_minutes)
+            final_required_date = self._shift_business_days(
+                final_calendar_id,
+                required_date,
+                lead_days + minute_shift,
+            )
+
+        required_by_path = {}
+
+        def compute_required_date(path, parent_date, parent_minutes):
+            step = path_step_map.get(path)
+            if not step:
+                return
+            calendar_id = self._resolve_calendar_id(step.line_id)
+            lead_days = self._resolve_lead_time_days(step, product)
+            step_minutes = step.duration_min or 0 if step.time_unit == 'MINUTE' else 0
+            minute_shift, total_minutes = self._calc_shift_days(parent_minutes, step_minutes)
+            required_for_step = self._shift_business_days(
+                calendar_id,
+                parent_date,
+                lead_days + minute_shift,
+            )
+            required_by_path[path] = (required_for_step, total_minutes)
+            for child_path in sorted(children_map.get(path, []), key=self._path_key):
+                compute_required_date(child_path, required_for_step, total_minutes)
+
+        for root_path in sorted(children_map.get(None, []), key=self._path_key):
+            compute_required_date(root_path, final_required_date, final_minutes)
+
+        for step in reversed(steps):
+            if not step.line_id:
+                self.warnings.append(f"ライン未設定の工程をスキップ: routing_step_id={step.id}")
+                continue
+
+            effective_line_id = step.line_id
+            step_product = step.output_product if step.output_product_id else product
+            line_obj = self._line_cache.get(step.line_id)
+            if line_obj and line_obj.line_type == 'OUTSOURCE' and step_product:
+                supplier_line_id = self._get_supplier_line_id(step_product.id)
+                if supplier_line_id:
+                    effective_line_id = supplier_line_id
+
+            calendar_id = self._resolve_calendar_id(effective_line_id)
+            lead_days = self._resolve_lead_time_days(step, product)
+            if step.hierarchy_path == 'final':
+                target_date = final_required_date
+            elif step.hierarchy_path in required_by_path:
+                target_date = required_by_path[step.hierarchy_path][0]
+            else:
+                target_date = self._shift_business_days(calendar_id, required_date, lead_days)
+
+            is_shifted = bool(target_date != order_line.due_date)
+            product_code = step_product.product_code if step_product else order_line.product_code
+            product_id = step_product.id if step_product else product.id
+
+            if step.hierarchy_path == 'final':
+                base_mult = Decimal('1')
+            else:
+                base_mult = path_multiplier.get(step.hierarchy_path, Decimal('1'))
+            correction = correction_by_product.get(product_id, Decimal('1'))
+
+            key = (effective_line_id, product_code, target_date)
+            entry = aggregated.get(key)
+            if not entry:
+                entry = {
+                    'line_id': effective_line_id,
+                    'routing_step_id': step.id,
+                    'product_id': product_id,
+                    'product_code': product_code,
+                    'plan_date': target_date,
+                    'lead_time_days': lead_days,
+                    'firm_qty': Decimal('0'),
+                    'forecast_qty': Decimal('0'),
+                    'firm_is_shifted': False,
+                    'forecast_is_shifted': False,
+                    'firm_order_numbers': set(),
+                    'forecast_order_numbers': set(),
+                }
+                aggregated[key] = entry
+
+            qty = (order_line.quantity or Decimal('0')) * base_mult * correction
+            if order_line.order.order_type == 'FIRM':
+                entry['firm_qty'] += qty
+                entry['firm_is_shifted'] = bool(entry['firm_is_shifted'] or is_shifted)
+                entry['firm_order_numbers'].add(order_line.order.order_no)
+            else:
+                entry['forecast_qty'] += qty
+                entry['forecast_is_shifted'] = bool(entry['forecast_is_shifted'] or is_shifted)
+                entry['forecast_order_numbers'].add(order_line.order.order_no)
+
+            if step.hierarchy_path == 'final':
+                required_date = target_date
+
+    def _build_line_demand(self, entry, existing: LineDemand | None = None):
+        actual_qty = existing.actual_qty if existing is not None else Decimal('0')
+        demand = LineDemand(
+            line_id=entry['line_id'],
+            routing_step_id=entry['routing_step_id'],
+            product_id=entry['product_id'],
+            product_code=entry['product_code'],
+            plan_date=entry['plan_date'],
+            lead_time_days=entry['lead_time_days'],
+            forecast_qty=entry['forecast_qty'],
+            firm_qty=entry['firm_qty'],
+            actual_qty=actual_qty,
+            firm_is_shifted=bool(entry['firm_is_shifted']),
+            forecast_is_shifted=bool(entry['forecast_is_shifted']),
+            firm_order_numbers=self._normalize_order_numbers(entry['firm_order_numbers']),
+            forecast_order_numbers=self._normalize_order_numbers(entry['forecast_order_numbers']),
+        )
+        self._refresh_demand_fields(demand)
+        return demand
+
+    def _apply_shared_entry_metadata(self, demand: LineDemand, entry):
+        demand.routing_step_id = entry['routing_step_id']
+        demand.product_id = entry['product_id']
+        demand.lead_time_days = entry['lead_time_days']
+
+    def _refresh_demand_fields(self, demand: LineDemand):
+        required_qty = (demand.forecast_qty or Decimal('0')) + (demand.firm_qty or Decimal('0'))
+        actual_qty = demand.actual_qty or Decimal('0')
+        demand.is_shifted = bool(demand.firm_is_shifted or demand.forecast_is_shifted)
+        demand.plan_qty = required_qty
+        demand.plan_progress = self._calc_progress(demand.plan_qty, required_qty)
+        demand.actual_progress = self._calc_progress(actual_qty, required_qty)
+        demand.order_numbers = self._merge_order_number_strings(
+            demand.firm_order_numbers,
+            demand.forecast_order_numbers,
+        )
+
+    def _is_empty_demand(self, demand: LineDemand) -> bool:
+        return (
+            (demand.forecast_qty or Decimal('0')) == 0
+            and (demand.firm_qty or Decimal('0')) == 0
+        )
+
+    def _normalize_order_numbers(self, order_numbers) -> str:
+        if isinstance(order_numbers, str):
+            values = [item.strip() for item in order_numbers.split(',') if item.strip()]
+        else:
+            values = [str(item).strip() for item in order_numbers if str(item).strip()]
+
+        merged = ','.join(sorted(set(values)))
+        if len(merged) > 500:
+            return merged[:500]
+        return merged
+
+    def _merge_order_number_strings(self, *values: str) -> str:
+        merged_values = []
+        for value in values:
+            if not value:
+                continue
+            merged_values.extend(item.strip() for item in str(value).split(',') if item.strip())
+        return self._normalize_order_numbers(merged_values)
+
+    def _resolve_calendar_id(self, line_id):
+        cal_id = self._line_calendar_cache.get(line_id)
+        return cal_id or self._default_calendar_id
+
+    def _is_working_day(self, calendar_id, target_date):
+        if not calendar_id:
+            return target_date.weekday() < 5
+        key = (calendar_id, target_date)
+        if key in self._calendar_day_cache:
+            return self._calendar_day_cache[key]
+        return target_date.weekday() < 5
+
+    def _shift_business_days(self, calendar_id, target_date, days):
+        if not days:
+            if not calendar_id:
+                return target_date
+            if self._is_working_day(calendar_id, target_date):
+                return target_date
+            current = target_date
+            while True:
+                current = current - timedelta(days=1)
+                if self._is_working_day(calendar_id, current):
+                    return current
+
+        step = -1 if days > 0 else 1
+        remaining = abs(int(days))
+        current = target_date
+        while remaining > 0:
+            current = current + timedelta(days=step)
+            if self._is_working_day(calendar_id, current):
+                remaining -= 1
+        return current
+
+    def _path_key(self, path):
+        try:
+            return tuple(int(part) for part in str(path).split('.'))
+        except Exception:
+            return (str(path),)
+
+    def _calc_shift_days(self, prev_minutes, add_minutes):
+        minutes_per_day = 480
+        prev_days = math.floor(prev_minutes / minutes_per_day) if prev_minutes > 0 else 0
+        total_minutes = prev_minutes + add_minutes
+        total_days = math.floor(total_minutes / minutes_per_day) if total_minutes > 0 else 0
+        return total_days - prev_days, total_minutes
+
+    def _resolve_routing_in_memory(self, product_id: int, reference=None):
+        """プリフェッチ済みルーティングからメモリ内で有効なルーティングを解決する。"""
+        candidates = self._routing_by_product.get(product_id, [])
+        if not candidates:
+            return None, []
+
+        if reference is None:
+            ref_dt = datetime.now()
+        elif isinstance(reference, date) and not isinstance(reference, datetime):
+            ref_dt = datetime.combine(reference, time(DAY_BOUNDARY_HOUR, 0))
+        else:
+            ref_dt = reference
+
+        for routing, steps in candidates:
+            if routing.valid_from_datetime and routing.valid_from_datetime > ref_dt:
+                continue
+            if routing.valid_to_datetime and routing.valid_to_datetime < ref_dt:
+                continue
+            return routing, steps
+        return None, []
+
     def _get_routing_steps(self, product_id: int, reference=None):
-        """有効日時を考慮したルーティング工程一覧をキャッシュして返す。"""
+        """有効日時を考慮したルーティング工程一覧をキャッシュして返す（メモリ内解決）。"""
         cache_key = (product_id, reference)
         if cache_key in self._routing_cache:
             return self._routing_cache[cache_key]
 
-        routing = resolve_effective_routing(product_id, reference)
-
-        if not routing:
-            self._routing_cache[cache_key] = []
-            return []
-
-        steps = list(
-            routing.steps.select_related('line', 'output_product').order_by('step_no')
-        )
+        _, steps = self._resolve_routing_in_memory(product_id, reference)
         self._routing_cache[cache_key] = steps
         return steps
 
     def _pick_child_bom(self, product_id: int):
-        """子製品の有効BOMを取得（有効期間内優先、なければ最新有効）。連産品BOMは除外。"""
+        """子製品の有効BOMを取得（メモリ内解決）。連産品BOMは除外。"""
         if product_id in self._child_bom_cache:
             return self._child_bom_cache[product_id]
 
         today = date.today()
-        bom = (
-            BOM.objects.filter(
-                parent_product_id=product_id,
-                is_active=True,
-                is_coproduct=False,
-                valid_from__lte=today,
-            )
-            .order_by('-valid_from', '-id')
-            .first()
-        )
-        if not bom:
-            bom = (
-                BOM.objects.filter(
-                    parent_product_id=product_id,
-                    is_active=True,
-                    is_coproduct=False,
-                )
-                .order_by('-valid_from', '-id')
-                .first()
-            )
+        candidates = self._bom_by_parent.get(product_id, [])
+        bom = None
+        for candidate in candidates:
+            if candidate.valid_from and candidate.valid_from <= today:
+                bom = candidate
+                break
+        if not bom and candidates:
+            bom = candidates[0]
 
         self._child_bom_cache[product_id] = bom
         return bom
@@ -368,13 +695,7 @@ class OrderExpansionService:
             return
 
         next_active = active_bom_ids | {bom.id}
-
-        items = (
-            BOMItem.objects
-            .filter(bom_id=bom.id)
-            .select_related('child_product')
-            .order_by('id')
-        )
+        items = self._bom_items_by_bom.get(bom.id, [])
         for idx, item in enumerate(items, start=1):
             if not item.child_product_id:
                 continue
@@ -384,7 +705,7 @@ class OrderExpansionService:
 
             child_multiplier = current_multiplier * qty
             path_tuple = path_prefix + (idx,)
-            path_key = '.'.join(str(p) for p in path_tuple)
+            path_key = '.'.join(str(part) for part in path_tuple)
 
             path_result[path_key] = (
                 path_result.get(path_key, Decimal('0')) + child_multiplier
@@ -435,18 +756,11 @@ class OrderExpansionService:
         if product_id in self._supplier_line_cache:
             return self._supplier_line_cache[product_id]
 
-        bom_item = (
-            BOMItem.objects
-            .filter(child_product_id=product_id, supplier__isnull=False)
-            .select_related('supplier')
-            .first()
-        )
+        bom_item = self._supplier_bom_items.get(product_id)
         supplier_line_id = None
         if bom_item and bom_item.supplier_id:
             supplier_code = bom_item.supplier.supplier_code
-            line = Line.objects.filter(line_code=supplier_code).first()
-            if line:
-                supplier_line_id = line.id
+            supplier_line_id = self._supplier_line_by_code.get(supplier_code)
 
         self._supplier_line_cache[product_id] = supplier_line_id
         return supplier_line_id
@@ -454,27 +768,25 @@ class OrderExpansionService:
     def _resolve_lead_time_days(self, step, main_product=None) -> int:
         """
         工程のLT（日）を決定する。
-        - 最終品・ライン最終品（is_final_product or is_line_final_product）: ラインLT（Line.lead_time_days）のみ
-        - 中間品: RoutingStep.lead_time_days のみ使用（MINUTE管理工程はstep_lt=0なのでLT=0）
+        - 最終品・ライン最終品: RoutingStep(DAY)優先、なければ Line.lead_time_days
+        - 中間品: RoutingStep.lead_time_days のみ使用
         """
-        # 最終工程、またはoutput_productが最終品・ライン最終品かどうかを判定
         product = step.output_product if step.output_product_id else main_product
         is_final = (step.hierarchy_path == 'final') or (
             product and (product.is_final_product or product.is_line_final_product)
         )
 
         if is_final:
-            # 最終品・ライン最終品: DAY管理でstep_ltが設定されていればRoutingStep.lead_time_daysを最優先
             if step.time_unit == 'DAY' and step.lead_time_days:
                 return max(step.lead_time_days, 0)
-            # それ以外（MINUTE管理など）はラインLT
+            line_obj = self._line_cache.get(step.line_id) if step.line_id else None
+            if line_obj and line_obj.lead_time_days:
+                return max(line_obj.lead_time_days, 0)
             if step.line and step.line.lead_time_days:
                 return max(step.line.lead_time_days, 0)
             return 0
-        else:
-            # 中間品: RoutingStep.lead_time_days のみ使用（expand_processesと同じロジック）
-            # MINUTE管理の工程はstep_lt=0なのでLT=0（分計算のみ）
-            return max(step.lead_time_days or 0, 0)
+
+        return max(step.lead_time_days or 0, 0)
 
     def _calc_progress(self, numerator: Decimal, denominator: Decimal) -> Decimal:
         """0除算を避けつつ進捗（0-1）を小数3桁で返す。"""

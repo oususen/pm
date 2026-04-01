@@ -63,6 +63,8 @@ class OrderLine(models.Model):
     plant_code = models.CharField(max_length=20, null=True, blank=True, verbose_name='工場コード')
     ship_to_code = models.CharField(max_length=40, null=True, blank=True, verbose_name='納入先コード')
     remark = models.CharField(max_length=200, null=True, blank=True, verbose_name='備考')
+    is_expanded = models.BooleanField(default=False, verbose_name='展開済み')
+    expanded_at = models.DateTimeField(null=True, blank=True, verbose_name='展開日時')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
 
@@ -74,6 +76,7 @@ class OrderLine(models.Model):
         indexes = [
             models.Index(fields=['due_date']),
             models.Index(fields=['product_code']),
+            models.Index(fields=['order_type', 'is_expanded']),
         ]
 
     def __str__(self):

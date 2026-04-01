@@ -28,7 +28,7 @@ def run_order_expansion():
 
     try:
         service = OrderExpansionService()
-        result = service.expand_open_orders(clear_existing=True) or {}
+        result = service.expand_open_orders(clear_existing=False) or {}
         errors = result.get('errors') or []
         success = len(errors) == 0
         if not success:

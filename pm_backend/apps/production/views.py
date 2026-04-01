@@ -290,7 +290,7 @@ class LineDemandViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def expand(self, request):
         """OPEN受注をライン別に展開してt_line_demandを再生成"""
-        clear_param = request.data.get('clear_existing', True)
+        clear_param = request.data.get('clear_existing', False)
         if isinstance(clear_param, str):
             clear_existing = clear_param.lower() not in ['false', '0', 'no']
         else:
