@@ -346,7 +346,7 @@ class Routing(models.Model):
         db_table = 'm_routing'
         verbose_name = 'ルーティング'
         verbose_name_plural = 'ルーティング'
-        unique_together = [['product', 'routing_code']]
+        ordering = ['product', 'routing_code', '-valid_from_datetime']
 
     def __str__(self):
         code = None

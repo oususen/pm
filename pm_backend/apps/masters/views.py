@@ -1,4 +1,4 @@
-from rest_framework import viewsets, status, parsers
+from rest_framework import viewsets, status, parsers, serializers
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -989,26 +989,34 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        routing, created = Routing.objects.get_or_create(
+        # 同じルーティングコードの既存レコードをチェック
+        existing = Routing.objects.filter(
+            product=bom.parent_product, routing_code=routing_code,
+        ).order_by('-valid_from_datetime')
+
+        for ex in existing:
+            if ex.valid_to_datetime is None:
+                return Response(
+                    {'detail': f'ルーティングコード "{routing_code}" の既存ルーティング(ID:{ex.id})に終了日が設定されていません。'
+                               f'先に既存ルーティングの終了日を設定してから再実行してください。'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if valid_from_datetime and valid_from_datetime <= ex.valid_to_datetime:
+                return Response(
+                    {'detail': f'新しい開始日は既存ルーティング(ID:{ex.id})の終了日 {ex.valid_to_datetime:%Y-%m-%d %H:%M} より後に設定してください。'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        routing = Routing.objects.create(
             product=bom.parent_product,
             routing_code=routing_code,
-            defaults={
-                'description': description,
-                'is_default': set_default,
-                'is_active': True,
-                'valid_from_datetime': valid_from_datetime,
-            }
+            description=description,
+            is_default=set_default,
+            is_active=True,
+            valid_from_datetime=valid_from_datetime,
         )
-
-        routing.description = description
-        routing.is_active = True
-        routing.valid_from_datetime = valid_from_datetime
         if set_default:
             Routing.objects.filter(product=bom.parent_product).exclude(id=routing.id).update(is_default=False)
-            routing.is_default = True
-        routing.save()
-
-        routing.steps.all().delete()
         created_steps = []
         max_depth = max((depth for depth, _, _, _ in routing_items_info), default=0)
         for idx, (depth, path, item, parent_product) in enumerate(routing_items_info, start=1):
@@ -1089,9 +1097,9 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 'message': 'Routing generated from BOM (recursive)',
                 'routing': serialized.data,
                 'generated_steps': len(routing_items_info),
-                'replaced_existing': not created,
+                'replaced_existing': False,
             },
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+            status=status.HTTP_201_CREATED
         )
 
     @action(detail=True, methods=['post'])
@@ -1215,12 +1223,42 @@ class RoutingViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             return RoutingListSerializer
         return RoutingSerializer
 
+    def _validate_routing_code_overlap(self, product_id, routing_code, valid_from_datetime, exclude_id=None):
+        """同じルーティングコードの期間重複チェック"""
+        existing = Routing.objects.filter(
+            product_id=product_id, routing_code=routing_code,
+        )
+        if exclude_id:
+            existing = existing.exclude(id=exclude_id)
+
+        for ex in existing:
+            if ex.valid_to_datetime is None:
+                raise serializers.ValidationError(
+                    {'detail': f'ルーティングコード "{routing_code}" の既存ルーティング(ID:{ex.id})に終了日が設定されていません。'
+                               f'先に既存ルーティングの終了日を設定してから再実行してください。'}
+                )
+            if valid_from_datetime and valid_from_datetime <= ex.valid_to_datetime:
+                raise serializers.ValidationError(
+                    {'detail': f'新しい開始日は既存ルーティング(ID:{ex.id})の終了日 {ex.valid_to_datetime:%Y-%m-%d %H:%M} より後に設定してください。'}
+                )
+
     def perform_create(self, serializer):
+        data = serializer.validated_data
+        self._validate_routing_code_overlap(
+            data['product'].id, data['routing_code'], data.get('valid_from_datetime'),
+        )
         routing = serializer.save()
         if routing.is_default:
             Routing.objects.filter(product_id=routing.product_id).exclude(id=routing.id).update(is_default=False)
 
     def perform_update(self, serializer):
+        data = serializer.validated_data
+        self._validate_routing_code_overlap(
+            data.get('product', serializer.instance.product).id,
+            data.get('routing_code', serializer.instance.routing_code),
+            data.get('valid_from_datetime', serializer.instance.valid_from_datetime),
+            exclude_id=serializer.instance.id,
+        )
         routing = serializer.save()
         if routing.is_default:
             Routing.objects.filter(product_id=routing.product_id).exclude(id=routing.id).update(is_default=False)
