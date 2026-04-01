@@ -954,8 +954,8 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                     return Response({'detail': 'final_duration_min must be >0 when final_time_unit=MINUTE'}, status=status.HTTP_400_BAD_REQUEST)
                 final_lead_time_days = 0
             else:
-                if not final_lead_time_days or int(final_lead_time_days) <= 0:
-                    return Response({'detail': 'final_lead_time_days must be >0 when final_time_unit=DAY'}, status=status.HTTP_400_BAD_REQUEST)
+                if final_lead_time_days is None or int(final_lead_time_days) < 0:
+                    return Response({'detail': 'final_lead_time_days must be >=0 when final_time_unit=DAY'}, status=status.HTTP_400_BAD_REQUEST)
                 final_duration_min = None
 
         # Validate each item has process/time info
@@ -978,8 +978,8 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                     if it.duration_min is None or it.duration_min <= 0:
                         return Response({'detail': f'duration_min must be >0 (MINUTE) on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
                 else:
-                    if it.lead_time_days <= 0:
-                        return Response({'detail': f'lead_time_days must be >0 (DAY) on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
+                    if it.lead_time_days < 0:
+                        return Response({'detail': f'lead_time_days must be >=0 (DAY) on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
 
         routing_code = request.data.get('routing_code') or f"AUTO-{bom.parent_product.product_code}-{bom.version}"
         description = request.data.get('description') or 'bomから自動生成した'

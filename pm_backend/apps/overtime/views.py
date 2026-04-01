@@ -9,6 +9,7 @@ from rest_framework.decorators import action
 from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from django_filters.rest_framework import DjangoFilterBackend
 import django_filters
 
 from .access import can_manage_application
@@ -203,6 +204,7 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
     serializer_class = OvertimeApplicationSerializer
     permission_classes = [IsAuthenticated]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
+    filter_backends = [DjangoFilterBackend]
     filterset_class = OvertimeApplicationFilter
     ordering_fields = ['work_date', 'created_at', 'status']
     ordering = ['-work_date', '-created_at']
@@ -499,9 +501,9 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
                 id_list = [int(i) for i in ids_param.split(',') if i.strip()]
             except ValueError:
                 id_list = []
-            qs = self.get_queryset().filter(id__in=id_list).order_by('work_date', 'created_at')
+            qs = self.get_queryset().filter(id__in=id_list).order_by('work_date', 'applicant_id')
         else:
-            qs = self.filter_queryset(self.get_queryset())
+            qs = self.filter_queryset(self.get_queryset()).order_by('work_date', 'applicant_id')
 
         filters = {
             'team_name': request.query_params.get('team_name', ''),

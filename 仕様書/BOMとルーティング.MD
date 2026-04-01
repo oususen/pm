@@ -47,7 +47,7 @@ BOMからルーティングを自動生成する際のルールをまとめる�
 
 ## 注意事項
 - step_noは `(routing_id, step_no, parallel_group)` で一意。
-- `time_unit='DAY'` の場合は `lead_time_days > 0` を必須。
+- `time_unit='DAY'` の場合は `lead_time_days >= 0` を許可する。
 - リードタイムの遡りは稼働日(カレンダ)を考慮して算出する。
 
 ## ルーティングマスタ画面（`/masters/routing`）の表示ルール

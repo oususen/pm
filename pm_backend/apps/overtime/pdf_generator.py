@@ -89,7 +89,6 @@ def register_japanese_fonts() -> None:
         except Exception as e:
             # このフォントは使えないので次を試す
             last_error = e
-            pass  # フォント読み込みエラー、次候補を試す
             continue
 
     if not font_registered:
@@ -112,7 +111,7 @@ PAGE_W, PAGE_H = A4  # ポイント単位
 MARGIN_L = 15 * mm
 MARGIN_R = 15 * mm
 MARGIN_T = 15 * mm
-MARGIN_B = 20 * mm
+MARGIN_B = 12 * mm
 
 # カラー定数
 COLOR_HEADER_BG = colors.HexColor("#f0f0f0")
@@ -131,7 +130,19 @@ _COL_DEFS = [
     ("サイン", 30),
 ]
 
-MAX_ROWS = 30
+# フッター注意書き
+_FOOTER_NOTES = [
+    "①　深夜残業区分に入った場合は残業時間数と深夜残業時間数を分けて記入すること",
+    "②　申請書提出期限：残業実施日の午後4:00まで、休日出勤申請は前日の午後5:00まで",
+    "③　申請なしで実施した場合は事故が発生しても会社として責任を持たず、残業と認めない",
+    "④　申請時間より早く終了した場合はタイムカードの打刻を優先、遅くなった場合は翌日再申請",
+    "⑤　夜勤者については事後処理も可の場合がある",
+]
+FOOTER_H = len(_FOOTER_NOTES) * 4 * mm + 2 * mm  # フッター高さ
+
+HEADER_H = 8 * mm   # テーブルヘッダ行高さ
+ROW_H = 7 * mm       # データ行デフォルト高さ
+TOTAL_ROW_H = 7 * mm  # 合計行高さ
 
 
 def _fmt_time(t) -> str:
@@ -154,7 +165,7 @@ def _fmt_hours(val) -> str:
 
 def generate_overtime_pdf(applications, filters=None):
     """
-    時間外・休日出勤 申請書 PDF を生成する。
+    時間外・休日出勤 申請書 PDF を生成する（複数ページ対応）。
 
     applications: OvertimeApplication クエリセット or リスト
     filters: dict with keys 'team_name', 'group_name', 'date_from', 'date_to'
@@ -167,15 +178,13 @@ def generate_overtime_pdf(applications, filters=None):
 
     team_name = filters.get("team_name", "") or "全班"
     group_name = filters.get("group_name", "") or ""
-    date_from = filters.get("date_from", "")
-    date_to = filters.get("date_to", "")
 
     # グループ選択有無（'全グループ' でない場合はグループ指定あり）
     is_group_selected = bool(group_name) and group_name != "全グループ"
 
     # 事業部名・係名を申請データから取得
     division_name = ""
-    section_name = ""  # 係
+    section_name = ""
     if applications:
         try:
             division_name = applications[0].applicant.profile.division.name or ""
@@ -192,12 +201,9 @@ def generate_overtime_pdf(applications, filters=None):
     c = canvas.Canvas(buf, pagesize=A4)
 
     # ---- 有効描画領域 ----
-    content_w = PAGE_W - MARGIN_L - MARGIN_R  # ポイント単位
+    content_w = PAGE_W - MARGIN_L - MARGIN_R
 
-    # ---- タイトル ----
-    title_y = MARGIN_B + (PAGE_H - MARGIN_T - MARGIN_B) - 0 * mm  # y=275mm from bottom
-    title_y = 275 * mm
-    # タイトルを申請種別に応じて変更
+    # タイトルテキスト決定
     types = set(getattr(a, "application_type", "overtime") for a in applications)
     if types == {"holiday"}:
         title_text = "休日出勤  申請書"
@@ -205,63 +211,6 @@ def generate_overtime_pdf(applications, filters=None):
         title_text = "時間外  申請書"
     else:
         title_text = "時間外・休日出勤  申請書"
-
-    c.setFont("MSGothic-Bold", 16)
-    c.drawCentredString(PAGE_W / 2, title_y, title_text)
-
-    # ---- 出力日・部門行 (y=268mm) ----
-    info_y = 268 * mm
-    today = datetime.now()
-    date_str = f"出力日: {today.year}年{today.month}月{today.day}日"
-
-    c.setFont("MSGothic", 9)
-    # 左：部門
-    team_disp = f"{team_name}班" if team_name and not team_name.endswith("班") else (team_name or "全班")
-    if is_group_selected:
-        # グループ選択時: 事業部 / 係 / 班 / グループ の4行表示
-        dept_lines = [
-            f"実施部門: {division_name}",
-            f"　　　　　{section_name}" if section_name else None,
-            f"　　　　　{team_disp}",
-            f"　　　　　{group_name}",
-        ]
-        dept_lines = [l for l in dept_lines if l is not None]
-        for i, line in enumerate(dept_lines):
-            c.drawString(MARGIN_L, info_y - i * 4.5 * mm, line)
-    else:
-        # グループ未選択時: 事業部 / 班 の2行表示（従来通り）
-        c.drawString(MARGIN_L, info_y, f"実施部門: {division_name}")
-        c.drawString(MARGIN_L, info_y - 5 * mm, f"　　　　　{team_disp}")
-    # 右：出力日
-    c.drawRightString(PAGE_W - MARGIN_R, info_y, date_str)
-
-    # ---- 承認押印欄 (y=245mm 基準、ボックス上端) ----
-    # 4ボックス: 部長 / 課長 / 係長 / 班長
-    stamp_labels = ["部長", "課長", "係長", "班長"]
-    box_w = 22 * mm
-    box_h = 18 * mm
-    label_h = 5 * mm
-    box_gap = 1 * mm
-    total_stamp_w = len(stamp_labels) * box_w + (len(stamp_labels) - 1) * box_gap
-    stamp_x_start = PAGE_W - MARGIN_R - total_stamp_w
-    stamp_top_y = 262 * mm  # ボックス上端
-
-    c.setFont("MSGothic", 8)
-    for i, label in enumerate(stamp_labels):
-        bx = stamp_x_start + i * (box_w + box_gap)
-        by = stamp_top_y - box_h  # ボックス左下 y 座標
-        # 枠線
-        c.setStrokeColor(COLOR_BORDER)
-        c.setLineWidth(0.5)
-        c.rect(bx, by, box_w, box_h)
-        # ラベル（ボックス下）
-        label_y = by - label_h + 1 * mm
-        c.drawCentredString(bx + box_w / 2, label_y, label)
-
-    # ---- メインテーブル ----
-    table_top_y = 238 * mm  # テーブル上端
-    header_h = 8 * mm
-    row_h = 7 * mm
 
     # 列幅計算
     col_headers = [d[0] for d in _COL_DEFS]
@@ -272,41 +221,14 @@ def generate_overtime_pdf(applications, filters=None):
         (w * mm if w is not None else remaining_w) for w in col_widths_mm
     ]
 
-    def draw_row_bg(row_idx, y_top, height, is_header=False):
-        """行の背景色を描画する。"""
-        if is_header:
-            c.setFillColor(COLOR_HEADER_BG)
-        elif row_idx % 2 == 1:
-            c.setFillColor(COLOR_ALT_ROW)
-        else:
-            c.setFillColor(colors.white)
-        c.rect(MARGIN_L, y_top - height, content_w, height, fill=1, stroke=0)
-
-    def draw_cell_text(text, x, y_top, w, height, font="MSGothic", size=8, align="left"):
-        """セル内テキストを描画する（中央揃え縦位置）。"""
-        text_y = y_top - height / 2 - size / 2 * 0.8
-        c.setFont(font, size)
-        c.setFillColor(colors.black)
-        padding = 2
-        if align == "center":
-            c.drawCentredString(x + w / 2, text_y, text)
-        elif align == "right":
-            c.drawRightString(x + w - padding, text_y, text)
-        else:
-            # はみ出す場合はトリミング（理由列以外）
-            avail_w = w - padding * 2
-            while text and c.stringWidth(text, font, size) > avail_w:
-                text = text[:-1]
-            c.drawString(x + padding, text_y, text)
-
     FONT_SIZE_DATA = 7
-    LINE_H_PT = FONT_SIZE_DATA * 1.35  # 行間（ポイント）
-    REASON_COL_IDX = 6  # 理由列のインデックス
+    LINE_H_PT = FONT_SIZE_DATA * 1.35
+    REASON_COL_IDX = 6
     reason_col_w = col_widths_pt[REASON_COL_IDX]
-    REASON_PAD = 3  # 理由列 左右パディング（ポイント）
+    REASON_PAD = 3
 
     def wrap_reason(text):
-        """理由テキストを列幅に合わせた行リストに分割する（stringWidth使用）。"""
+        """理由テキストを列幅に合わせた行リストに分割する。"""
         if not text:
             return [""]
         avail = reason_col_w - REASON_PAD * 2
@@ -324,46 +246,134 @@ def generate_overtime_pdf(applications, filters=None):
             lines.append(current)
         return lines if lines else [""]
 
-    # 1st pass: 各行高さを確定
-    pre_data = []  # [(app_or_None, reason_lines, row_height)]
-    for row_idx in range(MAX_ROWS):
-        if row_idx < len(applications):
-            app = applications[row_idx]
-            reason = getattr(app, "reason", "") or ""
-            rlines = wrap_reason(reason)
-            rh = max(row_h, len(rlines) * LINE_H_PT + 4)
+    # 各申請の理由折返し・行高さを事前計算
+    app_rows = []  # [(app, reason_lines, row_height), ...]
+    for app in applications:
+        reason = getattr(app, "reason", "") or ""
+        rlines = wrap_reason(reason)
+        rh = max(ROW_H, len(rlines) * LINE_H_PT + 4)
+        app_rows.append((app, rlines, rh))
+
+    # ---- ページ分割 ----
+    # ヘッダ部（タイトル〜押印欄〜テーブルヘッダ前）の高さ
+    page_header_top = 275 * mm  # タイトル上端
+    table_top_y = 238 * mm     # テーブル上端
+
+    # 1ページ目: テーブル上端からフッター注記の上までが使える領域
+    first_page_avail = table_top_y - HEADER_H - MARGIN_B - FOOTER_H - TOTAL_ROW_H
+    # 2ページ目以降: ページ上端余白からフッター注記の上まで
+    cont_table_top = PAGE_H - MARGIN_T
+    cont_page_avail = cont_table_top - HEADER_H - MARGIN_B - FOOTER_H - TOTAL_ROW_H
+
+    # ページごとの行割り振り
+    pages = []  # [[(app, rlines, rh), ...], ...]
+    current_page = []
+    used_h = 0
+    avail = first_page_avail
+
+    for item in app_rows:
+        _, _, rh = item
+        if current_page and used_h + rh > avail:
+            # 現在ページに収まらない → ページ確定、次ページへ
+            pages.append(current_page)
+            current_page = [item]
+            used_h = rh
+            avail = cont_page_avail
         else:
-            app = None
-            rlines = [""]
-            rh = row_h
-        pre_data.append((app, rlines, rh))
+            current_page.append(item)
+            used_h += rh
 
-    # 累積y座標: row_top_y[i] = i行目の上端
-    def get_row_top(row_idx):
-        return table_top_y - header_h - sum(d[2] for d in pre_data[:row_idx])
+    if current_page:
+        pages.append(current_page)
+    if not pages:
+        pages = [[]]
 
-    def draw_grid_lines_variable():
-        """可変行高さ対応のテーブル罫線を描画する。"""
-        c.setStrokeColor(COLOR_BORDER)
-        c.setLineWidth(0.4)
-        total_data_h = sum(d[2] for d in pre_data)
-        total_h = header_h + total_data_h + row_h  # +row_h for total row
-        # 外枠
-        c.rect(MARGIN_L, table_top_y - total_h, content_w, total_h, fill=0, stroke=1)
-        # ヘッダ下線
-        c.line(MARGIN_L, table_top_y - header_h, MARGIN_L + content_w, table_top_y - header_h)
-        # データ行区切り線
-        for r in range(1, MAX_ROWS + 1):
-            ly = get_row_top(r)
-            c.line(MARGIN_L, ly, MARGIN_L + content_w, ly)
-        # 合計行下線
-        total_row_top = get_row_top(MAX_ROWS)
-        c.line(MARGIN_L, total_row_top - row_h, MARGIN_L + content_w, total_row_top - row_h)
-        # 列区切り線
+    total_pages = len(pages)
+    total_hours = 0.0
+    row_no = 0  # 通し番号
+
+    # ---- 描画ヘルパー ----
+    def draw_page_header(page_idx):
+        """ページヘッダ（タイトル・部門・押印欄）を描画する。"""
+        if page_idx == 0:
+            # 1ページ目: フルヘッダ
+            c.setFont("MSGothic-Bold", 16)
+            c.drawCentredString(PAGE_W / 2, 275 * mm, title_text)
+
+            info_y = 268 * mm
+            today = datetime.now()
+            date_str = f"出力日: {today.year}年{today.month}月{today.day}日"
+
+            c.setFont("MSGothic", 9)
+            team_disp = f"{team_name}班" if team_name and not team_name.endswith("班") else (team_name or "全班")
+            if is_group_selected:
+                dept_lines = [
+                    f"実施部門: {division_name}",
+                    f"　　　　　{section_name}" if section_name else None,
+                    f"　　　　　{team_disp}",
+                    f"　　　　　{group_name}",
+                ]
+                dept_lines = [l for l in dept_lines if l is not None]
+                for i, line in enumerate(dept_lines):
+                    c.drawString(MARGIN_L, info_y - i * 4.5 * mm, line)
+            else:
+                c.drawString(MARGIN_L, info_y, f"実施部門: {division_name}")
+                c.drawString(MARGIN_L, info_y - 5 * mm, f"　　　　　{team_disp}")
+            c.drawRightString(PAGE_W - MARGIN_R, info_y, date_str)
+
+            # 押印欄
+            stamp_labels = ["部長", "課長", "係長", "班長"]
+            box_w = 22 * mm
+            box_h = 18 * mm
+            label_h = 5 * mm
+            box_gap = 1 * mm
+            total_stamp_w = len(stamp_labels) * box_w + (len(stamp_labels) - 1) * box_gap
+            stamp_x_start = PAGE_W - MARGIN_R - total_stamp_w
+            stamp_top_y = 262 * mm
+
+            c.setFont("MSGothic", 8)
+            for i, label in enumerate(stamp_labels):
+                bx = stamp_x_start + i * (box_w + box_gap)
+                by = stamp_top_y - box_h
+                c.setStrokeColor(COLOR_BORDER)
+                c.setLineWidth(0.5)
+                c.rect(bx, by, box_w, box_h)
+                label_y = by - label_h + 1 * mm
+                c.drawCentredString(bx + box_w / 2, label_y, label)
+
+            return table_top_y
+        else:
+            # 2ページ目以降: タイトルのみ簡易表示
+            c.setFont("MSGothic-Bold", 10)
+            c.drawCentredString(PAGE_W / 2, PAGE_H - MARGIN_T + 5 * mm,
+                                f"{title_text}（{page_idx + 1}/{total_pages}）")
+            return cont_table_top
+
+    def draw_table_header(tbl_top):
+        """テーブルヘッダ行を描画する。"""
+        c.setFillColor(COLOR_HEADER_BG)
+        c.rect(MARGIN_L, tbl_top - HEADER_H, content_w, HEADER_H, fill=1, stroke=0)
         cx = MARGIN_L
-        for cw_ in col_widths_pt[:-1]:
-            cx += cw_
-            c.line(cx, table_top_y, cx, table_top_y - total_h)
+        for i, (hdr, cw) in enumerate(zip(col_headers, col_widths_pt)):
+            draw_cell_text(hdr, cx, tbl_top, cw, HEADER_H,
+                           font="MSGothic-Bold", size=8, align="center")
+            cx += cw
+
+    def draw_cell_text(text, x, y_top, w, height, font="MSGothic", size=8, align="left"):
+        """セル内テキストを描画する。"""
+        text_y = y_top - height / 2 - size / 2 * 0.8
+        c.setFont(font, size)
+        c.setFillColor(colors.black)
+        padding = 2
+        if align == "center":
+            c.drawCentredString(x + w / 2, text_y, text)
+        elif align == "right":
+            c.drawRightString(x + w - padding, text_y, text)
+        else:
+            avail_w = w - padding * 2
+            while text and c.stringWidth(text, font, size) > avail_w:
+                text = text[:-1]
+            c.drawString(x + padding, text_y, text)
 
     def draw_reason_lines(rlines, x, y_top, height):
         """理由列の折り返し済み行リストを描画する。"""
@@ -376,24 +386,60 @@ def generate_overtime_pdf(applications, filters=None):
             ly = start_y - li * LINE_H_PT
             c.drawString(x + REASON_PAD, ly, line)
 
-    # ヘッダ行
-    draw_row_bg(-1, table_top_y, header_h, is_header=True)
-    cx = MARGIN_L
-    for i, (hdr, cw) in enumerate(zip(col_headers, col_widths_pt)):
-        draw_cell_text(hdr, cx, table_top_y, cw, header_h, font="MSGothic-Bold", size=8, align="center")
-        cx += cw
+    def draw_footer_notes(bottom_y):
+        """フッター注意書きを描画する。bottom_yはテーブル（合計行含む）の下端。"""
+        c.setFont("MSGothic", 7)
+        c.setFillColor(colors.black)
+        note_y = bottom_y - 4 * mm
+        for note in _FOOTER_NOTES:
+            c.drawString(MARGIN_L, note_y, note)
+            note_y -= 4 * mm
 
-    # データ行（2nd pass: 描画）
-    total_hours = 0.0
+    def draw_grid(tbl_top, page_rows, total_row_top):
+        """テーブル罫線を描画する。"""
+        c.setStrokeColor(COLOR_BORDER)
+        c.setLineWidth(0.4)
+        total_bottom = total_row_top - TOTAL_ROW_H
+        total_h = tbl_top - total_bottom
+        # 外枠
+        c.rect(MARGIN_L, total_bottom, content_w, total_h, fill=0, stroke=1)
+        # ヘッダ下線
+        c.line(MARGIN_L, tbl_top - HEADER_H, MARGIN_L + content_w, tbl_top - HEADER_H)
+        # データ行区切り線
+        cur_y = tbl_top - HEADER_H
+        for _, _, rh in page_rows:
+            cur_y -= rh
+            c.line(MARGIN_L, cur_y, MARGIN_L + content_w, cur_y)
+        # 列区切り線
+        cx = MARGIN_L
+        for cw_ in col_widths_pt[:-1]:
+            cx += cw_
+            c.line(cx, tbl_top, cx, total_bottom)
 
-    for row_idx, (app, rlines, rh) in enumerate(pre_data):
-        row_top = get_row_top(row_idx)
-        draw_row_bg(row_idx, row_top, rh)
+    # ---- 各ページ描画 ----
+    for page_idx, page_rows in enumerate(pages):
+        if page_idx > 0:
+            c.showPage()
 
-        if app is not None:
+        tbl_top = draw_page_header(page_idx)
+        draw_table_header(tbl_top)
+
+        # データ行描画
+        cur_y = tbl_top - HEADER_H
+        for app, rlines, rh in page_rows:
+            row_top = cur_y
+            row_no += 1
+
+            # 背景色
+            if row_no % 2 == 0:
+                c.setFillColor(COLOR_ALT_ROW)
+            else:
+                c.setFillColor(colors.white)
+            c.rect(MARGIN_L, row_top - rh, content_w, rh, fill=1, stroke=0)
+
             # 申請者氏名
             applicant = getattr(app, "applicant", None)
-            name = f"{applicant.last_name}{applicant.first_name}".strip() if applicant else ""
+            name = f"{applicant.last_name}　{applicant.first_name}".strip() if applicant else ""
 
             # 実施日
             work_date = getattr(app, "work_date", None)
@@ -420,9 +466,9 @@ def generate_overtime_pdf(applications, filters=None):
             sig_field = getattr(app, "signature", None)
             sig_path = sig_field.path if sig_field and sig_field.name else None
 
-            # 理由以外のセル描画
+            # セル描画
             cells = [
-                (str(row_idx + 1), "center"),
+                (str(row_no), "center"),
                 (name, "left"),
                 (date_disp, "center"),
                 (work_time_str, "center"),
@@ -431,92 +477,57 @@ def generate_overtime_pdf(applications, filters=None):
                 None,  # 理由は別途描画
                 ("", "center"),  # サイン
             ]
-        else:
-            sig_path = None
-            cells = [("", "left")] * len(col_widths_pt)
-            cells[REASON_COL_IDX] = None
 
-        cx = MARGIN_L
-        for col_i, cell in enumerate(cells):
-            cw_ = col_widths_pt[col_i]
-            if cell is not None:
-                draw_cell_text(cell[0], cx, row_top, cw_, rh, size=FONT_SIZE_DATA, align=cell[1])
-            else:
-                # 理由列: 折り返し描画
-                draw_reason_lines(rlines, cx, row_top, rh)
-            cx += cw_
+            cx = MARGIN_L
+            for col_i, cell in enumerate(cells):
+                cw_ = col_widths_pt[col_i]
+                if cell is not None:
+                    draw_cell_text(cell[0], cx, row_top, cw_, rh,
+                                   size=FONT_SIZE_DATA, align=cell[1])
+                else:
+                    draw_reason_lines(rlines, cx, row_top, rh)
+                cx += cw_
 
-        # サイン画像の描画（最後の列）
-        if sig_path:
-            try:
-                sign_col_w = col_widths_pt[-1]
-                sign_x = MARGIN_L + sum(col_widths_pt[:-1])
-                pad = 1 * mm
-                img_w = sign_col_w - pad * 2
-                img_h = rh - pad * 2
-                c.drawImage(
-                    sig_path, sign_x + pad, row_top - rh + pad,
-                    width=img_w, height=img_h,
-                    preserveAspectRatio=True, anchor='c',
-                    mask='auto',
-                )
-            except Exception:
-                pass
+            # サイン画像
+            if sig_path:
+                try:
+                    sign_col_w = col_widths_pt[-1]
+                    sign_x = MARGIN_L + sum(col_widths_pt[:-1])
+                    pad = 1 * mm
+                    img_w = sign_col_w - pad * 2
+                    img_h = rh - pad * 2
+                    c.drawImage(
+                        sig_path, sign_x + pad, row_top - rh + pad,
+                        width=img_w, height=img_h,
+                        preserveAspectRatio=True, anchor='c',
+                        mask='auto',
+                    )
+                except Exception:
+                    pass
 
-    # 合計行
-    total_row_top = get_row_top(MAX_ROWS)
-    c.setFillColor(COLOR_HEADER_BG)
-    c.rect(MARGIN_L, total_row_top - row_h, content_w, row_h, fill=1, stroke=0)
-    n = len(applications)
-    c.setFont("MSGothic-Bold", 8)
-    c.setFillColor(colors.black)
-    c.drawString(MARGIN_L + 2, total_row_top - row_h / 2 - 3, f"合計 {n}件")
-    hours_col_x = MARGIN_L + sum(col_widths_pt[:5])
-    c.drawCentredString(
-        hours_col_x + col_widths_pt[5] / 2,
-        total_row_top - row_h / 2 - 3,
-        _fmt_hours(total_hours),
-    )
+            cur_y -= rh
 
-    # テーブル罫線（可変行高さ対応）
-    draw_grid_lines_variable()
+        # 合計行
+        total_row_top = cur_y
+        c.setFillColor(COLOR_HEADER_BG)
+        c.rect(MARGIN_L, total_row_top - TOTAL_ROW_H, content_w, TOTAL_ROW_H, fill=1, stroke=0)
+        n = len(applications)
+        c.setFont("MSGothic-Bold", 8)
+        c.setFillColor(colors.black)
+        c.drawString(MARGIN_L + 2, total_row_top - TOTAL_ROW_H / 2 - 3, f"合計 {n}件")
+        hours_col_x = MARGIN_L + sum(col_widths_pt[:5])
+        c.drawCentredString(
+            hours_col_x + col_widths_pt[5] / 2,
+            total_row_top - TOTAL_ROW_H / 2 - 3,
+            _fmt_hours(total_hours),
+        )
 
-    # ---- フッター注意書き ----
-    footer_notes = [
-        "①　深夜残業区分に入った場合は残業時間数と深夜残業時間数を分けて記入すること",
-        "②　申請書提出期限：残業実施日の午後4:00まで、休日出勤申請は前日の午後5:00まで",
-        "③　申請なしで実施した場合は事故が発生しても会社として責任を持たず、残業と認めない",
-        "④　申請時間より早く終了した場合はタイムカードの打刻を優先、遅くなった場合は翌日再申請",
-        "⑤　夜勤者については事後処理も可の場合がある",
-    ]
-    c.setFont("MSGothic", 7)
-    c.setFillColor(colors.black)
-    note_start_y = 18 * mm + (len(footer_notes) - 1) * 4 * mm
-    for i, note in enumerate(footer_notes):
-        note_y = note_start_y - i * 4 * mm
-        c.drawString(MARGIN_L, note_y, note)
+        # 罫線
+        draw_grid(tbl_top, page_rows, total_row_top)
+
+        # フッター注意書き
+        draw_footer_notes(total_row_top - TOTAL_ROW_H)
 
     c.save()
     buf.seek(0)
     return buf
-
-
-def _draw_row_cells(c, cells_with_widths, row_top, row_h):
-    """cells_with_widths: [(text, align, width_pt), ...]"""
-    cx = MARGIN_L
-    for text, align, cw in cells_with_widths:
-        size = 7
-        text_y = row_top - row_h / 2 - size / 2 * 0.8
-        c.setFont("MSGothic", size)
-        c.setFillColor(colors.black)
-        padding = 2
-        if align == "center":
-            c.drawCentredString(cx + cw / 2, text_y, text)
-        elif align == "right":
-            c.drawRightString(cx + cw - padding, text_y, text)
-        else:
-            max_chars = int(cw / (size * 0.6)) - 1
-            if len(text) > max_chars and max_chars > 0:
-                text = text[:max_chars] + "…"
-            c.drawString(cx + padding, text_y, text)
-        cx += cw

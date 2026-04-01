@@ -1053,7 +1053,7 @@ const applySourcingSideEffects = () => {
     itemForm.value.line = ''
     itemForm.value.time_unit = 'DAY'
     itemForm.value.duration_min = null
-    if (!itemForm.value.lead_time_days || itemForm.value.lead_time_days === 0) {
+    if (itemForm.value.lead_time_days === null || itemForm.value.lead_time_days === undefined || itemForm.value.lead_time_days === '') {
       itemForm.value.lead_time_days = 1
     }
   }
@@ -1372,8 +1372,8 @@ const generateRoutingFromBom = async () => {
       payload.final_duration_min = routingGenForm.value.final_duration_min
       payload.final_lead_time_days = 0
     } else {
-      if (!routingGenForm.value.final_lead_time_days || routingGenForm.value.final_lead_time_days <= 0) {
-        alert('最終工程のリードタイム(日)を1以上で入力してください')
+      if (routingGenForm.value.final_lead_time_days === null || routingGenForm.value.final_lead_time_days === undefined || routingGenForm.value.final_lead_time_days < 0) {
+        alert('最終工程のリードタイム(日)を0以上で入力してください')
         return
       }
       payload.final_lead_time_days = routingGenForm.value.final_lead_time_days
@@ -1689,8 +1689,8 @@ const saveBOMItem = async () => {
       alert('購買の場合、仕入先は必須です')
       return
     }
-    if (!itemForm.value.lead_time_days || itemForm.value.lead_time_days <= 0) {
-      alert('購買の場合、リードタイム(日)を1以上で入力してください')
+    if (itemForm.value.lead_time_days === null || itemForm.value.lead_time_days === undefined || itemForm.value.lead_time_days < 0) {
+      alert('購買の場合、リードタイム(日)を0以上で入力してください')
       return
     }
   }
