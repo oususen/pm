@@ -465,12 +465,18 @@ const loadCalendarDays = async () => {
     return
   }
   const { start, end } = monthRange.value
+  const res = await fetchCalendarDaysByRange(ymd(start), ymd(end))
+  calendarDays.value = res
+}
+
+const fetchCalendarDaysByRange = async (startDate, endDate) => {
+  if (!selectedCalendar.value) return []
   const res = await api.calendars.getCalendarDays(selectedCalendar.value, {
     page_size: 500,
-    target_date__gte: ymd(start),
-    target_date__lte: ymd(end),
+    target_date__gte: startDate,
+    target_date__lte: endDate,
   })
-  calendarDays.value = res.data.results || res.data || []
+  return res.data.results || res.data || []
 }
 
 const loadDaisoCalendarDays = async () => {
@@ -602,20 +608,28 @@ const applyRange = async () => {
     const start = new Date(range.value.start)
     const end = new Date(range.value.end)
     const existing = new Map()
-    calendarDays.value.forEach((d) => existing.set(d.target_date, d))
+    const existingRows = await fetchCalendarDaysByRange(range.value.start, range.value.end)
+    existingRows.forEach((d) => existing.set(d.target_date, d))
 
     const ops = []
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       const key = ymd(d)
+      const current = existing.get(key) || null
+      const isExistingWorkingDay = current ? !!current.is_working_day : null
+      const nextIsWorkingDay = current ? isExistingWorkingDay : !!range.value.isWorkingDay
       const payload = {
         calendar: selectedCalendar.value,
         target_date: key,
-        is_working_day: !!range.value.isWorkingDay,
-        work_minutes: range.value.workMinutes,
-        work_pattern: range.value.workPattern || null,
+        is_working_day: nextIsWorkingDay,
+        work_minutes: nextIsWorkingDay
+          ? range.value.workMinutes
+          : (current?.work_minutes ?? 0),
+        work_pattern: nextIsWorkingDay
+          ? (range.value.workPattern || null)
+          : (current?.work_pattern || null),
       }
-      if (existing.has(key)) {
-        ops.push(api.calendars.updateCalendarDay(existing.get(key).id, payload))
+      if (current?.id) {
+        ops.push(api.calendars.updateCalendarDay(current.id, payload))
       } else {
         ops.push(api.calendars.createCalendarDay(payload))
       }

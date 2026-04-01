@@ -56,7 +56,7 @@ from .serializers import (
 from .services.order_expansion import OrderExpansionService
 from .services.gantt_planning import generate_line_gantt_plans
 from masters.models import Routing, RoutingStep, ProcessCycleTime, Line, Supplier, Process, Calendar, CalendarDay, BOM, BOMItem, Product
-from masters.services.routing_service import build_effective_routing_q, normalize_routing_reference_datetime, resolve_effective_routing
+from masters.services.routing_service import build_effective_routing_q, build_effective_routing_range_q, normalize_routing_reference_datetime, resolve_effective_routing
 from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR, get_business_today, add_working_days
 from django.contrib.auth import get_user_model
 from django.db.models import Q
@@ -1018,6 +1018,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         start_dt = _parse_optional_date(start_date)
         end_dt = _parse_optional_date(end_date)
+        routing_candidate_q = build_effective_routing_range_q(start_dt, end_dt, prefix='routing__')
 
         # このラインで生産される全製品を特定（中間品、単品完成品、ライン最終品、工程最終品を含む）
         target_products = set()
@@ -1031,7 +1032,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         steps_on_line = RoutingStep.objects.filter(
             Q(line_id=line_id) | Q(line__isnull=True, process__line_id=line_id)
         ).filter(
-            build_effective_routing_q(start_dt, prefix='routing__')
+            routing_candidate_q
         ).select_related('output_product', 'routing__product', 'process')
 
         steps_on_line_count = 0
@@ -1090,6 +1091,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         if not target_products:
             return Response([])
         source_end_dt = (end_dt + timedelta(days=max_source_lt_days + 7)) if end_dt else None
+        routing_source_q = build_effective_routing_range_q(
+            start_dt,
+            source_end_dt or end_dt,
+            prefix='routing__',
+        )
 
         # 需要を計算：(product_id, plan_date) -> order_qty
         demand_map = defaultdict(Decimal)
@@ -1371,7 +1377,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             all_downstream_steps = list(RoutingStep.objects.filter(
                 output_product_id__in=parent_product_ids
             ).filter(
-                build_effective_routing_q(start_dt, prefix='routing__')
+                routing_source_q
             ).select_related('routing', 'routing__product', 'line'))
             logger.info("pickup: downstream_steps=%s", len(all_downstream_steps))
             for d_step in all_downstream_steps:
@@ -1907,7 +1913,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             steps_qs = RoutingStep.objects.filter(
                 output_product_id__in=parent_ids
             ).filter(
-                build_effective_routing_q(start_dt, prefix='routing__')
+                routing_source_q
             ).select_related('routing', 'routing__product')
             for step in steps_qs:
                 if step.routing and step.routing.product:
