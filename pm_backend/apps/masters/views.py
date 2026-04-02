@@ -48,6 +48,19 @@ def build_media_absolute_url(request, raw_url):
     return f"{media_url}/{path}"
 
 
+def get_overlapping_default_routings(routing):
+    """有効期間が重複する他の既定ルーティングを返す。"""
+    qs = Routing.objects.filter(
+        product_id=routing.product_id,
+        is_default=True,
+    ).exclude(id=routing.id)
+    if routing.valid_from_datetime:
+        qs = qs.exclude(valid_to_datetime__lt=routing.valid_from_datetime)
+    if routing.valid_to_datetime:
+        qs = qs.exclude(valid_from_datetime__gt=routing.valid_to_datetime)
+    return qs
+
+
 class ProductFilter(django_filters.FilterSet):
     created_from = django_filters.DateFilter(field_name='created_at', lookup_expr='gte')
     created_to = django_filters.DateFilter(field_name='created_at', lookup_expr='lte')
@@ -1016,7 +1029,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             valid_from_datetime=valid_from_datetime,
         )
         if set_default:
-            Routing.objects.filter(product=bom.parent_product).exclude(id=routing.id).update(is_default=False)
+            get_overlapping_default_routings(routing).update(is_default=False)
         created_steps = []
         max_depth = max((depth for depth, _, _, _ in routing_items_info), default=0)
         for idx, (depth, path, item, parent_product) in enumerate(routing_items_info, start=1):
@@ -1242,6 +1255,10 @@ class RoutingViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                     {'detail': f'新しい開始日は既存ルーティング(ID:{ex.id})の終了日 {ex.valid_to_datetime:%Y-%m-%d %H:%M} より後に設定してください。'}
                 )
 
+    def _get_overlapping_defaults(self, routing):
+        """有効期間が重複する他の既定ルーティングを返す"""
+        return get_overlapping_default_routings(routing)
+
     def perform_create(self, serializer):
         data = serializer.validated_data
         self._validate_routing_code_overlap(
@@ -1249,7 +1266,7 @@ class RoutingViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         )
         routing = serializer.save()
         if routing.is_default:
-            Routing.objects.filter(product_id=routing.product_id).exclude(id=routing.id).update(is_default=False)
+            self._get_overlapping_defaults(routing).update(is_default=False)
 
     def perform_update(self, serializer):
         data = serializer.validated_data
@@ -1261,7 +1278,7 @@ class RoutingViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         )
         routing = serializer.save()
         if routing.is_default:
-            Routing.objects.filter(product_id=routing.product_id).exclude(id=routing.id).update(is_default=False)
+            self._get_overlapping_defaults(routing).update(is_default=False)
 
 
 class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):

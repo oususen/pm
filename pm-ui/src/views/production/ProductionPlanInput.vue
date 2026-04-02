@@ -327,11 +327,19 @@
           </div>
           <button
             class="btn gantt-save-btn"
-            :class="{ 'gantt-save-dirty': ganttDirty }"
-            @click="saveGanttSchedule"
-            :disabled="!selectedLine"
+            :class="{ 'gantt-save-dirty': ganttEditDirty }"
+            @click="saveGanttEditChanges"
+            :disabled="!selectedLine || !ganttEditDirty"
           >
-            工程ガント保存
+            時間数量保存
+          </button>
+          <button
+            class="btn gantt-save-btn"
+            :class="{ 'gantt-save-dirty': ganttStructureDirty }"
+            @click="saveGanttStructureChanges"
+            :disabled="!selectedLine || !ganttStructureDirty"
+          >
+            追加削除保存
           </button>
         </div>
       </div>
@@ -345,6 +353,9 @@
         :preset-end-date="endDate"
         :show-add-anchors="showGanttAddAnchors"
         @dirty-change="onGanttDirtyChange"
+        @mode-change="onGanttModeChange"
+        @edit-dirty-change="onGanttEditDirtyChange"
+        @structure-dirty-change="onGanttStructureDirtyChange"
       />
     </div>
 
@@ -391,6 +402,45 @@
       <button class="btn-secondary" @click="doPickup" :disabled="processing || !selectedLine">F8: 取込＋在庫計算</button>
       <button class="btn-secondary" @click="resetRows" :disabled="processing">F5: キャンセル</button>
       <button class="btn-secondary" @click="openExportDialog" :disabled="processing || !filteredRows.length">F10: 印刷</button>
+      <div v-if="showProcessGantt" class="footer-gantt-controls">
+        <span class="footer-gantt-label">表示モード</span>
+        <button
+          type="button"
+          class="btn-secondary footer-mode-btn"
+          :class="{ active: !ganttMergeConsecutive }"
+          @click="setGanttMergeMode(false)"
+        >
+          分解
+        </button>
+        <button
+          type="button"
+          class="btn-secondary footer-mode-btn"
+          :class="{ active: ganttMergeConsecutive }"
+          @click="setGanttMergeMode(true)"
+        >
+          連結
+        </button>
+        <label class="footer-gantt-toggle">
+          <input type="checkbox" v-model="showGanttAddAnchors" />
+          ＋表示
+        </label>
+        <button
+          class="btn-secondary footer-gantt-save-btn"
+          :class="{ 'gantt-save-dirty': ganttEditDirty }"
+          @click="saveGanttEditChanges"
+          :disabled="!selectedLine || !ganttEditDirty"
+        >
+          時間数量保存
+        </button>
+        <button
+          class="btn-secondary footer-gantt-save-btn"
+          :class="{ 'gantt-save-dirty': ganttStructureDirty }"
+          @click="saveGanttStructureChanges"
+          :disabled="!selectedLine || !ganttStructureDirty"
+        >
+          追加削除保存
+        </button>
+      </div>
     </div>
     <div v-if="showChangeReasonDialog" class="modal-overlay" @click.self="closeChangeReasonDialog">
       <div class="modal-content">
@@ -623,6 +673,9 @@ const showGanttAddAnchors = ref(false)
 const ganttReloadKey = ref(0)
 const ganttRef = ref(null)
 const ganttDirty = ref(false)
+const ganttEditDirty = ref(false)
+const ganttStructureDirty = ref(false)
+const ganttMergeConsecutive = ref(false)
 const finalProcessStartTime = ref('08:00')
 const adjustToBreakEnd = ref(true)
 let lotTempId = 1
@@ -1805,9 +1858,15 @@ const toggleProcessGantt = async () => {
   showProcessGantt.value = !showProcessGantt.value
   if (showProcessGantt.value) {
     ganttDirty.value = false
+    ganttEditDirty.value = false
+    ganttStructureDirty.value = false
+    ganttMergeConsecutive.value = false
     ganttReloadKey.value += 1
   } else {
     ganttDirty.value = false
+    ganttEditDirty.value = false
+    ganttStructureDirty.value = false
+    ganttMergeConsecutive.value = false
   }
 }
 
@@ -1815,17 +1874,50 @@ const onGanttDirtyChange = (isDirty) => {
   ganttDirty.value = !!isDirty
 }
 
-const saveGanttSchedule = async () => {
+const onGanttModeChange = (isMerged) => {
+  ganttMergeConsecutive.value = !!isMerged
+}
+
+const onGanttEditDirtyChange = (isDirty) => {
+  ganttEditDirty.value = !!isDirty
+}
+
+const onGanttStructureDirtyChange = (isDirty) => {
+  ganttStructureDirty.value = !!isDirty
+}
+
+const setGanttMergeMode = (isMerged) => {
+  ganttMergeConsecutive.value = !!isMerged
+  const gantt = ganttRef.value
+  if (gantt && typeof gantt.setMergeConsecutive === 'function') {
+    gantt.setMergeConsecutive(isMerged)
+  }
+}
+
+const saveGanttEditChanges = async () => {
   if (!showProcessGantt.value) {
     alert('工程ガントを表示してください。')
     return
   }
   const gantt = ganttRef.value
-  if (!gantt || typeof gantt.saveSchedule !== 'function') {
+  if (!gantt || typeof gantt.saveEditChanges !== 'function') {
     alert('工程ガントが未読込です。')
     return
   }
-  await gantt.saveSchedule()
+  await gantt.saveEditChanges()
+}
+
+const saveGanttStructureChanges = async () => {
+  if (!showProcessGantt.value) {
+    alert('工程ガントを表示してください。')
+    return
+  }
+  const gantt = ganttRef.value
+  if (!gantt || typeof gantt.saveStructureChanges !== 'function') {
+    alert('工程ガントが未読込です。')
+    return
+  }
+  await gantt.saveStructureChanges()
 }
 
 
@@ -3336,6 +3428,8 @@ thead .sticky-col {
   display: flex;
   gap: 8px;
   margin-top: 6px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 .btn,
 .btn-secondary {
@@ -3348,6 +3442,32 @@ thead .sticky-col {
 .btn:hover,
 .btn-secondary:hover {
   background: #f3f4f6;
+}
+.footer-gantt-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.footer-gantt-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #374151;
+}
+.footer-mode-btn.active {
+  background: #2563eb;
+  color: #fff;
+  border-color: #1d4ed8;
+}
+.footer-gantt-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #111827;
+}
+.footer-gantt-save-btn {
+  font-weight: 700;
 }
 .btn.primary {
   background: #4a7ae5;
@@ -3458,7 +3578,15 @@ thead .sticky-col {
   color: #fff;
   border-color: #b91c1c;
 }
+.footer-gantt-save-btn.gantt-save-dirty {
+  background: #dc2626;
+  color: #fff;
+  border-color: #b91c1c;
+}
 .gantt-save-btn.gantt-save-dirty:hover {
+  background: #b91c1c;
+}
+.footer-gantt-save-btn.gantt-save-dirty:hover {
   background: #b91c1c;
 }
 .process-status {

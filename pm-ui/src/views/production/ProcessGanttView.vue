@@ -23,8 +23,11 @@
         <button class="btn primary" @click="generateSchedule" :disabled="!selectedLine">
           実行
         </button>
-        <button class="btn" @click="saveSchedule" :disabled="mergeConsecutive || !processGanttData.length">
-          保存
+        <button class="btn" @click="saveEditChanges" :disabled="mergeConsecutive || !processGanttData.length || !hasEditChanges">
+          時間数量保存
+        </button>
+        <button class="btn" @click="saveStructureChanges" :disabled="mergeConsecutive || !processGanttData.length || !hasStructureChanges">
+          追加削除保存
         </button>
       </div>
     </div>
@@ -124,6 +127,7 @@
                   v-for="bar in item.displayBars || item.bars"
                   :key="bar.key"
                   class="gantt-bar-wrapper"
+                  :class="{ 'is-temporary': bar.isTemporary }"
                   :title="buildBarTooltip(bar, item, proc)"
                   :style="{
                     left: bar.leftPx + 'px',
@@ -135,7 +139,7 @@
                   :data-duration-ms="bar.durationMs"
                   :data-quantity="bar.planQty"
                   :data-quantity-edited="bar.quantityEdited ? '1' : ''"
-                  @mousedown="onBarMouseDown"
+                  @mousedown="onBarMouseDown($event, bar)"
                 >
                   <div
                     class="gantt-bar"
@@ -200,7 +204,7 @@ const props = defineProps({
   presetEndDate: { type: String, default: '' },
   showAddAnchors: { type: Boolean, default: true },
 })
-const emit = defineEmits(['dirty-change'])
+const emit = defineEmits(['dirty-change', 'mode-change', 'edit-dirty-change', 'structure-dirty-change'])
 const TANK_LINE_CODE = 'L2200'
 const L2201_LINE_CODE = 'L2201'
 const TANK_PRODUCT_ORDER = [
@@ -233,7 +237,10 @@ const timelineStart = ref(null)
 const timelineEnd = ref(null)
 const timelineSlots = ref([])
 const hasUnsavedChanges = ref(false)
+const hasEditChanges = ref(false)
+const hasStructureChanges = ref(false)
 const manualAddLoading = ref(false)
+const pendingDeletes = ref([])
 const debugEnabled = true
 const calendarDayMap = ref({})
 const workPatternMap = ref({})
@@ -253,11 +260,32 @@ const logDebug = (...args) => {
   if (debugEnabled) console.info('[ProcessGanttView]', ...args)
 }
 
-const setUnsavedChanges = (isDirty) => {
+const emitDirtyState = () => {
+  const nextOverall = hasEditChanges.value || hasStructureChanges.value
+  if (hasUnsavedChanges.value !== nextOverall) {
+    hasUnsavedChanges.value = nextOverall
+    emit('dirty-change', nextOverall)
+  }
+  emit('edit-dirty-change', hasEditChanges.value)
+  emit('structure-dirty-change', hasStructureChanges.value)
+}
+
+const setEditDirty = (isDirty) => {
   const next = !!isDirty
-  if (hasUnsavedChanges.value === next) return
-  hasUnsavedChanges.value = next
-  emit('dirty-change', next)
+  if (hasEditChanges.value === next) return
+  hasEditChanges.value = next
+  emitDirtyState()
+}
+
+const setStructureDirty = (isDirty) => {
+  const next = !!isDirty
+  if (hasStructureChanges.value === next) return
+  hasStructureChanges.value = next
+  emitDirtyState()
+}
+
+const setMergeConsecutive = (isMerged) => {
+  mergeConsecutive.value = !!isMerged
 }
 
 const displayDays = computed(() => {
@@ -407,6 +435,60 @@ const renderedProcessGantt = computed(() =>
     })),
   }))
 )
+
+const findBarEntry = (targetBar) => {
+  for (const proc of processGanttData.value) {
+    for (const item of proc.items || []) {
+      const index = (item.bars || []).findIndex((bar) => bar === targetBar || bar.key === targetBar?.key)
+      if (index >= 0) {
+        return { proc, item, index, bar: item.bars[index] }
+      }
+    }
+  }
+  return null
+}
+
+const getBarIdentityKey = (bar) => {
+  if (!bar) return ''
+  return [
+    bar.planId ?? bar.plan_id,
+    bar.processId ?? bar.process_id,
+    bar.outputProductId ?? bar.output_product_id ?? '',
+  ].join('::')
+}
+
+const countTemporaryBars = () => {
+  let count = 0
+  processGanttData.value.forEach((proc) => {
+    ;(proc.items || []).forEach((item) => {
+      ;(item.bars || []).forEach((bar) => {
+        if (bar?.isTemporary) count += 1
+      })
+    })
+  })
+  return count
+}
+
+const refreshStructureDirty = () => {
+  setStructureDirty(countTemporaryBars() > 0 || pendingDeletes.value.length > 0)
+}
+
+const ensureStructureCategoryAvailable = () => {
+  if (hasEditChanges.value) {
+    alert('時間・数量の未保存変更があります。先に時間数量保存を実行してください。')
+    return false
+  }
+  return true
+}
+
+const ensureEditCategoryAvailable = (bar = null) => {
+  if (bar?.isTemporary) return true
+  if (hasStructureChanges.value) {
+    alert('追加・削除の未保存変更があります。先に追加削除保存を実行してください。')
+    return false
+  }
+  return true
+}
 
 function getDayClass(dateStr) {
   const d = new Date(dateStr)
@@ -706,7 +788,9 @@ const ensureProcessCodes = async (plans) => {
 
 const loadData = async () => {
   if (!selectedLine.value) return
-  setUnsavedChanges(false)
+  pendingDeletes.value = []
+  setEditDirty(false)
+  setStructureDirty(false)
   processGanttData.value = []
 
   try {
@@ -738,7 +822,9 @@ const loadData = async () => {
 
 const generateSchedule = async (clearExisting = true) => {
   if (!selectedLine.value) return
-  setUnsavedChanges(false)
+  pendingDeletes.value = []
+  setEditDirty(false)
+  setStructureDirty(false)
   processGanttData.value = []
 
   try {
@@ -764,79 +850,111 @@ const generateSchedule = async (clearExisting = true) => {
   }
 }
 
-const saveSchedule = async () => {
+const buildEditUpdates = () => {
+  const updates = []
+  processGanttData.value.forEach((proc) => {
+    ;(proc.items || []).forEach((item) => {
+      ;(item.bars || []).forEach((bar) => {
+        if (!bar || bar.isTemporary) return
+        const payload = {
+          plan_id: bar.planId,
+          process_id: bar.processId,
+          start_time: toLocalISO(bar.startTime),
+          end_time: toLocalISO(bar.endTime),
+        }
+        if (Number.isFinite(Number(bar.outputProductId)) && Number(bar.outputProductId) > 0) {
+          payload.output_product_id = Number(bar.outputProductId)
+        }
+        if (bar.quantityEdited) {
+          payload.quantity = Math.round(Number(bar.planQty || 0) * 1000) / 1000
+        }
+        updates.push(payload)
+      })
+    })
+  })
+  return updates
+}
+
+const collectTemporaryCreates = () => {
+  const creates = []
+  processGanttData.value.forEach((proc) => {
+    ;(proc.items || []).forEach((item) => {
+      ;(item.bars || []).forEach((bar) => {
+        if (!bar?.isTemporary) return
+        creates.push({
+          line_id: Number(selectedLine.value),
+          process_id: Number(bar.processId),
+          output_product_id: Number(bar.outputProductId),
+          start_time: toLocalISO(bar.startTime),
+          end_time: toLocalISO(bar.endTime),
+          quantity: Math.round(Number(bar.planQty || 0) * 1000) / 1000,
+          process_number: Number(bar.processNumber || 0),
+        })
+      })
+    })
+  })
+  return creates
+}
+
+const saveEditChanges = async () => {
   if (mergeConsecutive.value) {
     alert('連結表示では保存できません。分解表示に切り替えてください。')
+    return
+  }
+  if (hasStructureChanges.value) {
+    alert('追加・削除の未保存変更があります。先に追加削除保存を実行してください。')
     return
   }
   if (!timelineStart.value) {
     alert('保存するスケジュールがありません')
     return
   }
-  const bars = document.querySelectorAll('.gantt-bar-wrapper')
-  if (!bars.length) {
+  const updates = buildEditUpdates()
+  if (!updates.length) {
     alert('保存するスケジュールがありません')
     return
   }
 
-  const updates = []
-  const msPerSlot = slotHours * 60 * 60 * 1000
-  const msPerPixel = msPerSlot / pixelsPerSlot
-  bars.forEach((bar) => {
-    const planId = bar.dataset.planId
-    const processId = Number(bar.dataset.processId)
-    const durationMs = Number(bar.dataset.durationMs)
-    if (!planId || !processId || !durationMs) return
-
-    const currentLeft = parseFloat(bar.style.left || '0')
-    const newStartMs = timelineStart.value.getTime() + (currentLeft * msPerPixel)
-
-    const roundMs = 1000 * 60 * 5
-    const roundedStartMs = Math.round(newStartMs / roundMs) * roundMs
-    const finalStart = new Date(roundedStartMs)
-    const finalEnd = new Date(roundedStartMs + durationMs)
-
-    const payload = {
-      plan_id: planId,
-      process_id: processId,
-      start_time: toLocalISO(finalStart),
-      end_time: toLocalISO(finalEnd),
-    }
-    const outputProductId = Number(bar.dataset.outputProductId)
-    if (Number.isFinite(outputProductId) && outputProductId > 0) {
-      payload.output_product_id = outputProductId
-    }
-    const quantityEdited = bar.dataset.quantityEdited === '1'
-    const quantityRaw = bar.dataset.quantity
-    const quantityValue = Number(quantityRaw)
-    if (
-      quantityEdited &&
-      quantityRaw !== undefined &&
-      quantityRaw !== null &&
-      quantityRaw !== '' &&
-      Number.isFinite(quantityValue) &&
-      quantityValue >= 0
-    ) {
-      payload.quantity = Math.round(quantityValue * 1000) / 1000
-    }
-
-    updates.push(payload)
-  })
-
-  if (!updates.length) {
-    alert('保存対象のデータがありません')
-    return
-  }
-
   try {
-    logDebug('saveSchedule', { updates: updates.length })
+    logDebug('saveEditChanges', { updates: updates.length })
     await api.lineGanttPlans.bulkUpdate(updates)
     clearQuantityEditedFlags()
-    setUnsavedChanges(false)
-    alert('保存しました')
+    setEditDirty(false)
+    alert('時間・数量変更を保存しました')
   } catch (e) {
     console.error('保存エラー', e)
     alert('保存に失敗しました')
+  }
+}
+
+const saveStructureChanges = async () => {
+  if (mergeConsecutive.value) {
+    alert('連結表示では保存できません。分解表示に切り替えてください。')
+    return
+  }
+  if (hasEditChanges.value) {
+    alert('時間・数量の未保存変更があります。先に時間数量保存を実行してください。')
+    return
+  }
+  const creates = collectTemporaryCreates()
+  const deletes = pendingDeletes.value.map((item) => ({ ...item }))
+  if (!creates.length && !deletes.length) {
+    alert('保存対象の追加・削除がありません')
+    return
+  }
+  try {
+    manualAddLoading.value = true
+    logDebug('saveStructureChanges', { creates: creates.length, deletes: deletes.length })
+    await api.lineGanttPlans.bulkStructureSave({ creates, deletes })
+    pendingDeletes.value = []
+    setStructureDirty(false)
+    await loadData()
+    alert('追加・削除を保存しました')
+  } catch (e) {
+    console.error('追加削除保存エラー', e)
+    alert('追加・削除の保存に失敗しました')
+  } finally {
+    manualAddLoading.value = false
   }
 }
 
@@ -847,14 +965,16 @@ const clearQuantityEditedFlags = () => {
       if (!item.bars) return
       item.bars.forEach((bar) => {
         bar.quantityEdited = false
+        bar.scheduleEdited = false
       })
     })
   })
 }
 
-defineExpose({ saveSchedule })
+defineExpose({ saveSchedule: saveEditChanges, saveEditChanges, saveStructureChanges, setMergeConsecutive })
 
 let draggedBar = null
+let draggedBarModel = null
 let dragStartX = 0
 let dragOriginalLeft = 0
 let isDragging = false
@@ -878,17 +998,36 @@ function getDragTooltip() {
   return tooltip
 }
 
-function onBarMouseDown(e) {
+function syncDraggedBarModelFromElement() {
+  if (!draggedBar || !draggedBarModel || !timelineStart.value) return
+  const currentLeft = parseFloat(draggedBar.style.left || '0')
+  const msPerSlot = slotHours * 60 * 60 * 1000
+  const msPerPixel = msPerSlot / pixelsPerSlot
+  const roundMs = 1000 * 60 * 5
+  const newStartMs = timelineStart.value.getTime() + (currentLeft * msPerPixel)
+  const roundedStartMs = Math.round(newStartMs / roundMs) * roundMs
+  draggedBarModel.startTime = new Date(roundedStartMs)
+  draggedBarModel.endTime = new Date(roundedStartMs + Number(draggedBarModel.durationMs || 0))
+  updateBarDisplay(draggedBarModel)
+}
+
+function onBarMouseDown(e, bar) {
   if (mergeConsecutive.value) {
     alert('連結表示中はバー編集できません。分解表示に切り替えてください。')
     return
   }
-  handleDragStart(e)
+  if (bar?.isTemporary) {
+    if (!ensureStructureCategoryAvailable()) return
+  } else if (!ensureEditCategoryAvailable(bar)) {
+    return
+  }
+  handleDragStart(e, bar)
 }
 
-function handleDragStart(e) {
+function handleDragStart(e, bar) {
   if (e.button !== 0) return
   draggedBar = e.currentTarget
+  draggedBarModel = bar || null
   dragStartX = e.clientX
   dragOriginalLeft = parseFloat(draggedBar.style.left || '0')
   isDragging = false
@@ -951,11 +1090,19 @@ function handleDragEnd() {
   tooltip.style.display = 'none'
 
   if (isDragging) {
-    setUnsavedChanges(true)
-    alert('位置を調整しました。保存ボタンで確定してください。')
+    syncDraggedBarModelFromElement()
+    if (draggedBarModel?.isTemporary) {
+      setStructureDirty(true)
+      alert('位置を調整しました。追加削除保存で確定してください。')
+    } else {
+      if (draggedBarModel) draggedBarModel.scheduleEdited = true
+      setEditDirty(true)
+      alert('位置を調整しました。時間数量保存で確定してください。')
+    }
   }
 
   draggedBar = null
+  draggedBarModel = null
   isDragging = false
 }
 
@@ -1091,7 +1238,9 @@ function buildBarTooltip(bar, item, proc) {
     detailLines.push(`時間: ${bar.startLabel} - ${bar.endLabel}`)
   }
   if (bar.durationLabel) detailLines.push(`所要分: ${bar.durationLabel}`)
+  if (bar.isTemporary) detailLines.push('状態: 追加未保存')
   if (bar.quantityEdited) detailLines.push('数量変更: 未保存')
+  if (bar.scheduleEdited) detailLines.push('時間変更: 未保存')
   return detailLines.join('\n')
 }
 
@@ -1213,6 +1362,11 @@ function openStartTimeEdit(bar) {
     alert('連結表示中は開始時刻を編集できません。分解表示に切り替えてください。')
     return
   }
+  if (bar.isTemporary) {
+    if (!ensureStructureCategoryAvailable()) return
+  } else if (!ensureEditCategoryAvailable(bar)) {
+    return
+  }
   const input = window.prompt('開始日時を入力してください (YYYY-MM-DD HH:mm)', formatDateTimeInput(bar.startTime))
   if (!input) return
   const parsed = parseDateTimeInput(input)
@@ -1225,14 +1379,25 @@ function openStartTimeEdit(bar) {
   bar.startTime = newStart
   bar.endTime = newEnd
   updateBarDisplay(bar)
-  setUnsavedChanges(true)
-  alert('開始時間を変更しました。保存ボタンで確定してください。')
+  if (bar.isTemporary) {
+    setStructureDirty(true)
+    alert('開始時間を変更しました。追加削除保存で確定してください。')
+  } else {
+    bar.scheduleEdited = true
+    setEditDirty(true)
+    alert('開始時間を変更しました。時間数量保存で確定してください。')
+  }
 }
 
 function openQuantityEdit(bar) {
   if (!bar) return
   if (mergeConsecutive.value) {
     alert('連結表示中は数量を編集できません。分解表示に切り替えてください。')
+    return
+  }
+  if (bar.isTemporary) {
+    if (!ensureStructureCategoryAvailable()) return
+  } else if (!ensureEditCategoryAvailable(bar)) {
     return
   }
   const input = window.prompt('数量を入力してください（0以上）', formatQuantity(bar.planQty))
@@ -1243,10 +1408,15 @@ function openQuantityEdit(bar) {
     return
   }
   bar.planQty = parsed
-  bar.quantityEdited = true
   updateBarDisplay(bar)
-  setUnsavedChanges(true)
-  alert('数量を変更しました。保存ボタンで確定してください。')
+  if (bar.isTemporary) {
+    setStructureDirty(true)
+    alert('数量を変更しました。追加削除保存で確定してください。')
+  } else {
+    bar.quantityEdited = true
+    setEditDirty(true)
+    alert('数量を変更しました。時間数量保存で確定してください。')
+  }
 }
 
 async function deleteBar(bar) {
@@ -1255,21 +1425,26 @@ async function deleteBar(bar) {
     alert('連結表示中は削除できません。分解表示に切り替えてください。')
     return
   }
-  if (hasUnsavedChanges.value) {
-    alert('未保存の変更があります。先に工程ガント保存を実行してください。')
+  if (!ensureStructureCategoryAvailable()) return
+  if (!confirm('このプロセスのバーを削除しますか？')) return
+  const entry = findBarEntry(bar)
+  if (!entry) {
+    alert('削除対象のバーが見つかりません。')
     return
   }
-  if (!confirm('このプロセスのバーを削除しますか？')) return
-  try {
-    await api.lineGanttPlans.deleteProcess({
-      plan_id: bar.planId,
-      process_id: bar.processId,
-      output_product_id: bar.outputProductId || null,
-    })
-    await loadData()
-  } catch (e) {
-    alert('削除に失敗しました: ' + (e?.response?.data?.detail || e.message || '不明なエラー'))
+  entry.item.bars.splice(entry.index, 1)
+  if (!bar.isTemporary) {
+    const deleteKey = getBarIdentityKey(bar)
+    if (!pendingDeletes.value.some((item) => getBarIdentityKey(item) === deleteKey)) {
+      pendingDeletes.value.push({
+        plan_id: bar.planId,
+        process_id: bar.processId,
+        output_product_id: bar.outputProductId || null,
+      })
+    }
   }
+  refreshStructureDirty()
+  alert('削除予定に追加しました。追加削除保存で確定してください。')
 }
 
 async function openManualAdd(proc, item, anchor) {
@@ -1278,10 +1453,7 @@ async function openManualAdd(proc, item, anchor) {
     alert('連結表示中は追加できません。分解表示に切り替えてください。')
     return
   }
-  if (hasUnsavedChanges.value) {
-    alert('未保存の変更があります。先に工程ガント保存を実行してください。')
-    return
-  }
+  if (!ensureStructureCategoryAvailable()) return
 
   const defaultStart = anchor?.startAt ? new Date(anchor.startAt) : new Date()
   const defaultEnd = new Date(defaultStart.getTime() + 120 * 60 * 1000)
@@ -1332,20 +1504,35 @@ async function openManualAdd(proc, item, anchor) {
 
   try {
     manualAddLoading.value = true
-    await api.lineGanttPlans.manualAdd({
-      line_id: Number(selectedLine.value),
-      process_id: Number(proc.process_id),
-      output_product_id: Number(item.product_id),
-      start_time: toLocalISO(startDt),
-      end_time: toLocalISO(endDt),
-      quantity: qty,
-      process_number: Number(proc.process_number || 0),
-    })
-    await loadData()
-    alert('追加しました')
-  } catch (e) {
-    console.error('工程ガント追加エラー', e)
-    alert('追加に失敗しました')
+    const tempKey = `TEMP_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const durationMs = endDt.getTime() - startDt.getTime()
+    const newBar = {
+      key: tempKey,
+      planId: tempKey,
+      processId: Number(proc.process_id),
+      processNumber: Number(proc.process_number || 0),
+      outputProductId: Number(item.product_id),
+      startTime: startDt,
+      endTime: endDt,
+      durationMs,
+      planQty: qty,
+      quantityEdited: false,
+      scheduleEdited: false,
+      totalMinutesRequired: Math.max(durationMs / 60000, 0),
+      color: getBarColor(item.product_id),
+      label: '',
+      startLabel: '',
+      endLabel: '',
+      durationLabel: '',
+      leftPx: 0,
+      widthPx: 0,
+      isTemporary: true,
+    }
+    item.bars.push(newBar)
+    item.bars.sort((a, b) => a.startTime - b.startTime)
+    updateBarDisplay(newBar)
+    setStructureDirty(true)
+    alert('追加予定に登録しました。追加削除保存で確定してください。')
   } finally {
     manualAddLoading.value = false
   }
@@ -1433,12 +1620,14 @@ function buildProcessGantt(plans) {
           key: barKey,
           planId: plan.plan_id,
           processId: proc.process_id,
+          processNumber: proc.process_number || 0,
           outputProductId: outputProductId,
           startTime,
           endTime,
           durationMs: endTime.getTime() - startTime.getTime(),
           planQty: qtyValue,
           quantityEdited: false,
+          scheduleEdited: false,
           totalMinutesRequired: Number(proc.total_minutes_required ?? 0),
           color: getBarColor(colorKey),
           label: '',
@@ -1447,6 +1636,7 @@ function buildProcessGantt(plans) {
           durationLabel: '',
           leftPx: 0,
           widthPx: 0,
+          isTemporary: false,
         }
         item.bars.push(newBar)
         if (proc.coproduct_group_key || shouldMergeSameSlotBars) {
@@ -1537,6 +1727,14 @@ function getBarColor(productId) {
 }
 
 watch(
+  mergeConsecutive,
+  (next) => {
+    emit('mode-change', next)
+  },
+  { immediate: true }
+)
+
+watch(
   () => props.presetBaseDate,
   (val) => {
     if (val) baseDate.value = String(val)
@@ -1608,6 +1806,7 @@ onMounted(async () => {
   display: flex;
   gap: 8px;
   align-items: flex-end;
+  flex-wrap: wrap;
 }
 .field {
   display: flex;
@@ -1896,6 +2095,10 @@ onMounted(async () => {
   align-items: center;
   cursor: grab;
   user-select: none;
+}
+.gantt-bar-wrapper.is-temporary .gantt-bar {
+  outline: 2px dashed #f59e0b;
+  outline-offset: 1px;
 }
 .gantt-bar {
   height: 100%;

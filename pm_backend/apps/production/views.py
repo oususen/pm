@@ -3887,73 +3887,50 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
         serializer = self.get_serializer(upserted, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=['post'], url_path='manual-add')
-    def manual_add(self, request):
-        """
-        工程ガントに手動バーを1件追加する。
-        期待payload: { line_id, process_id, output_product_id, start_time, end_time, quantity, process_number? }
-        """
-        line_id = request.data.get('line_id')
-        process_id = request.data.get('process_id')
-        output_product_id = request.data.get('output_product_id')
-        start_time = request.data.get('start_time')
-        end_time = request.data.get('end_time')
-        quantity_raw = request.data.get('quantity')
-        process_number_raw = request.data.get('process_number')
+    def _parse_gantt_datetime_value(self, value):
+        if not value:
+            return None
+        try:
+            raw = str(value).strip()
+            if raw.endswith('Z'):
+                raw = raw[:-1] + '+00:00'
+            dt = datetime.fromisoformat(raw)
+        except Exception:
+            return None
+        if getattr(dt, 'tzinfo', None) is not None:
+            try:
+                dt = timezone.localtime(dt).replace(tzinfo=None)
+            except Exception:
+                dt = dt.replace(tzinfo=None)
+        return dt
 
+    def _create_manual_gantt_plan(self, *, line_id, process_id, output_product_id, start_time, end_time, quantity_raw, process_number_raw=None):
         try:
             line_id = int(line_id)
             process_id = int(process_id)
             output_product_id = int(output_product_id)
         except (TypeError, ValueError):
-            return Response(
-                {'detail': 'line_id, process_id, output_product_id must be numeric'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            raise ValueError('line_id, process_id, output_product_id must be numeric')
 
         try:
             quantity = Decimal(str(quantity_raw)).quantize(Decimal('0.001'))
         except Exception:
-            return Response({'detail': 'quantity is invalid'}, status=status.HTTP_400_BAD_REQUEST)
+            raise ValueError('quantity is invalid')
         if quantity <= 0:
-            return Response({'detail': 'quantity must be greater than 0'}, status=status.HTTP_400_BAD_REQUEST)
+            raise ValueError('quantity must be greater than 0')
 
-        def parse_datetime_value(value):
-            if not value:
-                return None
-            try:
-                raw = str(value).strip()
-                if raw.endswith('Z'):
-                    raw = raw[:-1] + '+00:00'
-                dt = datetime.fromisoformat(raw)
-            except Exception:
-                return None
-            if getattr(dt, 'tzinfo', None) is not None:
-                try:
-                    from django.utils import timezone
-                    dt = timezone.localtime(dt).replace(tzinfo=None)
-                except Exception:
-                    dt = dt.replace(tzinfo=None)
-            return dt
-
-        start_dt = parse_datetime_value(start_time)
-        end_dt = parse_datetime_value(end_time)
+        start_dt = self._parse_gantt_datetime_value(start_time)
+        end_dt = self._parse_gantt_datetime_value(end_time)
         if not start_dt or not end_dt:
-            return Response(
-                {'detail': 'start_time and end_time must be ISO datetime'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            raise ValueError('start_time and end_time must be ISO datetime')
         if end_dt <= start_dt:
-            return Response({'detail': 'end_time must be after start_time'}, status=status.HTTP_400_BAD_REQUEST)
+            raise ValueError('end_time must be after start_time')
 
         line = Line.objects.filter(id=line_id).first()
         process = Process.objects.filter(id=process_id).first()
         output_product = Product.objects.filter(id=output_product_id).first()
         if not line or not process or not output_product:
-            return Response(
-                {'detail': 'line/process/product not found'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            raise ValueError('line/process/product not found')
 
         routing_step = (
             RoutingStep.objects
@@ -4001,21 +3978,188 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
             'output_product_name': output_product.product_name,
         }]
 
-        with transaction.atomic():
-            created = LineGanttPlan.objects.create(
-                plan_id=plan_id,
-                line_id=line_id,
-                product_id=output_product_id,
-                plan_date=plan_date,
-                plan_qty=quantity,
-                sequence_no=None,
-                start_datetime=start_dt,
-                end_datetime=end_dt,
-                processes_plan=process_plan,
-            )
+        return LineGanttPlan.objects.create(
+            plan_id=plan_id,
+            line_id=line_id,
+            product_id=output_product_id,
+            plan_date=plan_date,
+            plan_qty=quantity,
+            sequence_no=None,
+            start_datetime=start_dt,
+            end_datetime=end_dt,
+            processes_plan=process_plan,
+        )
 
+    def _remove_gantt_process_entry(self, *, plan_id, process_id, output_product_id=None, change_user=None):
+        if not plan_id or not process_id:
+            raise ValueError('plan_id と process_id は必須です')
+        try:
+            process_id = int(process_id)
+        except Exception:
+            raise ValueError('process_id が不正です')
+        if output_product_id in [None, '']:
+            output_product_id = None
+        else:
+            try:
+                output_product_id = int(output_product_id)
+            except Exception:
+                output_product_id = None
+
+        plan = LineGanttPlan.objects.filter(plan_id=plan_id).first()
+        if not plan or not plan.processes_plan:
+            raise LookupError('対象の計画が見つかりません')
+
+        original = list(plan.processes_plan)
+        remaining = []
+        removed_proc = None
+        for proc in original:
+            if removed_proc is None and str(proc.get('process_id')) == str(process_id):
+                proc_out = proc.get('output_product_id')
+                if output_product_id is not None and str(proc_out) != str(output_product_id):
+                    remaining.append(proc)
+                else:
+                    removed_proc = proc
+            else:
+                remaining.append(proc)
+
+        if removed_proc is None:
+            raise LookupError('対象プロセスが見つかりません')
+
+        change_reason = '工程ガントバー削除'
+        backlog_filter = dict(plan_id=plan_id, process_id=process_id, sequence_no__gt=0)
+        if output_product_id is not None:
+            backlog_filter['product_id'] = output_product_id
+        backlog_qs = LineBacklog.objects.filter(**backlog_filter)
+        backlog_rows = list(backlog_qs)
+
+        backlog_qs.delete()
+        if remaining:
+            starts, ends = [], []
+            for proc in remaining:
+                try:
+                    starts.append(datetime.fromisoformat(proc['start_time']))
+                    ends.append(datetime.fromisoformat(proc['end_time']))
+                except Exception:
+                    continue
+            if starts:
+                plan.start_datetime = min(starts)
+            if ends:
+                plan.end_datetime = max(ends)
+            plan.processes_plan = remaining
+            plan.save()
+        else:
+            ProductionOrder.objects.filter(order_no=plan_id).delete()
+            plan.delete()
+
+        before_qty = 0
+        try:
+            before_qty = int(Decimal(str(removed_proc.get('quantity') or 0)).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+        except Exception:
+            pass
+        if backlog_rows:
+            for row in backlog_rows:
+                row_qty = int(row.plan_qty or 0)
+                if row_qty == 0:
+                    continue
+                ProductionPlanChangeLog.objects.create(
+                    plan_date=row.plan_date,
+                    product_id=row.product_id,
+                    process_id=row.process_id,
+                    line_id=row.line_id,
+                    sequence_no=row.sequence_no,
+                    plan_id=row.plan_id,
+                    before_qty=row_qty,
+                    after_qty=0,
+                    reason=change_reason,
+                    changed_by=change_user,
+                )
+        elif before_qty != 0:
+            resolved_product_id = output_product_id or removed_proc.get('output_product_id')
+            try:
+                resolved_product_id = int(resolved_product_id)
+            except Exception:
+                resolved_product_id = None
+            if resolved_product_id:
+                ProductionPlanChangeLog.objects.create(
+                    plan_date=plan.plan_date,
+                    product_id=resolved_product_id,
+                    process_id=process_id,
+                    line_id=plan.line_id,
+                    sequence_no=plan.sequence_no,
+                    plan_id=plan_id,
+                    before_qty=before_qty,
+                    after_qty=0,
+                    reason=change_reason,
+                    changed_by=change_user,
+                )
+
+        return {'deleted': True, 'plan_removed': not remaining}
+
+    @action(detail=False, methods=['post'], url_path='manual-add')
+    def manual_add(self, request):
+        """
+        工程ガントに手動バーを1件追加する。
+        期待payload: { line_id, process_id, output_product_id, start_time, end_time, quantity, process_number? }
+        """
+        try:
+            with transaction.atomic():
+                created = self._create_manual_gantt_plan(
+                    line_id=request.data.get('line_id'),
+                    process_id=request.data.get('process_id'),
+                    output_product_id=request.data.get('output_product_id'),
+                    start_time=request.data.get('start_time'),
+                    end_time=request.data.get('end_time'),
+                    quantity_raw=request.data.get('quantity'),
+                    process_number_raw=request.data.get('process_number'),
+                )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         serializer = self.get_serializer(created)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'], url_path='bulk-structure-save')
+    def bulk_structure_save(self, request):
+        creates = request.data.get('creates') or []
+        deletes = request.data.get('deletes') or []
+        if not isinstance(creates, list) or not isinstance(deletes, list):
+            return Response({'detail': 'creates と deletes は配列で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+        if not creates and not deletes:
+            return Response({'detail': '保存対象がありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        change_user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+        created_items = []
+        deleted_count = 0
+        try:
+            with transaction.atomic():
+                for create_item in creates:
+                    created_items.append(self._create_manual_gantt_plan(
+                        line_id=create_item.get('line_id'),
+                        process_id=create_item.get('process_id'),
+                        output_product_id=create_item.get('output_product_id'),
+                        start_time=create_item.get('start_time'),
+                        end_time=create_item.get('end_time'),
+                        quantity_raw=create_item.get('quantity'),
+                        process_number_raw=create_item.get('process_number'),
+                    ))
+                for delete_item in deletes:
+                    self._remove_gantt_process_entry(
+                        plan_id=delete_item.get('plan_id'),
+                        process_id=delete_item.get('process_id'),
+                        output_product_id=delete_item.get('output_product_id'),
+                        change_user=change_user,
+                    )
+                    deleted_count += 1
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except LookupError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = self.get_serializer(created_items, many=True)
+        return Response({
+            'created': len(created_items),
+            'deleted': deleted_count,
+            'created_items': serializer.data,
+        })
 
     @action(detail=False, methods=['put'], url_path='bulk-update')
     def bulk_update(self, request):
@@ -4171,121 +4315,21 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
         processes_plan が空になった場合は LineGanttPlan ごと削除。
         期待payload: { plan_id, process_id, output_product_id? }
         """
-        plan_id = request.data.get('plan_id')
-        process_id = request.data.get('process_id')
-        if not plan_id or not process_id:
-            return Response({'detail': 'plan_id と process_id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            process_id = int(process_id)
-        except Exception:
-            return Response({'detail': 'process_id が不正です'}, status=status.HTTP_400_BAD_REQUEST)
-        output_product_id = request.data.get('output_product_id')
-        if output_product_id in [None, '']:
-            output_product_id = None
-        else:
-            try:
-                output_product_id = int(output_product_id)
-            except Exception:
-                output_product_id = None
-
-        plan = LineGanttPlan.objects.filter(plan_id=plan_id).first()
-        if not plan or not plan.processes_plan:
-            return Response({'detail': '対象の計画が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
-
-        # 対象プロセスを processes_plan から探して除去（1件だけ）
-        original = list(plan.processes_plan)
-        remaining = []
-        removed_proc = None
-        for proc in original:
-            if removed_proc is None and str(proc.get('process_id')) == str(process_id):
-                proc_out = proc.get('output_product_id')
-                # output_product_id 指定ありの場合は一致するものだけ対象
-                if output_product_id is not None and str(proc_out) != str(output_product_id):
-                    remaining.append(proc)
-                else:
-                    removed_proc = proc  # 最初に見つかった1件だけ削除
-            else:
-                remaining.append(proc)
-
-        if removed_proc is None:
-            return Response({'detail': '対象プロセスが見つかりません'}, status=status.HTTP_404_NOT_FOUND)
-
         change_user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
-        change_reason = '工程ガントバー削除'
-
-        # 対象プロセスの LineBacklog(seq>0) を取得
-        backlog_filter = dict(plan_id=plan_id, process_id=process_id, sequence_no__gt=0)
-        if output_product_id is not None:
-            backlog_filter['product_id'] = output_product_id
-        backlog_qs = LineBacklog.objects.filter(**backlog_filter)
-        backlog_rows = list(backlog_qs)
-
-        with transaction.atomic():
-            backlog_qs.delete()
-            if remaining:
-                # processes_plan を更新して保存
-                starts, ends = [], []
-                for proc in remaining:
-                    try:
-                        starts.append(datetime.fromisoformat(proc['start_time']))
-                        ends.append(datetime.fromisoformat(proc['end_time']))
-                    except Exception:
-                        continue
-                if starts:
-                    plan.start_datetime = min(starts)
-                if ends:
-                    plan.end_datetime = max(ends)
-                plan.processes_plan = remaining
-                plan.save()
-            else:
-                # processes_plan が空になったら plan ごと削除
-                ProductionOrder.objects.filter(order_no=plan_id).delete()
-                plan.delete()
-
-        # 変更ログ
-        before_qty = 0
         try:
-            before_qty = int(Decimal(str(removed_proc.get('quantity') or 0)).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
-        except Exception:
-            pass
-        if backlog_rows:
-            for row in backlog_rows:
-                row_qty = int(row.plan_qty or 0)
-                if row_qty == 0:
-                    continue
-                ProductionPlanChangeLog.objects.create(
-                    plan_date=row.plan_date,
-                    product_id=row.product_id,
-                    process_id=row.process_id,
-                    line_id=row.line_id,
-                    sequence_no=row.sequence_no,
-                    plan_id=row.plan_id,
-                    before_qty=row_qty,
-                    after_qty=0,
-                    reason=change_reason,
-                    changed_by=change_user,
+            with transaction.atomic():
+                result = self._remove_gantt_process_entry(
+                    plan_id=request.data.get('plan_id'),
+                    process_id=request.data.get('process_id'),
+                    output_product_id=request.data.get('output_product_id'),
+                    change_user=change_user,
                 )
-        elif before_qty != 0:
-            resolved_product_id = output_product_id or removed_proc.get('output_product_id')
-            try:
-                resolved_product_id = int(resolved_product_id)
-            except Exception:
-                resolved_product_id = None
-            if resolved_product_id:
-                ProductionPlanChangeLog.objects.create(
-                    plan_date=plan.plan_date,
-                    product_id=resolved_product_id,
-                    process_id=process_id,
-                    line_id=plan.line_id,
-                    sequence_no=plan.sequence_no,
-                    plan_id=plan_id,
-                    before_qty=before_qty,
-                    after_qty=0,
-                    reason=change_reason,
-                    changed_by=change_user,
-                )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except LookupError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_404_NOT_FOUND)
 
-        return Response({'deleted': True, 'plan_removed': not remaining})
+        return Response(result)
 
 
 # ========================================

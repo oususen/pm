@@ -584,6 +584,28 @@ watch(
   }
 )
 
+// selectedItem が変わったら詳細パネルの状態を自動同期
+watch(selectedItem, async (item) => {
+  inputQty.value = null
+  actionReason.value = ''
+  scrapQty.value = null
+  scrapReason.value = ''
+  photoPreviewUrl.value = ''
+  if (!item) {
+    currentActualQty.value = 0
+    return
+  }
+  currentActualQty.value = item.actual_qty
+  if (item.equipment_id) selectedEquipmentIds.value = [item.equipment_id]
+  if (item.image_url) {
+    photoPreviewUrl.value = item.image_url
+  } else if (item.product_id) {
+    await loadProductPhoto(item.product_id)
+  }
+  syncSelectedAction()
+  nextTick(() => qtyInputRef.value?.focus())
+})
+
 onMounted(async () => {
   loadPrintSettings()
   loadSavedLabel()
@@ -846,20 +868,8 @@ const avatarColor = (code) => {
 // ──────────────────────────────
 // 操作
 // ──────────────────────────────
-async function selectItem(item) {
+function selectItem(item) {
   selectedItem.value = item
-  currentActualQty.value = item.actual_qty
-  inputQty.value = null
-  actionReason.value = ''
-  photoPreviewUrl.value = ''
-  if (item?.equipment_id) selectedEquipmentIds.value = [item.equipment_id]
-  if (item?.image_url) {
-    photoPreviewUrl.value = item.image_url
-  } else if (item?.product_id) {
-    await loadProductPhoto(item.product_id)
-  }
-  syncSelectedAction()
-  nextTick(() => qtyInputRef.value?.focus())
 }
 
 function selectAction(action) {
@@ -899,12 +909,7 @@ async function fetchEquipments() {
 
 function cancel() {
   selectedItem.value = null
-  inputQty.value = null
   selectedAction.value = ''
-  actionReason.value = ''
-  scrapQty.value = null
-  scrapReason.value = ''
-  photoPreviewUrl.value = ''
 }
 
 function openCamera() {
@@ -954,14 +959,10 @@ function jumpToProcessingItem(msg) {
     i => i.product_code === msg.productCode && isSameId(i.process_id, selectedProcessId.value)
   )
   if (!item) return
-  selectedItem.value = item
-  if (msg.equipmentId) selectedEquipmentIds.value = [msg.equipmentId]
-  selectedAction.value = ''
-  inputQty.value = null
-  actionReason.value = ''
-  syncSelectedAction()
   const idx = filteredItems.value.findIndex(i => isSameId(i.product_id || i.product_code, item.product_id || item.product_code))
   if (idx >= 0) currentPage.value = Math.floor(idx / PAGE_SIZE) + 1
+  selectItem(item)
+  if (msg.equipmentId) selectedEquipmentIds.value = [msg.equipmentId]
 }
 
 function onTomorrowToggle() {
@@ -1227,7 +1228,7 @@ async function confirmAdd() {
     currentPage.value = 1
   }
   showAddModal.value = false
-  await selectItem(newItem)
+  selectItem(newItem)
   selectedEquipmentIds.value = newItem.equipment_id ? [newItem.equipment_id] : []
   syncSelectedAction()
   showToast('追加しました')

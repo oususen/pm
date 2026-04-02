@@ -654,6 +654,28 @@ watch(
   }
 )
 
+// selectedItem が変わったら詳細パネルの状態を自動同期
+watch(selectedItem, async (item) => {
+  inputQty.value = null
+  actionReason.value = ''
+  scrapQty.value = null
+  scrapReason.value = ''
+  photoPreviewUrl.value = ''
+  if (!item) {
+    currentActualQty.value = 0
+    return
+  }
+  currentActualQty.value = item.actual_qty
+  if (item.equipment_id) selectedEquipmentId.value = item.equipment_id
+  if (item.image_url) {
+    photoPreviewUrl.value = item.image_url
+  } else if (item.product_id) {
+    await loadProductPhoto(item.product_id)
+  }
+  syncSelectedAction()
+  nextTick(() => qtyInputRef.value?.focus())
+})
+
 // ──────────────────────────────
 // 作業者初期化（ログインユーザー）
 // ──────────────────────────────
@@ -950,25 +972,8 @@ const avatarColor = (code) => {
 // ──────────────────────────────
 // 操作
 // ──────────────────────────────
-async function selectItem(item) {
+function selectItem(item) {
   selectedItem.value = item
-  currentActualQty.value = item.actual_qty
-  inputQty.value = null
-  actionReason.value = ''
-  photoPreviewUrl.value = ''
-  // 設備が明示指定されているアイテム（手動追加）はその設備に切り替える
-  // 設備未指定のアイテム（計画品）は設備選択を維持する
-  if (item?.equipment_id) {
-    selectedEquipmentId.value = item.equipment_id
-  }
-  if (item?.image_url) {
-    photoPreviewUrl.value = item.image_url
-  } else if (item?.product_id) {
-    await loadProductPhoto(item.product_id)
-  }
-  // 設備は工程単位でロード済み。計画品は設備選択を維持する
-  syncSelectedAction()
-  nextTick(() => qtyInputRef.value?.focus())
 }
 
 function selectAction(action) {
@@ -995,12 +1000,7 @@ async function fetchEquipments(processId) {
 
 function cancel() {
   selectedItem.value = null
-  inputQty.value = null
   selectedAction.value = ''
-  actionReason.value = ''
-  scrapQty.value = null
-  scrapReason.value = ''
-  photoPreviewUrl.value = ''
 }
 
 function openCamera() {
@@ -1065,17 +1065,10 @@ function jumpToProcessingItem(msg) {
     i => i.product_code === msg.productCode && isSameId(i.process_id, selectedProcessId.value)
   )
   if (!item) return
-  selectedItem.value = item
-  if (msg.equipmentId) {
-    selectedEquipmentId.value = msg.equipmentId
-  }
-  selectedAction.value = ''
-  inputQty.value = null
-  actionReason.value = ''
-  syncSelectedAction()
-  // リスト内のページを合わせる
   const idx = filteredItems.value.findIndex(i => isSameId(i.product_id || i.product_code, item.product_id || item.product_code))
   if (idx >= 0) currentPage.value = Math.floor(idx / PAGE_SIZE) + 1
+  selectItem(item)
+  if (msg.equipmentId) selectedEquipmentId.value = msg.equipmentId
 }
 
 async function onProcessChange() {
@@ -1428,7 +1421,7 @@ async function confirmAdd() {
   }
   showAddModal.value = false
   // 追加したアイテムをすぐ選択
-  await selectItem(newItem)
+  selectItem(newItem)
   selectedEquipmentId.value = newItem.equipment_id || ''
   syncSelectedAction()
   showToast(t('brakeInput.toast.added'))
