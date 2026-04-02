@@ -339,7 +339,7 @@ const loadCalendarDays = async (calendarId) => {
     return calendarDayCache.value[calendarId];
   }
   try {
-    const res = await api.calendars.getCalendarDays(calendarId);
+    const res = await api.calendars.getCalendarDays(calendarId, { page_size: 5000 });
     const rows = normalizeList(res.data || []);
     calendarDayCache.value[calendarId] = rows;
     return rows;
@@ -368,19 +368,26 @@ const loadHolidayColumns = async () => {
 
     const start = columns.value[0];
     const end = columns.value[columns.value.length - 1];
-    const holidaySet = new Set();
+    // 積集合: 全カレンダで休日の日だけを休日にする
+    let commonHolidays = null;
     for (const calendarId of calendarIds) {
       const dayRows = await loadCalendarDays(calendarId);
+      const calHolidays = new Set();
       dayRows.forEach((day) => {
         const dateStr = day.target_date;
         if (!dateStr) return;
         if (dateStr < start || dateStr > end) return;
         if (day.is_working_day === false || Number(day.work_minutes) === 0) {
-          holidaySet.add(dateStr);
+          calHolidays.add(dateStr);
         }
       });
+      if (commonHolidays === null) {
+        commonHolidays = calHolidays;
+      } else {
+        commonHolidays = new Set([...commonHolidays].filter((d) => calHolidays.has(d)));
+      }
     }
-    holidays.value = holidaySet.size ? holidaySet : fallback;
+    holidays.value = commonHolidays && commonHolidays.size ? commonHolidays : fallback;
   } catch (e) {
     console.error("休日判定の取得に失敗:", e);
     holidays.value = fallback;

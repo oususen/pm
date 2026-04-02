@@ -306,7 +306,6 @@ def recalculate_progress_qty(
 
         # 進度 = 前日進度 + 実績 - 需要 + 調整 + 非自工程仕損調整
         progress_adjust = resolve_day_adjustment(rows, progress_adjust_map)
-        planned_progress_adjust = resolve_day_adjustment(rows, planned_progress_adjust_map)
         progress_qty = (
             prev_progress
             + actual_total
@@ -316,6 +315,7 @@ def recalculate_progress_qty(
             + progress_adjust
         )
         # 計画在庫と同じ時制考慮: 過去日は実績、今日以降は計画
+        # 計画進度の調整はPROGRESS調整と同じものを使う（PLANNED_PROGRESSは使わない）
         planned_production = actual_total if plan_date < today else plan_total
         planned_progress_qty = (
             prev_planned_progress
@@ -323,7 +323,7 @@ def recalculate_progress_qty(
             - progress_shipment
             + adjust_total
             + scrap_adjust_total
-            + planned_progress_adjust
+            + progress_adjust
         )
 
         rep = pick_representative(rows)
