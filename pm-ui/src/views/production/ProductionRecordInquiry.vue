@@ -97,6 +97,13 @@
         </select>
       </div>
       <div class="filter-row">
+        <label>作業未終了</label>
+        <select v-model="unclosed">
+          <option value="">-- すべて --</option>
+          <option value="true">未終了のみ</option>
+        </select>
+      </div>
+      <div class="filter-row">
         <label>生産数0</label>
         <select v-model="excludeZeroProduction">
           <option value="">-- すべて --</option>
@@ -431,6 +438,7 @@ const operatorName = ref('')
 const sessionType = ref('')
 const status = ref('')
 const hasIssue = ref('')
+const unclosed = ref('')
 const excludeZeroProduction = ref('')
 const targetLineCodesByTab = ref(createDefaultTargetLineCodesByTab())
 const targetLineSaveMessage = ref('')
@@ -833,7 +841,9 @@ const loadSessions = async () => {
         })
       }
 
-      if (status.value === 'OPEN') {
+      if (unclosed.value === 'true') {
+        allItems = allItems.filter((row) => !row.ended_at)
+      } else if (status.value === 'OPEN') {
         allItems = allItems.filter((row) => !row.ended_at)
       } else if (status.value === 'CLOSED') {
         allItems = allItems.filter((row) => !!row.ended_at)
@@ -880,6 +890,7 @@ const loadSessions = async () => {
     // PAUSE フィルターは start_action でフロント判定するため API には渡さない
     if (status.value) params.status = status.value
     if (hasIssue.value) params.has_issue = hasIssue.value
+    if (unclosed.value) params.unclosed = unclosed.value
 
     const res = await api.processRealtime.getSessions(params)
     const items = res.data || []
@@ -919,6 +930,7 @@ const resetFilters = async () => {
   sessionType.value = ''
   status.value = ''
   hasIssue.value = ''
+  unclosed.value = ''
   excludeZeroProduction.value = ''
   startDate.value = nextDefaultDateRange.start
   endDate.value = nextDefaultDateRange.end
@@ -928,7 +940,7 @@ const resetFilters = async () => {
 
 // フィルタが変更されたら再検索が必要な状態にする
 watch(
-  [startDate, endDate, dateSearchMode, lineId, processId, productCode, sessionType, status, hasIssue, excludeZeroProduction],
+  [startDate, endDate, dateSearchMode, lineId, processId, productCode, sessionType, status, hasIssue, unclosed, excludeZeroProduction],
   () => { needsSearch.value = true }
 )
 

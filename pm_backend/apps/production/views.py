@@ -1908,6 +1908,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         # 親製品（中間品）から最終品を特定するマップを構築
         # parent_id -> [(line_id, final_product_id)]
         from masters.models import RoutingStep
+        routing_source_q = build_effective_routing_range_q(start_dt, end_dt, prefix='routing__')
         parent_to_final = {}
         if parent_ids:
             steps_qs = RoutingStep.objects.filter(

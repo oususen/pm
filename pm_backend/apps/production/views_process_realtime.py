@@ -444,6 +444,12 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             if d:
                 queryset = queryset.filter(plan_date__lte=d)
 
+        unclosed = request.query_params.get('unclosed')
+        if unclosed is not None:
+            normalized_uc = str(unclosed).strip().lower()
+            if normalized_uc in ('1', 'true', 'yes'):
+                queryset = queryset.filter(status='OPEN')
+
         has_issue = request.query_params.get('has_issue')
         if has_issue is not None:
             normalized = str(has_issue).strip().lower()
