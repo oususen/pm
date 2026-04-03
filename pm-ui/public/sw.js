@@ -63,7 +63,7 @@ self.addEventListener('fetch', (event) => {
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone))
         }
         return response
-      })
+      }).catch(() => new Response('', { status: 408, statusText: 'Offline' }))
     })
   )
 })

@@ -2,7 +2,9 @@
   <div class="notification-sources">
     <h2 class="page-title">通知入力</h2>
     <p class="page-note">
-      時限設定を忘れないように設定してください。
+      時限設定を忘れないように設定してください。<br/>
+      ・有効終了日なしの通知は作成から5日後に非表示、10日後にDB削除されます<br/>
+      ・有効終了日ありの通知は終了日経過で非表示、5日後にDB削除されます
     </p>
 
     <div v-if="!canView" class="no-permission">
