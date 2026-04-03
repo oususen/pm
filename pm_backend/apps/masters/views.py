@@ -965,7 +965,10 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             if final_time_unit == 'MINUTE':
                 if not final_duration_min or int(final_duration_min) <= 0:
                     return Response({'detail': 'final_duration_min must be >0 when final_time_unit=MINUTE'}, status=status.HTTP_400_BAD_REQUEST)
-                final_lead_time_days = 0
+                if final_lead_time_days is None or final_lead_time_days == '':
+                    final_lead_time_days = 0
+                elif int(final_lead_time_days) < 0:
+                    return Response({'detail': 'final_lead_time_days must be >=0'}, status=status.HTTP_400_BAD_REQUEST)
             else:
                 if final_lead_time_days is None or int(final_lead_time_days) < 0:
                     return Response({'detail': 'final_lead_time_days must be >=0 when final_time_unit=DAY'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1084,7 +1087,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 hierarchy_depth=0,
                 hierarchy_path="final",
                 time_unit=final_time_unit,
-                lead_time_days=int(final_lead_time_days) if final_time_unit == 'DAY' else 0,
+                lead_time_days=int(final_lead_time_days or 0),
                 duration_min=int(final_duration_min) if final_time_unit == 'MINUTE' else None,
                 remark=final_parent_product_code
             )

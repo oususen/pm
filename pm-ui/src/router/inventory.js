@@ -29,6 +29,12 @@ const inventory = [
     component: () => import("@/views/inventory/adjustments/AdjustmentHistory.vue"),
     meta: { pageTitle: "調整履歴", resource: "inventory" },
   },
+  {
+    path: "/inventory/actual-progress",
+    name: "InventoryActualProgressCalculator",
+    component: () => import("@/views/inventory/ActualProgressCalculator.vue"),
+    meta: { pageTitle: "実進度求め", resource: "inventory" },
+  },
 ];
 
 export default inventory;

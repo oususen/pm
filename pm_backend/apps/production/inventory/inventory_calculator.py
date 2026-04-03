@@ -287,20 +287,133 @@ def _build_firm_order_map(line_id, start_date, end_date):
 
 def _get_max_parent_bom_lead_time(product_id):
     """
-    製品を子製品として持つBOMの最大リードタイムを取得
+    製品の完成品向け累積LT（自分LTを含む）を取得する。
+
+    優先ロジック:
+    1. RoutingStep（output_product=対象製品）から、完成品までの階層累積LTの最大値を使用
+       - final工程のLTを起点に、hierarchy_path で子階層へ伝播した total LT を採用
+       - 対象製品の候補工程が複数ある場合は最大値
+    2. 1が取得できない場合は、従来互換として直親BOMの最大 lead_time_days を使用
 
     Args:
         product_id: 製品ID
 
     Returns:
-        int: 最大リードタイム（日）。BOMがない場合は0
+        int: 最大リードタイム（日）
     """
-    from masters.models import BOMItem
-    max_lt = BOMItem.objects.filter(
-        child_product_id=product_id,
-        bom__is_active=True
-    ).values_list('lead_time_days', flat=True)
-    return max(max_lt, default=0) or 0
+    from masters.models import BOMItem, RoutingStep
+    from masters.services.routing_service import build_effective_routing_q
+
+    if not product_id:
+        return 0
+
+    def fallback_direct_parent_lt():
+        max_lt = BOMItem.objects.filter(
+            child_product_id=product_id,
+            bom__is_active=True,
+        ).values_list('lead_time_days', flat=True)
+        return int(max(max_lt, default=0) or 0)
+
+    step_qs = RoutingStep.objects.filter(
+        output_product_id=product_id,
+    ).filter(
+        build_effective_routing_q(prefix='routing__')
+    ).select_related('line')
+
+    candidate_steps = list(step_qs)
+    if not candidate_steps:
+        return fallback_direct_parent_lt()
+
+    routing_ids = {s.routing_id for s in candidate_steps if s.routing_id}
+    if not routing_ids:
+        return fallback_direct_parent_lt()
+
+    steps = list(
+        RoutingStep.objects.filter(routing_id__in=routing_ids)
+        .filter(build_effective_routing_q(prefix='routing__'))
+        .select_related('line')
+    )
+
+    minutes_per_day = 480
+
+    def resolve_lead_time_days(step):
+        if step.lead_time_days and step.lead_time_days > 0:
+            return int(step.lead_time_days)
+        if step.line and step.line.lead_time_days:
+            return max(int(step.line.lead_time_days), 0)
+        return 0
+
+    def calc_shift_days(prev_minutes, add_minutes):
+        prev_days = (prev_minutes // minutes_per_day) if prev_minutes > 0 else 0
+        total_minutes = int(prev_minutes) + int(add_minutes or 0)
+        total_days = (total_minutes // minutes_per_day) if total_minutes > 0 else 0
+        return total_days - prev_days, total_minutes
+
+    def path_key(path):
+        try:
+            return tuple(int(p) for p in str(path).split('.'))
+        except Exception:
+            return (str(path),)
+
+    lt_by_step = {}
+    for routing_id in routing_ids:
+        routing_steps = [s for s in steps if s.routing_id == routing_id]
+        if not routing_steps:
+            continue
+
+        step_map = {
+            s.hierarchy_path: s
+            for s in routing_steps
+            if s.hierarchy_path and s.hierarchy_path != 'final'
+        }
+        children_map = {}
+        for path in step_map.keys():
+            parent_path = path.rsplit('.', 1)[0] if '.' in path else None
+            children_map.setdefault(parent_path, []).append(path)
+
+        final_step = next((s for s in routing_steps if s.hierarchy_path == 'final'), None)
+        base_days = 0
+        base_minutes = 0
+        if final_step:
+            lead_days = resolve_lead_time_days(final_step) if final_step.time_unit == 'DAY' else 0
+            step_minutes = final_step.duration_min or 0 if final_step.time_unit == 'MINUTE' else 0
+            minute_shift, base_minutes = calc_shift_days(0, step_minutes)
+            base_days = lead_days + minute_shift
+            lt_by_step[final_step.id] = {'total': base_days, 'self': base_days}
+
+        def compute(path, parent_days, parent_minutes):
+            step = step_map.get(path)
+            if not step:
+                return
+            lead_days = resolve_lead_time_days(step) if step.time_unit == 'DAY' else 0
+            step_minutes = step.duration_min or 0 if step.time_unit == 'MINUTE' else 0
+            minute_shift, total_minutes = calc_shift_days(parent_minutes, step_minutes)
+            self_days = lead_days + minute_shift
+            total_days = parent_days + self_days
+            lt_by_step[step.id] = {'total': total_days, 'self': self_days}
+            for child_path in sorted(children_map.get(path, []), key=path_key):
+                compute(child_path, total_days, total_minutes)
+
+        for root_path in sorted(children_map.get(None, []), key=path_key):
+            compute(root_path, base_days, base_minutes)
+
+        # hierarchy_path が無いデータでも最低限 self LT を返せるようにする
+        for step in routing_steps:
+            if step.id in lt_by_step:
+                continue
+            lead_days = resolve_lead_time_days(step) if step.time_unit == 'DAY' else 0
+            step_minutes = step.duration_min or 0 if step.time_unit == 'MINUTE' else 0
+            minute_shift, _total_minutes = calc_shift_days(0, step_minutes)
+            self_days = lead_days + minute_shift
+            lt_by_step[step.id] = {'total': self_days, 'self': self_days}
+
+    cumulative_lt = 0
+    for step in candidate_steps:
+        val = (lt_by_step.get(step.id) or {}).get('total')
+        if val is not None and int(val) > cumulative_lt:
+            cumulative_lt = int(val)
+
+    return max(cumulative_lt, fallback_direct_parent_lt())
 
 
 def _get_final_product_delivery_lt(line_id, product_id):
@@ -1109,8 +1222,8 @@ def recalculate_planned_stock_qty(
     today = reference_today or get_business_today()
     if reference_today is None and not is_working_day(today):
         today = get_prev_working_day(today)
-    # 製品のBOMの最大LTを取得し、LT+1日前から再計算
-    # これにより、親製品の実績変更が子製品の過去の出庫に正しく反映される
+    # 完成品向け累積LT（自分LT含む）の最大値を取得し、LT+1日前から再計算
+    # これにより、完成品側の実績変更が子製品の過去の出庫に正しく反映される
     max_lt = _get_max_parent_bom_lead_time(product_id)
     # 最終品はデリバリLT分だけ初期値を調整するため、計算窓を広げる。
     # self_lt_days（製造LT）ではなく firm_map と同じデリバリLT（RoutingStep/Line）を使う。

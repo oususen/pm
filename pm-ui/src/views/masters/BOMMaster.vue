@@ -472,7 +472,6 @@
                 type="number"
                 min="0"
                 v-model.number="routingGenForm.final_lead_time_days"
-                :disabled="routingGenForm.final_time_unit === 'MINUTE'"
                 class="tall-number-input"
               />
             </div>
@@ -1364,19 +1363,18 @@ const generateRoutingFromBom = async () => {
       payload.final_line_id = finalLineId
     }
     payload.final_time_unit = routingGenForm.value.final_time_unit
+    if (routingGenForm.value.final_lead_time_days === null || routingGenForm.value.final_lead_time_days === undefined || routingGenForm.value.final_lead_time_days < 0) {
+      alert('最終工程のリードタイム(日)を0以上で入力してください')
+      return
+    }
+    payload.final_lead_time_days = routingGenForm.value.final_lead_time_days
     if (routingGenForm.value.final_time_unit === 'MINUTE') {
       if (!routingGenForm.value.final_duration_min || routingGenForm.value.final_duration_min <= 0) {
         alert('最終工程の所要時間(分)を1以上で入力してください')
         return
       }
       payload.final_duration_min = routingGenForm.value.final_duration_min
-      payload.final_lead_time_days = 0
     } else {
-      if (routingGenForm.value.final_lead_time_days === null || routingGenForm.value.final_lead_time_days === undefined || routingGenForm.value.final_lead_time_days < 0) {
-        alert('最終工程のリードタイム(日)を0以上で入力してください')
-        return
-      }
-      payload.final_lead_time_days = routingGenForm.value.final_lead_time_days
       payload.final_duration_min = null
     }
   }

@@ -162,8 +162,8 @@ def recalculate_progress_qty(
         # 「過去から計算」など、表示開始日を起点に強制的に再計算する場合
         calc_start_date = override_calc_start_date
     else:
-        # 通常再計算: 製品のBOMの最大LTを取得し、LT+1日前から再計算
-        # これにより、親製品の実績変更が子製品の過去の需要（LineDemand）に正しく反映される
+        # 通常再計算: 完成品向け累積LT（自分LT含む）の最大値を取得し、LT+1日前から再計算
+        # これにより、完成品側の実績変更が子製品の過去の需要（LineDemand）に正しく反映される
         max_lt = _get_max_parent_bom_lead_time(product_id)
         calc_start_date = shift_working_days(today, -(max_lt + 1))
     progress_by_date = {}

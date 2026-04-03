@@ -636,8 +636,16 @@ const resolveByProductCode = async () => {
         })
       );
       const valid = withMaster.filter((x) => x.processCode || x.lineCode || x.lineName);
-      if (valid.length) {
-        setProcessCandidates(valid);
+      // process + line の組み合わせで重複排除
+      const seen = new Set();
+      const unique = valid.filter((x) => {
+        const k = `${x.processId || x.processCode}::${x.lineId || x.lineCode}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      if (unique.length) {
+        setProcessCandidates(unique);
         await reload();
         return;
       }
@@ -857,26 +865,51 @@ const reload = async () => {
     await loadHolidays(startDate, endDate);
 
     if (form.lineId && form.productId) {
-      const backlogRes = await api.lineBacklogs.getLineBacklogs({
+      const backlogParams = {
         line: form.lineId,
         product: form.productId,
         process: form.processId || undefined,
         plan_date__gte: startDate,
         plan_date__lte: endDate,
-      });
+      };
+      const demandParams = {
+        line: form.lineId,
+        product: form.productId,
+        plan_date__gte: startDate,
+        plan_date__lte: endDate,
+        page_size: 5000,
+      };
+      if (form.processCode) {
+        demandParams.process_search = form.processCode;
+      }
+      const [backlogRes, demandRes] = await Promise.all([
+        api.lineBacklogs.getLineBacklogs(backlogParams),
+        api.lineDemands.list(demandParams),
+      ]);
       const backlogItems = Array.isArray(backlogRes.data) ? backlogRes.data : [];
+      const demandItems = normalizeList(demandRes.data).filter(
+        (item) => !form.processId || Number(item.process || 0) === Number(form.processId)
+      );
       const metricMap = {};
+      // LineBacklogから実績・計画・進度・在庫を取得
       backlogItems.forEach((item) => {
         const key = item.plan_date;
         if (!metricMap[key]) {
           metricMap[key] = { plan: 0, firm: 0, inbound: 0, planQty: 0, progress: 0 };
         }
-        metricMap[key].plan += Number(item.demand_qty_plan || 0);
-        metricMap[key].firm += Number(item.firm_order_qty ?? item.actual_shipment_qty ?? 0);
         metricMap[key].inbound += Number(item.actual_qty || 0);
         metricMap[key].planQty += Number(item.plan_qty || 0);
         metricMap[key].progress += getMetricValueForType(item);
         metricMap[key].stock = Number(item.stock_qty || 0);
+      });
+      // LineDemandから内示・確定を取得
+      demandItems.forEach((item) => {
+        const key = item.plan_date;
+        if (!metricMap[key]) {
+          metricMap[key] = { plan: 0, firm: 0, inbound: 0, planQty: 0, progress: 0 };
+        }
+        metricMap[key].plan += Number(item.forecast_qty || 0);
+        metricMap[key].firm += Number(item.firm_qty || 0);
       });
       metricsByDate.value = metricMap;
 

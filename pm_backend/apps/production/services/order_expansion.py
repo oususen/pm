@@ -768,7 +768,7 @@ class OrderExpansionService:
     def _resolve_lead_time_days(self, step, main_product=None) -> int:
         """
         工程のLT（日）を決定する。
-        - 最終品・ライン最終品: RoutingStep(DAY)優先、なければ Line.lead_time_days
+        - 最終品・ライン最終品: RoutingStep.lead_time_days 優先、なければ Line.lead_time_days
         - 中間品: RoutingStep.lead_time_days のみ使用
         """
         product = step.output_product if step.output_product_id else main_product
@@ -777,7 +777,7 @@ class OrderExpansionService:
         )
 
         if is_final:
-            if step.time_unit == 'DAY' and step.lead_time_days:
+            if step.lead_time_days:
                 return max(step.lead_time_days, 0)
             line_obj = self._line_cache.get(step.line_id) if step.line_id else None
             if line_obj and line_obj.lead_time_days:

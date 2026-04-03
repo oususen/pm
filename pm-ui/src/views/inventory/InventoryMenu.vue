@@ -7,6 +7,11 @@
         <div class="tile-title">調整</div>
         <div class="tile-desc">進度/在庫/計画在庫/計画進度の調整画面へ遷移します。</div>
       </RouterLink>
+      <RouterLink to="/inventory/actual-progress" class="tile">
+        <div class="tile-icon">🧮</div>
+        <div class="tile-title">実進度求め</div>
+        <div class="tile-desc">在庫合計と親別需要窓から実進度を算出します。</div>
+      </RouterLink>
     </div>
     <p class="helper-text">在庫管理メニューから機能に遷移します。</p>
   </div>
