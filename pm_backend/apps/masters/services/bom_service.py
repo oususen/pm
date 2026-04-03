@@ -1,12 +1,119 @@
 """BOM関連のビジネスロジックサービス"""
 import math
 from typing import Dict, Any, List, Optional
-from masters.models import Product, BOM, BOMItem, Routing
-from masters.services.routing_service import resolve_effective_routing
+from django.db.models import Q
+from masters.models import Product, BOM, BOMItem, Routing, RoutingStep
+from masters.services.routing_service import resolve_effective_routing, build_effective_routing_q
 
 
 class BOMService:
     """BOM関連のサービスクラス"""
+
+    @staticmethod
+    def _convert_minute_duration_to_lt_days(duration_min: Any) -> int:
+        """
+        分管理を日LTへ変換する。
+        - 480分以下: 0日
+        - 480分超: duration_min // 480
+        """
+        minutes = int(duration_min or 0)
+        if minutes <= 480:
+            return 0
+        return max(minutes // 480, 0)
+
+    def _resolve_where_used_edge_lt_days(
+        self,
+        bom_item: BOMItem,
+        step_cache: Optional[Dict[Any, Any]] = None,
+        reference_date=None,
+    ) -> int:
+        """
+        where-used（子→親の1エッジ）向けLT解決。
+
+        リードタイム仕様書に合わせ、次の優先で解決する。
+        - 親製品が最終品: line.lead_time_days を使用
+        - time_unit='MINUTE': duration_min を日換算（ラインLTへフォールバックしない）
+        - time_unit='DAY': RoutingStep.lead_time_days -> Line.lead_time_days -> BOMItem.lead_time_days -> 0
+        """
+        parent_product = getattr(getattr(bom_item, 'bom', None), 'parent_product', None)
+        is_final_parent = bool(parent_product and getattr(parent_product, 'is_final_product', False))
+        if is_final_parent:
+            # 親製品（最終品）のルーティングからラインLTを取得
+            parent_id = getattr(parent_product, 'id', None)
+            if parent_id:
+                cache_key = ('final_parent', parent_id, reference_date)
+                if step_cache is not None and cache_key in step_cache:
+                    parent_step = step_cache[cache_key]
+                else:
+                    parent_step = (
+                        RoutingStep.objects
+                        .filter(routing__product_id=parent_id)
+                        .filter(build_effective_routing_q(reference_date, prefix='routing__'))
+                        .select_related('line')
+                        .order_by('step_no', 'id')
+                        .first()
+                    )
+                    if step_cache is not None:
+                        step_cache[cache_key] = parent_step
+                if parent_step:
+                    step_line = getattr(parent_step, 'line', None)
+                    line_lt = int(getattr(step_line, 'lead_time_days', 0) or 0)
+                    if line_lt > 0:
+                        return line_lt
+            # フォールバック: BOMItemのラインLT
+            line_obj = getattr(bom_item, 'line', None)
+            return max(int(getattr(line_obj, 'lead_time_days', 0) or 0), 0)
+
+        # BOMでMINUTE指定がある場合は、仕様どおりdurationのみで判定
+        if getattr(bom_item, 'time_unit', None) == 'MINUTE':
+            return self._convert_minute_duration_to_lt_days(getattr(bom_item, 'duration_min', 0))
+
+        step = None
+        line_id = getattr(bom_item, 'line_id', None)
+        child_product_id = getattr(bom_item, 'child_product_id', None)
+
+        if line_id and child_product_id:
+            cache_key = (line_id, child_product_id, reference_date)
+            if step_cache is not None and cache_key in step_cache:
+                step = step_cache[cache_key]
+            else:
+                step = (
+                    RoutingStep.objects.filter(line_id=line_id)
+                    .filter(build_effective_routing_q(reference_date, prefix='routing__'))
+                    .filter(
+                        (
+                            # output_productが設定されている場合
+                            # 子品目の工程ステップを優先
+                            Q(output_product_id=child_product_id)
+                        ) | (
+                            # output_product未設定の場合はrouting.productで解決
+                            Q(output_product_id__isnull=True, routing__product_id=child_product_id)
+                        )
+                    )
+                    .select_related('line')
+                    .order_by('step_no', 'id')
+                    .first()
+                )
+                if step_cache is not None:
+                    step_cache[cache_key] = step
+
+        if step is not None:
+            if getattr(step, 'time_unit', None) == 'MINUTE':
+                return self._convert_minute_duration_to_lt_days(getattr(step, 'duration_min', 0))
+
+            step_lt = int(getattr(step, 'lead_time_days', 0) or 0)
+            if step_lt > 0:
+                return step_lt
+
+            step_line = getattr(step, 'line', None)
+            line_lt = int(getattr(step_line, 'lead_time_days', 0) or 0) if step_line else 0
+            if line_lt > 0:
+                return line_lt
+
+        if getattr(bom_item, 'time_unit', None) == 'DAY':
+            return max(int(getattr(bom_item, 'lead_time_days', 0) or 0), 0)
+
+        return 0
 
     def calculate_intermediate_lt(
         self,
@@ -218,7 +325,8 @@ class BOMService:
         self,
         product_id: int,
         recursive: bool = False,
-        visited: Optional[set] = None
+        visited: Optional[set] = None,
+        step_cache: Optional[Dict[Any, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """
         逆展開：指定した製品がどの親製品で使われているかを取得
@@ -233,6 +341,8 @@ class BOMService:
         """
         if visited is None:
             visited = set()
+        if step_cache is None:
+            step_cache = {}
 
         if product_id in visited:
             return []
@@ -247,12 +357,19 @@ class BOMService:
         results = []
         for item in items:
             parent = item.bom.parent_product
+            resolved_lt_days = self._resolve_where_used_edge_lt_days(
+                item,
+                step_cache=step_cache,
+            )
             entry = {
                 'parent_product_id': parent.id,
                 'parent_product_code': parent.product_code,
                 'parent_product_name': parent.product_name,
                 'category': parent.category,
                 'quantity': float(item.quantity),
+                'lead_time_days': int(item.lead_time_days or 0),
+                'resolved_lead_time_days': int(resolved_lt_days or 0),
+                'time_unit': item.time_unit,
                 'sourcing_type': item.sourcing_type,
                 'is_final_product': parent.is_final_product,
                 'line_id': item.line_id,
@@ -271,7 +388,8 @@ class BOMService:
                 entry['parents'] = self.get_where_used(
                     parent.id,
                     recursive=True,
-                    visited=visited.copy()
+                    visited=visited.copy(),
+                    step_cache=step_cache,
                 )
 
             results.append(entry)
