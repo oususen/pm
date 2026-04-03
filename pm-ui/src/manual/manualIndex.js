@@ -49,6 +49,18 @@ export const manualSections = [
     ],
   },
   {
+    id: "inventory",
+    title: "在庫管理",
+    items: [
+      { title: "在庫管理メニュー", path: "在庫/在庫管理メニュー.md" },
+      { title: "在庫調整メニュー", path: "在庫/在庫調整メニュー.md" },
+      { title: "在庫調整", path: "在庫/在庫調整.md" },
+      { title: "進度調整", path: "在庫/進度調整.md" },
+      { title: "調整履歴", path: "在庫/調整履歴.md" },
+      { title: "実進度求め", path: "在庫/実進度求め.md" },
+    ],
+  },
+  {
     id: "production",
     title: "生産管理",
     items: [
@@ -59,6 +71,7 @@ export const manualSections = [
       { title: "仕損品記録", path: "生産/仕損品記録.md" },
       { title: "仕損履歴", path: "生産/仕損履歴.md" },
       { title: "進捗管理", path: "生産/進捗管理.md" },
+      { title: "実進度求め", path: "在庫/実進度求め.md" },
       { title: "在庫/残量一覧", path: "生産/在庫残量一覧.md" },
       { title: "構成部品在庫一覧", path: "生産/構成部品在庫一覧.md" },
       { title: "ライン需要一覧", path: "生産/ライン需要一覧.md" },
