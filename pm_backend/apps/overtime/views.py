@@ -3,7 +3,8 @@ from io import BytesIO
 from django.http import HttpResponse
 from django.utils import timezone
 from django.contrib.auth import get_user_model
-from django.db.models import Q
+from django.db.models import Q, CharField, F, Value
+from django.db.models.functions import Coalesce, NullIf
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
@@ -222,13 +223,25 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
         ).prefetch_related('approval_logs__approver')
 
         if role in ('manager', 'chief', 'supervisor'):
-            return qs
-        if role == 'leader':
+            filtered_qs = qs
+        elif role == 'leader':
             # 担当グループ（leader_units）のメンバーの申請のみ閲覧可能
             leader_units = user.profile.leader_units.all()
             if leader_units.exists():
-                return qs.filter(applicant__profile__unit__in=leader_units)
-        return qs.filter(applicant=user)
+                filtered_qs = qs.filter(applicant__profile__unit__in=leader_units)
+            else:
+                filtered_qs = qs.filter(applicant=user)
+        else:
+            filtered_qs = qs.filter(applicant=user)
+
+        # 一覧は申請者のユーザーID（社員コード）昇順を基本とする。
+        return filtered_qs.annotate(
+            applicant_sort_code=Coalesce(
+                NullIf(F('applicant__profile__employee_code'), Value('')),
+                F('applicant__username'),
+                output_field=CharField(),
+            )
+        ).order_by('applicant_sort_code', 'work_date', 'created_at', 'id')
 
     def update(self, request, *args, **kwargs):
         app = self.get_object()
