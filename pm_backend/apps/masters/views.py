@@ -1292,6 +1292,94 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     ordering_fields = ['step_no']
     ordering = ['routing', 'step_no']
 
+    def _resolve_sync_target_bom(self, step: RoutingStep):
+        parent_code = str(getattr(step, 'remark', '') or '').strip()
+        if not parent_code:
+            return None
+
+        base_qs = BOM.objects.filter(
+            parent_product__product_code=parent_code,
+            is_active=True,
+        )
+        if not base_qs.exists():
+            return None
+
+        ref_date = None
+        routing = getattr(step, 'routing', None)
+        if routing and getattr(routing, 'valid_from_datetime', None):
+            ref_date = routing.valid_from_datetime.date()
+
+        if ref_date:
+            effective_qs = base_qs.filter(
+                valid_from__lte=ref_date
+            ).filter(
+                Q(valid_to__isnull=True) | Q(valid_to__gte=ref_date)
+            )
+            target = effective_qs.order_by('-valid_from', '-id').first()
+            if target:
+                return target
+
+        return base_qs.order_by('-valid_from', '-id').first()
+
+    def _select_sync_target_items(self, step: RoutingStep, bom: BOM):
+        qs = BOMItem.objects.filter(
+            bom_id=bom.id,
+            child_product_id=step.output_product_id,
+        )
+        if not qs.exists():
+            return qs
+
+        exact = qs.filter(process_id=step.process_id, line_id=step.line_id)
+        if exact.exists():
+            return exact
+
+        if step.process_id:
+            process_matched = qs.filter(process_id=step.process_id)
+            if process_matched.exists():
+                return process_matched
+
+        if step.line_id:
+            line_matched = qs.filter(line_id=step.line_id)
+            if line_matched.exists():
+                return line_matched
+
+        return qs
+
+    def _sync_step_fields_to_bom(self, step: RoutingStep, field_names):
+        if not step.output_product_id:
+            return
+
+        bom = self._resolve_sync_target_bom(step)
+        if not bom:
+            return
+
+        items = self._select_sync_target_items(step, bom)
+        for item in items:
+            changed_fields = []
+
+            if 'lead_time_days' in field_names:
+                step_lt = int(getattr(step, 'lead_time_days', 0) or 0)
+                item_lt = int(getattr(item, 'lead_time_days', 0) or 0)
+                if item_lt != step_lt:
+                    item.lead_time_days = step_lt
+                    changed_fields.append('lead_time_days')
+
+            if 'duration_min' in field_names and getattr(step, 'time_unit', None) == 'MINUTE':
+                step_duration = int(step.duration_min) if step.duration_min is not None else None
+                item_duration = int(item.duration_min) if item.duration_min is not None else None
+                if item_duration != step_duration:
+                    item.duration_min = step_duration
+                    changed_fields.append('duration_min')
+
+            if changed_fields:
+                item.save(update_fields=changed_fields + ['updated_at'])
+
+    def perform_update(self, serializer):
+        sync_fields = [key for key in ('lead_time_days', 'duration_min') if key in serializer.validated_data]
+        step = serializer.save()
+        if sync_fields:
+            self._sync_step_fields_to_bom(step, sync_fields)
+
 
 class RoutingStepMaterialViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = RoutingStepMaterial.objects.all().select_related('routing_step', 'component')

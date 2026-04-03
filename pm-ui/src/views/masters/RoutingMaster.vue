@@ -156,7 +156,26 @@
                   <td>{{ step.output_product_code || '-' }}</td>
                   <td>{{ isRepresentativePart(step) ? '○' : '' }}</td>
                   <td>{{ displayTimeUnit(step.time_unit) }}</td>
-                  <td>{{ step.lead_time_days ?? '' }}</td>
+                  <td>
+                    <div class="duration-editor">
+                      <input
+                        v-model.number="leadTimeDraftByStepId[step.id]"
+                        type="number"
+                        min="0"
+                        step="1"
+                        class="duration-input"
+                        :disabled="!canEdit || savingLeadTimeStepId === step.id"
+                        @keydown.enter.prevent="saveLeadTime(step)"
+                      />
+                      <button
+                        class="duration-save-btn"
+                        :disabled="!canEdit || !isLeadTimeDirty(step) || savingLeadTimeStepId === step.id"
+                        @click="saveLeadTime(step)"
+                      >
+                        {{ savingLeadTimeStepId === step.id ? '保存中' : '保存' }}
+                      </button>
+                    </div>
+                  </td>
                   <td>
                     <div class="duration-editor">
                       <template v-if="isMinuteStep(step)">
@@ -288,6 +307,8 @@ const errorMessage = ref('')
 const stepLoadToken = ref(0)
 const durationDraftByStepId = ref({})
 const savingDurationStepId = ref(null)
+const leadTimeDraftByStepId = ref({})
+const savingLeadTimeStepId = ref(null)
 const routingHeaderDraft = ref({
   is_default: false,
   is_active: true,
@@ -575,6 +596,14 @@ const resetDurationDrafts = (stepList) => {
   durationDraftByStepId.value = draftMap
 }
 
+const resetLeadTimeDrafts = (stepList) => {
+  const draftMap = {}
+  stepList.forEach((step) => {
+    draftMap[step.id] = step.lead_time_days ?? 0
+  })
+  leadTimeDraftByStepId.value = draftMap
+}
+
 const isMinuteStep = (step) => step?.time_unit === 'MINUTE'
 
 const parseDuration = (value) => {
@@ -585,6 +614,23 @@ const parseDuration = (value) => {
   return num
 }
 
+const parseLeadTime = (value) => {
+  if (value === '' || value === null || value === undefined) return null
+  const num = Number(value)
+  if (!Number.isFinite(num) || !Number.isInteger(num)) return null
+  if (num < 0) return null
+  return num
+}
+
+const isLeadTimeDirty = (step) => {
+  const draft = leadTimeDraftByStepId.value[step.id]
+  const current = step.lead_time_days
+  if (draft === '' || draft === null || draft === undefined) {
+    return !(current === '' || current === null || current === undefined)
+  }
+  return String(draft) !== String(current ?? '')
+}
+
 const isDurationDirty = (step) => {
   const draft = durationDraftByStepId.value[step.id]
   const current = step.duration_min
@@ -592,6 +638,33 @@ const isDurationDirty = (step) => {
     return !(current === '' || current === null || current === undefined)
   }
   return String(draft) !== String(current ?? '')
+}
+
+const saveLeadTime = async (step) => {
+  if (!canEdit.value || !step?.id) return
+  if (!isLeadTimeDirty(step)) return
+
+  const leadTime = parseLeadTime(leadTimeDraftByStepId.value[step.id])
+  if (leadTime === null) {
+    alert('LT(日)は0以上の整数で入力してください。')
+    return
+  }
+
+  savingLeadTimeStepId.value = step.id
+  errorMessage.value = ''
+  try {
+    await api.routings.patchRoutingStep(step.id, { lead_time_days: leadTime })
+    step.lead_time_days = leadTime
+    leadTimeDraftByStepId.value[step.id] = leadTime
+  } catch (error) {
+    console.error('LT更新エラー:', error)
+    const detail = error?.response?.data?.detail || 'LT(日)の更新に失敗しました'
+    alert(detail)
+  } finally {
+    if (savingLeadTimeStepId.value === step.id) {
+      savingLeadTimeStepId.value = null
+    }
+  }
 }
 
 const saveDuration = async (step) => {
@@ -703,6 +776,7 @@ const fetchStepsAndMaterials = async (routingId) => {
     if (stepLoadToken.value !== token) return
     steps.value = stepList
     resetDurationDrafts(stepList)
+    resetLeadTimeDrafts(stepList)
 
     // ルーティングID一括取得（ステップ数分のN+1リクエストを回避）
     // routing 指定時はサーバー側でページネーション無効化のため page_size 不要
@@ -760,6 +834,7 @@ watch(selectedRoutingId, async (routingId) => {
     bomQuantityByChildId.value = {}
     representativeChildProductIds.value = new Set()
     durationDraftByStepId.value = {}
+    leadTimeDraftByStepId.value = {}
     processFilter.value = ''
     return
   }
