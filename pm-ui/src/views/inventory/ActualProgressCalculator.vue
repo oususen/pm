@@ -197,6 +197,8 @@ const demandRows = ref([]);
 const workdayMap = ref(new Map());
 const workdayLoaded = ref(false);
 const workdayLoading = ref(false);
+const customerWorkdayMaps = new Map();
+const customerWorkdayLoading = new Map();
 
 const toNum = (value, fallback = 0) => {
   const n = Number(value);
@@ -225,6 +227,16 @@ const formatDate = (dateObj) => {
   const m = String(dateObj.getUTCMonth() + 1).padStart(2, "0");
   const d = String(dateObj.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
+};
+
+const normalizeDateString = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const datePart = raw.split(" ")[0].split("T")[0];
+  const normalized = datePart.replaceAll("/", "-");
+  const parsed = parseDate(normalized);
+  if (!parsed) return "";
+  return formatDate(parsed);
 };
 
 const addDays = (dateStr, days) => {
@@ -261,6 +273,32 @@ const addWorkingDays = (dateStr, days) => {
   while (remaining > 0) {
     cursor = addDays(cursor, step);
     if (isWorkingDay(cursor)) remaining -= 1;
+  }
+  return cursor;
+};
+
+const isWorkingDayByCalendar = (dateStr, calendarId = null) => {
+  if (calendarId && customerWorkdayMaps.has(calendarId)) {
+    const map = customerWorkdayMaps.get(calendarId);
+    const defined = map?.get(dateStr);
+    if (typeof defined === "boolean") return defined;
+  }
+  return isWorkingDay(dateStr);
+};
+
+const addWorkingDaysByCalendar = (dateStr, days, calendarId = null) => {
+  const base = parseDate(dateStr);
+  if (!base) return "";
+  const delta = Number(days || 0);
+  if (delta === 0) return formatDate(base);
+
+  const step = delta > 0 ? 1 : -1;
+  let remaining = Math.abs(delta);
+  let cursor = formatDate(base);
+
+  while (remaining > 0) {
+    cursor = addDays(cursor, step);
+    if (isWorkingDayByCalendar(cursor, calendarId)) remaining -= 1;
   }
   return cursor;
 };
@@ -304,6 +342,41 @@ const ensureWorkdayCalendar = async () => {
   } finally {
     workdayLoaded.value = true;
     workdayLoading.value = false;
+  }
+};
+
+const ensureCustomerWorkdayCalendar = async (calendarId) => {
+  if (!calendarId) return;
+  if (customerWorkdayMaps.has(calendarId)) return;
+  if (customerWorkdayLoading.has(calendarId)) {
+    await customerWorkdayLoading.get(calendarId);
+    return;
+  }
+
+  const promise = (async () => {
+    try {
+      const dayRes = await api.calendars.getCalendarDays(calendarId, { page_size: 5000 });
+      const dayRows = normalizeList(dayRes.data);
+      const map = new Map();
+      dayRows.forEach((day) => {
+        const dateStr = String(day.target_date || "");
+        if (!dateStr) return;
+        if (day.is_working_day === true || day.is_working_day === false) {
+          map.set(dateStr, Boolean(day.is_working_day));
+        }
+      });
+      customerWorkdayMaps.set(calendarId, map);
+    } catch (e) {
+      console.error("顧客カレンダ取得エラー:", e);
+      customerWorkdayMaps.set(calendarId, new Map());
+    }
+  })();
+
+  customerWorkdayLoading.set(calendarId, promise);
+  try {
+    await promise;
+  } finally {
+    customerWorkdayLoading.delete(calendarId);
   }
 };
 
@@ -379,7 +452,6 @@ const buildAncestorsFromTree = (parents, productByCode, baseSelfLtDays = 0) => {
       if (existing) {
         existing.conversionFactor = toRound3(existing.conversionFactor + nodeFactor);
         existing.cumulativeLtDays = Math.max(existing.cumulativeLtDays, nodeCumulativeLt);
-        existing.selfLtDays = Math.max(existing.selfLtDays || 0, nodeSelfLtDays);
         existing.depth = Math.min(existing.depth, depth);
         existing.isFinal = existing.isFinal || isFinal;
         if (!existing.parentId && item?.parent_product_id) existing.parentId = Number(item.parent_product_id);
@@ -391,7 +463,6 @@ const buildAncestorsFromTree = (parents, productByCode, baseSelfLtDays = 0) => {
           parentName: item?.parent_product_name || parentMeta?.product_name || "",
           conversionFactor: nodeFactor,
           cumulativeLtDays: nodeCumulativeLt,
-          selfLtDays: nodeSelfLtDays,
           depth,
           isFinal,
         });
@@ -407,14 +478,10 @@ const buildAncestorsFromTree = (parents, productByCode, baseSelfLtDays = 0) => {
   return Array.from(ancestorMap.values());
 };
 
-const resolveDemandQty = (item) => {
-  const forecast = toNum(item?.forecast_qty);
-  const firm = toNum(item?.firm_qty);
-  if (item?.is_shifted && firm > 0 && forecast > 0) return firm + forecast;
-  if (firm > 0) return firm;
-  if (forecast > 0) return forecast;
-  return 0;
-};
+const resolveOrderLineQty = (item) => toNum(item?.quantity || 0);
+
+const resolveOrderType = (item) =>
+  String(item?.effective_order_type || item?.order_type || "").trim().toUpperCase();
 
 const fetchProductsByCodes = async (codes) => {
   const uniqueCodes = Array.from(new Set(codes.map((code) => normalizeCode(code)).filter(Boolean)));
@@ -452,12 +519,11 @@ const applyTargetPartData = async () => {
       .filter((row) => row.isFinal)
       .sort((a, b) => a.parentCode.localeCompare(b.parentCode));
 
-      parentRows.value = finalParents.map((row) => ({
+    parentRows.value = finalParents.map((row) => ({
       parentId: row.parentId,
       parentCode: row.parentCode,
       parentName: row.parentName,
       cumulativeLtDays: toNum(row.cumulativeLtDays),
-      selfLtDays: toNum(row.selfLtDays || 0),
     }));
 
     const stockProductIds = [targetPart.id, ...ancestors.map((row) => row.parentId)]
@@ -511,30 +577,72 @@ const applyTargetPartData = async () => {
         const parentId = Number(row.parentId || 0) || null;
         const ltDays = toNum(row.cumulativeLtDays || 0);
         if (!parentId || ltDays <= 0) return;
-        const demandStart = addWorkingDays(baseDate.value, 1);
-        const demandEnd = addWorkingDays(baseDate.value, ltDays);
-        const parentSelfLtDays = Math.max(0, Number(row.selfLtDays || 0));
-        const fetchStart = addWorkingDays(demandStart, -parentSelfLtDays);
-        const fetchEnd = addWorkingDays(demandEnd, -parentSelfLtDays);
-        const demandRes = await api.lineDemands.list({
+        const fetchStart = addDays(baseDate.value, 1);
+        const fetchEnd = addDays(baseDate.value, Math.max(ltDays, 0) + 45);
+        const orderRes = await api.orders.listOrderLines({
           product: parentId,
-          plan_date__gte: fetchStart,
-          plan_date__lte: fetchEnd,
+          order_type: "FIRM,FORECAST",
+          due_date__gte: fetchStart,
+          due_date__lte: fetchEnd,
           page_size: 5000,
         });
-        const demandList = normalizeList(demandRes.data);
-        demandList.forEach((item) => {
-          const planDate = String(item.plan_date || "");
-          if (!planDate) return;
-          const demandLeadDays = Math.max(0, Number(item.lead_time_days || 0));
-          const orderDate = addWorkingDays(planDate, demandLeadDays);
-          if (!orderDate) return;
-          if (orderDate < demandStart || orderDate > demandEnd) return;
-          const qty = resolveDemandQty(item);
+
+        const orderLines = normalizeList(orderRes.data);
+        const calendarIds = Array.from(
+          new Set(
+            orderLines
+              .map((item) => Number(item?.customer_calendar_id || 0))
+              .filter((id) => Number.isFinite(id) && id > 0)
+          )
+        );
+        await Promise.all(calendarIds.map((id) => ensureCustomerWorkdayCalendar(id)));
+
+        const preferredQtyByCustomerDate = new Map();
+        const windowByCalendar = new Map();
+
+        orderLines.forEach((item) => {
+          const dueDate = normalizeDateString(item?.due_date);
+          if (!dueDate) return;
+
+          const orderType = resolveOrderType(item);
+          if (orderType !== "FIRM" && orderType !== "FORECAST") return;
+
+          const qty = resolveOrderLineQty(item);
           if (qty === 0) return;
-          const key = `${row.parentCode}__${orderDate}`;
-          const cur = demandAgg.get(key) || 0;
-          demandAgg.set(key, toRound3(cur + qty));
+
+          const calendarId = Number(item?.customer_calendar_id || 0) || 0;
+          if (!windowByCalendar.has(calendarId)) {
+            windowByCalendar.set(calendarId, {
+              start: addWorkingDaysByCalendar(baseDate.value, 1, calendarId || null),
+              end: addWorkingDaysByCalendar(baseDate.value, ltDays, calendarId || null),
+            });
+          }
+          const win = windowByCalendar.get(calendarId);
+          if (!win?.start || !win?.end) return;
+          if (dueDate < win.start || dueDate > win.end) return;
+
+          const customerCode = normalizeCode(item?.customer_code) || "_";
+          const shipToCode = normalizeCode(item?.ship_to_code) || "_";
+          const key = `${customerCode}__${shipToCode}__${dueDate}`;
+          const cur = preferredQtyByCustomerDate.get(key) || { firm: 0, forecast: 0 };
+          if (orderType === "FIRM") {
+            cur.firm = toRound3(cur.firm + qty);
+          } else {
+            cur.forecast = toRound3(cur.forecast + qty);
+          }
+          preferredQtyByCustomerDate.set(key, cur);
+        });
+
+        preferredQtyByCustomerDate.forEach((v, key) => {
+          const sepIdx = key.lastIndexOf("__");
+          const rawOrderDate = sepIdx >= 0 ? key.slice(sepIdx + 2) : "";
+          const orderDate = normalizeDateString(rawOrderDate);
+          if (!orderDate) return;
+          const selectedQty = v.firm > 0 ? v.firm : v.forecast;
+          if (selectedQty === 0) return;
+          const aggKey = `${row.parentCode}__${orderDate}`;
+          const cur = demandAgg.get(aggKey) || 0;
+          demandAgg.set(aggKey, toRound3(cur + selectedQty));
         });
       })
     );
@@ -598,7 +706,7 @@ const totalStockConverted = computed(() =>
 );
 
 const isDemandInWindow = (row) => {
-  const orderDate = String(row.orderDate || "");
+  const orderDate = normalizeDateString(row?.orderDate);
   if (!orderDate) return false;
   const lt = resolveParentLt(row.parentCode);
   if (lt <= 0) return false;
@@ -629,7 +737,7 @@ const actualProgress = computed(() =>
 );
 
 const addParent = () => {
-  parentRows.value.push({ parentCode: "", parentName: "", cumulativeLtDays: 0, selfLtDays: 0 });
+  parentRows.value.push({ parentCode: "", parentName: "", cumulativeLtDays: 0 });
 };
 
 const removeParent = (index) => {

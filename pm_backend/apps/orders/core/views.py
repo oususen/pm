@@ -6,6 +6,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 import django_filters
+from django.db.models import Q
 
 from .models import (
     Order,
@@ -68,6 +69,9 @@ class OrderViewSet(viewsets.ModelViewSet):
 
 
 class OrderLineFilter(django_filters.FilterSet):
+    due_date__gte = django_filters.DateFilter(field_name='due_date', lookup_expr='gte')
+    due_date__lte = django_filters.DateFilter(field_name='due_date', lookup_expr='lte')
+    order_type = django_filters.CharFilter(method='filter_order_type')
     customer_code = django_filters.CharFilter(
         field_name='order__customer__customer_code', lookup_expr='endswith'
     )
@@ -80,7 +84,22 @@ class OrderLineFilter(django_filters.FilterSet):
 
     class Meta:
         model = OrderLine
-        fields = ['order', 'product', 'due_date', 'customer_code', 'product_code', 'ship_to_code']
+        fields = [
+            'order', 'product', 'due_date', 'due_date__gte', 'due_date__lte',
+            'order_type', 'customer_code', 'product_code', 'ship_to_code'
+        ]
+
+    def filter_order_type(self, queryset, name, value):
+        if not value:
+            return queryset
+        raw_values = [v.strip().upper() for v in str(value).split(',') if v.strip()]
+        valid_values = [v for v in raw_values if v in {'FIRM', 'FORECAST'}]
+        if not valid_values:
+            return queryset.none()
+        return queryset.filter(
+            Q(order_type__in=valid_values) |
+            (Q(order_type__isnull=True) & Q(order__order_type__in=valid_values))
+        )
 
 
 class OrderLineViewSet(viewsets.ModelViewSet):

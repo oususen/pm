@@ -7,17 +7,19 @@ class OrderLineSerializer(serializers.ModelSerializer):
     """Order line serializer"""
     product_name = serializers.SerializerMethodField()
     order_type_display = serializers.CharField(source='get_order_type_display', read_only=True)
+    effective_order_type = serializers.SerializerMethodField()
     customer_code = serializers.CharField(source='order.customer.customer_code', read_only=True)
     customer_name = serializers.CharField(source='order.customer.customer_name', read_only=True)
+    customer_calendar_id = serializers.IntegerField(source='order.customer.calendar_id', read_only=True)
     order_no = serializers.CharField(source='order.order_no', read_only=True)
 
     class Meta:
         model = OrderLine
         fields = [
             'id', 'order', 'line_no', 'product', 'product_code', 'product_name',
-            'order_type', 'order_type_display',
+            'order_type', 'order_type_display', 'effective_order_type',
             'quantity', 'actual_shipment_qty', 'due_date', 'plant_code', 'ship_to_code', 'remark',
-            'customer_code', 'customer_name', 'order_no',
+            'customer_code', 'customer_name', 'customer_calendar_id', 'order_no',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -25,6 +27,13 @@ class OrderLineSerializer(serializers.ModelSerializer):
     def get_product_name(self, obj):
         if obj.product:
             return obj.product.product_name
+        return None
+
+    def get_effective_order_type(self, obj):
+        if obj.order_type:
+            return obj.order_type
+        if obj.order and obj.order.order_type:
+            return obj.order.order_type
         return None
 
 
