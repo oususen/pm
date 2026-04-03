@@ -1322,6 +1322,34 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         return base_qs.order_by('-valid_from', '-id').first()
 
     def _select_sync_target_items(self, step: RoutingStep, bom: BOM):
+        is_final_step = str(getattr(step, 'hierarchy_path', '') or '').strip().lower() == 'final'
+
+        if is_final_step:
+            base_qs = BOMItem.objects.filter(
+                bom_id=bom.id,
+                sourcing_type__in=['MAKE', 'SUBCON'],
+            )
+
+            exact = base_qs.filter(process_id=step.process_id, line_id=step.line_id)
+            if exact.exists():
+                return exact
+
+            if step.process_id:
+                process_matched = base_qs.filter(process_id=step.process_id)
+                if process_matched.count() == 1:
+                    return process_matched
+
+            if step.line_id:
+                line_matched = base_qs.filter(line_id=step.line_id)
+                if line_matched.count() == 1:
+                    return line_matched
+
+            child_exact = base_qs.filter(child_product_id=step.output_product_id)
+            if child_exact.exists():
+                return child_exact
+
+            return base_qs.none()
+
         qs = BOMItem.objects.filter(
             bom_id=bom.id,
             child_product_id=step.output_product_id,
