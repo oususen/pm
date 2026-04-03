@@ -379,6 +379,7 @@ const buildAncestorsFromTree = (parents, productByCode, baseSelfLtDays = 0) => {
       if (existing) {
         existing.conversionFactor = toRound3(existing.conversionFactor + nodeFactor);
         existing.cumulativeLtDays = Math.max(existing.cumulativeLtDays, nodeCumulativeLt);
+        existing.selfLtDays = Math.max(existing.selfLtDays || 0, nodeSelfLtDays);
         existing.depth = Math.min(existing.depth, depth);
         existing.isFinal = existing.isFinal || isFinal;
         if (!existing.parentId && item?.parent_product_id) existing.parentId = Number(item.parent_product_id);
@@ -390,6 +391,7 @@ const buildAncestorsFromTree = (parents, productByCode, baseSelfLtDays = 0) => {
           parentName: item?.parent_product_name || parentMeta?.product_name || "",
           conversionFactor: nodeFactor,
           cumulativeLtDays: nodeCumulativeLt,
+          selfLtDays: nodeSelfLtDays,
           depth,
           isFinal,
         });
@@ -455,6 +457,7 @@ const applyTargetPartData = async () => {
       parentCode: row.parentCode,
       parentName: row.parentName,
       cumulativeLtDays: toNum(row.cumulativeLtDays),
+      selfLtDays: toNum(row.selfLtDays || 0),
     }));
 
     const stockProductIds = [targetPart.id, ...ancestors.map((row) => row.parentId)]
@@ -510,16 +513,23 @@ const applyTargetPartData = async () => {
         if (!parentId || ltDays <= 0) return;
         const demandStart = addWorkingDays(baseDate.value, 1);
         const demandEnd = addWorkingDays(baseDate.value, ltDays);
+        const parentSelfLtDays = Math.max(0, Number(row.selfLtDays || 0));
+        const fetchStart = addWorkingDays(demandStart, -parentSelfLtDays);
+        const fetchEnd = addWorkingDays(demandEnd, -parentSelfLtDays);
         const demandRes = await api.lineDemands.list({
           product: parentId,
-          plan_date__gte: demandStart,
-          plan_date__lte: demandEnd,
+          plan_date__gte: fetchStart,
+          plan_date__lte: fetchEnd,
           page_size: 5000,
         });
         const demandList = normalizeList(demandRes.data);
         demandList.forEach((item) => {
-          const orderDate = String(item.plan_date || "");
+          const planDate = String(item.plan_date || "");
+          if (!planDate) return;
+          const demandLeadDays = Math.max(0, Number(item.lead_time_days || 0));
+          const orderDate = addWorkingDays(planDate, demandLeadDays);
           if (!orderDate) return;
+          if (orderDate < demandStart || orderDate > demandEnd) return;
           const qty = resolveDemandQty(item);
           if (qty === 0) return;
           const key = `${row.parentCode}__${orderDate}`;
@@ -619,7 +629,7 @@ const actualProgress = computed(() =>
 );
 
 const addParent = () => {
-  parentRows.value.push({ parentCode: "", parentName: "", cumulativeLtDays: 0 });
+  parentRows.value.push({ parentCode: "", parentName: "", cumulativeLtDays: 0, selfLtDays: 0 });
 };
 
 const removeParent = (index) => {
