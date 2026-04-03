@@ -115,6 +115,152 @@ class BOMService:
 
         return 0
 
+    def _resolve_time_unit_lt_days(self, time_unit: Any, lead_time_days: Any, duration_min: Any) -> Optional[int]:
+        """time_unitに応じてLT(日)を解決する。"""
+        if time_unit == 'DAY':
+            return max(int(lead_time_days or 0), 0)
+        if time_unit == 'MINUTE':
+            return self._convert_minute_duration_to_lt_days(duration_min)
+        return None
+
+    def _resolve_where_used_parent_context(
+        self,
+        parent_product: Product,
+        context_cache: Optional[Dict[Any, Any]] = None,
+        reference_date=None,
+    ) -> Dict[str, Any]:
+        """
+        where-used行で表示する親品の工程・ライン・自LTを解決する。
+
+        優先順:
+        1) 親品を出力する有効RoutingStep
+        2) 親品を子に持つ有効BOMItem（次工程側の定義）
+        3) 親品の有効ルーティング全体から自LTを推定
+        4) Productの標準LT
+        """
+        parent_id = getattr(parent_product, 'id', None)
+        cache_key = ('where_used_parent_ctx', parent_id, reference_date)
+        if context_cache is not None and cache_key in context_cache:
+            return context_cache[cache_key]
+
+        context = {
+            'line_id': getattr(parent_product, 'line_id', None),
+            'line_code': getattr(getattr(parent_product, 'line', None), 'line_code', None),
+            'line_name': getattr(getattr(parent_product, 'line', None), 'line_name', None),
+            'line_type': getattr(getattr(parent_product, 'line', None), 'line_type', None),
+            'process_id': getattr(parent_product, 'process_id', None),
+            'process_code': getattr(getattr(parent_product, 'process', None), 'process_code', None),
+            'process_name': getattr(getattr(parent_product, 'process', None), 'process_name', None),
+            'self_lt_days': None,
+        }
+
+        # 1) 親品の有効ルーティングを1本解決
+        parent_routing_key = ('where_used_parent_routing', parent_id, reference_date)
+        if context_cache is not None and parent_routing_key in context_cache:
+            parent_routing = context_cache[parent_routing_key]
+        else:
+            parent_routing = resolve_effective_routing(parent_id, reference=reference_date)
+            if context_cache is not None:
+                context_cache[parent_routing_key] = parent_routing
+
+        # 2) 親品の実工程（有効ルーティング内の出力ステップ）を最優先
+        parent_step_key = ('where_used_parent_step', parent_id, reference_date)
+        if context_cache is not None and parent_step_key in context_cache:
+            parent_step = context_cache[parent_step_key]
+        else:
+            parent_step = None
+            if parent_routing is not None:
+                parent_step = (
+                    RoutingStep.objects
+                    .filter(routing_id=parent_routing.id)
+                    .filter(
+                        Q(output_product_id=parent_id)
+                        | Q(output_product_id__isnull=True)
+                    )
+                    .select_related('line', 'process')
+                    .order_by('-step_no', '-id')
+                    .first()
+                )
+                if parent_step is None:
+                    parent_step = (
+                        RoutingStep.objects
+                        .filter(routing_id=parent_routing.id)
+                        .select_related('line', 'process')
+                        .order_by('-step_no', '-id')
+                        .first()
+                    )
+            if context_cache is not None:
+                context_cache[parent_step_key] = parent_step
+
+        if parent_step is not None:
+            step_line = getattr(parent_step, 'line', None)
+            step_process = getattr(parent_step, 'process', None)
+            if step_line is not None:
+                context['line_id'] = parent_step.line_id
+                context['line_code'] = step_line.line_code
+                context['line_name'] = step_line.line_name
+                context['line_type'] = step_line.line_type
+            if step_process is not None:
+                context['process_id'] = parent_step.process_id
+                context['process_code'] = step_process.process_code
+                context['process_name'] = step_process.process_name
+            # where-usedの自LTは工程一覧の「LT(日)」をそのまま使う
+            context['self_lt_days'] = max(int(getattr(parent_step, 'lead_time_days', 0) or 0), 0)
+
+        # 3) 親品を子に持つBOMItem（次工程）を補完情報として使用
+        parent_item_key = ('where_used_parent_item', parent_id)
+        if context_cache is not None and parent_item_key in context_cache:
+            parent_as_child_item = context_cache[parent_item_key]
+        else:
+            parent_as_child_item = (
+                BOMItem.objects
+                .filter(child_product_id=parent_id, bom__is_active=True)
+                .select_related('line', 'process')
+                .order_by('-bom__valid_from', '-bom_id', '-id')
+                .first()
+            )
+            if context_cache is not None:
+                context_cache[parent_item_key] = parent_as_child_item
+
+        if parent_as_child_item is not None:
+            item_line = getattr(parent_as_child_item, 'line', None)
+            item_process = getattr(parent_as_child_item, 'process', None)
+            if not context.get('line_id') and item_line is not None:
+                context['line_id'] = parent_as_child_item.line_id
+                context['line_code'] = item_line.line_code
+                context['line_name'] = item_line.line_name
+                context['line_type'] = item_line.line_type
+            if not context.get('process_id') and item_process is not None:
+                context['process_id'] = parent_as_child_item.process_id
+                context['process_code'] = item_process.process_code
+                context['process_name'] = item_process.process_name
+            if context['self_lt_days'] is None:
+                context['self_lt_days'] = max(int(getattr(parent_as_child_item, 'lead_time_days', 0) or 0), 0)
+
+        # 4) Product.self_lt_days（既存保持値）をフォールバックで利用
+        if context['self_lt_days'] is None and getattr(parent_product, 'self_lt_days', None) is not None:
+            context['self_lt_days'] = max(int(parent_product.self_lt_days or 0), 0)
+
+        # 5) まだ未設定なら有効ルーティング全体のLT(日)合計を推定値として利用
+        if context['self_lt_days'] is None:
+            if parent_routing is not None:
+                total_self_lt = 0
+                has_step = False
+                for step in parent_routing.steps.all():
+                    step_lt = max(int(getattr(step, 'lead_time_days', 0) or 0), 0)
+                    has_step = True
+                    total_self_lt += step_lt
+                if has_step:
+                    context['self_lt_days'] = max(int(total_self_lt), 0)
+
+        # 6) 最終フォールバック
+        if context['self_lt_days'] is None and getattr(parent_product, 'standard_lt_days', None) is not None:
+            context['self_lt_days'] = max(int(parent_product.standard_lt_days or 0), 0)
+
+        if context_cache is not None:
+            context_cache[cache_key] = context
+        return context
+
     def calculate_intermediate_lt(
         self,
         product_id: int,
@@ -352,11 +498,22 @@ class BOMService:
         items = BOMItem.objects.filter(
             child_product_id=product_id,
             bom__is_active=True
-        ).select_related('bom__parent_product', 'line', 'process', 'supplier')
+        ).select_related(
+            'bom__parent_product',
+            'bom__parent_product__line',
+            'bom__parent_product__process',
+            'line',
+            'process',
+            'supplier',
+        )
 
         results = []
         for item in items:
             parent = item.bom.parent_product
+            parent_context = self._resolve_where_used_parent_context(
+                parent,
+                context_cache=step_cache,
+            )
             resolved_lt_days = self._resolve_where_used_edge_lt_days(
                 item,
                 step_cache=step_cache,
@@ -366,12 +523,20 @@ class BOMService:
                 'parent_product_code': parent.product_code,
                 'parent_product_name': parent.product_name,
                 'category': parent.category,
+                'parent_self_lt_days': parent_context.get('self_lt_days'),
                 'quantity': float(item.quantity),
                 'lead_time_days': int(item.lead_time_days or 0),
                 'resolved_lead_time_days': int(resolved_lt_days or 0),
                 'time_unit': item.time_unit,
                 'sourcing_type': item.sourcing_type,
                 'is_final_product': parent.is_final_product,
+                'parent_line_id': parent_context.get('line_id'),
+                'parent_line_code': parent_context.get('line_code'),
+                'parent_line_name': parent_context.get('line_name'),
+                'parent_line_type': parent_context.get('line_type'),
+                'parent_process_id': parent_context.get('process_id'),
+                'parent_process_code': parent_context.get('process_code'),
+                'parent_process_name': parent_context.get('process_name'),
                 'line_id': item.line_id,
                 'line_code': item.line.line_code if item.line else None,
                 'line_name': item.line.line_name if item.line else None,
@@ -395,3 +560,90 @@ class BOMService:
             results.append(entry)
 
         return results
+
+    def get_where_used_self_info(
+        self,
+        product_id: int,
+        context_cache: Optional[Dict[Any, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """where-used表示用に検索対象製品自身の情報を返す。
+        検索品自身を output_product とする全ルーティングのステップから工程・ラインを取得する。
+        """
+        product = (
+            Product.objects
+            .filter(id=product_id)
+            .select_related('line', 'process')
+            .first()
+        )
+        if product is None:
+            return None
+
+        if context_cache is None:
+            context_cache = {}
+
+        # 検索品自身を output_product とするステップを探す（全ルーティングから）
+        self_step = (
+            RoutingStep.objects
+            .filter(output_product_id=product_id)
+            .filter(build_effective_routing_q(prefix='routing__'))
+            .select_related('line', 'process')
+            .order_by('-routing__valid_from_datetime', '-step_no', '-id')
+            .first()
+        )
+
+        # 見つからない場合は自分のルーティングから取得
+        if self_step is None:
+            own_routing = resolve_effective_routing(product_id)
+            if own_routing:
+                self_step = (
+                    RoutingStep.objects
+                    .filter(routing_id=own_routing.id)
+                    .select_related('line', 'process')
+                    .order_by('-step_no', '-id')
+                    .first()
+                )
+
+        # それでもない場合は _resolve_where_used_parent_context にフォールバック
+        if self_step is None:
+            context = self._resolve_where_used_parent_context(
+                product,
+                context_cache=context_cache,
+            )
+        else:
+            step_line = getattr(self_step, 'line', None)
+            step_process = getattr(self_step, 'process', None)
+            context = {
+                'line_id': self_step.line_id if step_line else getattr(product, 'line_id', None),
+                'line_code': getattr(step_line, 'line_code', None) or getattr(getattr(product, 'line', None), 'line_code', None),
+                'line_name': getattr(step_line, 'line_name', None) or getattr(getattr(product, 'line', None), 'line_name', None),
+                'line_type': getattr(step_line, 'line_type', None) or getattr(getattr(product, 'line', None), 'line_type', None),
+                'process_id': self_step.process_id if step_process else getattr(product, 'process_id', None),
+                'process_code': getattr(step_process, 'process_code', None) or getattr(getattr(product, 'process', None), 'process_code', None),
+                'process_name': getattr(step_process, 'process_name', None) or getattr(getattr(product, 'process', None), 'process_name', None),
+                'self_lt_days': max(int(getattr(self_step, 'lead_time_days', 0) or 0), 0),
+            }
+
+        line_type = context.get('line_type')
+        if line_type == 'PURCHASE' or product.category == 'PURCHASED':
+            sourcing_type = 'BUY'
+        elif line_type == 'OUTSOURCE':
+            sourcing_type = 'SUBCON'
+        else:
+            sourcing_type = 'MAKE'
+
+        return {
+            'product_id': product.id,
+            'product_code': product.product_code,
+            'product_name': product.product_name,
+            'category': product.category,
+            'is_final_product': bool(product.is_final_product),
+            'sourcing_type': sourcing_type,
+            'line_id': context.get('line_id'),
+            'line_code': context.get('line_code'),
+            'line_name': context.get('line_name'),
+            'line_type': context.get('line_type'),
+            'process_id': context.get('process_id'),
+            'process_code': context.get('process_code'),
+            'process_name': context.get('process_name'),
+            'self_lt_days': context.get('self_lt_days'),
+        }

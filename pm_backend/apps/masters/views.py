@@ -255,13 +255,16 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         recursive = request.query_params.get('recursive', 'false').lower() == 'true'
 
         service = BOMService()
-        results = service.get_where_used(product.id, recursive=recursive)
+        step_cache = {}
+        results = service.get_where_used(product.id, recursive=recursive, step_cache=step_cache)
+        self_info = service.get_where_used_self_info(product.id, context_cache=step_cache)
 
         return Response({
             'product_id': product.id,
             'product_code': product.product_code,
             'product_name': product.product_name,
             'recursive': recursive,
+            'self_info': self_info,
             'parents': results,
             'count': len(results),
         })

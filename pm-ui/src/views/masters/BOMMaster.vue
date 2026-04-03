@@ -611,10 +611,22 @@
                 <th>数量</th>
                 <th>調達区分</th>
                 <th>加工先</th>
+                <th>加工工程</th>
+                <th>自LT</th>
                 <th>最終品</th>
               </tr>
             </thead>
             <tbody>
+              <tr v-if="whereUsedSelfRow" class="self-row">
+                <td>★ {{ whereUsedSelfRow.parent_product_code }} - {{ whereUsedSelfRow.parent_product_name }}（検索品）</td>
+                <td>{{ getCategoryLabel(whereUsedSelfRow.category) }}</td>
+                <td>{{ whereUsedSelfRow.quantity }}</td>
+                <td>{{ getSourcingTypeLabel(whereUsedSelfRow.sourcing_type) }}</td>
+                <td>{{ formatWhereUsedDestination(whereUsedSelfRow) }}</td>
+                <td>{{ formatWhereUsedProcess(whereUsedSelfRow) }}</td>
+                <td>{{ formatWhereUsedSelfLt(whereUsedSelfRow) }}</td>
+                <td>{{ whereUsedSelfRow.is_final_product ? '最終品' : '' }}</td>
+              </tr>
               <template v-for="item in whereUsedResults" :key="item.parent_product_id">
                 <tr>
                   <td>{{ item.parent_product_code }} - {{ item.parent_product_name }}</td>
@@ -622,6 +634,8 @@
                   <td>{{ item.quantity }}</td>
                   <td>{{ getSourcingTypeLabel(item.sourcing_type) }}</td>
                   <td>{{ formatWhereUsedDestination(item) }}</td>
+                  <td>{{ formatWhereUsedProcess(item) }}</td>
+                  <td>{{ formatWhereUsedSelfLt(item) }}</td>
                   <td>{{ item.is_final_product ? '最終品' : '' }}</td>
                 </tr>
                 <!-- 再帰結果の子要素（インデント表示） -->
@@ -634,6 +648,8 @@
                     <td>{{ child.quantity }}</td>
                     <td>{{ getSourcingTypeLabel(child.sourcing_type) }}</td>
                     <td>{{ formatWhereUsedDestination(child) }}</td>
+                    <td>{{ formatWhereUsedProcess(child) }}</td>
+                    <td>{{ formatWhereUsedSelfLt(child) }}</td>
                     <td>{{ child.is_final_product ? '最終品' : '' }}</td>
                   </tr>
                 </template>
@@ -738,6 +754,7 @@ const whereUsedProductId = ref('')
 const whereUsedProductFilter = ref('')
 const whereUsedRecursive = ref(false)
 const whereUsedResults = ref([])
+const whereUsedSelfInfo = ref(null)
 const whereUsedLoading = ref(false)
 
 // BOMコピー用
@@ -1183,6 +1200,60 @@ const filteredWhereUsedProducts = computed(() => {
   )
 })
 
+const whereUsedSelfRow = computed(() => {
+  const src = whereUsedSelfInfo.value
+  const selectedProduct = findProductById(whereUsedProductId.value)
+  if (!src?.product_id && !selectedProduct) return null
+
+  if (src?.product_id) {
+    return {
+      parent_product_id: src.product_id,
+      parent_product_code: src.product_code,
+      parent_product_name: src.product_name,
+      category: src.category,
+      quantity: 1,
+      sourcing_type: src.sourcing_type || 'MAKE',
+      is_final_product: Boolean(src.is_final_product),
+      parent_line_id: src.line_id,
+      parent_line_code: src.line_code,
+      parent_line_name: src.line_name,
+      parent_line_type: src.line_type,
+      parent_process_id: src.process_id,
+      parent_process_code: src.process_code,
+      parent_process_name: src.process_name,
+      parent_self_lt_days: src.self_lt_days,
+    }
+  }
+
+  const lineObj = findLineById(selectedProduct?.line)
+  const processObj = findProcessById(selectedProduct?.process)
+  const lineType = lineObj?.line_type || ''
+  let sourcingType = 'MAKE'
+  if (lineType === 'PURCHASE' || selectedProduct?.category === 'PURCHASED') {
+    sourcingType = 'BUY'
+  } else if (lineType === 'OUTSOURCE') {
+    sourcingType = 'SUBCON'
+  }
+
+  return {
+    parent_product_id: selectedProduct.id,
+    parent_product_code: selectedProduct.product_code,
+    parent_product_name: selectedProduct.product_name,
+    category: selectedProduct.category,
+    quantity: 1,
+    sourcing_type: sourcingType,
+    is_final_product: Boolean(selectedProduct.is_final_product),
+    parent_line_id: selectedProduct.line ?? null,
+    parent_line_code: lineObj?.line_code || null,
+    parent_line_name: lineObj?.line_name || null,
+    parent_line_type: lineType || null,
+    parent_process_id: selectedProduct.process ?? null,
+    parent_process_code: processObj?.process_code || null,
+    parent_process_name: processObj?.process_name || null,
+    parent_self_lt_days: selectedProduct.self_lt_days,
+  }
+})
+
 const filteredCopyProducts = computed(() => {
   const keyword = copyProductFilter.value.trim().toLowerCase()
   let pool = products.value
@@ -1232,29 +1303,64 @@ const getLineType = (lineId) => {
 
 const getSourcingTypeLabel = (value) => sourcingTypeMap[value] || value
 
+const formatCodeName = (code, name) => {
+  if (code && name) return `${code} ${name}`
+  return code || name || ''
+}
+
+const findProductById = (productId) => {
+  if (!productId) return null
+  return products.value.find((product) => `${product.id}` === `${productId}`) || null
+}
+
+const findLineById = (lineId) => {
+  if (!lineId) return null
+  return lines.value.find((line) => `${line.id}` === `${lineId}`) || null
+}
+
+const findProcessById = (processId) => {
+  if (!processId) return null
+  return processes.value.find((process) => `${process.id}` === `${processId}`) || null
+}
+
 const formatWhereUsedDestination = (item) => {
   if (!item) return ''
-  const formatCodeName = (code, name) => {
-    if (code && name) return `${code} ${name}`
-    return code || name || ''
-  }
-  const lineLabel = formatCodeName(item.line_code, item.line_name)
+  const parentProduct = findProductById(item.parent_product_id)
+  const parentLineId = item.parent_line_id || parentProduct?.line || null
+  const parentLineObj = findLineById(parentLineId)
+  const parentLineLabel = formatCodeName(item.parent_line_code || parentLineObj?.line_code, item.parent_line_name || parentLineObj?.line_name)
   const supplierLabel = formatCodeName(item.supplier_code, item.supplier_name)
-  const processLabel = formatCodeName(item.process_code, item.process_name)
-  const lineType = item.line_type || getLineType(item.line_id)
+  const lineType = item.parent_line_type || parentLineObj?.line_type || item.line_type || getLineType(item.line_id)
 
   if (lineType === 'OUTSOURCE') {
-    return supplierLabel || lineLabel || processLabel
+    return supplierLabel || parentLineLabel || '-'
   }
 
   switch (item.sourcing_type) {
     case 'BUY':
-      return supplierLabel || lineLabel || processLabel
+      return supplierLabel || parentLineLabel || '-'
     case 'SUBCON':
-      return lineLabel || supplierLabel || processLabel
+      return parentLineLabel || supplierLabel || '-'
     default:
-      return lineLabel || processLabel || supplierLabel
+      return parentLineLabel || supplierLabel || '-'
   }
+}
+
+const formatWhereUsedProcess = (item) => {
+  if (!item) return '-'
+  const parentProduct = findProductById(item.parent_product_id)
+  const parentProcessId = item.parent_process_id || parentProduct?.process || null
+  const parentProcessObj = findProcessById(parentProcessId)
+  const parentProcessLabel = formatCodeName(item.parent_process_code || parentProcessObj?.process_code, item.parent_process_name || parentProcessObj?.process_name)
+  return parentProcessLabel || '-'
+}
+
+const formatWhereUsedSelfLt = (item) => {
+  if (!item) return '-'
+  const parentProduct = findProductById(item.parent_product_id)
+  const selfLt = item.parent_self_lt_days ?? parentProduct?.self_lt_days
+  if (selfLt === null || selfLt === undefined || selfLt === '') return '-'
+  return selfLt
 }
 
 const goToDetailPage = (bom) => {
@@ -1520,6 +1626,7 @@ const openWhereUsedDialog = () => {
   whereUsedProductFilter.value = ''
   whereUsedRecursive.value = false
   whereUsedResults.value = []
+  whereUsedSelfInfo.value = null
 }
 
 const closeWhereUsedDialog = () => {
@@ -1528,6 +1635,7 @@ const closeWhereUsedDialog = () => {
   whereUsedProductFilter.value = ''
   whereUsedRecursive.value = false
   whereUsedResults.value = []
+  whereUsedSelfInfo.value = null
 }
 
 // BOMコピー
@@ -1576,6 +1684,7 @@ const doCopyBOM = async () => {
 const fetchWhereUsed = async () => {
   if (!whereUsedProductId.value) {
     whereUsedResults.value = []
+    whereUsedSelfInfo.value = null
     return
   }
   whereUsedLoading.value = true
@@ -1584,11 +1693,42 @@ const fetchWhereUsed = async () => {
       whereUsedProductId.value,
       whereUsedRecursive.value
     )
+    if (response.data?.self_info) {
+      whereUsedSelfInfo.value = response.data.self_info
+    } else {
+      const selectedProduct = findProductById(whereUsedProductId.value)
+      const lineObj = findLineById(selectedProduct?.line)
+      const processObj = findProcessById(selectedProduct?.process)
+      const lineType = lineObj?.line_type || ''
+      let sourcingType = 'MAKE'
+      if (lineType === 'PURCHASE' || selectedProduct?.category === 'PURCHASED') {
+        sourcingType = 'BUY'
+      } else if (lineType === 'OUTSOURCE') {
+        sourcingType = 'SUBCON'
+      }
+      whereUsedSelfInfo.value = {
+        product_id: response.data?.product_id || selectedProduct?.id || null,
+        product_code: response.data?.product_code || selectedProduct?.product_code || '',
+        product_name: response.data?.product_name || selectedProduct?.product_name || '',
+        category: selectedProduct?.category || '',
+        is_final_product: Boolean(selectedProduct?.is_final_product),
+        sourcing_type: sourcingType,
+        line_id: selectedProduct?.line || null,
+        line_code: lineObj?.line_code || null,
+        line_name: lineObj?.line_name || null,
+        line_type: lineType || null,
+        process_id: selectedProduct?.process || null,
+        process_code: processObj?.process_code || null,
+        process_name: processObj?.process_name || null,
+        self_lt_days: selectedProduct?.self_lt_days ?? null,
+      }
+    }
     whereUsedResults.value = response.data.parents || []
   } catch (error) {
     console.error('逆展開取得エラー:', error)
     alert('逆展開データの取得に失敗しました')
     whereUsedResults.value = []
+    whereUsedSelfInfo.value = null
   } finally {
     whereUsedLoading.value = false
   }
