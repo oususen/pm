@@ -1358,19 +1358,12 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             if exact.exists():
                 return exact
 
+            # finalステップは誤同期を避けるため、process一致を必須にする
+            # （line単独一致フォールバックは別工程へ誤反映しやすい）
             if step.process_id:
                 process_matched = base_qs.filter(process_id=step.process_id)
-                if process_matched.count() == 1:
+                if process_matched.exists():
                     return process_matched
-
-            if step.line_id:
-                line_matched = base_qs.filter(line_id=step.line_id)
-                if line_matched.count() == 1:
-                    return line_matched
-
-            child_exact = base_qs.filter(child_product_id=step.output_product_id)
-            if child_exact.exists():
-                return child_exact
 
             return base_qs.none()
 
