@@ -9,6 +9,25 @@ from masters.services.routing_service import resolve_effective_routing, build_ef
 class BOMService:
     """BOM関連のサービスクラス"""
 
+    def _resolve_effective_parent_routing(
+        self,
+        parent_product_id: Optional[int],
+        step_cache: Optional[Dict[Any, Any]] = None,
+        reference_date=None,
+    ):
+        """親製品の有効ルーティングを1本解決する。"""
+        if not parent_product_id:
+            return None
+
+        cache_key = ('where_used_effective_parent_routing', parent_product_id, reference_date)
+        if step_cache is not None and cache_key in step_cache:
+            return step_cache[cache_key]
+
+        routing = resolve_effective_routing(parent_product_id, reference=reference_date)
+        if step_cache is not None:
+            step_cache[cache_key] = routing
+        return routing
+
     @staticmethod
     def _convert_minute_duration_to_lt_days(duration_min: Any) -> int:
         """
@@ -37,22 +56,39 @@ class BOMService:
         """
         parent_product = getattr(getattr(bom_item, 'bom', None), 'parent_product', None)
         is_final_parent = bool(parent_product and getattr(parent_product, 'is_final_product', False))
+        parent_id = getattr(parent_product, 'id', None)
+        parent_routing = self._resolve_effective_parent_routing(
+            parent_id,
+            step_cache=step_cache,
+            reference_date=reference_date,
+        )
+
         if is_final_parent:
             # 親製品（最終品）のルーティングからラインLTを取得
-            parent_id = getattr(parent_product, 'id', None)
-            if parent_id:
-                cache_key = ('final_parent', parent_id, reference_date)
+            if parent_id and parent_routing:
+                cache_key = ('final_parent', parent_routing.id, parent_id, reference_date)
                 if step_cache is not None and cache_key in step_cache:
                     parent_step = step_cache[cache_key]
                 else:
                     parent_step = (
                         RoutingStep.objects
-                        .filter(routing__product_id=parent_id)
-                        .filter(build_effective_routing_q(reference_date, prefix='routing__'))
+                        .filter(routing_id=parent_routing.id)
+                        .filter(
+                            Q(output_product_id=parent_id)
+                            | Q(output_product_id__isnull=True)
+                        )
                         .select_related('line')
-                        .order_by('step_no', 'id')
+                        .order_by('-step_no', '-id')
                         .first()
                     )
+                    if parent_step is None:
+                        parent_step = (
+                            RoutingStep.objects
+                            .filter(routing_id=parent_routing.id)
+                            .select_related('line')
+                            .order_by('-step_no', '-id')
+                            .first()
+                        )
                     if step_cache is not None:
                         step_cache[cache_key] = parent_step
                 if parent_step:
@@ -73,13 +109,18 @@ class BOMService:
         child_product_id = getattr(bom_item, 'child_product_id', None)
 
         if line_id and child_product_id:
-            cache_key = (line_id, child_product_id, reference_date)
+            cache_key = ('where_used_edge_step', parent_routing.id if parent_routing else None, line_id, child_product_id, reference_date)
             if step_cache is not None and cache_key in step_cache:
                 step = step_cache[cache_key]
             else:
+                step_qs = RoutingStep.objects.filter(line_id=line_id)
+                if parent_routing is not None:
+                    step_qs = step_qs.filter(routing_id=parent_routing.id)
+                else:
+                    step_qs = step_qs.filter(build_effective_routing_q(reference_date, prefix='routing__'))
+
                 step = (
-                    RoutingStep.objects.filter(line_id=line_id)
-                    .filter(build_effective_routing_q(reference_date, prefix='routing__'))
+                    step_qs
                     .filter(
                         (
                             # output_productが設定されている場合
@@ -473,6 +514,7 @@ class BOMService:
         recursive: bool = False,
         visited: Optional[set] = None,
         step_cache: Optional[Dict[Any, Any]] = None,
+        reference_date=None,
     ) -> List[Dict[str, Any]]:
         """
         逆展開：指定した製品がどの親製品で使われているかを取得
@@ -513,10 +555,12 @@ class BOMService:
             parent_context = self._resolve_where_used_parent_context(
                 parent,
                 context_cache=step_cache,
+                reference_date=reference_date,
             )
             resolved_lt_days = self._resolve_where_used_edge_lt_days(
                 item,
                 step_cache=step_cache,
+                reference_date=reference_date,
             )
             entry = {
                 'parent_product_id': parent.id,
@@ -555,6 +599,7 @@ class BOMService:
                     recursive=True,
                     visited=visited.copy(),
                     step_cache=step_cache,
+                    reference_date=reference_date,
                 )
 
             results.append(entry)
@@ -565,6 +610,7 @@ class BOMService:
         self,
         product_id: int,
         context_cache: Optional[Dict[Any, Any]] = None,
+        reference_date=None,
     ) -> Optional[Dict[str, Any]]:
         """where-used表示用に検索対象製品自身の情報を返す。
         検索品自身を output_product とする全ルーティングのステップから工程・ラインを取得する。
@@ -585,7 +631,7 @@ class BOMService:
         self_step = (
             RoutingStep.objects
             .filter(output_product_id=product_id)
-            .filter(build_effective_routing_q(prefix='routing__'))
+            .filter(build_effective_routing_q(reference_date, prefix='routing__'))
             .select_related('line', 'process')
             .order_by('-routing__valid_from_datetime', '-step_no', '-id')
             .first()
@@ -593,7 +639,7 @@ class BOMService:
 
         # 見つからない場合は自分のルーティングから取得
         if self_step is None:
-            own_routing = resolve_effective_routing(product_id)
+            own_routing = resolve_effective_routing(product_id, reference=reference_date)
             if own_routing:
                 self_step = (
                     RoutingStep.objects
@@ -608,6 +654,7 @@ class BOMService:
             context = self._resolve_where_used_parent_context(
                 product,
                 context_cache=context_cache,
+                reference_date=reference_date,
             )
         else:
             step_line = getattr(self_step, 'line', None)

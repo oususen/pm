@@ -352,7 +352,15 @@ const collectWhereUsedCodes = (parents, set = new Set()) => {
   return set;
 };
 
-const buildAncestorsFromTree = (parents, productByCode) => {
+const resolveSelfLtDays = (item) => {
+  const raw = item?.parent_self_lt_days;
+  if (raw !== null && raw !== undefined && raw !== "") {
+    return normalizeLtDays(raw);
+  }
+  return normalizeLtDays(item?.resolved_lead_time_days ?? item?.lead_time_days);
+};
+
+const buildAncestorsFromTree = (parents, productByCode, baseSelfLtDays = 0) => {
   const ancestorMap = new Map();
 
   const walk = (nodes, depth, parentFactor, cumulativeLt) => {
@@ -363,10 +371,8 @@ const buildAncestorsFromTree = (parents, productByCode) => {
       const parentMeta = productByCode.get(parentCode);
       const nodeQty = toNum(item?.quantity || 0);
       const nodeFactor = toRound3(parentFactor * nodeQty);
-      const edgeLtDays = normalizeLtDays(
-        item?.resolved_lead_time_days ?? item?.lead_time_days
-      );
-      const nodeCumulativeLt = toNum(cumulativeLt + edgeLtDays);
+      const nodeSelfLtDays = resolveSelfLtDays(item);
+      const nodeCumulativeLt = toNum(cumulativeLt + nodeSelfLtDays);
       const isFinal = Boolean(item?.is_final_product || parentMeta?.is_final_product);
 
       const existing = ancestorMap.get(parentCode);
@@ -395,7 +401,7 @@ const buildAncestorsFromTree = (parents, productByCode) => {
     });
   };
 
-  walk(parents, 1, 1, 0);
+  walk(parents, 1, 1, normalizeLtDays(baseSelfLtDays));
   return Array.from(ancestorMap.values());
 };
 
@@ -421,8 +427,9 @@ const applyTargetPartData = async () => {
   targetSyncMessage.value = "";
   try {
     await ensureWorkdayCalendar();
-    const whereUsedRes = await api.products.getWhereUsed(targetPart.id, true);
+    const whereUsedRes = await api.products.getWhereUsed(targetPart.id, true, baseDate.value);
     const parentTree = whereUsedRes?.data?.parents || [];
+    const targetSelfLtDays = normalizeLtDays(whereUsedRes?.data?.self_info?.self_lt_days || 0);
 
     const allCodes = [targetPart.productCode, ...Array.from(collectWhereUsedCodes(parentTree))];
     const productRows = await fetchProductsByCodes(allCodes);
@@ -432,7 +439,7 @@ const applyTargetPartData = async () => {
         .filter(([code]) => Boolean(code))
     );
 
-    const ancestors = buildAncestorsFromTree(parentTree, productByCode)
+    const ancestors = buildAncestorsFromTree(parentTree, productByCode, targetSelfLtDays)
       .filter((row) => row.parentCode)
       .sort((a, b) => {
         if (a.depth !== b.depth) return a.depth - b.depth;

@@ -22,7 +22,7 @@ from .serializers import (
 )
 from .services.routing_service import build_effective_routing_q, resolve_effective_routing
 from accounts.permissions import HasResourcePermissionOrReadOnly
-from django.utils.dateparse import parse_datetime
+from django.utils.dateparse import parse_datetime, parse_date
 
 
 class MastersPermissionMixin:
@@ -248,16 +248,37 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         Query Parameters:
             recursive: true/false - 再帰的に上位階層まで辿るか（デフォルト: false）
+            reference_date: YYYY-MM-DD または ISO日時（ルーティング有効判定の基準日時）
         """
         from masters.services.bom_service import BOMService
 
         product = self.get_object()
         recursive = request.query_params.get('recursive', 'false').lower() == 'true'
+        reference_raw = request.query_params.get('reference_date')
+        reference_date = None
+        if reference_raw:
+            reference_date = parse_datetime(reference_raw)
+            if reference_date is None:
+                reference_date = parse_date(reference_raw)
+            if reference_date is None:
+                return Response(
+                    {'detail': 'reference_date は YYYY-MM-DD または ISO日時で指定してください。'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         service = BOMService()
         step_cache = {}
-        results = service.get_where_used(product.id, recursive=recursive, step_cache=step_cache)
-        self_info = service.get_where_used_self_info(product.id, context_cache=step_cache)
+        results = service.get_where_used(
+            product.id,
+            recursive=recursive,
+            step_cache=step_cache,
+            reference_date=reference_date,
+        )
+        self_info = service.get_where_used_self_info(
+            product.id,
+            context_cache=step_cache,
+            reference_date=reference_date,
+        )
 
         return Response({
             'product_id': product.id,
