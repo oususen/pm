@@ -445,6 +445,11 @@ const applyDemands = (payload) => {
   }
 };
 
+const isHiddenStCoproductParent = (row) => {
+  const code = String(row?.product_code || "").trim().toUpperCase();
+  return Boolean(row?.is_virtual_set) && code.startsWith("ST");
+};
+
 const reloadDemands = async () => {
   const res = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
   const payload = res.data || [];
@@ -455,6 +460,7 @@ const reloadDemands = async () => {
 const groups = computed(() => {
   if (!demands.value.length) return [];
   const filtered = demands.value.filter((d) => {
+    if (isHiddenStCoproductParent(d)) return false;
     const within =
       d.plan_date >= columns.value[0] &&
       d.plan_date <= columns.value[columns.value.length - 1];

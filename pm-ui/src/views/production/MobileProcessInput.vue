@@ -601,6 +601,7 @@ const selectedCoproductChildren = ref([])
 const selectedCoproductParentCode = ref('')
 const selectedCoproductNoticeLoading = ref(false)
 const bomTreeCache = new Map()
+const relatedProductsCacheByProcess = new Map()
 let selectedCoproductNoticeRequestSeq = 0
 
 const record = ref({
@@ -1707,6 +1708,78 @@ const getBomTreeCached = async (productId) => {
   }
 }
 
+const getRelatedProductsCached = async (processId) => {
+  const cacheKey = String(processId || '').trim()
+  if (!cacheKey) return []
+  if (relatedProductsCacheByProcess.has(cacheKey)) {
+    return relatedProductsCacheByProcess.get(cacheKey) || []
+  }
+  try {
+    const res = await api.processes.getRelatedProducts(processId)
+    const rows = res?.data || []
+    const list = Array.isArray(rows) ? rows : []
+    relatedProductsCacheByProcess.set(cacheKey, list)
+    return list
+  } catch (error) {
+    console.error('工程関連製品取得エラー:', error)
+    relatedProductsCacheByProcess.set(cacheKey, [])
+    return []
+  }
+}
+
+const enrichCoproductParentsForList = async (candidates, processId) => {
+  const list = Array.isArray(candidates) ? [...candidates] : []
+  if (!processId || list.length === 0) return list
+
+  const relatedProducts = await getRelatedProductsCached(processId)
+  const coproductParents = relatedProducts.filter(
+    (p) => normalizeRelationType(p?.relation_type) === 'coproduct_parent'
+  )
+  if (coproductParents.length === 0) return list
+
+  const existingProductIds = new Set(
+    list
+      .map((it) => String(it?.product || '').trim())
+      .filter(Boolean)
+  )
+
+  for (const parent of coproductParents) {
+    const parentId = String(parent?.id || '').trim()
+    if (!parentId || existingProductIds.has(parentId)) continue
+
+    const tree = await getBomTreeCached(parent.id)
+    if (!tree?.is_coproduct || !Array.isArray(tree.children) || tree.children.length === 0) continue
+
+    const childIdSet = new Set(
+      tree.children
+        .map((ch) => String(ch?.product_id || '').trim())
+        .filter(Boolean)
+    )
+    if (childIdSet.size === 0) continue
+
+    const matchedChildren = list.filter((it) => childIdSet.has(String(it?.product || '').trim()))
+    if (matchedChildren.length === 0) continue
+
+    const base = matchedChildren[0] || {}
+    const planQty = matchedChildren.reduce((maxVal, it) => {
+      const qty = Number(it?.plan_qty ?? 0)
+      return Number.isFinite(qty) ? Math.max(maxVal, qty) : maxVal
+    }, 0)
+
+    list.push({
+      ...base,
+      product: parent.id,
+      product_code: parent.product_code || '',
+      product_name: parent.product_name || '',
+      relation_type: 'coproduct_parent',
+      plan_qty: planQty,
+    })
+    existingProductIds.add(parentId)
+  }
+
+  return list
+}
+
 const loadSelectedCoproductNotice = async () => {
   if (record.value.record_type !== 'PRODUCTION') {
     invalidateSelectedCoproductNotice()
@@ -2418,8 +2491,9 @@ const loadPlannedProducts = async () => {
       }
     })
 
-    // 連産品の子品番を除外（生産記録用）
-    const filteredForProduction = await filterCoproductChildrenFromList(tempProducts)
+    // 連産親を補完し、連産品の子品番を除外（生産記録用）
+    const productsWithParents = await enrichCoproductParentsForList(tempProducts, selectedProcessId.value)
+    const filteredForProduction = await filterCoproductChildrenFromList(productsWithParents)
 
     // 生産記録用リスト（全時間帯）を保持
     allPlanProducts.value = [...filteredForProduction]

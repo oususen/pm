@@ -141,7 +141,8 @@ def _apply_delta_to_inventory_and_progress(session, delta):
     # 子の在庫・計画在庫から (delta * quantity) を減算
     boms = BOM.objects.filter(
         parent_product_id=session.product_id,
-        is_active=True
+        is_active=True,
+        is_coproduct=False,
     ).prefetch_related('items')
     child_product_ids = set()
 

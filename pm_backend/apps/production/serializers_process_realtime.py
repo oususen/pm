@@ -440,6 +440,10 @@ def update_line_backlog_actual_shipment(process, product, qty, plan_date):
     bom = BOM.objects.filter(parent_product=product, is_active=True).order_by('-valid_from', '-id').first()
     if not bom:
         return
+    # 連産品（仮想セット）親は子の実需（actual_shipment_qty）を即時加算しない。
+    # 在庫再計算ロジックでは連産BOMを出庫計算対象外としているため、ここも合わせる。
+    if bom.is_coproduct:
+        return
 
     qty_decimal = Decimal(qty)
     for item in bom.items.select_related('child_product').all():

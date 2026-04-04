@@ -709,6 +709,11 @@ const createEmptyCell = () => ({
   plannedProgress: 0,
 });
 
+const isHiddenStCoproductParent = (row) => {
+  const code = String(row?.product_code || "").trim().toUpperCase();
+  return Boolean(row?.is_virtual_set) && code.startsWith("ST");
+};
+
 const groups = computed(() => {
   if (!backlogs.value.length) return [];
   const start = columns.value[0];
@@ -718,6 +723,7 @@ const groups = computed(() => {
   const productKeyword = productFilter.value.trim().toLowerCase();
 
   const filtered = backlogs.value.filter((d) => {
+    if (isHiddenStCoproductParent(d)) return false;
     const within = d.plan_date >= start && d.plan_date <= end;
     const lineText = `${d.line_code || ""}${d.line_name || ""}`.toLowerCase();
     const processText = `${d.process_code || ""}${d.process_name || ""}`.toLowerCase();
@@ -730,6 +736,7 @@ const groups = computed(() => {
 
   // 顧客の内示/確定 (LineDemand) を日付・ライン・工程・品番でマップ化
   const filteredDemands = lineDemands.value.filter((d) => {
+    if (isHiddenStCoproductParent(d)) return false;
     const within = d.plan_date >= start && d.plan_date <= end;
     const lineText = `${d.line_code || ""}${d.line_name || ""}${d.line || ""}`.toLowerCase();
     const processText = `${d.process_code || ""}${d.process_name || ""}`.toLowerCase();
