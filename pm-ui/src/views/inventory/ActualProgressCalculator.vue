@@ -1,7 +1,7 @@
 <template>
   <div class="actual-progress-page">
     <h2 class="page-title">実進度求め</h2>
-    <p class="page-desc">実進度 = 全状態在庫合計（部品換算） - 親別需要窓合計（明日〜親別累積LT）</p>
+    <p class="page-desc">実進度 = 全状態在庫合計（部品換算） - 完成品別需要窓合計（明日〜完成品別累積LT）</p>
 
     <section class="panel">
       <h3 class="panel-title">対象部品</h3>
@@ -43,7 +43,7 @@
     <section class="panel">
       <h3 class="panel-title">設定</h3>
       <div class="form-row">
-        <label>基準日</label>
+        <label>基準日（棚卸日）</label>
         <input v-model="baseDate" type="date" />
       </div>
       <div class="result-grid">
@@ -52,7 +52,7 @@
           <div class="metric-value">{{ totalStockConverted }}</div>
         </div>
         <div class="metric">
-          <div class="metric-label">親別需要窓合計</div>
+          <div class="metric-label">完成品別需要窓合計</div>
           <div class="metric-value">{{ totalDemandWindow }}</div>
         </div>
         <div class="metric metric-main">
@@ -71,14 +71,14 @@
 
     <section class="panel">
       <div class="panel-head">
-        <h3 class="panel-title">親設定（累積LT）</h3>
+        <h3 class="panel-title">完成品設定（累積LT）</h3>
         <button class="btn" type="button" @click="addParent">行追加</button>
       </div>
       <table class="grid">
         <thead>
           <tr>
-            <th>親製品コード</th>
-            <th>親製品名</th>
+            <th>完成品コード</th>
+            <th>完成品名</th>
             <th>累積LT(日)</th>
             <th>需要開始日</th>
             <th>需要終了日</th>
@@ -93,11 +93,11 @@
             <td><input v-model.number="row.cumulativeLtDays" type="number" min="0" step="1" /></td>
             <td>{{ parentWindowStart(row) || "-" }}</td>
             <td>{{ parentWindowEnd(row) || "-" }}</td>
-            <td>{{ parentDemandTotals[row.parentCode] || 0 }}</td>
+            <td>{{ resolveParentDemandTotal(row.parentCode) }}</td>
             <td><button class="btn btn-danger" type="button" @click="removeParent(index)">削除</button></td>
           </tr>
           <tr v-if="!parentRows.length">
-            <td colspan="7" class="empty">親設定がありません</td>
+            <td colspan="7" class="empty">完成品設定がありません</td>
           </tr>
         </tbody>
       </table>
@@ -106,12 +106,18 @@
     <section class="panel">
       <div class="panel-head">
         <h3 class="panel-title">在庫（部品換算）</h3>
-        <button class="btn" type="button" @click="addInventory">行追加</button>
+        <div class="panel-actions">
+          <button class="btn" type="button" @click="exportInventoryListXlsx" :disabled="!inventoryRows.length">
+            Excel出力
+          </button>
+          <button class="btn" type="button" @click="addInventory">行追加</button>
+        </div>
       </div>
       <table class="grid">
         <thead>
           <tr>
-            <th>系統（親製品）</th>
+            <th>関連品（自品＋中間品＋完成品）</th>
+            <th>品名</th>
             <th>階層</th>
             <th>状態</th>
             <th>在庫数量</th>
@@ -123,6 +129,7 @@
         <tbody>
           <tr v-for="(row, index) in inventoryRows" :key="`i-${index}`">
             <td><input v-model.trim="row.familyCode" type="text" /></td>
+            <td><input v-model.trim="row.familyName" type="text" /></td>
             <td><input v-model.trim="row.levelName" type="text" /></td>
             <td><input v-model.trim="row.stateName" type="text" /></td>
             <td><input v-model.number="row.stockQty" type="number" step="1" /></td>
@@ -131,7 +138,7 @@
             <td><button class="btn btn-danger" type="button" @click="removeInventory(index)">削除</button></td>
           </tr>
           <tr v-if="!inventoryRows.length">
-            <td colspan="7" class="empty">在庫データがありません</td>
+            <td colspan="8" class="empty">在庫データがありません</td>
           </tr>
         </tbody>
       </table>
@@ -139,16 +146,20 @@
 
     <section class="panel">
       <div class="panel-head">
-        <h3 class="panel-title">需要（親別・日別）</h3>
+        <h3 class="panel-title">需要（完成品別・日別）</h3>
         <button class="btn" type="button" @click="addDemand">行追加</button>
       </div>
+      <p v-if="unresolvedParentCodes.length" class="target-warning">
+        完成品係数未設定: {{ unresolvedParentCodes.join(", ") }}（在庫（部品換算）の「関連品（自品＋中間品＋完成品）」と完全一致で設定してください）
+      </p>
       <table class="grid">
         <thead>
           <tr>
-            <th>親製品コード</th>
+            <th>完成品コード</th>
             <th>日付</th>
             <th>注文数量</th>
-            <th>親累積LT</th>
+            <th>完成品累積LT</th>
+            <th>完成品係数</th>
             <th>需要窓判定</th>
             <th>需要窓数量</th>
             <th></th>
@@ -160,12 +171,13 @@
             <td><input v-model="row.orderDate" type="date" /></td>
             <td><input v-model.number="row.orderQty" type="number" step="1" /></td>
             <td>{{ resolveParentLt(row.parentCode) }}</td>
+            <td>{{ resolveParentConversionFactor(row.parentCode) ?? "未設定" }}</td>
             <td>{{ isDemandInWindow(row) ? "1" : "0" }}</td>
             <td>{{ demandWindowQty(row) }}</td>
             <td><button class="btn btn-danger" type="button" @click="removeDemand(index)">削除</button></td>
           </tr>
           <tr v-if="!demandRows.length">
-            <td colspan="7" class="empty">需要データがありません</td>
+            <td colspan="8" class="empty">需要データがありません</td>
           </tr>
         </tbody>
       </table>
@@ -175,6 +187,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
+import * as XLSX from "xlsx";
 import api from "@/api/client";
 
 const today = new Date().toISOString().slice(0, 10);
@@ -208,6 +221,8 @@ const toNum = (value, fallback = 0) => {
 const toRound3 = (value) => Number(toNum(value).toFixed(3));
 
 const normalizeCode = (value) => String(value || "").trim();
+const normalizeCodeKey = (value) => String(value || "").trim().toUpperCase();
+const isCoproductCode = (value) => normalizeCodeKey(value).startsWith("ST");
 
 const normalizeLtDays = (value) => Math.max(0, Math.ceil(toNum(value, 0)));
 
@@ -526,7 +541,9 @@ const applyTargetPartData = async () => {
       cumulativeLtDays: toNum(row.cumulativeLtDays),
     }));
 
-    const stockProductIds = [targetPart.id, ...ancestors.map((row) => row.parentId)]
+    const inventoryAncestors = ancestors.filter((row) => !isCoproductCode(row.parentCode));
+
+    const stockProductIds = [targetPart.id, ...inventoryAncestors.map((row) => row.parentId)]
       .filter((id) => Number.isFinite(Number(id)))
       .map((id) => Number(id));
     const uniqueStockIds = Array.from(new Set(stockProductIds));
@@ -553,16 +570,18 @@ const applyTargetPartData = async () => {
       {
         productId: Number(targetPart.id),
         familyCode: targetPart.productCode,
+        familyName: targetPart.productName,
         levelName: "自工程",
         stateName: "対象部品在庫",
         stockQty: toRound3(selfStock),
         conversionFactor: 1,
       },
     ];
-    ancestors.forEach((row) => {
+    inventoryAncestors.forEach((row) => {
       autoInventoryRows.push({
         productId: row.parentId,
         familyCode: row.parentCode,
+        familyName: row.parentName,
         levelName: `親階層${row.depth}`,
         stateName: row.isFinal ? "親在庫(最終品)" : "親在庫",
         stockQty: toRound3(stockByProduct.get(Number(row.parentId)) || 0),
@@ -661,7 +680,7 @@ const applyTargetPartData = async () => {
         return a.parentCode.localeCompare(b.parentCode);
       });
 
-    targetSyncMessage.value = `反映完了: 親${parentRows.value.length}件 / 在庫${inventoryRows.value.length}件 / 需要${demandRows.value.length}件`;
+    targetSyncMessage.value = `反映完了: 完成品${parentRows.value.length}件 / 在庫${inventoryRows.value.length}件 / 需要${demandRows.value.length}件`;
   } catch (e) {
     console.error("対象部品反映エラー:", e);
     targetSyncMessage.value = "";
@@ -674,18 +693,49 @@ const applyTargetPartData = async () => {
 const parentMap = computed(() => {
   const map = new Map();
   parentRows.value.forEach((row) => {
-    const key = String(row.parentCode || "").trim();
+    const key = normalizeCodeKey(row.parentCode);
     if (!key) return;
     map.set(key, Number(row.cumulativeLtDays || 0));
   });
   return map;
 });
 
+const parentFactorMap = computed(() => {
+  const map = new Map();
+  inventoryRows.value.forEach((row) => {
+    const key = normalizeCodeKey(row.familyCode);
+    if (!key) return;
+    if (map.has(key)) return;
+    map.set(key, toRound3(toNum(row.conversionFactor, 0)));
+  });
+  return map;
+});
+
 const resolveParentLt = (parentCode) => {
-  const key = String(parentCode || "").trim();
+  const key = normalizeCodeKey(parentCode);
   if (!key) return 0;
   return Number(parentMap.value.get(key) || 0);
 };
+
+const resolveParentConversionFactor = (parentCode) => {
+  const key = normalizeCodeKey(parentCode);
+  if (!key) return null;
+  if (!parentFactorMap.value.has(key)) return null;
+  return Number(parentFactorMap.value.get(key));
+};
+
+const unresolvedParentCodes = computed(() => {
+  const set = new Set();
+  parentRows.value.forEach((row) => {
+    const code = normalizeCode(row.parentCode);
+    if (!code) return;
+    const lt = resolveParentLt(code);
+    if (lt <= 0) return;
+    if (resolveParentConversionFactor(code) !== null) return;
+    set.add(code);
+  });
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
+});
 
 const parentWindowStart = (row) => {
   if (!row || !Number(row.cumulativeLtDays || 0)) return addWorkingDays(baseDate.value, 1);
@@ -701,6 +751,45 @@ const parentWindowEnd = (row) => {
 const stockConverted = (row) =>
   Number((Number(row.stockQty || 0) * Number(row.conversionFactor || 0)).toFixed(3));
 
+const sanitizeFileName = (value) => String(value || "").replace(/[\\/:*?"<>|]/g, "_");
+
+const exportInventoryListXlsx = () => {
+  const rows = inventoryRows.value.filter((row) => normalizeCode(row.familyCode));
+  if (!rows.length) {
+    alert("出力対象の在庫データがありません。");
+    return;
+  }
+
+  const headers = [
+    "関連品コード",
+    "品名",
+    "階層",
+    "状態",
+    "机上在庫",
+    "棚卸在庫",
+    "部品換算係数",
+    "部品換算在庫",
+  ];
+  const body = rows.map((row) => [
+    normalizeCode(row.familyCode),
+    String(row.familyName || "").trim(),
+    String(row.levelName || "").trim(),
+    String(row.stateName || "").trim(),
+    toNum(row.stockQty),
+    "",
+    toNum(row.conversionFactor),
+    stockConverted(row),
+  ]);
+
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...body]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "棚卸リスト");
+
+  const partCode = sanitizeFileName(targetPart.productCode || "対象部品");
+  const dateLabel = sanitizeFileName(baseDate.value || today);
+  XLSX.writeFile(wb, `棚卸リスト_${partCode}_${dateLabel}.xlsx`);
+};
+
 const totalStockConverted = computed(() =>
   Number(inventoryRows.value.reduce((sum, row) => sum + stockConverted(row), 0).toFixed(3))
 );
@@ -715,18 +804,31 @@ const isDemandInWindow = (row) => {
   return orderDate >= start && orderDate <= end;
 };
 
-const demandWindowQty = (row) => (isDemandInWindow(row) ? Number(row.orderQty || 0) : 0);
+const demandWindowQty = (row) => {
+  if (!isDemandInWindow(row)) return 0;
+  const factor = resolveParentConversionFactor(row.parentCode);
+  if (factor === null) return 0;
+  return Number((Number(row.orderQty || 0) * factor).toFixed(3));
+};
 
 const parentDemandTotals = computed(() => {
-  const totals = {};
+  const totals = new Map();
   demandRows.value.forEach((row) => {
-    const key = String(row.parentCode || "").trim();
+    const key = normalizeCodeKey(row.parentCode);
     if (!key) return;
-    if (!isDemandInWindow(row)) return;
-    totals[key] = Number((Number(totals[key] || 0) + Number(row.orderQty || 0)).toFixed(3));
+    const qty = demandWindowQty(row);
+    if (qty === 0) return;
+    const cur = Number(totals.get(key) || 0);
+    totals.set(key, Number((cur + qty).toFixed(3)));
   });
   return totals;
 });
+
+const resolveParentDemandTotal = (parentCode) => {
+  const key = normalizeCodeKey(parentCode);
+  if (!key) return 0;
+  return Number(parentDemandTotals.value.get(key) || 0);
+};
 
 const totalDemandWindow = computed(() =>
   Number(demandRows.value.reduce((sum, row) => sum + demandWindowQty(row), 0).toFixed(3))
@@ -747,6 +849,7 @@ const removeParent = (index) => {
 const addInventory = () => {
   inventoryRows.value.push({
     familyCode: "",
+    familyName: "",
     levelName: "",
     stateName: "",
     stockQty: 0,
@@ -799,6 +902,11 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+}
+.panel-actions {
+  display: flex;
+  align-items: center;
   gap: 8px;
 }
 .panel-title {
