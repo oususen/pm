@@ -2327,6 +2327,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             routing__is_active=True,
         ).select_related('routing', 'output_product', 'process')
         process_ids = set()
+        products_with_own_steps_on_line = set()
+        steps_by_process = defaultdict(list)
         cycle_product_ids = set(p['product_id'] for p in base_plans)
         for step in steps_qs:
             product_keys = []
@@ -2334,7 +2336,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 product_keys.append(step.output_product_id)
             if step.routing_id and step.routing.product_id:
                 product_keys.append(step.routing.product_id)
+                products_with_own_steps_on_line.add(step.routing.product_id)
             process_ids.add(step.process_id)
+            steps_by_process[step.process_id].append(step)
             if step.output_product_id:
                 cycle_product_ids.add(step.output_product_id)
             if step.routing_id and step.routing.product_id:
@@ -2348,6 +2352,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 is_line_final_product=True,
             ).values_list('id', flat=True)
         )
+
+        # ライン最終品フォールバック用: ルーティング未登録でもライン配下の全工程に展開
+        line_processes_for_fallback = list(
+            Process.objects.filter(line_id=line_id, is_active=True).order_by('process_code')
+        )
+        process_ids.update(p.id for p in line_processes_for_fallback)
         plan_process_map = Process.objects.in_bulk(
             [int(p['process_id']) for p in base_plans if p.get('process_id')]
         )
@@ -2383,6 +2393,48 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if owned_steps:
                     return sort_steps_for_plan(owned_steps)
             return sort_steps_for_plan(steps)
+
+        def should_fallback_to_line_processes(product_id):
+            if product_id not in line_final_plan_product_ids:
+                return False
+            if not line_processes_for_fallback:
+                return False
+            # 他品番ルーティングのoutput_product一致だけでは「自品番ルーティングあり」とみなさない
+            return product_id not in products_with_own_steps_on_line
+
+        fallback_coproduct_target_cache = {}
+
+        def resolve_fallback_target_product(product_id, process_id, plan_date):
+            """
+            ライン最終品フォールバック時の展開先品番を解決する。
+            - 連産品ドライバ子品番が同工程に存在し、かつ親品番(product_id)の通常BOM配下にある場合
+              => 連産親(ST...)へ置換
+            - それ以外
+              => 元の品番を使用
+            戻り値: (target_product_id, child_target_product_id)
+            """
+            cache_key = (product_id, process_id, plan_date)
+            cached = fallback_coproduct_target_cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+            steps_for_process = sort_steps_for_plan(steps_by_process.get(process_id, []))
+            for step in steps_for_process:
+                child_id = step.output_product_id
+                if not child_id:
+                    continue
+                copro_info = copro_child_map.get(child_id)
+                if not copro_info:
+                    continue
+                if find_bom_multiplier(product_id, child_id, plan_date) is None:
+                    continue
+                resolved = (copro_info['parent_id'], child_id)
+                fallback_coproduct_target_cache[cache_key] = resolved
+                return resolved
+
+            resolved = (product_id, None)
+            fallback_coproduct_target_cache[cache_key] = resolved
+            return resolved
 
         # サイクルタイムをまとめて取得（ライン特定優先、なければライン指定なしを使用）
         cycle_time_map = defaultdict(list)
@@ -2429,8 +2481,21 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     affected_keys.add((product_id, plan_process_id, plan_date, seq_key))
                     continue
                 steps = select_steps_for_plan_product(product_id, plan_date)
-                if not steps:
-                    if is_l2201_line and product_id in line_final_plan_product_ids and plan_process_id:
+                use_fallback = should_fallback_to_line_processes(product_id)
+                if not steps or use_fallback:
+                    # ライン最終品フォールバック: ルーティング未登録でもライン配下の全工程に展開
+                    if use_fallback:
+                        for proc in line_processes_for_fallback:
+                            target_product_id, child_target_product_id = resolve_fallback_target_product(
+                                product_id, proc.id, plan_date
+                            )
+                            affected_keys.add((target_product_id, proc.id, plan_date, seq_key))
+                            # 旧データ掃除のため、元品番キーも削除対象に含める
+                            if target_product_id != product_id:
+                                affected_keys.add((product_id, proc.id, plan_date, seq_key))
+                            if include_coproduct_children and child_target_product_id and child_target_product_id != target_product_id:
+                                affected_keys.add((child_target_product_id, proc.id, plan_date, seq_key))
+                    elif is_l2201_line and product_id in line_final_plan_product_ids and plan_process_id:
                         affected_keys.add((product_id, plan_process_id, plan_date, seq_key))
                     continue
                 for step in sorted(steps, key=lambda s: s.step_no or 0):
@@ -2515,7 +2580,75 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 continue
 
             steps = select_steps_for_plan_product(product_id, plan_date)
-            if not steps:
+            use_fallback = should_fallback_to_line_processes(product_id)
+            if not steps or use_fallback:
+                # ライン最終品フォールバック: ルーティング未登録でもライン配下の全工程に展開
+                if use_fallback:
+                    for proc in line_processes_for_fallback:
+                        target_product_id, child_target_product_id = resolve_fallback_target_product(
+                            product_id, proc.id, plan_date
+                        )
+                        computed_time_min = None
+                        ct = pick_cycle_time(target_product_id, proc.id, plan_date)
+                        if not ct and child_target_product_id and child_target_product_id != target_product_id:
+                            ct = pick_cycle_time(child_target_product_id, proc.id, plan_date)
+                        if not ct and product_id != target_product_id:
+                            ct = pick_cycle_time(product_id, proc.id, plan_date)
+                        if proc.management_unit == 'MINUTE' and ct:
+                            try:
+                                computed_time_min = float(
+                                    (Decimal(plan_qty) * Decimal(ct.cycle_time_min or 0)) + Decimal(ct.setup_time_min or 0)
+                                )
+                            except Exception:
+                                computed_time_min = None
+
+                        key = (target_product_id, proc.id, plan_date, seq_key)
+                        entry = aggregated.get(key)
+                        if not entry:
+                            entry = {
+                                'plan_qty': Decimal('0'),
+                                'order_qty': Decimal('0'),
+                                'demand_qty_plan': Decimal('0'),
+                                'time_min': Decimal('0'),
+                                'plan_ids': set(),
+                                'step': None,
+                                'cycle_time': ct,
+                                'routing_product_id': None,
+                                'source_routing_step_id': None,
+                                'step_no': None,
+                            }
+                            aggregated[key] = entry
+                        entry['plan_qty'] += Decimal(plan_qty or 0)
+                        entry['order_qty'] += Decimal(order_qty or 0)
+                        entry['demand_qty_plan'] += Decimal(demand_qty_plan or 0)
+                        if computed_time_min is not None:
+                            entry['time_min'] += Decimal(str(computed_time_min))
+                        if parent_plan_id:
+                            entry['plan_ids'].add(parent_plan_id)
+
+                        if include_coproduct_children and child_target_product_id and child_target_product_id != target_product_id:
+                            child_key = (child_target_product_id, proc.id, plan_date, seq_key)
+                            child_entry = aggregated.get(child_key)
+                            if not child_entry:
+                                child_entry = {
+                                    'plan_qty': Decimal('0'),
+                                    'order_qty': Decimal('0'),
+                                    'demand_qty_plan': Decimal('0'),
+                                    'time_min': Decimal('0'),
+                                    'plan_ids': set(),
+                                    'step': None,
+                                    'cycle_time': ct,
+                                    'routing_product_id': None,
+                                    'source_routing_step_id': None,
+                                    'step_no': None,
+                                }
+                                aggregated[child_key] = child_entry
+                            child_entry['plan_qty'] += Decimal(plan_qty or 0)
+                            child_entry['order_qty'] += Decimal(order_qty or 0)
+                            child_entry['demand_qty_plan'] += Decimal(demand_qty_plan or 0)
+                            if parent_plan_id:
+                                child_entry['plan_ids'].add(parent_plan_id)
+                    continue
                 if is_l2201_line and product_id in line_final_plan_product_ids and plan_process_id:
                     computed_time_min = None
                     ct = pick_cycle_time(product_id, plan_process_id, plan_date)
@@ -5551,7 +5684,7 @@ class ProductionRecordInquirySettingView(APIView):
     TAB_KEYS = ['tank', 'floor', FLOOR_SHIPPING_TAB_KEY, 'blade', 'laser', 'brake', 'spot']
     DEFAULT_TARGET_LINE_CODES_BY_TAB = {
         'tank': ['L2200', 'L2201'],
-        'floor': [],
+        'floor': ['L2100'],
         FLOOR_SHIPPING_TAB_KEY: [],
         'blade': [],
         'laser': [],

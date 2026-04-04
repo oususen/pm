@@ -7,7 +7,7 @@ from django.db.models import Q
 import logging
 from rest_framework.exceptions import ValidationError
 
-from masters.models import RoutingStep, Line, Calendar, CalendarDay, WorkPattern, BreakTime, BOM, BOMItem, Product
+from masters.models import RoutingStep, Line, Process, Calendar, CalendarDay, WorkPattern, BreakTime, BOM, BOMItem, Product
 from ..models_line_backlog import LineBacklog
 from ..models_line_plan import LinePlan
 
@@ -265,6 +265,87 @@ def _build_l2201_synthetic_spec(product: Product, process, cycle_time_minutes: f
         output_product_name=product.product_name or '',
         transfer_time_minutes=0.0,
     )
+
+
+def _build_line_final_backlog_fallback_specs(
+    backlog_rows: List[LineBacklog],
+    product: Product,
+    step_no_by_process: Dict[int, int],
+) -> List[ProcessSpec]:
+    """自品番ルーティング未登録のライン最終品向けに、LineBacklog工程行からProcessSpecを組み立てる。"""
+    specs = []
+    seen = set()
+    for row in backlog_rows:
+        if not row.process_id or row.process_id in seen:
+            continue
+        seen.add(row.process_id)
+        process_obj = getattr(row, 'process', None)
+        specs.append(ProcessSpec(
+            process_id=row.process_id,
+            process_name=getattr(process_obj, 'process_name', '') or '',
+            process_number=step_no_by_process.get(row.process_id, 0),
+            cycle_time_minutes=float(getattr(row, 'cycle_time_min', 0.0) or 0.0),
+            setup_time_minutes=0.0,
+            parallel_count=1,
+            parallel_group=1,
+            output_product_id=product.id,
+            output_product_code=product.product_code or '',
+            output_product_name=product.product_name or '',
+            transfer_time_minutes=0.0,
+        ))
+    specs.sort(key=lambda s: (s.process_number or 0, s.process_id or 0))
+    return specs
+
+
+def _build_line_final_line_process_fallback_specs(
+    line_id: int,
+    product: Product,
+    step_no_by_process: Dict[int, int],
+) -> List[ProcessSpec]:
+    """ライン最終品の自品番ルーティング未登録時に、ライン配下の全工程でProcessSpecを組み立てる。"""
+    specs = []
+    processes = Process.objects.filter(line_id=line_id, is_active=True).order_by('process_code', 'id')
+    for proc in processes:
+        specs.append(ProcessSpec(
+            process_id=proc.id,
+            process_name=proc.process_name or '',
+            process_number=step_no_by_process.get(proc.id, 0),
+            cycle_time_minutes=0.0,
+            setup_time_minutes=0.0,
+            parallel_count=1,
+            parallel_group=1,
+            output_product_id=product.id,
+            output_product_code=product.product_code or '',
+            output_product_name=product.product_name or '',
+            transfer_time_minutes=0.0,
+        ))
+    specs.sort(key=lambda s: (s.process_number or 0, s.process_id or 0))
+    return specs
+
+
+def _resolve_line_final_fallback_coproduct_step(
+    process_id: int,
+    steps_by_process: Dict[int, List[RoutingStep]],
+    coproduct_parent_map: Dict[int, Product],
+    bom_multiplier_map: Dict[int, Decimal],
+) -> Optional[RoutingStep]:
+    """
+    ライン最終品フォールバック時に、工程ごとの連産品ドライバ子品番を表すRoutingStepを返す。
+    条件:
+    - output_product が連産品ドライバ子（coproduct_parent_mapに存在）
+    - かつ、対象最終品の通常BOM配下に存在（bom_multiplier_mapに存在）
+    """
+    candidates = _sort_routing_steps(steps_by_process.get(process_id, []))
+    for step in candidates:
+        child_id = step.output_product_id
+        if not child_id:
+            continue
+        if child_id not in coproduct_parent_map:
+            continue
+        if child_id not in bom_multiplier_map:
+            continue
+        return step
+    return None
 
 
 def _sort_routing_steps(steps: List[RoutingStep]) -> List[RoutingStep]:
@@ -530,7 +611,9 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
     ).select_related('routing', 'process', 'output_product')
 
     steps_by_product: Dict[int, List[RoutingStep]] = {}
+    steps_by_process: Dict[int, List[RoutingStep]] = {}
     for step in steps_qs:
+        steps_by_process.setdefault(step.process_id, []).append(step)
         product_keys = []
         if step.output_product_id:
             product_keys.append(step.output_product_id)
@@ -552,6 +635,12 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
     default_steps = sorted(steps_qs, key=lambda s: (s.step_no or 0, getattr(s, 'parallel_group', 1) or 1))
 
     grouped = {}
+    backlog_rows_by_key: Dict[Tuple[int, date, int], List[LineBacklog]] = {}
+    if not use_line_plan:
+        for backlog_row in qs_backlog:
+            key = (backlog_row.product_id, backlog_row.plan_date, backlog_row.sequence_no or 0)
+            backlog_rows_by_key.setdefault(key, []).append(backlog_row)
+
     for obj in qs:
         key = (obj.product_id, obj.plan_date, obj.sequence_no or 0)
         current = grouped.get(key)
@@ -601,11 +690,56 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
     plans = []
     for obj in base_plans:
         product = obj.product
+        backlog_key = (obj.product_id, obj.plan_date, obj.sequence_no or 0)
+        plan_backlog_rows = backlog_rows_by_key.get(backlog_key, [])
         multiplier_map = _build_bom_multiplier_map(product.id, obj.plan_date)
         coproduct_parent_map, coproduct_children_set, driver_cycle_time_map = _build_coproduct_maps(obj.plan_date)
         coproduct_parent_ids = {parent.id for parent in coproduct_parent_map.values()}
         l2201_synthetic_plan = is_l2201_line and getattr(product, 'is_line_final_product', False)
         steps = _select_steps_for_gantt_product(product, steps_by_product, is_l2201_line)
+        owned_steps = [step for step in steps if step.routing_id and step.routing.product_id == product.id]
+        use_line_final_line_process_fallback = (
+            (not is_l2201_line)
+            and getattr(product, 'is_line_final_product', False)
+            and not owned_steps
+        )
+
+        if use_line_final_line_process_fallback:
+            process_specs = _build_line_final_line_process_fallback_specs(
+                line_id,
+                product,
+                step_no_by_process,
+            )
+            # 工程別連産品マッピング: driver子品番をspecにセットし、後段で親(ST)表示へ置換させる
+            for spec in process_specs:
+                driver_step = _resolve_line_final_fallback_coproduct_step(
+                    spec.process_id,
+                    steps_by_process,
+                    coproduct_parent_map,
+                    multiplier_map,
+                )
+                if not driver_step:
+                    continue
+                child = driver_step.output_product
+                if not child:
+                    continue
+                spec.output_product_id = child.id
+                spec.output_product_code = child.product_code or ''
+                spec.output_product_name = child.product_name or ''
+                spec.parallel_count = driver_step.parallel_count or 1
+                spec.parallel_group = getattr(driver_step, 'parallel_group', 1) or 1
+                spec.transfer_time_minutes = float(getattr(driver_step, 'transfer_time_minutes', 0.0))
+                cycle_time_min, setup_time_min = _get_cycle_setup(driver_step, child.id, obj.plan_date)
+                if cycle_time_min > 0:
+                    spec.cycle_time_minutes = cycle_time_min
+                    spec.setup_time_minutes = setup_time_min
+            # ライン工程が空の場合のみ、同一keyのBacklog工程行へフォールバック
+            if not process_specs and plan_backlog_rows:
+                process_specs = _build_line_final_backlog_fallback_specs(
+                    plan_backlog_rows,
+                    product,
+                    step_no_by_process,
+                )
         if not steps and l2201_synthetic_plan:
             # L2201専用: 自分を親に持つルーティングが無いライン最終品は計画行の工程で1本扱いにする
             synthetic_cycle_time = driver_cycle_time_map.get(product.id, 0.0) if product.id in coproduct_parent_ids else 0.0
@@ -624,7 +758,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 )
                 continue
             process_specs = [synthetic_spec]
-        else:
+        elif not use_line_final_line_process_fallback:
             if not steps and is_l2201_line:
                 logger.warning(
                     'gantt_plans: skip L2201 plan_id=%s product_id=%s code=%s because no owned routing steps were found',

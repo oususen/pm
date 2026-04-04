@@ -240,9 +240,6 @@
     </div>
     </div>
 
-    <div v-show="activeTab === 'floor'" class="empty-tab">
-      フロアタブは準備中です。
-    </div>
     <div v-show="activeTab === 'blade'" class="empty-tab">
       ブレードタブは準備中です。
     </div>
@@ -398,7 +395,7 @@ const availableOperators = computed(() => {
 })
 
 const activeTab = ref('tank')
-const operationalTabKeys = ['tank', 'laser']
+const operationalTabKeys = ['tank', 'floor', 'laser']
 const settingsTargetTab = ref('tank')
 const configurableTabs = [
   { key: 'tank', label: 'タンク' },

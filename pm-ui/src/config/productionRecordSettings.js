@@ -5,7 +5,7 @@ const DEFAULT_ENTER_COUNT = 2
 const TAB_KEYS = ['tank', 'floor', 'blade', 'laser', 'brake']
 const DEFAULT_TARGET_LINE_CODES_BY_TAB = {
   tank: ['L2200', 'L2201'],
-  floor: [],
+  floor: ['L2100'],
   blade: [],
   laser: [],
   brake: [],
