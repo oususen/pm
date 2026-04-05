@@ -145,9 +145,9 @@
                 <button
                   class="btn"
                   @click="runNow(cfg)"
-                  :disabled="running.has(configKey(cfg)) || !canEdit"
+                  :disabled="isRunNowDisabled(cfg)"
                 >
-                  {{ running.has(configKey(cfg)) ? '実行中...' : '今すぐ実行' }}
+                  {{ runNowLabel(cfg) }}
                 </button>
               </td>
               <td class="last-cell">
@@ -242,10 +242,19 @@
         <button
           class="btn"
           @click="runNow(cfg)"
-          :disabled="running.has(configKey(cfg)) || !canEdit"
+          :disabled="isRunNowDisabled(cfg)"
           style="margin-left: 8px"
         >
-          {{ running.has(configKey(cfg)) ? '実行中...' : '今すぐ実行' }}
+          {{ runNowLabel(cfg) }}
+        </button>
+        <button
+          v-if="canCancelTask(cfg) && isRunningStatus(cfg)"
+          class="btn cancel"
+          @click="cancelRun(cfg)"
+          :disabled="cancelling.has(configKey(cfg)) || isCancelRequested(cfg) || !canEdit"
+          style="margin-left: 8px"
+        >
+          {{ isCancelRequested(cfg) ? 'キャンセル要求中...' : (cancelling.has(configKey(cfg)) ? '要求中...' : 'キャンセル要求') }}
         </button>
       </div>
 
@@ -363,10 +372,19 @@
         <button
           class="btn"
           @click="runNow(cfg)"
-          :disabled="running.has(configKey(cfg)) || !canEdit"
+          :disabled="isRunNowDisabled(cfg)"
           style="margin-left: 8px"
         >
-          {{ running.has(configKey(cfg)) ? '実行中...' : '今すぐ実行' }}
+          {{ runNowLabel(cfg) }}
+        </button>
+        <button
+          v-if="canCancelTask(cfg) && isRunningStatus(cfg)"
+          class="btn cancel"
+          @click="cancelRun(cfg)"
+          :disabled="cancelling.has(configKey(cfg)) || isCancelRequested(cfg) || !canEdit"
+          style="margin-left: 8px"
+        >
+          {{ isCancelRequested(cfg) ? 'キャンセル要求中...' : (cancelling.has(configKey(cfg)) ? '要求中...' : 'キャンセル要求') }}
         </button>
       </div>
 
@@ -444,10 +462,10 @@
         <button
           class="btn"
           @click="runNow(orderExpansionConfig)"
-          :disabled="running.has(configKey(orderExpansionConfig)) || !canEdit"
+          :disabled="isRunNowDisabled(orderExpansionConfig)"
           style="margin-left: 8px"
         >
-          {{ running.has(configKey(orderExpansionConfig)) ? '実行中...' : '今すぐ実行' }}
+          {{ runNowLabel(orderExpansionConfig) }}
         </button>
       </div>
 
@@ -493,6 +511,7 @@ const route = useRoute()
 const configs = ref([])
 const saving = reactive(new Set())
 const running = reactive(new Set())
+const cancelling = reactive(new Set())
 const canEdit = computed(() => {
   const user = authState.user
   if (!user) return false
@@ -577,6 +596,11 @@ const safetyStockTaskLabel = (taskName) => {
 const showRangeBaseDay = (taskName) => taskName === 'PICKUP_ONLY'
 
 const configKey = (cfg) => `${cfg.task_name}-${cfg.line || 'none'}-${cfg.id || 'new'}`
+const isRunningStatus = (cfg) => cfg?.last_run_status === 'RUNNING'
+const isCancelRequested = (cfg) => (cfg?.last_run_message || '').includes('[CANCEL_REQUESTED]')
+const canCancelTask = (cfg) => inventoryTaskOrder.includes(cfg?.task_name)
+const isRunNowDisabled = (cfg) => !cfg || !canEdit.value || running.has(configKey(cfg)) || isRunningStatus(cfg)
+const runNowLabel = (cfg) => (running.has(configKey(cfg)) || isRunningStatus(cfg) ? '実行中...' : '今すぐ実行')
 
 const loadConfig = async () => {
   try {
@@ -654,6 +678,10 @@ const stopPolling = () => {
 
 const runNow = async (cfg) => {
   if (!canEdit.value) return
+  if (isRunningStatus(cfg)) {
+    alert('既に実行中です。必要なら「キャンセル要求」を実行してください。')
+    return
+  }
   const key = configKey(cfg)
   const targetName =
     cfg.task_name === 'AUTO_PLAN'
@@ -687,7 +715,7 @@ const runNow = async (cfg) => {
         if (Date.now() - pollStart > POLL_TIMEOUT) {
           stopPolling()
           running.delete(key)
-          alert('タイムアウト：10分経過しても完了しませんでした。\n画面をリロードして最新状態を確認してください。')
+          alert('10分経過しても完了しませんでした。\n継続実行中の可能性があります。必要なら「キャンセル要求」を実行してください。')
           return
         }
         await loadConfig()
@@ -711,6 +739,29 @@ const runNow = async (cfg) => {
     } else {
       alert('実行に失敗しました。')
     }
+  }
+}
+
+const cancelRun = async (cfg) => {
+  if (!canEdit.value || !canCancelTask(cfg) || !isRunningStatus(cfg)) return
+  const key = configKey(cfg)
+  const targetName = inventoryTaskLabel(cfg.task_name)
+  if (!confirm(`${targetName}のキャンセル要求を送信しますか？`)) return
+
+  cancelling.add(key)
+  try {
+    const res = await api.scheduleConfig.cancel({
+      task_name: cfg.task_name,
+      config_id: cfg.id,
+      line: cfg.line,
+    })
+    alert(res.data?.detail || 'キャンセル要求を受け付けました。')
+    await loadConfig()
+  } catch (e) {
+    const detail = e.response?.data?.detail
+    alert(detail || 'キャンセル要求に失敗しました。')
+  } finally {
+    cancelling.delete(key)
   }
 }
 
@@ -775,10 +826,6 @@ const startPollingIfRunning = () => {
   const pollTargets = [...inventoryTaskConfigs.value, ...safetyStockConfigs.value]
   const runningTask = pollTargets.find((cfg) => cfg.last_run_status === 'RUNNING')
   if (!runningTask) return
-  if (runningTask.last_run_at) {
-    const elapsed = Date.now() - new Date(runningTask.last_run_at).getTime()
-    if (elapsed > 10 * 60 * 1000) return
-  }
   const key = configKey(runningTask)
   running.add(key)
   stopPolling()
@@ -923,6 +970,11 @@ onUnmounted(() => {
   background: #4a7ae5;
   color: #fff;
   border-color: #3865c7;
+}
+.btn.cancel {
+  background: #fff7ed;
+  color: #b45309;
+  border-color: #fdba74;
 }
 .btn:disabled {
   opacity: 0.5;

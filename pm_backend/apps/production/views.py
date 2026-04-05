@@ -6346,23 +6346,18 @@ class ScheduleRunNowView(APIView):
                 result = run_order_expansion()
                 return Response({'detail': '自動受注展開を実行しました', **(result or {})})
             elif task in task_labels:
-                from django.utils import timezone
-                # 二重実行防止: 同一タスクのRUNNING状態チェック（10分超はスタック扱いでリセット）
-                stale_cfg = ScheduleConfig.objects.filter(
+                # 二重実行防止: RUNNING中は常に拒否（自動タイムアウト解除はしない）
+                running_cfg = ScheduleConfig.objects.filter(
                     task_name=task,
                     last_run_status='RUNNING',
                 ).first()
-                if stale_cfg:
-                    elapsed = (timezone.now() - stale_cfg.last_run_at).total_seconds() if stale_cfg.last_run_at else 9999
-                    if elapsed < 600:
-                        return Response(
-                            {'detail': '既に実行中です。完了までお待ちください。'},
-                            status=status.HTTP_409_CONFLICT,
-                        )
-                    stale_cfg.last_run_status = 'FAILED'
-                    stale_cfg.last_run_message = f'タイムアウト（{int(elapsed)}秒経過）により強制リセット'
-                    stale_cfg.save(update_fields=['last_run_status', 'last_run_message'])
-                    logger.warning(f'[スケジューラ] {task} RUNNING状態が{int(elapsed)}秒スタック → FAILEDにリセット')
+                if running_cfg:
+                    running_msg = running_cfg.last_run_message or ''
+                    if '[CANCEL_REQUESTED]' in running_msg:
+                        detail = '既にキャンセル要求済みの実行が停止待ちです。完了までお待ちください。'
+                    else:
+                        detail = '既に実行中です。完了までお待ちください。必要なら「キャンセル要求」を実行してください。'
+                    return Response({'detail': detail}, status=status.HTTP_409_CONFLICT)
 
                 # バックグラウンドスレッドで実行
                 def _run():
@@ -6399,6 +6394,40 @@ class ScheduleRunNowView(APIView):
                 {'detail': f'実行に失敗しました: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+class ScheduleCancelView(APIView):
+    """定時タスクのキャンセル要求API（実行中タスク向け）"""
+
+    def post(self, request):
+        from .scheduler.tasks import request_task_cancel
+
+        task = (request.data.get('task_name') or 'INVENTORY_RECALC').upper()
+        config_id = request.data.get('config_id') or request.data.get('id')
+        supported_tasks = {'INVENTORY_RECALC', 'PICKUP_ONLY', 'INVENTORY_ONLY', 'PROGRESS_ONLY'}
+
+        if task not in supported_tasks:
+            return Response(
+                {'detail': f'このタスクはキャンセル未対応です: {task}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if config_id:
+            exists = ScheduleConfig.objects.filter(id=config_id, task_name=task).exists()
+            if not exists:
+                return Response({'detail': '対象設定が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+
+        result = request_task_cancel(task)
+        if not result.get('ok'):
+            if result.get('reason') == 'not_found':
+                return Response({'detail': '対象設定が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+            if result.get('reason') == 'not_running':
+                return Response({'detail': '現在このタスクは実行中ではありません。'}, status=status.HTTP_409_CONFLICT)
+            return Response({'detail': 'キャンセル要求に失敗しました。'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        if result.get('already_requested'):
+            return Response({'detail': '既にキャンセル要求済みです。停止完了までお待ちください。'})
+        return Response({'detail': 'キャンセル要求を受け付けました。安全な区切りで停止します。'})
 
 
 class StockMigrationDetectView(APIView):

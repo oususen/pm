@@ -8,4 +8,7 @@ export const createScheduleConfigAPI = (client) => ({
   runNow(payload = {}) {
     return client.post('/schedule-config/run-now/', payload)
   },
+  cancel(payload = {}) {
+    return client.post('/schedule-config/cancel/', payload)
+  },
 })

@@ -11,6 +11,7 @@ from rest_framework.parsers import JSONParser
 from rest_framework.request import Request
 
 logger = logging.getLogger('production')
+CANCEL_REQUEST_MARKER = '[CANCEL_REQUESTED]'
 
 SUPPORTED_TASKS = {
     'INVENTORY_RECALC': {
@@ -46,6 +47,48 @@ SUPPORTED_TASKS = {
         'include_progress_in_inventory': False,
     },
 }
+
+
+def _is_cancel_requested(task_name):
+    """定時タスクにキャンセル要求が出ているかを確認する。"""
+    from production.models_schedule_config import ScheduleConfig
+
+    message = (
+        ScheduleConfig.objects.filter(task_name=task_name)
+        .values_list('last_run_message', flat=True)
+        .first()
+        or ''
+    )
+    return CANCEL_REQUEST_MARKER in message
+
+
+def request_task_cancel(task_name):
+    """
+    実行中タスクにキャンセル要求を記録する。
+
+    Returns:
+        dict: {
+            ok: bool,
+            reason: 'not_found' | 'not_running' | None,
+            already_requested: bool,
+        }
+    """
+    from production.models_schedule_config import ScheduleConfig
+
+    config = ScheduleConfig.objects.filter(task_name=(task_name or '').upper()).first()
+    if not config:
+        return {'ok': False, 'reason': 'not_found', 'already_requested': False}
+    if config.last_run_status != 'RUNNING':
+        return {'ok': False, 'reason': 'not_running', 'already_requested': False}
+
+    current_message = config.last_run_message or ''
+    if CANCEL_REQUEST_MARKER in current_message:
+        return {'ok': True, 'reason': None, 'already_requested': True}
+
+    requested_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    config.last_run_message = (current_message + '\n' if current_message else '') + f'{CANCEL_REQUEST_MARKER} {requested_at}'
+    config.save(update_fields=['last_run_message'])
+    return {'ok': True, 'reason': None, 'already_requested': False}
 
 
 def _create_drf_request(data):
@@ -204,17 +247,30 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
     purchase_count = 0
     recalc_count = 0
     progress_count = 0
+    canceled = False
+    cancel_message = ''
+
+    def should_cancel(checkpoint):
+        nonlocal canceled, cancel_message
+        if _is_cancel_requested(task_name):
+            canceled = True
+            cancel_message = f'キャンセル要求を検知したため中断しました（{checkpoint}）'
+            logger.warning(f'[スケジューラ] {task_name}: {cancel_message}')
+            return True
+        return False
 
     # ViewSetインスタンスを準備
     viewset = LineBacklogViewSet()
     viewset.format_kwarg = None
     viewset.kwargs = {}
 
-    if task_spec['pickup_prod']:
+    if task_spec['pickup_prod'] and not should_cancel('取り込み開始前'):
         prod_lines = Line.objects.filter(is_active=True, line_type='PROD')
         logger.info(f'[スケジューラ] Step 1: pickup開始 ({prod_lines.count()}ライン)')
 
         for line in prod_lines:
+            if should_cancel(f'pickup前 line={line.line_code}'):
+                break
             try:
                 logger.info(
                     f'[スケジューラ] pickup: ライン {line.line_code} ({line.line_name})'
@@ -232,7 +288,7 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                 logger.error(f'[スケジューラ] {error_msg}', exc_info=True)
                 errors.append(error_msg)
 
-    if task_spec['pickup_purchase']:
+    if task_spec['pickup_purchase'] and not should_cancel('購買取り込み開始前'):
         supplier_ids = list(
             BOMItem.objects.filter(
                 sourcing_type__in=['BUY', 'SUBCON'],
@@ -245,6 +301,8 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
         )
 
         for supplier_id in supplier_ids:
+            if should_cancel(f'pickup_purchase前 supplier_id={supplier_id}'):
+                break
             try:
                 logger.info(
                     f'[スケジューラ] pickup_purchase: supplier_id={supplier_id}'
@@ -263,11 +321,13 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                 errors.append(error_msg)
 
     active_lines = Line.objects.filter(is_active=True)
-    if task_spec['inventory']:
+    if task_spec['inventory'] and not should_cancel('在庫再計算開始前'):
         logger.info(
             f'[スケジューラ] Step 3: 在庫再計算開始 ({active_lines.count()}ライン)'
         )
         for line in active_lines:
+            if should_cancel(f'在庫再計算前 line={line.line_code}'):
+                break
             try:
                 effective_start_date = _resolve_effective_start_date(
                     line,
@@ -300,11 +360,13 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                 logger.error(f'[スケジューラ] {error_msg}', exc_info=True)
                 errors.append(error_msg)
 
-    if task_spec['progress']:
+    if task_spec['progress'] and not should_cancel('進度再計算開始前'):
         logger.info(
             f'[スケジューラ] Step 4: 進度再計算開始 ({active_lines.count()}ライン)'
         )
         for line in active_lines:
+            if should_cancel(f'進度再計算前 line={line.line_code}'):
+                break
             try:
                 line_effective_start_date = _resolve_effective_start_date(
                     line,
@@ -329,6 +391,8 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                     .filter(product_id__isnull=False, min_process_id__isnull=False)
                 )
                 for row in products:
+                    if should_cancel(f'進度再計算前 line={line.line_code} product_id={row["product_id"]}'):
+                        break
                     product_effective_start_date = _resolve_effective_start_date(
                         line,
                         start_date,
@@ -353,7 +417,7 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                 errors.append(error_msg)
 
     duration = time.perf_counter() - start_time
-    success = len(errors) == 0
+    success = len(errors) == 0 and not canceled
 
     result = {
         'pickup_lines': pickup_count,
@@ -364,16 +428,19 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
         'end_date': end_date_str,
         'duration_seconds': round(duration, 2),
         'errors': errors,
+        'canceled': canceled,
     }
 
     if config:
         config.last_run_status = 'SUCCESS' if success else 'FAILED'
         config.last_run_duration_seconds = round(duration, 2)
         error_summary = '\n'.join(errors) if errors else ''
+        cancel_summary = f'\n状態: {cancel_message}' if canceled else ''
         config.last_run_message = (
             f'[{task_spec["label"]}] 期間: {start_date_str}〜{end_date_str}, '
             f'取込: {pickup_count}ライン, 購買取込: {purchase_count}仕入先, '
             f'在庫再計算: {recalc_count}ライン, 進度再計算: {progress_count}製品 ({round(duration, 1)}秒)'
+            + cancel_summary
             + (f'\nエラー: {error_summary}' if error_summary else '')
         )
         config.save(update_fields=[
@@ -382,7 +449,8 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
 
     logger.info(
         f'[スケジューラ] 完了({task_name}): pickup={pickup_count}, purchase={purchase_count}, '
-        f'recalc={recalc_count}, progress={progress_count}, {round(duration, 1)}秒, エラー={len(errors)}件'
+        f'recalc={recalc_count}, progress={progress_count}, canceled={canceled}, '
+        f'{round(duration, 1)}秒, エラー={len(errors)}件'
     )
 
     return result
