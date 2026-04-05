@@ -838,8 +838,19 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         if not demand_rows:
             return Response({'created': 0, 'candidates': 0, 'skipped_no_process': 0})
 
-        purchase_process = Process.objects.filter(process_code='PURCHASE').first()
-        purchase_process_id = purchase_process.id if purchase_process else None
+        purchase_line_ids = {
+            row.get('line_id')
+            for row in demand_rows
+            if row.get('line__line_type') == 'PURCHASE' and row.get('line_id')
+        }
+        purchase_processes_by_line = {}
+        if purchase_line_ids:
+            purchase_process_rows = Process.objects.filter(
+                process_code='PURCHASE',
+                line_id__in=purchase_line_ids,
+            ).order_by('line_id', 'id').values_list('line_id', 'id')
+            for line_id, process_id in purchase_process_rows:
+                purchase_processes_by_line.setdefault(line_id, process_id)
 
         candidate_keys = set()
         skipped_no_process = 0
@@ -850,7 +861,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             process_id = row.get('routing_step__process_id')
 
             if not process_id and row.get('line__line_type') == 'PURCHASE':
-                process_id = purchase_process_id
+                process_id = purchase_processes_by_line.get(line_id)
 
             if not line_id or not product_id or not plan_date or not process_id:
                 skipped_no_process += 1
@@ -891,7 +902,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             ))
 
         if to_create:
-            LineBacklog.objects.bulk_create(to_create, batch_size=1000)
+            LineBacklog.objects.bulk_create(
+                to_create,
+                batch_size=1000,
+                ignore_conflicts=True,
+            )
 
         return Response({
             'created': len(to_create),
