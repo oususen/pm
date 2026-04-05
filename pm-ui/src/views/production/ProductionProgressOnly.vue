@@ -217,6 +217,13 @@ import {
   resolveSpecialDisplayOrder,
 } from "@/utils/groupSort";
 
+const props = defineProps({
+  mode: {
+    type: String,
+    default: "production",
+  },
+});
+
 const lineFilter = ref("");
 const processFilter = ref("");
 const productFilter = ref("");
@@ -422,6 +429,20 @@ const load = async () => {
   loading.value = true;
   error.value = "";
   try {
+    if (props.mode === "purchase" && hasFilter.value) {
+      try {
+        await api.lineBacklogs.seedProgressBacklogsFromDemand({
+          start_date: columns.value[0],
+          end_date: columns.value[columns.value.length - 1],
+          line_search: lineFilter.value.trim(),
+          process_search: processFilter.value.trim(),
+          product_search: productFilter.value.trim(),
+        });
+      } catch (e) {
+        console.error("進度表示用Backlog補完に失敗:", e);
+      }
+    }
+
     const demandParams = {
       plan_date__gte: columns.value[0],
       plan_date__lte: columns.value[columns.value.length - 1],

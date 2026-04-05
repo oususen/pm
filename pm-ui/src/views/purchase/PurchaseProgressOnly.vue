@@ -1,5 +1,5 @@
 <template>
-  <ProductionProgressOnly />
+  <ProductionProgressOnly mode="purchase" />
 </template>
 
 <script setup>

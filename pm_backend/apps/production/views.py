@@ -781,6 +781,124 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(items, many=True)
         return Response(serializer.data)
 
+    @action(detail=False, methods=['post'], url_path='seed_progress_backlogs_from_demand')
+    def seed_progress_backlogs_from_demand(self, request):
+        """
+        進度表示用に、LineDemand から LineBacklog の空行(sequence_no=0)を補完する。
+        - 需要(order_qty/demand_qty_plan)は設定しない
+        - 既存行があるキーは作成しない
+        """
+        start_dt = _parse_optional_date(request.data.get('start_date'))
+        end_dt = _parse_optional_date(request.data.get('end_date'))
+        if not start_dt or not end_dt:
+            return Response({'detail': 'start_date and end_date are required'}, status=status.HTTP_400_BAD_REQUEST)
+        if start_dt > end_dt:
+            return Response({'detail': 'start_date must be <= end_date'}, status=status.HTTP_400_BAD_REQUEST)
+
+        line_search = str(request.data.get('line_search') or '').strip()
+        process_search = str(request.data.get('process_search') or '').strip()
+        product_search = str(request.data.get('product_search') or '').strip()
+
+        demand_qs = LineDemand.objects.filter(
+            plan_date__gte=start_dt,
+            plan_date__lte=end_dt,
+            product_id__isnull=False,
+            line_id__isnull=False,
+        )
+
+        if line_search:
+            demand_qs = demand_qs.filter(
+                Q(line__line_code__icontains=line_search) | Q(line__line_name__icontains=line_search)
+            )
+        if product_search:
+            demand_qs = demand_qs.filter(
+                Q(product__product_code__icontains=product_search) |
+                Q(product__product_name__icontains=product_search) |
+                Q(product_code__icontains=product_search)
+            )
+        if process_search:
+            process_q = (
+                Q(routing_step__process__process_code__icontains=process_search) |
+                Q(routing_step__process__process_name__icontains=process_search)
+            )
+            lower_kw = process_search.lower()
+            if lower_kw in {'purchase', '購買'}:
+                process_q = process_q | Q(line__line_type='PURCHASE')
+            demand_qs = demand_qs.filter(process_q)
+
+        demand_rows = list(
+            demand_qs.values(
+                'line_id',
+                'product_id',
+                'plan_date',
+                'routing_step__process_id',
+                'line__line_type',
+            ).distinct()
+        )
+        if not demand_rows:
+            return Response({'created': 0, 'candidates': 0, 'skipped_no_process': 0})
+
+        purchase_process = Process.objects.filter(process_code='PURCHASE').first()
+        purchase_process_id = purchase_process.id if purchase_process else None
+
+        candidate_keys = set()
+        skipped_no_process = 0
+        for row in demand_rows:
+            line_id = row.get('line_id')
+            product_id = row.get('product_id')
+            plan_date = row.get('plan_date')
+            process_id = row.get('routing_step__process_id')
+
+            if not process_id and row.get('line__line_type') == 'PURCHASE':
+                process_id = purchase_process_id
+
+            if not line_id or not product_id or not plan_date or not process_id:
+                skipped_no_process += 1
+                continue
+            candidate_keys.add((line_id, process_id, product_id, plan_date))
+
+        if not candidate_keys:
+            return Response({'created': 0, 'candidates': 0, 'skipped_no_process': skipped_no_process})
+
+        line_ids = {k[0] for k in candidate_keys}
+        process_ids = {k[1] for k in candidate_keys}
+        product_ids = {k[2] for k in candidate_keys}
+        existing_keys = set(
+            LineBacklog.objects.filter(
+                line_id__in=line_ids,
+                process_id__in=process_ids,
+                product_id__in=product_ids,
+                plan_date__gte=start_dt,
+                plan_date__lte=end_dt,
+                sequence_no=0,
+            ).values_list('line_id', 'process_id', 'product_id', 'plan_date')
+        )
+
+        to_create = []
+        for line_id, process_id, product_id, plan_date in sorted(candidate_keys):
+            if (line_id, process_id, product_id, plan_date) in existing_keys:
+                continue
+            to_create.append(LineBacklog(
+                plan_date=plan_date,
+                process_id=process_id,
+                product_id=product_id,
+                line_id=line_id,
+                sequence_no=0,
+                order_qty=0,
+                demand_qty_plan=0,
+                plan_qty=0,
+                actual_qty=0,
+            ))
+
+        if to_create:
+            LineBacklog.objects.bulk_create(to_create, batch_size=1000)
+
+        return Response({
+            'created': len(to_create),
+            'candidates': len(candidate_keys),
+            'skipped_no_process': skipped_no_process,
+        })
+
     def _attach_order_split(self, items):
         from collections import defaultdict
         from django.db.models import Q

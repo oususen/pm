@@ -21,6 +21,9 @@ export const createLineBacklogsAPI = (client) => ({
   pickupPurchaseForProducts(payload) {
     return client.post('/line-backlogs/pickup_purchase_for_products/', payload)
   },
+  seedProgressBacklogsFromDemand(payload) {
+    return client.post('/line-backlogs/seed_progress_backlogs_from_demand/', payload)
+  },
   expandProcesses(payload) {
     return client.post('/line-backlogs/expand_processes/', payload)
   },
