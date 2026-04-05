@@ -118,12 +118,6 @@ def recalculate_progress_qty(
         workday_cache[target_date] = is_work
         return is_work
 
-    def get_prev_working_day(target_date):
-        prev_date = target_date - timedelta(days=1)
-        while not is_working_day(prev_date):
-            prev_date = prev_date - timedelta(days=1)
-        return prev_date
-
     def shift_working_days(target_date, days):
         """営業日ベースで日付をシフト"""
         if not days:
@@ -239,8 +233,6 @@ def recalculate_progress_qty(
 
     for plan_date in sorted(by_date.keys()):
         rows = by_date[plan_date]
-        working_day = is_working_day(plan_date)
-
         # 棚卸確定フラグがある場合、その値を正として採用
         if any(getattr(r, 'is_stocktake_fix', False) for r in rows):
             sample = rows[0]
@@ -283,28 +275,13 @@ def recalculate_progress_qty(
 
         progress_shipment = int(demand_qty or 0)
 
-        prev_day = get_prev_working_day(plan_date)
-        prev_progress = progress_by_date.get(prev_day, last_progress)
-        prev_planned_progress = planned_progress_by_date.get(prev_day, last_planned_progress)
-
-        # 非稼働日は前営業日の進度をそのまま保持する
-        if not working_day:
-            progress_qty = prev_progress
-            planned_progress_qty = prev_planned_progress
-            rep = pick_representative(rows)
-            for row in rows:
-                row.progress_qty = 0
-                row.planned_progress_qty = 0
-            rep.progress_qty = progress_qty
-            rep.planned_progress_qty = planned_progress_qty
-            progress_by_date[plan_date] = progress_qty
-            planned_progress_by_date[plan_date] = planned_progress_qty
-            last_progress = progress_qty
-            last_planned_progress = planned_progress_qty
-            backlogs_to_update.extend(rows)
-            continue
+        # 進度は日次の累積値のため、休日を含めて「前日（暦日）」を基準に引き継ぐ。
+        prev_date = plan_date - timedelta(days=1)
+        prev_progress = progress_by_date.get(prev_date, last_progress)
+        prev_planned_progress = planned_progress_by_date.get(prev_date, last_planned_progress)
 
         # 進度 = 前日進度 + 実績 - 需要 + 調整 + 非自工程仕損調整
+        # 非稼働日でも当日の実績を反映する（在庫/計画在庫の再計算方針に統一）。
         progress_adjust = resolve_day_adjustment(rows, progress_adjust_map)
         progress_qty = (
             prev_progress

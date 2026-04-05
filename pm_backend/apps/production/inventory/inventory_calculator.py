@@ -1030,9 +1030,12 @@ def recalculate_stock_qty(
         base_rows = [r for r in rows if r.sequence_no == 0]
         return min(base_rows, key=lambda r: r.id)
 
-    today = reference_today or get_business_today()
-    if reference_today is None and not is_working_day(today):
-        today = get_prev_working_day(today)
+    # 計算起点日（calc_today）と実績反映判定日（business_today）を分離する。
+    # 休日に再計算した場合でも、当日の実績は出庫計算に反映する。
+    business_today = reference_today or get_business_today()
+    calc_today = business_today
+    if reference_today is None and not is_working_day(calc_today):
+        calc_today = get_prev_working_day(calc_today)
     stock_by_date = {}
     firm_map = firm_map or {}
 
@@ -1040,7 +1043,7 @@ def recalculate_stock_qty(
     # 在庫の再計算範囲を calc_start_date まで広げて stock_qty を常に最新に保つ。
     # effective_start = min(start_date, calc_start_date)
     max_lt = _get_max_parent_bom_lead_time(product_id)
-    calc_start_date = shift_working_days(today, -(max_lt + 1))
+    calc_start_date = shift_working_days(calc_today, -(max_lt + 1))
     effective_start = min(start_date, calc_start_date)
 
     # effective_start が start_date より古い場合、バックログを再取得して by_date を再構築
@@ -1099,7 +1102,7 @@ def recalculate_stock_qty(
         scrap_adjust_total = sum(r.scrap_adjust_qty or 0 for r in rows)
         # adjust_qty は在庫計算に使わない（既存仕様）
 
-        if plan_date <= today:
+        if plan_date <= business_today:
             if is_final:
                 actual_shipment = firm_map.get((sample.product_id, plan_date), Decimal('0'))
             else:
@@ -1219,9 +1222,12 @@ def recalculate_planned_stock_qty(
         base_rows = [r for r in rows if r.sequence_no == 0]
         return min(base_rows, key=lambda r: r.id)
 
-    today = reference_today or get_business_today()
-    if reference_today is None and not is_working_day(today):
-        today = get_prev_working_day(today)
+    # 計算起点日（calc_today）と実績反映判定日（business_today）を分離する。
+    # 休日に再計算した場合でも、当日の実績は計画在庫計算に反映する。
+    business_today = reference_today or get_business_today()
+    calc_today = business_today
+    if reference_today is None and not is_working_day(calc_today):
+        calc_today = get_prev_working_day(calc_today)
     # 完成品向け累積LT（自分LT含む）の最大値を取得し、LT+1日前から再計算
     # これにより、完成品側の実績変更が子製品の過去の出庫に正しく反映される
     max_lt = _get_max_parent_bom_lead_time(product_id)
@@ -1233,7 +1239,7 @@ def recalculate_planned_stock_qty(
     if is_final_product:
         final_delivery_lt = _get_final_product_delivery_lt(line_id, product_id)
         max_lt = max(max_lt, final_delivery_lt)
-    calc_start_date = shift_working_days(today, -(max_lt + 1))
+    calc_start_date = shift_working_days(calc_today, -(max_lt + 1))
     planned_by_date = {}
     firm_map = firm_map or {}
 
@@ -1307,12 +1313,12 @@ def recalculate_planned_stock_qty(
         is_line_final = bool(getattr(sample.product, 'is_line_final_product', False))
         if is_final:
             firm_qty = firm_map.get((sample.product_id, plan_date), Decimal('0'))
-            if plan_date <= today:
+            if plan_date <= business_today:
                 planned_shipment = firm_qty
             else:
                 planned_shipment = firm_qty if firm_qty > 0 else Decimal(str(order_total))
         elif is_line_final:
-            if plan_date < today:
+            if plan_date < business_today:
                 # ライン最終品でも過去日は実績優先で整合を取る。
                 # 親参照がない（BOM未設定）場合のみ需要(order_qty)にフォールバック。
                 planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days)
@@ -1321,10 +1327,10 @@ def recalculate_planned_stock_qty(
             else:
                 planned_shipment = Decimal(str(order_total))
         else:
-            if plan_date < today:
+            if plan_date < business_today:
                 planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days)
             else:
-                planned_shipment = _calculate_parent_planned_shipment(sample, today, shift_working_days)
+                planned_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days)
         planned_shipment = int(planned_shipment or 0)
 
         prev_day = get_prev_working_day(plan_date)
@@ -1333,7 +1339,7 @@ def recalculate_planned_stock_qty(
 
         # 計画在庫 = 前日計画在庫 + 実績/計画 - 出庫
         # 仕損による子部品消費は出庫計算で反映済み（adjust_qty は使用しない）
-        if plan_date < today:
+        if plan_date < business_today:
             planned_stock = (
                 prev_planned
                 + actual_total
