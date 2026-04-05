@@ -1313,7 +1313,10 @@ def recalculate_planned_stock_qty(
         is_line_final = bool(getattr(sample.product, 'is_line_final_product', False))
         if is_final:
             firm_qty = firm_map.get((sample.product_id, plan_date), Decimal('0'))
-            if plan_date <= business_today:
+            # 完成品の計画出庫判定は calc_today（営業日調整済）を使う。
+            # business_today に変更すると、休日当日で firm_qty=0 の際に
+            # 顧客カレンダ由来の order_qty にフォールバックできず計画出庫が欠落する。
+            if plan_date <= calc_today:
                 planned_shipment = firm_qty
             else:
                 planned_shipment = firm_qty if firm_qty > 0 else Decimal(str(order_total))
