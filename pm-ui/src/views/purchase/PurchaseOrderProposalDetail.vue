@@ -15,6 +15,7 @@
         <div><strong>ステータス:</strong> {{ statusLabel(proposal.status) }}</div>
         <div><strong>発注日:</strong> {{ proposal.order_date }}</div>
         <div><strong>希望納入日:</strong> {{ proposal.desired_delivery_date }}</div>
+        <div><strong>次回納入日:</strong> {{ proposal.next_delivery_date || '-' }}</div>
       </div>
 
       <div class="section">
@@ -36,6 +37,10 @@
             <label>希望納入日</label>
             <input v-model="form.desired_delivery_date" type="date" :disabled="!canEdit" />
           </div>
+          <div class="form-group">
+            <label>次回納入日</label>
+            <input v-model="form.next_delivery_date" type="date" :disabled="!canEdit" />
+          </div>
           <div class="form-group full">
             <label>備考</label>
             <textarea v-model="form.note" rows="2" :disabled="!canEdit" />
@@ -52,6 +57,7 @@
               <th>購買ライン</th>
               <th>不足日</th>
               <th>不足数</th>
+              <th>次回納入日</th>
               <th>発注数</th>
               <th>備考</th>
               <th v-if="canEdit">操作</th>
@@ -77,6 +83,7 @@
               </td>
               <td><input v-model="line.shortage_date" type="date" :disabled="!canEdit" /></td>
               <td><input v-model.number="line.shortage_qty" type="number" :disabled="!canEdit" /></td>
+              <td><input v-model="line.next_delivery_date" type="date" :disabled="!canEdit" /></td>
               <td><input v-model.number="line.order_qty" type="number" min="0" :disabled="!canEdit" /></td>
               <td><input v-model="line.note" :disabled="!canEdit" /></td>
               <td v-if="canEdit">
@@ -87,19 +94,10 @@
         </table>
         <div v-if="canEdit" class="line-actions">
           <button class="btn-secondary" @click="addLine">行追加</button>
-          <label class="horizon-label">
-            参照日数
-            <input
-              v-model.number="autoFillHorizonDays"
-              class="horizon-input"
-              type="number"
-              min="1"
-              max="365"
-            />
-          </label>
-          <button class="btn-secondary" @click="runAutoFill('PROGRESS')">進度から提案</button>
-          <button class="btn-secondary" @click="runAutoFill('PLANNED_PROGRESS')">計画進度から提案</button>
-          <button class="btn-secondary" @click="runAutoFill('PLANNED_STOCK')">計画在庫から提案</button>
+          <button class="btn-secondary" :disabled="!canRunAutoFill" @click="runAutoFill('PROGRESS')">進度から提案</button>
+          <button class="btn-secondary" :disabled="!canRunAutoFill" @click="runAutoFill('PLANNED_PROGRESS')">計画進度から提案</button>
+          <button class="btn-secondary" :disabled="!canRunAutoFill" @click="runAutoFill('PLANNED_STOCK')">計画在庫から提案</button>
+          <span v-if="!canRunAutoFill" class="auto-fill-hint">※次回納入日を入力してください</span>
         </div>
       </div>
 
@@ -211,7 +209,6 @@ const approvalConfigs = ref([])
 const suppliers = ref([])
 const products = ref([])
 const purchaseLines = ref([])
-const autoFillHorizonDays = ref(30)
 const showSendDialog = ref(false)
 const sendingMail = ref(false)
 const sendForm = ref({
@@ -224,9 +221,12 @@ const form = ref({
   supplier: null,
   order_date: '',
   desired_delivery_date: '',
+  next_delivery_date: '',
   note: '',
   lines: [],
 })
+
+const canRunAutoFill = computed(() => canEdit.value && Boolean(form.value.next_delivery_date))
 
 const statusMap = {
   DRAFT: '作成中',
@@ -337,6 +337,7 @@ const buildLineRow = (line = {}) => ({
   line: line.line ?? null,
   shortage_date: line.shortage_date || '',
   shortage_qty: line.shortage_qty ?? null,
+  next_delivery_date: line.next_delivery_date || '',
   order_qty: line.order_qty ?? 0,
   note: line.note || '',
 })
@@ -346,6 +347,7 @@ const setFormFromProposal = (data) => {
     supplier: data.supplier,
     order_date: data.order_date,
     desired_delivery_date: data.desired_delivery_date,
+    next_delivery_date: data.next_delivery_date || '',
     note: data.note || '',
     lines: (data.lines || []).map((line) => buildLineRow(line)),
   }
@@ -390,6 +392,7 @@ const serializeLines = () =>
       line: line.line,
       shortage_date: line.shortage_date || null,
       shortage_qty: line.shortage_qty ?? null,
+      next_delivery_date: line.next_delivery_date || null,
       order_qty: line.order_qty ?? 0,
       note: line.note || '',
     }))
@@ -400,6 +403,7 @@ const saveProposal = async () => {
     supplier: form.value.supplier,
     order_date: form.value.order_date,
     desired_delivery_date: form.value.desired_delivery_date,
+    next_delivery_date: form.value.next_delivery_date || null,
     note: form.value.note,
     lines: serializeLines(),
   })
@@ -413,22 +417,18 @@ const autoFillSourceLabel = (source) => {
   return '計画在庫'
 }
 
-const normalizeHorizonDays = (value) => {
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed)) return 30
-  return Math.max(1, Math.min(Math.trunc(parsed), 365))
-}
-
 const runAutoFill = async (source) => {
-  const horizonDays = normalizeHorizonDays(autoFillHorizonDays.value)
-  autoFillHorizonDays.value = horizonDays
+  if (!form.value.next_delivery_date) {
+    alert('次回納入日を入力してください')
+    return
+  }
   await api.purchaseOrderProposals.autoFill(proposalId, {
     clear_existing: true,
-    horizon_days: horizonDays,
+    next_delivery_date: form.value.next_delivery_date,
     source,
   })
   await fetchDetail()
-  alert(`${autoFillSourceLabel(source)}から提案を反映しました（参照${horizonDays}日）`)
+  alert(`${autoFillSourceLabel(source)}から提案を反映しました（〜${form.value.next_delivery_date}）`)
 }
 
 const submitProposal = async () => {
@@ -681,15 +681,9 @@ onMounted(async () => {
   align-items: center;
   flex-wrap: wrap;
 }
-.horizon-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.auto-fill-hint {
   font-size: 12px;
-}
-.horizon-input {
-  width: 90px;
-  padding: 4px 6px;
+  color: #92400e;
 }
 .action-row {
   display: flex;

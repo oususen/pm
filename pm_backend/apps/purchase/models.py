@@ -82,6 +82,7 @@ class PurchaseOrderProposal(models.Model):
     supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name='order_proposals')
     order_date = models.DateField()
     desired_delivery_date = models.DateField()
+    next_delivery_date = models.DateField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -116,6 +117,7 @@ class PurchaseOrderProposalLine(models.Model):
     line = models.ForeignKey(Line, on_delete=models.PROTECT, related_name='purchase_order_proposal_lines')
     shortage_date = models.DateField(null=True, blank=True)
     shortage_qty = models.IntegerField(null=True, blank=True)
+    next_delivery_date = models.DateField(null=True, blank=True)
     order_qty = models.IntegerField(default=0)
     snapshot_stock = models.IntegerField(null=True, blank=True)
     snapshot_min_stock = models.IntegerField(null=True, blank=True)

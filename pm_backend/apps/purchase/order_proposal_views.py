@@ -509,13 +509,44 @@ def _normalize_auto_fill_source(value):
     return AUTO_FILL_SOURCE_DEFAULT
 
 
-def _build_auto_fill_lines(proposal: PurchaseOrderProposal, horizon_days: int = 30, source: str = AUTO_FILL_SOURCE_DEFAULT):
+def _build_auto_fill_lines(proposal: PurchaseOrderProposal, next_delivery_date: date, source: str = AUTO_FILL_SOURCE_DEFAULT):
+    from production.inventory.inventory_calculator import recalculate_inventory_for_line
+    from purchase.views import _resolve_inventory_effective_start_date
+
     order_date = proposal.order_date
-    end_date = order_date + timedelta(days=max(1, min(horizon_days, 365)))
+    delivery_date = proposal.desired_delivery_date
+    # 参照範囲: [delivery_date, next_delivery_date - 1]
+    range_start = delivery_date
+    range_end = next_delivery_date - timedelta(days=1)
     generated = []
     source = _normalize_auto_fill_source(source)
 
-    for line_obj, product in _collect_supplier_product_line_pairs(proposal.supplier, order_date):
+    pairs = _collect_supplier_product_line_pairs(proposal.supplier, order_date)
+
+    # 参照範囲の値を正しくするため、先に次回納入日までの在庫・計画在庫・進度・計画進度を再計算
+    today = get_business_today()
+    recalc_end_date = range_end
+    line_products_map = {}
+    for line_obj, product in pairs:
+        line_products_map.setdefault(line_obj.id, set()).add(product['id'])
+    for line_id, product_ids in line_products_map.items():
+        target_product_ids = sorted(product_ids)
+        effective_start_dt = _resolve_inventory_effective_start_date(
+            line_id,
+            today,
+            recalc_end_date,
+            product_ids=target_product_ids,
+        )
+        recalculate_inventory_for_line(
+            line_id,
+            effective_start_dt,
+            recalc_end_date,
+            include_progress=True,
+            line_final_only=False,
+            product_ids=target_product_ids,
+        )
+
+    for line_obj, product in pairs:
         min_stock_qty = (
             StockAllocation.objects.filter(product_id=product['id'])
             .aggregate(v=Max('min_stock_qty'))
@@ -526,8 +557,8 @@ def _build_auto_fill_lines(proposal: PurchaseOrderProposal, horizon_days: int = 
             LineBacklog.objects.filter(
                 line_id=line_obj.id,
                 product_id=product['id'],
-                plan_date__gte=order_date,
-                plan_date__lte=end_date,
+                plan_date__gte=range_start,
+                plan_date__lte=range_end,
             )
             .order_by('plan_date')
             .values('plan_date', 'planned_stock_qty', 'progress_qty', 'planned_progress_qty')
@@ -535,10 +566,10 @@ def _build_auto_fill_lines(proposal: PurchaseOrderProposal, horizon_days: int = 
         if not rows:
             continue
 
-        shortage_date = None
         shortage_qty = 0
         snapshot_stock = None
         snapshot_min_stock = int(min_stock_qty) if source == AUTO_FILL_SOURCE_PLANNED_STOCK else 0
+        first_reference = None
         for row in rows:
             if source == AUTO_FILL_SOURCE_PROGRESS:
                 reference_value = int(row['progress_qty'] or 0)
@@ -549,9 +580,10 @@ def _build_auto_fill_lines(proposal: PurchaseOrderProposal, horizon_days: int = 
             else:
                 reference_value = int(row['planned_stock_qty'] or 0)
                 current_shortage = int(min_stock_qty) - reference_value
+            if first_reference is None:
+                first_reference = reference_value
             if current_shortage > 0:
-                if shortage_date is None:
-                    shortage_date = row['plan_date']
+                if snapshot_stock is None:
                     snapshot_stock = reference_value
                 shortage_qty = max(shortage_qty, current_shortage)
 
@@ -569,10 +601,11 @@ def _build_auto_fill_lines(proposal: PurchaseOrderProposal, horizon_days: int = 
         generated.append({
             'product': product['id'],
             'line': line_obj.id,
-            'shortage_date': shortage_date,
+            'shortage_date': delivery_date,
             'shortage_qty': shortage_qty,
+            'next_delivery_date': next_delivery_date,
             'order_qty': order_qty,
-            'snapshot_stock': snapshot_stock,
+            'snapshot_stock': snapshot_stock if snapshot_stock is not None else first_reference,
             'snapshot_min_stock': snapshot_min_stock,
             'note': '',
         })
@@ -1262,6 +1295,15 @@ class PurchaseOrderProposalDetailView(APIView):
                     proposal.desired_delivery_date = _coerce_date(request.data.get('desired_delivery_date'), 'desired_delivery_date')
                 except ValueError as exc:
                     return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            if 'next_delivery_date' in request.data:
+                raw_nd = request.data.get('next_delivery_date')
+                if raw_nd in (None, ''):
+                    proposal.next_delivery_date = None
+                else:
+                    try:
+                        proposal.next_delivery_date = _coerce_date(raw_nd, 'next_delivery_date')
+                    except ValueError as exc:
+                        return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
             if 'note' in request.data:
                 proposal.note = str(request.data.get('note') or '')
             proposal.save()
@@ -1593,17 +1635,26 @@ class PurchaseOrderProposalAutoFillView(APIView):
         if proposal.status not in (PurchaseOrderProposal.STATUS_DRAFT, PurchaseOrderProposal.STATUS_REJECTED):
             return Response({'detail': 'DRAFTまたはREJECTEDのみ自動提案できます'}, status=status.HTTP_400_BAD_REQUEST)
 
+        raw_next = request.data.get('next_delivery_date')
+        if not raw_next:
+            return Response({'detail': '次回納入日を指定してください'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            horizon_days = int(request.data.get('horizon_days', 30))
+            next_delivery_date = datetime.strptime(str(raw_next), '%Y-%m-%d').date()
         except (TypeError, ValueError):
-            return Response({'detail': 'horizon_days must be integer'}, status=status.HTTP_400_BAD_REQUEST)
-        horizon_days = max(1, min(horizon_days, 365))
+            return Response({'detail': 'next_delivery_date はYYYY-MM-DD形式で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+        if next_delivery_date <= proposal.desired_delivery_date:
+            return Response({'detail': '次回納入日は納入日より後の日付を指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ヘッダの次回納入日も保存
+        if proposal.next_delivery_date != next_delivery_date:
+            proposal.next_delivery_date = next_delivery_date
+            proposal.save(update_fields=['next_delivery_date', 'updated_at'])
 
         source = _normalize_auto_fill_source(request.data.get('source'))
         clear_existing = str(request.data.get('clear_existing', 'true')).lower() in ('true', '1', 'yes')
         generated_lines = _build_auto_fill_lines(
             proposal,
-            horizon_days=horizon_days,
+            next_delivery_date=next_delivery_date,
             source=source,
         )
 
