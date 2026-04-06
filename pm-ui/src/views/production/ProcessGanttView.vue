@@ -645,9 +645,17 @@ const parseTimeParts = (value) => {
   return { hour, minute }
 }
 
+const isNonWorkingCalendarDay = (day) => {
+  if (!day) return false
+  const isWorking = day.is_working_day
+  if (isWorking === false) return true
+  if (typeof isWorking === 'string' && isWorking.toLowerCase() === 'false') return true
+  return day.work_minutes != null && Number(day.work_minutes) === 0
+}
+
 const getWorkStartForDate = (dateKey) => {
   const day = calendarDayMap.value[dateKey]
-  if (day && day.is_working_day === false) return null
+  if (isNonWorkingCalendarDay(day)) return null
   if (day && day.work_pattern) {
     const pattern = workPatternMap.value[String(day.work_pattern)]
     const parsed = parseTimeParts(pattern?.start_time)
@@ -658,7 +666,7 @@ const getWorkStartForDate = (dateKey) => {
 
 const getWorkEndForDate = (dateKey, startParts) => {
   const day = calendarDayMap.value[dateKey]
-  if (day && day.is_working_day === false) return null
+  if (isNonWorkingCalendarDay(day)) return null
   const start = startParts || workStartFallback
   let endParts = null
   let dayOffset = 0
@@ -692,10 +700,25 @@ const getWorkEndForDate = (dateKey, startParts) => {
 
 const resolveDaisoCalendarId = async () => {
   if (daisoCalendarId.value !== undefined) return daisoCalendarId.value || null
+  const pickDaiso = (rows) => {
+    const list = rows || []
+    const exact = list.find((row) => String(row.calendar_code || '').trim().toLowerCase() === 'daiso')
+    if (exact) return exact
+    return list.find((row) => {
+      const code = String(row.calendar_code || '').trim().toLowerCase()
+      const name = String(row.calendar_name || '').trim().toLowerCase()
+      return code.includes('daiso') || name.includes('daiso') || name.includes('ダイソウ')
+    })
+  }
   try {
     const res = await api.calendars.getCalendars({ search: 'daiso', page_size: 200 })
     const rows = res.data?.results || res.data || []
-    const daiso = rows.find((row) => String(row.calendar_code || '').toLowerCase() === 'daiso')
+    let daiso = pickDaiso(rows)
+    if (!daiso) {
+      const fallbackRes = await api.calendars.getCalendars({ page_size: 5000 })
+      const fallbackRows = fallbackRes.data?.results || fallbackRes.data || []
+      daiso = pickDaiso(fallbackRows)
+    }
     daisoCalendarId.value = daiso?.id || null
   } catch (e) {
     console.error('DAISOカレンダ取得エラー', e)
@@ -729,15 +752,34 @@ const loadWorkPatternData = async (lineId, startDate, endDate) => {
   const calendarId = await resolveLineCalendarId(lineId)
   if (!calendarId) return
 
-  try {
-    const daysRes = await api.calendars.getCalendarDays(calendarId)
-    const days = daysRes.data?.results || daysRes.data || []
-    const filtered = days.filter((day) => {
+  const filterByRange = (days) => {
+    return (days || []).filter((day) => {
       if (!day.target_date) return false
       if (startDate && day.target_date < startDate) return false
       if (endDate && day.target_date > endDate) return false
       return true
     })
+  }
+
+  try {
+    const daysRes = await api.calendars.getCalendarDays(calendarId, { page_size: 5000 })
+    const days = daysRes.data?.results || daysRes.data || []
+    const primaryFiltered = filterByRange(days)
+    const mergedByDate = new Map(primaryFiltered.map((day) => [day.target_date, day]))
+
+    const daisoId = await resolveDaisoCalendarId()
+    if (daisoId && String(daisoId) !== String(calendarId)) {
+      const daisoRes = await api.calendars.getCalendarDays(daisoId, { page_size: 5000 })
+      const daisoDays = daisoRes.data?.results || daisoRes.data || []
+      const daisoFiltered = filterByRange(daisoDays)
+      daisoFiltered.forEach((day) => {
+        if (!mergedByDate.has(day.target_date)) {
+          mergedByDate.set(day.target_date, day)
+        }
+      })
+    }
+
+    const filtered = Array.from(mergedByDate.values())
     const dayMap = {}
     const patternIds = new Set()
     filtered.forEach((day) => {
