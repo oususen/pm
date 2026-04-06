@@ -685,6 +685,7 @@ const processLoadMessage = ref('')
 const dailySettings = ref({})
 const calendarDayMap = ref({})
 const workPatternMap = ref({})
+const daisoCalendarId = ref(undefined)
 const workStartFallback = { hour: 8, minute: 0 }
 const workMinutesFallback = 480
 const processing = ref(false)
@@ -2125,11 +2126,21 @@ const formatWorkTimeLabel = (dateKey) => {
 
 const getWorkTimeLabel = (dateKey) => formatWorkTimeLabel(dateKey)
 
-const loadWorkPatternData = async (lineId, start, end) => {
-  calendarDayMap.value = {}
-  workPatternMap.value = {}
-  if (!lineId) return
+const resolveDaisoCalendarId = async () => {
+  if (daisoCalendarId.value !== undefined) return daisoCalendarId.value || null
+  try {
+    const res = await api.calendars.getCalendars({ search: 'daiso', page_size: 200 })
+    const rows = res.data?.results || res.data || []
+    const daiso = rows.find((row) => String(row.calendar_code || '').toLowerCase() === 'daiso')
+    daisoCalendarId.value = daiso?.id || null
+  } catch (e) {
+    console.error('DAISOカレンダ取得エラー', e)
+    daisoCalendarId.value = null
+  }
+  return daisoCalendarId.value || null
+}
 
+const resolveLineCalendarId = async (lineId) => {
   let calendarId = null
   const line = lines.value.find((item) => String(item.id) === String(lineId))
   if (line && line.calendar) {
@@ -2140,9 +2151,18 @@ const loadWorkPatternData = async (lineId, start, end) => {
       calendarId = lineRes.data?.calendar ?? null
     } catch (e) {
       console.error('ライン勤務カレンダ取得エラー', e)
-      calendarId = null
     }
   }
+  if (calendarId) return calendarId
+  return await resolveDaisoCalendarId()
+}
+
+const loadWorkPatternData = async (lineId, start, end) => {
+  calendarDayMap.value = {}
+  workPatternMap.value = {}
+  if (!lineId) return
+
+  const calendarId = await resolveLineCalendarId(lineId)
   if (!calendarId) return
 
   try {
