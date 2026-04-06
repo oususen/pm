@@ -70,7 +70,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="app in filteredApplications" :key="app.id">
+          <tr v-for="app in pagedApplications" :key="app.id">
             <td>{{ app.work_date }}</td>
             <td>{{ app.team_name || '-' }}</td>
             <td>{{ app.group_name || '-' }}</td>
@@ -121,6 +121,22 @@
           </tr>
         </tfoot>
       </table>
+      </div>
+      <!-- ページネーション -->
+      <div v-if="totalPages > 1" class="pagination">
+        <button class="page-btn" :disabled="currentPage <= 1" @click="currentPage = 1">«</button>
+        <button class="page-btn" :disabled="currentPage <= 1" @click="currentPage--">‹</button>
+        <template v-for="p in totalPages" :key="p">
+          <button
+            v-if="p === 1 || p === totalPages || (p >= currentPage - 2 && p <= currentPage + 2)"
+            class="page-btn" :class="{ active: p === currentPage }"
+            @click="currentPage = p"
+          >{{ p }}</button>
+          <span v-else-if="p === currentPage - 3 || p === currentPage + 3" class="page-dots">…</span>
+        </template>
+        <button class="page-btn" :disabled="currentPage >= totalPages" @click="currentPage++">›</button>
+        <button class="page-btn" :disabled="currentPage >= totalPages" @click="currentPage = totalPages">»</button>
+        <span class="page-info">{{ filteredApplications.length }}件中 {{ (currentPage-1)*pageSize+1 }}〜{{ Math.min(currentPage*pageSize, filteredApplications.length) }}件</span>
       </div>
     </template>
 
@@ -188,12 +204,14 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import api from '@/api/client'
 
 const applications = ref([])
 const loading = ref(false)
 const detailApp = ref(null)
+const currentPage = ref(1)
+const pageSize = 30
 
 const filterTeam = ref('')
 const filterGroup = ref('')
@@ -234,6 +252,11 @@ const filteredApplications = computed(() =>
     (!filterDate.value || a.work_date === filterDate.value)
   )
 )
+const totalPages = computed(() => Math.ceil(filteredApplications.value.length / pageSize) || 1)
+const pagedApplications = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return filteredApplications.value.slice(start, start + pageSize)
+})
 const totalHours = computed(() =>
   Math.round(filteredApplications.value.reduce((sum, a) =>
     sum + parseFloat(a.hours) + parseFloat(a.midnight_hours), 0
@@ -250,6 +273,10 @@ const filters = ref({
   work_date__lte: '',
   status: '',
 })
+
+watch([filterTeam, filterGroup, filterTypes, filterName, filterDate, filters], () => {
+  currentPage.value = 1
+}, { deep: true })
 
 function formatDateTime(val) {
   if (!val) return '-'
@@ -471,6 +498,31 @@ onMounted(fetchList)
 .btn-ghost { background: transparent; color: #6b7280; }
 .btn-pdf { background: #7c3aed; color: white; }
 .btn-pdf:hover { background: #6d28d9; }
+/* Pagination */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.page-btn {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: white;
+  font-size: 13px;
+  cursor: pointer;
+  color: #374151;
+}
+.page-btn:hover:not(:disabled):not(.active) { background: #f3f4f6; }
+.page-btn.active { background: #40916c; color: white; border-color: #40916c; font-weight: 600; }
+.page-btn:disabled { opacity: 0.4; cursor: default; }
+.page-dots { color: #9ca3af; font-size: 13px; padding: 0 2px; }
+.page-info { margin-left: 12px; font-size: 12px; color: #6b7280; }
 /* Modal */
 .modal-overlay {
   position: fixed;

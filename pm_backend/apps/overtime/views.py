@@ -207,6 +207,7 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     filter_backends = [DjangoFilterBackend]
     filterset_class = OvertimeApplicationFilter
+    pagination_class = None
     ordering_fields = ['work_date', 'created_at', 'status']
     ordering = ['-work_date', '-created_at']
 
