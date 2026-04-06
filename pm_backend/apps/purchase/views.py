@@ -792,16 +792,35 @@ class EngineeringChangeView(APIView):
                 BOMItem.objects.filter(child_product_id__in=old_part_ids, bom__is_active=True)
                 .select_related('bom__parent_product')
             )
+            # 全親製品を収集
+            all_parent_ids = set()
+            raw_parent_map = {}
             for bi in bom_items:
                 parent = bi.bom.parent_product
                 if not parent:
                     continue
+                all_parent_ids.add(parent.id)
                 key = bi.child_product_id
-                if key not in parent_map:
-                    parent_map[key] = {}
-                parent_map[key][parent.product_code] = {
+                if key not in raw_parent_map:
+                    raw_parent_map[key] = {}
+                raw_parent_map[key][parent.id] = {
                     'product_code': parent.product_code,
                     'product_name': parent.product_name,
+                }
+            # 親製品のうち、さらに他のBOMの子部品になっているもの（中間品）を除外し最終品のみ残す
+            intermediate_ids = set()
+            if all_parent_ids:
+                intermediate_ids = set(
+                    BOMItem.objects.filter(
+                        child_product_id__in=all_parent_ids,
+                        bom__is_active=True,
+                    ).values_list('child_product_id', flat=True)
+                )
+            for child_id, parents in raw_parent_map.items():
+                parent_map[child_id] = {
+                    p['product_code']: p
+                    for pid, p in parents.items()
+                    if pid not in intermediate_ids
                 }
 
         workday_cache = {}
