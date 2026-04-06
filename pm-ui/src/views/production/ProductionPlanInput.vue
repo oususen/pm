@@ -947,7 +947,11 @@ const dateColumns = computed(() => {
     const day = d.getDay()
     const label = `${d.getMonth() + 1}/${d.getDate()}(${weekday[day]})`
     const key = formatDateKey(d)
-    const dayClass = day === 0 ? 'sun' : day === 6 ? 'sat' : ''
+    let dayClass = day === 0 ? 'sun' : day === 6 ? 'sat' : ''
+    // カレンダ上の休日（祝日・GW等）も日曜と同じスタイルにする
+    if (!dayClass && isHolidayDate(key)) {
+      dayClass = 'sun'
+    }
     cols.push({ key, label, dayClass })
   }
   return cols
@@ -2166,12 +2170,13 @@ const resolveDaisoCalendarId = async () => {
 const resolveLineCalendarId = async (lineId) => {
   let calendarId = null
   const line = lines.value.find((item) => String(item.id) === String(lineId))
-  if (line && line.calendar) {
-    calendarId = line.calendar
+  const lineCalendar = line?.calendar?.id ?? line?.calendar ?? null
+  if (lineCalendar) {
+    calendarId = lineCalendar
   } else {
     try {
       const lineRes = await api.lines.getLine(lineId)
-      calendarId = lineRes.data?.calendar ?? null
+      calendarId = lineRes.data?.calendar?.id ?? lineRes.data?.calendar ?? null
     } catch (e) {
       console.error('ライン勤務カレンダ取得エラー', e)
     }

@@ -303,6 +303,20 @@ const normalizeList = (payload) => {
   return Array.isArray(payload) ? payload : payload?.results || [];
 };
 
+const normalizeCalendarId = (calendarValue) => {
+  if (calendarValue === null || calendarValue === undefined) return null;
+  if (typeof calendarValue === "object") return calendarValue?.id ?? null;
+  return calendarValue;
+};
+
+const isNonWorkingCalendarDay = (day) => {
+  if (!day) return false;
+  const isWorking = day.is_working_day;
+  if (isWorking === false) return true;
+  if (typeof isWorking === "string" && isWorking.toLowerCase() === "false") return true;
+  return day.work_minutes != null && Number(day.work_minutes) === 0;
+};
+
 const ensureLineList = async () => {
   if (lineList?.value?.length) return;
   try {
@@ -319,7 +333,7 @@ const ensureLineCalendars = async (lineIds) => {
   const map = { ...lineCalendarMap.value };
   (lineList.value || []).forEach((line) => {
     if (line?.id !== undefined && map[line.id] === undefined) {
-      map[line.id] = line.calendar || null;
+      map[line.id] = normalizeCalendarId(line.calendar);
     }
   });
   const missing = lineIds.filter((id) => map[id] === undefined);
@@ -328,7 +342,7 @@ const ensureLineCalendars = async (lineIds) => {
       missing.map(async (id) => {
         try {
           const res = await api.lines.getLine(id);
-          map[id] = res.data?.calendar ?? null;
+          map[id] = normalizeCalendarId(res.data?.calendar);
         } catch (err) {
           console.error("ライン詳細の取得に失敗:", err);
           map[id] = null;
@@ -364,10 +378,36 @@ const loadHolidayColumns = async () => {
     const calendarIds = Array.from(
       new Set(
         lineIds
-          .map((id) => calendarMap?.[id])
+          .map((id) => normalizeCalendarId(calendarMap?.[id]))
           .filter((id) => id !== null && id !== undefined)
       )
     );
+    // ライン専用カレンダが無い場合はDAISOカレンダをフォールバック
+    if (!calendarIds.length) {
+      const pickDaiso = (rows) => {
+        const list = rows || [];
+        const exact = list.find((row) => String(row.calendar_code || "").trim().toLowerCase() === "daiso");
+        if (exact) return exact;
+        return list.find((row) => {
+          const code = String(row.calendar_code || "").trim().toLowerCase();
+          const name = String(row.calendar_name || "").trim().toLowerCase();
+          return code.includes("daiso") || name.includes("daiso") || name.includes("ダイソウ");
+        });
+      };
+      try {
+        const res = await api.calendars.getCalendars({ search: 'daiso', page_size: 200 });
+        const rows = res.data?.results || res.data || [];
+        let daiso = pickDaiso(rows);
+        if (!daiso) {
+          const fallbackRes = await api.calendars.getCalendars({ page_size: 5000 });
+          const fallbackRows = fallbackRes.data?.results || fallbackRes.data || [];
+          daiso = pickDaiso(fallbackRows);
+        }
+        if (daiso?.id) calendarIds.push(daiso.id);
+      } catch (e) {
+        console.error('DAISOカレンダ取得エラー', e);
+      }
+    }
     if (!calendarIds.length) {
       holidays.value = fallback;
       return;
@@ -384,7 +424,7 @@ const loadHolidayColumns = async () => {
         const dateStr = day.target_date;
         if (!dateStr) return;
         if (dateStr < start || dateStr > end) return;
-        if (day.is_working_day === false || Number(day.work_minutes) === 0) {
+        if (isNonWorkingCalendarDay(day)) {
           calHolidays.add(dateStr);
         }
       });

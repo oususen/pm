@@ -496,6 +496,9 @@ function getDayClass(dateStr) {
   const dow = d.getDay()
   if (dow === 0) return 'sun'
   if (dow === 6) return 'sat'
+  // カレンダ上の休日（祝日・GW等）も日曜と同じスタイルにする
+  const day = calendarDayMap.value[dateStr]
+  if (isNonWorkingCalendarDay(day)) return 'sun'
   return ''
 }
 
@@ -730,12 +733,13 @@ const resolveDaisoCalendarId = async () => {
 const resolveLineCalendarId = async (lineId) => {
   let calendarId = null
   const line = lines.value.find((item) => String(item.id) === String(lineId))
-  if (line && line.calendar) {
-    calendarId = line.calendar
+  const lineCalendar = line?.calendar?.id ?? line?.calendar ?? null
+  if (lineCalendar) {
+    calendarId = lineCalendar
   } else {
     try {
       const lineRes = await api.lines.getLine(lineId)
-      calendarId = lineRes.data?.calendar ?? null
+      calendarId = lineRes.data?.calendar?.id ?? lineRes.data?.calendar ?? null
     } catch (e) {
       console.error('ライン勤務カレンダ取得エラー', e)
     }
@@ -1795,6 +1799,11 @@ watch(
   },
   { immediate: true }
 )
+
+watch([calendarDayMap, workPatternMap], () => {
+  if (!timelineStart.value || !timelineEnd.value || !timelineSlots.value.length) return
+  timelineSlots.value = buildTimelineSlots(timelineStart.value, timelineEnd.value)
+})
 
 watch(
   () => props.presetBaseDate,
