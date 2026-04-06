@@ -103,9 +103,11 @@
 
       <div class="section action-row">
         <button class="btn-primary" :disabled="!canEdit" @click="saveProposal">保存</button>
-        <button class="btn-success" v-if="proposal.status === 'DRAFT'" @click="submitProposal">業務員サイン</button>
+        <button class="btn-success" v-if="['DRAFT', 'REJECTED'].includes(proposal.status)" @click="submitProposal">業務員サイン</button>
+        <button class="btn-danger" v-if="proposal.status === 'DRAFT'" @click="deleteProposal">削除</button>
         <button class="btn-success" v-if="canApprove" @click="approveProposal">{{ approveButtonLabel }}</button>
         <button class="btn-danger" v-if="canReject" @click="rejectProposal">差戻</button>
+        <button class="btn-danger" v-if="canCancel" @click="cancelProposal">キャンセル</button>
         <button class="btn-secondary" v-if="canGenerateOrderPdf" @click="downloadOrderPdf">注文書作成</button>
         <button
           class="btn-success"
@@ -267,7 +269,7 @@ const taskStatusMap = {
 
 const taskStatusLabel = (taskStatus) => taskStatusMap[taskStatus] || taskStatus
 
-const canEdit = computed(() => proposal.value && proposal.value.status === 'DRAFT')
+const canEdit = computed(() => proposal.value && ['DRAFT', 'REJECTED'].includes(proposal.value.status))
 const currentUserId = computed(() => Number(authState.user?.id || 0))
 const approvalTaskTypeByStatus = {
   SUBMITTED: 'APPROVE_L2',
@@ -304,6 +306,22 @@ const isProxyFinalApproval = computed(() =>
 const approveButtonLabel = computed(() => (isProxyFinalApproval.value ? '部長代理承認' : '承認'))
 const canApprove = computed(() => Boolean(proposal.value && hasMyPendingApprovalTask.value))
 const canReject = computed(() => Boolean(proposal.value && hasMyPendingApprovalTask.value))
+const level4AuthorizedSet = computed(() => {
+  const level4 = (approvalConfigs.value || []).find((row) => Number(row.approval_level) === 4)
+  const ids = [
+    ...(Array.isArray(level4?.approver_users) ? level4.approver_users : []),
+    ...(Array.isArray(level4?.proxy_approver_users) ? level4.proxy_approver_users : []),
+  ]
+  return new Set(ids.map((id) => Number(id)).filter((id) => Number.isFinite(id)))
+})
+const canCancel = computed(() =>
+  Boolean(
+    proposal.value &&
+      proposal.value.status === 'APPROVED' &&
+      currentUserId.value &&
+      level4AuthorizedSet.value.has(currentUserId.value)
+  )
+)
 const canGenerateOrderPdf = computed(() =>
   proposal.value && ['APPROVED', 'SENT'].includes(proposal.value.status)
 )
@@ -438,6 +456,24 @@ const submitProposal = async () => {
   alert('提出しました')
 }
 
+const deleteProposal = async () => {
+  if (!proposal.value || proposal.value.status !== 'DRAFT') {
+    alert('DRAFTのみ削除できます')
+    return
+  }
+  if (!window.confirm('この発注提案を削除します。よろしいですか？')) {
+    return
+  }
+  try {
+    await api.purchaseOrderProposals.delete(proposalId)
+    alert('削除しました')
+    router.push('/purchase/order-proposals')
+  } catch (error) {
+    const detail = error?.response?.data?.detail || '削除に失敗しました'
+    alert(detail)
+  }
+}
+
 const approveProposal = async () => {
   if (!canApprove.value) {
     alert('この承認は担当者のみ実行できます')
@@ -462,6 +498,25 @@ const rejectProposal = async () => {
   await api.purchaseOrderProposals.reject(proposalId, { comment })
   await fetchDetail()
   alert('差戻しました')
+}
+
+const cancelProposal = async () => {
+  if (!canCancel.value) {
+    alert('キャンセル権限がありません（事業部長または代理承認者のみ）')
+    return
+  }
+  if (!window.confirm('この発注提案をキャンセルします。よろしいですか？')) {
+    return
+  }
+  const comment = window.prompt('キャンセル理由（任意）', '') || ''
+  try {
+    await api.purchaseOrderProposals.cancel(proposalId, { comment })
+    await fetchDetail()
+    alert('キャンセルしました')
+  } catch (error) {
+    const detail = error?.response?.data?.detail || 'キャンセルに失敗しました'
+    alert(detail)
+  }
 }
 
 const resolvePdfFilename = (contentDisposition, fallback) => {

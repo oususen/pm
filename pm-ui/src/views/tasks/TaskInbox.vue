@@ -173,7 +173,7 @@ const normalizePurchaseTask = (row) => {
     due_date: row.due_date || "",
     created_at: row.created_at || "",
     target_primary: row.proposal_no || `提案ID:${row.proposal}`,
-    target_secondary,
+    target_secondary: targetSecondary,
     action_label: actionLabel,
     navigate() {
       router.push(`/purchase/order-proposals/${row.proposal}`)

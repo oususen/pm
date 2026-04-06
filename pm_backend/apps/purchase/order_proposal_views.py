@@ -26,7 +26,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from masters.models import BOMItem, Calendar, Contact, Line, Product, Supplier
+from masters.models import BOMItem, Calendar, Contact, Line, Process, Product, Supplier
 from notifications.models import Notification
 from orders.utils.calendar_utils import WorkingDayCalculator, get_business_today
 from production.models_line_backlog import LineBacklog
@@ -353,6 +353,73 @@ def _resolve_notification_operator_name(proposal: PurchaseOrderProposal, fallbac
     if fallback_name:
         return fallback_name
     return 'system'
+
+
+def _write_plan_qty_on_final_approval(proposal: PurchaseOrderProposal):
+    """最終承認時に各提案行の order_qty を LineBacklog.plan_qty として納入日に書き込む。
+    購買計画は sequence_no=1 固定（仕様: LineBacklog_sequence_no仕様.md）。
+    既存 seq=1 レコードは上書き。追加注文は別UIで対応する想定。"""
+    delivery_date = proposal.desired_delivery_date
+    if not delivery_date:
+        return
+    for prop_line in proposal.lines.all():
+        order_qty = int(prop_line.order_qty or 0)
+        if order_qty <= 0:
+            continue
+        line_id = prop_line.line_id
+        product_id = prop_line.product_id
+        if not line_id or not product_id:
+            continue
+        process = (
+            Process.objects.filter(line_id=line_id, process_code='PURCHASE').first()
+            or Process.objects.filter(line_id=line_id).order_by('id').first()
+        )
+        process_id = process.id if process else None
+
+        product_code = getattr(prop_line.product, 'product_code', '') or ''
+        plan_id = f'{product_code}_{delivery_date.strftime("%Y%m%d")}_{order_qty}_1'
+
+        LineBacklog.objects.update_or_create(
+            line_id=line_id,
+            product_id=product_id,
+            plan_date=delivery_date,
+            sequence_no=1,
+            defaults={
+                'process_id': process_id,
+                'plan_qty': order_qty,
+                'order_qty': 0,
+                'actual_qty': 0,
+                'stock_qty': 0,
+                'planned_stock_qty': 0,
+                'adjust_qty': 0,
+                'scrap_qty': 0,
+                'actual_shipment_qty': 0,
+                'plan_id': plan_id,
+            },
+        )
+
+
+def _delete_plan_qty_for_proposal(proposal: PurchaseOrderProposal):
+    """提案差戻/キャンセル時に、最終承認時に書き込んだ LineBacklog.plan_qty(seq=1) を削除する。
+    仕様: plan_id = {product_code}_{YYYYMMDD}_{qty}_1 で一意特定できるため plan_id で削除。"""
+    delivery_date = proposal.desired_delivery_date
+    if not delivery_date:
+        return
+    for prop_line in proposal.lines.all():
+        order_qty = int(prop_line.order_qty or 0)
+        if order_qty <= 0:
+            continue
+        product_code = getattr(prop_line.product, 'product_code', '') or ''
+        if not product_code:
+            continue
+        plan_id = f'{product_code}_{delivery_date.strftime("%Y%m%d")}_{order_qty}_1'
+        LineBacklog.objects.filter(
+            line_id=prop_line.line_id,
+            product_id=prop_line.product_id,
+            plan_date=delivery_date,
+            sequence_no=1,
+            plan_id=plan_id,
+        ).delete()
 
 
 def _create_tasks_for_users(proposal: PurchaseOrderProposal, task_type: str, users, due_date: date | None = None):
@@ -1274,8 +1341,8 @@ class PurchaseOrderProposalDetailView(APIView):
         proposal = PurchaseOrderProposal.objects.filter(pk=pk).first()
         if not proposal:
             return Response(status=status.HTTP_404_NOT_FOUND)
-        if proposal.status != PurchaseOrderProposal.STATUS_DRAFT:
-            return Response({'detail': 'DRAFTのみ編集できます'}, status=status.HTTP_400_BAD_REQUEST)
+        if proposal.status not in (PurchaseOrderProposal.STATUS_DRAFT, PurchaseOrderProposal.STATUS_REJECTED):
+            return Response({'detail': 'DRAFT/差戻のみ編集できます'}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
             supplier_id = request.data.get('supplier')
@@ -1342,8 +1409,8 @@ class PurchaseOrderProposalSubmitView(APIView):
         proposal = PurchaseOrderProposal.objects.filter(pk=pk).first()
         if not proposal:
             return Response(status=status.HTTP_404_NOT_FOUND)
-        if proposal.status != PurchaseOrderProposal.STATUS_DRAFT:
-            return Response({'detail': 'DRAFTのみサインできます'}, status=status.HTTP_400_BAD_REQUEST)
+        if proposal.status not in (PurchaseOrderProposal.STATUS_DRAFT, PurchaseOrderProposal.STATUS_REJECTED):
+            return Response({'detail': 'DRAFT/差戻のみサインできます'}, status=status.HTTP_400_BAD_REQUEST)
         if not proposal.lines.exists():
             return Response({'detail': '明細がありません'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1439,6 +1506,10 @@ class PurchaseOrderProposalApproveView(APIView):
             if current_task_type:
                 _mark_tasks_done(proposal, current_task_type)
 
+            # 最終承認時: 提案行の order_qty を LineBacklog.plan_qty として書込
+            if next_status == PurchaseOrderProposal.STATUS_APPROVED:
+                _write_plan_qty_on_final_approval(proposal)
+
             if next_task_type and next_users:
                 _create_tasks_for_users(
                     proposal=proposal,
@@ -1479,7 +1550,14 @@ class PurchaseOrderProposalRejectView(APIView):
             return Response({'detail': 'comment is required'}, status=status.HTTP_400_BAD_REQUEST)
 
         current_level = STATUS_TO_APPROVAL_LEVEL.get(proposal.status)
-        if current_level is None or proposal.status in (PurchaseOrderProposal.STATUS_SENT, PurchaseOrderProposal.STATUS_CANCELED):
+        if (
+            current_level is None
+            or proposal.status in (
+                PurchaseOrderProposal.STATUS_APPROVED,
+                PurchaseOrderProposal.STATUS_SENT,
+                PurchaseOrderProposal.STATUS_CANCELED,
+            )
+        ):
             return Response({'detail': 'この状態では差戻できません'}, status=status.HTTP_400_BAD_REQUEST)
 
         notify_users = []
@@ -1518,6 +1596,67 @@ class PurchaseOrderProposalRejectView(APIView):
 
         _create_notification(
             title=f'発注提案書 差戻: {proposal.proposal_no}',
+            description=comment,
+            users=notify_users,
+            operator_name=_resolve_notification_operator_name(proposal, request.user),
+        )
+
+        proposal = (
+            PurchaseOrderProposal.objects.select_related('supplier', 'created_by')
+            .prefetch_related('lines__product', 'lines__line', 'approvals__approved_by', 'tasks__assigned_to')
+            .get(pk=pk)
+        )
+        return Response(PurchaseOrderProposalDetailSerializer(proposal).data)
+
+
+class PurchaseOrderProposalCancelView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk: int):
+        proposal = PurchaseOrderProposal.objects.filter(pk=pk).first()
+        if not proposal:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        comment = str(request.data.get('comment') or '').strip()
+
+        # キャンセル可能なのは最終承認済(APPROVED)のみ。送信済/既キャンセルは不可。
+        if proposal.status != PurchaseOrderProposal.STATUS_APPROVED:
+            return Response({'detail': 'この状態ではキャンセルできません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 権限チェック: L4(事業部長) の承認者または代理承認者のみキャンセル可
+        l4_config = _get_approval_config(4)
+        authorized_ids = set(l4_config.approver_users.values_list('id', flat=True))
+        authorized_ids.update(l4_config.proxy_approver_users.values_list('id', flat=True))
+        user_id = getattr(request.user, 'id', None)
+        if not user_id or user_id not in authorized_ids:
+            return Response(
+                {'detail': 'キャンセル権限がありません（事業部長または代理承認者のみ実行可）'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        notify_users = []
+        if proposal.created_by_id:
+            notify_users.append(proposal.created_by)
+        approvers = (
+            proposal.approvals.filter(
+                action=PurchaseOrderProposalApproval.ACTION_APPROVED,
+                approved_by_id__isnull=False,
+            )
+            .select_related('approved_by')
+        )
+        notify_users.extend([row.approved_by for row in approvers if row.approved_by_id])
+
+        with transaction.atomic():
+            proposal.status = PurchaseOrderProposal.STATUS_CANCELED
+            proposal.save(update_fields=['status', 'updated_at'])
+
+            # 最終承認時に書き込んだ plan_qty(seq=1) を削除
+            _delete_plan_qty_for_proposal(proposal)
+
+            _mark_all_pending_tasks_skipped(proposal)
+
+        _create_notification(
+            title=f'発注提案書 キャンセル: {proposal.proposal_no}',
             description=comment,
             users=notify_users,
             operator_name=_resolve_notification_operator_name(proposal, request.user),
