@@ -246,6 +246,19 @@
               </select>
             </div>
 
+            <div class="work-date-area">
+              <label class="qty-label">
+                作業日
+                <span class="required-mark">*</span>
+              </label>
+              <input
+                type="date"
+                v-model="workDateStr"
+                class="work-date-input"
+              />
+              <div class="work-date-hint">上部の日付は表示用です。保存は作業日で行います。</div>
+            </div>
+
             <div class="action-bar">
               <button class="btn-save" :disabled="!canSave" @click="save">保存</button>
               <button class="btn-cancel" @click="cancel">キャンセル</button>
@@ -412,6 +425,7 @@ const addDays = (ymd, n) => {
 // ──────────────────────────────
 const router = useRouter()
 const planDateStr = ref(businessToday())
+const workDateStr = ref(businessToday())
 const processes = ref([])
 const lines = ref([])
 const allItems = ref([])
@@ -852,6 +866,7 @@ const isSelected = (item) => selectedItem.value && itemKey(item) === itemKey(sel
 const itemKey = (item) => `${item.line_id}-${item.process_id}-${item.product_id || `code:${item.product_code || ''}`}`
 const canSave = computed(() => {
   if (!selectedItem.value || selectedEquipmentIds.value.length === 0 || !selectedAction.value) return false
+  if (!String(workDateStr.value || '').trim()) return false
   if (selectedAction.value === 'END' && !(inputQty.value > 0)) return false
   if (selectedAction.value === 'PAUSE' && !(inputQty.value >= 0)) return false
   if (requiresReason.value && !actionReason.value) return false
@@ -991,6 +1006,13 @@ function onYesterdayToggle() {
 async function save() {
   if (!canSave.value) return
   const item = selectedItem.value
+  const targetWorkDate = String(workDateStr.value || '').trim()
+  if (targetWorkDate !== planDateStr.value) {
+    const ok = window.confirm(
+      `表示日付(${planDateStr.value})と作業日(${targetWorkDate})が異なります。作業日で保存しますか？`
+    )
+    if (!ok) return
+  }
   try {
     let lastData = null
     // 閉じるアクション（終了・中断・一時終了）はSTARTED/PAUSED状態の全設備に一括送信する（片方だけ外してENDするミス防止）
@@ -1014,7 +1036,7 @@ async function save() {
         product_id:            item.product_id,
         product_code:          item.product_code,
         equipment_id:          eqId,
-        plan_date:             planDateStr.value,
+        plan_date:             targetWorkDate,
         operator:              operator.value,
         operator_action:       selectedAction.value,
         operator_action_reason: actionReason.value,
@@ -1931,5 +1953,22 @@ function showToast(message, type = 'success') {
   .btn-save, .btn-cancel {
     flex: 1 1 140px;
   }
+}
+.work-date-area { margin-bottom: 12px; }
+.work-date-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+  background: #fff;
+  box-sizing: border-box;
+  margin-top: 4px;
+}
+.work-date-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #6b7280;
 }
 </style>
