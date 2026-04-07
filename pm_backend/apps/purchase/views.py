@@ -788,39 +788,63 @@ class EngineeringChangeView(APIView):
         old_part_ids = list({part.old_part_id for part in parts})
         parent_map = {}
         if old_part_ids:
-            bom_items = (
-                BOMItem.objects.filter(child_product_id__in=old_part_ids, bom__is_active=True)
-                .select_related('bom__parent_product')
+            # BOM階層を再帰的に辿り、is_final_product=Trueの最終品を探す
+            # まず全BOMの親子関係をキャッシュ（アクティブBOMのみ）
+            all_bom_edges = list(
+                BOMItem.objects.filter(bom__is_active=True)
+                .values_list('child_product_id', 'bom__parent_product_id')
             )
-            # 全親製品を収集
-            all_parent_ids = set()
-            raw_parent_map = {}
-            for bi in bom_items:
-                parent = bi.bom.parent_product
-                if not parent:
+            child_to_parents = {}
+            for child_id, parent_id in all_bom_edges:
+                if parent_id is None:
                     continue
-                all_parent_ids.add(parent.id)
-                key = bi.child_product_id
-                if key not in raw_parent_map:
-                    raw_parent_map[key] = {}
-                raw_parent_map[key][parent.id] = {
-                    'product_code': parent.product_code,
-                    'product_name': parent.product_name,
-                }
-            # 親製品のうち、さらに他のBOMの子部品になっているもの（中間品）を除外し最終品のみ残す
-            intermediate_ids = set()
-            if all_parent_ids:
-                intermediate_ids = set(
-                    BOMItem.objects.filter(
-                        child_product_id__in=all_parent_ids,
-                        bom__is_active=True,
-                    ).values_list('child_product_id', flat=True)
-                )
-            for child_id, parents in raw_parent_map.items():
-                parent_map[child_id] = {
-                    p['product_code']: p
-                    for pid, p in parents.items()
-                    if pid not in intermediate_ids
+                child_to_parents.setdefault(child_id, set()).add(parent_id)
+
+            # is_final_product=True の製品IDセットをキャッシュ
+            final_product_ids = set(
+                Product.objects.filter(is_final_product=True, is_active=True)
+                .values_list('id', flat=True)
+            )
+
+            # BOMツリーを上に辿り、is_final_product=Trueの製品を見つける
+            def find_final_parents(product_id, visited=None):
+                if visited is None:
+                    visited = set()
+                if product_id in visited:
+                    return set()
+                visited.add(product_id)
+                result = set()
+                # この製品自体が最終品ならば結果に含める
+                if product_id in final_product_ids:
+                    result.add(product_id)
+                # さらに上の親も辿る（最終品の上にさらに最終品がある場合も考慮）
+                upper_parents = child_to_parents.get(product_id)
+                if upper_parents:
+                    for pid in upper_parents:
+                        result |= find_final_parents(pid, visited)
+                return result
+
+            final_ids_all = set()
+            raw_final_map = {}
+            for old_id in old_part_ids:
+                finals = find_final_parents(old_id, visited=set())
+                raw_final_map[old_id] = finals
+                final_ids_all |= finals
+
+            # 最終品の製品情報を一括取得
+            final_products = {}
+            if final_ids_all:
+                for p in Product.objects.filter(id__in=final_ids_all):
+                    final_products[p.id] = {
+                        'product_code': p.product_code,
+                        'product_name': p.product_name,
+                    }
+
+            for old_id in old_part_ids:
+                parent_map[old_id] = {
+                    final_products[fid]['product_code']: final_products[fid]
+                    for fid in raw_final_map.get(old_id, set())
+                    if fid in final_products
                 }
 
         workday_cache = {}
