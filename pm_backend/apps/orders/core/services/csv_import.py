@@ -320,6 +320,7 @@ class CSVImportService:
             orders_dict[key].append(daily)
 
         created_orders = 0
+        updated_orders = 0
         created_lines = 0
         superseded_orders = 0
         additional_order_notices = []
@@ -658,8 +659,28 @@ class CSVImportService:
                     continue  # skip generic line creation below
 
                 else:
-                    order = Order.objects.create(**order_defaults)
-                    created_orders += 1
+                    if order_type == 'FORECAST':
+                        # FORECAST再取込対応: 同一order_noの既存注文があれば行を置換
+                        order, created = Order.objects.get_or_create(
+                            customer_id=customer_id,
+                            order_no=order_no,
+                            order_type=order_type,
+                            version_no=version_no,
+                            defaults=order_defaults
+                        )
+                        if created:
+                            created_orders += 1
+                        else:
+                            order.source_system = order_defaults['source_system']
+                            order.source_file = order_defaults['source_file']
+                            order.order_date = order_defaults['order_date']
+                            order.status = 'OPEN'
+                            order.save()
+                            order.lines.all().delete()
+                            updated_orders += 1
+                    else:
+                        order = Order.objects.create(**order_defaults)
+                        created_orders += 1
 
                 # Process order lines
                 if order_type == 'FORECAST':
@@ -672,6 +693,7 @@ class CSVImportService:
                             product_earliest_dates[daily.product_code] = daily.due_date
 
                     # Supersede existing forecast lines that overlap with new data (per product)
+                    # 自分自身（再取込で再利用した注文）は除外する
                     for product_code, earliest_date in product_earliest_dates.items():
                         superseded_count = Order.objects.filter(
                             customer_id=customer_id,
@@ -679,7 +701,7 @@ class CSVImportService:
                             status='OPEN',
                             lines__product_code=product_code,
                             lines__due_date__gte=earliest_date
-                        ).distinct().update(status='SUPERSEDED')
+                        ).exclude(id=order.id).distinct().update(status='SUPERSEDED')
                         superseded_orders += superseded_count
 
                     # Create new order lines
@@ -753,6 +775,7 @@ class CSVImportService:
 
         return {
             'orders': created_orders,
+            'updated_orders': updated_orders,
             'lines': created_lines,
             'deleted_forecast_orders': superseded_orders,
             'additional_order_notices': additional_order_notices,

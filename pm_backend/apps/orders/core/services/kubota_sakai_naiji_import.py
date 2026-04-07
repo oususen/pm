@@ -14,7 +14,7 @@ class KubotaSakaiNaijiImportService:
     - Structure: V2 header row + V3 data row pairs
     - Encoding: Shift-JIS (cp932)
     - Horizontal data: 3 months × 31 days = 93 columns
-    - Grouping: product_code + inspection_type (同じ品番で検査区分が複数存在)
+    - Grouping: product_code + inspection_type + ship_to (同じ品番でも納入先・検査区分が異なれば別レコード)
 
     Column mapping:
     - Column 0: data_no = "36"
@@ -32,6 +32,7 @@ class KubotaSakaiNaijiImportService:
     COL_CALC_DATE = 4  # 計算日 (Excel列5) - YYMMDD format, Order識別用
     COL_PRODUCT_CODE = 8
     COL_PRODUCT_NAME = 11  # 品名
+    COL_SHIP_TO = 12       # 納入先コード (5476, ZS02 等)
     COL_INSPECTION_TYPE = 17
     COL_RECORD_TYPE = 24  # レコード識別 V2/V3 (Excel列25)
     COL_START_MONTH = 25  # 開始月度 (Excel列26)
@@ -180,12 +181,14 @@ class KubotaSakaiNaijiImportService:
                     product_code = row[self.COL_PRODUCT_CODE].strip() if len(row) > self.COL_PRODUCT_CODE else ''
                     inspection_type = row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else ''
                     record_type = row[self.COL_RECORD_TYPE].strip() if len(row) > self.COL_RECORD_TYPE else ''
+                    ship_to = row[self.COL_SHIP_TO].strip() if len(row) > self.COL_SHIP_TO else ''
 
                     if not product_code:
                         continue
 
-                    # Group by (product_code, inspection_type)
-                    key = (product_code, inspection_type)
+                    # Group by (product_code, inspection_type, ship_to)
+                    # 同品番・同検査区分でも納入先が異なれば別レコードとして扱う
+                    key = (product_code, inspection_type, ship_to)
 
                     if record_type == 'V2':
                         v2_rows[key] = (row, row_no)
@@ -200,14 +203,14 @@ class KubotaSakaiNaijiImportService:
 
             for key in v2_rows.keys():
                 if key not in v3_rows:
-                    self.warnings.append(f"Product {key[0]} (inspection={key[1]}): V2 found but V3 missing")
+                    self.warnings.append(f"Product {key[0]} (inspection={key[1]}, ship_to={key[2]}): V2 found but V3 missing")
                     continue
 
                 v2_row, v2_row_no = v2_rows[key]
                 v3_row, v3_row_no = v3_rows[key]
 
                 try:
-                    product_code, inspection_type = key
+                    product_code, inspection_type, ship_to_code = key
 
                     # Extract calculation date (for Order identification)
                     calc_date = v2_row[self.COL_CALC_DATE].strip() if len(v2_row) > self.COL_CALC_DATE else ''
@@ -251,6 +254,7 @@ class KubotaSakaiNaijiImportService:
                             'v2_row_no': v2_row_no,
                             'v3_row_no': v3_row_no,
                             'calc_date': calc_date,  # 計算日（Order識別用）
+                            'ship_to': ship_to_code,  # 納入先コード
                             'encoding': encoding
                         },
                         parse_status='PENDING'
@@ -392,6 +396,7 @@ class KubotaSakaiNaijiImportService:
                             self.warnings.append(f'Auto-registered new product: {raw.product_code}')
 
                         # Create daily record
+                        raw_ship_to = (raw.raw_payload or {}).get('ship_to', '')
                         daily = StgOrderDaily(
                             raw_kubota=raw,
                             customer=customer,
@@ -400,6 +405,7 @@ class KubotaSakaiNaijiImportService:
                             product_code=raw.product_code,
                             due_date=due_date,
                             quantity=quantity,
+                            ship_to_code=raw_ship_to,
                             source_system='CSV',
                             source_file=raw.source_file
                         )
