@@ -1059,10 +1059,12 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             get_overlapping_default_routings(routing).update(is_default=False)
         created_steps = []
         max_depth = max((depth for depth, _, _, _ in routing_items_info), default=0)
+        # step_no + parallel_group の一意性を保証するためにセットで管理
+        used_step_keys = set()
         for idx, (depth, path, item, parent_product) in enumerate(routing_items_info, start=1):
             path_str = ".".join(str(p) for p in path) if path else "1"
             step_no = (max_depth - len(path) + 1) * 1000
-            parallel_group = int("".join(str(p) for p in path)) if path else 1
+            parallel_group = idx  # 通し番号で一意性を保証
             parent_product_code = parent_product.product_code if parent_product else ''
 
             # BUY品の場合は仕入先ラインとPURCHASE工程を使用
