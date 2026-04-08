@@ -5,11 +5,16 @@
       <div class="page-actions">
         <button v-if="canEdit" @click="openLineFinalDialog" class="btn-secondary">ライン最終品 一括設定</button>
         <button @click="fetchProducts(1)" class="btn-primary">更新</button>
-        <button v-if="canEdit" @click="showNewDialog" class="btn-success">新規</button>
+        <button @click="openProcessTab('create')" class="btn-success" :disabled="!canEdit">処理</button>
       </div>
     </div>
 
-    <div class="page-content">
+    <div class="master-tab-bar">
+      <button type="button" class="master-tab-btn" :class="{ active: activeTab === 'list' }" @click="activeTab = 'list'">一覧</button>
+      <button type="button" class="master-tab-btn" :class="{ active: activeTab === 'process' }" @click="activeTab = 'process'">処理</button>
+    </div>
+
+    <div v-if="activeTab === 'list'" class="page-content">
       <div class="filter-bar">
         <div class="filter-field">
           <label>品番/品名</label>
@@ -154,6 +159,8 @@
               <td>{{ product.is_active ? '有効' : '無効' }}</td>
               <td>
                 <button v-if="canEdit" @click="editProduct(product)" class="btn-sm">編集</button>
+                <button v-if="canEdit" @click="copyProduct(product)" class="btn-sm">コピー</button>
+                <button @click="viewProduct(product)" class="btn-sm">照会</button>
                 <button v-if="canEdit" @click="deleteProduct(product.id)" class="btn-sm btn-danger">削除</button>
               </td>
             </tr>
@@ -193,169 +200,211 @@
       </div>
     </div>
 
-    <!-- 新規/編集ダイアログ -->
-    <div v-if="showDialog" class="modal-overlay" @click.self="closeDialog">
-      <div class="modal-content">
-        <h2>{{ isEdit ? '製品編集' : '製品新規作成' }}</h2>
+    <div v-else class="page-content process-page-content">
+      <div class="process-mode-panel">
+        <div class="process-mode-row">
+          <span class="process-mode-label">処理区分</span>
+          <label class="mode-option">
+            <input type="radio" name="process-mode" value="create" :checked="processMode === 'create'" @change="changeProcessMode('create')" />
+            新規
+          </label>
+          <label class="mode-option">
+            <input type="radio" name="process-mode" value="edit" :checked="processMode === 'edit'" @change="changeProcessMode('edit')" />
+            変更
+          </label>
+          <label class="mode-option">
+            <input type="radio" name="process-mode" value="view" :checked="processMode === 'view'" @change="changeProcessMode('view')" />
+            照会
+          </label>
+        </div>
+        <div v-if="processMode !== 'create'" class="process-target-row">
+          <label>対象品番</label>
+          <select v-model="processTargetId" @change="loadProcessTarget">
+            <option :value="null">一覧から選択してください</option>
+            <option v-for="product in products" :key="product.id" :value="product.id">
+              {{ product.product_code }} - {{ product.product_name }}
+            </option>
+          </select>
+          <button type="button" class="btn-secondary" @click="activeTab = 'list'">一覧で選択</button>
+        </div>
+      </div>
+
+      <div class="process-form-card">
+        <h2>{{ processModeTitle }}</h2>
         <form @submit.prevent="saveProduct">
-          <fieldset class="form-fieldset" :disabled="!canEdit">
-          <div class="form-group">
-            <label>品番コード *</label>
-            <input v-model="formData.product_code" required :disabled="isEdit" />
-          </div>
-          <div class="form-group">
-            <label>品名 *</label>
-            <input v-model="formData.product_name" required />
-          </div>
-          <div class="form-group">
-            <label>カテゴリ *</label>
-            <select v-model="formData.category" required>
-              <option value="">選択してください</option>
-              <option v-for="cat in categoryOptions" :key="cat.value" :value="cat.value">
-                {{ cat.label }}
-              </option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>単位</label>
-            <input v-model="formData.unit" placeholder="個" />
-          </div>
-          <div class="form-group">
-            <label>標準LT(日)</label>
-            <input v-model.number="formData.standard_lt_days" type="number" min="0" />
-          </div>
-          <div class="form-group">
-            <label>最小発注数</label>
-            <input v-model.number="formData.order_lot_min" type="number" min="0" />
-          </div>
-          <div class="form-group">
-            <label>発注倍数</label>
-            <input v-model.number="formData.order_lot_multiple" type="number" min="1" />
-          </div>
-          <div class="form-group-section">レーザ材料情報（重量 = 比重×縦×横×厚さ / 1,000,000 kg）</div>
-          <div class="form-group">
-            <label>比重 (g/cm³)</label>
-            <input v-model.number="formData.specific_gravity" type="number" step="0.0001" min="0" placeholder="例: 7.85" />
-          </div>
-          <div class="form-group">
-            <label>縦 (mm)</label>
-            <input v-model.number="formData.size_length" type="number" step="0.01" min="0" placeholder="例: 1219" />
-          </div>
-          <div class="form-group">
-            <label>横 (mm)</label>
-            <input v-model.number="formData.size_width" type="number" step="0.01" min="0" placeholder="例: 2438" />
-          </div>
-          <div class="form-group">
-            <label>厚さ (mm)</label>
-            <input v-model.number="formData.size_thickness" type="number" step="0.001" min="0" placeholder="例: 4.5" />
-          </div>
-          <div v-if="computedUnitWeight != null" class="form-group">
-            <label>重量/枚 (kg) ※自動計算</label>
-            <div class="computed-value">{{ computedUnitWeight.toFixed(3) }} kg</div>
-          </div>
-          <div class="form-group">
-            <label>機種名</label>
-            <input v-model="formData.model_name" placeholder="例: 17U" />
-          </div>
-          <div class="form-group">
-            <label>製品グループ</label>
-            <select v-model="formData.product_group">
-              <option :value="null">未設定</option>
-              <option v-for="group in productGroups" :key="group.id" :value="group.id">
-                {{ group.group_code }} - {{ group.group_name }}
-              </option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>使用容器</label>
-            <select v-model="formData.used_container">
-              <option :value="null">未設定</option>
-              <option v-for="container in containers" :key="container.id" :value="container.id">
-                {{ formatContainerOption(container) }}
-              </option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>容器入り数</label>
-            <input v-model.number="formData.capacity" type="number" min="0" />
-          </div>
-          <div class="form-group">
-            <label>ライン情報</label>
-            <select v-model="formData.line">
-              <option :value="null">未設定</option>
-              <option v-for="line in lines" :key="line.id" :value="line.id">
-                {{ line.line_code }} - {{ line.line_name }}
-              </option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>工程情報</label>
-            <select v-model="formData.process">
-              <option :value="null">未設定</option>
-              <option v-for="proc in processes" :key="proc.id" :value="proc.id">
-                {{ proc.process_code }} - {{ proc.process_name }}
-              </option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>後工程</label>
-            <select v-model="formData.next_process">
-              <option :value="null">未設定</option>
-              <option v-for="proc in processes" :key="proc.id" :value="proc.id">
-                {{ proc.process_code }} - {{ proc.process_name }}
-              </option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>管理区分（日/分）</label>
-            <select v-model="formData.management_unit">
-              <option :value="null">未設定</option>
-              <option value="DAY">日</option>
-              <option value="MINUTE">分</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>画像URL</label>
-            <input v-model="formData.image_url" placeholder="/media/products/..." />
-            <div class="upload-row">
-              <input type="file" ref="fileInput" @change="onFileSelected" accept="image/*" />
-              <button type="button" class="btn-secondary" @click="triggerFileInput" :disabled="!isEdit && !formData.id">
-                画像をアップロード
+          <fieldset class="form-fieldset process-form-fieldset" :disabled="!canEdit || isViewMode">
+            <div class="process-section">
+              <h3 class="process-section-title">基本情報</h3>
+              <div class="process-section-grid">
+                <div class="form-group">
+                  <label>品番コード *</label>
+                  <input v-model="formData.product_code" required :disabled="processMode !== 'create'" />
+                </div>
+                <div class="form-group">
+                  <label>品名 *</label>
+                  <input v-model="formData.product_name" required />
+                </div>
+                <div class="form-group">
+                  <label>カテゴリ *</label>
+                  <select v-model="formData.category" required>
+                    <option value="">選択してください</option>
+                    <option v-for="cat in categoryOptions" :key="cat.value" :value="cat.value">
+                      {{ cat.label }}
+                    </option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>単位</label>
+                  <input v-model="formData.unit" placeholder="個" />
+                </div>
+                <div class="form-group">
+                  <label>標準LT(日)</label>
+                  <input v-model.number="formData.standard_lt_days" type="number" min="0" />
+                </div>
+                <div class="form-group">
+                  <label>最小発注数</label>
+                  <input v-model.number="formData.order_lot_min" type="number" min="0" />
+                </div>
+                <div class="form-group">
+                  <label>発注倍数</label>
+                  <input v-model.number="formData.order_lot_multiple" type="number" min="1" />
+                </div>
+                <div class="form-group">
+                  <label>機種名</label>
+                  <input v-model="formData.model_name" placeholder="例: 17U" />
+                </div>
+                <div class="form-group">
+                  <label>製品グループ</label>
+                  <select v-model="formData.product_group">
+                    <option :value="null">未設定</option>
+                    <option v-for="group in productGroups" :key="group.id" :value="group.id">
+                      {{ group.group_code }} - {{ group.group_name }}
+                    </option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>使用容器</label>
+                  <select v-model="formData.used_container">
+                    <option :value="null">未設定</option>
+                    <option v-for="container in containers" :key="container.id" :value="container.id">
+                      {{ formatContainerOption(container) }}
+                    </option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>容器入り数</label>
+                  <input v-model.number="formData.capacity" type="number" min="0" />
+                </div>
+                <div class="form-group-section process-group-full">レーザ材料情報（重量 = 比重×縦×横×厚さ / 1,000,000 kg）</div>
+                <div class="form-group">
+                  <label>比重 (g/cm³)</label>
+                  <input v-model.number="formData.specific_gravity" type="number" step="0.0001" min="0" placeholder="例: 7.85" />
+                </div>
+                <div class="form-group">
+                  <label>縦 (mm)</label>
+                  <input v-model.number="formData.size_length" type="number" step="0.01" min="0" placeholder="例: 1219" />
+                </div>
+                <div class="form-group">
+                  <label>横 (mm)</label>
+                  <input v-model.number="formData.size_width" type="number" step="0.01" min="0" placeholder="例: 2438" />
+                </div>
+                <div class="form-group">
+                  <label>厚さ (mm)</label>
+                  <input v-model.number="formData.size_thickness" type="number" step="0.001" min="0" placeholder="例: 4.5" />
+                </div>
+                <div v-if="computedUnitWeight != null" class="form-group">
+                  <label>重量/枚 (kg) ※自動計算</label>
+                  <div class="computed-value">{{ computedUnitWeight.toFixed(3) }} kg</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="process-section">
+              <h3 class="process-section-title">工程情報</h3>
+              <div class="process-section-grid">
+                <div class="form-group">
+                  <label>ライン情報</label>
+                  <select v-model="formData.line">
+                    <option :value="null">未設定</option>
+                    <option v-for="line in lines" :key="line.id" :value="line.id">
+                      {{ line.line_code }} - {{ line.line_name }}
+                    </option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>工程情報</label>
+                  <select v-model="formData.process">
+                    <option :value="null">未設定</option>
+                    <option v-for="proc in processes" :key="proc.id" :value="proc.id">
+                      {{ proc.process_code }} - {{ proc.process_name }}
+                    </option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>後工程</label>
+                  <select v-model="formData.next_process">
+                    <option :value="null">未設定</option>
+                    <option v-for="proc in processes" :key="proc.id" :value="proc.id">
+                      {{ proc.process_code }} - {{ proc.process_name }}
+                    </option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>管理区分（日/分）</label>
+                  <select v-model="formData.management_unit">
+                    <option :value="null">未設定</option>
+                    <option value="DAY">日</option>
+                    <option value="MINUTE">分</option>
+                  </select>
+                </div>
+                <div class="process-check-grid process-group-full">
+                  <label>
+                    <input type="checkbox" v-model="formData.is_final_product" />
+                    最終品（完成品として出荷される品目）
+                  </label>
+                  <label>
+                    <input type="checkbox" v-model="formData.is_line_final_product" />
+                    ライン最終品（ラインで最後に出力される品目）
+                  </label>
+                  <label>
+                    <input type="checkbox" v-model="formData.is_virtual_set" />
+                    仮想セット品番（連産品用、在庫を持たない親品番）
+                  </label>
+                  <label>
+                    <input type="checkbox" v-model="formData.is_active" />
+                    有効
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="process-section">
+              <h3 class="process-section-title">図面情報（写真など）</h3>
+              <div class="process-section-grid">
+                <div class="form-group process-group-full">
+                  <label>画像URL</label>
+                  <input v-model="formData.image_url" placeholder="/media/products/..." />
+                  <div class="upload-row">
+                    <input type="file" ref="fileInput" @change="onFileSelected" accept="image/*" />
+                    <button type="button" class="btn-secondary" @click="triggerFileInput" :disabled="isViewMode || (processMode === 'create' && !formData.id)">
+                      画像をアップロード
+                    </button>
+                    <span class="hint-small" v-if="processMode === 'create' && !formData.id">保存後にアップロードできます</span>
+                  </div>
+                </div>
+                <div class="form-group process-group-full image-preview" v-if="formData.image_url">
+                  <img :src="formData.image_url" alt="Product image" />
+                </div>
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button v-if="!isViewMode" type="submit" class="btn-primary" :disabled="!canEdit">
+                {{ processMode === 'edit' ? '更新' : '作成' }}
               </button>
-              <span class="hint-small" v-if="!isEdit && !formData.id">保存後にアップロードできます</span>
+              <button type="button" @click="resetProcessForm" class="btn-secondary">入力クリア</button>
+              <button type="button" @click="activeTab = 'list'" class="btn-secondary">一覧へ戻る</button>
             </div>
-            <div class="image-preview" v-if="formData.image_url">
-              <img :src="formData.image_url" alt="Product image" />
-            </div>
-          </div>
-          <div class="form-group">
-            <label>
-              <input type="checkbox" v-model="formData.is_final_product" />
-              最終品（完成品として出荷される品目）
-            </label>
-          </div>
-          <div class="form-group">
-            <label>
-              <input type="checkbox" v-model="formData.is_line_final_product" />
-              ライン最終品（ラインで最後に出力される品目）
-            </label>
-          </div>
-          <div class="form-group">
-            <label>
-              <input type="checkbox" v-model="formData.is_virtual_set" />
-              仮想セット品番（連産品用、在庫を持たない親品番）
-            </label>
-          </div>
-          <div class="form-group">
-            <label>
-              <input type="checkbox" v-model="formData.is_active" />
-              有効
-            </label>
-          </div>
-          <div class="form-actions">
-            <button type="submit" class="btn-primary" :disabled="!canEdit">保存</button>
-            <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
-          </div>
           </fieldset>
         </form>
       </div>
@@ -448,31 +497,7 @@ const categoryOptions = [
 
 const getCategoryLabel = (value) => categoryMap[value] || value
 
-// データ
-const products = ref([])
-const lines = ref([])
-const processes = ref([])
-const productGroups = ref([])
-const containers = ref([])
-const customers = ref([])
-const showDialog = ref(false)
-const isEdit = ref(false)
-const currentPage = ref(1)
-const pageSize = ref(50)
-const totalCount = ref(0)
-const filters = ref({
-  search: '',
-  category: '',
-  product_group: '',
-  is_final_product: '',
-  is_line_final_product: '',
-  has_bom: '',
-  customer_code: '',
-  is_active: '',
-  created_from: '',
-  created_to: ''
-})
-const formData = ref({
+const createEmptyFormData = () => ({
   product_code: '',
   product_name: '',
   model_name: '',
@@ -490,6 +515,7 @@ const formData = ref({
   capacity: null,
   line: null,
   process: null,
+  next_process: null,
   management_unit: null,
   is_active: true,
   is_line_final_product: false,
@@ -497,8 +523,67 @@ const formData = ref({
   is_virtual_set: false,
   image_url: '',
 })
+
+const mapProductToFormData = (product, options = {}) => {
+  const source = product || {}
+  const asCopy = options.asCopy === true
+  return {
+    ...createEmptyFormData(),
+    ...source,
+    id: asCopy ? undefined : source.id,
+    product_code: asCopy ? '' : (source.product_code ?? ''),
+    model_name: source.model_name ?? '',
+    order_lot_min: source.order_lot_min ?? null,
+    order_lot_multiple: source.order_lot_multiple ?? 1,
+    line: source.line ?? null,
+    process: source.process ?? null,
+    next_process: source.next_process ?? null,
+    management_unit: source.management_unit ?? null,
+    specific_gravity: source.specific_gravity ?? 7.85,
+    size_length: source.size_length ?? null,
+    size_width: source.size_width ?? null,
+    size_thickness: source.size_thickness ?? null,
+    product_group: source.product_group ?? null,
+    used_container: source.used_container ?? null,
+    capacity: source.capacity ?? null,
+    image_url: asCopy ? '' : (source.image_url || ''),
+  }
+}
+
+// データ
+const products = ref([])
+const lines = ref([])
+const processes = ref([])
+const productGroups = ref([])
+const containers = ref([])
+const customers = ref([])
+const activeTab = ref('list')
+const processMode = ref('create')
+const processTargetId = ref(null)
+const currentPage = ref(1)
+const pageSize = ref(50)
+const totalCount = ref(0)
+const filters = ref({
+  search: '',
+  category: '',
+  product_group: '',
+  is_final_product: '',
+  is_line_final_product: '',
+  has_bom: '',
+  customer_code: '',
+  is_active: '',
+  created_from: '',
+  created_to: ''
+})
+const formData = ref(createEmptyFormData())
 const fileInput = ref(null)
 const canEdit = computed(() => canAccessMasterResource('masters.product', 'edit'))
+const isViewMode = computed(() => processMode.value === 'view')
+const processModeTitle = computed(() => {
+  if (processMode.value === 'edit') return '製品変更'
+  if (processMode.value === 'view') return '製品照会'
+  return '製品新規作成'
+})
 
 // ライン最終品一括設定
 const showLineFinalDialog = ref(false)
@@ -711,70 +796,75 @@ const fetchCustomers = async () => {
   }
 }
 
-// 新規ダイアログ表示
-const showNewDialog = () => {
-  if (!canEdit.value) return
-  isEdit.value = false
-  formData.value = {
-    product_code: '',
-    product_name: '',
-    model_name: '',
-    category: '',
-    unit: '個',
-    standard_lt_days: 0,
-    order_lot_min: null,
-    order_lot_multiple: 1,
-    specific_gravity: 7.85,
-    size_length: null,
-    size_width: null,
-    size_thickness: null,
-    product_group: null,
-    used_container: null,
-    capacity: null,
-    line: null,
-    process: null,
-    next_process: null,
-    management_unit: null,
-    is_active: true,
-    is_line_final_product: false,
-    is_final_product: false,
-    is_virtual_set: false,
-    image_url: '',
+const openProcessTab = (mode = 'create', product = null) => {
+  if (mode !== 'view' && !canEdit.value) return
+  activeTab.value = 'process'
+  processMode.value = mode
+  if (mode === 'create') {
+    processTargetId.value = null
+    formData.value = product ? mapProductToFormData(product, { asCopy: true }) : createEmptyFormData()
+    return
   }
-  showDialog.value = true
+  processTargetId.value = product?.id ?? null
+  formData.value = product ? mapProductToFormData(product) : createEmptyFormData()
 }
 
-// 編集ダイアログ表示
+const changeProcessMode = (mode) => {
+  if (mode !== 'view' && !canEdit.value) return
+  processMode.value = mode
+  if (mode === 'create') {
+    processTargetId.value = null
+    formData.value = createEmptyFormData()
+    return
+  }
+  if (!processTargetId.value) {
+    formData.value = createEmptyFormData()
+  }
+}
+
+const loadProcessTarget = async () => {
+  const targetId = Number(processTargetId.value || 0)
+  if (!targetId) {
+    formData.value = createEmptyFormData()
+    return
+  }
+  try {
+    const response = await api.products.getProduct(targetId)
+    processTargetId.value = targetId
+    formData.value = mapProductToFormData(response.data)
+  } catch (error) {
+    console.error('製品詳細取得エラー:', error)
+    alert('製品データの取得に失敗しました')
+  }
+}
+
+const resetProcessForm = () => {
+  if (processMode.value === 'create') {
+    formData.value = createEmptyFormData()
+    return
+  }
+  if (processTargetId.value) {
+    void loadProcessTarget()
+  } else {
+    formData.value = createEmptyFormData()
+  }
+}
+
+// コピーして新規作成タブを表示
+const copyProduct = (product) => {
+  if (!canEdit.value) return
+  openProcessTab('create', product)
+}
+
+// 変更タブ表示
 const editProduct = (product) => {
   if (!canEdit.value) return
-  isEdit.value = true
-  formData.value = {
-    ...product,
-    model_name: product.model_name ?? '',
-    order_lot_min: product.order_lot_min ?? null,
-    order_lot_multiple: product.order_lot_multiple ?? 1,
-    line: product.line ?? null,
-    process: product.process ?? null,
-    next_process: product.next_process ?? null,
-    management_unit: product.management_unit ?? null,
-    specific_gravity: product.specific_gravity ?? 7.85,
-    size_length: product.size_length ?? null,
-    size_width: product.size_width ?? null,
-    size_thickness: product.size_thickness ?? null,
-    product_group: product.product_group ?? null,
-    used_container: product.used_container ?? null,
-    capacity: product.capacity ?? null,
-  }
-  if (!formData.value.image_url) {
-    formData.value.image_url = ''
-  }
-  showDialog.value = true
+  openProcessTab('edit', product)
 }
 
-// ダイアログを閉じる
-const closeDialog = () => {
-  showDialog.value = false
-  if (fileInput.value) fileInput.value.value = ''
+// 照会タブ表示
+const viewProduct = (product) => {
+  openProcessTab('view', product)
 }
 
 // フィルタリセット
@@ -803,7 +893,11 @@ const normalizeNumber = (value) => {
 
 // 保存
 const saveProduct = async () => {
-  if (!canEdit.value) return
+  if (!canEdit.value || isViewMode.value) return
+  if (processMode.value !== 'create' && !formData.value.id) {
+    alert('対象品番を選択してください')
+    return
+  }
   try {
     const payload = {
       ...formData.value,
@@ -820,15 +914,20 @@ const saveProduct = async () => {
       size_width: normalizeNumber(formData.value.size_width),
       size_thickness: normalizeNumber(formData.value.size_thickness),
     }
-    if (isEdit.value) {
+    if (processMode.value === 'edit') {
       await api.products.updateProduct(payload.id, payload)
       alert('更新しました')
     } else {
-      await api.products.createProduct(payload)
+      const response = await api.products.createProduct(payload)
+      const created = response?.data
+      if (created?.id) {
+        processMode.value = 'edit'
+        processTargetId.value = created.id
+        formData.value = mapProductToFormData(created)
+      }
       alert('作成しました')
     }
-    await fetchProducts()
-    closeDialog()
+    await fetchProducts(currentPage.value)
   } catch (error) {
     console.error('保存エラー:', error)
     alert('保存に失敗しました')
@@ -836,14 +935,14 @@ const saveProduct = async () => {
 }
 
 const triggerFileInput = () => {
-  if (!canEdit.value) return
+  if (!canEdit.value || isViewMode.value) return
   if (fileInput.value) {
     fileInput.value.click()
   }
 }
 
 const onFileSelected = async (e) => {
-  if (!canEdit.value) return
+  if (!canEdit.value || isViewMode.value) return
   const file = e.target.files && e.target.files[0]
   if (!file) return
   if (!formData.value.id) {
@@ -956,11 +1055,179 @@ watch(
   height: 100%;
 }
 
+.master-tab-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.master-tab-btn {
+  padding: 6px 14px;
+  border: 1px solid #cbd5e1;
+  border-bottom: 2px solid #94a3b8;
+  border-radius: 6px 6px 0 0;
+  background: #f8fafc;
+  color: #334155;
+  cursor: pointer;
+}
+
+.master-tab-btn.active {
+  background: #ffffff;
+  color: #0f172a;
+  border-bottom-color: #2563eb;
+  font-weight: 700;
+}
+
 .page-content {
   display: flex;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+}
+
+.process-page-content {
+  overflow: auto;
+  gap: 12px;
+}
+
+.process-mode-panel {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.process-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.process-mode-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.mode-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #1f2937;
+}
+
+.process-target-row {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.process-target-row label {
+  font-size: 12px;
+  color: #555;
+}
+
+.process-target-row select {
+  min-width: 360px;
+  max-width: 520px;
+  height: 34px;
+  box-sizing: border-box;
+  padding: 0.35rem 0.45rem;
+  font-size: 0.9rem;
+}
+
+.process-target-row .btn-secondary {
+  height: 34px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+}
+
+.process-form-card {
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.process-form-card h2 {
+  margin: 0 0 10px 0;
+  font-size: 18px;
+  color: #111827;
+}
+
+.process-form-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.process-section {
+  border: 1px solid #dbe3ec;
+  border-radius: 6px;
+  padding: 8px 10px 10px;
+  background: #fbfdff;
+}
+
+.process-section-title {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.process-section-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 12px;
+  align-items: end;
+}
+
+.process-group-full {
+  grid-column: 1 / -1;
+}
+
+.process-form-card .form-group {
+  margin-bottom: 0;
+}
+
+.process-check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 6px 12px;
+}
+
+.process-check-grid label {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+}
+
+.process-form-card .form-group label {
+  margin-bottom: 0.25rem;
+  line-height: 1.2;
+}
+
+.process-form-card .form-group > input:not([type="checkbox"]):not([type="file"]),
+.process-form-card .form-group > select {
+  width: 100%;
+  box-sizing: border-box;
+  height: 34px;
+  padding: 0.35rem 0.45rem;
+  font-size: 0.9rem;
+}
+
+.process-form-card .form-group input[type="checkbox"] {
+  margin-right: 0.35rem;
+}
+
+.process-form-card .form-actions {
+  margin-top: 4px;
 }
 
 .form-fieldset {
@@ -973,7 +1240,7 @@ watch(
 .filter-bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 8px 12px;
   align-items: flex-end;
   margin-bottom: 16px;
 }
@@ -987,12 +1254,29 @@ watch(
 .filter-field label {
   font-size: 12px;
   color: #555;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
+}
+
+.filter-bar .filter-field > input,
+.filter-bar .filter-field > select {
+  width: 100%;
+  box-sizing: border-box;
+  height: 34px;
+  padding: 0.35rem 0.45rem;
+  font-size: 0.9rem;
 }
 
 .filter-actions {
   display: flex;
   gap: 8px;
+}
+
+.filter-actions button {
+  height: 34px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
 }
 
 .list-area {
