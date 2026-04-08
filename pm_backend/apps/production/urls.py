@@ -30,6 +30,7 @@ from production.views_process_realtime import ProcessRealtimeRecordViewSet
 from production.views_services import BOMServiceViewSet, CRPViewSet
 from production.views_brake_line import BrakeLinePlanView, BrakeLineProductsView, BrakeLineEquipmentsView, BrakeLineActualAddView, BrakeLineRecordView, BrakeLineSessionView, BrakeLineSessionDetailView
 from production.views_spot_line import SpotLinePlanView, SpotLineEquipmentsView, SpotLineProductsView, SpotLineRecordView
+from production.views_gantt_display_product_map import GanttDisplayProductMapViewSet
 
 router = DefaultRouter()
 router.register(r'line-demands', LineDemandViewSet, basename='linedemand')
@@ -42,6 +43,7 @@ router.register(r'line-default-schedule-settings', LineDefaultScheduleSettingVie
 router.register(r'laser-patterns', LaserPatternViewSet, basename='laserpattern')
 router.register(r'laser-actuals', LaserActualViewSet, basename='laseractual')
 router.register(r'laser-shift-records', LaserShiftRecordViewSet, basename='lasershiftrecord')
+router.register(r'gantt-display-product-maps', GanttDisplayProductMapViewSet, basename='ganttdisplayproductmap')
 
 # Execution endpoints
 router.register(r'stock-allocations', StockAllocationViewSet, basename='stockallocation')

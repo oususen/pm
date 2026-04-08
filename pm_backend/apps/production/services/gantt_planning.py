@@ -10,6 +10,7 @@ from rest_framework.exceptions import ValidationError
 from masters.models import RoutingStep, Line, Process, Calendar, CalendarDay, WorkPattern, BreakTime, BOM, BOMItem, Product
 from ..models_line_backlog import LineBacklog
 from ..models_line_plan import LinePlan
+from ..models_gantt_display_product_map import GanttDisplayProductMap
 
 logger = logging.getLogger(__name__)
 
@@ -441,6 +442,47 @@ def _build_coproduct_parent_map(plan_date) -> Dict[int, Product]:
     return parent_map
 
 
+def _build_display_product_map_by_final(line_id: int) -> Dict[int, Dict[int, Product]]:
+    """
+    ラインごとの表示品マップを構築する。
+    Returns:
+        { final_product_id: { process_id: display_product } }
+    """
+    rows = (
+        GanttDisplayProductMap.objects
+        .filter(line_id=line_id)
+        .select_related('display_product')
+        .order_by('final_product_id', 'process_id', 'id')
+    )
+    result: Dict[int, Dict[int, Product]] = {}
+    for row in rows:
+        final_id = int(row.final_product_id)
+        process_id = int(row.process_id)
+        process_map = result.setdefault(final_id, {})
+        # 同一(最終品, 工程)に複数行ある場合は先頭を採用
+        if process_id not in process_map and row.display_product_id:
+            process_map[process_id] = row.display_product
+    return result
+
+
+def _resolve_display_product_override(
+    *,
+    process_id: int,
+    display_map: Dict[int, Product],
+    default_product_id: Optional[int],
+    default_product_code: str,
+    default_product_name: str,
+) -> Tuple[Optional[int], str, str]:
+    """
+    工程単位の表示品マップがある場合は表示品を上書きする。
+    マップ未登録の工程は従来ロジックの値をそのまま返す。
+    """
+    mapped = display_map.get(int(process_id)) if display_map else None
+    if not mapped:
+        return default_product_id, default_product_code, default_product_name
+    return mapped.id, mapped.product_code or '', mapped.product_name or ''
+
+
 def _is_coproduct_sub_process(spec: ProcessSpec, coproduct_parent_map: Dict[int, Product]) -> bool:
     """連産品BOMの子品目を出力する工程かどうかを判定（名前依存なし）"""
     return bool(spec.output_product_id and spec.output_product_id in coproduct_parent_map)
@@ -687,13 +729,28 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
     # キー: (plan_date, process_id), 値: 前のsequenceの終了時刻
     previous_process_end_by_date: Dict[Tuple[date, int], datetime] = {}
 
+    # 連産品マップを日付ごとにキャッシュ（ループ外で構築）
+    _coproduct_cache: Dict[date, tuple] = {}
+    # BOM乗数マップを製品×日付ごとにキャッシュ
+    _multiplier_cache: Dict[Tuple[int, date], Dict[int, Decimal]] = {}
+    # ライン最終品×工程の表示品マップ（ライン単位で1回だけ取得）
+    display_product_map_by_final = _build_display_product_map_by_final(line_id)
+
     plans = []
     for obj in base_plans:
         product = obj.product
+        display_product_map = display_product_map_by_final.get(int(product.id), {})
         backlog_key = (obj.product_id, obj.plan_date, obj.sequence_no or 0)
         plan_backlog_rows = backlog_rows_by_key.get(backlog_key, [])
-        multiplier_map = _build_bom_multiplier_map(product.id, obj.plan_date)
-        coproduct_parent_map, coproduct_children_set, driver_cycle_time_map = _build_coproduct_maps(obj.plan_date)
+        # キャッシュ付きBOM乗数マップ
+        _mult_key = (product.id, obj.plan_date)
+        if _mult_key not in _multiplier_cache:
+            _multiplier_cache[_mult_key] = _build_bom_multiplier_map(product.id, obj.plan_date)
+        multiplier_map = _multiplier_cache[_mult_key]
+        # キャッシュ付き連産品マップ
+        if obj.plan_date not in _coproduct_cache:
+            _coproduct_cache[obj.plan_date] = _build_coproduct_maps(obj.plan_date)
+        coproduct_parent_map, coproduct_children_set, driver_cycle_time_map = _coproduct_cache[obj.plan_date]
         coproduct_parent_ids = {parent.id for parent in coproduct_parent_map.values()}
         l2201_synthetic_plan = is_l2201_line and getattr(product, 'is_line_final_product', False)
         steps = _select_steps_for_gantt_product(product, steps_by_product, is_l2201_line)
@@ -993,6 +1050,13 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                     output_product_code = parent.product_code
                     output_product_name = parent.product_name
                     coproduct_group_key = coproduct_group_key or f"{plan_id}_{spec.process_id}_{parent.id}"
+                output_product_id, output_product_code, output_product_name = _resolve_display_product_override(
+                    process_id=spec.process_id,
+                    display_map=display_product_map,
+                    default_product_id=output_product_id,
+                    default_product_code=output_product_code,
+                    default_product_name=output_product_name,
+                )
                 process_plan = {
                     'process_id': spec.process_id,
                     'process_name': spec.process_name,
@@ -1068,6 +1132,13 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                     output_product_code = parent.product_code
                     output_product_name = parent.product_name
                     coproduct_group_key = coproduct_group_key or f"{plan_id}_{spec.process_id}_{parent.id}"
+                output_product_id, output_product_code, output_product_name = _resolve_display_product_override(
+                    process_id=spec.process_id,
+                    display_map=display_product_map,
+                    default_product_id=output_product_id,
+                    default_product_code=output_product_code,
+                    default_product_name=output_product_name,
+                )
                 process_plan = {
                     'process_id': spec.process_id,
                     'process_name': spec.process_name,

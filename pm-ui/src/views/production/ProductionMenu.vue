@@ -131,6 +131,13 @@ const tiles = computed(() => {
       resource: "production.plan_input",
     },
     {
+      to: "/production/gantt-display-product-map",
+      label: "ガントチャート生成表示品マップ",
+      icon: "🗺️",
+      required: "edit",
+      resource: "production.plan_input",
+    },
+    {
       to: "/production/default-start-time",
       label: t("productionMenu.tiles.defaultStart"),
       icon: "⏲",
