@@ -534,12 +534,28 @@ const applyTargetPartData = async () => {
       .filter((row) => row.isFinal)
       .sort((a, b) => a.parentCode.localeCompare(b.parentCode));
 
-    parentRows.value = finalParents.map((row) => ({
-      parentId: row.parentId,
-      parentCode: row.parentCode,
-      parentName: row.parentName,
-      cumulativeLtDays: toNum(row.cumulativeLtDays),
-    }));
+    // 対象部品自身が最終品の場合、自分を完成品設定に追加
+    const selfIsFinal = Boolean(whereUsedRes?.data?.self_info?.is_final_product);
+    const selfAsParent = selfIsFinal
+      ? [
+          {
+            parentId: Number(targetPart.id),
+            parentCode: targetPart.productCode,
+            parentName: targetPart.productName,
+            cumulativeLtDays: Math.max(targetSelfLtDays, 1),
+          },
+        ]
+      : [];
+
+    parentRows.value = [
+      ...selfAsParent,
+      ...finalParents.map((row) => ({
+        parentId: row.parentId,
+        parentCode: row.parentCode,
+        parentName: row.parentName,
+        cumulativeLtDays: toNum(row.cumulativeLtDays),
+      })),
+    ];
 
     const inventoryAncestors = ancestors.filter((row) => !isCoproductCode(row.parentCode));
 

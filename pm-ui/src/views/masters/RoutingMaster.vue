@@ -251,8 +251,8 @@
                   v-if="item.checked"
                   type="number"
                   v-model.number="item.migrate_qty"
-                  :max="item.stock_qty"
-                  min="0"
+                  :max="item.stock_qty >= 0 ? item.stock_qty : 0"
+                  :min="item.stock_qty < 0 ? item.stock_qty : 0"
                   class="migrate-qty-input"
                 />
                 <span v-else>-</span>
@@ -262,7 +262,8 @@
         </table>
         <p class="migration-note">
           ※ 実績(actual_qty)は旧ラインに残ります<br>
-          ※ 移行はadjust_qtyへの加減算で行われます（在庫再計算後に反映）
+          ※ 移行はadjust_qtyへの加減算で行われます（在庫再計算後に反映）<br>
+          <span class="migration-warning">※ 移行実行後、在庫/残量一覧画面で「過去から再計算」を必ず実行してください</span>
         </p>
         <div class="migration-actions">
           <button class="btn-secondary" @click="migrationDialogVisible = false">キャンセル</button>
@@ -895,7 +896,7 @@ const executeMigration = async () => {
   executingMigration.value = true
   try {
     const items = migrationCandidates.value
-      .filter((c) => c.checked && c.migrate_qty > 0)
+      .filter((c) => c.checked && c.migrate_qty !== 0)
       .map((c) => ({
         product_id: c.product_id,
         old_line_id: c.old_line_id,
@@ -1232,6 +1233,11 @@ onMounted(async () => {
   color: #6b7280;
   margin: 0 0 16px;
   line-height: 1.6;
+}
+.migration-warning {
+  color: #dc2626;
+  font-size: 14px;
+  font-weight: bold;
 }
 .migration-actions {
   display: flex;

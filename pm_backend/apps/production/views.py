@@ -65,6 +65,8 @@ logger = logging.getLogger(__name__)
 
 FLOOR_SHIPPING_TAB_KEY = 'floor-shipping'
 FLOOR_SHIPPING_DELIVERY_LABEL = 'フロア配送'
+FLOOR_SHIPPING_PM_SEQUENCE_THRESHOLD = 50
+INVALID_SEQUENCE_SORT_VALUE = 10 ** 9
 
 
 def _parse_optional_date(value):
@@ -1387,7 +1389,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 seq = int(value or 0)
             except (TypeError, ValueError):
                 seq = 0
-            return seq if seq > 0 else 10 ** 9
+            return seq if seq > 0 else INVALID_SEQUENCE_SORT_VALUE
 
         def resolve_lead_time_days(current_product_id, bom_item=None):
             """現ラインのLTを優先して解決する。"""
@@ -1620,7 +1622,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         for plan_date, lots in selected_rows_by_date.items():
                             ordered_lots = sorted(lots, key=lambda item: sort_sequence_value(item[1]))
                             for lot_index, (qty, _sequence_no) in enumerate(ordered_lots):
-                                effective_lt_days = 0 if lot_index == 0 else 1
+                                seq_value = sort_sequence_value(_sequence_no)
+                                force_pm_by_sequence = (
+                                    seq_value != INVALID_SEQUENCE_SORT_VALUE and
+                                    seq_value > FLOOR_SHIPPING_PM_SEQUENCE_THRESHOLD
+                                )
+                                effective_lt_days = 1 if force_pm_by_sequence else (0 if lot_index == 0 else 1)
                                 shifted_date = shift_business_days(plan_date, effective_lt_days) if effective_lt_days else plan_date
                                 key = (current_output_product, shifted_date)
                                 demand_map[key] += qty * total_qty_per
@@ -6476,53 +6483,136 @@ class StockMigrationDetectView(APIView):
                 'new_process': process,
             }
 
-        if not product_new_info:
-            return Response([])
+        seen = set()
+        results = []
 
-        # 対象品番のうち、別ライン（新ラインと異なる）かつ在庫>0 かつ source_routing_step=NULL のLineBacklogを検索
-        product_ids = list(product_new_info.keys())
-        orphaned = (
+        # --- 方向1: 他ラインにある在庫を、このラインに引き寄せる検出 ---
+        if product_new_info:
+            product_ids = list(product_new_info.keys())
+            orphaned_pull = (
+                LineBacklog.objects
+                .filter(
+                    product_id__in=product_ids,
+                    source_routing_step__isnull=True,
+                    sequence_no=0,
+                )
+                .exclude(stock_qty=0)
+                .exclude(line_id=line_id)
+                .select_related('product', 'line', 'process')
+                .order_by('product__product_code', '-plan_date')
+            )
+
+            for lb in orphaned_pull:
+                key = (lb.product_id, lb.line_id, lb.process_id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                new_info = product_new_info[lb.product_id]
+                new_line = new_info['new_line']
+                new_process = new_info['new_process']
+                results.append({
+                    'product_id': lb.product_id,
+                    'product_code': lb.product.product_code,
+                    'product_name': lb.product.product_name,
+                    'old_line_id': lb.line_id,
+                    'old_line_code': lb.line.line_code if lb.line else '',
+                    'old_line_name': lb.line.line_name if lb.line else '',
+                    'old_process_id': lb.process_id,
+                    'old_process_code': lb.process.process_code if lb.process else '',
+                    'old_process_name': lb.process.process_name if lb.process else '',
+                    'stock_qty': lb.stock_qty,
+                    'new_line_id': new_line.id if new_line else None,
+                    'new_line_code': new_line.line_code if new_line else '',
+                    'new_line_name': new_line.line_name if new_line else '',
+                    'new_process_id': new_process.id if new_process else None,
+                    'new_process_code': new_process.process_code if new_process else '',
+                    'new_process_name': new_process.process_name if new_process else '',
+                })
+
+        # --- 方向2: このラインに在庫があるが、有効ルーティングが別ラインの品番を検出 ---
+        local_backlogs = (
             LineBacklog.objects
             .filter(
-                product_id__in=product_ids,
+                line_id=line_id,
                 source_routing_step__isnull=True,
-                stock_qty__gt=0,
                 sequence_no=0,
             )
-            .exclude(line_id=line_id)
+            .exclude(stock_qty=0)
             .select_related('product', 'line', 'process')
             .order_by('product__product_code', '-plan_date')
         )
 
-        # 品番×旧ライン×旧工程の組み合わせごとに最新日の1件を返す（複数旧ライン対応）
-        seen = set()
-        results = []
-        for lb in orphaned:
-            key = (lb.product_id, lb.line_id, lb.process_id)
-            if key in seen:
-                continue
-            seen.add(key)
-            new_info = product_new_info[lb.product_id]
-            new_line = new_info['new_line']
-            new_process = new_info['new_process']
-            results.append({
-                'product_id': lb.product_id,
-                'product_code': lb.product.product_code,
-                'product_name': lb.product.product_name,
-                'old_line_id': lb.line_id,
-                'old_line_code': lb.line.line_code if lb.line else '',
-                'old_line_name': lb.line.line_name if lb.line else '',
-                'old_process_id': lb.process_id,
-                'old_process_code': lb.process.process_code if lb.process else '',
-                'old_process_name': lb.process.process_name if lb.process else '',
-                'stock_qty': lb.stock_qty,
-                'new_line_id': new_line.id if new_line else None,
-                'new_line_code': new_line.line_code if new_line else '',
-                'new_line_name': new_line.line_name if new_line else '',
-                'new_process_id': new_process.id if new_process else None,
-                'new_process_code': new_process.process_code if new_process else '',
-                'new_process_name': new_process.process_name if new_process else '',
-            })
+        # このラインに有効ルーティングがある品番IDを除外対象にする
+        local_active_product_ids = set(product_new_info.keys())
+
+        # ローカル在庫のうち、このラインに有効ルーティングがない品番を抽出
+        reverse_candidate_product_ids = set()
+        reverse_backlogs = []
+        for lb in local_backlogs:
+            if lb.product_id not in local_active_product_ids:
+                reverse_candidate_product_ids.add(lb.product_id)
+                reverse_backlogs.append(lb)
+
+        if reverse_candidate_product_ids:
+            # これらの品番の有効ルーティングがどのラインにあるか調べる
+            reverse_steps = RoutingStep.objects.filter(
+                Q(routing__product_id__in=reverse_candidate_product_ids) |
+                Q(output_product_id__in=reverse_candidate_product_ids),
+            ).filter(
+                build_effective_routing_q(prefix='routing__')
+            ).select_related('output_product', 'routing__product', 'process', 'line', 'process__line').order_by(
+                '-routing__is_default',
+                '-routing__valid_from_datetime',
+                'step_no',
+            )
+
+            # 品番ごとに移行先（有効ルーティングのライン・工程）を特定
+            reverse_new_info = {}
+            for step in reverse_steps:
+                product = step.output_product or step.routing.product
+                if not product or product.id not in reverse_candidate_product_ids:
+                    continue
+                if product.id in reverse_new_info:
+                    continue
+                process = step.process
+                new_line = step.line or (process.line if hasattr(process, 'line') else None)
+                # 有効ルーティングがこのラインと同じなら孤立ではない
+                if new_line and new_line.id == int(line_id):
+                    continue
+                reverse_new_info[product.id] = {
+                    'product': product,
+                    'new_line': new_line,
+                    'new_process': process,
+                }
+
+            for lb in reverse_backlogs:
+                if lb.product_id not in reverse_new_info:
+                    continue
+                key = (lb.product_id, lb.line_id, lb.process_id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                new_info = reverse_new_info[lb.product_id]
+                new_line = new_info['new_line']
+                new_process = new_info['new_process']
+                results.append({
+                    'product_id': lb.product_id,
+                    'product_code': lb.product.product_code,
+                    'product_name': lb.product.product_name,
+                    'old_line_id': lb.line_id,
+                    'old_line_code': lb.line.line_code if lb.line else '',
+                    'old_line_name': lb.line.line_name if lb.line else '',
+                    'old_process_id': lb.process_id,
+                    'old_process_code': lb.process.process_code if lb.process else '',
+                    'old_process_name': lb.process.process_name if lb.process else '',
+                    'stock_qty': lb.stock_qty,
+                    'new_line_id': new_line.id if new_line else None,
+                    'new_line_code': new_line.line_code if new_line else '',
+                    'new_line_name': new_line.line_name if new_line else '',
+                    'new_process_id': new_process.id if new_process else None,
+                    'new_process_code': new_process.process_code if new_process else '',
+                    'new_process_name': new_process.process_name if new_process else '',
+                })
 
         return Response(results)
 
@@ -6580,9 +6670,9 @@ class StockMigrationExecuteView(APIView):
                     {'detail': f'migrate_qty は整数で指定してください: {raw_qty}'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            if migrate_qty <= 0:
+            if migrate_qty == 0:
                 return Response(
-                    {'detail': f'品番ID {product_id}: migrate_qty は1以上で指定してください'},
+                    {'detail': f'品番ID {product_id}: migrate_qty は0以外で指定してください'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -6595,13 +6685,20 @@ class StockMigrationExecuteView(APIView):
                     process_id=old_process_id,
                     sequence_no=0,
                     source_routing_step__isnull=True,
-                    stock_qty__gt=0,
                 )
+                .exclude(stock_qty=0)
                 .order_by('-plan_date')
                 .first()
             )
             current_stock = latest.stock_qty if latest else 0
-            if migrate_qty > current_stock:
+            # プラス在庫: migrate_qty は正で current_stock 以下
+            # マイナス在庫: migrate_qty は負で current_stock 以上（絶対値で超えない）
+            if current_stock > 0 and (migrate_qty < 0 or migrate_qty > current_stock):
+                return Response(
+                    {'detail': f'品番ID {product_id}: 移行数量({migrate_qty})が現在在庫({current_stock})を超えています'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if current_stock < 0 and (migrate_qty > 0 or migrate_qty < current_stock):
                 return Response(
                     {'detail': f'品番ID {product_id}: 移行数量({migrate_qty})が現在在庫({current_stock})を超えています'},
                     status=status.HTTP_400_BAD_REQUEST,
