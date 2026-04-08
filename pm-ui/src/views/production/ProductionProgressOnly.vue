@@ -625,16 +625,21 @@ const confirmDeepRecalc = async () => {
   recalculating.value = true;
   error.value = "";
   try {
-    const lineIds = getDisplayedLineIds();
+    const targets = getDisplayedLineTargets();
+    if (!targets.length) {
+      alert("再計算対象の品番がありません。");
+      return;
+    }
     const start = startDate.value;
     const end = columns.value[columns.value.length - 1];
     await Promise.all(
-      lineIds.map((lineId) =>
+      targets.map((target) =>
         api.lineBacklogs.recalculateInventoryDeep({
-          line_id: lineId,
+          line_id: target.line_id,
           start_date: start,
           end_date: end,
-        }).catch((e) => console.error('過去から再計算に失敗:', lineId, e))
+          product_ids: target.product_ids,
+        }).catch((e) => console.error('過去から再計算に失敗:', target.line_id, e))
       )
     );
     await load();
