@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from masters.models import BOM, BOMItem, Line, Process, Product, Routing
+from masters.serializers import BOMItemSerializer
 from masters.services.routing_service import (
     build_effective_routing_range_q,
     normalize_routing_reference_datetime,
@@ -196,3 +197,41 @@ class RoutingEffectiveDatetimeTest(TestCase):
         generated = Routing.objects.exclude(id=existing.id).get(product=parent, routing_code='AUTO-TEST-BOM-PARENT-v1')
         self.assertTrue(existing.is_default)
         self.assertTrue(generated.is_default)
+
+
+class BOMItemValidationTest(TestCase):
+    def test_self_reference_is_rejected(self):
+        parent = Product.objects.create(
+            product_code='TEST-BOM-SELF-PARENT',
+            product_name='自己参照テスト親製品',
+        )
+        line = Line.objects.create(
+            line_code='TEST-BOM-SELF-LINE',
+            line_name='自己参照試験ライン',
+        )
+        process = Process.objects.create(
+            process_code='TEST-BOM-SELF-PROC',
+            process_name='自己参照試験工程',
+            line=line,
+        )
+        bom = BOM.objects.create(
+            parent_product=parent,
+            version='v1',
+            valid_from=date(2026, 4, 1),
+            is_active=True,
+        )
+
+        serializer = BOMItemSerializer(data={
+            'bom': bom.id,
+            'child_product': parent.id,
+            'quantity': '1.000',
+            'sourcing_type': 'MAKE',
+            'process': process.id,
+            'line': line.id,
+            'time_unit': 'MINUTE',
+            'duration_min': 10,
+            'lead_time_days': 0,
+        })
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('child_product', serializer.errors)

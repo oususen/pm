@@ -124,9 +124,16 @@ class BOMItemSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
     def validate(self, attrs):
+        bom = attrs.get('bom', getattr(self.instance, 'bom', None))
+        child_product = attrs.get('child_product', getattr(self.instance, 'child_product', None))
         sourcing_type = attrs.get('sourcing_type', getattr(self.instance, 'sourcing_type', None))
         time_unit = attrs.get('time_unit', getattr(self.instance, 'time_unit', 'MINUTE'))
         process = attrs.get('process', getattr(self.instance, 'process', None))
+
+        if bom and child_product and getattr(bom, 'parent_product_id', None) == getattr(child_product, 'id', None):
+            raise serializers.ValidationError({
+                'child_product': '親製品と同じ製品は登録できません（自己参照BOM）。'
+            })
 
         if sourcing_type in ['MAKE', 'SUBCON'] and process is None:
             raise serializers.ValidationError('自社製造/外注の場合、工程は必須です。')
