@@ -169,3 +169,115 @@ class FloorShippingSequenceRuleTest(TestCase):
 
         self.assertEqual(same_day.order_qty, 10)
         self.assertEqual(previous_day.order_qty, 20)
+
+    def test_pickup_treats_sequence_over_50_as_pm(self):
+        floor_line = Line.objects.create(
+            line_code='L-FLOOR',
+            line_name='フロアライン',
+        )
+        delivery_line = Line.objects.create(
+            line_code='L-FLOOR-DELIVERY',
+            line_name='フロア配送',
+        )
+
+        floor_process = Process.objects.create(
+            process_code='P-FLOOR',
+            process_name='フロア工程',
+            line=floor_line,
+        )
+        delivery_process = Process.objects.create(
+            process_code='P-FLOOR-DELIVERY',
+            process_name='フロア配送工程',
+            line=delivery_line,
+        )
+
+        floor_product = Product.objects.create(
+            product_code='TEST-FLOOR-PRODUCT-2',
+            product_name='フロア品2',
+        )
+        delivery_product = Product.objects.create(
+            product_code='TEST-DELIVERY-PRODUCT-2',
+            product_name='配送品2',
+        )
+
+        BOMItem.objects.create(
+            bom=BOM.objects.create(
+                parent_product=delivery_product,
+                version='v1',
+                valid_from=date(2026, 1, 1),
+            ),
+            child_product=floor_product,
+            quantity=1,
+        )
+
+        RoutingStep.objects.create(
+            routing=Routing.objects.create(
+                product=floor_product,
+                routing_code='FLOOR-ROUTE-2',
+                is_default=True,
+            ),
+            step_no=1,
+            process=floor_process,
+            line=floor_line,
+            output_product=floor_product,
+            hierarchy_path='1',
+            hierarchy_depth=1,
+            time_unit='DAY',
+            lead_time_days=1,
+        )
+        RoutingStep.objects.create(
+            routing=Routing.objects.create(
+                product=delivery_product,
+                routing_code='DELIVERY-ROUTE-2',
+                is_default=True,
+            ),
+            step_no=1,
+            process=delivery_process,
+            line=delivery_line,
+            output_product=delivery_product,
+            hierarchy_path='1',
+            hierarchy_depth=1,
+            time_unit='DAY',
+            lead_time_days=1,
+        )
+
+        LineBacklog.objects.create(
+            plan_date=date(2026, 4, 2),
+            process=delivery_process,
+            product=delivery_product,
+            line=delivery_line,
+            sequence_no=51,
+            plan_qty=7,
+            plan_id='LOT-FORCE-PM',
+        )
+
+        view = LineBacklogViewSet.as_view({'post': 'pickup'})
+        request = self.factory.post(
+            '/api/line-backlogs/pickup/',
+            {
+                'line_id': floor_line.id,
+                'start_date': '2026-04-01',
+                'end_date': '2026-04-02',
+            },
+            format='json',
+        )
+        response = view(request)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        previous_day = LineBacklog.objects.get(
+            line=floor_line,
+            process=floor_process,
+            product=floor_product,
+            plan_date=date(2026, 4, 1),
+            sequence_no=0,
+        )
+        same_day = LineBacklog.objects.filter(
+            line=floor_line,
+            process=floor_process,
+            product=floor_product,
+            plan_date=date(2026, 4, 2),
+            sequence_no=0,
+        ).first()
+
+        self.assertEqual(previous_day.order_qty, 7)
+        self.assertTrue(same_day is None or same_day.order_qty in (None, 0))

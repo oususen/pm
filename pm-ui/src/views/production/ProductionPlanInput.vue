@@ -139,7 +139,7 @@
       注意: このラインに有効な現行ルーティング品番がないため、表示対象はありません。
     </div>
     <div v-if="isFloorShippingDeliveryLine" class="line-rule-notice">
-      注意: フロア配送は同一日・同一品番を sequence_no 昇順で 1件目=AM、2件目=PM と解釈します。入力は 2件までです。
+      注意: フロア配送は同一日・同一品番を sequence_no 昇順で 1件目=AM、2件目=PM と解釈します（暫定運用: sequence_no > 50 はPM扱い）。入力は 2件までです。
     </div>
 
     <div class="grid-wrapper" ref="gridWrapperRef">
@@ -688,6 +688,7 @@ const workPatternMap = ref({})
 const daisoCalendarId = ref(undefined)
 const workStartFallback = { hour: 8, minute: 0 }
 const workMinutesFallback = 480
+const GANTT_GENERATE_TIMEOUT_MS = 120000
 const processing = ref(false)
 const currentLineRoutingFilterMode = ref('filtered')
 const coproductDisplayCache = new Map()
@@ -1267,14 +1268,18 @@ const savePlan = async () => {
         include_progress: false,
         line_final_only: true,
       })
-      await api.lineGanttPlans.generate({
-        line_id: selectedLine.value,
-        start_date: startDate.value,
-        end_date: endDate.value,
-        clear_existing: true,
-        final_process_start_time: finalProcessStartTime.value,
-        adjust_to_break_end: adjustToBreakEnd.value,
-      })
+      await withTimeout(
+        api.lineGanttPlans.generate({
+          line_id: selectedLine.value,
+          start_date: startDate.value,
+          end_date: endDate.value,
+          clear_existing: true,
+          final_process_start_time: finalProcessStartTime.value,
+          adjust_to_break_end: adjustToBreakEnd.value,
+        }),
+        GANTT_GENERATE_TIMEOUT_MS,
+        `工程ガント生成が ${Math.floor(GANTT_GENERATE_TIMEOUT_MS / 1000)}秒を超えたため中断しました。`,
+      )
       // 工程ガントを再読み込み
       ganttReloadKey.value += 1
       if (showProcessLoad.value) {
@@ -1286,6 +1291,8 @@ const savePlan = async () => {
       if (expandError.response && expandError.response.data) {
         // DRFのValidationErrorなどは配列やオブジェクトで返ることがあるため文字列化
         msg += '\n' + (Array.isArray(expandError.response.data) ? expandError.response.data.join('\n') : JSON.stringify(expandError.response.data, null, 2))
+      } else if (expandError?.message) {
+        msg += `\n${expandError.message}`
       }
       alert(`保存は完了しましたが、エラーが発生しました。\n${msg}`)
       return
@@ -1510,6 +1517,23 @@ const toApiRows = (payload) => {
   if (Array.isArray(payload.results)) return payload.results
   if (Array.isArray(payload)) return payload
   return []
+}
+
+const withTimeout = (promise, timeoutMs, timeoutMessage) => {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(timeoutMessage || 'request timeout'))
+    }, timeoutMs)
+    promise
+      .then((value) => {
+        clearTimeout(timer)
+        resolve(value)
+      })
+      .catch((error) => {
+        clearTimeout(timer)
+        reject(error)
+      })
+  })
 }
 
 const fetchCurrentLineProductIdSet = async (lineId) => {
