@@ -653,7 +653,7 @@ const selectPlanTab = (tab) => {
   activePlanTab.value = tab.key
 }
 const activeSpotTab = ref('normal-plan')
-const activeFloorShippingTab = ref('inventory')
+const activeFloorShippingTab = ref('progress')
 const spotExcelRows = ref([])
 const spotExcelFileName = ref('')
 const spotExcelMessage = ref('')
@@ -695,6 +695,7 @@ const startDate = ref(toDateInput(defaultStart))
 const horizonDays = ref(7)
 const keyword = ref('')
 const TANK_LINE_CODE = 'L2200'
+const FLOOR_LINE_CODE = 'L2100'
 const COPRODUCT_LIMITED_LINE_CODES = new Set(['L2201'])
 const TANK_PRODUCT_ORDER = [
   'YD60003386',
@@ -718,6 +719,20 @@ const FLOOR_SHIPPING_PRODUCT_ORDER = [
   'YD40007722',
   'YD40007688',
   'YD40002946',
+]
+const FLOOR_L2100_PRODUCT_ORDER = [
+  'YD40006245',
+  'YD40007003',
+  'YD40006842',
+  'YD40007243',
+  'YD40007372',
+  'YD40006630',
+  'YD40006618',
+  'YD40006237',
+  'YD40007688',
+  'YD40007722',
+  'YD40002946',
+  'YD40002683',
 ]
 const gridWrapperRef = ref(null)
 const lockDays = ref(0)
@@ -1441,6 +1456,8 @@ const normalizeProductCode = (code) =>
     .trim()
     .toUpperCase()
     .replace(/[０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+const normalizeFloorOrderCode = (code) =>
+  normalizeProductCode(code).replace(/[A-Z]$/, '')
 const getFloorShippingOrder = () => (
   isFloorShippingDeliveryLine.value
     ? FLOOR_SHIPPING_PRODUCT_ORDER.map((code) => `${code}T`)
@@ -1448,6 +1465,7 @@ const getFloorShippingOrder = () => (
 )
 
 const sortRowsForLine = (inputRows) => {
+  const line = selectedLineObj.value
   if (activePlanTab.value === 'floor-shipping') {
     const orderList = getFloorShippingOrder()
     const orderMap = new Map(orderList.map((code, idx) => [code, idx]))
@@ -1461,7 +1479,19 @@ const sortRowsForLine = (inputRows) => {
       return codeA.localeCompare(codeB)
     })
   }
-  const line = selectedLineObj.value
+  if (line && line.line_code === FLOOR_LINE_CODE) {
+    const orderList = FLOOR_L2100_PRODUCT_ORDER
+    const orderMap = new Map(orderList.map((code, idx) => [code, idx]))
+    const fallback = orderList.length + 1
+    return [...inputRows].sort((a, b) => {
+      const codeA = normalizeFloorOrderCode(getRowProductCode(a))
+      const codeB = normalizeFloorOrderCode(getRowProductCode(b))
+      const priA = orderMap.has(codeA) ? orderMap.get(codeA) : fallback
+      const priB = orderMap.has(codeB) ? orderMap.get(codeB) : fallback
+      if (priA !== priB) return priA - priB
+      return codeA.localeCompare(codeB)
+    })
+  }
   if (!line || line.line_code !== TANK_LINE_CODE) return inputRows
   const orderMap = new Map(TANK_PRODUCT_ORDER.map((code, idx) => [code, idx]))
   const fallback = TANK_PRODUCT_ORDER.length + 1
