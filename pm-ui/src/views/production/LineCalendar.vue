@@ -479,14 +479,32 @@ const fetchCalendarDaysByRange = async (startDate, endDate) => {
   return res.data.results || res.data || []
 }
 
+const ensureDaisoCalendarId = async () => {
+  if (daisoCalendarId.value) return daisoCalendarId.value
+  const res = await api.calendars.getCalendars({ search: 'daiso', page_size: 200 })
+  const rows = res.data.results || res.data || []
+  const found = rows.find((row) => String(row.calendar_code || '').toLowerCase() === 'daiso')
+  daisoCalendarId.value = found?.id || ''
+  return daisoCalendarId.value
+}
+
+const fetchDaisoWorkingMapByRange = async (startDate, endDate) => {
+  const calendarId = await ensureDaisoCalendarId()
+  if (!calendarId) return new Map()
+  const res = await api.calendars.getCalendarDays(calendarId, {
+    page_size: 5000,
+    target_date__gte: startDate,
+    target_date__lte: endDate,
+  })
+  const rows = res.data.results || res.data || []
+  const map = new Map()
+  rows.forEach((row) => map.set(row.target_date, !!row.is_working_day))
+  return map
+}
+
 const loadDaisoCalendarDays = async () => {
   const { start, end } = monthRange.value
-  if (!daisoCalendarId.value) {
-    const res = await api.calendars.getCalendars({ search: 'daiso', page_size: 200 })
-    const rows = res.data.results || res.data || []
-    const found = rows.find((row) => String(row.calendar_code || '').toLowerCase() === 'daiso')
-    daisoCalendarId.value = found?.id || ''
-  }
+  await ensureDaisoCalendarId()
   if (!daisoCalendarId.value) {
     daisoCalendarDays.value = []
     return
@@ -609,6 +627,7 @@ const applyRange = async () => {
     const end = new Date(range.value.end)
     const existing = new Map()
     const existingRows = await fetchCalendarDaysByRange(range.value.start, range.value.end)
+    const daisoWorkingMap = await fetchDaisoWorkingMapByRange(range.value.start, range.value.end)
     existingRows.forEach((d) => existing.set(d.target_date, d))
 
     const ops = []
@@ -616,7 +635,12 @@ const applyRange = async () => {
       const key = ymd(d)
       const current = existing.get(key) || null
       const isExistingWorkingDay = current ? !!current.is_working_day : null
-      const nextIsWorkingDay = current ? isExistingWorkingDay : !!range.value.isWorkingDay
+      const fallbackWorking = daisoWorkingMap.has(key)
+        ? daisoWorkingMap.get(key)
+        : d.getDay() !== 0 && d.getDay() !== 6
+      const nextIsWorkingDay = current
+        ? isExistingWorkingDay
+        : (!!range.value.isWorkingDay && fallbackWorking)
       const payload = {
         calendar: selectedCalendar.value,
         target_date: key,
