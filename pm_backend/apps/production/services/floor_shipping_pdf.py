@@ -39,13 +39,15 @@ PM_SEQUENCE_THRESHOLD = 50
 JPN_WEEKDAYS = ['月', '火', '水', '木', '金', '土', '日']
 
 # 色定義
-COLOR_HEADER_BG = colors.HexColor('#4472C4')
-COLOR_HEADER_TEXT = colors.white
+COLOR_HEADER_BG = colors.white
+COLOR_HEADER_TEXT = colors.black
 COLOR_SECTION_15 = colors.HexColor('#FFC000')  # 15時着ヘッダ（オレンジ系）
 COLOR_SECTION_08 = colors.HexColor('#70AD47')  # 8時着ヘッダ（緑系）
 COLOR_TOTAL_BG = colors.HexColor('#D9E2F3')
 COLOR_GRAND_TOTAL_BG = colors.HexColor('#B4C6E7')
-COLOR_WEEKEND_BG = colors.HexColor('#F2F2F2')
+COLOR_WEEKEND_BG = colors.HexColor('#FDE9E9')  # 休日列（薄赤）
+COLOR_ROW_ODD_BG = colors.white
+COLOR_ROW_EVEN_BG = colors.HexColor('#F7F3E8')
 COLOR_GRID = colors.HexColor('#808080')
 SECTION_TITLE_15 = '１５時着（午前便　AM１１：３０頃）'
 SECTION_TITLE_08 = '８時着（午後便　PM18：３０頃）'
@@ -394,7 +396,8 @@ def generate_floor_shipping_pdf(line_id: int, start_date: date, end_date: date) 
         x += label_col_w
 
         for d in display_dates:
-            c.setFillColor(bg_color)
+            is_weekend = d.weekday() >= 5
+            c.setFillColor(COLOR_WEEKEND_BG if is_weekend else bg_color)
             c.rect(x, y_pos - row_h, date_col_w, row_h, fill=1, stroke=0)
             c.setStrokeColor(COLOR_GRID)
             c.rect(x, y_pos - row_h, date_col_w, row_h, fill=0, stroke=1)
@@ -426,28 +429,30 @@ def generate_floor_shipping_pdf(line_id: int, start_date: date, end_date: date) 
 
     # 15時着セクション
     y = draw_section_header(y, SECTION_TITLE_15, COLOR_SECTION_15)
-    for pc, label, lbl_color in PRODUCT_ORDER:
+    for row_index, (pc, label, lbl_color) in enumerate(PRODUCT_ORDER, start=1):
         name = product_names.get(pc, '')
         data_for_product = {}
         for d in display_dates:
             qty = pm_data.get(d, {}).get(pc, 0)
             if qty > 0:
                 data_for_product[d] = qty
-        y = draw_product_row(y, pc, label, name, data_for_product, row_bg=lbl_color, label_color=colors.white)
+        row_bg = COLOR_ROW_ODD_BG if row_index % 2 == 1 else COLOR_ROW_EVEN_BG
+        y = draw_product_row(y, pc, label, name, data_for_product, row_bg=row_bg, label_color=lbl_color)
 
     pm_totals = calc_section_totals(pm_data)
     y = draw_total_row(y, '合計', pm_totals)
 
     # 8時着セクション
     y = draw_section_header(y, SECTION_TITLE_08, COLOR_SECTION_08)
-    for pc, label, lbl_color in PRODUCT_ORDER:
+    for row_index, (pc, label, lbl_color) in enumerate(PRODUCT_ORDER, start=1):
         name = product_names.get(pc, '')
         data_for_product = {}
         for d in display_dates:
             qty = am_data.get(d, {}).get(pc, 0)
             if qty > 0:
                 data_for_product[d] = qty
-        y = draw_product_row(y, pc, label, name, data_for_product, row_bg=lbl_color, label_color=colors.white)
+        row_bg = COLOR_ROW_ODD_BG if row_index % 2 == 1 else COLOR_ROW_EVEN_BG
+        y = draw_product_row(y, pc, label, name, data_for_product, row_bg=row_bg, label_color=lbl_color)
 
     am_totals = calc_section_totals(am_data)
     y = draw_total_row(y, '合計', am_totals)
