@@ -59,6 +59,24 @@
         excel
       </button>
     </div>
+    <div v-else-if="activePlanTab === 'floor-shipping'" class="laser-subtab-bar">
+      <button
+        type="button"
+        class="laser-subtab-item"
+        :class="{ active: activeFloorShippingTab === 'inventory' }"
+        @click="activeFloorShippingTab = 'inventory'"
+      >
+        在庫基準
+      </button>
+      <button
+        type="button"
+        class="laser-subtab-item"
+        :class="{ active: activeFloorShippingTab === 'progress' }"
+        @click="activeFloorShippingTab = 'progress'"
+      >
+        進度基準
+      </button>
+    </div>
 
     <template
       v-if="(activePlanTab !== 'laser' || activeLaserTab === 'normal-plan') && (activePlanTab !== 'spot' || activeSpotTab === 'normal-plan')"
@@ -197,12 +215,12 @@
           </tr>
           <tr class="head-level2">
             <template v-for="(c, colIdx) in dateColumns" :key="c.key">
-              <th class="mini demand-col" :class="c.dayClass">需要</th>
+              <th class="mini demand-col" :class="c.dayClass">{{ isProgressMode ? '受注' : '需要' }}</th>
               <th class="mini actual-col" :class="c.dayClass">実績</th>
-              <th class="mini stock-col" :class="c.dayClass">在庫</th>
+              <th class="mini stock-col" :class="c.dayClass">{{ isProgressMode ? '進度' : '在庫' }}</th>
               <th class="mini plan-col" :class="c.dayClass">計画</th>
               <th class="mini sequence-col" :class="c.dayClass">順</th>
-              <th class="mini stock-plan-col day-end" :class="c.dayClass">計画在庫</th>
+              <th class="mini stock-plan-col day-end" :class="c.dayClass">{{ isProgressMode ? '計進' : '計画在庫' }}</th>
             </template>
           </tr>
         </thead>
@@ -225,13 +243,13 @@
             </td>
             <template v-for="(c, colIdx) in dateColumns" :key="c.key">
               <td class="num demand" :class="c.dayClass">
-                <span class="readonly-value">{{ displayValue(row.daily?.[c.key]?.demand) }}</span>
+                <span class="readonly-value">{{ displayValue(isProgressMode ? row.daily?.[c.key]?.line_demand_qty : row.daily?.[c.key]?.demand) }}</span>
               </td>
               <td class="num actual" :class="c.dayClass">
                 <span class="readonly-value">{{ displayValue(row.daily?.[c.key]?.actual) }}</span>
               </td>
               <td class="num stock" :class="c.dayClass">
-                <span class="readonly-value">{{ displayValue(getStockDisplay(row, colIdx)) }}</span>
+                <span class="readonly-value">{{ displayValue(isProgressMode ? row.daily?.[c.key]?.progress : getStockDisplay(row, colIdx)) }}</span>
               </td>
               <td class="num plan" :class="c.dayClass">
                 <div class="lot-stack">
@@ -298,7 +316,7 @@
                 </div>
               </td>
               <td class="num stock-plan day-end" :class="c.dayClass">
-                <span class="readonly-value">{{ displayValue(getPlanStockDisplay(row, colIdx)) }}</span>
+                <span class="readonly-value">{{ displayValue(isProgressMode ? row.daily?.[c.key]?.planned_progress : getPlanStockDisplay(row, colIdx)) }}</span>
               </td>
             </template>
           </tr>
@@ -604,6 +622,7 @@ const selectPlanTab = (tab) => {
   activePlanTab.value = tab.key
 }
 const activeSpotTab = ref('normal-plan')
+const activeFloorShippingTab = ref('inventory')
 const spotExcelRows = ref([])
 const spotExcelFileName = ref('')
 const spotExcelMessage = ref('')
@@ -656,6 +675,19 @@ const TANK_PRODUCT_ORDER = [
   'YD60009783',
   'YD60009874'
 ]
+const FLOOR_SHIPPING_PRODUCT_ORDER = [
+  'YD40006245',
+  'YD40006630',
+  'YD40006237',
+  'YD40006618',
+  'YD40006842',
+  'YD40007003',
+  'YD40007243',
+  'YD40007372',
+  'YD40007722',
+  'YD40007688',
+  'YD40002946',
+]
 const gridWrapperRef = ref(null)
 const lockDays = ref(0)
 const isEditUnlocked = ref(false)
@@ -695,6 +727,9 @@ const coproductDisplayCache = new Map()
 
 const selectedLineObj = computed(() =>
   lines.value.find((l) => `${l.id}` === `${selectedLine.value}`)
+)
+const isProgressMode = computed(() =>
+  activePlanTab.value === 'floor-shipping' && activeFloorShippingTab.value === 'progress'
 )
 const isFloorShippingDeliveryLine = computed(() => {
   if (activePlanTab.value !== 'floor-shipping') return false
@@ -987,6 +1022,9 @@ const initDaily = () => {
       sequence_no: '',
       extraLots: [],
       has_row: false,
+      line_demand_qty: 0,
+      progress: 0,
+      planned_progress: 0,
     }
   })
   return daily
@@ -1005,6 +1043,9 @@ const ensureDailyCell = (row, dateKey) => {
       sequence_no: '',
       extraLots: [],
       has_row: false,
+      line_demand_qty: 0,
+      progress: 0,
+      planned_progress: 0,
     }
   }
   if (!row.daily[dateKey].extraLots) {
@@ -1317,8 +1358,31 @@ const getProductCode = (id) => {
   return p ? p.product_code : ''
 }
 const getRowProductCode = (row) => row.product_code || getProductCode(row.product_id) || ''
+const normalizeProductCode = (code) =>
+  String(code || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+const getFloorShippingOrder = () => (
+  isFloorShippingDeliveryLine.value
+    ? FLOOR_SHIPPING_PRODUCT_ORDER.map((code) => `${code}T`)
+    : FLOOR_SHIPPING_PRODUCT_ORDER
+)
 
 const sortRowsForLine = (inputRows) => {
+  if (activePlanTab.value === 'floor-shipping') {
+    const orderList = getFloorShippingOrder()
+    const orderMap = new Map(orderList.map((code, idx) => [code, idx]))
+    const fallback = orderList.length + 1
+    return [...inputRows].sort((a, b) => {
+      const codeA = normalizeProductCode(getRowProductCode(a))
+      const codeB = normalizeProductCode(getRowProductCode(b))
+      const priA = orderMap.has(codeA) ? orderMap.get(codeA) : fallback
+      const priB = orderMap.has(codeB) ? orderMap.get(codeB) : fallback
+      if (priA !== priB) return priA - priB
+      return codeA.localeCompare(codeB)
+    })
+  }
   const line = selectedLineObj.value
   if (!line || line.line_code !== TANK_LINE_CODE) return inputRows
   const orderMap = new Map(TANK_PRODUCT_ORDER.map((code, idx) => [code, idx]))
@@ -2374,12 +2438,21 @@ const buildExportRow = (row) => {
   const data = []
   dateColumns.value.forEach((c, colIdx) => {
     const daily = row.daily?.[c.key] || {}
-    data.push(displayValue(daily.demand))
-    data.push(displayValue(daily.actual))
-    data.push(displayValue(getStockDisplay(row, colIdx)))
-    data.push(formatLotValues(daily, 'plan'))
-    data.push(formatLotValues(daily, 'sequence_no'))
-    data.push(displayValue(getPlanStockDisplay(row, colIdx)))
+    if (isProgressMode.value) {
+      data.push(displayValue(daily.line_demand_qty))
+      data.push(displayValue(daily.actual))
+      data.push(displayValue(daily.progress))
+      data.push(formatLotValues(daily, 'plan'))
+      data.push(formatLotValues(daily, 'sequence_no'))
+      data.push(displayValue(daily.planned_progress))
+    } else {
+      data.push(displayValue(daily.demand))
+      data.push(displayValue(daily.actual))
+      data.push(displayValue(getStockDisplay(row, colIdx)))
+      data.push(formatLotValues(daily, 'plan'))
+      data.push(formatLotValues(daily, 'sequence_no'))
+      data.push(displayValue(getPlanStockDisplay(row, colIdx)))
+    }
   })
   return data
 }
@@ -2405,7 +2478,11 @@ const exportToExcel = () => {
   })
   const header2 = ['No', '品番']
   dateColumns.value.forEach(() => {
-    header2.push('需要', '実績', '在庫', '計画', '順序', '計画在庫')
+    if (isProgressMode.value) {
+      header2.push('受注', '実績', '進度', '計画', '順', '計進')
+    } else {
+      header2.push('需要', '実績', '在庫', '計画', '順序', '計画在庫')
+    }
   })
   linesOut.push(header1.map(escapeCsv).join(','))
   linesOut.push(header2.map(escapeCsv).join(','))
@@ -2438,7 +2515,14 @@ const buildPrintTableHtml = () => {
     </div>
   `
 
-  const metrics = [
+  const metrics = isProgressMode.value ? [
+    { key: 'demand', label: '受注', getValue: (row, daily, colIdx) => displayValue(daily.line_demand_qty) },
+    { key: 'actual', label: '実績', getValue: (row, daily, colIdx) => displayValue(daily.actual) },
+    { key: 'progress', label: '進度', getValue: (row, daily, colIdx) => displayValue(daily.progress) },
+    { key: 'plan', label: '計画', getValue: (row, daily, colIdx) => formatLotValues(daily, 'plan') },
+    { key: 'sequence', label: '順', getValue: (row, daily, colIdx) => formatLotValues(daily, 'sequence_no') },
+    { key: 'planned_progress', label: '計進', getValue: (row, daily, colIdx) => displayValue(daily.planned_progress) },
+  ] : [
     { key: 'demand', label: '計需', getValue: (row, daily, colIdx) => displayValue(daily.demand) },
     { key: 'actual', label: '実需', getValue: (row, daily, colIdx) => displayValue(daily.actual) },
     { key: 'plan', label: '計画', getValue: (row, daily, colIdx) => formatLotValues(daily, 'plan') },
@@ -2604,23 +2688,31 @@ const onGlobalKeydown = (event) => {
 }
 
 const fetchAndApplyData = async () => {
-    currentLineRoutingFilterMode.value = 'filtered'
-    const [backlogRes, planRes, lineRoutingFilter] = await Promise.all([
-      api.lineBacklogs.getLineBacklogs({
+  currentLineRoutingFilterMode.value = 'filtered'
+  const fetchLineDemands = activePlanTab.value === 'floor-shipping'
+    ? api.lineDemands.list({
         line: selectedLine.value,
         plan_date__gte: startDate.value,
         plan_date__lte: endDate.value,
-      }),
-      api.linePlans.getLinePlans({
-        line: selectedLine.value,
-        plan_date__gte: startDate.value,
-        plan_date__lte: endDate.value,
-      }),
-      fetchCurrentLineProductIdSet(selectedLine.value),
-    ])
-    currentLineRoutingFilterMode.value = lineRoutingFilter?.mode || 'fallback'
-    const backlogData = backlogRes.data?.results || backlogRes.data || []
-    const planData = planRes.data?.results || planRes.data || []
+      })
+    : Promise.resolve(null)
+  const [backlogRes, planRes, lineRoutingFilter, lineDemandRes] = await Promise.all([
+    api.lineBacklogs.getLineBacklogs({
+      line: selectedLine.value,
+      plan_date__gte: startDate.value,
+      plan_date__lte: endDate.value,
+    }),
+    api.linePlans.getLinePlans({
+      line: selectedLine.value,
+      plan_date__gte: startDate.value,
+      plan_date__lte: endDate.value,
+    }),
+    fetchCurrentLineProductIdSet(selectedLine.value),
+    fetchLineDemands,
+  ])
+  currentLineRoutingFilterMode.value = lineRoutingFilter?.mode || 'fallback'
+  const backlogData = backlogRes.data?.results || backlogRes.data || []
+  const planData = planRes.data?.results || planRes.data || []
     const filterRowsByCurrentLineRouting = (items) => {
       const list = Array.isArray(items) ? items : []
       if (lineRoutingFilter?.mode === 'fallback') {
@@ -2652,6 +2744,8 @@ const fetchAndApplyData = async () => {
     const demandMap = new Map()
     const actualMap = new Map()
     const stockSourceMap = new Map()
+    const progressSourceMap = new Map()
+    const lineDemandMap = new Map()
     const prodKeyByDateKey = new Map()
     const productInfoByProdKey = new Map()
     const planLotsByDate = new Map()
@@ -2735,6 +2829,20 @@ const fetchAndApplyData = async () => {
           plan_stock: Number(d.planned_stock_qty || 0),
         })
       }
+      // 進度データ（sequence_no=0の需要行を優先）
+      const progressEntry = progressSourceMap.get(dateKey)
+      if (
+        !progressEntry ||
+        priority < progressEntry.priority ||
+        (priority === progressEntry.priority && seqNo < progressEntry.seq)
+      ) {
+        progressSourceMap.set(dateKey, {
+          priority,
+          seq: seqNo,
+          progress: Number(d.progress_qty || 0),
+          planned_progress: Number(d.planned_progress_qty || 0),
+        })
+      }
     })
 
     planLotsByDate.forEach((lots, dateKey) => {
@@ -2783,6 +2891,43 @@ const fetchAndApplyData = async () => {
       daily.actual = Number(actualMap.get(dateKey) || 0)
       daily.has_row = true
     })
+
+    // 進度データを適用
+    progressSourceMap.forEach((entry, dateKey) => {
+      const parts = dateKey.split('__')
+      const date = parts.pop()
+      const prodKey = parts.join('__')
+      if (!prodKey || !date) return
+      const row = ensureRow(prodKey)
+      const daily = ensureDailyCell(row, date)
+      daily.progress = Number(entry.progress || 0)
+      daily.planned_progress = Number(entry.planned_progress || 0)
+    })
+
+    // LineDemand受注データを適用（進度基準モード用）
+    if (lineDemandRes) {
+      const demandData = lineDemandRes.data?.results || lineDemandRes.data || []
+      demandData.forEach((d) => {
+        if (!d.product) return
+        const prodKey = `${d.product}`
+        const dateKey = `${prodKey}__${d.plan_date}`
+        const firm = Number(d.firm_qty || 0)
+        const forecast = Number(d.forecast_qty || 0)
+        // 確定あったら確定、ないときは内示、両方あるときは合計
+        const qty = (firm > 0 && forecast > 0) ? firm + forecast : (firm > 0 ? firm : forecast)
+        const prev = lineDemandMap.get(dateKey) || 0
+        lineDemandMap.set(dateKey, prev + qty)
+      })
+      lineDemandMap.forEach((qty, dateKey) => {
+        const parts = dateKey.split('__')
+        const date = parts.pop()
+        const prodKey = parts.join('__')
+        if (!prodKey || !date) return
+        const row = ensureRow(prodKey)
+        const daily = ensureDailyCell(row, date)
+        daily.line_demand_qty = qty
+      })
+    }
 
     // L2201専用: ライン最終品は計画/在庫データが未作成でも行表示する
     ensureL2201LineFinalRows(grouped, productInfoByProdKey)

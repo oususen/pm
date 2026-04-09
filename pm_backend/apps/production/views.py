@@ -108,6 +108,7 @@ def _is_floor_shipping_delivery_line(line_obj):
 
 
 def _resolve_inventory_effective_start_date(line_id, requested_start_date, end_date, product_ids=None):
+    from .inventory.inventory_calculator import _get_max_parent_bom_lead_time
     line_obj = Line.objects.filter(id=line_id).first()
     calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
         calendar_code='daiso'
@@ -164,10 +165,10 @@ def _resolve_inventory_effective_start_date(line_id, requested_start_date, end_d
 
     max_lt = 0
     if product_ids_for_line:
-        max_lt = BOMItem.objects.filter(
-            bom__is_active=True,
-            child_product_id__in=product_ids_for_line,
-        ).aggregate(v=Max('lead_time_days'))['v'] or 0
+        max_lt = max(
+            (int(_get_max_parent_bom_lead_time(pid) or 0) for pid in product_ids_for_line),
+            default=0,
+        )
     planned_progress_start_dt = shift_working_days(today, -(int(max_lt) + 1))
     return min(requested_start_date, stock_start_dt, planned_progress_start_dt)
 
@@ -177,6 +178,8 @@ def _resolve_product_recalc_start_date(line_id, end_date, product_ids=None):
     表示品番だけ再計算用の内部開始日を返す。
     画面の表示開始日は使わず、計算上必要な開始日だけを採用する。
     """
+    from .inventory.inventory_calculator import _get_max_parent_bom_lead_time
+
     line_obj = Line.objects.filter(id=line_id).first()
     calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
         calendar_code='daiso'
@@ -233,10 +236,10 @@ def _resolve_product_recalc_start_date(line_id, end_date, product_ids=None):
 
     max_lt = 0
     if product_ids_for_line:
-        max_lt = BOMItem.objects.filter(
-            bom__is_active=True,
-            child_product_id__in=product_ids_for_line,
-        ).aggregate(v=Max('lead_time_days'))['v'] or 0
+        max_lt = max(
+            (int(_get_max_parent_bom_lead_time(pid) or 0) for pid in product_ids_for_line),
+            default=0,
+        )
     planned_progress_start_dt = shift_working_days(today, -(int(max_lt) + 1))
     return min(stock_start_dt, planned_progress_start_dt)
 
@@ -1627,7 +1630,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                                     seq_value != INVALID_SEQUENCE_SORT_VALUE and
                                     seq_value > FLOOR_SHIPPING_PM_SEQUENCE_THRESHOLD
                                 )
-                                effective_lt_days = 1 if force_pm_by_sequence else (0 if lot_index == 0 else 1)
+                                effective_lt_days = 1 if force_pm_by_sequence else (2 if lot_index == 0 else 1)
                                 shifted_date = shift_business_days(plan_date, effective_lt_days) if effective_lt_days else plan_date
                                 key = (current_output_product, shifted_date)
                                 demand_map[key] += qty * total_qty_per
