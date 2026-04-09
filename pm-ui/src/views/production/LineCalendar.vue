@@ -488,20 +488,6 @@ const ensureDaisoCalendarId = async () => {
   return daisoCalendarId.value
 }
 
-const fetchDaisoWorkingMapByRange = async (startDate, endDate) => {
-  const calendarId = await ensureDaisoCalendarId()
-  if (!calendarId) return new Map()
-  const res = await api.calendars.getCalendarDays(calendarId, {
-    page_size: 5000,
-    target_date__gte: startDate,
-    target_date__lte: endDate,
-  })
-  const rows = res.data.results || res.data || []
-  const map = new Map()
-  rows.forEach((row) => map.set(row.target_date, !!row.is_working_day))
-  return map
-}
-
 const loadDaisoCalendarDays = async () => {
   const { start, end } = monthRange.value
   await ensureDaisoCalendarId()
@@ -623,44 +609,28 @@ const applyRange = async () => {
   }
   applyingRange.value = true
   try {
-    const start = new Date(range.value.start)
-    const end = new Date(range.value.end)
-    const existing = new Map()
     const existingRows = await fetchCalendarDaysByRange(range.value.start, range.value.end)
-    const daisoWorkingMap = await fetchDaisoWorkingMapByRange(range.value.start, range.value.end)
-    existingRows.forEach((d) => existing.set(d.target_date, d))
+    const workingRows = existingRows.filter((row) => !!row.is_working_day)
+
+    if (!workingRows.length) {
+      alert('対象期間に出勤日がありません。先に出勤日を設定してください。')
+      return
+    }
 
     const ops = []
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const key = ymd(d)
-      const current = existing.get(key) || null
-      const isExistingWorkingDay = current ? !!current.is_working_day : null
-      const fallbackWorking = daisoWorkingMap.has(key)
-        ? daisoWorkingMap.get(key)
-        : d.getDay() !== 0 && d.getDay() !== 6
-      const nextIsWorkingDay = current
-        ? isExistingWorkingDay
-        : (!!range.value.isWorkingDay && fallbackWorking)
-      const payload = {
+    for (const row of workingRows) {
+      ops.push(api.calendars.updateCalendarDay(row.id, {
         calendar: selectedCalendar.value,
-        target_date: key,
-        is_working_day: nextIsWorkingDay,
-        work_minutes: nextIsWorkingDay
-          ? range.value.workMinutes
-          : (current?.work_minutes ?? 0),
-        work_pattern: nextIsWorkingDay
-          ? (range.value.workPattern || null)
-          : (current?.work_pattern || null),
-      }
-      if (current?.id) {
-        ops.push(api.calendars.updateCalendarDay(current.id, payload))
-      } else {
-        ops.push(api.calendars.createCalendarDay(payload))
-      }
+        target_date: row.target_date,
+        is_working_day: true,
+        work_minutes: range.value.workMinutes,
+        work_pattern: range.value.workPattern || null,
+      }))
     }
+
     await Promise.all(ops)
     await loadCalendarDays()
-    alert('勤務時間を登録しました。')
+    alert(`出勤日 ${workingRows.length} 件に勤務パターンを適用しました。`)
   } catch (e) {
     console.error('勤務時間登録エラー', e)
     alert('登録に失敗しました。')
