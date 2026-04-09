@@ -15,6 +15,7 @@ from production.views import (
     ScheduleRunNowView,
     ScheduleCancelView,
     LineBacklogAdjustmentView,
+    FloorShippingPDFView,
     LaserPatternViewSet,
     LaserActualViewSet,
     LaserActualDetailUpdateView,
@@ -83,4 +84,5 @@ urlpatterns = [
     path('spot-line-products/', SpotLineProductsView.as_view(), name='spot-line-products'),
     path('spot-line-equipments/', SpotLineEquipmentsView.as_view(), name='spot-line-equipments'),
     path('spot-line-record/', SpotLineRecordView.as_view(), name='spot-line-record'),
+    path('floor-shipping-pdf/', FloorShippingPDFView.as_view(), name='floor-shipping-pdf'),
 ]

@@ -6795,3 +6795,39 @@ class StockMigrationExecuteView(APIView):
             )
 
         return Response({'migrated': migrated, 'count': len(migrated)})
+
+
+class FloorShippingPDFView(APIView):
+    """フロア配送 8時着/15時着 明細PDF生成"""
+
+    def get(self, request):
+        line_id = request.query_params.get('line')
+        start = request.query_params.get('start_date')
+        end = request.query_params.get('end_date')
+        if not line_id or not start or not end:
+            return Response(
+                {'detail': 'line, start_date, end_date は必須です'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            from datetime import datetime as dt
+            start_date = dt.strptime(start, '%Y-%m-%d').date()
+            end_date = dt.strptime(end, '%Y-%m-%d').date()
+        except ValueError:
+            return Response(
+                {'detail': '日付形式が不正です (YYYY-MM-DD)'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from production.services.floor_shipping_pdf import generate_floor_shipping_pdf
+        try:
+            pdf_bytes = generate_floor_shipping_pdf(int(line_id), start_date, end_date)
+        except Exception as e:
+            logger.exception('フロア配送PDF生成エラー')
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        from django.http import HttpResponse as DjangoHttpResponse
+        response = DjangoHttpResponse(pdf_bytes, content_type='application/pdf')
+        filename = f'フロア配送明細_{start}_{end}.pdf'
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response

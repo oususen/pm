@@ -163,4 +163,5 @@ export default {
   spotLineActuals: createSpotLineActualsAPI(client),
   systemSettings: createSystemSettingsAPI(client),
   ganttDisplayProductMaps: createGanttDisplayProductMapsAPI(client),
+  client,
 }

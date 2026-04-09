@@ -143,6 +143,13 @@
         <button class="btn accent" @click="toggleProcessLoad" :disabled="processing || !selectedLine">
           {{ showProcessLoad ? '工程負荷を閉じる' : '工程負荷表示' }}
         </button>
+        <button
+          v-if="canShowDeliveryDetailPDFButton"
+          class="btn"
+          style="background: #70AD47; color: #fff;"
+          @click="downloadFloorShippingPDF"
+          :disabled="processing || !selectedLine"
+        >配送明細PDF</button>
       </div>
     </div>
 
@@ -157,7 +164,7 @@
       注意: このラインに有効な現行ルーティング品番がないため、表示対象はありません。
     </div>
     <div v-if="isFloorShippingDeliveryLine" class="line-rule-notice">
-      注意: フロア配送は同一日・同一品番を sequence_no 昇順で 1件目=AM、2件目=PM と解釈します（暫定運用: sequence_no > 50 はPM扱い）。入力は 2件までです。
+      注意: フロア配送は同一日・同一品番を sequence_no 昇順で 1件目=8時着、2件目=15時着 と解釈します（暫定運用: sequence_no > 50 は15時着扱い）。入力は 2件までです。
     </div>
 
     <div class="grid-wrapper" ref="gridWrapperRef">
@@ -318,6 +325,30 @@
               <td class="num stock-plan day-end" :class="c.dayClass">
                 <span class="readonly-value">{{ displayValue(isProgressMode ? row.daily?.[c.key]?.planned_progress : getPlanStockDisplay(row, colIdx)) }}</span>
               </td>
+            </template>
+          </tr>
+          <tr v-if="isFloorShippingDeliveryLine" class="cart-summary-row">
+            <td class="sticky-col number-col"></td>
+            <td class="sticky-col code-col cart-label" colspan="2">8時着台車数</td>
+            <template v-for="c in dateColumns" :key="'am-cart-' + c.key">
+              <td :class="c.dayClass"></td>
+              <td :class="c.dayClass"></td>
+              <td :class="c.dayClass"></td>
+              <td class="num cart-value" :class="c.dayClass">{{ floorShippingCartCounts[c.key]?.am || '' }}</td>
+              <td :class="c.dayClass"></td>
+              <td :class="c.dayClass" class="day-end"></td>
+            </template>
+          </tr>
+          <tr v-if="isFloorShippingDeliveryLine" class="cart-summary-row">
+            <td class="sticky-col number-col"></td>
+            <td class="sticky-col code-col cart-label" colspan="2">15時着台車数</td>
+            <template v-for="c in dateColumns" :key="'pm-cart-' + c.key">
+              <td :class="c.dayClass"></td>
+              <td :class="c.dayClass"></td>
+              <td :class="c.dayClass"></td>
+              <td class="num cart-value" :class="c.dayClass">{{ floorShippingCartCounts[c.key]?.pm || '' }}</td>
+              <td :class="c.dayClass"></td>
+              <td :class="c.dayClass" class="day-end"></td>
             </template>
           </tr>
           <tr v-if="!filteredRows.length">
@@ -737,6 +768,53 @@ const isFloorShippingDeliveryLine = computed(() => {
   if (!line) return false
   const text = `${String(line.line_code || '').trim()} ${String(line.line_name || '').trim()}`
   return text.includes('フロア配送')
+})
+const floorShippingPdfSourceLineId = computed(() => {
+  if (isFloorShippingDeliveryLine.value && selectedLine.value) {
+    return selectedLine.value
+  }
+  const deliveryLine = lines.value.find((line) => {
+    const text = `${String(line?.line_code || '').trim()} ${String(line?.line_name || '').trim()}`
+    return text.includes('フロア配送')
+  })
+  return deliveryLine?.id || null
+})
+const canShowDeliveryDetailPDFButton = computed(() => (
+  activePlanTab.value === 'floor' || isFloorShippingDeliveryLine.value
+))
+// フロア配送: 8時着/15時着台車数（台車1台=2個、異なる製品は混載しない）
+const floorShippingCartCounts = computed(() => {
+  if (!isFloorShippingDeliveryLine.value) return {}
+  const result = {}
+  dateColumns.value.forEach((c) => {
+    let amCarts = 0
+    let pmCarts = 0
+    filteredRows.value.forEach((row) => {
+      const daily = row.daily?.[c.key]
+      if (!daily) return
+      // メインロット（1件目=8時着）
+      const mainQty = Number(daily.plan) || 0
+      const mainSeq = parseInt(daily.sequence_no)
+      const mainIsPM = !isNaN(mainSeq) && mainSeq > 50
+      if (mainQty > 0) {
+        if (mainIsPM) {
+          pmCarts += Math.ceil(mainQty / 2)
+        } else {
+          amCarts += Math.ceil(mainQty / 2)
+        }
+      }
+      // extraLots（2件目=15時着）
+      const extras = Array.isArray(daily.extraLots) ? daily.extraLots : []
+      extras.forEach((lot) => {
+        const qty = Number(lot.plan_qty) || 0
+        if (qty > 0) {
+          pmCarts += Math.ceil(qty / 2)
+        }
+      })
+    })
+    result[c.key] = { am: amCarts, pm: pmCarts }
+  })
+  return result
 })
 const configurablePlanTabs = computed(() => planTabs.filter((tab) => operationalPlanTabs.includes(tab.key)))
 const normalizeLineCode = (value) => String(value || '').trim().toUpperCase()
@@ -2457,6 +2535,30 @@ const buildExportRow = (row) => {
   return data
 }
 
+const downloadFloorShippingPDF = async () => {
+  const sourceLineId = floorShippingPdfSourceLineId.value
+  if (!sourceLineId) {
+    alert('フロア配送ラインが見つかりません。')
+    return
+  }
+  try {
+    const res = await api.client.get('/floor-shipping-pdf/', {
+      params: {
+        line: sourceLineId,
+        start_date: startDate.value,
+        end_date: endDate.value,
+      },
+      responseType: 'blob',
+    })
+    const blob = new Blob([res.data], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank')
+  } catch (e) {
+    console.error('配送明細PDF生成エラー', e)
+    alert('PDF生成に失敗しました: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
 const exportToExcel = () => {
   if (!filteredRows.value.length) {
     alert('出力対象のデータがありません。')
@@ -4117,6 +4219,24 @@ thead .sticky-col {
   margin: 6px 0 0;
   font-size: 13px;
   opacity: 0.9;
+}
+.cart-summary-row {
+  background: #f0f4ff !important;
+  border-top: 2px solid #7a8bb5;
+}
+.cart-summary-row td {
+  font-weight: 700;
+  font-size: 12px;
+}
+.cart-summary-row .cart-label {
+  text-align: left;
+  white-space: nowrap;
+  background: #e0e8f5 !important;
+}
+.cart-summary-row .cart-value {
+  text-align: right;
+  font-size: 13px;
+  color: #1a3a6a;
 }
 
 </style>
