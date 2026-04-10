@@ -1410,6 +1410,7 @@ const savePlan = async () => {
         end_date: endDate.value,
         read_only: false,
         include_coproduct_children: true,
+        use_coproduct: activePlanTab.value !== 'floor',
       })
       await api.lineBacklogs.recalculateInventory({
         line_id: selectedLine.value,

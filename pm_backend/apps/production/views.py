@@ -1142,7 +1142,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         """
         import logging
         import time
-        from masters.models import BOMItem, RoutingStep
+        from masters.models import BOM, BOMItem, RoutingStep
         from collections import defaultdict
 
         logger = logging.getLogger(__name__)
@@ -1299,6 +1299,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         gantt_usage_cache = {}
         downstream_backlog_cache = {}
+        final_target_candidate_cache = {}
 
         def build_line_start_map(line_id, product_ids):
             key = (
@@ -1386,6 +1387,59 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             rows = list(qs.values_list('product_id', 'plan_date', 'plan_qty', 'plan_id', 'sequence_no'))
             downstream_backlog_cache[cache_key] = rows
             return rows
+
+        def resolve_routing_final_target_ids(routing_final_product):
+            """
+            後ラインのルーティング最終品を基点に、当該期間で有効なBOMを辿って
+            ライン最終品（例: 6842K）を需要参照候補として取得する。
+            """
+            if not routing_final_product:
+                return []
+            cache_key = routing_final_product.id
+            cached = final_target_candidate_cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+            reference_date = end_dt or start_dt or datetime.today().date()
+            candidates = [routing_final_product.id]
+            visited = {routing_final_product.id}
+            frontier = [routing_final_product.id]
+
+            while frontier:
+                parent_ids = list(frontier)
+                frontier = []
+                bom_qs = (
+                    BOM.objects.filter(
+                        parent_product_id__in=parent_ids,
+                        is_active=True,
+                        is_coproduct=False,
+                        valid_from__lte=reference_date,
+                    )
+                    .filter(Q(valid_to__isnull=True) | Q(valid_to__gte=reference_date))
+                    .prefetch_related('items__child_product')
+                )
+                for bom in bom_qs:
+                    for item in bom.items.all():
+                        child_id = item.child_product_id
+                        if not child_id or child_id in visited:
+                            continue
+                        visited.add(child_id)
+                        child_product = getattr(item, 'child_product', None)
+                        if child_product and child_product.is_line_final_product:
+                            # ライン最終品まで到達したら、それ以上は辿らない
+                            candidates.append(child_id)
+                            continue
+                        frontier.append(child_id)
+
+            deduped = []
+            seen = set()
+            for candidate_id in candidates:
+                if candidate_id in seen:
+                    continue
+                seen.add(candidate_id)
+                deduped.append(candidate_id)
+            final_target_candidate_cache[cache_key] = deduped
+            return deduped
 
         def sort_sequence_value(value):
             try:
@@ -1549,21 +1603,23 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
                 # ステップ3: 親製品を出力するライン（後工程）をRoutingStepから特定（キャッシュから）
                 downstream_steps = downstream_steps_by_product.get(parent_product.id, [])
-                # 連産などで1つの親に複数のライン最終品が紐づく場合は、
-                # 別最終品由来の親計画をfallbackで混在させないようにする
-                final_targets_for_parent = {
-                    s.routing.product_id
-                    for s in downstream_steps
-                    if s.routing
-                    and s.routing.product
-                    and s.routing.product.is_line_final_product
-                    and s.routing.product_id
-                    and s.routing.product_id != parent_product.id
-                }
-                has_multiple_final_targets = len(final_targets_for_parent) > 1
+                line_final_ids_by_line = defaultdict(set)
+                for candidate_step in downstream_steps:
+                    downstream_line_id = candidate_step.line_id
+                    if not downstream_line_id:
+                        continue
+                    routing_product = getattr(getattr(candidate_step, 'routing', None), 'product', None)
+                    if not routing_product or not routing_product.is_line_final_product:
+                        continue
+                    if routing_product.id == parent_product.id:
+                        continue
+                    for candidate_id in resolve_routing_final_target_ids(routing_product):
+                        if candidate_id != parent_product.id:
+                            line_final_ids_by_line[downstream_line_id].add(candidate_id)
 
                 # 同一(line, process, output_product, routing)が完全に重複している場合だけスキップ
                 seen_steps = set()
+                processed_line_keys = set()
                 for d_step in downstream_steps:
                     step_key = (d_step.line_id, d_step.process_id, d_step.output_product_id, d_step.routing_id)
                     if step_key in seen_steps:
@@ -1572,31 +1628,37 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     downstream_line_id = d_step.line_id
                     if not downstream_line_id:
                         continue
+                    # 親品番需要は「後工程ライン単位で1回」だけ参照する
+                    line_key = (downstream_line_id, parent_product.id)
+                    if line_key in processed_line_keys:
+                        continue
+                    processed_line_keys.add(line_key)
 
                     # リードタイム（日）を考慮：現ラインのRoutingStep > Line > BOM明細 の順で優先
                     lt_days = resolve_lead_time_days(current_output_product, bom_item)
 
-                    # ステップ4: 後工程ラインのLineBacklogから計画数を取得
-                    # 親製品が中間品の場合、そのRoutingの最終品（ライン最終品）を基準にする
-                    routing_final_product = None
-                    if d_step.routing and d_step.routing.product:
-                        # Routingの製品がライン最終品の場合、それを使用
-                        if d_step.routing.product.is_line_final_product:
-                            routing_final_product = d_step.routing.product
-
                     target_ids = [parent_product.id]
-                    if routing_final_product and routing_final_product != parent_product:
-                        target_ids.append(routing_final_product.id)
+                    target_ids.extend(sorted(line_final_ids_by_line.get(downstream_line_id, set())))
 
                     # LineBacklog取得：ガントのstart_datetimeを優先し、無ければ親製品/ライン最終品の計画を使用
-                    line_start_map, gantt_plan_ids = build_line_start_map(downstream_line_id, target_ids)
+                    parent_start_map, parent_plan_ids = build_line_start_map(downstream_line_id, [parent_product.id])
+                    final_target_ids = [pid for pid in target_ids if pid != parent_product.id]
+                    final_start_map = {}
+                    final_plan_ids = set()
+                    if final_target_ids:
+                        final_start_map, final_plan_ids = build_line_start_map(downstream_line_id, final_target_ids)
+                    line_start_map = {}
+                    for plan_date in set(parent_start_map) | set(final_start_map):
+                        qty = parent_start_map.get(plan_date)
+                        if qty is None or qty <= 0:
+                            qty = final_start_map.get(plan_date, Decimal('0'))
+                        if qty:
+                            line_start_map[plan_date] = qty
+                    gantt_plan_ids = set(parent_plan_ids) | set(final_plan_ids)
                     backlog_rows = get_downstream_backlog_rows(downstream_line_id, target_ids)
 
                     # ステップ5: 後工程の計画数 × BOM個数 = 現在ラインの必要数
-                    if routing_final_product and routing_final_product != parent_product:
-                        total_qty_per = qty_per
-                    else:
-                        total_qty_per = qty_per
+                    total_qty_per = qty_per
 
                     if _is_floor_shipping_delivery_line(getattr(d_step, 'line', None)):
                         selected_rows_by_date = {}
@@ -1609,12 +1671,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                                     continue
                                 target_map = parent_rows if backlog_product_id == parent_product.id else final_rows
                                 target_map.setdefault(plan_date, []).append((qty, sequence_no))
-
                             for plan_date in set(parent_rows) | set(final_rows):
-                                if has_multiple_final_targets:
-                                    selected_rows_by_date[plan_date] = list(final_rows.get(plan_date, []))
-                                else:
-                                    selected_rows_by_date[plan_date] = list(parent_rows.get(plan_date) or final_rows.get(plan_date, []))
+                                preferred_rows = parent_rows.get(plan_date) or final_rows.get(plan_date, [])
+                                if preferred_rows:
+                                    selected_rows_by_date[plan_date] = list(preferred_rows)
                         else:
                             for _, plan_date, plan_qty, _backlog_plan_id, sequence_no in backlog_rows:
                                 qty = Decimal(str(plan_qty or 0))
@@ -1652,13 +1712,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             else:
                                 final_map[plan_date] = final_map.get(plan_date, Decimal('0')) + qty
                         for plan_date in set(parent_map) | set(final_map):
-                            if has_multiple_final_targets:
-                                # 複数最終品を持つ親では、当該最終品の数量のみを採用する
+                            qty = parent_map.get(plan_date)
+                            if qty is None or qty <= 0:
                                 qty = final_map.get(plan_date, Decimal('0'))
-                            else:
-                                qty = parent_map.get(plan_date)
-                                if qty is None or qty <= 0:
-                                    qty = final_map.get(plan_date, Decimal('0'))
                             if qty:
                                 fallback_map[plan_date] = qty
                     else:
@@ -2231,6 +2287,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             include_coproduct_children = include_coproduct_children.lower() in ['true', '1', 'yes']
         else:
             include_coproduct_children = bool(include_coproduct_children)
+        use_coproduct = request.data.get('use_coproduct', True)
+        if isinstance(use_coproduct, str):
+            use_coproduct = use_coproduct.lower() in ['true', '1', 'yes']
+        else:
+            use_coproduct = bool(use_coproduct)
         force_direct_process = request.data.get('force_direct_process', False)
         if isinstance(force_direct_process, str):
             force_direct_process = force_direct_process.lower() in ['true', '1', 'yes']
@@ -2331,23 +2392,24 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         # is_coproduct=True のBOMから子→親の対応を構築（最新valid_from優先）
         # is_coproduct_driver=True の子製品のみを copro_child_map に登録（共用部品問題を回避）
-        copro_boms = BOM.objects.filter(is_coproduct=True, is_active=True).order_by('-valid_from', '-id').prefetch_related('items')
-        for bom in copro_boms:
-            for item in bom.items.all():
-                try:
-                    qty_decimal = Decimal(item.quantity)
-                except Exception:
-                    continue
-                if qty_decimal == 0:
-                    continue
-                # is_coproduct_driver=True の子製品のみを連産品展開の対象とする
-                if item.is_coproduct_driver:
-                    if item.child_product_id not in copro_child_map:
-                        copro_child_map[item.child_product_id] = {
-                            'parent_id': bom.parent_product_id,
-                            'qty_per': qty_decimal,
-                        }
-                parent_children.setdefault(bom.parent_product_id, []).append((item.child_product_id, qty_decimal))
+        if use_coproduct:
+            copro_boms = BOM.objects.filter(is_coproduct=True, is_active=True).order_by('-valid_from', '-id').prefetch_related('items')
+            for bom in copro_boms:
+                for item in bom.items.all():
+                    try:
+                        qty_decimal = Decimal(item.quantity)
+                    except Exception:
+                        continue
+                    if qty_decimal == 0:
+                        continue
+                    # is_coproduct_driver=True の子製品のみを連産品展開の対象とする
+                    if item.is_coproduct_driver:
+                        if item.child_product_id not in copro_child_map:
+                            copro_child_map[item.child_product_id] = {
+                                'parent_id': bom.parent_product_id,
+                                'qty_per': qty_decimal,
+                            }
+                    parent_children.setdefault(bom.parent_product_id, []).append((item.child_product_id, qty_decimal))
 
         # 親セットごとに日付別セット数と代表子を決定
         for parent_id, children in parent_children.items():
@@ -2432,6 +2494,79 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     except Exception:
                         return None
             return None
+
+        fallback_descendant_multiplier_cache = {}
+        fallback_process_output_cache = {}
+
+        def collect_descendant_multipliers(parent_id, plan_date):
+            """
+            非連産BOMを再帰展開し、parent_id配下の子孫品番倍率を返す。
+            戻り値: {product_id: Decimal倍率}（parent_id自身は含まない）
+            """
+            cache_key = (parent_id, plan_date)
+            cached = fallback_descendant_multiplier_cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+            result = defaultdict(Decimal)
+
+            def walk(current_id, current_multiplier, path):
+                for ent in bom_qty_map.get(current_id, []):
+                    if plan_date < ent['valid_from']:
+                        continue
+                    if ent['valid_to'] and plan_date > ent['valid_to']:
+                        continue
+                    child_id = ent.get('child_id')
+                    qty = ent.get('qty')
+                    if not child_id:
+                        continue
+                    if child_id in path:
+                        continue
+                    try:
+                        next_multiplier = Decimal(current_multiplier) * Decimal(qty)
+                    except Exception:
+                        continue
+                    if next_multiplier == 0:
+                        continue
+                    result[child_id] += next_multiplier
+                    walk(child_id, next_multiplier, path | {child_id})
+
+            walk(parent_id, Decimal('1'), {parent_id})
+            fallback_descendant_multiplier_cache[cache_key] = result
+            return result
+
+        def get_effective_output_products_for_process(process_id, plan_date):
+            """
+            指定工程で有効な出力品番ID集合を返す（同一工程の重複Routingを除外するための判定用）。
+            """
+            cache_key = (process_id, plan_date)
+            cached = fallback_process_output_cache.get(cache_key)
+            if cached is not None:
+                return cached
+            output_ids = set()
+            for step in steps_by_process.get(process_id, []):
+                if not step.output_product_id:
+                    continue
+                if not is_step_effective_for_reference(step, plan_date):
+                    continue
+                output_ids.add(step.output_product_id)
+            fallback_process_output_cache[cache_key] = output_ids
+            return output_ids
+
+        def collect_fallback_process_targets(base_target_product_id, process_id, plan_date):
+            """
+            フォールバック展開時に、基準品番＋そのBOM子孫のうち
+            当該工程で出力対象になっている品番を返す。
+            """
+            effective_output_ids = get_effective_output_products_for_process(process_id, plan_date)
+            targets = {}
+            if base_target_product_id in effective_output_ids:
+                targets[base_target_product_id] = Decimal('1')
+            descendant_multipliers = collect_descendant_multipliers(base_target_product_id, plan_date)
+            for descendant_id, multiplier in descendant_multipliers.items():
+                if descendant_id in effective_output_ids and multiplier != 0:
+                    targets[descendant_id] = targets.get(descendant_id, Decimal('0')) + Decimal(multiplier)
+            return targets
 
         # ラインに紐づくカレンダがあれば使用、無ければdaisoを使用
         line_obj = Line.objects.filter(id=line_id).first()
@@ -2632,12 +2767,23 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             target_product_id, child_target_product_id = resolve_fallback_target_product(
                                 product_id, proc.id, plan_date
                             )
-                            affected_keys.add((target_product_id, proc.id, plan_date, seq_key))
-                            # 旧データ掃除のため、元品番キーも削除対象に含める
-                            if target_product_id != product_id:
-                                affected_keys.add((product_id, proc.id, plan_date, seq_key))
-                            if include_coproduct_children and child_target_product_id and child_target_product_id != target_product_id:
+                            # 旧データ掃除のため、工程日付キーの候補は常に削除対象に含める
+                            affected_keys.add((product_id, proc.id, plan_date, seq_key))
+                            if target_product_id and target_product_id != product_id:
+                                affected_keys.add((target_product_id, proc.id, plan_date, seq_key))
+                            if child_target_product_id and child_target_product_id != target_product_id:
                                 affected_keys.add((child_target_product_id, proc.id, plan_date, seq_key))
+                            fallback_targets = collect_fallback_process_targets(
+                                target_product_id, proc.id, plan_date
+                            )
+                            for expanded_target_id in fallback_targets.keys():
+                                affected_keys.add((expanded_target_id, proc.id, plan_date, seq_key))
+                            if include_coproduct_children and child_target_product_id and child_target_product_id != target_product_id:
+                                child_fallback_targets = collect_fallback_process_targets(
+                                    child_target_product_id, proc.id, plan_date
+                                )
+                                for child_expanded_target_id in child_fallback_targets.keys():
+                                    affected_keys.add((child_expanded_target_id, proc.id, plan_date, seq_key))
                     elif is_l2201_line and product_id in line_final_plan_product_ids and plan_process_id:
                         affected_keys.add((product_id, plan_process_id, plan_date, seq_key))
                     continue
@@ -2731,49 +2877,35 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         target_product_id, child_target_product_id = resolve_fallback_target_product(
                             product_id, proc.id, plan_date
                         )
-                        computed_time_min = None
-                        ct = pick_cycle_time(target_product_id, proc.id, plan_date)
-                        if not ct and child_target_product_id and child_target_product_id != target_product_id:
-                            ct = pick_cycle_time(child_target_product_id, proc.id, plan_date)
-                        if not ct and product_id != target_product_id:
-                            ct = pick_cycle_time(product_id, proc.id, plan_date)
-                        if proc.management_unit == 'MINUTE' and ct:
-                            try:
-                                computed_time_min = float(
-                                    (Decimal(plan_qty) * Decimal(ct.cycle_time_min or 0)) + Decimal(ct.setup_time_min or 0)
-                                )
-                            except Exception:
-                                computed_time_min = None
+                        fallback_targets = collect_fallback_process_targets(
+                            target_product_id, proc.id, plan_date
+                        )
+                        for expanded_target_id, multiplier in fallback_targets.items():
+                            scaled_plan_qty = Decimal(plan_qty or 0) * Decimal(multiplier or 0)
+                            scaled_order_qty = Decimal(order_qty or 0) * Decimal(multiplier or 0)
+                            scaled_demand_qty = Decimal(demand_qty_plan or 0) * Decimal(multiplier or 0)
 
-                        key = (target_product_id, proc.id, plan_date, seq_key)
-                        entry = aggregated.get(key)
-                        if not entry:
-                            entry = {
-                                'plan_qty': Decimal('0'),
-                                'order_qty': Decimal('0'),
-                                'demand_qty_plan': Decimal('0'),
-                                'time_min': Decimal('0'),
-                                'plan_ids': set(),
-                                'step': None,
-                                'cycle_time': ct,
-                                'routing_product_id': None,
-                                'source_routing_step_id': None,
-                                'step_no': None,
-                            }
-                            aggregated[key] = entry
-                        entry['plan_qty'] += Decimal(plan_qty or 0)
-                        entry['order_qty'] += Decimal(order_qty or 0)
-                        entry['demand_qty_plan'] += Decimal(demand_qty_plan or 0)
-                        if computed_time_min is not None:
-                            entry['time_min'] += Decimal(str(computed_time_min))
-                        if parent_plan_id:
-                            entry['plan_ids'].add(parent_plan_id)
+                            computed_time_min = None
+                            ct = pick_cycle_time(expanded_target_id, proc.id, plan_date)
+                            if not ct and expanded_target_id != target_product_id:
+                                ct = pick_cycle_time(target_product_id, proc.id, plan_date)
+                            if not ct and child_target_product_id and child_target_product_id != expanded_target_id:
+                                ct = pick_cycle_time(child_target_product_id, proc.id, plan_date)
+                            if not ct and product_id != expanded_target_id:
+                                ct = pick_cycle_time(product_id, proc.id, plan_date)
 
-                        if include_coproduct_children and child_target_product_id and child_target_product_id != target_product_id:
-                            child_key = (child_target_product_id, proc.id, plan_date, seq_key)
-                            child_entry = aggregated.get(child_key)
-                            if not child_entry:
-                                child_entry = {
+                            if proc.management_unit == 'MINUTE' and ct:
+                                try:
+                                    computed_time_min = float(
+                                        (Decimal(scaled_plan_qty) * Decimal(ct.cycle_time_min or 0)) + Decimal(ct.setup_time_min or 0)
+                                    )
+                                except Exception:
+                                    computed_time_min = None
+
+                            key = (expanded_target_id, proc.id, plan_date, seq_key)
+                            entry = aggregated.get(key)
+                            if not entry:
+                                entry = {
                                     'plan_qty': Decimal('0'),
                                     'order_qty': Decimal('0'),
                                     'demand_qty_plan': Decimal('0'),
@@ -2785,12 +2917,44 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                                     'source_routing_step_id': None,
                                     'step_no': None,
                                 }
-                                aggregated[child_key] = child_entry
-                            child_entry['plan_qty'] += Decimal(plan_qty or 0)
-                            child_entry['order_qty'] += Decimal(order_qty or 0)
-                            child_entry['demand_qty_plan'] += Decimal(demand_qty_plan or 0)
+                                aggregated[key] = entry
+                            entry['plan_qty'] += Decimal(scaled_plan_qty or 0)
+                            entry['order_qty'] += Decimal(scaled_order_qty or 0)
+                            entry['demand_qty_plan'] += Decimal(scaled_demand_qty or 0)
+                            if computed_time_min is not None:
+                                entry['time_min'] += Decimal(str(computed_time_min))
                             if parent_plan_id:
-                                child_entry['plan_ids'].add(parent_plan_id)
+                                entry['plan_ids'].add(parent_plan_id)
+
+                        if include_coproduct_children and child_target_product_id and child_target_product_id != target_product_id:
+                            child_fallback_targets = collect_fallback_process_targets(
+                                child_target_product_id, proc.id, plan_date
+                            )
+                            for child_expanded_target_id, child_multiplier in child_fallback_targets.items():
+                                scaled_child_plan_qty = Decimal(plan_qty or 0) * Decimal(child_multiplier or 0)
+                                scaled_child_order_qty = Decimal(order_qty or 0) * Decimal(child_multiplier or 0)
+                                scaled_child_demand_qty = Decimal(demand_qty_plan or 0) * Decimal(child_multiplier or 0)
+                                child_key = (child_expanded_target_id, proc.id, plan_date, seq_key)
+                                child_entry = aggregated.get(child_key)
+                                if not child_entry:
+                                    child_entry = {
+                                        'plan_qty': Decimal('0'),
+                                        'order_qty': Decimal('0'),
+                                        'demand_qty_plan': Decimal('0'),
+                                        'time_min': Decimal('0'),
+                                        'plan_ids': set(),
+                                        'step': None,
+                                        'cycle_time': ct,
+                                        'routing_product_id': None,
+                                        'source_routing_step_id': None,
+                                        'step_no': None,
+                                    }
+                                    aggregated[child_key] = child_entry
+                                child_entry['plan_qty'] += Decimal(scaled_child_plan_qty or 0)
+                                child_entry['order_qty'] += Decimal(scaled_child_order_qty or 0)
+                                child_entry['demand_qty_plan'] += Decimal(scaled_child_demand_qty or 0)
+                                if parent_plan_id:
+                                    child_entry['plan_ids'].add(parent_plan_id)
                     continue
                 if is_l2201_line and product_id in line_final_plan_product_ids and plan_process_id:
                     computed_time_min = None
