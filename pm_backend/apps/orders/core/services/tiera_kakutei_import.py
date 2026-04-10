@@ -35,6 +35,11 @@ class TieraKakuteiImportService:
     COL_SUPPLIER_CODE = 2  # サプライヤコード
     EXPECTED_SUPPLIER_CODE = 'E820T2'
 
+    # 受注品番→計画品番変換マップ（顧客品番と社内計画品番が異なる場合）
+    PRODUCT_CODE_MAP = {
+        'YD40006696': 'YD40006696_TATA',
+    }
+
     def __init__(self):
         self.errors = []
         self.warnings = []
@@ -311,12 +316,15 @@ class TieraKakuteiImportService:
                     continue
 
                 try:
+                    # 受注品番→計画品番変換（PRODUCT_CODE_MAPに定義がある場合）
+                    plan_product_code = self.PRODUCT_CODE_MAP.get(raw.product_code, raw.product_code)
+
                     # Auto-register product if not exists
-                    product_name_for_master = raw.product_name if raw.product_name else raw.product_code
+                    product_name_for_master = raw.product_name if raw.product_name else plan_product_code
                     product_name_kana_for_master = raw.product_name_kana if raw.product_name_kana else None
 
                     product, created = Product.objects.get_or_create(
-                        product_code=raw.product_code,
+                        product_code=plan_product_code,
                         defaults={
                             'product_name': product_name_for_master,
                             'product_name_halfwidth': product_name_kana_for_master,
@@ -327,7 +335,7 @@ class TieraKakuteiImportService:
                         }
                     )
                     if created:
-                        self.warnings.append(f'Auto-registered new product: {raw.product_code} ({product_name_for_master})')
+                        self.warnings.append(f'Auto-registered new product: {plan_product_code} ({product_name_for_master})')
 
                     # Create daily record
                     daily = StgOrderDaily(
@@ -335,7 +343,7 @@ class TieraKakuteiImportService:
                         customer=customer,
                         order_type=raw.order_type,
                         version_no='v1',
-                        product_code=raw.product_code,
+                        product_code=plan_product_code,
                         product_name=raw.product_name,
                         product_name_halfwidth=raw.product_name_kana,
                         due_date=raw.due_date,
