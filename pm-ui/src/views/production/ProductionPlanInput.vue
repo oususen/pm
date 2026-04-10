@@ -136,6 +136,12 @@
         <button class="btn" @click="savePlan" :disabled="processing || !rows.length || !selectedLine">保存</button>
         <button class="btn" @click="doDisplayOnly" :disabled="processing || !selectedLine">表示のみ</button>
         <button class="btn" @click="doFetchOnly" :disabled="processing || !selectedLine">需要取込</button>
+        <button
+          v-if="canShowFloorSpotAutoPlanButton"
+          class="btn"
+          @click="doFloorSpotAutoPlan"
+          :disabled="processing || !selectedLine"
+        >自動計画</button>
         <button class="btn primary" @click="doPickup" :disabled="processing || !selectedLine">取込＋在庫計算</button>
         <button class="btn accent" @click="toggleProcessGantt" :disabled="processing || !selectedLine">
           {{ showProcessGantt ? '工程ガントを閉じる' : '工程ガント表示' }}
@@ -796,6 +802,16 @@ const floorShippingPdfSourceLineId = computed(() => {
 })
 const canShowDeliveryDetailPDFButton = computed(() => (
   activePlanTab.value === 'floor' || isFloorShippingDeliveryLine.value
+))
+const isFloorSpotLine = computed(() => {
+  const line = selectedLineObj.value
+  if (!line) return false
+  const lineCode = String(line.line_code || '').trim().toUpperCase()
+  const lineName = String(line.line_name || '').trim()
+  return lineCode === 'L2101' || lineName.includes('フロアスポット')
+})
+const canShowFloorSpotAutoPlanButton = computed(() => (
+  activePlanTab.value === 'floor' && isFloorSpotLine.value
 ))
 // フロア配送: 8時着/15時着台車数（台車1台=2個、異なる製品は混載しない）
 const floorShippingCartCounts = computed(() => {
@@ -3125,6 +3141,58 @@ const doFetchOnly = async () => {
   } finally {
     processing.value = false
   }
+}
+
+const applyDemandToPlanForVisiblePeriod = () => {
+  let autoPlanCount = 0
+  rows.value.forEach((row) => {
+    dateColumns.value.forEach((c) => {
+      const daily = ensureDailyCell(row, c.key)
+      const demandQtyRaw = Number(daily.demand || 0)
+      const demandQty = Number.isFinite(demandQtyRaw) ? Math.max(0, demandQtyRaw) : 0
+      daily.plan = demandQty > 0 ? demandQty : ''
+      daily.sequence_no = ''
+      daily.extraLots = []
+      if (demandQty > 0) autoPlanCount += 1
+    })
+  })
+  return autoPlanCount
+}
+
+const doFloorSpotAutoPlan = async () => {
+  if (!selectedLine.value) return
+  if (!canShowFloorSpotAutoPlanButton.value) return
+  const lineLabel = selectedLineLabel.value || `ID:${selectedLine.value}`
+  const confirmed = window.confirm(
+    `表示期間内の需要数を計画数へセットして自動計画を実行します。\n` +
+    `ライン: ${lineLabel}\n` +
+    `期間: ${startDate.value} ～ ${endDate.value}\n\n` +
+    `需要取込→保存（工程展開・在庫計算・ガント生成）を実行します。`
+  )
+  if (!confirmed) return
+
+  processing.value = true
+  try {
+    await api.lineBacklogs.pickup({
+      line_id: selectedLine.value,
+      start_date: startDate.value,
+      end_date: endDate.value,
+    })
+    await fetchAndApplyData()
+    const autoPlanCount = applyDemandToPlanForVisiblePeriod()
+    if (!autoPlanCount) {
+      alert('表示期間内に需要がないため、自動計画を実行しませんでした。')
+      return
+    }
+  } catch (e) {
+    console.error('フロアスポット自動計画エラー', e)
+    alert('自動計画の事前処理（需要取込）に失敗しました。')
+    return
+  } finally {
+    processing.value = false
+  }
+
+  await savePlan()
 }
 
 const bulkDeletePlans = async () => {
