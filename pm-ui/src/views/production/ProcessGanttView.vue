@@ -1786,9 +1786,8 @@ function buildProcessGantt(plans) {
 }
 
 function getBarColor(productId) {
-  // 冷色系パレット（ブルー/シアン/グリーン寄り）で統一
-  const colors = ['#1d4ed8', '#0ea5e9', '#14b8a6', '#22c55e', '#6366f1', '#0891b2']
-  const hash = (productId || 0) % colors.length
+  const colors = ['#E3A12B', '#E3D92B', '#85E32B', '#2BE3DA', '#2BB1E3', '#2BE3DF', '#2BE36F', '#51E32B', '#BFE32B']
+  const hash = Math.abs(Number(productId) || 0) % colors.length
   return colors[hash]
 }
 
