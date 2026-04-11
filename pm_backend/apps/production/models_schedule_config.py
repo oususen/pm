@@ -19,6 +19,7 @@ class ScheduleConfig(models.Model):
         ('AUTO_SAFETY_STOCK_INTERNAL', '自動安全在庫（社内）'),
         ('AUTO_SAFETY_STOCK_PURCHASE', '自動安全在庫（購入品）'),
         ('AUTO_PURCHASE_ORDER_CHECK', '発注タイミング日次チェック'),
+        ('PURCHASE_ACTUAL_RECONCILE_CHECK', '納入実績整合チェック'),
     ]
     STATUS_CHOICES = [
         ('SUCCESS', '成功'),

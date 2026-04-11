@@ -195,7 +195,7 @@
         <p class="helper">{{ inventoryTaskHelp(cfg.task_name) }}</p>
       </div>
 
-      <div class="field" style="margin-top: 12px">
+      <div v-if="showInventoryRangeSetting(cfg.task_name)" class="field" style="margin-top: 12px">
         <label>{{ showRangeBaseDay(cfg.task_name) ? '計算期間' : '対象期間' }}</label>
         <div class="input-row">
           <template v-if="showRangeBaseDay(cfg.task_name)">
@@ -287,6 +287,205 @@
       </div>
     </div>
     </template>
+
+    <div class="card" v-if="purchaseActualReconcileConfig && showInventorySection">
+      <div class="field">
+        <label>納入実績整合チェック（比較のみ） - 実行時刻</label>
+        <div class="input-row">
+          <input
+            type="number"
+            min="0"
+            max="23"
+            v-model.number="purchaseActualReconcileConfig.scheduled_hour"
+            :disabled="!canEdit"
+            class="time-input"
+          />
+          <span class="suffix">時</span>
+          <input
+            type="number"
+            min="0"
+            max="59"
+            v-model.number="purchaseActualReconcileConfig.scheduled_minute"
+            :disabled="!canEdit"
+            class="time-input"
+          />
+          <span class="suffix">分</span>
+        </div>
+        <p class="helper">夜間は比較のみ実行し、差分があればレポートを保存します。修正は下の「修正実行」ボタンで手動実行します。</p>
+      </div>
+
+      <div class="field" style="margin-top: 12px">
+        <label class="checkbox-label">
+          <input type="checkbox" v-model="purchaseActualReconcileConfig.is_enabled" :disabled="!canEdit" />
+          有効
+        </label>
+      </div>
+
+      <div class="field" style="margin-top: 12px">
+        <label>差分通知先</label>
+        <div class="notify-search">
+          <input
+            v-model="purchaseActualReconcileConfig.searchCode"
+            :disabled="!canEdit"
+            class="notify-search-input"
+            placeholder="社員コード/氏名/ユーザー名で検索して追加"
+            @keyup.enter.prevent="addFirstCandidate(purchaseActualReconcileConfig)"
+          />
+        </div>
+        <div v-if="candidateList(purchaseActualReconcileConfig).length" class="candidate-list">
+          <div
+            v-for="u in candidateList(purchaseActualReconcileConfig)"
+            :key="u.id"
+            class="candidate-item"
+            @click="addUser(purchaseActualReconcileConfig, u)"
+          >
+            <span class="candidate-code">{{ codeLabel(u) }}</span>
+            <span class="candidate-name">{{ nameLabel(u) }}</span>
+          </div>
+        </div>
+        <div class="selected-list" v-if="purchaseActualReconcileConfig.notify_user_codes.length">
+          <span
+            class="chip"
+            v-for="code in purchaseActualReconcileConfig.notify_user_codes"
+            :key="code"
+          >
+            <span class="chip-code">{{ code }}</span>
+            <span class="chip-name">{{ chipName(purchaseActualReconcileConfig, code) }}</span>
+            <button
+              type="button"
+              class="chip-remove"
+              :disabled="!canEdit"
+              @click="removeCode(purchaseActualReconcileConfig, code)"
+            >
+              ×
+            </button>
+          </span>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button
+          class="btn primary"
+          @click="saveConfig(purchaseActualReconcileConfig)"
+          :disabled="saving.has(configKey(purchaseActualReconcileConfig)) || !canEdit"
+        >
+          {{ saving.has(configKey(purchaseActualReconcileConfig)) ? '保存中...' : '保存' }}
+        </button>
+        <button
+          class="btn"
+          @click="runNow(purchaseActualReconcileConfig)"
+          :disabled="isRunNowDisabled(purchaseActualReconcileConfig)"
+          style="margin-left: 8px"
+        >
+          {{ runNowLabel(purchaseActualReconcileConfig) }}
+        </button>
+        <button
+          class="btn"
+          @click="loadReconcileReport"
+          :disabled="loadingReconcileReport"
+          style="margin-left: 8px"
+        >
+          {{ loadingReconcileReport ? '読込中...' : 'レポート再読込' }}
+        </button>
+        <button
+          class="btn cancel"
+          @click="fixPurchaseActualReconcile"
+          :disabled="fixingReconcile || !canEdit || isRunningStatus(purchaseActualReconcileConfig)"
+          style="margin-left: 8px"
+        >
+          {{ fixingReconcile ? '修正中...' : '修正実行' }}
+        </button>
+      </div>
+
+      <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
+
+      <div v-if="purchaseActualReconcileConfig.last_run_at" class="last-run">
+        <h3 class="section-title">最終実行情報</h3>
+        <table class="info-table">
+          <tbody>
+            <tr>
+              <th>実行日時</th>
+              <td>{{ formatDateTime(purchaseActualReconcileConfig.last_run_at) }}</td>
+            </tr>
+            <tr>
+              <th>結果</th>
+              <td>
+                <span :class="statusClass(purchaseActualReconcileConfig)">{{ purchaseActualReconcileConfig.last_run_status_display || '-' }}</span>
+              </td>
+            </tr>
+            <tr>
+              <th>実行時間</th>
+              <td>{{ purchaseActualReconcileConfig.last_run_duration_seconds != null ? purchaseActualReconcileConfig.last_run_duration_seconds + '秒' : '-' }}</td>
+            </tr>
+            <tr>
+              <th>詳細</th>
+              <td class="message-cell">{{ purchaseActualReconcileConfig.last_run_message || '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="last-run" v-if="latestReconcileReport">
+        <h3 class="section-title">最新差分レポート</h3>
+        <table class="info-table">
+          <tbody>
+            <tr>
+              <th>レポートID</th>
+              <td>{{ latestReconcileReport.id }}</td>
+            </tr>
+            <tr>
+              <th>作成日時</th>
+              <td>{{ formatDateTime(latestReconcileReport.created_at) }}</td>
+            </tr>
+            <tr>
+              <th>モード</th>
+              <td>{{ latestReconcileReport.mode_display || latestReconcileReport.mode }}</td>
+            </tr>
+            <tr>
+              <th>比較件数</th>
+              <td>{{ latestReconcileReport.compared_count }}件</td>
+            </tr>
+            <tr>
+              <th>差分件数</th>
+              <td>{{ latestReconcileReport.diff_count }}件</td>
+            </tr>
+            <tr>
+              <th>修正件数</th>
+              <td>{{ latestReconcileReport.fixed_count }}件</td>
+            </tr>
+            <tr>
+              <th>詳細</th>
+              <td class="message-cell">{{ latestReconcileReport.message || '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="table-wrapper" style="margin-top: 12px" v-if="reconcileDetails.length">
+          <table class="config-table">
+            <thead>
+              <tr>
+                <th>納入日</th>
+                <th>ライン</th>
+                <th>品番</th>
+                <th>期待実績</th>
+                <th>Backlog実績</th>
+                <th>差分</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in reconcileDetails" :key="row.id">
+                <td>{{ row.plan_date }}</td>
+                <td>{{ row.line_code }} {{ row.line_name }}</td>
+                <td>{{ row.product_code }} {{ row.product_name }}</td>
+                <td>{{ row.expected_qty }}</td>
+                <td>{{ row.backlog_qty }}</td>
+                <td>{{ row.diff_qty }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
 
     <template v-if="showSafetyStockSection">
     <div class="card" v-for="cfg in safetyStockConfigs" :key="configKey(cfg)">
@@ -512,6 +711,10 @@ const configs = ref([])
 const saving = reactive(new Set())
 const running = reactive(new Set())
 const cancelling = reactive(new Set())
+const reconcileReports = ref([])
+const reconcileDetails = ref([])
+const loadingReconcileReport = ref(false)
+const fixingReconcile = ref(false)
 const canEdit = computed(() => {
   const user = authState.user
   if (!user) return false
@@ -532,12 +735,17 @@ const autoPlanConfigs = computed(() =>
     .filter((cfg) => cfg.task_name === 'AUTO_PLAN')
     .sort((a, b) => (a.line_code || '').localeCompare(b.line_code || ''))
 )
+const purchaseActualReconcileTaskName = 'PURCHASE_ACTUAL_RECONCILE_CHECK'
 const inventoryTaskOrder = ['INVENTORY_RECALC', 'PICKUP_ONLY', 'INVENTORY_ONLY', 'PROGRESS_ONLY']
 const inventoryTaskConfigs = computed(() =>
   configs.value
     .filter((cfg) => inventoryTaskOrder.includes(cfg.task_name))
     .sort((a, b) => inventoryTaskOrder.indexOf(a.task_name) - inventoryTaskOrder.indexOf(b.task_name))
 )
+const purchaseActualReconcileConfig = computed(() =>
+  configs.value.find((cfg) => cfg.task_name === purchaseActualReconcileTaskName) || null
+)
+const latestReconcileReport = computed(() => (reconcileReports.value.length ? reconcileReports.value[0] : null))
 const safetyStockTaskOrder = ['AUTO_SAFETY_STOCK_INTERNAL', 'AUTO_SAFETY_STOCK_PURCHASE']
 const safetyStockConfigs = computed(() =>
   configs.value
@@ -573,6 +781,7 @@ const statusClass = (cfg) => ({
 })
 
 const inventoryTaskLabel = (taskName) => {
+  if (taskName === purchaseActualReconcileTaskName) return '納入実績整合チェック'
   if (taskName === 'PICKUP_ONLY') return '取り込みのみ'
   if (taskName === 'INVENTORY_ONLY') return '在庫計算のみ'
   if (taskName === 'PROGRESS_ONLY') return '進度計算のみ'
@@ -580,6 +789,7 @@ const inventoryTaskLabel = (taskName) => {
 }
 
 const inventoryTaskHelp = (taskName) => {
+  if (taskName === purchaseActualReconcileTaskName) return 'ProcessRealtimeRecord（納入実績入力）と LineBacklog.actual_qty を比較し、差分レポートを保存します。'
   if (taskName === 'PICKUP_ONLY') return '毎日指定した時刻に需要取り込み（pickup / pickup_purchase）のみを実行します。'
   if (taskName === 'INVENTORY_ONLY') return '毎日指定した時刻に在庫・計画在庫の再計算のみを実行します（必要に応じて過去営業日まで遡って再計算、進度は更新しません）。'
   if (taskName === 'PROGRESS_ONLY') return '毎日指定した時刻に進度のみを再計算します（必要に応じてLT+1営業日前まで遡って再計算します）。'
@@ -594,6 +804,7 @@ const safetyStockTaskLabel = (taskName) => {
 // INVENTORY_RECALC は _resolve_effective_start_date が LT 基準で開始日を自動決定するため、
 // UI での開始日選択は意味を持たない。PICKUP_ONLY のみ開始日選択を表示する。
 const showRangeBaseDay = (taskName) => taskName === 'PICKUP_ONLY'
+const showInventoryRangeSetting = (taskName) => taskName !== purchaseActualReconcileTaskName
 
 const configKey = (cfg) => `${cfg.task_name}-${cfg.line || 'none'}-${cfg.id || 'new'}`
 const isRunningStatus = (cfg) => cfg?.last_run_status === 'RUNNING'
@@ -601,6 +812,24 @@ const isCancelRequested = (cfg) => (cfg?.last_run_message || '').includes('[CANC
 const canCancelTask = (cfg) => inventoryTaskOrder.includes(cfg?.task_name)
 const isRunNowDisabled = (cfg) => !cfg || !canEdit.value || running.has(configKey(cfg)) || isRunningStatus(cfg)
 const runNowLabel = (cfg) => (running.has(configKey(cfg)) || isRunningStatus(cfg) ? '実行中...' : '今すぐ実行')
+
+const loadReconcileReport = async () => {
+  loadingReconcileReport.value = true
+  try {
+    const res = await api.scheduleConfig.getPurchaseActualReconcileReports({
+      limit: 10,
+      detail_limit: 200,
+    })
+    reconcileReports.value = Array.isArray(res.data?.reports) ? res.data.reports : []
+    reconcileDetails.value = Array.isArray(res.data?.details) ? res.data.details : []
+  } catch (e) {
+    console.error('整合レポートの取得に失敗', e)
+    reconcileReports.value = []
+    reconcileDetails.value = []
+  } finally {
+    loadingReconcileReport.value = false
+  }
+}
 
 const loadConfig = async () => {
   try {
@@ -696,6 +925,8 @@ const runNow = async (cfg) => {
       ? `${targetName}を今すぐ実行しますか？`
       : cfg.task_name === 'ORDER_EXPANSION'
         ? '自動受注展開を今すぐ実行しますか？'
+        : cfg.task_name === purchaseActualReconcileTaskName
+          ? '納入実績整合チェック（比較のみ）を今すぐ実行しますか？\n差分があればレポートへ保存され、通知設定がある場合は通知します。'
         : isSafetyStockTask(cfg.task_name)
           ? `${safetyStockTaskLabel(cfg.task_name)}を今すぐ実行しますか？\nバックグラウンドで実行されます。`
         : `${inventoryTaskLabel(cfg.task_name)}を今すぐ実行しますか？\nバックグラウンドで実行されます。`
@@ -707,6 +938,9 @@ const runNow = async (cfg) => {
     // 非同期実行の場合はポーリングで完了を待つ
     if (res.data?.async) {
       await loadConfig()
+      if (cfg.task_name === purchaseActualReconcileTaskName) {
+        await loadReconcileReport()
+      }
       stopPolling()
       const pollStart = Date.now()
       const POLL_TIMEOUT = 10 * 60 * 1000 // 10分
@@ -725,11 +959,17 @@ const runNow = async (cfg) => {
           running.delete(key)
           const statusLabel = updated.last_run_status === 'SUCCESS' ? '成功' : '失敗'
           alert(`${targetName}が完了しました（${statusLabel}）\n${updated.last_run_message || ''}`)
+          if (cfg.task_name === purchaseActualReconcileTaskName) {
+            await loadReconcileReport()
+          }
         }
       }, 5000)
     } else {
       alert(`完了しました。\n${res.data?.detail || ''}`)
       await loadConfig()
+      if (cfg.task_name === purchaseActualReconcileTaskName) {
+        await loadReconcileReport()
+      }
       running.delete(key)
     }
   } catch (e) {
@@ -739,6 +979,29 @@ const runNow = async (cfg) => {
     } else {
       alert('実行に失敗しました。')
     }
+  }
+}
+
+const fixPurchaseActualReconcile = async () => {
+  const cfg = purchaseActualReconcileConfig.value
+  if (!cfg || !canEdit.value) return
+  if (isRunningStatus(cfg)) {
+    alert('整合チェックが実行中です。完了後に再実行してください。')
+    return
+  }
+  if (!confirm('最新状態で差分を手動修正しますか？\nLineBacklog.actual_qty を ProcessRealtimeRecord に合わせます。')) return
+
+  fixingReconcile.value = true
+  try {
+    const res = await api.scheduleConfig.runPurchaseActualReconcileFix()
+    alert(`修正を実行しました。\n${res.data?.message || ''}`)
+    await loadConfig()
+    await loadReconcileReport()
+  } catch (e) {
+    const detail = e.response?.data?.detail
+    alert(detail || '修正実行に失敗しました。')
+  } finally {
+    fixingReconcile.value = false
   }
 }
 
@@ -824,6 +1087,9 @@ const removeCode = (cfg, code) => {
 
 const startPollingIfRunning = () => {
   const pollTargets = [...inventoryTaskConfigs.value, ...safetyStockConfigs.value]
+  if (purchaseActualReconcileConfig.value) {
+    pollTargets.push(purchaseActualReconcileConfig.value)
+  }
   const runningTask = pollTargets.find((cfg) => cfg.last_run_status === 'RUNNING')
   if (!runningTask) return
   const key = configKey(runningTask)
@@ -838,16 +1104,24 @@ const startPollingIfRunning = () => {
       return
     }
     await loadConfig()
-    const updated = [...inventoryTaskConfigs.value, ...safetyStockConfigs.value].find((cfg) => configKey(cfg) === key)
+    const currentTargets = [...inventoryTaskConfigs.value, ...safetyStockConfigs.value]
+    if (purchaseActualReconcileConfig.value) {
+      currentTargets.push(purchaseActualReconcileConfig.value)
+    }
+    const updated = currentTargets.find((cfg) => configKey(cfg) === key)
     if (updated && updated.last_run_status !== 'RUNNING') {
       stopPolling()
       running.delete(key)
+      if (updated.task_name === purchaseActualReconcileTaskName) {
+        await loadReconcileReport()
+      }
     }
   }, 5000)
 }
 
 onMounted(async () => {
   await loadConfig()
+  await loadReconcileReport()
   loadUsers()
   startPollingIfRunning()
 })
