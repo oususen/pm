@@ -1,9 +1,11 @@
-from datetime import date, timedelta
+from collections import defaultdict
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 import math
 import re
 
-from django.db.models import Max, Sum
+from django.db import transaction
+from django.db.models import Sum
 from django.db.models import Q
 from rest_framework import status
 from rest_framework.response import Response
@@ -88,37 +90,15 @@ def _resolve_inventory_effective_start_date(
     end_date: date,
     product_ids=None,
 ) -> date:
-    line_obj = Line.objects.filter(id=line_id).first()
-    calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
-        calendar_code='daiso'
-    ).values_list('id', flat=True).first()
-    workday_cache = {}
+    # 生産側（在庫/残量画面）と同じ開始日補正ロジックを使い、再計算結果を一致させる
+    from production.views import _resolve_inventory_effective_start_date as _resolve_inventory_effective_start_date_production
 
-    business_today = get_business_today()
-    stock_start_dt = _shift_business_days(calendar_id, business_today, 2, workday_cache)
-    target_product_ids = sorted({int(pid) for pid in (product_ids or []) if pid is not None})
-    if target_product_ids:
-        product_ids_for_line = target_product_ids
-    else:
-        product_ids_for_line = list(
-            LineBacklog.objects.filter(
-                line_id=line_id,
-                plan_date__lte=end_date,
-            ).values_list('product_id', flat=True).distinct()
-        )
-    max_lt = 0
-    if product_ids_for_line:
-        max_lt = BOMItem.objects.filter(
-            bom__is_active=True,
-            child_product_id__in=product_ids_for_line,
-        ).aggregate(v=Max('lead_time_days'))['v'] or 0
-    planned_progress_start_dt = _shift_business_days(
-        calendar_id,
-        business_today,
-        int(max_lt) + 1,
-        workday_cache,
+    return _resolve_inventory_effective_start_date_production(
+        line_id=line_id,
+        requested_start_date=requested_start_date,
+        end_date=end_date,
+        product_ids=product_ids,
     )
-    return min(requested_start_date, stock_start_dt, planned_progress_start_dt)
 
 
 def _routing_path_key(path):
@@ -308,6 +288,222 @@ def _shift_business_days(calendar_id, target_date, days, workday_cache):
     return current
 
 
+def _to_int_or_none(value):
+    if value is None or value == '':
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_purchase_actual_date(date_text: str, fallback_date: date):
+    text = str(date_text or '').strip()
+    if not text:
+        return fallback_date
+    try:
+        return date.fromisoformat(text.replace('/', '-'))
+    except ValueError:
+        return fallback_date
+
+
+def _resolve_purchase_actual_target_context(
+    process_obj: Process | None,
+    supplier_id,
+    line_id,
+    arrival_date_text: str,
+    reference_dt,
+):
+    supplier_obj = Supplier.objects.filter(id=supplier_id).first() if supplier_id else None
+    canonical_line = _resolve_purchase_line(supplier_obj) if supplier_obj else None
+    target_line_id = canonical_line.id if canonical_line else _to_int_or_none(line_id)
+    if not target_line_id and process_obj and getattr(process_obj, 'line_id', None):
+        target_line_id = int(process_obj.line_id)
+
+    base_dt = reference_dt or datetime.now()
+    if getattr(base_dt, 'tzinfo', None):
+        from django.utils import timezone
+        base_dt = timezone.localtime(base_dt).replace(tzinfo=None)
+    fallback_date = base_dt.date()
+    target_date = _parse_purchase_actual_date(arrival_date_text, fallback_date)
+    serializer_plan_date = resolve_workday_date_for_process(process_obj, base_dt)
+    return target_line_id, target_date, serializer_plan_date
+
+
+def _update_purchase_actual_backlog(line_id, process_id, product_id, plan_date, delta_qty):
+    if not line_id or not process_id or not product_id:
+        return
+    delta_int = int(delta_qty or 0)
+    if delta_int == 0:
+        return
+
+    if delta_int > 0:
+        backlog, _ = LineBacklog.objects.get_or_create(
+            line_id=line_id,
+            process_id=process_id,
+            product_id=product_id,
+            plan_date=plan_date,
+            sequence_no=0,
+            defaults={
+                'order_qty': 0,
+                'plan_qty': 0,
+                'actual_qty': 0,
+                'stock_qty': 0,
+                'planned_stock_qty': 0,
+                'adjust_qty': 0,
+                'scrap_qty': 0,
+                'actual_shipment_qty': 0,
+            }
+        )
+    else:
+        backlog = LineBacklog.objects.filter(
+            line_id=line_id,
+            process_id=process_id,
+            product_id=product_id,
+            plan_date=plan_date,
+            sequence_no=0,
+        ).first()
+        if not backlog:
+            return
+    backlog.actual_qty = int(backlog.actual_qty or 0) + delta_int
+    backlog.save(update_fields=['actual_qty'])
+
+
+def _normalize_record_timestamp(record, target_date):
+    if not record or not target_date or not getattr(record, 'timestamp', None):
+        return False
+    current_dt = record.timestamp
+    if getattr(current_dt, 'tzinfo', None):
+        from django.utils import timezone
+        current_dt = timezone.localtime(current_dt).replace(tzinfo=None)
+    if current_dt.date() == target_date:
+        return False
+    record.timestamp = datetime.combine(target_date, current_dt.time())
+    return True
+
+
+def _recalculate_purchase_child_stock(parent_product_id, target_dates):
+    targets = sorted({d for d in (target_dates or []) if d})
+    if not parent_product_id or not targets:
+        return
+    child_product_ids = {
+        int(cid)
+        for cid, qty_per in BOMItem.objects.filter(
+            bom__parent_product_id=parent_product_id,
+            bom__is_active=True,
+            bom__is_coproduct=False,
+        ).values_list('child_product_id', 'quantity')
+        if cid and (qty_per or 0) != 0
+    }
+    if not child_product_ids:
+        return
+
+    today = get_business_today()
+    try:
+        from production.views_process_realtime import _recalculate_child_stock_after_record_edit
+        for target_date in targets:
+            if target_date and target_date <= today:
+                _recalculate_child_stock_after_record_edit(
+                    parent_plan_date=target_date,
+                    today=today,
+                    child_product_ids=child_product_ids,
+                )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("子部品の在庫再計算に失敗: %s", e)
+
+
+def _resolve_purchase_line_id_from_supplier(supplier_id):
+    sid = _to_int_or_none(supplier_id)
+    if not sid:
+        return None
+    supplier = Supplier.objects.filter(id=sid).first()
+    if not supplier:
+        return None
+    line = (
+        Line.objects.filter(line_code=supplier.supplier_code).first()
+        or Line.objects.filter(line_name__icontains=str(supplier.supplier_name or '').strip()).first()
+    )
+    return line.id if line else None
+
+
+def _resolve_purchase_record_line_id(record):
+    event = record.event_data or {}
+    line_id = _to_int_or_none(event.get('line_id'))
+    if line_id:
+        return line_id
+    supplier_line_id = _resolve_purchase_line_id_from_supplier(event.get('supplier_id'))
+    if supplier_line_id:
+        return supplier_line_id
+    return getattr(record.process, 'line_id', None)
+
+
+def _resolve_purchase_record_target_date(record):
+    event = record.event_data or {}
+    arrival_text = (event.get('arrival_date') or '').strip()
+    return _parse_purchase_actual_date(arrival_text, record.timestamp.date())
+
+
+def _reconcile_purchase_actual_backlog_for_key(process_id, product_id, line_id):
+    pid = _to_int_or_none(process_id)
+    product = _to_int_or_none(product_id)
+    line = _to_int_or_none(line_id)
+    if not pid or not product or not line:
+        return
+
+    expected_by_date = defaultdict(int)
+    rec_qs = (
+        ProcessRealtimeRecord.objects.filter(
+            process_id=pid,
+            product_id=product,
+            record_type='PRODUCTION',
+            event_data__source='PURCHASE_ACTUAL_INPUT',
+        )
+        .select_related('process')
+    )
+    for rec in rec_qs:
+        rec_line_id = _resolve_purchase_record_line_id(rec)
+        if _to_int_or_none(rec_line_id) != line:
+            continue
+        rec_date = _resolve_purchase_record_target_date(rec)
+        expected_by_date[rec_date] += int(rec.qty or 0)
+
+    backlog_qs = LineBacklog.objects.filter(
+        line_id=line,
+        process_id=pid,
+        product_id=product,
+        sequence_no=0,
+    )
+    existing = {row.plan_date: row for row in backlog_qs}
+    all_dates = set(existing.keys()) | set(expected_by_date.keys())
+
+    for target_date in sorted(all_dates):
+        expected_qty = int(expected_by_date.get(target_date, 0))
+        current_row = existing.get(target_date)
+        if current_row:
+            if int(current_row.actual_qty or 0) != expected_qty:
+                current_row.actual_qty = expected_qty
+                current_row.save(update_fields=['actual_qty'])
+            continue
+        if expected_qty <= 0:
+            continue
+        LineBacklog.objects.create(
+            line_id=line,
+            process_id=pid,
+            product_id=product,
+            plan_date=target_date,
+            sequence_no=0,
+            order_qty=0,
+            plan_qty=0,
+            actual_qty=expected_qty,
+            stock_qty=0,
+            planned_stock_qty=0,
+            adjust_qty=0,
+            scrap_qty=0,
+            actual_shipment_qty=0,
+        )
+
+
 class PurchaseActualCandidatesView(APIView):
     def get(self, request):
         product_code = (request.query_params.get('product_code') or '').strip()
@@ -444,6 +640,7 @@ class PurchaseActualRegisterView(APIView):
                 'source': 'PURCHASE_ACTUAL_INPUT',
                 'arrival_date': (request.data.get('arrival_date') or '').strip(),
                 'supplier_id': request.data.get('supplier_id'),
+                'line_id': effective_line_id,
             },
         }
 
@@ -451,72 +648,56 @@ class PurchaseActualRegisterView(APIView):
         serializer.is_valid(raise_exception=True)
         record = serializer.save()
 
-        # 仕入れ在庫画面は購入先ライン単位で参照するため、
-        # process.line と選択ラインが異なる場合は選択ラインへ actual を補正反映する。
-        target_line_id = None
-        try:
-            target_line_id = int(effective_line_id) if effective_line_id else None
-        except (TypeError, ValueError):
-            target_line_id = None
-
         arrival_date_text = (request.data.get('arrival_date') or '').strip()
-        target_date = record.timestamp.date()
-        if arrival_date_text:
-            try:
-                target_date = date.fromisoformat(arrival_date_text.replace('/', '-'))
-            except ValueError:
-                target_date = record.timestamp.date()
+        serializer_line_id = getattr(process_obj, 'line_id', None)
+        target_line_id, target_date, serializer_plan_date = _resolve_purchase_actual_target_context(
+            process_obj=process_obj,
+            supplier_id=supplier_id,
+            line_id=effective_line_id,
+            arrival_date_text=arrival_date_text,
+            reference_dt=record.timestamp,
+        )
 
-        now = record.timestamp
-        if getattr(now, 'tzinfo', None):
-            from django.utils import timezone
-            now = timezone.localtime(now).replace(tzinfo=None)
-        serializer_plan_date = resolve_workday_date_for_process(process_obj, now)
-
-        if target_line_id and (process_obj.line_id != target_line_id or target_date != serializer_plan_date):
-            backlog, _ = LineBacklog.objects.get_or_create(
+        # register 時は serializer 側で「現在日時の plan_date」に反映済み。
+        # 納入日指定が異なる場合は、旧plan_dateから減算して指定plan_dateへ移送する。
+        if target_line_id and serializer_line_id and (
+            int(serializer_line_id) != int(target_line_id) or target_date != serializer_plan_date
+        ):
+            _update_purchase_actual_backlog(
+                line_id=serializer_line_id,
+                process_id=process_obj.id,
+                product_id=product.id,
+                plan_date=serializer_plan_date,
+                delta_qty=-int(qty),
+            )
+            _update_purchase_actual_backlog(
                 line_id=target_line_id,
                 process_id=process_obj.id,
                 product_id=product.id,
                 plan_date=target_date,
-                sequence_no=0,
-                defaults={
-                    'order_qty': 0,
-                    'plan_qty': 0,
-                    'actual_qty': 0,
-                    'stock_qty': 0,
-                    'planned_stock_qty': 0,
-                    'adjust_qty': 0,
-                    'scrap_qty': 0,
-                    'actual_shipment_qty': 0,
-                }
+                delta_qty=int(qty),
             )
-            backlog.actual_qty = int(backlog.actual_qty or 0) + int(qty)
-            backlog.save(update_fields=['actual_qty'])
 
-        # 子部品の在庫・出庫を再計算（生産実績変更と同様の処理）
-        # reference_today=target_date により凍結基準を入力した納入日基準にずらし、
-        # 遡及入力時も actual_shipment_qty（出庫/実需）が正しく計算される。
-        try:
-            from production.views_process_realtime import _recalculate_child_stock_after_record_edit
-            child_product_ids = {
-                int(cid)
-                for cid, qty_per in BOMItem.objects.filter(
-                    bom__parent_product_id=product.id,
-                    bom__is_active=True,
-                    bom__is_coproduct=False,
-                ).values_list('child_product_id', 'quantity')
-                if cid and (qty_per or 0) != 0
-            }
-            if child_product_ids:
-                _recalculate_child_stock_after_record_edit(
-                    parent_plan_date=target_date,
-                    today=get_business_today(),
-                    child_product_ids=child_product_ids,
-                )
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning("子部品の在庫再計算に失敗: %s", e)
+        update_fields = []
+        event_data = dict(record.event_data or {})
+        event_data['arrival_date'] = target_date.isoformat()
+        event_data['line_id'] = target_line_id
+        record.event_data = event_data
+        update_fields.append('event_data')
+        if _normalize_record_timestamp(record, target_date):
+            update_fields.append('timestamp')
+        if update_fields:
+            record.save(update_fields=update_fields)
+
+        for lid in {serializer_line_id, target_line_id}:
+            _reconcile_purchase_actual_backlog_for_key(
+                process_id=process_obj.id,
+                product_id=product.id,
+                line_id=lid,
+            )
+
+        # 子部品の在庫・出庫を再計算（生産実績変更と同様）
+        _recalculate_purchase_child_stock(product.id, [target_date])
 
         return Response({'id': record.id, 'detail': 'created'}, status=status.HTTP_201_CREATED)
 
@@ -653,26 +834,228 @@ class PurchaseActualInquiryView(APIView):
         for rec in qs.order_by('-timestamp', '-id')[:2000]:
             supplier_name = ''
             supplier_code = ''
-            supplier_raw = (rec.event_data or {}).get('supplier_id')
+            event_data = rec.event_data or {}
+            supplier_raw = event_data.get('supplier_id')
             try:
                 supplier = Supplier.objects.filter(id=int(supplier_raw)).first() if supplier_raw else None
             except (TypeError, ValueError):
                 supplier = None
+            supplier_id_value = _to_int_or_none(supplier_raw)
             if supplier:
                 supplier_name = supplier.supplier_name or ''
                 supplier_code = supplier.supplier_code or ''
 
+            timestamp_date = rec.timestamp.date()
+            arrival_date_text = (event_data.get('arrival_date') or '').strip()
+            delivery_date = _parse_purchase_actual_date(arrival_date_text, timestamp_date)
+
             rows.append({
                 'id': rec.id,
-                'delivery_date': rec.timestamp.date().isoformat(),
+                'delivery_date': delivery_date.isoformat(),
+                'record_date': timestamp_date.isoformat(),
+                'arrival_date': delivery_date.isoformat(),
                 'product_code': rec.product_code or '',
                 'product_name': rec.product_name or '',
                 'supplier': f'{supplier_code} - {supplier_name}'.strip(' -'),
+                'supplier_id': supplier_id_value,
+                'line_id': _to_int_or_none(event_data.get('line_id')),
                 'qty': float(rec.qty or 0),
                 'operator_name': rec.operator_name or '',
+                'remarks': rec.remarks or '',
             })
 
         return Response(rows)
+
+
+class PurchaseActualDetailView(APIView):
+    def _get_record(self, record_id):
+        return (
+            ProcessRealtimeRecord.objects
+            .filter(
+                id=record_id,
+                record_type='PRODUCTION',
+                event_data__source='PURCHASE_ACTUAL_INPUT',
+            )
+            .select_related('process', 'product')
+            .first()
+        )
+
+    def put(self, request, record_id):
+        record = self._get_record(record_id)
+        if not record:
+            return Response({'detail': 'record not found'}, status=status.HTTP_404_NOT_FOUND)
+        if not record.product_id:
+            return Response({'detail': 'product not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        old_event_data = dict(record.event_data or {})
+        old_supplier_id = _to_int_or_none(old_event_data.get('supplier_id'))
+        old_line_id = _to_int_or_none(old_event_data.get('line_id'))
+        old_arrival_date = (old_event_data.get('arrival_date') or '').strip()
+        old_qty_int = int(record.qty or 0)
+
+        qty_raw = request.data.get('qty', record.qty)
+        try:
+            new_qty = Decimal(str(qty_raw))
+        except (InvalidOperation, TypeError, ValueError):
+            return Response({'detail': 'qty must be a number'}, status=status.HTTP_400_BAD_REQUEST)
+        if new_qty <= 0:
+            return Response({'detail': 'qty must be > 0'}, status=status.HTTP_400_BAD_REQUEST)
+        new_qty_int = int(new_qty)
+
+        if 'supplier_id' in request.data:
+            supplier_id = _to_int_or_none(request.data.get('supplier_id'))
+        else:
+            supplier_id = old_supplier_id
+
+        if 'line_id' in request.data:
+            line_id = _to_int_or_none(request.data.get('line_id'))
+        else:
+            line_id = old_line_id
+
+        if 'arrival_date' in request.data:
+            arrival_date_text = (request.data.get('arrival_date') or '').strip()
+        else:
+            arrival_date_text = old_arrival_date
+
+        if 'operator_name' in request.data:
+            operator_name = (request.data.get('operator_name') or '').strip()
+        else:
+            operator_name = record.operator_name or ''
+
+        if 'remarks' in request.data:
+            remarks = (request.data.get('remarks') or '').strip()
+        else:
+            remarks = record.remarks or ''
+
+        old_target_line_id, old_target_date, old_serializer_plan_date = _resolve_purchase_actual_target_context(
+            process_obj=record.process,
+            supplier_id=old_supplier_id,
+            line_id=old_line_id,
+            arrival_date_text=old_arrival_date,
+            reference_dt=record.timestamp,
+        )
+        new_target_line_id, new_target_date, _ = _resolve_purchase_actual_target_context(
+            process_obj=record.process,
+            supplier_id=supplier_id,
+            line_id=line_id,
+            arrival_date_text=arrival_date_text,
+            reference_dt=record.timestamp,
+        )
+        old_effective_line_id = old_target_line_id or getattr(record.process, 'line_id', None)
+        new_effective_line_id = new_target_line_id or getattr(record.process, 'line_id', None)
+        serializer_line_id = getattr(record.process, 'line_id', None)
+
+        new_event_data = dict(old_event_data)
+        new_event_data['source'] = 'PURCHASE_ACTUAL_INPUT'
+        new_event_data['supplier_id'] = supplier_id
+        new_event_data['line_id'] = new_effective_line_id
+        new_event_data['arrival_date'] = new_target_date.isoformat()
+
+        with transaction.atomic():
+            # 旧納入日(plan_date)から数量を減算
+            _update_purchase_actual_backlog(
+                line_id=old_effective_line_id,
+                process_id=record.process_id,
+                product_id=record.product_id,
+                delta_qty=-old_qty_int,
+                plan_date=old_target_date,
+            )
+            # 旧実装で serializer plan_date にも積まれていたレコードは同時に掃除
+            if serializer_line_id and (
+                int(serializer_line_id) != int(old_effective_line_id)
+                or old_serializer_plan_date != old_target_date
+            ):
+                _update_purchase_actual_backlog(
+                    line_id=serializer_line_id,
+                    process_id=record.process_id,
+                    product_id=record.product_id,
+                    delta_qty=-old_qty_int,
+                    plan_date=old_serializer_plan_date,
+                )
+
+            # レコード更新
+            update_fields = ['qty', 'operator_name', 'remarks', 'event_data']
+            record.qty = new_qty
+            record.operator_name = operator_name
+            record.remarks = remarks
+            record.event_data = new_event_data
+            if _normalize_record_timestamp(record, new_target_date):
+                update_fields.append('timestamp')
+            record.save(update_fields=update_fields)
+
+            # 新納入日(plan_date)へ数量を加算
+            _update_purchase_actual_backlog(
+                line_id=new_effective_line_id,
+                process_id=record.process_id,
+                product_id=record.product_id,
+                delta_qty=new_qty_int,
+                plan_date=new_target_date,
+            )
+
+            for lid in {old_effective_line_id, new_effective_line_id, serializer_line_id}:
+                _reconcile_purchase_actual_backlog_for_key(
+                    process_id=record.process_id,
+                    product_id=record.product_id,
+                    line_id=lid,
+                )
+
+        _recalculate_purchase_child_stock(record.product_id, [old_target_date, new_target_date])
+        return Response({'detail': 'updated'})
+
+    def delete(self, request, record_id):
+        record = self._get_record(record_id)
+        if not record:
+            return Response({'detail': 'record not found'}, status=status.HTTP_404_NOT_FOUND)
+        if not record.product_id:
+            return Response({'detail': 'product not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        old_event_data = dict(record.event_data or {})
+        old_supplier_id = _to_int_or_none(old_event_data.get('supplier_id'))
+        old_line_id = _to_int_or_none(old_event_data.get('line_id'))
+        old_arrival_date = (old_event_data.get('arrival_date') or '').strip()
+        old_qty_int = int(record.qty or 0)
+
+        old_target_line_id, old_target_date, old_serializer_plan_date = _resolve_purchase_actual_target_context(
+            process_obj=record.process,
+            supplier_id=old_supplier_id,
+            line_id=old_line_id,
+            arrival_date_text=old_arrival_date,
+            reference_dt=record.timestamp,
+        )
+        old_effective_line_id = old_target_line_id or getattr(record.process, 'line_id', None)
+        serializer_line_id = getattr(record.process, 'line_id', None)
+        product_id = record.product_id
+
+        with transaction.atomic():
+            _update_purchase_actual_backlog(
+                line_id=old_effective_line_id,
+                process_id=record.process_id,
+                product_id=product_id,
+                delta_qty=-old_qty_int,
+                plan_date=old_target_date,
+            )
+            if serializer_line_id and (
+                int(serializer_line_id) != int(old_effective_line_id)
+                or old_serializer_plan_date != old_target_date
+            ):
+                _update_purchase_actual_backlog(
+                    line_id=serializer_line_id,
+                    process_id=record.process_id,
+                    product_id=product_id,
+                    delta_qty=-old_qty_int,
+                    plan_date=old_serializer_plan_date,
+                )
+            record.delete()
+
+            for lid in {old_effective_line_id, serializer_line_id}:
+                _reconcile_purchase_actual_backlog_for_key(
+                    process_id=record.process_id,
+                    product_id=product_id,
+                    line_id=lid,
+                )
+
+        _recalculate_purchase_child_stock(product_id, [old_target_date])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class PurchaseActualBulkItemsView(APIView):

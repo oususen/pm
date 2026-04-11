@@ -42,6 +42,12 @@ const purchase = [
     meta: { pageTitle: "納入実績照会", resource: "purchase" },
   },
   {
+    path: "/purchase/actual-edit",
+    name: "PurchaseActualEdit",
+    component: () => import("@/views/purchase/PurchaseActualEdit.vue"),
+    meta: { pageTitle: "納入実績編集", resource: "purchase.actual_input" },
+  },
+  {
     path: "/purchase/order-proposals",
     name: "PurchaseOrderProposalList",
     component: () => import("@/views/purchase/PurchaseOrderProposalList.vue"),

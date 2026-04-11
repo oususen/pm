@@ -11,6 +11,12 @@ export const createPurchaseActualsAPI = (client) => ({
   register(payload) {
     return client.post('/purchase-actual/register/', payload)
   },
+  update(id, payload) {
+    return client.put(`/purchase-actual/${id}/`, payload)
+  },
+  remove(id) {
+    return client.delete(`/purchase-actual/${id}/`)
+  },
   getBulkItems(params) {
     return client.get('/purchase-actual/bulk-items/', { params })
   },

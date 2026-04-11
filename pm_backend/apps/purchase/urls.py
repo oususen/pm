@@ -16,6 +16,7 @@ from .order_proposal_views import (
     SupplierOrderScheduleListCreateView,
 )
 from .views import (
+    PurchaseActualDetailView,
     EngineeringChangeCaseRecalculateView,
     EngineeringChangePartDetailView,
     EngineeringChangeView,
@@ -36,6 +37,7 @@ urlpatterns = [
     path('purchase-actual/inquiry/', PurchaseActualInquiryView.as_view(), name='purchase-actual-inquiry'),
     path('purchase-actual/progress/', PurchaseActualProgressView.as_view(), name='purchase-actual-progress'),
     path('purchase-actual/register/', PurchaseActualRegisterView.as_view(), name='purchase-actual-register'),
+    path('purchase-actual/<int:record_id>/', PurchaseActualDetailView.as_view(), name='purchase-actual-detail'),
     path('purchase-actual/bulk-items/', PurchaseActualBulkItemsView.as_view(), name='purchase-actual-bulk-items'),
     path('supplier-order-schedules/', SupplierOrderScheduleListCreateView.as_view(), name='supplier-order-schedules'),
     path('supplier-order-schedules/<int:pk>/', SupplierOrderScheduleDetailView.as_view(), name='supplier-order-schedule-detail'),

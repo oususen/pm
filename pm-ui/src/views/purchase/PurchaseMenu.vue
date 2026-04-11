@@ -92,6 +92,13 @@ const tiles = computed(() => [
     resource: "purchase.actual_inquiry",
   },
   {
+    to: "/purchase/actual-edit",
+    label: "納入実績編集",
+    icon: "✏️",
+    required: "edit",
+    resource: "purchase.actual_input",
+  },
+  {
     to: "/purchase/supplier-calendar",
     label: "仕入れ先カレンダ",
     icon: "🗓️",
