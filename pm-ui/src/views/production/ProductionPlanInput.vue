@@ -81,8 +81,21 @@
     <template
       v-if="(activePlanTab !== 'laser' || activeLaserTab === 'normal-plan') && (activePlanTab !== 'spot' || activeSpotTab === 'normal-plan')"
     >
-    <div class="toolbar">
-      <div class="toolbar-left">
+    <div class="toolbar" :class="{ collapsed: toolbarCollapsed }">
+      <button
+        type="button"
+        class="toolbar-toggle"
+        @click="toggleToolbar"
+        :title="toolbarCollapsed ? 'フィルタを表示' : 'フィルタを隠す'"
+      >{{ toolbarCollapsed ? '▼' : '▲' }}</button>
+      <div v-if="toolbarCollapsed" class="toolbar-summary">
+        <span class="summary-item">{{ selectedLineSummary }}</span>
+        <span class="summary-sep">|</span>
+        <span class="summary-item">{{ startDate }} 〜 {{ horizonDays }}日</span>
+        <span v-if="keyword" class="summary-sep">|</span>
+        <span v-if="keyword" class="summary-item">検索: {{ keyword }}</span>
+      </div>
+      <div v-show="!toolbarCollapsed" class="toolbar-left">
         <div class="field">
           <label>ライン</label>
           <select v-model="selectedLine" @change="loadData">
@@ -110,7 +123,7 @@
           <input type="text" v-model="keyword" placeholder="品番/品名で絞り込み" />
         </div>
       </div>
-      <div class="toolbar-right">
+      <div v-show="!toolbarCollapsed" class="toolbar-right">
         <div class="field">
           <label>デフォルト開始時刻</label>
           <input
@@ -329,7 +342,7 @@
                 </div>
               </td>
               <td class="num stock-plan day-end" :class="c.dayClass">
-                <span class="readonly-value">{{ displayValue(isProgressMode ? row.daily?.[c.key]?.planned_progress : getPlanStockDisplay(row, colIdx)) }}</span>
+                <span class="readonly-value">{{ displayValue(isProgressMode ? getPlannedProgressDisplay(row, colIdx) : getPlanStockDisplay(row, colIdx)) }}</span>
               </td>
             </template>
           </tr>
@@ -651,6 +664,17 @@ import LaserPatternEditor from './LaserPatternEditor.vue'
 import LaserMonthlyMaterialSummary from './LaserMonthlyMaterialSummary.vue'
 const router = useRouter()
 const selectedLine = ref('')
+const TOOLBAR_COLLAPSED_KEY = 'productionPlanInput.toolbarCollapsed'
+const toolbarCollapsed = ref(localStorage.getItem(TOOLBAR_COLLAPSED_KEY) === '1')
+const toggleToolbar = () => {
+  toolbarCollapsed.value = !toolbarCollapsed.value
+  localStorage.setItem(TOOLBAR_COLLAPSED_KEY, toolbarCollapsed.value ? '1' : '0')
+}
+const selectedLineSummary = computed(() => {
+  const line = (availableLines.value || []).find((l) => l.id === selectedLine.value)
+  if (!line) return 'ライン未選択'
+  return `${line.line_code} - ${line.line_name}`
+})
 const activePlanTab = ref('')
 const activeLaserTab = ref('normal-plan')
 const selectPlanTab = (tab) => {
@@ -1574,6 +1598,24 @@ const getPlanStockDisplay = (row, colIdx) => {
     delta += getPlanDelta(daily)
     if (i === colIdx) {
       const baseValue = value === null || value === undefined ? 0 : Number(value)
+      return baseValue + delta
+    }
+  }
+  return ''
+}
+
+const getPlannedProgressDisplay = (row, colIdx) => {
+  if (!row || !row.daily) return ''
+  const cols = dateColumns.value
+  let delta = 0
+  for (let i = 0; i <= colIdx; i += 1) {
+    const key = cols[i]?.key
+    if (!key) continue
+    const daily = row.daily[key] || {}
+    delta += getPlanDelta(daily)
+    if (i === colIdx) {
+      const base = daily.planned_progress
+      const baseValue = base === null || base === undefined || base === '' ? 0 : Number(base)
       return baseValue + delta
     }
   }
@@ -3450,6 +3492,44 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
   border: 1px solid #c5cfde;
   padding: 6px;
   border-radius: 4px;
+  position: relative;
+}
+.toolbar.collapsed {
+  padding: 2px 6px;
+  align-items: center;
+}
+.toolbar-toggle {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  width: 22px;
+  height: 18px;
+  font-size: 10px;
+  line-height: 1;
+  border: 1px solid #8aa0c0;
+  background: #fff;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0;
+  z-index: 2;
+}
+.toolbar-toggle:hover {
+  background: #f0f4fa;
+}
+.toolbar.collapsed .toolbar-toggle {
+  position: static;
+}
+.toolbar-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #1f2a44;
+  font-weight: 600;
+  flex: 1;
+}
+.toolbar-summary .summary-sep {
+  color: #8aa0c0;
 }
 .toolbar-left {
   display: flex;
