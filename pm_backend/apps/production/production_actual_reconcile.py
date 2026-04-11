@@ -3,8 +3,8 @@ from datetime import date, datetime, timedelta
 import logging
 
 from django.db import transaction
-from django.utils import timezone
 
+from masters.models import Line, Process, Product
 from notifications.models import Notification
 from production.models_line_backlog import LineBacklog
 from production.models_process_realtime import ProcessRealtimeRecord
@@ -40,11 +40,11 @@ def _parse_date_or_none(value):
         return None
 
 
-def _to_local_naive(dt):
+def _to_naive_datetime(dt):
     if not dt:
         return None
-    if timezone.is_aware(dt):
-        return timezone.localtime(dt).replace(tzinfo=None)
+    if isinstance(dt, datetime) and dt.tzinfo is not None:
+        return dt.replace(tzinfo=None)
     return dt
 
 
@@ -57,7 +57,7 @@ def _resolve_production_record_plan_date(record):
     )
     if plan_date:
         return plan_date
-    ts = _to_local_naive(record.timestamp)
+    ts = _to_naive_datetime(record.timestamp)
     if not ts:
         return datetime.now().date()
     return resolve_workday_date_for_process(record.process, ts)
@@ -164,6 +164,14 @@ def collect_production_actual_reconcile_diffs():
         backlog_by_key[key] = int(row.actual_qty or 0)
 
     all_keys = set(expected_by_key.keys()) | set(backlog_by_key.keys())
+    line_ids = {line_id for line_id, _, _, _ in all_keys}
+    process_ids = {process_id for _, process_id, _, _ in all_keys}
+    product_ids = {product_id for _, _, product_id, _ in all_keys}
+
+    line_map = Line.objects.in_bulk(line_ids)
+    process_map = Process.objects.in_bulk(process_ids)
+    product_map = Product.objects.in_bulk(product_ids)
+
     diff_rows = []
 
     for line_id, process_id, product_id, plan_date in sorted(
@@ -175,27 +183,19 @@ def collect_production_actual_reconcile_diffs():
         if expected_qty == backlog_qty:
             continue
 
-        lb = (
-            LineBacklog.objects.filter(
-                line_id=line_id,
-                process_id=process_id,
-                product_id=product_id,
-                plan_date=plan_date,
-                sequence_no=0,
-            )
-            .select_related('line', 'process', 'product')
-            .first()
-        )
+        line = line_map.get(line_id)
+        process = process_map.get(process_id)
+        product = product_map.get(product_id)
         diff_rows.append({
             'line_id': line_id,
-            'line_code': getattr(getattr(lb, 'line', None), 'line_code', ''),
-            'line_name': getattr(getattr(lb, 'line', None), 'line_name', ''),
+            'line_code': getattr(line, 'line_code', ''),
+            'line_name': getattr(line, 'line_name', ''),
             'process_id': process_id,
-            'process_code': getattr(getattr(lb, 'process', None), 'process_code', ''),
-            'process_name': getattr(getattr(lb, 'process', None), 'process_name', ''),
+            'process_code': getattr(process, 'process_code', ''),
+            'process_name': getattr(process, 'process_name', ''),
             'product_id': product_id,
-            'product_code': getattr(getattr(lb, 'product', None), 'product_code', ''),
-            'product_name': getattr(getattr(lb, 'product', None), 'product_name', ''),
+            'product_code': getattr(product, 'product_code', ''),
+            'product_name': getattr(product, 'product_name', ''),
             'plan_date': plan_date,
             'expected_qty': expected_qty,
             'backlog_qty': backlog_qty,
