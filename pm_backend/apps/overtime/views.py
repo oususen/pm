@@ -137,18 +137,7 @@ def advance_to_next_level(application):
         supervisor_count = create_pending_logs(application, 'supervisor')
 
         if leader_count > 0 or supervisor_count > 0:
-            pending_users = [
-                log.approver
-                for log in application.approval_logs.filter(
-                    role__in=['leader', 'supervisor'], status='pending'
-                )
-                if log.approver
-            ]
-            create_approval_notification(
-                application,
-                pending_users,
-                f"【残業申請 承認依頼】{applicant_name} / {application.work_date}",
-            )
+            # 承認依頼通知は送らない（承認待ち画面で確認する運用）
             return
 
         # リーダーも班長もいない場合は係長以降へ
@@ -168,16 +157,7 @@ def advance_to_next_level(application):
         role = APPROVAL_LEVELS[i]
         count = create_pending_logs(application, role)
         if count > 0:
-            pending_users = [
-                log.approver
-                for log in application.approval_logs.filter(role=role, status='pending')
-                if log.approver
-            ]
-            create_approval_notification(
-                application,
-                pending_users,
-                f"【残業申請 承認依頼】{applicant_name} / {application.work_date}",
-            )
+            # 承認依頼通知は送らない（承認待ち画面で確認する運用）
             return
 
     # 全レベル完了 → 最終承認
@@ -453,18 +433,13 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
         if not approved_apps:
             return Response({'detail': '処理できる申請がありませんでした。'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 次の承認レベルへ進める（通知は一括でまとめて送る）
-        chief_approvers = {}  # approver_id -> User
-        auto_approved = []
-
+        # 次の承認レベルへ進める（承認依頼通知は送らない: 承認待ち画面で確認）
         for app in approved_apps:
-            # approved_supervisor 以降から次レベルを探す（リーダーは並列なのでスキップ）
             if app.status == 'approved_supervisor':
                 start_idx = 2
             elif app.status == 'approved_chief':
                 start_idx = 3
             else:
-                # approved_leader または想定外: 班長がすでにpendingなので何もしない
                 continue
 
             advanced = False
@@ -472,35 +447,17 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
                 role = APPROVAL_LEVELS[i]
                 count = create_pending_logs(app, role)
                 if count > 0:
-                    for pending_log in app.approval_logs.filter(role=role, status='pending'):
-                        if pending_log.approver:
-                            chief_approvers[pending_log.approver.id] = pending_log.approver
                     advanced = True
                     break
 
             if not advanced:
-                # 承認者なし → 最終承認
+                # 承認者なし → 最終承認（申請者への完了通知は残す）
                 app.status = 'approved_manager'
                 app.save(update_fields=['status', 'updated_at'])
-                auto_approved.append(app)
                 create_approval_notification(
                     app, [app.applicant],
                     f"【残業申請 承認完了】{app.work_date} の申請が承認されました",
                 )
-
-        # 係長への一括通知（1通）
-        notify_apps = [a for a in approved_apps if a not in auto_approved]
-        if notify_apps and chief_approvers:
-            approver_name = f"{user.last_name} {user.first_name}".strip() or user.username
-            applicant_names = "、".join(dict.fromkeys(
-                f"{a.applicant.last_name}{a.applicant.first_name}".strip() or a.applicant.username
-                for a in notify_apps
-            ))
-            create_approval_notification(
-                notify_apps[0],
-                list(chief_approvers.values()),
-                f"【残業申請 一括確認依頼】{approver_name} より {len(notify_apps)}件（{applicant_names}）",
-            )
 
         return Response({'approved': len(approved_apps)})
 

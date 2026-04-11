@@ -5,9 +5,28 @@
     <div class="list-card">
       <div class="list-header">
         <div class="list-note">通知の一覧を表示します。</div>
-        <button class="btn confirm-all-btn" type="button" @click="handleMarkAllRead" :disabled="!unreadCount">
-          すべて確認済み
-        </button>
+        <div class="header-actions">
+          <label class="filter-label">
+            カテゴリ:
+            <select v-model="filterDomain" class="filter-select">
+              <option value="">すべて</option>
+              <option v-for="opt in availableDomainOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </label>
+          <button class="btn confirm-all-btn" type="button" @click="handleMarkAllRead" :disabled="!unreadCount">
+            すべて確認済み
+          </button>
+          <button
+            class="btn delete-all-btn"
+            type="button"
+            @click="handleDeleteFiltered"
+            :disabled="!sortedNotifications.length"
+          >
+            絞り込み削除
+          </button>
+        </div>
       </div>
 
       <table class="notification-table">
@@ -45,6 +64,13 @@
                   ✓ 確認
                 </button>
                 <span v-else class="confirmed-label">確認済み</span>
+                <button
+                  class="btn delete-btn-inline"
+                  type="button"
+                  @click.stop="handleDelete(item.id)"
+                >
+                  削除
+                </button>
               </td>
             </tr>
             <tr v-if="expandedIds.has(item.id)" class="row-detail">
@@ -129,8 +155,11 @@ const domainOptions = [
   { value: "purchase", label: "購買" },
   { value: "shipping", label: "出荷" },
   { value: "equipment", label: "設備" },
+  { value: "overtime", label: "残業" },
   { value: "common", label: "共通" },
 ];
+
+const filterDomain = ref("");
 
 const categoryOptions = [
   { value: "progress", label: "進捗" },
@@ -229,6 +258,7 @@ const filteredNotifications = computed(() => {
   return notifications.value.filter((item) => {
     if (!item) return false;
     if (!isWithinRange(item)) return false;
+    if (filterDomain.value && String(item.domain || "") !== filterDomain.value) return false;
     const targetDepartments = Array.isArray(item.target_departments) ? item.target_departments : [];
     const targetPositions = Array.isArray(item.target_positions) ? item.target_positions : [];
     const targetUsers = Array.isArray(item.target_users) ? item.target_users : [];
@@ -263,6 +293,16 @@ const sortedNotifications = computed(() => {
 });
 
 const unreadCount = computed(() => filteredNotifications.value.filter((item) => !item.is_read).length);
+
+const availableDomainOptions = computed(() => {
+  const presentDomains = new Set(notifications.value.map((n) => String(n?.domain || "")).filter(Boolean));
+  const known = domainOptions.filter((opt) => presentDomains.has(opt.value));
+  const knownValues = new Set(known.map((opt) => opt.value));
+  const unknown = [...presentDomains]
+    .filter((d) => !knownValues.has(d))
+    .map((d) => ({ value: d, label: d }));
+  return [...known, ...unknown];
+});
 
 const getDomainLabel = (domain) => {
   const found = domainOptions.find((opt) => opt.value === domain);
@@ -362,6 +402,33 @@ const handleMarkAllRead = async () => {
     await loadNotifications();
   } catch (error) {
     console.error("一括確認処理に失敗しました:", error);
+  }
+};
+
+const handleDelete = async (id) => {
+  if (!window.confirm("この通知を削除します。よろしいですか？")) return;
+  try {
+    await api.notifications.delete(id);
+    await loadNotifications();
+  } catch (error) {
+    console.error("通知の削除に失敗しました:", error);
+    window.alert("通知の削除に失敗しました。");
+  }
+};
+
+const handleDeleteFiltered = async () => {
+  const targetIds = filteredNotifications.value.map((item) => item.id);
+  if (!targetIds.length) return;
+  const scope = filterDomain.value
+    ? `カテゴリ「${getDomainLabel(filterDomain.value)}」の通知 ${targetIds.length} 件`
+    : `表示中の通知 ${targetIds.length} 件`;
+  if (!window.confirm(`${scope}をすべて削除します。よろしいですか？`)) return;
+  try {
+    await Promise.all(targetIds.map((id) => api.notifications.delete(id)));
+    await loadNotifications();
+  } catch (error) {
+    console.error("一括削除に失敗しました:", error);
+    window.alert("一括削除に失敗しました。");
   }
 };
 
@@ -547,6 +614,55 @@ onMounted(() => {
 .confirm-all-btn:disabled {
   background: #94a3b8;
   cursor: not-allowed;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filter-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #1f2a44;
+}
+
+.filter-select {
+  padding: 6px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fff;
+}
+
+.delete-all-btn {
+  background: #dc2626;
+  color: #fff;
+}
+
+.delete-all-btn:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.delete-all-btn:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+
+.delete-btn-inline {
+  background: #ef4444;
+  color: #fff;
+  padding: 4px 10px;
+  font-size: 12px;
+  margin-left: 6px;
+}
+
+.delete-btn-inline:hover {
+  background: #dc2626;
 }
 
 .confirmed-label {

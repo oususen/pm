@@ -19,9 +19,10 @@ def _get_business_today():
 
 
 class NotificationViewSet(viewsets.ModelViewSet):
-    queryset = Notification.objects.all().order_by('display_order', 'id')
+    queryset = Notification.objects.all().order_by('display_order', '-id')
     serializer_class = NotificationSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = None
 
     def get_queryset(self):
         qs = super().get_queryset()
