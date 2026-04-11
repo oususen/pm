@@ -35,6 +35,10 @@ from .models_purchase_actual_reconcile import (
     PurchaseActualReconcileReport,
     PurchaseActualReconcileReportDetail,
 )
+from .models_production_actual_reconcile import (
+    ProductionActualReconcileReport,
+    ProductionActualReconcileReportDetail,
+)
 from .models_laser_pattern import LaserPattern
 from .models_laser_actual import LaserActual, LaserActualDetail
 from .models_laser_kadojiseki import LaserShiftRecord
@@ -50,6 +54,8 @@ from .serializers import (
     ScheduleConfigSerializer,
     PurchaseActualReconcileReportSerializer,
     PurchaseActualReconcileReportDetailSerializer,
+    ProductionActualReconcileReportSerializer,
+    ProductionActualReconcileReportDetailSerializer,
     StockAllocationSerializer,
     ProductionOrderSerializer,
     ProductionOrderListSerializer,
@@ -6206,6 +6212,7 @@ class ScheduleConfigView(APIView):
             ('PROGRESS_ONLY', 8, 30, False),
             ('AUTO_PURCHASE_ORDER_CHECK', 6, 30, False),
             ('PURCHASE_ACTUAL_RECONCILE_CHECK', 2, 0, False),
+            ('PRODUCTION_ACTUAL_RECONCILE_CHECK', 2, 30, False),
         ]
         for task_name, hour, minute, is_enabled in inventory_defaults:
             ScheduleConfig.objects.get_or_create(
@@ -6495,6 +6502,7 @@ class ScheduleRunNowView(APIView):
         from .scheduler.tasks_auto_plan import run_auto_plan
         from .scheduler.tasks_order_expansion import run_order_expansion
         from .scheduler.tasks_purchase_actual_reconcile import run_purchase_actual_reconcile_check
+        from .scheduler.tasks_production_actual_reconcile import run_production_actual_reconcile_check
         from purchase.order_proposal_views import run_auto_purchase_order_check
         task = (request.data.get('task_name') or 'INVENTORY_RECALC').upper()
         task_labels = {
@@ -6506,6 +6514,7 @@ class ScheduleRunNowView(APIView):
             'AUTO_SAFETY_STOCK_PURCHASE': '自動安全在庫（購入品）',
             'AUTO_PURCHASE_ORDER_CHECK': '発注タイミング日次チェック',
             'PURCHASE_ACTUAL_RECONCILE_CHECK': '納入実績整合チェック',
+            'PRODUCTION_ACTUAL_RECONCILE_CHECK': '生産実績整合チェック',
         }
         config_id = request.data.get('config_id') or request.data.get('id')
         line_id = request.data.get('line')
@@ -6553,6 +6562,8 @@ class ScheduleRunNowView(APIView):
                             run_auto_purchase_order_check()
                         elif task == 'PURCHASE_ACTUAL_RECONCILE_CHECK':
                             run_purchase_actual_reconcile_check(apply_fix=False)
+                        elif task == 'PRODUCTION_ACTUAL_RECONCILE_CHECK':
+                            run_production_actual_reconcile_check(apply_fix=False)
                         else:
                             run_inventory_recalculation(task_name=task)
                     except Exception:
@@ -6650,6 +6661,81 @@ class PurchaseActualReconcileFixView(APIView):
             })
         except Exception as e:
             logger.exception('納入実績整合修正に失敗')
+            return Response(
+                {'detail': f'修正に失敗しました: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class ProductionActualReconcileReportView(APIView):
+    """生産実績整合チェックのレポート取得API"""
+
+    def get(self, request):
+        limit = request.query_params.get('limit', 10)
+        detail_limit = request.query_params.get('detail_limit', 200)
+        report_id = request.query_params.get('report_id')
+
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            limit = 10
+        limit = max(1, min(limit, 50))
+
+        try:
+            detail_limit = int(detail_limit)
+        except (TypeError, ValueError):
+            detail_limit = 200
+        detail_limit = max(1, min(detail_limit, 1000))
+
+        report_qs = (
+            ProductionActualReconcileReport.objects
+            .select_related('task_config', 'created_by')
+            .order_by('-id')
+        )
+        if report_id:
+            report_qs = report_qs.filter(id=report_id)
+
+        reports = list(report_qs[:limit])
+        latest = reports[0] if reports else None
+        detail_rows = []
+        if latest:
+            detail_rows = list(
+                ProductionActualReconcileReportDetail.objects
+                .filter(report_id=latest.id)
+                .select_related('line', 'process', 'product')
+                .order_by('plan_date', 'line__line_code', 'product__product_code')[:detail_limit]
+            )
+
+        return Response({
+            'reports': ProductionActualReconcileReportSerializer(reports, many=True).data,
+            'details': ProductionActualReconcileReportDetailSerializer(detail_rows, many=True).data,
+            'latest_report_id': latest.id if latest else None,
+        })
+
+
+class ProductionActualReconcileFixView(APIView):
+    """生産実績整合チェックの手動修正実行API"""
+
+    def post(self, request):
+        from .scheduler.tasks_production_actual_reconcile import run_production_actual_reconcile_check
+
+        task_name = 'PRODUCTION_ACTUAL_RECONCILE_CHECK'
+        running = ScheduleConfig.objects.filter(task_name=task_name, last_run_status='RUNNING').exists()
+        if running:
+            return Response(
+                {'detail': '現在整合チェックが実行中です。完了後に再実行してください。'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+        try:
+            result = run_production_actual_reconcile_check(apply_fix=True, created_by=user)
+            return Response({
+                'detail': '修正を実行しました。',
+                **result,
+            })
+        except Exception as e:
+            logger.exception('生産実績整合修正に失敗')
             return Response(
                 {'detail': f'修正に失敗しました: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,

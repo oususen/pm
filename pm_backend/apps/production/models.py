@@ -14,6 +14,10 @@ from .models_purchase_actual_reconcile import (
     PurchaseActualReconcileReport,
     PurchaseActualReconcileReportDetail,
 )
+from .models_production_actual_reconcile import (
+    ProductionActualReconcileReport,
+    ProductionActualReconcileReportDetail,
+)
 from .models_routing_migration_log import RoutingMigrationLog
 from .models_gantt_display_product_map import GanttDisplayProductMap
 from .models_laser_pattern import LaserPattern, LaserPatternComponent, LaserPatternFinishedProduct

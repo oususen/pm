@@ -14,6 +14,12 @@ export const createScheduleConfigAPI = (client) => ({
   runPurchaseActualReconcileFix(payload = {}) {
     return client.post('/schedule-config/purchase-actual-reconcile/fix/', payload)
   },
+  getProductionActualReconcileReports(params = {}) {
+    return client.get('/schedule-config/production-actual-reconcile/reports/', { params })
+  },
+  runProductionActualReconcileFix(payload = {}) {
+    return client.post('/schedule-config/production-actual-reconcile/fix/', payload)
+  },
   cancel(payload = {}) {
     return client.post('/schedule-config/cancel/', payload)
   },

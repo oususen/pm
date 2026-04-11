@@ -23,6 +23,10 @@ from .models_purchase_actual_reconcile import (
     PurchaseActualReconcileReport,
     PurchaseActualReconcileReportDetail,
 )
+from .models_production_actual_reconcile import (
+    ProductionActualReconcileReport,
+    ProductionActualReconcileReportDetail,
+)
 from .models_laser_pattern import LaserPattern, LaserPatternComponent, LaserPatternFinishedProduct
 from .models_laser_actual import LaserActual, LaserActualDetail
 from .models_laser_kadojiseki import LaserShiftRecord
@@ -1236,6 +1240,61 @@ class PurchaseActualReconcileReportSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PurchaseActualReconcileReport
+        fields = [
+            'id',
+            'task_config',
+            'mode', 'mode_display',
+            'status', 'status_display',
+            'compared_count',
+            'diff_count',
+            'fixed_count',
+            'message',
+            'created_by', 'created_by_name',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = fields
+
+    def get_created_by_name(self, obj):
+        if not obj.created_by_id:
+            return ''
+        full_name = obj.created_by.get_full_name() or ''
+        if full_name.strip():
+            return full_name
+        return obj.created_by.username or ''
+
+
+class ProductionActualReconcileReportDetailSerializer(serializers.ModelSerializer):
+    line_code = serializers.CharField(source='line.line_code', read_only=True)
+    line_name = serializers.CharField(source='line.line_name', read_only=True)
+    process_code = serializers.CharField(source='process.process_code', read_only=True)
+    process_name = serializers.CharField(source='process.process_name', read_only=True)
+    product_code = serializers.CharField(source='product.product_code', read_only=True)
+    product_name = serializers.CharField(source='product.product_name', read_only=True)
+
+    class Meta:
+        model = ProductionActualReconcileReportDetail
+        fields = [
+            'id',
+            'report',
+            'line', 'line_code', 'line_name',
+            'process', 'process_code', 'process_name',
+            'product', 'product_code', 'product_name',
+            'plan_date',
+            'expected_qty', 'backlog_qty', 'diff_qty',
+            'fixed',
+            'created_at',
+        ]
+        read_only_fields = fields
+
+
+class ProductionActualReconcileReportSerializer(serializers.ModelSerializer):
+    mode_display = serializers.CharField(source='get_mode_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductionActualReconcileReport
         fields = [
             'id',
             'task_config',

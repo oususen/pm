@@ -67,6 +67,7 @@ class Command(BaseCommand):
         from production.scheduler.tasks_order_expansion import run_order_expansion
         from production.scheduler.tasks_safety_stock import run_auto_safety_stock
         from production.scheduler.tasks_purchase_actual_reconcile import run_purchase_actual_reconcile_check
+        from production.scheduler.tasks_production_actual_reconcile import run_production_actual_reconcile_check
         from purchase.order_proposal_views import run_auto_purchase_order_check
 
         # 既存ジョブ（設定チェックを除く）をクリア
@@ -256,6 +257,36 @@ class Command(BaseCommand):
             )
         else:
             logger.info('ジョブ無効: purchase_actual_reconcile_check')
+
+        production_actual_reconcile_cfg, _ = ScheduleConfig.objects.get_or_create(
+            task_name='PRODUCTION_ACTUAL_RECONCILE_CHECK',
+            line=None,
+            defaults={
+                'scheduled_hour': 2,
+                'scheduled_minute': 30,
+                'is_enabled': False,
+            },
+        )
+        if production_actual_reconcile_cfg.is_enabled:
+            trigger = CronTrigger(
+                hour=production_actual_reconcile_cfg.scheduled_hour,
+                minute=production_actual_reconcile_cfg.scheduled_minute,
+                timezone='Asia/Tokyo',
+            )
+            scheduler.add_job(
+                run_production_actual_reconcile_check,
+                trigger,
+                id='production_actual_reconcile_check',
+                replace_existing=True,
+                misfire_grace_time=3600,
+                kwargs={'apply_fix': False},
+            )
+            logger.info(
+                f'ジョブ登録: production_actual_reconcile_check - '
+                f'{production_actual_reconcile_cfg.scheduled_hour:02d}:{production_actual_reconcile_cfg.scheduled_minute:02d}'
+            )
+        else:
+            logger.info('ジョブ無効: production_actual_reconcile_check')
 
     def _check_config_changes(self, scheduler):
         """DB設定の変更を検知してジョブを再登録"""

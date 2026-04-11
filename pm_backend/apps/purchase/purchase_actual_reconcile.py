@@ -228,7 +228,9 @@ def _create_report_details(report, diff_rows, fixed=False):
 
 
 def _notify_diff_if_needed(task_config, report):
-    if report.diff_count <= 0:
+    if not task_config or report.diff_count <= 0:
+        return
+    if not task_config.notify_users.exists():
         return
 
     title = '[差分検知] 納入実績整合チェック'
@@ -249,8 +251,7 @@ def _notify_diff_if_needed(task_config, report):
         valid_to=datetime.now().date() + timedelta(days=7),
         operator_name='system',
     )
-    if task_config and task_config.notify_users.exists():
-        notification.target_users.set(task_config.notify_users.all())
+    notification.target_users.set(task_config.notify_users.all())
 
 
 def run_purchase_actual_reconcile(task_config=None, apply_fix=False, created_by=None):
