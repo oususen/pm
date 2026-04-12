@@ -45,7 +45,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in filteredRows" :key="row.id">
+            <tr v-for="row in filteredRows" :key="row.id" :style="{ backgroundColor: finalProductColor(row.final_product) }">
               <td>{{ formatLine(row) }}</td>
               <td>{{ formatProduct(row.final_product_code, row.final_product_name) }}</td>
               <td>{{ formatProcess(row.process_code, row.process_name) }}</td>
@@ -86,6 +86,30 @@ const loading = ref(false)
 const deletingId = ref(null)
 
 const canEdit = computed(() => hasPermission(authState.user, 'production.plan_input', 'edit'))
+
+// ライン最終品ごとの色分け用パレット（淡い背景色）
+const FINAL_PRODUCT_COLORS = [
+  '#e8f5e9', '#e3f2fd', '#fff3e0', '#f3e5f5', '#e0f7fa',
+  '#fce4ec', '#f1f8e9', '#ede7f6', '#fff8e1', '#e1f5fe',
+  '#fbe9e7', '#e8eaf6', '#f9fbe7', '#efebe9', '#e0f2f1',
+  '#fffde7', '#f5f5f5', '#fafafa', '#eceff1', '#fff9c4',
+]
+const finalProductColorMap = computed(() => {
+  const map = {}
+  let colorIndex = 0
+  // rows順に走査してユニークなfinal_productにカラーを割り当て
+  for (const row of rows.value) {
+    const key = row.final_product
+    if (key != null && !(key in map)) {
+      map[key] = FINAL_PRODUCT_COLORS[colorIndex % FINAL_PRODUCT_COLORS.length]
+      colorIndex++
+    }
+  }
+  return map
+})
+const finalProductColor = (finalProduct) => {
+  return finalProductColorMap.value[finalProduct] || 'transparent'
+}
 
 const toArray = (res) => {
   const data = res?.data
