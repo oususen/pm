@@ -34,7 +34,7 @@
     </div>
 
     <div class="note">
-      ガントチャートの計画数と実績数を比較しています。ガントチャートは連産品の子製品以外の製品と連産品のみで作成されるため、連産品の子製品などは計画しても「計画外」として表示されます。
+      ガントチャートの計画と実績との比較。ガントチャートは連産品の子以外の製品と連産品のみで作成のため、連産品の子は計画しても「計画外」として表示される。
     </div>
 
     <div v-if="summary" class="summary-bar">
@@ -258,7 +258,7 @@ onMounted(() => {
   background: #fff5f5;
   border-left: 3px solid #d32f2f;
   color: #d32f2f;
-  font-size: 24px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
