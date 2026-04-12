@@ -2123,7 +2123,7 @@ const submitRecord = async () => {
 
     data.remarks = record.value.remarks
 
-    await api.processRealtime.create(data)
+    const res = await api.processRealtime.create(data)
     if (submittedOperatorProductId) {
       const nextStarted = new Set(startedProductIds.value)
       const nextLatestOperatorAction = new Map(latestOperatorActionByProduct.value)
@@ -2140,7 +2140,18 @@ const submitRecord = async () => {
       startedProductIdsLoaded.value = true
     }
 
-    alert(t('processInput.alert.saved'))
+    // 計画超過チェック警告
+    const overrun = res.data?.plan_overrun_warning
+    if (overrun) {
+      alert(
+        `⚠ 計画超過\n` +
+        `${overrun.process_name} / ${overrun.product_code} ${overrun.product_name}\n` +
+        `計画: ${overrun.plan_qty} → 実績: ${overrun.actual_qty} （${overrun.over_qty} 超過）\n` +
+        `数量を確認してください。`
+      )
+    } else {
+      alert(t('processInput.alert.saved'))
+    }
     if (moveToEquipmentState) {
       prepareEquipmentStateForm()
     } else {

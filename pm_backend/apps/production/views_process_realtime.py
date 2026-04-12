@@ -23,6 +23,7 @@ from .serializers_process_realtime import (
     _resolve_product_process_line,
     resolve_workday_date_for_process,
     _next_session_no,
+    check_plan_overrun,
 )
 from .services.gantt_planning import LineWorkCalendar
 from masters.models import Product, Process, Supplier, BOM
@@ -374,7 +375,27 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         serializer = ProcessRealtimeCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         record = serializer.save()
-        return Response(ProcessRealtimeRecordSerializer(record).data, status=status.HTTP_201_CREATED)
+        response_data = ProcessRealtimeRecordSerializer(record).data
+
+        # 生産実績・作業者アクション(END/PAUSE)の場合、計画超過チェック
+        record_type = request.data.get('record_type', '')
+        event_data = request.data.get('event_data') or {}
+        action_upper = str(event_data.get('action', '')).upper()
+        is_production = record_type == 'PRODUCTION'
+        is_end_or_pause = record_type == 'OPERATOR_ACTION' and action_upper in ('END', 'PAUSE')
+
+        if is_production or is_end_or_pause:
+            process = getattr(record, 'process', None)
+            product = getattr(record, 'product', None)
+            plan_date = getattr(record, 'plan_date', None)
+            if not plan_date and hasattr(record, 'timestamp') and record.timestamp:
+                plan_date = resolve_workday_date_for_process(process, record.timestamp)
+            if process and product and plan_date:
+                overrun = check_plan_overrun(process, product, plan_date)
+                if overrun:
+                    response_data['plan_overrun_warning'] = overrun
+
+        return Response(response_data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['get', 'post'], url_path='sessions')
     def sessions(self, request):

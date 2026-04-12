@@ -20,6 +20,7 @@ from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR, get_business_today, W
 from production.models_brake_line_record import BrakeLineRecord
 from production.models_line_backlog import LineBacklog
 from production.models_record_inquiry_setting import ProductionRecordInquirySetting
+from production.serializers_process_realtime import check_plan_overrun
 
 
 class BrakeLinePlanView(APIView):
@@ -573,13 +574,25 @@ class BrakeLineActualAddView(APIView):
             )
             obj.refresh_from_db()
 
-        return Response({
+        response_data = {
             'id': obj.id,
             'plan_date': str(obj.plan_date),
             'actual_qty': int(obj.actual_qty),
             'plan_qty': int(obj.plan_qty),
             'created': created,
-        })
+        }
+
+        # 計画超過チェック
+        try:
+            process_obj = Process.objects.get(pk=process_id)
+            product_obj = Product.objects.get(pk=product_id)
+            overrun = check_plan_overrun(process_obj, product_obj, plan_date)
+            if overrun:
+                response_data['plan_overrun_warning'] = overrun
+        except (Process.DoesNotExist, Product.DoesNotExist):
+            pass
+
+        return Response(response_data)
 
 
 class BrakeLineRecordView(APIView):
@@ -759,7 +772,17 @@ class BrakeLineRecordView(APIView):
                 'plan_qty':    int(obj.plan_qty),
             }
 
-        return Response({
+        # 計画超過チェック
+        plan_overrun_warning = None
+        if backlog_data and product_id:
+            try:
+                process_obj = Process.objects.get(pk=process_id)
+                product_obj = Product.objects.get(pk=product_id)
+                plan_overrun_warning = check_plan_overrun(process_obj, product_obj, plan_date)
+            except (Process.DoesNotExist, Product.DoesNotExist):
+                pass
+
+        response_data = {
             'id':              rec.id,
             'operator':        rec.operator,
             'operator_action': rec.operator_action,
@@ -770,7 +793,11 @@ class BrakeLineRecordView(APIView):
             'qty':             rec.qty,
             'recorded_at':     rec.recorded_at.isoformat(),
             'backlog':         backlog_data,
-        }, status=201)
+        }
+        if plan_overrun_warning:
+            response_data['plan_overrun_warning'] = plan_overrun_warning
+
+        return Response(response_data, status=201)
 
 
 class BrakeLineSessionView(APIView):

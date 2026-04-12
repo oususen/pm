@@ -1099,6 +1099,18 @@ async function save() {
     } else {
       showToast(`${label}を記録しました${labelStatusMessage}`, labelStatusType)
     }
+
+    // 計画超過チェック警告
+    if (data.plan_overrun_warning) {
+      const ow = data.plan_overrun_warning
+      alert(
+        `⚠ 計画超過\n` +
+        `${ow.process_name} / ${ow.product_code} ${ow.product_name}\n` +
+        `計画: ${ow.plan_qty} → 実績: ${ow.actual_qty} （${ow.over_qty} 超過）\n` +
+        `数量を確認してください。`
+      )
+    }
+
     nextTick(() => qtyInputRef.value?.focus())
   } catch (e) {
     showToast(e?.response?.data?.detail || '保存に失敗しました', 'error')

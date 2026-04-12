@@ -224,6 +224,12 @@ const production = [
     component: () => import("@/views/production/ProductPhotoUpload.vue"),
     meta: { pageTitle: "製品写真アップロード", manualPath: "README.md" },
   },
+  {
+    path: "/production/plan-deviation-report",
+    name: "PlanDeviationReport",
+    component: () => import("@/views/production/PlanDeviationReport.vue"),
+    meta: { pageTitle: "計画乖離レポート" },
+  },
 ];
 
 export default production;

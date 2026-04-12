@@ -253,6 +253,64 @@ def update_line_backlog_production(process, product, qty, plan_date):
         backlog.save(update_fields=['actual_qty'])
 
 
+def check_plan_overrun(process, product, plan_date):
+    """
+    実績数量がガントチャート計画数量を超過しているかチェックする。
+    ガントチャート計画（LineGanttPlan.processes_plan）を基準に比較する。
+
+    Returns:
+        dict or None: 超過している場合は警告情報を返す。超過なしならNone。
+    """
+    from .models_line_gantt_plan import LineGanttPlan
+
+    line = getattr(process, 'line', None)
+    if not line or not product:
+        return None
+
+    # 実績数（sequence_no=0）
+    try:
+        actual_row = LineBacklog.objects.get(
+            line=line,
+            process=process,
+            product=product,
+            plan_date=plan_date,
+            sequence_no=0,
+        )
+        actual_qty = actual_row.actual_qty or 0
+    except LineBacklog.DoesNotExist:
+        return None
+
+    # ガントチャート計画から該当工程・製品の計画数を集計
+    gantt_plans = LineGanttPlan.objects.filter(
+        line=line,
+        plan_date=plan_date,
+    )
+    total_plan = 0
+    process_id = process.id
+    product_id = product.id
+    for gp in gantt_plans:
+        for pp in (gp.processes_plan or []):
+            pp_process_id = pp.get('process_id')
+            pp_product_id = pp.get('output_product_id') or gp.product_id
+            if pp_process_id == process_id and pp_product_id == product_id:
+                total_plan += int(pp.get('quantity', 0))
+
+    if total_plan <= 0:
+        return None
+
+    if actual_qty > total_plan:
+        return {
+            'actual_qty': actual_qty,
+            'plan_qty': total_plan,
+            'over_qty': actual_qty - total_plan,
+            'product_code': getattr(product, 'product_code', ''),
+            'product_name': getattr(product, 'product_name', ''),
+            'process_name': getattr(process, 'process_name', ''),
+        }
+
+    return None
+
+
 def adjust_production_for_scrap(process, product, scrap_qty, plan_date):
     """
     仕損登録時に生産実績を減算する（実績入力済みの場合のみ使用）

@@ -36,6 +36,7 @@ from production.views_services import BOMServiceViewSet, CRPViewSet
 from production.views_brake_line import BrakeLinePlanView, BrakeLineProductsView, BrakeLineEquipmentsView, BrakeLineActualAddView, BrakeLineRecordView, BrakeLineSessionView, BrakeLineSessionDetailView
 from production.views_spot_line import SpotLinePlanView, SpotLineEquipmentsView, SpotLineProductsView, SpotLineRecordView
 from production.views_gantt_display_product_map import GanttDisplayProductMapViewSet
+from production.views_plan_deviation_report import PlanDeviationReportView
 
 router = DefaultRouter()
 router.register(r'line-demands', LineDemandViewSet, basename='linedemand')
@@ -93,4 +94,5 @@ urlpatterns = [
     path('spot-line-equipments/', SpotLineEquipmentsView.as_view(), name='spot-line-equipments'),
     path('spot-line-record/', SpotLineRecordView.as_view(), name='spot-line-record'),
     path('floor-shipping-pdf/', FloorShippingPDFView.as_view(), name='floor-shipping-pdf'),
+    path('plan-deviation-report/', PlanDeviationReportView.as_view(), name='plan-deviation-report'),
 ]

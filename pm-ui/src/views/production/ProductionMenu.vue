@@ -169,6 +169,14 @@ const tiles = computed(() => {
       resource: "production.scrap_history",
     },
     {
+      to: "/production/plan-deviation-report",
+      label: "計画乖離レポート",
+      icon: "📊",
+      iconLabel: "乖離",
+      required: "view",
+      resource: "production.record_inquiry",
+    },
+    {
       to: "/production/progress-only",
       label: t("productionMenu.tiles.progressOnly"),
       icon: "📈",
