@@ -302,10 +302,14 @@ def _build_line_final_line_process_fallback_specs(
     line_id: int,
     product: Product,
     step_no_by_process: Dict[int, int],
+    target_process_ids: Optional[List[int]] = None,
 ) -> List[ProcessSpec]:
-    """ライン最終品の自品番ルーティング未登録時に、ライン配下の全工程でProcessSpecを組み立てる。"""
+    """ライン最終品の自品番ルーティング未登録時に、ライン工程からProcessSpecを組み立てる。"""
     specs = []
-    processes = Process.objects.filter(line_id=line_id, is_active=True).order_by('process_code', 'id')
+    processes = Process.objects.filter(line_id=line_id, is_active=True)
+    if target_process_ids:
+        processes = processes.filter(id__in=target_process_ids)
+    processes = processes.order_by('process_code', 'id')
     for proc in processes:
         specs.append(ProcessSpec(
             process_id=proc.id,
@@ -370,15 +374,37 @@ def _calculate_total_minutes(spec: ProcessSpec, quantity: Decimal) -> float:
     return (spec.cycle_time_minutes * float(quantity)) + spec.setup_time_minutes
 
 
-def _pick_active_bom(parent_product_id: int, plan_date):
-    return BOM.objects.filter(
-        parent_product_id=parent_product_id,
-        is_active=True,
-        valid_from__lte=plan_date,
-    ).filter(Q(valid_to__gte=plan_date) | Q(valid_to__isnull=True)).order_by('-valid_from').first()
+def _pick_active_bom(
+    parent_product_id: int,
+    plan_date,
+    cache: Optional[Dict[Tuple[int, date], Optional[BOM]]] = None,
+):
+    key = (parent_product_id, plan_date)
+    if cache is not None and key in cache:
+        return cache[key]
+
+    bom = (
+        BOM.objects.filter(
+            parent_product_id=parent_product_id,
+            is_active=True,
+            valid_from__lte=plan_date,
+        )
+        .filter(Q(valid_to__gte=plan_date) | Q(valid_to__isnull=True))
+        .order_by('-valid_from')
+        .first()
+    )
+    if cache is not None:
+        cache[key] = bom
+    return bom
 
 
-def _build_bom_multiplier_map(final_product_id: int, plan_date) -> Dict[int, Decimal]:
+def _build_bom_multiplier_map(
+    final_product_id: int,
+    plan_date,
+    *,
+    active_bom_cache: Optional[Dict[Tuple[int, date], Optional[BOM]]] = None,
+    bom_items_cache: Optional[Dict[int, List[BOMItem]]] = None,
+) -> Dict[int, Decimal]:
     multipliers: Dict[int, Decimal] = {final_product_id: Decimal('1')}
     expanded: Dict[int, Decimal] = {final_product_id: Decimal('0')}
     queue = [final_product_id]
@@ -391,10 +417,19 @@ def _build_bom_multiplier_map(final_product_id: int, plan_date) -> Dict[int, Dec
         delta = total_mult - prev_expanded
         expanded[product_id] = total_mult
 
-        bom = _pick_active_bom(product_id, plan_date)
+        bom = _pick_active_bom(product_id, plan_date, cache=active_bom_cache)
         if not bom:
             continue
-        for item in BOMItem.objects.filter(bom_id=bom.id):
+
+        if bom_items_cache is not None:
+            items = bom_items_cache.get(bom.id)
+            if items is None:
+                items = list(BOMItem.objects.filter(bom_id=bom.id))
+                bom_items_cache[bom.id] = items
+        else:
+            items = list(BOMItem.objects.filter(bom_id=bom.id))
+
+        for item in items:
             if item.quantity is None:
                 continue
             qty = Decimal(item.quantity)
@@ -733,6 +768,8 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
     _coproduct_cache: Dict[date, tuple] = {}
     # BOM乗数マップを製品×日付ごとにキャッシュ
     _multiplier_cache: Dict[Tuple[int, date], Dict[int, Decimal]] = {}
+    _active_bom_cache: Dict[Tuple[int, date], Optional[BOM]] = {}
+    _bom_items_cache: Dict[int, List[BOMItem]] = {}
     # ライン最終品×工程の表示品マップ（ライン単位で1回だけ取得）
     display_product_map_by_final = _build_display_product_map_by_final(line_id)
 
@@ -745,7 +782,12 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
         # キャッシュ付きBOM乗数マップ
         _mult_key = (product.id, obj.plan_date)
         if _mult_key not in _multiplier_cache:
-            _multiplier_cache[_mult_key] = _build_bom_multiplier_map(product.id, obj.plan_date)
+            _multiplier_cache[_mult_key] = _build_bom_multiplier_map(
+                product.id,
+                obj.plan_date,
+                active_bom_cache=_active_bom_cache,
+                bom_items_cache=_bom_items_cache,
+            )
         multiplier_map = _multiplier_cache[_mult_key]
         # キャッシュ付き連産品マップ
         if obj.plan_date not in _coproduct_cache:
@@ -762,10 +804,13 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
         )
 
         if use_line_final_line_process_fallback:
+            # 表示品マップがある最終品は、マップ登録工程のみをフォールバック対象にする
+            fallback_target_process_ids = list(display_product_map.keys()) if display_product_map else None
             process_specs = _build_line_final_line_process_fallback_specs(
                 line_id,
                 product,
                 step_no_by_process,
+                target_process_ids=fallback_target_process_ids,
             )
             # 工程別連産品マッピング: driver子品番をspecにセットし、後段で親(ST)表示へ置換させる
             for spec in process_specs:
