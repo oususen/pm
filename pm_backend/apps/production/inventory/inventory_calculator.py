@@ -442,6 +442,18 @@ def _get_final_product_delivery_lt(line_id, product_id):
     return 0
 
 
+def _resolve_line_calendar_id(line_id):
+    """ラインに紐づくカレンダーIDを取得する。未設定時は daiso カレンダーを使用。"""
+    from masters.models import Calendar, Line
+
+    if not line_id:
+        return None
+    line_obj = Line.objects.filter(id=line_id).only('calendar_id').first()
+    return getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
+        calendar_code='daiso'
+    ).values_list('id', flat=True).first()
+
+
 def _build_adjustment_maps(line_id, start_date, end_date, product_ids=None):
     """調整を一括取得して辞書化（計算ループ中はDB参照しない）"""
     target_product_ids = sorted({int(pid) for pid in (product_ids or []) if pid is not None})
@@ -890,6 +902,9 @@ def recalculate_stock_qty(
     firm_map=None,
     stock_adjust_map=None,
     reference_today=None,
+    max_parent_lt=None,
+    calendar_id=None,
+    shared_workday_cache=None,
 ):
     """
     実在庫を日次で再計算
@@ -944,35 +959,6 @@ def recalculate_stock_qty(
         for obj in created:
             by_date.setdefault(obj.plan_date, []).append(obj)
 
-    # 基礎行（sequence_no=0）が無い日付には新規作成してから計算する
-    to_create = []
-    for plan_date, rows in by_date.items():
-        has_base = any((r.sequence_no or 0) == 0 for r in rows)
-        if not has_base:
-            sample = rows[0]
-            to_create.append(LineBacklog(
-                plan_date=plan_date,
-                process_id=sample.process_id,
-                product_id=sample.product_id,
-                line_id=sample.line_id,
-                sequence_no=0,
-                order_qty=0,
-                demand_qty_plan=0,
-                plan_qty=0,
-                actual_qty=0,
-                stock_qty=0,
-                planned_stock_qty=0,
-                adjust_qty=0,
-                scrap_adjust_qty=0,
-                scrap_qty=0,
-                actual_shipment_qty=0,
-            ))
-    if to_create:
-        created = LineBacklog.objects.bulk_create(to_create)
-        created_any = True
-        for obj in created:
-            by_date.setdefault(obj.plan_date, []).append(obj)
-
     if created_any:
         # PK が欠落している可能性があるため、対象期間を再取得して by_date を作り直す
         backlogs = list(LineBacklog.objects.filter(
@@ -984,20 +970,16 @@ def recalculate_stock_qty(
         for backlog in backlogs:
             by_date.setdefault(backlog.plan_date, []).append(backlog)
 
-    calendar_id = None
-    workday_cache = {}
-    if line_id:
-        from masters.models import Line, Calendar, CalendarDay
-        line_obj = Line.objects.filter(id=line_id).first()
-        calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
-            calendar_code='daiso'
-        ).values_list('id', flat=True).first()
+    workday_cache = shared_workday_cache if shared_workday_cache is not None else {}
+    if calendar_id is None and line_id:
+        calendar_id = _resolve_line_calendar_id(line_id)
 
     def is_working_day(target_date):
         if not calendar_id:
             return target_date.weekday() < 5
         if target_date in workday_cache:
             return workday_cache[target_date]
+        from masters.models import CalendarDay
         cal = CalendarDay.objects.filter(
             calendar_id=calendar_id,
             target_date=target_date
@@ -1042,7 +1024,9 @@ def recalculate_stock_qty(
     # 計画在庫は calc_start_date の stock_qty を初期値として参照するため、
     # 在庫の再計算範囲を calc_start_date まで広げて stock_qty を常に最新に保つ。
     # effective_start = min(start_date, calc_start_date)
-    max_lt = _get_max_parent_bom_lead_time(product_id)
+    if max_parent_lt is None:
+        max_parent_lt = _get_max_parent_bom_lead_time(product_id)
+    max_lt = int(max_parent_lt or 0)
     calc_start_date = shift_working_days(calc_today, -(max_lt + 1))
     effective_start = min(start_date, calc_start_date)
 
@@ -1149,6 +1133,9 @@ def recalculate_planned_stock_qty(
     firm_map=None,
     planned_stock_adjust_map=None,
     reference_today=None,
+    max_parent_lt=None,
+    calendar_id=None,
+    shared_workday_cache=None,
 ):
     """
     計画在庫を日次で再計算（時制考慮版）
@@ -1176,20 +1163,16 @@ def recalculate_planned_stock_qty(
     for backlog in backlogs:
         by_date.setdefault(backlog.plan_date, []).append(backlog)
 
-    calendar_id = None
-    workday_cache = {}
-    if line_id:
-        from masters.models import Line, Calendar, CalendarDay
-        line_obj = Line.objects.filter(id=line_id).first()
-        calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
-            calendar_code='daiso'
-        ).values_list('id', flat=True).first()
+    workday_cache = shared_workday_cache if shared_workday_cache is not None else {}
+    if calendar_id is None and line_id:
+        calendar_id = _resolve_line_calendar_id(line_id)
 
     def is_working_day(target_date):
         if not calendar_id:
             return target_date.weekday() < 5
         if target_date in workday_cache:
             return workday_cache[target_date]
+        from masters.models import CalendarDay
         cal = CalendarDay.objects.filter(
             calendar_id=calendar_id,
             target_date=target_date
@@ -1230,7 +1213,9 @@ def recalculate_planned_stock_qty(
         calc_today = get_prev_working_day(calc_today)
     # 完成品向け累積LT（自分LT含む）の最大値を取得し、LT+1日前から再計算
     # これにより、完成品側の実績変更が子製品の過去の出庫に正しく反映される
-    max_lt = _get_max_parent_bom_lead_time(product_id)
+    if max_parent_lt is None:
+        max_parent_lt = _get_max_parent_bom_lead_time(product_id)
+    max_lt = int(max_parent_lt or 0)
     # 最終品はデリバリLT分だけ初期値を調整するため、計算窓を広げる。
     # self_lt_days（製造LT）ではなく firm_map と同じデリバリLT（RoutingStep/Line）を使う。
     sample_product = backlogs[0].product if backlogs else None
@@ -1313,11 +1298,16 @@ def recalculate_planned_stock_qty(
         is_line_final = bool(getattr(sample.product, 'is_line_final_product', False))
         if is_final:
             firm_qty = firm_map.get((sample.product_id, plan_date), Decimal('0'))
-            # 完成品の計画出庫判定は calc_today（営業日調整済）を使う。
-            # business_today に変更すると、休日当日で firm_qty=0 の際に
-            # 顧客カレンダ由来の order_qty にフォールバックできず計画出庫が欠落する。
-            if plan_date <= calc_today:
+            # 完成品の過去/未来判定は business_today に統一する。
+            # 休日当日で firm_qty=0 の場合のみ order_qty にフォールバックして
+            # 計画出庫の欠落を防ぐ。
+            if plan_date < business_today:
                 planned_shipment = firm_qty
+            elif plan_date == business_today:
+                if (not is_working_day(business_today)) and firm_qty <= 0:
+                    planned_shipment = Decimal(str(order_total))
+                else:
+                    planned_shipment = firm_qty
             else:
                 planned_shipment = firm_qty if firm_qty > 0 else Decimal(str(order_total))
         elif is_line_final:
@@ -1436,6 +1426,13 @@ def recalculate_inventory_for_line(
         end_date,
         product_ids=target_product_ids or None,
     )
+    shared_calendar_id = _resolve_line_calendar_id(line_id) if line_id else None
+    shared_workday_cache = {}
+    max_parent_lt_cache = {}
+    recalculate_progress_qty = None
+    if include_progress:
+        from .progress_calculator import recalculate_progress_qty as _recalculate_progress_qty
+        recalculate_progress_qty = _recalculate_progress_qty
 
     # 製品ごとに在庫計算
     product_qs = LineBacklog.objects.filter(
@@ -1459,6 +1456,10 @@ def recalculate_inventory_for_line(
 
     for product_id in product_ids:
         logger.info(f"製品ID {product_id} の在庫計算中...")
+        max_parent_lt = max_parent_lt_cache.get(product_id)
+        if max_parent_lt is None:
+            max_parent_lt = _get_max_parent_bom_lead_time(product_id)
+            max_parent_lt_cache[product_id] = max_parent_lt
 
         if not progress_only:
             # 実在庫を計算
@@ -1470,6 +1471,9 @@ def recalculate_inventory_for_line(
                 end_date,
                 firm_map=firm_map,
                 stock_adjust_map=adjustment_maps.get('STOCK'),
+                max_parent_lt=max_parent_lt,
+                calendar_id=shared_calendar_id,
+                shared_workday_cache=shared_workday_cache,
             )
             stock_elapsed = time.perf_counter() - t0
             stock_total += stock_elapsed
@@ -1485,6 +1489,9 @@ def recalculate_inventory_for_line(
                 end_date,
                 firm_map=firm_map,
                 planned_stock_adjust_map=adjustment_maps.get('PLANNED_STOCK'),
+                max_parent_lt=max_parent_lt,
+                calendar_id=shared_calendar_id,
+                shared_workday_cache=shared_workday_cache,
             )
             planned_elapsed = time.perf_counter() - t1
             planned_total += planned_elapsed
@@ -1492,8 +1499,6 @@ def recalculate_inventory_for_line(
                 planned_max = (planned_elapsed, product_id)
 
         if include_progress:
-            from .progress_calculator import recalculate_progress_qty
-
             # 進度を計算
             t2 = time.perf_counter()
             recalculate_progress_qty(
@@ -1504,6 +1509,9 @@ def recalculate_inventory_for_line(
                 progress_adjust_map=adjustment_maps.get('PROGRESS'),
                 planned_progress_adjust_map=adjustment_maps.get('PLANNED_PROGRESS'),
                 override_calc_start_date=progress_calc_start_date,
+                max_parent_lt=max_parent_lt,
+                calendar_id=shared_calendar_id,
+                shared_workday_cache=shared_workday_cache,
             )
             progress_elapsed = time.perf_counter() - t2
             progress_total += progress_elapsed

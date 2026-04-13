@@ -22,6 +22,9 @@ def recalculate_progress_qty(
     progress_adjust_map=None,
     planned_progress_adjust_map=None,
     override_calc_start_date=None,
+    max_parent_lt=None,
+    calendar_id=None,
+    shared_workday_cache=None,
 ):
     """
     進度を日次で再計算
@@ -95,10 +98,9 @@ def recalculate_progress_qty(
     for backlog in backlogs:
         by_date.setdefault(backlog.plan_date, []).append(backlog)
 
-    calendar_id = None
-    workday_cache = {}
-    if line_id:
-        line_obj = Line.objects.filter(id=line_id).first()
+    workday_cache = shared_workday_cache if shared_workday_cache is not None else {}
+    if calendar_id is None and line_id:
+        line_obj = Line.objects.filter(id=line_id).only('calendar_id').first()
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
             calendar_code='daiso'
         ).values_list('id', flat=True).first()
@@ -158,7 +160,9 @@ def recalculate_progress_qty(
     else:
         # 通常再計算: 完成品向け累積LT（自分LT含む）の最大値を取得し、LT+1日前から再計算
         # これにより、完成品側の実績変更が子製品の過去の需要（LineDemand）に正しく反映される
-        max_lt = _get_max_parent_bom_lead_time(product_id)
+        if max_parent_lt is None:
+            max_parent_lt = _get_max_parent_bom_lead_time(product_id)
+        max_lt = int(max_parent_lt or 0)
         calc_start_date = shift_working_days(today, -(max_lt + 1))
     progress_by_date = {}
     last_progress = 0

@@ -119,7 +119,7 @@ def _is_floor_shipping_delivery_line(line_obj):
     return FLOOR_SHIPPING_DELIVERY_LABEL in f'{line_code} {line_name}'
 
 
-def _resolve_inventory_effective_start_date(line_id, requested_start_date, end_date, product_ids=None):
+def _resolve_inventory_effective_start_date(line_id, requested_start_date, end_date, product_ids=None, line_final_only=False):
     from .inventory.inventory_calculator import _get_max_parent_bom_lead_time
     line_obj = Line.objects.filter(id=line_id).first()
     calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
@@ -168,12 +168,13 @@ def _resolve_inventory_effective_start_date(line_id, requested_start_date, end_d
     if target_product_ids:
         product_ids_for_line = target_product_ids
     else:
-        product_ids_for_line = list(
-            LineBacklog.objects.filter(
-                line_id=line_id,
-                plan_date__lte=end_date,
-            ).values_list('product_id', flat=True).distinct()
+        product_qs = LineBacklog.objects.filter(
+            line_id=line_id,
+            plan_date__lte=end_date,
         )
+        if line_final_only:
+            product_qs = product_qs.filter(product__is_line_final_product=True)
+        product_ids_for_line = list(product_qs.values_list('product_id', flat=True).distinct())
 
     max_lt = 0
     if product_ids_for_line:
@@ -3873,6 +3874,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             start_dt,
             end_dt,
             product_ids=requested_product_ids or None,
+            line_final_only=line_final_only,
         )
 
         try:
