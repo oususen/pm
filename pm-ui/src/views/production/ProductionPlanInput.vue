@@ -152,14 +152,24 @@
           :disabled="processing || !selectedLine || headerDisplayOnlyLocked"
           :title="headerDisplayOnlyLocked ? 'ヘッダの表示のみは1回実行後に無効化されます（下部F4を使用してください）' : ''"
         >表示のみ</button>
-        <button class="btn" @click="doFetchOnly" :disabled="processing || !selectedLine">需要取込</button>
+        <button
+          class="btn"
+          @click="doFetchOnly"
+          :disabled="true"
+          title="ヘッダの需要取込は無効です。下部のF6をご利用ください。"
+        >需要取込</button>
         <button
           v-if="canShowFloorSpotAutoPlanButton"
           class="btn"
           @click="doFloorSpotAutoPlan"
           :disabled="processing || !selectedLine"
         >自動計画</button>
-        <button class="btn primary" @click="doPickup" :disabled="processing || !selectedLine">取込＋在庫計算</button>
+        <button
+          class="btn primary header-readonly-btn"
+          @click="doPickup"
+          :disabled="true"
+          title="ヘッダの取込＋在庫計算は無効です。下部のF8をご利用ください。"
+        >取込＋在庫計算</button>
         <button class="btn accent" @click="toggleProcessGantt" :disabled="processing || !selectedLine">
           {{ showProcessGantt ? '工程ガントを閉じる' : '工程ガント表示' }}
         </button>
@@ -173,6 +183,13 @@
           @click="downloadFloorShippingPDF"
           :disabled="processing || !selectedLine"
         >配送明細PDF</button>
+        <button
+          v-if="canShowDeliveryDetailPDFButton"
+          class="btn"
+          style="background: #C00000; color: #fff;"
+          @click="downloadHokushinDeliveryPDF"
+          :disabled="processing || !selectedLine"
+        >納品書</button>
       </div>
     </div>
 
@@ -670,6 +687,51 @@
         <button class="btn" type="button" @click="saveLineSettings">保存</button>
       </div>
       <div v-if="lineSettingsMessage" class="settings-message">{{ lineSettingsMessage }}</div>
+    </div>
+
+    <!-- 北進塗装 納品書 確認モーダル -->
+    <div v-if="hokushinDialogOpen" class="hokushin-dialog-overlay" @click.self="closeHokushinDialog">
+      <div class="hokushin-dialog">
+        <h3 class="hokushin-dialog-title">㈱北進塗装 納品書 発行確認</h3>
+        <div v-if="!hokushinDialogEdit" class="hokushin-dialog-body">
+          <p class="hokushin-dialog-text">
+            <span class="hokushin-date">{{ formatJPDate(hokushinAmDate) }}15時着</span><br/>
+            <span class="hokushin-date">{{ formatJPDate(hokushinYoiDate) }}8時着</span><br/>
+            納品書を発行しますか？
+          </p>
+          <div v-if="!hokushinAmHasItems || !hokushinYoiHasItems" class="hokushin-dialog-warn">
+            <template v-if="!hokushinAmHasItems && !hokushinYoiHasItems">
+              ※両便とも明細がありません
+            </template>
+            <template v-else-if="!hokushinAmHasItems">
+              ※AM便は明細がありません（宵積みのみ出力されます）
+            </template>
+            <template v-else>
+              ※宵積みは明細がありません（AM便のみ出力されます）
+            </template>
+          </div>
+          <div class="hokushin-dialog-actions">
+            <button class="btn primary" @click="confirmHokushinDialog">はい</button>
+            <button class="btn" @click="hokushinDialogEdit = true">いいえ</button>
+            <button class="btn" @click="closeHokushinDialog">キャンセル</button>
+          </div>
+        </div>
+        <div v-else class="hokushin-dialog-body">
+          <p class="hokushin-dialog-text">日付を変更してください</p>
+          <div class="hokushin-edit-row">
+            <label>AM便 (15時着):</label>
+            <input type="date" v-model="hokushinAmDate" />
+          </div>
+          <div class="hokushin-edit-row">
+            <label>宵積み (8時着):</label>
+            <input type="date" v-model="hokushinYoiDate" />
+          </div>
+          <div class="hokushin-dialog-actions">
+            <button class="btn primary" @click="confirmHokushinDialog">OK</button>
+            <button class="btn" @click="closeHokushinDialog">キャンセル</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -2713,6 +2775,94 @@ const downloadFloorShippingPDF = async () => {
   }
 }
 
+// 北進塗装納品書 確認モーダル状態
+const hokushinDialogOpen = ref(false)
+const hokushinDialogEdit = ref(false)
+const hokushinAmDate = ref('')
+const hokushinYoiDate = ref('')
+const hokushinAmHasItems = ref(true)
+const hokushinYoiHasItems = ref(true)
+
+const formatJPDate = (ymd) => {
+  if (!ymd) return ''
+  const parts = ymd.split('-')
+  if (parts.length !== 3) return ymd
+  return `${parseInt(parts[1], 10)}月${parseInt(parts[2], 10)}日`
+}
+
+const closeHokushinDialog = () => {
+  hokushinDialogOpen.value = false
+  hokushinDialogEdit.value = false
+}
+
+// ボタン押下: プレビュー取得→確認モーダル表示
+const downloadHokushinDeliveryPDF = async () => {
+  const sourceLineId = floorShippingPdfSourceLineId.value
+  if (!sourceLineId) {
+    alert('フロア配送ラインが見つかりません。')
+    return
+  }
+  try {
+    const res = await api.client.get('/hokushin-delivery-pdf/', {
+      params: { line: sourceLineId, preview: '1' },
+    })
+    const data = res.data || {}
+    hokushinAmDate.value = data.am_delivery_date || ''
+    hokushinYoiDate.value = data.yoi_delivery_date || ''
+    hokushinAmHasItems.value = !!data.am_has_items
+    hokushinYoiHasItems.value = !!data.yoi_has_items
+    if (!hokushinAmHasItems.value && !hokushinYoiHasItems.value) {
+      // 両便とも空でも編集可能にしたい場合のためダイアログは開く
+      // （BOSS要望: いいえで日付変更可能）
+    }
+    hokushinDialogEdit.value = false
+    hokushinDialogOpen.value = true
+  } catch (e) {
+    console.error('北進塗装納品書プレビュー取得エラー', e)
+    alert('プレビュー取得に失敗しました: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
+// 確認: はい or 編集OK → 実際にPDF発行
+const confirmHokushinDialog = async () => {
+  const sourceLineId = floorShippingPdfSourceLineId.value
+  if (!sourceLineId) {
+    alert('フロア配送ラインが見つかりません。')
+    return
+  }
+  try {
+    const res = await api.client.get('/hokushin-delivery-pdf/', {
+      params: {
+        line: sourceLineId,
+        am_delivery_date: hokushinAmDate.value,
+        yoi_delivery_date: hokushinYoiDate.value,
+      },
+      responseType: 'blob',
+    })
+    const blob = new Blob([res.data], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank')
+    closeHokushinDialog()
+  } catch (e) {
+    if (e.response?.status === 404 && e.response?.data instanceof Blob) {
+      try {
+        const text = await e.response.data.text()
+        const json = JSON.parse(text)
+        if (json.code === 'EMPTY_DELIVERY') {
+          alert('指定した日付に対象便がありません。')
+          return
+        }
+        alert('PDF生成に失敗しました: ' + (json.detail || ''))
+        return
+      } catch (_) {
+        // fallthrough
+      }
+    }
+    console.error('北進塗装納品書PDF生成エラー', e)
+    alert('PDF生成に失敗しました: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
 const exportToExcel = () => {
   if (!filteredRows.value.length) {
     alert('出力対象のデータがありません。')
@@ -3459,6 +3609,92 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
 </script>
 
 <style scoped>
+.hokushin-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.hokushin-dialog {
+  background: #fff;
+  min-width: 360px;
+  max-width: 480px;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  padding: 20px 24px;
+  font-family: "Noto Sans JP", "Segoe UI", Arial, sans-serif;
+}
+.hokushin-dialog-title {
+  margin: 0 0 14px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #1f2a44;
+  border-bottom: 2px solid #C00000;
+  padding-bottom: 6px;
+}
+.hokushin-dialog-text {
+  font-size: 15px;
+  line-height: 1.8;
+  margin: 12px 0;
+  color: #1f2a44;
+}
+.hokushin-dialog-text .hokushin-date {
+  font-weight: 700;
+  color: #C00000;
+}
+.hokushin-dialog-warn {
+  background: #FFF3CD;
+  border-left: 4px solid #FFC107;
+  padding: 8px 12px;
+  margin: 10px 0;
+  font-size: 13px;
+  color: #856404;
+}
+.hokushin-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0;
+  font-size: 14px;
+}
+.hokushin-edit-row label {
+  min-width: 130px;
+  color: #1f2a44;
+}
+.hokushin-edit-row input[type="date"] {
+  padding: 4px 8px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+.hokushin-dialog-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+.hokushin-dialog-actions .btn {
+  padding: 6px 16px;
+  border: 1px solid #ccc;
+  background: #f5f5f5;
+  color: #333;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.hokushin-dialog-actions .btn.primary {
+  background: #C00000;
+  color: #fff;
+  border-color: #C00000;
+  font-weight: 700;
+}
+.hokushin-dialog-actions .btn:hover {
+  opacity: 0.88;
+}
+
 .plan-container {
   padding: 6px 8px 10px;
   background: #eef2f6;
@@ -4073,6 +4309,11 @@ thead .sticky-col {
 .btn.accent:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+}
+.header-readonly-btn:disabled {
+  background: #fff !important;
+  color: #374151;
+  border-color: #b5c1d2;
 }
 .cursor-product-bubble {
   position: fixed;
