@@ -260,6 +260,9 @@
                 <div class="form-group">
                   <label>標準LT(日)</label>
                   <input v-model.number="formData.standard_lt_days" type="number" min="0" />
+                  <small class="field-note">
+                    ※ 枚方集荷・運送など特殊運用専用。生産計画・在庫・進度・購買などの本命LTには使用しません（本命LTは RoutingStep.lead_time_days を参照）。
+                  </small>
                 </div>
                 <div class="form-group">
                   <label>最小発注数</label>
@@ -1363,6 +1366,13 @@ watch(
 
 .form-group {
   margin-bottom: 1rem;
+}
+.form-group .field-note {
+  display: block;
+  margin-top: 4px;
+  color: #888;
+  font-size: 11px;
+  line-height: 1.4;
 }
 .form-group-section {
   font-size: 12px;

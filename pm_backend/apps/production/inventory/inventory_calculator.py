@@ -10,6 +10,7 @@ from orders.utils.calendar_utils import get_business_today
 from ..models_line_backlog import LineBacklog
 from ..models_line_backlog_adjustment import LineBacklogAdjustment
 from ..serializers_process_realtime import _resolve_product_process_line
+from .lead_time_utils import resolve_lead_days_for_step
 from quality.models_scrap import ScrapRecord, ScrapRecordDetail
 
 
@@ -318,7 +319,7 @@ def _get_max_parent_bom_lead_time(product_id):
         output_product_id=product_id,
     ).filter(
         build_effective_routing_q(prefix='routing__')
-    ).select_related('line')
+    ).select_related('line', 'output_product')
 
     candidate_steps = list(step_qs)
     if not candidate_steps:
@@ -331,23 +332,8 @@ def _get_max_parent_bom_lead_time(product_id):
     steps = list(
         RoutingStep.objects.filter(routing_id__in=routing_ids)
         .filter(build_effective_routing_q(prefix='routing__'))
-        .select_related('line')
+        .select_related('line', 'output_product')
     )
-
-    minutes_per_day = 480
-
-    def resolve_lead_time_days(step):
-        if step.lead_time_days and step.lead_time_days > 0:
-            return int(step.lead_time_days)
-        if step.line and step.line.lead_time_days:
-            return max(int(step.line.lead_time_days), 0)
-        return 0
-
-    def calc_shift_days(prev_minutes, add_minutes):
-        prev_days = (prev_minutes // minutes_per_day) if prev_minutes > 0 else 0
-        total_minutes = int(prev_minutes) + int(add_minutes or 0)
-        total_days = (total_minutes // minutes_per_day) if total_minutes > 0 else 0
-        return total_days - prev_days, total_minutes
 
     def path_key(path):
         try:
@@ -373,38 +359,28 @@ def _get_max_parent_bom_lead_time(product_id):
 
         final_step = next((s for s in routing_steps if s.hierarchy_path == 'final'), None)
         base_days = 0
-        base_minutes = 0
         if final_step:
-            lead_days = resolve_lead_time_days(final_step) if final_step.time_unit == 'DAY' else 0
-            step_minutes = final_step.duration_min or 0 if final_step.time_unit == 'MINUTE' else 0
-            minute_shift, base_minutes = calc_shift_days(0, step_minutes)
-            base_days = lead_days + minute_shift
+            base_days = resolve_lead_days_for_step(final_step)
             lt_by_step[final_step.id] = {'total': base_days, 'self': base_days}
 
-        def compute(path, parent_days, parent_minutes):
+        def compute(path, parent_days):
             step = step_map.get(path)
             if not step:
                 return
-            lead_days = resolve_lead_time_days(step) if step.time_unit == 'DAY' else 0
-            step_minutes = step.duration_min or 0 if step.time_unit == 'MINUTE' else 0
-            minute_shift, total_minutes = calc_shift_days(parent_minutes, step_minutes)
-            self_days = lead_days + minute_shift
+            self_days = resolve_lead_days_for_step(step)
             total_days = parent_days + self_days
             lt_by_step[step.id] = {'total': total_days, 'self': self_days}
             for child_path in sorted(children_map.get(path, []), key=path_key):
-                compute(child_path, total_days, total_minutes)
+                compute(child_path, total_days)
 
         for root_path in sorted(children_map.get(None, []), key=path_key):
-            compute(root_path, base_days, base_minutes)
+            compute(root_path, base_days)
 
         # hierarchy_path が無いデータでも最低限 self LT を返せるようにする
         for step in routing_steps:
             if step.id in lt_by_step:
                 continue
-            lead_days = resolve_lead_time_days(step) if step.time_unit == 'DAY' else 0
-            step_minutes = step.duration_min or 0 if step.time_unit == 'MINUTE' else 0
-            minute_shift, _total_minutes = calc_shift_days(0, step_minutes)
-            self_days = lead_days + minute_shift
+            self_days = resolve_lead_days_for_step(step)
             lt_by_step[step.id] = {'total': self_days, 'self': self_days}
 
     cumulative_lt = 0
@@ -618,7 +594,7 @@ def _compute_planned_stock_lt_adjustment(product_id, initial_date, max_lt, shift
     「initial_date+1 ～ initial_date+LT」の出庫分（LTシフト）を差し引く必要がある。
 
     社内品: 親製品の実績（BOM LT 分）を差し引く
-    最終品: self_lt_days 分先の firm 需要を差し引く
+    最終品: デリバリLT分先の firm 需要を差し引く
 
     ※ initial_date+LT ≤ today-1 の条件下では全て実績確定しているため値が安定する。
     """
@@ -640,9 +616,8 @@ def _compute_planned_stock_lt_adjustment(product_id, initial_date, max_lt, shift
     if final_delivery_lt is not None:
         delivery_lt = int(final_delivery_lt or 0)
     else:
-        # 呼び出し元から渡されない場合（後方互換）は self_lt_days を使用
-        product = Product.objects.filter(id=product_id).first()
-        delivery_lt = int(product.self_lt_days or 0) if product and product.is_final_product else -1
+        # 呼び出し元未指定時は0日として扱う（後方互換のself_lt_days参照は廃止）
+        delivery_lt = 0
 
     if delivery_lt >= 0:
         for offset in range(delivery_lt):  # 0, 1, ..., delivery_lt-1
@@ -1245,7 +1220,7 @@ def recalculate_planned_stock_qty(
         # 実在庫はLTシフトなし、計画在庫はLTシフトありで計算するため、
         # initial_date+1 ～ initial_date+LT の出庫分（LTシフト）を差し引く。
         # 社内品：親の実績を BOM LT 分差し引く
-        # 最終品：self_lt_days 分先の firm 需要を差し引く
+        # 最終品：デリバリLT分先の firm 需要を差し引く
         lt_adjustment = _compute_planned_stock_lt_adjustment(
             product_id, initial_backlog.plan_date, max_lt, shift_working_days,
             firm_map=firm_map,            final_delivery_lt=final_delivery_lt if is_final_product else None,

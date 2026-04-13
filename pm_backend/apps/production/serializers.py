@@ -1,5 +1,4 @@
 from decimal import Decimal, ROUND_HALF_UP
-import math
 
 from django.db import transaction
 from django.db.models import F, Sum
@@ -32,6 +31,7 @@ from .models_laser_actual import LaserActual, LaserActualDetail
 from .models_laser_kadojiseki import LaserShiftRecord
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_production import ProcessActual, ProductionOrder, StockAllocation
+from .inventory.lead_time_utils import resolve_lead_days_for_step
 
 
 class LineDemandSerializer(serializers.ModelSerializer):
@@ -174,22 +174,6 @@ class LineBacklogSerializer(serializers.ModelSerializer):
             build_effective_routing_q(prefix='routing__')
         ).select_related('line', 'output_product'))
 
-        minutes_per_day = 480
-
-        def resolve_lead_time_days(step):
-            if step.lead_time_days and step.lead_time_days > 0:
-                return step.lead_time_days
-            if step.line and step.line.lead_time_days:
-                return max(step.line.lead_time_days, 0)
-            return 0
-
-        def calc_shift_days(prev_minutes, add_minutes):
-            # 480分未満は0日扱い（切り捨て）
-            prev_days = math.floor(prev_minutes / minutes_per_day) if prev_minutes > 0 else 0
-            total_minutes = prev_minutes + add_minutes
-            total_days = math.floor(total_minutes / minutes_per_day) if total_minutes > 0 else 0
-            return total_days - prev_days, total_minutes
-
         def path_key(path):
             try:
                 return tuple(int(p) for p in str(path).split('.'))
@@ -213,35 +197,28 @@ class LineBacklogSerializer(serializers.ModelSerializer):
 
             final_step = next((s for s in routing_steps if s.hierarchy_path == 'final'), None)
             base_days = 0
-            base_minutes = 0
             if final_step:
-                lead_days = resolve_lead_time_days(final_step) if final_step.time_unit == 'DAY' else 0
-                step_minutes = final_step.duration_min or 0 if final_step.time_unit == 'MINUTE' else 0
-                minute_shift, base_minutes = calc_shift_days(0, step_minutes)
-                base_days = lead_days + minute_shift
+                base_days = resolve_lead_days_for_step(final_step)
                 lt_by_step[final_step.id] = {
                     'total': base_days,
                     'self': base_days,
                 }
 
-            def compute(path, parent_days, parent_minutes):
+            def compute(path, parent_days):
                 step = step_map.get(path)
                 if not step:
                     return
-                lead_days = resolve_lead_time_days(step) if step.time_unit == 'DAY' else 0
-                step_minutes = step.duration_min or 0 if step.time_unit == 'MINUTE' else 0
-                minute_shift, total_minutes = calc_shift_days(parent_minutes, step_minutes)
-                self_days = lead_days + minute_shift
+                self_days = resolve_lead_days_for_step(step)
                 total_days = parent_days + self_days
                 lt_by_step[step.id] = {
                     'total': total_days,
                     'self': self_days,
                 }
                 for child_path in sorted(children_map.get(path, []), key=path_key):
-                    compute(child_path, total_days, total_minutes)
+                    compute(child_path, total_days)
 
             for root_path in sorted(children_map.get(None, []), key=path_key):
-                compute(root_path, base_days, base_minutes)
+                compute(root_path, base_days)
 
         step_lookup = {}
         for step in steps:

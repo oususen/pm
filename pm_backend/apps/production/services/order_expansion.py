@@ -1,6 +1,5 @@
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
-import math
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Iterable, List, Tuple
 
@@ -10,6 +9,7 @@ from django.utils import timezone
 from masters.models import BOM, BOMItem, Line, Routing, RoutingStep
 from orders.core.models import OrderLine
 from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR
+from production.inventory.lead_time_utils import resolve_lead_days_for_step
 from production.models import LineDemand
 
 
@@ -410,7 +410,6 @@ class OrderExpansionService:
 
         required_date = order_line.due_date
         final_required_date = required_date
-        final_minutes = 0
 
         path_step_map = {
             step.hierarchy_path: step
@@ -425,36 +424,32 @@ class OrderExpansionService:
         final_step = next((step for step in steps if step.hierarchy_path == 'final'), None)
         if final_step:
             final_calendar_id = self._resolve_calendar_id(final_step.line_id)
-            lead_days = self._resolve_lead_time_days(final_step, product)
-            step_minutes = final_step.duration_min or 0 if final_step.time_unit == 'MINUTE' else 0
-            minute_shift, final_minutes = self._calc_shift_days(0, step_minutes)
+            lead_days = resolve_lead_days_for_step(final_step)
             final_required_date = self._shift_business_days(
                 final_calendar_id,
                 required_date,
-                lead_days + minute_shift,
+                lead_days,
             )
 
         required_by_path = {}
 
-        def compute_required_date(path, parent_date, parent_minutes):
+        def compute_required_date(path, parent_date):
             step = path_step_map.get(path)
             if not step:
                 return
             calendar_id = self._resolve_calendar_id(step.line_id)
-            lead_days = self._resolve_lead_time_days(step, product)
-            step_minutes = step.duration_min or 0 if step.time_unit == 'MINUTE' else 0
-            minute_shift, total_minutes = self._calc_shift_days(parent_minutes, step_minutes)
+            lead_days = resolve_lead_days_for_step(step)
             required_for_step = self._shift_business_days(
                 calendar_id,
                 parent_date,
-                lead_days + minute_shift,
+                lead_days,
             )
-            required_by_path[path] = (required_for_step, total_minutes)
+            required_by_path[path] = required_for_step
             for child_path in sorted(children_map.get(path, []), key=self._path_key):
-                compute_required_date(child_path, required_for_step, total_minutes)
+                compute_required_date(child_path, required_for_step)
 
         for root_path in sorted(children_map.get(None, []), key=self._path_key):
-            compute_required_date(root_path, final_required_date, final_minutes)
+            compute_required_date(root_path, final_required_date)
 
         for step in reversed(steps):
             if not step.line_id:
@@ -470,11 +465,11 @@ class OrderExpansionService:
                     effective_line_id = supplier_line_id
 
             calendar_id = self._resolve_calendar_id(effective_line_id)
-            lead_days = self._resolve_lead_time_days(step, product)
+            lead_days = resolve_lead_days_for_step(step)
             if step.hierarchy_path == 'final':
                 target_date = final_required_date
             elif step.hierarchy_path in required_by_path:
-                target_date = required_by_path[step.hierarchy_path][0]
+                target_date = required_by_path[step.hierarchy_path]
             else:
                 target_date = self._shift_business_days(calendar_id, required_date, lead_days)
 
@@ -621,13 +616,6 @@ class OrderExpansionService:
         except Exception:
             return (str(path),)
 
-    def _calc_shift_days(self, prev_minutes, add_minutes):
-        minutes_per_day = 480
-        prev_days = math.floor(prev_minutes / minutes_per_day) if prev_minutes > 0 else 0
-        total_minutes = prev_minutes + add_minutes
-        total_days = math.floor(total_minutes / minutes_per_day) if total_minutes > 0 else 0
-        return total_days - prev_days, total_minutes
-
     def _resolve_routing_in_memory(self, product_id: int, reference=None):
         """プリフェッチ済みルーティングからメモリ内で有効なルーティングを解決する。"""
         candidates = self._routing_by_product.get(product_id, [])
@@ -764,29 +752,6 @@ class OrderExpansionService:
 
         self._supplier_line_cache[product_id] = supplier_line_id
         return supplier_line_id
-
-    def _resolve_lead_time_days(self, step, main_product=None) -> int:
-        """
-        工程のLT（日）を決定する。
-        - 最終品・ライン最終品: RoutingStep.lead_time_days 優先、なければ Line.lead_time_days
-        - 中間品: RoutingStep.lead_time_days のみ使用
-        """
-        product = step.output_product if step.output_product_id else main_product
-        is_final = (step.hierarchy_path == 'final') or (
-            product and (product.is_final_product or product.is_line_final_product)
-        )
-
-        if is_final:
-            if step.lead_time_days:
-                return max(step.lead_time_days, 0)
-            line_obj = self._line_cache.get(step.line_id) if step.line_id else None
-            if line_obj and line_obj.lead_time_days:
-                return max(line_obj.lead_time_days, 0)
-            if step.line and step.line.lead_time_days:
-                return max(step.line.lead_time_days, 0)
-            return 0
-
-        return max(step.lead_time_days or 0, 0)
 
     def _calc_progress(self, numerator: Decimal, denominator: Decimal) -> Decimal:
         """0除算を避けつつ進捗（0-1）を小数3桁で返す。"""

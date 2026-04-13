@@ -28,18 +28,6 @@ class BOMService:
             step_cache[cache_key] = routing
         return routing
 
-    @staticmethod
-    def _convert_minute_duration_to_lt_days(duration_min: Any) -> int:
-        """
-        分管理を日LTへ変換する。
-        - 480分以下: 0日
-        - 480分超: duration_min // 480
-        """
-        minutes = int(duration_min or 0)
-        if minutes <= 480:
-            return 0
-        return max(minutes // 480, 0)
-
     def _resolve_where_used_edge_lt_days(
         self,
         bom_item: BOMItem,
@@ -49,10 +37,12 @@ class BOMService:
         """
         where-used（子→親の1エッジ）向けLT解決。
 
-        リードタイム仕様書に合わせ、次の優先で解決する。
-        - 親製品が最終品: line.lead_time_days を使用
-        - time_unit='MINUTE': duration_min を日換算（ラインLTへフォールバックしない）
-        - time_unit='DAY': RoutingStep.lead_time_days -> Line.lead_time_days -> BOMItem.lead_time_days -> 0
+        統一ルール:
+        - 投入LT は RoutingStep.lead_time_days を使用（0 は有効値）
+        - 未設定時のみ Line.lead_time_days にフォールバック
+        - duration_min はサイクルタイム専用のため使用しない
+        - time_unit (DAY / MINUTE) による分岐を持たない
+        - 親製品が最終品の特殊経路（親側のラインLT参照）は互換のため維持
         """
         parent_product = getattr(getattr(bom_item, 'bom', None), 'parent_product', None)
         is_final_parent = bool(parent_product and getattr(parent_product, 'is_final_product', False))
@@ -100,10 +90,6 @@ class BOMService:
             line_obj = getattr(bom_item, 'line', None)
             return max(int(getattr(line_obj, 'lead_time_days', 0) or 0), 0)
 
-        # BOMでMINUTE指定がある場合は、仕様どおりdurationのみで判定
-        if getattr(bom_item, 'time_unit', None) == 'MINUTE':
-            return self._convert_minute_duration_to_lt_days(getattr(bom_item, 'duration_min', 0))
-
         step = None
         line_id = getattr(bom_item, 'line_id', None)
         child_product_id = getattr(bom_item, 'child_product_id', None)
@@ -139,30 +125,16 @@ class BOMService:
                     step_cache[cache_key] = step
 
         if step is not None:
-            if getattr(step, 'time_unit', None) == 'MINUTE':
-                return self._convert_minute_duration_to_lt_days(getattr(step, 'duration_min', 0))
-
-            step_lt = int(getattr(step, 'lead_time_days', 0) or 0)
-            if step_lt > 0:
-                return step_lt
+            step_lt_raw = getattr(step, 'lead_time_days', None)
+            if step_lt_raw is not None:
+                return max(int(step_lt_raw), 0)
 
             step_line = getattr(step, 'line', None)
             line_lt = int(getattr(step_line, 'lead_time_days', 0) or 0) if step_line else 0
             if line_lt > 0:
                 return line_lt
 
-        if getattr(bom_item, 'time_unit', None) == 'DAY':
-            return max(int(getattr(bom_item, 'lead_time_days', 0) or 0), 0)
-
-        return 0
-
-    def _resolve_time_unit_lt_days(self, time_unit: Any, lead_time_days: Any, duration_min: Any) -> Optional[int]:
-        """time_unitに応じてLT(日)を解決する。"""
-        if time_unit == 'DAY':
-            return max(int(lead_time_days or 0), 0)
-        if time_unit == 'MINUTE':
-            return self._convert_minute_duration_to_lt_days(duration_min)
-        return None
+        return max(int(getattr(bom_item, 'lead_time_days', 0) or 0), 0)
 
     def _resolve_where_used_parent_context(
         self,

@@ -22,6 +22,7 @@ from production.serializers_process_realtime import (
     ProcessRealtimeCreateSerializer,
     resolve_workday_date_for_process,
 )
+from production.inventory.lead_time_utils import resolve_lead_days_for_step
 from production.inventory.inventory_calculator import (
     recalculate_inventory_for_line,
 )
@@ -109,19 +110,8 @@ def _routing_path_key(path):
 
 
 def _resolve_engineering_change_step_lt_days(step):
-    product = step.output_product if step.output_product_id else (step.routing.product if step.routing_id else None)
-    is_final = (step.hierarchy_path == 'final') or (
-        product and (product.is_final_product or product.is_line_final_product)
-    )
-    if is_final:
-        if step.time_unit == 'DAY' and int(step.lead_time_days or 0) > 0:
-            return int(step.lead_time_days or 0)
-        if step.line and int(step.line.lead_time_days or 0) > 0:
-            return int(step.line.lead_time_days or 0)
-        return 0
-    if step.time_unit == 'DAY':
-        return int(step.lead_time_days or 0)
-    return 0
+    """統一ルール: step.lead_time_days を使用（0 は有効値、未設定時のみ line fallback）。"""
+    return resolve_lead_days_for_step(step)
 
 
 def _build_engineering_change_routing_lt_cache(routing_id: int, routing_lt_cache: dict):
@@ -137,14 +127,6 @@ def _build_engineering_change_routing_lt_cache(routing_id: int, routing_lt_cache
         routing_lt_cache[routing_id] = {}
         return routing_lt_cache[routing_id]
 
-    minutes_per_day = 480
-
-    def calc_shift_days(prev_minutes, add_minutes):
-        prev_days = math.floor(prev_minutes / minutes_per_day) if prev_minutes > 0 else 0
-        total_minutes = prev_minutes + add_minutes
-        total_days = math.floor(total_minutes / minutes_per_day) if total_minutes > 0 else 0
-        return total_days - prev_days, total_minutes
-
     step_map = {
         s.hierarchy_path: s
         for s in steps
@@ -158,35 +140,28 @@ def _build_engineering_change_routing_lt_cache(routing_id: int, routing_lt_cache
     lt_by_step = {}
     final_step = next((s for s in steps if s.hierarchy_path == 'final'), None)
     base_days = 0
-    base_minutes = 0
     if final_step:
         base_days = _resolve_engineering_change_step_lt_days(final_step)
-        final_minutes = int(final_step.duration_min or 0) if final_step.time_unit == 'MINUTE' else 0
-        minute_shift, base_minutes = calc_shift_days(0, final_minutes)
-        base_days += minute_shift
         lt_by_step[final_step.id] = {
             'total': base_days,
             'self': base_days,
         }
 
-    def compute(path, parent_days, parent_minutes):
+    def compute(path, parent_days):
         step = step_map.get(path)
         if not step:
             return
-        lead_days = _resolve_engineering_change_step_lt_days(step)
-        step_minutes = int(step.duration_min or 0) if step.time_unit == 'MINUTE' else 0
-        minute_shift, total_minutes = calc_shift_days(parent_minutes, step_minutes)
-        self_days = lead_days + minute_shift
+        self_days = _resolve_engineering_change_step_lt_days(step)
         total_days = parent_days + self_days
         lt_by_step[step.id] = {
             'total': total_days,
             'self': self_days,
         }
         for child_path in sorted(children_map.get(path, []), key=_routing_path_key):
-            compute(child_path, total_days, total_minutes)
+            compute(child_path, total_days)
 
     for root_path in sorted(children_map.get(None, []), key=_routing_path_key):
-        compute(root_path, base_days, base_minutes)
+        compute(root_path, base_days)
 
     routing_lt_cache[routing_id] = lt_by_step
     return lt_by_step

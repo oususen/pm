@@ -22,20 +22,9 @@ from .inventory_calculator import (
     _build_firm_order_map,
     _get_max_parent_bom_lead_time,
 )
+from .lead_time_utils import resolve_lead_days_for_step
 
 logger = logging.getLogger(__name__)
-
-
-def _convert_minute_duration_to_lt_days(duration_min):
-    """
-    分管理の所要時間を営業日換算LTに変換する。
-    - 480分以下: 0日
-    - 480分超: duration_min // 480 日
-    """
-    minutes = int(duration_min or 0)
-    if minutes <= 480:
-        return 0
-    return max(minutes // 480, 0)
 
 
 def _resolve_edge_lead_time_days(line_id, child_product_id, bom_item=None, step_cache=None, reference_date=None):
@@ -56,7 +45,7 @@ def _resolve_edge_lead_time_days(line_id, child_product_id, bom_item=None, step_
 def _resolve_final_product_lt_days(line_id, product_id, reference_date=None):
     """
     最終品/ライン最終品向けLT解決。
-    最終品はパイプライン需要控除の基準となるため、DAY工程優先・それ以外はラインLTを使用する。
+    統一ルール: step.lead_time_days を使用し、未設定時のみ line.lead_time_days にフォールバック。
     """
     step = (
         RoutingStep.objects.filter(
@@ -72,13 +61,7 @@ def _resolve_final_product_lt_days(line_id, product_id, reference_date=None):
         .first()
     )
     if step is not None:
-        if getattr(step, 'time_unit', None) == 'DAY':
-            step_lt = int(step.lead_time_days or 0)
-            if step_lt > 0:
-                return step_lt
-        step_line = getattr(step, 'line', None)
-        if step_line and int(step_line.lead_time_days or 0) > 0:
-            return int(step_line.lead_time_days or 0)
+        return resolve_lead_days_for_step(step)
     return 0
 
 
@@ -176,15 +159,11 @@ def _resolve_stocktake_lead_time_days(line_id, product_id, bom_item=None, step_c
     """
     棚卸専用のLT解決。
 
-    優先順位:
-    - time_unit=MINUTE:
-      - 中間品は duration_min のみで解決（ラインLTへフォールバックしない）
-      - 480分以下=0日、480分超=duration_min//480 日
-    - time_unit=DAY:
-      1. RoutingStep.lead_time_days
-      2. RoutingStep.line.lead_time_days
-      3. BOMItem.lead_time_days
-      4. 0
+    統一ルール:
+    - RoutingStep.lead_time_days を使用（0 は有効値）
+    - 未設定(None)時のみ RoutingStep.line.lead_time_days にフォールバック
+    - duration_min は使用しない
+    - Step が存在しない場合のみ BOMItem.lead_time_days を最終フォールバックとして使用
     """
     step = None
     cache_key = (line_id, product_id, reference_date)
@@ -207,23 +186,10 @@ def _resolve_stocktake_lead_time_days(line_id, product_id, bom_item=None, step_c
         if step_cache is not None:
             step_cache[cache_key] = step
 
-    # 分管理の中間品は duration_min のみを使用（ラインLTフォールバック禁止）
-    if bom_item is not None and getattr(bom_item, 'time_unit', None) == 'MINUTE':
-        return _convert_minute_duration_to_lt_days(getattr(bom_item, 'duration_min', 0))
-
     if step is not None:
-        if getattr(step, 'time_unit', None) == 'MINUTE':
-            return _convert_minute_duration_to_lt_days(getattr(step, 'duration_min', 0))
+        return resolve_lead_days_for_step(step)
 
-        lead_days = int(step.lead_time_days or 0)
-        if lead_days > 0:
-            return lead_days
-
-        step_line = getattr(step, 'line', None)
-        if step_line and int(step_line.lead_time_days or 0) > 0:
-            return int(step_line.lead_time_days or 0)
-
-    if bom_item is not None and getattr(bom_item, 'time_unit', None) == 'DAY':
+    if bom_item is not None:
         return max(int(getattr(bom_item, 'lead_time_days', 0) or 0), 0)
 
     return 0

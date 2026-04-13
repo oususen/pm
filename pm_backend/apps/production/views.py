@@ -19,6 +19,7 @@ from django.http import HttpResponse
 from django.utils import timezone
 
 from .models import LineDemand
+from .inventory.lead_time_utils import resolve_lead_days_for_step
 from orders.models import OrderLine
 from .models_line_backlog import LineBacklog
 from .models_line_backlog_adjustment import LineBacklogAdjustment
@@ -1062,13 +1063,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 return None
 
             def resolve_lead_time_days(product_id, reference_date=None):
-                # 最終品は工程LT優先、未設定時にラインLTを使用
+                # 統一ルール: step.lead_time_days を使用（0 は有効、未設定時のみ line fallback）
                 step = _pick_effective_step(product_id, reference_date)
                 if step:
-                    if step.lead_time_days:
-                        return step.lead_time_days
-                    if step.line and step.line.lead_time_days:
-                        return step.line.lead_time_days
+                    return resolve_lead_days_for_step(step)
                 return 0
 
             for ol in order_lines:
@@ -1462,30 +1460,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             return seq if seq > 0 else INVALID_SEQUENCE_SORT_VALUE
 
         def resolve_lead_time_days(current_product_id, bom_item=None):
-            """現ラインのLTを優先して解決する。"""
+            """統一ルール: step.lead_time_days を使用（0 有効、未設定時のみ line fallback）。"""
             step = product_step_map.get(current_product_id)
             if step is not None:
                 try:
-                    step_product = getattr(step, 'output_product', None) or getattr(step.routing, 'product', None)
-                    is_final_like = bool(
-                        step_product and (
-                            getattr(step_product, 'is_final_product', False)
-                            or getattr(step_product, 'is_line_final_product', False)
-                        )
-                    )
-                    # time_unit基準でLT解決:
-                    # - 最終品/ライン最終品: RoutingStep.lead_time_days 優先、未設定時に line.lead_time_days
-                    # - 中間品(MINUTE): RoutingStep.lead_time_days のみ使用（0なら0のまま）
-                    # - DAY: routing_step.lead_time_days を使用
-                    if step.time_unit == 'MINUTE':
-                        if is_final_like:
-                            if step.lead_time_days:
-                                return max(int(step.lead_time_days or 0), 0)
-                            step_line = getattr(step, 'line', None)
-                            return max(int(getattr(step_line, 'lead_time_days', 0) or 0), 0)
-                        return max(int(step.lead_time_days or 0), 0)
-
-                    return max(int(step.lead_time_days or 0), 0)
+                    return resolve_lead_days_for_step(step)
                 except Exception:
                     return 0
             if bom_item and bom_item.lead_time_days:

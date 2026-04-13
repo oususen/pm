@@ -294,7 +294,7 @@ class HirakataPickupPDFService:
                     cc.container_code,
                     cc.name AS container_name,
                     COALESCE(p.capacity, 0) AS capacity_per_container,
-                    COALESCE(NULLIF(p.standard_lt_days, 0), NULLIF(p.self_lt_days, 0), 1) AS lead_time_days,
+                    COALESCE(NULLIF(p.standard_lt_days, 0), 1) AS lead_time_days,
                     COALESCE(NULLIF(ol.quantity, 0), 0) AS effective_quantity
                 FROM t_order_line ol
                 INNER JOIN t_order o ON ol.order_id = o.id
