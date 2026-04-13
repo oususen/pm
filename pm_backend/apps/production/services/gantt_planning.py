@@ -14,9 +14,13 @@ from ..models_gantt_display_product_map import GanttDisplayProductMap
 
 logger = logging.getLogger(__name__)
 
+COPRODUCT_CHILD_DISPLAY_EXCEPTION_PRODUCT_CODES = {'YD40002683'}
+COPRODUCT_CHILD_DISPLAY_EXCEPTION_PROCESS_CODES = {'4001'}
+
 @dataclass
 class ProcessSpec:
     process_id: int
+    process_code: str
     process_name: str
     process_number: int
     cycle_time_minutes: float
@@ -234,6 +238,7 @@ def _build_process_specs(steps: List[RoutingStep], plan_qty: Decimal, plan_date,
         parallel_group = getattr(step, 'parallel_group', 1) or 1
         specs.append(ProcessSpec(
             process_id=step.process_id,
+            process_code=step.process.process_code if step.process_id else '',
             process_name=step.process.process_name if step.process_id else '',
             process_number=step.step_no or 0,
             cycle_time_minutes=cycle_time_min,
@@ -255,6 +260,7 @@ def _build_l2201_synthetic_spec(product: Product, process, cycle_time_minutes: f
         return None
     return ProcessSpec(
         process_id=process_id,
+        process_code=getattr(process_obj, 'process_code', '') or '',
         process_name=getattr(process_obj, 'process_name', '') or '',
         process_number=process_number or 0,
         cycle_time_minutes=float(cycle_time_minutes or 0.0),
@@ -283,6 +289,7 @@ def _build_line_final_backlog_fallback_specs(
         process_obj = getattr(row, 'process', None)
         specs.append(ProcessSpec(
             process_id=row.process_id,
+            process_code=getattr(process_obj, 'process_code', '') or '',
             process_name=getattr(process_obj, 'process_name', '') or '',
             process_number=step_no_by_process.get(row.process_id, 0),
             cycle_time_minutes=float(getattr(row, 'cycle_time_min', 0.0) or 0.0),
@@ -313,6 +320,7 @@ def _build_line_final_line_process_fallback_specs(
     for proc in processes:
         specs.append(ProcessSpec(
             process_id=proc.id,
+            process_code=proc.process_code or '',
             process_name=proc.process_name or '',
             process_number=step_no_by_process.get(proc.id, 0),
             cycle_time_minutes=0.0,
@@ -526,6 +534,17 @@ def _is_coproduct_sub_process(spec: ProcessSpec, coproduct_parent_map: Dict[int,
 def _is_coproduct_child(spec: ProcessSpec, coproduct_children_set: set) -> bool:
     """連産品の子品目を出力する工程かどうかを判定（除外用）"""
     return bool(spec.output_product_id and spec.output_product_id in coproduct_children_set)
+
+def _is_coproduct_child_display_exception(spec: ProcessSpec, plan_product: Optional[Product] = None) -> bool:
+    """連産子でも工程ガントに表示する特例判定。"""
+    product_codes = {
+        str(getattr(spec, 'output_product_code', '') or '').strip().upper(),
+        str(getattr(plan_product, 'product_code', '') or '').strip().upper(),
+    }
+    if not (product_codes & COPRODUCT_CHILD_DISPLAY_EXCEPTION_PRODUCT_CODES):
+        return False
+    process_code = str(getattr(spec, 'process_code', '') or '').strip()
+    return process_code in COPRODUCT_CHILD_DISPLAY_EXCEPTION_PROCESS_CODES
 
 
 def _overlaps(start: datetime, end: datetime, item: Dict) -> bool:
@@ -935,7 +954,11 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 })
                 continue
             # 連産品の子（代表品でない）はスキップ（親の工程として一緒に処理される）
-            if (not is_l2201_line) and _is_coproduct_child(spec, coproduct_children_set):
+            if (
+                (not is_l2201_line)
+                and _is_coproduct_child(spec, coproduct_children_set)
+                and (not _is_coproduct_child_display_exception(spec, product))
+            ):
                 continue
             qty_product_id = spec.output_product_id or obj.product_id
             process_qty = multiplier_map.get(qty_product_id, Decimal('1')) * obj.plan_qty

@@ -207,6 +207,7 @@ const props = defineProps({
 const emit = defineEmits(['dirty-change', 'mode-change', 'edit-dirty-change', 'structure-dirty-change'])
 const TANK_LINE_CODE = 'L2200'
 const L2201_LINE_CODE = 'L2201'
+const FLOOR_4001_COPRODUCT_CHILD_DISPLAY_EXCEPTION_CODES = new Set(['YD40002683'])
 const TANK_PRODUCT_ORDER = [
   'YD60003386',
   'YD60011305',
@@ -516,6 +517,12 @@ const shouldDisplayProductInProcess = (
   const code = String(productCode || '').trim()
   const codeUpper = code.toUpperCase()
   if (codeUpper.startsWith('ST')) return true
+  if (FLOOR_4001_COPRODUCT_CHILD_DISPLAY_EXCEPTION_CODES.has(codeUpper)) {
+    const processCode = String(
+      processCodeMap.value[Number(processId)] || processCodeMap.value[String(processId)] || ''
+    ).trim()
+    if (processCode === '4001' || Number(processId) === 4001) return true
+  }
   const pid = Number(productId)
   if (!Number.isFinite(pid) || pid <= 0) return false
   const childSet = childMapSource?.[Number(processId)]

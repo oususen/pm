@@ -847,6 +847,7 @@ const FLOOR_L2100_PRODUCT_ORDER = [
   'YD40002946',
   'YD40002683',
 ]
+const FLOOR_4001_COPRODUCT_CHILD_DISPLAY_EXCEPTION_CODES = new Set(['YD40002683'])
 const gridWrapperRef = ref(null)
 const lockDays = ref(0)
 const isEditUnlocked = ref(false)
@@ -921,8 +922,15 @@ const isFloorSpotLine = computed(() => {
   const lineName = String(line.line_name || '').trim()
   return lineCode === 'L2101' || lineName.includes('フロアスポット')
 })
+const isFloorShippingAutoPlanLine = computed(() => {
+  const line = selectedLineObj.value
+  if (!line) return false
+  const lineCode = String(line.line_code || '').trim().toUpperCase()
+  const lineName = String(line.line_name || '').trim()
+  return activePlanTab.value === 'floor-shipping' && (lineCode === 'L2102' || lineName.includes('フロア配送'))
+})
 const canShowFloorSpotAutoPlanButton = computed(() => (
-  activePlanTab.value === 'floor' && isFloorSpotLine.value
+  (activePlanTab.value === 'floor' && isFloorSpotLine.value) || isFloorShippingAutoPlanLine.value
 ))
 // フロア配送: 8時着/15時着台車数（台車1台=2個、異なる製品は混載しない）
 const floorShippingCartCounts = computed(() => {
@@ -2031,9 +2039,23 @@ const fetchCoproductDisplayProductIdSet = async (parentIds) => {
 }
 
 const filterRowsByExcludedProductIds = (rows, excludedIds) => {
+  const isCoproductChildDisplayException = (row) => {
+    const productCode = String(row?.product_code || '').trim().toUpperCase()
+    if (!FLOOR_4001_COPRODUCT_CHILD_DISPLAY_EXCEPTION_CODES.has(productCode)) return false
+
+    const processCode = String(
+      row?.process_code || row?.processCode || row?.resolved_process_code || ''
+    ).trim()
+    if (processCode === '4001') return true
+
+    const processId = Number(row?.process ?? row?.process_id)
+    return Number.isFinite(processId) && processId === 4001
+  }
+
   return (Array.isArray(rows) ? rows : []).filter((row) => {
     const productId = row?.product
     if (productId === null || productId === undefined || productId === '') return false
+    if (excludedIds.has(String(productId)) && isCoproductChildDisplayException(row)) return true
     return !excludedIds.has(String(productId))
   })
 }
@@ -3409,7 +3431,8 @@ const applyDemandToPlanForVisiblePeriod = () => {
   rows.value.forEach((row) => {
     dateColumns.value.forEach((c) => {
       const daily = ensureDailyCell(row, c.key)
-      const demandQtyRaw = Number(daily.demand || 0)
+      const sourceQty = isProgressMode.value ? daily.line_demand_qty : daily.demand
+      const demandQtyRaw = Number(sourceQty || 0)
       const demandQty = Number.isFinite(demandQtyRaw) ? Math.max(0, demandQtyRaw) : 0
       daily.plan = demandQty > 0 ? demandQty : ''
       daily.sequence_no = ''
@@ -3446,7 +3469,7 @@ const doFloorSpotAutoPlan = async () => {
       return
     }
   } catch (e) {
-    console.error('フロアスポット自動計画エラー', e)
+    console.error('自動計画エラー', e)
     alert('自動計画の事前処理（需要取込）に失敗しました。')
     return
   } finally {
