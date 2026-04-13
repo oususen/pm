@@ -207,9 +207,17 @@
           <button class="btn-primary" @click="saveTemplate" :disabled="!canEditFields || saving">
             {{ form.id ? "下書き更新" : "下書き保存" }}
           </button>
-          <button class="btn-secondary" @click="loadSm009Defaults" :disabled="!canEditFields">
-            SM-009初期項目を読込
+          <button class="btn-secondary" @click="openOperationExcelPicker" :disabled="!canEditFields || excelImportLoading">
+            {{ excelImportLoading ? "Excel読込中..." : "運用中Excel読込" }}
           </button>
+          <input
+            ref="operationExcelInput"
+            type="file"
+            accept=".xlsx,.xls"
+            class="hidden-file-input"
+            :disabled="!canEditFields || excelImportLoading"
+            @change="onOperationExcelFileChange"
+          />
           <button class="btn-approve" @click="submitForReview" :disabled="!canSubmitForReview || actionLoading">
             確認依頼
           </button>
@@ -539,30 +547,6 @@ const RECORD_TYPE_LABELS = {
   TEXT: "文字",
 }
 
-const SM009_DAILY_ITEMS = [
-  { inspection_no: 1, item_name: "電極のガタ（上下）", standard: "ガタ無きこと", frequency: "始業時", method: "シャンクを掴んで\n揺する", record_type: "CHECK", unit: "", criteria: "" },
-  { inspection_no: 2, item_name: "加圧部の面直", standard: "プロジェクションの\n圧痕がはっきり\n見えること", frequency: "始業時", method: "ワーク上にナットを\n空打ちして圧痕を見る", record_type: "CHECK", unit: "", criteria: "" },
-  { inspection_no: 3, item_name: "ガイドピンのガタ", standard: "下部電極との隙間が\n0.5mm以下のこと\n（ピアノ線棒が通らないこと）", frequency: "始業時", method: "ピアノ線棒（φ0.5)を\n隙間に通す", record_type: "CHECK", unit: "", criteria: "" },
-  { inspection_no: 4, item_name: "ガイドピンの割れ", standard: "無きこと", frequency: "始業時", method: "目視で確認する", record_type: "CHECK", unit: "", criteria: "" },
-  { inspection_no: 5, item_name: "水・エアの漏れ", standard: "無きこと", frequency: "始業時", method: "目視・手感・聴感で\n確認する", record_type: "CHECK", unit: "", criteria: "" },
-  { inspection_no: 6, item_name: "上部ストローク\nセンサーの作動", standard: "ワーク・ナット空打ちにて\nNGランプ点灯すること", frequency: "始業時", method: "イジワルテストで\n確認する", record_type: "CHECK", unit: "", criteria: "" },
-  { inspection_no: 7, item_name: "条件No.の設定確認", standard: "No.『13』であること", frequency: "始業時", method: "タイマーを確認する", record_type: "CHECK", unit: "", criteria: "" },
-  { inspection_no: 8, item_name: "溶着強度の確認", standard: "70N・m以上\n（記録は数値記入）", frequency: "始業時", method: "テストピースを\nトルクレンチにて\n破壊する", record_type: "NUMERIC", unit: "N・m", criteria: "70以上" },
-  { inspection_no: 9, item_name: "上部押さえ交換", standard: "新品または再研磨品に交換", frequency: "始業時", method: "専用工具", record_type: "CHECK", unit: "", criteria: "" },
-  { inspection_no: 10, item_name: "ドレン水抜き", standard: "水が溜まっていないこと", frequency: "始業時", method: "ドレンコック開放", record_type: "CHECK", unit: "", criteria: "" },
-  { inspection_no: 11, item_name: "上部ストロックセンサー調整", standard: "上部ランプ消灯すること", frequency: "電極交換後", method: "「上部ストロークセンサー\n調整要領書」に基づく", record_type: "CHECK", unit: "", criteria: "" },
-  { inspection_no: 12, item_name: "オンス銅板の確認", standard: "２/３以上残りある事", frequency: "始業時", method: "目視", record_type: "CHECK", unit: "", criteria: "" },
-  { inspection_no: 13, item_name: "加圧確認", standard: "加圧が0.22±0.01MPaであること", frequency: "始業時", method: "加圧計の針が2個の緑色矢印の中にあるのを目視で確認", record_type: "CHECK", unit: "", criteria: "" },
-  { inspection_no: 14, item_name: "ベーク板の削れ", standard: "表面の削れ、欠けが無いこと", frequency: "始業時", method: "目視", record_type: "CHECK", unit: "", criteria: "" },
-]
-
-const SM009_QUARTERLY_ITEMS = [
-  { item_name: "プログラムNo.", standard: "13", method: "参考値: ――", criteria: "設定と同じこと", record_type: "TEXT", unit: "" },
-  { item_name: "加圧", standard: "0.22MPa", method: "参考値: 2.7kN", criteria: "参考値±0.3kN以内", record_type: "NUMERIC", unit: "kN" },
-  { item_name: "電流", standard: "10800A", method: "参考値: 10800A", criteria: "参考値±500A以内", record_type: "NUMERIC", unit: "A" },
-  { item_name: "通電時間", standard: "5サイクル", method: "参考値: ――", criteria: "設定と同じこと", record_type: "NUMERIC", unit: "サイクル" },
-]
-
 const route = useRoute()
 const router = useRouter()
 
@@ -583,6 +567,8 @@ const rejectDialogVisible = ref(false)
 const rejectComment = ref("")
 const listFilter = ref({ keyword: "", status: "" })
 const prevVersionItems = ref([])
+const operationExcelInput = ref(null)
+const excelImportLoading = ref(false)
 
 const createEmptyForm = () => ({
   id: null,
@@ -1193,43 +1179,6 @@ const attachmentCountLabel = (item) => {
   return Array.isArray(item?.attachments) ? item.attachments.length : 0
 }
 
-const buildSm009Defaults = () => {
-  const daily = SM009_DAILY_ITEMS.map((item, index) => ({
-    local_key: createLocalKey(),
-    section_type: "DAILY",
-    display_order: index + 1,
-    inspection_no: item.inspection_no,
-    item_name: item.item_name,
-    standard: item.standard,
-    frequency: item.frequency,
-    method: item.method,
-    record_type: item.record_type,
-    unit: item.unit,
-    criteria: item.criteria,
-    is_required: true,
-    is_active: true,
-    attachments: [],
-  }))
-
-  const quarterly = SM009_QUARTERLY_ITEMS.map((item, index) => ({
-    local_key: createLocalKey(),
-    section_type: "QUARTERLY",
-    display_order: index + 1,
-    inspection_no: null,
-    item_name: item.item_name,
-    standard: item.standard,
-    frequency: "3ヶ月/1回",
-    method: item.method,
-    record_type: item.record_type,
-    unit: item.unit,
-    criteria: item.criteria,
-    is_required: true,
-    is_active: true,
-    attachments: [],
-  }))
-  return [...daily, ...quarterly]
-}
-
 const dailyItems = computed(() =>
   [...form.value.items]
     .filter((item) => item.section_type === "DAILY")
@@ -1343,13 +1292,390 @@ const uploadAttachmentImage = async (event, attachment) => {
   }
 }
 
-const loadSm009Defaults = () => {
-  if (form.value.items.length > 0) {
-    const ok = window.confirm("現在の項目をSM-009初期項目で上書きします。よろしいですか？")
-    if (!ok) return
+const normalizeImportHeader = (value) => {
+  return String(value || "")
+    .replace(/\s+/g, "")
+    .replace(/[()（）]/g, "")
+    .trim()
+}
+
+const normalizeRecordTypeFromExcel = (value) => {
+  const text = String(value || "").trim()
+  if (!text) return "CHECK"
+  if (text.includes("数")) return "NUMERIC"
+  if (text.includes("文") || text.includes("テキスト")) return "TEXT"
+  if (text.includes("CHECK") || text.includes("チェック")) return "CHECK"
+  return "CHECK"
+}
+
+const normalizeBooleanFromExcel = (value, defaultValue = true) => {
+  const text = String(value || "").trim().toLowerCase()
+  if (!text) return defaultValue
+  if (["false", "0", "off", "no", "無効", "いいえ"].includes(text)) return false
+  if (["true", "1", "on", "yes", "有効", "はい"].includes(text)) return true
+  return defaultValue
+}
+
+const normalizeExcelDateString = (value) => {
+  const text = String(value || "").trim()
+  if (!text) return ""
+  const m = text.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/)
+  if (!m) return text
+  const y = m[1]
+  const month = String(m[2]).padStart(2, "0")
+  const day = String(m[3]).padStart(2, "0")
+  return `${y}-${month}-${day}`
+}
+
+const rowToJoinedText = (row) =>
+  (Array.isArray(row) ? row : [])
+    .map((cell) => String(cell || "").trim())
+    .filter(Boolean)
+    .join(" ")
+
+const buildImportHeaderMap = (headerRow) => {
+  const map = {}
+  ;(Array.isArray(headerRow) ? headerRow : []).forEach((cell, index) => {
+    const key = normalizeImportHeader(cell)
+    const lower = key.toLowerCase()
+    const normalizedNo = lower.replace(/[.\-_:]/g, "")
+    if (!key) return
+    if (["no", "番号"].includes(normalizedNo) || key === "No") map.inspection_no = index
+    if (key.includes("点検項目") || key === "項目") map.item_name = index
+    if (key.includes("規格") || key.includes("設定")) map.standard = index
+    if (key.includes("確認頻度")) map.frequency = index
+    if (key.includes("方法") || key.includes("参考値単位") || key.includes("参考値")) map.method = index
+    if (key.includes("記録種別")) map.record_type = index
+    if (key === "単位") map.unit = index
+    if (key.includes("判定基準")) map.criteria = index
+    if (key.includes("必須")) map.is_required = index
+    if (key === "有効") map.is_active = index
+  })
+  return map
+}
+
+const findHeaderRowIndex = (rows, sectionType) => {
+  const normalizedRows = Array.isArray(rows) ? rows : []
+  for (let i = 0; i < normalizedRows.length; i += 1) {
+    const headerMap = buildImportHeaderMap(normalizedRows[i] || [])
+    const hasItemName = Number.isInteger(headerMap.item_name)
+    const hasSectionSpecificKey =
+      sectionType === "DAILY"
+        ? Number.isInteger(headerMap.inspection_no) || Number.isInteger(headerMap.frequency)
+        : Number.isInteger(headerMap.standard) || Number.isInteger(headerMap.method)
+    if (hasItemName && hasSectionSpecificKey) return i
   }
-  form.value.items = buildSm009Defaults()
-  resizeAllTextareas()
+  return -1
+}
+
+const isSectionBreakRow = (rowText) => {
+  return (
+    rowText.includes("日次点検項目") ||
+    rowText.includes("定期実測項目") ||
+    rowText.includes("3ヶ月/1回実測確認") ||
+    rowText.includes("3ヶ月1回実測確認") ||
+    rowText.includes("ワークフロー履歴") ||
+    rowText.includes("異常時記入") ||
+    rowText.includes("特記事項") ||
+    rowText.includes("付表")
+  )
+}
+
+const parseImportedRows = (rows, sectionType, defaults = {}) => {
+  const normalizedRows = Array.isArray(rows) ? rows : []
+  const sectionItems = []
+  if (!normalizedRows.length) return sectionItems
+
+  const headerIndex = findHeaderRowIndex(normalizedRows, sectionType)
+  if (headerIndex < 0) return sectionItems
+
+  const headerMap = buildImportHeaderMap(normalizedRows[headerIndex] || [])
+  for (let i = headerIndex + 1; i < normalizedRows.length; i += 1) {
+    const row = normalizedRows[i] || []
+    const rowText = rowToJoinedText(row)
+    if (!rowText) continue
+    if (isSectionBreakRow(rowText)) break
+
+    const itemName = String(row[headerMap.item_name] || "").trim()
+    if (!itemName) continue
+    if (normalizeImportHeader(itemName).includes("点検項目")) continue
+
+    sectionItems.push({
+      local_key: createLocalKey(),
+      section_type: sectionType,
+      display_order: sectionItems.length + 1,
+      inspection_no:
+        sectionType === "DAILY"
+          ? Number(row[headerMap.inspection_no] || sectionItems.length + 1) || sectionItems.length + 1
+          : null,
+      item_name: itemName,
+      standard: String(row[headerMap.standard] || "").trim(),
+      frequency:
+        sectionType === "DAILY"
+          ? String(row[headerMap.frequency] || defaults.frequency || "始業時").trim()
+          : String(row[headerMap.frequency] || defaults.frequency || "3ヶ月/1回").trim(),
+      method: String(row[headerMap.method] || "").trim(),
+      record_type: normalizeRecordTypeFromExcel(row[headerMap.record_type]),
+      unit: String(row[headerMap.unit] || "").trim(),
+      criteria: String(row[headerMap.criteria] || "").trim(),
+      is_required: normalizeBooleanFromExcel(row[headerMap.is_required], true),
+      is_active: normalizeBooleanFromExcel(row[headerMap.is_active], true),
+      attachments: [],
+    })
+  }
+  return sectionItems
+}
+
+const splitTemplateRowsBySection = (rows) => {
+  const normalizedRows = Array.isArray(rows) ? rows : []
+  const result = {
+    dailyRows: [],
+    quarterlyRows: [],
+    metaRows: [],
+  }
+
+  let dailyStart = -1
+  let quarterlyStart = -1
+  for (let i = 0; i < normalizedRows.length; i += 1) {
+    const row = normalizedRows[i] || []
+    const rowText = rowToJoinedText(row)
+    const headerMap = buildImportHeaderMap(row)
+    if (
+      dailyStart < 0 &&
+      (rowText.includes("日次点検項目") || (Number.isInteger(headerMap.item_name) && Number.isInteger(headerMap.inspection_no)))
+    ) {
+      dailyStart = i
+    }
+    if (
+      quarterlyStart < 0 &&
+      (rowText.includes("定期実測項目") ||
+        rowText.includes("3ヶ月/1回実測確認") ||
+        rowText.includes("3ヶ月1回実測確認"))
+    ) {
+      quarterlyStart = i
+    }
+  }
+
+  // タイトル行が無いExcel向け: 日次表の後にある「No列なし」の項目ヘッダを定期実測として扱う
+  if (dailyStart > -1 && quarterlyStart < 0) {
+    for (let i = dailyStart + 1; i < normalizedRows.length; i += 1) {
+      const headerMap = buildImportHeaderMap(normalizedRows[i] || [])
+      if (Number.isInteger(headerMap.item_name) && !Number.isInteger(headerMap.inspection_no)) {
+        quarterlyStart = i
+        break
+      }
+    }
+  }
+
+  const metaEnd = [dailyStart, quarterlyStart].filter((idx) => idx > -1).sort((a, b) => a - b)[0]
+  result.metaRows = normalizedRows.slice(0, Number.isInteger(metaEnd) ? metaEnd : normalizedRows.length)
+  if (dailyStart > -1) {
+    const dailyEnd = quarterlyStart > -1 ? quarterlyStart : normalizedRows.length
+    result.dailyRows = normalizedRows.slice(dailyStart, dailyEnd)
+  }
+  if (quarterlyStart > -1) {
+    let quarterlyEnd = normalizedRows.length
+    for (let i = quarterlyStart + 1; i < normalizedRows.length; i += 1) {
+      const rowText = rowToJoinedText(normalizedRows[i] || [])
+      if (rowText.includes("付表")) {
+        quarterlyEnd = i
+        break
+      }
+    }
+    result.quarterlyRows = normalizedRows.slice(quarterlyStart, quarterlyEnd)
+  }
+  return result
+}
+
+const collectDailyRowsFallback = (rows, startIndex, endIndex) => {
+  if (startIndex < 0) return []
+  const collected = []
+  for (let i = startIndex; i < endIndex; i += 1) {
+    const row = rows[i] || []
+    const rowText = rowToJoinedText(row)
+    if (!rowText) continue
+    if (rowText.includes("異常時記入") || rowText.includes("特記事項")) break
+    collected.push(row)
+  }
+  return collected
+}
+
+const collectQuarterlyRowsFallback = (rows, startIndex) => {
+  if (startIndex < 0) return []
+  const collected = []
+  for (let i = startIndex; i < rows.length; i += 1) {
+    const row = rows[i] || []
+    const rowText = rowToJoinedText(row)
+    if (!rowText) continue
+    if (rowText.includes("ワークフロー履歴") || rowText.includes("付表")) break
+    collected.push(row)
+  }
+  return collected
+}
+
+const extractMetaFromImportedRows = (metaRows) => {
+  const metadata = {}
+  const rows = Array.isArray(metaRows) ? metaRows : []
+  rows.forEach((row) => {
+    const key = String(row?.[0] || "").trim()
+    const value = String(row?.[1] || "").trim()
+    if (!key) return
+    if (key === "設備コード") metadata.sheet_code = value
+    if (key === "設備名") metadata.sheet_name = value
+    if (key === "帳票タイトル") metadata.title = value
+    if (key === "元シート名") metadata.source_sheet_name = value
+    if (key === "改訂日") metadata.revision_date = normalizeExcelDateString(value)
+    if (key === "改訂内容") metadata.revision_notes = value
+    if (key === "運用開始日") metadata.effective_from = normalizeExcelDateString(value)
+    if (key === "版") metadata.version = Number(value || 1) || 1
+  })
+
+  if (!metadata.title) {
+    const firstCell = String(rows?.[0]?.[0] || "").trim()
+    if (firstCell) metadata.title = firstCell
+  }
+  return metadata
+}
+
+const getSheetRows = (workbook, sheetName) => {
+  const sheet = workbook?.Sheets?.[sheetName]
+  if (!sheet) return []
+  return XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    defval: "",
+    raw: false,
+    blankrows: false,
+  })
+}
+
+const scoreSheetRows = (rows) => {
+  const normalizedRows = Array.isArray(rows) ? rows : []
+  let score = 0
+  normalizedRows.forEach((row) => {
+    const rowText = rowToJoinedText(row)
+    if (!rowText) return
+    if (rowText.includes("設備点検") || rowText.includes("点検表")) score += 1
+    if (rowText.includes("日次点検項目")) score += 3
+    if (rowText.includes("定期実測項目")) score += 3
+    if (rowText.includes("点検項目") && rowText.includes("規格")) score += 2
+  })
+  return score
+}
+
+const selectBestSheetName = (workbook) => {
+  const names = Array.isArray(workbook?.SheetNames) ? workbook.SheetNames : []
+  if (!names.length) return ""
+  const preferred = names.find((name) => String(name || "").toUpperCase().includes("SM-"))
+  if (preferred) return preferred
+
+  let bestName = names[0]
+  let bestScore = -1
+  names.forEach((name) => {
+    const score = scoreSheetRows(getSheetRows(workbook, name))
+    if (score > bestScore) {
+      bestScore = score
+      bestName = name
+    }
+  })
+  return bestName
+}
+
+const readTemplateItemsFromExcel = async (file) => {
+  const buffer = await file.arrayBuffer()
+  const workbook = XLSX.read(buffer, { type: "array", cellDates: true })
+  const sheetName = selectBestSheetName(workbook)
+  if (!sheetName) {
+    throw new Error("シートが存在しません。")
+  }
+  const rows = getSheetRows(workbook, sheetName)
+
+  const { dailyRows, quarterlyRows, metaRows } = splitTemplateRowsBySection(rows)
+  let importedDailyItems = parseImportedRows(dailyRows, "DAILY", { frequency: "始業時" })
+  let importedQuarterlyItems = parseImportedRows(quarterlyRows, "QUARTERLY", { frequency: "3ヶ月/1回" })
+
+  // SM-010 など旧帳票向けフォールバック: 全シートから日次/定期の表を再抽出
+  if (!importedDailyItems.length || !importedQuarterlyItems.length) {
+    const dailyHeaderIndex = findHeaderRowIndex(rows, "DAILY")
+    const quarterlySectionIndex = rows.findIndex((row) => {
+      const text = rowToJoinedText(row)
+      return (
+        text.includes("定期実測項目") ||
+        text.includes("3ヶ月/1回実測確認") ||
+        text.includes("3ヶ月1回実測確認")
+      )
+    })
+    const dailyFallbackRows = collectDailyRowsFallback(
+      rows,
+      Math.max(0, dailyHeaderIndex),
+      quarterlySectionIndex > -1 ? quarterlySectionIndex : rows.length
+    )
+    const quarterlyHeaderIndexInAll = findHeaderRowIndex(
+      rows.slice(Math.max(0, quarterlySectionIndex), rows.length),
+      "QUARTERLY"
+    )
+    const quarterlyHeaderAbsolute =
+      quarterlySectionIndex > -1 && quarterlyHeaderIndexInAll > -1
+        ? quarterlySectionIndex + quarterlyHeaderIndexInAll
+        : findHeaderRowIndex(rows, "QUARTERLY")
+    const quarterlyFallbackRows = collectQuarterlyRowsFallback(rows, Math.max(0, quarterlyHeaderAbsolute))
+
+    if (!importedDailyItems.length) {
+      importedDailyItems = parseImportedRows(dailyFallbackRows, "DAILY", { frequency: "始業時" })
+    }
+    if (!importedQuarterlyItems.length) {
+      importedQuarterlyItems = parseImportedRows(quarterlyFallbackRows, "QUARTERLY", { frequency: "3ヶ月/1回" })
+    }
+  }
+
+  const importedItems = [...importedDailyItems, ...importedQuarterlyItems]
+  if (!importedItems.length) {
+    throw new Error(`点検項目が見つかりません（シート: ${sheetName}）。`)
+  }
+  const metadata = extractMetaFromImportedRows(metaRows)
+  return { metadata, importedItems }
+}
+
+const applyImportedTemplateData = ({ metadata, importedItems }) => {
+  if (metadata.sheet_code) form.value.sheet_code = metadata.sheet_code
+  if (metadata.sheet_name) form.value.sheet_name = metadata.sheet_name
+  if (metadata.title) form.value.title = metadata.title
+  if (metadata.source_sheet_name) form.value.source_sheet_name = metadata.source_sheet_name
+  if (metadata.revision_date) form.value.revision_date = metadata.revision_date
+  if (metadata.revision_notes) form.value.revision_notes = metadata.revision_notes
+  if (metadata.effective_from) form.value.effective_from = metadata.effective_from
+  if (metadata.version) form.value.version = Number(metadata.version || 1) || 1
+  form.value.items = importedItems
+}
+
+const openOperationExcelPicker = () => {
+  operationExcelInput.value?.click()
+}
+
+const onOperationExcelFileChange = async (event) => {
+  const file = event?.target?.files?.[0]
+  if (!file) return
+
+  if (form.value.items.length > 0) {
+    const ok = window.confirm("現在の項目を運用中Excelの内容で上書きします。よろしいですか？")
+    if (!ok) {
+      if (event?.target) event.target.value = ""
+      return
+    }
+  }
+
+  excelImportLoading.value = true
+  try {
+    const importedData = await readTemplateItemsFromExcel(file)
+    applyImportedTemplateData(importedData)
+    await resizeAllTextareas()
+    alert(`Excelを読み込みました。${importedData.importedItems.length}件の点検項目を反映しました。`)
+  } catch (error) {
+    console.error("設備点検表Excel読込に失敗:", error)
+    alert(`Excel読込に失敗しました。${error?.message || "既存の設備点検表Excel形式か確認してください。"}`)
+  } finally {
+    excelImportLoading.value = false
+    if (event?.target) event.target.value = ""
+  }
 }
 
 const toFormModel = (raw) => {
@@ -2258,6 +2584,9 @@ textarea {
 }
 .btn-sm {
   padding: 3px 8px;
+}
+.hidden-file-input {
+  display: none;
 }
 button:disabled {
   opacity: 0.5;
