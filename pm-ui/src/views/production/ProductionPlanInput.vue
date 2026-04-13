@@ -143,11 +143,15 @@
             休憩明けに補正
           </label>
         </div>
-        <button class="btn" @click="resetRows" :disabled="processing || !rows.length">クリア</button>
         <button class="btn" @click="bulkDeletePlans" :disabled="processing || !selectedLine">計画一括削除</button>
         <button class="btn" @click="openChangeReasonDialog" :disabled="processing">計画変更</button>
         <button class="btn" @click="savePlan" :disabled="processing || !rows.length || !selectedLine">保存</button>
-        <button class="btn" @click="doDisplayOnly" :disabled="processing || !selectedLine">表示のみ</button>
+        <button
+          class="btn"
+          @click="doDisplayOnly"
+          :disabled="processing || !selectedLine || headerDisplayOnlyLocked"
+          :title="headerDisplayOnlyLocked ? 'ヘッダの表示のみは1回実行後に無効化されます（下部F4を使用してください）' : ''"
+        >表示のみ</button>
         <button class="btn" @click="doFetchOnly" :disabled="processing || !selectedLine">需要取込</button>
         <button
           v-if="canShowFloorSpotAutoPlanButton"
@@ -251,7 +255,11 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(row, idx) in filteredRows" :key="row.id">
+          <tr
+            v-for="(row, idx) in filteredRows"
+            :key="row.id"
+            :class="{ 'active-input-row': activeInputRowId === row.id }"
+          >
             <td class="sticky-col number-col">
               <div class="row-controls">
                 <span class="product-info">{{ idx + 1 }}</span>
@@ -288,6 +296,8 @@
                     :data-col="colIdx"
                     data-field="plan"
                     @keydown="onCellKeydown($event, idx, colIdx, 'plan')"
+                    @focus="setActiveInputRow(row, $event)"
+                    @blur="onCellBlur"
                     :disabled="isPlanCellLocked(c.key)"
                     :readonly="isHolidayDate(c.key)"
                     :class="{ locked: isPlanCellLocked(c.key) }"
@@ -302,6 +312,8 @@
                       inputmode="decimal"
                       :value="lot.plan_qty === 0 || lot.plan_qty === '' || lot.plan_qty == null ? '' : lot.plan_qty"
                       @input="onExtraPlanInput(row, c.key, lot, $event.target.value)"
+                      @focus="setActiveInputRow(row, $event)"
+                      @blur="onCellBlur"
                       :disabled="isPlanCellLocked(c.key)"
                       :readonly="isHolidayDate(c.key)"
                       :class="{ locked: isPlanCellLocked(c.key) }"
@@ -321,6 +333,8 @@
                     :data-col="colIdx"
                     data-field="sequence"
                     @keydown="onCellKeydown($event, idx, colIdx, 'sequence')"
+                    @focus="setActiveInputRow(row, $event)"
+                    @blur="onCellBlur"
                     :disabled="isPlanCellLocked(c.key)"
                     :class="{ locked: isPlanCellLocked(c.key) }"
                   />
@@ -334,6 +348,8 @@
                       inputmode="numeric"
                       :value="lot.sequence_no === 0 || lot.sequence_no === '' || lot.sequence_no == null ? '' : lot.sequence_no"
                       @input="onExtraSequenceInput(row, c.key, lot, $event.target.value)"
+                      @focus="setActiveInputRow(row, $event)"
+                      @blur="onCellBlur"
                       :disabled="isPlanCellLocked(c.key)"
                       :class="{ locked: isPlanCellLocked(c.key) }"
                     />
@@ -545,6 +561,11 @@
         <p class="processing-sub">少々お待ちください</p>
       </div>
     </div>
+    <div
+      v-if="cursorProductTail"
+      class="cursor-product-bubble"
+      :style="cursorProductBubbleStyle"
+    >{{ cursorProductTail }}</div>
     </template>
     <LaserPatternEditor
       v-else-if="activePlanTab === 'laser' && activeLaserTab === 'pattern-editor'"
@@ -798,6 +819,10 @@ const workStartFallback = { hour: 8, minute: 0 }
 const workMinutesFallback = 480
 const GANTT_GENERATE_TIMEOUT_MS = 120000
 const processing = ref(false)
+const headerDisplayOnlyLocked = ref(false)
+const activeInputRowId = ref(null)
+const cursorProductTail = ref('')
+const cursorProductBubbleStyle = ref({})
 const currentLineRoutingFilterMode = ref('filtered')
 const coproductDisplayCache = new Map()
 
@@ -1202,6 +1227,10 @@ const moveRow = (rowId, direction) => {
 
 const resetRows = () => {
   rows.value = []
+  activeInputRowId.value = null
+  cursorProductTail.value = ''
+  cursorProductBubbleStyle.value = {}
+  headerDisplayOnlyLocked.value = false
 }
 
 const goBack = () => {
@@ -1491,6 +1520,38 @@ const getProductCode = (id) => {
   const p = products.value.find((x) => x.id === id)
   return p ? p.product_code : ''
 }
+const getProductCodeTail5 = (row) => {
+  const code = String(row?.product_code || getProductCode(row?.product_id) || '')
+  if (!code) return ''
+  const digitsOnly = (code.match(/\d/g) || []).join('')
+  if (digitsOnly.length >= 5) return digitsOnly.slice(-5)
+  return code.slice(-5)
+}
+const setActiveInputRow = (row, event) => {
+  activeInputRowId.value = row?.id ?? null
+  cursorProductTail.value = getProductCodeTail5(row)
+  const rect = event?.target?.getBoundingClientRect?.()
+  if (rect) {
+    const left = Math.round(rect.left + (rect.width / 2))
+    const top = Math.round(rect.top - 8)
+    cursorProductBubbleStyle.value = {
+      left: `${left}px`,
+      top: `${top}px`,
+      transform: 'translate(-50%, -100%)',
+    }
+  }
+}
+const onCellBlur = () => {
+  window.setTimeout(() => {
+    const root = gridWrapperRef.value
+    const active = document.activeElement
+    if (!root || !active || !root.contains(active)) {
+      activeInputRowId.value = null
+      cursorProductTail.value = ''
+      cursorProductBubbleStyle.value = {}
+    }
+  }, 0)
+}
 const getRowProductCode = (row) => row.product_code || getProductCode(row.product_id) || ''
 const normalizeProductCode = (code) =>
   String(code || '')
@@ -1727,6 +1788,10 @@ const refreshDates = () => {
 const loadData = async () => {
   // 取り込み前は空表示（手動で「取り込み」を押す運用）
   rows.value = []
+  activeInputRowId.value = null
+  cursorProductTail.value = ''
+  cursorProductBubbleStyle.value = {}
+  headerDisplayOnlyLocked.value = false
   currentLineRoutingFilterMode.value = 'filtered'
   if (selectedLine.value) {
     await fetchLineDefaultSetting(selectedLine.value)
@@ -3147,6 +3212,7 @@ const doPickup = async () => {
       line_final_only: true,
     })
     await fetchAndApplyData()
+    headerDisplayOnlyLocked.value = true
   } catch (e) {
     console.error('バックログ取り込みエラー', e)
     alert('取り込みに失敗しました。')
@@ -3160,6 +3226,7 @@ const doDisplayOnly = async () => {
   processing.value = true
   try {
     await fetchAndApplyData()
+    headerDisplayOnlyLocked.value = true
   } catch (e) {
     console.error('データ取得エラー', e)
     alert('データの取得に失敗しました。')
@@ -3178,6 +3245,7 @@ const doFetchOnly = async () => {
       end_date: endDate.value,
     })
     await fetchAndApplyData()
+    headerDisplayOnlyLocked.value = true
   } catch (e) {
     console.error('データ取得エラー', e)
     alert('データの取得に失敗しました。')
@@ -3849,6 +3917,12 @@ thead .sticky-col {
   color: #666;
   cursor: not-allowed;
 }
+.plan-grid tbody tr.active-input-row td {
+  background: #fff7cf;
+}
+.plan-grid tbody tr.active-input-row td.sticky-col {
+  background: #ffef9c;
+}
 .plan-grid tbody td.num.plan {
   padding: 0 !important;
 }
@@ -3999,6 +4073,19 @@ thead .sticky-col {
 .btn.accent:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+}
+.cursor-product-bubble {
+  position: fixed;
+  z-index: 1200;
+  pointer-events: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fde68a;
+  border: 1px solid #d97706;
+  color: #7c2d12;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
 }
 
 
