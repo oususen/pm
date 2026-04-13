@@ -137,6 +137,7 @@
           <span>{{ t('processInput.currentTimeOnly') }}</span>
         </label>
       </div>
+      <div v-if="isPlannedProductsLoading" class="hint">{{ t('processInput.loadingProductList') }}</div>
       <div v-if="record.record_type === 'SCRAP'" class="planned-cards">
         <div
           v-for="p in displayProductList"
@@ -589,8 +590,8 @@ const scrapSearchText = ref('')
 const defaultProductId = ref(null)
 const productImageMap = ref({})
 const productMetaMap = ref({})
-// 現場では同一品番を連続で扱うケースが多いため、初期表示は時間帯絞り込みOFF
-const filterCurrentTime = ref(false)
+// 初期表示は「現在時刻のみ」をON（現在時刻の時間帯を優先表示）
+const filterCurrentTime = ref(true)
 const timeSlots = ref([])
 const activeSlotIndex = ref(null)
 const selectedOperatorAction = ref('')
@@ -600,9 +601,11 @@ const latestOperatorActionByProduct = ref(new Map())
 const selectedCoproductChildren = ref([])
 const selectedCoproductParentCode = ref('')
 const selectedCoproductNoticeLoading = ref(false)
+const isPlannedProductsLoading = ref(false)
 const bomTreeCache = new Map()
 const relatedProductsCacheByProcess = new Map()
 let selectedCoproductNoticeRequestSeq = 0
+let plannedProductsRequestSeq = 0
 
 const record = ref({
   record_type: '',
@@ -1417,6 +1420,50 @@ const mergeProductionProductsByProduct = (items) => {
   return Array.from(mergedMap.values())
 }
 
+const buildTotalActualByProduct = (items) => {
+  const totalMap = new Map()
+  ;(Array.isArray(items) ? items : []).forEach((item) => {
+    if (!item || item.product === null || item.product === undefined || item.product === '') return
+    const key = String(item.product)
+    const qty = toSafeNumber(item.actual_qty)
+    if (!totalMap.has(key) || qty > toSafeNumber(totalMap.get(key))) {
+      totalMap.set(key, qty)
+    }
+  })
+  return totalMap
+}
+
+const buildPlanBeforeActiveSlotByProduct = (slots, activeIndex) => {
+  const planBeforeMap = new Map()
+  const normalizedActiveIndex = Number.isFinite(Number(activeIndex)) ? Number(activeIndex) : 0
+  const upperBound = Math.max(Math.min(normalizedActiveIndex, slots.length), 0)
+
+  for (let idx = 0; idx < upperBound; idx += 1) {
+    const merged = mergeProductionProductsByProduct(slots[idx]?.items || [])
+    merged.forEach((item) => {
+      const key = String(item?.product || '')
+      if (!key) return
+      const nextPlan = toSafeNumber(planBeforeMap.get(key)) + toSafeNumber(item?.plan_qty)
+      planBeforeMap.set(key, nextPlan)
+    })
+  }
+  return planBeforeMap
+}
+
+const applySlotActualProgress = (slotItems, planBeforeMap, totalActualMap) => {
+  return (Array.isArray(slotItems) ? slotItems : []).map((item) => {
+    const key = String(item?.product || '')
+    if (!key) return item
+    const totalActual = toSafeNumber(totalActualMap.get(key))
+    const plannedBefore = toSafeNumber(planBeforeMap.get(key))
+    const slotActual = Math.max(totalActual - plannedBefore, 0)
+    return {
+      ...item,
+      actual_qty: slotActual,
+    }
+  })
+}
+
 const getPlanQtyState = (item) => {
   const planQty = toSafeNumber(item?.plan_qty)
   const actualQty = toSafeNumber(item?.actual_qty)
@@ -1959,6 +2006,16 @@ const onProcessChange = () => {
     selectedLineId.value = String(proc.line)
   }
 
+  productionProducts.value = []
+  scrapProducts.value = []
+  allPlanProducts.value = []
+  allScrapProducts.value = []
+  timeSlots.value = []
+  activeSlotIndex.value = null
+  defaultProductId.value = null
+  productImageMap.value = {}
+  productMetaMap.value = {}
+  invalidateSelectedCoproductNotice()
   resetForm()
   manualProducts.value = []
   manualProductsLoaded.value = false
@@ -1983,6 +2040,7 @@ const onLineChange = () => {
   defaultProductId.value = null
   productImageMap.value = {}
   productMetaMap.value = {}
+  invalidateSelectedCoproductNotice()
   manualProducts.value = []
   manualProductsLoaded.value = false
   manualProductsProcessId.value = null
@@ -2359,7 +2417,10 @@ const applyTimeSlotFilter = () => {
   if (index > slots.length - 1) index = slots.length - 1
   activeSlotIndex.value = index
 
-  const slotItems = mergeProductionProductsByProduct(slots[index]?.items || [])
+  const mergedSlotItems = mergeProductionProductsByProduct(slots[index]?.items || [])
+  const planBeforeMap = buildPlanBeforeActiveSlotByProduct(slots, index)
+  const totalActualMap = buildTotalActualByProduct(allPlanProducts.value)
+  const slotItems = applySlotActualProgress(mergedSlotItems, planBeforeMap, totalActualMap)
   productionProducts.value = ensureStartedProductsVisible(slotItems)
 
   const slotProductIds = new Set(slotItems.map((p) => String(p.product)))
@@ -2444,8 +2505,38 @@ const goNextSlot = () => {
   applyTimeSlotFilter()
 }
 
+const fetchProcessPlanProductsFromBacklogs = async (lineId, processId) => {
+  const listRes = await api.lineBacklogs.getLineBacklogs({
+    line: lineId,
+    process: processId,
+    plan_date: currentDateYmd.value,
+  })
+  const listItems = listRes.data.results || listRes.data || []
+  if (Array.isArray(listItems) && listItems.length > 0) {
+    return listItems
+  }
+
+  try {
+    const pickupRes = await api.lineBacklogs.pickup({
+      line_id: lineId,
+      start_date: currentDateYmd.value,
+      end_date: currentDateYmd.value,
+    })
+    const pickupItems = pickupRes.data.results || pickupRes.data || []
+    return (Array.isArray(pickupItems) ? pickupItems : []).filter(
+      (it) => String(it.process) === String(processId) && String(it.plan_date) === String(currentDateYmd.value)
+    )
+  } catch (e) {
+    console.error('本日の計画ピックアップエラー:', e)
+    return []
+  }
+}
+
 const loadPlannedProducts = async () => {
   if (!selectedProcessId.value) return
+  const requestSeq = ++plannedProductsRequestSeq
+  isPlannedProductsLoading.value = true
+  invalidateSelectedCoproductNotice()
 
   productionProducts.value = []
   scrapProducts.value = []
@@ -2457,43 +2548,33 @@ const loadPlannedProducts = async () => {
     const process = processes.value.find(p => String(p.id) === String(selectedProcessId.value))
     const lineId = process?.line
     if (!lineId) return
+    const processId = selectedProcessId.value
 
-    // 工程に紐づく「当日の予定製品」を優先的に取得（line-backlogs は process 単位で絞れる）
-    const listRes = await api.lineBacklogs.getLineBacklogs({
-      line: lineId,
-      process: selectedProcessId.value,
-      plan_date: currentDateYmd.value,
-    })
-    const listItems = listRes.data.results || listRes.data || []
-    let tempProducts = []
-    if (Array.isArray(listItems) && listItems.length > 0) {
-      tempProducts = listItems
-    } else {
-      // まだ line-backlogs が計算されていない場合は pickup で生成（当日のみ）
-      try {
-        const pickupRes = await api.lineBacklogs.pickup({
-          line_id: lineId,
-          start_date: currentDateYmd.value,
-          end_date: currentDateYmd.value,
-        })
-        const pickupItems = pickupRes.data.results || pickupRes.data || []
-        tempProducts = (Array.isArray(pickupItems) ? pickupItems : []).filter(
-          (it) => String(it.process) === String(selectedProcessId.value) && String(it.plan_date) === String(currentDateYmd.value)
-        )
-      } catch (e) {
-        console.error('本日の計画ピックアップエラー:', e)
-        tempProducts = []
-      }
+    // 現在時刻のみON時は、まず LINE_GANTT_PLANS を使って即時表示する
+    if (filterCurrentTime.value) {
+      const [currentSlotItemsResult, fastSlotResult] = await Promise.all([
+        buildCurrentTimePlanItems(lineId, processId, []),
+        buildPlanTimeSlots(lineId, processId, []),
+      ])
+      if (requestSeq !== plannedProductsRequestSeq) return
+
+      allPlanProducts.value = mergeProductionProductsByProduct(currentSlotItemsResult.items || [])
+      timeSlots.value = fastSlotResult.slots
+      activeSlotIndex.value = fastSlotResult.activeIndex
+      applyTimeSlotFilter()
     }
 
+    let tempProducts = await fetchProcessPlanProductsFromBacklogs(lineId, processId)
+
     // 時間帯スロットを構築し、デフォルトで現在時刻スロットを選択
-    const slotResult = await buildPlanTimeSlots(lineId, selectedProcessId.value, tempProducts)
+    const slotResult = await buildPlanTimeSlots(lineId, processId, tempProducts)
+    if (requestSeq !== plannedProductsRequestSeq) return
     timeSlots.value = slotResult.slots
     activeSlotIndex.value = slotResult.activeIndex
 
-    const actualLookup = buildActualQtyLookupByProductProcess(tempProducts, selectedProcessId.value)
+    const actualLookup = buildActualQtyLookupByProductProcess(tempProducts, processId)
     tempProducts = (Array.isArray(tempProducts) ? tempProducts : []).map((it) => {
-      const key = `${it?.product}_${selectedProcessId.value}`
+      const key = `${it?.product}_${processId}`
       return {
         ...it,
         actual_qty: actualLookup.has(key)
@@ -2503,28 +2584,51 @@ const loadPlannedProducts = async () => {
     })
 
     // 連産親を補完し、連産品の子品番を除外（生産記録用）
-    const productsWithParents = await enrichCoproductParentsForList(tempProducts, selectedProcessId.value)
+    const productsWithParents = await enrichCoproductParentsForList(tempProducts, processId)
+    if (requestSeq !== plannedProductsRequestSeq) return
     const filteredForProduction = await filterCoproductChildrenFromList(productsWithParents)
+    if (requestSeq !== plannedProductsRequestSeq) return
 
     // 生産記録用リスト（全時間帯）を保持
     allPlanProducts.value = [...filteredForProduction]
 
-    // 仕損品記録用リストを作成: related-products APIから工程関連製品を追加
-    await loadScrapProducts(selectedProcessId.value, filteredForProduction, lineId)
-    allScrapProducts.value = [...scrapProducts.value]
-
-    // スロット/全体切替を反映した表示リストを適用
+    // 生産記録の体感速度を優先し、まず生産リストを先に反映
     applyTimeSlotFilter()
 
     if (productionProducts.value.length === 1 && productionProducts.value[0].product) {
       defaultProductId.value = productionProducts.value[0].product
     }
 
-    if (!productionProducts.value.length && !scrapProducts.value.length) {
-      loadManualProducts(selectedProcessId.value)
+    if (!productionProducts.value.length) {
+      loadManualProducts(processId)
+    }
+
+    // 仕損品記録用リストは後続で構築（PRODUCTIONでは待たない）
+    const scrapLoadTask = (async () => {
+      await loadScrapProducts(processId, filteredForProduction, lineId)
+      if (requestSeq !== plannedProductsRequestSeq) return
+      allScrapProducts.value = [...scrapProducts.value]
+      if (record.value.record_type === 'SCRAP') {
+        applyTimeSlotFilter()
+        if (!productionProducts.value.length && !scrapProducts.value.length) {
+          loadManualProducts(processId)
+        }
+      }
+    })()
+
+    if (record.value.record_type === 'SCRAP') {
+      await scrapLoadTask
+    } else {
+      scrapLoadTask.catch((err) => {
+        console.error('仕損品記録用製品リスト取得エラー:', err)
+      })
     }
   } catch (error) {
     console.error('本日の計画取得エラー:', error)
+  } finally {
+    if (requestSeq === plannedProductsRequestSeq) {
+      isPlannedProductsLoading.value = false
+    }
   }
 }
 
@@ -3725,6 +3829,11 @@ label {
   border-color: #1d4ed8;
   background: #2563eb;
   color: #ffffff;
+}
+.btn-planned.active .plan-qty,
+.btn-planned.current-processing .plan-qty {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .btn-link {
