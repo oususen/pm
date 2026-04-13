@@ -1080,8 +1080,10 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 step_process = item.process
                 step_line = item.line
                 step_time_unit = item.time_unit
-                step_lead_time_days = item.lead_time_days if item.time_unit == 'DAY' else 0
-                step_duration_min = item.duration_min if item.time_unit == 'MINUTE' else None
+                # lead_time_days と duration_min は直交した概念（投入LT と 加工サイクル）
+                # ライン最終品では両方同時に必要になるため、time_unit で片方を0/Noneに落とさず両方コピーする
+                step_lead_time_days = int(item.lead_time_days or 0)
+                step_duration_min = item.duration_min
                 step_remark = parent_product_code
 
             step = RoutingStep.objects.create(
@@ -1091,6 +1093,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 process=step_process,
                 line=step_line,
                 output_product=item.child_product,
+                source_bom_item=item,
                 hierarchy_depth=depth,
                 hierarchy_path=path_str,
                 time_unit=step_time_unit,
@@ -1251,6 +1254,72 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     ordering_fields = ['created_at']
     ordering = ['id']
 
+    def _select_sync_target_steps(self, bom_item: BOMItem):
+        fk_qs = RoutingStep.objects.filter(source_bom_item_id=bom_item.id)
+        if fk_qs.exists():
+            return fk_qs
+
+        bom = getattr(bom_item, 'bom', None)
+        if bom is None or not bom_item.child_product_id:
+            return RoutingStep.objects.none()
+        parent_product = getattr(bom, 'parent_product', None)
+        parent_code = getattr(parent_product, 'product_code', None)
+        if not parent_code:
+            return RoutingStep.objects.none()
+
+        # BOMから自動生成されたRoutingStepは remark に親製品コードを保持している
+        base_qs = RoutingStep.objects.filter(
+            remark=parent_code,
+            output_product_id=bom_item.child_product_id,
+            routing__is_active=True,
+        )
+        if not base_qs.exists():
+            return base_qs
+
+        exact = base_qs.filter(process_id=bom_item.process_id, line_id=bom_item.line_id)
+        if exact.exists():
+            return exact
+
+        if bom_item.process_id:
+            process_matched = base_qs.filter(process_id=bom_item.process_id)
+            if process_matched.exists():
+                return process_matched
+
+        if bom_item.line_id:
+            line_matched = base_qs.filter(line_id=bom_item.line_id)
+            if line_matched.exists():
+                return line_matched
+
+        return base_qs
+
+    def _sync_item_fields_to_routing(self, bom_item: BOMItem, field_names):
+        steps = self._select_sync_target_steps(bom_item)
+        for step in steps:
+            changed_fields = []
+
+            if 'lead_time_days' in field_names:
+                item_lt = int(getattr(bom_item, 'lead_time_days', 0) or 0)
+                step_lt = int(getattr(step, 'lead_time_days', 0) or 0)
+                if step_lt != item_lt:
+                    step.lead_time_days = item_lt
+                    changed_fields.append('lead_time_days')
+
+            if 'duration_min' in field_names:
+                item_duration = int(bom_item.duration_min) if bom_item.duration_min is not None else None
+                step_duration = int(step.duration_min) if step.duration_min is not None else None
+                if step_duration != item_duration:
+                    step.duration_min = item_duration
+                    changed_fields.append('duration_min')
+
+            if changed_fields:
+                step.save(update_fields=changed_fields + ['updated_at'])
+
+    def perform_update(self, serializer):
+        sync_fields = [key for key in ('lead_time_days', 'duration_min') if key in serializer.validated_data]
+        item = serializer.save()
+        if sync_fields:
+            self._sync_item_fields_to_routing(item, sync_fields)
+
 
 class RoutingViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Routing.objects.all().select_related('product')
@@ -1314,11 +1383,16 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = RoutingStep.objects.all()
     serializer_class = RoutingStepSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ['routing', 'process', 'line', 'time_unit']
+    filterset_fields = ['routing', 'process', 'line', 'time_unit', 'source_bom_item']
     ordering_fields = ['step_no']
     ordering = ['routing', 'step_no']
 
     def _resolve_sync_target_bom(self, step: RoutingStep):
+        if getattr(step, 'source_bom_item_id', None):
+            src = getattr(step, 'source_bom_item', None)
+            if src and getattr(src, 'bom_id', None):
+                return src.bom
+
         parent_code = str(getattr(step, 'remark', '') or '').strip()
         if not parent_code:
             return None
@@ -1348,6 +1422,9 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         return base_qs.order_by('-valid_from', '-id').first()
 
     def _select_sync_target_items(self, step: RoutingStep, bom: BOM):
+        if getattr(step, 'source_bom_item_id', None):
+            return BOMItem.objects.filter(id=step.source_bom_item_id)
+
         is_final_step = str(getattr(step, 'hierarchy_path', '') or '').strip().lower() == 'final'
 
         if is_final_step:
@@ -1424,6 +1501,13 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     def perform_update(self, serializer):
         sync_fields = [key for key in ('lead_time_days', 'duration_min') if key in serializer.validated_data]
         step = serializer.save()
+        if sync_fields:
+            self._sync_step_fields_to_bom(step, sync_fields)
+
+    def perform_create(self, serializer):
+        # 新規工程作成時もBOMItem側に値を伝播し、後続編集で発生しがちなBOM/Routingのズレを防ぐ
+        step = serializer.save()
+        sync_fields = [key for key in ('lead_time_days', 'duration_min') if key in serializer.validated_data]
         if sync_fields:
             self._sync_step_fields_to_bom(step, sync_fields)
 

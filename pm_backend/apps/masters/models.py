@@ -371,6 +371,14 @@ class RoutingStep(models.Model):
     process = models.ForeignKey(Process, on_delete=models.CASCADE, verbose_name='工程')
     line = models.ForeignKey(Line, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='ライン')
     output_product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='加工後品目')
+    source_bom_item = models.ForeignKey(
+        BOMItem,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='generated_routing_steps',
+        verbose_name='元BOM明細',
+    )
     hierarchy_path = models.CharField(max_length=100, default='', blank=True, verbose_name='工程階層パス')
     hierarchy_depth = models.IntegerField(default=0, verbose_name='工程階層深さ')
     time_unit = models.CharField(max_length=10, choices=TIME_UNIT_CHOICES, default='DAY', verbose_name='時間単位')

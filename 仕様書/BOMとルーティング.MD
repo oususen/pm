@@ -40,6 +40,11 @@ BOMからルーティングを自動生成する際のルールをまとめる�
 - 初期値は **実行時点の2日後 08:00** とする。
 - 未指定でAPIを呼んだ場合も、バックエンドで **2日後 08:00** を補完して保存する。
 
+### 5) BOM明細との紐付け
+- 自動生成される `RoutingStep` には、生成元の `BOMItem` を `source_bom_item_id` として保存する。
+- BOM↔Routingの同期時は `source_bom_item_id` を最優先キーとして解決する。
+- `remark`（親製品コード）は表示・補助用途として維持する。
+
 ## ORDERDEMAND展開での利用
 - 受注展開は `step_no` 昇順 -> `parallel_group` 昇順で処理される。
 - 上記ルールにより、BOM階層の順序が工程順として利用可能になる。
@@ -49,6 +54,8 @@ BOMからルーティングを自動生成する際のルールをまとめる�
 - step_noは `(routing_id, step_no, parallel_group)` で一意。
 - `time_unit='DAY'` の場合は `lead_time_days >= 0` を許可する。
 - リードタイムの遡りは稼働日(カレンダ)を考慮して算出する。
+- 一次情報はBOMItemとし、RoutingStepはBOMから生成される派生データとして扱う。
+- BOM↔Routing同期の紐付けはFK（`source_bom_item_id`）優先に段階移行し、`remark` は表示情報として維持する（詳細: `仕様書/LT同期改善チケット.md`）。
 
 ## ルーティングマスタ画面（`/masters/routing`）の表示ルール
 
