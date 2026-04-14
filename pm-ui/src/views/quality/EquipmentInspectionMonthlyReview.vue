@@ -196,10 +196,24 @@ const overview = ref(null)
 const selectedSheetCode = ref(String(route.query.sheet_code || ""))
 const selectedMonth = ref(String(route.query.month || new Date().toISOString().slice(0, 7)))
 
-const canView = computed(() => {
-  return hasPermission(authState.user, "quality", "view") || hasPermission(authState.user, "quality", "edit")
-})
-const canEdit = computed(() => hasPermission(authState.user, "quality", "edit"))
+const canAccessQuality = (resource, level = "view", aliases = []) => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_superuser) return true
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  const candidates = [resource, ...aliases]
+  const hasSpecific = permissions.some((item) => candidates.includes(item.resource))
+  if (hasSpecific) {
+    return candidates.some((candidate) => hasPermission(user, candidate, level))
+  }
+  return hasPermission(user, "quality", level)
+}
+const canView = computed(() =>
+  canAccessQuality("quality.equipment_inspection_monthly_review", "view", ["quality.equipment_inspection"])
+)
+const canEdit = computed(() =>
+  canAccessQuality("quality.equipment_inspection_monthly_review", "edit", ["quality.equipment_inspection"])
+)
 
 const statusLabel = (value) => {
   if (value === "COMPLETED") return "完了"

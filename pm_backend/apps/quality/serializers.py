@@ -359,10 +359,9 @@ class EquipmentInspectionTemplateSerializer(serializers.ModelSerializer):
             attachments_data = item_payload.pop("attachments", [])
             if not item_payload.get("display_order"):
                 item_payload["display_order"] = index
-            created_items.append(EquipmentInspectionItem(template=template, **item_payload))
+            item = EquipmentInspectionItem.objects.create(template=template, **item_payload)
+            created_items.append(item)
             attachment_groups.append(attachments_data)
-
-        created_items = EquipmentInspectionItem.objects.bulk_create(created_items)
 
         attachment_records = []
         for item, attachments_data in zip(created_items, attachment_groups):

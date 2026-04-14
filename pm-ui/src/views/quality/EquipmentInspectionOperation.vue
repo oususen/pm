@@ -43,7 +43,8 @@
     <section class="panel" v-if="selectedSheetCode">
       <div class="record-summary">
         <div>
-          <div class="summary-title">{{ form.template_title || currentTemplate?.title || "-" }}</div>
+          <div class="summary-month">{{ inspectionYearMonthLabel }}</div>
+          <div v-if="displaySummaryTitle" class="summary-title">{{ displaySummaryTitle }}</div>
           <div class="summary-meta">
             設備: {{ form.sheet_code || selectedSheetCode }} {{ form.sheet_name || currentTemplate?.sheet_name || "" }}
           </div>
@@ -141,7 +142,7 @@
                 </div>
               </td>
               <td>
-                <textarea v-model="result.comment" rows="2" :disabled="!canEditRecord" />
+                <textarea v-model="result.comment" rows="2" :disabled="!canEditComment" />
               </td>
               <td class="col-ref">
                 <button
@@ -162,11 +163,29 @@
       </div>
 
       <div class="record-actions">
-        <button class="btn-primary" @click="saveRecord('DRAFT')" :disabled="!canEditRecord || saving">
+        <button
+          v-if="!isCompleted"
+          class="btn-primary"
+          @click="saveRecord('DRAFT')"
+          :disabled="!canEditRecord || saving"
+        >
           下書き保存
         </button>
-        <button class="btn-approve" @click="saveRecord('COMPLETED')" :disabled="!canEditRecord || saving">
+        <button
+          v-if="!isCompleted"
+          class="btn-approve"
+          @click="saveRecord('COMPLETED')"
+          :disabled="!canEditRecord || saving"
+        >
           点検完了
+        </button>
+        <button
+          v-else
+          class="btn-primary"
+          @click="saveRecord('COMPLETED')"
+          :disabled="!canEditComment || saving"
+        >
+          コメント保存
         </button>
       </div>
     </section>
@@ -265,11 +284,43 @@ const attachmentViewer = ref({
   attachments: [],
 })
 
-const canView = computed(() => {
-  return hasPermission(authState.user, "quality", "view") || hasPermission(authState.user, "quality", "edit")
+const canAccessQuality = (resource, level = "view", aliases = []) => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_superuser) return true
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  const candidates = [resource, ...aliases]
+  const hasSpecific = permissions.some((item) => candidates.includes(item.resource))
+  if (hasSpecific) {
+    return candidates.some((candidate) => hasPermission(user, candidate, level))
+  }
+  return hasPermission(user, "quality", level)
+}
+const canView = computed(() =>
+  canAccessQuality("quality.equipment_inspection_operation", "view", ["quality.equipment_inspection"])
+)
+const canEdit = computed(() =>
+  canAccessQuality("quality.equipment_inspection_operation", "edit", ["quality.equipment_inspection"])
+)
+const isCompleted = computed(() => String(form.value.status || "").toUpperCase() === "COMPLETED")
+const canEditRecord = computed(() => canEdit.value && !isLocked.value && !isCompleted.value)
+const canEditComment = computed(() => canEdit.value && !isLocked.value)
+const inspectionYearMonthLabel = computed(() => {
+  const raw = String(selectedDate.value || "").trim()
+  if (!raw) return "-"
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime())) return "-"
+  const year = date.getFullYear()
+  const month = date.getMonth() + 1
+  return `${year}年 ${month}月`
 })
-const canEdit = computed(() => hasPermission(authState.user, "quality", "edit"))
-const canEditRecord = computed(() => canEdit.value && !isLocked.value)
+const displaySummaryTitle = computed(() => {
+  const title = String(form.value.template_title || currentTemplate.value?.title || "").trim()
+  if (!title) return ""
+  const normalized = title.replace(/\s+/g, "")
+  if (normalized === "年月度" || normalized === "年月") return ""
+  return title
+})
 
 const statusLabel = (value) => {
   if (value === "COMPLETED") return "完了"
@@ -561,7 +612,7 @@ const handleNumericInput = (result) => {
 }
 
 const saveRecord = async (targetStatus) => {
-  if (!canEditRecord.value) return
+  if (!canEditComment.value) return
   if (!selectedSheetCode.value || !selectedDate.value) {
     alert("設備と点検日を選択してください。")
     return
@@ -670,6 +721,12 @@ onMounted(async () => {
   font-size: 18px;
   font-weight: 700;
   color: #0f172a;
+}
+.summary-month {
+  font-size: 28px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.1;
 }
 .summary-meta {
   margin-top: 4px;

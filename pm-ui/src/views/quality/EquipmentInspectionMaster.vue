@@ -617,11 +617,19 @@ const equipmentSelectOptions = computed(() => {
   return options
 })
 
-const canView = computed(() => {
-  return hasPermission(authState.user, "quality", "view") || hasPermission(authState.user, "quality", "edit")
-})
+const canAccessQuality = (resource, level = "view") => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_superuser) return true
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  if (permissions.some((item) => item.resource === resource)) {
+    return hasPermission(user, resource, level)
+  }
+  return hasPermission(user, "quality", level)
+}
 
-const canEdit = computed(() => hasPermission(authState.user, "quality", "edit"))
+const canView = computed(() => canAccessQuality("quality.equipment_inspection_master", "view"))
+const canEdit = computed(() => canAccessQuality("quality.equipment_inspection_master", "edit"))
 const currentUserId = computed(() => Number(authState.user?.id || 0))
 const normalizeStatus = (status) => String(status || "").trim().toUpperCase()
 const normalizedFormStatus = computed(() => normalizeStatus(form.value.status) || "DRAFT")
@@ -784,16 +792,6 @@ const resolveApprovalNames = () => {
   return names
 }
 
-const resolvePrintBaseDate = () => {
-  const candidates = [form.value.effective_from, form.value.revision_date]
-  for (const raw of candidates) {
-    if (!raw) continue
-    const date = new Date(raw)
-    if (!Number.isNaN(date.getTime())) return date
-  }
-  return new Date()
-}
-
 const buildAttachmentAppendixRows = () => {
   const rows = []
   const targetItems = [...dailyItems.value, ...quarterlyItems.value]
@@ -946,12 +944,20 @@ const printCurrentTemplate = () => {
   const effectiveFrom = form.value.effective_from || "-"
   const printedAt = new Date().toLocaleString("ja-JP")
   const approvalNames = resolveApprovalNames()
-  const baseDate = resolvePrintBaseDate()
-  const targetYear = baseDate.getFullYear()
-  const targetMonth = baseDate.getMonth() + 1
   const dayNumbers = Array.from({ length: 31 }, (_, idx) => idx + 1)
   const dayHeaderHtml = dayNumbers.map((day) => `<th class="day-head">${day}</th>`).join("")
   const emptyDayCellsHtml = dayNumbers.map(() => '<td class="check-cell"></td>').join("")
+  const supervisorCheckCellsHtml = dayNumbers.map(() => '<th class="supervisor-check-cell"></th>').join("")
+  const inspectionColgroupHtml = `
+    <colgroup>
+      <col style="width: 22px;" />
+      <col style="width: 170px;" />
+      <col style="width: 150px;" />
+      <col style="width: 38px;" />
+      <col style="width: 170px;" />
+      ${dayNumbers.map(() => '<col style="width: 14px;" />').join("")}
+    </colgroup>
+  `
 
   const dailyRowsHtml = dailyItems.value
     .map(
@@ -975,9 +981,8 @@ const printCurrentTemplate = () => {
         <td>${toPrintCell(item.item_name)}</td>
         <td>${toPrintCell(item.standard)}</td>
         <td>${toPrintCell(item.method)}</td>
+        <td></td>
         <td>${toPrintCell(item.criteria)}</td>
-        <td>${escapeHtml(recordTypeLabel(item.record_type))}</td>
-        <td>${escapeHtml(item.unit || "")}</td>
       </tr>
     `
     )
@@ -991,29 +996,32 @@ const printCurrentTemplate = () => {
       <meta charset="utf-8" />
       <title>設備点検表 PDF出力</title>
       <style>
-        @page { size: A4 landscape; margin: 7mm; }
+        @page { size: A4 landscape; margin: 4mm 10mm; }
         body { font-family: "Yu Gothic", "Meiryo", sans-serif; color: #111827; font-size: 9px; margin: 0; }
-        .sheet { padding: 4px; }
-        .top-row { display: flex; justify-content: space-between; align-items: stretch; margin-bottom: 2px; }
-        .month-box { display: flex; align-items: center; gap: 8px; padding: 2px 0; font-size: 10px; }
-        .month-value { font-weight: 700; min-width: 30px; text-align: center; }
-        .confirm-box { padding: 2px 0; font-size: 10px; font-weight: 700; }
-        .title-row { font-size: 24px; line-height: 1.1; margin: 2px 0 3px; font-weight: 700; letter-spacing: 0.02em; }
-        .meta-row { display: flex; gap: 10px; margin-bottom: 3px; font-size: 9px; }
+        .sheet { padding: 0; }
+        .header-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 2px; }
+        .title-row { font-size: 18px; line-height: 1.0; font-weight: 700; letter-spacing: 0.02em; flex: 1; }
+        .confirm-wrap { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+        .confirm-box { font-size: 9px; font-weight: 700; line-height: 1.0; white-space: nowrap; }
+        .confirm-sign-box { width: 90px; height: 16px; border: 1px solid #111827; }
+        .meta-row { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-bottom: 2px; font-size: 8px; }
         .meta-item { white-space: nowrap; }
         table { width: 100%; border-collapse: collapse; table-layout: fixed; }
         th, td { border: 1px solid #111827; padding: 1px 2px; vertical-align: top; word-break: break-word; }
         thead th { background: #f5f5f5; }
-        .inspection-table .no-head, .inspection-table .no-cell { width: 28px; text-align: center; }
-        .inspection-table .item-head { width: 118px; }
-        .inspection-table .std-head { width: 118px; }
-        .inspection-table .freq-head { width: 54px; text-align: center; }
-        .inspection-table .method-head { width: 138px; }
-        .inspection-table .day-head { width: 9px; padding: 0; text-align: center; font-size: 8px; font-weight: 700; }
-        .inspection-table .check-cell { width: 9px; padding: 0; height: 19px; }
-        .quarterly-title { margin: 4px 0 2px; font-size: 10px; font-weight: 700; }
-        .quarterly-table th, .quarterly-table td { padding: 2px 4px; }
-        .footer { margin-top: 3px; text-align: right; font-size: 8px; color: #334155; }
+        .inspection-table .no-head, .inspection-table .no-cell { width: 24px; text-align: center; }
+        .inspection-table .item-head { width: 200px; }
+        .inspection-table .std-head { width: 180px; }
+        .inspection-table .freq-head { width: 40px; text-align: center; }
+        .inspection-table .method-head { width: 200px; }
+        .inspection-table .day-head { width: 2.5px; padding: 0; text-align: center; font-size: 6px; font-weight: 700; }
+        .inspection-table .check-cell { width: 2.5px; padding: 0; height: 19px; }
+        .inspection-table .supervisor-title-space { border-right: 1px solid #111827; }
+        .inspection-table .supervisor-title-cell { text-align: left; font-size: 9px; padding: 0 4px; }
+        .inspection-table .supervisor-check-cell { width: 9px; padding: 0; height: 13px; }
+        .quarterly-title { margin: 2px 0 1px; font-size: 9px; font-weight: 700; }
+        .quarterly-table th, .quarterly-table td { padding: 1px 3px; font-size: 8px; }
+        .footer { margin-top: 1px; text-align: right; font-size: 7px; color: #334155; }
         .appendix-page-break { page-break-before: always; }
         .appendix-root { padding: 4px; }
         .appendix-root-title { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
@@ -1028,14 +1036,13 @@ const printCurrentTemplate = () => {
     </head>
     <body>
       <div class="sheet">
-        <div class="top-row">
-          <div class="month-box">
-            <span class="month-value">${targetYear}</span><span>年</span>
-            <span class="month-value">${targetMonth}</span><span>月度</span>
+        <div class="header-row">
+          <div class="title-row">${escapeHtml(form.value.title || "設備始業点検表")}</div>
+          <div class="confirm-wrap">
+            <div class="confirm-box">月度確認</div>
+            <div class="confirm-sign-box"></div>
           </div>
-          <div class="confirm-box">月度確認</div>
         </div>
-        <div class="title-row">${escapeHtml(form.value.title || "設備始業点検表")}</div>
         <div class="meta-row">
           <div class="meta-item">作成日: ${escapeHtml(createdDate)}</div>
           <div class="meta-item">設備コード: ${escapeHtml(form.value.sheet_code || "-")}</div>
@@ -1052,7 +1059,16 @@ const printCurrentTemplate = () => {
         </div>
 
         <table class="inspection-table">
+          ${inspectionColgroupHtml}
           <thead>
+            <tr>
+              <th class="supervisor-title-space" colspan="5"></th>
+              <th class="supervisor-title-cell" colspan="31">監督者確認</th>
+            </tr>
+            <tr>
+              <th class="supervisor-title-space" colspan="5"></th>
+              ${supervisorCheckCellsHtml}
+            </tr>
             <tr>
               <th class="no-head">No</th>
               <th class="item-head">点検項目</th>
@@ -1072,15 +1088,14 @@ const printCurrentTemplate = () => {
           <thead>
             <tr>
               <th>項目</th>
-              <th>規格（設定）</th>
-              <th>参考値/単位</th>
+              <th>設定</th>
+              <th>参考値</th>
+              <th>実測値</th>
               <th>判定基準</th>
-              <th>記録種別</th>
-              <th>単位</th>
             </tr>
           </thead>
           <tbody>
-            ${quarterlyRowsHtml || '<tr><td colspan="6">データなし</td></tr>'}
+            ${quarterlyRowsHtml || '<tr><td colspan="5">データなし</td></tr>'}
           </tbody>
         </table>
         <div class="footer">PM 設備点検表</div>
@@ -1294,6 +1309,7 @@ const uploadAttachmentImage = async (event, attachment) => {
 
 const normalizeImportHeader = (value) => {
   return String(value || "")
+    .normalize("NFKC")
     .replace(/\s+/g, "")
     .replace(/[()（）]/g, "")
     .trim()
@@ -1338,7 +1354,7 @@ const buildImportHeaderMap = (headerRow) => {
   ;(Array.isArray(headerRow) ? headerRow : []).forEach((cell, index) => {
     const key = normalizeImportHeader(cell)
     const lower = key.toLowerCase()
-    const normalizedNo = lower.replace(/[.\-_:]/g, "")
+    const normalizedNo = lower.replace(/[.\-_:。．]/g, "")
     if (!key) return
     if (["no", "番号"].includes(normalizedNo) || key === "No") map.inspection_no = index
     if (key.includes("点検項目") || key === "項目") map.item_name = index
@@ -1352,6 +1368,15 @@ const buildImportHeaderMap = (headerRow) => {
     if (key === "有効") map.is_active = index
   })
   return map
+}
+
+const parseInspectionNoValue = (value) => {
+  const text = String(value || "").trim()
+  if (!text) return null
+  const matched = text.match(/\d+/)
+  if (!matched) return null
+  const num = Number(matched[0])
+  return Number.isFinite(num) ? num : null
 }
 
 const findHeaderRowIndex = (rows, sectionType) => {
@@ -1397,7 +1422,46 @@ const parseImportedRows = (rows, sectionType, defaults = {}) => {
     if (isSectionBreakRow(rowText)) break
 
     const itemName = String(row[headerMap.item_name] || "").trim()
-    if (!itemName) continue
+    const inspectionNoRaw =
+      Number.isInteger(headerMap.inspection_no) && headerMap.inspection_no >= 0
+        ? String(row[headerMap.inspection_no] || "").trim()
+        : ""
+    const inspectionNoNum = parseInspectionNoValue(inspectionNoRaw)
+    const hasInspectionNo = sectionType !== "DAILY" || inspectionNoNum !== null
+    if (!itemName) {
+      // 旧帳票で改行が次行に分割される場合、直前行へ連結する
+      const prev = sectionItems[sectionItems.length - 1]
+      if (!prev) continue
+      const standardCont = String(row[headerMap.standard] || "").trim()
+      const frequencyCont = String(row[headerMap.frequency] || "").trim()
+      const methodCont = String(row[headerMap.method] || "").trim()
+      const unitCont = String(row[headerMap.unit] || "").trim()
+      const criteriaCont = String(row[headerMap.criteria] || "").trim()
+      if (standardCont) prev.standard = prev.standard ? `${prev.standard}\n${standardCont}` : standardCont
+      if (frequencyCont) prev.frequency = prev.frequency ? `${prev.frequency}\n${frequencyCont}` : frequencyCont
+      if (methodCont) prev.method = prev.method ? `${prev.method}\n${methodCont}` : methodCont
+      if (unitCont) prev.unit = prev.unit ? `${prev.unit}\n${unitCont}` : unitCont
+      if (criteriaCont) prev.criteria = prev.criteria ? `${prev.criteria}\n${criteriaCont}` : criteriaCont
+      continue
+    }
+
+    // 日次でNoが空の行は「前行の続き（セル内改行が行分割されたケース）」として扱う
+    if (sectionType === "DAILY" && !hasInspectionNo) {
+      const prev = sectionItems[sectionItems.length - 1]
+      if (!prev) continue
+      const standardCont = String(row[headerMap.standard] || "").trim()
+      const frequencyCont = String(row[headerMap.frequency] || "").trim()
+      const methodCont = String(row[headerMap.method] || "").trim()
+      const unitCont = String(row[headerMap.unit] || "").trim()
+      const criteriaCont = String(row[headerMap.criteria] || "").trim()
+      prev.item_name = prev.item_name ? `${prev.item_name}\n${itemName}` : itemName
+      if (standardCont) prev.standard = prev.standard ? `${prev.standard}\n${standardCont}` : standardCont
+      if (frequencyCont) prev.frequency = prev.frequency ? `${prev.frequency}\n${frequencyCont}` : frequencyCont
+      if (methodCont) prev.method = prev.method ? `${prev.method}\n${methodCont}` : methodCont
+      if (unitCont) prev.unit = prev.unit ? `${prev.unit}\n${unitCont}` : unitCont
+      if (criteriaCont) prev.criteria = prev.criteria ? `${prev.criteria}\n${criteriaCont}` : criteriaCont
+      continue
+    }
     if (normalizeImportHeader(itemName).includes("点検項目")) continue
 
     sectionItems.push({
@@ -1406,7 +1470,7 @@ const parseImportedRows = (rows, sectionType, defaults = {}) => {
       display_order: sectionItems.length + 1,
       inspection_no:
         sectionType === "DAILY"
-          ? Number(row[headerMap.inspection_no] || sectionItems.length + 1) || sectionItems.length + 1
+          ? inspectionNoNum || sectionItems.length + 1
           : null,
       item_name: itemName,
       standard: String(row[headerMap.standard] || "").trim(),
