@@ -326,8 +326,10 @@ const loadGrid = async () => {
 
     rows.value = Object.values(grouped)
       .filter((item) => {
-        if (!keyword.value) return true
-        return item.productCode.includes(keyword.value) || item.productName.includes(keyword.value)
+        const kw = (keyword.value || '').trim().toLowerCase()
+        if (!kw) return true
+        return String(item.productCode || '').toLowerCase().includes(kw)
+          || String(item.productName || '').toLowerCase().includes(kw)
       })
       .map((row) => {
         dateColumns.value.forEach((col) => {
