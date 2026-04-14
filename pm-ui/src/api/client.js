@@ -52,6 +52,7 @@ import { createGanttDisplayProductMapsAPI } from './resources/ganttDisplayProduc
 import { createPlanDeviationReportAPI } from './resources/planDeviationReport'
 import { createKubotaSakaiTrucksAPI } from './resources/kubotaSakaiTrucks'
 import { createKubotaSakaiDueAdjustmentsAPI } from './resources/kubotaSakaiDueAdjustments'
+import { createKubotaSakaiTripAssignmentsAPI } from './resources/kubotaSakaiTripAssignments'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
@@ -169,5 +170,6 @@ export default {
   planDeviationReport: createPlanDeviationReportAPI(client),
   kubotaSakaiTrucks: createKubotaSakaiTrucksAPI(client),
   kubotaSakaiDueAdjustments: createKubotaSakaiDueAdjustmentsAPI(client),
+  kubotaSakaiTripAssignments: createKubotaSakaiTripAssignmentsAPI(client),
   client,
 }

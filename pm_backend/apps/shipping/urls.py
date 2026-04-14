@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from shipping.views import ShipmentActualViewSet
 from shipping.views_kubota_sakai_due_adjustment import KubotaSakaiDueAdjustmentViewSet
+from shipping.views_kubota_sakai_trip_assignment import KubotaSakaiTripAssignmentViewSet
 from shipping.views_shipping_order import (
     generate_shipping_order_pdf_api,
     get_available_dates,
@@ -25,6 +26,7 @@ from shipping.views_hirakata_pickup import (
 router = DefaultRouter()
 router.register(r'shipment-actuals', ShipmentActualViewSet, basename='shipmentactual')
 router.register(r'kubota-sakai-due-adjustments', KubotaSakaiDueAdjustmentViewSet, basename='kubotasakaidueadjustment')
+router.register(r'kubota-sakai-trip-assignments', KubotaSakaiTripAssignmentViewSet, basename='kubotasakaitripassignment')
 
 urlpatterns = [
     path('', include(router.urls)),

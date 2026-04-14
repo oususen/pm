@@ -108,6 +108,12 @@ const settings = [
     meta: { pageTitle: "クボタ堺取り込み通知設定", resource: "settings" },
   },
   {
+    path: "/settings/kubota-sakai-config",
+    name: "KubotaSakaiConfig",
+    component: () => import("@/views/settings/KubotaSakaiConfig.vue"),
+    meta: { pageTitle: "クボタ堺便計画設定", resource: "settings.kubota_sakai_config" },
+  },
+  {
     path: "/settings/system",
     name: "SystemSettings",
     component: () => import("@/views/settings/SystemSettings.vue"),

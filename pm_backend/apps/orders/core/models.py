@@ -138,6 +138,49 @@ class KubotaSakaiDueAdjustment(models.Model):
         return f"{self.order_line_id}-{self.split_no} {self.adjusted_due_date} {self.adjusted_qty}"
 
 
+class KubotaSakaiTripAssignment(models.Model):
+    """クボタ堺向け便割付"""
+
+    id = models.BigAutoField(primary_key=True)
+    order_line = models.ForeignKey(
+        OrderLine,
+        on_delete=models.CASCADE,
+        related_name='kubota_sakai_trip_assignments',
+        verbose_name='受注明細',
+    )
+    truck = models.ForeignKey(
+        'masters.KubotaSakaiTruck',
+        on_delete=models.CASCADE,
+        related_name='kubota_sakai_trip_assignments',
+        verbose_name='便',
+    )
+    departure_date = models.DateField(verbose_name='出発日')
+    qty = models.DecimalField(max_digits=14, decimal_places=3, verbose_name='割付数量')
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='kubota_sakai_trip_assignments',
+        verbose_name='作成者',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 't_kubota_sakai_trip_assignment'
+        verbose_name = 'クボタ堺便割付'
+        verbose_name_plural = 'クボタ堺便割付'
+        indexes = [
+            models.Index(fields=['departure_date', 'truck']),
+            models.Index(fields=['order_line']),
+        ]
+        ordering = ['departure_date', 'truck_id', 'order_line_id', 'id']
+
+    def __str__(self):
+        return f"{self.departure_date} truck={self.truck_id} line={self.order_line_id} qty={self.qty}"
+
+
 class StgOrderRaw(models.Model):
     """受注取込ステージング（生データ） - 旧モデル、互換性のため残す"""
     ORDER_TYPE_CHOICES = [

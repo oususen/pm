@@ -225,6 +225,7 @@ class UserPermission(models.Model):
         ('shipping.hirakata_pickup', '出荷: 枚方集荷依頼書'),
         ('shipping.fujishoji_document', '出荷: 富士商事出荷指示書'),
         ('shipping.kubota_sakai_due_adjustment', '出荷: クボタ堺納期調整'),
+        ('shipping.kubota_sakai_trip_planning', '出荷: クボタ堺便計画'),
         ('inventory', '在庫'),
         ('quality', '品質'),
         ('quality.equipment_inspection_master', '品質: 設備点検項目作成'),
@@ -262,6 +263,7 @@ class UserPermission(models.Model):
         ('settings.supplier_order_schedule', '設定: 発注スケジュール設定'),
         ('settings.purchase_order_approval', '設定: 発注承認者設定'),
         ('settings.stocktake_init', '設定: 棚卸初期化'),
+        ('settings.kubota_sakai_config', '設定: クボタ堺便計画設定'),
         ('users', 'ユーザー管理'),
         ('manual', 'マニュアル'),
     ]

@@ -47,6 +47,10 @@
         <div class="icon-box">🔔</div>
         <div class="label">クボタ堺取り込み通知</div>
       </RouterLink>
+      <RouterLink v-if="canAccessSetting('settings.kubota_sakai_config', 'view')" to="/settings/kubota-sakai-config" class="master-tile">
+        <div class="icon-box">🚛</div>
+        <div class="label">クボタ堺便計画設定</div>
+      </RouterLink>
       <RouterLink v-if="canAccessSetting('settings', 'view')" to="/settings/system" class="master-tile">
         <div class="icon-box">⚙️</div>
         <div class="label">システム設定</div>

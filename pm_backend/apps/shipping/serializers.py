@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from masters.models import Customer, Product
-from orders.core.models import KubotaSakaiDueAdjustment
+from orders.core.models import KubotaSakaiDueAdjustment, KubotaSakaiTripAssignment
 from .models import ShipmentActual, ShipmentActualHistory
 
 
@@ -112,3 +112,28 @@ class KubotaSakaiDueAdjustmentSerializer(serializers.ModelSerializer):
             'base_qty',
             'order_no',
         ]
+
+
+class KubotaSakaiTripAssignmentSerializer(serializers.ModelSerializer):
+    product_code = serializers.CharField(source='order_line.product_code', read_only=True)
+    product_name = serializers.CharField(source='order_line.product.product_name', read_only=True)
+    due_date = serializers.DateField(source='order_line.due_date', read_only=True)
+    truck_name = serializers.CharField(source='truck.name', read_only=True)
+
+    class Meta:
+        model = KubotaSakaiTripAssignment
+        fields = [
+            'id',
+            'order_line',
+            'truck',
+            'departure_date',
+            'qty',
+            'created_by',
+            'created_at',
+            'updated_at',
+            'product_code',
+            'product_name',
+            'due_date',
+            'truck_name',
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at', 'product_code', 'product_name', 'due_date', 'truck_name']

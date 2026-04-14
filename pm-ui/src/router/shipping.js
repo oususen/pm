@@ -47,6 +47,12 @@ const shipping = [
     component: () => import("@/views/shipping/KubotaSakaiDueAdjustment.vue"),
     meta: { pageTitle: "クボタ堺納期調整", resource: "shipping.kubota_sakai_due_adjustment" },
   },
+  {
+    path: "/shipping/kubota-sakai-trip-planning",
+    name: "KubotaSakaiTripPlanning",
+    component: () => import("@/views/shipping/KubotaSakaiTripPlanning.vue"),
+    meta: { pageTitle: "クボタ堺便計画", resource: "shipping.kubota_sakai_trip_planning" },
+  },
 ];
 
 export default shipping;

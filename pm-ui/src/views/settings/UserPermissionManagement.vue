@@ -396,6 +396,7 @@ const permissionResources = [
   { value: 'shipping.hirakata_pickup', label: '出荷: 枚方集荷依頼書' },
   { value: 'shipping.fujishoji_document', label: '出荷: 富士商事出荷指示書' },
   { value: 'shipping.kubota_sakai_due_adjustment', label: '出荷: クボタ堺納期調整' },
+  { value: 'shipping.kubota_sakai_trip_planning', label: '出荷: クボタ堺便計画' },
   { value: 'inventory', label: '在庫' },
   { value: 'quality', label: '品質' },
   { value: 'quality.equipment_inspection_master', label: '品質: 設備点検表（点検項目作成）' },
@@ -430,6 +431,7 @@ const permissionResources = [
   { value: 'settings.supplier_order_schedule', label: '設定: 発注スケジュール設定' },
   { value: 'settings.purchase_order_approval', label: '設定: 発注承認者設定' },
   { value: 'settings.stocktake_init', label: '設定: 棚卸初期化' },
+  { value: 'settings.kubota_sakai_config', label: '設定: クボタ堺便計画設定' },
   { value: 'manual', label: 'マニュアル' },
 ]
 
