@@ -50,6 +50,8 @@ import { createSpotLineActualsAPI } from './resources/spotLineActuals'
 import { createSystemSettingsAPI } from './resources/systemSettings'
 import { createGanttDisplayProductMapsAPI } from './resources/ganttDisplayProductMaps'
 import { createPlanDeviationReportAPI } from './resources/planDeviationReport'
+import { createKubotaSakaiTrucksAPI } from './resources/kubotaSakaiTrucks'
+import { createKubotaSakaiDueAdjustmentsAPI } from './resources/kubotaSakaiDueAdjustments'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
@@ -165,5 +167,7 @@ export default {
   systemSettings: createSystemSettingsAPI(client),
   ganttDisplayProductMaps: createGanttDisplayProductMapsAPI(client),
   planDeviationReport: createPlanDeviationReportAPI(client),
+  kubotaSakaiTrucks: createKubotaSakaiTrucksAPI(client),
+  kubotaSakaiDueAdjustments: createKubotaSakaiDueAdjustmentsAPI(client),
   client,
 }

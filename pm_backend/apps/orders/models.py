@@ -1,4 +1,5 @@
 from .core.models import (
+    KubotaSakaiDueAdjustment,
     Order,
     OrderLine,
     StgOrderDaily,
@@ -19,6 +20,7 @@ from shipping.models import DeliveryProgress, ShipmentActual, ShipmentActualHist
 __all__ = [
     'Order',
     'OrderLine',
+    'KubotaSakaiDueAdjustment',
     'ShipmentActual',
     'ShipmentActualHistory',
     'StgOrderRaw',

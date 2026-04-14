@@ -98,6 +98,13 @@ const tiles = computed(() => [
     required: "view",
     resource: "shipping.fujishoji_document",
   },
+  {
+    to: "/shipping/kubota-sakai-due-adjustment",
+    label: "クボタ堺納期調整",
+    icon: "🗓️",
+    required: "view",
+    resource: "shipping.kubota_sakai_due_adjustment",
+  },
 ].map((tile) => ({
   ...tile,
   disabled: !hasMenuPermission(tile.resource, tile.required),

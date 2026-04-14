@@ -41,6 +41,12 @@ const shipping = [
     component: () => import("@/views/shipping/HirakataPickup.vue"),
     meta: { pageTitle: "枚方集荷依頼書", manualPath: "出荷/枚方集荷依頼書.md", resource: "shipping.hirakata_pickup" },
   },
+  {
+    path: "/shipping/kubota-sakai-due-adjustment",
+    name: "KubotaSakaiDueAdjustment",
+    component: () => import("@/views/shipping/KubotaSakaiDueAdjustment.vue"),
+    meta: { pageTitle: "クボタ堺納期調整", resource: "shipping.kubota_sakai_due_adjustment" },
+  },
 ];
 
 export default shipping;

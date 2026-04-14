@@ -70,6 +70,7 @@ const tiles = computed(() => {
     { to: '/masters/calendar', label: 'カレンダマスタ', icon: '📅', required: 'view', resource: 'masters.calendar' },
     { to: '/masters/work-pattern', label: '勤務パターン', icon: '⏰', required: 'view', resource: 'masters.work_pattern' },
     { to: '/masters/contact', label: '連絡先マスタ', icon: '📞', required: 'view', resource: 'masters.contact' },
+    { to: '/masters/kubota-sakai-truck', label: 'クボタ堺便マスタ', icon: '🚚', required: 'view', resource: 'masters.kubota_sakai_truck' },
   ]
 
   return list.map((tile) => ({

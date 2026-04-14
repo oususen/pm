@@ -3,7 +3,8 @@ from .views import (
     ProductViewSet, CustomerViewSet, ProcessViewSet, LineViewSet, ProductionLineViewSet,
     SupplierViewSet, CalendarViewSet, CalendarDayViewSet, WorkPatternViewSet, BreakTimeViewSet,
     BOMViewSet, BOMItemViewSet, RoutingViewSet, RoutingStepViewSet,
-    RoutingStepMaterialViewSet, ProductGroupViewSet, ContainerCapacityViewSet, EquipmentViewSet, ContactViewSet
+    RoutingStepMaterialViewSet, ProductGroupViewSet, ContainerCapacityViewSet, EquipmentViewSet, ContactViewSet,
+    KubotaSakaiTruckViewSet
 )
 
 router = DefaultRouter()
@@ -26,5 +27,6 @@ router.register(r'routings', RoutingViewSet)
 router.register(r'routing-steps', RoutingStepViewSet)
 router.register(r'routing-step-materials', RoutingStepMaterialViewSet)
 router.register(r'contacts', ContactViewSet)
+router.register(r'kubota-sakai-trucks', KubotaSakaiTruckViewSet)
 
 urlpatterns = router.urls

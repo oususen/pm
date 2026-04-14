@@ -598,6 +598,34 @@ class Equipment(models.Model):
         return f"{self.equipment_code} - {self.equipment_name}"
 
 
+class KubotaSakaiTruck(models.Model):
+    """クボタ堺向け便マスタ"""
+    id = models.BigAutoField(primary_key=True)
+    name = models.CharField(max_length=50, unique=True, verbose_name='便名')
+    width = models.IntegerField(verbose_name='荷台幅(mm)')
+    depth = models.IntegerField(verbose_name='荷台奥行(mm)')
+    height = models.IntegerField(verbose_name='荷台高さ(mm)')
+    max_weight = models.IntegerField(verbose_name='最大積載重量(kg)')
+    departure_time = models.TimeField(verbose_name='出発時刻')
+    arrival_time = models.TimeField(verbose_name='到着時刻')
+    arrival_day_offset = models.IntegerField(default=0, verbose_name='到着日オフセット', help_text='0=当日着, 1=翌日着')
+    default_use = models.BooleanField(default=True, verbose_name='常用便')
+    is_active = models.BooleanField(default=True, verbose_name='有効')
+    display_order = models.IntegerField(default=0, verbose_name='表示順')
+    notes = models.TextField(null=True, blank=True, verbose_name='備考')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'm_kubota_sakai_truck'
+        verbose_name = 'クボタ堺向け便'
+        verbose_name_plural = 'クボタ堺向け便'
+        ordering = ['display_order', 'name']
+
+    def __str__(self):
+        return self.name
+
+
 class Contact(models.Model):
     """連絡先マスタ"""
     id = models.BigAutoField(primary_key=True)

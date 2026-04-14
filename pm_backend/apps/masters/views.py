@@ -12,13 +12,15 @@ import uuid
 from datetime import date, datetime, timedelta
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
-    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact
+    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact,
+    KubotaSakaiTruck
 )
 from .serializers import (
     ProductSerializer, CustomerSerializer, ProcessSerializer, LineSerializer,
     SupplierSerializer, CalendarSerializer, CalendarDaySerializer, WorkPatternSerializer, BreakTimeSerializer,
     BOMSerializer, BOMItemSerializer, RoutingSerializer, RoutingListSerializer, RoutingStepSerializer,
-    RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer, EquipmentSerializer, ContactSerializer
+    RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer, EquipmentSerializer, ContactSerializer,
+    KubotaSakaiTruckSerializer
 )
 from .services.routing_service import build_effective_routing_q, resolve_effective_routing
 from accounts.permissions import HasResourcePermissionOrReadOnly
@@ -318,6 +320,16 @@ class EquipmentViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     search_fields = ['equipment_code', 'equipment_name', 'line__line_code', 'line__line_name', 'process__process_code', 'process__process_name']
     ordering_fields = ['display_order', 'equipment_code', 'created_at']
     ordering = ['display_order', 'equipment_code']
+
+
+class KubotaSakaiTruckViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
+    queryset = KubotaSakaiTruck.objects.all()
+    serializer_class = KubotaSakaiTruckSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_active', 'default_use']
+    search_fields = ['name']
+    ordering_fields = ['display_order', 'name', 'departure_time']
+    ordering = ['display_order', 'name']
 
 
 class CustomerViewSet(MastersPermissionMixin, viewsets.ModelViewSet):

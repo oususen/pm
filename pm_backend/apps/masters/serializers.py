@@ -2,7 +2,8 @@ from rest_framework import serializers
 from django.db.models import Sum
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
-    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact
+    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact,
+    KubotaSakaiTruck
 )
 
 def build_media_absolute_url(request, raw_url):
@@ -56,6 +57,12 @@ class EquipmentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Equipment
+        fields = '__all__'
+
+
+class KubotaSakaiTruckSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = KubotaSakaiTruck
         fields = '__all__'
 
 

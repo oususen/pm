@@ -83,6 +83,12 @@ const masters = [
     component: () => import("@/views/masters/ContactMaster.vue"),
     meta: { pageTitle: "連絡先マスタ", resource: "masters.contact" },
   },
+  {
+    path: "/masters/kubota-sakai-truck",
+    name: "KubotaSakaiTruckMaster",
+    component: () => import("@/views/masters/KubotaSakaiTruckMaster.vue"),
+    meta: { pageTitle: "クボタ堺便マスタ", resource: "masters.kubota_sakai_truck" },
+  },
 ];
 
 export default masters;

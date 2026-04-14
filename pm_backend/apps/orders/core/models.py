@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from django.conf import settings
 from django.db import models
 from masters.models import Customer, Product
@@ -81,6 +83,59 @@ class OrderLine(models.Model):
 
     def __str__(self):
         return f"{self.order.order_no} - Line {self.line_no}: {self.product_code}"
+
+
+class KubotaSakaiDueAdjustment(models.Model):
+    """クボタ堺向け納期調整"""
+
+    ADJUSTMENT_TYPE_CHOICES = [
+        ('just', 'ジャスト'),
+        ('forward', '前倒し'),
+        ('backward', '後ろ倒し'),
+    ]
+
+    id = models.BigAutoField(primary_key=True)
+    order_line = models.ForeignKey(
+        OrderLine,
+        on_delete=models.CASCADE,
+        related_name='kubota_sakai_due_adjustments',
+        verbose_name='受注明細',
+    )
+    split_no = models.PositiveIntegerField(verbose_name='分割連番')
+    adjusted_due_date = models.DateField(verbose_name='調整後納期')
+    adjusted_qty = models.DecimalField(max_digits=14, decimal_places=3, verbose_name='調整後数量')
+    remaining_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='残量')
+    adjustment_type = models.CharField(
+        max_length=20,
+        choices=ADJUSTMENT_TYPE_CHOICES,
+        default='just',
+        verbose_name='調整種別',
+    )
+    customer_approved = models.BooleanField(default=False, verbose_name='顧客承認済み')
+    adjusted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='kubota_sakai_due_adjustments',
+        verbose_name='調整者',
+    )
+    adjusted_at = models.DateTimeField(default=datetime.now, verbose_name='調整日時')
+    note = models.TextField(blank=True, default='', verbose_name='メモ')
+
+    class Meta:
+        db_table = 't_kubota_sakai_due_adjustment'
+        verbose_name = 'クボタ堺納期調整'
+        verbose_name_plural = 'クボタ堺納期調整'
+        unique_together = [['order_line', 'split_no']]
+        indexes = [
+            models.Index(fields=['adjusted_due_date']),
+            models.Index(fields=['order_line', 'split_no']),
+        ]
+        ordering = ['order_line_id', 'split_no', 'id']
+
+    def __str__(self):
+        return f"{self.order_line_id}-{self.split_no} {self.adjusted_due_date} {self.adjusted_qty}"
 
 
 class StgOrderRaw(models.Model):

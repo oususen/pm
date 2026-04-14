@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from masters.models import Customer, Product
+from orders.core.models import KubotaSakaiDueAdjustment
 from .models import ShipmentActual, ShipmentActualHistory
 
 
@@ -70,3 +71,44 @@ class ShipmentActualHistorySerializer(serializers.ModelSerializer):
             'quantity', 'remark', 'created_at',
         ]
         read_only_fields = ['id', 'created_at']
+
+
+class KubotaSakaiDueAdjustmentSerializer(serializers.ModelSerializer):
+    product_code = serializers.CharField(source='order_line.product_code', read_only=True)
+    product_name = serializers.CharField(source='order_line.product.product_name', read_only=True)
+    base_due_date = serializers.DateField(source='order_line.due_date', read_only=True)
+    base_qty = serializers.DecimalField(source='order_line.quantity', max_digits=14, decimal_places=3, read_only=True)
+    order_no = serializers.CharField(source='order_line.order.order_no', read_only=True)
+
+    class Meta:
+        model = KubotaSakaiDueAdjustment
+        fields = [
+            'id',
+            'order_line',
+            'split_no',
+            'adjusted_due_date',
+            'adjusted_qty',
+            'remaining_qty',
+            'adjustment_type',
+            'customer_approved',
+            'adjusted_by',
+            'adjusted_at',
+            'note',
+            'product_code',
+            'product_name',
+            'base_due_date',
+            'base_qty',
+            'order_no',
+        ]
+        read_only_fields = [
+            'id',
+            'split_no',
+            'adjustment_type',
+            'adjusted_by',
+            'adjusted_at',
+            'product_code',
+            'product_name',
+            'base_due_date',
+            'base_qty',
+            'order_no',
+        ]
