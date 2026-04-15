@@ -17,6 +17,7 @@ class KubotaHirakataKakuteiImportService:
     - Column 18: Delivery Date (納入指示日) - YYMMDD format
     - Column 21: issue_date (発行日) - YYMMDD format (Order識別用)
     - Column 19: Quantity (納入指示数)
+    - Column 13: Ship To (納入場所)
 
     Format NO=47 (RCV_NVAN.csv / NVAN-2 mixed in same file):
     - Column 0: NO (データNo) = "47"
@@ -27,6 +28,7 @@ class KubotaHirakataKakuteiImportService:
     - Column 23: Delivery Date (納期) - MMDD / MDD / YYMMDD / YYYYMMDD
     - Column 24: Quantity (指示数)
     - Column 26: issue_date (発行日) - YYMMDD format (Order識別用)
+    - Column 12: Ship To (納場所)
     """
 
     # Supported formats
@@ -35,8 +37,10 @@ class KubotaHirakataKakuteiImportService:
 
     # Column positions
     COL_DATA_NO = 0
+    COL_FACTORY = 1
     COL_ORDER_NO = 3
-    COL_SHIP_TO = 12
+    COL_SHIP_TO_45 = 13
+    COL_SHIP_TO_47 = 12
     COL_PRODUCT_CODE_45 = 5
     COL_PRODUCT_NAME_45 = 8
     COL_DELIVERY_DATE_45 = 18
@@ -214,13 +218,14 @@ class KubotaHirakataKakuteiImportService:
                             continue
 
                         product_code = row[self.COL_PRODUCT_CODE_45].strip() if len(row) > self.COL_PRODUCT_CODE_45 else ''
+                        plant_code = row[self.COL_FACTORY].strip() if len(row) > self.COL_FACTORY else ''
                         product_name = row[self.COL_PRODUCT_NAME_45].strip() if len(row) > self.COL_PRODUCT_NAME_45 else ''
                         delivery_date_str = row[self.COL_DELIVERY_DATE_45].strip() if len(row) > self.COL_DELIVERY_DATE_45 else ''
                         quantity_str = row[self.COL_QUANTITY_45].strip() if len(row) > self.COL_QUANTITY_45 else ''
                         issue_date_str = row[self.COL_ISSUE_DATE_45].strip() if len(row) > self.COL_ISSUE_DATE_45 else ''
                         order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
                         inspection_type = row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else ''
-                        ship_to = row[self.COL_SHIP_TO].strip() if len(row) > self.COL_SHIP_TO else ''
+                        ship_to = row[self.COL_SHIP_TO_45].strip() if len(row) > self.COL_SHIP_TO_45 else ''
 
                         due_date = self.parse_date_from_yymmdd(delivery_date_str)
                         fmt = '45'
@@ -239,13 +244,14 @@ class KubotaHirakataKakuteiImportService:
                             continue
 
                         product_code = row[self.COL_PRODUCT_CODE_47].strip() if len(row) > self.COL_PRODUCT_CODE_47 else ''
+                        plant_code = row[self.COL_FACTORY].strip() if len(row) > self.COL_FACTORY else ''
                         product_name = row[self.COL_PRODUCT_NAME_47].strip() if len(row) > self.COL_PRODUCT_NAME_47 else ''
                         delivery_date_str = row[self.COL_DELIVERY_DATE_47].strip() if len(row) > self.COL_DELIVERY_DATE_47 else ''
                         quantity_str = row[self.COL_QUANTITY_47].strip() if len(row) > self.COL_QUANTITY_47 else ''
                         issue_date_str = row[self.COL_ISSUE_DATE_47].strip() if len(row) > self.COL_ISSUE_DATE_47 else ''
                         order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
                         inspection_type = row[self.COL_INSPECTION_TYPE_47].strip() if len(row) > self.COL_INSPECTION_TYPE_47 else ''
-                        ship_to = row[self.COL_SHIP_TO].strip() if len(row) > self.COL_SHIP_TO else ''
+                        ship_to = row[self.COL_SHIP_TO_47].strip() if len(row) > self.COL_SHIP_TO_47 else ''
 
                         due_date = (
                             self.parse_date_from_mmdd(delivery_date_str)
@@ -276,6 +282,7 @@ class KubotaHirakataKakuteiImportService:
                     raw_payload = {
                         'row': row,
                         'encoding': encoding,
+                        'plant_code': plant_code,
                         'format': fmt
                     }
                     if issue_date_str:

@@ -28,6 +28,7 @@ class KubotaSakaiKakuteiImportService:
 
     SUPPORTED_DATA_NOS = ('47', '49')
     COL_DATA_NO = 0
+    COL_FACTORY = 1  # 工場
     COL_PRODUCT_CODE = 5
     COL_PRODUCT_NAME = 10  # 品名 (Excel列11)
     COL_SHIP_TO = 12  # 納場所 (Excel列13)
@@ -217,6 +218,7 @@ class KubotaSakaiKakuteiImportService:
                     # Extract data
                     product_code = row[self.COL_PRODUCT_CODE].strip() if len(row) > self.COL_PRODUCT_CODE else ''
                     product_name = row[self.COL_PRODUCT_NAME].strip() if len(row) > self.COL_PRODUCT_NAME else ''
+                    plant_code = row[self.COL_FACTORY].strip() if len(row) > self.COL_FACTORY else ''
                     ship_to = row[self.COL_SHIP_TO].strip() if len(row) > self.COL_SHIP_TO else ''
                     inspection_type = row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else ''
                     delivery_date_str = row[self.COL_DELIVERY_DATE].strip() if len(row) > self.COL_DELIVERY_DATE else ''
@@ -256,6 +258,7 @@ class KubotaSakaiKakuteiImportService:
                         raw_payload={
                             'row': row,
                             'encoding': encoding,
+                            'plant_code': plant_code,
                             'issue_date': issue_date_str,  # 発行日（Order識別用）
                             'order_no': order_no,  # 発注番号（製品毎）
                             'ship_to': ship_to,  # 納場所

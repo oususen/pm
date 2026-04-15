@@ -218,13 +218,12 @@ def recalculate_progress_qty(
             qty = Decimal('0')
             firm_qty = demand.firm_qty if demand.firm_qty and demand.firm_qty > 0 else Decimal('0')
             forecast_qty = demand.forecast_qty if demand.forecast_qty and demand.forecast_qty > 0 else Decimal('0')
-            is_shifted = bool(getattr(demand, 'is_shifted', False))
-            if is_shifted and firm_qty > 0 and forecast_qty > 0:
-                qty = firm_qty + forecast_qty
-            elif firm_qty > 0:
+            if firm_qty > 0:
                 qty = firm_qty
             elif forecast_qty > 0:
                 qty = forecast_qty
+            else:
+                qty = Decimal('0')
             if demand.routing_step_id:
                 key = (demand.plan_date, demand.routing_step_id)
                 demand_by_step[key] = demand_by_step.get(key, Decimal('0')) + qty

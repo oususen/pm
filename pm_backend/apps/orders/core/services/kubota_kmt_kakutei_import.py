@@ -7,12 +7,14 @@ from masters.models import Customer, Product
 
 
 class KubotaKmtKakuteiImportService:
-    """Kubota KMT Confirmed (NO=27) CSV Import Service"""
+    """Kubota KMT Confirmed (NO=27/49) CSV Import Service"""
 
-    DATA_NO = '27'
+    SUPPORTED_DATA_NOS = ('27', '49')
+    KMT_PLANT_CODES = ('92', '76')
     FACTORY = 'KMT'
 
     COL_DATA_NO = 0
+    COL_FACTORY = 1
     COL_CHUBAN = 3  # 注番（顧客発注番号）
     COL_PRODUCT_CODE = 5
     COL_PRODUCT_NAME = 10
@@ -21,6 +23,11 @@ class KubotaKmtKakuteiImportService:
     COL_DELIVERY_DATE = 21  # 納期(YYYYMMDD)
     COL_QUANTITY = 22  # 指示数
     COL_ISSUE_DATE = 24  # 発行日(YYMMDD)
+    # No=49統合補充（工場92/76）の列マップ
+    COL49_DELIVERY_DATE = 23  # 納期(MMDD)
+    COL49_QUANTITY = 24  # 指示数
+    COL49_ISSUE_DATE = 26  # 発行日(YYMMDD)
+    COL49_ORDER_NO = 33  # 発注番号
 
     def __init__(self):
         self.errors = []
@@ -40,6 +47,21 @@ class KubotaKmtKakuteiImportService:
         if not date_str:
             return None
         s = str(date_str).strip()
+        if len(s) == 3 and s.isdigit():
+            s = '0' + s
+        if len(s) == 4 and s.isdigit():
+            try:
+                mm = int(s[:2])
+                dd = int(s[2:4])
+                today = datetime.now().date()
+                year = today.year
+                if mm > today.month + 6:
+                    year -= 1
+                elif mm < today.month - 6:
+                    year += 1
+                return datetime(year, mm, dd).date()
+            except ValueError:
+                return None
         if len(s) == 8 and s.isdigit():
             try:
                 return datetime.strptime(s, '%Y%m%d').date()
@@ -86,7 +108,7 @@ class KubotaKmtKakuteiImportService:
                     continue
 
                 data_no = row[self.COL_DATA_NO].strip() if len(row) > self.COL_DATA_NO else ''
-                if data_no != self.DATA_NO:
+                if data_no not in self.SUPPORTED_DATA_NOS:
                     continue
 
                 product_code = row[self.COL_PRODUCT_CODE].strip() if len(row) > self.COL_PRODUCT_CODE else ''
@@ -94,12 +116,22 @@ class KubotaKmtKakuteiImportService:
                     continue
 
                 product_name = row[self.COL_PRODUCT_NAME].strip() if len(row) > self.COL_PRODUCT_NAME else ''
+                plant_code = row[self.COL_FACTORY].strip() if len(row) > self.COL_FACTORY else ''
+                # No=49 は工場コードでKMT判定（堺49の誤取込を防止）
+                if data_no == '49' and plant_code not in self.KMT_PLANT_CODES:
+                    continue
                 ship_to = row[self.COL_SHIP_TO].strip() if len(row) > self.COL_SHIP_TO else ''
                 inspection_type = row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else ''
-                due_date_str = row[self.COL_DELIVERY_DATE].strip() if len(row) > self.COL_DELIVERY_DATE else ''
-                qty_str = row[self.COL_QUANTITY].strip() if len(row) > self.COL_QUANTITY else ''
-                issue_date = row[self.COL_ISSUE_DATE].strip() if len(row) > self.COL_ISSUE_DATE else ''
-                chuban = row[self.COL_CHUBAN].strip() if len(row) > self.COL_CHUBAN else ''
+                if data_no == '49':
+                    due_date_str = row[self.COL49_DELIVERY_DATE].strip() if len(row) > self.COL49_DELIVERY_DATE else ''
+                    qty_str = row[self.COL49_QUANTITY].strip() if len(row) > self.COL49_QUANTITY else ''
+                    issue_date = row[self.COL49_ISSUE_DATE].strip() if len(row) > self.COL49_ISSUE_DATE else ''
+                    chuban = row[self.COL49_ORDER_NO].strip() if len(row) > self.COL49_ORDER_NO else ''
+                else:
+                    due_date_str = row[self.COL_DELIVERY_DATE].strip() if len(row) > self.COL_DELIVERY_DATE else ''
+                    qty_str = row[self.COL_QUANTITY].strip() if len(row) > self.COL_QUANTITY else ''
+                    issue_date = row[self.COL_ISSUE_DATE].strip() if len(row) > self.COL_ISSUE_DATE else ''
+                    chuban = row[self.COL_CHUBAN].strip() if len(row) > self.COL_CHUBAN else ''
 
                 due_date = self.parse_date(due_date_str)
                 if not due_date:
@@ -117,7 +149,7 @@ class KubotaKmtKakuteiImportService:
                         order_type=order_type,
                         source_file=file.name,
                         source_row_no=row_no,
-                        data_no=self.DATA_NO,
+                        data_no=data_no,
                         record_type='',
                         product_name=product_name,
                         product_code=product_code,
@@ -128,6 +160,7 @@ class KubotaKmtKakuteiImportService:
                         raw_payload={
                             'row': row,
                             'encoding': encoding,
+                            'plant_code': plant_code,
                             'factory': self.FACTORY,
                             'ship_to': ship_to,
                             'issue_date': issue_date,
@@ -140,7 +173,7 @@ class KubotaKmtKakuteiImportService:
             if not raw_records:
                 return {
                     'success': False,
-                    'message': 'No valid NO=27 confirmed order records found in file',
+                    'message': 'No valid NO=27/49 confirmed KMT order records found in file',
                     'errors': self.errors,
                     'warnings': self.warnings,
                 }
@@ -171,7 +204,7 @@ class KubotaKmtKakuteiImportService:
             raw_records_with_ids = StgOrderRawKubota.objects.filter(
                 source_file=file.name,
                 customer_code=customer_code,
-                data_no=self.DATA_NO,
+                data_no__in=self.SUPPORTED_DATA_NOS,
             ).order_by('-id')[:len(raw_records)]
 
             raw_ids = [r.id for r in raw_records_with_ids]
@@ -229,4 +262,3 @@ class KubotaKmtKakuteiImportService:
                 StgOrderDaily.objects.bulk_create(daily_records)
 
         return len(raw_records), len(daily_records), min_raw_id, max_raw_id
-

@@ -214,6 +214,7 @@ class OrderExpansionService:
 
         objects_to_create: List[LineDemand] = []
         for key, entry in aggregated.items():
+            self._apply_firm_priority_to_entry(entry)
             existing = existing_map.get(key)
             objects_to_create.append(self._build_line_demand(entry, existing=existing))
 
@@ -260,6 +261,12 @@ class OrderExpansionService:
             existing = existing_map.get(key)
 
             if entry:
+                # 確定優先: 既存FIRMがあるキーはFORECASTを展開しない
+                if existing is not None and (existing.firm_qty or Decimal('0')) > 0:
+                    entry = dict(entry)
+                    entry['forecast_qty'] = Decimal('0')
+                    entry['forecast_is_shifted'] = False
+                    entry['forecast_order_numbers'] = set()
                 if existing is None:
                     existing = self._build_line_demand(entry)
                     existing_map[key] = existing
@@ -327,6 +334,10 @@ class OrderExpansionService:
                 existing.firm_order_numbers,
                 self._normalize_order_numbers(entry['firm_order_numbers']),
             )
+            # 確定優先: FIRMが入ったキーのFORECASTは0化
+            existing.forecast_qty = Decimal('0')
+            existing.forecast_is_shifted = False
+            existing.forecast_order_numbers = ''
             self._refresh_demand_fields(existing)
             to_update.append(existing)
 
@@ -346,6 +357,13 @@ class OrderExpansionService:
             'created': len(to_create),
             'updated': len(to_update),
         }
+
+    def _apply_firm_priority_to_entry(self, entry):
+        """同一キーに確定がある場合、内示は無効化する。"""
+        if (entry.get('firm_qty') or Decimal('0')) > 0:
+            entry['forecast_qty'] = Decimal('0')
+            entry['forecast_is_shifted'] = False
+            entry['forecast_order_numbers'] = set()
 
     def _load_existing_demands(self):
         return {

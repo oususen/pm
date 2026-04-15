@@ -360,9 +360,20 @@ class CSVImportService:
                         factory_label = None
                         if first_daily and hasattr(first_daily, 'raw_kubota') and first_daily.raw_kubota:
                             raw_payload = first_daily.raw_kubota.raw_payload or {}
-                            factory_label = raw_payload.get('factory')
-                            if factory_label:
-                                factory_label = str(factory_label).strip()
+                            # 工場コード（CSV 1列目）を最優先で工場ラベルに変換
+                            plant_code = str(raw_payload.get('plant_code', '')).strip()
+                            plant_factory_map = {
+                                '23': 'HIRAKATA',
+                                '21': 'SAKAI',
+                                '92': 'KMT',
+                                '76': 'KMT',
+                            }
+                            if plant_code in plant_factory_map:
+                                factory_label = plant_factory_map[plant_code]
+                            else:
+                                factory_label = raw_payload.get('factory')
+                                if factory_label:
+                                    factory_label = str(factory_label).strip()
                             is_kubota_special = (
                                 raw_payload.get('special') is True
                                 or raw_payload.get('format') == 'NVAN-2'

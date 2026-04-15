@@ -1503,7 +1503,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             firm_map = defaultdict(Decimal)
             forecast_map = defaultdict(Decimal)
             shifted_keys = set()
-
             for ol in order_lines:
                 if not ol.product_id:
                     continue
@@ -1528,7 +1527,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 firm_qty = firm_map.get(key, Decimal('0'))
                 forecast_qty = forecast_map.get(key, Decimal('0'))
                 # 前倒しで同日に重なった需要のみ、確定＋内示を合算する。
-                # 前倒しが無い場合は従来どおり「確定優先」。
+                # 前倒しが無い場合は「確定優先」。
                 if key in shifted_keys and firm_qty > 0 and forecast_qty > 0:
                     demand_qty = firm_qty + forecast_qty
                 else:

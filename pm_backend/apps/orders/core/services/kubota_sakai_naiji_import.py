@@ -29,6 +29,7 @@ class KubotaSakaiNaijiImportService:
 
     DATA_NO = '36'
     COL_DATA_NO = 0
+    COL_FACTORY = 1  # 工場
     COL_CALC_DATE = 4  # 計算日 (Excel列5) - YYMMDD format, Order識別用
     COL_PRODUCT_CODE = 8
     COL_PRODUCT_NAME = 11  # 品名
@@ -179,6 +180,7 @@ class KubotaSakaiNaijiImportService:
                 try:
                     # Extract key fields
                     product_code = row[self.COL_PRODUCT_CODE].strip() if len(row) > self.COL_PRODUCT_CODE else ''
+                    plant_code = row[self.COL_FACTORY].strip() if len(row) > self.COL_FACTORY else ''
                     inspection_type = row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else ''
                     record_type = row[self.COL_RECORD_TYPE].strip() if len(row) > self.COL_RECORD_TYPE else ''
                     ship_to = row[self.COL_SHIP_TO].strip() if len(row) > self.COL_SHIP_TO else ''
@@ -220,6 +222,7 @@ class KubotaSakaiNaijiImportService:
 
                     # Extract start month
                     start_month = v2_row[self.COL_START_MONTH].strip() if len(v2_row) > self.COL_START_MONTH else ''
+                    plant_code = v2_row[self.COL_FACTORY].strip() if len(v2_row) > self.COL_FACTORY else ''
 
                     # Extract date headers (V2) and quantities (V3)
                     date_headers = []
@@ -254,6 +257,7 @@ class KubotaSakaiNaijiImportService:
                             'v2_row_no': v2_row_no,
                             'v3_row_no': v3_row_no,
                             'calc_date': calc_date,  # 計算日（Order識別用）
+                            'plant_code': plant_code,
                             'ship_to': ship_to_code,  # 納入先コード
                             'encoding': encoding
                         },

@@ -7,6 +7,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 import django_filters
 from django.db.models import Q
+import csv
 
 from .models import (
     Order,
@@ -206,6 +207,64 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         # Default service
         return CSVImportService()
 
+    def _infer_kubota_factory_from_file(self, file, order_type):
+        """Infer Kubota factory from CSV contents using No + 工場 columns.
+
+        Rule:
+        - 工場 23 => HIRAKATA
+        - 工場 21 => SAKAI
+        - 工場 92/76 => KMT
+        - Fallback by No when 工場が取れない:
+          27 => KMT, 45 => HIRAKATA, 49 => SAKAI
+        """
+        try:
+            file.seek(0)
+            raw_data = file.read()
+            decoded = None
+            for enc in ('cp932', 'shift-jis', 'utf-8-sig', 'utf-8'):
+                try:
+                    decoded = raw_data.decode(enc)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if decoded is None:
+                return None
+
+            plant_map = {
+                '23': 'HIRAKATA',
+                '21': 'SAKAI',
+                '92': 'KMT',
+                '76': 'KMT',
+            }
+            no_fallback_map = {
+                '27': 'KMT',
+                '45': 'HIRAKATA',
+                '49': 'SAKAI',
+            }
+
+            for row_no, row in enumerate(csv.reader(decoded.splitlines()), start=1):
+                if row_no > 300:
+                    break
+                if len(row) < 2:
+                    continue
+                no_val = (row[0] or '').strip()
+                plant_val = (row[1] or '').strip()
+
+                # Skip header-like rows
+                if not no_val.isdigit():
+                    continue
+
+                if plant_val in plant_map:
+                    return plant_map[plant_val]
+
+                if order_type == 'FIRM' and no_val in no_fallback_map:
+                    return no_fallback_map[no_val]
+            return None
+        except Exception:
+            return None
+        finally:
+            file.seek(0)
+
     @action(
         detail=False,
         methods=['post'],
@@ -234,6 +293,36 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     {'error': 'Customer code is required'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+
+            # Kubotaは No + 工場 で自動判定可能だが、UIで工場選択がある場合は不一致をエラーにする
+            if customer_code == '000196':
+                inferred_factory = self._infer_kubota_factory_from_file(file, order_type)
+                # 工場未指定時のみ CSV から推定して補完
+                if not factory:
+                    if inferred_factory:
+                        factory = inferred_factory
+                # 工場指定済みで不一致なら、誤取込防止のためエラー
+                elif inferred_factory and factory != inferred_factory:
+                    factory_name_map = {
+                        'SAKAI': '堺',
+                        'HIRAKATA': '枚方',
+                        'KMT': 'KMT',
+                    }
+                    selected_name = factory_name_map.get(factory, factory)
+                    inferred_name = factory_name_map.get(inferred_factory, inferred_factory)
+                    return Response(
+                        {
+                            'success': False,
+                            'error': (
+                                f'選択工場（{selected_name}）とCSV実データ工場（{inferred_name}）が一致しません。'
+                            ),
+                            'message': (
+                                f'このファイルは {inferred_name} 向けデータです。'
+                                f'{inferred_name} を選択して再アップロードしてください。'
+                            ),
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
 
             # リーデンは現行運用で「確定（FIRM）のみ」受付
             if customer_code == '000018' and order_type != 'FIRM':

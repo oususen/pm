@@ -1,5 +1,6 @@
 import csv
 from datetime import datetime
+from datetime import timedelta
 from decimal import Decimal
 from django.db import transaction
 from orders.core.models import StgOrderRawKubota, StgOrderDaily
@@ -13,6 +14,7 @@ class KubotaKmtNaijiImportService:
     FACTORY = 'KMT'
 
     COL_DATA_NO = 0
+    COL_FACTORY = 1
     COL_PRODUCT_CODE = 7
     COL_PRODUCT_NAME = 8
     COL_SHIP_TO = 11  # 納入場所
@@ -98,6 +100,7 @@ class KubotaKmtNaijiImportService:
                     continue
 
                 product_name = row[self.COL_PRODUCT_NAME].strip() if len(row) > self.COL_PRODUCT_NAME else ''
+                plant_code = row[self.COL_FACTORY].strip() if len(row) > self.COL_FACTORY else ''
                 ship_to = row[self.COL_SHIP_TO].strip() if len(row) > self.COL_SHIP_TO else ''
                 inspection_type = row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else ''
                 order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
@@ -131,6 +134,7 @@ class KubotaKmtNaijiImportService:
                             raw_payload={
                                 'row': row,
                                 'encoding': encoding,
+                                'plant_code': plant_code,
                                 'factory': self.FACTORY,
                                 'ship_to': ship_to,
                                 'calc_date': calc_date,
@@ -169,6 +173,7 @@ class KubotaKmtNaijiImportService:
             }
 
     def save_to_database(self, raw_records, file, customer_code):
+        from collections import defaultdict
         with transaction.atomic():
             StgOrderRawKubota.objects.bulk_create(raw_records)
 
@@ -185,6 +190,22 @@ class KubotaKmtNaijiImportService:
             customer = Customer.objects.get(customer_code=customer_code)
             daily_records = []
 
+            # 確定優先: 同一顧客・同一品番・同一納入先・同一納期にFIRMがあればFORECASTを除外
+            # 直近90日のFIRMを参照して過去確定による恒久的な除外を避ける
+            firm_cutoff = datetime.now() - timedelta(days=90)
+            product_codes = list({r.product_code for r in raw_records_with_ids if r.product_code})
+            firm_dates_by_product_shipto = defaultdict(set)
+            if product_codes:
+                firm_qs = StgOrderDaily.objects.filter(
+                    customer=customer,
+                    order_type='FIRM',
+                    product_code__in=product_codes,
+                    created_at__gte=firm_cutoff,
+                ).values('product_code', 'ship_to_code', 'due_date')
+                for row in firm_qs:
+                    key = (row['product_code'], row['ship_to_code'] or '')
+                    firm_dates_by_product_shipto[key].add(row['due_date'])
+
             for raw in raw_records_with_ids:
                 if not raw.product_code or not raw.delivery_date or not raw.quantity:
                     raw.parse_status = 'ERROR'
@@ -193,6 +214,13 @@ class KubotaKmtNaijiImportService:
                     continue
 
                 try:
+                    raw_ship_to = (raw.raw_payload or {}).get('ship_to', '')
+                    firm_key = (raw.product_code, raw_ship_to)
+                    if raw.delivery_date in firm_dates_by_product_shipto.get(firm_key, set()):
+                        raw.parse_status = 'PARSED'
+                        raw.save()
+                        continue
+
                     product, created = Product.objects.get_or_create(
                         product_code=raw.product_code,
                         defaults={
@@ -215,7 +243,7 @@ class KubotaKmtNaijiImportService:
                             product_code=raw.product_code,
                             due_date=raw.delivery_date,
                             quantity=raw.quantity,
-                            ship_to_code=(raw.raw_payload or {}).get('ship_to', ''),
+                            ship_to_code=raw_ship_to,
                             source_system='CSV',
                             source_file=raw.source_file,
                         )
@@ -233,4 +261,3 @@ class KubotaKmtNaijiImportService:
                 StgOrderDaily.objects.bulk_create(daily_records)
 
         return len(raw_records), len(daily_records), min_raw_id, max_raw_id
-

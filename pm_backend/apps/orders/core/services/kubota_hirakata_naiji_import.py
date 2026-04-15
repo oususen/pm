@@ -31,6 +31,7 @@ class KubotaHirakataNaijiImportService:
 
     DATA_NO = '36'
     COL_DATA_NO = 0
+    COL_FACTORY = 1
     COL_PRODUCT_CODE = 8
     COL_PRODUCT_NAME = 11  # 品名
     COL_SHIP_TO = 12
@@ -168,6 +169,7 @@ class KubotaHirakataNaijiImportService:
 
                 try:
                     product_code = row[self.COL_PRODUCT_CODE].strip()
+                    plant_code = row[self.COL_FACTORY].strip() if len(row) > self.COL_FACTORY else ''
                     inspection_type = row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else ''
                     record_type = row[self.COL_RECORD_TYPE].strip() if len(row) > self.COL_RECORD_TYPE else ''
                     ship_to = row[self.COL_SHIP_TO].strip() if len(row) > self.COL_SHIP_TO else ''
@@ -202,6 +204,7 @@ class KubotaHirakataNaijiImportService:
                 try:
                     # Extract product name
                     product_name = v2_row[self.COL_PRODUCT_NAME].strip() if len(v2_row) > self.COL_PRODUCT_NAME else ''
+                    plant_code = v2_row[self.COL_FACTORY].strip() if len(v2_row) > self.COL_FACTORY else ''
 
                     # Extract date headers and quantities
                     date_headers = []
@@ -240,6 +243,7 @@ class KubotaHirakataNaijiImportService:
                             'v2_row': v2_row,
                             'v3_row': v3_row,
                             'encoding': encoding,
+                            'plant_code': plant_code,
                             'ship_to': ship_to,
                         },
                         parse_status='PENDING'
