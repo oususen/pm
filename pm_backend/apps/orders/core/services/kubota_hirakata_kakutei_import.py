@@ -36,6 +36,7 @@ class KubotaHirakataKakuteiImportService:
     # Column positions
     COL_DATA_NO = 0
     COL_ORDER_NO = 3
+    COL_SHIP_TO = 12
     COL_PRODUCT_CODE_45 = 5
     COL_PRODUCT_NAME_45 = 8
     COL_DELIVERY_DATE_45 = 18
@@ -219,6 +220,7 @@ class KubotaHirakataKakuteiImportService:
                         issue_date_str = row[self.COL_ISSUE_DATE_45].strip() if len(row) > self.COL_ISSUE_DATE_45 else ''
                         order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
                         inspection_type = row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else ''
+                        ship_to = row[self.COL_SHIP_TO].strip() if len(row) > self.COL_SHIP_TO else ''
 
                         due_date = self.parse_date_from_yymmdd(delivery_date_str)
                         fmt = '45'
@@ -243,6 +245,7 @@ class KubotaHirakataKakuteiImportService:
                         issue_date_str = row[self.COL_ISSUE_DATE_47].strip() if len(row) > self.COL_ISSUE_DATE_47 else ''
                         order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
                         inspection_type = row[self.COL_INSPECTION_TYPE_47].strip() if len(row) > self.COL_INSPECTION_TYPE_47 else ''
+                        ship_to = row[self.COL_SHIP_TO].strip() if len(row) > self.COL_SHIP_TO else ''
 
                         due_date = (
                             self.parse_date_from_mmdd(delivery_date_str)
@@ -277,6 +280,8 @@ class KubotaHirakataKakuteiImportService:
                     }
                     if issue_date_str:
                         raw_payload['issue_date'] = issue_date_str
+                    if ship_to:
+                        raw_payload['ship_to'] = ship_to
 
                     raw_record = StgOrderRawKubota(
                         customer_code=customer_code,
@@ -398,6 +403,7 @@ class KubotaHirakataKakuteiImportService:
                         product_code=raw.product_code,
                         due_date=raw.delivery_date,
                         quantity=raw.quantity,
+                        ship_to_code=(raw.raw_payload or {}).get('ship_to', ''),
                         source_system=raw.source_system,
                         source_file=raw.source_file
                     )

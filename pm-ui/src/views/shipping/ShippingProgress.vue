@@ -21,6 +21,9 @@
           v-model="shipToFilter"
           placeholder="納入先で絞り込み"
         />
+        <button type="button" @click="toggleShipToMode">
+          納入先: {{ splitByShipTo ? "分行" : "集約" }}
+        </button>
         <input type="date" v-model="startDate" />
         <select v-model.number="horizon">
           <option :value="30">30日</option>
@@ -54,7 +57,7 @@
                 </div>
                 <div class="info-row">
                   <span class="info-label">納入先</span>
-                  <span class="info-value">{{ g.ship_to_code || "-" }}</span>
+                  <span class="info-value">{{ g.ship_to_display || "-" }}</span>
                 </div>
                 <div class="info-row">
                   <span class="info-label">合計内示</span>
@@ -225,6 +228,7 @@ const holidays = ref(new Set());
 const daisoCalendarId = ref(null);
 const currentPage = ref(1);
 const pageSize = ref(20);
+const splitByShipTo = ref(true);
 
 const normalizeList = (payload) => {
   return Array.isArray(payload) ? payload : payload?.results || [];
@@ -289,6 +293,13 @@ const endDate = computed(() => {
 });
 
 const isHoliday = (dateStr) => holidays.value.has(dateStr) || isWeekend(dateStr);
+
+const buildGroupKey = (productCode, customerCode, shipToCode) => {
+  if (splitByShipTo.value) {
+    return `${productCode}__${customerCode}__${shipToCode}`;
+  }
+  return `${productCode}__${customerCode}`;
+};
 
 const buildWeekendFallback = () => {
   return new Set(columns.value.filter((d) => isWeekend(d)));
@@ -364,7 +375,7 @@ const groups = computed(() => {
     const productCode = order.product_code;
     const customerCode = order.customer_code || "";
     const customerName = order.customer_name || "";
-    const shipToCode = order.ship_to_code || "";
+    const shipToCode = (order.ship_to_code || "").trim();
 
     // 製品フィルタ
     if (productFilter.value) {
@@ -398,7 +409,7 @@ const groups = computed(() => {
     processedCount++;
 
     // グループ作成
-    const groupKey = `${productCode}__${customerCode}__${shipToCode}`;
+    const groupKey = buildGroupKey(productCode, customerCode, shipToCode);
     const specialDisplayOrder = resolveSpecialDisplayOrder(order);
     if (!map.has(groupKey)) {
       map.set(groupKey, {
@@ -407,7 +418,9 @@ const groups = computed(() => {
         product_name: order.product_name,
         customer_code: customerCode,
         customer_name: customerName,
-        ship_to_code: shipToCode,
+        ship_to_code: splitByShipTo.value ? shipToCode : "",
+        ship_to_codes: new Set(),
+        ship_to_display: "-",
         special_display_order: specialDisplayOrder,
         cells: {},
         summary: { forecast: 0, firm: 0, actual: 0, adjust: 0, progressRate: "-" },
@@ -415,6 +428,7 @@ const groups = computed(() => {
     }
 
     const group = map.get(groupKey);
+    group.ship_to_codes.add(shipToCode);
     if (specialDisplayOrder !== null) {
       const currentOrder = resolveSpecialDisplayOrder(group);
       if (currentOrder === null || specialDisplayOrder < currentOrder) {
@@ -451,8 +465,8 @@ const groups = computed(() => {
     const aDate = actual.shipment_date ? actual.shipment_date.slice(0, 10) : "";
     const aProduct = actual.product_code;
     const aCustomer = actual.customer_code || "";
-    const aShipTo = actual.ship_to_code || "";
-    const aKey = `${aProduct}__${aCustomer}__${aShipTo}`;
+    const aShipTo = (actual.ship_to_code || "").trim();
+    const aKey = buildGroupKey(aProduct, aCustomer, aShipTo);
     const perDate = actualMap.get(aKey) || new Map();
     const current = perDate.get(aDate) || 0;
     perDate.set(aDate, current + Number(actual.quantity || 0));
@@ -503,6 +517,14 @@ const groups = computed(() => {
       adjust: totalAdjust,
       progressRate: cumulativeProgress.toLocaleString(),
     };
+    const shipToList = Array.from(g.ship_to_codes || new Set()).filter((v) => v);
+    if (splitByShipTo.value) {
+      g.ship_to_display = g.ship_to_code || "-";
+    } else if (shipToList.length <= 1) {
+      g.ship_to_display = shipToList[0] || "-";
+    } else {
+      g.ship_to_display = "混在";
+    }
 
     return g;
   });
@@ -563,6 +585,11 @@ const formatCustomer = (group) => {
     return `${group.customer_code || ""} ${group.customer_name}`.trim();
   }
   return group.customer_code || "-";
+};
+
+const toggleShipToMode = () => {
+  splitByShipTo.value = !splitByShipTo.value;
+  currentPage.value = 1;
 };
 
 const getProgressRate = (group, date) => {

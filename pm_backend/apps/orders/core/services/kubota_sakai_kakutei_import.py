@@ -8,15 +8,15 @@ from masters.models import Customer, Product
 
 
 class KubotaSakaiKakuteiImportService:
-    """Kubota Sakai Factory Confirmed (47番確定) CSV Import Service
+    """Kubota Sakai Factory Confirmed (47/49番確定) CSV Import Service
 
-    Format: RCV_JVAN_47_(堺).csv
-    - Data No: 47 (confirmed/firm orders)
+    Format: RCV_JVAN_(47/49)_(堺).csv
+    - Data No: 47 / 49 (confirmed/firm orders)
     - Structure: Simple 1 row = 1 order line
     - Encoding: Shift-JIS (cp932)
 
     Column mapping (Python indices):
-    - Column 0: data_no = "47"
+    - Column 0: data_no = "47" or "49"
     - Column 5: product_code (品番)
     - Column 10: product_name (品名)
     - Column 14: inspection_type (検区)
@@ -26,10 +26,11 @@ class KubotaSakaiKakuteiImportService:
     - Column 33: order_no (発注番号) - 製品毎に異なる
     """
 
-    DATA_NO = '47'
+    SUPPORTED_DATA_NOS = ('47', '49')
     COL_DATA_NO = 0
     COL_PRODUCT_CODE = 5
     COL_PRODUCT_NAME = 10  # 品名 (Excel列11)
+    COL_SHIP_TO = 12  # 納場所 (Excel列13)
     COL_INSPECTION_TYPE = 14  # 検区 (Excel列15)
     COL_DELIVERY_DATE = 23  # 納期 (Excel列24) - MMDD format
     COL_QUANTITY = 24  # 指示数/数量 (Excel列25)
@@ -148,7 +149,7 @@ class KubotaSakaiKakuteiImportService:
             return None
 
     def import_csv(self, file, customer_code, order_type, source_system='CSV'):
-        """Import Kubota Sakai confirmed order CSV (47番確定)
+        """Import Kubota Sakai confirmed order CSV (47/49番確定)
 
         Args:
             file: Uploaded file object
@@ -194,11 +195,12 @@ class KubotaSakaiKakuteiImportService:
                 if row_no <= 10 and len(row) > self.COL_DATA_NO:
                     data_no_samples.add(row[self.COL_DATA_NO].strip())
 
-                # デバッグ：最初の3データ行を記録（47番のみ）
-                if len(sample_rows) < 3 and len(row) > self.COL_DATA_NO and row[self.COL_DATA_NO].strip() == self.DATA_NO:
+                # デバッグ：最初の3データ行を記録（47/49番のみ）
+                row_data_no = row[self.COL_DATA_NO].strip() if len(row) > self.COL_DATA_NO else ''
+                if len(sample_rows) < 3 and row_data_no in self.SUPPORTED_DATA_NOS:
                     sample_rows.append({
                         'row_no': row_no,
-                        'data_no': row[self.COL_DATA_NO].strip() if len(row) > self.COL_DATA_NO else '',
+                        'data_no': row_data_no,
                         'product_code': row[self.COL_PRODUCT_CODE].strip() if len(row) > self.COL_PRODUCT_CODE else '',
                         'product_name': row[self.COL_PRODUCT_NAME].strip() if len(row) > self.COL_PRODUCT_NAME else '',
                         'inspection': row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else '',
@@ -208,13 +210,14 @@ class KubotaSakaiKakuteiImportService:
                     })
 
                 # Filter by data_no
-                if row[self.COL_DATA_NO].strip() != self.DATA_NO:
+                if row_data_no not in self.SUPPORTED_DATA_NOS:
                     continue
 
                 try:
                     # Extract data
                     product_code = row[self.COL_PRODUCT_CODE].strip() if len(row) > self.COL_PRODUCT_CODE else ''
                     product_name = row[self.COL_PRODUCT_NAME].strip() if len(row) > self.COL_PRODUCT_NAME else ''
+                    ship_to = row[self.COL_SHIP_TO].strip() if len(row) > self.COL_SHIP_TO else ''
                     inspection_type = row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else ''
                     delivery_date_str = row[self.COL_DELIVERY_DATE].strip() if len(row) > self.COL_DELIVERY_DATE else ''
                     quantity_str = row[self.COL_QUANTITY].strip() if len(row) > self.COL_QUANTITY else ''
@@ -242,8 +245,8 @@ class KubotaSakaiKakuteiImportService:
                         order_type=order_type,
                         source_file=file.name,
                         source_row_no=row_no,
-                        data_no=self.DATA_NO,
-                        record_type='',  # Not applicable for 47番
+                        data_no=row_data_no,
+                        record_type='',  # Not applicable for 47/49番
                         product_name=product_name,
                         product_code=product_code,
                         delivery_date=delivery_date,
@@ -254,7 +257,8 @@ class KubotaSakaiKakuteiImportService:
                             'row': row,
                             'encoding': encoding,
                             'issue_date': issue_date_str,  # 発行日（Order識別用）
-                            'order_no': order_no  # 発注番号（製品毎）
+                            'order_no': order_no,  # 発注番号（製品毎）
+                            'ship_to': ship_to,  # 納場所
                         },
                         parse_status='PENDING'
                     )
@@ -268,11 +272,11 @@ class KubotaSakaiKakuteiImportService:
                 debug_info = f"Found data_no values: {', '.join(sorted(data_no_samples)) if data_no_samples else 'none'}"
                 sample_info = ""
                 if sample_rows:
-                    sample_info = "\n\nSample data from 47番 rows:\n"
+                    sample_info = "\n\nSample data from 47/49番 rows:\n"
                     for sample in sample_rows:
                         sample_info += f"Row {sample['row_no']}: product_code={sample['product_code']}, delivery_date={sample['delivery_date']}, quantity={sample['quantity']}, order_no={sample['order_no']}\n"
 
-                error_msg = f'No valid {self.DATA_NO}番 confirmed order records found in file. {debug_info}{sample_info}'
+                error_msg = f'No valid 47/49番 confirmed order records found in file. {debug_info}{sample_info}'
                 print(f"DEBUG: {error_msg}")  # Console output for debugging
 
                 return {
@@ -315,7 +319,7 @@ class KubotaSakaiKakuteiImportService:
     def save_to_database(self, raw_records, file, customer_code):
         """Save raw records and create daily records
 
-        For Kubota confirmed (47番), the structure is simple:
+        For Kubota confirmed (47/49番), the structure is simple:
         1. Save StgOrderRawKubota records (1 row = 1 order line)
         2. Create corresponding StgOrderDaily records
 
@@ -330,7 +334,7 @@ class KubotaSakaiKakuteiImportService:
             raw_records_with_ids = StgOrderRawKubota.objects.filter(
                 source_file=file.name,
                 customer_code=customer_code,
-                data_no=self.DATA_NO
+                data_no__in=self.SUPPORTED_DATA_NOS
             ).order_by('-id')[:len(raw_records)]
 
             # Track min and max IDs
@@ -380,6 +384,7 @@ class KubotaSakaiKakuteiImportService:
                         product_code=raw.product_code,
                         due_date=raw.delivery_date,
                         quantity=raw.quantity,
+                        ship_to_code=(raw.raw_payload or {}).get('ship_to', ''),
                         source_system='CSV',
                         source_file=raw.source_file
                     )

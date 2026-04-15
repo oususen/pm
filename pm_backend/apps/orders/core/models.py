@@ -346,7 +346,7 @@ class StgOrderRawKubota(models.Model):
     source_row_no = models.IntegerField(verbose_name='ソース行番号')
 
     # クボタ固有フィールド
-    data_no = models.CharField(max_length=10, null=True, blank=True, verbose_name='データNo')  # 36/45/47
+    data_no = models.CharField(max_length=10, null=True, blank=True, verbose_name='データNo')  # 4/27/36/45/47/49
     record_type = models.CharField(max_length=10, null=True, blank=True, verbose_name='レコード識別')  # V2/V3
     product_code = models.CharField(max_length=50, null=True, blank=True, verbose_name='品番')
     inspection_type = models.CharField(max_length=10, null=True, blank=True, verbose_name='検査区分')  # N, NS, TS, $ など
@@ -357,7 +357,7 @@ class StgOrderRawKubota(models.Model):
     date_headers = models.JSONField(null=True, blank=True, verbose_name='日付ヘッダー配列')  # ["51201", "51202", ...]
     quantities = models.JSONField(null=True, blank=True, verbose_name='数量配列')  # [72, 56, 64, ...]
 
-    # 確定用（45/47番）
+    # 確定用（27/45/47/49番）
     delivery_date = models.DateField(null=True, blank=True, verbose_name='納入指示日')
     quantity = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True, verbose_name='納入指示数')
     order_no = models.CharField(max_length=50, null=True, blank=True, verbose_name='注番')

@@ -18,7 +18,7 @@
         <label>検索</label>
         <input v-model.trim="keyword" type="text" placeholder="品番/品名" @keydown.enter="loadGrid" />
       </div>
-      <button class="btn save-btn" :disabled="loading || saving" @click="saveAdjustments">保存</button>
+      <button class="btn save-btn" :disabled="true" @click="saveAdjustments">保存停止中</button>
       <button class="btn" :disabled="loading" @click="loadGrid">表示のみ</button>
     </div>
 
@@ -111,7 +111,7 @@ const formatLocalDate = (date) => {
 
 const loading = ref(false)
 const saving = ref(false)
-const keyword = ref('')
+const keyword = ref('v0')
 const startDate = ref(formatLocalDate(new Date()))
 const horizonDays = ref(30)
 const rows = ref([])
@@ -317,6 +317,7 @@ const loadGrid = async () => {
       const firmKey = `${productCode}__${dueDate}`
       if (firmByProductDate[firmKey] && firmByProductDate[firmKey] > 0) return
       ensureGroup(productCode, productName)
+      if (line.id) grouped[productCode].orderLineIds.push(line.id)
       const qty = parseNumber(line.quantity)
       if (Object.prototype.hasOwnProperty.call(grouped[productCode].demandByDate, dueDate)) {
         grouped[productCode].demandByDate[dueDate] += qty
@@ -361,48 +362,7 @@ const onDeliveryBlur = (row, dateKey) => {
 }
 
 const saveAdjustments = async () => {
-  saving.value = true
-  try {
-    const payloadRows = rows.value.map((row) => {
-      const adjustments = dateColumns.value
-        .map((col) => {
-          const qty = parseNumber(row.deliveryByDate[col.key])
-          if (qty <= 0) return null
-          return {
-            adjusted_due_date: col.key,
-            adjusted_qty: qty,
-            remaining_qty: parseNumber(row.remainingByDate[col.key]),
-            customer_approved: true,
-            note: '',
-          }
-        })
-        .filter(Boolean)
-
-      return {
-        order_key: row.orderKey,
-        order_line_ids: row.orderLineIds,
-        adjustments,
-      }
-    })
-
-    await api.kubotaSakaiDueAdjustments.bulkSave(payloadRows)
-    await loadGrid()
-    alert('保存しました。')
-  } catch (error) {
-    const detail = error?.response?.data?.detail || '保存に失敗しました。'
-    const errors = error?.response?.data?.errors
-    if (Array.isArray(errors) && errors.length > 0) {
-      const lines = errors.map((item) => {
-        const key = item.order_key ? `行:${item.order_key}` : '行'
-        return `${key} ${item.detail || '入力エラー'}`
-      })
-      alert([detail, ...lines].join('\n'))
-    } else {
-      alert(detail)
-    }
-  } finally {
-    saving.value = false
-  }
+  alert('納期調整の保存は現在停止中です。')
 }
 
 onMounted(loadGrid)

@@ -370,10 +370,12 @@ class CSVImportService:
                             )
                             if not factory_label:
                                 data_no = (first_daily.raw_kubota.data_no or '').strip()
-                                if data_no == '47':
+                                if data_no in ('47', '49'):
                                     factory_label = 'SAKAI'
                                 elif data_no == '45':
                                     factory_label = 'HIRAKATA'
+                                elif data_no == '27':
+                                    factory_label = 'KMT'
                             if factory_label:
                                 factory_label = factory_label.upper()
                                 if is_kubota_special:
@@ -684,25 +686,52 @@ class CSVImportService:
 
                 # Process order lines
                 if order_type == 'FORECAST':
-                    # For FORECAST: Partial replacement strategy (per product)
-                    # Track earliest due date per product in new forecast
-                    product_earliest_dates = {}
-                    for daily in dailies:
-                        current_earliest = product_earliest_dates.get(daily.product_code)
-                        if current_earliest is None or daily.due_date < current_earliest:
-                            product_earliest_dates[daily.product_code] = daily.due_date
+                    # For FORECAST: Partial replacement strategy
+                    # Kubota(000196) は納入先単位で上書きし、別納入先（例: ZGHC）を巻き込まない
+                    if customer.customer_code == '000196':
+                        product_shipto_earliest_dates = {}
+                        for daily in dailies:
+                            ship_to = (daily.ship_to_code or '').strip()
+                            key = (daily.product_code, ship_to)
+                            current_earliest = product_shipto_earliest_dates.get(key)
+                            if current_earliest is None or daily.due_date < current_earliest:
+                                product_shipto_earliest_dates[key] = daily.due_date
 
-                    # Supersede existing forecast lines that overlap with new data (per product)
-                    # 自分自身（再取込で再利用した注文）は除外する
-                    for product_code, earliest_date in product_earliest_dates.items():
-                        superseded_count = Order.objects.filter(
-                            customer_id=customer_id,
-                            order_type='FORECAST',
-                            status='OPEN',
-                            lines__product_code=product_code,
-                            lines__due_date__gte=earliest_date
-                        ).exclude(id=order.id).distinct().update(status='SUPERSEDED')
-                        superseded_orders += superseded_count
+                        # 自分自身（再取込で再利用した注文）は除外する
+                        for (product_code, ship_to), earliest_date in product_shipto_earliest_dates.items():
+                            q = Order.objects.filter(
+                                customer_id=customer_id,
+                                order_type='FORECAST',
+                                status='OPEN',
+                                lines__product_code=product_code,
+                                lines__due_date__gte=earliest_date,
+                            ).exclude(id=order.id)
+
+                            if ship_to:
+                                q = q.filter(lines__ship_to_code=ship_to)
+                            else:
+                                q = q.filter(Q(lines__ship_to_code__isnull=True) | Q(lines__ship_to_code=''))
+
+                            superseded_count = q.distinct().update(status='SUPERSEDED')
+                            superseded_orders += superseded_count
+                    else:
+                        # その他得意先: 従来どおり品番単位
+                        product_earliest_dates = {}
+                        for daily in dailies:
+                            current_earliest = product_earliest_dates.get(daily.product_code)
+                            if current_earliest is None or daily.due_date < current_earliest:
+                                product_earliest_dates[daily.product_code] = daily.due_date
+
+                        # 自分自身（再取込で再利用した注文）は除外する
+                        for product_code, earliest_date in product_earliest_dates.items():
+                            superseded_count = Order.objects.filter(
+                                customer_id=customer_id,
+                                order_type='FORECAST',
+                                status='OPEN',
+                                lines__product_code=product_code,
+                                lines__due_date__gte=earliest_date
+                            ).exclude(id=order.id).distinct().update(status='SUPERSEDED')
+                            superseded_orders += superseded_count
 
                     # Create new order lines
                     line_no = 1

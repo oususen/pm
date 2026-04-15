@@ -63,8 +63,6 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
         return super().get_queryset().filter(
             order_line__order__status='OPEN',
             order_line__order__customer__customer_code='000196',
-            order_line__order__order_no__icontains='SAKAI',
-            order_line__order__order_type='FIRM',
         )
 
     @action(detail=False, methods=['get'])
@@ -83,8 +81,6 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
         line_qs = OrderLine.objects.select_related('order', 'order__customer', 'product').filter(
             order__status='OPEN',
             order__customer__customer_code='000196',
-            order__order_no__icontains='SAKAI',
-            order__order_type='FIRM',
         )
 
         line_qs = line_qs.filter(
@@ -173,6 +169,11 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def bulk_save(self, request):
+        return Response(
+            {'detail': 'クボタ堺納期調整の保存は現在停止中です。'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
         rows = request.data.get('rows')
         if not isinstance(rows, list):
             return Response({'detail': 'rows は配列で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
@@ -187,8 +188,6 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             id__in=line_ids,
             order__status='OPEN',
             order__customer__customer_code='000196',
-            order__order_no__icontains='SAKAI',
-            order__order_type='FIRM',
         )
         line_map = {line.id: line for line in line_qs}
 
@@ -265,7 +264,19 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             if validation_errors:
                 continue
 
-            total_base_qty = sum((line.quantity for line in group_lines), Decimal('0'))
+            firm_qty_by_date = defaultdict(Decimal)
+            for line in group_lines:
+                if line.order.order_type == 'FIRM':
+                    firm_qty_by_date[line.due_date] += (line.quantity or Decimal('0'))
+            total_base_qty = Decimal('0')
+            for line in group_lines:
+                qty = line.quantity or Decimal('0')
+                if line.order.order_type == 'FIRM':
+                    total_base_qty += qty
+                else:
+                    if firm_qty_by_date.get(line.due_date, Decimal('0')) > 0:
+                        continue
+                    total_base_qty += qty
             if total != total_base_qty:
                 validation_errors.append({
                     'order_key': row.get('order_key'),

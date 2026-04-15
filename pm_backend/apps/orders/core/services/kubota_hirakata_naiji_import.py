@@ -33,6 +33,7 @@ class KubotaHirakataNaijiImportService:
     COL_DATA_NO = 0
     COL_PRODUCT_CODE = 8
     COL_PRODUCT_NAME = 11  # 品名
+    COL_SHIP_TO = 12
     COL_INSPECTION_TYPE = 17  # Different from Sakai (18)
     COL_RECORD_TYPE = 24  # レコード識別 V2/V3 (Excel列25)
     COL_START_MONTH = 25  # 開始月度 (Excel列26)
@@ -169,11 +170,12 @@ class KubotaHirakataNaijiImportService:
                     product_code = row[self.COL_PRODUCT_CODE].strip()
                     inspection_type = row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else ''
                     record_type = row[self.COL_RECORD_TYPE].strip() if len(row) > self.COL_RECORD_TYPE else ''
+                    ship_to = row[self.COL_SHIP_TO].strip() if len(row) > self.COL_SHIP_TO else ''
 
                     if not product_code:
                         continue
 
-                    key = (product_code, inspection_type)
+                    key = (product_code, inspection_type, ship_to)
 
                     # Store V2 (date headers) and V3 (quantities)
                     if record_type == 'V2':
@@ -189,13 +191,13 @@ class KubotaHirakataNaijiImportService:
 
             for key in v2_rows.keys():
                 if key not in v3_rows:
-                    product_code, inspection_type = key
-                    self.warnings.append(f"Product {product_code} inspection {inspection_type}: V2 found but V3 missing")
+                    product_code, inspection_type, ship_to = key
+                    self.warnings.append(f"Product {product_code} inspection {inspection_type} ship_to {ship_to}: V2 found but V3 missing")
                     continue
 
                 v2_row, v2_row_no = v2_rows[key]
                 v3_row, v3_row_no = v3_rows[key]
-                product_code, inspection_type = key
+                product_code, inspection_type, ship_to = key
 
                 try:
                     # Extract product name
@@ -237,7 +239,8 @@ class KubotaHirakataNaijiImportService:
                         raw_payload={
                             'v2_row': v2_row,
                             'v3_row': v3_row,
-                            'encoding': encoding
+                            'encoding': encoding,
+                            'ship_to': ship_to,
                         },
                         parse_status='PENDING'
                     )
@@ -378,6 +381,7 @@ class KubotaHirakataNaijiImportService:
                             product_code=raw.product_code,
                             due_date=due_date,
                             quantity=quantity,
+                            ship_to_code=(raw.raw_payload or {}).get('ship_to', ''),
                             source_system=raw.source_system,
                             source_file=raw.source_file
                         )

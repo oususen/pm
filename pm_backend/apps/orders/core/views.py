@@ -130,7 +130,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             customer_code: Customer code
             order_type: 'FIRM' or 'FORECAST'
             filename: CSV filename (for fallback detection)
-            factory: Explicit factory code (e.g., 'SAKAI', 'HIRAKATA')
+            factory: Explicit factory code (e.g., 'SAKAI', 'HIRAKATA', 'KMT')
             is_tiera_t3: True の場合はティエラT3専用ロジックを利用
         """
         # Import services here to avoid circular imports
@@ -165,6 +165,8 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     detected_factory = 'SAKAI'
                 elif '枚方' in filename or 'hirakata' in filename_lower:
                     detected_factory = 'HIRAKATA'
+                elif 'kmt' in filename_lower:
+                    detected_factory = 'KMT'
 
             if detected_factory == 'SAKAI':
                 if order_type == 'FORECAST':
@@ -184,6 +186,15 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     # クボタ_枚方_確定
                     from .services.kubota_hirakata_kakutei_import import KubotaHirakataKakuteiImportService
                     return KubotaHirakataKakuteiImportService()
+            elif detected_factory == 'KMT':
+                if order_type == 'FORECAST':
+                    # クボタ_KMT_内示
+                    from .services.kubota_kmt_naiji_import import KubotaKmtNaijiImportService
+                    return KubotaKmtNaijiImportService()
+                elif order_type == 'FIRM':
+                    # クボタ_KMT_確定
+                    from .services.kubota_kmt_kakutei_import import KubotaKmtKakuteiImportService
+                    return KubotaKmtKakuteiImportService()
 
         # Customer: 000018 (リーデン)
         elif customer_code == '000018':

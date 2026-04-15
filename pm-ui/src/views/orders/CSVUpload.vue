@@ -217,6 +217,7 @@ const orderTypes = [
 const factories = [
   { value: 'SAKAI', label: '堺工場', desc: 'Sakai', badge: '堺' },
   { value: 'HIRAKATA', label: '枚方工場', desc: 'Hirakata', badge: '枚' },
+  { value: 'KMT', label: 'KMT工場', desc: 'KMT', badge: 'K' },
 ]
 
 const formData = ref({

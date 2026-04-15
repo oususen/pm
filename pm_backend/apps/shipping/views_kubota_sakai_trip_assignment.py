@@ -302,8 +302,6 @@ class KubotaSakaiTripAssignmentViewSet(viewsets.ModelViewSet):
         return super().get_queryset().filter(
             order_line__order__status='OPEN',
             order_line__order__customer__customer_code='000196',
-            order_line__order__order_no__icontains='SAKAI',
-            order_line__order__order_type='FIRM',
         )
 
     @action(detail=False, methods=['get'])
@@ -314,8 +312,6 @@ class KubotaSakaiTripAssignmentViewSet(viewsets.ModelViewSet):
         line_qs = OrderLine.objects.select_related('product', 'order').filter(
             order__status='OPEN',
             order__customer__customer_code='000196',
-            order__order_no__icontains='SAKAI',
-            order__order_type='FIRM',
         ).filter(
             Q(due_date=target_date)
             | Q(kubota_sakai_due_adjustments__adjusted_due_date=target_date)
@@ -440,8 +436,6 @@ class KubotaSakaiTripAssignmentViewSet(viewsets.ModelViewSet):
             id__in=line_ids,
             order__status='OPEN',
             order__customer__customer_code='000196',
-            order__order_no__icontains='SAKAI',
-            order__order_type='FIRM',
         )
         line_map = {line.id: line for line in line_qs}
         truck_map = {t.id: t for t in KubotaSakaiTruck.objects.filter(id__in=list(truck_ids), is_active=True)}
