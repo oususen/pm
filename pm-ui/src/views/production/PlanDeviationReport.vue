@@ -28,6 +28,7 @@
           <option value="over">超過のみ</option>
           <option value="short">不足のみ</option>
           <option value="unplanned">計画外のみ</option>
+          <option value="exclude_unplanned">計画外除外</option>
         </select>
         <button class="btn-reload" @click="loadReport" :disabled="loading">更新</button>
       </div>
@@ -120,6 +121,9 @@ function statusLabel(status) {
 
 const filteredItems = computed(() => {
   if (!statusFilter.value) return items.value
+  if (statusFilter.value === 'exclude_unplanned') {
+    return items.value.filter(item => item.status !== 'unplanned')
+  }
   return items.value.filter(item => item.status === statusFilter.value)
 })
 
