@@ -38,6 +38,7 @@ from production.views_brake_line import BrakeLinePlanView, BrakeLineProductsView
 from production.views_spot_line import SpotLinePlanView, SpotLineEquipmentsView, SpotLineProductsView, SpotLineRecordView
 from production.views_gantt_display_product_map import GanttDisplayProductMapViewSet
 from production.views_plan_deviation_report import PlanDeviationReportView
+from production.views_record_confirmation import ProductionRecordConfirmationView
 
 router = DefaultRouter()
 router.register(r'line-demands', LineDemandViewSet, basename='linedemand')
@@ -97,4 +98,5 @@ urlpatterns = [
     path('floor-shipping-pdf/', FloorShippingPDFView.as_view(), name='floor-shipping-pdf'),
     path('hokushin-delivery-pdf/', HokushinDeliveryPDFView.as_view(), name='hokushin-delivery-pdf'),
     path('plan-deviation-report/', PlanDeviationReportView.as_view(), name='plan-deviation-report'),
+    path('record-confirmations/', ProductionRecordConfirmationView.as_view(), name='record-confirmations'),
 ]

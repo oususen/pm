@@ -3,6 +3,7 @@
 ガントチャート計画（LineGanttPlan）vs 実績（LineBacklog.actual_qty）の乖離を
 工程・製品ごとに集計する。
 """
+from collections import defaultdict
 from datetime import date
 
 from django.db.models import Q
@@ -12,8 +13,10 @@ from rest_framework.views import APIView
 from masters.models import Calendar
 from orders.utils.calendar_utils import get_business_today, WorkingDayCalculator
 from masters.models import Line
+from production.models_laser_actual import LaserActual, LaserActualDetail
 from production.models_line_backlog import LineBacklog
 from production.models_line_gantt_plan import LineGanttPlan
+from production.models_record_confirmation import ProductionRecordConfirmation
 from production.models_record_inquiry_setting import ProductionRecordInquirySetting
 
 
@@ -237,6 +240,30 @@ class PlanDeviationReportView(APIView):
         # 乖離数の絶対値でソート（大きい順）
         items.sort(key=lambda x: abs(x['deviation']), reverse=True)
 
+        # レーザライン選択時: 重複実績検出
+        laser_duplicates = []
+        if line_id:
+            try:
+                selected_line = Line.objects.get(id=line_id)
+                if 'レーザ' in (selected_line.line_name or ''):
+                    laser_duplicates = self._detect_laser_duplicates(target_date)
+            except Line.DoesNotExist:
+                pass
+
+        # 確認済みフラグ取得
+        confirmation = None
+        if line_id and process_id:
+            conf = ProductionRecordConfirmation.objects.filter(
+                work_date=target_date, line_id=line_id, process_id=process_id,
+            ).select_related('confirmed_by').first()
+            if conf:
+                confirmation = {
+                    'confirmed_by_name': (
+                        conf.confirmed_by.get_full_name() or conf.confirmed_by.username
+                    ) if conf.confirmed_by else '',
+                    'confirmed_at': conf.confirmed_at.isoformat() if conf.confirmed_at else None,
+                }
+
         return Response({
             'date': str(target_date),
             'items': items,
@@ -246,4 +273,57 @@ class PlanDeviationReportView(APIView):
                 'short_count': sum(1 for x in items if x['status'] == 'short'),
                 'unplanned_count': sum(1 for x in items if x['status'] == 'unplanned'),
             },
+            'laser_duplicates': laser_duplicates,
+            'confirmation': confirmation,
         })
+
+    @staticmethod
+    def _detect_laser_duplicates(target_date):
+        """
+        レーザ実績の重複検出:
+        同じ日に同じ品番（完成品）で同じ数量のレコードが2件以上ある場合を検出
+        """
+        details = (
+            LaserActualDetail.objects
+            .filter(
+                actual__work_date=target_date,
+                detail_type=LaserActualDetail.DETAIL_TYPE_FINISHED,
+            )
+            .select_related('actual')
+            .values(
+                'product_code', 'total_qty',
+                'actual__id', 'actual__pattern_no',
+                'actual__shot_count', 'actual__created_at',
+                'actual__equipment_code',
+            )
+        )
+
+        # (品番, 数量) でグルーピング
+        groups = defaultdict(list)
+        for d in details:
+            key = (d['product_code'], float(d['total_qty']))
+            groups[key].append(d)
+
+        duplicates = []
+        for (product_code, total_qty), records in groups.items():
+            if len(records) < 2:
+                continue
+            duplicates.append({
+                'product_code': product_code,
+                'total_qty': total_qty,
+                'count': len(records),
+                'records': [
+                    {
+                        'actual_id': r['actual__id'],
+                        'pattern_no': r['actual__pattern_no'],
+                        'shot_count': r['actual__shot_count'],
+                        'equipment_code': r['actual__equipment_code'],
+                        'created_at': r['actual__created_at'].isoformat() if r['actual__created_at'] else None,
+                    }
+                    for r in records
+                ],
+            })
+
+        # 数量の大きい順
+        duplicates.sort(key=lambda x: x['total_qty'], reverse=True)
+        return duplicates

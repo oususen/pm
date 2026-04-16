@@ -31,11 +31,51 @@
           <option value="exclude_unplanned">計画外除外</option>
         </select>
         <button class="btn-reload" @click="loadReport" :disabled="loading">更新</button>
+        <button
+          class="btn-confirm"
+          :class="{ confirmed: !!confirmation }"
+          :disabled="!canConfirm || confirming"
+          @click="confirmRecord"
+        >
+          {{ confirmation ? '確認済み' : (confirming ? '処理中...' : '確認済み') }}
+        </button>
       </div>
+    </div>
+
+    <div v-if="confirmation" class="confirmation-bar">
+      確認済み: {{ confirmation.confirmed_by_name }} ({{ formatDateTime(confirmation.confirmed_at) }})
     </div>
 
     <div class="note">
       ガントチャートの計画と実績との比較。ガントチャートは連産品の子以外の製品と連産品のみで作成のため、連産品の子は計画しても「計画外」として表示される。
+    </div>
+
+    <!-- レーザ重複実績セクション -->
+    <div v-if="laserDuplicates.length" class="laser-duplicates-section">
+      <h3>レーザ重複実績 ({{ laserDuplicates.length }} 件)</h3>
+      <p class="laser-dup-note">同じ品番・同じ数量で複数レコードが登録されています。二重入力の可能性があります。</p>
+      <table class="deviation-table dup-table">
+        <thead>
+          <tr>
+            <th>品番</th>
+            <th class="num">実績数</th>
+            <th class="num">件数</th>
+            <th>詳細</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="dup in laserDuplicates" :key="`${dup.product_code}-${dup.total_qty}`" class="dup-row">
+            <td>{{ dup.product_code }}</td>
+            <td class="num">{{ dup.total_qty }}</td>
+            <td class="num">{{ dup.count }}</td>
+            <td class="dup-details">
+              <span v-for="(rec, i) in dup.records" :key="rec.actual_id" class="dup-record">
+                {{ rec.pattern_no }} x{{ rec.shot_count }} ({{ rec.equipment_code }}){{ i < dup.records.length - 1 ? '、' : '' }}
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
     <div v-if="summary" class="summary-bar">
@@ -103,10 +143,18 @@ const items = ref([])
 const summary = ref(null)
 const lines = ref([])
 const processes = ref([])
+const laserDuplicates = ref([])
+const confirmation = ref(null)
+const confirming = ref(false)
 
 const filteredLines = computed(() => {
   if (!lineTypeFilter.value) return lines.value
   return lines.value.filter(l => l.line_type === lineTypeFilter.value)
+})
+
+// 確認済みボタンはライン＋工程（全工程以外）を選択した時のみ有効
+const canConfirm = computed(() => {
+  return !!selectedLineId.value && !!selectedProcessId.value && !confirmation.value
 })
 
 const STATUS_LABELS = {
@@ -117,6 +165,13 @@ const STATUS_LABELS = {
 
 function statusLabel(status) {
   return STATUS_LABELS[status] || status
+}
+
+function formatDateTime(isoStr) {
+  if (!isoStr) return ''
+  const d = new Date(isoStr)
+  if (Number.isNaN(d.getTime())) return ''
+  return `${d.toLocaleDateString('ja-JP')} ${d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}`
 }
 
 const filteredItems = computed(() => {
@@ -182,6 +237,8 @@ async function loadReport() {
     const res = await api.planDeviationReport.get(params)
     items.value = res.data.items || []
     summary.value = res.data.summary || null
+    laserDuplicates.value = res.data.laser_duplicates || []
+    confirmation.value = res.data.confirmation || null
     // 初回ロード時、サーバーが返した日付（前営業日）をセット
     if (!targetDate.value && res.data.date) {
       targetDate.value = res.data.date
@@ -190,8 +247,29 @@ async function loadReport() {
     console.error('レポート取得エラー:', e)
     items.value = []
     summary.value = null
+    laserDuplicates.value = []
+    confirmation.value = null
   } finally {
     loading.value = false
+  }
+}
+
+async function confirmRecord() {
+  if (!canConfirm.value || confirming.value) return
+  confirming.value = true
+  try {
+    await api.recordConfirmations.confirm({
+      work_date: targetDate.value,
+      line_id: selectedLineId.value,
+      process_id: selectedProcessId.value,
+    })
+    // レポート再読み込みで確認状態を更新
+    await loadReport()
+  } catch (e) {
+    console.error('確認済み登録エラー:', e)
+    alert('確認済みの登録に失敗しました。')
+  } finally {
+    confirming.value = false
   }
 }
 
@@ -256,6 +334,41 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
+.btn-confirm {
+  padding: 6px 16px;
+  background: #e65100;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.btn-confirm:hover:not(:disabled) {
+  background: #bf360c;
+}
+
+.btn-confirm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-confirm.confirmed {
+  background: #2e7d32;
+  cursor: default;
+}
+
+.confirmation-bar {
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  background: #e8f5e9;
+  border-left: 3px solid #2e7d32;
+  color: #1b5e20;
+  font-size: 14px;
+  font-weight: bold;
+}
+
 .note {
   padding: 8px 12px;
   margin-bottom: 10px;
@@ -264,6 +377,44 @@ onMounted(() => {
   color: #d32f2f;
   font-size: 14px;
   line-height: 1.5;
+}
+
+/* レーザ重複実績 */
+.laser-duplicates-section {
+  padding: 12px;
+  margin-bottom: 16px;
+  background: #fff3e0;
+  border: 2px solid #e65100;
+  border-radius: 8px;
+}
+
+.laser-duplicates-section h3 {
+  margin: 0 0 4px;
+  color: #e65100;
+  font-size: 16px;
+}
+
+.laser-dup-note {
+  margin: 0 0 8px;
+  color: #bf360c;
+  font-size: 13px;
+}
+
+.dup-table {
+  font-size: 13px;
+}
+
+.dup-row td {
+  background: #fff8e1;
+}
+
+.dup-details {
+  font-size: 12px;
+  color: #555;
+}
+
+.dup-record {
+  white-space: nowrap;
 }
 
 .summary-bar {

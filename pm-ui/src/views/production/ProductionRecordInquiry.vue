@@ -1213,9 +1213,92 @@ const exportCsv = () => _exportCsv(sessions.value, startDate.value, endDate.valu
 
 const exportExcel = () => _exportExcel(sessions.value, startDate.value, endDate.value)
 
-const exportExcel2 = () => {
+const exportExcel2 = async () => {
   const confirmed = window.confirm('出力したexcelの内容を基幹システムに入力するため、必ず期間を入力したい日にしてください')
   if (!confirmed) return
+
+  // 確認済みフラグチェック: 出力対象のライン・工程・期間で未確認日がないか確認
+  try {
+    // process_id → line_id のマッピングを構築
+    const processToLine = {}
+    // process_code → process_id のマッピング（ブレーキライン等process IDがないセッション用）
+    // line_id + process_code で一意にマッチさせる
+    const processCodeToId = {}
+    const lineProcessCodeToId = {}
+    for (const p of processes.value) {
+      if (p.id && p.line) processToLine[String(p.id)] = String(p.line)
+      if (p.id && p.process_code) {
+        processCodeToId[String(p.process_code)] = String(p.id)
+        if (p.line) lineProcessCodeToId[`${p.line}|${p.process_code}`] = String(p.id)
+      }
+    }
+
+    // セッションから出力対象の (日付, ライン, 工程) を抽出
+    const targetKeys = new Set()
+    for (const row of sessions.value) {
+      const d = row.plan_date || String(row.started_at || '').substring(0, 10)
+      if (!d) continue
+      // process_id: 直接あればそれを使い、なければprocess_codeから逆引き
+      let pid = String(row.process || row.equipment_process_id || '')
+      const rawLineId = row.line_id ? String(row.line_id) : ''
+      if (!pid) {
+        const pcode = String(row.process_code || '').trim()
+        if (pcode) {
+          // line_id + process_code で正確にマッチ、なければprocess_codeだけで逆引き
+          pid = (rawLineId ? lineProcessCodeToId[`${rawLineId}|${pcode}`] : '') || processCodeToId[pcode] || ''
+        }
+      }
+      // line_id: 直接あればそれを使い、なければprocessから逆引き
+      const lid = rawLineId || processToLine[pid] || ''
+      if (lid && pid) {
+        targetKeys.add(`${d}|${lid}|${pid}`)
+      }
+    }
+
+    if (targetKeys.size > 0) {
+      // 確認済みフラグを取得
+      const confRes = await api.recordConfirmations.get({
+        date_from: startDate.value,
+        date_to: endDate.value,
+      })
+      const confirmedKeys = new Set()
+      for (const item of (confRes.data?.items || [])) {
+        confirmedKeys.add(`${item.work_date}|${item.line_id}|${item.process_id}`)
+      }
+
+      // 未確認のキーを検出
+      const missing = []
+      for (const key of targetKeys) {
+        if (!confirmedKeys.has(key)) {
+          missing.push(key)
+        }
+      }
+
+      if (missing.length > 0) {
+        // 未確認の日付・ライン・工程をわかりやすく表示
+        const lineMap = {}
+        for (const line of lines.value) {
+          lineMap[String(line.id)] = line.line_code || String(line.id)
+        }
+        const processMap = {}
+        for (const p of processes.value) {
+          processMap[String(p.id)] = p.process_code || String(p.id)
+        }
+        const missingLabels = missing.slice(0, 10).map((key) => {
+          const [d, lid, pid] = key.split('|')
+          return `${d} / ${lineMap[lid] || lid} / ${processMap[pid] || pid}`
+        })
+        const suffix = missing.length > 10 ? `\n... 他 ${missing.length - 10} 件` : ''
+        alert(`以下の日付・ライン・工程が未確認のため出力できません。\n計画乖離レポートで確認済みにしてください。\n\n${missingLabels.join('\n')}${suffix}`)
+        return
+      }
+    }
+  } catch (e) {
+    console.error('確認済みチェックエラー:', e)
+    alert('確認済みフラグの確認に失敗しました。')
+    return
+  }
+
   exportProductionSummaryExcel(
     sessions.value,
     startDate.value,
