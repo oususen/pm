@@ -289,6 +289,7 @@ class PlanDeviationReportView(APIView):
                 actual__work_date=target_date,
                 detail_type=LaserActualDetail.DETAIL_TYPE_FINISHED,
             )
+            .exclude(total_qty=0)
             .select_related('actual')
             .values(
                 'product_code', 'total_qty',
