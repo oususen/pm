@@ -86,64 +86,61 @@ class OrderLine(models.Model):
 
 
 class KubotaSakaiDueAdjustment(models.Model):
-    """クボタ堺向け納期調整"""
+    """クボタ堺向け納期調整（BACKLOG型）
+    1行 = 品番 + 納入場所 + 注番 + 日付 の組み合わせ。
+    取り込みで ORDER_LINE から demand_qty をスナップし、
+    画面で delivery_qty を入力、remaining_qty を累積計算する。
+    """
 
-    ADJUSTMENT_TYPE_CHOICES = [
-        ('just', 'ジャスト'),
-        ('forward', '前倒し'),
-        ('backward', '後ろ倒し'),
+    ORDER_TYPE_CHOICES = [
+        ('FIRM', '確定'),
+        ('FORECAST', '内示'),
     ]
 
     id = models.BigAutoField(primary_key=True)
+    product_code = models.CharField(max_length=50, verbose_name='品番')
+    ship_to_code = models.CharField(max_length=40, null=True, blank=True, verbose_name='納入場所コード')
+    source_order_no = models.CharField(max_length=50, null=True, blank=True, verbose_name='注番')
+    order_type = models.CharField(max_length=20, choices=ORDER_TYPE_CHOICES, default='FORECAST', verbose_name='受注タイプ')
+    due_date = models.DateField(verbose_name='日付')
+    demand_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='受注数')
+    delivery_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='納入数')
+    remaining_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='残量')
+
+    # 参照用（取り込み元）
     order_line = models.ForeignKey(
         OrderLine,
-        on_delete=models.CASCADE,
-        related_name='kubota_sakai_due_adjustments',
-        verbose_name='受注明細',
-    )
-    split_no = models.PositiveIntegerField(verbose_name='分割連番')
-    adjusted_due_date = models.DateField(verbose_name='調整後納期')
-    adjusted_qty = models.DecimalField(max_digits=14, decimal_places=3, verbose_name='調整後数量')
-    remaining_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='残量')
-    adjustment_type = models.CharField(
-        max_length=20,
-        choices=ADJUSTMENT_TYPE_CHOICES,
-        default='just',
-        verbose_name='調整種別',
-    )
-    customer_approved = models.BooleanField(default=False, verbose_name='顧客承認済み')
-    adjusted_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name='kubota_sakai_due_adjustments',
-        verbose_name='調整者',
+        verbose_name='受注明細',
     )
-    adjusted_at = models.DateTimeField(default=datetime.now, verbose_name='調整日時')
-    note = models.TextField(blank=True, default='', verbose_name='メモ')
 
-    # スナップショット列（保存時に order_line から取得して固定）
-    source_order_no = models.CharField(max_length=50, null=True, blank=True, verbose_name='元注番')
-    source_due_date = models.DateField(null=True, blank=True, verbose_name='元納期')
-    source_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='元数量')
-    ship_to_code = models.CharField(max_length=40, null=True, blank=True, verbose_name='納入場所コード')
-    ship_to_name = models.CharField(max_length=100, null=True, blank=True, verbose_name='納入場所名')
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='kubota_sakai_due_adj_updated',
+        verbose_name='更新者',
+    )
+    updated_at = models.DateTimeField(null=True, blank=True, verbose_name='更新日時')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
 
     class Meta:
         db_table = 't_kubota_sakai_due_adjustment'
         verbose_name = 'クボタ堺納期調整'
         verbose_name_plural = 'クボタ堺納期調整'
-        unique_together = [['order_line', 'split_no']]
+        unique_together = [['product_code', 'ship_to_code', 'source_order_no', 'due_date']]
         indexes = [
-            models.Index(fields=['adjusted_due_date']),
-            models.Index(fields=['order_line', 'split_no']),
-            models.Index(fields=['ship_to_code', 'source_order_no'], name='kbt_saki_due_shipto_ord_idx'),
+            models.Index(fields=['due_date']),
+            models.Index(fields=['product_code', 'ship_to_code'], name='kbt_saki_due_prod_ship_idx'),
         ]
-        ordering = ['order_line_id', 'split_no', 'id']
+        ordering = ['product_code', 'ship_to_code', 'source_order_no', 'due_date']
 
     def __str__(self):
-        return f"{self.order_line_id}-{self.split_no} {self.adjusted_due_date} {self.adjusted_qty}"
+        return f"{self.product_code} {self.ship_to_code} {self.source_order_no or '内示'} {self.due_date} D:{self.demand_qty} L:{self.delivery_qty}"
 
 
 class KubotaSakaiTripAssignment(models.Model):

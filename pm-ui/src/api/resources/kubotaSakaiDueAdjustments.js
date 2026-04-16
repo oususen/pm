@@ -5,6 +5,9 @@ export const createKubotaSakaiDueAdjustmentsAPI = (client) => ({
   grid(params = {}) {
     return client.get('/kubota-sakai-due-adjustments/grid/', { params })
   },
+  importOrders(data = {}) {
+    return client.post('/kubota-sakai-due-adjustments/import_orders/', data)
+  },
   bulkSave(rows = []) {
     return client.post('/kubota-sakai-due-adjustments/bulk_save/', { rows })
   },

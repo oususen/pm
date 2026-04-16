@@ -74,54 +74,24 @@ class ShipmentActualHistorySerializer(serializers.ModelSerializer):
 
 
 class KubotaSakaiDueAdjustmentSerializer(serializers.ModelSerializer):
-    product_code = serializers.CharField(source='order_line.product_code', read_only=True)
-    product_name = serializers.CharField(source='order_line.product.product_name', read_only=True)
-    base_due_date = serializers.DateField(source='order_line.due_date', read_only=True)
-    base_qty = serializers.DecimalField(source='order_line.quantity', max_digits=14, decimal_places=3, read_only=True)
-    order_no = serializers.CharField(source='order_line.order.order_no', read_only=True)
-
     class Meta:
         model = KubotaSakaiDueAdjustment
         fields = [
             'id',
-            'order_line',
-            'split_no',
-            'adjusted_due_date',
-            'adjusted_qty',
+            'product_code',
+            'ship_to_code',
+            'source_order_no',
+            'order_type',
+            'due_date',
+            'demand_qty',
+            'delivery_qty',
             'remaining_qty',
-            'adjustment_type',
-            'customer_approved',
-            'adjusted_by',
-            'adjusted_at',
-            'note',
-            'source_order_no',
-            'source_due_date',
-            'source_qty',
-            'ship_to_code',
-            'ship_to_name',
-            'product_code',
-            'product_name',
-            'base_due_date',
-            'base_qty',
-            'order_no',
+            'order_line',
+            'updated_by',
+            'updated_at',
+            'created_at',
         ]
-        read_only_fields = [
-            'id',
-            'split_no',
-            'adjustment_type',
-            'adjusted_by',
-            'adjusted_at',
-            'source_order_no',
-            'source_due_date',
-            'source_qty',
-            'ship_to_code',
-            'ship_to_name',
-            'product_code',
-            'product_name',
-            'base_due_date',
-            'base_qty',
-            'order_no',
-        ]
+        read_only_fields = ['id', 'remaining_qty', 'created_at']
 
 
 class KubotaSakaiTripAssignmentSerializer(serializers.ModelSerializer):

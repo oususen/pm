@@ -48,6 +48,12 @@ const shipping = [
     meta: { pageTitle: "クボタ堺納期調整", resource: "shipping.kubota_sakai_due_adjustment" },
   },
   {
+    path: "/shipping/kubota-sakai-due-adjustment-2",
+    name: "KubotaSakaiDueAdjustment2",
+    component: () => import("@/views/shipping/KubotaSakaiDueAdjustment2.vue"),
+    meta: { pageTitle: "クボタ堺納期調整２", resource: "shipping.kubota_sakai_due_adjustment" },
+  },
+  {
     path: "/shipping/kubota-sakai-trip-planning",
     name: "KubotaSakaiTripPlanning",
     component: () => import("@/views/shipping/KubotaSakaiTripPlanning.vue"),
