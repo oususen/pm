@@ -123,6 +123,13 @@ class KubotaSakaiDueAdjustment(models.Model):
     adjusted_at = models.DateTimeField(default=datetime.now, verbose_name='調整日時')
     note = models.TextField(blank=True, default='', verbose_name='メモ')
 
+    # スナップショット列（保存時に order_line から取得して固定）
+    source_order_no = models.CharField(max_length=50, null=True, blank=True, verbose_name='元注番')
+    source_due_date = models.DateField(null=True, blank=True, verbose_name='元納期')
+    source_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='元数量')
+    ship_to_code = models.CharField(max_length=40, null=True, blank=True, verbose_name='納入場所コード')
+    ship_to_name = models.CharField(max_length=100, null=True, blank=True, verbose_name='納入場所名')
+
     class Meta:
         db_table = 't_kubota_sakai_due_adjustment'
         verbose_name = 'クボタ堺納期調整'
@@ -131,6 +138,7 @@ class KubotaSakaiDueAdjustment(models.Model):
         indexes = [
             models.Index(fields=['adjusted_due_date']),
             models.Index(fields=['order_line', 'split_no']),
+            models.Index(fields=['ship_to_code', 'source_order_no'], name='kbt_saki_due_shipto_ord_idx'),
         ]
         ordering = ['order_line_id', 'split_no', 'id']
 
