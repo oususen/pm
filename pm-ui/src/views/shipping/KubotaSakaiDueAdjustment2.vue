@@ -62,47 +62,62 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in displayRows" :key="row.rowKey">
+          <tr v-for="row in displayRows" :key="row.rowKey" :class="{ 'carry-tr': row.isCarry }">
             <td class="sticky-left date-col date-separator" :class="row.dayClass">{{ row.label }}</td>
-            <template v-for="(col, colIdx) in matrixColumns" :key="`${row.rowKey}-${col.colKey}`">
-              <td class="orderno-subcol" :class="{ 'product-start': colIdx > 0 }">
-                <div
-                  v-for="slotIdx in row.maxSlots"
-                  :key="`${row.rowKey}-${col.colKey}-label-${slotIdx}`"
-                  class="sub-cell"
-                  :class="{ forecast: slotLineAt(row, col.colKey, slotIdx - 1)?.orderType === 'FORECAST' }"
-                >{{ slotLabel(row, col.colKey, slotIdx - 1) }}</div>
-              </td>
-              <td class="readonly-cell demand" :class="row.dayClass">
-                <div
-                  v-for="slotIdx in row.maxSlots"
-                  :key="`${row.rowKey}-${col.colKey}-demand-${slotIdx}`"
-                  class="sub-cell"
-                >{{ slotDemand(row, col.colKey, slotIdx - 1) }}</div>
-              </td>
-              <td :class="row.dayClass">
-                <div
-                  v-for="slotIdx in row.maxSlots"
-                  :key="`${row.rowKey}-${col.colKey}-delivery-${slotIdx}`"
-                  class="sub-cell"
-                >
-                  <input
-                    v-if="slotLineAt(row, col.colKey, slotIdx - 1)"
-                    :value="displayInputValue(slotLineAt(row, col.colKey, slotIdx - 1).deliveryByDate[row.dateKey])"
-                    type="text"
-                    inputmode="decimal"
-                    @input="onDeliveryInput(slotLineAt(row, col.colKey, slotIdx - 1), row.dateKey, $event.target.value)"
-                    @blur="onDeliveryBlur(slotLineAt(row, col.colKey, slotIdx - 1), row.dateKey)"
-                  />
-                </div>
-              </td>
-              <td class="readonly-cell product-end" :class="row.dayClass">
-                <div
-                  v-for="slotIdx in row.maxSlots"
-                  :key="`${row.rowKey}-${col.colKey}-remaining-${slotIdx}`"
-                  class="sub-cell"
-                >{{ slotRemaining(row, col.colKey, slotIdx - 1) }}</div>
-              </td>
+            <template v-if="row.isCarry">
+              <template v-for="(col, colIdx) in matrixColumns" :key="`${row.rowKey}-${col.colKey}`">
+                <td :class="{ 'product-start': colIdx > 0 }"></td>
+                <td></td>
+                <td></td>
+                <td class="readonly-cell product-end carry-value">{{ formatNumber(row.cells[col.colKey]) }}</td>
+              </template>
+            </template>
+            <template v-else>
+              <template v-for="(col, colIdx) in matrixColumns" :key="`${row.rowKey}-${col.colKey}`">
+                <td class="orderno-subcol" :class="{ 'product-start': colIdx > 0 }">
+                  <div
+                    v-for="slotIdx in row.maxSlots"
+                    :key="`${row.rowKey}-${col.colKey}-label-${slotIdx}`"
+                    class="sub-cell"
+                    :class="{ forecast: slotLineAt(row, col.colKey, slotIdx - 1)?.orderType === 'FORECAST' }"
+                  >{{ slotLabel(row, col.colKey, slotIdx - 1) }}</div>
+                </td>
+                <td class="readonly-cell demand" :class="row.dayClass">
+                  <div
+                    v-for="slotIdx in row.maxSlots"
+                    :key="`${row.rowKey}-${col.colKey}-demand-${slotIdx}`"
+                    class="sub-cell"
+                  >{{ slotDemand(row, col.colKey, slotIdx - 1) }}</div>
+                </td>
+                <td :class="row.dayClass">
+                  <div
+                    v-for="slotIdx in row.maxSlots"
+                    :key="`${row.rowKey}-${col.colKey}-delivery-${slotIdx}`"
+                    class="sub-cell"
+                  >
+                    <input
+                      v-if="slotLineAt(row, col.colKey, slotIdx - 1)"
+                      :ref="(el) => { if (el) inputRefs[`${row.dateKey}-${col.colKey}-${slotIdx - 1}`] = el }"
+                      :data-row="row.dateKey"
+                      :data-col="col.colKey"
+                      :data-slot="slotIdx - 1"
+                      :value="displayInputValue(slotLineAt(row, col.colKey, slotIdx - 1).deliveryByDate[row.dateKey])"
+                      type="text"
+                      inputmode="decimal"
+                      @input="onDeliveryInput(slotLineAt(row, col.colKey, slotIdx - 1), row.dateKey, $event.target.value)"
+                      @blur="onDeliveryBlur(slotLineAt(row, col.colKey, slotIdx - 1), row.dateKey)"
+                      @keydown.enter.prevent="focusNextRow($event, row.dateKey, col.colKey, slotIdx - 1)"
+                    />
+                  </div>
+                </td>
+                <td class="readonly-cell product-end" :class="row.dayClass">
+                  <div
+                    v-for="slotIdx in row.maxSlots"
+                    :key="`${row.rowKey}-${col.colKey}-remaining-${slotIdx}`"
+                    class="sub-cell"
+                  >{{ slotRemaining(row, col.colKey, slotIdx - 1) }}</div>
+                </td>
+              </template>
             </template>
           </tr>
           <tr v-if="!displayRows.length">
@@ -128,8 +143,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import api from '@/api/client'
+
+const inputRefs = reactive({})
 
 const formatLocalDate = (date) => {
   const yyyy = String(date.getFullYear())
@@ -160,7 +177,7 @@ const loading = ref(false)
 const saving = ref(false)
 const importing = ref(false)
 const keyword = ref('V0')
-const keyword2 = ref('')
+const keyword2 = ref('6E')
 const startDate = ref(formatLocalDate(new Date()))
 const horizonDays = ref(30)
 const groups = ref([])
@@ -208,7 +225,24 @@ const matrixColumns = computed(() => {
 })
 
 const displayRows = computed(() => {
-  return dateColumns.value.map((dateCol) => {
+  // 繰越行
+  const hasCarry = matrixColumns.value.some((col) => parseNumber(col.group.carryRemaining) !== 0)
+  const carryRow = {
+    rowKey: '_carry',
+    dateKey: '_carry',
+    label: '繰越',
+    dayClass: 'carry-row',
+    isCarry: true,
+    maxSlots: 1,
+    cells: {},
+  }
+  if (hasCarry) {
+    matrixColumns.value.forEach((col) => {
+      carryRow.cells[col.colKey] = parseNumber(col.group.carryRemaining)
+    })
+  }
+
+  const dateRows = dateColumns.value.map((dateCol) => {
     const cells = {}
     let maxSlots = 0
     matrixColumns.value.forEach((col) => {
@@ -231,10 +265,13 @@ const displayRows = computed(() => {
       dateKey: dateCol.key,
       label: dateCol.label,
       dayClass: dateCol.dayClass,
+      isCarry: false,
       maxSlots: maxSlots || 1,
       cells,
     }
   })
+
+  return hasCarry ? [carryRow, ...dateRows] : dateRows
 })
 
 const isHolidayDate = (dateKey, weekDay) => {
@@ -288,6 +325,39 @@ const loadKubotaSakaiCalendarDays = async () => {
   }
 }
 
+const recalcGroupRemaining = (group) => {
+  // 品番+納入場所の全注番を合算して累積残量を計算
+  // carry_remaining: 表示期間より前の繰越残量
+  const dates = dateColumns.value.map((c) => c.key).sort()
+  let running = parseNumber(group.carryRemaining)
+  const remainingAtDate = {}
+  for (const d of dates) {
+    let dayDemand = 0
+    let dayDelivery = 0
+    for (const line of group.lines) {
+      dayDemand += parseNumber(line.demandByDate[d])
+      dayDelivery += parseNumber(line.deliveryByDate[d])
+    }
+    running += dayDelivery - dayDemand
+    remainingAtDate[d] = running
+  }
+  // まず全ラインの残量をクリア
+  for (const line of group.lines) {
+    for (const d of dates) {
+      line.remainingByDate[d] = 0
+    }
+  }
+  // 各日付で、その日にデータがあるラインのうち最後のものに残量をセット
+  for (const d of dates) {
+    const activeLines = group.lines.filter((line) => {
+      return parseNumber(line.demandByDate[d]) > 0 || parseNumber(line.deliveryByDate[d]) > 0
+    })
+    if (activeLines.length > 0) {
+      activeLines[activeLines.length - 1].remainingByDate[d] = remainingAtDate[d]
+    }
+  }
+}
+
 const buildLine = (li) => {
   const demandByDate = {}
   const deliveryByDate = {}
@@ -297,15 +367,11 @@ const buildLine = (li) => {
     deliveryByDate[col.key] = 0
     remainingByDate[col.key] = 0
   })
-  // APIから返されたデータをマッピング
   Object.entries(li.demand_by_date || {}).forEach(([d, q]) => {
     if (Object.prototype.hasOwnProperty.call(demandByDate, d)) demandByDate[d] = parseNumber(q)
   })
   Object.entries(li.delivery_by_date || {}).forEach(([d, q]) => {
     if (Object.prototype.hasOwnProperty.call(deliveryByDate, d)) deliveryByDate[d] = parseNumber(q)
-  })
-  Object.entries(li.remaining_by_date || {}).forEach(([d, q]) => {
-    if (Object.prototype.hasOwnProperty.call(remainingByDate, d)) remainingByDate[d] = parseNumber(q)
   })
   return {
     lineKey: li.line_key,
@@ -318,12 +384,17 @@ const buildLine = (li) => {
   }
 }
 
-const buildGroupFromGridItem = (item) => ({
-  groupKey: item.group_key,
-  productCode: item.product_code,
-  shipToCode: item.ship_to_code || '-',
-  lines: (item.lines || []).map(buildLine),
-})
+const buildGroupFromGridItem = (item) => {
+  const group = {
+    groupKey: item.group_key,
+    productCode: item.product_code,
+    shipToCode: item.ship_to_code || '-',
+    carryRemaining: parseNumber(item.carry_remaining),
+    lines: (item.lines || []).map(buildLine),
+  }
+  recalcGroupRemaining(group)
+  return group
+}
 
 const slotLineAt = (row, colKey, slotIdx) => {
   const arr = row.cells[colKey]
@@ -404,15 +475,37 @@ const importOrders = async () => {
   }
 }
 
+const findGroupForLine = (line) => {
+  return groups.value.find((g) => g.lines.includes(line))
+}
+
 const onDeliveryInput = (line, dateKey, rawValue) => {
   const normalized = rawValue.replace(/[^\d.-]/g, '')
   line.deliveryByDate[dateKey] = normalized === '' ? 0 : parseNumber(normalized)
   line._dirty = true
+  const group = findGroupForLine(line)
+  if (group) recalcGroupRemaining(group)
 }
 
 const onDeliveryBlur = (line, dateKey) => {
   const qty = parseNumber(line.deliveryByDate[dateKey])
   if (qty < 0) line.deliveryByDate[dateKey] = 0
+}
+
+const focusNextRow = (event, currentDateKey, colKey, slotIdx) => {
+  const dates = dateColumns.value.map((c) => c.key)
+  const currentIdx = dates.indexOf(currentDateKey)
+  if (currentIdx < 0) return
+  // 次の日付行で同じ列・同じスロットのinputを探す
+  for (let i = currentIdx + 1; i < dates.length; i++) {
+    const key = `${dates[i]}-${colKey}-${slotIdx}`
+    const el = inputRefs[key]
+    if (el) {
+      el.focus()
+      el.select()
+      return
+    }
+  }
 }
 
 const saveDeliveries = async () => {
@@ -654,5 +747,18 @@ onMounted(loadGrid)
   text-align: center;
   color: #6b7280;
   padding: 16px 0;
+}
+.carry-tr td {
+  background: #f0f4ff;
+  border-bottom: 2px solid #9ab1d6;
+  font-weight: 700;
+}
+.carry-tr .sticky-left {
+  background: #f0f4ff;
+}
+.carry-value {
+  text-align: right;
+  padding: 3px 6px !important;
+  color: #1e40af;
 }
 </style>

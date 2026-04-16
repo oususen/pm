@@ -217,6 +217,18 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             start_date = date.today()
         end_date = start_date + timedelta(days=horizon_days - 1)
 
+        # 表示期間より前の繰越残量を計算（品番+納入場所別）
+        carry_qs = KubotaSakaiDueAdjustment.objects.filter(
+            due_date__lt=start_date,
+        ).order_by('product_code', 'ship_to_code')
+        carry_remaining = {}  # (product_code, ship_to_code) → Decimal
+        for row in carry_qs:
+            gkey = (row.product_code, row.ship_to_code or '')
+            if gkey not in carry_remaining:
+                carry_remaining[gkey] = Decimal('0')
+            carry_remaining[gkey] += row.delivery_qty - row.demand_qty
+
+        # 表示期間内のデータ取得
         qs = KubotaSakaiDueAdjustment.objects.filter(
             due_date__range=(start_date, end_date),
         ).order_by('product_code', 'ship_to_code', 'source_order_no', 'due_date')
@@ -226,10 +238,12 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
         for row in qs:
             outer_key = f"{row.product_code}||{row.ship_to_code or ''}"
             if outer_key not in outer_groups:
+                gkey = (row.product_code, row.ship_to_code or '')
                 outer_groups[outer_key] = {
                     'group_key': outer_key,
                     'product_code': row.product_code,
                     'ship_to_code': row.ship_to_code,
+                    'carry_remaining': str(carry_remaining.get(gkey, Decimal('0'))),
                     'lines_map': {},
                 }
             line_key = f"{row.product_code}||{row.ship_to_code or ''}||{row.source_order_no or ''}"
@@ -240,14 +254,11 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     'order_type': row.order_type,
                     'demand_by_date': {},
                     'delivery_by_date': {},
-                    'remaining_by_date': {},
                 }
             li = outer_groups[outer_key]['lines_map'][line_key]
             d_str = row.due_date.isoformat()
             li['demand_by_date'][d_str] = str(row.demand_qty)
             li['delivery_by_date'][d_str] = str(row.delivery_qty)
-            li['remaining_by_date'][d_str] = str(row.remaining_qty)
-            # FIRM が1つでもあれば全体を FIRM に
             if row.order_type == 'FIRM':
                 li['order_type'] = 'FIRM'
 
@@ -261,14 +272,13 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     'order_type': li['order_type'],
                     'demand_by_date': li['demand_by_date'],
                     'delivery_by_date': li['delivery_by_date'],
-                    'remaining_by_date': li['remaining_by_date'],
                 })
-            # 注番付き FIRM を先、内示（NULL）を後に
             lines_out.sort(key=lambda x: (x['source_order_no'] is None, x['source_order_no'] or ''))
             rows.append({
                 'group_key': og['group_key'],
                 'product_code': og['product_code'],
                 'ship_to_code': og['ship_to_code'],
+                'carry_remaining': og['carry_remaining'],
                 'lines': lines_out,
             })
 
@@ -359,28 +369,37 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
 
 
 def _recalculate_remaining_for_groups(groups):
-    """(product_code, ship_to_code) のグループごとに、注番別で残量を時系列再計算。
-    残量 = 累積(demand_qty) - 累積(delivery_qty)  ※LT考慮なし
+    """(product_code, ship_to_code) のグループごとに、全注番合算で残量を時系列再計算。
+    残量 = 累積(納入) - 累積(受注)  ※LT考慮なし、注番をまたいで合算
     """
     for product_code, ship_to_code in groups:
-        qs = KubotaSakaiDueAdjustment.objects.filter(
+        all_rows = list(KubotaSakaiDueAdjustment.objects.filter(
             product_code=product_code,
             ship_to_code=ship_to_code or None,
-        ).order_by('source_order_no', 'due_date')
+        ).order_by('due_date', 'source_order_no'))
 
-        # 注番別にグルーピング
-        by_order_no = defaultdict(list)
-        for row in qs:
-            by_order_no[row.source_order_no or ''].append(row)
+        if not all_rows:
+            continue
 
-        for order_no, rows in by_order_no.items():
-            rows.sort(key=lambda r: r.due_date)
-            cumulative_demand = Decimal('0')
-            cumulative_delivery = Decimal('0')
-            for row in rows:
-                cumulative_demand += row.demand_qty
-                cumulative_delivery += row.delivery_qty
-                new_remaining = cumulative_demand - cumulative_delivery
-                if row.remaining_qty != new_remaining:
-                    row.remaining_qty = new_remaining
-                    row.save(update_fields=['remaining_qty'])
+        # 日付ごとに全注番の demand/delivery を合算
+        date_demand = defaultdict(lambda: Decimal('0'))
+        date_delivery = defaultdict(lambda: Decimal('0'))
+        for row in all_rows:
+            date_demand[row.due_date] += row.demand_qty
+            date_delivery[row.due_date] += row.delivery_qty
+
+        all_dates = sorted(set(date_demand.keys()) | set(date_delivery.keys()))
+        remaining_at_date = {}
+        cum_demand = Decimal('0')
+        cum_delivery = Decimal('0')
+        for d in all_dates:
+            cum_demand += date_demand.get(d, Decimal('0'))
+            cum_delivery += date_delivery.get(d, Decimal('0'))
+            remaining_at_date[d] = cum_delivery - cum_demand
+
+        # 各行に残量をセット
+        for row in all_rows:
+            new_remaining = remaining_at_date.get(row.due_date, Decimal('0'))
+            if row.remaining_qty != new_remaining:
+                row.remaining_qty = new_remaining
+                row.save(update_fields=['remaining_qty'])
