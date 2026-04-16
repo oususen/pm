@@ -144,14 +144,16 @@ class KubotaSakaiDueAdjustment(models.Model):
 
 
 class KubotaSakaiTripAssignment(models.Model):
-    """クボタ堺向け便割付"""
+    """クボタ堺向け便割付
+    納期調整(DueAdjustment)の delivery_qty を便に割り付ける。
+    """
 
     id = models.BigAutoField(primary_key=True)
-    order_line = models.ForeignKey(
-        OrderLine,
+    due_adjustment = models.ForeignKey(
+        KubotaSakaiDueAdjustment,
         on_delete=models.CASCADE,
-        related_name='kubota_sakai_trip_assignments',
-        verbose_name='受注明細',
+        related_name='trip_assignments',
+        verbose_name='納期調整',
     )
     truck = models.ForeignKey(
         'masters.KubotaSakaiTruck',
@@ -178,12 +180,12 @@ class KubotaSakaiTripAssignment(models.Model):
         verbose_name_plural = 'クボタ堺便割付'
         indexes = [
             models.Index(fields=['departure_date', 'truck']),
-            models.Index(fields=['order_line']),
+            models.Index(fields=['due_adjustment']),
         ]
-        ordering = ['departure_date', 'truck_id', 'order_line_id', 'id']
+        ordering = ['departure_date', 'truck_id', 'due_adjustment_id', 'id']
 
     def __str__(self):
-        return f"{self.departure_date} truck={self.truck_id} line={self.order_line_id} qty={self.qty}"
+        return f"{self.departure_date} truck={self.truck_id} adj={self.due_adjustment_id} qty={self.qty}"
 
 
 class StgOrderRaw(models.Model):

@@ -1,26 +1,43 @@
+"""クボタ堺便計画 API（生産計画パターン準拠）
+
+データフロー:
+  OrderLine →(取込)→ KubotaSakaiDueAdjustment →(便計画)→ TripAssignment →(sync)→ LineBacklog
+                                                                              → pickup カスケード → 前工程需要
+
+LinePlan / LineGanttPlan は不使用。LineBacklog のみ直接保存。
+plan_id に truck_id を埋め込み、pickup カスケードで arrival_day_offset ベースの LT 判定に使う。
+"""
+
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.db import transaction
 from django.db.models import Q
-from rest_framework import status, viewsets
-from rest_framework.decorators import action
+from rest_framework import status
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
-from masters.models import Calendar, CalendarDay, KubotaSakaiTruck, Line, Process
-from orders.core.models import KubotaSakaiDueAdjustment, KubotaSakaiTripAssignment, OrderLine
+from masters.models import Calendar, CalendarDay, KubotaSakaiTruck, Line, Process, Product
+from orders.core.models import KubotaSakaiDueAdjustment, KubotaSakaiTripAssignment
 from production.models_line_backlog import LineBacklog
 from system_settings.models import SystemSetting
 
-from .serializers import KubotaSakaiTripAssignmentSerializer
 from .services.truck_load_calculator import calculate_truck_load
 
+# クボタ配送ライン定数
 KUBOTA_DELIVERY_LINE_CODE = 'KUBOTA_DELIVERY'
 KUBOTA_DELIVERY_LINE_NAME = 'クボタ配送ライン'
 KUBOTA_DELIVERY_PROCESS_CODE = 'KUBOTA_DELIVERY'
 KUBOTA_DELIVERY_PROCESS_NAME = 'クボタ配送工程'
 
+# plan_id プレフィックス（pickup カスケードでクボタ便を識別するためのマーカー）
+KUBOTA_TRIP_PLAN_ID_PREFIX = 'KBT_T'
+
+
+# ---------------------------------------------------------------------------
+# ヘルパー
+# ---------------------------------------------------------------------------
 
 def _parse_date(value):
     if not value:
@@ -36,6 +53,13 @@ def _to_decimal(value, default='0'):
         return Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
         return Decimal(default)
+
+
+def _to_int_qty(value):
+    qty = _to_decimal(value)
+    if qty <= 0:
+        return 0
+    return int(qty.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
 
 
 def _resolve_kubota_calendar():
@@ -77,32 +101,38 @@ def _subtract_business_days(target_date, days, calendar_map):
     return current
 
 
-def _safe_product_name(order_line):
-    if order_line.product_id and order_line.product:
-        return order_line.product.product_name or ''
-    return ''
+def _get_deadline_days():
+    row = SystemSetting.objects.filter(key='kubota_sakai.assignment_deadline_days').first()
+    if not row:
+        return 3
+    try:
+        return max(int(row.value), 0)
+    except Exception:
+        return 3
 
 
-def _build_load_item(order_line, qty):
-    product = order_line.product
+def _build_load_item(product, qty):
+    """Product オブジェクトから積載計算用アイテムを構築"""
     container = getattr(product, 'used_container', None) if product else None
     unit_weight = Decimal('0')
-    if product:
-        if all(getattr(product, f, None) is not None for f in ('specific_gravity', 'size_length', 'size_width', 'size_thickness')):
-            unit_weight = (
-                _to_decimal(product.specific_gravity)
-                * _to_decimal(product.size_length)
-                * _to_decimal(product.size_width)
-                * _to_decimal(product.size_thickness)
-                / Decimal('1000000')
-            )
+    if product and all(
+        getattr(product, f, None) is not None
+        for f in ('specific_gravity', 'size_length', 'size_width', 'size_thickness')
+    ):
+        unit_weight = (
+            _to_decimal(product.specific_gravity)
+            * _to_decimal(product.size_length)
+            * _to_decimal(product.size_width)
+            * _to_decimal(product.size_thickness)
+            / Decimal('1000000')
+        )
 
     capacity = getattr(product, 'capacity', None) if product else None
     if not capacity and container:
         capacity = container.capacity
 
     return {
-        'product_code': order_line.product_code,
+        'product_code': product.product_code if product else '',
         'qty': _to_decimal(qty),
         'unit_weight': unit_weight,
         'container': {
@@ -117,31 +147,9 @@ def _build_load_item(order_line, qty):
     }
 
 
-def _get_deadline_days():
-    row = SystemSetting.objects.filter(key='kubota_sakai.assignment_deadline_days').first()
-    if not row:
-        return 3
-    try:
-        return max(int(row.value), 0)
-    except Exception:
-        return 3
-
-
-def _line_available_qty_on_date(line, target_date, line_adjustments):
-    adjustments = line_adjustments.get(line.id, [])
-    if adjustments:
-        return sum((_to_decimal(adj.adjusted_qty) for adj in adjustments if adj.adjusted_due_date == target_date), Decimal('0'))
-    if line.due_date == target_date:
-        return _to_decimal(line.quantity)
-    return Decimal('0')
-
-
-def _to_int_qty(value):
-    qty = _to_decimal(value)
-    if qty <= 0:
-        return 0
-    return int(qty.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
-
+# ---------------------------------------------------------------------------
+# クボタ配送ライン / 工程の解決
+# ---------------------------------------------------------------------------
 
 def _resolve_kubota_delivery_line_process():
     calendar = _resolve_kubota_calendar()
@@ -251,14 +259,25 @@ def _resolve_kubota_delivery_line_process():
     return line, process
 
 
+# ---------------------------------------------------------------------------
+# LineBacklog 同期
+# ---------------------------------------------------------------------------
+
 def _sync_kubota_delivery_backlog_for_date(target_date):
+    """便割付結果をクボタ配送ラインの LineBacklog に同期する。
+
+    plan_id 形式: KBT_T{truck_id}_{product_code}_{YYYYMMDD}_{seq}
+    pickup カスケードが plan_id から truck_id を抽出し、
+    arrival_day_offset ベースで前工程リードタイムを決定する。
+    """
     line, process = _resolve_kubota_delivery_line_process()
     assignments = list(
-        KubotaSakaiTripAssignment.objects.select_related('order_line__product')
+        KubotaSakaiTripAssignment.objects.select_related('due_adjustment', 'truck')
         .filter(departure_date=target_date)
-        .order_by('order_line__product_code', 'order_line_id', 'id')
+        .order_by('truck_id', 'due_adjustment__product_code', 'id')
     )
 
+    # 対象日の既存 plan 行を全削除（sequence_no > 0）
     LineBacklog.objects.filter(
         line_id=line.id,
         process_id=process.id,
@@ -266,24 +285,37 @@ def _sync_kubota_delivery_backlog_for_date(target_date):
         sequence_no__gt=0,
     ).delete()
 
-    seq_by_product = defaultdict(int)
+    # Product キャッシュ
+    product_codes = set(a.due_adjustment.product_code for a in assignments)
+    products = {
+        p.product_code: p
+        for p in Product.objects.filter(product_code__in=product_codes)
+    }
+
+    seq_counter = defaultdict(int)
     to_create = []
     for assignment in assignments:
-        product = assignment.order_line.product
+        product_code = assignment.due_adjustment.product_code
+        product = products.get(product_code)
         if not product:
             continue
         qty = _to_int_qty(assignment.qty)
         if qty <= 0:
             continue
-        seq_by_product[product.id] += 1
+        seq_counter[product.id] += 1
+        plan_id = (
+            f"{KUBOTA_TRIP_PLAN_ID_PREFIX}{assignment.truck_id}"
+            f"_{product_code}_{target_date:%Y%m%d}_{seq_counter[product.id]}"
+        )
         to_create.append(
             LineBacklog(
                 plan_date=target_date,
                 process_id=process.id,
                 product_id=product.id,
                 line_id=line.id,
-                sequence_no=seq_by_product[product.id],
+                sequence_no=seq_counter[product.id],
                 plan_qty=qty,
+                plan_id=plan_id,
                 order_qty=0,
                 demand_qty_plan=0,
             )
@@ -293,75 +325,102 @@ def _sync_kubota_delivery_backlog_for_date(target_date):
         LineBacklog.objects.bulk_create(to_create)
 
 
-class KubotaSakaiTripAssignmentViewSet(viewsets.ModelViewSet):
-    queryset = KubotaSakaiTripAssignment.objects.select_related('order_line', 'order_line__product', 'truck', 'created_by')
-    serializer_class = KubotaSakaiTripAssignmentSerializer
-    ordering = ['departure_date', 'truck_id', 'order_line_id', 'id']
+# ---------------------------------------------------------------------------
+# plan_id から truck_id を抽出するユーティリティ（pickup カスケード用）
+# ---------------------------------------------------------------------------
 
-    def get_queryset(self):
-        return super().get_queryset().filter(
-            order_line__order__status='OPEN',
-            order_line__order__customer__customer_code='000196',
-        )
+def parse_truck_id_from_plan_id(plan_id):
+    """plan_id が 'KBT_T{truck_id}_...' 形式ならtruck_idを返す。それ以外はNone。"""
+    if not plan_id or not plan_id.startswith(KUBOTA_TRIP_PLAN_ID_PREFIX):
+        return None
+    try:
+        rest = plan_id[len(KUBOTA_TRIP_PLAN_ID_PREFIX):]
+        truck_id_str = rest.split('_', 1)[0]
+        return int(truck_id_str)
+    except (ValueError, IndexError):
+        return None
 
-    @action(detail=False, methods=['get'])
-    def grid(self, request):
+
+def is_kubota_delivery_line(line_obj):
+    """ラインがクボタ配送ラインかどうかを判定"""
+    if not line_obj:
+        return False
+    line_code = str(getattr(line_obj, 'line_code', '') or '').strip()
+    line_name = str(getattr(line_obj, 'line_name', '') or '').strip()
+    return (
+        line_code in ('L3102', KUBOTA_DELIVERY_LINE_CODE)
+        or 'クボタ配送' in line_name
+    )
+
+
+# ---------------------------------------------------------------------------
+# API View
+# ---------------------------------------------------------------------------
+
+class KubotaSakaiTripPlanView(APIView):
+    """クボタ堺便計画
+
+    GET  → grid（DueAdjustment の delivery_qty > 0 を表示）
+    POST → save（TripAssignment 保存 + LineBacklog 同期）
+    """
+
+    def get(self, request):
         target_date = _parse_date(request.query_params.get('target_date')) or date.today()
         keyword = str(request.query_params.get('keyword') or '').strip()
 
-        line_qs = OrderLine.objects.select_related('product', 'order').filter(
-            order__status='OPEN',
-            order__customer__customer_code='000196',
-        ).filter(
-            Q(due_date=target_date)
-            | Q(kubota_sakai_due_adjustments__adjusted_due_date=target_date)
-        ).distinct()
-
+        # DueAdjustment から対象日の納入予定を取得
+        adj_qs = KubotaSakaiDueAdjustment.objects.filter(
+            due_date=target_date,
+            delivery_qty__gt=0,
+        )
         if keyword:
-            line_qs = line_qs.filter(
-                Q(product_code__icontains=keyword)
-                | Q(product__product_name__icontains=keyword)
-            )
+            adj_qs = adj_qs.filter(Q(product_code__icontains=keyword))
 
-        lines = list(line_qs.order_by('product_code', 'due_date', 'id'))
-        line_ids = [line.id for line in lines]
+        adjustments = list(adj_qs.order_by('product_code', 'ship_to_code', 'source_order_no', 'id'))
+        adj_ids = [a.id for a in adjustments]
 
-        adjustments = KubotaSakaiDueAdjustment.objects.filter(order_line_id__in=line_ids).order_by('order_line_id', 'split_no')
-        line_adjustments = defaultdict(list)
-        for adj in adjustments:
-            line_adjustments[adj.order_line_id].append(adj)
+        # Product lookup
+        product_codes = set(a.product_code for a in adjustments)
+        products = {
+            p.product_code: p
+            for p in Product.objects.select_related('used_container').filter(product_code__in=product_codes)
+        }
 
-        assignments = KubotaSakaiTripAssignment.objects.filter(order_line_id__in=line_ids, departure_date=target_date).order_by('order_line_id', 'id')
+        # 既存割付
+        existing = KubotaSakaiTripAssignment.objects.filter(
+            due_adjustment_id__in=adj_ids,
+            departure_date=target_date,
+        ).select_related('truck').order_by('due_adjustment_id', 'id')
         assignment_map = defaultdict(list)
-        for item in assignments:
-            assignment_map[item.order_line_id].append(item)
+        for item in existing:
+            assignment_map[item.due_adjustment_id].append(item)
 
+        # カレンダー・期限
         calendar = _resolve_kubota_calendar()
         calendar_map = _build_calendar_day_map(calendar)
         deadline_days = _get_deadline_days()
         today = date.today()
 
         rows = []
-        for line in lines:
-            available_qty = _line_available_qty_on_date(line, target_date, line_adjustments)
-            if available_qty <= 0:
-                continue
-
-            current_assignments = assignment_map.get(line.id, [])
+        for adj in adjustments:
+            product = products.get(adj.product_code)
+            container = getattr(product, 'used_container', None) if product else None
+            current_assignments = assignment_map.get(adj.id, [])
             assigned_qty = sum((_to_decimal(a.qty) for a in current_assignments), Decimal('0'))
-            unassigned_qty = available_qty - assigned_qty
+            delivery_qty = _to_decimal(adj.delivery_qty)
+            unassigned_qty = delivery_qty - assigned_qty
             deadline_date = _subtract_business_days(target_date, deadline_days, calendar_map)
             overdue = unassigned_qty > 0 and today > deadline_date
 
-            product = line.product
-            container = getattr(product, 'used_container', None) if product else None
-
             rows.append({
-                'order_line_id': line.id,
-                'adjusted_due_date': target_date.isoformat(),
-                'product_code': line.product_code,
-                'product_name': _safe_product_name(line),
-                'qty': str(available_qty),
+                'due_adjustment_id': adj.id,
+                'due_date': target_date.isoformat(),
+                'product_code': adj.product_code,
+                'product_name': product.product_name if product else '',
+                'ship_to_code': adj.ship_to_code or '',
+                'source_order_no': adj.source_order_no or '',
+                'order_type': adj.order_type,
+                'delivery_qty': str(delivery_qty),
                 'assigned_qty': str(assigned_qty),
                 'unassigned_qty': str(unassigned_qty),
                 'container_name': getattr(container, 'name', '') if container else '',
@@ -379,19 +438,23 @@ class KubotaSakaiTripAssignmentViewSet(viewsets.ModelViewSet):
                 ],
             })
 
+        # 便一覧 + 占有率サマリー
         trucks = list(KubotaSakaiTruck.objects.filter(is_active=True).order_by('display_order', 'name'))
-        all_assignments_today = list(
-            KubotaSakaiTripAssignment.objects.select_related('order_line', 'order_line__product', 'truck')
+        all_today = list(
+            KubotaSakaiTripAssignment.objects.select_related('due_adjustment', 'truck')
             .filter(departure_date=target_date, truck_id__in=[t.id for t in trucks])
-            .order_by('truck_id', 'id')
         )
         per_truck = defaultdict(list)
-        for assignment in all_assignments_today:
-            per_truck[assignment.truck_id].append(assignment)
+        for a in all_today:
+            per_truck[a.truck_id].append(a)
 
         truck_summaries = []
         for truck in trucks:
-            load_items = [_build_load_item(a.order_line, a.qty) for a in per_truck.get(truck.id, [])]
+            load_items = []
+            for a in per_truck.get(truck.id, []):
+                product = products.get(a.due_adjustment.product_code)
+                if product:
+                    load_items.append(_build_load_item(product, a.qty))
             load = calculate_truck_load(load_items, truck)
             truck_summaries.append({
                 'truck_id': truck.id,
@@ -412,8 +475,7 @@ class KubotaSakaiTripAssignmentViewSet(viewsets.ModelViewSet):
             'truck_summaries': truck_summaries,
         })
 
-    @action(detail=False, methods=['post'])
-    def bulk_save(self, request):
+    def post(self, request):
         target_date = _parse_date(request.data.get('target_date'))
         rows = request.data.get('rows')
         if not target_date:
@@ -421,42 +483,50 @@ class KubotaSakaiTripAssignmentViewSet(viewsets.ModelViewSet):
         if not isinstance(rows, list):
             return Response({'detail': 'rows は配列で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
 
-        line_ids = []
+        # 対象 DueAdjustment / Truck 取得
+        adj_ids = []
         truck_ids = set()
         for row in rows:
-            line_id = row.get('order_line_id')
-            if line_id:
-                line_ids.append(int(line_id))
+            adj_id = row.get('due_adjustment_id')
+            if adj_id:
+                adj_ids.append(int(adj_id))
             for al in row.get('allocations') or []:
                 truck_id = al.get('truck_id')
                 if truck_id:
                     truck_ids.add(int(truck_id))
 
-        line_qs = OrderLine.objects.select_related('product', 'order').filter(
-            id__in=line_ids,
-            order__status='OPEN',
-            order__customer__customer_code='000196',
-        )
-        line_map = {line.id: line for line in line_qs}
-        truck_map = {t.id: t for t in KubotaSakaiTruck.objects.filter(id__in=list(truck_ids), is_active=True)}
+        adj_map = {
+            a.id: a
+            for a in KubotaSakaiDueAdjustment.objects.filter(
+                id__in=adj_ids,
+                due_date=target_date,
+                delivery_qty__gt=0,
+            )
+        }
+        truck_map = {
+            t.id: t
+            for t in KubotaSakaiTruck.objects.filter(id__in=list(truck_ids), is_active=True)
+        }
 
-        line_adjustments = defaultdict(list)
-        for adj in KubotaSakaiDueAdjustment.objects.filter(order_line_id__in=line_ids):
-            line_adjustments[adj.order_line_id].append(adj)
+        # Product lookup（積載チェック用）
+        product_codes = set(a.product_code for a in adj_map.values())
+        products = {
+            p.product_code: p
+            for p in Product.objects.select_related('used_container').filter(product_code__in=product_codes)
+        }
 
         errors = []
         normalized = []
         for row in rows:
-            line_id = int(row.get('order_line_id') or 0)
-            line = line_map.get(line_id)
-            if not line:
-                errors.append({'order_line_id': line_id, 'detail': '対象外の受注明細です。'})
+            adj_id = int(row.get('due_adjustment_id') or 0)
+            adj = adj_map.get(adj_id)
+            if not adj:
+                errors.append({'due_adjustment_id': adj_id, 'detail': '対象外の納期調整データです。'})
                 continue
 
-            available_qty = _line_available_qty_on_date(line, target_date, line_adjustments)
             allocations = row.get('allocations') or []
             if not isinstance(allocations, list):
-                errors.append({'order_line_id': line_id, 'detail': 'allocations は配列で指定してください。'})
+                errors.append({'due_adjustment_id': adj_id, 'detail': 'allocations は配列で指定してください。'})
                 continue
 
             normalized_allocations = []
@@ -468,30 +538,41 @@ class KubotaSakaiTripAssignmentViewSet(viewsets.ModelViewSet):
                     continue
                 truck = truck_map.get(truck_id)
                 if not truck:
-                    errors.append({'order_line_id': line_id, 'detail': f'便が不正です: {truck_id}'})
+                    errors.append({'due_adjustment_id': adj_id, 'detail': f'便が不正です: {truck_id}'})
                     continue
                 normalized_allocations.append({'truck_id': truck_id, 'qty': qty})
                 total += qty
 
-            if total > available_qty:
-                errors.append({'order_line_id': line_id, 'detail': f'割付数量超過: available={available_qty} assigned={total}'})
+            if total > _to_decimal(adj.delivery_qty):
+                errors.append({
+                    'due_adjustment_id': adj_id,
+                    'detail': f'割付数量超過: delivery={adj.delivery_qty} assigned={total}',
+                })
                 continue
 
-            normalized.append({'line_id': line_id, 'allocations': normalized_allocations})
+            normalized.append({'adj_id': adj_id, 'allocations': normalized_allocations})
 
         if errors:
-            return Response({'detail': '入力エラーがあります。', 'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {'detail': '入力エラーがあります。', 'errors': errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         user = request.user if request.user and request.user.is_authenticated else None
 
         with transaction.atomic():
-            KubotaSakaiTripAssignment.objects.filter(order_line_id__in=[n['line_id'] for n in normalized], departure_date=target_date).delete()
+            # 対象行の既存割付を削除 → 再作成
+            KubotaSakaiTripAssignment.objects.filter(
+                due_adjustment_id__in=[n['adj_id'] for n in normalized],
+                departure_date=target_date,
+            ).delete()
+
             create_items = []
             for row in normalized:
                 for al in row['allocations']:
                     create_items.append(
                         KubotaSakaiTripAssignment(
-                            order_line_id=row['line_id'],
+                            due_adjustment_id=row['adj_id'],
                             truck_id=al['truck_id'],
                             departure_date=target_date,
                             qty=al['qty'],
@@ -501,8 +582,9 @@ class KubotaSakaiTripAssignmentViewSet(viewsets.ModelViewSet):
             if create_items:
                 KubotaSakaiTripAssignment.objects.bulk_create(create_items)
 
+            # 積載チェック（全便対象）
             all_today = list(
-                KubotaSakaiTripAssignment.objects.select_related('order_line', 'order_line__product', 'truck')
+                KubotaSakaiTripAssignment.objects.select_related('due_adjustment', 'truck')
                 .filter(departure_date=target_date)
             )
             per_truck = defaultdict(list)
@@ -512,15 +594,30 @@ class KubotaSakaiTripAssignmentViewSet(viewsets.ModelViewSet):
             save_errors = []
             for truck_id, items in per_truck.items():
                 truck = items[0].truck
-                load_items = [_build_load_item(item.order_line, item.qty) for item in items]
+                load_items = []
+                for item in items:
+                    product = products.get(item.due_adjustment.product_code)
+                    if product:
+                        load_items.append(_build_load_item(product, item.qty))
                 load = calculate_truck_load(load_items, truck)
                 if load['errors']:
-                    save_errors.append({'truck_id': truck_id, 'truck_name': truck.name, 'errors': load['errors']})
+                    save_errors.append({
+                        'truck_id': truck_id,
+                        'truck_name': truck.name,
+                        'errors': load['errors'],
+                    })
 
             if save_errors:
                 transaction.set_rollback(True)
-                return Response({'detail': '便積載制約エラーがあります。', 'errors': save_errors}, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {'detail': '便積載制約エラーがあります。', 'errors': save_errors},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
+            # LineBacklog 同期（LinePlan不使用、LineBacklog直接保存）
             _sync_kubota_delivery_backlog_for_date(target_date)
 
-        return Response({'saved_rows': len(normalized), 'saved_allocations': len(create_items)})
+        return Response({
+            'saved_rows': len(normalized),
+            'saved_allocations': len(create_items),
+        })

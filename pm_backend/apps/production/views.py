@@ -68,7 +68,7 @@ from .serializers import (
 )
 from .services.order_expansion import OrderExpansionService
 from .services.gantt_planning import generate_line_gantt_plans
-from masters.models import Routing, RoutingStep, ProcessCycleTime, Line, Supplier, Process, Calendar, CalendarDay, BOM, BOMItem, Product
+from masters.models import Routing, RoutingStep, ProcessCycleTime, Line, Supplier, Process, Calendar, CalendarDay, BOM, BOMItem, Product, KubotaSakaiTruck
 from masters.services.routing_service import build_effective_routing_q, build_effective_routing_range_q, normalize_routing_reference_datetime, resolve_effective_routing
 from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR, get_business_today, add_working_days
 from django.contrib.auth import get_user_model
@@ -80,6 +80,9 @@ FLOOR_SHIPPING_TAB_KEY = 'floor-shipping'
 FLOOR_SHIPPING_DELIVERY_LABEL = 'フロア配送'
 FLOOR_SHIPPING_PM_SEQUENCE_THRESHOLD = 50
 INVALID_SEQUENCE_SORT_VALUE = 10 ** 9
+
+# クボタ配送ライン: plan_id から truck_id を抽出して arrival_day_offset ベースで LT を決定
+KUBOTA_DELIVERY_LABELS = ('L3102', 'KUBOTA_DELIVERY', 'クボタ配送')
 
 
 def _parse_optional_date(value):
@@ -118,6 +121,15 @@ def _is_floor_shipping_delivery_line(line_obj):
     line_code = str(getattr(line_obj, 'line_code', '') or '').strip()
     line_name = str(getattr(line_obj, 'line_name', '') or '').strip()
     return FLOOR_SHIPPING_DELIVERY_LABEL in f'{line_code} {line_name}'
+
+
+def _is_kubota_delivery_line(line_obj):
+    """クボタ配送ラインかどうかを判定"""
+    if not line_obj:
+        return False
+    line_code = str(getattr(line_obj, 'line_code', '') or '').strip()
+    line_name = str(getattr(line_obj, 'line_name', '') or '').strip()
+    return any(label in f'{line_code} {line_name}' for label in KUBOTA_DELIVERY_LABELS)
 
 
 def _resolve_inventory_effective_start_date(line_id, requested_start_date, end_date, product_ids=None, line_final_only=False):
@@ -1682,6 +1694,57 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                                     seq_value > FLOOR_SHIPPING_PM_SEQUENCE_THRESHOLD
                                 )
                                 effective_lt_days = 1 if force_pm_by_sequence else (2 if lot_index == 0 else 1)
+                                shifted_date = shift_business_days(plan_date, effective_lt_days) if effective_lt_days else plan_date
+                                key = (current_output_product, shifted_date)
+                                demand_map[key] += qty * total_qty_per
+                                downstream_found = True
+                        continue
+
+                    # --- クボタ配送ライン: plan_id から truck の arrival_day_offset で LT 決定 ---
+                    if _is_kubota_delivery_line(getattr(d_step, 'line', None)):
+                        from shipping.views_kubota_sakai_trip_assignment import parse_truck_id_from_plan_id
+                        # truck の arrival_day_offset キャッシュ
+                        if not hasattr(self, '_kubota_truck_offset_cache'):
+                            self._kubota_truck_offset_cache = {}
+                        truck_offset_cache = self._kubota_truck_offset_cache
+
+                        def _get_truck_offset(truck_id):
+                            if truck_id not in truck_offset_cache:
+                                truck = KubotaSakaiTruck.objects.filter(id=truck_id).first()
+                                truck_offset_cache[truck_id] = getattr(truck, 'arrival_day_offset', 0) if truck else 0
+                            return truck_offset_cache[truck_id]
+
+                        kubota_rows_by_date = defaultdict(list)
+                        if len(target_ids) > 1:
+                            parent_rows = {}
+                            final_rows = {}
+                            for backlog_product_id, plan_date, plan_qty, backlog_plan_id, _seq in backlog_rows:
+                                qty = Decimal(str(plan_qty or 0))
+                                if qty == 0:
+                                    continue
+                                target_map = parent_rows if backlog_product_id == parent_product.id else final_rows
+                                target_map.setdefault(plan_date, []).append((qty, backlog_plan_id))
+                            for plan_date in set(parent_rows) | set(final_rows):
+                                preferred = parent_rows.get(plan_date) or final_rows.get(plan_date, [])
+                                if preferred:
+                                    kubota_rows_by_date[plan_date] = list(preferred)
+                        else:
+                            for _, plan_date, plan_qty, backlog_plan_id, _seq in backlog_rows:
+                                qty = Decimal(str(plan_qty or 0))
+                                if qty == 0:
+                                    continue
+                                kubota_rows_by_date[plan_date].append((qty, backlog_plan_id))
+
+                        for plan_date, lots in kubota_rows_by_date.items():
+                            for qty, backlog_plan_id in lots:
+                                truck_id = parse_truck_id_from_plan_id(backlog_plan_id)
+                                if truck_id:
+                                    offset = _get_truck_offset(truck_id)
+                                    # offset=0（当日朝出発→当日着）→ LT=1（当日準備でOK）
+                                    # offset=1（前日夕出発→翌日着）→ LT=2（前日に準備必要）
+                                    effective_lt_days = 1 + offset
+                                else:
+                                    effective_lt_days = lt_days or 2
                                 shifted_date = shift_business_days(plan_date, effective_lt_days) if effective_lt_days else plan_date
                                 key = (current_output_product, shifted_date)
                                 demand_map[key] += qty * total_qty_per

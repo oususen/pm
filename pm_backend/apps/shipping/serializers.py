@@ -95,16 +95,15 @@ class KubotaSakaiDueAdjustmentSerializer(serializers.ModelSerializer):
 
 
 class KubotaSakaiTripAssignmentSerializer(serializers.ModelSerializer):
-    product_code = serializers.CharField(source='order_line.product_code', read_only=True)
-    product_name = serializers.CharField(source='order_line.product.product_name', read_only=True)
-    due_date = serializers.DateField(source='order_line.due_date', read_only=True)
+    product_code = serializers.CharField(source='due_adjustment.product_code', read_only=True)
+    due_date = serializers.DateField(source='due_adjustment.due_date', read_only=True)
     truck_name = serializers.CharField(source='truck.name', read_only=True)
 
     class Meta:
         model = KubotaSakaiTripAssignment
         fields = [
             'id',
-            'order_line',
+            'due_adjustment',
             'truck',
             'departure_date',
             'qty',
@@ -112,8 +111,7 @@ class KubotaSakaiTripAssignmentSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'product_code',
-            'product_name',
             'due_date',
             'truck_name',
         ]
-        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at', 'product_code', 'product_name', 'due_date', 'truck_name']
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at', 'product_code', 'due_date', 'truck_name']

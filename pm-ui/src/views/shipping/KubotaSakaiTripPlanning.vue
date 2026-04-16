@@ -35,14 +35,14 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in rows" :key="row.order_line_id" :class="{ overdue: row.overdue }">
-            <td>{{ row.adjusted_due_date }}</td>
+          <tr v-for="row in rows" :key="row.due_adjustment_id" :class="{ overdue: row.overdue }">
+            <td>{{ row.due_date }}</td>
             <td>{{ row.product_code }}</td>
             <td>{{ row.product_name }}</td>
-            <td class="num">{{ formatNumber(row.qty) }}</td>
+            <td class="num">{{ formatNumber(row.delivery_qty) }}</td>
             <td class="num">{{ formatNumber(row.unassigned_qty_preview) }}</td>
             <td>
-              <div v-for="(al, idx) in row.allocations" :key="`${row.order_line_id}-${idx}`" class="allocation-row">
+              <div v-for="(al, idx) in row.allocations" :key="`${row.due_adjustment_id}-${idx}`" class="allocation-row">
                 <select v-model.number="al.truck_id">
                   <option :value="null">便を選択</option>
                   <option v-for="truck in trucks" :key="truck.id" :value="truck.id">{{ truck.name }}</option>
@@ -99,7 +99,7 @@ const formatNumber = (value) => {
 
 const recalcRow = (row) => {
   const assigned = row.allocations.reduce((sum, item) => sum + parseNumber(item.qty), 0)
-  row.unassigned_qty_preview = Number((parseNumber(row.qty) - assigned).toFixed(3))
+  row.unassigned_qty_preview = Number((parseNumber(row.delivery_qty) - assigned).toFixed(3))
 }
 
 const normalizeAllocation = (item = null) => ({
@@ -148,7 +148,7 @@ const save = async () => {
   saving.value = true
   try {
     const payloadRows = rows.value.map((row) => ({
-      order_line_id: row.order_line_id,
+      due_adjustment_id: row.due_adjustment_id,
       allocations: row.allocations
         .map((item) => ({
           truck_id: item.truck_id,
@@ -165,7 +165,7 @@ const save = async () => {
     if (Array.isArray(errors) && errors.length > 0) {
       const lines = errors.map((item) => {
         if (item.truck_name) return `${item.truck_name}: ${(item.errors || []).join(', ')}`
-        if (item.order_line_id) return `order_line_id=${item.order_line_id}: ${item.detail || '入力エラー'}`
+        if (item.due_adjustment_id) return `${item.detail || '入力エラー'}`
         return JSON.stringify(item)
       })
       alert([detail, ...lines].join('\n'))
