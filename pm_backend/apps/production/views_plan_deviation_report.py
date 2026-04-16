@@ -287,7 +287,7 @@ class PlanDeviationReportView(APIView):
             LaserActualDetail.objects
             .filter(
                 actual__work_date=target_date,
-                detail_type=LaserActualDetail.DETAIL_TYPE_FINISHED,
+                detail_type=LaserActualDetail.DETAIL_TYPE_COMPONENT,
             )
             .exclude(total_qty=0)
             .select_related('actual')
