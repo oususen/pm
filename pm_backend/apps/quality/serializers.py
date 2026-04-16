@@ -304,6 +304,7 @@ class EquipmentInspectionTemplateSerializer(serializers.ModelSerializer):
             "chief_reviewed_at",
             "approved_at",
             "rejection_comment",
+            "submitted_items_snapshot",
             "created_at",
             "updated_at",
             "items",
@@ -324,6 +325,7 @@ class EquipmentInspectionTemplateSerializer(serializers.ModelSerializer):
             "reviewed_at",
             "chief_reviewed_at",
             "approved_at",
+            "submitted_items_snapshot",
         ]
 
     def get_created_by_name(self, obj):

@@ -640,10 +640,24 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        user_comment = str(request.data.get("comment") or "").strip()
+
         with transaction.atomic():
             prev_status = template.status
             if not template.created_by_id:
                 template.created_by = request.user
+
+            # 提出時の点検項目スナップショットを保存（差し戻し後の再提出時に差分比較用）
+            # 差し戻し後の再提出時は前回のスナップショットを維持（上長が前回提出時との差分を確認できるように）
+            if prev_status != EquipmentInspectionTemplate.STATUS_REJECTED or not template.submitted_items_snapshot:
+                snapshot = list(
+                    template.items.order_by("section_type", "display_order").values(
+                        "section_type", "display_order", "inspection_no",
+                        "item_name", "standard", "frequency", "method",
+                        "record_type", "unit", "criteria", "is_required", "is_active",
+                    )
+                )
+                template.submitted_items_snapshot = snapshot
 
             template.reviewer_user = reviewer_user
             template.chief_user = chief_user
@@ -672,11 +686,12 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
                 due_date=_task_due_date(template),
             )
 
-            comment = (
+            assignee_info = (
                 f"班長: {_display_name(reviewer_user) or '未判定'} / "
                 f"係長: {_display_name(chief_user) or '未判定'} / "
                 f"部長: {_display_name(approver_user) or '未判定'}"
             )
+            comment = f"{assignee_info}\n{user_comment}" if user_comment else assignee_info
             _log_workflow(
                 template=template,
                 action=EquipmentInspectionWorkflowLog.ACTION_SUBMITTED,
@@ -685,9 +700,12 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
                 to_status=template.status,
                 comment=comment,
             )
+            notification_desc = f"{first_stage[3]}待ちです。"
+            if user_comment:
+                notification_desc += f"\nコメント: {user_comment}"
             _create_notification(
                 title=f"設備点検表 確認依頼: {template.sheet_code} v{template.version}",
-                description=f"{first_stage[3]}待ちです。",
+                description=notification_desc,
                 users=[first_stage[2]],
                 operator_name=_display_name(request.user),
             )

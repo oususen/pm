@@ -272,7 +272,7 @@
                   </td>
                   <td>
                     <span v-if="itemDiffStatus(item) === 'new'" class="diff-badge diff-badge-new">新規</span>
-                    <span v-else-if="itemDiffStatus(item) === 'changed'" class="diff-badge diff-badge-changed">改訂</span>
+                    <span v-else-if="itemDiffStatus(item) === 'changed'" class="diff-badge diff-badge-changed">{{ diffLabel }}</span>
                     <textarea class="auto-grow-textarea" v-model="item.item_name" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" />
                   </td>
                   <td><textarea class="auto-grow-textarea" v-model="item.standard" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
@@ -343,7 +343,7 @@
                 <tr v-for="item in quarterlyItems" :key="item.local_key" :class="{ 'diff-new': itemDiffStatus(item) === 'new', 'diff-changed': itemDiffStatus(item) === 'changed' }">
                   <td>
                     <span v-if="itemDiffStatus(item) === 'new'" class="diff-badge diff-badge-new">新規</span>
-                    <span v-else-if="itemDiffStatus(item) === 'changed'" class="diff-badge diff-badge-changed">改訂</span>
+                    <span v-else-if="itemDiffStatus(item) === 'changed'" class="diff-badge diff-badge-changed">{{ diffLabel }}</span>
                     <textarea class="auto-grow-textarea" v-model="item.item_name" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" />
                   </td>
                   <td><textarea class="auto-grow-textarea" v-model="item.standard" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
@@ -411,6 +411,29 @@
           <div v-if="!form.workflow_logs.length" class="no-data">履歴はありません</div>
         </div>
       </section>
+    </div>
+
+    <!-- 確認依頼コメントモーダル -->
+    <div v-if="submitDialogVisible" class="modal-backdrop" @click.self="cancelSubmit">
+      <div class="modal-panel reject-modal">
+        <div class="modal-header">
+          <h3 class="panel-title">確認依頼</h3>
+        </div>
+        <div class="reject-modal-body">
+          <label class="reject-label">コメント（任意）</label>
+          <textarea
+            v-model="submitComment"
+            class="reject-textarea"
+            rows="5"
+            placeholder="確認依頼時のコメントがあれば入力してください。"
+            autofocus
+          />
+        </div>
+        <div class="reject-modal-footer">
+          <button class="btn-secondary" @click="cancelSubmit">キャンセル</button>
+          <button class="btn-approve" @click="confirmSubmitForReview">確認依頼</button>
+        </div>
+      </div>
     </div>
 
     <!-- 差戻しコメントモーダル -->
@@ -565,6 +588,8 @@ const attachmentDialogVisible = ref(false)
 const attachmentTargetKey = ref("")
 const rejectDialogVisible = ref(false)
 const rejectComment = ref("")
+const submitDialogVisible = ref(false)
+const submitComment = ref("")
 const listFilter = ref({ keyword: "", status: "" })
 const prevVersionItems = ref([])
 const operationExcelInput = ref(null)
@@ -685,12 +710,29 @@ const filteredTemplates = computed(() => {
     return true
   })
 })
-// 差分表示: 前版との比較
+// 差分表示: 前版との比較 / 差し戻し後修正の比較
 const DIFF_FIELDS = ["item_name", "standard", "frequency", "method", "record_type", "unit", "criteria", "is_required", "is_active"]
-const showDiff = computed(() => prevVersionItems.value.length > 0)
+const PENDING_STATUSES = ["SUPERVISOR_PENDING", "CHIEF_PENDING", "MANAGER_PENDING"]
+
+// スナップショット比較（差し戻し後再提出時）: 上長確認画面で前回提出時との差分を表示
+const isSnapshotDiff = computed(() => {
+  const snapshot = form.value.submitted_items_snapshot
+  if (!snapshot || !snapshot.length) return false
+  return PENDING_STATUSES.includes(normalizedFormStatus.value)
+})
+
+// 差分比較のベースとなるアイテム一覧（スナップショット優先、なければ前版）
+const diffBaseItems = computed(() => {
+  if (isSnapshotDiff.value) return form.value.submitted_items_snapshot
+  return prevVersionItems.value
+})
+const showDiff = computed(() => diffBaseItems.value.length > 0)
+// 差分の種別ラベル（改訂 vs 修正）
+const diffLabel = computed(() => isSnapshotDiff.value ? "修正" : "改訂")
+
 const findPrevItem = (item) => {
   // item_nameで照合（番号は表示用で再採番されるため識別子として使わない）
-  return prevVersionItems.value.find(
+  return diffBaseItems.value.find(
     (p) => p.section_type === item.section_type && p.item_name === item.item_name
   ) || null
 }
@@ -705,7 +747,7 @@ const itemDiffStatus = (item) => {
 }
 const deletedItems = computed(() => {
   if (!showDiff.value) return []
-  return prevVersionItems.value.filter((prev) =>
+  return diffBaseItems.value.filter((prev) =>
     !form.value.items.some(
       (cur) => cur.section_type === prev.section_type && cur.item_name === prev.item_name
     )
@@ -1765,6 +1807,7 @@ const toFormModel = (raw) => {
     approver_user: raw.approver_user || null,
     approver_user_name: raw.approver_user_name || "",
     rejection_comment: raw.rejection_comment || "",
+    submitted_items_snapshot: Array.isArray(raw.submitted_items_snapshot) ? raw.submitted_items_snapshot : null,
     reviewed_at: raw.reviewed_at || "",
     chief_reviewed_at: raw.chief_reviewed_at || "",
     approved_at: raw.approved_at || "",
@@ -2019,20 +2062,30 @@ const saveTemplate = async () => {
   }
 }
 
-const submitForReview = async () => {
+const submitForReview = () => {
   if (!form.value.id || !canSubmitForReview.value) return
   if (!validateForm()) return
-  const ok = window.confirm("編集内容を保存して確認依頼に進めます。よろしいですか？")
-  if (!ok) return
+  submitComment.value = ""
+  submitDialogVisible.value = true
+}
 
+const cancelSubmit = () => {
+  submitDialogVisible.value = false
+  submitComment.value = ""
+}
+
+const confirmSubmitForReview = async () => {
+  if (!form.value.id) return
+  submitDialogVisible.value = false
   actionLoading.value = true
   try {
     // 未保存の編集内容を先に保存してから確認依頼
     const savedId = await saveTemplateInternal()
     const targetId = savedId || form.value.id
-    await api.qualityEquipmentInspections.submitForReview(targetId)
+    await api.qualityEquipmentInspections.submitForReview(targetId, submitComment.value)
     await loadTemplateList()
     await loadTemplateDetail(targetId)
+    submitComment.value = ""
     alert("確認依頼を登録しました。")
   } catch (error) {
     console.error("確認依頼に失敗:", error)

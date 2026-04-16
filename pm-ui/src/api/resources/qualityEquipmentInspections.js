@@ -14,8 +14,8 @@ export const createQualityEquipmentInspectionsAPI = (client) => ({
   delete(id) {
     return client.delete(`/equipment-inspection-templates/${id}/`);
   },
-  submitForReview(id) {
-    return client.post(`/equipment-inspection-templates/${id}/submit_for_review/`);
+  submitForReview(id, comment = "") {
+    return client.post(`/equipment-inspection-templates/${id}/submit_for_review/`, { comment });
   },
   review(id) {
     return client.post(`/equipment-inspection-templates/${id}/review/`);
