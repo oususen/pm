@@ -1691,6 +1691,8 @@ const saveActual = async () => {
 watch(
   () => form.value.pattern,
   async (patternId) => {
+    // パターン変更時は前回の警告をクリア
+    if (formMessageType.value === 'warning') setFormMessage('', 'info')
     if (!patternId) {
       form.value.operator_action = ''
       form.value.operator_action_reason = ''
@@ -1703,8 +1705,31 @@ watch(
       form.value.equipment = selected.equipment ? String(selected.equipment) : ''
     }
     await loadLatestActionForPattern(patternId)
+    // 当日同一パターンの重複チェック
+    await checkDuplicatePatternToday(patternId)
   }
 )
+
+const checkDuplicatePatternToday = async (patternId) => {
+  const pid = String(patternId || '').trim()
+  if (!pid) return
+  try {
+    const today = businessDateYmd()
+    const res = await api.laserActuals.getLaserActuals({
+      pattern: pid,
+      work_date__gte: today,
+      work_date__lte: today,
+      page_size: 1,
+    })
+    const rows = normalizeList(res.data)
+    if (rows.length > 0) {
+      const patternNo = selectedPattern.value?.pattern_no || pid
+      setFormMessage(`⚠ パターン ${patternNo} は本日すでに実績が登録されています。`, 'warning')
+    }
+  } catch {
+    // チェック失敗時は警告なしで続行
+  }
+}
 
 watch(
   () => operatorActionOptions.value.map((item) => item.value).join('|'),
@@ -2030,6 +2055,13 @@ onMounted(async () => {
 .message.is-error {
   background: #fee2e2;
   color: #991b1b;
+}
+
+.message.is-warning {
+  background: #fef9c3;
+  color: #854d0e;
+  border: 1px solid #fde047;
+  font-weight: 700;
 }
 
 .message.is-info {
