@@ -527,6 +527,10 @@ const groups = computed(() => {
     }
 
     return g;
+  }).filter((g) => {
+    // 表示期間内にデータがないグループは非表示
+    const s = g.summary;
+    return s.forecast !== 0 || s.firm !== 0 || s.actual !== 0 || s.adjust !== 0;
   });
 
   result.sort((a, b) =>
