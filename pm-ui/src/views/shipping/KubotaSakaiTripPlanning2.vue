@@ -24,9 +24,44 @@
       </button>
       <button class="btn save-btn" :disabled="loading || saving" @click="save">保存</button>
       <button class="btn" :disabled="loading" @click="loadGrid">表示</button>
+      <button class="btn detail-btn" :disabled="loading" @click="showTruckDetail = !showTruckDetail">
+        便詳細
+      </button>
     </div>
 
-    <div class="table-wrap">
+    <div v-if="showTruckDetail" class="truck-detail-wrap">
+      <table class="truck-detail-table">
+        <thead>
+          <tr>
+            <th>便名</th>
+            <th>俗称</th>
+            <th>出発時刻</th>
+            <th>着時刻</th>
+            <th>長さ(mm)</th>
+            <th>奥行き(mm)</th>
+            <th>日ずれ</th>
+            <th>通常便</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="truck in detailTrucks" :key="`detail-${truck.id}`">
+            <td>{{ truck.name || '-' }}</td>
+            <td>{{ truckDisplayName(truck) }}</td>
+            <td>{{ truck.departure_time || '-' }}</td>
+            <td>{{ truck.arrival_time || '-' }}</td>
+            <td class="num-cell">{{ formatNumber(truck.width) }}</td>
+            <td class="num-cell">{{ formatNumber(truck.depth) }}</td>
+            <td class="num-cell">{{ formatNumber(truck.arrival_day_offset) }}</td>
+            <td>{{ truck.default_use ? '通常' : '-' }}</td>
+          </tr>
+          <tr v-if="!detailTrucks.length">
+            <td colspan="8" class="detail-empty">便マスタがありません</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-wrap" ref="tableWrapRef">
       <table class="grid">
         <thead ref="theadRef">
           <tr>
@@ -37,27 +72,64 @@
               :key="`day-${dateKey}`"
               :colspan="SLOT_COUNT"
               class="date-head"
+              :class="{
+                'holiday-head': isHoliday(dateKey),
+                'day-split-left': isDaySplitStart(dateKey),
+              }"
             >
               {{ formatHeaderDate(dateKey) }}
             </th>
           </tr>
           <tr>
             <template v-for="dateKey in dateKeys" :key="`truck-${dateKey}`">
-              <th v-for="slotIdx in SLOT_COUNT" :key="`truck-${dateKey}-${slotIdx}`" class="truck-head">
+              <th
+                v-for="slotIdx in SLOT_COUNT"
+                :key="`truck-${dateKey}-${slotIdx}`"
+                :class="[
+                  'truck-head',
+                  slotWidthClass(slotIdx - 1),
+                  {
+                    'holiday-head': isHoliday(dateKey),
+                    'day-split-left': slotIdx === 1 && isDaySplitStart(dateKey),
+                  },
+                ]"
+              >
                 {{ truckNameAt(dateKey, slotIdx - 1) }}
               </th>
             </template>
           </tr>
           <tr>
             <template v-for="dateKey in dateKeys" :key="`occ-${dateKey}`">
-              <th v-for="slotIdx in SLOT_COUNT" :key="`occ-${dateKey}-${slotIdx}`" class="occ-head">
+              <th
+                v-for="slotIdx in SLOT_COUNT"
+                :key="`occ-${dateKey}-${slotIdx}`"
+                :class="[
+                  'occ-head',
+                  slotWidthClass(slotIdx - 1),
+                  {
+                    'holiday-head': isHoliday(dateKey),
+                    'day-split-left': slotIdx === 1 && isDaySplitStart(dateKey),
+                  },
+                ]"
+              >
                 {{ truckOccupancyLabel(dateKey, slotIdx - 1) }}
               </th>
             </template>
           </tr>
           <tr>
             <template v-for="dateKey in dateKeys" :key="`item-${dateKey}`">
-              <th v-for="slotIdx in SLOT_COUNT" :key="`item-${dateKey}-${slotIdx}`" class="item-head">
+              <th
+                v-for="slotIdx in SLOT_COUNT"
+                :key="`item-${dateKey}-${slotIdx}`"
+                :class="[
+                  'item-head',
+                  slotWidthClass(slotIdx - 1),
+                  {
+                    'holiday-head': isHoliday(dateKey),
+                    'day-split-left': slotIdx === 1 && isDaySplitStart(dateKey),
+                  },
+                ]"
+              >
                 {{ slotLabels[slotIdx - 1] }}
               </th>
             </template>
@@ -68,7 +140,7 @@
             <td class="code-col">{{ row.product_code }}</td>
             <td class="shipto-col">{{ row.ship_to_code || '-' }}</td>
             <template v-for="dateKey in dateKeys" :key="`${row.rowKey}-${dateKey}`">
-              <td class="cell-center cell-stacked">
+              <td class="cell-center cell-stacked col-order" :class="{ 'day-split-left': isDaySplitStart(dateKey) }">
                 <div
                   v-for="slotIdx in row.maxSlots"
                   :key="`${row.rowKey}-${dateKey}-order-${slotIdx}`"
@@ -77,7 +149,7 @@
                   {{ sourceOrderLabel(slotEntryAt(row, dateKey, slotIdx - 1)) }}
                 </div>
               </td>
-              <td class="cell-right cell-stacked">
+              <td class="cell-right cell-stacked col-demand">
                 <div
                   v-for="slotIdx in row.maxSlots"
                   :key="`${row.rowKey}-${dateKey}-demand-${slotIdx}`"
@@ -86,7 +158,7 @@
                   {{ formatNumber(slotEntryAt(row, dateKey, slotIdx - 1)?.delivery_qty) }}
                 </div>
               </td>
-              <td class="cell-right cell-stacked">
+              <td class="cell-right cell-stacked col-assigned">
                 <div
                   v-for="slotIdx in row.maxSlots"
                   :key="`${row.rowKey}-${dateKey}-assigned-${slotIdx}`"
@@ -95,7 +167,7 @@
                   {{ formatNumber(assignedQty(slotEntryAt(row, dateKey, slotIdx - 1))) }}
                 </div>
               </td>
-              <td class="cell-select cell-stacked">
+              <td class="cell-select cell-stacked col-select">
                 <div
                   v-for="slotIdx in row.maxSlots"
                   :key="`${row.rowKey}-${dateKey}-select-${slotIdx}`"
@@ -108,20 +180,24 @@
                       class="allocation-row"
                     >
                       <select v-model.number="al.truck_id" @change="handleAllocationChange(slotEntryAt(row, dateKey, slotIdx - 1))">
-                        <option :value="null">便選択</option>
+                        <option :value="null">便</option>
                         <option
                           v-for="truck in trucksByDate[dateKey] || []"
                           :key="truck.id"
                           :value="truck.id"
                         >
-                          {{ truck.name }}
+                          {{ truckDisplayName(truck) }}
                         </option>
                       </select>
                       <input
                         v-model="al.qty"
                         type="text"
-                        inputmode="decimal"
+                        inputmode="numeric"
                         @input="handleAllocationQtyInput(slotEntryAt(row, dateKey, slotIdx - 1))"
+                        @focus="showProductBubble(row, $event)"
+                        @mouseenter="showProductBubble(row, $event)"
+                        @blur="handleQtyInputBlur"
+                        @mouseleave="handleQtyInputMouseLeave($event)"
                       />
                       <button class="mini" @click="addAllocation(slotEntryAt(row, dateKey, slotIdx - 1))">+</button>
                       <button
@@ -135,7 +211,7 @@
                   </div>
                 </div>
               </td>
-              <td class="cell-right cell-stacked">
+              <td class="cell-right cell-stacked col-remain">
                 <div
                   v-for="slotIdx in row.maxSlots"
                   :key="`${row.rowKey}-${dateKey}-remain-${slotIdx}`"
@@ -155,6 +231,11 @@
     </div>
 
     <div class="note">未割付期限: 調整後納期の{{ assignmentDeadlineDays }}営業日前</div>
+    <div
+      v-if="cursorProductCode"
+      class="cursor-product-bubble"
+      :style="cursorProductBubbleStyle"
+    >{{ cursorProductCode }}</div>
   </div>
 </template>
 
@@ -163,6 +244,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import api from '@/api/client'
 
 const theadRef = ref(null)
+const tableWrapRef = ref(null)
 
 const setStickyTopValues = () => {
   if (!theadRef.value) return
@@ -214,9 +296,21 @@ const formatNumber = (value) => {
   return Number.isInteger(num) ? String(num) : num.toFixed(3).replace(/\.?0+$/, '')
 }
 
+const parseIntegerQty = (value) => {
+  if (value === null || value === undefined || value === '') return 0
+  const normalized = String(value).replace(/[，,]/g, '').replace(/[．]/g, '.')
+  const num = Number(normalized)
+  return Number.isFinite(num) ? Math.max(0, Math.trunc(num)) : 0
+}
+
+const normalizeQtyText = (value) => {
+  const qty = parseIntegerQty(value)
+  return qty > 0 ? String(qty) : ''
+}
+
 const normalizeAllocation = (item = null) => ({
   truck_id: item?.truck_id ?? null,
-  qty: item?.qty ?? '',
+  qty: normalizeQtyText(item?.qty ?? ''),
 })
 
 const sortEntries = (items = []) => {
@@ -240,11 +334,42 @@ const summaryByDate = ref({})
 const previewSummaryByDate = ref({})
 const mergedRows = ref([])
 const previewTimers = new Map()
+const showTruckDetail = ref(false)
+const holidayByDate = ref({})
+const cursorProductCode = ref('')
+const cursorProductBubbleStyle = ref({})
 
 const dateKeys = computed(() => {
   const span = Math.max(1, Number(horizonDays.value) || 1)
   return Array.from({ length: span }).map((_, idx) => addDays(targetDate.value, idx))
 })
+
+const detailTrucks = computed(() => {
+  const firstDate = dateKeys.value[0]
+  const base = trucksByDate.value[firstDate] || []
+  if (base.length > 0) return base
+  const merged = []
+  const seen = new Set()
+  Object.values(trucksByDate.value || {}).forEach((list) => {
+    ;(list || []).forEach((truck) => {
+      const key = Number(truck.id)
+      if (seen.has(key)) return
+      seen.add(key)
+      merged.push(truck)
+    })
+  })
+  return merged
+})
+
+const isHoliday = (dateKey) => Boolean(holidayByDate.value[dateKey])
+const isDaySplitStart = (dateKey) => dateKeys.value[0] !== dateKey
+const slotWidthClass = (slotIdx) => {
+  if (slotIdx === 0) return 'col-order'
+  if (slotIdx === 1) return 'col-demand'
+  if (slotIdx === 2) return 'col-assigned'
+  if (slotIdx === 3) return 'col-select'
+  return 'col-remain'
+}
 
 const sourceOrderLabel = (entry) => {
   if (!entry) return ''
@@ -253,7 +378,7 @@ const sourceOrderLabel = (entry) => {
 
 const assignedQty = (entry) => {
   if (!entry) return 0
-  return entry.allocations.reduce((sum, al) => sum + parseNumber(al.qty), 0)
+  return entry.allocations.reduce((sum, al) => sum + parseIntegerQty(al.qty), 0)
 }
 
 const recalcEntry = (entry) => {
@@ -268,6 +393,11 @@ const handleAllocationChange = (entry) => {
 }
 
 const handleAllocationQtyInput = (entry) => {
+  if (entry?.allocations?.length) {
+    entry.allocations.forEach((al) => {
+      al.qty = normalizeQtyText(al.qty)
+    })
+  }
   recalcEntry(entry)
   if (entry?.due_date) schedulePreview(entry.due_date)
 }
@@ -293,9 +423,14 @@ const truckAt = (dateKey, slotIdx) => {
   return trucks[slotIdx] || null
 }
 
+const truckDisplayName = (truck) => {
+  if (!truck) return ''
+  return (truck.alias_name || '').trim() || truck.name || ''
+}
+
 const truckNameAt = (dateKey, slotIdx) => {
   const truck = truckAt(dateKey, slotIdx)
-  return truck?.name || `便${slotIdx + 1}`
+  return truckDisplayName(truck) || `便${slotIdx + 1}`
 }
 
 const truckOccupancyPercent = (dateKey, slotIdx) => {
@@ -317,7 +452,7 @@ const buildPayloadRowsForDate = (dateKey) => {
       allocations: entry.allocations
         .map((item) => ({
           truck_id: item.truck_id,
-          qty: parseNumber(item.qty),
+          qty: parseIntegerQty(item.qty),
         }))
         .filter((item) => item.truck_id && item.qty > 0),
     }))
@@ -348,6 +483,40 @@ const schedulePreview = (dateKey) => {
   previewTimers.set(dateKey, timer)
 }
 
+const showProductBubble = (row, event) => {
+  cursorProductCode.value = String(row?.product_code || '')
+  const rect = event?.target?.getBoundingClientRect?.()
+  if (!rect) return
+  const left = Math.round(rect.left + rect.width / 2)
+  const top = Math.round(rect.top - 8)
+  cursorProductBubbleStyle.value = {
+    left: `${left}px`,
+    top: `${top}px`,
+    transform: 'translate(-50%, -100%)',
+  }
+}
+
+const hideProductBubble = () => {
+  cursorProductCode.value = ''
+  cursorProductBubbleStyle.value = {}
+}
+
+const handleQtyInputBlur = () => {
+  window.setTimeout(() => {
+    const root = tableWrapRef.value
+    const active = document.activeElement
+    if (!root || !active || !root.contains(active)) {
+      hideProductBubble()
+    }
+  }, 0)
+}
+
+const handleQtyInputMouseLeave = (event) => {
+  if (document.activeElement !== event?.target) {
+    hideProductBubble()
+  }
+}
+
 const refreshAllPreview = async () => {
   await Promise.all(dateKeys.value.map((dateKey) => previewLoadForDate(dateKey)))
 }
@@ -363,6 +532,7 @@ const loadGrid = async () => {
     )
     const nextTrucksByDate = {}
     const nextSummaryByDate = {}
+    const nextHolidayByDate = {}
     const map = new Map()
     let maxDeadline = 3
 
@@ -373,6 +543,7 @@ const loadGrid = async () => {
       const payloadRows = Array.isArray(res.data?.rows) ? res.data.rows : []
       nextTrucksByDate[dateKey] = trucks
       nextSummaryByDate[dateKey] = summaries
+      nextHolidayByDate[dateKey] = Boolean(res.data?.is_holiday)
       maxDeadline = Math.max(maxDeadline, Number(res.data?.assignment_deadline_days || 3))
 
       payloadRows.forEach((raw) => {
@@ -419,6 +590,7 @@ const loadGrid = async () => {
 
     trucksByDate.value = nextTrucksByDate
     summaryByDate.value = nextSummaryByDate
+    holidayByDate.value = nextHolidayByDate
     previewSummaryByDate.value = {}
     assignmentDeadlineDays.value = maxDeadline
     mergedRows.value = rows.sort((a, b) => {
@@ -466,7 +638,7 @@ const save = async () => {
           allocations: entry.allocations
             .map((item) => ({
               truck_id: item.truck_id,
-              qty: parseNumber(item.qty),
+              qty: parseIntegerQty(item.qty),
             }))
             .filter((item) => item.truck_id && item.qty > 0),
         }))
@@ -501,6 +673,7 @@ onMounted(async () => {
 onUnmounted(() => {
   previewTimers.forEach((timerId) => clearTimeout(timerId))
   previewTimers.clear()
+  hideProductBubble()
 })
 </script>
 
@@ -561,6 +734,39 @@ onUnmounted(() => {
   background: #dbe8ff;
   border-color: #8daed6;
 }
+.detail-btn {
+  background: #f7f7f7;
+}
+.truck-detail-wrap {
+  background: #fff;
+  border: 1px solid #c5cfde;
+  border-radius: 4px;
+  padding: 6px;
+}
+.truck-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.truck-detail-table th,
+.truck-detail-table td {
+  border: 1px solid #2d3748;
+  font-size: 12px;
+  padding: 4px 6px;
+}
+.truck-detail-table th {
+  background: #e8edf3;
+  text-align: center;
+}
+.num-cell {
+  text-align: center;
+}
+.detail-empty {
+  text-align: center;
+  color: #6b7280;
+}
+.day-split-left {
+  border-left: 2px solid #111827 !important;
+}
 .table-wrap {
   flex: 1;
   overflow: auto;
@@ -580,7 +786,7 @@ onUnmounted(() => {
   border-right: 1px solid #2d3748;
   border-bottom: 1px solid #2d3748;
   font-size: 12px;
-  padding: 4px 6px;
+  padding: 4px 0;
   background: #f8fafc;
   vertical-align: top;
 }
@@ -614,10 +820,30 @@ onUnmounted(() => {
   font-size: 34px;
   line-height: 1.2;
 }
+.holiday-head {
+  color: #b91c1c !important;
+}
 .truck-head,
 .occ-head,
 .item-head {
   min-width: 96px;
+}
+.col-order {
+  width: 70px;
+  min-width: 70px !important;
+  max-width: 70px;
+}
+.col-demand,
+.col-assigned,
+.col-remain {
+  width: 50px;
+  min-width: 50px !important;
+  max-width: 50px;
+}
+.col-select {
+  width: 110px;
+  min-width: 110px !important;
+  max-width: 110px;
 }
 .truck-head {
   background: #f1f5f9 !important;
@@ -653,7 +879,7 @@ onUnmounted(() => {
   background: #fff;
 }
 .cell-right {
-  text-align: right;
+  text-align: center;
   background: #fff;
 }
 .cell-select {
@@ -663,7 +889,7 @@ onUnmounted(() => {
 .cell-stacked .sub-cell {
   min-height: 28px;
   line-height: 28px;
-  padding: 0 6px;
+  padding: 0;
   border-bottom: 1px dashed #e2e8f0;
   box-sizing: border-box;
 }
@@ -671,7 +897,7 @@ onUnmounted(() => {
   border-bottom: none;
 }
 .select-subcell {
-  padding: 2px 4px !important;
+  padding: 2px 0 !important;
   min-height: 30px !important;
   line-height: normal !important;
 }
@@ -683,6 +909,7 @@ onUnmounted(() => {
 .allocation-row {
   display: flex;
   gap: 4px;
+  flex-wrap: wrap;
 }
 .allocation-row select,
 .allocation-row input {
@@ -693,19 +920,22 @@ onUnmounted(() => {
   font-size: 12px;
 }
 .allocation-row select {
-  width: 86px;
+  width: 35px;
 }
 .allocation-row input {
-  width: 60px;
+  width: 30px;
   text-align: right;
 }
 .mini {
-  width: 22px;
-  height: 22px;
+  width: 15px;
+  height: 15px;
   border: 1px solid #cbd5e1;
   border-radius: 3px;
   background: #fff;
   cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  padding: 0;
 }
 .mini.danger {
   color: #b91c1c;
@@ -722,5 +952,18 @@ onUnmounted(() => {
 .note {
   font-size: 12px;
   color: #6b7280;
+}
+.cursor-product-bubble {
+  position: fixed;
+  z-index: 1200;
+  pointer-events: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fde68a;
+  border: 1px solid #d97706;
+  color: #7c2d12;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
 }
 </style>

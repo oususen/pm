@@ -602,6 +602,7 @@ class KubotaSakaiTruck(models.Model):
     """クボタ堺向け便マスタ"""
     id = models.BigAutoField(primary_key=True)
     name = models.CharField(max_length=50, unique=True, verbose_name='便名')
+    alias_name = models.CharField(max_length=50, null=True, blank=True, verbose_name='俗称')
     width = models.IntegerField(verbose_name='荷台幅(mm)')
     depth = models.IntegerField(verbose_name='荷台奥行(mm)')
     height = models.IntegerField(verbose_name='荷台高さ(mm)')

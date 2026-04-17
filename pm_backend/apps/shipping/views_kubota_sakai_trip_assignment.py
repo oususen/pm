@@ -62,6 +62,15 @@ def _to_int_qty(value):
     return int(qty.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
 
 
+def _format_hhmm(value):
+    if not value:
+        return ''
+    try:
+        return value.strftime('%H:%M')
+    except Exception:
+        return str(value)
+
+
 def _resolve_kubota_calendar():
     rows = Calendar.objects.all()
     code_hits = rows.filter(
@@ -400,6 +409,7 @@ class KubotaSakaiTripPlanView(APIView):
         calendar_map = _build_calendar_day_map(calendar)
         deadline_days = _get_deadline_days()
         today = date.today()
+        is_holiday = not _is_working_day(target_date, calendar_map)
 
         rows = []
         for adj in adjustments:
@@ -458,7 +468,7 @@ class KubotaSakaiTripPlanView(APIView):
             load = calculate_truck_load(load_items, truck)
             truck_summaries.append({
                 'truck_id': truck.id,
-                'truck_name': truck.name,
+                'truck_name': truck.alias_name or truck.name,
                 'occupancy_percent': str(load['occupancy_percent']),
                 'total_weight': str(load['total_weight']),
                 'errors': load['errors'],
@@ -466,10 +476,21 @@ class KubotaSakaiTripPlanView(APIView):
 
         return Response({
             'target_date': target_date.isoformat(),
+            'is_holiday': is_holiday,
             'assignment_deadline_days': deadline_days,
             'rows': rows,
             'trucks': [
-                {'id': t.id, 'name': t.name, 'default_use': t.default_use}
+                {
+                    'id': t.id,
+                    'name': t.name,
+                    'alias_name': t.alias_name,
+                    'default_use': t.default_use,
+                    'width': t.width,
+                    'depth': t.depth,
+                    'departure_time': _format_hhmm(t.departure_time),
+                    'arrival_time': _format_hhmm(t.arrival_time),
+                    'arrival_day_offset': t.arrival_day_offset,
+                }
                 for t in trucks
             ],
             'truck_summaries': truck_summaries,
@@ -603,7 +624,7 @@ class KubotaSakaiTripPlanView(APIView):
                 if load['errors']:
                     save_errors.append({
                         'truck_id': truck_id,
-                        'truck_name': truck.name,
+                        'truck_name': truck.alias_name or truck.name,
                         'errors': load['errors'],
                     })
 
@@ -711,7 +732,7 @@ class KubotaSakaiTripLoadPreviewView(APIView):
             load = calculate_truck_load(per_truck_load_items.get(truck.id, []), truck)
             summaries.append({
                 'truck_id': truck.id,
-                'truck_name': truck.name,
+                'truck_name': truck.alias_name or truck.name,
                 'occupancy_percent': str(load['occupancy_percent']),
                 'total_weight': str(load['total_weight']),
                 'errors': load['errors'],

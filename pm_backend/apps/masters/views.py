@@ -327,7 +327,7 @@ class KubotaSakaiTruckViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     serializer_class = KubotaSakaiTruckSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['is_active', 'default_use']
-    search_fields = ['name']
+    search_fields = ['name', 'alias_name']
     ordering_fields = ['display_order', 'name', 'departure_time']
     ordering = ['display_order', 'name']
 

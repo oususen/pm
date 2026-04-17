@@ -13,6 +13,7 @@
         <thead>
           <tr>
             <th>便名</th>
+            <th>俗称</th>
             <th>荷台幅(mm)</th>
             <th>荷台奥行(mm)</th>
             <th>荷台高さ(mm)</th>
@@ -29,6 +30,7 @@
         <tbody>
           <tr v-for="truck in trucks" :key="truck.id">
             <td>{{ truck.name }}</td>
+            <td>{{ truck.alias_name || '' }}</td>
             <td>{{ truck.width }}</td>
             <td>{{ truck.depth }}</td>
             <td>{{ truck.height }}</td>
@@ -59,6 +61,10 @@
           <div class="form-group">
             <label>便名 *</label>
             <input v-model.trim="formData.name" required :disabled="isEdit" />
+          </div>
+          <div class="form-group">
+            <label>俗称</label>
+            <input v-model.trim="formData.alias_name" :disabled="!canEdit" />
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -140,6 +146,7 @@ const canEdit = computed(() => canAccessMasterResource('masters.kubota_sakai_tru
 const createEmptyForm = () => ({
   id: null,
   name: '',
+  alias_name: '',
   width: 2400,
   depth: 9000,
   height: 2400,
@@ -213,6 +220,7 @@ const saveTruck = async () => {
     arrival_day_offset: Number(formData.value.arrival_day_offset || 0),
     display_order: Number(formData.value.display_order || 0),
     notes: formData.value.notes || null,
+    alias_name: formData.value.alias_name || null,
   }
 
   try {
