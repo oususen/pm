@@ -117,7 +117,7 @@
       <div class="export-actions">
         <button class="btn btn-secondary" :disabled="loading || !sessions.length || needsSearch" @click="exportCsv">CSV出力</button>
         <button class="btn btn-secondary" :disabled="loading || !sessions.length || needsSearch" @click="exportExcel">Excel出力</button>
-        <button class="btn btn-secondary" :disabled="loading || !sessions.length || needsSearch" @click="exportExcel2">基幹システム入力用Excel</button>
+        <button class="btn btn-secondary" :disabled="loading || !sessions.length || needsSearch || dateSearchMode === 'actual'" @click="exportExcel2">基幹システム入力用Excel</button>
         <button class="btn btn-secondary" :disabled="loading || !sessions.length || needsSearch" @click="exportPdf">印刷(PDF)</button>
       </div>
     </div>
