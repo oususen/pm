@@ -2,6 +2,9 @@ export const createLaserActualsAPI = (client) => ({
   getLaserActuals(params = {}) {
     return client.get('/laser-actuals/', { params })
   },
+  getCurrentProcessing(params = {}) {
+    return client.get('/laser-actuals/current-processing/', { params })
+  },
   getLaserActual(id) {
     return client.get(`/laser-actuals/${id}/`)
   },

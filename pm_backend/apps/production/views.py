@@ -5919,6 +5919,72 @@ class LaserActualViewSet(viewsets.ModelViewSet):
     ordering_fields = ['work_date', 'created_at', 'pattern_no', 'shot_count', 'total_process_time']
     ordering = ['-work_date', '-created_at', '-id']
 
+    @action(detail=False, methods=['get'], url_path='current-processing')
+    def current_processing(self, request):
+        """
+        加工中表示専用の軽量エンドポイント。
+        設備ごとの最新アクションを走査し、START/RESUME のみ返す。
+        """
+        try:
+            scan_limit = int(request.query_params.get('scan_limit', 2000))
+        except (TypeError, ValueError):
+            scan_limit = 2000
+        scan_limit = max(200, min(scan_limit, 10000))
+
+        rows = (
+            LaserActual.objects
+            .order_by('-created_at', '-id')
+            .values(
+                'equipment_id',
+                'equipment_code',
+                'equipment_name',
+                'pattern_id',
+                'pattern_no',
+                'operator_action',
+            )[:scan_limit]
+        )
+
+        latest_by_equipment = {}
+        for row in rows:
+            equipment_id = str(row.get('equipment_id') or '').strip()
+            equipment_code = str(row.get('equipment_code') or '').strip()
+            equipment_name = str(row.get('equipment_name') or '').strip()
+            if equipment_id:
+                equipment_key = f'id:{equipment_id}'
+            elif equipment_code:
+                equipment_key = f'code:{equipment_code}'
+            elif equipment_name:
+                equipment_key = f'name:{equipment_name}'
+            else:
+                continue
+
+            if equipment_key in latest_by_equipment:
+                continue
+            latest_by_equipment[equipment_key] = row
+
+        active_rows = []
+        for equipment_key, row in latest_by_equipment.items():
+            action = str(row.get('operator_action') or '').upper()
+            if action not in ('START', 'RESUME'):
+                continue
+            active_rows.append({
+                'equipment_key': equipment_key,
+                'equipment': row.get('equipment_id'),
+                'equipment_code': str(row.get('equipment_code') or '').strip(),
+                'equipment_name': str(row.get('equipment_name') or '').strip(),
+                'pattern': row.get('pattern_id'),
+                'pattern_no': str(row.get('pattern_no') or '').strip(),
+            })
+
+        active_rows.sort(
+            key=lambda row: (
+                str(row.get('equipment_name') or '').strip(),
+                str(row.get('equipment_code') or '').strip(),
+                int(row.get('equipment') or 0),
+            )
+        )
+        return Response({'results': active_rows})
+
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         try:

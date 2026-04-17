@@ -1588,23 +1588,13 @@ const loadLatestActionForPattern = async (patternId) => {
 
 const loadCurrentProcessingState = async () => {
   try {
-    const res = await api.laserActuals.getLaserActuals({
-      ordering: '-created_at',
-      page_size: 500,
+    const res = await api.laserActuals.getCurrentProcessing({
+      scan_limit: 2000,
     })
     const rows = normalizeList(res.data)
 
-    const latestByEquipment = {}
-    for (const row of rows) {
-      const key = buildEquipmentKey(row?.equipment, row?.equipment_code, row?.equipment_name)
-      if (!key || latestByEquipment[key]) continue
-      latestByEquipment[key] = row
-    }
-
     const nextState = {}
-    Object.values(latestByEquipment).forEach((row) => {
-      const action = String(row?.operator_action || '').toUpperCase()
-      if (!(action === 'START' || action === 'RESUME')) return
+    rows.forEach((row) => {
       const key = buildEquipmentKey(row?.equipment, row?.equipment_code, row?.equipment_name)
       if (!key) return
       nextState[key] = {
@@ -1615,7 +1605,37 @@ const loadCurrentProcessingState = async () => {
     })
     currentProcessingByEquipment.value = nextState
   } catch (error) {
-    // 表示復元失敗時はそのまま入力を継続可能にする
+    // 軽量API失敗時は従来の一覧取得ロジックでフォールバック
+    try {
+      const res = await api.laserActuals.getLaserActuals({
+        ordering: '-created_at',
+        page_size: 500,
+      })
+      const rows = normalizeList(res.data)
+
+      const latestByEquipment = {}
+      for (const row of rows) {
+        const key = buildEquipmentKey(row?.equipment, row?.equipment_code, row?.equipment_name)
+        if (!key || latestByEquipment[key]) continue
+        latestByEquipment[key] = row
+      }
+
+      const nextState = {}
+      Object.values(latestByEquipment).forEach((row) => {
+        const action = String(row?.operator_action || '').toUpperCase()
+        if (!(action === 'START' || action === 'RESUME')) return
+        const key = buildEquipmentKey(row?.equipment, row?.equipment_code, row?.equipment_name)
+        if (!key) return
+        nextState[key] = {
+          equipmentLabel: buildEquipmentLabel(row?.equipment_name, row?.equipment),
+          patternNo: String(row?.pattern_no || '').trim(),
+          patternId: String(row?.pattern || '').trim(),
+        }
+      })
+      currentProcessingByEquipment.value = nextState
+    } catch {
+      // 表示復元失敗時はそのまま入力を継続可能にする
+    }
   }
 }
 
@@ -1762,9 +1782,10 @@ watch(
 
 onMounted(async () => {
   clearMessages()
+  const processingStatePromise = loadCurrentProcessingState()
   await Promise.all([loadEquipments(), loadPatterns()])
   await Promise.all([loadActuals(), loadKadoRecords()])
-  await loadCurrentProcessingState()
+  await processingStatePromise
 })
 </script>
 
