@@ -66,8 +66,12 @@ def _collect_items_for_delivery(
     data_dict: Dict[date, Dict[str, int]],
     target_date: date,
     product_names: Dict[str, str],
+    include_all: bool = False,
 ) -> List[Tuple[str, str, str, int, colors.Color]]:
     """納品書明細項目を取得
+
+    Args:
+        include_all: True なら数量0の製品も含める（納品書２用）
 
     Returns:
         [(label, product_code, short_name, qty, label_color), ...]
@@ -76,7 +80,7 @@ def _collect_items_for_delivery(
     day_map = data_dict.get(target_date, {})
     for code, label, label_color in PRODUCT_ORDER:
         qty = day_map.get(code, 0)
-        if qty <= 0:
+        if not include_all and qty <= 0:
             continue
         name = product_names.get(code, '')
         short_name = _extract_short_name(name)
@@ -97,6 +101,7 @@ def _draw_delivery_page(
     dispatch_date: date,
     dispatch_hour: int,
     items: List[Tuple[str, str, str, int, colors.Color]],
+    show_row_lines: bool = False,
 ):
     """1便分の納品書を1ページ描画"""
     margin_left = 12 * mm
@@ -189,7 +194,15 @@ def _draw_delivery_page(
     code_col_w = (page_w - margin_right) - code_col_x - qty_col_w - unit_col_w
 
     c.setFont(font_name, 12)
-    for label, code, short_name, qty, label_color in items:
+    row_right = page_w - margin_right
+    for i, (label, code, short_name, qty, label_color) in enumerate(items):
+        # 行間の罫線（先頭行以外、show_row_lines有効時のみ）
+        if show_row_lines and i > 0:
+            c.setStrokeColor(colors.HexColor('#CCCCCC'))
+            c.setLineWidth(0.4)
+            c.line(margin_left, y, row_right, y)
+            c.setStrokeColor(colors.black)
+
         # ラベル
         c.setFillColor(label_color)
         c.drawString(margin_left, y - 5 * mm, label)
@@ -199,13 +212,12 @@ def _draw_delivery_page(
         code_text = f'{code}{short_name}' if short_name else code
         c.drawString(code_col_x, y - 5 * mm, code_text)
 
-        # 数量（右寄せ）
-        qty_text = str(qty)
-        qtw = c.stringWidth(qty_text, font_name, 12)
-        c.drawString(code_col_x + code_col_w + qty_col_w - qtw, y - 5 * mm, qty_text)
-
-        # 単位
-        c.drawString(code_col_x + code_col_w + qty_col_w + 3 * mm, y - 5 * mm, '台')
+        # 数量（右寄せ）— 0以下は空白
+        if qty > 0:
+            qty_text = str(qty)
+            qtw = c.stringWidth(qty_text, font_name, 12)
+            c.drawString(code_col_x + code_col_w + qty_col_w - qtw, y - 5 * mm, qty_text)
+            c.drawString(code_col_x + code_col_w + qty_col_w + 3 * mm, y - 5 * mm, '台')
 
         y -= row_h
 
@@ -221,6 +233,7 @@ def _resolve_hokushin_context(
     line_id: int,
     am_delivery_date: date = None,
     yoi_delivery_date: date = None,
+    include_all: bool = False,
 ):
     """北進塗装納品書用のコンテキストを構築
 
@@ -267,10 +280,10 @@ def _resolve_hokushin_context(
     )
 
     # AM便 明細: pm_data[am_delivery_date]（15時着 LT=0 → display_date = plan_date）
-    am_items = _collect_items_for_delivery(pm_data, am_delivery_date, product_names)
+    am_items = _collect_items_for_delivery(pm_data, am_delivery_date, product_names, include_all=include_all)
 
     # 宵積み 明細: am_data[yoi_dispatch_date]（8時着 LT=1 → display_date = plan_date - 1営業日）
-    yoi_items = _collect_items_for_delivery(am_data, yoi_dispatch_date, product_names)
+    yoi_items = _collect_items_for_delivery(am_data, yoi_dispatch_date, product_names, include_all=include_all)
 
     return {
         'line': line,
@@ -347,6 +360,71 @@ def generate_hokushin_delivery_pdf(
             dispatch_date=yoi_dispatch_date,
             dispatch_hour=16,
             items=yoi_items,
+        )
+        c.showPage()
+
+    c.save()
+    return buf.getvalue()
+
+
+def preview_hokushin_delivery_all(line_id: int) -> dict:
+    """全製品版: デフォルト日付と便の有無を返す（PDF生成せず）"""
+    ctx = _resolve_hokushin_context(line_id, include_all=True)
+    has_any_qty = any(qty > 0 for _, _, _, qty, _ in ctx['am_items']) or \
+                  any(qty > 0 for _, _, _, qty, _ in ctx['yoi_items'])
+    return {
+        'am_delivery_date': ctx['am_delivery_date'].strftime('%Y-%m-%d'),
+        'yoi_delivery_date': ctx['yoi_delivery_date'].strftime('%Y-%m-%d'),
+        'am_has_items': any(qty > 0 for _, _, _, qty, _ in ctx['am_items']),
+        'yoi_has_items': any(qty > 0 for _, _, _, qty, _ in ctx['yoi_items']),
+    }
+
+
+def generate_hokushin_delivery_all_pdf(
+    line_id: int,
+    am_delivery_date: date = None,
+    yoi_delivery_date: date = None,
+) -> bytes:
+    """㈱北進塗装様向け 納品書PDF（全製品版）— 数量0の製品も表示"""
+    _register_fonts()
+
+    ctx = _resolve_hokushin_context(line_id, am_delivery_date, yoi_delivery_date, include_all=True)
+    am_items = ctx['am_items']
+    yoi_items = ctx['yoi_items']
+    am_delivery_date = ctx['am_delivery_date']
+    yoi_delivery_date = ctx['yoi_delivery_date']
+    am_dispatch_date = ctx['am_dispatch_date']
+    yoi_dispatch_date = ctx['yoi_dispatch_date']
+
+    buf = io.BytesIO()
+    page_size = A4
+    c = canvas.Canvas(buf, pagesize=page_size)
+    page_w, page_h = page_size
+    font_name = 'MSGothic'
+
+    if am_items:
+        _draw_delivery_page(
+            c, page_w, page_h, font_name,
+            convoy_label='AM便',
+            delivery_date=am_delivery_date,
+            delivery_hour=15,
+            dispatch_date=am_dispatch_date,
+            dispatch_hour=12,
+            items=am_items,
+            show_row_lines=True,
+        )
+        c.showPage()
+
+    if yoi_items:
+        _draw_delivery_page(
+            c, page_w, page_h, font_name,
+            convoy_label='宵積み',
+            delivery_date=yoi_delivery_date,
+            delivery_hour=8,
+            dispatch_date=yoi_dispatch_date,
+            dispatch_hour=16,
+            items=yoi_items,
+            show_row_lines=True,
         )
         c.showPage()
 

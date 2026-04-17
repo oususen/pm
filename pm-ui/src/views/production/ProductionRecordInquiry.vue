@@ -32,7 +32,7 @@
         <button class="date-mode-btn" :class="{ active: dateSearchMode === 'actual' }" @click="dateSearchMode = 'actual'">実施日</button>
         <span class="date-mode-hint">
           <template v-if="dateSearchMode === 'plan'">計画日：通常はこれを使用し、その日の計画として登録された実績を検索。</template>
-          <template v-else>実施日：早出の場合、実際にその日に作業した実績を検索（例：3/21日の計画を3/20の7時に実施した場合、3/21で検索）。</template>
+          <template v-else>実施日：実際加工した時刻、早出の場合、実際にその日に作業した実績を検索（例：3/20日の計画を3/20の7時に実施した場合、8時日替わりのため3/19で検索）。</template>
         </span>
       </div>
       <!--

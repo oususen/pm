@@ -7348,3 +7348,67 @@ class HokushinDeliveryPDFView(APIView):
         filename = f'北進塗装納品書_{today.strftime("%Y%m%d")}.pdf'
         response['Content-Disposition'] = f'inline; filename="{filename}"'
         return response
+
+
+class HokushinDeliveryAllPDFView(APIView):
+    """㈱北進塗装様向け 納品書PDF（全製品版）
+
+    Query params:
+        line: ライン ID（必須）
+        preview: '1' ならPDFを生成せずデフォルト日付と便の有無をJSON返却
+        am_delivery_date: AM便 納品日（YYYY-MM-DD、省略時=本日）
+        yoi_delivery_date: 宵積み 納品日（YYYY-MM-DD、省略時=翌営業日）
+    """
+
+    def get(self, request):
+        line_id = request.query_params.get('line')
+        if not line_id:
+            return Response(
+                {'detail': 'line は必須です'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from datetime import datetime as dt
+        from production.services.hokushin_delivery_pdf import (
+            generate_hokushin_delivery_all_pdf,
+            preview_hokushin_delivery_all,
+        )
+
+        def _parse_date(key):
+            raw = request.query_params.get(key)
+            if not raw:
+                return None
+            try:
+                return dt.strptime(raw, '%Y-%m-%d').date()
+            except ValueError:
+                raise ValueError(f'{key} の日付形式が不正です (YYYY-MM-DD)')
+
+        try:
+            am_date = _parse_date('am_delivery_date')
+            yoi_date = _parse_date('yoi_delivery_date')
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if request.query_params.get('preview') == '1':
+            try:
+                data = preview_hokushin_delivery_all(int(line_id))
+            except Exception as e:
+                logger.exception('北進塗装納品書（全製品）プレビューエラー')
+                return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(data)
+
+        try:
+            pdf_bytes = generate_hokushin_delivery_all_pdf(
+                int(line_id), am_delivery_date=am_date, yoi_delivery_date=yoi_date
+            )
+        except Exception as e:
+            logger.exception('北進塗装納品書（全製品）PDF生成エラー')
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        from django.http import HttpResponse as DjangoHttpResponse
+        from orders.utils.calendar_utils import get_business_today
+        today = get_business_today()
+        response = DjangoHttpResponse(pdf_bytes, content_type='application/pdf')
+        filename = f'北進塗装納品書（全製品）_{today.strftime("%Y%m%d")}.pdf'
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response

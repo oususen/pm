@@ -190,6 +190,13 @@
           @click="downloadHokushinDeliveryPDF"
           :disabled="processing || !selectedLine"
         >納品書</button>
+        <button
+          v-if="canShowDeliveryDetailPDFButton"
+          class="btn"
+          style="background: #C00000; color: #fff;"
+          @click="downloadHokushinDeliveryAllPDF"
+          :disabled="processing || !selectedLine"
+        >納品書２</button>
       </div>
     </div>
 
@@ -729,6 +736,51 @@
           <div class="hokushin-dialog-actions">
             <button class="btn primary" @click="confirmHokushinDialog">OK</button>
             <button class="btn" @click="closeHokushinDialog">キャンセル</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 北進塗装 納品書２（全製品）確認モーダル -->
+    <div v-if="hokushinAllDialogOpen" class="hokushin-dialog-overlay" @click.self="closeHokushinAllDialog">
+      <div class="hokushin-dialog">
+        <h3 class="hokushin-dialog-title">㈱北進塗装 納品書２（全製品）発行確認</h3>
+        <div v-if="!hokushinAllDialogEdit" class="hokushin-dialog-body">
+          <p class="hokushin-dialog-text">
+            <span class="hokushin-date">{{ formatJPDate(hokushinAllAmDate) }}15時着</span><br/>
+            <span class="hokushin-date">{{ formatJPDate(hokushinAllYoiDate) }}8時着</span><br/>
+            納品書２（全製品）を発行しますか？
+          </p>
+          <div v-if="!hokushinAllAmHasItems || !hokushinAllYoiHasItems" class="hokushin-dialog-warn">
+            <template v-if="!hokushinAllAmHasItems && !hokushinAllYoiHasItems">
+              ※両便とも数量のある明細がありません（全製品が空白で出力されます）
+            </template>
+            <template v-else-if="!hokushinAllAmHasItems">
+              ※AM便は数量のある明細がありません
+            </template>
+            <template v-else>
+              ※宵積みは数量のある明細がありません
+            </template>
+          </div>
+          <div class="hokushin-dialog-actions">
+            <button class="btn primary" @click="confirmHokushinAllDialog">はい</button>
+            <button class="btn" @click="hokushinAllDialogEdit = true">いいえ</button>
+            <button class="btn" @click="closeHokushinAllDialog">キャンセル</button>
+          </div>
+        </div>
+        <div v-else class="hokushin-dialog-body">
+          <p class="hokushin-dialog-text">日付を変更してください</p>
+          <div class="hokushin-edit-row">
+            <label>AM便 (15時着):</label>
+            <input type="date" v-model="hokushinAllAmDate" />
+          </div>
+          <div class="hokushin-edit-row">
+            <label>宵積み (8時着):</label>
+            <input type="date" v-model="hokushinAllYoiDate" />
+          </div>
+          <div class="hokushin-dialog-actions">
+            <button class="btn primary" @click="confirmHokushinAllDialog">OK</button>
+            <button class="btn" @click="closeHokushinAllDialog">キャンセル</button>
           </div>
         </div>
       </div>
@@ -2881,6 +2933,77 @@ const confirmHokushinDialog = async () => {
       }
     }
     console.error('北進塗装納品書PDF生成エラー', e)
+    alert('PDF生成に失敗しました: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
+// 北進塗装 納品書２（全製品）モーダル状態
+const hokushinAllDialogOpen = ref(false)
+const hokushinAllDialogEdit = ref(false)
+const hokushinAllAmDate = ref('')
+const hokushinAllYoiDate = ref('')
+const hokushinAllAmHasItems = ref(true)
+const hokushinAllYoiHasItems = ref(true)
+
+const closeHokushinAllDialog = () => {
+  hokushinAllDialogOpen.value = false
+  hokushinAllDialogEdit.value = false
+}
+
+const downloadHokushinDeliveryAllPDF = async () => {
+  const sourceLineId = floorShippingPdfSourceLineId.value
+  if (!sourceLineId) {
+    alert('フロア配送ラインが見つかりません。')
+    return
+  }
+  try {
+    const res = await api.client.get('/hokushin-delivery-all-pdf/', {
+      params: { line: sourceLineId, preview: '1' },
+    })
+    const data = res.data || {}
+    hokushinAllAmDate.value = data.am_delivery_date || ''
+    hokushinAllYoiDate.value = data.yoi_delivery_date || ''
+    hokushinAllAmHasItems.value = !!data.am_has_items
+    hokushinAllYoiHasItems.value = !!data.yoi_has_items
+    hokushinAllDialogEdit.value = false
+    hokushinAllDialogOpen.value = true
+  } catch (e) {
+    console.error('北進塗装納品書２プレビュー取得エラー', e)
+    alert('プレビュー取得に失敗しました: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
+const confirmHokushinAllDialog = async () => {
+  const sourceLineId = floorShippingPdfSourceLineId.value
+  if (!sourceLineId) {
+    alert('フロア配送ラインが見つかりません。')
+    return
+  }
+  try {
+    const res = await api.client.get('/hokushin-delivery-all-pdf/', {
+      params: {
+        line: sourceLineId,
+        am_delivery_date: hokushinAllAmDate.value,
+        yoi_delivery_date: hokushinAllYoiDate.value,
+      },
+      responseType: 'blob',
+    })
+    const blob = new Blob([res.data], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank')
+    closeHokushinAllDialog()
+  } catch (e) {
+    if (e.response?.status === 500 && e.response?.data instanceof Blob) {
+      try {
+        const text = await e.response.data.text()
+        const json = JSON.parse(text)
+        alert('PDF生成に失敗しました: ' + (json.detail || ''))
+        return
+      } catch (_) {
+        // fallthrough
+      }
+    }
+    console.error('北進塗装納品書２PDF生成エラー', e)
     alert('PDF生成に失敗しました: ' + (e.response?.data?.detail || e.message))
   }
 }
