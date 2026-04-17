@@ -119,6 +119,13 @@ const tiles = computed(() => [
     required: "view",
     resource: "shipping.kubota_sakai_trip_planning",
   },
+  {
+    to: "/shipping/kubota-sakai-trip-planning-2",
+    label: "クボタ堺便計画２",
+    icon: "🚛",
+    required: "view",
+    resource: "shipping.kubota_sakai_trip_planning",
+  },
 ].map((tile) => ({
   ...tile,
   disabled: !hasMenuPermission(tile.resource, tile.required),

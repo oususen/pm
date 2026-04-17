@@ -37,7 +37,7 @@
             <col style="width: 40px" />
           </template>
         </colgroup>
-        <thead>
+        <thead ref="theadRef">
           <tr class="head1">
             <th rowspan="2" class="sticky-left date-separator">日付</th>
             <th
@@ -62,7 +62,11 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in displayRows" :key="row.rowKey" :class="{ 'carry-tr': row.isCarry }">
+          <tr
+            v-for="row in displayRows"
+            :key="row.rowKey"
+            :class="{ 'carry-tr': row.isCarry, 'day-row': !row.isCarry }"
+          >
             <td class="sticky-left date-col date-separator" :class="row.dayClass">{{ row.label }}</td>
             <template v-if="row.isCarry">
               <template v-for="(col, colIdx) in matrixColumns" :key="`${row.rowKey}-${col.colKey}`">
@@ -143,10 +147,28 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import api from '@/api/client'
 
 const inputRefs = reactive({})
+const theadRef = ref(null)
+
+const setStickyTopValues = () => {
+  if (!theadRef.value) return
+  const rows = theadRef.value.querySelectorAll('tr')
+  let cumTop = 0
+  rows.forEach((tr) => {
+    const cells = tr.querySelectorAll('th')
+    cells.forEach((th) => {
+      if (!th.hasAttribute('rowspan')) {
+        th.style.top = `${cumTop}px`
+      }
+    })
+    cumTop += tr.offsetHeight
+  })
+  const rowspanCells = theadRef.value.querySelectorAll('th[rowspan]')
+  rowspanCells.forEach((th) => { th.style.top = '0px' })
+}
 
 const formatLocalDate = (date) => {
   const yyyy = String(date.getFullYear())
@@ -448,6 +470,7 @@ const loadGrid = async () => {
     ])
     const items = res.data?.rows || []
     groups.value = items.map(buildGroupFromGridItem)
+    nextTick(setStickyTopValues)
   } catch (error) {
     const message = error?.response?.data?.detail || 'データ取得に失敗しました。'
     alert(message)
@@ -546,7 +569,11 @@ const saveDeliveries = async () => {
   }
 }
 
-onMounted(loadGrid)
+onMounted(async () => {
+  await loadGrid()
+  await nextTick()
+  setStickyTopValues()
+})
 </script>
 
 <style scoped>
@@ -616,18 +643,31 @@ onMounted(loadGrid)
 .grid {
   width: max-content;
   min-width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   table-layout: fixed;
 }
 .grid th,
 .grid td {
-  border: 1px solid #d7dfe8;
+  border-right: 1px solid #d7dfe8;
+  border-bottom: 1px solid #d7dfe8;
   padding: 3px 6px;
   white-space: nowrap;
   font-size: 12px;
   height: 28px;
   box-sizing: border-box;
   vertical-align: top;
+}
+.grid thead tr:first-child th {
+  border-top: 1px solid #d7dfe8;
+}
+.grid th:first-child,
+.grid td:first-child {
+  border-left: 1px solid #d7dfe8;
+}
+.grid th {
+  position: sticky;
+  z-index: 2;
 }
 .grid tbody td {
   padding: 0;
@@ -728,6 +768,7 @@ onMounted(loadGrid)
   z-index: 5;
   background: #dbe6f7;
   border-top: 2px solid #9ab1d6;
+  border-bottom: 1px solid #d7dfe8;
 }
 .total-row .total-label {
   text-align: center;
@@ -760,5 +801,8 @@ onMounted(loadGrid)
   text-align: right;
   padding: 3px 6px !important;
   color: #1e40af;
+}
+.day-row td {
+  border-bottom: 2px solid #94a3b8;
 }
 </style>

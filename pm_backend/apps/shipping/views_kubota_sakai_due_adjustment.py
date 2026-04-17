@@ -33,6 +33,24 @@ def _parse_decimal(value):
         return None
 
 
+def _line_priority_for_allocation(row):
+    """同日内での注番割当優先順位。
+    FIRM を優先し、注番文字列昇順。FORECAST(注番NULL)は後ろ。
+    """
+    order_rank = 0 if row.order_type == 'FIRM' else 1
+    source = row.source_order_no or ''
+    null_rank = 1 if row.source_order_no is None else 0
+    return (row.due_date, order_rank, null_rank, source, row.id)
+
+
+def _bucket_priority(row):
+    """需要バケットの優先順（納期調整での注番紐づけ順）。"""
+    order_rank = 0 if row.order_type == 'FIRM' else 1
+    null_rank = 1 if row.source_order_no is None else 0
+    source = row.source_order_no or ''
+    return (row.due_date, order_rank, null_rank, source, row.id)
+
+
 def _source_order_no(order_line):
     """FIRM は OrderLine.customer_order_no、FORECAST は NULL。"""
     order_type = getattr(order_line.order, 'order_type', None) if order_line.order_id else None
@@ -294,7 +312,7 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
     # ========== bulk_save ==========
     @action(detail=False, methods=['post'])
     def bulk_save(self, request):
-        """delivery_qty を保存し、残量を再計算する。"""
+        """delivery_qty を保存し、注番紐づけをFIFOで確定して残量を再計算する。"""
         rows = request.data.get('rows')
         if not isinstance(rows, list):
             return Response({'detail': 'rows は配列で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
@@ -303,6 +321,10 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
         now = datetime.now()
         updated_count = 0
         affected_groups = set()
+        # 入力値（セル値）: (product_code, ship_to_code, source_order_no, due_date) -> delivery
+        input_delivery_map = {}
+        # 行分解を再実行しないために保持
+        parsed_line_rows = []
 
         with transaction.atomic():
             for row in rows:
@@ -318,6 +340,8 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                 product_code, ship_to_code, source_order_no = parts
                 ship_to_code = ship_to_code or None
                 source_order_no = source_order_no or None
+                parsed_line_rows.append((product_code, ship_to_code, source_order_no, delivery_by_date))
+                affected_groups.add((product_code, ship_to_code or ''))
 
                 for date_str, qty_val in delivery_by_date.items():
                     due_date_val = _parse_date(date_str)
@@ -326,38 +350,167 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     delivery = _parse_decimal(qty_val)
                     if delivery is None:
                         delivery = Decimal('0')
+                    if delivery < 0:
+                        delivery = Decimal('0')
+                    input_delivery_map[(product_code, ship_to_code, source_order_no, due_date_val)] = delivery
 
-                    adj = KubotaSakaiDueAdjustment.objects.filter(
+            # 入力で指定されたキーで行が無いものは先に作成（demand=0）
+            for product_code, ship_to_code, source_order_no, delivery_by_date in parsed_line_rows:
+                for date_str, qty_val in delivery_by_date.items():
+                    due_date_val = _parse_date(date_str)
+                    if not due_date_val:
+                        continue
+                    key = (product_code, ship_to_code, source_order_no, due_date_val)
+                    if key not in input_delivery_map:
+                        continue
+                    exists = KubotaSakaiDueAdjustment.objects.filter(
                         product_code=product_code,
                         ship_to_code=ship_to_code,
                         source_order_no=source_order_no,
                         due_date=due_date_val,
-                    ).first()
+                    ).exists()
+                    if exists:
+                        continue
+                    KubotaSakaiDueAdjustment.objects.create(
+                        product_code=product_code,
+                        ship_to_code=ship_to_code,
+                        source_order_no=source_order_no,
+                        order_type='FIRM' if source_order_no else 'FORECAST',
+                        due_date=due_date_val,
+                        demand_qty=Decimal('0'),
+                        delivery_qty=Decimal('0'),
+                        remaining_qty=Decimal('0'),
+                        updated_by=user,
+                        updated_at=now,
+                    )
 
-                    if adj:
-                        if adj.delivery_qty != delivery:
-                            adj.delivery_qty = delivery
+            # グループごとにFIFO再配分して delivery_qty を確定
+            # 重要: 日付別の計画数量（Σdelivery@date）は維持し、注番のみ再紐づけする。
+            for product_code, ship_to_code_norm in affected_groups:
+                ship_to_code = ship_to_code_norm or None
+                group_rows = list(
+                    KubotaSakaiDueAdjustment.objects.filter(
+                        product_code=product_code,
+                        ship_to_code=ship_to_code,
+                    )
+                )
+                if not group_rows:
+                    continue
+                existing_by_key = {
+                    (r.source_order_no, r.due_date): r
+                    for r in group_rows
+                }
+
+                # 日付別総納入量（入力で上書き、未入力は既存値）
+                date_totals = defaultdict(lambda: Decimal('0'))
+                touched_dates = set()
+                for adj in group_rows:
+                    key = (adj.product_code, adj.ship_to_code, adj.source_order_no, adj.due_date)
+                    qty = input_delivery_map.get(key, adj.delivery_qty or Decimal('0'))
+                    if qty < 0:
+                        qty = Decimal('0')
+                    date_totals[adj.due_date] += qty
+                for key, qty in input_delivery_map.items():
+                    p, s, so, d = key
+                    if p != product_code or (s or None) != ship_to_code:
+                        continue
+                    touched_dates.add(d)
+                    if (so, d) not in existing_by_key:
+                        add_qty = qty if qty and qty > 0 else Decimal('0')
+                        date_totals[d] += add_qty
+
+                # 需要バケット（注番紐づけ先）
+                demand_buckets = [r for r in group_rows if (r.demand_qty or Decimal('0')) > 0]
+                demand_buckets.sort(key=_bucket_priority)
+
+                # demandが全く無いグループは日付総量を既存の行優先でそのまま保持
+                if not demand_buckets:
+                    fallback_rows = sorted(group_rows, key=_line_priority_for_allocation)
+                    for adj in fallback_rows:
+                        d = adj.due_date
+                        new_delivery = date_totals.get(d, Decimal('0'))
+                        if adj.delivery_qty != new_delivery:
+                            adj.delivery_qty = new_delivery
                             adj.updated_by = user
                             adj.updated_at = now
                             adj.save(update_fields=['delivery_qty', 'updated_by', 'updated_at'])
                             updated_count += 1
-                    else:
-                        # テーブルに行がない場合（demand=0 だが delivery を入れたい場合）
-                        KubotaSakaiDueAdjustment.objects.create(
-                            product_code=product_code,
-                            ship_to_code=ship_to_code,
-                            source_order_no=source_order_no,
-                            order_type='FIRM' if source_order_no else 'FORECAST',
-                            due_date=due_date_val,
-                            demand_qty=Decimal('0'),
-                            delivery_qty=delivery,
-                            remaining_qty=Decimal('0'),
-                            updated_by=user,
-                            updated_at=now,
-                        )
-                        updated_count += 1
+                    continue
 
-                    affected_groups.add((product_code, ship_to_code or ''))
+                # FIFOで日別数量を注番へ割付
+                remaining_demands = [b.demand_qty or Decimal('0') for b in demand_buckets]
+                alloc_map = defaultdict(lambda: Decimal('0'))  # (source_order_no, ship_date) -> qty
+                ship_dates = sorted(date_totals.keys())
+
+                bucket_idx = 0
+                for ship_date in ship_dates:
+                    qty_left = date_totals[ship_date]
+                    if qty_left <= 0:
+                        continue
+
+                    while qty_left > 0 and bucket_idx < len(demand_buckets):
+                        rem = remaining_demands[bucket_idx]
+                        if rem <= 0:
+                            bucket_idx += 1
+                            continue
+                        take = rem if rem <= qty_left else qty_left
+                        bucket = demand_buckets[bucket_idx]
+                        alloc_key = (bucket.source_order_no, ship_date)
+                        alloc_map[alloc_key] += take
+                        remaining_demands[bucket_idx] -= take
+                        qty_left -= take
+                        if remaining_demands[bucket_idx] <= 0:
+                            bucket_idx += 1
+
+                    # 需要超過分は最終バケットへ保持
+                    if qty_left > 0:
+                        last_bucket = demand_buckets[-1]
+                        alloc_key = (last_bucket.source_order_no, ship_date)
+                        alloc_map[alloc_key] += qty_left
+
+                # 書き戻し（既存行更新/不足行作成/不要行ゼロ化）
+                bucket_meta = {}
+                for b in demand_buckets:
+                    if b.source_order_no not in bucket_meta:
+                        bucket_meta[b.source_order_no] = {
+                            'order_type': b.order_type,
+                            'order_line_id': b.order_line_id,
+                        }
+
+                new_keys = set(alloc_map.keys())
+                all_candidate_keys = set(existing_by_key.keys()) | new_keys
+
+                for source_order_no, ship_date in all_candidate_keys:
+                    new_delivery = alloc_map.get((source_order_no, ship_date), Decimal('0'))
+                    adj = existing_by_key.get((source_order_no, ship_date))
+
+                    if adj:
+                        if adj.delivery_qty != new_delivery:
+                            adj.delivery_qty = new_delivery
+                            adj.updated_by = user
+                            adj.updated_at = now
+                            adj.save(update_fields=['delivery_qty', 'updated_by', 'updated_at'])
+                            updated_count += 1
+                        continue
+
+                    if new_delivery <= 0:
+                        continue
+
+                    meta = bucket_meta.get(source_order_no, {})
+                    KubotaSakaiDueAdjustment.objects.create(
+                        product_code=product_code,
+                        ship_to_code=ship_to_code,
+                        source_order_no=source_order_no,
+                        order_type=meta.get('order_type') or ('FIRM' if source_order_no else 'FORECAST'),
+                        due_date=ship_date,
+                        demand_qty=Decimal('0'),
+                        delivery_qty=new_delivery,
+                        remaining_qty=Decimal('0'),
+                        order_line_id=meta.get('order_line_id'),
+                        updated_by=user,
+                        updated_at=now,
+                    )
+                    updated_count += 1
 
             # 残量再計算
             _recalculate_remaining_for_groups(affected_groups)

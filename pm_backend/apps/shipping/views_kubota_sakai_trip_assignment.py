@@ -621,3 +621,103 @@ class KubotaSakaiTripPlanView(APIView):
             'saved_rows': len(normalized),
             'saved_allocations': len(create_items),
         })
+
+
+class KubotaSakaiTripLoadPreviewView(APIView):
+    """未保存の便割付入力を使って便占有率を試算する。"""
+
+    def post(self, request):
+        target_date = _parse_date(request.data.get('target_date'))
+        rows = request.data.get('rows')
+        if not target_date:
+            return Response({'detail': 'target_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(rows, list):
+            return Response({'detail': 'rows は配列で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        due_adjustments = list(
+            KubotaSakaiDueAdjustment.objects.filter(
+                due_date=target_date,
+                delivery_qty__gt=0,
+            ).order_by('id')
+        )
+        due_adjustment_map = {item.id: item for item in due_adjustments}
+
+        posted_alloc_map = {}
+        truck_ids = set()
+        errors = []
+        for row in rows:
+            try:
+                due_adjustment_id = int(row.get('due_adjustment_id') or 0)
+            except (TypeError, ValueError):
+                due_adjustment_id = 0
+            if due_adjustment_id <= 0:
+                continue
+            if due_adjustment_id not in due_adjustment_map:
+                errors.append({'due_adjustment_id': due_adjustment_id, 'detail': '対象外の納期調整データです。'})
+                continue
+
+            allocations = row.get('allocations') or []
+            if not isinstance(allocations, list):
+                errors.append({'due_adjustment_id': due_adjustment_id, 'detail': 'allocations は配列で指定してください。'})
+                continue
+
+            normalized_allocations = []
+            for item in allocations:
+                try:
+                    truck_id = int(item.get('truck_id') or 0)
+                except (TypeError, ValueError):
+                    truck_id = 0
+                qty = _to_decimal(item.get('qty'))
+                if truck_id <= 0 or qty <= 0:
+                    continue
+                normalized_allocations.append({'truck_id': truck_id, 'qty': qty})
+                truck_ids.add(truck_id)
+            posted_alloc_map[due_adjustment_id] = normalized_allocations
+
+        if errors:
+            return Response({'detail': '入力エラーがあります。', 'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing_map = defaultdict(list)
+        for item in KubotaSakaiTripAssignment.objects.filter(
+            due_adjustment_id__in=[d.id for d in due_adjustments],
+            departure_date=target_date,
+        ).order_by('id'):
+            existing_map[item.due_adjustment_id].append({'truck_id': item.truck_id, 'qty': _to_decimal(item.qty)})
+            truck_ids.add(item.truck_id)
+
+        trucks = list(KubotaSakaiTruck.objects.filter(is_active=True).order_by('display_order', 'name'))
+        if truck_ids:
+            truck_ids.update([truck.id for truck in trucks])
+        truck_map = {truck.id: truck for truck in trucks}
+
+        product_codes = set(item.product_code for item in due_adjustments)
+        products = {
+            product.product_code: product
+            for product in Product.objects.select_related('used_container').filter(product_code__in=product_codes)
+        }
+
+        per_truck_load_items = defaultdict(list)
+        for due_adjustment in due_adjustments:
+            product = products.get(due_adjustment.product_code)
+            allocations = posted_alloc_map.get(due_adjustment.id, existing_map.get(due_adjustment.id, []))
+            for allocation in allocations:
+                truck = truck_map.get(allocation['truck_id'])
+                if not truck or not product:
+                    continue
+                per_truck_load_items[truck.id].append(_build_load_item(product, allocation['qty']))
+
+        summaries = []
+        for truck in trucks:
+            load = calculate_truck_load(per_truck_load_items.get(truck.id, []), truck)
+            summaries.append({
+                'truck_id': truck.id,
+                'truck_name': truck.name,
+                'occupancy_percent': str(load['occupancy_percent']),
+                'total_weight': str(load['total_weight']),
+                'errors': load['errors'],
+            })
+
+        return Response({
+            'target_date': target_date.isoformat(),
+            'truck_summaries': summaries,
+        })

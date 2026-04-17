@@ -3,7 +3,10 @@ from rest_framework.routers import DefaultRouter
 
 from shipping.views import ShipmentActualViewSet
 from shipping.views_kubota_sakai_due_adjustment import KubotaSakaiDueAdjustmentViewSet
-from shipping.views_kubota_sakai_trip_assignment import KubotaSakaiTripPlanView
+from shipping.views_kubota_sakai_trip_assignment import (
+    KubotaSakaiTripLoadPreviewView,
+    KubotaSakaiTripPlanView,
+)
 from shipping.views_shipping_order import (
     generate_shipping_order_pdf_api,
     get_available_dates,
@@ -31,6 +34,7 @@ urlpatterns = [
     # クボタ堺便計画（APIView: GET=grid, POST=save）
     path('kubota-sakai-trip-assignments/grid/', KubotaSakaiTripPlanView.as_view(), name='kubota-sakai-trip-grid'),
     path('kubota-sakai-trip-assignments/bulk_save/', KubotaSakaiTripPlanView.as_view(), name='kubota-sakai-trip-save'),
+    path('kubota-sakai-trip-assignments/preview-load/', KubotaSakaiTripLoadPreviewView.as_view(), name='kubota-sakai-trip-preview-load'),
     # Shipping order APIs
     path('shipping/available-dates/', get_available_dates, name='shipping-available-dates'),
     path('shipping/order-data/<str:target_date_str>/', get_shipping_order_data, name='shipping-order-data'),

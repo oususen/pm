@@ -8,6 +8,9 @@ export const createKubotaSakaiTripAssignmentsAPI = (client) => ({
   bulkSave(targetDate, rows = []) {
     return client.post('/kubota-sakai-trip-assignments/bulk_save/', { target_date: targetDate, rows })
   },
+  previewLoad(targetDate, rows = []) {
+    return client.post('/kubota-sakai-trip-assignments/preview-load/', { target_date: targetDate, rows })
+  },
   get(id) {
     return client.get(`/kubota-sakai-trip-assignments/${id}/`)
   },
