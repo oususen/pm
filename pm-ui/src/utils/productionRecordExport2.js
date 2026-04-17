@@ -67,10 +67,10 @@ export const buildProductionSummaryRows = (
       )
       return (
         sessionType === 'WORK' &&
-        ['END', 'PAUSE'].includes(endAction) &&
-        mapped?.mapped === true &&
+        inDateRange &&
         (productionQty || 0) > 0 &&
-        inDateRange
+        ['END', 'PAUSE'].includes(endAction) &&
+        mapped?.mapped === true
       )
     })
     .map(({ row, appProductCode, processCode, mapped, productionQty }) => {
