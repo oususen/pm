@@ -1256,10 +1256,14 @@ const exportExcel2 = async () => {
     }
 
     if (targetKeys.size > 0) {
-      // 確認済みフラグを取得
+      // 確認済みフラグを取得（実施日検索で日跨ぎセッションがある場合、
+      // plan_date が検索期間外になるため、targetKeys の全日付を網羅する）
+      const allDates = [...targetKeys].map((k) => k.split('|')[0]).filter(Boolean)
+      const confDateFrom = [startDate.value, ...allDates].sort()[0]
+      const confDateTo = [endDate.value, ...allDates].sort().pop()
       const confRes = await api.recordConfirmations.get({
-        date_from: startDate.value,
-        date_to: endDate.value,
+        date_from: confDateFrom,
+        date_to: confDateTo,
       })
       const confirmedKeys = new Set()
       for (const item of (confRes.data?.items || [])) {
