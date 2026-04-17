@@ -114,6 +114,12 @@ const settings = [
     meta: { pageTitle: "クボタ堺便計画設定", resource: "settings.kubota_sakai_config" },
   },
   {
+    path: "/settings/lock-date",
+    name: "LockDateSettings",
+    component: () => import("@/views/settings/LockDateSettings.vue"),
+    meta: { pageTitle: "締め日管理", resource: "settings.lock_date" },
+  },
+  {
     path: "/settings/system",
     name: "SystemSettings",
     component: () => import("@/views/settings/SystemSettings.vue"),

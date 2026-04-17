@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from django.conf import settings
 from django.db import models
 
@@ -24,3 +26,22 @@ class SystemSetting(models.Model):
 
     def __str__(self):
         return f"{self.key} = {self.value}"
+
+    @classmethod
+    def get_lock_date(cls, category):
+        """締め日を取得する汎用メソッド。
+        category: 'kubota_sakai_due', 'inventory', 'progress' など
+        値の形式: '2026-04-16'(固定日付) or 'days:3'(今日のN日前)
+        """
+        from orders.utils.calendar_utils import get_business_today
+        try:
+            setting = cls.objects.get(key=f'lock_date.{category}')
+            if not setting.value:
+                return None
+            val = setting.value.strip()
+            if val.startswith('days:'):
+                n = int(val[5:])
+                return get_business_today() - timedelta(days=n) if n > 0 else None
+            return datetime.strptime(val, '%Y-%m-%d').date()
+        except (cls.DoesNotExist, ValueError):
+            return None

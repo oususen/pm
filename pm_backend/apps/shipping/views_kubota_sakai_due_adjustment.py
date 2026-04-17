@@ -9,10 +9,15 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from orders.core.models import KubotaSakaiDueAdjustment, OrderLine
+from system_settings.models import SystemSetting
 from .serializers import KubotaSakaiDueAdjustmentSerializer
 
 
 KUBOTA_CUSTOMER_CODE = '000196'
+
+
+def _get_lock_date():
+    return SystemSetting.get_lock_date('kubota_sakai_due')
 
 
 def _parse_date(value):
@@ -77,6 +82,19 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
         if not start_date:
             start_date = date.today()
         end_date = start_date + timedelta(days=horizon_days - 1)
+
+        # 締め日以前は取込対象外
+        lock_date = _get_lock_date()
+        if lock_date:
+            if start_date <= lock_date:
+                start_date = lock_date + timedelta(days=1)
+            if start_date > end_date:
+                return Response({
+                    'created': 0, 'updated': 0, 'deleted_forecast': 0,
+                    'total_demand_rows': 0,
+                    'lock_date': lock_date.isoformat(),
+                    'detail': f'{lock_date} まで締め済みのため取込対象がありません。',
+                })
 
         # 対象 OrderLine: クボタ堺 + OPEN + 納期が期間内
         line_qs = OrderLine.objects.select_related('order', 'order__customer', 'product').filter(
@@ -302,10 +320,12 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
 
         rows.sort(key=lambda r: (r['product_code'] or '', r['ship_to_code'] or ''))
 
+        lock_date = _get_lock_date()
         return Response({
             'start_date': start_date.isoformat(),
             'end_date': end_date.isoformat(),
             'horizon_days': horizon_days,
+            'lock_date': lock_date.isoformat() if lock_date else None,
             'rows': rows,
         })
 
@@ -319,6 +339,7 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
 
         user = request.user if request.user and request.user.is_authenticated else None
         now = datetime.now()
+        lock_date = _get_lock_date()
         updated_count = 0
         affected_groups = set()
         # 入力値（セル値）: (product_code, ship_to_code, source_order_no, due_date) -> delivery
@@ -346,6 +367,8 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                 for date_str, qty_val in delivery_by_date.items():
                     due_date_val = _parse_date(date_str)
                     if not due_date_val:
+                        continue
+                    if lock_date and due_date_val <= lock_date:
                         continue
                     delivery = _parse_decimal(qty_val)
                     if delivery is None:
@@ -524,7 +547,10 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
 def _recalculate_remaining_for_groups(groups):
     """(product_code, ship_to_code) のグループごとに、全注番合算で残量を時系列再計算。
     残量 = 累積(納入) - 累積(受注)  ※LT考慮なし、注番をまたいで合算
+    締め日以前の行はremaining_qtyを変更しない。
     """
+    lock_date = _get_lock_date()
+
     for product_code, ship_to_code in groups:
         all_rows = list(KubotaSakaiDueAdjustment.objects.filter(
             product_code=product_code,
@@ -550,8 +576,10 @@ def _recalculate_remaining_for_groups(groups):
             cum_delivery += date_delivery.get(d, Decimal('0'))
             remaining_at_date[d] = cum_delivery - cum_demand
 
-        # 各行に残量をセット
+        # 各行に残量をセット（締め日以前はスキップ）
         for row in all_rows:
+            if lock_date and row.due_date <= lock_date:
+                continue
             new_remaining = remaining_at_date.get(row.due_date, Decimal('0'))
             if row.remaining_qty != new_remaining:
                 row.remaining_qty = new_remaining

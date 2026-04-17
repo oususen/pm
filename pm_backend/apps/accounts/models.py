@@ -263,6 +263,7 @@ class UserPermission(models.Model):
         ('settings.supplier_order_schedule', '設定: 発注スケジュール設定'),
         ('settings.purchase_order_approval', '設定: 発注承認者設定'),
         ('settings.stocktake_init', '設定: 棚卸初期化'),
+        ('settings.lock_date', '設定: 締め日管理'),
         ('settings.kubota_sakai_config', '設定: クボタ堺便計画設定'),
         ('users', 'ユーザー管理'),
         ('manual', 'マニュアル'),

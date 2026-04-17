@@ -7,6 +7,7 @@ from decimal import Decimal
 from django.db.models import F
 from orders.models import OrderLine
 from orders.utils.calendar_utils import get_business_today
+from system_settings.models import SystemSetting
 from ..models_line_backlog import LineBacklog
 from ..models_line_backlog_adjustment import LineBacklogAdjustment
 from ..serializers_process_realtime import _resolve_product_process_line
@@ -993,6 +994,7 @@ def recalculate_stock_qty(
     calc_today = business_today
     if reference_today is None and not is_working_day(calc_today):
         calc_today = get_prev_working_day(calc_today)
+    inventory_lock_date = SystemSetting.get_lock_date('inventory')
     stock_by_date = {}
     firm_map = firm_map or {}
 
@@ -1044,6 +1046,17 @@ def recalculate_stock_qty(
             stock_qty = sample.stock_qty or 0
             stock_by_date[plan_date] = stock_qty
             last_stock = stock_qty
+            continue
+
+        # 締め日以前は既存値を維持し再計算しない
+        if inventory_lock_date and plan_date <= inventory_lock_date:
+            existing_stock = 0
+            for row in rows:
+                if row.stock_qty:
+                    existing_stock = row.stock_qty
+                    break
+            stock_by_date[plan_date] = existing_stock
+            last_stock = existing_stock
             continue
 
         # effective_start より前は既存の在庫値を使用し、更新しない（安全ガード）
@@ -1200,6 +1213,7 @@ def recalculate_planned_stock_qty(
         final_delivery_lt = _get_final_product_delivery_lt(line_id, product_id)
         max_lt = max(max_lt, final_delivery_lt)
     calc_start_date = shift_working_days(calc_today, -(max_lt + 1))
+    inventory_lock_date = SystemSetting.get_lock_date('inventory')
     planned_by_date = {}
     firm_map = firm_map or {}
 
@@ -1245,6 +1259,17 @@ def recalculate_planned_stock_qty(
             planned_stock = sample.planned_stock_qty or 0
             planned_by_date[plan_date] = planned_stock
             last_planned = planned_stock
+            continue
+
+        # 締め日以前は既存値を維持し再計算しない
+        if inventory_lock_date and plan_date <= inventory_lock_date:
+            existing_planned = 0
+            for row in rows:
+                if row.planned_stock_qty:
+                    existing_planned = row.planned_stock_qty
+                    break
+            planned_by_date[plan_date] = existing_planned
+            last_planned = existing_planned
             continue
 
         # 計算開始日以前は通常計算をスキップ。

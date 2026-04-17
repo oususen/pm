@@ -21,6 +21,7 @@
           <input v-model.trim="keyword2" type="text" placeholder="キーワード2" @keydown.enter="loadGrid" />
         </div>
       </div>
+      <span v-if="lockDate" class="lock-badge">{{ lockDate }} まで締め済</span>
       <button class="btn import-btn" :disabled="importing || loading" @click="importOrders">{{ importing ? '取込中...' : '取込' }}</button>
       <button class="btn save-btn" :disabled="saving || loading" @click="saveDeliveries">{{ saving ? '保存中...' : '保存' }}</button>
       <button class="btn" :disabled="loading" @click="loadGrid">表示</button>
@@ -65,7 +66,7 @@
           <tr
             v-for="row in displayRows"
             :key="row.rowKey"
-            :class="{ 'carry-tr': row.isCarry, 'day-row': !row.isCarry }"
+            :class="{ 'carry-tr': row.isCarry, 'day-row': !row.isCarry, 'locked-row': !row.isCarry && isDateLocked(row.dateKey) }"
           >
             <td class="sticky-left date-col date-separator" :class="row.dayClass">{{ row.label }}</td>
             <template v-if="row.isCarry">
@@ -106,6 +107,8 @@
                       :data-col="col.colKey"
                       :data-slot="slotIdx - 1"
                       :value="displayInputValue(slotLineAt(row, col.colKey, slotIdx - 1).deliveryByDate[row.dateKey])"
+                      :disabled="isDateLocked(row.dateKey)"
+                      :class="{ 'locked-cell': isDateLocked(row.dateKey) }"
                       type="text"
                       inputmode="decimal"
                       @input="onDeliveryInput(slotLineAt(row, col.colKey, slotIdx - 1), row.dateKey, $event.target.value)"
@@ -203,6 +206,7 @@ const keyword2 = ref('6E')
 const startDate = ref(formatLocalDate(new Date()))
 const horizonDays = ref(30)
 const groups = ref([])
+const lockDate = ref(null)
 const calendarDayMap = ref({})
 const kubotaSakaiCalendarId = ref(null)
 
@@ -295,6 +299,11 @@ const displayRows = computed(() => {
 
   return hasCarry ? [carryRow, ...dateRows] : dateRows
 })
+
+const isDateLocked = (dateKey) => {
+  if (!lockDate.value) return false
+  return dateKey <= lockDate.value
+}
 
 const isHolidayDate = (dateKey, weekDay) => {
   const day = calendarDayMap.value[dateKey]
@@ -468,6 +477,7 @@ const loadGrid = async () => {
       }),
       loadKubotaSakaiCalendarDays(),
     ])
+    lockDate.value = res.data?.lock_date || null
     const items = res.data?.rows || []
     groups.value = items.map(buildGroupFromGridItem)
     nextTick(setStickyTopValues)
@@ -628,6 +638,18 @@ onMounted(async () => {
 .save-btn {
   background: #dff3e6;
   border-color: #8fc8a1;
+}
+.lock-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #92400e;
+  white-space: nowrap;
 }
 .import-btn {
   background: #dbe8ff;
@@ -804,5 +826,16 @@ onMounted(async () => {
 }
 .day-row td {
   border-bottom: 2px solid #94a3b8;
+}
+.locked-row td {
+  background: #f3f4f6 !important;
+}
+.locked-row .sticky-left {
+  background: #f3f4f6 !important;
+}
+.locked-cell {
+  background: #e5e7eb !important;
+  color: #9ca3af !important;
+  cursor: not-allowed;
 }
 </style>

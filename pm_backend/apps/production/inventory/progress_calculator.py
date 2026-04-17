@@ -9,6 +9,7 @@ from django.db.models import Q
 
 from masters.models import Calendar, CalendarDay, Line, RoutingStep
 from orders.utils.calendar_utils import get_business_today
+from system_settings.models import SystemSetting
 from ..models import LineDemand
 from ..models_line_backlog import LineBacklog
 from .inventory_calculator import _get_max_parent_bom_lead_time
@@ -164,6 +165,7 @@ def recalculate_progress_qty(
             max_parent_lt = _get_max_parent_bom_lead_time(product_id)
         max_lt = int(max_parent_lt or 0)
         calc_start_date = shift_working_days(today, -(max_lt + 1))
+    progress_lock_date = SystemSetting.get_lock_date('progress')
     progress_by_date = {}
     last_progress = 0
     planned_progress_by_date = {}
@@ -243,6 +245,21 @@ def recalculate_progress_qty(
             progress_by_date[plan_date] = last_progress
             last_planned_progress = sample.planned_progress_qty or 0
             planned_progress_by_date[plan_date] = last_planned_progress
+            continue
+
+        # 締め日以前は既存値を維持し再計算しない
+        if progress_lock_date and plan_date <= progress_lock_date:
+            existing_progress = 0
+            existing_planned_progress = 0
+            for row in rows:
+                if row.progress_qty or row.planned_progress_qty:
+                    existing_progress = row.progress_qty or 0
+                    existing_planned_progress = row.planned_progress_qty or 0
+                    break
+            progress_by_date[plan_date] = existing_progress
+            planned_progress_by_date[plan_date] = existing_planned_progress
+            last_progress = existing_progress
+            last_planned_progress = existing_planned_progress
             continue
 
         # 計算開始日以前は既存の進度値を使用し、更新しない

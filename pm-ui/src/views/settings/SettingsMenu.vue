@@ -51,6 +51,10 @@
         <div class="icon-box">🚛</div>
         <div class="label">クボタ堺便計画設定</div>
       </RouterLink>
+      <RouterLink v-if="canAccessSetting('settings.lock_date', 'view')" to="/settings/lock-date" class="master-tile">
+        <div class="icon-box">📅</div>
+        <div class="label">締め日管理</div>
+      </RouterLink>
       <RouterLink v-if="canAccessSetting('settings', 'view')" to="/settings/system" class="master-tile">
         <div class="icon-box">⚙️</div>
         <div class="label">システム設定</div>
