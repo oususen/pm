@@ -24,6 +24,9 @@
       </button>
       <button class="btn save-btn" :disabled="loading || saving" @click="save">保存</button>
       <button class="btn" :disabled="loading" @click="loadGrid">表示</button>
+      <button class="btn" :disabled="loading || exportingCsv" @click="exportLoadDetailCsv">
+        {{ exportingCsv ? '出力中...' : '占有CSV' }}
+      </button>
       <button class="btn detail-btn" :disabled="loading" @click="showTruckDetail = !showTruckDetail">
         便詳細
       </button>
@@ -216,7 +219,7 @@
                   v-for="slotIdx in row.maxSlots"
                   :key="`${row.rowKey}-${dateKey}-remain-${slotIdx}`"
                   class="sub-cell"
-                  :class="{ warn: slotEntryAt(row, dateKey, slotIdx - 1)?.overdue }"
+                  :class="{ 'remain-negative': parseNumber(slotEntryAt(row, dateKey, slotIdx - 1)?.unassigned_qty_preview) > 0 }"
                 >
                   {{ formatNumber(slotEntryAt(row, dateKey, slotIdx - 1)?.unassigned_qty_preview) }}
                 </div>
@@ -323,11 +326,12 @@ const sortEntries = (items = []) => {
 }
 
 const targetDate = ref(formatLocalDate(new Date()))
-const horizonDays = ref(2)
+const horizonDays = ref(5)
 const keyword = ref('')
 const loading = ref(false)
 const importing = ref(false)
 const saving = ref(false)
+const exportingCsv = ref(false)
 const assignmentDeadlineDays = ref(3)
 const trucksByDate = ref({})
 const summaryByDate = ref({})
@@ -624,6 +628,62 @@ const importOrders = async () => {
     alert(message)
   } finally {
     importing.value = false
+  }
+}
+
+const csvEscape = (value) => {
+  const text = value == null ? '' : String(value)
+  if (/[",\r\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`
+  }
+  return text
+}
+
+const exportLoadDetailCsv = async () => {
+  exportingCsv.value = true
+  try {
+    const res = await api.kubotaSakaiTripAssignments.loadDetail(targetDate.value)
+    const rows = Array.isArray(res.data?.rows) ? res.data.rows : []
+    if (!rows.length) {
+      alert('対象日の便割付データがありません。')
+      return
+    }
+
+    const header = ['便', '便面積', '製品', '数量', '容器名', '容器', '使用容器数', '使用容器面積', '占有']
+    const lines = [header.join(',')]
+    rows.forEach((row) => {
+      const truckLabel = row.truck_alias_name
+        ? `${row.truck_alias_name} (${row.truck_name})`
+        : row.truck_name
+      const record = [
+        truckLabel,
+        row.truck_area,
+        row.product_code,
+        row.qty,
+        row.container_name || '-',
+        row.container_size || '-',
+        row.container_count,
+        row.used_container_area,
+        `${row.occupancy_percent}%`,
+      ]
+      lines.push(record.map(csvEscape).join(','))
+    })
+
+    const csv = `\uFEFF${lines.join('\r\n')}`
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `便占有明細_${targetDate.value}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    const message = error?.response?.data?.detail || 'CSV出力に失敗しました。'
+    alert(message)
+  } finally {
+    exportingCsv.value = false
   }
 }
 
@@ -940,7 +1000,7 @@ onUnmounted(() => {
 .mini.danger {
   color: #b91c1c;
 }
-.warn {
+.remain-negative {
   color: #b91c1c;
   font-weight: 700;
 }

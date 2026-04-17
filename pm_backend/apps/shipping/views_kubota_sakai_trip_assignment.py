@@ -71,6 +71,32 @@ def _format_hhmm(value):
         return str(value)
 
 
+def _calculate_assignment_area(item, truck):
+    """1割付レコードの実効使用面積を返す。"""
+    container = item.get('container') or {}
+    qty = _to_decimal(item.get('qty'))
+    capacity = _to_decimal(container.get('capacity'), default='1')
+    if capacity <= 0:
+        capacity = Decimal('1')
+
+    width = _to_decimal(container.get('width'))
+    depth = _to_decimal(container.get('depth'))
+    height = _to_decimal(container.get('height'))
+    if width <= 0 or depth <= 0 or qty <= 0:
+        return Decimal('0')
+
+    layers = Decimal('1')
+    if bool(container.get('stackable', True)) and height > 0:
+        truck_layers = int(_to_decimal(truck.height) // height)
+        if truck_layers > 0:
+            max_stack = int(container.get('max_stack') or 999)
+            layers = Decimal(str(min(truck_layers, max_stack if max_stack > 0 else truck_layers)))
+
+    effective_floor = width * depth / (layers if layers > 0 else Decimal('1'))
+    container_count = qty / capacity
+    return effective_floor * container_count
+
+
 def _resolve_kubota_calendar():
     rows = Calendar.objects.all()
     code_hits = rows.filter(
@@ -742,3 +768,85 @@ class KubotaSakaiTripLoadPreviewView(APIView):
             'target_date': target_date.isoformat(),
             'truck_summaries': summaries,
         })
+
+
+class KubotaSakaiTripLoadDetailView(APIView):
+    """便ごとの占有計算明細を返す（CSV出力用）。"""
+
+    def get(self, request):
+        target_date = _parse_date(request.query_params.get('target_date'))
+        if not target_date:
+            return Response({'detail': 'target_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        assignments = list(
+            KubotaSakaiTripAssignment.objects.select_related('due_adjustment', 'truck')
+            .filter(departure_date=target_date)
+            .order_by('truck__display_order', 'truck__name', 'id')
+        )
+        if not assignments:
+            return Response({'target_date': target_date.isoformat(), 'rows': []})
+
+        product_codes = {a.due_adjustment.product_code for a in assignments}
+        products = {
+            p.product_code: p
+            for p in Product.objects.select_related('used_container').filter(product_code__in=product_codes)
+        }
+
+        grouped = {}
+        for assignment in assignments:
+            key = (assignment.truck_id, assignment.due_adjustment.product_code)
+            if key not in grouped:
+                grouped[key] = {
+                    'truck': assignment.truck,
+                    'product_code': assignment.due_adjustment.product_code,
+                    'qty': Decimal('0'),
+                }
+            grouped[key]['qty'] += _to_decimal(assignment.qty)
+
+        rows = []
+        for item in grouped.values():
+            truck = item['truck']
+            product_code = item['product_code']
+            qty = item['qty']
+            product = products.get(product_code)
+            container = getattr(product, 'used_container', None) if product else None
+
+            capacity = getattr(product, 'capacity', None) if product else None
+            if not capacity and container:
+                capacity = container.capacity
+            if not capacity:
+                capacity = 1
+            capacity = max(int(_to_decimal(capacity)), 1)
+
+            load_item = _build_load_item(product, qty)
+            used_area = _calculate_assignment_area(load_item, truck)
+            truck_area = _to_decimal(truck.width) * _to_decimal(truck.depth)
+            occupancy_percent = Decimal('0')
+            if truck_area > 0:
+                occupancy_percent = ((used_area / truck_area) * Decimal('100')).quantize(Decimal('0.01'))
+
+            rows.append({
+                'truck_id': truck.id,
+                'truck_name': truck.name,
+                'truck_alias_name': truck.alias_name or '',
+                'truck_label': truck.alias_name or truck.name,
+                'truck_area': str(truck_area.quantize(Decimal('1'))),
+                'product_code': product_code,
+                'qty': str(qty.quantize(Decimal('1'), rounding=ROUND_HALF_UP)),
+                'container_name': getattr(container, 'name', '') if container else '',
+                'container_width': int(getattr(container, 'width', 0) or 0),
+                'container_depth': int(getattr(container, 'depth', 0) or 0),
+                'container_height': int(getattr(container, 'height', 0) or 0),
+                'container_size': (
+                    f"{int(getattr(container, 'width', 0) or 0)}x"
+                    f"{int(getattr(container, 'depth', 0) or 0)}x"
+                    f"{int(getattr(container, 'height', 0) or 0)}"
+                ) if container else '-',
+                'capacity': capacity,
+                'container_count': str((qty / Decimal(str(capacity))).quantize(Decimal('0.001'))),
+                'used_container_area': str(used_area.quantize(Decimal('1'), rounding=ROUND_HALF_UP)),
+                'occupancy_percent': str(occupancy_percent),
+            })
+
+        rows.sort(key=lambda r: (r['truck_label'], r['product_code']))
+        return Response({'target_date': target_date.isoformat(), 'rows': rows})

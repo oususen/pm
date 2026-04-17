@@ -95,6 +95,7 @@ class EquipmentInspectionTemplate(models.Model):
     approved_at = models.DateTimeField(null=True, blank=True, verbose_name="部長承認日時")
     rejection_comment = models.TextField(blank=True, default="", verbose_name="差戻しコメント")
     submitted_items_snapshot = models.JSONField(null=True, blank=True, verbose_name="提出時点検項目スナップショット")
+    measurement_months = models.JSONField(default=list, blank=True, verbose_name="定期実測対象月")
 
     processes = models.ManyToManyField(
         "masters.Process",

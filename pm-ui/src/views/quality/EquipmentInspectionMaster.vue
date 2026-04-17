@@ -321,7 +321,14 @@
 
         <div class="item-section">
           <div class="section-header">
-            <h4>定期実測項目（3ヶ月）</h4>
+            <h4>{{ quarterlyTitle }}</h4>
+            <div class="measurement-months-wrap" v-if="canEditFields">
+              <span class="measurement-months-label">対象月:</span>
+              <label v-for="m in 12" :key="m" class="measurement-month-check">
+                <input type="checkbox" :checked="form.measurement_months.includes(m)" @change="toggleMeasurementMonth(m)" />
+                {{ m }}月
+              </label>
+            </div>
             <button class="btn-secondary btn-sm" @click="addItem('QUARTERLY')" :disabled="!canEditFields">
               行追加
             </button>
@@ -623,6 +630,7 @@ const createEmptyForm = () => ({
   processes: [],
   lines: [],
   items: [],
+  measurement_months: [],
   workflow_logs: [],
 })
 
@@ -944,7 +952,7 @@ const exportCurrentTemplateExcel = () => {
       item.criteria || "",
     ]),
     [],
-    ["定期実測項目（3ヶ月）"],
+    [quarterlyTitle.value],
     ["項目", "規格（設定）", "参考値/単位", "判定基準", "記録種別", "単位"],
     ...quarterlyItems.value.map((item) => [
       item.item_name || "",
@@ -995,7 +1003,7 @@ const printCurrentTemplate = () => {
       <col style="width: 22px;" />
       <col style="width: 170px;" />
       <col style="width: 150px;" />
-      <col style="width: 38px;" />
+      <col style="width: 46px;" />
       <col style="width: 170px;" />
       ${dayNumbers.map(() => '<col style="width: 14px;" />').join("")}
     </colgroup>
@@ -1054,7 +1062,7 @@ const printCurrentTemplate = () => {
         .inspection-table .no-head, .inspection-table .no-cell { width: 24px; text-align: center; }
         .inspection-table .item-head { width: 200px; }
         .inspection-table .std-head { width: 180px; }
-        .inspection-table .freq-head { width: 40px; text-align: center; }
+        .inspection-table .freq-head { width: 46px; text-align: center; }
         .inspection-table .method-head { width: 200px; }
         .inspection-table .day-head { width: 2.5px; padding: 0; text-align: center; font-size: 6px; font-weight: 700; }
         .inspection-table .check-cell { width: 2.5px; padding: 0; height: 19px; }
@@ -1125,7 +1133,7 @@ const printCurrentTemplate = () => {
           </tbody>
         </table>
 
-        <div class="quarterly-title">定期実測項目（3ヶ月）</div>
+        <div class="quarterly-title">${escapeHtml(quarterlyTitle.value)}</div>
         <table class="quarterly-table">
           <thead>
             <tr>
@@ -1247,6 +1255,22 @@ const quarterlyItems = computed(() =>
     .filter((item) => item.section_type === "QUARTERLY")
     .sort((a, b) => Number(a.display_order || 0) - Number(b.display_order || 0))
 )
+
+const quarterlyTitle = computed(() => {
+  const months = form.value.measurement_months
+  if (!months || months.length === 0) return "定期実測項目"
+  return `定期実測項目（${months.map((m) => `${m}月`).join("・")}）`
+})
+
+const toggleMeasurementMonth = (month) => {
+  const idx = form.value.measurement_months.indexOf(month)
+  if (idx >= 0) {
+    form.value.measurement_months.splice(idx, 1)
+  } else {
+    form.value.measurement_months.push(month)
+    form.value.measurement_months.sort((a, b) => a - b)
+  }
+}
 
 const resequenceSection = (sectionType) => {
   const targetItems = form.value.items
@@ -1808,6 +1832,7 @@ const toFormModel = (raw) => {
     approver_user_name: raw.approver_user_name || "",
     rejection_comment: raw.rejection_comment || "",
     submitted_items_snapshot: Array.isArray(raw.submitted_items_snapshot) ? raw.submitted_items_snapshot : null,
+    measurement_months: Array.isArray(raw.measurement_months) ? raw.measurement_months : [],
     reviewed_at: raw.reviewed_at || "",
     chief_reviewed_at: raw.chief_reviewed_at || "",
     approved_at: raw.approved_at || "",
@@ -1890,6 +1915,7 @@ const buildPayload = () => {
     is_active: Boolean(form.value.is_active),
     processes: Array.isArray(form.value.processes) ? form.value.processes.map(Number) : [],
     lines: Array.isArray(form.value.lines) ? form.value.lines.map(Number) : [],
+    measurement_months: Array.isArray(form.value.measurement_months) ? form.value.measurement_months : [],
     items: normalizedItems,
   }
 }
@@ -2585,6 +2611,33 @@ tr.diff-deleted td {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.measurement-months-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  flex: 1;
+  margin-left: 12px;
+}
+.measurement-months-label {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.measurement-month-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.measurement-month-check input[type="checkbox"] {
+  width: auto;
+  margin: 0;
 }
 .center {
   text-align: center;

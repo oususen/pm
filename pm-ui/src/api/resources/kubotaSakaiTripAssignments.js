@@ -11,6 +11,9 @@ export const createKubotaSakaiTripAssignmentsAPI = (client) => ({
   previewLoad(targetDate, rows = []) {
     return client.post('/kubota-sakai-trip-assignments/preview-load/', { target_date: targetDate, rows })
   },
+  loadDetail(targetDate) {
+    return client.get('/kubota-sakai-trip-assignments/load-detail/', { params: { target_date: targetDate } })
+  },
   get(id) {
     return client.get(`/kubota-sakai-trip-assignments/${id}/`)
   },

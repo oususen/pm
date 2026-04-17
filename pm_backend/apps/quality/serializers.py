@@ -305,6 +305,7 @@ class EquipmentInspectionTemplateSerializer(serializers.ModelSerializer):
             "approved_at",
             "rejection_comment",
             "submitted_items_snapshot",
+            "measurement_months",
             "created_at",
             "updated_at",
             "items",
