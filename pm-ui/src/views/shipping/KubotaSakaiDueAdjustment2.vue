@@ -56,8 +56,8 @@
             <template v-for="(col, colIdx) in matrixColumns" :key="`sub-${col.colKey}`">
               <th :class="{ 'product-start': colIdx > 0 }">注番</th>
               <th>受注</th>
-              <th>納入</th>
-              <th class="product-end">残量</th>
+              <th>計画</th>
+              <th class="product-end">注残</th>
             </template>
           </tr>
         </thead>
@@ -326,8 +326,8 @@ const loadKubotaSakaiCalendarDays = async () => {
 }
 
 const recalcGroupRemaining = (group) => {
-  // 品番+納入場所の全注番を合算して累積残量を計算
-  // carry_remaining: 表示期間より前の繰越残量
+  // 品番+納入場所の全注番を合算して累積注残を計算
+  // carry_remaining: 表示期間より前の繰越注残
   const dates = dateColumns.value.map((c) => c.key).sort()
   let running = parseNumber(group.carryRemaining)
   const remainingAtDate = {}
@@ -341,13 +341,13 @@ const recalcGroupRemaining = (group) => {
     running += dayDelivery - dayDemand
     remainingAtDate[d] = running
   }
-  // まず全ラインの残量をクリア
+  // まず全ラインの注残をクリア
   for (const line of group.lines) {
     for (const d of dates) {
       line.remainingByDate[d] = 0
     }
   }
-  // 各日付で、その日にデータがあるラインのうち最後のものに残量をセット
+  // 各日付で、その日にデータがあるラインのうち最後のものに注残をセット
   for (const d of dates) {
     const activeLines = group.lines.filter((line) => {
       return parseNumber(line.demandByDate[d]) > 0 || parseNumber(line.deliveryByDate[d]) > 0
@@ -418,12 +418,12 @@ const slotRemaining = (row, colKey, slotIdx) => {
 }
 
 const groupTotalRemaining = (group) => {
-  // 最終日の残量合計（各注番の最終残量）
+  // 最終日の注残合計（各注番の最終注残）
   const lastDate = dateColumns.value.length ? dateColumns.value[dateColumns.value.length - 1].key : null
   if (!lastDate) return 0
   let total = 0
   for (const line of group.lines) {
-    // 最後に残量がある日のremaining
+    // 最後に注残がある日のremaining
     let lastRemaining = 0
     for (const col of dateColumns.value) {
       const r = parseNumber(line.remainingByDate[col.key])

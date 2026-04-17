@@ -52,7 +52,7 @@
                   <th :class="col.dayClass">注番</th>
                   <th :class="col.dayClass">受注</th>
                   <th :class="col.dayClass">納入</th>
-                  <th :class="col.dayClass">残量</th>
+                  <th :class="col.dayClass">注残</th>
                 </template>
               </tr>
             </thead>
