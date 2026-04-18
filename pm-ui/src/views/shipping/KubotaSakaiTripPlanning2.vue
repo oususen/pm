@@ -907,13 +907,12 @@ onUnmounted(() => {
 }
 .date-head-content {
   position: relative;
-  min-height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .date-head-label {
-  font-size: 30px;
+  font-size: 24px;
   line-height: 1.2;
 }
 .pseudo-occ {
@@ -957,13 +956,16 @@ onUnmounted(() => {
 }
 .truck-head {
   background: #f1f5f9 !important;
+  border-bottom: 1px solid #2d3748 !important;
 }
 .occ-head {
   background: #f8fafc !important;
+  border-bottom: 1px solid #2d3748 !important;
 }
 .item-head {
   background: #eef2f7 !important;
   font-weight: 500;
+  border-bottom: 1px solid #2d3748 !important;
 }
 .code-col {
   min-width: 135px;
