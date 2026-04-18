@@ -830,6 +830,7 @@ const settingsTargetTab = ref('tank')
 const planTabs = [
   { key: 'tank', label: 'タンク' },
   { key: 'floor', label: 'フロア' },
+  { key: 'kubota', label: 'クボタ' },
   { key: 'floor-shipping', label: 'フロア出荷' },
   { key: 'blade', label: 'ブレード' },
   { key: 'laser', label: 'レーザ' },
@@ -837,10 +838,11 @@ const planTabs = [
   { key: 'spot', label: 'スポット' },
   { key: 'line-settings', label: 'ライン編集' },
 ]
-const operationalPlanTabs = ['tank', 'floor', 'floor-shipping', 'blade', 'laser', 'brake', 'spot']
+const operationalPlanTabs = ['tank', 'floor', 'kubota', 'floor-shipping', 'blade', 'laser', 'brake', 'spot']
 const lineKeywordsByTab = {
   tank: ['タンク', 'tank'],
   floor: ['フロア', 'floor'],
+  kubota: ['クボタ', 'kubota', '小型'],
   'floor-shipping': ['北進塗装', 'フロア配送'],
   blade: ['ブレード', 'blade'],
   laser: ['レーザ', 'laser'],

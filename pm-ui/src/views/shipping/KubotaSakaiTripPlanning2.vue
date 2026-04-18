@@ -80,7 +80,11 @@
                 'day-split-left': isDaySplitStart(dateKey),
               }"
             >
-              {{ formatHeaderDate(dateKey) }}
+              <div class="date-head-content">
+                <span class="pseudo-occ pseudo-occ-left">A:{{ pseudoTruckOccupancyPercent(dateKey, 'A') }}%</span>
+                <span class="date-head-label">{{ formatHeaderDate(dateKey) }}</span>
+                <span class="pseudo-occ pseudo-occ-right">P:{{ pseudoTruckOccupancyPercent(dateKey, 'P') }}%</span>
+              </div>
             </th>
           </tr>
           <tr>
@@ -367,6 +371,20 @@ const detailTrucks = computed(() => {
 
 const isHoliday = (dateKey) => Boolean(holidayByDate.value[dateKey])
 const isDaySplitStart = (dateKey) => dateKeys.value[0] !== dateKey
+const pseudoTruckMarkers = {
+  A: new Set(['A', 'A便', 'Ａ', 'Ａ便']),
+  P: new Set(['P', 'P便', 'Ｐ', 'Ｐ便']),
+}
+const normalizeTruckMarker = (truck) => String(truck?.alias_name || truck?.name || '').trim().toUpperCase()
+const isPseudoTruckType = (truck, type) => {
+  const marker = normalizeTruckMarker(truck)
+  const base = marker.replace(/\s+/g, '')
+  if (type === 'A') return pseudoTruckMarkers.A.has(base)
+  if (type === 'P') return pseudoTruckMarkers.P.has(base)
+  return false
+}
+const isPseudoTruck = (truck) => isPseudoTruckType(truck, 'A') || isPseudoTruckType(truck, 'P')
+const displayTrucksForDate = (dateKey) => (trucksByDate.value[dateKey] || []).filter((truck) => !isPseudoTruck(truck))
 const slotWidthClass = (slotIdx) => {
   if (slotIdx === 0) return 'col-order'
   if (slotIdx === 1) return 'col-demand'
@@ -423,7 +441,7 @@ const entriesAt = (row, dateKey) => row.byDate?.[dateKey] || []
 const slotEntryAt = (row, dateKey, slotIdx) => entriesAt(row, dateKey)[slotIdx] || null
 
 const truckAt = (dateKey, slotIdx) => {
-  const trucks = trucksByDate.value[dateKey] || []
+  const trucks = displayTrucksForDate(dateKey)
   return trucks[slotIdx] || null
 }
 
@@ -447,6 +465,14 @@ const truckOccupancyPercent = (dateKey, slotIdx) => {
 }
 
 const truckOccupancyLabel = (dateKey, slotIdx) => `${truckOccupancyPercent(dateKey, slotIdx)}%`
+const pseudoTruckOccupancyPercent = (dateKey, type) => {
+  const pseudoTruck = (trucksByDate.value[dateKey] || []).find((truck) => isPseudoTruckType(truck, type))
+  if (!pseudoTruck) return 0
+  const previewSummary = (previewSummaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === Number(pseudoTruck.id))
+  if (previewSummary) return parseNumber(previewSummary.occupancy_percent)
+  const savedSummary = (summaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === Number(pseudoTruck.id))
+  return parseNumber(savedSummary?.occupancy_percent)
+}
 
 const buildPayloadRowsForDate = (dateKey) => {
   return mergedRows.value
@@ -877,8 +903,32 @@ onUnmounted(() => {
 }
 .date-head {
   background: #eceff3 !important;
-  font-size: 34px;
+  padding: 0 6px !important;
+}
+.date-head-content {
+  position: relative;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.date-head-label {
+  font-size: 30px;
   line-height: 1.2;
+}
+.pseudo-occ {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 20px;
+  font-weight: 500;
+  color: #111827;
+}
+.pseudo-occ-left {
+  left: 8px;
+}
+.pseudo-occ-right {
+  right: 8px;
 }
 .holiday-head {
   color: #b91c1c !important;

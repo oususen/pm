@@ -50,6 +50,11 @@
               <div class="head-group">
                 <span class="head-code">{{ col.productCode }}</span>
                 <span class="head-ship">{{ col.shipToCode }}</span>
+                <button
+                  class="copy-btn"
+                  :disabled="loading || saving || importing"
+                  @click.stop="applyDemandToPlan(col.group)"
+                >→</button>
               </div>
             </th>
           </tr>
@@ -467,6 +472,24 @@ const groupTotalRemaining = (group) => {
   return Number(total.toFixed(3))
 }
 
+const applyDemandToPlan = (group) => {
+  if (!group) return
+  let changed = false
+  for (const line of group.lines) {
+    for (const col of dateColumns.value) {
+      if (isDateLocked(col.key)) continue
+      const demandQty = parseNumber(line.demandByDate[col.key])
+      const currentQty = parseNumber(line.deliveryByDate[col.key])
+      if (currentQty !== demandQty) {
+        line.deliveryByDate[col.key] = demandQty
+        changed = true
+      }
+    }
+    if (changed) line._dirty = true
+  }
+  if (changed) recalcGroupRemaining(group)
+}
+
 const loadGrid = async () => {
   loading.value = true
   try {
@@ -720,6 +743,22 @@ onMounted(async () => {
 .head-ship {
   color: #374151;
   font-weight: 500;
+}
+.copy-btn {
+  height: 22px;
+  min-width: 22px;
+  padding: 0 6px;
+  border: 1px solid #9fb2d1;
+  border-radius: 3px;
+  background: #f8fbff;
+  color: #1f3b69;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.copy-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 .grid th.holiday,
 .grid td.holiday {
