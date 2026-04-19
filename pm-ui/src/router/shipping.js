@@ -69,13 +69,19 @@ const shipping = [
     path: "/shipping/trip-execution",
     name: "ShippingTripExecution",
     component: () => import("@/views/shipping/ShippingTripExecution.vue"),
-    meta: { pageTitle: "便確認（実行）", resource: "shipping" },
+    meta: { pageTitle: "便確認（出荷担当）", resource: "shipping.trip_execution", actualInputEnabled: false },
   },
   {
     path: "/shipping/trip-progress",
     name: "ShippingTripProgress",
+    component: () => import("@/views/shipping/ShippingTripExecution.vue"),
+    meta: { pageTitle: "便確認（業務員）", resource: "shipping.trip_progress", actualInputEnabled: true },
+  },
+  {
+    path: "/shipping/trip-progress-summary",
+    name: "ShippingTripProgressSummary",
     component: () => import("@/views/shipping/ShippingTripProgress.vue"),
-    meta: { pageTitle: "便進捗確認", resource: "shipping" },
+    meta: { pageTitle: "便進捗サマリー", resource: "shipping.trip_progress" },
   },
 ];
 

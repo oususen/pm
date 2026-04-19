@@ -154,6 +154,10 @@ def _build_effective_permissions(user):
         perm = permission_map.get(resource)
         if perm:
             result.append(perm)
+    # RESOURCE_CHOICES 未反映のキーも返す（運用中の新規権限追加直後の取りこぼし防止）
+    for resource, perm in permission_map.items():
+        if resource not in resources:
+            result.append(perm)
     return result
 
 

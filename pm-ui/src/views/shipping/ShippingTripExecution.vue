@@ -120,6 +120,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import api from '@/api/client'
 
 const formatDate = (d) => {
@@ -139,6 +140,8 @@ const statusFilter = ref('')
 const loading = ref(false)
 const updatingTripId = ref(null)
 const summary = ref({ total: 0, planned: 0, loading: 0, departed: 0, closed: 0 })
+const route = useRoute()
+const canActualEdit = computed(() => Boolean(route.meta?.actualInputEnabled))
 
 const visibleTrips = computed(() => {
   if (!statusFilter.value) return trips.value
@@ -168,7 +171,7 @@ const businessTypeLabel = (value) => {
 const canMarkLoading = (trip) => trip?.status === 'PLANNED'
 const canMarkDeparted = (trip) => ['PLANNED', 'LOADING'].includes(trip?.status)
 const canReopen = (trip) => ['LOADING', 'DEPARTED', 'CLOSED'].includes(trip?.status)
-const canRegisterActual = (trip) => trip?.status === 'DEPARTED'
+const canRegisterActual = (trip) => canActualEdit.value && trip?.status === 'DEPARTED'
 
 const parseQty = (value) => {
   const num = Number(String(value ?? '').replace(/,/g, ''))

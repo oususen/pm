@@ -397,6 +397,8 @@ const permissionResources = [
   { value: 'shipping.fujishoji_document', label: '出荷: 富士商事出荷指示書' },
   { value: 'shipping.kubota_sakai_due_adjustment', label: '出荷: クボタ堺納期調整' },
   { value: 'shipping.kubota_sakai_trip_planning', label: '出荷: クボタ堺便計画' },
+  { value: 'shipping.trip_execution', label: '出荷: 便確認（実行）' },
+  { value: 'shipping.trip_progress', label: '出荷: 便進捗確認' },
   { value: 'inventory', label: '在庫' },
   { value: 'quality', label: '品質' },
   { value: 'quality.equipment_inspection_master', label: '品質: 設備点検表（点検項目作成）' },

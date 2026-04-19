@@ -128,17 +128,24 @@ const tiles = computed(() => [
   },
   {
     to: "/shipping/trip-execution",
-    label: "便確認（実行）",
+    label: "便確認（出荷担当）",
     icon: "📱",
     required: "view",
-    resource: "shipping",
+    resource: "shipping.trip_execution",
   },
   {
     to: "/shipping/trip-progress",
-    label: "便進捗確認",
+    label: "便確認（業務員）",
     icon: "📈",
     required: "view",
-    resource: "shipping",
+    resource: "shipping.trip_progress",
+  },
+  {
+    to: "/shipping/trip-progress-summary",
+    label: "便進捗確認（一覧）",
+    icon: "📋",
+    required: "view",
+    resource: "shipping.trip_progress",
   },
 ].map((tile) => ({
   ...tile,

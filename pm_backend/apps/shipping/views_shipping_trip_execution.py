@@ -193,6 +193,24 @@ class ShippingTripExecutionView(APIView):
                     trip.loading_by = request.user
             trip.save()
         elif action == 'reopen':
+            marker_prefix = f'[TRIP_ACTUAL]{trip.id}:'
+            existing_actuals = list(
+                ShipmentActual.objects.filter(remark__startswith=marker_prefix).order_by('id')
+            )
+            for actual in existing_actuals:
+                ShipmentActualHistory.objects.create(
+                    shipment_actual=actual,
+                    action='DELETE',
+                    shipment_date=actual.shipment_date,
+                    product_code=actual.product_code,
+                    customer_code=actual.customer_code,
+                    ship_to_code=actual.ship_to_code,
+                    quantity=actual.quantity,
+                    remark=actual.remark,
+                )
+            if existing_actuals:
+                ShipmentActual.objects.filter(id__in=[a.id for a in existing_actuals]).delete()
+
             trip.status = 'PLANNED'
             trip.departure_time_actual = None
             trip.loading_by = None

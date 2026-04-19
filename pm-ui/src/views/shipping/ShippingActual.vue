@@ -82,7 +82,7 @@
                 <td>{{ displayCustomer(item) }}</td>
                 <td>{{ item.ship_to_code || '-' }}</td>
                 <td class="num">{{ formatQty(item.quantity) }}</td>
-                <td>{{ item.remark || '-' }}</td>
+                <td>{{ displayRemark(item.remark) }}</td>
                 <td class="actions">
                   <button v-if="canEdit" class="btn-sm" @click="startEdit(item)">編集</button>
                   <button class="btn-sm btn-secondary" @click="loadHistory(item)">履歴</button>
@@ -124,7 +124,7 @@
               <td>{{ h.customer_code || '-' }}</td>
               <td>{{ h.ship_to_code || '-' }}</td>
               <td class="num">{{ formatQty(h.quantity) }}</td>
-              <td>{{ h.remark || '-' }}</td>
+              <td>{{ displayRemark(h.remark) }}</td>
             </tr>
             <tr v-if="!historyRecords.length">
               <td colspan="8" class="no-data">履歴がありません</td>
@@ -211,6 +211,13 @@ function displayCustomer(item) {
     return `${item.customer_code || ""} ${item.customer_name}`.trim();
   }
   return item.customer_code || "-";
+}
+
+function displayRemark(value) {
+  const v = String(value || "").trim();
+  if (!v) return "-";
+  if (v.startsWith("[TRIP_ACTUAL]")) return "-";
+  return v;
 }
 
 function resetForm() {

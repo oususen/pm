@@ -23,7 +23,13 @@ class ShipmentActualSerializer(serializers.ModelSerializer):
     def get_product_name(self, obj):
         if obj.product_id and obj.product:
             return obj.product.product_name
-        return None
+        code = str(getattr(obj, 'product_code', '') or '').strip()
+        if not code:
+            return None
+        cache = self.context.setdefault('_product_name_by_code', {})
+        if code not in cache:
+            cache[code] = Product.objects.filter(product_code=code).values_list('product_name', flat=True).first()
+        return cache.get(code)
 
     def get_customer_name(self, obj):
         if obj.customer_id and obj.customer:
