@@ -59,6 +59,7 @@
             <div class="detail-qty">{{ row.qty }}</div>
             <div class="actual-input-wrap">
               <input
+                v-if="isActualInputMode"
                 :value="actualQtyValue(trip.id, row.allocation_id, row.qty)"
                 type="number"
                 step="1"
@@ -66,12 +67,15 @@
                 :disabled="!canRegisterActual(trip)"
                 @input="setActualQty(trip.id, row.allocation_id, $event.target.value)"
               />
+              <div v-else class="actual-readonly">
+                {{ actualQtyValue(trip.id, row.allocation_id, row.qty) }}
+              </div>
             </div>
           </div>
           <div v-if="!trip.details.length" class="no-detail">明細なし</div>
         </div>
 
-        <div class="actual-row">
+        <div v-if="isActualInputMode" class="actual-row">
           <label class="field inline-field">
             <span>実績日</span>
             <input
@@ -122,6 +126,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
 
 const formatDate = (d) => {
   const yyyy = String(d.getFullYear())
@@ -141,7 +147,20 @@ const loading = ref(false)
 const updatingTripId = ref(null)
 const summary = ref({ total: 0, planned: 0, loading: 0, departed: 0, closed: 0 })
 const route = useRoute()
-const canActualEdit = computed(() => Boolean(route.meta?.actualInputEnabled))
+const isActualInputMode = computed(() => Boolean(route.meta?.actualInputEnabled))
+const canTripEdit = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_superuser) return true
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  const routeResource = route.meta?.resource
+  if (routeResource && permissions.some((item) => item.resource === routeResource)) {
+    return hasPermission(user, routeResource, 'edit')
+  }
+  return hasPermission(user, 'shipping', 'edit')
+})
+const canActualEdit = computed(() => canTripEdit.value && isActualInputMode.value)
+const canStatusEdit = computed(() => canTripEdit.value && !isActualInputMode.value)
 
 const visibleTrips = computed(() => {
   if (!statusFilter.value) return trips.value
@@ -168,9 +187,9 @@ const businessTypeLabel = (value) => {
   return map[value] || value
 }
 
-const canMarkLoading = (trip) => trip?.status === 'PLANNED'
-const canMarkDeparted = (trip) => ['PLANNED', 'LOADING'].includes(trip?.status)
-const canReopen = (trip) => ['LOADING', 'DEPARTED', 'CLOSED'].includes(trip?.status)
+const canMarkLoading = (trip) => canStatusEdit.value && trip?.status === 'PLANNED'
+const canMarkDeparted = (trip) => canStatusEdit.value && ['PLANNED', 'LOADING'].includes(trip?.status)
+const canReopen = (trip) => canStatusEdit.value && ['LOADING', 'DEPARTED', 'CLOSED'].includes(trip?.status)
 const canRegisterActual = (trip) => canActualEdit.value && trip?.status === 'DEPARTED'
 
 const parseQty = (value) => {
@@ -235,6 +254,10 @@ const setStatusFilter = (status) => {
 }
 
 const registerActual = async (trip) => {
+  if (!canRegisterActual(trip)) {
+    alert('実績登録の編集権限がありません。')
+    return
+  }
   const shipmentDate = actualDateValue(trip.id, trip.departure_date)
   if (!shipmentDate) {
     alert('実績日を入力してください。')
@@ -264,6 +287,10 @@ const registerActual = async (trip) => {
 }
 
 const updateTripStatus = async (trip, action) => {
+  if (!canStatusEdit.value) {
+    alert('ステータス更新の編集権限がありません。')
+    return
+  }
   updatingTripId.value = trip.id
   try {
     const res = await api.shippingTrips.updateExecutionStatus({
@@ -444,6 +471,18 @@ onMounted(loadTrips)
   font-size: 18px;
   text-align: right;
 }
+.actual-readonly {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 28px;
+  line-height: 1;
+  text-align: right;
+  color: #475569;
+  background: #f8fafc;
+}
 .no-detail {
   text-align: center;
   color: #64748b;
@@ -545,6 +584,11 @@ onMounted(loadTrips)
     height: 34px;
     font-size: 16px;
     padding: 0 6px;
+  }
+  .actual-readonly {
+    min-height: 34px;
+    font-size: 24px;
+    padding: 5px 6px;
   }
   .actual-row {
     display: grid;

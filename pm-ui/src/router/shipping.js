@@ -81,7 +81,7 @@ const shipping = [
     path: "/shipping/trip-progress-summary",
     name: "ShippingTripProgressSummary",
     component: () => import("@/views/shipping/ShippingTripProgress.vue"),
-    meta: { pageTitle: "便進捗サマリー", resource: "shipping.trip_progress" },
+    meta: { pageTitle: "便進捗サマリー", resource: "shipping.trip_progress_summary" },
   },
 ];
 

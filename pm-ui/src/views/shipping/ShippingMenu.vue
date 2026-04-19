@@ -145,7 +145,7 @@ const tiles = computed(() => [
     label: "便進捗確認（一覧）",
     icon: "📋",
     required: "view",
-    resource: "shipping.trip_progress",
+    resource: "shipping.trip_progress_summary",
   },
 ].map((tile) => ({
   ...tile,
