@@ -9,6 +9,10 @@ from shipping.views_kubota_sakai_trip_assignment import (
     KubotaSakaiTripLoadPreviewView,
     KubotaSakaiTripPlanView,
 )
+from shipping.views_shipping_trip_execution import (
+    ShippingTripExecutionView,
+    ShippingTripProgressView,
+)
 from shipping.views_shipping_order import (
     generate_shipping_order_pdf_api,
     get_available_dates,
@@ -39,6 +43,8 @@ urlpatterns = [
     path('kubota-sakai-trip-assignments/preview-load/', KubotaSakaiTripLoadPreviewView.as_view(), name='kubota-sakai-trip-preview-load'),
     path('kubota-sakai-trip-assignments/load-detail/', KubotaSakaiTripLoadDetailView.as_view(), name='kubota-sakai-trip-load-detail'),
     path('kubota-sakai-trip-assignments/pickup-detail-pdf/', KubotaSakaiPickupDetailPdfView.as_view(), name='kubota-sakai-pickup-detail-pdf'),
+    path('shipping-trips/execution/', ShippingTripExecutionView.as_view(), name='shipping-trip-execution'),
+    path('shipping-trips/progress/', ShippingTripProgressView.as_view(), name='shipping-trip-progress'),
     # Shipping order APIs
     path('shipping/available-dates/', get_available_dates, name='shipping-available-dates'),
     path('shipping/order-data/<str:target_date_str>/', get_shipping_order_data, name='shipping-order-data'),

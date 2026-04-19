@@ -188,6 +188,138 @@ class KubotaSakaiTripAssignment(models.Model):
         return f"{self.departure_date} truck={self.truck_id} adj={self.due_adjustment_id} qty={self.qty}"
 
 
+class ShippingRun(models.Model):
+    """共通出荷業務ヘッダ。顧客/納入場単位で出荷実行を束ねる。"""
+
+    STATUS_CHOICES = [
+        ('OPEN', '進行中'),
+        ('CLOSED', '完了'),
+    ]
+
+    id = models.BigAutoField(primary_key=True)
+    business_type = models.CharField(max_length=40, verbose_name='業務種別')
+    customer_code = models.CharField(max_length=20, verbose_name='得意先コード')
+    ship_to_code = models.CharField(max_length=40, null=True, blank=True, verbose_name='納入場コード')
+    target_date_from = models.DateField(verbose_name='対象開始日')
+    target_date_to = models.DateField(verbose_name='対象終了日')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='OPEN', verbose_name='ステータス')
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='shipping_runs',
+        verbose_name='作成者',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 't_shipping_run'
+        verbose_name = '出荷業務'
+        verbose_name_plural = '出荷業務'
+        unique_together = [['business_type', 'customer_code', 'ship_to_code', 'target_date_from', 'target_date_to']]
+        indexes = [
+            models.Index(fields=['business_type', 'customer_code', 'ship_to_code']),
+            models.Index(fields=['target_date_from', 'target_date_to']),
+        ]
+
+    def __str__(self):
+        return f"{self.business_type}:{self.customer_code}:{self.ship_to_code or '-'} {self.target_date_from}~{self.target_date_to}"
+
+
+class ShippingTrip(models.Model):
+    """共通便ヘッダ。trip_ref で顧客固有便ID（堺は TRUCK:{id}）を保持する。"""
+
+    STATUS_CHOICES = [
+        ('PLANNED', '計画'),
+        ('LOADING', '積込中'),
+        ('DEPARTED', '出発済'),
+        ('CLOSED', '完了'),
+    ]
+
+    id = models.BigAutoField(primary_key=True)
+    run = models.ForeignKey(
+        ShippingRun,
+        on_delete=models.CASCADE,
+        related_name='trips',
+        verbose_name='出荷業務',
+    )
+    business_type = models.CharField(max_length=40, verbose_name='業務種別')
+    customer_code = models.CharField(max_length=20, verbose_name='得意先コード')
+    ship_to_code = models.CharField(max_length=40, null=True, blank=True, verbose_name='納入場コード')
+    departure_date = models.DateField(verbose_name='出発日')
+    trip_ref = models.CharField(max_length=80, verbose_name='便参照キー')
+    trip_code = models.CharField(max_length=80, null=True, blank=True, verbose_name='便コード')
+    departure_time_plan = models.TimeField(null=True, blank=True, verbose_name='予定出発時刻')
+    departure_time_actual = models.DateTimeField(null=True, blank=True, verbose_name='実出発時刻')
+    loading_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='shipping_trip_loading_by',
+        verbose_name='積込担当者',
+    )
+    departed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='shipping_trip_departed_by',
+        verbose_name='出発担当者',
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PLANNED', verbose_name='ステータス')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 't_shipping_trip'
+        verbose_name = '出荷便'
+        verbose_name_plural = '出荷便'
+        unique_together = [['business_type', 'customer_code', 'ship_to_code', 'departure_date', 'trip_ref']]
+        indexes = [
+            models.Index(fields=['run']),
+            models.Index(fields=['departure_date', 'status']),
+        ]
+
+    def __str__(self):
+        return f"{self.departure_date} {self.business_type} {self.trip_ref}"
+
+
+class ShippingTripAllocation(models.Model):
+    """共通便割付。source_type/source_id で元明細を表現する。"""
+
+    id = models.BigAutoField(primary_key=True)
+    trip = models.ForeignKey(
+        ShippingTrip,
+        on_delete=models.CASCADE,
+        related_name='allocations',
+        verbose_name='出荷便',
+    )
+    source_type = models.CharField(max_length=40, verbose_name='元データ種別')
+    source_id = models.BigIntegerField(verbose_name='元データID')
+    product_code = models.CharField(max_length=50, verbose_name='品番')
+    ship_to_code = models.CharField(max_length=40, null=True, blank=True, verbose_name='納入場コード')
+    due_date = models.DateField(null=True, blank=True, verbose_name='納期')
+    qty = models.DecimalField(max_digits=14, decimal_places=3, verbose_name='割付数量')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 't_shipping_trip_allocation'
+        verbose_name = '出荷便割付'
+        verbose_name_plural = '出荷便割付'
+        unique_together = [['trip', 'source_type', 'source_id']]
+        indexes = [
+            models.Index(fields=['source_type', 'source_id']),
+            models.Index(fields=['product_code']),
+        ]
+
+    def __str__(self):
+        return f"trip={self.trip_id} {self.source_type}:{self.source_id} qty={self.qty}"
+
+
 class StgOrderRaw(models.Model):
     """受注取込ステージング（生データ） - 旧モデル、互換性のため残す"""
     ORDER_TYPE_CHOICES = [

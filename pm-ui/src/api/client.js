@@ -53,6 +53,7 @@ import { createPlanDeviationReportAPI, createRecordConfirmationAPI } from './res
 import { createKubotaSakaiTrucksAPI } from './resources/kubotaSakaiTrucks'
 import { createKubotaSakaiDueAdjustmentsAPI } from './resources/kubotaSakaiDueAdjustments'
 import { createKubotaSakaiTripAssignmentsAPI } from './resources/kubotaSakaiTripAssignments'
+import { createShippingTripsAPI } from './resources/shippingTrips'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
@@ -172,5 +173,6 @@ export default {
   kubotaSakaiTrucks: createKubotaSakaiTrucksAPI(client),
   kubotaSakaiDueAdjustments: createKubotaSakaiDueAdjustmentsAPI(client),
   kubotaSakaiTripAssignments: createKubotaSakaiTripAssignmentsAPI(client),
+  shippingTrips: createShippingTripsAPI(client),
   client,
 }

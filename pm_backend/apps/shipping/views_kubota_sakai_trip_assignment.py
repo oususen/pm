@@ -14,7 +14,7 @@ from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_HALF_UP
 from io import BytesIO
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import HttpResponse
 from rest_framework import status
 from rest_framework.response import Response
@@ -26,7 +26,13 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfgen import canvas
 
 from masters.models import Calendar, CalendarDay, KubotaSakaiTruck, Line, Process, Product
-from orders.core.models import KubotaSakaiDueAdjustment, KubotaSakaiTripAssignment
+from orders.core.models import (
+    KubotaSakaiDueAdjustment,
+    KubotaSakaiTripAssignment,
+    ShippingRun,
+    ShippingTrip,
+    ShippingTripAllocation,
+)
 from production.models_line_backlog import LineBacklog
 from system_settings.models import SystemSetting
 
@@ -40,6 +46,9 @@ KUBOTA_DELIVERY_PROCESS_NAME = 'クボタ配送工程'
 
 # plan_id プレフィックス（pickup カスケードでクボタ便を識別するためのマーカー）
 KUBOTA_TRIP_PLAN_ID_PREFIX = 'KBT_T'
+KUBOTA_COMMON_BUSINESS_TYPE = 'KUBOTA_SAKAI'
+KUBOTA_COMMON_SOURCE_TYPE = 'KUBOTA_SAKAI_DUE'
+KUBOTA_CUSTOMER_CODE = '000196'
 
 
 # ---------------------------------------------------------------------------
@@ -395,6 +404,127 @@ def is_kubota_delivery_line(line_obj):
     )
 
 
+def _sync_common_shipping_tables(target_date, normalized_rows, adj_map, truck_map, user):
+    """堺専用割付を共通出荷テーブルへ同期する。"""
+    due_ids = [int(row['adj_id']) for row in normalized_rows]
+    if due_ids:
+        ShippingTripAllocation.objects.filter(
+            source_type=KUBOTA_COMMON_SOURCE_TYPE,
+            source_id__in=due_ids,
+            trip__business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+            trip__customer_code=KUBOTA_CUSTOMER_CODE,
+            trip__departure_date=target_date,
+        ).delete()
+
+    run_cache = {}
+    trip_cache = {}
+    create_allocations = []
+
+    for row in normalized_rows:
+        adj = adj_map.get(int(row['adj_id']))
+        if not adj:
+            continue
+        ship_to_code = str(adj.ship_to_code or '')
+
+        run_key = (
+            KUBOTA_COMMON_BUSINESS_TYPE,
+            KUBOTA_CUSTOMER_CODE,
+            ship_to_code,
+            target_date,
+            target_date,
+        )
+        run = run_cache.get(run_key)
+        if not run:
+            run, _ = ShippingRun.objects.get_or_create(
+                business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+                customer_code=KUBOTA_CUSTOMER_CODE,
+                ship_to_code=ship_to_code,
+                target_date_from=target_date,
+                target_date_to=target_date,
+                defaults={
+                    'status': 'OPEN',
+                    'created_by': user,
+                },
+            )
+            run_cache[run_key] = run
+
+        for allocation in row.get('allocations') or []:
+            truck_id = int(allocation.get('truck_id') or 0)
+            qty = _to_decimal(allocation.get('qty'))
+            if truck_id <= 0 or qty <= 0:
+                continue
+            truck = truck_map.get(truck_id)
+            if not truck:
+                continue
+            trip_ref = f"TRUCK:{truck_id}"
+            trip_key = (
+                KUBOTA_COMMON_BUSINESS_TYPE,
+                KUBOTA_CUSTOMER_CODE,
+                ship_to_code,
+                target_date,
+                trip_ref,
+            )
+            trip = trip_cache.get(trip_key)
+            if not trip:
+                trip, created = ShippingTrip.objects.get_or_create(
+                    business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+                    customer_code=KUBOTA_CUSTOMER_CODE,
+                    ship_to_code=ship_to_code,
+                    departure_date=target_date,
+                    trip_ref=trip_ref,
+                    defaults={
+                        'run': run,
+                        'trip_code': truck.alias_name or truck.name,
+                        'departure_time_plan': truck.departure_time,
+                        'status': 'PLANNED',
+                    },
+                )
+                if not created:
+                    trip_updates = []
+                    if trip.run_id != run.id:
+                        trip.run = run
+                        trip_updates.append('run')
+                    next_code = truck.alias_name or truck.name
+                    if (trip.trip_code or '') != (next_code or ''):
+                        trip.trip_code = next_code
+                        trip_updates.append('trip_code')
+                    if trip.departure_time_plan != truck.departure_time:
+                        trip.departure_time_plan = truck.departure_time
+                        trip_updates.append('departure_time_plan')
+                    if trip_updates:
+                        trip.save(update_fields=trip_updates + ['updated_at'])
+                trip_cache[trip_key] = trip
+
+            create_allocations.append(
+                ShippingTripAllocation(
+                    trip=trip,
+                    source_type=KUBOTA_COMMON_SOURCE_TYPE,
+                    source_id=adj.id,
+                    product_code=adj.product_code,
+                    ship_to_code=adj.ship_to_code or '',
+                    due_date=adj.due_date,
+                    qty=qty,
+                )
+            )
+
+    if create_allocations:
+        ShippingTripAllocation.objects.bulk_create(create_allocations)
+
+    # 当日・該当業務の空便を掃除
+    empty_trip_ids = list(
+        ShippingTrip.objects.filter(
+            business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+            customer_code=KUBOTA_CUSTOMER_CODE,
+            departure_date=target_date,
+        )
+        .annotate(allocation_count=Count('allocations'))
+        .filter(allocation_count=0)
+        .values_list('id', flat=True)
+    )
+    if empty_trip_ids:
+        ShippingTrip.objects.filter(id__in=empty_trip_ids).delete()
+
+
 # ---------------------------------------------------------------------------
 # API View
 # ---------------------------------------------------------------------------
@@ -669,6 +799,15 @@ class KubotaSakaiTripPlanView(APIView):
                     {'detail': '便積載制約エラーがあります。', 'errors': save_errors},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+
+            # 共通出荷テーブルへ同時保存（堺専用と同一トランザクション）
+            _sync_common_shipping_tables(
+                target_date=target_date,
+                normalized_rows=normalized,
+                adj_map=adj_map,
+                truck_map=truck_map,
+                user=user,
+            )
 
             # LineBacklog 同期（LinePlan不使用、LineBacklog直接保存）
             _sync_kubota_delivery_backlog_for_date(target_date)
