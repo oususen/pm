@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 
 from masters.models import Product
 from orders.core.models import ShippingTrip, ShippingTripAllocation
+from shipping.models import ShipmentActual, ShipmentActualHistory
 
 
 def _parse_date(value):
@@ -165,7 +166,7 @@ class ShippingTripExecutionView(APIView):
         action = (request.data.get('action') or '').strip()
         if not trip_id:
             return Response({'detail': 'trip_id は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
-        if action not in ('mark_loading', 'mark_departed', 'reopen'):
+        if action not in ('mark_loading', 'mark_departed', 'reopen', 'register_actual'):
             return Response({'detail': 'action が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
@@ -192,13 +193,111 @@ class ShippingTripExecutionView(APIView):
                     trip.loading_by = request.user
             trip.save()
         elif action == 'reopen':
-            if trip.status == 'CLOSED':
-                return Response({'detail': '完了便は再オープンできません。'}, status=status.HTTP_400_BAD_REQUEST)
             trip.status = 'PLANNED'
             trip.departure_time_actual = None
             trip.loading_by = None
             trip.departed_by = None
             trip.save()
+        elif action == 'register_actual':
+            if trip.status != 'DEPARTED':
+                return Response(
+                    {'detail': '出発済の便のみ実績登録できます。'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            shipment_date = _parse_date(request.data.get('shipment_date')) or trip.departure_date
+            raw_actuals = request.data.get('actuals') or []
+            if not isinstance(raw_actuals, list):
+                return Response({'detail': 'actuals は配列で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+            allocations = list(
+                ShippingTripAllocation.objects.filter(trip_id=trip.id).order_by('id')
+            )
+            allocation_map = {a.id: a for a in allocations}
+
+            normalized = {}
+            for item in raw_actuals:
+                try:
+                    allocation_id = int(item.get('allocation_id') or 0)
+                except Exception:
+                    allocation_id = 0
+                qty = _to_decimal(item.get('quantity'))
+                if allocation_id <= 0 or allocation_id not in allocation_map:
+                    continue
+                normalized[allocation_id] = qty
+
+            created_count = 0
+            updated_count = 0
+            deleted_count = 0
+            for allocation in allocations:
+                qty = normalized.get(allocation.id, Decimal('0'))
+                marker = f'[TRIP_ACTUAL]{trip.id}:{allocation.id}'
+                existing = ShipmentActual.objects.filter(remark=marker).order_by('-id').first()
+                if qty <= 0:
+                    if existing:
+                        ShipmentActualHistory.objects.create(
+                            shipment_actual=existing,
+                            action='DELETE',
+                            shipment_date=existing.shipment_date,
+                            product_code=existing.product_code,
+                            customer_code=existing.customer_code,
+                            ship_to_code=existing.ship_to_code,
+                            quantity=existing.quantity,
+                            remark=existing.remark,
+                        )
+                        existing.delete()
+                        deleted_count += 1
+                    continue
+
+                if existing:
+                    ShipmentActualHistory.objects.create(
+                        shipment_actual=existing,
+                        action='UPDATE',
+                        shipment_date=existing.shipment_date,
+                        product_code=existing.product_code,
+                        customer_code=existing.customer_code,
+                        ship_to_code=existing.ship_to_code,
+                        quantity=existing.quantity,
+                        remark=existing.remark,
+                    )
+                    existing.shipment_date = shipment_date
+                    existing.product_code = allocation.product_code
+                    existing.customer_code = trip.customer_code
+                    existing.ship_to_code = allocation.ship_to_code or trip.ship_to_code
+                    existing.quantity = qty
+                    existing.save()
+                    updated_count += 1
+                else:
+                    created = ShipmentActual.objects.create(
+                        shipment_date=shipment_date,
+                        product_code=allocation.product_code,
+                        customer_code=trip.customer_code,
+                        ship_to_code=allocation.ship_to_code or trip.ship_to_code,
+                        quantity=qty,
+                        remark=marker,
+                    )
+                    ShipmentActualHistory.objects.create(
+                        shipment_actual=created,
+                        action='CREATE',
+                        shipment_date=created.shipment_date,
+                        product_code=created.product_code,
+                        customer_code=created.customer_code,
+                        ship_to_code=created.ship_to_code,
+                        quantity=created.quantity,
+                        remark=created.remark,
+                    )
+                    created_count += 1
+
+            # 実績登録完了と同時に便を完了状態へ進める。
+            if trip.status != 'CLOSED':
+                trip.status = 'CLOSED'
+                trip.save(update_fields=['status'])
+
+            return Response({
+                'detail': '出荷実績を登録しました。',
+                'created': created_count,
+                'updated': updated_count,
+                'deleted': deleted_count,
+            })
 
         allocations = list(
             ShippingTripAllocation.objects
@@ -227,10 +326,13 @@ class ShippingTripProgressView(APIView):
             return Response({'detail': 'date_from は date_to 以前を指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
 
         business_type = (request.query_params.get('business_type') or '').strip()
+        status_filter = (request.query_params.get('status') or '').strip().upper()
 
         qs = ShippingTrip.objects.filter(departure_date__gte=date_from, departure_date__lte=date_to)
         if business_type:
             qs = qs.filter(business_type=business_type)
+        if status_filter in ('PLANNED', 'LOADING', 'DEPARTED', 'CLOSED'):
+            qs = qs.filter(status=status_filter)
         trips = list(
             qs.select_related('run__created_by', 'loading_by', 'departed_by')
             .order_by('departure_date', 'business_type', 'departure_time_plan', 'trip_code', 'trip_ref', 'id')
@@ -288,6 +390,7 @@ class ShippingTripProgressView(APIView):
             'date_from': date_from.isoformat(),
             'date_to': date_to.isoformat(),
             'business_type': business_type,
+            'status': status_filter,
             'business_types': business_types,
             'daily_summary': [
                 {'date': day, **summary}

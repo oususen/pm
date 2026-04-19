@@ -16,6 +16,16 @@
           <option v-for="item in businessTypes" :key="item" :value="item">{{ businessTypeLabel(item) }}</option>
         </select>
       </label>
+      <label class="field">
+        <span>ステータス</span>
+        <select v-model="statusFilter">
+          <option value="">すべて</option>
+          <option value="PLANNED">未着手</option>
+          <option value="LOADING">積込完了</option>
+          <option value="DEPARTED">出発済</option>
+          <option value="CLOSED">完了</option>
+        </select>
+      </label>
       <button class="btn" :disabled="loading" @click="loadProgress">表示</button>
     </div>
 
@@ -97,6 +107,7 @@ nextWeek.setDate(today.getDate() + 6)
 const dateFrom = ref(formatDate(today))
 const dateTo = ref(formatDate(nextWeek))
 const businessType = ref('')
+const statusFilter = ref('')
 const businessTypes = ref([])
 const dailySummary = ref([])
 const trips = ref([])
@@ -133,6 +144,7 @@ const loadProgress = async () => {
       date_from: dateFrom.value,
       date_to: dateTo.value,
       business_type: businessType.value || undefined,
+      status: statusFilter.value || undefined,
     })
     const data = res.data || {}
     businessTypes.value = Array.isArray(data.business_types) ? data.business_types : []
