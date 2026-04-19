@@ -10,13 +10,20 @@ plan_id に truck_id を埋め込み、pickup カスケードで arrival_day_off
 
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_HALF_UP
+from io import BytesIO
 
 from django.db import transaction
 from django.db.models import Q
+from django.http import HttpResponse
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.pdfgen import canvas
 
 from masters.models import Calendar, CalendarDay, KubotaSakaiTruck, Line, Process, Product
 from orders.core.models import KubotaSakaiDueAdjustment, KubotaSakaiTripAssignment
@@ -93,7 +100,7 @@ def _calculate_assignment_area(item, truck):
             layers = Decimal(str(min(truck_layers, max_stack if max_stack > 0 else truck_layers)))
 
     effective_floor = width * depth / (layers if layers > 0 else Decimal('1'))
-    container_count = qty / capacity
+    container_count = (qty / capacity).to_integral_value(rounding=ROUND_CEILING)
     return effective_floor * container_count
 
 
@@ -845,10 +852,230 @@ class KubotaSakaiTripLoadDetailView(APIView):
                     f"{int(getattr(container, 'height', 0) or 0)}"
                 ) if container else '-',
                 'capacity': capacity,
-                'container_count': str((qty / Decimal(str(capacity))).quantize(Decimal('0.001'))),
+                'container_count': str((qty / Decimal(str(capacity))).to_integral_value(rounding=ROUND_CEILING)),
                 'used_container_area': str(used_area.quantize(Decimal('1'), rounding=ROUND_HALF_UP)),
                 'occupancy_percent': str(occupancy_percent),
             })
 
         rows.sort(key=lambda r: (r['truck_label'], r['product_code']))
         return Response({'target_date': target_date.isoformat(), 'rows': rows})
+
+
+class KubotaSakaiPickupDetailPdfView(APIView):
+    """出発日別の集荷明細表PDFを返す。"""
+
+    def get(self, request):
+        start_date = _parse_date(request.query_params.get('start_date'))
+        end_date = _parse_date(request.query_params.get('end_date'))
+        if not start_date or not end_date:
+            return Response({'detail': 'start_date と end_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if start_date > end_date:
+            return Response({'detail': '開始日は終了日以前を指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # kubota_sakai カレンダで営業日逆算（offset>=1）
+        calendar = _resolve_kubota_calendar()
+        calendar_map = _build_calendar_day_map(calendar)
+
+        max_offset = KubotaSakaiTruck.objects.filter(is_active=True).order_by('-arrival_day_offset').values_list('arrival_day_offset', flat=True).first() or 0
+        buffer_days = max(14, int(max_offset) * 3 + 7)
+        due_end = end_date + timedelta(days=buffer_days)
+
+        assignments = list(
+            KubotaSakaiTripAssignment.objects.select_related('due_adjustment', 'truck')
+            .filter(
+                due_adjustment__due_date__gte=start_date,
+                due_adjustment__due_date__lte=due_end,
+                qty__gt=0,
+            )
+            .order_by('due_adjustment__due_date', 'truck__display_order', 'truck__name', 'id')
+        )
+
+        product_codes = {a.due_adjustment.product_code for a in assignments}
+        products = {
+            p.product_code: p
+            for p in Product.objects.select_related('used_container').filter(product_code__in=product_codes)
+        }
+
+        # departure_date -> truck_id -> product_code で集計
+        grouped = defaultdict(lambda: defaultdict(lambda: defaultdict(Decimal)))
+        truck_meta = {}
+        for item in assignments:
+            truck = item.truck
+            if not truck:
+                continue
+            offset_days = max(int(truck.arrival_day_offset or 0), 0)
+            due_date = item.due_adjustment.due_date
+            departure_date = _subtract_business_days(due_date, offset_days, calendar_map)
+            if departure_date < start_date or departure_date > end_date:
+                continue
+            product_code = item.due_adjustment.product_code
+            grouped[departure_date][truck.id][product_code] += _to_decimal(item.qty)
+            if truck.id not in truck_meta:
+                truck_meta[truck.id] = {
+                    'name': truck.name,
+                    'alias_name': truck.alias_name or '',
+                    'display_order': truck.display_order or 0,
+                    'departure_time': _format_hhmm(truck.departure_time),
+                }
+
+        pdf_bytes = self._render_pdf(start_date, end_date, grouped, truck_meta, products)
+        filename = f"クボタ堺_集荷明細表_{start_date:%Y%m%d}_{end_date:%Y%m%d}.pdf"
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    def _render_pdf(self, start_date, end_date, grouped, truck_meta, products):
+        try:
+            pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKakuGo-W5'))
+        except Exception:
+            pass
+
+        font_name = 'HeiseiKakuGo-W5'
+        buf = BytesIO()
+        c = canvas.Canvas(buf, pagesize=A4)
+        width, height = A4
+        left = 12 * mm
+        right = width - 12 * mm
+        top = height - 12 * mm
+        line_h = 5.6 * mm
+        table_left = left + 4 * mm
+        table_right = right - 1 * mm
+
+        def draw_header(page_no):
+            c.setFont(font_name, 14)
+            c.drawString(left, top, 'クボタ堺 集荷明細表（出発日別）')
+            c.setFont(font_name, 9)
+            c.drawString(left, top - 6.5 * mm, f'対象期間: {start_date:%Y-%m-%d} ～ {end_date:%Y-%m-%d}')
+            c.drawRightString(right, top - 6.5 * mm, f'Page {page_no}')
+
+        def draw_line(y_pos, width=1.0, dashed=False):
+            c.saveState()
+            c.setLineWidth(width)
+            if dashed:
+                c.setDash(1.5, 2.5)
+            c.line(table_left, y_pos, table_right, y_pos)
+            c.restoreState()
+
+        def draw_double_line(y_pos, width=1.2, gap=1.2 * mm):
+            c.saveState()
+            c.setLineWidth(width)
+            c.line(left, y_pos, table_right, y_pos)
+            c.line(left, y_pos - gap, table_right, y_pos - gap)
+            c.restoreState()
+
+        def draw_departure_title(dep_date, continuation=False):
+            c.setFont(font_name, 11)
+            suffix = ' (続き)' if continuation else ''
+            c.drawString(left, y, f'出発日: {dep_date:%Y-%m-%d}{suffix}')
+
+        def draw_truck_title(truck_text, dep_time):
+            c.setFont(font_name, 10)
+            c.drawString(left + 2 * mm, y, f'便: {truck_text}')
+            if dep_time:
+                c.drawString(left + 34 * mm, y, f'出発時刻：{dep_time}')
+
+        def draw_columns():
+            c.setFont(font_name, 9)
+            c.drawString(left + 8 * mm, y, '品番')
+            c.drawString(left + 58 * mm, y, '品名')
+            c.drawRightString(left + 162 * mm, y, '容器数')
+            c.drawRightString(left + 180 * mm, y, '数量')
+
+        # ヘッダ（対象期間）と最初の出発日の間を2行ぶん空ける
+        y = top - 14 * mm - (line_h * 2)
+        page_no = 1
+        draw_header(page_no)
+
+        departure_dates = sorted(grouped.keys())
+        if not departure_dates:
+            c.setFont(font_name, 11)
+            c.drawString(left, y - 6 * mm, '対象データがありません。')
+            c.save()
+            buf.seek(0)
+            return buf.read()
+
+        for dep_idx, dep in enumerate(departure_dates):
+            if y < 28 * mm:
+                c.showPage()
+                page_no += 1
+                draw_header(page_no)
+                y = top - 14 * mm - (line_h * 2)
+            if dep_idx > 0:
+                # 日と日の間に2行ぶんの余白を入れてから二重線を描画
+                y -= (line_h * 2)
+                draw_double_line(y + 1.8 * mm, width=1.3, gap=1.2 * mm)
+                # 二重線の後も2行ぶん余白を入れる
+                y -= (line_h * 2)
+
+            draw_departure_title(dep)
+            y -= line_h
+
+            truck_ids = sorted(
+                grouped[dep].keys(),
+                key=lambda tid: (
+                    int((truck_meta.get(tid) or {}).get('display_order') or 0),
+                    str((truck_meta.get(tid) or {}).get('alias_name') or (truck_meta.get(tid) or {}).get('name') or ''),
+                    int(tid),
+                ),
+            )
+            for truck_idx, truck_id in enumerate(truck_ids):
+                if y < 20 * mm:
+                    c.showPage()
+                    page_no += 1
+                    draw_header(page_no)
+                    y = top - 14 * mm - (line_h * 2)
+                    draw_departure_title(dep, continuation=True)
+                    y -= line_h
+                if truck_idx > 0:
+                    draw_line(y + 1.6 * mm, width=1.1, dashed=False)
+                    y -= 1.8 * mm
+
+                meta = truck_meta.get(truck_id) or {}
+                truck_label = (meta.get('alias_name') or '').strip() or (meta.get('name') or f'便{truck_id}')
+                departure_time = meta.get('departure_time') or ''
+                draw_truck_title(truck_label, departure_time)
+                y -= line_h
+
+                draw_columns()
+                y -= line_h
+
+                product_codes = sorted(grouped[dep][truck_id].keys())
+                for prod_idx, code in enumerate(product_codes):
+                    if y < 16 * mm:
+                        c.showPage()
+                        page_no += 1
+                        draw_header(page_no)
+                        y = top - 14 * mm - (line_h * 2)
+                        draw_departure_title(dep, continuation=True)
+                        y -= line_h
+                        draw_truck_title(truck_label, departure_time)
+                        y -= line_h
+                        draw_columns()
+                        y -= line_h
+                    qty = grouped[dep][truck_id][code]
+                    product = products.get(code)
+                    name = (product.product_name if product else '') or ''
+                    capacity_val = _to_decimal(getattr(product, 'capacity', None) if product else None, default='0')
+                    if capacity_val <= 0:
+                        container = getattr(product, 'used_container', None) if product else None
+                        capacity_val = _to_decimal(getattr(container, 'capacity', None) if container else None, default='0')
+                    if capacity_val <= 0:
+                        capacity_val = Decimal('1')
+                    container_count = (qty / capacity_val).to_integral_value(rounding=ROUND_CEILING)
+                    qty_text = str(qty.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+                    container_text = str(container_count)
+                    c.setFont(font_name, 9)
+                    c.drawString(left + 8 * mm, y, str(code))
+                    c.drawString(left + 58 * mm, y, name[:28])
+                    c.drawRightString(left + 162 * mm, y, container_text)
+                    c.drawRightString(left + 180 * mm, y, qty_text)
+                    if prod_idx < len(product_codes) - 1:
+                        draw_line(y - 1.4 * mm, width=0.6, dashed=True)
+                    y -= line_h
+                y -= 1.5 * mm
+
+            y -= 2.5 * mm
+
+        c.save()
+        buf.seek(0)
+        return buf.read()

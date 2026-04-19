@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 
 
 def _to_decimal(value, default='0'):
@@ -69,7 +69,7 @@ def calculate_truck_load(assignments, truck):
             continue
 
         container_floor = width * depth
-        container_count = qty / capacity
+        container_count = (qty / capacity).to_integral_value(rounding=ROUND_CEILING)
 
         layers = Decimal('1')
         if stackable and height > 0:

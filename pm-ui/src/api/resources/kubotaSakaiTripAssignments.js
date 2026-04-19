@@ -14,6 +14,12 @@ export const createKubotaSakaiTripAssignmentsAPI = (client) => ({
   loadDetail(targetDate) {
     return client.get('/kubota-sakai-trip-assignments/load-detail/', { params: { target_date: targetDate } })
   },
+  pickupDetailPdf(startDate, endDate) {
+    return client.get('/kubota-sakai-trip-assignments/pickup-detail-pdf/', {
+      params: { start_date: startDate, end_date: endDate },
+      responseType: 'blob',
+    })
+  },
   get(id) {
     return client.get(`/kubota-sakai-trip-assignments/${id}/`)
   },

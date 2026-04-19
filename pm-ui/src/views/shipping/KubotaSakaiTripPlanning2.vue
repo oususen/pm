@@ -27,9 +27,34 @@
       <button class="btn" :disabled="loading || exportingCsv" @click="exportLoadDetailCsv">
         {{ exportingCsv ? '出力中...' : '占有CSV' }}
       </button>
+      <button class="btn pickup-btn" :disabled="loading || exportingPickupPdf" @click="openPickupPdfDialog">
+        {{ exportingPickupPdf ? '出力中...' : '集荷明細PDF' }}
+      </button>
       <button class="btn detail-btn" :disabled="loading" @click="showTruckDetail = !showTruckDetail">
         便詳細
       </button>
+    </div>
+
+    <div v-if="showPickupPdfDialog" class="modal-overlay" @click.self="closePickupPdfDialog">
+      <div class="modal-card">
+        <h3 class="modal-title">集荷明細表（PDF）</h3>
+        <div class="modal-fields">
+          <label class="modal-field">
+            <span>開始日</span>
+            <input v-model="pickupPdfStartDate" type="date" />
+          </label>
+          <label class="modal-field">
+            <span>終了日</span>
+            <input v-model="pickupPdfEndDate" type="date" />
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" :disabled="exportingPickupPdf" @click="closePickupPdfDialog">閉じる</button>
+          <button class="btn pickup-btn" :disabled="exportingPickupPdf" @click="exportPickupDetailPdf">
+            {{ exportingPickupPdf ? '出力中...' : 'PDF出力' }}
+          </button>
+        </div>
+      </div>
     </div>
 
     <div v-if="showTruckDetail" class="truck-detail-wrap">
@@ -233,6 +258,28 @@
           <tr v-if="!mergedRows.length">
             <td :colspan="2 + dateKeys.length * SLOT_COUNT" class="empty">データがありません</td>
           </tr>
+          <tr v-else class="daily-load-row">
+            <td class="code-col daily-load-label">積み荷明細</td>
+            <td class="shipto-col daily-load-label"></td>
+            <template v-for="dateKey in dateKeys" :key="`daily-load-${dateKey}`">
+              <td class="daily-load-cell" :colspan="SLOT_COUNT" :class="{ 'day-split-left': isDaySplitStart(dateKey) }">
+                <div v-if="(loadBlocksByDate[dateKey] || []).length" class="daily-load-blocks">
+                  <table class="daily-load-table">
+                    <tbody>
+                      <template v-for="(block, blockIdx) in loadBlocksByDate[dateKey]" :key="`${dateKey}-block-${blockIdx}`">
+                        <tr v-for="(line, lineIdx) in block.lines" :key="`${dateKey}-line-${blockIdx}-${lineIdx}`">
+                          <td v-if="lineIdx === 0" class="daily-load-truck" :rowspan="block.lines.length">{{ block.truckLabel }}</td>
+                          <td class="daily-load-product">{{ line[0] ? `${line[0].productCode}×${formatNumber(line[0].qty)}` : '' }}</td>
+                          <td class="daily-load-product">{{ line[1] ? `${line[1].productCode}×${formatNumber(line[1].qty)}` : '' }}</td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+                <div v-else class="daily-load-empty">-</div>
+              </td>
+            </template>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -288,7 +335,8 @@ const addDays = (baseDate, days) => {
 
 const formatHeaderDate = (dateText) => {
   const d = new Date(`${dateText}T00:00:00`)
-  return `${d.getMonth() + 1}月${d.getDate()}日`
+  const w = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()]
+  return `${d.getMonth() + 1}/${d.getDate()}(${w})`
 }
 
 const parseNumber = (value) => {
@@ -336,6 +384,7 @@ const loading = ref(false)
 const importing = ref(false)
 const saving = ref(false)
 const exportingCsv = ref(false)
+const exportingPickupPdf = ref(false)
 const assignmentDeadlineDays = ref(3)
 const trucksByDate = ref({})
 const summaryByDate = ref({})
@@ -343,6 +392,9 @@ const previewSummaryByDate = ref({})
 const mergedRows = ref([])
 const previewTimers = new Map()
 const showTruckDetail = ref(false)
+const showPickupPdfDialog = ref(false)
+const pickupPdfStartDate = ref('')
+const pickupPdfEndDate = ref('')
 const holidayByDate = ref({})
 const cursorProductCode = ref('')
 const cursorProductBubbleStyle = ref({})
@@ -450,6 +502,12 @@ const truckDisplayName = (truck) => {
   return (truck.alias_name || '').trim() || truck.name || ''
 }
 
+const loadDetailTruckLabel = (truck) => {
+  const base = truckDisplayName(truck) || truck?.name || ''
+  if (!base) return '便'
+  return base.includes('便') ? base : `便 ${base}`
+}
+
 const truckNameAt = (dateKey, slotIdx) => {
   const truck = truckAt(dateKey, slotIdx)
   return truckDisplayName(truck) || `便${slotIdx + 1}`
@@ -473,6 +531,70 @@ const pseudoTruckOccupancyPercent = (dateKey, type) => {
   const savedSummary = (summaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === Number(pseudoTruck.id))
   return parseNumber(savedSummary?.occupancy_percent)
 }
+
+const loadBlocksByDate = computed(() => {
+  const result = {}
+  dateKeys.value.forEach((dateKey) => {
+    const truckMap = new Map((trucksByDate.value[dateKey] || []).map((truck) => [Number(truck.id), truck]))
+    const qtyMap = new Map()
+    mergedRows.value.forEach((row) => {
+      const entries = entriesAt(row, dateKey)
+      entries.forEach((entry) => {
+        ;(entry.allocations || []).forEach((allocation) => {
+          const truckId = Number(allocation.truck_id)
+          const qty = parseIntegerQty(allocation.qty)
+          if (!truckId || qty <= 0) return
+          const key = `${truckId}||${row.product_code}`
+          qtyMap.set(key, (qtyMap.get(key) || 0) + qty)
+        })
+      })
+    })
+    const items = [...qtyMap.entries()]
+      .map(([key, qty]) => {
+        const [truckIdText, productCode] = key.split('||')
+        const truckId = Number(truckIdText)
+        const truck = truckMap.get(truckId)
+        return {
+          truckId,
+          truckLabel: loadDetailTruckLabel(truck),
+          productCode,
+          qty,
+        }
+      })
+      .sort((a, b) => {
+        if (a.truckId !== b.truckId) return a.truckId - b.truckId
+        return String(a.productCode).localeCompare(String(b.productCode))
+      })
+    const blocks = []
+    let currentTruckId = null
+    items.forEach((item) => {
+      if (item.truckId !== currentTruckId) {
+        currentTruckId = item.truckId
+        blocks.push({
+          truckId: item.truckId,
+          truckLabel: item.truckLabel,
+          products: [],
+        })
+      }
+      blocks[blocks.length - 1].products.push({
+        productCode: item.productCode,
+        qty: item.qty,
+      })
+    })
+    result[dateKey] = blocks.map((block) => {
+      const lines = []
+      for (let idx = 0; idx < block.products.length; idx += 2) {
+        lines.push(block.products.slice(idx, idx + 2))
+      }
+      return {
+        truckId: block.truckId,
+        truckLabel: block.truckLabel,
+        lines: lines.length ? lines : [[]],
+      }
+    })
+  })
+  return result
+})
 
 const buildPayloadRowsForDate = (dateKey) => {
   return mergedRows.value
@@ -713,6 +835,54 @@ const exportLoadDetailCsv = async () => {
   }
 }
 
+const openPickupPdfDialog = () => {
+  showPickupPdfDialog.value = true
+  pickupPdfStartDate.value = targetDate.value
+  pickupPdfEndDate.value = addDays(targetDate.value, Math.max(0, Number(horizonDays.value || 1) - 1))
+}
+
+const closePickupPdfDialog = () => {
+  if (exportingPickupPdf.value) return
+  showPickupPdfDialog.value = false
+}
+
+const exportPickupDetailPdf = async () => {
+  const startDate = pickupPdfStartDate.value
+  const endDate = pickupPdfEndDate.value
+  if (!startDate || !endDate) {
+    alert('開始日と終了日を指定してください。')
+    return
+  }
+  if (startDate > endDate) {
+    alert('開始日は終了日以前を指定してください。')
+    return
+  }
+  exportingPickupPdf.value = true
+  try {
+    const res = await api.kubotaSakaiTripAssignments.pickupDetailPdf(startDate, endDate)
+    const blob = new Blob([res.data], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `クボタ堺_集荷明細表_${startDate}_${endDate}.pdf`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+    showPickupPdfDialog.value = false
+  } catch (error) {
+    const data = error?.response?.data
+    if (data instanceof Blob) {
+      alert('PDF出力に失敗しました。')
+      return
+    }
+    const message = data?.detail || data?.error || 'PDF出力に失敗しました。'
+    alert(message)
+  } finally {
+    exportingPickupPdf.value = false
+  }
+}
+
 const save = async () => {
   saving.value = true
   try {
@@ -822,6 +992,56 @@ onUnmounted(() => {
 }
 .detail-btn {
   background: #f7f7f7;
+}
+.pickup-btn {
+  background: #eefcf5;
+  border-color: #80c79c;
+}
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  z-index: 1300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-card {
+  width: min(420px, calc(100vw - 32px));
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 14px;
+  box-shadow: 0 8px 24px rgba(2, 6, 23, 0.18);
+}
+.modal-title {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #111827;
+}
+.modal-fields {
+  display: flex;
+  gap: 8px;
+}
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  font-size: 12px;
+  color: #374151;
+}
+.modal-field input {
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+}
+.modal-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .truck-detail-wrap {
   background: #fff;
@@ -1077,5 +1297,58 @@ onUnmounted(() => {
   font-size: 12px;
   font-weight: 700;
   line-height: 1.3;
+}
+.daily-load-row td {
+  background: #f9fbff;
+  border-top: 2px solid #94a3b8;
+}
+.daily-load-label {
+  font-weight: 700;
+  text-align: center;
+  background: #eef2f7 !important;
+}
+.daily-load-cell {
+  padding: 0 !important;
+  background: #fdfefe !important;
+}
+.daily-load-blocks {
+  width: 100%;
+}
+.daily-load-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.daily-load-table td {
+  border-right: 1px solid #cbd5e1;
+  border-bottom: 1px solid #cbd5e1;
+  padding: 2px 4px;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.daily-load-table tr:last-child td {
+  border-bottom: none;
+}
+.daily-load-table td:last-child {
+  border-right: none;
+}
+.daily-load-truck {
+  width: 54px;
+  text-align: left;
+  vertical-align: top;
+  background: #fafafa;
+  font-weight: 500;
+}
+.daily-load-product {
+  text-align: left;
+  vertical-align: middle;
+  color: #111827;
+}
+.daily-load-empty {
+  min-height: 28px;
+  line-height: 28px;
+  padding: 0 6px;
+  color: #94a3b8;
 }
 </style>
