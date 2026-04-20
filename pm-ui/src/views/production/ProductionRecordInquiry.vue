@@ -801,8 +801,28 @@ const loadSessions = async () => {
         brakeItems = normalizeList(brakeRes.data)
       }
 
+      // ── ProcessWorkSession（後入力セッション等）取得 ──
+      let pwsItems = []
+      {
+        const pwsParams = {
+          limit: 1000,
+          ...(dateSearchMode.value === 'plan'
+            ? { plan_date_start: startDate.value, plan_date_end: endDate.value }
+            : { start_date: startDate.value, end_date: endDate.value }),
+        }
+        if (lineId.value) pwsParams.line_id = lineId.value
+        if (processId.value) pwsParams.process_id = processId.value
+        if (productCode.value.trim()) pwsParams.product_code = productCode.value.trim()
+        if (status.value) pwsParams.status = status.value
+        if (unclosed.value) pwsParams.unclosed = unclosed.value
+        const pwsRes = await api.processRealtime.getSessions(pwsParams)
+        const pwsAll = normalizeList(pwsRes.data)
+        const allowedProcessIds = tankProcessIdSet.value
+        pwsItems = pwsAll.filter((row) => allowedProcessIds.has(String(row?.process || '')))
+      }
+
       // ── マージ＆共通フィルター ──
-      let allItems = [...laserItems, ...brakeItems]
+      let allItems = [...laserItems, ...brakeItems, ...pwsItems]
 
       const keyword = String(productCode.value || '').trim().toLowerCase()
       if (keyword) {
