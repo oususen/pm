@@ -18,6 +18,7 @@ from orders.utils.calendar_utils import get_business_today
 from production.models_brake_line_record import BrakeLineRecord
 from production.models_line_backlog import LineBacklog
 from production.models_record_inquiry_setting import ProductionRecordInquirySetting
+from production.services.brake_spot_session_sync import sync_brake_spot_action_to_process_session
 from production.serializers_process_realtime import check_plan_overrun
 
 
@@ -426,6 +427,26 @@ class SpotLineRecordView(APIView):
             operator_action_reason=operator_action_reason,
             qty=qty,
             sequence_no=sequence_no,
+        )
+
+        # 新構造へも同時保存（ProcessRealtimeRecord + ProcessWorkSession）
+        # 複数設備同時使用時は 2台目以降(skip_qty_update=true)をセッション同期対象外にし、
+        # セッション重複作成を回避する。
+        sync_brake_spot_action_to_process_session(
+            process_id=process_id,
+            product_id=product_id,
+            product_code=product_code,
+            product_name='',
+            operator_action=operator_action,
+            operator_action_reason=operator_action_reason,
+            qty=qty,
+            operator_name=operator,
+            plan_date=plan_date,
+            line_id=line_id,
+            equipment_id=equipment_id or None,
+            source='SPOT_LINE_RECORD',
+            source_record_id=rec.id,
+            sync_session=not skip_qty_update,
         )
 
         # END / PAUSE の場合は LineBacklog.actual_qty を加算

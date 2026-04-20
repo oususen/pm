@@ -821,6 +821,43 @@ const loadSessions = async () => {
         pwsItems = pwsAll.filter((row) => allowedProcessIds.has(String(row?.process || '')))
       }
 
+      // ── 二重表示対策（BrakeLineSession と ProcessWorkSession の重複排除） ──
+      // 新構造への二重保存期間中は、同一セッションが両方のAPIから返るため
+      // ProcessWorkSession側を優先して BrakeLineSession 側を除外する。
+      const normalizeKeyText = (value) => String(value || '').trim().toLowerCase()
+      const normalizeKeyTime = (value) => {
+        const raw = String(value || '').trim()
+        if (!raw) return ''
+        return raw
+          .replace('T', ' ')
+          .replace('Z', '')
+          .split('+')[0]
+          .split('.')[0]
+      }
+      const toMinuteKey = (value) => {
+        const ts = normalizeKeyTime(value)
+        return ts ? ts.slice(0, 16) : ''
+      }
+      const buildSessionDedupKey = (row) => {
+        const processKey = normalizeKeyText(row?.process_code)
+        const qty = Number(row?.production_qty || 0)
+        return [
+          toMinuteKey(row?.started_at),
+          toMinuteKey(row?.ended_at),
+          normalizeKeyText(row?.plan_date),
+          normalizeKeyText(row?.session_type),
+          processKey,
+          normalizeKeyText(row?.product_code),
+          normalizeKeyText(row?.operator_name),
+          normalizeKeyText(row?.start_action),
+          normalizeKeyText(row?.end_action),
+          Number(row?.duration_seconds || 0),
+          Number.isFinite(qty) ? qty.toFixed(3) : '0.000',
+        ].join('|')
+      }
+      const pwsKeySet = new Set(pwsItems.map((row) => buildSessionDedupKey(row)))
+      brakeItems = brakeItems.filter((row) => !pwsKeySet.has(buildSessionDedupKey(row)))
+
       // ── マージ＆共通フィルター ──
       let allItems = [...laserItems, ...brakeItems, ...pwsItems]
 

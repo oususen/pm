@@ -413,7 +413,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             'product',
             'start_record',
             'end_record',
-        )
+        ).prefetch_related('session_equipments__equipment')
 
         process_id = request.query_params.get('process_id')
         if process_id:
@@ -747,7 +747,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['patch', 'delete'], url_path=r'sessions/(?P<session_id>[^/.]+)')
     def session_detail(self, request, session_id=None):
-        session = ProcessWorkSession.objects.select_related('process', 'product').filter(id=session_id).first()
+        session = ProcessWorkSession.objects.select_related('process', 'product').prefetch_related('session_equipments__equipment').filter(id=session_id).first()
         if not session:
             return Response({'detail': 'セッションが見つかりません。'}, status=status.HTTP_404_NOT_FOUND)
 

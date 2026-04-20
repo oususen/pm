@@ -1069,6 +1069,7 @@ class ProcessWorkSessionSerializer(serializers.ModelSerializer):
     process_name = serializers.CharField(source='process.process_name', read_only=True)
     operator_name = serializers.SerializerMethodField()
     pause_reason = serializers.SerializerMethodField()
+    equipments = serializers.SerializerMethodField()
 
     @staticmethod
     def _extract_pause_reason_from_record(record):
@@ -1115,6 +1116,21 @@ class ProcessWorkSessionSerializer(serializers.ModelSerializer):
                 return reason
         return ''
 
+    def get_equipments(self, obj):
+        manager = getattr(obj, 'session_equipments', None)
+        if manager is None:
+            return []
+        rows = []
+        for rel in manager.all():
+            equipment = getattr(rel, 'equipment', None)
+            rows.append({
+                'equipment_id': rel.equipment_id,
+                'equipment_code': getattr(equipment, 'equipment_code', '') if equipment else '',
+                'equipment_name': getattr(equipment, 'equipment_name', '') if equipment else '',
+                'role': rel.role,
+            })
+        return rows
+
     class Meta:
         model = ProcessWorkSession
         fields = [
@@ -1132,6 +1148,7 @@ class ProcessWorkSessionSerializer(serializers.ModelSerializer):
             'start_action',
             'end_action',
             'pause_reason',
+            'equipments',
             'started_at',
             'ended_at',
             'status',
