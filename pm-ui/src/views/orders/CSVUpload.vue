@@ -111,7 +111,7 @@
         </div>
 
         <div v-if="result" class="result-section">
-          <h3>{{ result.success ? '成功' : 'エラー' }}</h3>
+          <h3>{{ result.success ? (uploadedFileName + ' 成功') : 'エラー' }}</h3>
           <p>{{ result.message }}</p>
 
           <!-- Display order creation results if available -->
@@ -206,6 +206,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
 
 const customers = ref([])
 const selectedFile = ref(null)
+const uploadedFileName = ref('')
 const uploading = ref(false)
 const result = ref(null)
 const fileWarning = ref(null)
@@ -322,6 +323,7 @@ const uploadCSV = async () => {
 
   uploading.value = true
   result.value = null
+  uploadedFileName.value = selectedFile.value.name
 
   try {
     const formDataToSend = new FormData()
