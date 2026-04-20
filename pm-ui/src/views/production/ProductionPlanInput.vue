@@ -1593,7 +1593,7 @@ const savePlan = async () => {
         line_id: selectedLine.value,
         start_date: startDate.value,
         end_date: endDate.value,
-        include_progress: false,
+        include_progress: isProgressMode.value,
         line_final_only: true,
       })
       await withTimeout(
@@ -3505,7 +3505,7 @@ const doPickup = async () => {
       line_id: selectedLine.value,
       start_date: startDate.value,
       end_date: endDate.value,
-      include_progress: false,
+      include_progress: isProgressMode.value,
       line_final_only: true,
     })
     await fetchAndApplyData()
