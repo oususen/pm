@@ -66,20 +66,20 @@
     <div v-if="showDeepRecalcDialog" class="code-modal-overlay" @click.self="showDeepRecalcDialog = false">
       <div class="code-modal deep-recalc-modal">
         <div class="code-modal-header">
-          <h3>過去から在庫・進度を再計算</h3>
+          <h3>過去から進度を再計算</h3>
           <button class="close-btn" type="button" @click="showDeepRecalcDialog = false">×</button>
         </div>
         <div class="code-modal-body deep-recalc-body">
           <p>
-            表示開始日（<strong>{{ startDate }}</strong>）を起点に、在庫・進度を過去から巻き直します。
+            表示開始日（<strong>{{ startDate }}</strong>）を基準に、ルーティング/BOM由来LTで算出した開始日から進度を再計算します。
           </p>
           <ul>
             <li>対象ライン: <strong>{{ getDisplayedLineIds().join(', ') }}</strong></li>
             <li>計算範囲: {{ startDate }} 〜 {{ columns[columns.length - 1] }}</li>
-            <li>在庫・進度を再計算した後、計画在庫・計画進度も自動的に更新されます。</li>
+            <li>在庫は再計算せず、進度のみ更新します。</li>
             <li>データ量によっては完了まで時間がかかる場合があります。</li>
           </ul>
-          <p class="deep-recalc-warn">※ 日付制限なしで過去データを上書きします。実行前に内容をご確認ください。</p>
+          <p class="deep-recalc-warn">※ 各品番のLT算出結果（calc_start_date）の最古日を開始日に採用します。</p>
           <div class="deep-recalc-actions">
             <button type="button" @click="showDeepRecalcDialog = false">キャンセル</button>
             <button type="button" class="btn-confirm-deep" @click="confirmDeepRecalc">実行</button>
@@ -324,6 +324,23 @@ const ensureLineList = async () => {
     lineList.value = normalizeList(res.data || []);
   } catch (e) {
     console.error("ライン一覧の取得に失敗:", e);
+  }
+};
+
+const resolveCalcStartDateForProducts = async (productIds, fallbackStartDate) => {
+  if (!Array.isArray(productIds) || !productIds.length) return fallbackStartDate;
+  try {
+    const responses = await Promise.all(
+      productIds.map((productId) => api.lineBacklogs.getCalcStartDate({ product_id: productId }))
+    );
+    const dates = responses
+      .map((res) => res?.data?.calc_start_date)
+      .filter((dateStr) => typeof dateStr === "string" && dateStr.length > 0);
+    if (!dates.length) return fallbackStartDate;
+    return dates.reduce((minDate, dateStr) => (dateStr < minDate ? dateStr : minDate), dates[0]);
+  } catch (e) {
+    console.error("calc_start_date取得に失敗:", e);
+    return fallbackStartDate;
   }
 };
 
@@ -630,17 +647,20 @@ const confirmDeepRecalc = async () => {
       alert("再計算対象の品番がありません。");
       return;
     }
-    const start = startDate.value;
     const end = columns.value[columns.value.length - 1];
     await Promise.all(
-      targets.map((target) =>
-        api.lineBacklogs.recalculateInventoryDeep({
-          line_id: target.line_id,
-          start_date: start,
-          end_date: end,
-          product_ids: target.product_ids,
-        }).catch((e) => console.error('過去から再計算に失敗:', target.line_id, e))
-      )
+      targets.map((target) => {
+        const productIds = Array.isArray(target.product_ids) ? target.product_ids : [];
+        return resolveCalcStartDateForProducts(productIds, startDate.value).then((calcStartDate) =>
+          api.lineBacklogs.recalculateInventoryDeep({
+            line_id: target.line_id,
+            start_date: calcStartDate,
+            end_date: end,
+            product_ids: target.product_ids,
+            progress_only: true,
+          }).catch((e) => console.error('過去から再計算に失敗:', target.line_id, e))
+        );
+      })
     );
     await load();
   } catch (e) {

@@ -4158,6 +4158,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         except ValueError as e:
             return Response({'detail': f'Invalid date format: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
+        progress_only_raw = request.data.get('progress_only', False)
+        if isinstance(progress_only_raw, str):
+            progress_only = progress_only_raw.lower() in ['true', '1', 'yes']
+        else:
+            progress_only = bool(progress_only_raw)
+
         try:
             result = recalculate_inventory_for_line(
                 line_id,
@@ -4166,10 +4172,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 include_progress=True,
                 product_ids=product_ids,
                 progress_calc_start_date=start_dt,
+                progress_only=progress_only,
             )
             return Response({
                 'detail': '過去からの在庫・進度再計算が完了しました',
                 'product_count': result.get('product_count', 0),
+                'progress_only': progress_only,
             })
         except Exception as e:
             return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

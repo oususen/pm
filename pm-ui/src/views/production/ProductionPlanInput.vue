@@ -144,32 +144,32 @@
           </label>
         </div>
         <button class="btn" @click="bulkDeletePlans" :disabled="processing || !selectedLine">計画一括削除</button>
+        <button
+          v-if="activePlanTab === 'floor-shipping'"
+          class="btn primary"
+          @click="openBulkActualDialog"
+          :disabled="processing || !selectedLine || !rows.length"
+        >一括実績入力</button>
         <button class="btn" @click="openChangeReasonDialog" :disabled="processing">計画変更</button>
+        <button
+          v-if="activePlanTab === 'floor-shipping'"
+          class="btn primary"
+          @click="saveActuals"
+          :disabled="processing || !rows.length || !selectedLine"
+        >実績保存</button>
+        <button
+          v-if="activePlanTab === 'floor-shipping' && activeFloorShippingTab === 'progress'"
+          class="btn primary"
+          @click="recalculateProgressFromPast"
+          :disabled="processing || !rows.length || !selectedLine"
+        >過去から再計算</button>
         <button class="btn" @click="savePlan" :disabled="processing || !rows.length || !selectedLine">保存</button>
-        <button
-          class="btn"
-          @click="doDisplayOnly"
-          :disabled="processing || !selectedLine || headerDisplayOnlyLocked"
-          :title="headerDisplayOnlyLocked ? 'ヘッダの表示のみは1回実行後に無効化されます（下部F4を使用してください）' : ''"
-        >表示のみ</button>
-        <button
-          class="btn"
-          @click="doFetchOnly"
-          :disabled="true"
-          title="ヘッダの需要取込は無効です。下部のF6をご利用ください。"
-        >需要取込</button>
         <button
           v-if="canShowFloorSpotAutoPlanButton"
           class="btn"
           @click="doFloorSpotAutoPlan"
           :disabled="processing || !selectedLine"
         >自動計画</button>
-        <button
-          class="btn primary header-readonly-btn"
-          @click="doPickup"
-          :disabled="true"
-          title="ヘッダの取込＋在庫計算は無効です。下部のF8をご利用ください。"
-        >取込＋在庫計算</button>
         <button class="btn accent" @click="toggleProcessGantt" :disabled="processing || !selectedLine">
           {{ showProcessGantt ? '工程ガントを閉じる' : '工程ガント表示' }}
         </button>
@@ -304,7 +304,18 @@
                 <span class="readonly-value">{{ displayValue(isProgressMode ? row.daily?.[c.key]?.line_demand_qty : row.daily?.[c.key]?.demand) }}</span>
               </td>
               <td class="num actual" :class="c.dayClass">
-                <span class="readonly-value">{{ displayValue(row.daily?.[c.key]?.actual) }}</span>
+                <input
+                  type="text"
+                  inputmode="decimal"
+                  :value="row.daily?.[c.key]?.actual === 0 || row.daily?.[c.key]?.actual === '' || row.daily?.[c.key]?.actual == null ? '' : row.daily?.[c.key]?.actual"
+                  @input="onActualInput(row, c.key, $event.target.value)"
+                  :data-row="idx"
+                  :data-col="colIdx"
+                  data-field="actual"
+                  @keydown="onCellKeydown($event, idx, colIdx, 'actual')"
+                  @focus="setActiveInputRow(row, $event)"
+                  @blur="onCellBlur"
+                />
               </td>
               <td class="num stock" :class="c.dayClass">
                 <span class="readonly-value">{{ displayValue(isProgressMode ? row.daily?.[c.key]?.progress : getStockDisplay(row, colIdx)) }}</span>
@@ -575,6 +586,25 @@
           <button class="btn" @click="exportToExcel" :disabled="!filteredRows.length">Excel出力</button>
           <button class="btn primary" @click="exportToPdf" :disabled="!filteredRows.length">PDF出力</button>
           <button class="btn" @click="closeExportDialog">キャンセル</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showBulkActualDialog" class="modal-overlay" @click.self="closeBulkActualDialog">
+      <div class="modal-content">
+        <h2>実績一括入力</h2>
+        <p class="export-note">期間内の計画合計を実績セルへセットします。セット後に差分だけ手修正してください。</p>
+        <div class="field">
+          <label>開始日</label>
+          <input type="date" v-model="bulkActualStartDate" />
+        </div>
+        <div class="field">
+          <label>終了日</label>
+          <input type="date" v-model="bulkActualEndDate" />
+        </div>
+        <div class="modal-actions">
+          <button class="btn" type="button" @click="closeBulkActualDialog">キャンセル</button>
+          <button class="btn primary" type="button" @click="applyBulkActualFromPlan">セット</button>
         </div>
       </div>
     </div>
@@ -908,6 +938,9 @@ const isEditUnlocked = ref(false)
 const changeReason = ref('')
 const changeReasonDraft = ref('')
 const showChangeReasonDialog = ref(false)
+const showBulkActualDialog = ref(false)
+const bulkActualStartDate = ref('')
+const bulkActualEndDate = ref('')
 const lineSettingsMessage = ref('')
 
 const lines = ref([])
@@ -936,7 +969,6 @@ const workStartFallback = { hour: 8, minute: 0 }
 const workMinutesFallback = 480
 const GANTT_GENERATE_TIMEOUT_MS = 120000
 const processing = ref(false)
-const headerDisplayOnlyLocked = ref(false)
 const activeInputRowId = ref(null)
 const cursorProductTail = ref('')
 const cursorProductBubbleStyle = ref({})
@@ -1354,7 +1386,6 @@ const resetRows = () => {
   activeInputRowId.value = null
   cursorProductTail.value = ''
   cursorProductBubbleStyle.value = {}
-  headerDisplayOnlyLocked.value = false
 }
 
 const goBack = () => {
@@ -1915,7 +1946,6 @@ const loadData = async () => {
   activeInputRowId.value = null
   cursorProductTail.value = ''
   cursorProductBubbleStyle.value = {}
-  headerDisplayOnlyLocked.value = false
   currentLineRoutingFilterMode.value = 'filtered'
   if (selectedLine.value) {
     await fetchLineDefaultSetting(selectedLine.value)
@@ -2228,6 +2258,11 @@ const onPlanInput = (row, dateKey, value) => {
     // 数量クリア時は順もクリア
     daily.sequence_no = ''
   }
+}
+
+const onActualInput = (row, dateKey, value) => {
+  const daily = ensureDailyCell(row, dateKey)
+  daily.actual = value === '' ? '' : value
 }
 
 const onSequenceInput = (row, dateKey, value) => {
@@ -3229,6 +3264,8 @@ const onGlobalKeydown = (event) => {
     event.preventDefault()
     if (showChangeReasonDialog.value) {
       closeChangeReasonDialog()
+    } else if (showBulkActualDialog.value) {
+      closeBulkActualDialog()
     } else if (showExportDialog.value) {
       closeExportDialog()
     } else if (!processing.value) {
@@ -3509,7 +3546,6 @@ const doPickup = async () => {
       line_final_only: true,
     })
     await fetchAndApplyData()
-    headerDisplayOnlyLocked.value = true
   } catch (e) {
     console.error('バックログ取り込みエラー', e)
     alert('取り込みに失敗しました。')
@@ -3523,7 +3559,6 @@ const doDisplayOnly = async () => {
   processing.value = true
   try {
     await fetchAndApplyData()
-    headerDisplayOnlyLocked.value = true
   } catch (e) {
     console.error('データ取得エラー', e)
     alert('データの取得に失敗しました。')
@@ -3542,7 +3577,6 @@ const doFetchOnly = async () => {
       end_date: endDate.value,
     })
     await fetchAndApplyData()
-    headerDisplayOnlyLocked.value = true
   } catch (e) {
     console.error('データ取得エラー', e)
     alert('データの取得に失敗しました。')
@@ -3602,6 +3636,164 @@ const doFloorSpotAutoPlan = async () => {
   }
 
   await savePlan()
+}
+
+const openBulkActualDialog = () => {
+  bulkActualStartDate.value = startDate.value
+  bulkActualEndDate.value = endDate.value
+  showBulkActualDialog.value = true
+}
+
+const closeBulkActualDialog = () => {
+  showBulkActualDialog.value = false
+}
+
+const calcDailyPlanTotal = (daily) => {
+  if (!daily) return 0
+  let total = Number(daily.plan || 0)
+  if (!Number.isFinite(total)) total = 0
+  const extraLots = Array.isArray(daily.extraLots) ? daily.extraLots : []
+  extraLots.forEach((lot) => {
+    const qty = Number(lot?.plan_qty || 0)
+    if (Number.isFinite(qty)) total += qty
+  })
+  return total
+}
+
+const applyBulkActualFromPlan = () => {
+  if (!bulkActualStartDate.value || !bulkActualEndDate.value) {
+    alert('開始日と終了日を指定してください。')
+    return
+  }
+  if (bulkActualStartDate.value > bulkActualEndDate.value) {
+    alert('終了日は開始日以降で指定してください。')
+    return
+  }
+  if (bulkActualStartDate.value < startDate.value || bulkActualEndDate.value > endDate.value) {
+    alert('選択期間は表示期間内で指定してください。')
+    return
+  }
+  rows.value.forEach((row) => {
+    dateColumns.value.forEach((c) => {
+      if (c.key < bulkActualStartDate.value || c.key > bulkActualEndDate.value) return
+      const daily = ensureDailyCell(row, c.key)
+      const planTotal = calcDailyPlanTotal(daily)
+      daily.actual = planTotal > 0 ? planTotal : ''
+    })
+  })
+  showBulkActualDialog.value = false
+}
+
+const saveActuals = async () => {
+  if (!selectedLine.value) {
+    alert('ラインを選択してください。')
+    return
+  }
+
+  const items = []
+  const invalidCells = []
+  rows.value.forEach((row) => {
+    if (!row.product_id || !row.process_id) return
+    dateColumns.value.forEach((c) => {
+      const daily = ensureDailyCell(row, c.key)
+      const rawActual = daily.actual
+      if (rawActual !== '' && rawActual !== null && rawActual !== undefined && Number.isNaN(Number(rawActual))) {
+        invalidCells.push(`${row.product_code || getProductCode(row.product_id) || row.product_id} / ${c.key}`)
+      }
+      const actualVal = Number(rawActual || 0)
+      items.push({
+        product_id: row.product_id,
+        process_id: row.process_id,
+        plan_date: c.key,
+        actual_qty: Number.isFinite(actualVal) ? actualVal : 0,
+        sequence_no: 0,
+      })
+    })
+  })
+
+  if (invalidCells.length) {
+    alert(`実績に数値以外が入力されています。\n${invalidCells.slice(0, 10).join('\n')}${invalidCells.length > 10 ? `\n...他${invalidCells.length - 10}件` : ''}`)
+    return
+  }
+
+  if (!items.length) {
+    alert('実績保存対象がありません。')
+    return
+  }
+
+  processing.value = true
+  try {
+    const res = await api.lineBacklogs.save({
+      line_id: selectedLine.value,
+      items,
+    })
+    alert(`実績を保存しました。\n作成: ${res.data?.created ?? 0}件, 更新: ${res.data?.updated ?? 0}件`)
+    await fetchAndApplyData()
+  } catch (e) {
+    console.error('実績保存エラー', e)
+    alert('実績保存に失敗しました。')
+  } finally {
+    processing.value = false
+  }
+}
+
+const recalculateProgressFromPast = async () => {
+  if (!selectedLine.value) {
+    alert('ラインを選択してください。')
+    return
+  }
+  const productIds = Array.from(new Set(
+    rows.value
+      .map((row) => Number(row.product_id))
+      .filter((id) => Number.isFinite(id) && id > 0)
+  ))
+  if (!productIds.length) {
+    alert('再計算対象の品番がありません。')
+    return
+  }
+
+  let calcStartDate = startDate.value
+  try {
+    const responses = await Promise.all(
+      productIds.map((productId) => api.lineBacklogs.getCalcStartDate({ product_id: productId }))
+    )
+    const dates = responses
+      .map((res) => res?.data?.calc_start_date)
+      .filter((dateStr) => typeof dateStr === 'string' && dateStr.length > 0)
+    if (dates.length) {
+      calcStartDate = dates.reduce((minDate, dateStr) => (dateStr < minDate ? dateStr : minDate), dates[0])
+    }
+  } catch (e) {
+    console.error('calc_start_date取得エラー', e)
+  }
+
+  const lineLabel = selectedLineLabel.value || `ID:${selectedLine.value}`
+  const ok = window.confirm(
+    `進度のみ過去再計算を実行します。\n` +
+    `ライン: ${lineLabel}\n` +
+    `開始日: ${calcStartDate}（ルーティング/BOM由来LTで自動算出）\n` +
+    `終了日: ${endDate.value}\n` +
+    `対象品番: ${productIds.length}件`
+  )
+  if (!ok) return
+
+  processing.value = true
+  try {
+    await api.lineBacklogs.recalculateInventoryDeep({
+      line_id: selectedLine.value,
+      start_date: calcStartDate,
+      end_date: endDate.value,
+      product_ids: productIds,
+      progress_only: true,
+    })
+    await fetchAndApplyData()
+    alert('過去から再計算（進度のみ）が完了しました。')
+  } catch (e) {
+    console.error('過去から再計算エラー', e)
+    alert('過去から再計算に失敗しました。')
+  } finally {
+    processing.value = false
+  }
 }
 
 const bulkDeletePlans = async () => {
