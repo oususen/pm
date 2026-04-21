@@ -3771,7 +3771,8 @@ const recalculateProgressFromPast = async () => {
   const ok = window.confirm(
     `進度のみ過去再計算を実行します。\n` +
     `ライン: ${lineLabel}\n` +
-    `開始日: ${calcStartDate}（ルーティング/BOM由来LTで自動算出）\n` +
+    `表示開始日: ${startDate.value}\n` +
+    `再計算開始日（内部）: ${calcStartDate}（ルーティング/BOM由来LTで自動算出）\n` +
     `終了日: ${endDate.value}\n` +
     `対象品番: ${productIds.length}件`
   )
