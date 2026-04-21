@@ -76,6 +76,7 @@ export const manualSections = [
       { title: "構成部品在庫一覧", path: "生産/構成部品在庫一覧.md" },
       { title: "ライン需要一覧", path: "生産/ライン需要一覧.md" },
       { title: "生産計画入力", path: "生産/生産計画入力.md" },
+      { title: "配送計画（フロア出荷）", path: "生産/配送計画.md" },
       { title: "デフォルト開始時刻設定", path: "生産/デフォルト開始時刻設定.md" },
       { title: "ライン勤務カレンダ", path: "生産/ライン勤務カレンダ.md" },
       { title: "在庫引当一覧", path: "生産/在庫引当一覧.md" },
