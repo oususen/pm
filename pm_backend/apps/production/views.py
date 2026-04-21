@@ -5900,6 +5900,7 @@ class LaserActualFilter(django_filters.FilterSet):
     equipment = django_filters.NumberFilter(field_name='equipment_id')
     pattern = django_filters.NumberFilter(field_name='pattern_id')
     pattern_no = django_filters.CharFilter(method='filter_pattern_no')
+    operator_action = django_filters.CharFilter(field_name='operator_action')
 
     class Meta:
         model = LaserActual

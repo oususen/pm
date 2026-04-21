@@ -1739,6 +1739,7 @@ const checkDuplicatePatternToday = async (patternId) => {
       pattern: pid,
       work_date__gte: today,
       work_date__lte: today,
+      operator_action: 'END',
       page_size: 1,
     })
     const rows = normalizeList(res.data)
