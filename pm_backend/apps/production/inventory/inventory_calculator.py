@@ -1084,7 +1084,8 @@ def recalculate_stock_qty(
             actual_shipment = Decimal('0')
         actual_shipment = int(actual_shipment or 0)
 
-        prev_day = get_prev_working_day(plan_date)
+        # 在庫も進度と同様、休日を含めて「前日（暦日）」を基準に引き継ぐ。
+        prev_day = plan_date - timedelta(days=1)
         prev_stock = stock_by_date.get(prev_day, last_stock)
 
         stock_adjust = _resolve_day_adjustment(rows, stock_adjust_map)
@@ -1326,7 +1327,8 @@ def recalculate_planned_stock_qty(
                 planned_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days)
         planned_shipment = int(planned_shipment or 0)
 
-        prev_day = get_prev_working_day(plan_date)
+        # 在庫も進度と同様、休日を含めて「前日（暦日）」を基準に引き継ぐ。
+        prev_day = plan_date - timedelta(days=1)
         prev_planned = planned_by_date.get(prev_day, last_planned)
         planned_stock_adjust = _resolve_day_adjustment(rows, planned_stock_adjust_map)
 
