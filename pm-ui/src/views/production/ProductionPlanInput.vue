@@ -3795,7 +3795,8 @@ const recalculateProgressFromPast = async () => {
       .map((res) => res?.data?.calc_start_date)
       .filter((dateStr) => typeof dateStr === 'string' && dateStr.length > 0)
     if (dates.length) {
-      calcStartDate = dates.reduce((minDate, dateStr) => (dateStr < minDate ? dateStr : minDate), dates[0])
+      const ltStartDate = dates.reduce((minDate, dateStr) => (dateStr < minDate ? dateStr : minDate), dates[0])
+      calcStartDate = ltStartDate < startDate.value ? ltStartDate : startDate.value
     }
   } catch (e) {
     console.error('calc_start_date取得エラー', e)

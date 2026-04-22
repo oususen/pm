@@ -7296,9 +7296,9 @@ class HokushinDeliveryListPDFView(APIView):
         if not user or not user.is_authenticated:
             return 'システム'
 
-        full_name = (user.get_full_name() or '').strip()
-        if full_name:
-            return full_name
+        last_name = (getattr(user, 'last_name', '') or '').strip()
+        if last_name:
+            return last_name
 
         username = (user.get_username() or '').strip()
         if username:

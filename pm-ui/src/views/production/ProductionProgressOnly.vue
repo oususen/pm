@@ -651,14 +651,16 @@ const confirmDeepRecalc = async () => {
     await Promise.all(
       targets.map((target) => {
         const productIds = Array.isArray(target.product_ids) ? target.product_ids : [];
-        return resolveCalcStartDateForProducts(productIds, startDate.value).then((calcStartDate) =>
-          api.lineBacklogs.recalculateInventoryDeep({
+        return resolveCalcStartDateForProducts(productIds, startDate.value).then((calcStartDate) => {
+          const effectiveStart = calcStartDate < startDate.value ? calcStartDate : startDate.value;
+          return api.lineBacklogs.recalculateInventoryDeep({
             line_id: target.line_id,
-            start_date: calcStartDate,
+            start_date: effectiveStart,
             end_date: end,
             product_ids: target.product_ids,
             progress_only: true,
-          }).catch((e) => console.error('過去から再計算に失敗:', target.line_id, e))
+          }).catch((e) => console.error('過去から再計算に失敗:', target.line_id, e));
+        }
         );
       })
     );
