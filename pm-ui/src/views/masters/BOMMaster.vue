@@ -237,11 +237,12 @@
                   <th>製品名</th>
                   <th class="level-col">階層</th>
                   <th class="qty-col">数量</th>
+                  <th class="lt-col">LT(日)</th>
+                  <th class="lt-col">積LT</th>
+                  <th class="duration-col">所要(分)</th>
                   <th>工程</th>
                   <th>ライン</th>
                   <th>仕入先</th>
-                  <th>リードタイム(日)</th>
-                  <th>所要時間(分)</th>
                 </tr>
               </thead>
               <tbody>
@@ -252,11 +253,12 @@
                   <td>{{ row.product_name }}</td>
                   <td class="level-col">{{ row.level }}</td>
                   <td class="qty-col">{{ row.quantity }}</td>
+                  <td class="lt-col">{{ row.lead_time_days }}</td>
+                  <td class="lt-col">{{ row.cumulative_lt }}</td>
+                  <td class="duration-col">{{ row.duration_min }}</td>
                   <td>{{ row.process }}</td>
                   <td>{{ row.line }}</td>
                   <td>{{ row.supplier }}</td>
-                  <td>{{ row.lead_time_days }}</td>
-                  <td>{{ row.duration_min }}</td>
                 </tr>
               </tbody>
             </table>
@@ -536,11 +538,12 @@
                   <th>製品名</th>
                   <th class="level-col">階層</th>
                   <th class="qty-col">数量</th>
+                  <th class="lt-col">LT(日)</th>
+                  <th class="lt-col">積LT</th>
+                  <th class="duration-col">所要(分)</th>
                   <th>工程</th>
                   <th>ライン</th>
                   <th>仕入先</th>
-                  <th>リードタイム(日)</th>
-                  <th>所要時間(分)</th>
                 </tr>
               </thead>
               <tbody>
@@ -551,11 +554,12 @@
                   <td>{{ row.product_name }}</td>
                   <td class="level-col">{{ row.level }}</td>
                   <td class="qty-col">{{ row.quantity }}</td>
+                  <td class="lt-col">{{ row.lead_time_days }}</td>
+                  <td class="lt-col">{{ row.cumulative_lt }}</td>
+                  <td class="duration-col">{{ row.duration_min }}</td>
                   <td>{{ row.process }}</td>
                   <td>{{ row.line }}</td>
                   <td>{{ row.supplier }}</td>
-                  <td>{{ row.lead_time_days }}</td>
-                  <td>{{ row.duration_min }}</td>
                 </tr>
               </tbody>
             </table>
@@ -2160,12 +2164,22 @@ const TreeBranch = defineComponent({
 }
 
 .level-col {
-  width: 60px;
+  width: 40px;
   text-align: center;
 }
 
 .qty-col {
-  width: 90px;
+  width: 36px;
+  text-align: right;
+}
+
+.lt-col {
+  width: 50px;
+  text-align: right;
+}
+
+.duration-col {
+  width: 60px;
   text-align: right;
 }
 

@@ -783,7 +783,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 is_active=True,
             ).order_by('-valid_from', '-id').first()
 
-        def walk_bom(b, parent_prefix='', level=0, visited=None):
+        def walk_bom(b, parent_prefix='', level=0, visited=None, cumulative_lt=0):
             if visited is None:
                 visited = set()
             if b.id in visited:
@@ -795,6 +795,8 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 display_name = f"{root_label} [{b.parent_product.product_code}]" if b.parent_product else root_label
                 process_display = ''
                 line_display = ''
+                root_lead_time_days = ''
+                root_duration_min = ''
                 if b.parent_product_id:
                     default_routing = resolve_effective_routing(b.parent_product_id)
                     if default_routing:
@@ -804,6 +806,11 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                                 process_display = f"{last_step.process.process_code} - {last_step.process.process_name}"
                             if last_step.line:
                                 line_display = f"{last_step.line.line_code} - {last_step.line.line_name}"
+                            if last_step.lead_time_days is not None:
+                                root_lead_time_days = last_step.lead_time_days
+                                cumulative_lt = last_step.lead_time_days
+                            if last_step.duration_min is not None:
+                                root_duration_min = last_step.duration_min
 
                 rows.append({
                     'bom_id': b.id,
@@ -815,8 +822,9 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                     'process': process_display,
                     'line': line_display,
                     'supplier': '',
-                    'lead_time_days': '',
-                    'duration_min': '',
+                    'lead_time_days': root_lead_time_days,
+                    'duration_min': root_duration_min,
+                    'cumulative_lt': cumulative_lt,
                 })
 
             items_qs = list(
@@ -830,6 +838,9 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 display_prefix = parent_prefix + connector
                 display_name = display_prefix + (item.child_product.product_code if item.child_product else '')
 
+                item_lt = item.lead_time_days or 0
+                item_cumulative_lt = cumulative_lt + item_lt
+
                 rows.append({
                     'bom_id': b.id,
                     'parent_product': b.parent_product.product_code if b.parent_product else '',
@@ -842,12 +853,13 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                     'supplier': item.supplier.supplier_name if item.supplier else '',
                     'lead_time_days': item.lead_time_days if item.lead_time_days is not None else '',
                     'duration_min': item.duration_min if item.duration_min is not None else '',
+                    'cumulative_lt': item_cumulative_lt,
                 })
 
                 child_bom = pick_child_bom(item.child_product) if item.child_product else None
                 if child_bom and child_bom.id not in visited:
                     child_prefix = parent_prefix + ('   ' if is_last else '│  ')
-                    walk_bom(child_bom, parent_prefix=child_prefix, level=level + 1, visited=visited)
+                    walk_bom(child_bom, parent_prefix=child_prefix, level=level + 1, visited=visited, cumulative_lt=item_cumulative_lt)
 
         walk_bom(bom, parent_prefix='', level=0, visited=set())
         return rows
