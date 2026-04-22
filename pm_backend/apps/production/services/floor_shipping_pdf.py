@@ -51,6 +51,7 @@ COLOR_ROW_EVEN_BG = colors.HexColor('#F7F3E8')
 COLOR_GRID = colors.HexColor('#808080')
 SECTION_TITLE_15 = '１５時着（午前便　AM１１：３０頃）'
 SECTION_TITLE_08 = '８時着（午後便　PM18：３０頃）'
+PAGE_DAYS = 14
 
 
 def _register_fonts():
@@ -143,6 +144,11 @@ def _get_display_dates(start_date, end_date):
         dates.append(current)
         current += timedelta(days=1)
     return dates
+
+
+def _chunk_dates(dates, size):
+    for i in range(0, len(dates), size):
+        yield dates[i:i + size]
 
 
 def _collect_floor_shipping_data(line_id, start_date, end_date, calendar_id, cal_cache):
@@ -268,21 +274,22 @@ def generate_floor_shipping_pdf(line_id: int, start_date: date, end_date: date) 
 
     # 列幅計算
     label_col_w = 58 * mm * (4 / 3)  # 製品コード+名前列（現状の2/3）
-    date_col_w = max(
-        (page_w - margin_left - margin_right - label_col_w) / max(len(display_dates), 1),
-        12 * mm
-    )
     row_h = 5 * mm
     section_header_h = 5.5 * mm
 
-    table_w = label_col_w + date_col_w * len(display_dates)
-
-    def draw_page_header(y_pos):
+    def draw_page_header(y_pos, page_dates):
         c.setFont(font_name, font_size_title)
-        c.drawString(margin_left, y_pos, f'フロア配送明細  {start_date.strftime("%Y/%m/%d")} ～ {end_date.strftime("%Y/%m/%d")}')
+        c.drawString(margin_left, y_pos, f'フロア配送明細(ダイソウ→北進様)  {start_date.strftime("%Y/%m/%d")} ～ {end_date.strftime("%Y/%m/%d")}')
+        if page_dates:
+            c.setFont(font_name, 8 * font_scale)
+            c.setFillColor(colors.HexColor('#666666'))
+            range_text = f'{page_dates[0].strftime("%Y/%m/%d")} ～ {page_dates[-1].strftime("%Y/%m/%d")}'
+            tw = c.stringWidth(range_text, font_name, 8 * font_scale)
+            c.drawString(page_w - margin_right - tw, y_pos - 1 * mm, range_text)
+            c.setFillColor(colors.black)
         return y_pos - 6 * mm
 
-    def draw_date_header(y_pos):
+    def draw_date_header(y_pos, page_dates, date_col_w):
         """日付ヘッダー行"""
         x = margin_left
         # ラベル列
@@ -293,7 +300,7 @@ def generate_floor_shipping_pdf(line_id: int, start_date: date, end_date: date) 
         c.drawString(x + 1 * mm, y_pos - row_h + 1 * mm, '')
         x += label_col_w
 
-        for d in display_dates:
+        for d in page_dates:
             is_weekend = d.weekday() >= 5
             if is_weekend:
                 c.setFillColor(COLOR_WEEKEND_BG)
@@ -316,7 +323,7 @@ def generate_floor_shipping_pdf(line_id: int, start_date: date, end_date: date) 
         c.rect(x, y_pos - row_h, label_col_w, row_h, fill=1, stroke=0)
         x += label_col_w
 
-        for d in display_dates:
+        for d in page_dates:
             is_weekend = d.weekday() >= 5
             if is_weekend:
                 c.setFillColor(COLOR_WEEKEND_BG)
@@ -333,7 +340,7 @@ def generate_floor_shipping_pdf(line_id: int, start_date: date, end_date: date) 
 
         return y_pos - row_h
 
-    def draw_section_header(y_pos, title, bg_color):
+    def draw_section_header(y_pos, title, bg_color, table_w):
         """セクションヘッダー（15時着 / 8時着）"""
         x = margin_left
         c.setFillColor(bg_color)
@@ -343,7 +350,7 @@ def generate_floor_shipping_pdf(line_id: int, start_date: date, end_date: date) 
         c.drawString(x + 2 * mm, y_pos - section_header_h + 1.5 * mm, title)
         return y_pos - section_header_h
 
-    def draw_product_row(y_pos, product_code, label, name, data_by_date, row_bg=None, label_color=None):
+    def draw_product_row(y_pos, product_code, label, name, data_by_date, page_dates, date_col_w, row_bg=None, label_color=None):
         """製品行を描画"""
         x = margin_left
 
@@ -361,7 +368,7 @@ def generate_floor_shipping_pdf(line_id: int, start_date: date, end_date: date) 
         c.drawString(x + 0.5 * mm, y_pos - row_h + 1 * mm, cell_text)
         x += label_col_w
 
-        for d in display_dates:
+        for d in page_dates:
             is_weekend = d.weekday() >= 5
             bg = COLOR_WEEKEND_BG if is_weekend else row_bg
             if bg:
@@ -381,7 +388,7 @@ def generate_floor_shipping_pdf(line_id: int, start_date: date, end_date: date) 
 
         return y_pos - row_h
 
-    def draw_total_row(y_pos, title, totals_by_date, bg_color=COLOR_TOTAL_BG):
+    def draw_total_row(y_pos, title, totals_by_date, page_dates, date_col_w, bg_color=COLOR_TOTAL_BG):
         """合計行"""
         x = margin_left
 
@@ -395,7 +402,7 @@ def generate_floor_shipping_pdf(line_id: int, start_date: date, end_date: date) 
         c.drawString(x + label_col_w - tw - 1 * mm, y_pos - row_h + 1 * mm, title)
         x += label_col_w
 
-        for d in display_dates:
+        for d in page_dates:
             is_weekend = d.weekday() >= 5
             c.setFillColor(COLOR_WEEKEND_BG if is_weekend else bg_color)
             c.rect(x, y_pos - row_h, date_col_w, row_h, fill=1, stroke=0)
@@ -413,9 +420,9 @@ def generate_floor_shipping_pdf(line_id: int, start_date: date, end_date: date) 
 
         return y_pos - row_h
 
-    def calc_section_totals(section_data):
+    def calc_section_totals(section_data, page_dates):
         totals = {}
-        for d in display_dates:
+        for d in page_dates:
             total = 0
             for pc, _, _ in PRODUCT_ORDER:
                 total += section_data.get(d, {}).get(pc, 0)
@@ -423,47 +430,54 @@ def generate_floor_shipping_pdf(line_id: int, start_date: date, end_date: date) 
         return totals
 
     # --- ページ描画 ---
-    y = page_h - margin_top
-    y = draw_page_header(y)
-    y = draw_date_header(y)
+    for page_dates in _chunk_dates(display_dates, PAGE_DAYS):
+        date_col_w = max(
+            (page_w - margin_left - margin_right - label_col_w) / max(len(page_dates), 1),
+            12 * mm
+        )
+        table_w = label_col_w + date_col_w * len(page_dates)
 
-    # 15時着セクション
-    y = draw_section_header(y, SECTION_TITLE_15, COLOR_SECTION_15)
-    for row_index, (pc, label, lbl_color) in enumerate(PRODUCT_ORDER, start=1):
-        name = product_names.get(pc, '')
-        data_for_product = {}
-        for d in display_dates:
-            qty = pm_data.get(d, {}).get(pc, 0)
-            if qty > 0:
-                data_for_product[d] = qty
-        row_bg = COLOR_ROW_ODD_BG if row_index % 2 == 1 else COLOR_ROW_EVEN_BG
-        y = draw_product_row(y, pc, label, name, data_for_product, row_bg=row_bg, label_color=lbl_color)
+        y = page_h - margin_top
+        y = draw_page_header(y, page_dates)
+        y = draw_date_header(y, page_dates, date_col_w)
 
-    pm_totals = calc_section_totals(pm_data)
-    y = draw_total_row(y, '合計', pm_totals)
+        # 15時着セクション
+        y = draw_section_header(y, SECTION_TITLE_15, COLOR_SECTION_15, table_w)
+        for row_index, (pc, label, lbl_color) in enumerate(PRODUCT_ORDER, start=1):
+            name = product_names.get(pc, '')
+            data_for_product = {}
+            for d in page_dates:
+                qty = pm_data.get(d, {}).get(pc, 0)
+                if qty > 0:
+                    data_for_product[d] = qty
+            row_bg = COLOR_ROW_ODD_BG if row_index % 2 == 1 else COLOR_ROW_EVEN_BG
+            y = draw_product_row(y, pc, label, name, data_for_product, page_dates, date_col_w, row_bg=row_bg, label_color=lbl_color)
 
-    # 8時着セクション
-    y = draw_section_header(y, SECTION_TITLE_08, COLOR_SECTION_08)
-    for row_index, (pc, label, lbl_color) in enumerate(PRODUCT_ORDER, start=1):
-        name = product_names.get(pc, '')
-        data_for_product = {}
-        for d in display_dates:
-            qty = am_data.get(d, {}).get(pc, 0)
-            if qty > 0:
-                data_for_product[d] = qty
-        row_bg = COLOR_ROW_ODD_BG if row_index % 2 == 1 else COLOR_ROW_EVEN_BG
-        y = draw_product_row(y, pc, label, name, data_for_product, row_bg=row_bg, label_color=lbl_color)
+        pm_totals = calc_section_totals(pm_data, page_dates)
+        y = draw_total_row(y, '合計', pm_totals, page_dates, date_col_w)
 
-    am_totals = calc_section_totals(am_data)
-    y = draw_total_row(y, '合計', am_totals)
+        # 8時着セクション
+        y = draw_section_header(y, SECTION_TITLE_08, COLOR_SECTION_08, table_w)
+        for row_index, (pc, label, lbl_color) in enumerate(PRODUCT_ORDER, start=1):
+            name = product_names.get(pc, '')
+            data_for_product = {}
+            for d in page_dates:
+                qty = am_data.get(d, {}).get(pc, 0)
+                if qty > 0:
+                    data_for_product[d] = qty
+            row_bg = COLOR_ROW_ODD_BG if row_index % 2 == 1 else COLOR_ROW_EVEN_BG
+            y = draw_product_row(y, pc, label, name, data_for_product, page_dates, date_col_w, row_bg=row_bg, label_color=lbl_color)
 
-    # 出荷数合計
-    grand_totals = {}
-    for d in display_dates:
-        grand_totals[d] = am_totals.get(d, 0) + pm_totals.get(d, 0)
-    y = draw_total_row(y, '出荷数合計', grand_totals, bg_color=COLOR_GRAND_TOTAL_BG)
+        am_totals = calc_section_totals(am_data, page_dates)
+        y = draw_total_row(y, '合計', am_totals, page_dates, date_col_w)
 
-    c.showPage()
+        # 出荷数合計
+        grand_totals = {}
+        for d in page_dates:
+            grand_totals[d] = am_totals.get(d, 0) + pm_totals.get(d, 0)
+        y = draw_total_row(y, '出荷数合計', grand_totals, page_dates, date_col_w, bg_color=COLOR_GRAND_TOTAL_BG)
+
+        c.showPage()
     c.save()
     buf.seek(0)
     return buf.read()

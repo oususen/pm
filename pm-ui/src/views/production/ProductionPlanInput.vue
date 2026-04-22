@@ -171,18 +171,25 @@
           :disabled="processing || !selectedLine"
         >自動計画</button>
         <button class="btn accent" @click="toggleProcessGantt" :disabled="processing || !selectedLine">
-          {{ showProcessGantt ? '工程ガントを閉じる' : '工程ガント表示' }}
+          {{ showProcessGantt ? 'ガント閉じ' : 'ガント表示' }}
         </button>
         <button class="btn accent" @click="toggleProcessLoad" :disabled="processing || !selectedLine">
-          {{ showProcessLoad ? '工程負荷を閉じる' : '工程負荷表示' }}
+          {{ showProcessLoad ? '負荷閉' : '負荷表示' }}
         </button>
         <button
-          v-if="canShowDeliveryDetailPDFButton"
+          v-if="canShowFloorDeliveryDetailPDFButton"
           class="btn"
           style="background: #70AD47; color: #fff;"
           @click="downloadFloorShippingPDF"
           :disabled="processing || !selectedLine"
-        >配送明細PDF</button>
+        >配送明細</button>
+        <button
+          v-if="canShowDeliveryDetailPDFButton"
+          class="btn"
+          style="background: #1f4e78; color: #fff;"
+          @click="downloadHokushinDeliveryListPDF"
+          :disabled="processing || !selectedLine"
+        >北進納入リスト</button>
         <button
           v-if="canShowDeliveryDetailPDFButton"
           class="btn"
@@ -999,7 +1006,10 @@ const floorShippingPdfSourceLineId = computed(() => {
   return deliveryLine?.id || null
 })
 const canShowDeliveryDetailPDFButton = computed(() => (
-  activePlanTab.value === 'floor' || isFloorShippingDeliveryLine.value
+  activePlanTab.value === 'floor-shipping'
+))
+const canShowFloorDeliveryDetailPDFButton = computed(() => (
+  activePlanTab.value === 'floor' || activePlanTab.value === 'floor-shipping'
 ))
 const isFloorSpotLine = computed(() => {
   const line = selectedLineObj.value
@@ -2882,6 +2892,30 @@ const downloadFloorShippingPDF = async () => {
     window.open(url, '_blank')
   } catch (e) {
     console.error('配送明細PDF生成エラー', e)
+    alert('PDF生成に失敗しました: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
+const downloadHokushinDeliveryListPDF = async () => {
+  const sourceLineId = floorShippingPdfSourceLineId.value
+  if (!sourceLineId) {
+    alert('フロア配送ラインが見つかりません。')
+    return
+  }
+  try {
+    const res = await api.client.get('/hokushin-delivery-list-pdf/', {
+      params: {
+        line: sourceLineId,
+        start_date: startDate.value,
+        end_date: endDate.value,
+      },
+      responseType: 'blob',
+    })
+    const blob = new Blob([res.data], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank')
+  } catch (e) {
+    console.error('北進納入リストPDF生成エラー', e)
     alert('PDF生成に失敗しました: ' + (e.response?.data?.detail || e.message))
   }
 }
