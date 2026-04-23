@@ -21,6 +21,176 @@
 
 ---
 
+# 0. 全テーブル索引（現行コード基準）
+
+この章は **`pm_backend/apps/**/models*.py` の `db_table` 定義**を基準にした全テーブル索引。  
+「どこに説明があるか」を追えるように、テーブル名をアプリ別に列挙する。
+
+## 0.1 masters
+- `m_product`
+- `m_customer`
+- `m_process`
+- `m_line`
+- `m_supplier`
+- `m_calendar`
+- `m_work_pattern`
+- `m_break_time`
+- `m_calendar_day`
+- `m_bom`
+- `m_bom_item`
+- `m_routing`
+- `m_routing_step`
+- `m_routing_step_material`
+- `m_process_cycle_time`
+- `m_product_group`
+- `m_container_capacity`
+- `m_equipment`
+- `m_kubota_sakai_truck`
+- `m_contacts`
+
+## 0.2 orders
+- `t_order`
+- `t_order_line`
+- `t_kubota_sakai_due_adjustment`
+- `t_kubota_sakai_trip_assignment`
+- `t_shipping_run`
+- `t_shipping_trip`
+- `t_shipping_trip_allocation`
+- `stg_order_raw`
+- `stg_order_raw_tiera`
+- `stg_order_raw_rieden`
+- `stg_order_raw_kubota`
+- `stg_order_daily`
+- `kubota_sakai_import_config`
+
+## 0.3 production
+- `t_line_demand`
+- `line_backlog`
+- `line_plan`
+- `t_line_gantt_plan`
+- `t_line_realtime_record`
+- `t_line_status`
+- `t_process_realtime_record`
+- `t_stock_allocation`
+- `t_production_order`
+- `t_process_actual`
+- `line_daily_schedule_setting`
+- `t_line_default_schedule_setting`
+- `production_plan_lock_setting`
+- `production_plan_change_log`
+- `production_schedule_config`
+- `production_line_backlog_adjustment`
+- `production_record_inquiry_setting`
+- `production_routing_migration_log`
+- `t_laser_pattern`
+- `t_laser_pattern_component`
+- `t_laser_pattern_finished`
+- `t_laser_actual`
+- `t_laser_actual_detail`
+- `t_laser_shift_record`
+- `brake_line_record`
+- `t_gantt_display_product_map`
+- `t_process_work_session`
+- `t_process_work_session_equipment`
+- `t_production_record_confirmation`
+- `production_purchase_actual_reconcile_report`
+- `production_purchase_actual_reconcile_report_detail`
+- `production_production_actual_reconcile_report`
+- `production_production_actual_reconcile_report_detail`
+
+## 0.4 quality
+- `t_scrap_record`
+- `t_scrap_record_detail`
+- `quality_equipment_inspection_template`
+- `quality_equipment_inspection_item`
+- `quality_equipment_inspection_item_attachment`
+- `quality_equipment_inspection_record`
+- `quality_equipment_inspection_result`
+- `quality_equipment_inspection_confirmation`
+- `quality_equipment_inspection_task`
+- `quality_equipment_inspection_workflow_log`
+
+## 0.5 shipping
+- `t_shipment_actual`
+- `t_shipment_actual_history`
+- `t_delivery_progress`
+
+## 0.6 purchase
+- `purchase_plan_lock_setting`
+- `supplier_order_schedule`
+- `purchase_order_proposal`
+- `purchase_order_proposal_line`
+- `purchase_order_proposal_approval`
+- `purchase_order_approval_config`
+- `purchase_order_task`
+- `purchase_plan_change_log`
+- `engineering_change_case`
+- `engineering_change_part`
+
+## 0.7 accounts
+- `accounts_department`
+- `accounts_userprofile`
+- `accounts_unit_line_mapping`
+- `accounts_user_smtp_configs`
+- `accounts_userpermission`
+- `accounts_departmentpermission`
+- `accounts_positionpermission`
+- `accounts_department_position_permission`
+
+## 0.8 notifications
+- `notifications`
+- `notification_reads`
+
+## 0.9 overtime
+- `t_overtime_application`
+- `t_overtime_approval_log`
+
+## 0.10 proposals
+- `proposals_department`
+- `proposals_employee`
+- `proposals_employeepermission`
+
+## 0.11 system_settings
+- `system_settings`
+
+## 0.12 参照ルール
+- **主要テーブルのカラム説明**: この文書の各章（1〜18）を参照。
+- **関係性（FK/多重度）**: [ER_diagram_v3.md](./ER_diagram_v3.md) を参照。
+- **業務ロジックまで含む詳細**: 各業務仕様書（例: `受注管理仕様書.md`, `生産計画仕様書.md`, `在庫計算仕様書.md`）を参照。
+
+## 0.13 テーブル別 主参照仕様書
+
+下表は「どのテーブルをどの仕様書で読むべきか」の主参照先。  
+テーブル個別説明が薄い場合は、まず同じ行の仕様書を参照し、次に本書各章とER図で補完する。
+
+| テーブル群 | 主参照仕様書 | 補足 |
+|---|---|---|
+| `m_product`, `m_process`, `m_line`, `m_bom`, `m_bom_item`, `m_routing`, `m_routing_step`, `m_process_cycle_time` | `生産計画仕様書.md`, `リードタイム仕様書.md`, `受注展開仕様書.md` | 製品/工程/LT/展開の中核 |
+| `m_calendar`, `m_calendar_day`, `m_work_pattern`, `m_break_time` | `受注管理仕様書.md`, `納入先コード処理実装まとめ.md` | 営業日・勤務パターン |
+| `m_customer` | `受注管理仕様書.md`, `出荷指示書機能仕様書.md` | 得意先・カレンダ連携 |
+| `m_supplier` | `購買需要計算仕様書.md` | 購買LT・調達関連 |
+| `m_product_group`, `m_container_capacity` | `出荷指示書機能仕様書.md` | 出荷帳票用マスタ |
+| `m_equipment` | `スポットライン実績入力仕様書.md`, `設備点検表仕様書.md` | 設備実績・点検 |
+| `m_kubota_sakai_truck` | `クボタ堺出荷便計画仕様書.md` | 便マスタ |
+| `accounts_*` | `権限仕様書.md` | 部署階層/ロール/権限 |
+| `t_order`, `t_order_line`, `stg_order_*`, `stg_order_daily` | `受注管理仕様書.md`, `受注展開仕様書.md` | 受注取込〜明細 |
+| `t_line_demand`, `line_backlog`, `line_plan`, `t_line_gantt_plan` | `生産計画仕様書.md`, `在庫計算仕様書.md`, `前工程需要計算仕様書.md` | 計画/需要/在庫系トランザクション |
+| `t_line_realtime_record`, `t_line_status`, `t_process_realtime_record`, `t_process_work_session*`, `t_production_record_confirmation`, `brake_line_record` | `生産計画仕様書.md`, `スポットライン実績入力仕様書.md`, `レーザー実績入力仕様書.md` | 実績入力・稼働監視 |
+| `t_stock_allocation`, `t_production_order`, `t_process_actual` | `生産計画仕様書.md`, `在庫計算仕様書.md` | 製造実行 |
+| `production_schedule_config`, `production_plan_lock_setting`, `production_plan_change_log`, `production_record_inquiry_setting` | `自動計画生成タスク仕様書.md`, `システム設定仕様書.md`, `生産計画仕様書.md` | 設定/履歴 |
+| `production_line_backlog_adjustment` | `在庫進度調整画面仕様書.md` | 調整入力 |
+| `t_laser_pattern*`, `t_laser_actual*`, `t_laser_shift_record` | `レーザー実績入力仕様書.md`, `レーザ月所要材料集計仕様書.md` | レーザー系 |
+| `production_*_reconcile_report*` | `生産実績整合チェック仕様書.md`, `納入実績整合チェック仕様書.md` | 整合チェック |
+| `t_scrap_record`, `t_scrap_record_detail` | `仕損登録仕様書.md` | 仕損/戻し |
+| `quality_equipment_inspection_*` | `設備点検表仕様書.md` | 設備点検ワークフロー |
+| `t_shipment_actual`, `t_shipment_actual_history`, `t_delivery_progress` | `出荷進度照会仕様書.md`, `出荷指示書機能仕様書.md` | 出荷実績/進捗 |
+| `t_kubota_sakai_due_adjustment`, `t_kubota_sakai_trip_assignment`, `t_shipping_run`, `t_shipping_trip`, `t_shipping_trip_allocation`, `kubota_sakai_import_config` | `クボタ堺出荷便計画仕様書.md` | 堺専用＋共通出荷連携 |
+| `purchase_*`, `engineering_change_*` | `購買需要計算仕様書.md`, `自動発注提案仕様書.md`, `設変新規管理仕様書.md` | 購買/設変 |
+| `notifications`, `notification_reads` | `通知閲覧.md`, `通知編集.md` | 通知 |
+| `t_overtime_application`, `t_overtime_approval_log` | `残業申請仕様書.md` | 残業申請 |
+| `proposals_*` | `自動発注提案仕様書.md` | 提案系基盤 |
+| `system_settings` | `システム設定仕様書.md` | 全体設定 |
+
 # 1. 製品 `m_product`
 | カラム | 型 | 説明 |
 |---|---|---|
