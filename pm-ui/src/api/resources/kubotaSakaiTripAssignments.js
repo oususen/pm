@@ -20,6 +20,12 @@ export const createKubotaSakaiTripAssignmentsAPI = (client) => ({
       responseType: 'blob',
     })
   },
+  getPseudoTruckProducts() {
+    return client.get('/kubota-sakai-trip-assignments/pseudo-truck-products/')
+  },
+  savePseudoTruckProducts(rows) {
+    return client.post('/kubota-sakai-trip-assignments/pseudo-truck-products/', { rows })
+  },
   get(id) {
     return client.get(`/kubota-sakai-trip-assignments/${id}/`)
   },

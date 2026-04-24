@@ -33,6 +33,36 @@
       <button class="btn detail-btn" :disabled="loading" @click="showTruckDetail = !showTruckDetail">
         便詳細
       </button>
+      <button class="btn pseudo-product-btn" :disabled="loading" @click="togglePseudoProductPanel">
+        擬似便対象製品
+      </button>
+      <button class="btn auto-assign-btn" :disabled="loading || saving || autoAssigning" @click="openAutoAssignDialog">
+        自動便振分
+      </button>
+    </div>
+
+    <div v-if="showAutoAssignDialog" class="modal-overlay" @click.self="closeAutoAssignDialog">
+      <div class="modal-card">
+        <h3 class="modal-title">自動便振分</h3>
+        <div class="modal-fields">
+          <label class="modal-field">
+            <span>適用カレンダ</span>
+            <select v-model.number="autoAssignCalendarId">
+              <option v-for="cal in calendarList" :key="cal.id" :value="cal.id">{{ cal.calendar_name }}</option>
+            </select>
+          </label>
+          <label class="modal-field">
+            <span>振分開始日</span>
+            <input v-model="autoAssignStartDate" type="date" />
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" :disabled="autoAssigning" @click="closeAutoAssignDialog">閉じる</button>
+          <button class="btn auto-assign-btn" :disabled="autoAssigning" @click="autoAssignTrips">
+            {{ autoAssigning ? '振分中...' : '実行' }}
+          </button>
+        </div>
+      </div>
     </div>
 
     <div v-if="showPickupPdfDialog" class="modal-overlay" @click.self="closePickupPdfDialog">
@@ -89,6 +119,42 @@
       </table>
     </div>
 
+    <div v-if="showPseudoProductPanel" class="pseudo-product-wrap">
+      <div class="pseudo-product-toolbar">
+        <span class="pseudo-product-title">擬似便対象製品</span>
+        <button class="btn save-btn" :disabled="savingPseudo" @click="savePseudoProducts">
+          {{ savingPseudo ? '保存中...' : '保存' }}
+        </button>
+      </div>
+      <table class="pseudo-product-table">
+        <thead>
+          <tr>
+            <th class="pseudo-label-col">便</th>
+            <th v-for="row in pseudoProductRows" :key="`pth-${row.key}`" class="pseudo-product-col">
+              <div class="pseudo-col-code">{{ row.product_code }}</div>
+              <div class="pseudo-col-name">{{ productNameMap.get(row.product_code) || '' }}</div>
+              <div class="pseudo-col-shipto">{{ row.ship_to_code || '-' }}</div>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="pt in pseudoTrucks" :key="`ptr-${pt.id}`">
+            <td class="pseudo-label-col">{{ pt.alias_name || pt.name }}</td>
+            <td v-for="row in pseudoProductRows" :key="`pp-${row.key}-${pt.id}`" class="pseudo-check-cell">
+              <input
+                type="checkbox"
+                :checked="row.truckIds.has(pt.id)"
+                @change="togglePseudoTruck(row, pt.id)"
+              />
+            </td>
+          </tr>
+          <tr v-if="!pseudoProductRows.length">
+            <td colspan="1" class="detail-empty">データがありません</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
     <div class="table-wrap" ref="tableWrapRef">
       <table class="grid">
         <thead ref="theadRef">
@@ -106,9 +172,9 @@
               }"
             >
               <div class="date-head-content">
-                <span class="pseudo-occ pseudo-occ-left">A:{{ pseudoTruckOccupancyPercent(dateKey, 'A') }}%</span>
+                <span class="pseudo-occ pseudo-occ-left" :class="{ 'pseudo-occ-over': pseudoTruckOccupancyPercent(dateKey, 'A') > 95 }">A:{{ pseudoTruckOccupancyPercent(dateKey, 'A') }}%</span>
                 <span class="date-head-label">{{ formatHeaderDate(dateKey) }}</span>
-                <span class="pseudo-occ pseudo-occ-right">P:{{ pseudoTruckOccupancyPercent(dateKey, 'P') }}%</span>
+                <span class="pseudo-occ pseudo-occ-right" :class="{ 'pseudo-occ-over': pseudoTruckOccupancyPercent(dateKey, 'P') > 95 }">P:{{ pseudoTruckOccupancyPercent(dateKey, 'P') }}%</span>
               </div>
             </th>
           </tr>
@@ -294,7 +360,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import api from '@/api/client'
 
 const theadRef = ref(null)
@@ -392,6 +458,17 @@ const previewSummaryByDate = ref({})
 const mergedRows = ref([])
 const previewTimers = new Map()
 const showTruckDetail = ref(false)
+const showPseudoProductPanel = ref(false)
+const pseudoTrucks = ref([])
+const pseudoProductRows = ref([])
+const savingPseudo = ref(false)
+const autoAssigning = ref(false)
+const showAutoAssignDialog = ref(false)
+const calendarList = ref([])
+const autoAssignCalendarId = ref(null)
+const autoAssignStartDate = ref('')
+const calendarDayMap = ref({})
+const productNameMap = ref(new Map())
 const showPickupPdfDialog = ref(false)
 const pickupPdfStartDate = ref('')
 const pickupPdfEndDate = ref('')
@@ -699,6 +776,9 @@ const loadGrid = async () => {
       maxDeadline = Math.max(maxDeadline, Number(res.data?.assignment_deadline_days || 3))
 
       payloadRows.forEach((raw) => {
+        if (raw.product_code && raw.product_name) {
+          productNameMap.value.set(raw.product_code, raw.product_name)
+        }
         const key = `${raw.product_code}||${raw.ship_to_code || ''}`
         if (!map.has(key)) {
           map.set(key, {
@@ -920,6 +1000,261 @@ const save = async () => {
   }
 }
 
+// ---- 擬似便対象製品 ----
+
+const togglePseudoProductPanel = async () => {
+  showPseudoProductPanel.value = !showPseudoProductPanel.value
+  if (showPseudoProductPanel.value) {
+    await loadPseudoProducts()
+  }
+}
+
+const loadPseudoProducts = async () => {
+  try {
+    const res = await api.kubotaSakaiTripAssignments.getPseudoTruckProducts()
+    pseudoTrucks.value = res.data?.pseudo_trucks || []
+    const mappings = res.data?.mappings || []
+    const mappingMap = new Map()
+    mappings.forEach((m) => {
+      const key = `${m.product_code}||${m.ship_to_code || ''}`
+      mappingMap.set(key, new Set((m.trucks || []).map((t) => Number(t.truck_id))))
+    })
+    const gridKeys = new Set()
+    mergedRows.value.forEach((row) => {
+      gridKeys.add(`${row.product_code}||${row.ship_to_code || ''}`)
+    })
+    pseudoProductRows.value = [...gridKeys].sort().map((key) => {
+      const [productCode, shipToCode] = key.split('||', 2)
+      return {
+        key,
+        product_code: productCode,
+        ship_to_code: shipToCode,
+        truckIds: mappingMap.get(key) || new Set(),
+      }
+    })
+  } catch (error) {
+    alert('擬似便対象製品の取得に失敗しました。')
+  }
+}
+
+const togglePseudoTruck = (row, truckId) => {
+  if (row.truckIds.has(truckId)) {
+    row.truckIds.delete(truckId)
+  } else {
+    row.truckIds.add(truckId)
+  }
+}
+
+const savePseudoProducts = async () => {
+  savingPseudo.value = true
+  try {
+    const rows = pseudoProductRows.value.map((row) => ({
+      product_code: row.product_code,
+      ship_to_code: row.ship_to_code || '',
+      truck_ids: [...row.truckIds],
+    }))
+    await api.kubotaSakaiTripAssignments.savePseudoTruckProducts(rows)
+    alert('擬似便対象製品を保存しました。')
+  } catch (error) {
+    alert('保存に失敗しました。')
+  } finally {
+    savingPseudo.value = false
+  }
+}
+
+// ---- 自動便振分 ----
+
+const isWorkingDayByCalendar = (dateKey) => {
+  if (dateKey in calendarDayMap.value) return calendarDayMap.value[dateKey]
+  const d = new Date(`${dateKey}T00:00:00`)
+  return d.getDay() !== 0 && d.getDay() !== 6
+}
+
+const addBusinessDaysByCalendar = (baseDateStr, days) => {
+  let current = new Date(`${baseDateStr}T00:00:00`)
+  let remaining = days
+  while (remaining > 0) {
+    current.setDate(current.getDate() + 1)
+    if (isWorkingDayByCalendar(formatLocalDate(current))) remaining--
+  }
+  return formatLocalDate(current)
+}
+
+const openAutoAssignDialog = async () => {
+  try {
+    if (!calendarList.value.length) {
+      const res = await api.calendars.getCalendars()
+      calendarList.value = (res.data?.results || res.data || []).sort((a, b) =>
+        String(a.calendar_name).localeCompare(String(b.calendar_name)),
+      )
+    }
+    if (!autoAssignCalendarId.value && calendarList.value.length) {
+      const kubota = calendarList.value.find(
+        (c) => /kubota|kobota|クボタ/.test(`${c.calendar_code}${c.calendar_name}`),
+      )
+      autoAssignCalendarId.value = kubota ? kubota.id : calendarList.value[0].id
+    }
+    await loadCalendarDays()
+    autoAssignStartDate.value = addBusinessDaysByCalendar(formatLocalDate(new Date()), 4)
+    showAutoAssignDialog.value = true
+  } catch (error) {
+    alert('カレンダー情報の取得に失敗しました。')
+  }
+}
+
+const closeAutoAssignDialog = () => {
+  if (autoAssigning.value) return
+  showAutoAssignDialog.value = false
+}
+
+const loadCalendarDays = async () => {
+  if (!autoAssignCalendarId.value) return
+  const res = await api.calendars.getCalendarDays(autoAssignCalendarId.value, { page_size: 9999 })
+  const days = res.data?.results || res.data || []
+  const map = {}
+  days.forEach((d) => { map[d.target_date] = Boolean(d.is_working_day) })
+  calendarDayMap.value = map
+}
+
+watch(autoAssignCalendarId, async (newVal) => {
+  if (newVal && showAutoAssignDialog.value) {
+    await loadCalendarDays()
+    autoAssignStartDate.value = addBusinessDaysByCalendar(formatLocalDate(new Date()), 4)
+  }
+})
+
+const autoAssignTrips = async () => {
+  autoAssigning.value = true
+  try {
+    let pseudoData = pseudoProductRows.value
+    if (!pseudoData.length || !pseudoTrucks.value.length) {
+      const res = await api.kubotaSakaiTripAssignments.getPseudoTruckProducts()
+      pseudoTrucks.value = res.data?.pseudo_trucks || []
+      const mappings = res.data?.mappings || []
+      pseudoData = mappings.map((m) => ({
+        key: `${m.product_code}||${m.ship_to_code || ''}`,
+        product_code: m.product_code,
+        ship_to_code: m.ship_to_code || '',
+        truckIds: new Set((m.trucks || []).map((t) => Number(t.truck_id))),
+      }))
+    }
+
+    const pseudoMap = new Map()
+    pseudoData.forEach((row) => {
+      if (row.truckIds.size > 0) {
+        pseudoMap.set(`${row.product_code}||${row.ship_to_code || ''}`, row.truckIds)
+      }
+    })
+
+    const thresholdDate = autoAssignStartDate.value || formatLocalDate(new Date())
+
+    const skippedProducts = new Set()
+    let assignedCount = 0
+
+    const pseudoTruckA = pseudoTrucks.value.find((t) => {
+      const marker = (t.alias_name || t.name || '').trim().toUpperCase().replace(/\s+/g, '')
+      return ['A', 'A便', 'Ａ', 'Ａ便'].includes(marker)
+    })
+    const pseudoTruckP = pseudoTrucks.value.find((t) => {
+      const marker = (t.alias_name || t.name || '').trim().toUpperCase().replace(/\s+/g, '')
+      return ['P', 'P便', 'Ｐ', 'Ｐ便'].includes(marker)
+    })
+
+    if (!pseudoTruckA && !pseudoTruckP) {
+      alert('擬似便（A便/P便）がトラックマスタに登録されていません。')
+      return
+    }
+
+    const getOccupancy = (dateKey, truckId) => {
+      const preview = (previewSummaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === Number(truckId))
+      if (preview) return parseNumber(preview.occupancy_percent)
+      const saved = (summaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === Number(truckId))
+      return parseNumber(saved?.occupancy_percent)
+    }
+
+    const targetDateKeys = dateKeys.value.filter((dk) => dk >= thresholdDate)
+
+    const assignEntry = (entry, truck) => {
+      const qty = parseIntegerQty(entry.delivery_qty)
+      entry.allocations = [{ truck_id: truck.id, qty: String(qty) }]
+      recalcEntry(entry)
+      assignedCount++
+    }
+
+    const classifyEntry = (row, entry) => {
+      if (parseNumber(entry.delivery_qty) <= 0) return null
+      if (entry.allocations.some((al) => al.truck_id && parseIntegerQty(al.qty) > 0)) return null
+
+      const lookupKey = `${row.product_code}||${row.ship_to_code || ''}`
+      const truckIds = pseudoMap.get(lookupKey)
+      if (!truckIds) { skippedProducts.add(`${row.product_code}(${row.ship_to_code || '-'})`); return null }
+
+      const hasA = pseudoTruckA && truckIds.has(pseudoTruckA.id)
+      const hasP = pseudoTruckP && truckIds.has(pseudoTruckP.id)
+      if (!hasA && !hasP) { skippedProducts.add(row.product_code); return null }
+
+      if (hasA && hasP) return 'both'
+      if (hasA) return 'A_only'
+      return 'P_only'
+    }
+
+    // Phase 1: 単独製品を割当（A-only→A, P-only→P）
+    for (const dateKey of targetDateKeys) {
+      for (const row of mergedRows.value) {
+        for (const entry of entriesAt(row, dateKey)) {
+          const type = classifyEntry(row, entry)
+          if (type === 'A_only') assignEntry(entry, pseudoTruckA)
+          else if (type === 'P_only') assignEntry(entry, pseudoTruckP)
+        }
+      }
+    }
+
+    // プレビュー更新 → A便の占有率を取得
+    await Promise.all(targetDateKeys.map((dk) => previewLoadForDate(dk)))
+
+    // Phase 2: A+P両方の製品 → Aに1つずつ積んで95%超えたらPに戻す
+    for (const dateKey of targetDateKeys) {
+      const bothEntries = []
+      for (const row of mergedRows.value) {
+        for (const entry of entriesAt(row, dateKey)) {
+          if (classifyEntry(row, entry) === 'both') bothEntries.push(entry)
+        }
+      }
+      if (!bothEntries.length) continue
+
+      let aFull = false
+      for (const entry of bothEntries) {
+        if (aFull) {
+          assignEntry(entry, pseudoTruckP)
+          continue
+        }
+        // まずAに積んでみる
+        assignEntry(entry, pseudoTruckA)
+        await previewLoadForDate(dateKey)
+        if (getOccupancy(dateKey, pseudoTruckA.id) >= 95) {
+          // 超えた → この製品をPに戻す
+          entry.allocations = [{ truck_id: pseudoTruckP.id, qty: String(parseIntegerQty(entry.delivery_qty)) }]
+          recalcEntry(entry)
+          aFull = true
+        }
+      }
+    }
+
+    await Promise.all(targetDateKeys.map((dk) => previewLoadForDate(dk)))
+
+    let message = `自動振分完了: ${assignedCount}件割当`
+    if (skippedProducts.size > 0) {
+      message += `\n\n未設定のためスキップした製品:\n${[...skippedProducts].sort().join(', ')}`
+    }
+    showAutoAssignDialog.value = false
+    alert(message)
+  } catch (error) {
+    alert('自動振分に失敗しました。')
+  } finally {
+    autoAssigning.value = false
+  }
+}
+
 onMounted(async () => {
   await loadGrid()
   await nextTick()
@@ -992,6 +1327,14 @@ onUnmounted(() => {
 }
 .detail-btn {
   background: #f7f7f7;
+}
+.pseudo-product-btn {
+  background: #fef9c3;
+  border-color: #d4a017;
+}
+.auto-assign-btn {
+  background: #e0e7ff;
+  border-color: #6366f1;
 }
 .pickup-btn {
   background: #eefcf5;
@@ -1068,6 +1411,65 @@ onUnmounted(() => {
 }
 .detail-empty {
   text-align: center;
+  color: #6b7280;
+}
+.pseudo-product-wrap {
+  background: #fff;
+  border: 1px solid #c5cfde;
+  border-radius: 4px;
+  padding: 6px;
+  max-height: 300px;
+  overflow: auto;
+}
+.pseudo-product-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.pseudo-product-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: #111827;
+}
+.pseudo-product-table {
+  width: auto;
+  border-collapse: collapse;
+}
+.pseudo-product-table th,
+.pseudo-product-table td {
+  border: 1px solid #2d3748;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.pseudo-product-table th {
+  background: #e8edf3;
+  text-align: center;
+}
+.pseudo-check-cell {
+  text-align: center;
+}
+.pseudo-label-col {
+  white-space: nowrap;
+  font-weight: 600;
+  text-align: center;
+  min-width: 30px;
+}
+.pseudo-product-col {
+  text-align: center;
+  white-space: nowrap;
+  padding: 2px 6px !important;
+}
+.pseudo-col-code {
+  font-size: 11px;
+  font-weight: 600;
+}
+.pseudo-col-name {
+  font-size: 10px;
+  color: #374151;
+}
+.pseudo-col-shipto {
+  font-size: 10px;
   color: #6b7280;
 }
 .day-split-left {
@@ -1148,6 +1550,10 @@ onUnmounted(() => {
 }
 .pseudo-occ-right {
   right: 8px;
+}
+.pseudo-occ-over {
+  color: #dc2626 !important;
+  font-weight: 700;
 }
 .holiday-head {
   color: #b91c1c !important;

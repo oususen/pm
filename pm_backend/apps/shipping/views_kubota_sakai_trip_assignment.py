@@ -28,6 +28,7 @@ from reportlab.pdfgen import canvas
 from masters.models import Calendar, CalendarDay, KubotaSakaiTruck, Line, Process, Product
 from orders.core.models import (
     KubotaSakaiDueAdjustment,
+    KubotaSakaiPseudoTruckProduct,
     KubotaSakaiTripAssignment,
     ShippingRun,
     ShippingTrip,
@@ -115,16 +116,16 @@ def _calculate_assignment_area(item, truck):
 
 def _resolve_kubota_calendar():
     rows = Calendar.objects.all()
-    code_hits = rows.filter(
+    exact_hits = rows.filter(
         Q(calendar_code__iexact='kubota_sakai')
         | Q(calendar_code__iexact='kobota_sakai')
-        | Q(calendar_code__icontains='kubota')
-        | Q(calendar_code__icontains='kobota')
     )
-    if code_hits.exists():
-        return code_hits.order_by('id').first()
+    if exact_hits.exists():
+        return exact_hits.order_by('id').first()
     name_hits = rows.filter(Q(calendar_name__icontains='クボタ') & Q(calendar_name__icontains='堺'))
-    return name_hits.order_by('id').first()
+    if name_hits.exists():
+        return name_hits.order_by('id').first()
+    return None
 
 
 def _build_calendar_day_map(calendar):
@@ -1218,3 +1219,87 @@ class KubotaSakaiPickupDetailPdfView(APIView):
         c.save()
         buf.seek(0)
         return buf.read()
+
+
+class KubotaSakaiPseudoTruckProductView(APIView):
+    """擬似便対象製品マスタの取得・保存。
+
+    GET  → 全製品の擬似便紐付けリストを返す
+    POST → 製品×擬似便の紐付けを一括保存
+    """
+
+    def get(self, request):
+        mappings = KubotaSakaiPseudoTruckProduct.objects.select_related('truck').all()
+        result = defaultdict(list)
+        for m in mappings:
+            key = f"{m.product_code}||{m.ship_to_code or ''}"
+            result[key].append({
+                'truck_id': m.truck_id,
+                'truck_name': m.truck.name if m.truck else '',
+                'truck_alias': m.truck.alias_name if m.truck else '',
+            })
+
+        pseudo_trucks = list(
+            KubotaSakaiTruck.objects.filter(is_active=True)
+            .order_by('display_order', 'name')
+        )
+        pseudo_truck_list = []
+        for t in pseudo_trucks:
+            marker = (t.alias_name or t.name or '').strip().upper().replace('　', '')
+            if marker in ('A', 'A便', 'Ａ', 'Ａ便', 'P', 'P便', 'Ｐ', 'Ｐ便'):
+                pseudo_truck_list.append({
+                    'id': t.id,
+                    'name': t.name,
+                    'alias_name': t.alias_name or '',
+                })
+
+        mapping_list = []
+        for key, trucks in sorted(result.items()):
+            product_code, ship_to_code = key.split('||', 1)
+            mapping_list.append({
+                'product_code': product_code,
+                'ship_to_code': ship_to_code,
+                'trucks': trucks,
+            })
+
+        return Response({
+            'pseudo_trucks': pseudo_truck_list,
+            'mappings': mapping_list,
+        })
+
+    def post(self, request):
+        rows = request.data.get('rows')
+        if not isinstance(rows, list):
+            return Response(
+                {'detail': 'rows は配列で指定してください。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        pseudo_trucks = set(
+            KubotaSakaiTruck.objects.filter(is_active=True)
+            .values_list('id', flat=True)
+        )
+
+        with transaction.atomic():
+            KubotaSakaiPseudoTruckProduct.objects.all().delete()
+            create_items = []
+            for row in rows:
+                product_code = str(row.get('product_code') or '').strip()
+                ship_to_code = str(row.get('ship_to_code') or '').strip()
+                truck_ids = row.get('truck_ids') or []
+                if not product_code or not isinstance(truck_ids, list):
+                    continue
+                for tid in truck_ids:
+                    tid = int(tid)
+                    if tid in pseudo_trucks:
+                        create_items.append(
+                            KubotaSakaiPseudoTruckProduct(
+                                product_code=product_code,
+                                ship_to_code=ship_to_code,
+                                truck_id=tid,
+                            )
+                        )
+            if create_items:
+                KubotaSakaiPseudoTruckProduct.objects.bulk_create(create_items)
+
+        return Response({'saved': len(create_items)})

@@ -188,6 +188,32 @@ class KubotaSakaiTripAssignment(models.Model):
         return f"{self.departure_date} truck={self.truck_id} adj={self.due_adjustment_id} qty={self.qty}"
 
 
+class KubotaSakaiPseudoTruckProduct(models.Model):
+    """擬似便対象製品マスタ。製品+納入場ごとに自動振分先の擬似便(A/P)を紐付ける。"""
+
+    id = models.BigAutoField(primary_key=True)
+    product_code = models.CharField(max_length=50, verbose_name='製品コード')
+    ship_to_code = models.CharField(max_length=40, default='', blank=True, verbose_name='納入場コード')
+    truck = models.ForeignKey(
+        'masters.KubotaSakaiTruck',
+        on_delete=models.CASCADE,
+        related_name='pseudo_truck_products',
+        verbose_name='擬似便',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'm_kubota_sakai_pseudo_truck_product'
+        verbose_name = '擬似便対象製品'
+        verbose_name_plural = '擬似便対象製品'
+        unique_together = [('product_code', 'ship_to_code', 'truck')]
+        ordering = ['product_code', 'ship_to_code', 'truck_id']
+
+    def __str__(self):
+        return f"{self.product_code}({self.ship_to_code}) → truck={self.truck_id}"
+
+
 class ShippingRun(models.Model):
     """共通出荷業務ヘッダ。顧客/納入場単位で出荷実行を束ねる。"""
 
