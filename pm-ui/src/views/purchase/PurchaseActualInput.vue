@@ -541,7 +541,12 @@ const normalizeBulkPlanDate = () => {
   const digits = raw.replace(/\D/g, '')
   const currentYear = new Date().getFullYear()
   let year = currentYear, month = null, day = null
-  if (digits.length === 3) { month = Number(digits.slice(0, 1)); day = Number(digits.slice(1, 3)) }
+  if (digits.length === 2) {
+    const parts = raw.split(/\D+/)
+    if (parts.length === 2) { month = Number(parts[0]); day = Number(parts[1]) }
+    else { month = Number(digits.slice(0, 1)); day = Number(digits.slice(1, 2)) }
+  }
+  else if (digits.length === 3) { month = Number(digits.slice(0, 1)); day = Number(digits.slice(1, 3)) }
   else if (digits.length === 4) { month = Number(digits.slice(0, 2)); day = Number(digits.slice(2, 4)) }
   else if (digits.length === 8) { year = Number(digits.slice(0, 4)); month = Number(digits.slice(4, 6)); day = Number(digits.slice(6, 8)) }
   else return
@@ -559,6 +564,7 @@ const onBulkPlanDateBlur = async () => {
 }
 
 const loadBulkItems = async () => {
+  normalizeBulkPlanDate()
   bulkLineLabel.value = ''
   bulkLineId.value = ''
   bulkProcessId.value = ''
