@@ -194,7 +194,8 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     created_count += 1
 
             # 内示→確定の遷移処理:
-            # 同日・同品番・同納入場所で FIRM 行があれば、FORECAST 行の delivery_qty を引き継いで削除
+            # 需要として存在していた内示が取込対象から消えた場合のみ引き継ぎ削除する。
+            # demand_qty=0 の調整用内示行は保持する。
             firm_keys_by_date_product = {}  # (product_code, ship_to_code, due_date) → FIRM key
             forecast_keys_by_date_product = {}  # (product_code, ship_to_code, due_date) → FORECAST key
             for key, data in demand_map.items():
@@ -211,7 +212,11 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     continue  # 既に更新済み
                 product_code, ship_to, src_order_no, due_date_val = ekey
                 dp_key = (product_code, ship_to, due_date_val)
-                if existing_row.order_type == 'FORECAST' and dp_key in firm_keys_by_date_product:
+                if (
+                    existing_row.order_type == 'FORECAST'
+                    and (existing_row.demand_qty or Decimal('0')) > 0
+                    and dp_key in firm_keys_by_date_product
+                ):
                     # FIRM 行に delivery_qty を引き継ぎ
                     firm_key = firm_keys_by_date_product[dp_key]
                     firm_row = existing_map.get(firm_key) or KubotaSakaiDueAdjustment.objects.filter(
