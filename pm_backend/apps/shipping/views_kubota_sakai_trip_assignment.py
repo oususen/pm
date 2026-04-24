@@ -701,7 +701,8 @@ class KubotaSakaiTripPlanView(APIView):
         }
 
         errors = []
-        normalized = []
+        # due_adjustment_id ごとに集約して検証・保存する
+        normalized_map = {}
         for row in rows:
             adj_id = int(row.get('due_adjustment_id') or 0)
             adj = adj_map.get(adj_id)
@@ -715,7 +716,7 @@ class KubotaSakaiTripPlanView(APIView):
                 continue
 
             normalized_allocations = []
-            total = Decimal('0')
+            row_total = Decimal('0')
             for al in allocations:
                 truck_id = int(al.get('truck_id') or 0)
                 qty = _to_decimal(al.get('qty'))
@@ -726,16 +727,27 @@ class KubotaSakaiTripPlanView(APIView):
                     errors.append({'due_adjustment_id': adj_id, 'detail': f'便が不正です: {truck_id}'})
                     continue
                 normalized_allocations.append({'truck_id': truck_id, 'qty': qty})
-                total += qty
+                row_total += qty
 
-            if total > _to_decimal(adj.delivery_qty):
+            if adj_id not in normalized_map:
+                normalized_map[adj_id] = {'adj_id': adj_id, 'allocations': [], 'total': Decimal('0')}
+            normalized_map[adj_id]['allocations'].extend(normalized_allocations)
+            normalized_map[adj_id]['total'] += row_total
+
+        normalized = []
+        for item in normalized_map.values():
+            adj = adj_map.get(item['adj_id'])
+            if not adj:
+                # 上流で弾いているが防御的にチェック
+                errors.append({'due_adjustment_id': item['adj_id'], 'detail': '対象外の納期調整データです。'})
+                continue
+            if item['total'] > _to_decimal(adj.delivery_qty):
                 errors.append({
-                    'due_adjustment_id': adj_id,
-                    'detail': f'割付数量超過: delivery={adj.delivery_qty} assigned={total}',
+                    'due_adjustment_id': item['adj_id'],
+                    'detail': f'割付数量超過: delivery={adj.delivery_qty} assigned={item["total"]}',
                 })
                 continue
-
-            normalized.append({'adj_id': adj_id, 'allocations': normalized_allocations})
+            normalized.append({'adj_id': item['adj_id'], 'allocations': item['allocations']})
 
         if errors:
             return Response(
