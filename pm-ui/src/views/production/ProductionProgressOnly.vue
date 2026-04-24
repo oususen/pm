@@ -236,6 +236,7 @@ const recalculating = ref(false);
 const error = ref("");
 const backlogs = ref([]);
 const lineDemands = ref([]);
+const purchaseTargetProductIds = ref([]);
 const holidays = ref(new Set());
 const lineCalendarMap = ref({});
 const calendarDayCache = ref({});
@@ -301,6 +302,66 @@ const buildWeekendFallback = () => {
 
 const normalizeList = (payload) => {
   return Array.isArray(payload) ? payload : payload?.results || [];
+};
+
+const resolvePurchaseCompatibleProductIds = async () => {
+  const keyword = String(lineFilter.value || "").trim();
+  if (!keyword) return [];
+
+  const [supplierRes, lineRes] = await Promise.all([
+    api.suppliers.getSuppliers({ page_size: 5000 }),
+    api.lines.getLines({ page_size: 5000 }),
+  ]);
+  const supplierRows = normalizeList(supplierRes.data || []);
+  const lineRows = normalizeList(lineRes.data || []);
+
+  const matchedSuppliers = supplierRows.filter((s) => {
+    const code = String(s.supplier_code || "").toLowerCase();
+    const name = String(s.supplier_name || "").toLowerCase();
+    const kw = keyword.toLowerCase();
+    return code.includes(kw) || name.includes(kw);
+  });
+
+  const matchedLineIds = new Set(
+    lineRows
+      .filter((l) => {
+        const code = String(l.line_code || "").toLowerCase();
+        const name = String(l.line_name || "").toLowerCase();
+        const kw = keyword.toLowerCase();
+        return code.includes(kw) || name.includes(kw);
+      })
+      .map((l) => l.id)
+      .filter((id) => Number.isFinite(Number(id)))
+  );
+
+  matchedSuppliers.forEach((supplier) => {
+    const line = lineRows.find(
+      (l) => String(l.line_code || "").trim() === String(supplier.supplier_code || "").trim()
+    );
+    if (line?.id) matchedLineIds.add(line.id);
+  });
+
+  const requests = [];
+  matchedSuppliers.forEach((supplier) => {
+    requests.push(api.routings.getRoutingSteps({ supplier: supplier.id, page_size: 5000 }));
+  });
+  matchedLineIds.forEach((lineId) => {
+    requests.push(api.routings.getRoutingSteps({ line: lineId, page_size: 5000 }));
+  });
+
+  if (!requests.length) return [];
+  const responses = await Promise.all(requests);
+  const ids = new Set();
+  responses.forEach((res) => {
+    const steps = normalizeList(res.data || []);
+    steps.forEach((step) => {
+      const outputProductId = Number(step.output_product);
+      if (Number.isFinite(outputProductId) && outputProductId > 0) {
+        ids.add(outputProductId);
+      }
+    });
+  });
+  return Array.from(ids).sort((a, b) => a - b);
 };
 
 const normalizeCalendarId = (calendarValue) => {
@@ -468,6 +529,9 @@ const getBacklogParams = () => {
   if (lineFilter.value.trim()) params.line_search = lineFilter.value.trim();
   if (processFilter.value.trim()) params.process_search = processFilter.value.trim();
   if (productFilter.value.trim()) params.product_search = productFilter.value.trim();
+  if (props.mode === "purchase" && purchaseTargetProductIds.value.length) {
+    params.product__in = purchaseTargetProductIds.value.join(",");
+  }
   return params;
 };
 
@@ -486,6 +550,18 @@ const load = async () => {
   loading.value = true;
   error.value = "";
   try {
+    if (props.mode === "purchase") {
+      purchaseTargetProductIds.value = await resolvePurchaseCompatibleProductIds();
+      if (lineFilter.value.trim() && purchaseTargetProductIds.value.length === 0) {
+        backlogs.value = [];
+        lineDemands.value = [];
+        await loadHolidayColumns();
+        return;
+      }
+    } else {
+      purchaseTargetProductIds.value = [];
+    }
+
     if (props.mode === "purchase" && hasFilter.value) {
       try {
         await api.lineBacklogs.seedProgressBacklogsFromDemand({
@@ -515,7 +591,12 @@ const load = async () => {
     applyBacklogs(backlogRes.data || []);
     const demandPayload = demandRes?.data || [];
     await loadHolidayColumns();
-    lineDemands.value = Array.isArray(demandPayload) ? demandPayload : demandPayload.results || [];
+    let normalizedDemands = Array.isArray(demandPayload) ? demandPayload : demandPayload.results || [];
+    if (props.mode === "purchase" && purchaseTargetProductIds.value.length) {
+      const targetSet = new Set(purchaseTargetProductIds.value);
+      normalizedDemands = normalizedDemands.filter((d) => targetSet.has(Number(d.product)));
+    }
+    lineDemands.value = normalizedDemands;
   } catch (e) {
     error.value = e?.message || "読み込みに失敗しました";
   } finally {

@@ -370,6 +370,7 @@ class RoutingStep(models.Model):
     step_no = models.IntegerField(verbose_name='工程番号')
     process = models.ForeignKey(Process, on_delete=models.CASCADE, verbose_name='工程')
     line = models.ForeignKey(Line, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='ライン')
+    supplier = models.ForeignKey(Supplier, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='外作先')
     output_product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='加工後品目')
     source_bom_item = models.ForeignKey(
         BOMItem,

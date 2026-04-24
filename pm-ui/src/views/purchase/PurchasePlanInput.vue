@@ -194,6 +194,7 @@ const suppliers = ref([])
 const products = ref([])
 const rows = ref([])
 const processing = ref(false)
+const holidayDates = ref(new Set())
 
 const buildLocalDate = (dateText) => {
   if (!dateText) return new Date()
@@ -218,7 +219,8 @@ const dateColumns = computed(() => {
     const day = d.getDay()
     const label = `${d.getMonth() + 1}/${d.getDate()}(${weekday[day]})`
     const key = formatDateKey(d)
-    const dayClass = day === 0 ? 'sun' : day === 6 ? 'sat' : ''
+    const isHoliday = holidayDates.value.has(key)
+    const dayClass = day === 0 ? 'sun' : day === 6 ? 'sat' : isHoliday ? 'sun' : ''
     cols.push({ key, label, dayClass })
   }
   return cols
@@ -530,6 +532,73 @@ const refreshDates = () => {
   rows.value.forEach((r) => {
     r.daily = initDaily()
   })
+  loadHolidayColumns()
+}
+
+const buildWeekendFallback = () => {
+  const fallback = new Set()
+  const base = buildLocalDate(startDate.value)
+  for (let i = 0; i < horizonDays.value; i++) {
+    const d = new Date(base)
+    d.setDate(d.getDate() + i)
+    const day = d.getDay()
+    if (day === 0 || day === 6) {
+      fallback.add(formatDateKey(d))
+    }
+  }
+  return fallback
+}
+
+const normalizeList = (payload) => {
+  return Array.isArray(payload) ? payload : payload?.results || []
+}
+
+const loadHolidayColumns = async () => {
+  const fallback = buildWeekendFallback()
+  try {
+    const pickDaiso = (rows) => {
+      const list = rows || []
+      const exact = list.find((row) => String(row.calendar_code || '').trim().toLowerCase() === 'daiso')
+      if (exact) return exact
+      return list.find((row) => {
+        const code = String(row.calendar_code || '').trim().toLowerCase()
+        const name = String(row.calendar_name || '').trim().toLowerCase()
+        return code.includes('daiso') || name.includes('daiso') || name.includes('ダイソウ')
+      })
+    }
+
+    const res = await api.calendars.getCalendars({ search: 'daiso', page_size: 200 })
+    const rows = normalizeList(res.data || [])
+    let daiso = pickDaiso(rows)
+    if (!daiso) {
+      const fallbackRes = await api.calendars.getCalendars({ page_size: 5000 })
+      const fallbackRows = normalizeList(fallbackRes.data || [])
+      daiso = pickDaiso(fallbackRows)
+    }
+    if (!daiso?.id) {
+      holidayDates.value = fallback
+      return
+    }
+
+    const daysRes = await api.calendars.getCalendarDays(daiso.id, { page_size: 5000 })
+    const dayRows = normalizeList(daysRes.data || [])
+    const displayedDates = new Set()
+    const base = buildLocalDate(startDate.value)
+    for (let i = 0; i < horizonDays.value; i++) {
+      const d = new Date(base)
+      d.setDate(d.getDate() + i)
+      displayedDates.add(formatDateKey(d))
+    }
+    const holidaySet = new Set(
+      dayRows
+        .filter((day) => !day.is_working_day && displayedDates.has(day.target_date))
+        .map((day) => day.target_date)
+    )
+    holidayDates.value = holidaySet.size > 0 ? new Set([...fallback, ...holidaySet]) : fallback
+  } catch (e) {
+    console.error('仕入計画 休日判定の取得エラー', e)
+    holidayDates.value = fallback
+  }
 }
 
 const loadData = async () => {
@@ -562,45 +631,40 @@ const fetchLockSetting = async () => {
 
 const fetchProducts = async (supplierId = null) => {
   try {
-    let bomItems = []
-    let routingProductIds = new Set()
+    let targetProductIds = new Set()
     if (supplierId) {
-      const baseParams = { supplier: supplierId }
-      const [buyRes, subconRes] = await Promise.all([
-        api.bomItems.getBOMItems({ ...baseParams, sourcing_type: 'BUY' }),
-        api.bomItems.getBOMItems({ ...baseParams, sourcing_type: 'SUBCON' }),
-      ])
-      const buyItems = buyRes.data.results || buyRes.data || []
-      const subconItems = subconRes.data.results || subconRes.data || []
-      bomItems = [...buyItems, ...subconItems]
-
-      // BOM未紐付け品も表示できるよう、仕入先ラインのルーティング出力品目を対象に含める
+      // ルーティング基準（互換）:
+      // 1) 外作先一致
+      // 2) 仕入先コードと一致するライン上の工程
       const supplier = suppliers.value.find((s) => Number(s.id) === Number(supplierId))
-      if (supplier?.supplier_code) {
-        const linesRes = await api.lines.getLines()
-        const lines = linesRes.data.results || linesRes.data || []
-        const purchaseLine = lines.find((l) => l.line_code === supplier.supplier_code)
-        if (purchaseLine?.id) {
-          const stepsRes = await api.routings.getRoutingSteps({ line: purchaseLine.id })
-          const steps = stepsRes.data.results || stepsRes.data || []
-          routingProductIds = new Set(
-            steps
-              .map((s) => Number(s.output_product))
-              .filter((id) => Number.isFinite(id) && id > 0)
-          )
-        }
+      const [stepsBySupplierRes, linesRes] = await Promise.all([
+        api.routings.getRoutingSteps({ supplier: supplierId, page_size: 5000 }),
+        api.lines.getLines({ page_size: 500 }),
+      ])
+      const stepsBySupplier = stepsBySupplierRes.data.results || stepsBySupplierRes.data || []
+      const allLines = linesRes.data.results || linesRes.data || []
+      const purchaseLine = supplier?.supplier_code
+        ? allLines.find((l) => String(l.line_code || '').trim() === String(supplier.supplier_code || '').trim())
+        : null
+      let stepsByLine = []
+      if (purchaseLine?.id) {
+        const stepsByLineRes = await api.routings.getRoutingSteps({ line: purchaseLine.id, page_size: 5000 })
+        stepsByLine = stepsByLineRes.data.results || stepsByLineRes.data || []
       }
+      const mergedSteps = [...stepsBySupplier, ...stepsByLine]
+      targetProductIds = new Set(
+        mergedSteps
+          .map((s) => Number(s.output_product))
+          .filter((id) => Number.isFinite(id) && id > 0)
+      )
     } else {
       const params = { sourcing_type: 'BUY' }
       const bomItemsRes = await api.bomItems.getBOMItems(params)
-      bomItems = bomItemsRes.data.results || bomItemsRes.data || []
+      const bomItems = bomItemsRes.data.results || bomItemsRes.data || []
+      targetProductIds = new Set(bomItems.map((item) => item.child_product))
     }
 
-    // 子製品IDを抽出
-    const targetProductIds = new Set(bomItems.map((item) => item.child_product))
-    routingProductIds.forEach((id) => targetProductIds.add(id))
-
-    // 全製品から対象のみを抽出（仕入先指定時は該当BOMがあるもののみ）
+    // 全製品から対象のみを抽出
     const allProducts = await api.products.getAllProducts()
     const filtered =
       supplierId && targetProductIds.size
@@ -617,6 +681,7 @@ const fetchProducts = async (supplierId = null) => {
 onMounted(async () => {
   try {
     await Promise.all([fetchSuppliers(), fetchProducts(), fetchLockSetting()])
+    await loadHolidayColumns()
     await loadData()
   } catch (e) {
     console.error('初期データ取得エラー', e)

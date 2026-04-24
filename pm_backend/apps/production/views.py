@@ -2078,6 +2078,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         end_date = request.data.get('end_date')
         start_dt = _parse_optional_date(start_date)
         end_dt = _parse_optional_date(end_date)
+        routing_source_q = build_effective_routing_range_q(start_dt, end_dt, prefix='routing__')
 
         bom_items = BOMItem.objects.filter(
             sourcing_type__in=['BUY', 'SUBCON'],
@@ -2090,6 +2091,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         parent_to_children = defaultdict(list)
         parent_ids = set()
         child_ids = set()
+        bom_child_ids = set()
+        relation_keys = set()
         for item in bom_items:
             parent_id = item.bom.parent_product_id if item.bom_id else None
             if not parent_id:
@@ -2100,7 +2103,44 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             lead_time_days = item.lead_time_days or 0
             parent_ids.add(parent_id)
             child_ids.add(item.child_product_id)
+            bom_child_ids.add(item.child_product_id)
+            key = (parent_id, item.child_product_id, qty, int(lead_time_days or 0))
+            if key in relation_keys:
+                continue
+            relation_keys.add(key)
             parent_to_children[parent_id].append((item.child_product_id, qty, lead_time_days))
+
+        # ルーティング工程（外作先）基準の紐付けを追加
+        # BOMが無い丸ごと外作でも、RoutingStep.supplier から需要計算対象を決定する。
+        routing_steps = RoutingStep.objects.filter(
+            output_product_id__isnull=False,
+        ).filter(
+            routing_source_q
+        ).filter(
+            Q(supplier_id=supplier_id) | Q(line_id=line_id)
+        ).select_related('routing')
+        if requested_product_ids:
+            routing_steps = routing_steps.filter(output_product_id__in=requested_product_ids)
+
+        for step in routing_steps:
+            source_parent_id = None
+            if step.routing_id and getattr(step.routing, 'product_id', None):
+                source_parent_id = step.routing.product_id
+            if not source_parent_id:
+                source_parent_id = step.output_product_id
+            child_id = step.output_product_id
+            if not source_parent_id or not child_id:
+                continue
+
+            qty = Decimal('1')
+            lead_time_days = int(step.lead_time_days or 0)
+            parent_ids.add(source_parent_id)
+            child_ids.add(child_id)
+            key = (source_parent_id, child_id, qty, lead_time_days)
+            if key in relation_keys:
+                continue
+            relation_keys.add(key)
+            parent_to_children[source_parent_id].append((child_id, qty, lead_time_days))
 
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
             calendar_code='daiso'
@@ -2152,11 +2192,71 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             # 親製品の数量を取得:
             # - 通常ライン: plan_qty > 0
             # - 外作ライン(OUTSOURCE): 計画を持たないため order_qty > 0 も対象にする
+            # - 最終品はここでは除外し、LineDemandを親数量の基準として別途取り込む
             parent_orders = list(
-                parent_qs.values('product_id', 'line_id', 'line__line_type', 'plan_date', 'plan_qty', 'order_qty', 'plan_id').filter(
-                    Q(plan_qty__gt=0) | Q(order_qty__gt=0, line__line_type='OUTSOURCE')
-                )
+                parent_qs.values(
+                    'product_id',
+                    'line_id',
+                    'line__line_type',
+                    'product__is_final_product',
+                    'plan_date',
+                    'plan_qty',
+                    'order_qty',
+                    'plan_id',
+                ).filter(
+                    Q(plan_qty__gt=0) |
+                    Q(order_qty__gt=0, line__line_type='OUTSOURCE')
+                ).exclude(product__is_final_product=True)
             )
+
+        # 最終品の親数量は LineDemand を基準にする（社内ラインpickupと同じ）
+        final_parent_ids = set(
+            Product.objects.filter(
+                id__in=parent_ids,
+                is_final_product=True,
+            ).values_list('id', flat=True)
+        )
+        def _resolve_linedemand_qty(demand_row):
+            """
+            社内ライン最終品のpickupロジックと同一:
+            - 前倒し重複(is_shifted)で firm/forecast が両方ある場合のみ合算
+            - それ以外は firm 優先、無ければ forecast
+            - 互換のため split未設定時のみ plan_qty を最後に参照
+            """
+            firm_qty = Decimal(str(demand_row.get('firm_qty') or 0))
+            forecast_qty = Decimal(str(demand_row.get('forecast_qty') or 0))
+            is_shifted = bool(demand_row.get('is_shifted'))
+            if is_shifted and firm_qty > 0 and forecast_qty > 0:
+                return firm_qty + forecast_qty
+            if firm_qty > 0:
+                return firm_qty
+            if forecast_qty > 0:
+                return forecast_qty
+            return Decimal(str(demand_row.get('plan_qty') or 0))
+
+        if final_parent_ids:
+            final_demand_qs = LineDemand.objects.filter(product_id__in=final_parent_ids)
+            if start_dt:
+                final_demand_qs = final_demand_qs.filter(plan_date__gte=start_dt)
+            if end_dt:
+                final_demand_qs = final_demand_qs.filter(plan_date__lte=end_dt)
+
+            for row in final_demand_qs.values(
+                'product_id', 'plan_date', 'firm_qty', 'forecast_qty', 'is_shifted', 'plan_qty'
+            ):
+                qty = _resolve_linedemand_qty(row)
+                if qty == 0:
+                    continue
+                parent_orders.append({
+                    'product_id': row.get('product_id'),
+                    'line_id': None,
+                    'line__line_type': 'FINAL_DEMAND',
+                    'product__is_final_product': True,
+                    'plan_date': row.get('plan_date'),
+                    'plan_qty': qty,
+                    'order_qty': qty,
+                    'plan_id': None,
+                })
 
         # 日替わり8時ルール: 8時より前は前日扱い
         def apply_day_boundary(dt_val):
@@ -2167,8 +2267,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         # 親製品（中間品）から最終品を特定するマップを構築
         # parent_id -> [(line_id, final_product_id)]
-        from masters.models import RoutingStep
-        routing_source_q = build_effective_routing_range_q(start_dt, end_dt, prefix='routing__')
         parent_to_final = {}
         if parent_ids:
             steps_qs = RoutingStep.objects.filter(
@@ -2221,7 +2319,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             line_id_parent = row.get('line_id')
             plan_date = row['plan_date']
 
-            # 外作ライン(OUTSOURCE)は計画を持たないため order_qty（需要）を使用する
+            # 外作ライン(OUTSOURCE)は計画未作成時に order_qty（需要）を使用する
             if row.get('line__line_type') == 'OUTSOURCE':
                 plan_qty = Decimal(str(row.get('order_qty') or 0))
             else:
@@ -2239,8 +2337,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 demand_map[(child_id, target_date)] += plan_qty * qty
 
         # フォールバック: 購買ラインのLineDemand（内示/確定集計）を需要として取り込む
+        # ただし、社内ライン最終品と同じ方針で「最終品のみ」を対象にする。
         # BOM展開で同一キーがある場合はBOM計算値を優先する。
-        direct_qs = LineDemand.objects.filter(line_id=line_id)
+        direct_qs = LineDemand.objects.filter(
+            line_id=line_id,
+            product__is_final_product=True,
+        )
         if start_dt:
             direct_qs = direct_qs.filter(plan_date__gte=start_dt)
         if end_dt:
@@ -2249,15 +2351,17 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             direct_qs = direct_qs.filter(product_id__in=requested_product_ids)
 
         direct_demand_product_ids = set()
-        for row in direct_qs.values('product_id', 'plan_date', 'plan_qty'):
+        for row in direct_qs.values('product_id', 'plan_date', 'firm_qty', 'forecast_qty', 'is_shifted', 'plan_qty'):
             product_id = row.get('product_id')
             plan_date = row.get('plan_date')
-            qty = Decimal(str(row.get('plan_qty') or 0))
+            qty = _resolve_linedemand_qty(row)
             if not product_id or not plan_date or qty == 0:
                 continue
             direct_demand_product_ids.add(product_id)
             # BOM展開対象品は、需要ソースを親計画由来（BOM）に統一する
-            if product_id in child_ids:
+            # ※ ルーティング由来品まで除外すると、丸外作でフォールバックが効かないため
+            #    除外対象は BOM 由来の子品目に限定する。
+            if product_id in bom_child_ids:
                 continue
             key = (product_id, plan_date)
             if key not in demand_map:
@@ -2266,6 +2370,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         target_product_ids = set(child_ids) | direct_demand_product_ids
         if requested_product_ids:
             target_product_ids = set(requested_product_ids)
+
         existing_qs = LineBacklog.objects.filter(
             line_id=line_id,
             process_id=process_id,

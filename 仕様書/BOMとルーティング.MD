@@ -84,6 +84,26 @@ BOMからルーティングを自動生成する際のルールをまとめる�
 - `hierarchy_path`（階層）と `parallel_group`（並列G）は表示専用（編集不可）とする。
 - `使用個数` は整数で編集可能とする。
 - 右ペイン上部で `既定 / 有効 / 有効開始日時 / 有効終了日時` を編集・保存できる。
+- 工程一覧に `外作先` 列を表示し、値は `m_routing_step.supplier_id` に紐づく `m_supplier.supplier_name` を表示する。
+
+### 工程の手動追加（`/masters/routing`）
+- 右ペイン上部に `工程追加` ボタンを持ち、押下時にインライン入力行を表示する。
+- 入力項目:
+  - `工程番号(step_no)`（必須, 1以上整数）
+  - `並列G(parallel_group)`（必須, 1以上整数）
+  - `工程(process)`（必須）
+  - `ライン(line)`（任意）
+  - `外作先(supplier)`（任意）
+  - `加工後品目(output_product)`（任意）
+  - `時間単位(time_unit)`（`DAY`/`MINUTE`）
+  - `LT(日)`（`DAY`時必須, 0以上整数）
+  - `所要時間(分)`（`MINUTE`時必須, 1以上整数）
+  - `親製品(remark)`（任意）
+- 保存は `POST /api/routing-steps/` で行い、成功時は工程一覧を再読込する。
+
+### ルーティング工程の外作先
+- `m_routing_step` は `supplier_id`（`m_supplier` へのFK, NULL可）を持つ。
+- 丸ごと外作運用では、親ルーティングに外注工程を1行追加し、`supplier_id` で外作先を管理する。
 
 ### 使用個数（`usage_quantity`）算出
 - APIレスポンスで `routing-steps` の各行に `usage_quantity` を含める。

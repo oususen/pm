@@ -346,7 +346,7 @@ class RoutingStepInline(admin.TabularInline):
     autocomplete_fields = ['output_product']
     fields = [
         'hierarchy_indicator', 'step_no', 'parallel_group', 'process', 'line',
-        'output_product', 'time_unit', 'lead_time_days', 'duration_min',
+        'supplier', 'output_product', 'time_unit', 'lead_time_days', 'duration_min',
         'usage_quantity', 'remark'
     ]
 
@@ -373,8 +373,8 @@ class RoutingStepMaterialInline(admin.TabularInline):
 
 @admin.register(RoutingStep)
 class RoutingStepAdmin(admin.ModelAdmin):
-    list_display = ['routing_label', 'step_no', 'parallel_group', 'hierarchy_path', 'process', 'line', 'output_product', 'time_unit', 'lead_time_days', 'duration_min']
-    list_filter = ['process', 'line', 'time_unit']
+    list_display = ['routing_label', 'step_no', 'parallel_group', 'hierarchy_path', 'process', 'line', 'supplier', 'output_product', 'time_unit', 'lead_time_days', 'duration_min']
+    list_filter = ['process', 'line', 'supplier', 'time_unit']
     search_fields = ['routing__routing_code', 'routing__product__product_code', 'process__process_code', 'line__line_code']
     autocomplete_fields = ['output_product']
     readonly_fields = ['parallel_group', 'hierarchy_path']
@@ -480,12 +480,12 @@ class RoutingAdmin(admin.ModelAdmin):
         ws.append([
             'Routing Code', 'Product Code', 'Product Name',
             'Step No', 'Hierarchy Path', 'Process Code', 'Process Name',
-            'Line Code', 'Line Name', 'Output Product', 'Time Unit',
+            'Line Code', 'Line Name', '外作先コード', '外作先名', 'Output Product', 'Time Unit',
             'Lead Time (Days)', 'Duration (Min)', 'Remark'
         ])
 
         for routing in queryset.select_related('product'):
-            steps = routing.steps.select_related('process', 'line', 'output_product').order_by('step_no')
+            steps = routing.steps.select_related('process', 'line', 'supplier', 'output_product').order_by('step_no')
             for step in steps:
                 ws.append([
                     routing.routing_code,
@@ -497,6 +497,8 @@ class RoutingAdmin(admin.ModelAdmin):
                     step.process.process_name if step.process else '',
                     step.line.line_code if step.line else '',
                     step.line.line_name if step.line else '',
+                    step.supplier.supplier_code if step.supplier else '',
+                    step.supplier.supplier_name if step.supplier else '',
                     step.output_product.product_code if step.output_product else '',
                     step.time_unit,
                     step.lead_time_days,

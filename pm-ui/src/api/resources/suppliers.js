@@ -1,6 +1,6 @@
 export const createSuppliersAPI = (client) => ({
-  getSuppliers() {
-    return client.get('/suppliers/')
+  getSuppliers(params = {}) {
+    return client.get('/suppliers/', { params })
   },
   getSupplier(id) {
     return client.get(`/suppliers/${id}/`)

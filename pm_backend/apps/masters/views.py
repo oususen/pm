@@ -1407,7 +1407,7 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = RoutingStep.objects.all()
     serializer_class = RoutingStepSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ['routing', 'process', 'line', 'time_unit', 'source_bom_item']
+    filterset_fields = ['routing', 'process', 'line', 'supplier', 'time_unit', 'source_bom_item']
     ordering_fields = ['step_no']
     ordering = ['routing', 'step_no']
 

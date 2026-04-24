@@ -199,6 +199,8 @@ class RoutingStepSerializer(serializers.ModelSerializer):
     line_name = serializers.CharField(source='line.line_name', read_only=True)
     output_product_code = serializers.CharField(source='output_product.product_code', read_only=True)
     output_product_name = serializers.CharField(source='output_product.product_name', read_only=True)
+    supplier_code = serializers.CharField(source='supplier.supplier_code', read_only=True)
+    supplier_name = serializers.CharField(source='supplier.supplier_name', read_only=True)
     display_label = serializers.SerializerMethodField()
     usage_quantity = serializers.SerializerMethodField()
 

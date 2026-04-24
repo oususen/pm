@@ -743,23 +743,39 @@ const fetchSuppliers = async () => {
 
 const fetchProducts = async (supplierId = null) => {
   try {
-    let bomItems = [];
+    let targetProductIds = new Set();
     if (supplierId) {
-      const baseParams = { supplier: supplierId };
-      const [buyRes, subconRes] = await Promise.all([
-        api.bomItems.getBOMItems({ ...baseParams, sourcing_type: "BUY" }),
-        api.bomItems.getBOMItems({ ...baseParams, sourcing_type: "SUBCON" }),
+      // ルーティング基準（互換）:
+      // 1) 外作先一致
+      // 2) 仕入先コードと一致するライン上の工程
+      const supplier = suppliers.value.find((s) => Number(s.id) === Number(supplierId));
+      const [stepsBySupplierRes, linesRes] = await Promise.all([
+        api.routings.getRoutingSteps({ supplier: supplierId, page_size: 5000 }),
+        api.lines.getLines({ page_size: 500 }),
       ]);
-      const buyItems = buyRes.data.results || buyRes.data || [];
-      const subconItems = subconRes.data.results || subconRes.data || [];
-      bomItems = [...buyItems, ...subconItems];
+      const stepsBySupplier = stepsBySupplierRes.data.results || stepsBySupplierRes.data || [];
+      const allLines = linesRes.data.results || linesRes.data || [];
+      const purchaseLine = supplier?.supplier_code
+        ? allLines.find((l) => String(l.line_code || "").trim() === String(supplier.supplier_code || "").trim())
+        : null;
+      let stepsByLine = [];
+      if (purchaseLine?.id) {
+        const stepsByLineRes = await api.routings.getRoutingSteps({ line: purchaseLine.id, page_size: 5000 });
+        stepsByLine = stepsByLineRes.data.results || stepsByLineRes.data || [];
+      }
+      const mergedSteps = [...stepsBySupplier, ...stepsByLine];
+      targetProductIds = new Set(
+        mergedSteps
+          .map((s) => Number(s.output_product))
+          .filter((id) => Number.isFinite(id) && id > 0)
+      );
     } else {
       const params = { sourcing_type: "BUY" };
       const bomItemsRes = await api.bomItems.getBOMItems(params);
-      bomItems = bomItemsRes.data.results || bomItemsRes.data || [];
+      const bomItems = bomItemsRes.data.results || bomItemsRes.data || [];
+      targetProductIds = new Set(bomItems.map((item) => item.child_product));
     }
 
-    const targetProductIds = new Set(bomItems.map((item) => item.child_product));
     const allProducts = await api.products.getAllProducts();
     const filtered =
       supplierId && targetProductIds.size

@@ -3,6 +3,14 @@
     <div class="page-header">
       <h1 class="page-title">ルーティングマスタ</h1>
       <div class="page-actions">
+        <button
+          v-if="canEdit"
+          class="btn-success"
+          @click="toggleCreateRow"
+          :disabled="creatingRouting || loadingProducts"
+        >
+          {{ showCreateRow ? '新規入力を閉じる' : '新規' }}
+        </button>
         <select v-model="migrationLineId" class="line-select" :disabled="loadingLines">
           <option value="">ライン選択（在庫移行用）</option>
           <option v-for="line in lines" :key="line.id" :value="line.id">
@@ -34,6 +42,40 @@
       </label>
       <span class="count-text">表示件数: {{ filteredRoutings.length }}</span>
       <span v-if="!canEdit" class="readonly-note">閲覧のみ（編集権限なし）</span>
+    </div>
+    <div v-if="canEdit && showCreateRow" class="create-row">
+      <select v-model="newRoutingDraft.product" class="create-select" :disabled="creatingRouting || loadingProducts">
+        <option value="">{{ loadingProducts ? '品番読込中...' : '品番を選択' }}</option>
+        <option v-for="product in sortedProducts" :key="product.id" :value="product.id">
+          {{ product.product_code }} - {{ product.product_name }}
+        </option>
+      </select>
+      <input
+        v-model.trim="newRoutingDraft.routing_code"
+        class="create-input"
+        type="text"
+        maxlength="30"
+        placeholder="ルーティングコード"
+        :disabled="creatingRouting"
+      />
+      <input
+        v-model.trim="newRoutingDraft.description"
+        class="create-input create-input--wide"
+        type="text"
+        placeholder="説明（任意）"
+        :disabled="creatingRouting"
+      />
+      <label class="checkbox-inline">
+        <input v-model="newRoutingDraft.is_default" type="checkbox" :disabled="creatingRouting" />
+        既定
+      </label>
+      <label class="checkbox-inline">
+        <input v-model="newRoutingDraft.is_active" type="checkbox" :disabled="creatingRouting" />
+        有効
+      </label>
+      <button class="btn-primary" @click="createRouting" :disabled="isCreateDisabled">
+        {{ creatingRouting ? '作成中...' : '作成' }}
+      </button>
     </div>
 
     <div class="split-layout">
@@ -119,6 +161,84 @@
               </button>
             </div>
           </div>
+          <div v-if="canEdit && showCreateStepRow" class="create-step-row">
+            <input
+              v-model.number="newStepDraft.step_no"
+              type="number"
+              min="1"
+              step="1"
+              class="duration-input"
+              placeholder="工程番号"
+              :disabled="creatingStep"
+            />
+            <input
+              v-model.number="newStepDraft.parallel_group"
+              type="number"
+              min="1"
+              step="1"
+              class="duration-input"
+              placeholder="並列G"
+              :disabled="creatingStep"
+            />
+            <select v-model="newStepDraft.process" class="step-select" :disabled="creatingStep || loadingProcesses">
+              <option value="">{{ loadingProcesses ? '工程読込中...' : '工程を選択' }}</option>
+              <option v-for="proc in processOptions" :key="proc.id" :value="proc.id">
+                {{ proc.process_code }} - {{ proc.process_name }}
+              </option>
+            </select>
+            <select v-model="newStepDraft.line" class="step-select" :disabled="creatingStep || loadingLines">
+              <option value="">ライン未設定</option>
+              <option v-for="line in lines" :key="line.id" :value="line.id">
+                {{ line.line_code }} - {{ line.line_name }}
+              </option>
+            </select>
+            <select v-model="newStepDraft.supplier" class="step-select" :disabled="creatingStep || loadingSuppliers">
+              <option value="">外作先未設定</option>
+              <option v-for="supplier in supplierOptions" :key="supplier.id" :value="supplier.id">
+                {{ supplier.supplier_code }} - {{ supplier.supplier_name }}
+              </option>
+            </select>
+            <select v-model="newStepDraft.output_product" class="step-select" :disabled="creatingStep || loadingProducts">
+              <option value="">加工後品目未設定</option>
+              <option v-for="product in sortedProducts" :key="product.id" :value="product.id">
+                {{ product.product_code }} - {{ product.product_name }}
+              </option>
+            </select>
+            <select v-model="newStepDraft.time_unit" class="step-select step-select--small" :disabled="creatingStep">
+              <option value="DAY">日</option>
+              <option value="MINUTE">分</option>
+            </select>
+            <input
+              v-if="newStepDraft.time_unit === 'DAY'"
+              v-model.number="newStepDraft.lead_time_days"
+              type="number"
+              min="0"
+              step="1"
+              class="duration-input"
+              placeholder="LT(日)"
+              :disabled="creatingStep"
+            />
+            <input
+              v-else
+              v-model.number="newStepDraft.duration_min"
+              type="number"
+              min="1"
+              step="1"
+              class="duration-input"
+              placeholder="所要時間(分)"
+              :disabled="creatingStep"
+            />
+            <input
+              v-model.trim="newStepDraft.remark"
+              type="text"
+              class="create-input"
+              placeholder="親製品（任意）"
+              :disabled="creatingStep"
+            />
+            <button class="btn-primary" :disabled="isCreateStepDisabled" @click="createStep">
+              {{ creatingStep ? '追加中...' : '工程追加保存' }}
+            </button>
+          </div>
           <div class="step-filter-row">
             <label>工程</label>
             <select v-model="processFilter">
@@ -127,6 +247,9 @@
                 {{ proc.label }}
               </option>
             </select>
+            <button v-if="canEdit" class="btn-success btn-small" @click="toggleCreateStepRow" :disabled="creatingStep">
+              {{ showCreateStepRow ? '工程追加を閉じる' : '工程追加' }}
+            </button>
           </div>
           <div class="table-wrap">
             <table class="data-table compact">
@@ -137,6 +260,7 @@
                   <th>並列G</th>
                   <th>工程</th>
                   <th>ライン</th>
+                  <th>外作先</th>
                   <th>加工後品目</th>
                   <th>代表部品</th>
                   <th>時間単位</th>
@@ -153,6 +277,7 @@
                   <td>{{ step.parallel_group }}</td>
                   <td>{{ step.process_name || step.process || '-' }}</td>
                   <td>{{ step.line_name || step.line || '-' }}</td>
+                  <td>{{ step.supplier_name || '-' }}</td>
                   <td>{{ step.output_product_code || '-' }}</td>
                   <td>{{ isRepresentativePart(step) ? '○' : '' }}</td>
                   <td>{{ displayTimeUnit(step.time_unit) }}</td>
@@ -319,6 +444,35 @@ const routingHeaderDraft = ref({
 const savingRoutingHeader = ref(false)
 const processFilter = ref('')
 const representativeChildProductIds = ref(new Set())
+const products = ref([])
+const loadingProducts = ref(false)
+const processes = ref([])
+const suppliers = ref([])
+const loadingProcesses = ref(false)
+const loadingSuppliers = ref(false)
+const showCreateRow = ref(false)
+const creatingRouting = ref(false)
+const newRoutingDraft = ref({
+  product: '',
+  routing_code: '',
+  description: '',
+  is_default: false,
+  is_active: true,
+})
+const showCreateStepRow = ref(false)
+const creatingStep = ref(false)
+const newStepDraft = ref({
+  step_no: '',
+  parallel_group: 1,
+  process: '',
+  line: '',
+  supplier: '',
+  output_product: '',
+  time_unit: 'DAY',
+  lead_time_days: 0,
+  duration_min: '',
+  remark: '',
+})
 
 // 在庫移行機能
 const lines = ref([])
@@ -415,6 +569,49 @@ const filteredRoutings = computed(() => {
     ].join(' ').toLowerCase()
     return text.includes(q)
   })
+})
+const sortedProducts = computed(() => {
+  return [...products.value].sort((a, b) => {
+    const left = `${a?.product_code || ''} ${a?.product_name || ''}`
+    const right = `${b?.product_code || ''} ${b?.product_name || ''}`
+    return left.localeCompare(right, 'ja')
+  })
+})
+const isCreateDisabled = computed(() => {
+  if (!canEdit.value) return true
+  if (creatingRouting.value || loadingProducts.value) return true
+  if (!newRoutingDraft.value.product) return true
+  if (!String(newRoutingDraft.value.routing_code || '').trim()) return true
+  return false
+})
+const processOptions = computed(() => {
+  return [...processes.value].sort((a, b) => {
+    const left = `${a?.process_code || ''} ${a?.process_name || ''}`
+    const right = `${b?.process_code || ''} ${b?.process_name || ''}`
+    return left.localeCompare(right, 'ja')
+  })
+})
+const supplierOptions = computed(() => {
+  return [...suppliers.value].sort((a, b) => {
+    const left = `${a?.supplier_code || ''} ${a?.supplier_name || ''}`
+    const right = `${b?.supplier_code || ''} ${b?.supplier_name || ''}`
+    return left.localeCompare(right, 'ja')
+  })
+})
+const isCreateStepDisabled = computed(() => {
+  if (!canEdit.value) return true
+  if (!selectedRoutingId.value || creatingStep.value) return true
+  if (!newStepDraft.value.process) return true
+  const stepNo = Number(newStepDraft.value.step_no)
+  const parallelGroup = Number(newStepDraft.value.parallel_group)
+  if (!Number.isInteger(stepNo) || stepNo <= 0) return true
+  if (!Number.isInteger(parallelGroup) || parallelGroup <= 0) return true
+  if (newStepDraft.value.time_unit === 'MINUTE') {
+    const durationMin = Number(newStepDraft.value.duration_min)
+    return !Number.isInteger(durationMin) || durationMin <= 0
+  }
+  const leadTimeDays = Number(newStepDraft.value.lead_time_days)
+  return !Number.isInteger(leadTimeDays) || leadTimeDays < 0
 })
 
 const sortedSteps = computed(() => {
@@ -828,6 +1025,148 @@ const refreshAll = async () => {
   }
 }
 
+const resetCreateDraft = () => {
+  newRoutingDraft.value = {
+    product: '',
+    routing_code: '',
+    description: '',
+    is_default: false,
+    is_active: true,
+  }
+}
+
+const toggleCreateRow = () => {
+  showCreateRow.value = !showCreateRow.value
+  if (!showCreateRow.value) {
+    resetCreateDraft()
+  }
+}
+
+const fetchProducts = async () => {
+  loadingProducts.value = true
+  try {
+    products.value = await api.products.getAllProducts({ is_active: true })
+  } catch (error) {
+    console.error('品番一覧取得エラー:', error)
+    alert('品番一覧の取得に失敗しました。')
+  } finally {
+    loadingProducts.value = false
+  }
+}
+
+const fetchProcesses = async () => {
+  loadingProcesses.value = true
+  try {
+    const res = await api.processes.getProcesses({ is_active: true, page_size: 500 })
+    processes.value = normalizeList(res?.data)
+  } catch (error) {
+    console.error('工程一覧取得エラー:', error)
+    alert('工程一覧の取得に失敗しました。')
+  } finally {
+    loadingProcesses.value = false
+  }
+}
+
+const fetchSuppliers = async () => {
+  loadingSuppliers.value = true
+  try {
+    const res = await api.suppliers.getSuppliers({ page_size: 500 })
+    suppliers.value = normalizeList(res?.data)
+  } catch (error) {
+    console.error('外作先一覧取得エラー:', error)
+    alert('外作先一覧の取得に失敗しました。')
+  } finally {
+    loadingSuppliers.value = false
+  }
+}
+
+const resetCreateStepDraft = () => {
+  newStepDraft.value = {
+    step_no: '',
+    parallel_group: 1,
+    process: '',
+    line: '',
+    supplier: '',
+    output_product: selectedRouting.value?.product || '',
+    time_unit: 'DAY',
+    lead_time_days: 0,
+    duration_min: '',
+    remark: selectedRouting.value?.product_code || '',
+  }
+}
+
+const toggleCreateStepRow = () => {
+  showCreateStepRow.value = !showCreateStepRow.value
+  if (showCreateStepRow.value) {
+    resetCreateStepDraft()
+  }
+}
+
+const createStep = async () => {
+  if (isCreateStepDisabled.value || !selectedRoutingId.value) return
+  creatingStep.value = true
+  errorMessage.value = ''
+  try {
+    const payload = {
+      routing: Number(selectedRoutingId.value),
+      step_no: Number(newStepDraft.value.step_no),
+      parallel_group: Number(newStepDraft.value.parallel_group || 1),
+      process: Number(newStepDraft.value.process),
+      line: newStepDraft.value.line ? Number(newStepDraft.value.line) : null,
+      supplier: newStepDraft.value.supplier ? Number(newStepDraft.value.supplier) : null,
+      output_product: newStepDraft.value.output_product ? Number(newStepDraft.value.output_product) : null,
+      time_unit: newStepDraft.value.time_unit === 'MINUTE' ? 'MINUTE' : 'DAY',
+      lead_time_days: newStepDraft.value.time_unit === 'DAY' ? Number(newStepDraft.value.lead_time_days || 0) : 0,
+      duration_min: newStepDraft.value.time_unit === 'MINUTE' ? Number(newStepDraft.value.duration_min) : null,
+      remark: String(newStepDraft.value.remark || '').trim() || null,
+    }
+    await api.routings.createRoutingStep(payload)
+    await fetchStepsAndMaterials(selectedRoutingId.value)
+    resetCreateStepDraft()
+  } catch (error) {
+    console.error('工程追加エラー:', error)
+    const detail =
+      error?.response?.data?.detail ||
+      error?.response?.data?.non_field_errors?.[0] ||
+      '工程の追加に失敗しました'
+    alert(detail)
+  } finally {
+    creatingStep.value = false
+  }
+}
+
+const createRouting = async () => {
+  if (isCreateDisabled.value) return
+  creatingRouting.value = true
+  errorMessage.value = ''
+  try {
+    const payload = {
+      product: Number(newRoutingDraft.value.product),
+      routing_code: String(newRoutingDraft.value.routing_code || '').trim(),
+      description: String(newRoutingDraft.value.description || '').trim() || null,
+      is_default: Boolean(newRoutingDraft.value.is_default),
+      is_active: Boolean(newRoutingDraft.value.is_active),
+    }
+    const res = await api.routings.createRouting(payload)
+    const newRoutingId = res?.data?.id
+    resetCreateDraft()
+    showCreateRow.value = false
+    await refreshAll()
+    if (newRoutingId) {
+      selectedRoutingId.value = Number(newRoutingId)
+    }
+  } catch (error) {
+    console.error('ルーティング新規作成エラー:', error)
+    const detail =
+      error?.response?.data?.detail ||
+      error?.response?.data?.non_field_errors?.[0] ||
+      'ルーティング新規作成に失敗しました'
+    alert(detail)
+  } finally {
+    creatingRouting.value = false
+  }
+}
+
 watch(selectedRoutingId, async (routingId) => {
   if (!routingId) {
     steps.value = []
@@ -844,6 +1183,9 @@ watch(selectedRoutingId, async (routingId) => {
 
 watch(selectedRouting, (routing) => {
   resetRoutingHeaderDraft(routing)
+  if (showCreateStepRow.value) {
+    resetCreateStepDraft()
+  }
 }, { immediate: true })
 
 watch(filteredRoutings, (list) => {
@@ -923,7 +1265,7 @@ const executeMigration = async () => {
 }
 
 onMounted(async () => {
-  await Promise.all([refreshAll(), fetchLines()])
+  await Promise.all([refreshAll(), fetchLines(), fetchProducts(), fetchProcesses(), fetchSuppliers()])
 })
 </script>
 
@@ -933,6 +1275,63 @@ onMounted(async () => {
   align-items: center;
   gap: 12px;
   margin-bottom: 12px;
+}
+
+.create-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #dcdfe5;
+  border-radius: 8px;
+  background: #fff;
+  flex-wrap: wrap;
+}
+
+.create-step-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #eceff5;
+  background: #f7fafc;
+  flex-wrap: wrap;
+}
+
+.create-select {
+  min-width: 320px;
+  max-width: 460px;
+  padding: 7px 10px;
+  border: 1px solid #d5d7dd;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.create-input {
+  min-width: 180px;
+  padding: 7px 10px;
+  border: 1px solid #d5d7dd;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.create-input--wide {
+  min-width: 260px;
+}
+
+.step-select {
+  min-width: 170px;
+  max-width: 260px;
+  padding: 5px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.step-select--small {
+  min-width: 90px;
+  max-width: 110px;
 }
 
 .search-input {
@@ -1040,6 +1439,11 @@ onMounted(async () => {
   padding: 8px 12px;
   border-bottom: 1px solid #eceff5;
   background: #fafbfc;
+}
+
+.btn-small {
+  padding: 4px 10px;
+  font-size: 12px;
 }
 
 .step-filter-row label {
