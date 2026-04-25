@@ -21,10 +21,7 @@ from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR, get_business_today, W
 from production.models_brake_line_record import BrakeLineRecord
 from production.models_line_backlog import LineBacklog
 from production.models_record_inquiry_setting import ProductionRecordInquirySetting
-from production.services.brake_spot_session_sync import (
-    find_equipment_active_product_conflict,
-    sync_brake_spot_action_to_process_session,
-)
+from production.services.brake_spot_session_sync import find_equipment_active_product_conflict
 from production.serializers_process_realtime import check_plan_overrun
 
 logger = logging.getLogger(__name__)
@@ -781,31 +778,6 @@ class BrakeLineRecordView(APIView):
             qty=qty,
             sequence_no=record_sequence_no,
         )
-
-        # 新構造へも同時保存（ProcessRealtimeRecord + ProcessWorkSession）
-        try:
-            sync_brake_spot_action_to_process_session(
-                process_id=process_id,
-                product_id=product_id,
-                product_code=product_code,
-                product_name='',
-                operator_action=operator_action,
-                operator_action_reason=operator_action_reason,
-                qty=qty,
-                operator_name=operator,
-                plan_date=plan_date,
-                line_id=line_id,
-                equipment_id=equipment_id or None,
-                source='BRAKE_LINE_RECORD',
-                source_record_id=rec.id,
-                sync_session=True,
-            )
-        except Exception:
-            # 現場運用を止めないため、二重保存側の障害で主保存（BrakeLineRecord）を失敗させない
-            logger.exception(
-                'ブレーキ実績の二重保存に失敗しました。brake_line_record_id=%s',
-                rec.id,
-            )
 
         # END / PAUSE の場合は LineBacklog(sequence_no=0) に実績を加算
         backlog_data = None
