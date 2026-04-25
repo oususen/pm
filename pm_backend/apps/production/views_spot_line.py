@@ -420,15 +420,17 @@ class SpotLineRecordView(APIView):
                     or 'この設備'
                 )
                 conflict_product_code = str(conflict.product_code or '').strip() or '前の品番'
+                conflict_date = str(conflict.plan_date or '')
                 return Response(
                     {
                         'detail_code': 'production.error.equipmentBusyWithProduct',
                         'detail_params': {
                             'equipment': equipment_label,
                             'product': conflict_product_code,
+                            'date': conflict_date,
                         },
                         'detail': (
-                            f'{equipment_label} は {conflict_product_code} が未終了です。'
+                            f'{equipment_label} は {conflict_product_code}（{conflict_date}）が未終了です。'
                             '先に終了してください。'
                         )
                     },

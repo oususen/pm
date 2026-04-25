@@ -288,6 +288,7 @@
               <button class="btn-save" :disabled="!canSave" @click="save">{{ t('brakeInput.save') }}</button>
               <button class="btn-cancel" @click="cancel">{{ t('brakeInput.cancel') }}</button>
             </div>
+            <div v-if="equipmentConflictError" class="equipment-conflict-error">{{ equipmentConflictError }}</div>
           </div>
         </template>
       </div>
@@ -631,6 +632,7 @@ const addEquipments = ref([])         // 追加モーダル用設備一覧
 
 // トースト
 const toast = ref({ show: false, message: '', type: 'success' })
+const equipmentConflictError = ref('')
 const PRINT_SETTINGS_KEY = 'brake_line_print_settings_v1'
 const LABEL_CACHE_KEY = 'brake_line_luck_jingle_label_v1'
 
@@ -1237,8 +1239,14 @@ async function save() {
     }
 
     nextTick(() => qtyInputRef.value?.focus())
+    equipmentConflictError.value = ''
   } catch (e) {
-    showToast(resolveApiErrorMessage(e, t('brakeInput.error.saveFailed')), 'error')
+    const detailCode = String(e?.response?.data?.detail_code || '')
+    if (detailCode === 'production.error.equipmentBusyWithProduct') {
+      equipmentConflictError.value = resolveApiErrorMessage(e, t('brakeInput.error.saveFailed'))
+    } else {
+      showToast(resolveApiErrorMessage(e, t('brakeInput.error.saveFailed')), 'error')
+    }
   }
 }
 
@@ -2249,6 +2257,17 @@ function showToast(message, type = 'success') {
 }
 .toast.success { background: #2e9688; color: #fff; }
 .toast.error   { background: #c0392b; color: #fff; }
+.equipment-conflict-error {
+  margin-top: 12px;
+  padding: 12px 16px;
+  background: #fff0f0;
+  border: 2px solid #e53935;
+  border-radius: 6px;
+  color: #c62828;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
 .toast-enter-active, .toast-leave-active { transition: opacity .3s, transform .3s; }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(12px); }
 

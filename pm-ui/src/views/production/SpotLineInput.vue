@@ -263,6 +263,7 @@
               <button class="btn-save" :disabled="!canSave" @click="save">保存</button>
               <button class="btn-cancel" @click="cancel">キャンセル</button>
             </div>
+            <div v-if="equipmentConflictError" class="equipment-conflict-error">{{ equipmentConflictError }}</div>
           </div>
         </template>
       </div>
@@ -579,6 +580,7 @@ const filteredSpotLineProducts = computed(() => {
 const addEquipments = ref([])
 
 const toast = ref({ show: false, message: '', type: 'success' })
+const equipmentConflictError = ref('')
 const PRINT_SETTINGS_KEY = 'spot_line_print_settings_v1'
 const LABEL_CACHE_KEY = 'spot_line_luck_jingle_label_v1'
 
@@ -1122,8 +1124,14 @@ async function save() {
     }
 
     nextTick(() => qtyInputRef.value?.focus())
+    equipmentConflictError.value = ''
   } catch (e) {
-    showToast(resolveApiErrorMessage(e, '保存に失敗しました'), 'error')
+    const detailCode = String(e?.response?.data?.detail_code || '')
+    if (detailCode === 'production.error.equipmentBusyWithProduct') {
+      equipmentConflictError.value = resolveApiErrorMessage(e, '保存に失敗しました')
+    } else {
+      showToast(resolveApiErrorMessage(e, '保存に失敗しました'), 'error')
+    }
   }
 }
 
@@ -1849,6 +1857,18 @@ function showToast(message, type = 'success') {
 .type-btn.active { border-color: #4e7cbf; background: #e8f0fb; color: #4e7cbf; font-weight: 700; }
 .selected-product-name { font-size: 12px; color: #555; }
 .equip-btns-modal { flex-wrap: wrap; }
+
+.equipment-conflict-error {
+  margin-top: 12px;
+  padding: 12px 16px;
+  background: #fff0f0;
+  border: 2px solid #e53935;
+  border-radius: 6px;
+  color: #c62828;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
 
 /* トースト */
 .toast {
