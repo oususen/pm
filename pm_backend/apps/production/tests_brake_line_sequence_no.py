@@ -235,6 +235,10 @@ class BrakeSpotDualWriteTest(TestCase):
             product_code='TEST-DUAL',
             product_name='二重書込テスト品',
         )
+        self.other_product = Product.objects.create(
+            product_code='TEST-DUAL-2',
+            product_name='二重書込テスト品2',
+        )
         self.brake_equipment = Equipment.objects.create(
             equipment_code='EQ-BRAKE-DUAL',
             equipment_name='ブレーキ設備',
@@ -310,6 +314,46 @@ class BrakeSpotDualWriteTest(TestCase):
             ProcessWorkSessionEquipment.objects.filter(
                 session=session,
                 role=ProcessWorkSessionEquipment.ROLE_PRIMARY,
+            ).count(),
+            1,
+        )
+
+    def test_brake_record_rejects_start_when_same_equipment_has_other_open_product(self):
+        BrakeLineRecord.objects.create(
+            plan_date=self.plan_date,
+            line=self.brake_line,
+            process=self.brake_process,
+            product=self.product,
+            product_code=self.product.product_code,
+            equipment=self.brake_equipment,
+            operator='tester',
+            operator_action=BrakeLineRecord.OPERATOR_ACTION_START,
+            qty=0,
+        )
+
+        request = self.factory.post(
+            '/api/production/brake-line-record/',
+            {
+                'line_id': self.brake_line.id,
+                'process_id': self.brake_process.id,
+                'product_id': self.other_product.id,
+                'product_code': self.other_product.product_code,
+                'plan_date': self.plan_date.isoformat(),
+                'operator': 'tester',
+                'operator_action': BrakeLineRecord.OPERATOR_ACTION_START,
+                'qty': 0,
+                'equipment_id': self.brake_equipment.id,
+            },
+            format='json',
+        )
+        response = BrakeLineRecordView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('未終了', response.data['detail'])
+        self.assertEqual(
+            BrakeLineRecord.objects.filter(
+                equipment=self.brake_equipment,
+                operator_action=BrakeLineRecord.OPERATOR_ACTION_START,
             ).count(),
             1,
         )
@@ -394,4 +438,45 @@ class BrakeSpotDualWriteTest(TestCase):
                 role=ProcessWorkSessionEquipment.ROLE_SUB,
             ).count(),
             1,
+        )
+
+    def test_spot_record_rejects_start_when_same_equipment_has_other_open_product(self):
+        BrakeLineRecord.objects.create(
+            plan_date=self.plan_date,
+            line=self.spot_line,
+            process=self.spot_process,
+            product=self.product,
+            product_code=self.product.product_code,
+            equipment=self.spot_equipment_1,
+            operator='tester',
+            operator_action=BrakeLineRecord.OPERATOR_ACTION_PAUSE,
+            qty=0,
+        )
+
+        request = self.factory.post(
+            '/api/production/spot-line-record/',
+            {
+                'line_id': self.spot_line.id,
+                'process_id': self.spot_process.id,
+                'product_id': self.other_product.id,
+                'product_code': self.other_product.product_code,
+                'plan_date': self.plan_date.isoformat(),
+                'operator': 'tester',
+                'operator_action': BrakeLineRecord.OPERATOR_ACTION_START,
+                'qty': 0,
+                'skip_qty_update': False,
+                'equipment_id': self.spot_equipment_1.id,
+            },
+            format='json',
+        )
+        response = SpotLineRecordView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('未終了', response.data['detail'])
+        self.assertEqual(
+            BrakeLineRecord.objects.filter(
+                equipment=self.spot_equipment_1,
+                operator_action=BrakeLineRecord.OPERATOR_ACTION_START,
+            ).count(),
+            0,
         )

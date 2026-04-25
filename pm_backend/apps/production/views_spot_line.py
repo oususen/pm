@@ -19,7 +19,10 @@ from orders.utils.calendar_utils import get_business_today
 from production.models_brake_line_record import BrakeLineRecord
 from production.models_line_backlog import LineBacklog
 from production.models_record_inquiry_setting import ProductionRecordInquirySetting
-from production.services.brake_spot_session_sync import sync_brake_spot_action_to_process_session
+from production.services.brake_spot_session_sync import (
+    find_equipment_active_product_conflict,
+    sync_brake_spot_action_to_process_session,
+)
 from production.serializers_process_realtime import check_plan_overrun
 
 logger = logging.getLogger(__name__)
@@ -406,6 +409,34 @@ class SpotLineRecordView(APIView):
             plan_date = date.fromisoformat(plan_date_str)
         except ValueError:
             return Response({'detail': '日付形式が不正です（YYYY-MM-DD）'}, status=400)
+
+        if operator_action == BrakeLineRecord.OPERATOR_ACTION_START:
+            conflict = find_equipment_active_product_conflict(
+                equipment_id=equipment_id,
+                product_id=product_id or None,
+                product_code=product_code,
+            )
+            if conflict:
+                equipment_label = (
+                    (conflict.equipment.equipment_name if conflict.equipment else '')
+                    or (conflict.equipment.equipment_code if conflict.equipment else '')
+                    or 'この設備'
+                )
+                conflict_product_code = str(conflict.product_code or '').strip() or '前の品番'
+                return Response(
+                    {
+                        'detail_code': 'production.error.equipmentBusyWithProduct',
+                        'detail_params': {
+                            'equipment': equipment_label,
+                            'product': conflict_product_code,
+                        },
+                        'detail': (
+                            f'{equipment_label} は {conflict_product_code} が未終了です。'
+                            '先に終了してください。'
+                        )
+                    },
+                    status=400,
+                )
 
         qty = 0
         if not skip_qty_update and operator_action in {BrakeLineRecord.OPERATOR_ACTION_END, BrakeLineRecord.OPERATOR_ACTION_PAUSE}:

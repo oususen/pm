@@ -427,6 +427,15 @@ const SCRAP_REASONS = [
   { value: '503:変形/キズ',        label: '503: 変形/キズ' },
 ]
 
+function resolveApiErrorMessage(error, fallback) {
+  const data = error?.response?.data || {}
+  const detailCode = String(data.detail_code || '').trim()
+  if (detailCode) {
+    return t(detailCode, data.detail_params || {})
+  }
+  return data.detail || fallback
+}
+
 // ──────────────────────────────
 // 日付ユーティリティ（8時区切り）
 // ──────────────────────────────
@@ -853,7 +862,7 @@ async function loadPlan() {
       currentProcessingByEquipment.value = {}
     }
   } catch (e) {
-    showToast(e?.response?.data?.detail || t('brakeInput.error.loadFailed'), 'error')
+    showToast(resolveApiErrorMessage(e, t('brakeInput.error.loadFailed')), 'error')
   } finally {
     loading.value = false
   }
@@ -1229,7 +1238,7 @@ async function save() {
 
     nextTick(() => qtyInputRef.value?.focus())
   } catch (e) {
-    showToast(e?.response?.data?.detail || t('brakeInput.error.saveFailed'), 'error')
+    showToast(resolveApiErrorMessage(e, t('brakeInput.error.saveFailed')), 'error')
   }
 }
 

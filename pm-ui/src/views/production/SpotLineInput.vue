@@ -388,6 +388,7 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
+import { t } from '@/i18n'
 import { buildLuckJingleLabelDataUrl, createLuckJingleFileName, openLuckJinglePreview, shareLuckJingleLabel } from '@/utils/luckJingleLabel'
 
 const SCRAP_REASONS = [
@@ -396,6 +397,15 @@ const SCRAP_REASONS = [
   { value: '502:精度不良',         label: '502: 精度不良' },
   { value: '503:変形/キズ',        label: '503: 変形/キズ' },
 ]
+
+function resolveApiErrorMessage(error, fallback) {
+  const data = error?.response?.data || {}
+  const detailCode = String(data.detail_code || '').trim()
+  if (detailCode) {
+    return t(detailCode, data.detail_params || {})
+  }
+  return data.detail || fallback
+}
 
 const PAUSE_REASONS = ['設備トラブル', '治具トラブル', '品質トラブル', '材料待ち', '段取り', 'リーダー待ち', '3S活動', '改善活動', '品番間違い', 'その他']
 const TEMP_END_REASONS = ['設備なし', '治具なし', '品番切替', '材料不足', 'その他']
@@ -788,7 +798,7 @@ async function loadPlan() {
       currentProcessingByEquipment.value = {}
     }
   } catch (e) {
-    showToast(e?.response?.data?.detail || '計画の読み込みに失敗しました', 'error')
+    showToast(resolveApiErrorMessage(e, '計画の読み込みに失敗しました'), 'error')
   } finally {
     loading.value = false
   }
@@ -1113,7 +1123,7 @@ async function save() {
 
     nextTick(() => qtyInputRef.value?.focus())
   } catch (e) {
-    showToast(e?.response?.data?.detail || '保存に失敗しました', 'error')
+    showToast(resolveApiErrorMessage(e, '保存に失敗しました'), 'error')
   }
 }
 

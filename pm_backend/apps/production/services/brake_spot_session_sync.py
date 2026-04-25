@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from production.models_brake_line_record import BrakeLineRecord
 from production.models_process_realtime import ProcessRealtimeRecord
 from production.models_process_work_session import ProcessWorkSession
 from production.models_process_work_session_equipment import ProcessWorkSessionEquipment
@@ -9,6 +10,48 @@ from production.serializers_process_realtime import (
     apply_operator_action_session,
 )
 from masters.models import Process, Product
+
+
+ACTIVE_BRAKE_SPOT_ACTIONS = {
+    BrakeLineRecord.OPERATOR_ACTION_START,
+    BrakeLineRecord.OPERATOR_ACTION_RESUME,
+    BrakeLineRecord.OPERATOR_ACTION_PAUSE,
+}
+
+
+def find_equipment_active_product_conflict(*, equipment_id, product_id=None, product_code=''):
+    """
+    同一設備の最新状態が別品番の未終了状態かを返す。
+    """
+    if not equipment_id:
+        return None
+
+    latest_record = (
+        BrakeLineRecord.objects
+        .filter(equipment_id=equipment_id)
+        .select_related('equipment', 'product')
+        .order_by('-recorded_at', '-id')
+        .first()
+    )
+    if not latest_record:
+        return None
+
+    latest_action = str(latest_record.operator_action or '').upper()
+    if latest_action not in ACTIVE_BRAKE_SPOT_ACTIONS:
+        return None
+
+    same_product = False
+    if product_id and latest_record.product_id:
+        same_product = int(latest_record.product_id) == int(product_id)
+    elif not product_id:
+        incoming_code = str(product_code or '').strip()
+        record_code = str(latest_record.product_code or '').strip()
+        same_product = bool(incoming_code and record_code and incoming_code == record_code)
+
+    if same_product:
+        return None
+
+    return latest_record
 
 
 def _resolve_target_session_for_equipment(*, explicit_session, process, product, plan_date):
