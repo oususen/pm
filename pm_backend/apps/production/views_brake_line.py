@@ -673,8 +673,18 @@ class BrakeLineRecordView(APIView):
                 if rec.equipment_id and equipment_key not in latest_by_equipment:
                     latest_by_equipment[equipment_key] = rec
 
+        # 設備ごとの加工中状態は plan_date に関係なく全期間の最新レコードで判定
         processing_by_equipment = {}
-        for equipment_key, rec in latest_by_equipment.items():
+        global_equipment_qs = BrakeLineRecord.objects.select_related('equipment')
+        if process_id:
+            global_equipment_qs = global_equipment_qs.filter(process_id=process_id)
+        global_latest_by_equipment = {}
+        for rec in global_equipment_qs.order_by('-recorded_at', '-id'):
+            if rec.equipment_id:
+                equipment_key = f"id:{rec.equipment_id}"
+                if equipment_key not in global_latest_by_equipment:
+                    global_latest_by_equipment[equipment_key] = rec
+        for equipment_key, rec in global_latest_by_equipment.items():
             if rec.operator_action not in {
                 BrakeLineRecord.OPERATOR_ACTION_START,
                 BrakeLineRecord.OPERATOR_ACTION_RESUME,

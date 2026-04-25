@@ -21,7 +21,8 @@ ACTIVE_BRAKE_SPOT_ACTIONS = {
 
 def find_equipment_active_product_conflict(*, equipment_id, product_id=None, product_code=''):
     """
-    同一設備の最新状態が別品番の未終了状態かを返す。
+    同一設備の最新状態が未終了（START/RESUME/PAUSE）なら該当レコードを返す。
+    同じ製品でも別製品でもブロック対象。
     """
     if not equipment_id:
         return None
@@ -38,17 +39,6 @@ def find_equipment_active_product_conflict(*, equipment_id, product_id=None, pro
 
     latest_action = str(latest_record.operator_action or '').upper()
     if latest_action not in ACTIVE_BRAKE_SPOT_ACTIONS:
-        return None
-
-    same_product = False
-    if product_id and latest_record.product_id:
-        same_product = int(latest_record.product_id) == int(product_id)
-    elif not product_id:
-        incoming_code = str(product_code or '').strip()
-        record_code = str(latest_record.product_code or '').strip()
-        same_product = bool(incoming_code and record_code and incoming_code == record_code)
-
-    if same_product:
         return None
 
     return latest_record

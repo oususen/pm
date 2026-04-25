@@ -356,8 +356,22 @@ class SpotLineRecordView(APIView):
             if rec.operator_action in PAUSED:
                 item_state_map[item_key] = rec.operator_action
 
+        # 設備ごとの加工中状態は plan_date に関係なく全期間の最新レコードで判定
         processing_by_equipment = {}
-        for eq_key, rec in latest_by_equipment.items():
+        global_equipment_qs = (
+            BrakeLineRecord.objects
+            .filter(line_id__in=line_ids)
+            .select_related('equipment')
+        )
+        if process_id:
+            global_equipment_qs = global_equipment_qs.filter(process_id=process_id)
+        global_latest_by_equipment = {}
+        for rec in global_equipment_qs.order_by('-recorded_at', '-id'):
+            if rec.equipment_id:
+                eq_key = f"id:{rec.equipment_id}"
+                if eq_key not in global_latest_by_equipment:
+                    global_latest_by_equipment[eq_key] = rec
+        for eq_key, rec in global_latest_by_equipment.items():
             if rec.operator_action not in {
                 BrakeLineRecord.OPERATOR_ACTION_START,
                 BrakeLineRecord.OPERATOR_ACTION_RESUME,
