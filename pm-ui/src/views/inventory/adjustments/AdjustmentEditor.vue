@@ -137,6 +137,10 @@
               <p>※ 在庫は日々累積で繰り越されるため、調整対象日に値を入れることで以降の全日に反映されます。</p>
               <p>※ 在庫補正の正しい手順：<strong>在庫再計算 → 実在庫入力 → 調整保存 → 再計算</strong>（上記ガイドを使用）。</p>
             </template>
+            <template v-else-if="props.adjustType === 'PLANNED_STOCK'">
+              <p>※ 計画在庫は日々累積で繰り越されるため、調整対象日に値を入れることで以降の全日に反映されます。</p>
+              <p>※ 計画在庫補正の正しい手順：<strong>計画在庫再計算 → 実計画在庫入力 → 調整保存 → 再計算</strong>（上記ガイドを使用）。</p>
+            </template>
             <template v-else-if="props.adjustType === 'PROGRESS'">
               <p>※ 進度は日々累積で繰り越されるため、調整対象日に値を入れることで以降の全日に反映されます。</p>
               <p>※ 進度補正の正しい手順：<strong>進度再計算 → 実進度入力 → 調整保存 → 再計算</strong>（上記ガイドを使用）。</p>
@@ -821,19 +825,23 @@ const reflectionLabel =
     ? "計画進度"
     : "進度";
 
-// 補正ガイドを表示するタイプ（STOCK / PROGRESS）
-const isGuideType = props.adjustType === "STOCK" || props.adjustType === "PROGRESS";
-const guideTitle = props.adjustType === "STOCK" ? "在庫補正ガイド" : "進度補正ガイド";
-const guideStep1Label = props.adjustType === "STOCK" ? "① 在庫を最新化" : "① 進度を最新化";
-const guideStep1Btn = props.adjustType === "STOCK" ? "在庫再計算して確認" : "進度再計算して確認";
-const guideSystemLabel = props.adjustType === "STOCK" ? "システム在庫（今日）" : "システム進度（今日）";
-const guideActualLabel = props.adjustType === "STOCK" ? "実在庫（今日）" : "実進度（今日）";
-const guideActualPlaceholder = props.adjustType === "STOCK" ? "実測値を入力" : "実績値を入力";
-const guideStep2Label = props.adjustType === "STOCK" ? "② 実在庫を入力して差分を確認" : "② 実進度を入力して差分を確認";
+// 補正ガイドを表示するタイプ（STOCK / PROGRESS / PLANNED_STOCK）
+const isGuideType = props.adjustType === "STOCK" || props.adjustType === "PROGRESS" || props.adjustType === "PLANNED_STOCK";
+const _guideWord =
+  props.adjustType === "STOCK" ? "在庫"
+  : props.adjustType === "PLANNED_STOCK" ? "計画在庫"
+  : "進度";
+const guideTitle = `${_guideWord}補正ガイド`;
+const guideStep1Label = `① ${_guideWord}を最新化`;
+const guideStep1Btn = `${_guideWord}再計算して確認`;
+const guideSystemLabel = `システム${_guideWord}（今日）`;
+const guideActualLabel = props.adjustType === "STOCK" ? "実在庫（今日）" : props.adjustType === "PLANNED_STOCK" ? "実計画在庫（今日）" : "実進度（今日）";
+const guideActualPlaceholder = props.adjustType === "PROGRESS" ? "実績値を入力" : "実測値を入力";
+const guideStep2Label = props.adjustType === "STOCK" ? "② 実在庫を入力して差分を確認" : props.adjustType === "PLANNED_STOCK" ? "② 実計画在庫を入力して差分を確認" : "② 実進度を入力して差分を確認";
 const guideStep3Label = "③ 差分を調整対象日に適用して再計算";
 const guideApplyBtn = "調整を保存して再計算";
-const guideReasonPrefix = props.adjustType === "STOCK" ? "在庫補正" : "進度補正";
-const guideActualWord = props.adjustType === "STOCK" ? "実在庫" : "実進度";
+const guideReasonPrefix = `${_guideWord}補正`;
+const guideActualWord = props.adjustType === "STOCK" ? "実在庫" : props.adjustType === "PLANNED_STOCK" ? "実計画在庫" : "実進度";
 
 const reload = async () => {
   loading.value = true;

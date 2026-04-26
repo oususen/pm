@@ -12,6 +12,11 @@
         <div class="tile-title">在庫調整</div>
         <div class="tile-desc">在庫の補正値を登録します。</div>
       </RouterLink>
+      <RouterLink to="/inventory/adjustments/planned-stock" class="tile">
+        <div class="tile-icon">📊</div>
+        <div class="tile-title">計画在庫調整</div>
+        <div class="tile-desc">計画在庫の補正値を登録します。</div>
+      </RouterLink>
       <RouterLink to="/inventory/adjustments/history" class="tile">
         <div class="tile-icon">📋</div>
         <div class="tile-title">調整履歴</div>

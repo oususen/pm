@@ -527,6 +527,76 @@ def _get_shipment_scrap_qty(product_id, line_id, process_id, plan_date):
     return result['total'] or Decimal('0')
 
 
+FLOOR_SHIPPING_DELIVERY_LABEL = 'フロア配送'
+FLOOR_SHIPPING_PM_THRESHOLD = 50
+
+
+def _is_floor_shipping_delivery_line(line_obj):
+    if not line_obj:
+        return False
+    line_code = str(getattr(line_obj, 'line_code', '') or '').strip()
+    line_name = str(getattr(line_obj, 'line_name', '') or '').strip()
+    return FLOOR_SHIPPING_DELIVERY_LABEL in f'{line_code} {line_name}'
+
+
+def _check_floor_shipping_parent(parent_product_id, cache):
+    if parent_product_id in cache:
+        return cache[parent_product_id]
+    from masters.models import RoutingStep
+    step = RoutingStep.objects.filter(
+        output_product_id=parent_product_id
+    ).select_related('line').first()
+    result = bool(step and step.line and _is_floor_shipping_delivery_line(step.line))
+    cache[parent_product_id] = result
+    return result
+
+
+def _floor_shipping_plan_shipment(backlog, shift_fn, parent_product, qty_per):
+    """フロア配送ラインの出庫をsequence_noベースのLTで計算（pickup側と同一ロジック）
+
+    pickup (views.py) の便判定:
+      sorted by sequence_no → lot_index で判定
+      - sequence_no > 50: 強制2便 (LT=1)
+      - lot_index == 0 かつ sequence_no ≤ 50: 1便 (LT=2)
+      - lot_index > 0 かつ sequence_no ≤ 50: 2便 (LT=1)
+    """
+    total = Decimal('0')
+    date_lt1 = shift_fn(backlog.plan_date, 1) if shift_fn else backlog.plan_date
+    date_lt2 = shift_fn(backlog.plan_date, 2) if shift_fn else backlog.plan_date
+
+    checked_dates = set()
+    for parent_date in [date_lt2, date_lt1]:
+        if parent_date in checked_dates:
+            continue
+        checked_dates.add(parent_date)
+
+        plan_rows = list(LineBacklog.objects.filter(
+            product=parent_product,
+            plan_date=parent_date,
+            sequence_no__gt=0,
+        ).values_list('sequence_no', 'plan_qty'))
+        if not plan_rows:
+            continue
+
+        def _sort_key(item):
+            seq = int(item[0] or 0)
+            return seq if seq > 0 else 10 ** 9
+        plan_rows.sort(key=_sort_key)
+
+        for lot_index, (seq_no, plan_qty) in enumerate(plan_rows):
+            seq = int(seq_no or 0)
+            force_pm = seq > FLOOR_SHIPPING_PM_THRESHOLD
+            effective_lt = 1 if force_pm else (2 if lot_index == 0 else 1)
+            expected_parent = shift_fn(backlog.plan_date, effective_lt) if shift_fn else backlog.plan_date
+            if expected_parent != parent_date:
+                continue
+            plan = int(plan_qty or 0)
+            if plan:
+                total += Decimal(str(plan)) * qty_per
+
+    return total
+
+
 def _calculate_parent_actual_shipment(backlog, shift_fn=None):
     """
     実在庫・計画在庫用の実績出庫計算（後工程の実績 + 仕損を使用）
@@ -672,7 +742,7 @@ def _compute_planned_stock_lt_adjustment(product_id, initial_date, max_lt, shift
     return int(total_adjustment)
 
 
-def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None):
+def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None, floor_shipping_cache=None):
     """
     計画在庫用の出庫計算（実績優先、なければ計画を使用）+ 仕損
 
@@ -684,6 +754,7 @@ def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None):
     Args:
         backlog: LineBacklogインスタンス
         shift_fn: LTシフト関数（営業日ベースで日付をシフト）
+        floor_shipping_cache: フロア配送ライン判定キャッシュ
     """
     from masters.models import BOMItem
 
@@ -698,6 +769,7 @@ def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None):
 
     from django.db.models import Sum
 
+    fs_cache = floor_shipping_cache if floor_shipping_cache is not None else {}
     total_shipment = Decimal('0')
     for bom_item in parent_bom_items:
         parent_product = bom_item.bom.parent_product
@@ -706,6 +778,13 @@ def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None):
         qty_per = bom_item.quantity or Decimal('0')
         if qty_per == 0:
             continue
+
+        if _check_floor_shipping_parent(parent_product.id, fs_cache):
+            total_shipment += _floor_shipping_plan_shipment(
+                backlog, shift_fn, parent_product, qty_per,
+            )
+            continue
+
         lead_days = bom_item.lead_time_days or 0
         parent_date = backlog.plan_date
         if shift_fn:
@@ -738,7 +817,7 @@ def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None):
     return total_shipment
 
 
-def _calculate_parent_planned_shipment(backlog, today, shift_fn):
+def _calculate_parent_planned_shipment(backlog, today, shift_fn, floor_shipping_cache=None):
     """
     計画在庫用の出庫計算（後工程の計画値＝内示を使用）+ 仕損
 
@@ -763,6 +842,7 @@ def _calculate_parent_planned_shipment(backlog, today, shift_fn):
 
     from django.db.models import Sum
 
+    fs_cache = floor_shipping_cache if floor_shipping_cache is not None else {}
     total_shipment = Decimal('0')
     for bom_item in parent_bom_items:
         parent_product = bom_item.bom.parent_product
@@ -771,6 +851,13 @@ def _calculate_parent_planned_shipment(backlog, today, shift_fn):
         qty_per = bom_item.quantity or Decimal('0')
         if qty_per == 0:
             continue
+
+        if _check_floor_shipping_parent(parent_product.id, fs_cache):
+            total_shipment += _floor_shipping_plan_shipment(
+                backlog, shift_fn, parent_product, qty_per,
+            )
+            continue
+
         lead_days = bom_item.lead_time_days or 0
         parent_date = backlog.plan_date
         if shift_fn:
@@ -1217,6 +1304,7 @@ def recalculate_planned_stock_qty(
     inventory_lock_date = SystemSetting.get_lock_date('inventory')
     planned_by_date = {}
     firm_map = firm_map or {}
+    floor_shipping_cache = {}
 
     # 計算開始日以前の実在庫を初期値として取得
     # 最終品: calc_start_date 当日（__lte）の在庫を使う
@@ -1315,16 +1403,16 @@ def recalculate_planned_stock_qty(
             if plan_date < business_today:
                 # ライン最終品でも過去日は実績優先で整合を取る。
                 # 親参照がない（BOM未設定）場合のみ需要(order_qty)にフォールバック。
-                planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days)
+                planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days, floor_shipping_cache)
                 if not planned_shipment:
                     planned_shipment = Decimal(str(order_total))
             else:
                 planned_shipment = Decimal(str(order_total))
         else:
             if plan_date < business_today:
-                planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days)
+                planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days, floor_shipping_cache)
             else:
-                planned_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days)
+                planned_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days, floor_shipping_cache)
         planned_shipment = int(planned_shipment or 0)
 
         # 在庫も進度と同様、休日を含めて「前日（暦日）」を基準に引き継ぐ。

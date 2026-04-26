@@ -24,6 +24,12 @@ const inventory = [
     meta: { pageTitle: "在庫調整", manualPath: "在庫/在庫調整.md", resource: "inventory" },
   },
   {
+    path: "/inventory/adjustments/planned-stock",
+    name: "InventoryPlannedStockAdjustment",
+    component: () => import("@/views/inventory/adjustments/PlannedStockAdjustment.vue"),
+    meta: { pageTitle: "計画在庫調整", resource: "inventory" },
+  },
+  {
     path: "/inventory/adjustments/history",
     name: "InventoryAdjustmentHistory",
     component: () => import("@/views/inventory/adjustments/AdjustmentHistory.vue"),
