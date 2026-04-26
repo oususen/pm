@@ -79,6 +79,7 @@
             <li>在庫は再計算せず、進度のみ更新します。</li>
             <li>データ量によっては完了まで時間がかかる場合があります。</li>
           </ul>
+          <p class="deep-recalc-danger">※ 過去の日の実績を入力した後にのみ実行してください。<br>表示開始日を実績入力日の一番古い日にしてください。<br>むやみに実行すると在庫・進度データが不整合になる恐れがあります。</p>
           <p class="deep-recalc-warn">※ 各品番のLT算出結果（calc_start_date）の最古日を開始日に採用します。</p>
           <div class="deep-recalc-actions">
             <button type="button" @click="showDeepRecalcDialog = false">キャンセル</button>
@@ -1392,6 +1393,11 @@ const getCellClass = (group, date, rowKey) => {
     padding-left: 20px;
     li { margin-bottom: 4px; }
   }
+}
+.deep-recalc-danger {
+  color: #dc2626;
+  font-size: 13px;
+  font-weight: 700;
 }
 .deep-recalc-warn {
   color: #b45309;

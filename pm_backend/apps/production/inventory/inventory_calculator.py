@@ -1383,6 +1383,23 @@ def recalculate_planned_stock_qty(
         # 仕損による子部品の消費は、出庫計算（親の実績/計画+仕損）で反映される
         order_total = sum(r.order_qty or 0 for r in rows)
 
+        # 非稼働日は入庫・出庫とも発生しないため前日からそのまま繰越す。
+        # shift_working_daysが休日→営業日にマッピングするため、営業日と同じ親データを
+        # 二重カウントしてしまう問題を防ぐ。
+        if not is_working_day(plan_date):
+            prev_day = plan_date - timedelta(days=1)
+            prev_planned = planned_by_date.get(prev_day, last_planned)
+            planned_stock_adjust = _resolve_day_adjustment(rows, planned_stock_adjust_map)
+            planned_stock = prev_planned + planned_stock_adjust
+            rep = pick_representative(rows)
+            for row in rows:
+                row.planned_stock_qty = 0
+            rep.planned_stock_qty = planned_stock
+            planned_by_date[plan_date] = planned_stock
+            last_planned = planned_stock
+            backlogs_to_update.extend(rows)
+            continue
+
         is_final = bool(getattr(sample.product, 'is_final_product', False))
         is_line_final = bool(getattr(sample.product, 'is_line_final_product', False))
         if is_final:
