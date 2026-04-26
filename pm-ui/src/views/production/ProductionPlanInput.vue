@@ -76,6 +76,13 @@
       >
         進度基準
       </button>
+      <button
+        type="button"
+        class="laser-subtab-item manual-btn"
+        @click="openManual('生産/配送計画.md')"
+      >
+        マニュアル
+      </button>
     </div>
 
     <template
@@ -160,7 +167,7 @@
         <button
           v-if="activePlanTab === 'floor-shipping' && activeFloorShippingTab === 'progress'"
           class="btn primary"
-          @click="recalculateProgressFromPast"
+          @click="showRecalcWarning = true"
           :disabled="processing || !rows.length || !selectedLine"
         >過去から再計算</button>
         <button class="btn" @click="savePlan" :disabled="processing || !rows.length || !selectedLine">保存</button>
@@ -823,6 +830,24 @@
       </div>
     </div>
   </div>
+
+  <!-- 過去から再計算 警告モーダル -->
+  <div v-if="showRecalcWarning" class="recalc-overlay" @click.self="showRecalcWarning = false">
+    <div class="recalc-modal">
+      <div class="recalc-warning-text">
+        <p>⚠ 注意</p>
+        <ul>
+          <li>過去の日の実績を入力した後にのみ実行してください。</li>
+          <li>表示開始日を実績入力日の一番古い日にしてください。</li>
+        </ul>
+        <p>むやみに実行すると在庫・進度データが不整合になる恐れがあります。</p>
+      </div>
+      <div class="recalc-modal-buttons">
+        <button class="btn" @click="showRecalcWarning = false">キャンセル</button>
+        <button class="btn primary" @click="showRecalcWarning = false; recalculateProgressFromPast()">続行</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -838,6 +863,7 @@ const router = useRouter()
 const selectedLine = ref('')
 const TOOLBAR_COLLAPSED_KEY = 'productionPlanInput.toolbarCollapsed'
 const toolbarCollapsed = ref(localStorage.getItem(TOOLBAR_COLLAPSED_KEY) === '1')
+const openManual = (path) => { window.open(`/manual?path=${encodeURIComponent(path)}`, '_blank') }
 const toggleToolbar = () => {
   toolbarCollapsed.value = !toolbarCollapsed.value
   localStorage.setItem(TOOLBAR_COLLAPSED_KEY, toolbarCollapsed.value ? '1' : '0')
@@ -976,6 +1002,7 @@ const workStartFallback = { hour: 8, minute: 0 }
 const workMinutesFallback = 480
 const GANTT_GENERATE_TIMEOUT_MS = 120000
 const processing = ref(false)
+const showRecalcWarning = ref(false)
 const activeInputRowId = ref(null)
 const cursorProductTail = ref('')
 const cursorProductBubbleStyle = ref({})
@@ -4987,6 +5014,12 @@ thead .sticky-col {
   border-color: #1d4ed8;
   color: #fff;
 }
+.laser-subtab-item.manual-btn {
+  margin-left: auto;
+  background: #e8f5e9;
+  border-color: #4caf50;
+  color: #2e7d32;
+}
 .laser-editor-section {
   margin-top: 8px;
 }
@@ -5120,6 +5153,46 @@ thead .sticky-col {
   text-align: right;
   font-size: 13px;
   color: #1a3a6a;
+}
+.recalc-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.recalc-modal {
+  background: #fff;
+  border: 3px solid #c62828;
+  border-radius: 10px;
+  padding: 28px 32px;
+  max-width: 520px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.25);
+}
+.recalc-warning-text {
+  color: #c62828;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.8;
+}
+.recalc-warning-text p:first-child {
+  font-size: 1.4rem;
+  margin-bottom: 8px;
+}
+.recalc-warning-text ul {
+  margin: 0 0 12px 20px;
+  padding: 0;
+}
+.recalc-warning-text li {
+  margin-bottom: 4px;
+}
+.recalc-modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
 }
 
 </style>
