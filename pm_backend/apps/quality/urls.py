@@ -7,6 +7,12 @@ from .views import (
     EquipmentInspectionTaskListView,
     EquipmentInspectionTemplateViewSet,
 )
+from .views_checksheet import (
+    ProductChecksheetBatchViewSet,
+    ProductChecksheetRecordViewSet,
+    ProductChecksheetTaskListView,
+    ProductChecksheetTemplateViewSet,
+)
 
 router = DefaultRouter()
 router.register(
@@ -24,8 +30,24 @@ router.register(
     EquipmentInspectionConfirmationViewSet,
     basename="equipmentinspectionconfirmation",
 )
+router.register(
+    r"product-checksheet-templates",
+    ProductChecksheetTemplateViewSet,
+    basename="productchecksheets-template",
+)
+router.register(
+    r"product-checksheet-batches",
+    ProductChecksheetBatchViewSet,
+    basename="productchecksheets-batch",
+)
+router.register(
+    r"product-checksheet-records",
+    ProductChecksheetRecordViewSet,
+    basename="productchecksheets-record",
+)
 
 urlpatterns = [
     path("equipment-inspection-tasks/", EquipmentInspectionTaskListView.as_view(), name="equipmentinspectiontask-list"),
+    path("product-checksheet-tasks/", ProductChecksheetTaskListView.as_view(), name="productchecksheet-task-list"),
     path("", include(router.urls)),
 ]

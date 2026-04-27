@@ -43,27 +43,17 @@ const shipping = [
   },
   {
     path: "/shipping/kubota-sakai-due-adjustment",
+    alias: ["/shipping/kubota-sakai-due-adjustment-2"],
     name: "KubotaSakaiDueAdjustment",
     component: () => import("@/views/shipping/KubotaSakaiDueAdjustment.vue"),
     meta: { pageTitle: "クボタ堺納期調整", resource: "shipping.kubota_sakai_due_adjustment" },
   },
   {
-    path: "/shipping/kubota-sakai-due-adjustment-2",
-    name: "KubotaSakaiDueAdjustment2",
-    component: () => import("@/views/shipping/KubotaSakaiDueAdjustment2.vue"),
-    meta: { pageTitle: "クボタ堺納期調整２", resource: "shipping.kubota_sakai_due_adjustment" },
-  },
-  {
     path: "/shipping/kubota-sakai-trip-planning",
+    alias: ["/shipping/kubota-sakai-trip-planning-2"],
     name: "KubotaSakaiTripPlanning",
     component: () => import("@/views/shipping/KubotaSakaiTripPlanning.vue"),
     meta: { pageTitle: "クボタ堺便計画", resource: "shipping.kubota_sakai_trip_planning" },
-  },
-  {
-    path: "/shipping/kubota-sakai-trip-planning-2",
-    name: "KubotaSakaiTripPlanning2",
-    component: () => import("@/views/shipping/KubotaSakaiTripPlanning2.vue"),
-    meta: { pageTitle: "クボタ堺便計画２", resource: "shipping.kubota_sakai_trip_planning" },
   },
   {
     path: "/shipping/trip-execution",

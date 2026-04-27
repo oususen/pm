@@ -24,6 +24,7 @@ from .models_gantt_display_product_map import GanttDisplayProductMap
 from .models_laser_pattern import LaserPattern, LaserPatternComponent, LaserPatternFinishedProduct
 from .models_laser_actual import LaserActual, LaserActualDetail
 from .models_record_confirmation import ProductionRecordConfirmation
+from .models_production import ProcessActual, ProductionOrder, StockAllocation
 
 
 class LineDemand(models.Model):

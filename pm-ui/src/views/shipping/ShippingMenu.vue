@@ -106,22 +106,8 @@ const tiles = computed(() => [
     resource: "shipping.kubota_sakai_due_adjustment",
   },
   {
-    to: "/shipping/kubota-sakai-due-adjustment-2",
-    label: "クボタ堺納期調整２",
-    icon: "🗓️",
-    required: "view",
-    resource: "shipping.kubota_sakai_due_adjustment",
-  },
-  {
     to: "/shipping/kubota-sakai-trip-planning",
     label: "クボタ堺便計画",
-    icon: "🚛",
-    required: "view",
-    resource: "shipping.kubota_sakai_trip_planning",
-  },
-  {
-    to: "/shipping/kubota-sakai-trip-planning-2",
-    label: "クボタ堺便計画２",
     icon: "🚛",
     required: "view",
     resource: "shipping.kubota_sakai_trip_planning",

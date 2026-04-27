@@ -15,136 +15,170 @@
         </select>
       </div>
       <div class="field search-field">
-        <label>品番/品名 OR検索</label>
+        <label>品番 OR検索</label>
         <div class="search-inputs">
           <input v-model.trim="keyword" type="text" placeholder="キーワード1" @keydown.enter="loadGrid" />
           <input v-model.trim="keyword2" type="text" placeholder="キーワード2" @keydown.enter="loadGrid" />
         </div>
       </div>
-      <button class="btn save-btn" :disabled="saving || loading" @click="saveAdjustments">{{ saving ? '保存中...' : '保存' }}</button>
+      <span v-if="lockDate" class="lock-badge">{{ lockDate }} まで締め済</span>
+      <span v-if="duePlanLockDate" class="lock-badge plan-lock">{{ duePlanLockDate }} まで計画ロック</span>
+      <button class="btn import-btn" :disabled="importing || loading" @click="importOrders">{{ importing ? '取込中...' : '取込' }}</button>
+      <button class="btn save-btn" :disabled="saving || loading" @click="saveDeliveries">{{ saving ? '保存中...' : '保存' }}</button>
       <button class="btn" :disabled="loading" @click="loadGrid">表示</button>
     </div>
 
     <div class="table-wrap">
-      <div class="table-split">
-        <div class="main-grid-wrap">
-          <table class="grid">
-            <colgroup>
-              <col style="width: 60px" />
-              <col style="width: 120px" />
-              <col style="width: 60px" />
-              <template v-for="col in dateColumns" :key="`col-${col.key}`">
-                <col style="width: 70px" />
-                <col style="width: 30px" />
-                <col style="width: 50px" />
-                <col style="width: 30px" />
+      <table class="grid">
+        <colgroup>
+          <col style="width: 60px" />
+          <template v-for="col in matrixColumns" :key="`col-${col.colKey}`">
+            <col style="width: 70px" />
+            <col style="width: 40px" />
+            <col style="width: 45px" />
+            <col style="width: 40px" />
+          </template>
+        </colgroup>
+        <thead ref="theadRef">
+          <tr class="head1">
+            <th rowspan="2" class="sticky-left date-separator">日付</th>
+            <th
+              v-for="(col, colIdx) in matrixColumns"
+              :key="col.colKey"
+              colspan="4"
+              :class="{ 'product-start': colIdx > 0 }"
+            >
+              <div class="head-group">
+                <span class="head-code">{{ col.productCode }}</span>
+                <span class="head-ship">{{ col.shipToCode }}</span>
+                <button
+                  class="copy-btn"
+                  :disabled="loading || saving || importing"
+                  @click.stop="applyDemandToPlan(col.group)"
+                >→</button>
+              </div>
+            </th>
+          </tr>
+          <tr class="head2">
+            <template v-for="(col, colIdx) in matrixColumns" :key="`sub-${col.colKey}`">
+              <th :class="{ 'product-start': colIdx > 0 }">注番</th>
+              <th>受注</th>
+              <th>計画</th>
+              <th class="product-end">注残</th>
+            </template>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="row in displayRows"
+            :key="row.rowKey"
+            :class="{ 'carry-tr': row.isCarry, 'day-row': !row.isCarry, 'locked-row': !row.isCarry && isDateLocked(row.dateKey) }"
+          >
+            <td class="sticky-left date-col date-separator" :class="row.dayClass">{{ row.label }}</td>
+            <template v-if="row.isCarry">
+              <template v-for="(col, colIdx) in matrixColumns" :key="`${row.rowKey}-${col.colKey}`">
+                <td :class="{ 'product-start': colIdx > 0 }"></td>
+                <td></td>
+                <td></td>
+                <td class="readonly-cell product-end carry-value">{{ formatNumber(row.cells[col.colKey]) }}</td>
               </template>
-            </colgroup>
-            <thead>
-              <tr class="head1">
-                <th rowspan="2" class="sticky code-col">品番</th>
-                <th rowspan="2" class="sticky name-col">品名</th>
-                <th rowspan="2" class="shipto-col">納入場所</th>
-                <th v-for="col in dateColumns" :key="col.key" colspan="4" :class="col.dayClass">{{ col.label }}</th>
-              </tr>
-              <tr class="head2">
-                <template v-for="col in dateColumns" :key="`${col.key}-sub`">
-                  <th :class="col.dayClass">注番</th>
-                  <th :class="col.dayClass">受注</th>
-                  <th :class="col.dayClass">納入</th>
-                  <th :class="col.dayClass">注残</th>
-                </template>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="group in displayGroups" :key="group.groupKey">
-                <td class="sticky code-col">{{ group.productCode }}</td>
-                <td class="sticky name-col">{{ group.productName }}</td>
-                <td class="shipto-col">{{ group.shipToCode || '-' }}</td>
-                <template v-for="col in dateColumns" :key="`${group.groupKey}-${col.key}`">
-                  <td class="orderno-subcol">
-                    <div
-                      v-for="slotIdx in group.maxSlots"
-                      :key="`${col.key}-lbl-${slotIdx}`"
-                      class="sub-cell"
-                      :class="{ forecast: slotLineAt(group, col.key, slotIdx - 1) && slotLineAt(group, col.key, slotIdx - 1).orderType === 'FORECAST' }"
-                    >{{ slotLabel(group, col.key, slotIdx - 1) }}</div>
-                  </td>
-                  <td class="readonly-cell demand" :class="col.dayClass">
-                    <div
-                      v-for="slotIdx in group.maxSlots"
-                      :key="`${col.key}-d-${slotIdx}`"
-                      class="sub-cell"
-                    >{{ slotDemand(group, col.key, slotIdx - 1) }}</div>
-                  </td>
-                  <td :class="col.dayClass">
-                    <div
-                      v-for="slotIdx in group.maxSlots"
-                      :key="`${col.key}-i-${slotIdx}`"
-                      class="sub-cell"
-                    >
-                      <input
-                        v-if="slotLineAt(group, col.key, slotIdx - 1)"
-                        :value="displayInputValue(slotLineAt(group, col.key, slotIdx - 1).deliveryByDate[col.key])"
-                        type="text"
-                        inputmode="decimal"
-                        @input="onDeliveryInput(slotLineAt(group, col.key, slotIdx - 1), col.key, $event.target.value)"
-                        @blur="onDeliveryBlur(slotLineAt(group, col.key, slotIdx - 1), col.key)"
-                      />
-                    </div>
-                  </td>
-                  <td class="readonly-cell" :class="col.dayClass">
-                    <div
-                      v-for="slotIdx in group.maxSlots"
-                      :key="`${col.key}-r-${slotIdx}`"
-                      class="sub-cell"
-                    >{{ slotRemaining(group, col.key, slotIdx - 1) }}</div>
-                  </td>
-                </template>
-              </tr>
-              <tr v-if="!displayGroups.length">
-                <td :colspan="dateColumns.length * 4 + 3" class="empty">データがありません</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="total-grid-wrap">
-          <table class="grid total-grid">
-            <thead>
-              <tr class="head1">
-                <th>総残</th>
-              </tr>
-              <tr class="head2">
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="group in displayGroups" :key="`total-${group.groupKey}`">
-                <td class="stacked-total">
+            </template>
+            <template v-else>
+              <template v-for="(col, colIdx) in matrixColumns" :key="`${row.rowKey}-${col.colKey}`">
+                <td class="orderno-subcol" :class="{ 'product-start': colIdx > 0 }">
                   <div
-                    v-for="slotIdx in group.maxSlots"
-                    :key="`total-${group.groupKey}-${slotIdx}`"
+                    v-for="slotIdx in row.maxSlots"
+                    :key="`${row.rowKey}-${col.colKey}-label-${slotIdx}`"
                     class="sub-cell"
-                    :class="{ error: slotIdx === 1 && groupTotalDiff(group) !== 0 }"
-                  >{{ slotIdx === 1 ? formatNumber(groupTotalDiff(group)) : '' }}</div>
+                    :class="{ forecast: slotLineAt(row, col.colKey, slotIdx - 1)?.orderType === 'FORECAST' }"
+                  >{{ slotLabel(row, col.colKey, slotIdx - 1) }}</div>
                 </td>
-              </tr>
-              <tr v-if="!displayGroups.length">
-                <td class="empty"></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+                <td class="readonly-cell demand" :class="row.dayClass">
+                  <div
+                    v-for="slotIdx in row.maxSlots"
+                    :key="`${row.rowKey}-${col.colKey}-demand-${slotIdx}`"
+                    class="sub-cell"
+                  >{{ slotDemand(row, col.colKey, slotIdx - 1) }}</div>
+                </td>
+                <td :class="row.dayClass">
+                  <div
+                    v-for="slotIdx in row.maxSlots"
+                    :key="`${row.rowKey}-${col.colKey}-delivery-${slotIdx}`"
+                    class="sub-cell"
+                  >
+                    <input
+                      v-if="editableLineAt(row, col, slotIdx - 1)"
+                      :ref="(el) => { if (el) inputRefs[`${row.dateKey}-${col.colKey}-${slotIdx - 1}`] = el }"
+                      :data-row="row.dateKey"
+                      :data-col="col.colKey"
+                      :data-slot="slotIdx - 1"
+                      :value="displayInputValue(editableLineAt(row, col, slotIdx - 1).deliveryByDate[row.dateKey])"
+                      :disabled="isDateLocked(row.dateKey)"
+                      :class="{ 'locked-cell': isDateLocked(row.dateKey) }"
+                      type="text"
+                      inputmode="decimal"
+                      @input="onDeliveryInput(editableLineAt(row, col, slotIdx - 1), row.dateKey, $event.target.value)"
+                      @blur="onDeliveryBlur(editableLineAt(row, col, slotIdx - 1), row.dateKey)"
+                      @keydown.enter.prevent="focusNextRow($event, row.dateKey, col.colKey, slotIdx - 1)"
+                    />
+                  </div>
+                </td>
+                <td class="readonly-cell product-end" :class="row.dayClass">
+                  <div
+                    v-for="slotIdx in row.maxSlots"
+                    :key="`${row.rowKey}-${col.colKey}-remaining-${slotIdx}`"
+                    class="sub-cell"
+                  >{{ slotRemaining(row, col.colKey, slotIdx - 1) }}</div>
+                </td>
+              </template>
+            </template>
+          </tr>
+          <tr v-if="!displayRows.length">
+            <td :colspan="matrixColumns.length * 4 + 1" class="empty">データがありません</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr class="total-row">
+            <th class="sticky-left total-label date-separator">総残</th>
+            <template v-for="(col, colIdx) in matrixColumns" :key="`total-${col.colKey}`">
+              <td class="total-blank" :class="{ 'product-start': colIdx > 0 }"></td>
+              <td class="total-blank"></td>
+              <td class="total-blank"></td>
+              <td class="total-value product-end" :class="{ error: groupTotalRemaining(col.group) !== 0 }">
+                {{ formatNumber(groupTotalRemaining(col.group)) }}
+              </td>
+            </template>
+          </tr>
+        </tfoot>
+      </table>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import api from '@/api/client'
 
-// --- Utility Functions ---
+const inputRefs = reactive({})
+const theadRef = ref(null)
+
+const setStickyTopValues = () => {
+  if (!theadRef.value) return
+  const rows = theadRef.value.querySelectorAll('tr')
+  let cumTop = 0
+  rows.forEach((tr) => {
+    const cells = tr.querySelectorAll('th')
+    cells.forEach((th) => {
+      if (!th.hasAttribute('rowspan')) {
+        th.style.top = `${cumTop}px`
+      }
+    })
+    cumTop += tr.offsetHeight
+  })
+  const rowspanCells = theadRef.value.querySelectorAll('th[rowspan]')
+  rowspanCells.forEach((th) => { th.style.top = '0px' })
+}
+
 const formatLocalDate = (date) => {
   const yyyy = String(date.getFullYear())
   const mm = String(date.getMonth() + 1).padStart(2, '0')
@@ -160,7 +194,7 @@ const parseNumber = (value) => {
 
 const formatNumber = (value) => {
   const num = parseNumber(value)
-  if (Math.abs(num) < 0.000001) return '0'
+  if (Math.abs(num) < 0.000001) return ''
   return Number.isInteger(num) ? String(num) : num.toFixed(3).replace(/\.?0+$/, '')
 }
 
@@ -170,72 +204,126 @@ const displayInputValue = (value) => {
   return Number.isInteger(num) ? String(num) : num.toFixed(3).replace(/\.?0+$/, '')
 }
 
-// --- State ---
 const loading = ref(false)
 const saving = ref(false)
-const keyword = ref('V0') 
+const importing = ref(false)
+const keyword = ref('V0')
 const keyword2 = ref('6E')
 const startDate = ref(formatLocalDate(new Date()))
 const horizonDays = ref(30)
 const groups = ref([])
+const lockDate = ref(null)
+const duePlanLockDate = ref(null)
 const calendarDayMap = ref({})
 const kubotaSakaiCalendarId = ref(null)
 
-// --- Computed ---
 const dateColumns = computed(() => {
   const base = new Date(`${startDate.value}T00:00:00`)
   return Array.from({ length: horizonDays.value }).map((_, idx) => {
     const d = new Date(base)
     d.setDate(base.getDate() + idx)
-    const mm = String(d.getMonth() + 1).padStart(2, '0')
-    const dd = String(d.getDate()).padStart(2, '0')
+    const mm = d.getMonth() + 1
+    const dd = d.getDate()
     const w = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()]
     const key = formatLocalDate(d)
-    return { key, label: `${mm}/${dd}(${w})`, dayClass: isHolidayDate(key, d.getDay()) ? 'holiday' : '' }
+    return { key, label: `${mm}/${dd}${w}`, dayClass: isHolidayDate(key, d.getDay()) ? 'holiday' : '' }
   })
 })
 
-const displayGroups = computed(() => {
-  const dateKeys = dateColumns.value.map((c) => c.key)
+const filteredGroups = computed(() => {
   const kw1 = keyword.value.trim().toLowerCase()
   const kw2 = keyword2.value.trim().toLowerCase()
+  if (!kw1 && !kw2) return groups.value
+  return groups.value.filter((group) => {
+    const searchTarget = `${group.productCode}`.toLowerCase()
+    const match1 = kw1 && searchTarget.includes(kw1)
+    const match2 = kw2 && searchTarget.includes(kw2)
+    return match1 || match2
+  })
+})
 
-  // 1. Keyword Filtering (OR logic)
-  let filtered = groups.value
-  if (kw1 || kw2) {
-    filtered = groups.value.filter(group => {
-      const searchTarget = `${group.productCode} ${group.productName}`.toLowerCase()
-      const match1 = kw1 && searchTarget.includes(kw1)
-      const match2 = kw2 && searchTarget.includes(kw2)
-      return match1 || match2
+const matrixColumns = computed(() => {
+  return [...filteredGroups.value]
+    .sort((a, b) => {
+      const codeCmp = String(a.productCode).localeCompare(String(b.productCode))
+      if (codeCmp !== 0) return codeCmp
+      return String(a.shipToCode || '').localeCompare(String(b.shipToCode || ''))
+    })
+    .map((group) => ({
+      colKey: group.groupKey,
+      productCode: group.productCode,
+      shipToCode: group.shipToCode || '-',
+      group,
+    }))
+})
+
+const lineSortCompare = (a, b) => {
+  const aFc = a.orderType === 'FORECAST' ? 1 : 0
+  const bFc = b.orderType === 'FORECAST' ? 1 : 0
+  if (aFc !== bFc) return aFc - bFc
+  return String(a.sourceOrderNo || '').localeCompare(String(b.sourceOrderNo || ''))
+}
+
+const lineHasAnyValueInHorizon = (line) => {
+  return dateColumns.value.some((dateCol) => {
+    const demand = parseNumber(line.demandByDate[dateCol.key])
+    const delivery = parseNumber(line.deliveryByDate[dateCol.key])
+    return demand > 0 || delivery > 0
+  })
+}
+
+const displayRows = computed(() => {
+  // 繰越行
+  const hasCarry = matrixColumns.value.some((col) => parseNumber(col.group.carryRemaining) !== 0)
+  const carryRow = {
+    rowKey: '_carry',
+    dateKey: '_carry',
+    label: '繰越',
+    dayClass: 'carry-row',
+    isCarry: true,
+    maxSlots: 1,
+    cells: {},
+  }
+  if (hasCarry) {
+    matrixColumns.value.forEach((col) => {
+      carryRow.cells[col.colKey] = parseNumber(col.group.carryRemaining)
     })
   }
 
-  // 2. Map to display structure with slots
-  return filtered.map((group) => {
-    const slotsByDate = {}
+  const dateRows = dateColumns.value.map((dateCol) => {
+    const cells = {}
     let maxSlots = 0
-    dateKeys.forEach((d) => {
-      const active = group.lines.filter((line) => {
-        const src = parseNumber(line.demandByDate[d])
-        const del = parseNumber(line.deliveryByDate[d])
-        return src > 0 || del > 0
-      })
-      active.sort((a, b) => {
-        const aFc = a.orderType === 'FORECAST' ? 1 : 0
-        const bFc = b.orderType === 'FORECAST' ? 1 : 0
-        if (aFc !== bFc) return aFc - bFc
-        return String(a.sourceOrderNo || '').localeCompare(String(b.sourceOrderNo || ''))
-      })
-      slotsByDate[d] = active
-      if (active.length > maxSlots) maxSlots = active.length
+    matrixColumns.value.forEach((col) => {
+      const visibleLines = col.group.lines
+        .filter((line) => {
+          const demand = parseNumber(line.demandByDate[dateCol.key])
+          const delivery = parseNumber(line.deliveryByDate[dateCol.key])
+          return demand > 0 || delivery > 0
+        })
+        .sort(lineSortCompare)
+      cells[col.colKey] = visibleLines
+      if (visibleLines.length > maxSlots) maxSlots = visibleLines.length
     })
-    if (maxSlots === 0) maxSlots = 1
-    return { ...group, slotsByDate, maxSlots }
+    return {
+      rowKey: dateCol.key,
+      dateKey: dateCol.key,
+      label: dateCol.label,
+      dayClass: dateCol.dayClass,
+      isCarry: false,
+      maxSlots: maxSlots || 1,
+      cells,
+    }
   })
+
+  return hasCarry ? [carryRow, ...dateRows] : dateRows
 })
 
-// --- Methods ---
+const isDateLocked = (dateKey) => {
+  if (lockDate.value && dateKey <= lockDate.value) return true
+  if (duePlanLockDate.value && dateKey <= duePlanLockDate.value) return true
+  return false
+}
+
 const isHolidayDate = (dateKey, weekDay) => {
   const day = calendarDayMap.value[dateKey]
   if (day && typeof day.is_working_day === 'boolean') return !day.is_working_day
@@ -276,13 +364,48 @@ const resolveKubotaSakaiCalendarId = async () => {
 const loadKubotaSakaiCalendarDays = async () => {
   try {
     const calendarId = await resolveKubotaSakaiCalendarId()
-    if (!calendarId) { calendarDayMap.value = {}; return; }
+    if (!calendarId) { calendarDayMap.value = {}; return }
     const daysRes = await api.calendars.getCalendarDays(calendarId, { page_size: 5000 })
     const days = daysRes.data?.results || daysRes.data || []
     const map = {}
     days.forEach((day) => { if (day?.target_date) map[day.target_date] = day })
     calendarDayMap.value = map
-  } catch (error) { calendarDayMap.value = {} }
+  } catch (error) {
+    calendarDayMap.value = {}
+  }
+}
+
+const recalcGroupRemaining = (group) => {
+  // 品番+納入場所の全注番を合算して累積注残を計算
+  // carry_remaining: 表示期間より前の繰越注残
+  const dates = dateColumns.value.map((c) => c.key).sort()
+  let running = parseNumber(group.carryRemaining)
+  const remainingAtDate = {}
+  for (const d of dates) {
+    let dayDemand = 0
+    let dayDelivery = 0
+    for (const line of group.lines) {
+      dayDemand += parseNumber(line.demandByDate[d])
+      dayDelivery += parseNumber(line.deliveryByDate[d])
+    }
+    running += dayDelivery - dayDemand
+    remainingAtDate[d] = running
+  }
+  // まず全ラインの注残をクリア
+  for (const line of group.lines) {
+    for (const d of dates) {
+      line.remainingByDate[d] = 0
+    }
+  }
+  // 各日付で、その日にデータがあるラインのうち最後のものに注残をセット
+  for (const d of dates) {
+    const activeLines = group.lines.filter((line) => {
+      return parseNumber(line.demandByDate[d]) > 0 || parseNumber(line.deliveryByDate[d]) > 0
+    })
+    if (activeLines.length > 0) {
+      activeLines[activeLines.length - 1].remainingByDate[d] = remainingAtDate[d]
+    }
+  }
 }
 
 const buildLine = (li) => {
@@ -294,73 +417,105 @@ const buildLine = (li) => {
     deliveryByDate[col.key] = 0
     remainingByDate[col.key] = 0
   })
-  const sourceQtyByDate = li.source_qty_by_date || {}
-  const sourceDates = []
-  Object.entries(sourceQtyByDate).forEach(([d, q]) => {
-    const qty = parseNumber(q)
-    if (qty > 0) sourceDates.push(d)
-    if (Object.prototype.hasOwnProperty.call(demandByDate, d)) demandByDate[d] = qty
+  Object.entries(li.demand_by_date || {}).forEach(([d, q]) => {
+    if (Object.prototype.hasOwnProperty.call(demandByDate, d)) demandByDate[d] = parseNumber(q)
   })
-  const hasAdjustments = Array.isArray(li.adjustments) && li.adjustments.length > 0
-  if (hasAdjustments) {
-    li.adjustments.forEach((adj) => {
-      const key = adj.adjusted_due_date
-      if (Object.prototype.hasOwnProperty.call(deliveryByDate, key)) {
-        deliveryByDate[key] = parseNumber(adj.adjusted_qty)
-        remainingByDate[key] = parseNumber(adj.remaining_qty)
-      }
-    })
-  } else {
-    Object.entries(sourceQtyByDate).forEach(([d, q]) => {
-      if (Object.prototype.hasOwnProperty.call(deliveryByDate, d)) deliveryByDate[d] = parseNumber(q)
-    })
-  }
+  Object.entries(li.delivery_by_date || {}).forEach(([d, q]) => {
+    if (Object.prototype.hasOwnProperty.call(deliveryByDate, d)) deliveryByDate[d] = parseNumber(q)
+  })
   return {
     lineKey: li.line_key,
-    orderLineIds: li.order_line_ids || [],
     sourceOrderNo: li.source_order_no,
     orderType: li.order_type,
-    sourceDates: sourceDates.sort(),
-    sourceQty: parseNumber(li.source_qty_total),
     demandByDate,
     deliveryByDate,
     remainingByDate,
-    _untouched: !hasAdjustments,
+    _dirty: false,
   }
 }
 
-const buildGroupFromGridItem = (item) => ({
-  groupKey: item.group_key,
-  productCode: item.product_code,
-  productName: item.product_name,
-  shipToCode: item.ship_to_code,
-  shipToName: item.ship_to_name,
-  lines: (item.lines || []).map(buildLine),
-})
+const buildGroupFromGridItem = (item) => {
+  const group = {
+    groupKey: item.group_key,
+    productCode: item.product_code,
+    shipToCode: item.ship_to_code || '-',
+    carryRemaining: parseNumber(item.carry_remaining),
+    lines: (item.lines || []).map(buildLine),
+  }
+  recalcGroupRemaining(group)
+  return group
+}
 
-const slotLineAt = (group, dateKey, slotIdx) => {
-  const arr = group.slotsByDate[dateKey]
+const slotLineAt = (row, colKey, slotIdx) => {
+  const arr = row.cells[colKey]
   return arr && arr[slotIdx] ? arr[slotIdx] : null
 }
-const slotLabel = (group, dateKey, slotIdx) => {
-  const line = slotLineAt(group, dateKey, slotIdx)
+
+const getPrimaryEditableLine = (group) => {
+  if (!group?.lines?.length) return null
+  const candidates = group.lines.filter(lineHasAnyValueInHorizon).sort(lineSortCompare)
+  if (candidates.length > 0) return candidates[0]
+  return [...group.lines].sort(lineSortCompare)[0] || null
+}
+
+const editableLineAt = (row, col, slotIdx) => {
+  const line = slotLineAt(row, col.colKey, slotIdx)
+  if (line) return line
+  if (slotIdx !== 0) return null
+  return getPrimaryEditableLine(col.group)
+}
+
+const slotLabel = (row, colKey, slotIdx) => {
+  const line = slotLineAt(row, colKey, slotIdx)
   if (!line) return ''
   return line.sourceOrderNo || (line.orderType === 'FORECAST' ? '内示' : '-')
 }
-const slotDemand = (group, dateKey, slotIdx) => {
-  const line = slotLineAt(group, dateKey, slotIdx)
-  return line ? formatNumber(line.demandByDate[dateKey]) : ''
+
+const slotDemand = (row, colKey, slotIdx) => {
+  const line = slotLineAt(row, colKey, slotIdx)
+  return line ? formatNumber(line.demandByDate[row.dateKey]) : ''
 }
-const slotRemaining = (group, dateKey, slotIdx) => {
-  const line = slotLineAt(group, dateKey, slotIdx)
-  return line ? formatNumber(line.remainingByDate[dateKey]) : ''
+
+const slotRemaining = (row, colKey, slotIdx) => {
+  const line = slotLineAt(row, colKey, slotIdx)
+  return line ? formatNumber(line.remainingByDate[row.dateKey]) : ''
 }
-const groupTotalDiff = (group) => {
-  const totalDemand = group.lines.reduce((sum, line) => sum + parseNumber(line.sourceQty), 0)
-  const totalDelivery = group.lines.reduce((sum, line) => {
-    return sum + Object.values(line.deliveryByDate).reduce((s, v) => s + parseNumber(v), 0)
-  }, 0)
-  return Number((totalDemand - totalDelivery).toFixed(3))
+
+const groupTotalRemaining = (group) => {
+  // 最終日の注残合計（各注番の最終注残）
+  const lastDate = dateColumns.value.length ? dateColumns.value[dateColumns.value.length - 1].key : null
+  if (!lastDate) return 0
+  let total = 0
+  for (const line of group.lines) {
+    // 最後に注残がある日のremaining
+    let lastRemaining = 0
+    for (const col of dateColumns.value) {
+      const r = parseNumber(line.remainingByDate[col.key])
+      if (r !== 0 || parseNumber(line.demandByDate[col.key]) > 0 || parseNumber(line.deliveryByDate[col.key]) > 0) {
+        lastRemaining = r
+      }
+    }
+    total += lastRemaining
+  }
+  return Number(total.toFixed(3))
+}
+
+const applyDemandToPlan = (group) => {
+  if (!group) return
+  let changed = false
+  for (const line of group.lines) {
+    for (const col of dateColumns.value) {
+      if (isDateLocked(col.key)) continue
+      const demandQty = parseNumber(line.demandByDate[col.key])
+      const currentQty = parseNumber(line.deliveryByDate[col.key])
+      if (currentQty !== demandQty) {
+        line.deliveryByDate[col.key] = demandQty
+        changed = true
+      }
+    }
+    if (changed) line._dirty = true
+  }
+  if (changed) recalcGroupRemaining(group)
 }
 
 const loadGrid = async () => {
@@ -370,12 +525,14 @@ const loadGrid = async () => {
       api.kubotaSakaiDueAdjustments.grid({
         start_date: startDate.value,
         horizon_days: horizonDays.value,
-        // keywordはフロントでフィルタリングするためここでは送らない（または広く取得）
       }),
       loadKubotaSakaiCalendarDays(),
     ])
+    lockDate.value = res.data?.lock_date || null
+    duePlanLockDate.value = res.data?.due_plan_lock_date || null
     const items = res.data?.rows || []
     groups.value = items.map(buildGroupFromGridItem)
+    nextTick(setStickyTopValues)
   } catch (error) {
     const message = error?.response?.data?.detail || 'データ取得に失敗しました。'
     alert(message)
@@ -384,73 +541,83 @@ const loadGrid = async () => {
   }
 }
 
+const importOrders = async () => {
+  if (importing.value || loading.value) return
+  importing.value = true
+  try {
+    const res = await api.kubotaSakaiDueAdjustments.importOrders({
+      start_date: startDate.value,
+      horizon_days: horizonDays.value,
+    })
+    const d = res.data
+    alert(`取込完了: 新規${d.created}件, 更新${d.updated}件, 内示→確定削除${d.deleted_forecast}件`)
+    await loadGrid()
+  } catch (error) {
+    const message = error?.response?.data?.detail || '取込に失敗しました。'
+    alert(message)
+  } finally {
+    importing.value = false
+  }
+}
+
+const findGroupForLine = (line) => {
+  return groups.value.find((g) => g.lines.includes(line))
+}
+
 const onDeliveryInput = (line, dateKey, rawValue) => {
   const normalized = rawValue.replace(/[^\d.-]/g, '')
   line.deliveryByDate[dateKey] = normalized === '' ? 0 : parseNumber(normalized)
-  line._untouched = false
+  line._dirty = true
+  const group = findGroupForLine(line)
+  if (group) recalcGroupRemaining(group)
 }
 
 const onDeliveryBlur = (line, dateKey) => {
   const qty = parseNumber(line.deliveryByDate[dateKey])
-  if (qty <= 0) line.deliveryByDate[dateKey] = 0
+  if (qty < 0) line.deliveryByDate[dateKey] = 0
 }
 
-const buildSavePayload = () => {
-  const payloadRows = []
-  let hasError = false
-  outer: for (const group of groups.value) {
-    for (const line of group.lines) {
-      if (line._untouched) continue
+const focusNextRow = (event, currentDateKey, colKey, slotIdx) => {
+  const dates = dateColumns.value.map((c) => c.key)
+  const currentIdx = dates.indexOf(currentDateKey)
+  if (currentIdx < 0) return
+  // 次の日付行で同じ列・同じスロットのinputを探す
+  for (let i = currentIdx + 1; i < dates.length; i++) {
+    const key = `${dates[i]}-${colKey}-${slotIdx}`
+    const el = inputRefs[key]
+    if (el) {
+      el.focus()
+      el.select()
+      return
+    }
+  }
+}
 
-      const adjustments = []
-      let needApproval = false
-      const minSourceDate = line.sourceDates.length ? line.sourceDates[0] : null
+const saveDeliveries = async () => {
+  if (saving.value || loading.value) return
+
+  // 変更された行を収集
+  const payloadRows = []
+  for (const group of groups.value) {
+    for (const line of group.lines) {
+      if (!line._dirty) continue
+      const deliveryByDate = {}
       for (const col of dateColumns.value) {
         const qty = parseNumber(line.deliveryByDate[col.key])
-        if (qty <= 0) continue
-        if (minSourceDate && col.key > minSourceDate) needApproval = true
-        adjustments.push({
-          adjusted_due_date: col.key,
-          adjusted_qty: qty,
-          customer_approved: false,
-          note: '',
-        })
+        deliveryByDate[col.key] = qty
       }
-
-      const total = adjustments.reduce((s, a) => s + a.adjusted_qty, 0)
-      if (Math.abs(total - line.sourceQty) > 0.001) {
-        alert(`数量合計不一致: ${group.productCode} / ${group.shipToCode || '-'} / ${line.sourceOrderNo || '内示'} / 元=${line.sourceQty} 納入計=${total}`)
-        hasError = true
-        break outer
-      }
-
-      if (needApproval) {
-        const ok = confirm(`[${group.productCode}] ${line.sourceOrderNo || '内示'} に後ろ倒し納入があります。顧客の口頭承認は済んでいますか？`)
-        if (!ok) {
-          hasError = true
-          break outer
-        }
-        adjustments.forEach((a) => { a.customer_approved = true })
-      }
-
       payloadRows.push({
-        group_key: line.lineKey,
-        order_line_ids: line.orderLineIds,
-        adjustments,
+        line_key: line.lineKey,
+        delivery_by_date: deliveryByDate,
       })
     }
   }
-  return { payloadRows, hasError }
-}
 
-const saveAdjustments = async () => {
-  if (saving.value || loading.value) return
-  const { payloadRows, hasError } = buildSavePayload()
-  if (hasError) return
   if (payloadRows.length === 0) {
     alert('変更された行がありません。')
     return
   }
+
   saving.value = true
   try {
     await api.kubotaSakaiDueAdjustments.bulkSave(payloadRows)
@@ -458,18 +625,17 @@ const saveAdjustments = async () => {
     await loadGrid()
   } catch (error) {
     const data = error?.response?.data
-    if (data?.errors?.length) {
-      const msg = data.errors.slice(0, 5).map((e) => `- ${e.detail}`).join('\n')
-      alert(`保存失敗:\n${msg}`)
-    } else {
-      alert(data?.detail || '保存に失敗しました。')
-    }
+    alert(data?.detail || '保存に失敗しました。')
   } finally {
     saving.value = false
   }
 }
 
-onMounted(loadGrid)
+onMounted(async () => {
+  await loadGrid()
+  await nextTick()
+  setStickyTopValues()
+})
 </script>
 
 <style scoped>
@@ -525,39 +691,45 @@ onMounted(loadGrid)
   background: #dff3e6;
   border-color: #8fc8a1;
 }
+.lock-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #92400e;
+  white-space: nowrap;
+}
+.import-btn {
+  background: #dbe8ff;
+  border-color: #8daed6;
+}
+.lock-badge.plan-lock {
+  background: #dbeafe;
+  border-color: #3b82f6;
+  color: #1e3a8a;
+}
 .table-wrap {
   flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: auto;
   background: #fff;
   border: 1px solid #c5cfde;
   border-radius: 4px;
 }
-.table-split {
-  display: flex;
-  align-items: flex-start;
-  width: 100%;
-}
-.main-grid-wrap {
-  flex: 1;
-  min-width: 0;
-  overflow-x: auto;
-  overflow-y: visible;
-  border-right: 1px solid #cbd5e1;
-}
-.total-grid-wrap {
-  flex: 0 0 88px;
-  width: 88px;
-}
 .grid {
   width: max-content;
   min-width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   table-layout: fixed;
 }
 .grid th,
 .grid td {
-  border: 1px solid #d7dfe8;
+  border-right: 1px solid #d7dfe8;
+  border-bottom: 1px solid #d7dfe8;
   padding: 3px 6px;
   white-space: nowrap;
   font-size: 12px;
@@ -565,8 +737,83 @@ onMounted(loadGrid)
   box-sizing: border-box;
   vertical-align: top;
 }
+.grid thead tr:first-child th {
+  border-top: 1px solid #d7dfe8;
+}
+.grid th:first-child,
+.grid td:first-child {
+  border-left: 1px solid #d7dfe8;
+}
+.grid th {
+  position: sticky;
+  z-index: 2;
+}
 .grid tbody td {
   padding: 0;
+}
+.grid thead .head1 th {
+  background: #cfd8ec;
+}
+.grid thead .head2 th {
+  background: #e7edf7;
+}
+.grid th.product-start,
+.grid td.product-start {
+  border-left: 2px solid #7b8aa7;
+}
+.grid th.product-end,
+.grid td.product-end {
+  border-right: 2px solid #7b8aa7;
+}
+.head-group {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.head-code {
+  font-weight: 700;
+}
+.head-ship {
+  color: #374151;
+  font-weight: 500;
+}
+.copy-btn {
+  height: 22px;
+  min-width: 22px;
+  padding: 0 6px;
+  border: 1px solid #9fb2d1;
+  border-radius: 3px;
+  background: #f8fbff;
+  color: #1f3b69;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.copy-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.grid th.holiday,
+.grid td.holiday {
+  background: #ffe3e3;
+}
+.sticky-left {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: #fff;
+}
+.head1 .sticky-left,
+.head2 .sticky-left {
+  z-index: 6;
+}
+.date-col {
+  text-align: right;
+  padding: 3px 8px !important;
+}
+.date-separator {
+  border-right: 3px solid #5f6f8f !important;
 }
 .sub-cell {
   height: 26px;
@@ -590,6 +837,15 @@ onMounted(loadGrid)
   color: #374151;
   background: #f1f5f9;
 }
+.readonly-cell {
+  color: #4b5563;
+}
+.readonly-cell.demand .sub-cell {
+  background: #f4f7fb;
+}
+.readonly-cell.demand .sub-cell.forecast {
+  background: #eef4fb;
+}
 .sub-cell input {
   width: 100%;
   height: 22px;
@@ -600,71 +856,59 @@ onMounted(loadGrid)
   box-sizing: border-box;
   background: #fff;
 }
-.grid tbody td.sticky {
-  padding: 3px 6px;
-}
-.grid tbody td.shipto-col {
-  padding: 3px 6px;
-}
-.grid thead .head1 th {
-  background: #cfd8ec;
-}
-.grid thead .head2 th {
-  background: #e7edf7;
-}
-.grid th.holiday,
-.grid td.holiday {
-  background: #ffe3e3;
-}
-.sticky {
+.total-row th,
+.total-row td {
   position: sticky;
-  left: 0;
-  background: #fff;
-  z-index: 2;
+  bottom: 0;
+  z-index: 5;
+  background: #dbe6f7;
+  border-top: 2px solid #9ab1d6;
+  border-bottom: 1px solid #d7dfe8;
 }
-.code-col {
-  left: 0;
-  min-width: 120px;
-}
-.name-col {
-  left: 120px;
-  min-width: 70px;
-  width: 80px;
-}
-.shipto-col {
+.total-row .total-label {
   text-align: center;
-  color: #374151;
-}
-.readonly-cell {
-  color: #4b5563;
-}
-.readonly-cell.demand .sub-cell {
-  background: #f4f7fb;
-}
-.readonly-cell.demand .sub-cell.forecast {
-  background: #eef4fb;
-}
-.total-grid {
-  width: 88px;
-  min-width: 88px;
-}
-.total-grid th,
-.total-grid td {
-  text-align: right;
-}
-.total-grid tbody td {
-  padding: 0;
-}
-.stacked-total .sub-cell {
-  text-align: right;
-}
-.sub-cell.error {
-  color: #b91c1c;
   font-weight: 700;
+}
+.total-row .total-value {
+  text-align: right;
+  font-weight: 700;
+}
+.total-row .total-blank {
+  background: #e5edf9;
+}
+.total-row .error {
+  color: #b91c1c;
 }
 .empty {
   text-align: center;
   color: #6b7280;
   padding: 16px 0;
+}
+.carry-tr td {
+  background: #f0f4ff;
+  border-bottom: 2px solid #9ab1d6;
+  font-weight: 700;
+}
+.carry-tr .sticky-left {
+  background: #f0f4ff;
+}
+.carry-value {
+  text-align: right;
+  padding: 3px 6px !important;
+  color: #1e40af;
+}
+.day-row td {
+  border-bottom: 2px solid #94a3b8;
+}
+.locked-row td {
+  background: #f3f4f6 !important;
+}
+.locked-row .sticky-left {
+  background: #f3f4f6 !important;
+}
+.locked-cell {
+  background: #e5e7eb !important;
+  color: #9ca3af !important;
+  cursor: not-allowed;
 }
 </style>

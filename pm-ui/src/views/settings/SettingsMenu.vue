@@ -35,6 +35,10 @@
         <div class="icon-box">🔒</div>
         <div class="label">生産計画ロック設定</div>
       </RouterLink>
+      <RouterLink v-if="canAccessSetting('settings.production_plan_lock', 'view')" to="/settings/kubota-sakai-due-plan-lock" class="master-tile">
+        <div class="icon-box">🔒</div>
+        <div class="label">クボタ堺納期調整ロック設定</div>
+      </RouterLink>
       <RouterLink v-if="canAccessSetting('settings.scheduled_tasks', 'view')" to="/settings/task-settings" class="master-tile">
         <div class="icon-box">⏰</div>
         <div class="label">タスク設定</div>

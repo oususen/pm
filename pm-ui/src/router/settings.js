@@ -48,6 +48,12 @@ const settings = [
     meta: { pageTitle: "生産計画ロック設定", resource: "settings.production_plan_lock" },
   },
   {
+    path: "/settings/kubota-sakai-due-plan-lock",
+    name: "KubotaSakaiDuePlanLockSetting",
+    component: () => import("@/views/settings/KubotaSakaiDuePlanLockSetting.vue"),
+    meta: { pageTitle: "クボタ堺納期調整ロック設定", resource: "settings.production_plan_lock" },
+  },
+  {
     path: "/settings/scheduled-tasks",
     name: "ScheduledTasks",
     component: () => import("@/views/settings/ScheduledTasks.vue"),

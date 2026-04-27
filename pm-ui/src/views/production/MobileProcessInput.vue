@@ -2000,6 +2000,45 @@ const isEquipmentTroubleReason = (value) => {
   return String(value || '').trim() === PAUSE_REASON_EQUIPMENT_TROUBLE
 }
 
+const ensureProductChecksheetBeforeRealtime = async (data) => {
+  const recordType = String(data.record_type || '').toUpperCase()
+  const action = String(data.event_data?.action || '').toUpperCase()
+  const isProductionRecord = recordType === 'PRODUCTION'
+  const isOperatorEnd = recordType === 'OPERATOR_ACTION' && action === 'END'
+  if (!isProductionRecord && !isOperatorEnd) return true
+
+  const productId = data.product_id
+  const qty = isOperatorEnd ? data.production_qty : data.qty
+  if (!selectedLineId.value || !selectedProcessId.value || !productId || !qty) return true
+
+  const response = await api.productChecksheets.prepareBatch({
+    line: selectedLineId.value,
+    process: selectedProcessId.value,
+    product: productId,
+    quantity: qty,
+    lot_no: data.batch_no || '',
+    operator_name: data.operator_name || record.value.operator_name || '',
+    source_context: {
+      source: 'MobileProcessInput',
+      payload: data,
+    },
+  })
+  const batch = response.data
+  if (!batch.required || batch.is_complete) return true
+
+  sessionStorage.setItem('product-checksheet:mobile-process-input', JSON.stringify({
+    selectedLineId: selectedLineId.value,
+    selectedProcessId: selectedProcessId.value,
+    record: record.value,
+  }))
+  alert(`この工程作業入力は製品チェックシートが必要です。${batch.completed_count}/${batch.quantity} 枚の入力が完了しています。全数入力後に登録できます。`)
+  router.push({
+    path: `/quality/product-checksheet/input/${batch.id}`,
+    query: { return: route.fullPath },
+  })
+  return false
+}
+
 const onProcessChange = () => {
   const proc = processes.value.find((p) => String(p.id) === String(selectedProcessId.value))
   if (proc?.line) {
@@ -2180,6 +2219,9 @@ const submitRecord = async () => {
     }
 
     data.remarks = record.value.remarks
+
+    const checksheetReady = await ensureProductChecksheetBeforeRealtime(data)
+    if (!checksheetReady) return
 
     const res = await api.processRealtime.create(data)
     if (submittedOperatorProductId) {
@@ -3231,9 +3273,31 @@ function openEquipmentInspection() {
   })
 }
 
+const restorePendingProductChecksheetInput = () => {
+  const raw = sessionStorage.getItem('product-checksheet:mobile-process-input')
+  if (!raw) return false
+  try {
+    const saved = JSON.parse(raw)
+    if (saved.selectedLineId) selectedLineId.value = String(saved.selectedLineId)
+    if (saved.selectedProcessId) {
+      selectedProcessId.value = String(saved.selectedProcessId)
+      onProcessChange()
+    }
+    if (saved.record) {
+      record.value = { ...record.value, ...saved.record }
+    }
+    sessionStorage.removeItem('product-checksheet:mobile-process-input')
+    return true
+  } catch (error) {
+    console.warn('製品チェックシート入力前の工程入力復元に失敗しました', error)
+    return false
+  }
+}
+
 onMounted(async () => {
   await ensureAuth()
   await Promise.all([loadLines(), loadProcesses()])
+  if (restorePendingProductChecksheetInput()) return
   const queryProcessId = route.query.process_id
   if (queryProcessId) {
     selectedProcessId.value = String(queryProcessId)

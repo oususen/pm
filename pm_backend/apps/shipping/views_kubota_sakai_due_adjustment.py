@@ -8,7 +8,9 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from masters.models import Calendar
 from orders.core.models import KubotaSakaiDueAdjustment, OrderLine
+from orders.utils.calendar_utils import WorkingDayCalculator, get_business_today
 from system_settings.models import SystemSetting
 from .serializers import KubotaSakaiDueAdjustmentSerializer
 
@@ -18,6 +20,33 @@ KUBOTA_CUSTOMER_CODE = '000196'
 
 def _get_lock_date():
     return SystemSetting.get_lock_date('kubota_sakai_due')
+
+
+def _resolve_kubota_calendar():
+    rows = Calendar.objects.all()
+    exact_hits = rows.filter(
+        Q(calendar_code__iexact='kubota_sakai')
+        | Q(calendar_code__iexact='kobota_sakai')
+    )
+    if exact_hits.exists():
+        return exact_hits.order_by('id').first()
+    name_hits = rows.filter(Q(calendar_name__icontains='クボタ') & Q(calendar_name__icontains='堺'))
+    if name_hits.exists():
+        return name_hits.order_by('id').first()
+    return None
+
+
+def _get_due_plan_lock_date():
+    try:
+        setting = SystemSetting.objects.get(key='lock_days.kubota_sakai_due_plan')
+        days = int(str(setting.value or '0').strip())
+        if days <= 0:
+            return None
+        base_date = get_business_today()
+        calculator = WorkingDayCalculator(_resolve_kubota_calendar())
+        return calculator.add_working_days(base_date, days)
+    except (SystemSetting.DoesNotExist, ValueError, TypeError):
+        return None
 
 
 def _parse_date(value):
@@ -326,11 +355,13 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
         rows.sort(key=lambda r: (r['product_code'] or '', r['ship_to_code'] or ''))
 
         lock_date = _get_lock_date()
+        due_plan_lock_date = _get_due_plan_lock_date()
         return Response({
             'start_date': start_date.isoformat(),
             'end_date': end_date.isoformat(),
             'horizon_days': horizon_days,
             'lock_date': lock_date.isoformat() if lock_date else None,
+            'due_plan_lock_date': due_plan_lock_date.isoformat() if due_plan_lock_date else None,
             'rows': rows,
         })
 
@@ -345,6 +376,7 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
         user = request.user if request.user and request.user.is_authenticated else None
         now = datetime.now()
         lock_date = _get_lock_date()
+        due_plan_lock_date = _get_due_plan_lock_date()
         updated_count = 0
         affected_groups = set()
         # 入力値（セル値）: (product_code, ship_to_code, source_order_no, due_date) -> delivery
@@ -373,7 +405,7 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     due_date_val = _parse_date(date_str)
                     if not due_date_val:
                         continue
-                    if lock_date and due_date_val <= lock_date:
+                    if (lock_date and due_date_val <= lock_date) or (due_plan_lock_date and due_date_val <= due_plan_lock_date):
                         continue
                     delivery = _parse_decimal(qty_val)
                     if delivery is None:
