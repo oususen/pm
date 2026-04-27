@@ -32,7 +32,7 @@ class HirakataPickupPDFService:
     DESTINATION = "枚方製造所行き"
     TARGET_GROUP_NAME_KEYWORD = "枚方"
     TARGET_GROUP_CODE_KEYWORD = "HIRAKATA"
-    WORKING_CALENDAR_CODE = "kubota_muke"
+    WORKING_CALENDAR_CODE = "kubota_hirakata"
 
     def __init__(self):
         self._register_font()
