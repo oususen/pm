@@ -171,7 +171,7 @@
 | `m_supplier` | `購買需要計算仕様書.md` | 購買LT・調達関連 |
 | `m_product_group`, `m_container_capacity` | `出荷指示書機能仕様書.md` | 出荷帳票用マスタ |
 | `m_equipment` | `スポットライン実績入力仕様書.md`, `設備点検表仕様書.md` | 設備実績・点検 |
-| `m_kubota_sakai_truck` | `クボタ堺出荷便計画仕様書.md` | 便マスタ |
+| `m_kubota_sakai_truck` | `クボタ堺納期調整及び便計画仕様書.md` | 便マスタ |
 | `accounts_*` | `権限仕様書.md` | 部署階層/ロール/権限 |
 | `t_order`, `t_order_line`, `stg_order_*`, `stg_order_daily` | `受注管理仕様書.md`, `受注展開仕様書.md` | 受注取込〜明細 |
 | `t_line_demand`, `line_backlog`, `line_plan`, `t_line_gantt_plan` | `生産計画仕様書.md`, `在庫計算仕様書.md`, `前工程需要計算仕様書.md` | 計画/需要/在庫系トランザクション |
@@ -184,7 +184,7 @@
 | `t_scrap_record`, `t_scrap_record_detail` | `仕損登録仕様書.md` | 仕損/戻し |
 | `quality_equipment_inspection_*` | `設備点検表仕様書.md` | 設備点検ワークフロー |
 | `t_shipment_actual`, `t_shipment_actual_history`, `t_delivery_progress` | `出荷進度照会仕様書.md`, `出荷指示書機能仕様書.md` | 出荷実績/進捗 |
-| `t_kubota_sakai_due_adjustment`, `t_kubota_sakai_trip_assignment`, `t_shipping_run`, `t_shipping_trip`, `t_shipping_trip_allocation`, `kubota_sakai_import_config` | `クボタ堺出荷便計画仕様書.md` | 堺専用＋共通出荷連携 |
+| `t_kubota_sakai_due_adjustment`, `t_kubota_sakai_trip_assignment`, `t_shipping_run`, `t_shipping_trip`, `t_shipping_trip_allocation`, `kubota_sakai_import_config` | `クボタ堺納期調整及び便計画仕様書.md` | 堺専用＋共通出荷連携 |
 | `purchase_*`, `engineering_change_*` | `購買需要計算仕様書.md`, `自動発注提案仕様書.md`, `設変新規管理仕様書.md` | 購買/設変 |
 | `notifications`, `notification_reads` | `通知閲覧.md`, `通知編集.md` | 通知 |
 | `t_overtime_application`, `t_overtime_approval_log` | `残業申請仕様書.md` | 残業申請 |

@@ -1,6 +1,6 @@
 from datetime import date, datetime, timedelta
 from collections import defaultdict
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.db import transaction
 from django.db.models import Q
@@ -8,14 +8,19 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from masters.models import Calendar
+from masters.models import Calendar, Line, Process, Product
 from orders.core.models import KubotaSakaiDueAdjustment, OrderLine
+from production.models_plan_change_log import ProductionPlanChangeLog
 from orders.utils.calendar_utils import WorkingDayCalculator, get_business_today
 from system_settings.models import SystemSetting
 from .serializers import KubotaSakaiDueAdjustmentSerializer
 
 
 KUBOTA_CUSTOMER_CODE = '000196'
+KUBOTA_DUE_ADJUSTMENT_LINE_CODE = 'KBT_DUE_ADJ'
+KUBOTA_DUE_ADJUSTMENT_LINE_NAME = 'クボタ納期調整'
+KUBOTA_DUE_ADJUSTMENT_PROCESS_CODE = 'KBT_DUE_ADJ'
+KUBOTA_DUE_ADJUSTMENT_PROCESS_NAME = 'クボタ納期調整'
 
 
 def _get_lock_date():
@@ -65,6 +70,103 @@ def _parse_decimal(value):
         return Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
         return None
+
+
+def _resolve_due_adjustment_line_process():
+    line = (
+        Line.objects.filter(
+            Q(line_name=KUBOTA_DUE_ADJUSTMENT_LINE_NAME)
+            | Q(line_code=KUBOTA_DUE_ADJUSTMENT_LINE_CODE)
+        )
+        .order_by('id')
+        .first()
+    )
+    if not line:
+        line = Line.objects.create(
+            line_code=KUBOTA_DUE_ADJUSTMENT_LINE_CODE,
+            line_name=KUBOTA_DUE_ADJUSTMENT_LINE_NAME,
+            line_type='OTHER',
+            is_active=True,
+        )
+
+    process = (
+        Process.objects.filter(
+            Q(process_name=KUBOTA_DUE_ADJUSTMENT_PROCESS_NAME)
+            | Q(process_code=KUBOTA_DUE_ADJUSTMENT_PROCESS_CODE)
+        )
+        .order_by('id')
+        .first()
+    )
+    if not process:
+        process = Process.objects.create(
+            process_code=KUBOTA_DUE_ADJUSTMENT_PROCESS_CODE,
+            process_name=KUBOTA_DUE_ADJUSTMENT_PROCESS_NAME,
+            line=line,
+            management_unit='DAY',
+            is_active=True,
+        )
+    elif process.line_id != line.id:
+        process.line = line
+        process.save(update_fields=['line'])
+
+    return line, process
+
+
+def _to_log_int_qty(value):
+    num = _parse_decimal(value)
+    if num is None:
+        return 0
+    return int(num.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+
+
+def _build_due_adjustment_plan_id(product_code, due_date, ship_to_code=None, source_order_no=None):
+    product = str(product_code or '').strip() or 'UNKNOWN'
+    ship_to = str(ship_to_code or '').strip() or 'NO_SHIP'
+    source = str(source_order_no or '').strip() or 'TOTAL'
+    plan_id = f'KBT_DUE_{product}_{due_date:%Y%m%d}_{ship_to}_{source}'
+    return plan_id[:255]
+
+
+def _create_due_adjustment_change_log(
+    product_code,
+    ship_to_code,
+    due_date,
+    before_qty,
+    after_qty,
+    reason,
+    user,
+    line,
+    process,
+    product_cache,
+):
+    code = str(product_code or '').strip()
+    if not code:
+        return False
+
+    if code not in product_cache:
+        product_cache[code] = Product.objects.filter(product_code=code).order_by('id').first()
+    product = product_cache.get(code)
+    if not product:
+        return False
+
+    ProductionPlanChangeLog.objects.create(
+        plan_date=due_date,
+        product_id=product.id,
+        process_id=process.id,
+        line_id=line.id,
+        sequence_no=1,
+        plan_id=_build_due_adjustment_plan_id(
+            product_code=code,
+            due_date=due_date,
+            ship_to_code=ship_to_code,
+            source_order_no='TOTAL',
+        ),
+        before_qty=_to_log_int_qty(before_qty),
+        after_qty=_to_log_int_qty(after_qty),
+        reason=reason,
+        changed_by=user,
+    )
+    return True
 
 
 def _line_priority_for_allocation(row):
@@ -372,13 +474,21 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
         rows = request.data.get('rows')
         if not isinstance(rows, list):
             return Response({'detail': 'rows は配列で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+        change_reason = str(request.data.get('change_reason') or '').strip()
+        allow_due_plan_lock_update = bool(change_reason)
 
         user = request.user if request.user and request.user.is_authenticated else None
         now = datetime.now()
         lock_date = _get_lock_date()
         due_plan_lock_date = _get_due_plan_lock_date()
         updated_count = 0
+        change_log_count = 0
         affected_groups = set()
+        log_line = None
+        log_process = None
+        product_cache = {}
+        if allow_due_plan_lock_update:
+            log_line, log_process = _resolve_due_adjustment_line_process()
         # 入力値（セル値）: (product_code, ship_to_code, source_order_no, due_date) -> delivery
         input_delivery_map = {}
         # 行分解を再実行しないために保持
@@ -405,7 +515,9 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     due_date_val = _parse_date(date_str)
                     if not due_date_val:
                         continue
-                    if (lock_date and due_date_val <= lock_date) or (due_plan_lock_date and due_date_val <= due_plan_lock_date):
+                    if lock_date and due_date_val <= lock_date:
+                        continue
+                    if due_plan_lock_date and due_date_val <= due_plan_lock_date and not allow_due_plan_lock_update:
                         continue
                     delivery = _parse_decimal(qty_val)
                     if delivery is None:
@@ -460,6 +572,9 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     (r.source_order_no, r.due_date): r
                     for r in group_rows
                 }
+                before_date_totals = defaultdict(lambda: Decimal('0'))
+                for adj in group_rows:
+                    before_date_totals[adj.due_date] += (adj.delivery_qty or Decimal('0'))
 
                 # 日付別総納入量（入力で上書き、未入力は既存値）
                 date_totals = defaultdict(lambda: Decimal('0'))
@@ -495,6 +610,25 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                             adj.updated_at = now
                             adj.save(update_fields=['delivery_qty', 'updated_by', 'updated_at'])
                             updated_count += 1
+                    if allow_due_plan_lock_update:
+                        for target_date in sorted(touched_dates):
+                            before_total = before_date_totals.get(target_date, Decimal('0'))
+                            after_total = date_totals.get(target_date, Decimal('0'))
+                            if before_total == after_total:
+                                continue
+                            if _create_due_adjustment_change_log(
+                                product_code=product_code,
+                                ship_to_code=ship_to_code,
+                                due_date=target_date,
+                                before_qty=before_total,
+                                after_qty=after_total,
+                                reason=change_reason,
+                                user=user,
+                                line=log_line,
+                                process=log_process,
+                                product_cache=product_cache,
+                            ):
+                                change_log_count += 1
                     continue
 
                 # FIFOで日別数量を注番へ割付
@@ -571,6 +705,25 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                         updated_at=now,
                     )
                     updated_count += 1
+                if allow_due_plan_lock_update:
+                    for target_date in sorted(touched_dates):
+                        before_total = before_date_totals.get(target_date, Decimal('0'))
+                        after_total = date_totals.get(target_date, Decimal('0'))
+                        if before_total == after_total:
+                            continue
+                        if _create_due_adjustment_change_log(
+                            product_code=product_code,
+                            ship_to_code=ship_to_code,
+                            due_date=target_date,
+                            before_qty=before_total,
+                            after_qty=after_total,
+                            reason=change_reason,
+                            user=user,
+                            line=log_line,
+                            process=log_process,
+                            product_cache=product_cache,
+                        ):
+                            change_log_count += 1
 
             # 残量再計算
             _recalculate_remaining_for_groups(affected_groups)
@@ -578,6 +731,7 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
         return Response({
             'updated': updated_count,
             'affected_groups': len(affected_groups),
+            'change_logs': change_log_count,
         })
 
 

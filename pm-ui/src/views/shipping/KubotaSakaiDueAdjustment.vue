@@ -21,9 +21,14 @@
           <input v-model.trim="keyword2" type="text" placeholder="キーワード2" @keydown.enter="loadGrid" />
         </div>
       </div>
+      <div class="field">
+        <label>一括入力開始日</label>
+        <input v-model="bulkStartDate" :min="startDate" :max="bulkStartDateMax" type="date" />
+      </div>
       <span v-if="lockDate" class="lock-badge">{{ lockDate }} まで締め済</span>
       <span v-if="duePlanLockDate" class="lock-badge plan-lock">{{ duePlanLockDate }} まで計画ロック</span>
       <button class="btn import-btn" :disabled="importing || loading" @click="importOrders">{{ importing ? '取込中...' : '取込' }}</button>
+      <button class="btn" :disabled="importing || loading || saving" @click="openChangeReasonDialog">計画変更</button>
       <button class="btn save-btn" :disabled="saving || loading" @click="saveDeliveries">{{ saving ? '保存中...' : '保存' }}</button>
       <button class="btn" :disabled="loading" @click="loadGrid">表示</button>
     </div>
@@ -152,11 +157,26 @@
         </tfoot>
       </table>
     </div>
+
+    <div v-if="showChangeReasonDialog" class="modal-overlay" @click.self="closeChangeReasonDialog">
+      <div class="modal-content">
+        <h2>変更理由入力</h2>
+        <textarea
+          v-model="changeReasonDraft"
+          rows="4"
+          placeholder="変更理由を入力してください"
+        ></textarea>
+        <div class="modal-actions">
+          <button class="btn" @click="closeChangeReasonDialog">キャンセル</button>
+          <button class="btn save-btn" @click="confirmChangeReason">確定</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import api from '@/api/client'
 
 const inputRefs = reactive({})
@@ -210,12 +230,17 @@ const importing = ref(false)
 const keyword = ref('V0')
 const keyword2 = ref('6E')
 const startDate = ref(formatLocalDate(new Date()))
+const bulkStartDate = ref(startDate.value)
 const horizonDays = ref(30)
 const groups = ref([])
 const lockDate = ref(null)
 const duePlanLockDate = ref(null)
 const calendarDayMap = ref({})
 const kubotaSakaiCalendarId = ref(null)
+const isEditUnlocked = ref(false)
+const changeReason = ref('')
+const changeReasonDraft = ref('')
+const showChangeReasonDialog = ref(false)
 
 const dateColumns = computed(() => {
   const base = new Date(`${startDate.value}T00:00:00`)
@@ -229,6 +254,25 @@ const dateColumns = computed(() => {
     return { key, label: `${mm}/${dd}${w}`, dayClass: isHolidayDate(key, d.getDay()) ? 'holiday' : '' }
   })
 })
+
+const bulkStartDateMax = computed(() => {
+  if (!dateColumns.value.length) return startDate.value
+  return dateColumns.value[dateColumns.value.length - 1].key
+})
+
+const normalizeBulkStartDate = () => {
+  const keys = dateColumns.value.map((col) => col.key)
+  if (!keys.length) return
+  const minKey = keys[0]
+  const maxKey = keys[keys.length - 1]
+  if (!bulkStartDate.value || bulkStartDate.value < minKey) {
+    bulkStartDate.value = minKey
+    return
+  }
+  if (bulkStartDate.value > maxKey) {
+    bulkStartDate.value = maxKey
+  }
+}
 
 const filteredGroups = computed(() => {
   const kw1 = keyword.value.trim().toLowerCase()
@@ -320,7 +364,7 @@ const displayRows = computed(() => {
 
 const isDateLocked = (dateKey) => {
   if (lockDate.value && dateKey <= lockDate.value) return true
-  if (duePlanLockDate.value && dateKey <= duePlanLockDate.value) return true
+  if (duePlanLockDate.value && dateKey <= duePlanLockDate.value && !isEditUnlocked.value) return true
   return false
 }
 
@@ -503,8 +547,10 @@ const groupTotalRemaining = (group) => {
 const applyDemandToPlan = (group) => {
   if (!group) return
   let changed = false
+  const applyFrom = bulkStartDate.value
   for (const line of group.lines) {
     for (const col of dateColumns.value) {
+      if (applyFrom && col.key < applyFrom) continue
       if (isDateLocked(col.key)) continue
       const demandQty = parseNumber(line.demandByDate[col.key])
       const currentQty = parseNumber(line.deliveryByDate[col.key])
@@ -517,6 +563,10 @@ const applyDemandToPlan = (group) => {
   }
   if (changed) recalcGroupRemaining(group)
 }
+
+watch([startDate, horizonDays], () => {
+  normalizeBulkStartDate()
+})
 
 const loadGrid = async () => {
   loading.value = true
@@ -595,6 +645,10 @@ const focusNextRow = (event, currentDateKey, colKey, slotIdx) => {
 
 const saveDeliveries = async () => {
   if (saving.value || loading.value) return
+  if (isEditUnlocked.value && !changeReason.value) {
+    alert('変更理由を入力してください。')
+    return
+  }
 
   // 変更された行を収集
   const payloadRows = []
@@ -620,8 +674,13 @@ const saveDeliveries = async () => {
 
   saving.value = true
   try {
-    await api.kubotaSakaiDueAdjustments.bulkSave(payloadRows)
+    await api.kubotaSakaiDueAdjustments.bulkSave(payloadRows, {
+      change_reason: isEditUnlocked.value ? changeReason.value : '',
+    })
     alert('保存しました。')
+    isEditUnlocked.value = false
+    changeReason.value = ''
+    changeReasonDraft.value = ''
     await loadGrid()
   } catch (error) {
     const data = error?.response?.data
@@ -631,7 +690,28 @@ const saveDeliveries = async () => {
   }
 }
 
+const openChangeReasonDialog = () => {
+  changeReasonDraft.value = changeReason.value
+  showChangeReasonDialog.value = true
+}
+
+const closeChangeReasonDialog = () => {
+  showChangeReasonDialog.value = false
+}
+
+const confirmChangeReason = () => {
+  const reason = (changeReasonDraft.value || '').trim()
+  if (!reason) {
+    alert('変更理由を入力してください。')
+    return
+  }
+  changeReason.value = reason
+  isEditUnlocked.value = true
+  showChangeReasonDialog.value = false
+}
+
 onMounted(async () => {
+  normalizeBulkStartDate()
   await loadGrid()
   await nextTick()
   setStickyTopValues()
@@ -910,5 +990,41 @@ onMounted(async () => {
   background: #e5e7eb !important;
   color: #9ca3af !important;
   cursor: not-allowed;
+}
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.modal-content {
+  width: 420px;
+  max-width: calc(100vw - 24px);
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.25);
+  padding: 16px;
+}
+.modal-content h2 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+.modal-content textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.modal-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 </style>

@@ -8,8 +8,10 @@ export const createKubotaSakaiDueAdjustmentsAPI = (client) => ({
   importOrders(data = {}) {
     return client.post('/kubota-sakai-due-adjustments/import_orders/', data)
   },
-  bulkSave(rows = []) {
-    return client.post('/kubota-sakai-due-adjustments/bulk_save/', { rows })
+  bulkSave(rows = [], options = {}) {
+    const payload = { rows }
+    if (options.change_reason) payload.change_reason = options.change_reason
+    return client.post('/kubota-sakai-due-adjustments/bulk_save/', payload)
   },
   get(id) {
     return client.get(`/kubota-sakai-due-adjustments/${id}/`)
