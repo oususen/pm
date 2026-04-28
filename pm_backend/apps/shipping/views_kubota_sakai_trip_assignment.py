@@ -14,7 +14,7 @@ from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_HALF_UP
 from io import BytesIO
 
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Q
 from django.http import HttpResponse
 from rest_framework import status
 from rest_framework.response import Response
@@ -559,6 +559,12 @@ class KubotaSakaiTripPlanView(APIView):
             for p in Product.objects.select_related('used_container').filter(product_code__in=product_codes)
         }
 
+        # テーブル全体の最新調整日
+        last_adjusted_at_raw = KubotaSakaiDueAdjustment.objects.aggregate(
+            last=Max('updated_at')
+        )['last']
+        last_adjusted_at = last_adjusted_at_raw.strftime('%Y-%m-%d %H:%M') if last_adjusted_at_raw else None
+
         # 既存割付
         existing = KubotaSakaiTripAssignment.objects.filter(
             due_adjustment_id__in=adj_ids,
@@ -642,6 +648,7 @@ class KubotaSakaiTripPlanView(APIView):
             'target_date': target_date.isoformat(),
             'is_holiday': is_holiday,
             'assignment_deadline_days': deadline_days,
+            'last_adjusted_at': last_adjusted_at,
             'rows': rows,
             'trucks': [
                 {

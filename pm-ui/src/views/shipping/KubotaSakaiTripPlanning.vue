@@ -39,6 +39,7 @@
       <button class="btn auto-assign-btn" :disabled="loading || saving || autoAssigning" @click="openAutoAssignDialog">
         自動便振分
       </button>
+      <span v-if="lastAdjustedAt" class="adj-badge">最新納期調整日: {{ formatAdjDate(lastAdjustedAt) }}</span>
     </div>
 
     <div v-if="showAutoAssignDialog" class="modal-overlay" @click.self="closeAutoAssignDialog">
@@ -405,6 +406,12 @@ const formatHeaderDate = (dateText) => {
   return `${d.getMonth() + 1}/${d.getDate()}(${w})`
 }
 
+const formatAdjDate = (dateStr) => {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  return `${d.getMonth() + 1}/${d.getDate()}`
+}
+
 const parseNumber = (value) => {
   if (value === null || value === undefined || value === '') return 0
   const num = Number(String(value).replace(/,/g, ''))
@@ -449,6 +456,7 @@ const keyword = ref('')
 const loading = ref(false)
 const importing = ref(false)
 const saving = ref(false)
+const lastAdjustedAt = ref(null)
 const exportingCsv = ref(false)
 const exportingPickupPdf = ref(false)
 const assignmentDeadlineDays = ref(3)
@@ -774,6 +782,7 @@ const loadGrid = async () => {
       nextSummaryByDate[dateKey] = summaries
       nextHolidayByDate[dateKey] = Boolean(res.data?.is_holiday)
       maxDeadline = Math.max(maxDeadline, Number(res.data?.assignment_deadline_days || 3))
+      if (res.data?.last_adjusted_at) lastAdjustedAt.value = res.data.last_adjusted_at
 
       payloadRows.forEach((raw) => {
         if (raw.product_code && raw.product_name) {
@@ -1335,6 +1344,18 @@ onUnmounted(() => {
 .auto-assign-btn {
   background: #e0e7ff;
   border-color: #6366f1;
+}
+.adj-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  background: #e0f2fe;
+  border: 1px solid #38bdf8;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #0369a1;
+  white-space: nowrap;
 }
 .pickup-btn {
   background: #eefcf5;

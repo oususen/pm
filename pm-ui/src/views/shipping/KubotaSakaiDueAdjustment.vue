@@ -25,6 +25,7 @@
         <label>一括入力開始日</label>
         <input v-model="bulkStartDate" :min="startDate" :max="bulkStartDateMax" type="date" />
       </div>
+      <span v-if="lastAdjustedAt" class="lock-badge adj-badge">納期調整日: {{ formatAdjDate(lastAdjustedAt) }}</span>
       <span v-if="lockDate" class="lock-badge">{{ lockDate }} まで締め済</span>
       <span v-if="duePlanLockDate" class="lock-badge plan-lock">{{ duePlanLockDate }} まで計画ロック</span>
       <button class="btn import-btn" :disabled="importing || loading" @click="importOrders">{{ importing ? '取込中...' : '取込' }}</button>
@@ -172,12 +173,66 @@
         </div>
       </div>
     </div>
+
+    <div v-if="showEmailDialog" class="modal-overlay" @click.self="closeEmailDialog">
+      <div class="modal-content email-modal">
+        <h2>納期調整メール送信</h2>
+
+        <div v-if="contactLoading" class="email-loading">連絡先を読み込み中...</div>
+
+        <div v-if="!contactLoading && emailContacts.length === 0" class="email-warning">
+          送信先の連絡先が登録されていません。連絡先マスタで種別「納期調整」を登録してください。
+        </div>
+
+        <div class="email-field">
+          <label>送信先</label>
+          <select v-model="emailTo" class="email-select" multiple>
+            <option v-for="c in emailContacts" :key="c.id" :value="c.email">
+              {{ c.display_name }} &lt;{{ c.email }}&gt;
+            </option>
+          </select>
+          <div class="email-hint">Ctrl/Command を押しながら複数選択できます。</div>
+        </div>
+
+        <div class="email-field">
+          <label>CC（連絡先）</label>
+          <select v-model="emailCcSelected" class="email-select" multiple>
+            <option v-for="c in emailContacts" :key="'cc-' + c.id" :value="c.email">
+              {{ c.display_name }} &lt;{{ c.email }}&gt;
+            </option>
+          </select>
+        </div>
+
+        <div class="email-field">
+          <label>CC（手入力）</label>
+          <input v-model.trim="emailCcManual" type="text" placeholder="example1@example.com, example2@example.com" />
+        </div>
+
+        <div class="email-field">
+          <label>件名</label>
+          <input v-model="emailSubject" type="text" />
+        </div>
+
+        <div class="email-field">
+          <label>本文</label>
+          <textarea v-model="emailBody" rows="14"></textarea>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn email-send-btn" :disabled="sendingEmail || emailTo.length === 0" @click="sendEmail">
+            {{ sendingEmail ? '送信中...' : '送信' }}
+          </button>
+          <button class="btn" @click="closeEmailDialog">キャンセル</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
 
 const inputRefs = reactive({})
 const theadRef = ref(null)
@@ -204,6 +259,12 @@ const formatLocalDate = (date) => {
   const mm = String(date.getMonth() + 1).padStart(2, '0')
   const dd = String(date.getDate()).padStart(2, '0')
   return `${yyyy}-${mm}-${dd}`
+}
+
+const formatAdjDate = (dateStr) => {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  return `${d.getMonth() + 1}月${d.getDate()}日`
 }
 
 const parseNumber = (value) => {
@@ -235,12 +296,23 @@ const horizonDays = ref(30)
 const groups = ref([])
 const lockDate = ref(null)
 const duePlanLockDate = ref(null)
+const lastAdjustedAt = ref(null)
 const calendarDayMap = ref({})
 const kubotaSakaiCalendarId = ref(null)
 const isEditUnlocked = ref(false)
 const changeReason = ref('')
 const changeReasonDraft = ref('')
 const showChangeReasonDialog = ref(false)
+const showEmailDialog = ref(false)
+const sendingEmail = ref(false)
+const contactLoading = ref(false)
+const emailContacts = ref([])
+const emailTo = ref([])
+const emailCcSelected = ref([])
+const emailCcManual = ref('')
+const emailSubject = ref('')
+const emailBody = ref('')
+const lastChangeSummary = ref([])
 
 const dateColumns = computed(() => {
   const base = new Date(`${startDate.value}T00:00:00`)
@@ -580,6 +652,7 @@ const loadGrid = async () => {
     ])
     lockDate.value = res.data?.lock_date || null
     duePlanLockDate.value = res.data?.due_plan_lock_date || null
+    lastAdjustedAt.value = res.data?.last_adjusted_at || null
     const items = res.data?.rows || []
     groups.value = items.map(buildGroupFromGridItem)
     nextTick(setStickyTopValues)
@@ -643,6 +716,48 @@ const focusNextRow = (event, currentDateKey, colKey, slotIdx) => {
   }
 }
 
+const collectChangeSummary = (payloadRows) => {
+  const summary = []
+  for (const row of payloadRows) {
+    const parts = row.line_key.split('||')
+    if (parts.length !== 3) continue
+    const productCode = parts[0]
+    const shipToCode = parts[1] || '-'
+    for (const [dateStr, qty] of Object.entries(row.delivery_by_date)) {
+      if (qty > 0) {
+        summary.push({ productCode, shipToCode, date: dateStr, qty })
+      }
+    }
+  }
+  summary.sort((a, b) => a.productCode.localeCompare(b.productCode) || a.date.localeCompare(b.date))
+  return summary
+}
+
+const buildEmailBody = (summary) => {
+  const today = formatLocalDate(new Date())
+  let body = `お疲れ様です。\nクボタ様向け製品の納期調整しましたため、ご連絡いたします。\n\n`
+  body += `【変更日】${today}\n`
+  if (changeReason.value) {
+    body += `【変更理由】${changeReason.value}\n`
+  }
+  body += `\n【変更内容】\n`
+  if (summary.length === 0) {
+    body += '（変更なし）\n'
+  } else {
+    body += '品番\t納入場所\t納期\t計画数\n'
+    for (const item of summary) {
+      body += `${item.productCode}\t${item.shipToCode}\t${item.date}\t${item.qty}\n`
+    }
+  }
+  body += `\nよろしくお願いいたします。\n`
+  const user = authState.user
+  const name = user ? `${user.last_name || ''} ${user.first_name || ''}`.trim() || user.username : ''
+  if (name) {
+    body += `\n調整者: ${name}\n`
+  }
+  return body
+}
+
 const saveDeliveries = async () => {
   if (saving.value || loading.value) return
   if (isEditUnlocked.value && !changeReason.value) {
@@ -650,7 +765,6 @@ const saveDeliveries = async () => {
     return
   }
 
-  // 変更された行を収集
   const payloadRows = []
   for (const group of groups.value) {
     for (const line of group.lines) {
@@ -672,16 +786,21 @@ const saveDeliveries = async () => {
     return
   }
 
+  lastChangeSummary.value = collectChangeSummary(payloadRows)
+
   saving.value = true
   try {
     await api.kubotaSakaiDueAdjustments.bulkSave(payloadRows, {
       change_reason: isEditUnlocked.value ? changeReason.value : '',
     })
-    alert('保存しました。')
     isEditUnlocked.value = false
     changeReason.value = ''
     changeReasonDraft.value = ''
     await loadGrid()
+    const wantEmail = window.confirm('保存しました。\n納期調整メールを送信しますか？')
+    if (wantEmail) {
+      openEmailDialog()
+    }
   } catch (error) {
     const data = error?.response?.data
     alert(data?.detail || '保存に失敗しました。')
@@ -708,6 +827,65 @@ const confirmChangeReason = () => {
   changeReason.value = reason
   isEditUnlocked.value = true
   showChangeReasonDialog.value = false
+}
+
+const openEmailDialog = async () => {
+  showEmailDialog.value = true
+  contactLoading.value = true
+  try {
+    const res = await api.kubotaSakaiDueAdjustments.getContacts()
+    emailContacts.value = res.data || []
+  } catch {
+    emailContacts.value = []
+  } finally {
+    contactLoading.value = false
+  }
+  emailTo.value = emailContacts.value.map((c) => c.email)
+  emailCcSelected.value = []
+  emailCcManual.value = ''
+  const today = formatLocalDate(new Date())
+  emailSubject.value = `【納期調整連絡】クボタ堺 ${today}`
+  emailBody.value = buildEmailBody(lastChangeSummary.value)
+}
+
+const closeEmailDialog = () => {
+  showEmailDialog.value = false
+}
+
+const sendEmail = async () => {
+  if (emailTo.value.length === 0) {
+    alert('送信先を選択してください。')
+    return
+  }
+  if (!emailSubject.value.trim()) {
+    alert('件名を入力してください。')
+    return
+  }
+
+  const ccList = [...emailCcSelected.value]
+  if (emailCcManual.value) {
+    for (const addr of emailCcManual.value.split(/[,;、\s]+/)) {
+      const trimmed = addr.trim()
+      if (trimmed && !ccList.includes(trimmed)) ccList.push(trimmed)
+    }
+  }
+
+  sendingEmail.value = true
+  try {
+    await api.kubotaSakaiDueAdjustments.sendEmail({
+      to_emails: emailTo.value,
+      cc_emails: ccList,
+      subject: emailSubject.value,
+      body: emailBody.value,
+    })
+    alert('メールを送信しました。')
+    showEmailDialog.value = false
+  } catch (error) {
+    const detail = error?.response?.data?.detail
+    alert(detail || 'メール送信に失敗しました。')
+  } finally {
+    sendingEmail.value = false
+  }
 }
 
 onMounted(async () => {
@@ -786,6 +964,11 @@ onMounted(async () => {
 .import-btn {
   background: #dbe8ff;
   border-color: #8daed6;
+}
+.lock-badge.adj-badge {
+  background: #e0f2fe;
+  border-color: #38bdf8;
+  color: #0369a1;
 }
 .lock-badge.plan-lock {
   background: #dbeafe;
@@ -1026,5 +1209,68 @@ onMounted(async () => {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+.email-modal {
+  width: 720px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.email-field {
+  margin-bottom: 14px;
+}
+.email-field > label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 4px;
+}
+.email-field input[type="text"],
+.email-field textarea {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+.email-field textarea {
+  resize: vertical;
+}
+.email-select {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 14px;
+}
+.email-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
+}
+.email-loading {
+  text-align: center;
+  padding: 12px;
+  color: #6b7280;
+}
+.email-warning {
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 4px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: #92400e;
+}
+.email-send-btn {
+  background: #2563eb;
+  color: #fff;
+  border-color: #1d4ed8;
+  font-weight: 600;
+}
+.email-send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>

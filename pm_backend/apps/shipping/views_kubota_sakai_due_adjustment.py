@@ -3,17 +3,18 @@ from collections import defaultdict
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Max, Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from masters.models import Calendar, Line, Process, Product
+from masters.models import Calendar, Contact, Line, Process, Product
 from orders.core.models import KubotaSakaiDueAdjustment, OrderLine
 from production.models_plan_change_log import ProductionPlanChangeLog
 from orders.utils.calendar_utils import WorkingDayCalculator, get_business_today
 from system_settings.models import SystemSetting
 from .serializers import KubotaSakaiDueAdjustmentSerializer
+from .services.email_service import EmailService
 
 
 KUBOTA_CUSTOMER_CODE = '000196'
@@ -400,6 +401,12 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                 carry_remaining[gkey] = Decimal('0')
             carry_remaining[gkey] += row.delivery_qty - row.demand_qty
 
+        # テーブル全体の最新調整日
+        last_adjusted_at_raw = KubotaSakaiDueAdjustment.objects.aggregate(
+            last=Max('updated_at')
+        )['last']
+        last_adjusted_at = last_adjusted_at_raw.strftime('%Y-%m-%d %H:%M') if last_adjusted_at_raw else None
+
         # 表示期間内のデータ取得
         qs = KubotaSakaiDueAdjustment.objects.filter(
             due_date__range=(start_date, end_date),
@@ -464,6 +471,7 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             'horizon_days': horizon_days,
             'lock_date': lock_date.isoformat() if lock_date else None,
             'due_plan_lock_date': due_plan_lock_date.isoformat() if due_plan_lock_date else None,
+            'last_adjusted_at': last_adjusted_at,
             'rows': rows,
         })
 
@@ -733,6 +741,93 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             'affected_groups': len(affected_groups),
             'change_logs': change_log_count,
         })
+
+    # ========== get_contacts ==========
+    @action(detail=False, methods=['get'])
+    def get_contacts(self, request):
+        contacts = Contact.objects.filter(
+            contact_type='納期調整',
+            is_active=True,
+        ).order_by('display_order', 'id')
+        result = []
+        for c in contacts:
+            name = c.company_name or ''
+            if c.department:
+                name += f' {c.department}'
+            if c.contact_person:
+                name += f' {c.contact_person}'
+            result.append({
+                'id': c.id,
+                'display_name': name.strip(),
+                'email': c.email,
+            })
+        return Response(result)
+
+    # ========== send_email ==========
+    @action(detail=False, methods=['post'])
+    def send_email(self, request):
+        to_emails = request.data.get('to_emails', [])
+        cc_emails = request.data.get('cc_emails', [])
+        subject = str(request.data.get('subject') or '').strip()
+        body = str(request.data.get('body') or '').strip()
+
+        if not to_emails:
+            return Response(
+                {'detail': '宛先を指定してください。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not subject:
+            return Response(
+                {'detail': '件名を入力してください。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user_id = request.user.id if request.user and request.user.is_authenticated else None
+        email_service = EmailService()
+        smtp_config = email_service.get_smtp_config(user_id)
+        if not smtp_config:
+            return Response(
+                {'detail': 'SMTP設定が見つかりません。管理者に連絡してください。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            import smtplib
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.text import MIMEText
+
+            msg = MIMEMultipart()
+            msg['From'] = smtp_config['user']
+            msg['To'] = ', '.join(to_emails)
+            msg['Subject'] = subject
+            if cc_emails:
+                msg['Cc'] = ', '.join(cc_emails)
+            msg.attach(MIMEText(body, 'plain', 'utf-8'))
+
+            recipients = list(to_emails)
+            if cc_emails:
+                recipients.extend(cc_emails)
+
+            with smtplib.SMTP(smtp_config['host'], smtp_config['port']) as server:
+                server.starttls()
+                server.login(smtp_config['user'], smtp_config['password'])
+                server.send_message(msg, to_addrs=recipients)
+
+            return Response({
+                'success': True,
+                'message': f'メールを送信しました（宛先: {len(to_emails)}件）',
+            })
+
+        except smtplib.SMTPAuthenticationError:
+            return Response(
+                {'detail': 'SMTP認証エラー: ユーザー名またはパスワードが正しくありません。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as exc:
+            return Response(
+                {'detail': f'メール送信エラー: {exc}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 def _recalculate_remaining_for_groups(groups):

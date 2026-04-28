@@ -25,4 +25,10 @@ export const createKubotaSakaiDueAdjustmentsAPI = (client) => ({
   remove(id) {
     return client.delete(`/kubota-sakai-due-adjustments/${id}/`)
   },
+  getContacts() {
+    return client.get('/kubota-sakai-due-adjustments/get_contacts/')
+  },
+  sendEmail(data) {
+    return client.post('/kubota-sakai-due-adjustments/send_email/', data)
+  },
 })
