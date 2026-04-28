@@ -363,6 +363,19 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     existing_row.delete()
                     deleted_count += 1
 
+            # 今回の取込結果に存在しない期間内レコードの整理。
+            # 納入場差異による内示の見え方を維持するため、FORECAST は自動削除しない。
+            # 取込対象外になった FIRM のみ、未入力(納入数=0)の行を削除する。
+            for ekey, existing_row in list(existing_map.items()):
+                if ekey in processed_keys:
+                    continue
+                if existing_row.order_type != 'FIRM':
+                    continue
+                if existing_row.delivery_qty != Decimal('0'):
+                    continue
+                existing_row.delete()
+                deleted_count += 1
+
             # 残量再計算（取り込み後）
             affected_groups = set()
             for key in processed_keys:
