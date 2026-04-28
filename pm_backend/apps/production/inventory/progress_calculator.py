@@ -156,15 +156,28 @@ def recalculate_progress_qty(
 
     today = get_business_today()
     if override_calc_start_date is not None:
-        # 「過去から計算」など、表示開始日を起点に強制的に再計算する場合
         calc_start_date = override_calc_start_date
     else:
-        # 通常再計算: 完成品向け累積LT（自分LT含む）の最大値を取得し、LT+1日前から再計算
-        # これにより、完成品側の実績変更が子製品の過去の需要（LineDemand）に正しく反映される
         if max_parent_lt is None:
             max_parent_lt = _get_max_parent_bom_lead_time(product_id)
         max_lt = int(max_parent_lt or 0)
         calc_start_date = shift_working_days(today, -(max_lt + 1))
+
+    # calc_start_date が start_date より古い場合、バックログを再取得
+    effective_start = start_date
+    if calc_start_date < start_date:
+        effective_start = calc_start_date
+        backlogs = list(LineBacklog.objects.filter(
+            line_id=line_id,
+            product_id=product_id,
+            plan_date__range=[effective_start, end_date]
+        ).select_related('product').order_by('plan_date', 'sequence_no', 'id'))
+        if not backlogs:
+            return
+        by_date = {}
+        for backlog in backlogs:
+            by_date.setdefault(backlog.plan_date, []).append(backlog)
+
     progress_lock_date = SystemSetting.get_lock_date('progress')
     progress_by_date = {}
     last_progress = 0
@@ -182,7 +195,6 @@ def recalculate_progress_qty(
     if initial_backlog:
         last_progress = initial_backlog.progress_qty or 0
         progress_by_date[initial_backlog.plan_date] = last_progress
-        # 計画進度の初期値は実進度（progress_qty）を使う（計画在庫が実在庫を初期値にするのと同じ思想）
         last_planned_progress = initial_backlog.progress_qty or 0
         planned_progress_by_date[initial_backlog.plan_date] = last_planned_progress
 
@@ -208,7 +220,7 @@ def recalculate_progress_qty(
     if start_date and end_date:
         demand_qs = LineDemand.objects.filter(
             line_id=line_id,
-            plan_date__range=[start_date, end_date],
+            plan_date__range=[effective_start, end_date],
         )
         step_ids = set(step_map.values())
         if step_ids:

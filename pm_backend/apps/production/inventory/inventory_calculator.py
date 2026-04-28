@@ -287,6 +287,21 @@ def _build_firm_order_map(line_id, start_date, end_date):
     return firm_map
 
 
+def _get_direct_parent_bom_lead_time(product_id):
+    """
+    直親BOMの最大lead_time_daysを返す（在庫・計画在庫用）。
+    累積LTではなく、直接の親BOMアイテムのLTのみを参照する。
+    """
+    from masters.models import BOMItem
+    if not product_id:
+        return 0
+    max_lt = BOMItem.objects.filter(
+        child_product_id=product_id,
+        bom__is_active=True,
+    ).values_list('lead_time_days', flat=True)
+    return int(max(max_lt, default=0) or 0)
+
+
 def _get_max_parent_bom_lead_time(product_id):
     """
     製品の完成品向け累積LT（自分LTを含む）を取得する。
@@ -1089,7 +1104,7 @@ def recalculate_stock_qty(
     # 在庫の再計算範囲を calc_start_date まで広げて stock_qty を常に最新に保つ。
     # effective_start = min(start_date, calc_start_date)
     if max_parent_lt is None:
-        max_parent_lt = _get_max_parent_bom_lead_time(product_id)
+        max_parent_lt = _get_direct_parent_bom_lead_time(product_id)
     max_lt = int(max_parent_lt or 0)
     calc_start_date = shift_working_days(calc_today, -(max_lt + 1))
     effective_start = min(start_date, calc_start_date)
@@ -1287,10 +1302,9 @@ def recalculate_planned_stock_qty(
     calc_today = business_today
     if reference_today is None and not is_working_day(calc_today):
         calc_today = get_prev_working_day(calc_today)
-    # 完成品向け累積LT（自分LT含む）の最大値を取得し、LT+1日前から再計算
-    # これにより、完成品側の実績変更が子製品の過去の出庫に正しく反映される
+    # 直親BOMのLTを使用し、LT+1日前から再計算
     if max_parent_lt is None:
-        max_parent_lt = _get_max_parent_bom_lead_time(product_id)
+        max_parent_lt = _get_direct_parent_bom_lead_time(product_id)
     max_lt = int(max_parent_lt or 0)
     # 最終品はデリバリLT分だけ初期値を調整するため、計算窓を広げる。
     # self_lt_days（製造LT）ではなく firm_map と同じデリバリLT（RoutingStep/Line）を使う。
@@ -1301,6 +1315,22 @@ def recalculate_planned_stock_qty(
         final_delivery_lt = _get_final_product_delivery_lt(line_id, product_id)
         max_lt = max(max_lt, final_delivery_lt)
     calc_start_date = shift_working_days(calc_today, -(max_lt + 1))
+
+    # calc_start_date が start_date より古い場合、バックログを再取得
+    if calc_start_date < start_date:
+        backlogs = list(LineBacklog.objects.filter(
+            line_id=line_id,
+            product_id=product_id,
+            plan_date__range=[calc_start_date, end_date]
+        ).select_related('product').order_by('plan_date', 'sequence_no', 'id'))
+        if not backlogs:
+            return
+        by_date = {}
+        for backlog in backlogs:
+            by_date.setdefault(backlog.plan_date, []).append(backlog)
+        sample_product = backlogs[0].product if backlogs else None
+        is_final_product = bool(sample_product and getattr(sample_product, 'is_final_product', False))
+
     inventory_lock_date = SystemSetting.get_lock_date('inventory')
     planned_by_date = {}
     firm_map = firm_map or {}
@@ -1561,8 +1591,16 @@ def recalculate_inventory_for_line(
     planned_max = (0.0, None)
     progress_max = (0.0, None)
 
+    direct_lt_cache = {}
+
     for product_id in product_ids:
         logger.info(f"製品ID {product_id} の在庫計算中...")
+        # 在庫・計画在庫は直親LT、進度は累積LTを使用
+        direct_lt = direct_lt_cache.get(product_id)
+        if direct_lt is None:
+            direct_lt = _get_direct_parent_bom_lead_time(product_id)
+            direct_lt_cache[product_id] = direct_lt
+
         max_parent_lt = max_parent_lt_cache.get(product_id)
         if max_parent_lt is None:
             max_parent_lt = _get_max_parent_bom_lead_time(product_id)
@@ -1578,7 +1616,7 @@ def recalculate_inventory_for_line(
                 end_date,
                 firm_map=firm_map,
                 stock_adjust_map=adjustment_maps.get('STOCK'),
-                max_parent_lt=max_parent_lt,
+                max_parent_lt=direct_lt,
                 calendar_id=shared_calendar_id,
                 shared_workday_cache=shared_workday_cache,
             )
@@ -1596,7 +1634,7 @@ def recalculate_inventory_for_line(
                 end_date,
                 firm_map=firm_map,
                 planned_stock_adjust_map=adjustment_maps.get('PLANNED_STOCK'),
-                max_parent_lt=max_parent_lt,
+                max_parent_lt=direct_lt,
                 calendar_id=shared_calendar_id,
                 shared_workday_cache=shared_workday_cache,
             )

@@ -117,7 +117,7 @@ def _resolve_effective_start_date(
 
     from masters.models import BOMItem, Calendar, CalendarDay
     from production.models_line_backlog import LineBacklog
-    from production.inventory.inventory_calculator import _get_max_parent_bom_lead_time
+    from production.inventory.inventory_calculator import _get_direct_parent_bom_lead_time
 
     calendar_id = getattr(line, 'calendar_id', None) or Calendar.objects.filter(
         calendar_code='daiso'
@@ -166,7 +166,7 @@ def _resolve_effective_start_date(
     if include_lt_anchor:
         max_lt = 0
         if product_id is not None:
-            max_lt = _get_max_parent_bom_lead_time(product_id)
+            max_lt = _get_direct_parent_bom_lead_time(product_id)
         else:
             product_ids = list(
                 LineBacklog.objects.filter(

@@ -25,7 +25,7 @@
         <label>一括入力開始日</label>
         <input v-model="bulkStartDate" :min="startDate" :max="bulkStartDateMax" type="date" />
       </div>
-      <span v-if="lastAdjustedAt" class="lock-badge adj-badge">納期調整日: {{ formatAdjDate(lastAdjustedAt) }}</span>
+      <span v-if="lastAdjustedAt" class="lock-badge adj-badge">最新納期調整日: {{ formatAdjDate(lastAdjustedAt) }}</span>
       <span v-if="lockDate" class="lock-badge">{{ lockDate }} まで締め済</span>
       <span v-if="duePlanLockDate" class="lock-badge plan-lock">{{ duePlanLockDate }} まで計画ロック</span>
       <button class="btn import-btn" :disabled="importing || loading" @click="importOrders">{{ importing ? '取込中...' : '取込' }}</button>

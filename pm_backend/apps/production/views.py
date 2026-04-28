@@ -133,7 +133,7 @@ def _is_kubota_delivery_line(line_obj):
 
 
 def _resolve_inventory_effective_start_date(line_id, requested_start_date, end_date, product_ids=None, line_final_only=False):
-    from .inventory.inventory_calculator import _get_max_parent_bom_lead_time
+    from .inventory.inventory_calculator import _get_direct_parent_bom_lead_time
     line_obj = Line.objects.filter(id=line_id).first()
     calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
         calendar_code='daiso'
@@ -192,11 +192,11 @@ def _resolve_inventory_effective_start_date(line_id, requested_start_date, end_d
     max_lt = 0
     if product_ids_for_line:
         max_lt = max(
-            (int(_get_max_parent_bom_lead_time(pid) or 0) for pid in product_ids_for_line),
+            (int(_get_direct_parent_bom_lead_time(pid) or 0) for pid in product_ids_for_line),
             default=0,
         )
-    planned_progress_start_dt = shift_working_days(today, -(int(max_lt) + 1))
-    return min(requested_start_date, stock_start_dt, planned_progress_start_dt)
+    inventory_start_dt = shift_working_days(today, -(int(max_lt) + 1))
+    return min(requested_start_date, stock_start_dt, inventory_start_dt)
 
 
 def _resolve_product_recalc_start_date(line_id, end_date, product_ids=None):
@@ -204,7 +204,7 @@ def _resolve_product_recalc_start_date(line_id, end_date, product_ids=None):
     表示品番だけ再計算用の内部開始日を返す。
     画面の表示開始日は使わず、計算上必要な開始日だけを採用する。
     """
-    from .inventory.inventory_calculator import _get_max_parent_bom_lead_time
+    from .inventory.inventory_calculator import _get_direct_parent_bom_lead_time
 
     line_obj = Line.objects.filter(id=line_id).first()
     calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
@@ -263,11 +263,11 @@ def _resolve_product_recalc_start_date(line_id, end_date, product_ids=None):
     max_lt = 0
     if product_ids_for_line:
         max_lt = max(
-            (int(_get_max_parent_bom_lead_time(pid) or 0) for pid in product_ids_for_line),
+            (int(_get_direct_parent_bom_lead_time(pid) or 0) for pid in product_ids_for_line),
             default=0,
         )
-    planned_progress_start_dt = shift_working_days(today, -(int(max_lt) + 1))
-    return min(stock_start_dt, planned_progress_start_dt)
+    inventory_start_dt = shift_working_days(today, -(int(max_lt) + 1))
+    return min(stock_start_dt, inventory_start_dt)
 
 
 class LineDemandFilter(django_filters.FilterSet):
@@ -4119,7 +4119,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             process_code: str (required)
             adjust_type: str (required) - STOCK / PLANNED_STOCK / PROGRESS / PLANNED_PROGRESS
         """
-        from .inventory.inventory_calculator import _get_max_parent_bom_lead_time
+        from .inventory.inventory_calculator import _get_max_parent_bom_lead_time, _get_direct_parent_bom_lead_time
 
         process_code = (request.query_params.get('process_code') or '').strip()
         adjust_type = (request.query_params.get('adjust_type') or '').strip().upper()
@@ -4132,6 +4132,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         process = Process.objects.filter(process_code=process_code, is_active=True).first()
         if not process:
             return Response({'detail': f'工程が見つかりません: {process_code}'}, status=status.HTTP_404_NOT_FOUND)
+
+        # 在庫・計画在庫は直親LT、進度は累積LTを使用
+        use_direct_lt = adjust_type in ('STOCK', 'PLANNED_STOCK')
 
         # 工程上の (product, line) 組み合わせを取得（重複なし）
         from masters.models import Product as ProductModel
@@ -4202,7 +4205,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             line = lines.get(lid)
             if not product or not line:
                 continue
-            max_lt = _get_max_parent_bom_lead_time(pid)
+            max_lt = _get_direct_parent_bom_lead_time(pid) if use_direct_lt else _get_max_parent_bom_lead_time(pid)
             target_date = calc_start(max_lt)
             results.append({
                 'product_id': pid,
@@ -4233,7 +4236,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         クエリパラメータ: product_id (required)
         """
-        from .inventory.inventory_calculator import _get_max_parent_bom_lead_time
+        from .inventory.inventory_calculator import _get_direct_parent_bom_lead_time
 
         product_id = request.query_params.get('product_id')
         if not product_id:
@@ -4244,7 +4247,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'product_id must be numeric'}, status=status.HTTP_400_BAD_REQUEST)
 
         today = get_business_today()
-        max_lt = _get_max_parent_bom_lead_time(product_id)
+        max_lt = _get_direct_parent_bom_lead_time(product_id)
 
         # daiso カレンダーで営業日シフト
         calendar_id = Calendar.objects.filter(calendar_code='daiso').values_list('id', flat=True).first()
