@@ -1295,39 +1295,40 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             for cal in cal_qs:
                 calendar_day_cache[cal.target_date] = cal.is_working_day
 
+        def is_line_working_day(check_date):
+            # カレンダ未設定 → 週末判定（月〜金を稼働日）
+            if not calendar_id:
+                return check_date.weekday() < 5
+            if check_date in calendar_day_cache:
+                return calendar_day_cache[check_date]
+            cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=check_date).first()
+            is_work = cal.is_working_day if cal is not None else check_date.weekday() < 5
+            calendar_day_cache[check_date] = is_work
+            return is_work
+
         def shift_business_days(target_date, days):
             """
             稼働日で日付をシフトする。
             days > 0 なら過去方向へ、days < 0 なら未来方向へ。
             カレンダが無い場合は週末判定（土日非稼働）、さらに無ければ暦日でシフト。
             """
-            def is_working_day(check_date):
-                # カレンダ未設定 → 週末判定（月〜金を稼働日）
-                if not calendar_id:
-                    return check_date.weekday() < 5
-                if check_date in calendar_day_cache:
-                    return calendar_day_cache[check_date]
-                cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=check_date).first()
-                is_work = cal.is_working_day if cal is not None else check_date.weekday() < 5
-                calendar_day_cache[check_date] = is_work
-                return is_work
 
             if not days:
                 if not calendar_id:
                     return target_date
-                if is_working_day(target_date):
+                if is_line_working_day(target_date):
                     return target_date
                 current = target_date
                 while True:
                     current = current - timedelta(days=1)
-                    if is_working_day(current):
+                    if is_line_working_day(current):
                         return current
             step = -1 if days > 0 else 1  # 正:過去へ、負:未来へ
             remaining = abs(int(days))
             current = target_date
             while remaining > 0:
                 current = current + timedelta(days=step)
-                if is_working_day(current):
+                if is_line_working_day(current):
                     remaining -= 1
             return current
 
@@ -1706,6 +1707,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                                 )
                                 effective_lt_days = 1 if force_pm_by_sequence else (2 if lot_index == 0 else 1)
                                 shifted_date = shift_business_days(plan_date, effective_lt_days) if effective_lt_days else plan_date
+                                shifted_date = shift_business_days(shifted_date, 0)
                                 key = (current_output_product, shifted_date)
                                 demand_map[key] += qty * total_qty_per
                                 downstream_found = True
@@ -1797,6 +1799,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                                 else:
                                     effective_lt_days = lt_days or 2
                                 shifted_date = _kubota_shift_business_days(plan_date, effective_lt_days) if effective_lt_days else plan_date
+                                # クボタ便側カレンダで算出した需要日が自ライン休日に当たる場合は、
+                                # 自ライン前営業日に寄せて在庫計算側との休日判定差異を吸収する。
+                                shifted_date = shift_business_days(shifted_date, 0)
                                 key = (current_output_product, shifted_date)
                                 demand_map[key] += qty * total_qty_per
                                 downstream_found = True
@@ -1838,6 +1843,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         if qty == 0:
                             continue
                         shifted_date = shift_business_days(plan_date, lt_days) if lt_days else plan_date
+                        shifted_date = shift_business_days(shifted_date, 0)
                         key = (current_output_product, shifted_date)
                         demand_map[key] += qty * total_qty_per
                         downstream_found = True
@@ -1908,6 +1914,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     for plan_date, plan_qty in backlog_items:
                         if lt_days:
                             plan_date = shift_business_days(plan_date, lt_days)
+                        plan_date = shift_business_days(plan_date, 0)
                         key = (current_output_product, plan_date)
                         demand_map[key] += Decimal(str(plan_qty or 0)) * qty_per
                         downstream_found = True
@@ -2408,6 +2415,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             qty = _resolve_linedemand_qty(row)
             if not product_id or not plan_date or qty == 0:
                 continue
+            plan_date = shift_business_days(plan_date, 0)
             direct_demand_product_ids.add(product_id)
             # BOM展開対象品は、需要ソースを親計画由来（BOM）に統一する
             # ※ ルーティング由来品まで除外すると、丸外作でフォールバックが効かないため

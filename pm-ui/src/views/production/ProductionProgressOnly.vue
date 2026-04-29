@@ -376,7 +376,7 @@ const isNonWorkingCalendarDay = (day) => {
   const isWorking = day.is_working_day;
   if (isWorking === false) return true;
   if (typeof isWorking === "string" && isWorking.toLowerCase() === "false") return true;
-  return day.work_minutes != null && Number(day.work_minutes) === 0;
+  return false;
 };
 
 const ensureLineList = async () => {
