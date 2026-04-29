@@ -24,6 +24,12 @@ const shipping = [
     meta: { pageTitle: "出荷進度照会", manualPath: "出荷/出荷進度照会.md", resource: "shipping.progress" },
   },
   {
+    path: "/shipping/order-expansion",
+    name: "ShippingOrderExpansion",
+    component: () => import("@/views/shipping/ShippingOrderExpansion.vue"),
+    meta: { pageTitle: "受注展開", resource: "shipping.progress" },
+  },
+  {
     path: "/shipping/order-document",
     name: "ShippingOrderDocument",
     component: () => import("@/views/shipping/ShippingOrderDocument.vue"),

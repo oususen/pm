@@ -100,6 +100,7 @@ export const manualSections = [
     items: [
       { title: "ユーザー管理", path: "設定/ユーザー管理.md" },
       { title: "権限設定", path: "設定/権限設定.md" },
+      { title: "定時タスク設定", path: "設定/定時タスク設定.md" },
       { title: "自動計画生成タスク", path: "設定/自動計画生成タスク.md" },
     ],
   },

@@ -21,6 +21,7 @@ class ScheduleConfig(models.Model):
         ('AUTO_PURCHASE_ORDER_CHECK', '発注タイミング日次チェック'),
         ('PURCHASE_ACTUAL_RECONCILE_CHECK', '納入実績整合チェック'),
         ('PRODUCTION_ACTUAL_RECONCILE_CHECK', '生産実績整合チェック'),
+        ('PLAN_TO_ACTUAL_COPY', '計画実績自動セット'),
     ]
     STATUS_CHOICES = [
         ('SUCCESS', '成功'),
@@ -40,6 +41,14 @@ class ScheduleConfig(models.Model):
         on_delete=models.CASCADE,
         related_name='schedule_configs',
         verbose_name='対象ライン'
+    )
+    process = models.ForeignKey(
+        'masters.Process',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='schedule_configs',
+        verbose_name='対象工程'
     )
     is_enabled = models.BooleanField(default=True, verbose_name='有効')
     scheduled_hour = models.PositiveSmallIntegerField(
@@ -144,11 +153,12 @@ class ScheduleConfig(models.Model):
         verbose_name_plural = 'スケジュール設定'
         constraints = [
             models.UniqueConstraint(
-                fields=['task_name', 'line'],
+                fields=['task_name', 'line', 'process'],
                 name='uniq_schedule_task_line'
             )
         ]
 
     def __str__(self):
         line_label = f' ({self.line.line_code})' if self.line_id else ''
-        return f'{self.get_task_name_display()}{line_label} - {self.scheduled_hour:02d}:{self.scheduled_minute:02d}'
+        process_label = f' / {self.process.process_code}' if self.process_id else ''
+        return f'{self.get_task_name_display()}{line_label}{process_label} - {self.scheduled_hour:02d}:{self.scheduled_minute:02d}'

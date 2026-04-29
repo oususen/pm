@@ -1123,6 +1123,8 @@ class ScheduleConfigSerializer(serializers.ModelSerializer):
     line_code = serializers.CharField(source='line.line_code', read_only=True)
     line_name = serializers.CharField(source='line.line_name', read_only=True)
     line_type = serializers.CharField(source='line.line_type', read_only=True)
+    process_code = serializers.CharField(source='process.process_code', read_only=True)
+    process_name = serializers.CharField(source='process.process_name', read_only=True)
     notify_user_names = serializers.SerializerMethodField()
     notify_user_codes = serializers.SerializerMethodField()
 
@@ -1130,6 +1132,7 @@ class ScheduleConfigSerializer(serializers.ModelSerializer):
         model = ScheduleConfig
         fields = [
             'id', 'task_name', 'task_name_display', 'line', 'line_code', 'line_name', 'line_type',
+            'process', 'process_code', 'process_name',
             'is_enabled',
             'scheduled_hour', 'scheduled_minute',
             'scheduled_dom',

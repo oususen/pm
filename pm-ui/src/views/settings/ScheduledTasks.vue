@@ -1,6 +1,9 @@
 <template>
   <div class="settings-container">
-    <h2 class="page-title">定時タスク設定</h2>
+    <div class="page-header">
+      <h2 class="page-title">定時タスク設定</h2>
+      <button class="btn" type="button" @click="openManual">マニュアル</button>
+    </div>
 
     <div class="card" v-if="showAutoPlanSection">
       <div class="card-header">
@@ -169,7 +172,12 @@
     </div>
 
     <template v-if="showInventorySection">
-    <div class="card" v-for="cfg in inventoryTaskConfigs" :key="configKey(cfg)">
+    <div
+      class="card inventory-tone-card"
+      :class="cardToneClass(idx)"
+      v-for="(cfg, idx) in inventoryTaskConfigs"
+      :key="configKey(cfg)"
+    >
       <div class="field">
         <label>{{ inventoryTaskLabel(cfg.task_name) }} - 実行時刻</label>
         <div class="input-row">
@@ -288,7 +296,86 @@
     </div>
     </template>
 
-    <div class="card" v-if="purchaseActualReconcileConfig && showInventorySection">
+    <div class="card inventory-tone-card inventory-tone-a" v-if="showInventorySection">
+      <div class="field">
+        <label>計画実績自動セット（ライン・工程別）</label>
+        <p class="helper">
+          指定時刻に、業務日付（8時境界）の計画合計を実績へ反映します。既存実績が０より大きい品番は上書きせず、スキップします。
+        </p>
+      </div>
+      <div class="input-row" style="margin-top: 8px">
+        <select v-model="newPlanToActual.line_id" class="date-input" :disabled="!canEdit">
+          <option value="">ライン選択</option>
+          <option v-for="line in selectableLines" :key="line.id" :value="line.id">
+            {{ line.line_code }} - {{ line.line_name }}
+          </option>
+        </select>
+        <select v-model="newPlanToActual.process_id" class="date-input" :disabled="!canEdit || !newPlanToActual.line_id">
+          <option value="">工程選択</option>
+          <option v-for="proc in selectableProcessesForNew" :key="proc.id" :value="proc.id">
+            {{ proc.process_code }} - {{ proc.process_name }}
+          </option>
+        </select>
+        <button class="btn" @click="addPlanToActualConfig" :disabled="!canEdit">追加</button>
+      </div>
+      <div class="table-wrapper" style="margin-top: 12px" v-if="planToActualConfigs.length">
+        <table class="config-table">
+          <thead>
+            <tr>
+              <th>ライン</th>
+              <th>工程</th>
+              <th>実行時刻</th>
+              <th>有効</th>
+              <th>操作</th>
+              <th>最終実行情報</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="cfg in planToActualConfigs" :key="configKey(cfg)">
+              <td>{{ cfg.line_code || '-' }}</td>
+              <td>{{ cfg.process_code || '-' }}</td>
+              <td>
+                <div class="time-row">
+                  <input type="number" min="0" max="23" v-model.number="cfg.scheduled_hour" :disabled="!canEdit" class="time-input" />
+                  <span class="suffix">時</span>
+                  <input type="number" min="0" max="59" v-model.number="cfg.scheduled_minute" :disabled="!canEdit" class="time-input" />
+                  <span class="suffix">分</span>
+                </div>
+              </td>
+              <td>
+                <label class="checkbox-label">
+                  <input type="checkbox" v-model="cfg.is_enabled" :disabled="!canEdit" />
+                  有効
+                </label>
+              </td>
+              <td class="actions-cell">
+                <button class="btn primary" @click="saveConfig(cfg)" :disabled="saving.has(configKey(cfg)) || !canEdit">
+                  {{ saving.has(configKey(cfg)) ? '保存中...' : '保存' }}
+                </button>
+                <button
+                  v-if="cfg.is_draft"
+                  class="btn"
+                  @click="removePlanToActualDraft(cfg)"
+                  :disabled="saving.has(configKey(cfg)) || !canEdit"
+                >
+                  キャンセル
+                </button>
+                <button class="btn" @click="runNow(cfg)" :disabled="isRunNowDisabled(cfg)">
+                  {{ runNowLabel(cfg) }}
+                </button>
+              </td>
+              <td class="last-cell">
+                <div class="last-row"><span class="last-label">日時</span><span>{{ formatDateTime(cfg.last_run_at) }}</span></div>
+                <div class="last-row"><span class="last-label">結果</span><span :class="statusClass(cfg)">{{ cfg.last_run_status_display || '-' }}</span></div>
+                <div class="message-cell">{{ cfg.last_run_message || '-' }}</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card inventory-tone-card inventory-tone-b" v-if="purchaseActualReconcileConfig && showInventorySection">
       <div class="field">
         <label>納入実績整合チェック（比較のみ） - 実行時刻</label>
         <div class="input-row">
@@ -487,7 +574,7 @@
       </div>
     </div>
 
-    <div class="card" v-if="productionActualReconcileConfig && showInventorySection">
+    <div class="card inventory-tone-card inventory-tone-a" v-if="productionActualReconcileConfig && showInventorySection">
       <div class="field">
         <label>生産実績整合チェック（比較のみ） - 実行時刻</label>
         <div class="input-row">
@@ -932,6 +1019,13 @@ const canEdit = computed(() => {
   return hasPermission(user, 'settings', 'edit')
 })
 const userList = ref([])
+const lines = ref([])
+const processes = ref([])
+const newPlanToActual = ref({
+  line_id: '',
+  process_id: '',
+})
+const planToActualDrafts = ref([])
 
 const autoPlanConfigs = computed(() =>
   configs.value
@@ -963,6 +1057,22 @@ const safetyStockConfigs = computed(() =>
     .sort((a, b) => safetyStockTaskOrder.indexOf(a.task_name) - safetyStockTaskOrder.indexOf(b.task_name))
 )
 const orderExpansionConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'ORDER_EXPANSION'))
+const planToActualConfigs = computed(() => {
+  const persisted = configs.value.filter((cfg) => cfg.task_name === 'PLAN_TO_ACTUAL_COPY')
+  const merged = [...persisted, ...planToActualDrafts.value]
+  return merged.sort((a, b) => {
+      const lineA = (a.line_code || '').localeCompare(b.line_code || '')
+      if (lineA !== 0) return lineA
+      return (a.process_code || '').localeCompare(b.process_code || '')
+    })
+})
+const selectableLines = computed(() =>
+  lines.value.filter((line) => line?.is_active)
+)
+const selectableProcessesForNew = computed(() => {
+  if (!newPlanToActual.value.line_id) return []
+  return processes.value.filter((p) => String(p.line) === String(newPlanToActual.value.line_id))
+})
 const showAutoPlanSection = computed(() => {
   const mode = String(route.query?.mode || '').toLowerCase()
   return mode !== 'inventory' && mode !== 'order-expansion' && mode !== 'safety-stock'
@@ -996,6 +1106,7 @@ const inventoryTaskLabel = (taskName) => {
   if (taskName === 'PICKUP_ONLY') return '取り込みのみ'
   if (taskName === 'INVENTORY_ONLY') return '在庫計算のみ'
   if (taskName === 'PROGRESS_ONLY') return '進度計算のみ'
+  if (taskName === 'PLAN_TO_ACTUAL_COPY') return '計画実績自動セット'
   return '取り込み＋在庫再計算'
 }
 
@@ -1005,6 +1116,7 @@ const inventoryTaskHelp = (taskName) => {
   if (taskName === 'PICKUP_ONLY') return '毎日指定した時刻に需要取り込み（pickup / pickup_purchase）のみを実行します。'
   if (taskName === 'INVENTORY_ONLY') return '毎日指定した時刻に在庫・計画在庫の再計算のみを実行します（必要に応じて過去営業日まで遡って再計算、進度は更新しません）。'
   if (taskName === 'PROGRESS_ONLY') return '毎日指定した時刻に進度のみを再計算します（必要に応じてLT+1営業日前まで遡って再計算します）。'
+  if (taskName === 'PLAN_TO_ACTUAL_COPY') return '毎日指定した時刻に、対象ライン・工程の業務日付計画合計を実績へ反映します。既存実績（actual_qty）が0以外の品番は上書きせずスキップします。'
   return '毎日指定した時刻に需要取り込み（pickup）→ 在庫・計画在庫・進度の自動再計算を実行します。'
 }
 const isSafetyStockTask = (taskName) => safetyStockTaskOrder.includes(taskName)
@@ -1020,12 +1132,16 @@ const showInventoryRangeSetting = (taskName) =>
   taskName !== purchaseActualReconcileTaskName
   && taskName !== productionActualReconcileTaskName
 
-const configKey = (cfg) => `${cfg.task_name}-${cfg.line || 'none'}-${cfg.id || 'new'}`
+const configKey = (cfg) => `${cfg.task_name}-${cfg.line || 'none'}-${cfg.process || 'none'}-${cfg.id || cfg.temp_key || 'new'}`
 const isRunningStatus = (cfg) => cfg?.last_run_status === 'RUNNING'
 const isCancelRequested = (cfg) => (cfg?.last_run_message || '').includes('[CANCEL_REQUESTED]')
 const canCancelTask = (cfg) => inventoryTaskOrder.includes(cfg?.task_name)
-const isRunNowDisabled = (cfg) => !cfg || !canEdit.value || running.has(configKey(cfg)) || isRunningStatus(cfg)
+const isRunNowDisabled = (cfg) => !cfg || !cfg.id || !canEdit.value || running.has(configKey(cfg)) || isRunningStatus(cfg)
 const runNowLabel = (cfg) => (running.has(configKey(cfg)) || isRunningStatus(cfg) ? '実行中...' : '今すぐ実行')
+const openManual = () => {
+  window.open(`/manual?path=${encodeURIComponent('設定/定時タスク設定.md')}`, '_blank')
+}
+const cardToneClass = (idx) => (idx % 2 === 0 ? 'inventory-tone-a' : 'inventory-tone-b')
 
 const loadReconcileReport = async () => {
   loadingReconcileReport.value = true
@@ -1090,6 +1206,21 @@ const loadUsers = async () => {
   }
 }
 
+const loadLineProcessMasters = async () => {
+  try {
+    const [lineRes, processRes] = await Promise.all([
+      api.lines.getLines({ is_active: true }),
+      api.processes.getProcesses({ is_active: true }),
+    ])
+    lines.value = lineRes.data?.results || lineRes.data || []
+    processes.value = processRes.data?.results || processRes.data || []
+  } catch (e) {
+    console.error('ライン/工程マスタの取得に失敗', e)
+    lines.value = []
+    processes.value = []
+  }
+}
+
 const saveConfig = async (cfg) => {
   if (!canEdit.value) return
   if (cfg.task_name === 'AUTO_PLAN' && autoPlanLocked.value) {
@@ -1103,6 +1234,7 @@ const saveConfig = async (cfg) => {
       id: cfg.id,
       task_name: cfg.task_name,
       line: cfg.line,
+      process: cfg.process,
       scheduled_hour: cfg.scheduled_hour,
       scheduled_minute: cfg.scheduled_minute,
       scheduled_dom: cfg.scheduled_dom,
@@ -1119,6 +1251,9 @@ const saveConfig = async (cfg) => {
       include_third_month: cfg.include_third_month,
       notify_user_codes: cfg.notify_user_codes,
     })
+    if (cfg.is_draft && cfg.temp_key) {
+      planToActualDrafts.value = planToActualDrafts.value.filter((row) => row.temp_key !== cfg.temp_key)
+    }
     alert('保存しました。設定は5分以内にスケジューラに反映されます。')
     await loadConfig()
   } catch (e) {
@@ -1126,6 +1261,66 @@ const saveConfig = async (cfg) => {
   } finally {
     saving.delete(key)
   }
+}
+
+const addPlanToActualConfig = () => {
+  if (!newPlanToActual.value.line_id || !newPlanToActual.value.process_id) {
+    alert('ラインと工程を選択してください。')
+    return
+  }
+  const line = lines.value.find((v) => String(v.id) === String(newPlanToActual.value.line_id))
+  const process = processes.value.find((v) => String(v.id) === String(newPlanToActual.value.process_id))
+  if (!line || !process) {
+    alert('選択内容が不正です。')
+    return
+  }
+  const exists = [...configs.value, ...planToActualDrafts.value].some((cfg) =>
+    cfg.task_name === 'PLAN_TO_ACTUAL_COPY'
+    && String(cfg.line) === String(line.id)
+    && String(cfg.process) === String(process.id)
+  )
+  if (exists) {
+    alert('同じライン・工程の設定は既に存在します。')
+    return
+  }
+  planToActualDrafts.value.push({
+    temp_key: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    is_draft: true,
+    task_name: 'PLAN_TO_ACTUAL_COPY',
+    line: line.id,
+    line_code: line.line_code,
+    line_name: line.line_name,
+    process: process.id,
+    process_code: process.process_code,
+    process_name: process.process_name,
+    scheduled_hour: 7,
+    scheduled_minute: 50,
+    is_enabled: true,
+    range_base_day: 'TODAY',
+    range_days_after: 45,
+    average_days_window: 60,
+    safety_days: 1,
+    include_current_month: false,
+    include_next_month: false,
+    include_second_month: false,
+    include_third_month: false,
+    notify_users: [],
+    notify_user_codes: [],
+    notify_user_names: {},
+    searchCode: '',
+    last_run_at: null,
+    last_run_status: null,
+    last_run_status_display: '',
+    last_run_message: '',
+    last_run_duration_seconds: null,
+  })
+  newPlanToActual.value = { line_id: '', process_id: '' }
+}
+
+const removePlanToActualDraft = (cfg) => {
+  if (!cfg?.is_draft) return
+  const key = cfg.temp_key
+  planToActualDrafts.value = planToActualDrafts.value.filter((row) => row.temp_key !== key)
 }
 
 const pollTimer = ref(null)
@@ -1392,6 +1587,7 @@ const startPollingIfRunning = () => {
 
 onMounted(async () => {
   await loadConfig()
+  await loadLineProcessMasters()
   await loadReconcileReport()
   await loadProductionReconcileReport()
   loadUsers()
@@ -1416,6 +1612,12 @@ onUnmounted(() => {
   font-size: 16px;
   font-weight: 700;
 }
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
 .card {
   background: #fff;
   border: 1px solid #c5cfde;
@@ -1423,6 +1625,16 @@ onUnmounted(() => {
   padding: 12px;
   max-width: 100%;
   margin-bottom: 12px;
+}
+.inventory-tone-card.inventory-tone-a {
+  background: #f7fbff;
+  border-color: #b9d7f4;
+  border-left: 6px solid #5b9bd5;
+}
+.inventory-tone-card.inventory-tone-b {
+  background: #f9fff7;
+  border-color: #c5e5be;
+  border-left: 6px solid #70ad47;
 }
 .card-header {
   display: flex;
@@ -1641,6 +1853,11 @@ onUnmounted(() => {
   font-size: 12px;
   color: #444;
 }
+.card > .field:first-child > label {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1d4ed8;
+}
 .input-row {
   display: flex;
   align-items: center;
@@ -1649,7 +1866,7 @@ onUnmounted(() => {
 .helper {
   margin: 0;
   font-size: 12px;
-  color: #666;
+  color: #dc2626;
 }
 .helper.warning {
   color: #b45309;

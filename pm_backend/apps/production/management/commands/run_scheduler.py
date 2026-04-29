@@ -68,6 +68,7 @@ class Command(BaseCommand):
         from production.scheduler.tasks_safety_stock import run_auto_safety_stock
         from production.scheduler.tasks_purchase_actual_reconcile import run_purchase_actual_reconcile_check
         from production.scheduler.tasks_production_actual_reconcile import run_production_actual_reconcile_check
+        from production.scheduler.tasks_plan_to_actual import run_plan_to_actual_copy
         from purchase.order_proposal_views import run_auto_purchase_order_check
 
         # 既存ジョブ（設定チェックを除く）をクリア
@@ -287,6 +288,35 @@ class Command(BaseCommand):
             )
         else:
             logger.info('ジョブ無効: production_actual_reconcile_check')
+
+        plan_to_actual_configs = (
+            ScheduleConfig.objects.select_related('line', 'process')
+            .filter(task_name='PLAN_TO_ACTUAL_COPY')
+        )
+        for cfg in plan_to_actual_configs:
+            if not cfg.is_enabled:
+                logger.info(f'ジョブ無効: plan_to_actual_{cfg.id}')
+                continue
+            if not cfg.line_id or not cfg.process_id:
+                logger.info(f'ジョブ無効(ライン/工程未設定): plan_to_actual_{cfg.id}')
+                continue
+            trigger = CronTrigger(
+                hour=cfg.scheduled_hour,
+                minute=cfg.scheduled_minute,
+                timezone='Asia/Tokyo',
+            )
+            scheduler.add_job(
+                run_plan_to_actual_copy,
+                trigger,
+                id=f'plan_to_actual_{cfg.id}',
+                replace_existing=True,
+                misfire_grace_time=3600,
+                kwargs={'config_id': cfg.id},
+            )
+            logger.info(
+                f'ジョブ登録: plan_to_actual_{cfg.id} - {cfg.scheduled_hour:02d}:{cfg.scheduled_minute:02d} '
+                f'(line={cfg.line.line_code if cfg.line_id else "-"}, process={cfg.process.process_code if cfg.process_id else "-"})'
+            )
 
     def _check_config_changes(self, scheduler):
         """DB設定の変更を検知してジョブを再登録"""

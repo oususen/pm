@@ -57,13 +57,13 @@ const settings = [
     path: "/settings/scheduled-tasks",
     name: "ScheduledTasks",
     component: () => import("@/views/settings/ScheduledTasks.vue"),
-    meta: { pageTitle: "定時タスク設定", resource: "settings.scheduled_tasks" },
+    meta: { pageTitle: "定時タスク設定", manualPath: "設定/定時タスク設定.md", resource: "settings.scheduled_tasks" },
   },
   {
     path: "/settings/inventory-task-settings",
     name: "InventoryTaskSettings",
     component: () => import("@/views/settings/ScheduledTasks.vue"),
-    meta: { pageTitle: "取り込み＋在庫進度計算", resource: "settings.scheduled_tasks" },
+    meta: { pageTitle: "取り込み＋在庫進度計算", manualPath: "設定/定時タスク設定.md", resource: "settings.scheduled_tasks" },
   },
   {
     path: "/settings/task-settings",

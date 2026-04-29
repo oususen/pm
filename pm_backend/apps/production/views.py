@@ -274,6 +274,7 @@ class LineDemandFilter(django_filters.FilterSet):
     """LineDemandのカスタムフィルタ"""
     plan_date__gte = django_filters.DateFilter(field_name='plan_date', lookup_expr='gte')
     plan_date__lte = django_filters.DateFilter(field_name='plan_date', lookup_expr='lte')
+    product__in = django_filters.CharFilter(method='filter_product_in')
     line_search = django_filters.CharFilter(method='filter_line_search')
     process_search = django_filters.CharFilter(method='filter_process_search')
     product_search = django_filters.CharFilter(method='filter_product_search')
@@ -303,6 +304,16 @@ class LineDemandFilter(django_filters.FilterSet):
                 Q(product__product_code__icontains=value) | Q(product__product_name__icontains=value) |
                 Q(product_code__icontains=value)
             )
+        return queryset
+
+    def filter_product_in(self, queryset, name, value):
+        """カンマ区切りの製品IDリストでフィルタ"""
+        if value:
+            try:
+                product_ids = [int(x.strip()) for x in value.split(',') if x.strip()]
+                return queryset.filter(product_id__in=product_ids)
+            except (ValueError, TypeError):
+                return queryset.none()
         return queryset
 
 
@@ -6547,7 +6558,7 @@ class ScheduleConfigView(APIView):
 
     def get(self, request):
         self._ensure_defaults()
-        configs = ScheduleConfig.objects.select_related('line').order_by('task_name', 'execution_order', 'line__line_code')
+        configs = ScheduleConfig.objects.select_related('line', 'process').order_by('task_name', 'execution_order', 'line__line_code')
         serializer = ScheduleConfigSerializer(configs, many=True)
         return Response(serializer.data)
 
@@ -6555,6 +6566,7 @@ class ScheduleConfigView(APIView):
         config_id = request.data.get('id') or request.data.get('config_id')
         task_name = str(request.data.get('task_name', 'INVENTORY_RECALC')).upper()
         line_id = request.data.get('line')
+        process_id = request.data.get('process')
 
         def to_bool(val, default=False):
             if val in (None, ''):
@@ -6660,6 +6672,7 @@ class ScheduleConfigView(APIView):
             )
 
         line_obj = None
+        process_obj = None
         safety_task_names = {'AUTO_SAFETY_STOCK_INTERNAL', 'AUTO_SAFETY_STOCK_PURCHASE'}
         if task_name == 'AUTO_PLAN':
             if not line_id:
@@ -6671,6 +6684,17 @@ class ScheduleConfigView(APIView):
                 return Response({'detail': '実行期間を1つ以上選択してください'}, status=status.HTTP_400_BAD_REQUEST)
         if task_name in safety_task_names and scheduled_dom is None:
             return Response({'detail': '安全在庫タスクは実行日（1-31）を指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+        if task_name == 'PLAN_TO_ACTUAL_COPY':
+            if not line_id:
+                return Response({'detail': 'ラインを指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+            if not process_id:
+                return Response({'detail': '工程を指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+            line_obj = Line.objects.filter(id=line_id, is_active=True).first()
+            if not line_obj:
+                return Response({'detail': '指定されたラインが見つかりません'}, status=status.HTTP_400_BAD_REQUEST)
+            process_obj = Process.objects.filter(id=process_id, line_id=line_id).first()
+            if not process_obj:
+                return Response({'detail': '指定された工程が見つかりません（ライン不一致を含む）'}, status=status.HTTP_400_BAD_REQUEST)
 
         if config_id:
             config = ScheduleConfig.objects.filter(id=config_id).first()
@@ -6680,6 +6704,7 @@ class ScheduleConfigView(APIView):
             config, _ = ScheduleConfig.objects.get_or_create(
                 task_name=task_name,
                 line=line_obj,
+                process=process_obj,
                 defaults={
                     'scheduled_hour': scheduled_hour,
                     'scheduled_minute': scheduled_minute,
@@ -6721,6 +6746,8 @@ class ScheduleConfigView(APIView):
             config.auto_plan_sequence_locked = from_sequence_ui
         if line_obj:
             config.line = line_obj
+        if task_name == 'PLAN_TO_ACTUAL_COPY':
+            config.process = process_obj
         config.updated_by = user
         update_fields = [
             'scheduled_hour', 'scheduled_minute', 'scheduled_dom',
@@ -6728,6 +6755,8 @@ class ScheduleConfigView(APIView):
             'is_enabled', 'include_current_month', 'include_next_month', 'include_second_month', 'include_third_month',
             'line', 'updated_at', 'updated_by',
         ]
+        if task_name == 'PLAN_TO_ACTUAL_COPY':
+            update_fields.append('process')
         if execution_order is not None:
             update_fields.append('execution_order')
         if task_name == 'AUTO_PLAN':
@@ -6769,6 +6798,7 @@ class ScheduleRunNowView(APIView):
         from .scheduler.tasks_order_expansion import run_order_expansion
         from .scheduler.tasks_purchase_actual_reconcile import run_purchase_actual_reconcile_check
         from .scheduler.tasks_production_actual_reconcile import run_production_actual_reconcile_check
+        from .scheduler.tasks_plan_to_actual import run_plan_to_actual_copy
         from purchase.order_proposal_views import run_auto_purchase_order_check
         task = (request.data.get('task_name') or 'INVENTORY_RECALC').upper()
         task_labels = {
@@ -6781,6 +6811,7 @@ class ScheduleRunNowView(APIView):
             'AUTO_PURCHASE_ORDER_CHECK': '発注タイミング日次チェック',
             'PURCHASE_ACTUAL_RECONCILE_CHECK': '納入実績整合チェック',
             'PRODUCTION_ACTUAL_RECONCILE_CHECK': '生産実績整合チェック',
+            'PLAN_TO_ACTUAL_COPY': '計画実績自動セット',
         }
         config_id = request.data.get('config_id') or request.data.get('id')
         line_id = request.data.get('line')
@@ -6830,6 +6861,10 @@ class ScheduleRunNowView(APIView):
                             run_purchase_actual_reconcile_check(apply_fix=False)
                         elif task == 'PRODUCTION_ACTUAL_RECONCILE_CHECK':
                             run_production_actual_reconcile_check(apply_fix=False)
+                        elif task == 'PLAN_TO_ACTUAL_COPY':
+                            if not config_id:
+                                raise ValueError('PLAN_TO_ACTUAL_COPY は config_id が必要です')
+                            run_plan_to_actual_copy(config_id=int(config_id))
                         else:
                             run_inventory_recalculation(task_name=task)
                     except Exception:

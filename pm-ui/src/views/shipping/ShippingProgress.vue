@@ -43,9 +43,10 @@
           <div v-if="groups.length" class="group-list">
             <div v-for="g in pagedGroups" :key="g.key" class="group-card">
               <div class="info-block">
-                <div class="info-row">
+                <div class="info-row product-code-row">
                   <span class="info-label">品番</span>
                   <span class="info-value">{{ g.product_code || "-" }}</span>
+                  <button type="button" class="routing-expand-btn" @click="openOrderExpansionPage(g)">routing展開</button>
                 </div>
                 <div class="info-row">
                   <span class="info-label">品名</span>
@@ -205,6 +206,7 @@
 
 <script setup>
 import { computed, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import api from "@/api/client";
 import {
   compareBySpecialOrderThenProductCode,
@@ -229,9 +231,68 @@ const daisoCalendarId = ref(null);
 const currentPage = ref(1);
 const pageSize = ref(20);
 const splitByShipTo = ref(true);
+const router = useRouter();
+const routingExpandStates = ref({});
+const productCacheByCode = new Map();
 
 const normalizeList = (payload) => {
   return Array.isArray(payload) ? payload : payload?.results || [];
+};
+
+const normalizeQty = (value) => {
+  const num = Number(value || 0);
+  return Number.isFinite(num) ? num : 0;
+};
+
+const addQtyToMap = (target, date, qty) => {
+  if (!date) return;
+  const current = normalizeQty(target[date]);
+  target[date] = current + normalizeQty(qty);
+};
+
+const toIsoDate = (value) => {
+  if (!value) return "";
+  if (typeof value === "string") return value.slice(0, 10);
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? "" : formatISODate(d);
+};
+
+const shiftBusinessDays = (dateStr, days) => {
+  const base = parseISODate(dateStr);
+  if (!base || Number.isNaN(base.getTime())) return dateStr;
+  if (!Number.isFinite(days) || days === 0) return formatISODate(base);
+  const step = days > 0 ? 1 : -1;
+  let remain = Math.abs(days);
+  let cur = new Date(base);
+  while (remain > 0) {
+    cur = addDays(cur, step);
+    const iso = formatISODate(cur);
+    if (!isHoliday(iso)) remain -= 1;
+  }
+  return formatISODate(cur);
+};
+
+const getRoutingExpandStateByKey = (groupKey) => {
+  if (!routingExpandStates.value[groupKey]) {
+    routingExpandStates.value[groupKey] = {
+      open: false,
+      loading: false,
+      loaded: false,
+      error: "",
+      nodes: [],
+    };
+  }
+  return routingExpandStates.value[groupKey];
+};
+
+const getRoutingExpandState = (group) => getRoutingExpandStateByKey(group.key);
+const isRoutingExpandLoading = (group) => getRoutingExpandState(group).loading;
+const isRoutingExpanded = (group) => getRoutingExpandState(group).open;
+
+const getRoutingExpandButtonLabel = (group) => {
+  const state = getRoutingExpandState(group);
+  if (state.loading) return "展開中...";
+  return state.open ? "routing閉じる" : "routing展開";
 };
 
 const ORDER_LINES_PAGE_SIZE = 20000;
@@ -414,6 +475,7 @@ const groups = computed(() => {
     if (!map.has(groupKey)) {
       map.set(groupKey, {
         key: groupKey,
+        product_id: order.product || order.product_id || null,
         product_code: order.product_code,
         product_name: order.product_name,
         customer_code: customerCode,
@@ -626,10 +688,263 @@ const getProgressRate = (group, date) => {
   return cumulativeProgress.toLocaleString();
 };
 
+const openOrderExpansionPage = (group) => {
+  router.push({
+    name: "ShippingOrderExpansion",
+    query: {
+      product_code: group.product_code || "",
+      customer_code: group.customer_code || "",
+      ship_to_code: group.ship_to_code || "",
+      start_date: startDate.value || "",
+      horizon: String(horizon.value || 30),
+    },
+  });
+};
+
+const getProductByCode = async (productCode) => {
+  const code = String(productCode || "").trim();
+  if (!code) return null;
+  if (productCacheByCode.has(code)) return productCacheByCode.get(code);
+  const res = await api.products.getProductsByCodesIn([code]);
+  const rows = normalizeList(res.data || []);
+  const found = rows.find((row) => String(row.product_code || "").trim() === code) || rows[0] || null;
+  productCacheByCode.set(code, found);
+  return found;
+};
+
+const getBOMChildrenByProductId = async (productId) => {
+  const bomRes = await api.boms.getBOMs({ parent_product: productId, page_size: 200 });
+  const allBoms = normalizeList(bomRes.data || []);
+  if (!allBoms.length) return [];
+
+  const parseTs = (row) => {
+    const raw = row?.valid_from_datetime || row?.valid_from || row?.created_at || "";
+    const ts = Date.parse(raw);
+    return Number.isFinite(ts) ? ts : 0;
+  };
+  const activeBoms = allBoms.filter((b) => b.is_active);
+  const candidates = activeBoms.length ? activeBoms : allBoms;
+  const targetBom = [...candidates].sort((a, b) => parseTs(b) - parseTs(a))[0];
+  if (!targetBom?.id) return [];
+
+  const merged = new Map();
+  const itemsRes = await api.bomItems.getBOMItems({ bom: targetBom.id, page_size: 2000 });
+  const items = normalizeList(itemsRes.data || []);
+  for (const item of items) {
+    const childId = Number(item.child_product || 0);
+    if (!childId) continue;
+    const key = String(childId);
+    const current = merged.get(key) || {
+      child_product: childId,
+      child_product_code: item.child_product_code || "",
+      child_product_name: item.child_product_name || "",
+      quantity: 0,
+    };
+    current.quantity += normalizeQty(item.quantity || 0);
+    merged.set(key, current);
+  }
+  return Array.from(merged.values()).filter((row) => normalizeQty(row.quantity) > 0);
+};
+
+const getRoutingMaterialChildrenByProductId = async (productId) => {
+  const routingsRes = await api.routings.getRoutings({ product: productId, page_size: 200 });
+  const routings = normalizeList(routingsRes.data || []);
+  if (!routings.length) return [];
+
+  const merged = new Map();
+  for (const routing of routings) {
+    const materialsRes = await api.routings.getRoutingStepMaterials({ routing: routing.id, page_size: 5000 });
+    const materials = normalizeList(materialsRes.data || []);
+    for (const material of materials) {
+      const childId = Number(material.component || 0);
+      if (!childId) continue;
+      const key = String(childId);
+      const current = merged.get(key) || {
+        child_product: childId,
+        child_product_code: material.component_code || "",
+        child_product_name: material.component_name || "",
+        quantity: 0,
+      };
+      current.quantity += normalizeQty(material.quantity || 0);
+      merged.set(key, current);
+    }
+  }
+  return Array.from(merged.values()).filter((row) => normalizeQty(row.quantity) > 0);
+};
+
+const getChildrenByProductId = async (productId) => {
+  const bomChildren = await getBOMChildrenByProductId(productId);
+  if (bomChildren.length > 0) return bomChildren;
+  return getRoutingMaterialChildrenByProductId(productId);
+};
+
+const buildRoutingTree = async (rootProductId) => {
+  const nodesByProduct = new Map();
+  const edgesByParent = new Map();
+  const visited = new Set();
+
+  const walk = async (productId) => {
+    if (!productId || visited.has(productId)) return;
+    visited.add(productId);
+    const items = await getChildrenByProductId(productId);
+    const children = [];
+    for (const item of items) {
+      const childId = Number(item.child_product || 0);
+      if (!childId) continue;
+      children.push({ childId, quantity: normalizeQty(item.quantity || 1) });
+      if (!nodesByProduct.has(childId)) {
+        nodesByProduct.set(childId, {
+          product_id: childId,
+          product_code: item.child_product_code || "",
+          product_name: item.child_product_name || "",
+        });
+      }
+      await walk(childId);
+    }
+    edgesByParent.set(productId, children);
+  };
+
+  await walk(rootProductId);
+  return { nodesByProduct, edgesByParent };
+};
+
+const fetchBacklogsByProducts = async (productIds) => {
+  if (!productIds.length) return [];
+  const start = shiftBusinessDays(columns.value[0], -365);
+  const end = columns.value[columns.value.length - 1];
+  const res = await api.lineBacklogs.getLineBacklogs({
+    product__in: productIds.join(","),
+    plan_date__gte: start,
+    plan_date__lte: end,
+    include_order_split: true,
+    page_size: 50000,
+  });
+  return normalizeList(res.data || []);
+};
+
+const buildBacklogMaps = (rows) => {
+  const daily = new Map();
+  const ltByProduct = new Map();
+  for (const row of rows) {
+    const pid = Number(row.product || 0);
+    const date = toIsoDate(row.plan_date);
+    if (!pid || !date) continue;
+    if (!daily.has(pid)) daily.set(pid, {});
+    const target = daily.get(pid);
+    if (!target[date]) target[date] = { planned_progress: 0, progress: 0 };
+    target[date].planned_progress += normalizeQty(row.planned_progress_qty);
+    target[date].progress += normalizeQty(row.progress_qty);
+
+    if (!ltByProduct.has(pid)) {
+      const selfLt = row.self_lt_days !== null && row.self_lt_days !== undefined ? Number(row.self_lt_days) : null;
+      const totalLt = row.total_lt_days !== null && row.total_lt_days !== undefined ? Number(row.total_lt_days) : null;
+      ltByProduct.set(pid, {
+        self_lt_days: Number.isFinite(selfLt) ? selfLt : null,
+        total_lt_days: Number.isFinite(totalLt) ? totalLt : null,
+      });
+    }
+  }
+  return { daily, ltByProduct };
+};
+
+const buildRootRequiredMap = (group) => {
+  const required = {};
+  for (const date of columns.value) {
+    const firm = normalizeQty(getValue(group, date, "firm"));
+    const forecast = normalizeQty(getValue(group, date, "forecast"));
+    const demand = firm > 0 ? firm : forecast;
+    if (demand > 0) addQtyToMap(required, date, demand);
+  }
+  return required;
+};
+
+const buildExpandedNodes = (group, tree, backlogMaps, rootProductId) => {
+  const { edgesByParent, nodesByProduct } = tree;
+  const { daily, ltByProduct } = backlogMaps;
+  const result = [];
+  const seenPath = new Set();
+
+  const walk = (parentProductId, parentRequired, level) => {
+    const edges = edgesByParent.get(parentProductId) || [];
+    for (const edge of edges) {
+      const childId = edge.childId;
+      const pathKey = `${parentProductId}->${childId}`;
+      if (seenPath.has(pathKey)) continue;
+      seenPath.add(pathKey);
+
+      const childMeta = nodesByProduct.get(childId) || {};
+      const ltMeta = ltByProduct.get(childId) || {};
+      const ltDays = Number.isFinite(ltMeta.self_lt_days) ? ltMeta.self_lt_days : (Number.isFinite(ltMeta.total_lt_days) ? ltMeta.total_lt_days : 0);
+      const childRequired = {};
+      Object.entries(parentRequired).forEach(([parentDate, parentQty]) => {
+        const shifted = shiftBusinessDays(parentDate, -Math.max(0, Number(ltDays || 0)));
+        addQtyToMap(childRequired, shifted, normalizeQty(parentQty) * normalizeQty(edge.quantity || 1));
+      });
+
+      const perDay = daily.get(childId) || {};
+      const plannedProgress = {};
+      const progress = {};
+      for (const date of columns.value) {
+        plannedProgress[date] = normalizeQty(perDay?.[date]?.planned_progress);
+        progress[date] = normalizeQty(perDay?.[date]?.progress);
+      }
+
+      result.push({
+        key: `${group.key}-${childId}-${level}`,
+        product_id: childId,
+        product_code: childMeta.product_code || String(childId),
+        product_name: childMeta.product_name || "",
+        level,
+        lt_days: ltDays,
+        required: childRequired,
+        planned_progress: plannedProgress,
+        progress,
+      });
+
+      walk(childId, childRequired, level + 1);
+    }
+  };
+
+  walk(rootProductId, buildRootRequiredMap(group), 1);
+  return result;
+};
+
+const toggleRoutingExpand = async (group) => {
+  const state = getRoutingExpandState(group);
+  state.open = !state.open;
+  if (!state.open || state.loaded || state.loading) return;
+  state.loading = true;
+  state.error = "";
+  try {
+    let rootProductId = Number(group.product_id || 0);
+    if (!rootProductId) {
+      const product = await getProductByCode(group.product_code);
+      rootProductId = Number(product?.id || 0);
+    }
+    if (!rootProductId) {
+      throw new Error("品番マスタに対象製品が見つかりません。");
+    }
+
+    const tree = await buildRoutingTree(rootProductId);
+    const expandedProductIds = Array.from(tree.nodesByProduct.keys());
+    const backlogRows = await fetchBacklogsByProducts(expandedProductIds);
+    const backlogMaps = buildBacklogMaps(backlogRows);
+    state.nodes = buildExpandedNodes(group, tree, backlogMaps, rootProductId);
+    state.loaded = true;
+  } catch (e) {
+    console.error("routing展開の取得に失敗:", e);
+    state.error = e?.message || "展開の取得に失敗しました。";
+    state.nodes = [];
+  } finally {
+    state.loading = false;
+  }
+};
+
 const load = async () => {
   loading.value = true;
   error.value = "";
   searched.value = true;
+  routingExpandStates.value = {};
   try {
     orderLines.value = await fetchAllOpenOrderLines();
     const shipmentActualsRes = await api.shipmentActuals.getShipmentActuals({
@@ -833,6 +1148,78 @@ watch(groups, () => {
 }
 .info-row:last-child {
   border-bottom: none;
+}
+.product-code-row {
+  justify-content: flex-start;
+  gap: 8px;
+}
+.routing-expand-btn {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid #2563eb;
+  border-radius: 4px;
+  background: #3b82f6;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.routing-expand-btn:hover {
+  background: #2563eb;
+}
+.routing-expand-btn:disabled {
+  background: #9ca3af;
+  border-color: #9ca3af;
+  cursor: not-allowed;
+}
+.routing-expand-area {
+  border-top: 1px solid #e5e7eb;
+  background: #f8fafc;
+  padding: 10px;
+}
+.routing-expand-error,
+.routing-expand-empty {
+  font-size: 12px;
+  color: #475569;
+  padding: 6px 4px;
+}
+.routing-node-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.routing-node-card {
+  border: 1px solid #dbe4f0;
+  border-radius: 6px;
+  background: #fff;
+  overflow: hidden;
+}
+.routing-node-header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 8px;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 12px;
+  background: #f1f5f9;
+}
+.routing-node-level {
+  font-weight: 700;
+  color: #334155;
+}
+.routing-node-code {
+  font-weight: 700;
+  color: #0f172a;
+}
+.routing-node-name {
+  color: #334155;
+}
+.routing-node-lt {
+  margin-left: auto;
+  color: #475569;
+}
+.routing-node-table {
+  min-width: 900px;
 }
 .info-label {
   font-weight: 600;
