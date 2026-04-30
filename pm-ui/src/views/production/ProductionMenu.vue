@@ -73,6 +73,13 @@ const tiles = computed(() => {
       resource: "production.process_input",
     },
     {
+      to: "/production/simultaneous-process-input",
+      label: t("productionMenu.tiles.simultaneousInput"),
+      icon: "🔄",
+      required: "edit",
+      resource: "production.process_input",
+    },
+    {
       to: "/production/laser-process-input",
       label: "レーザー実績入力",
       icon: "🧱",

@@ -174,6 +174,16 @@ const production = [
     },
   },
   {
+    path: "/production/simultaneous-process-input",
+    name: "SimultaneousProcessInput",
+    component: () => import("@/views/production/SimultaneousProcessInput.vue"),
+    meta: {
+      pageTitle: "同時加工入力",
+      allowedRecordTypes: ["PRODUCTION", "EQUIPMENT_STATE"],
+      manualPath: "生産/工程作業入力.md",
+    },
+  },
+  {
     path: "/production/laser-process-input",
     name: "LaserProcessInput",
     component: () => import("@/views/production/LaserProcessInput.vue"),

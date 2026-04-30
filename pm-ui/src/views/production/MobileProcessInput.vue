@@ -12,7 +12,7 @@
       <div class="inline-group">
         <label class="label-required inline-label">{{ t('processInput.line') }}</label>
         <div class="line-select-row">
-          <select v-model="selectedLineId" @change="onLineChange" class="input-large flex-input">
+          <select v-model="selectedLineId" @change="onLineChange" class="input-large flex-input" :disabled="isEmbeddedTablet">
             <option value="">{{ t('processInput.selectLine') }}</option>
             <option v-for="line in availableLines" :key="line.id" :value="String(line.id)">
               {{ line.line_code }} - {{ line.line_name }}
@@ -36,7 +36,7 @@
           v-model="selectedProcessId"
           @change="onProcessChange"
           class="input-large flex-input"
-          :disabled="!selectedLineId"
+          :disabled="!selectedLineId || isEmbeddedTablet"
         >
           <option value="">{{ t('processInput.selectProcess') }}</option>
           <option v-for="p in filteredProcesses" :key="p.id" :value="p.id">
@@ -3392,6 +3392,14 @@ onMounted(async () => {
   if (queryProcessId) {
     selectedProcessId.value = String(queryProcessId)
     onProcessChange()
+  }
+  if (route.query.operator_name !== undefined) {
+    const name = String(route.query.operator_name || '')
+    defaultOperatorName.value = name
+    record.value.operator_name = name
+  } else if (route.query.clear_operator === '1') {
+    defaultOperatorName.value = ''
+    record.value.operator_name = ''
   }
 })
 
