@@ -1,15 +1,15 @@
 <template>
   <div class="tablet-process-input">
     <div class="header">
-      <h2>工程作業記録（タブレット）</h2>
+      <h2>{{ t('tabletProcessInput.title') }}</h2>
     </div>
 
     <div class="selectors">
       <div class="selector">
-        <label>ライン</label>
+        <label>{{ t('processInput.line') }}</label>
         <div class="line-select-row">
           <select v-model="selectedLineId">
-            <option value="">-- ラインを選択 --</option>
+            <option value="">{{ t('processInput.selectLine') }}</option>
             <option v-for="line in availableLines" :key="line.id" :value="String(line.id)">
               {{ line.line_code }} - {{ line.line_name }}
             </option>
@@ -21,23 +21,23 @@
             :class="{ active: isSupportMode }"
             @click="toggleSupportMode"
           >
-            {{ isSupportMode ? '応援ON' : '応援OFF' }}
+            {{ isSupportMode ? t('tabletProcessInput.supportOn') : t('tabletProcessInput.supportOff') }}
           </button>
         </div>
       </div>
       <div class="selector">
-        <label>主工程</label>
+        <label>{{ t('tabletProcessInput.primaryProcess') }}</label>
         <select v-model="primaryProcessId">
-          <option value="">-- 工程を選択 --</option>
+          <option value="">{{ t('processInput.selectProcess') }}</option>
           <option v-for="proc in filteredProcesses" :key="`p-${proc.id}`" :value="String(proc.id)">
             {{ proc.process_code }} - {{ proc.process_name }}
           </option>
         </select>
       </div>
       <div class="selector">
-        <label>同時担当工程（任意）</label>
+        <label>{{ t('tabletProcessInput.secondaryProcess') }}</label>
         <select v-model="secondaryProcessId">
-          <option value="">-- 工程を選択 --</option>
+          <option value="">{{ t('processInput.selectProcess') }}</option>
           <option v-for="proc in filteredProcesses" :key="`s-${proc.id}`" :value="String(proc.id)">
             {{ proc.process_code }} - {{ proc.process_name }}
           </option>
@@ -47,7 +47,7 @@
 
     <div class="panels">
       <section class="panel">
-        <div class="panel-title">主工程入力</div>
+        <div class="panel-title">{{ t('tabletProcessInput.primaryPanel') }}</div>
         <div v-if="primaryProcessId" class="panel-frame-wrap">
           <iframe
             :src="primaryFrameSrc"
@@ -55,11 +55,11 @@
             title="primary-process-input"
           />
         </div>
-        <div v-else class="panel-empty">主工程を選択してください。</div>
+        <div v-else class="panel-empty">{{ t('tabletProcessInput.selectPrimary') }}</div>
       </section>
 
       <section class="panel">
-        <div class="panel-title">同時担当工程入力</div>
+        <div class="panel-title">{{ t('tabletProcessInput.secondaryPanel') }}</div>
         <div v-if="secondaryProcessId" class="panel-frame-wrap">
           <iframe
             :src="secondaryFrameSrc"
@@ -67,7 +67,7 @@
             title="secondary-process-input"
           />
         </div>
-        <div v-else class="panel-empty">同時担当工程を選択してください。</div>
+        <div v-else class="panel-empty">{{ t('tabletProcessInput.selectSecondary') }}</div>
       </section>
     </div>
   </div>
@@ -77,6 +77,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
+import { t } from '@/i18n'
 
 const lines = ref([])
 const processes = ref([])
@@ -130,14 +131,15 @@ const filteredProcesses = computed(() => {
 })
 
 const frameBasePath = '/production/mobile-process-input'
+const supportModeParam = computed(() => (isSupportMode.value ? 'on' : 'off'))
 const primaryFrameSrc = computed(() =>
   primaryProcessId.value
-    ? `${frameBasePath}?process_id=${encodeURIComponent(primaryProcessId.value)}&embed=tablet`
+    ? `${frameBasePath}?process_id=${encodeURIComponent(primaryProcessId.value)}&embed=tablet&support_mode=${supportModeParam.value}`
     : '',
 )
 const secondaryFrameSrc = computed(() =>
   secondaryProcessId.value
-    ? `${frameBasePath}?process_id=${encodeURIComponent(secondaryProcessId.value)}&embed=tablet`
+    ? `${frameBasePath}?process_id=${encodeURIComponent(secondaryProcessId.value)}&embed=tablet&support_mode=${supportModeParam.value}`
     : '',
 )
 

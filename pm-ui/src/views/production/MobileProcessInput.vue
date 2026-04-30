@@ -3324,6 +3324,17 @@ const toggleSupportMode = () => {
   }
 }
 
+const applySupportModeFromQuery = () => {
+  const raw = String(route.query.support_mode || '').toLowerCase()
+  if (raw === 'on' || raw === '1' || raw === 'true') {
+    isSupportMode.value = true
+    return
+  }
+  if (raw === 'off' || raw === '0' || raw === 'false') {
+    isSupportMode.value = false
+  }
+}
+
 const applyInitialLineSelection = () => {
   const candidateList = Array.isArray(availableLines.value) ? availableLines.value : []
   if (!candidateList.length) {
@@ -3373,6 +3384,7 @@ const restorePendingProductChecksheetInput = () => {
 
 onMounted(async () => {
   await ensureAuth()
+  applySupportModeFromQuery()
   await Promise.all([loadLines(), loadProcesses()])
   applyInitialLineSelection()
   if (restorePendingProductChecksheetInput()) return
@@ -3382,6 +3394,13 @@ onMounted(async () => {
     onProcessChange()
   }
 })
+
+watch(
+  () => route.query.support_mode,
+  () => {
+    applySupportModeFromQuery()
+  },
+)
 </script>
 
 <style scoped>

@@ -63,6 +63,14 @@ export const getLocaleOptions = () =>
 
 export const getLocaleCode = () => LOCALE_CODES[locale.value] || LOCALE_CODES[DEFAULT_LOCALE]
 
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key === STORAGE_KEY && event.newValue && SUPPORTED_LOCALES.includes(event.newValue)) {
+      locale.value = event.newValue
+    }
+  })
+}
+
 const MESSAGES = {
   ja: {
     'nav.subtitle': '管理システム',
@@ -425,6 +433,15 @@ const MESSAGES = {
     'approvalList.error.approve': '承認に失敗しました: ',
     'approvalList.error.reject': '却下に失敗しました: ',
     'approvalList.error.bulk': '一括確認依頼に失敗しました: ',
+    'tabletProcessInput.title': '工程作業記録（タブレット）',
+    'tabletProcessInput.primaryProcess': '主工程',
+    'tabletProcessInput.secondaryProcess': '同時担当工程（任意）',
+    'tabletProcessInput.supportOn': '応援ON',
+    'tabletProcessInput.supportOff': '応援OFF',
+    'tabletProcessInput.primaryPanel': '主工程入力',
+    'tabletProcessInput.secondaryPanel': '同時担当工程入力',
+    'tabletProcessInput.selectPrimary': '主工程を選択してください。',
+    'tabletProcessInput.selectSecondary': '同時担当工程を選択してください。',
   },
   pt: {
     'nav.subtitle': 'Sistema de Gestão',
@@ -787,6 +804,15 @@ const MESSAGES = {
     'approvalList.error.approve': 'Falha na aprovação: ',
     'approvalList.error.reject': 'Falha na rejeição: ',
     'approvalList.error.bulk': 'Falha na solicitação em massa: ',
+    'tabletProcessInput.title': 'Registro de Trabalho (Tablet)',
+    'tabletProcessInput.primaryProcess': 'Processo Principal',
+    'tabletProcessInput.secondaryProcess': 'Processo Simultâneo (opcional)',
+    'tabletProcessInput.supportOn': 'Apoio ON',
+    'tabletProcessInput.supportOff': 'Apoio OFF',
+    'tabletProcessInput.primaryPanel': 'Entrada do Processo Principal',
+    'tabletProcessInput.secondaryPanel': 'Entrada do Processo Simultâneo',
+    'tabletProcessInput.selectPrimary': 'Selecione o processo principal.',
+    'tabletProcessInput.selectSecondary': 'Selecione o processo simultâneo.',
   },
   th: {
     'nav.subtitle': 'ระบบการจัดการ',
@@ -1149,6 +1175,15 @@ const MESSAGES = {
     'approvalList.error.approve': 'การอนุมัติล้มเหลว: ',
     'approvalList.error.reject': 'การปฏิเสธล้มเหลว: ',
     'approvalList.error.bulk': 'การขออนุมัติทีเดียวล้มเหลว: ',
+    'tabletProcessInput.title': 'บันทึกงาน (แท็บเล็ต)',
+    'tabletProcessInput.primaryProcess': 'กระบวนการหลัก',
+    'tabletProcessInput.secondaryProcess': 'กระบวนการร่วม (ไม่บังคับ)',
+    'tabletProcessInput.supportOn': 'สนับสนุน ON',
+    'tabletProcessInput.supportOff': 'สนับสนุน OFF',
+    'tabletProcessInput.primaryPanel': 'ป้อนข้อมูลกระบวนการหลัก',
+    'tabletProcessInput.secondaryPanel': 'ป้อนข้อมูลกระบวนการร่วม',
+    'tabletProcessInput.selectPrimary': 'กรุณาเลือกกระบวนการหลัก',
+    'tabletProcessInput.selectSecondary': 'กรุณาเลือกกระบวนการร่วม',
   },
   vi: {
     'nav.subtitle': 'Hệ thống quản lý',
@@ -1511,5 +1546,14 @@ const MESSAGES = {
     'approvalList.error.approve': 'Phê duyệt thất bại: ',
     'approvalList.error.reject': 'Từ chối thất bại: ',
     'approvalList.error.bulk': 'Yêu cầu hàng loạt thất bại: ',
+    'tabletProcessInput.title': 'Ghi nhận thao tác (Máy tính bảng)',
+    'tabletProcessInput.primaryProcess': 'Công đoạn chính',
+    'tabletProcessInput.secondaryProcess': 'Công đoạn đồng thời (tùy chọn)',
+    'tabletProcessInput.supportOn': 'Hỗ trợ ON',
+    'tabletProcessInput.supportOff': 'Hỗ trợ OFF',
+    'tabletProcessInput.primaryPanel': 'Nhập công đoạn chính',
+    'tabletProcessInput.secondaryPanel': 'Nhập công đoạn đồng thời',
+    'tabletProcessInput.selectPrimary': 'Vui lòng chọn công đoạn chính.',
+    'tabletProcessInput.selectSecondary': 'Vui lòng chọn công đoạn đồng thời.',
   },
 }
