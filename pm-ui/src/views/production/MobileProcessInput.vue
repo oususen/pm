@@ -11,12 +11,23 @@
     <div class="section inline-row dual-row compact-label-row">
       <div class="inline-group">
         <label class="label-required inline-label">{{ t('processInput.line') }}</label>
-        <select v-model="selectedLineId" @change="onLineChange" class="input-large flex-input">
-          <option value="">{{ t('processInput.selectLine') }}</option>
-          <option v-for="line in availableLines" :key="line.id" :value="String(line.id)">
-            {{ line.line_code }} - {{ line.line_name }}
-          </option>
-        </select>
+        <div class="line-select-row">
+          <select v-model="selectedLineId" @change="onLineChange" class="input-large flex-input">
+            <option value="">{{ t('processInput.selectLine') }}</option>
+            <option v-for="line in availableLines" :key="line.id" :value="String(line.id)">
+              {{ line.line_code }} - {{ line.line_name }}
+            </option>
+          </select>
+          <button
+            v-if="showSupportToggle"
+            type="button"
+            class="support-toggle-btn"
+            :class="{ active: isSupportMode }"
+            @click="toggleSupportMode"
+          >
+            {{ isSupportMode ? '応援ON' : '応援OFF' }}
+          </button>
+        </div>
       </div>
 
       <div class="inline-group">
@@ -557,6 +568,7 @@ const processes = ref([])
 const lines = ref([])
 const selectedLineId = ref('')
 const selectedProcessId = ref('')
+const isSupportMode = ref(false)
 const recentRecords = ref([])
 const submitting = ref(false)
 
@@ -703,10 +715,18 @@ const preferredUserLineId = computed(() => {
   const target = defaultMapping || mappings[0]
   return target?.line_id ? String(target.line_id) : ''
 })
-const availableLines = computed(() => {
+const ownLines = computed(() => {
   const allowedIds = userAllowedLineIdSet.value
   if (!allowedIds.size) return lines.value
   return lines.value.filter((line) => allowedIds.has(String(line.id)))
+})
+const showSupportToggle = computed(() => {
+  const ownCount = ownLines.value.length
+  return ownCount > 0 && ownCount < lines.value.length
+})
+const availableLines = computed(() => {
+  if (isSupportMode.value) return lines.value
+  return ownLines.value
 })
 
 const isScrapOnlyPage = computed(() => route.name === 'ScrapRecordInput')
@@ -1015,6 +1035,25 @@ watch(
     selectedLineId.value = candidateList.length ? String(candidateList[0].id) : ''
   },
   { immediate: true }
+)
+
+watch(
+  ownLines,
+  (nextOwnLines) => {
+    if (isSupportMode.value) return
+    const ownIds = new Set((nextOwnLines || []).map((line) => String(line.id)))
+    if (selectedLineId.value && ownIds.has(String(selectedLineId.value))) return
+    const preferred = preferredUserLineId.value
+    if (preferred && ownIds.has(String(preferred))) {
+      selectedLineId.value = String(preferred)
+      onLineChange()
+      return
+    }
+    if (nextOwnLines.length) {
+      selectedLineId.value = String(nextOwnLines[0].id)
+      onLineChange()
+    }
+  },
 )
 
 watch(
@@ -3265,6 +3304,40 @@ const loadLines = async () => {
   }
 }
 
+const toggleSupportMode = () => {
+  isSupportMode.value = !isSupportMode.value
+  if (isSupportMode.value) return
+  const ownIds = new Set(ownLines.value.map((line) => String(line.id)))
+  if (selectedLineId.value && ownIds.has(String(selectedLineId.value))) return
+  const preferred = preferredUserLineId.value
+  if (preferred && ownIds.has(String(preferred))) {
+    selectedLineId.value = String(preferred)
+    onLineChange()
+    return
+  }
+  if (ownLines.value.length) {
+    selectedLineId.value = String(ownLines.value[0].id)
+    onLineChange()
+  } else {
+    selectedLineId.value = ''
+    onLineChange()
+  }
+}
+
+const applyInitialLineSelection = () => {
+  const candidateList = Array.isArray(availableLines.value) ? availableLines.value : []
+  if (!candidateList.length) {
+    selectedLineId.value = ''
+    return
+  }
+  const preferred = preferredUserLineId.value
+  if (preferred && candidateList.some((line) => String(line.id) === String(preferred))) {
+    selectedLineId.value = String(preferred)
+    return
+  }
+  selectedLineId.value = String(candidateList[0].id)
+}
+
 function openEquipmentInspection() {
   const processId = selectedProcessId.value || undefined
   const lineId = selectedLineId.value || undefined
@@ -3301,6 +3374,7 @@ const restorePendingProductChecksheetInput = () => {
 onMounted(async () => {
   await ensureAuth()
   await Promise.all([loadLines(), loadProcesses()])
+  applyInitialLineSelection()
   if (restorePendingProductChecksheetInput()) return
   const queryProcessId = route.query.process_id
   if (queryProcessId) {
@@ -3987,6 +4061,30 @@ label {
 
 .flex-input {
   flex: 1;
+}
+.line-select-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.support-toggle-btn {
+  height: 38px;
+  min-width: 78px;
+  padding: 0 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.support-toggle-btn.active {
+  border-color: #f59e0b;
+  background: #ffedd5;
+  color: #9a3412;
 }
 
 .product-row {

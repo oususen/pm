@@ -7,12 +7,23 @@
     <div class="selectors">
       <div class="selector">
         <label>ライン</label>
-        <select v-model="selectedLineId">
-          <option value="">-- ラインを選択 --</option>
-          <option v-for="line in availableLines" :key="line.id" :value="String(line.id)">
-            {{ line.line_code }} - {{ line.line_name }}
-          </option>
-        </select>
+        <div class="line-select-row">
+          <select v-model="selectedLineId">
+            <option value="">-- ラインを選択 --</option>
+            <option v-for="line in availableLines" :key="line.id" :value="String(line.id)">
+              {{ line.line_code }} - {{ line.line_name }}
+            </option>
+          </select>
+          <button
+            v-if="showSupportToggle"
+            type="button"
+            class="support-toggle-btn"
+            :class="{ active: isSupportMode }"
+            @click="toggleSupportMode"
+          >
+            {{ isSupportMode ? '応援ON' : '応援OFF' }}
+          </button>
+        </div>
       </div>
       <div class="selector">
         <label>主工程</label>
@@ -73,6 +84,7 @@ const processes = ref([])
 const selectedLineId = ref('')
 const primaryProcessId = ref('')
 const secondaryProcessId = ref('')
+const isSupportMode = ref(false)
 
 const userUnitLines = computed(() => {
   const unitLines = authState.user?.profile?.unit_lines
@@ -88,10 +100,28 @@ const userAllowedLineIdSet = computed(
     ),
 )
 
-const availableLines = computed(() => {
+const preferredUserLineId = computed(() => {
+  const mappings = userUnitLines.value
+  if (!mappings.length) return ''
+  const defaultMapping = mappings.find((item) => item?.is_default)
+  const target = defaultMapping || mappings[0]
+  return target?.line_id ? String(target.line_id) : ''
+})
+
+const ownLines = computed(() => {
   const allowedIds = userAllowedLineIdSet.value
   if (!allowedIds.size) return lines.value
   return lines.value.filter((line) => allowedIds.has(String(line.id)))
+})
+
+const showSupportToggle = computed(() => {
+  const ownCount = ownLines.value.length
+  return ownCount > 0 && ownCount < lines.value.length
+})
+
+const availableLines = computed(() => {
+  if (isSupportMode.value) return lines.value
+  return ownLines.value
 })
 
 const filteredProcesses = computed(() => {
@@ -117,6 +147,21 @@ watch(selectedLineId, () => {
   if (!validSet.has(secondaryProcessId.value)) secondaryProcessId.value = ''
 })
 
+watch(
+  [availableLines, preferredUserLineId],
+  ([nextLines, nextPreferred]) => {
+    const candidateList = Array.isArray(nextLines) ? nextLines : []
+    const exists = candidateList.some((line) => String(line.id) === String(selectedLineId.value))
+    if (exists) return
+    if (nextPreferred && candidateList.some((line) => String(line.id) === String(nextPreferred))) {
+      selectedLineId.value = String(nextPreferred)
+      return
+    }
+    selectedLineId.value = candidateList.length ? String(candidateList[0].id) : ''
+  },
+  { immediate: true },
+)
+
 const loadLines = async () => {
   const res = await api.lines.getProductionLines()
   lines.value = res.data.results || res.data || []
@@ -127,12 +172,37 @@ const loadProcesses = async () => {
   processes.value = res.data.results || res.data || []
 }
 
+const applyInitialLineSelection = () => {
+  const candidateList = Array.isArray(availableLines.value) ? availableLines.value : []
+  if (!candidateList.length) {
+    selectedLineId.value = ''
+    return
+  }
+  const preferred = preferredUserLineId.value
+  if (preferred && candidateList.some((line) => String(line.id) === String(preferred))) {
+    selectedLineId.value = String(preferred)
+    return
+  }
+  selectedLineId.value = String(candidateList[0].id)
+}
+
+const toggleSupportMode = () => {
+  isSupportMode.value = !isSupportMode.value
+  if (isSupportMode.value) return
+  const ownIds = new Set(ownLines.value.map((line) => String(line.id)))
+  if (selectedLineId.value && ownIds.has(String(selectedLineId.value))) return
+  const preferred = preferredUserLineId.value
+  if (preferred && ownIds.has(String(preferred))) {
+    selectedLineId.value = String(preferred)
+    return
+  }
+  selectedLineId.value = ownLines.value.length ? String(ownLines.value[0].id) : ''
+}
+
 onMounted(async () => {
   await ensureAuth()
   await Promise.all([loadLines(), loadProcesses()])
-  if (availableLines.value.length) {
-    selectedLineId.value = String(availableLines.value[0].id)
-  }
+  applyInitialLineSelection()
 })
 </script>
 
@@ -185,6 +255,33 @@ onMounted(async () => {
   background: #fff;
   font-size: 16px;
   font-weight: 600;
+}
+
+.line-select-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.support-toggle-btn {
+  height: 34px;
+  min-width: 78px;
+  padding: 0 10px;
+  border: 1px solid #b8c3d6;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.support-toggle-btn.active {
+  border-color: #f59e0b;
+  background: #ffedd5;
+  color: #9a3412;
 }
 
 .selector label {
