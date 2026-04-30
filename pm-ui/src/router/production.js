@@ -164,6 +164,16 @@ const production = [
     },
   },
   {
+    path: "/production/tablet-process-input",
+    name: "TabletProcessInput",
+    component: () => import("@/views/production/TabletProcessInput.vue"),
+    meta: {
+      pageTitle: "工程作業記録（タブレット）",
+      allowedRecordTypes: ["PRODUCTION", "EQUIPMENT_STATE"],
+      manualPath: "生産/工程作業入力.md",
+    },
+  },
+  {
     path: "/production/laser-process-input",
     name: "LaserProcessInput",
     component: () => import("@/views/production/LaserProcessInput.vue"),

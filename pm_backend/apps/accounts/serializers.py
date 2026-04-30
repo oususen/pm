@@ -136,6 +136,27 @@ class UserProfileSerializer(serializers.ModelSerializer):
         ]
 
 
+class UnitLineMappingSerializer(serializers.ModelSerializer):
+    unit_name = serializers.CharField(source='unit.name', read_only=True)
+    line_code = serializers.CharField(source='line.line_code', read_only=True)
+    line_name = serializers.CharField(source='line.line_name', read_only=True)
+
+    class Meta:
+        model = UnitLineMapping
+        fields = [
+            'id',
+            'unit',
+            'unit_name',
+            'line',
+            'line_code',
+            'line_name',
+            'sort_order',
+            'is_default',
+            'created_at',
+            'updated_at',
+        ]
+
+
 class UserPermissionSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserPermission

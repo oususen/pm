@@ -66,6 +66,13 @@ const tiles = computed(() => {
       resource: "production.process_input",
     },
     {
+      to: "/production/tablet-process-input",
+      label: "工程作業入力（タブレット）",
+      icon: "💻",
+      required: "edit",
+      resource: "production.process_input",
+    },
+    {
       to: "/production/laser-process-input",
       label: "レーザー実績入力",
       icon: "🧱",

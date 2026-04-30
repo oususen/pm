@@ -65,4 +65,10 @@ export const createAccountsAPI = (client) => ({
   getUnits(params = {}) {
     return client.get('/accounts/units/', { params })
   },
+  getUnitLineMappings(params = {}) {
+    return client.get('/accounts/unit-line-mappings/', { params })
+  },
+  setUnitLineMappingsForLine(payload) {
+    return client.post('/accounts/unit-line-mappings/set-for-line/', payload)
+  },
 })

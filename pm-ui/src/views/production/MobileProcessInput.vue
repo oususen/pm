@@ -1,5 +1,5 @@
 <template>
-  <div class="mobile-input" :class="pageModeClass">
+  <div class="mobile-input" :class="[pageModeClass, { 'tablet-input': isTabletLayout, 'embed-tablet': isEmbeddedTablet }]">
     <div class="mobile-header">
       <h2>{{ pageTitle }}</h2>
       <div class="header-info">
@@ -8,7 +8,7 @@
       </div>
     </div>
 
-    <div class="section inline-row dual-row">
+    <div class="section inline-row dual-row compact-label-row">
       <div class="inline-group">
         <label class="label-required inline-label">{{ t('processInput.line') }}</label>
         <select v-model="selectedLineId" @change="onLineChange" class="input-large flex-input">
@@ -670,8 +670,12 @@ const availableRecordTypes = computed(() => {
 const showRecordTypeSelection = computed(() => availableRecordTypes.value.length > 1)
 const pageTitleKeyMap = {
   MobileProcessInput: 'processInput.pageTitleWork',
+  TabletProcessInput: 'processInput.pageTitleWork',
   ScrapRecordInput: 'processInput.pageTitleScrap',
 }
+
+const isTabletLayout = computed(() => route.name === 'TabletProcessInput')
+const isEmbeddedTablet = computed(() => String(route.query.embed || '') === 'tablet')
 
 const pageTitle = computed(() => {
   const key = pageTitleKeyMap[route.name]
@@ -3332,6 +3336,40 @@ onMounted(async () => {
 }
 .mobile-input.page-stopped {
   background: #ffffff;
+}
+.mobile-input.tablet-input {
+  max-width: 1080px;
+  padding: 16px 18px;
+}
+.mobile-input.tablet-input .planned-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.mobile-input.tablet-input .planned-cards {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.mobile-input.tablet-input .record-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.mobile-input.embed-tablet .compact-label-row .inline-group {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 6px;
+}
+.mobile-input.embed-tablet .compact-label-row .inline-label {
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+.mobile-input.embed-tablet .compact-label-row .input-large {
+  height: 36px;
+  padding: 0 8px;
+  line-height: 1.2;
+  font-size: 14px;
+  box-sizing: border-box;
 }
 
 .mobile-header {

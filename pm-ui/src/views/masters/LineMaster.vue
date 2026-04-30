@@ -9,6 +9,15 @@
     </div>
 
     <div class="page-content">
+      <div class="filter-bar">
+        <label for="lineTypeFilter">区分</label>
+        <select id="lineTypeFilter" v-model="lineTypeFilter" @change="fetchLines">
+          <option value="">すべて</option>
+          <option value="PROD">社内</option>
+          <option value="PURCHASE">購入先</option>
+        </select>
+      </div>
+
       <table class="data-table">
         <thead>
           <tr>
@@ -62,6 +71,21 @@
             <input v-model.number="formData.lead_time_days" type="number" min="0" :disabled="!canEdit" />
           </div>
           <div class="form-group">
+            <label>所属グループ</label>
+            <div v-if="units.length" class="unit-list">
+              <label v-for="unit in units" :key="unit.id" class="unit-item">
+                <input
+                  type="checkbox"
+                  :value="unit.id"
+                  v-model="selectedUnitIds"
+                  :disabled="!canEdit"
+                />
+                <span>{{ unit.name }}</span>
+              </label>
+            </div>
+            <div v-else class="inline-empty">グループがありません</div>
+          </div>
+          <div class="form-group">
             <label>このラインを使用する工程</label>
             <div class="inline-table" v-if="lineStepsMap[formData.id]?.length">
               <div class="inline-header">
@@ -111,6 +135,9 @@ import { canAccessMasterResource } from '@/utils/masterPermissions'
 
 const lines = ref([])
 const lineStepsMap = ref({})
+const units = ref([])
+const selectedUnitIds = ref([])
+const lineTypeFilter = ref('PROD')
 const showDialog = ref(false)
 const isEdit = ref(false)
 const formData = ref({
@@ -122,7 +149,11 @@ const canEdit = computed(() => canAccessMasterResource('masters.line', 'edit'))
 
 const fetchLines = async () => {
   try {
-    const response = await api.lines.getLines()
+    const params = {}
+    if (lineTypeFilter.value) {
+      params.line_type = lineTypeFilter.value
+    }
+    const response = await api.lines.getLines(params)
     lines.value = response.data.results || response.data
   } catch (error) {
     console.error('ライン取得エラー:', error)
@@ -156,6 +187,31 @@ const fetchLineSteps = async () => {
   }
 }
 
+const fetchUnits = async () => {
+  try {
+    const res = await api.accounts.getUnits({ page_size: 20000 })
+    units.value = Array.isArray(res.data) ? res.data : (res.data.results || [])
+  } catch (error) {
+    console.error('グループ取得エラー:', error)
+    units.value = []
+  }
+}
+
+const fetchLineUnitMappings = async (lineId) => {
+  if (!lineId) {
+    selectedUnitIds.value = []
+    return
+  }
+  try {
+    const res = await api.accounts.getUnitLineMappings({ line: lineId, page_size: 20000 })
+    const mappings = Array.isArray(res.data) ? res.data : (res.data.results || [])
+    selectedUnitIds.value = mappings.map((m) => m.unit)
+  } catch (error) {
+    console.error('ライン紐付グループ取得エラー:', error)
+    selectedUnitIds.value = []
+  }
+}
+
 const showNewDialog = () => {
   if (!canEdit.value) return
   isEdit.value = false
@@ -164,13 +220,15 @@ const showNewDialog = () => {
     line_name: '',
     is_active: true
   }
+  selectedUnitIds.value = []
   showDialog.value = true
 }
 
-const editLine = (line) => {
+const editLine = async (line) => {
   if (!canEdit.value) return
   isEdit.value = true
   formData.value = { ...line }
+  await fetchLineUnitMappings(line.id)
   showDialog.value = true
 }
 
@@ -181,12 +239,22 @@ const closeDialog = () => {
 const saveLine = async () => {
   if (!canEdit.value) return
   try {
+    let targetLineId = formData.value.id
     if (isEdit.value) {
       await api.lines.updateLine(formData.value.id, formData.value)
+      targetLineId = formData.value.id
       alert('更新しました')
     } else {
-      await api.lines.createLine(formData.value)
+      const created = await api.lines.createLine(formData.value)
+      const createdLine = created.data || {}
+      targetLineId = createdLine.id
       alert('作成しました')
+    }
+    if (targetLineId) {
+      await api.accounts.setUnitLineMappingsForLine({
+        line: targetLineId,
+        unit_ids: selectedUnitIds.value,
+      })
     }
     await fetchLines()
     await fetchLineSteps()
@@ -215,6 +283,7 @@ const deleteLine = async (id) => {
 onMounted(() => {
   fetchLines()
   fetchLineSteps()
+  fetchUnits()
 })
 
 const formatDateTime = (value) => {
@@ -377,5 +446,46 @@ const getStepStats = (lineId) => {
 
 .btn-secondary:hover {
   background-color: #f5f5f5;
+}
+
+.filter-bar {
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-bar label {
+  font-weight: 600;
+  color: #333;
+}
+
+.filter-bar select {
+  min-width: 160px;
+  padding: 6px 10px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.unit-list {
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px;
+  background: #fff;
+}
+
+.unit-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-weight: 400 !important;
+}
+
+.unit-item:last-child {
+  margin-bottom: 0;
 }
 </style>

@@ -8,7 +8,9 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import (
     Department,
+    UnitLineMapping,
     UserProfile,
+    UserPermission,
     DepartmentPermission,
     PositionPermission,
     DepartmentPositionPermission,
@@ -21,8 +23,8 @@ from .serializers import (
     PositionPermissionSerializer,
     DepartmentPositionPermissionSerializer,
     UserSmtpConfigSerializer,
+    UnitLineMappingSerializer,
 )
-
 
 class DepartmentViewSet(viewsets.ModelViewSet):
     queryset = Department.objects.all()
@@ -299,6 +301,65 @@ class UnitListView(viewsets.ViewSet):
             queryset = queryset.filter(parent_id=parent_id)
         queryset = queryset.order_by('display_id', 'name')
         serializer = DepartmentSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+
+class UnitLineMappingViewSet(viewsets.ModelViewSet):
+    queryset = UnitLineMapping.objects.select_related('unit', 'line')
+    serializer_class = UnitLineMappingSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['unit', 'line']
+    ordering_fields = ['unit__display_id', 'unit__name', 'sort_order', 'id']
+    ordering = ['unit__display_id', 'unit__name', '-is_default', 'sort_order', 'id']
+
+    @action(detail=False, methods=['post'], url_path='set-for-line')
+    def set_for_line(self, request):
+        line_id = request.data.get('line')
+        unit_ids = request.data.get('unit_ids', [])
+
+        if not line_id:
+            return Response({'detail': 'line is required'}, status=400)
+        if unit_ids is None:
+            unit_ids = []
+        if not isinstance(unit_ids, list):
+            return Response({'detail': 'unit_ids must be list'}, status=400)
+
+        normalized_unit_ids = []
+        for unit_id in unit_ids:
+            try:
+                normalized_unit_ids.append(int(unit_id))
+            except (TypeError, ValueError):
+                return Response({'detail': 'unit_ids must contain integers'}, status=400)
+
+        valid_unit_ids = set(
+            Department.objects.filter(level='unit', id__in=normalized_unit_ids).values_list('id', flat=True)
+        )
+        invalid_ids = [uid for uid in normalized_unit_ids if uid not in valid_unit_ids]
+        if invalid_ids:
+            return Response({'detail': f'invalid unit ids: {invalid_ids}'}, status=400)
+
+        existing = UnitLineMapping.objects.filter(line_id=line_id)
+        existing_by_unit = {m.unit_id: m for m in existing}
+        requested_set = set(normalized_unit_ids)
+
+        for unit_id in requested_set:
+            if unit_id not in existing_by_unit:
+                UnitLineMapping.objects.create(
+                    unit_id=unit_id,
+                    line_id=line_id,
+                    sort_order=0,
+                    is_default=False,
+                )
+
+        delete_ids = [m.id for uid, m in existing_by_unit.items() if uid not in requested_set]
+        if delete_ids:
+            UnitLineMapping.objects.filter(id__in=delete_ids).delete()
+
+        serializer = self.get_serializer(
+            UnitLineMapping.objects.filter(line_id=line_id).order_by('-is_default', 'sort_order', 'id'),
+            many=True,
+        )
         return Response(serializer.data)
 
 
