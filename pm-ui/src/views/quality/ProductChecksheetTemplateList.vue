@@ -1,7 +1,7 @@
 <template>
   <div class="page-container checksheet-master" v-if="canView">
     <div class="page-header">
-      <h2 class="page-title">���質チェックシート作成</h2>
+      <h2 class="page-title">品質チェックシート作成</h2>
       <div class="page-actions">
         <button class="btn-secondary" @click="loadTemplateList" :disabled="loadingList || detailLoading">
           更新
@@ -22,7 +22,7 @@
           <input v-model="listFilter.keyword" class="list-filter-input" placeholder="品番・品名・テンプレ名" />
           <select v-model="listFilter.status" class="list-filter-select">
             <option value="">状態：すべて</option>
-            <option value="DRAFT">下��き</option>
+            <option value="DRAFT">下書き</option>
             <option value="SUPERVISOR_PENDING">班長確認待ち</option>
             <option value="CHIEF_PENDING">係長承認待ち</option>
             <option value="MANAGER_PENDING">部長承認待ち</option>
@@ -86,7 +86,7 @@
             <span v-if="form.chief_reviewed_at" class="status-date">（{{ formatDate(form.chief_reviewed_at) }}）</span>
           </span>
           <span class="status-meta">
-            部長担��: {{ form.approver_user_name || '-' }}
+            部長担当: {{ form.approver_user_name || '-' }}
             <span v-if="form.approved_at" class="status-date">（{{ formatDate(form.approved_at) }}）</span>
           </span>
         </div>
@@ -106,7 +106,7 @@
           <label>
             工程 <span class="required-mark">*</span>
             <select v-model="form.process" :disabled="!canEditFields" required>
-              <option value="">選���してください</option>
+              <option value="">選択してください</option>
               <option v-for="p in processOptions" :key="p.id" :value="p.id">{{ p.process_code }} - {{ p.process_name }}</option>
             </select>
           </label>

@@ -319,6 +319,7 @@
               </td>
               <td class="num actual" :class="c.dayClass">
                 <input
+                  v-if="activePlanTab === 'floor-shipping'"
                   type="text"
                   inputmode="decimal"
                   :value="row.daily?.[c.key]?.actual === 0 || row.daily?.[c.key]?.actual === '' || row.daily?.[c.key]?.actual == null ? '' : row.daily?.[c.key]?.actual"
@@ -330,6 +331,7 @@
                   @focus="setActiveInputRow(row, $event)"
                   @blur="onCellBlur"
                 />
+                <span v-else class="readonly-value">{{ displayValue(row.daily?.[c.key]?.actual) }}</span>
               </td>
               <td class="num stock" :class="c.dayClass">
                 <span class="readonly-value">{{ displayValue(isProgressMode ? row.daily?.[c.key]?.progress : getStockDisplay(row, colIdx)) }}</span>
