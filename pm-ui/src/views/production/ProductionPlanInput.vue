@@ -272,6 +272,14 @@
                   {{ getWorkTimeLabel(c.key) }}
                 </span>
                 <button
+                  v-if="canShowFloorSpotAutoPlanButton"
+                  type="button"
+                  class="btn-day-apply"
+                  :disabled="processing || !selectedLine || isPlanCellLocked(c.key)"
+                  @click="applyDemandToPlanForDay(c.key)"
+                  title="この日の需要を計画にセット"
+                >→</button>
+                <button
                   type="button"
                   class="btn-day-clear"
                   :disabled="processing || !selectedLine"
@@ -3648,6 +3656,28 @@ const doFetchOnly = async () => {
   }
 }
 
+const applyDemandToPlanForDay = (dateKey) => {
+  if (isPlanCellLocked(dateKey)) return
+  rows.value.forEach((row) => {
+    const daily = ensureDailyCell(row, dateKey)
+    const sourceQty = isProgressMode.value ? daily.line_demand_qty : daily.demand
+    const demandQtyRaw = Number(sourceQty || 0)
+    const demandQty = Number.isFinite(demandQtyRaw) ? Math.max(0, demandQtyRaw) : 0
+    const newPlan = demandQty > 0 ? demandQty : ''
+    if (daily.plan !== newPlan) {
+      daily.plan = newPlan
+      if (demandQty > 0) {
+        const seq = daily.sequence_no
+        if (seq === '' || seq === null || seq === undefined) {
+          daily.sequence_no = getNextSequenceForDate(dateKey)
+        }
+      } else {
+        daily.sequence_no = ''
+      }
+    }
+  })
+}
+
 const applyDemandToPlanForVisiblePeriod = () => {
   let autoPlanCount = 0
   rows.value.forEach((row) => {
@@ -4427,6 +4457,25 @@ thead tr.head-level2 th.sticky-col {
 .time-input-inline::placeholder {
   color: #15803d;
   opacity: 1;
+}
+.btn-day-apply {
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  border: 1px solid #60a5fa;
+  border-radius: 3px;
+  background: #fff;
+  color: #2563eb;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-weight: 700;
+}
+.btn-day-apply:hover:not(:disabled) {
+  background: #dbeafe;
+}
+.btn-day-apply:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .btn-day-clear {
   padding: 0 4px;
