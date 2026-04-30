@@ -271,77 +271,81 @@ onMounted(async () => {
 
 <style scoped>
 .simultaneous-process-input {
-  max-width: 1480px;
+  width: 100%;
   margin: 0 auto;
-  padding: 8px;
+  padding: 4px;
+  box-sizing: border-box;
 }
 
 .header {
   background: #fff;
   border: 1px solid #d7dde6;
   border-radius: 8px;
-  padding: 8px 12px;
-  margin-bottom: 6px;
+  padding: 4px 12px;
+  margin-bottom: 4px;
 }
 
 .header h2 {
   margin: 0;
-  font-size: 24px;
+  font-size: 20px;
   line-height: 1.1;
   color: #13315c;
 }
 
 .selectors {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
-  margin-bottom: 6px;
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
 }
 
 .selector {
   background: #eef2f6;
   border: 1px solid #d1d9e6;
   border-radius: 8px;
-  padding: 4px 6px;
-  display: grid;
-  grid-template-columns: auto 1fr;
+  padding: 3px 6px;
+  display: flex;
   align-items: center;
-  column-gap: 6px;
+  gap: 6px;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .selector select,
 .worker-input {
   width: 100%;
-  height: 34px;
+  min-width: 0;
+  height: 32px;
   border: 1px solid #b8c3d6;
   border-radius: 6px;
-  padding: 0 8px;
+  padding: 0 6px;
   background: #fff;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .worker-lookup {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
+  min-width: 0;
 }
 
 .worker-id-input {
-  width: 120px;
-  min-width: 120px;
-  height: 34px;
+  width: 100px;
+  min-width: 80px;
+  height: 32px;
   border: 1px solid #b8c3d6;
   border-radius: 6px;
-  padding: 0 8px;
+  padding: 0 6px;
   background: #fff;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .worker-resolved-name {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
@@ -368,14 +372,20 @@ onMounted(async () => {
 .line-select-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
+  min-width: 0;
+}
+
+.line-select-row select {
+  flex: 1;
+  min-width: 0;
 }
 
 .support-toggle-btn {
-  height: 34px;
-  min-width: 78px;
-  padding: 0 10px;
+  height: 32px;
+  min-width: 72px;
+  padding: 0 8px;
   border: 1px solid #b8c3d6;
   border-radius: 6px;
   background: #fff;
@@ -384,6 +394,7 @@ onMounted(async () => {
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .support-toggle-btn.active {
@@ -394,23 +405,25 @@ onMounted(async () => {
 
 .selector label {
   font-weight: 700;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .panels {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  gap: 4px;
 }
 
 .panel {
   background: #dfe5ec;
   border: 1px solid #c7d0dd;
   border-radius: 8px;
-  padding: 6px;
-  min-height: calc(100vh - 240px);
+  padding: 4px;
+  min-height: calc(100vh - 160px);
+  min-height: calc(100dvh - 160px);
 }
 
 .secondary-panel.inactive {
@@ -422,7 +435,7 @@ onMounted(async () => {
   font-weight: 800;
   color: #0f172a;
   margin-bottom: 2px;
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1;
   display: flex;
   align-items: center;
@@ -440,7 +453,8 @@ onMounted(async () => {
 
 .panel-frame {
   width: 100%;
-  min-height: calc(100vh - 248px + 76px);
+  min-height: calc(100vh - 168px + 76px);
+  min-height: calc(100dvh - 168px + 76px);
   border: 1px solid #c7d0dd;
   border-radius: 6px;
   background: #fff;
@@ -468,16 +482,18 @@ onMounted(async () => {
   font-weight: 700;
 }
 
-@media (max-width: 1200px) {
+@media (max-width: 640px) {
   .selectors {
-    grid-template-columns: 1fr 1fr;
+    flex-direction: column;
   }
   .panels {
     grid-template-columns: 1fr;
   }
-  .panel,
+  .panel {
+    min-height: 480px;
+  }
   .panel-frame {
-    min-height: 560px;
+    min-height: calc(480px + 76px);
   }
 }
 </style>
