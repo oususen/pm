@@ -358,12 +358,34 @@ class UserSerializer(serializers.ModelSerializer):
         if records:
             UserPermission.objects.bulk_create(records)
 
+    def _collect_dept_ids(self, profile):
+        ids = set()
+        for field in ('department', 'division', 'group', 'team'):
+            dept = getattr(profile, field, None)
+            if dept:
+                ids.add(dept.id)
+        for unit in getattr(profile, 'leader_units', None) and profile.leader_units.all() or []:
+            ids.add(unit.id)
+        if ids:
+            from accounts.models import Department
+            children = set(
+                Department.objects.filter(parent_id__in=ids)
+                .values_list('id', flat=True)
+            )
+            ids |= children
+            if children:
+                grandchildren = set(
+                    Department.objects.filter(parent_id__in=children)
+                    .values_list('id', flat=True)
+                )
+                ids |= grandchildren
+        return list(ids)
+
     def get_effective_permissions(self, instance):
         permissions = defaultdict(lambda: {'can_view': False, 'can_edit': False})
 
         user_perms = list(instance.permissions.all())
 
-        # Check if user is a manager (事業部長) - they get position permissions first
         is_manager = False
         try:
             if instance.profile and instance.profile.role == 'manager':
@@ -371,59 +393,57 @@ class UserSerializer(serializers.ModelSerializer):
         except:
             pass
 
-        if is_manager:
-            # For managers: Position permissions first, then department-specific permissions
-            try:
-                if instance.profile and instance.profile.role:
-                    pos_perms = PositionPermission.objects.filter(position_name=instance.profile.role)
-                    for perm in pos_perms:
-                        permissions[perm.resource]['can_view'] = perm.can_view
-                        permissions[perm.resource]['can_edit'] = perm.can_edit
-            except:
-                pass
-
-            # Department permissions (can override position permissions if more restrictive)
-            try:
-                if instance.profile and instance.profile.department:
-                    dept_perms = DepartmentPermission.objects.filter(department=instance.profile.department)
-                    for perm in dept_perms:
-                        permissions[perm.resource]['can_view'] = permissions[perm.resource]['can_view'] or perm.can_view
-                        permissions[perm.resource]['can_edit'] = permissions[perm.resource]['can_edit'] or perm.can_edit
-            except:
-                pass
-        else:
-            # For regular users: Department permissions first, then position permissions
-            try:
-                if instance.profile and instance.profile.department:
-                    dept_perms = DepartmentPermission.objects.filter(department=instance.profile.department)
-                    for perm in dept_perms:
-                        permissions[perm.resource]['can_view'] = perm.can_view
-                        permissions[perm.resource]['can_edit'] = perm.can_edit
-            except:
-                pass
-
-            # Position permissions
-            try:
-                if instance.profile and instance.profile.role:
-                    pos_perms = PositionPermission.objects.filter(position_name=instance.profile.role)
-                    for perm in pos_perms:
-                        permissions[perm.resource]['can_view'] = permissions[perm.resource]['can_view'] or perm.can_view
-                        permissions[perm.resource]['can_edit'] = permissions[perm.resource]['can_edit'] or perm.can_edit
-            except:
-                pass
-
-        # DepartmentPosition permissions (highest priority)
+        dept_ids = []
         try:
-            if instance.profile and instance.profile.department and instance.profile.role:
-                dept_pos_perms = DepartmentPositionPermission.objects.filter(
-                    department=instance.profile.department,
-                    position_name=instance.profile.role
-                )
-                for perm in dept_pos_perms:
-                    permissions[perm.resource]['can_view'] = perm.can_view
-                    permissions[perm.resource]['can_edit'] = perm.can_edit
+            if instance.profile:
+                dept_ids = self._collect_dept_ids(instance.profile)
         except:
             pass
+
+        if is_manager:
+            try:
+                if instance.profile and instance.profile.role:
+                    pos_perms = PositionPermission.objects.filter(position_name=instance.profile.role)
+                    for perm in pos_perms:
+                        permissions[perm.resource]['can_view'] = perm.can_view
+                        permissions[perm.resource]['can_edit'] = perm.can_edit
+            except:
+                pass
+
+            if dept_ids:
+                dept_perms = DepartmentPermission.objects.filter(department_id__in=dept_ids)
+                for perm in dept_perms:
+                    permissions[perm.resource]['can_view'] = permissions[perm.resource]['can_view'] or perm.can_view
+                    permissions[perm.resource]['can_edit'] = permissions[perm.resource]['can_edit'] or perm.can_edit
+        else:
+            if dept_ids:
+                dept_perms = DepartmentPermission.objects.filter(department_id__in=dept_ids)
+                for perm in dept_perms:
+                    permissions[perm.resource]['can_view'] = permissions[perm.resource]['can_view'] or perm.can_view
+                    permissions[perm.resource]['can_edit'] = permissions[perm.resource]['can_edit'] or perm.can_edit
+
+            try:
+                if instance.profile and instance.profile.role:
+                    pos_perms = PositionPermission.objects.filter(position_name=instance.profile.role)
+                    for perm in pos_perms:
+                        permissions[perm.resource]['can_view'] = permissions[perm.resource]['can_view'] or perm.can_view
+                        permissions[perm.resource]['can_edit'] = permissions[perm.resource]['can_edit'] or perm.can_edit
+            except:
+                pass
+
+        # DepartmentPosition permissions (highest priority among templates)
+        if dept_ids:
+            try:
+                if instance.profile and instance.profile.role:
+                    dept_pos_perms = DepartmentPositionPermission.objects.filter(
+                        department_id__in=dept_ids,
+                        position_name=instance.profile.role
+                    )
+                    for perm in dept_pos_perms:
+                        permissions[perm.resource]['can_view'] = permissions[perm.resource]['can_view'] or perm.can_view
+                        permissions[perm.resource]['can_edit'] = permissions[perm.resource]['can_edit'] or perm.can_edit
+            except:
+                pass
 
         # User permissions override templates
         for perm in user_perms:

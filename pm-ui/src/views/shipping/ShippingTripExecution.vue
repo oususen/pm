@@ -256,7 +256,11 @@ const businessTypeLabel = (value) => {
 const canMarkLoading = (trip) => canStatusEdit.value && trip?.status === 'PLANNED'
 const canMarkDeparted = (trip) => canStatusEdit.value && ['PLANNED', 'LOADING'].includes(trip?.status)
 const canReopen = (trip) => canStatusEdit.value && ['LOADING', 'DEPARTED', 'CLOSED'].includes(trip?.status)
-const canRegisterActual = (trip) => canActualEdit.value && trip?.status !== 'CLOSED'
+const canRegisterActual = (trip) => {
+  if (!canActualEdit.value) return false
+  if (isActualInputMode.value) return trip?.status === 'DEPARTED'
+  return trip?.status !== 'CLOSED'
+}
 
 const parseQty = (value) => {
   const num = Number(String(value ?? '').replace(/,/g, ''))
@@ -477,32 +481,33 @@ onMounted(loadTrips)
 
 <style scoped>
 .trip-execution-page {
-  padding: 8px;
+  padding: 4px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-width: 760px;
+  gap: 4px;
+  max-width: 900px;
   margin: 0 auto;
 }
 .toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 4px;
   align-items: flex-end;
 }
 .field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
+  gap: 2px;
+  font-size: 18px;
 }
 .field input,
 .field select {
   min-width: 160px;
-  height: 32px;
+  height: 42px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   padding: 0 8px;
+  font-size: 18px;
 }
 .summary {
   display: flex;
@@ -513,8 +518,8 @@ onMounted(loadTrips)
   background: #eef2ff;
   border: 1px solid #c7d2fe;
   border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 12px;
+  padding: 2px 8px;
+  font-size: 18px;
 }
 .chip-button {
   cursor: pointer;
@@ -531,7 +536,7 @@ onMounted(loadTrips)
   background: #fff;
   border: 1px solid #dbe2ee;
   border-radius: 8px;
-  padding: 6px 8px;
+  padding: 4px 6px;
   border-left: 5px solid #94a3b8;
 }
 .trip-color-0 { border-left-color: #3b82f6; background: #eff6ff; }
@@ -543,27 +548,27 @@ onMounted(loadTrips)
 .trip-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
+  gap: 6px;
+  margin-bottom: 2px;
   flex-wrap: wrap;
 }
 .trip-head h3 {
   margin: 0;
-  font-size: 20px;
+  font-size: 30px;
 }
 .trip-meta {
-  font-size: 12px;
+  font-size: 18px;
   color: #475569;
 }
 .actual-time {
-  font-size: 11px;
+  font-size: 16px;
   color: #475569;
   margin-left: auto;
 }
 .status {
   border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 12px;
+  padding: 3px 12px;
+  font-size: 18px;
   border: 1px solid;
 }
 .status-planned {
@@ -590,16 +595,16 @@ onMounted(loadTrips)
 .detail-head,
 .detail-row {
   display: grid;
-  grid-template-columns: 1fr 60px 90px;
-  gap: 6px;
+  grid-template-columns: 1fr 80px 120px;
+  gap: 4px;
   align-items: center;
-  padding: 4px 8px;
+  padding: 3px 6px;
 }
 .detail-head {
   background: #f8fafc;
-  font-size: 11px;
+  font-size: 16px;
   font-weight: 700;
-  padding: 3px 8px;
+  padding: 2px 6px;
 }
 .detail-row {
   border-top: 2px solid #cbd5e1;
@@ -610,28 +615,28 @@ onMounted(loadTrips)
 }
 .split-wrap {
   grid-column: 1 / -1;
-  margin-top: 2px;
+  margin-top: 1px;
   display: grid;
-  gap: 3px;
+  gap: 2px;
 }
 .split-row {
   display: grid;
-  grid-template-columns: 1fr 90px 60px;
-  gap: 4px;
+  grid-template-columns: 1fr 100px 80px;
+  gap: 3px;
 }
 .split-row input {
-  height: 28px;
+  height: 38px;
   border: 1px solid #cbd5e1;
   border-radius: 4px;
   padding: 0 6px;
-  font-size: 13px;
+  font-size: 18px;
 }
 .split-btn,
 .split-add,
 .split-save {
-  min-height: 28px;
-  font-size: 12px;
-  padding: 0 6px;
+  min-height: 38px;
+  font-size: 18px;
+  padding: 0 8px;
 }
 .split-actions {
   display: flex;
@@ -644,35 +649,35 @@ onMounted(loadTrips)
   text-overflow: ellipsis;
 }
 .product-code {
-  font-size: 14px;
+  font-size: 21px;
   font-weight: 700;
 }
 .product-name {
   margin-left: 6px;
-  font-size: 12px;
+  font-size: 18px;
   color: #475569;
 }
 .detail-qty {
   text-align: right;
-  font-size: 18px;
+  font-size: 27px;
   font-weight: 700;
 }
 .actual-input-wrap input {
   width: 100%;
-  height: 30px;
+  height: 40px;
   border: 1px solid #cbd5e1;
   border-radius: 4px;
   padding: 0 6px;
-  font-size: 16px;
+  font-size: 24px;
   text-align: right;
 }
 .actual-readonly {
   width: 100%;
-  min-height: 30px;
+  min-height: 40px;
   border: 1px solid #cbd5e1;
   border-radius: 4px;
   padding: 4px 6px;
-  font-size: 18px;
+  font-size: 27px;
   line-height: 1;
   text-align: right;
   color: #475569;
@@ -684,29 +689,29 @@ onMounted(loadTrips)
   padding: 6px;
 }
 .actual-row {
-  margin-top: 4px;
+  margin-top: 2px;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
   align-items: flex-end;
 }
 .inline-field {
   min-width: 160px;
 }
 .actions {
-  margin-top: 4px;
+  margin-top: 2px;
   display: flex;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 .btn {
-  min-height: 34px;
+  min-height: 42px;
   border: 1px solid #cbd5e1;
   background: #fff;
   border-radius: 4px;
   padding: 0 10px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 21px;
 }
 .btn.complete {
   background: #fffbeb;
@@ -762,27 +767,27 @@ onMounted(loadTrips)
   }
   .detail-head,
   .detail-row {
-    grid-template-columns: 1fr 50px 80px;
+    grid-template-columns: 1fr 70px 100px;
     gap: 4px;
     padding: 4px 6px;
   }
   .product-code {
-    font-size: 13px;
+    font-size: 19px;
   }
   .product-name {
-    font-size: 11px;
-  }
-  .detail-qty {
     font-size: 16px;
   }
+  .detail-qty {
+    font-size: 24px;
+  }
   .actual-input-wrap input {
-    height: 28px;
-    font-size: 14px;
+    height: 38px;
+    font-size: 21px;
     padding: 0 4px;
   }
   .actual-readonly {
-    min-height: 28px;
-    font-size: 16px;
+    min-height: 38px;
+    font-size: 24px;
     padding: 4px 4px;
   }
   .actual-row {
@@ -794,15 +799,15 @@ onMounted(loadTrips)
     min-width: 0;
   }
   .btn {
-    min-height: 36px;
-    font-size: 13px;
-    padding: 0 6px;
+    min-height: 48px;
+    font-size: 19px;
+    padding: 0 8px;
   }
   .summary {
     gap: 4px;
   }
   .chip {
-    font-size: 11px;
+    font-size: 16px;
     padding: 3px 8px;
   }
   .split-row {

@@ -343,6 +343,14 @@ const levelLabels = {
   division: '事業部',
   group: '係',
   team: '班',
+  unit: 'グループ',
+}
+
+const levelIndent = {
+  division: '',
+  group: '　',
+  team: '　　',
+  unit: '　　　',
 }
 
 const canAccessByResource = (resource, level = 'view') => {
@@ -362,14 +370,37 @@ const canAccessByResource = (resource, level = 'view') => {
 const canViewPage = computed(() => canAccessByResource('settings.permission_templates', 'view'))
 const canEditPage = computed(() => canAccessByResource('settings.permission_templates', 'edit'))
 
-const departmentOptions = computed(() =>
-  departments.value
-    .filter((dept) => dept.level === 'division')
-    .map((dept) => ({
-      value: dept.id,
-      label: `${dept.name} (${levelLabels[dept.level] || dept.level})`,
-    }))
-)
+const buildDepartmentTree = (depts) => {
+  const levelOrder = ['division', 'group', 'team', 'unit']
+  const byParent = {}
+  for (const dept of depts) {
+    const pid = dept.parent || null
+    if (!byParent[pid]) byParent[pid] = []
+    byParent[pid].push(dept)
+  }
+  for (const key of Object.keys(byParent)) {
+    byParent[key].sort((a, b) => {
+      const li = levelOrder.indexOf(a.level) - levelOrder.indexOf(b.level)
+      if (li !== 0) return li
+      return (a.name || '').localeCompare(b.name || '')
+    })
+  }
+  const result = []
+  const walk = (parentId) => {
+    for (const dept of (byParent[parentId] || [])) {
+      const indent = levelIndent[dept.level] || ''
+      result.push({
+        value: dept.id,
+        label: `${indent}${dept.name} (${levelLabels[dept.level] || dept.level})`,
+      })
+      walk(dept.id)
+    }
+  }
+  walk(null)
+  return result
+}
+
+const departmentOptions = computed(() => buildDepartmentTree(departments.value))
 
 const getPermissionLabel = (resource) => {
   const found = permissionResources.find((item) => item.value === resource)
