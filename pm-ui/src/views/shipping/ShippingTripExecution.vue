@@ -2,64 +2,63 @@
   <div class="trip-execution-page">
     <div class="toolbar">
       <label class="field">
-        <span>出発日</span>
+        <span>{{ t('shippingTripExecution.departureDate') }}</span>
         <input v-model="departureDate" type="date" />
       </label>
       <label class="field">
-        <span>業務区分</span>
+        <span>{{ t('shippingTripExecution.businessType') }}</span>
         <select v-model="businessType">
-          <option value="">すべて</option>
+          <option value="">{{ t('shippingTripExecution.all') }}</option>
           <option v-for="item in businessTypes" :key="item" :value="item">{{ businessTypeLabel(item) }}</option>
         </select>
       </label>
-      <button class="btn" :disabled="loading" @click="loadTrips">表示</button>
+      <label class="field">
+        <span>{{ t('shippingTripExecution.trip') }}</span>
+        <select v-model="tripFilter">
+          <option value="">{{ t('shippingTripExecution.all') }}</option>
+          <option v-for="item in tripOptions" :key="item" :value="item">{{ item }}</option>
+        </select>
+      </label>
+      <button class="btn" :disabled="loading" @click="loadTrips">{{ t('shippingTripExecution.show') }}</button>
     </div>
 
     <div class="summary">
-      <button class="chip chip-button" :class="{ active: !statusFilter }" @click="setStatusFilter('')">総便数: {{ summary.total }}</button>
-      <button class="chip chip-button" :class="{ active: statusFilter === 'PLANNED' }" @click="setStatusFilter('PLANNED')">未着手: {{ summary.planned }}</button>
-      <button class="chip chip-button" :class="{ active: statusFilter === 'LOADING' }" @click="setStatusFilter('LOADING')">積込完了: {{ summary.loading }}</button>
-      <button class="chip chip-button" :class="{ active: statusFilter === 'DEPARTED' }" @click="setStatusFilter('DEPARTED')">出発済: {{ summary.departed }}</button>
-      <button class="chip chip-button" :class="{ active: statusFilter === 'CLOSED' }" @click="setStatusFilter('CLOSED')">実績入力完了: {{ summary.closed }}</button>
+      <button class="chip chip-button" :class="{ active: !statusFilter }" @click="setStatusFilter('')">{{ t('shippingTripExecution.totalTrips') }}: {{ summary.total }}</button>
+      <button class="chip chip-button" :class="{ active: statusFilter === 'PLANNED' }" @click="setStatusFilter('PLANNED')">{{ t('shippingTripExecution.statusPlanned') }}: {{ summary.planned }}</button>
+      <button class="chip chip-button" :class="{ active: statusFilter === 'LOADING' }" @click="setStatusFilter('LOADING')">{{ t('shippingTripExecution.statusLoading') }}: {{ summary.loading }}</button>
+      <button class="chip chip-button" :class="{ active: statusFilter === 'DEPARTED' }" @click="setStatusFilter('DEPARTED')">{{ t('shippingTripExecution.statusDeparted') }}: {{ summary.departed }}</button>
+      <button class="chip chip-button" :class="{ active: statusFilter === 'CLOSED' }" @click="setStatusFilter('CLOSED')">{{ t('shippingTripExecution.statusClosedInput') }}: {{ summary.closed }}</button>
     </div>
 
-    <div v-if="loading" class="loading">読み込み中...</div>
-    <div v-else-if="!visibleTrips.length" class="empty">対象便がありません。</div>
+    <div v-if="loading" class="loading">{{ t('shippingTripExecution.loading') }}</div>
+    <div v-else-if="!visibleTrips.length" class="empty">{{ t('shippingTripExecution.noTrips') }}</div>
 
     <div v-else class="trip-list">
       <section v-for="trip in visibleTrips" :key="trip.id" class="trip-card">
         <header class="trip-head">
-          <div class="title-block">
-            <h3>{{ trip.trip_code || trip.trip_ref }}</h3>
-            <p>
-              <span>出発時刻: {{ trip.departure_time_plan || '-' }}</span>
-              <span class="dot">|</span>
-              <span>納入場: {{ trip.ship_to_code || '-' }}</span>
-            </p>
-          </div>
-          <div class="status-block">
-            <span class="status" :class="`status-${String(trip.status || '').toLowerCase()}`">
-              {{ statusLabel(trip.status) }}
-            </span>
-            <small v-if="trip.departure_time_actual">実出発: {{ trip.departure_time_actual }}</small>
-          </div>
+          <h3>{{ trip.trip_code || trip.trip_ref }}</h3>
+          <span class="trip-meta">{{ t('shippingTripExecution.departureTime') }}: {{ trip.departure_time_plan || '-' }} | {{ t('shippingTripExecution.deliveryPlace') }}: {{ trip.ship_to_code || '-' }}</span>
+          <span class="status" :class="`status-${String(trip.status || '').toLowerCase()}`">
+            {{ statusLabel(trip.status) }}
+          </span>
+          <small v-if="trip.departure_time_actual" class="actual-time">{{ t('shippingTripExecution.actualDeparture') }}: {{ trip.departure_time_actual }}</small>
         </header>
 
         <div class="detail-list">
           <div class="detail-head">
-            <span>品番 / 品名</span>
-            <span>計画</span>
-            <span>実績入力</span>
+            <span>{{ t('shippingTripExecution.product') }}</span>
+            <span>{{ t('shippingTripExecution.plan') }}</span>
+            <span>{{ isActualInputMode ? t('shippingTripExecution.actual') : t('shippingTripExecution.actualInput') }}</span>
           </div>
           <div v-for="row in trip.details" :key="row.allocation_id" class="detail-row">
             <div class="detail-main">
-              <p class="product-code">{{ row.product_code }}</p>
-              <p class="product-name">{{ row.product_name }}</p>
+              <span class="product-code">{{ row.product_code }}</span>
+              <span class="product-name">{{ row.product_name }}</span>
             </div>
             <div class="detail-qty">{{ row.qty }}</div>
             <div class="actual-input-wrap">
               <input
-                v-if="isActualInputMode"
+                v-if="isExecutionMode || isActualInputMode"
                 :value="actualQtyValue(trip.id, row.allocation_id, row.qty)"
                 type="number"
                 step="1"
@@ -71,13 +70,61 @@
                 {{ actualQtyValue(trip.id, row.allocation_id, row.qty) }}
               </div>
             </div>
+            <div v-if="isExecutionMode || isActualInputMode" class="split-wrap">
+              <div
+                v-for="(split, splitIdx) in splitRows(trip.id, row.allocation_id, row)"
+                :key="`${row.allocation_id}-${splitIdx}`"
+                class="split-row"
+              >
+                <input
+                  type="date"
+                  :value="split.production_date"
+                  :disabled="!canEditProductionDate(trip)"
+                  @input="setSplitDate(trip.id, row.allocation_id, splitIdx, $event.target.value)"
+                />
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  :value="split.quantity"
+                  :disabled="!canEditProductionDate(trip)"
+                  @input="setSplitQty(trip.id, row.allocation_id, splitIdx, $event.target.value)"
+                />
+                <button
+                  type="button"
+                  class="btn split-btn"
+                  :disabled="!canEditProductionDate(trip)"
+                  @click="removeSplitRow(trip.id, row.allocation_id, splitIdx, row)"
+                >
+                  {{ t('shippingTripExecution.delete') }}
+                </button>
+              </div>
+              <div class="split-actions">
+                <button
+                  type="button"
+                  class="btn split-add"
+                  :disabled="!canEditProductionDate(trip)"
+                  @click="addSplitRow(trip.id, row.allocation_id)"
+                >
+                  {{ t('shippingTripExecution.addProductionDate') }}
+                </button>
+                <button
+                  type="button"
+                  class="btn split-save"
+                  :disabled="updatingTripId === trip.id || !canEditProductionDate(trip)"
+                  @click="saveProductionDates(trip)"
+                >
+                  {{ t('shippingTripExecution.saveProductionDates') }}
+                </button>
+              </div>
+            </div>
           </div>
-          <div v-if="!trip.details.length" class="no-detail">明細なし</div>
+          <div v-if="!trip.details.length" class="no-detail">{{ t('shippingTripExecution.noDetails') }}</div>
         </div>
 
         <div v-if="isActualInputMode" class="actual-row">
           <label class="field inline-field">
-            <span>実績日</span>
+            <span>{{ t('shippingTripExecution.actualDate') }}</span>
             <input
               :value="actualDateValue(trip.id, trip.departure_date)"
               type="date"
@@ -90,7 +137,7 @@
             :disabled="updatingTripId === trip.id || !trip.details.length || !canRegisterActual(trip)"
             @click="registerActual(trip)"
           >
-            実績登録
+            {{ t('shippingTripExecution.registerActual') }}
           </button>
         </div>
 
@@ -100,21 +147,21 @@
             :disabled="updatingTripId === trip.id || !canMarkLoading(trip)"
             @click="updateTripStatus(trip, 'mark_loading')"
           >
-            積込完了
+            {{ t('shippingTripExecution.markLoading') }}
           </button>
           <button
             class="btn depart"
             :disabled="updatingTripId === trip.id || !canMarkDeparted(trip)"
             @click="updateTripStatus(trip, 'mark_departed')"
           >
-            出発
+            {{ t('shippingTripExecution.markDeparted') }}
           </button>
           <button
             class="btn reopen"
             :disabled="updatingTripId === trip.id || !canReopen(trip)"
             @click="updateTripStatus(trip, 'reopen')"
           >
-            差戻し
+            {{ t('shippingTripExecution.reopen') }}
           </button>
         </div>
       </section>
@@ -128,6 +175,7 @@ import { useRoute } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import { t } from '@/i18n'
 
 const formatDate = (d) => {
   const yyyy = String(d.getFullYear())
@@ -142,12 +190,15 @@ const businessTypes = ref([])
 const trips = ref([])
 const actualQtyMap = ref({})
 const actualDateMap = ref({})
+const productionSplitMap = ref({})
+const tripFilter = ref('')
 const statusFilter = ref('')
 const loading = ref(false)
 const updatingTripId = ref(null)
 const summary = ref({ total: 0, planned: 0, loading: 0, departed: 0, closed: 0 })
 const route = useRoute()
 const isActualInputMode = computed(() => Boolean(route.meta?.actualInputEnabled))
+const isExecutionMode = computed(() => !isActualInputMode.value)
 const canTripEdit = computed(() => {
   const user = authState.user
   if (!user) return false
@@ -159,19 +210,33 @@ const canTripEdit = computed(() => {
   }
   return hasPermission(user, 'shipping', 'edit')
 })
-const canActualEdit = computed(() => canTripEdit.value && isActualInputMode.value)
+const canActualEdit = computed(() => canTripEdit.value && (isExecutionMode.value || isActualInputMode.value))
 const canStatusEdit = computed(() => canTripEdit.value && !isActualInputMode.value)
+const canEditProductionDate = (trip) => isExecutionMode.value && canRegisterActual(trip)
 
 const visibleTrips = computed(() => {
-  if (!statusFilter.value) return trips.value
-  return (trips.value || []).filter((trip) => trip.status === statusFilter.value)
+  let list = trips.value || []
+  if (tripFilter.value) {
+    list = list.filter((trip) => String(trip.trip_code || trip.trip_ref || '') === tripFilter.value)
+  }
+  if (!statusFilter.value) return list
+  return list.filter((trip) => trip.status === statusFilter.value)
+})
+
+const tripOptions = computed(() => {
+  const set = new Set()
+  ;(trips.value || []).forEach((trip) => {
+    const code = String(trip.trip_code || trip.trip_ref || '').trim()
+    if (code) set.add(code)
+  })
+  return Array.from(set)
 })
 
 const statusLabel = (status) => {
-  if (status === 'PLANNED') return '未着手'
-  if (status === 'LOADING') return '積込完了'
-  if (status === 'DEPARTED') return '出発済'
-  if (status === 'CLOSED') return '完了'
+  if (status === 'PLANNED') return t('shippingTripExecution.statusPlanned')
+  if (status === 'LOADING') return t('shippingTripExecution.statusLoading')
+  if (status === 'DEPARTED') return t('shippingTripExecution.statusDeparted')
+  if (status === 'CLOSED') return t('shippingTripExecution.statusClosedInput')
   return status || '-'
 }
 
@@ -190,7 +255,7 @@ const businessTypeLabel = (value) => {
 const canMarkLoading = (trip) => canStatusEdit.value && trip?.status === 'PLANNED'
 const canMarkDeparted = (trip) => canStatusEdit.value && ['PLANNED', 'LOADING'].includes(trip?.status)
 const canReopen = (trip) => canStatusEdit.value && ['LOADING', 'DEPARTED', 'CLOSED'].includes(trip?.status)
-const canRegisterActual = (trip) => canActualEdit.value && trip?.status === 'DEPARTED'
+const canRegisterActual = (trip) => canActualEdit.value && trip?.status !== 'CLOSED'
 
 const parseQty = (value) => {
   const num = Number(String(value ?? '').replace(/,/g, ''))
@@ -201,16 +266,31 @@ const parseQty = (value) => {
 const initActualInputState = (tripList) => {
   const nextQtyMap = {}
   const nextDateMap = {}
+  const nextSplitMap = {}
   ;(tripList || []).forEach((trip) => {
     nextDateMap[trip.id] = actualDateMap.value[trip.id] || trip.departure_date
     const byAlloc = {}
+    const byAllocSplit = {}
     ;(trip.details || []).forEach((row) => {
       byAlloc[row.allocation_id] = actualQtyMap.value[trip.id]?.[row.allocation_id] ?? String(parseQty(row.qty))
+      const existing = productionSplitMap.value[trip.id]?.[row.allocation_id]
+      if (Array.isArray(existing) && existing.length) {
+        byAllocSplit[row.allocation_id] = existing
+      } else if (Array.isArray(row.production_splits) && row.production_splits.length) {
+        byAllocSplit[row.allocation_id] = row.production_splits.map((item) => ({
+          production_date: item.production_date || '',
+          quantity: String(parseQty(item.quantity || 0)),
+        }))
+      } else {
+        byAllocSplit[row.allocation_id] = [{ production_date: '', quantity: String(parseQty(row.qty)) }]
+      }
     })
     nextQtyMap[trip.id] = byAlloc
+    nextSplitMap[trip.id] = byAllocSplit
   })
   actualQtyMap.value = nextQtyMap
   actualDateMap.value = nextDateMap
+  productionSplitMap.value = nextSplitMap
 }
 
 const actualQtyValue = (tripId, allocationId, fallbackQty) =>
@@ -227,6 +307,53 @@ const actualDateValue = (tripId, fallbackDate) =>
 
 const setActualDate = (tripId, value) => {
   actualDateMap.value = { ...actualDateMap.value, [tripId]: value }
+}
+
+const splitRows = (tripId, allocationId, row) => {
+  const rows = productionSplitMap.value[tripId]?.[allocationId]
+  if (Array.isArray(rows) && rows.length) return rows
+  return [{ production_date: '', quantity: String(parseQty(row?.qty || 0)) }]
+}
+
+const setSplitDate = (tripId, allocationId, splitIdx, value) => {
+  const next = [...(productionSplitMap.value[tripId]?.[allocationId] || [])]
+  if (!next[splitIdx]) return
+  next[splitIdx] = { ...next[splitIdx], production_date: value || '' }
+  productionSplitMap.value = {
+    ...productionSplitMap.value,
+    [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
+  }
+}
+
+const setSplitQty = (tripId, allocationId, splitIdx, value) => {
+  const next = [...(productionSplitMap.value[tripId]?.[allocationId] || [])]
+  if (!next[splitIdx]) return
+  next[splitIdx] = { ...next[splitIdx], quantity: String(value ?? '') }
+  productionSplitMap.value = {
+    ...productionSplitMap.value,
+    [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
+  }
+}
+
+const addSplitRow = (tripId, allocationId) => {
+  const next = [...(productionSplitMap.value[tripId]?.[allocationId] || [])]
+  next.push({ production_date: '', quantity: '' })
+  productionSplitMap.value = {
+    ...productionSplitMap.value,
+    [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
+  }
+}
+
+const removeSplitRow = (tripId, allocationId, splitIdx, row) => {
+  const next = [...(productionSplitMap.value[tripId]?.[allocationId] || [])]
+  next.splice(splitIdx, 1)
+  if (!next.length) {
+    next.push({ production_date: '', quantity: String(parseQty(row?.qty || 0)) })
+  }
+  productionSplitMap.value = {
+    ...productionSplitMap.value,
+    [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
+  }
 }
 
 const loadTrips = async () => {
@@ -253,6 +380,41 @@ const setStatusFilter = (status) => {
   statusFilter.value = status
 }
 
+const buildActualPayload = (trip) =>
+  (trip.details || []).map((row) => ({
+    allocation_id: row.allocation_id,
+    quantity: parseQty(actualQtyValue(trip.id, row.allocation_id, row.qty)),
+    production_splits: (splitRows(trip.id, row.allocation_id, row) || [])
+      .map((item) => ({
+        production_date: item.production_date || '',
+        quantity: parseQty(item.quantity),
+      }))
+      .filter((item) => item.production_date && item.quantity > 0),
+  }))
+
+const saveProductionDates = async (trip) => {
+  if (!canEditProductionDate(trip)) {
+    alert('生産日内訳の編集権限がありません。')
+    return
+  }
+  updatingTripId.value = trip.id
+  try {
+    const res = await api.shippingTrips.updateExecutionStatus({
+      trip_id: trip.id,
+      action: 'save_production_dates',
+      actuals: buildActualPayload(trip),
+    })
+    const d = res.data || {}
+    alert(`生産日保存: ${d.updated || 0}件`)
+    await loadTrips()
+  } catch (error) {
+    const msg = error?.response?.data?.detail || '生産日内訳の保存に失敗しました。'
+    alert(msg)
+  } finally {
+    updatingTripId.value = null
+  }
+}
+
 const registerActual = async (trip) => {
   if (!canRegisterActual(trip)) {
     alert('実績登録の編集権限がありません。')
@@ -263,10 +425,7 @@ const registerActual = async (trip) => {
     alert('実績日を入力してください。')
     return
   }
-  const actuals = (trip.details || []).map((row) => ({
-    allocation_id: row.allocation_id,
-    quantity: parseQty(actualQtyValue(trip.id, row.allocation_id, row.qty)),
-  }))
+  const actuals = buildActualPayload(trip)
   updatingTripId.value = trip.id
   try {
     const res = await api.shippingTrips.updateExecutionStatus({
@@ -316,10 +475,10 @@ onMounted(loadTrips)
 
 <style scoped>
 .trip-execution-page {
-  padding: 12px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   max-width: 760px;
   margin: 0 auto;
 }
@@ -364,38 +523,33 @@ onMounted(loadTrips)
 }
 .trip-list {
   display: grid;
-  gap: 10px;
+  gap: 6px;
 }
 .trip-card {
   background: #fff;
   border: 1px solid #dbe2ee;
-  border-radius: 10px;
-  padding: 10px;
+  border-radius: 8px;
+  padding: 6px 8px;
 }
 .trip-head {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
   gap: 8px;
-  align-items: flex-start;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
 }
-.title-block h3 {
+.trip-head h3 {
   margin: 0;
   font-size: 20px;
 }
-.title-block p {
-  margin: 2px 0 0;
+.trip-meta {
   font-size: 12px;
   color: #475569;
 }
-.dot {
-  margin: 0 6px;
-}
-.status-block {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
+.actual-time {
+  font-size: 11px;
+  color: #475569;
+  margin-left: auto;
 }
 .status {
   border-radius: 999px;
@@ -421,63 +575,91 @@ onMounted(loadTrips)
 }
 .detail-list {
   border: 1px solid #e2e8f0;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
 }
 .detail-head,
 .detail-row {
   display: grid;
-  grid-template-columns: 1fr 72px 110px;
-  gap: 8px;
+  grid-template-columns: 1fr 60px 90px;
+  gap: 6px;
   align-items: center;
-  padding: 8px 10px;
+  padding: 4px 8px;
 }
 .detail-head {
   background: #f8fafc;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
+  padding: 3px 8px;
 }
 .detail-row {
   border-top: 1px solid #e2e8f0;
 }
+.split-wrap {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+  display: grid;
+  gap: 3px;
+}
+.split-row {
+  display: grid;
+  grid-template-columns: 1fr 90px 60px;
+  gap: 4px;
+}
+.split-row input {
+  height: 28px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 13px;
+}
+.split-btn,
+.split-add,
+.split-save {
+  min-height: 28px;
+  font-size: 12px;
+  padding: 0 6px;
+}
+.split-actions {
+  display: flex;
+  gap: 6px;
+}
 .detail-main {
   min-width: 0;
-}
-.product-code,
-.product-name {
-  margin: 0;
-  line-height: 1.25;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .product-code {
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 700;
 }
 .product-name {
-  margin-top: 2px;
-  font-size: 13px;
+  margin-left: 6px;
+  font-size: 12px;
   color: #475569;
 }
 .detail-qty {
   text-align: right;
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
 }
 .actual-input-wrap input {
   width: 100%;
-  height: 36px;
+  height: 30px;
   border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  padding: 0 8px;
-  font-size: 18px;
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 16px;
   text-align: right;
 }
 .actual-readonly {
   width: 100%;
-  min-height: 36px;
+  min-height: 30px;
   border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  padding: 6px 8px;
-  font-size: 28px;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 18px;
   line-height: 1;
   text-align: right;
   color: #475569;
@@ -486,32 +668,32 @@ onMounted(loadTrips)
 .no-detail {
   text-align: center;
   color: #64748b;
-  padding: 10px;
+  padding: 6px;
 }
 .actual-row {
-  margin-top: 8px;
+  margin-top: 4px;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   align-items: flex-end;
 }
 .inline-field {
-  min-width: 180px;
+  min-width: 160px;
 }
 .actions {
-  margin-top: 8px;
+  margin-top: 4px;
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 .btn {
-  min-height: 42px;
+  min-height: 34px;
   border: 1px solid #cbd5e1;
   background: #fff;
-  border-radius: 6px;
-  padding: 0 14px;
+  border-radius: 4px;
+  padding: 0 10px;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 14px;
 }
 .btn.complete {
   background: #fffbeb;
@@ -537,11 +719,11 @@ onMounted(loadTrips)
 .empty {
   text-align: center;
   color: #64748b;
-  padding: 20px 0;
+  padding: 12px 0;
 }
 @media (max-width: 640px) {
   .trip-execution-page {
-    padding: 10px;
+    padding: 6px;
     max-width: 100%;
   }
   .toolbar {
@@ -554,12 +736,12 @@ onMounted(loadTrips)
     width: 100%;
   }
   .trip-head {
-    flex-direction: column;
-    gap: 6px;
+    flex-wrap: wrap;
+    gap: 4px;
   }
-  .status-block {
+  .actual-time {
+    margin-left: 0;
     width: 100%;
-    align-items: flex-start;
   }
   .actions {
     display: grid;
@@ -567,41 +749,41 @@ onMounted(loadTrips)
   }
   .detail-head,
   .detail-row {
-    grid-template-columns: 1fr 58px 88px;
-    gap: 6px;
-    padding: 7px 8px;
+    grid-template-columns: 1fr 50px 80px;
+    gap: 4px;
+    padding: 4px 6px;
   }
   .product-code {
-    font-size: 15px;
+    font-size: 13px;
   }
   .product-name {
-    font-size: 12px;
+    font-size: 11px;
   }
   .detail-qty {
-    font-size: 18px;
+    font-size: 16px;
   }
   .actual-input-wrap input {
-    height: 34px;
-    font-size: 16px;
-    padding: 0 6px;
+    height: 28px;
+    font-size: 14px;
+    padding: 0 4px;
   }
   .actual-readonly {
-    min-height: 34px;
-    font-size: 24px;
-    padding: 5px 6px;
+    min-height: 28px;
+    font-size: 16px;
+    padding: 4px 4px;
   }
   .actual-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 8px;
+    gap: 6px;
   }
   .inline-field {
     min-width: 0;
   }
   .btn {
-    min-height: 44px;
-    font-size: 15px;
-    padding: 0 8px;
+    min-height: 36px;
+    font-size: 13px;
+    padding: 0 6px;
   }
   .summary {
     gap: 4px;
@@ -609,6 +791,9 @@ onMounted(loadTrips)
   .chip {
     font-size: 11px;
     padding: 3px 8px;
+  }
+  .split-row {
+    grid-template-columns: 1fr 80px 52px;
   }
 }
 </style>
