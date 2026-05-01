@@ -34,9 +34,9 @@
     <div v-else-if="!visibleTrips.length" class="empty">{{ t('shippingTripExecution.noTrips') }}</div>
 
     <div v-else class="trip-list">
-      <section v-for="trip in visibleTrips" :key="trip.id" class="trip-card">
+      <section v-for="(trip, tripIdx) in visibleTrips" :key="trip.id" class="trip-card" :class="`trip-color-${tripIdx % 6}`">
         <header class="trip-head">
-          <h3>{{ trip.trip_code || trip.trip_ref }}</h3>
+          <h3>{{ t('shippingTripExecution.trip') }}{{ trip.trip_code || trip.trip_ref }}</h3>
           <span class="trip-meta">{{ t('shippingTripExecution.departureTime') }}: {{ trip.departure_time_plan || '-' }} | {{ t('shippingTripExecution.deliveryPlace') }}: {{ trip.ship_to_code || '-' }}</span>
           <span class="status" :class="`status-${String(trip.status || '').toLowerCase()}`">
             {{ statusLabel(trip.status) }}
@@ -50,7 +50,7 @@
             <span>{{ t('shippingTripExecution.plan') }}</span>
             <span>{{ isActualInputMode ? t('shippingTripExecution.actual') : t('shippingTripExecution.actualInput') }}</span>
           </div>
-          <div v-for="row in trip.details" :key="row.allocation_id" class="detail-row">
+          <div v-for="(row, rowIdx) in trip.details" :key="row.allocation_id" class="detail-row" :class="{ 'detail-row-alt': rowIdx % 2 === 1 }">
             <div class="detail-main">
               <span class="product-code">{{ row.product_code }}</span>
               <span class="product-name">{{ row.product_name }}</span>
@@ -188,6 +188,7 @@ const departureDate = ref(formatDate(new Date()))
 const businessType = ref('')
 const businessTypes = ref([])
 const trips = ref([])
+const prevBusinessDay = ref('')
 const actualQtyMap = ref({})
 const actualDateMap = ref({})
 const productionSplitMap = ref({})
@@ -282,7 +283,7 @@ const initActualInputState = (tripList) => {
           quantity: String(parseQty(item.quantity || 0)),
         }))
       } else {
-        byAllocSplit[row.allocation_id] = [{ production_date: '', quantity: String(parseQty(row.qty)) }]
+        byAllocSplit[row.allocation_id] = [{ production_date: prevBusinessDay.value, quantity: String(parseQty(row.qty)) }]
       }
     })
     nextQtyMap[trip.id] = byAlloc
@@ -337,7 +338,7 @@ const setSplitQty = (tripId, allocationId, splitIdx, value) => {
 
 const addSplitRow = (tripId, allocationId) => {
   const next = [...(productionSplitMap.value[tripId]?.[allocationId] || [])]
-  next.push({ production_date: '', quantity: '' })
+  next.push({ production_date: prevBusinessDay.value, quantity: '' })
   productionSplitMap.value = {
     ...productionSplitMap.value,
     [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
@@ -365,6 +366,7 @@ const loadTrips = async () => {
     })
     const data = res.data || {}
     businessTypes.value = Array.isArray(data.business_types) ? data.business_types : []
+    prevBusinessDay.value = data.prev_business_day || ''
     summary.value = data.summary || { total: 0, planned: 0, loading: 0, departed: 0, closed: 0 }
     trips.value = Array.isArray(data.trips) ? data.trips : []
     initActualInputState(trips.value)
@@ -530,7 +532,14 @@ onMounted(loadTrips)
   border: 1px solid #dbe2ee;
   border-radius: 8px;
   padding: 6px 8px;
+  border-left: 5px solid #94a3b8;
 }
+.trip-color-0 { border-left-color: #3b82f6; background: #eff6ff; }
+.trip-color-1 { border-left-color: #f59e0b; background: #fffbeb; }
+.trip-color-2 { border-left-color: #10b981; background: #ecfdf5; }
+.trip-color-3 { border-left-color: #8b5cf6; background: #f5f3ff; }
+.trip-color-4 { border-left-color: #ef4444; background: #fef2f2; }
+.trip-color-5 { border-left-color: #06b6d4; background: #ecfeff; }
 .trip-head {
   display: flex;
   align-items: center;
@@ -593,7 +602,11 @@ onMounted(loadTrips)
   padding: 3px 8px;
 }
 .detail-row {
-  border-top: 1px solid #e2e8f0;
+  border-top: 2px solid #cbd5e1;
+  background: #bfdbfe;
+}
+.detail-row-alt {
+  background: #bbf7d0;
 }
 .split-wrap {
   grid-column: 1 / -1;

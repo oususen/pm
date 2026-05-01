@@ -474,7 +474,7 @@ const MESSAGES = {
     'shippingTripExecution.product': '品番 / 品名',
     'shippingTripExecution.plan': '計画',
     'shippingTripExecution.actualInput': '実績',
-    'shippingTripExecution.actual': '実績',
+    'shippingTripExecution.actual': '実績入力',
     'shippingTripExecution.productionBreakdown': '生産日内訳',
     'shippingTripExecution.delete': '削除',
     'shippingTripExecution.addProductionDate': '+ 生産日追加',

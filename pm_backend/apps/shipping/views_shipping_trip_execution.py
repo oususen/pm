@@ -6,8 +6,9 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from masters.models import Product
+from masters.models import Calendar, Product
 from orders.core.models import ShippingTrip, ShippingTripAllocation
+from orders.utils.calendar_utils import WorkingDayCalculator
 from shipping.models import ShipmentActual, ShipmentActualHistory
 
 SPLIT_TOKEN = '|PD='
@@ -265,8 +266,13 @@ class ShippingTripExecutionView(APIView):
         for trip in trips:
             status_count[trip.status] += 1
 
+        calendar = Calendar.objects.first()
+        calc = WorkingDayCalculator(calendar)
+        prev_business_day = calc.subtract_working_days(departure_date, 1).isoformat()
+
         return Response({
             'departure_date': departure_date.isoformat(),
+            'prev_business_day': prev_business_day,
             'business_type': business_type,
             'business_types': business_types,
             'summary': {
