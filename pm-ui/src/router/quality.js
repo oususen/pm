@@ -48,6 +48,12 @@ const quality = [
     meta: { pageTitle: "製品チェックシート配置編集" },
   },
   {
+    path: "/quality/product-checksheet/operation",
+    name: "ProductChecksheetOperation",
+    component: () => import("@/views/quality/ProductChecksheetOperation.vue"),
+    meta: { pageTitle: "チェック実施" },
+  },
+  {
     path: "/quality/product-checksheet/input/:batchId",
     name: "ProductChecksheetInput",
     component: () => import("@/views/quality/ProductChecksheetInput.vue"),

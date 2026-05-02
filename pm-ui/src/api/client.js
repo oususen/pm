@@ -78,6 +78,8 @@ const client = axios.create({
   withCredentials: true, // クッキーを送受信
 })
 
+const API_DEBUG_LOG = import.meta.env.VITE_API_DEBUG_LOG === 'true'
+
 // CSRFトークンを自動的に付与
 client.interceptors.request.use((config) => {
   // FormData の場合は Content-Type をブラウザに委譲し、boundary 付きで送る
@@ -93,24 +95,30 @@ client.interceptors.request.use((config) => {
   if (csrfToken) {
     config.headers['X-CSRFToken'] = csrfToken
   }
-  // デバッグ: リクエスト情報をコンソールに出力
-  console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`, { params: config.params, data: config.data })
+  if (API_DEBUG_LOG) {
+    // デバッグ時のみ出力
+    console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`, { params: config.params, data: config.data })
+  }
   return config
 })
 
 client.interceptors.response.use(
   (response) => {
-    // デバッグ: レスポンス情報をコンソールに出力
-    console.log(`[API Response] ${response.status} ${response.config.url}`, {
-      isArray: Array.isArray(response.data),
-      length: Array.isArray(response.data) ? response.data.length : 'N/A',
-      data: response.data
-    })
+    if (API_DEBUG_LOG) {
+      // デバッグ時のみ出力
+      console.log(`[API Response] ${response.status} ${response.config.url}`, {
+        isArray: Array.isArray(response.data),
+        length: Array.isArray(response.data) ? response.data.length : 'N/A',
+        data: response.data
+      })
+    }
     return response
   },
   (error) => {
-    // デバッグ: エラー情報をコンソールに出力
-    console.error(`[API Error] ${error.config?.url}`, error.response || error)
+    if (API_DEBUG_LOG) {
+      // デバッグ時のみ出力
+      console.error(`[API Error] ${error.config?.url}`, error.response || error)
+    }
     return Promise.reject(error)
   }
 )

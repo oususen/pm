@@ -4,6 +4,7 @@ from datetime import timedelta
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Count, Q
+from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_date
 from rest_framework import generics, parsers, status, viewsets
@@ -33,6 +34,7 @@ from .services_checksheet import (
     active_template_for,
     create_background_assets,
     generate_record_pdf,
+    generate_template_preview_pdf,
     normalize_responses,
     now_naive,
     parse_responses_json,
@@ -463,6 +465,19 @@ class ProductChecksheetTemplateViewSet(viewsets.ModelViewSet):
         if not template:
             return Response({"required": False})
         return Response({"required": True, "template": ProductChecksheetTemplateSerializer(template).data})
+
+    @action(detail=True, methods=["get"])
+    def preview_pdf(self, request, pk=None):
+        template = self.get_object()
+        pdf_buffer = generate_template_preview_pdf(template)
+        if not pdf_buffer:
+            return Response(
+                {"detail": "台紙画像が設定されていないためPDFを生成できません。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        product_code = template.product.product_code if template.product else "template"
+        filename = f"{product_code}_v{template.version}_preview.pdf"
+        return FileResponse(pdf_buffer, as_attachment=True, filename=filename, content_type="application/pdf")
 
     # --- ワークフローアクション ---
 

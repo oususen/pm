@@ -44,6 +44,7 @@ const canViewEquipment = computed(() =>
 );
 const canViewChecksheet = computed(() =>
   canAccessQuality("quality.product_checksheet_template", "view", [
+    "quality.product_checksheet_input",
     "quality.product_checksheet_review",
   ])
 );

@@ -37,6 +37,9 @@ export const createProductChecksheetsAPI = (client) => ({
   revise(id) {
     return client.post(`/product-checksheet-templates/${id}/revise/`)
   },
+  previewPdf(id) {
+    return client.get(`/product-checksheet-templates/${id}/preview_pdf/`, { responseType: 'blob' })
+  },
   listTasks(params = {}) {
     return client.get('/product-checksheet-tasks/', { params })
   },

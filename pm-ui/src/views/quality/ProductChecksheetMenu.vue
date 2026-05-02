@@ -5,16 +5,20 @@
     <div class="master-grid">
       <RouterLink v-if="canViewTemplate" to="/quality/product-checksheet/templates" class="master-tile">
         <div class="icon-box">📝</div>
-        <div class="label">品質チェックシート作成</div>
+        <div class="label">チェックシート作成</div>
       </RouterLink>
-      <RouterLink v-if="canViewOperation" to="/quality/product-checksheet/quality" class="master-tile">
+      <RouterLink v-if="canViewOperation" to="/quality/product-checksheet/operation" class="master-tile">
         <div class="icon-box">🛠</div>
-        <div class="label">品質チェックシート実施</div>
+        <div class="label">チェック実施</div>
+      </RouterLink>
+      <RouterLink v-if="canViewReview" to="/quality/product-checksheet/quality" class="master-tile">
+        <div class="icon-box">✅</div>
+        <div class="label">品質確認</div>
       </RouterLink>
     </div>
 
     <p class="helper-text">
-      チェックシート台紙の作成・承認と、製造時の品質チェックシート実施を行います。
+      チェックシート台紙の作成・承認、製造時のチェック実施、品質確認を行います。
     </p>
   </div>
 </template>
@@ -40,6 +44,13 @@ const canAccessQuality = (resource, level = "view", aliases = []) => {
 
 const canViewTemplate = computed(() => canAccessQuality("quality.product_checksheet_template", "view"))
 const canViewOperation = computed(() =>
+  canAccessQuality("quality.product_checksheet_input", "view", [
+    "quality.product_checksheet_operation",
+    "quality.product_checksheet_template",
+    "quality",
+  ])
+)
+const canViewReview = computed(() =>
   canAccessQuality("quality.product_checksheet_review", "view", ["quality.product_checksheet_template"])
 )
 </script>

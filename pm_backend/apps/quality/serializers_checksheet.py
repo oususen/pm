@@ -259,6 +259,7 @@ class ProductChecksheetBatchSerializer(serializers.ModelSerializer):
             "line", "line_code", "line_name",
             "process", "process_code", "process_name",
             "product", "product_code", "product_name",
+            "plan_date",
             "lot_no",
             "quantity",
             "operator_name",

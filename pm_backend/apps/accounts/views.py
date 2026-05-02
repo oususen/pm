@@ -15,6 +15,12 @@ from .models import (
     DepartmentPositionPermission,
 )
 
+def _safe_get_profile(user):
+    try:
+        return user.profile
+    except UserProfile.DoesNotExist:
+        return None
+
 
 def _profile_payload(user):
     try:
@@ -117,7 +123,7 @@ def _build_effective_permissions(user):
             for resource in resources
         ]
 
-    profile = getattr(user, 'profile', None)
+    profile = _safe_get_profile(user)
     department_id = profile.department_id if profile else None
     position_name = profile.role if profile and profile.role else ''
 

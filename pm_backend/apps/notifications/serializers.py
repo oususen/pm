@@ -5,6 +5,12 @@ from accounts.models import Department, UserProfile
 
 User = get_user_model()
 
+def _safe_get_profile(user):
+    try:
+        return user.profile
+    except UserProfile.DoesNotExist:
+        return None
+
 
 class NotificationSerializer(serializers.ModelSerializer):
     target_department_names = serializers.SerializerMethodField()
@@ -124,8 +130,7 @@ class NotificationSerializer(serializers.ModelSerializer):
 
         result = []
         for user in users:
-
-            profile = getattr(user, 'profile', None)
+            profile = _safe_get_profile(user)
             if not profile:
                 continue
 

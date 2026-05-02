@@ -792,6 +792,42 @@ class LinePlanViewSet(viewsets.ModelViewSet):
                         plan.plan_id,
                     )
 
+        # チェックシートバッチ自動生成
+        try:
+            from quality.services_checksheet import active_template_for, prepare_batch as cs_prepare_batch
+            from masters.models import Process as ProcessModel
+            process_cache = {}
+            for it in items:
+                product_id = it.get('product_id')
+                process_id = it.get('process_id')
+                plan_date = it.get('plan_date')
+                plan_qty_val = int(Decimal(str(it.get('plan_qty') or 0)))
+                if not product_id or not process_id or not plan_date or plan_qty_val <= 0:
+                    continue
+                prod = product_cache.get(product_id)
+                if not prod or not getattr(prod, 'is_line_final_product', False):
+                    continue
+                tmpl = active_template_for(line_id, process_id, product_id)
+                if not tmpl:
+                    continue
+                if process_id not in process_cache:
+                    try:
+                        process_cache[process_id] = ProcessModel.objects.get(id=process_id)
+                    except ProcessModel.DoesNotExist:
+                        continue
+                plan_date_obj = parse_plan_date(plan_date)
+                cs_prepare_batch(
+                    template=tmpl,
+                    line=line_obj,
+                    process=process_cache[process_id],
+                    product=prod,
+                    quantity=plan_qty_val,
+                    plan_date=plan_date_obj,
+                    user=change_user,
+                )
+        except Exception:
+            logger.exception("チェックシートバッチ自動生成でエラー")
+
         return Response({
             'created': created,
             'deleted_plan': deleted_plan,

@@ -1,5 +1,5 @@
 <template>
-  <div class="page-container">
+  <div class="page-container" v-if="canViewReview">
     <div class="page-header">
       <div>
         <h1 class="page-title">製品チェックシート品質確認一覧</h1>
@@ -75,6 +75,11 @@
       </table>
     </section>
   </div>
+
+  <div class="page-container" v-else>
+    <h1 class="page-title">製品チェックシート品質確認一覧</h1>
+    <p class="helper-text">品質の閲覧権限がありません。</p>
+  </div>
 </template>
 
 <script setup>
@@ -99,6 +104,7 @@ const canAccessQuality = (resource, level = 'view') => {
   if (permissions.some((item) => item.resource === resource)) return hasPermission(user, resource, level)
   return hasPermission(user, 'quality', level)
 }
+const canViewReview = computed(() => canAccessQuality('quality.product_checksheet_review', 'view'))
 const canEditReview = computed(() => canAccessQuality('quality.product_checksheet_review', 'edit'))
 
 const loadRecords = async () => {
@@ -129,7 +135,10 @@ const statusLabel = (status) => {
   return '未入力'
 }
 
-onMounted(loadRecords)
+onMounted(() => {
+  if (!canViewReview.value) return
+  loadRecords()
+})
 </script>
 
 <style scoped>

@@ -190,6 +190,7 @@ def prepare_batch(
     process,
     product,
     quantity,
+    plan_date=None,
     lot_no="",
     operator_name="",
     source_context=None,
@@ -206,6 +207,8 @@ def prepare_batch(
         "quantity": quantity,
         "status": ProductChecksheetBatch.STATUS_OPEN,
     }
+    if plan_date is not None:
+        filters["plan_date"] = plan_date
     batch = ProductChecksheetBatch.objects.filter(**filters).order_by("-id").first()
     if not batch:
         batch = ProductChecksheetBatch.objects.create(
@@ -353,6 +356,41 @@ def _draw_approval_stamp(draw, background, record, stamp_field=None):
     _draw_centered_text(draw, center, record.supervisor_name or "-", _font(max(14, stamp_size // 8), bold=True), color)
     stamp_date = (record.approved_at or record.completed_at or record.created_at).strftime("%Y-%m-%d")
     _draw_centered_text(draw, (center[0], bottom - stamp_size * 0.18), stamp_date, _font(max(12, stamp_size // 10)), color)
+
+
+def generate_template_preview_pdf(template: ProductChecksheetTemplate):
+    if not template.background_image:
+        return None
+    background = Image.open(template.background_image.path).convert("RGBA")
+    overlay = Image.new("RGBA", background.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    fields = list(template.fields.order_by("sort_order"))
+
+    for field in fields:
+        x, y = int(field.x), int(field.y)
+        w, h = int(field.width), int(field.height)
+        draw.rectangle((x, y, x + w, y + h), outline=(30, 64, 175, 140), width=2)
+        fill = (230, 240, 255, 80)
+        draw.rectangle((x + 1, y + 1, x + w - 1, y + h - 1), fill=fill)
+
+        if field.show_label and field.label:
+            font_size = max(min(h - 6, 18), 10)
+            font = _font(font_size)
+            label = field.label
+            if field.required:
+                label += " *"
+            bbox = draw.textbbox((0, 0), label, font=font)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+            tx = x + max((w - text_w) / 2, 2)
+            ty = y + max((h - text_h) / 2, 1)
+            draw.text((tx, ty), label, fill=(30, 64, 175, 200), font=font)
+
+    background = Image.alpha_composite(background, overlay)
+    output = io.BytesIO()
+    background.convert("RGB").save(output, format="PDF", resolution=200.0)
+    output.seek(0)
+    return output
 
 
 def generate_record_pdf(record: ProductChecksheetRecord):

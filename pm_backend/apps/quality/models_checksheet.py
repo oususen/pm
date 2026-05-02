@@ -217,6 +217,7 @@ class ProductChecksheetBatch(models.Model):
     line = models.ForeignKey(Line, on_delete=models.PROTECT, related_name="product_checksheet_batches", verbose_name="ライン")
     process = models.ForeignKey(Process, on_delete=models.PROTECT, related_name="product_checksheet_batches", verbose_name="工程")
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="product_checksheet_batches", verbose_name="製品")
+    plan_date = models.DateField(null=True, blank=True, verbose_name="計画日")
     lot_no = models.CharField(max_length=100, blank=True, default="", verbose_name="ロットNo")
     quantity = models.PositiveIntegerField(verbose_name="対象数量")
     operator_name = models.CharField(max_length=120, blank=True, default="", verbose_name="作業者")
@@ -240,6 +241,7 @@ class ProductChecksheetBatch(models.Model):
         verbose_name_plural = "製品チェックシート入力ロット"
         indexes = [
             models.Index(fields=["production_order", "line", "process", "product"]),
+            models.Index(fields=["plan_date", "line", "process", "product"]),
             models.Index(fields=["status", "created_at"]),
             models.Index(fields=["lot_no"]),
         ]

@@ -195,6 +195,9 @@
           <button class="btn-primary" @click="saveTemplate" :disabled="!canEditFields || saving">
             {{ form.id ? '下書き更新' : '下書き保存' }}
           </button>
+          <button class="btn-secondary" @click="downloadPreviewPdf" :disabled="!form.id || pdfLoading">
+            {{ pdfLoading ? 'PDF生成中...' : 'PDF出力' }}
+          </button>
           <button class="btn-approve" @click="submitForReview" :disabled="!canSubmitForReview || actionLoading">
             確認依頼
           </button>
@@ -229,7 +232,7 @@
                 <tr>
                   <th>No</th>
                   <th>キー</th>
-                  <th>ラ��ル</th>
+                  <th>ラベル</th>
                   <th>種別</th>
                   <th>必須</th>
                 </tr>
@@ -281,7 +284,7 @@
     <div v-if="submitDialogVisible" class="modal-backdrop" @click.self="cancelSubmit">
       <div class="modal-panel reject-modal">
         <div class="modal-header">
-          <h3 class="panel-title">��認依頼</h3>
+          <h3 class="panel-title">確認依頼</h3>
         </div>
         <div class="reject-modal-body">
           <label class="reject-label">コメント（任意）</label>
@@ -367,7 +370,12 @@ const actionLoading = ref(false)
 const selectedTemplateId = ref(null)
 const isListHidden = ref(false)
 const lineOptions = ref([])
-const processOptions = ref([])
+const allProcesses = ref([])
+const processOptions = computed(() => {
+  if (!form.value.line) return allProcesses.value
+  return allProcesses.value.filter((p) => String(p.line) === String(form.value.line))
+})
+const pdfLoading = ref(false)
 const rejectDialogVisible = ref(false)
 const rejectComment = ref('')
 const submitDialogVisible = ref(false)
@@ -597,7 +605,7 @@ const searchProducts = async () => {
   }
   productSearching.value = true
   try {
-    const res = await api.products.getProducts({ is_active: true, search: keyword, page_size: 20 })
+    const res = await api.products.getProducts({ is_active: true, is_line_final_product: true, search: keyword, page_size: 20 })
     if (serial !== productSearchSerial) return
     productSuggestions.value = res.data?.results || res.data || []
   } catch (error) {
@@ -622,7 +630,9 @@ const selectProduct = (product) => {
   form.value.product = product.id
   selectedProductLabel.value = `${product.product_code} - ${product.product_name}`
   if (!form.value.sheet_name) form.value.sheet_name = product.product_code || ''
-  if (!form.value.document_title) form.value.document_title = `${product.product_name || product.product_code || ''} チェックシート`.trim()
+  const selectedProcess = allProcesses.value.find((p) => String(p.id) === String(form.value.process))
+  const processName = selectedProcess?.process_name || ''
+  form.value.document_title = `${product.product_code || ''}${processName ? ' ' + processName : ''} チェックシート`.trim()
   productSearch.value = selectedProductLabel.value
   productSuggestions.value = [product]
   showProductSuggestions.value = false
@@ -639,11 +649,11 @@ const hideProductSuggestions = () => {
 const loadMasters = async () => {
   try {
     const [lineRes, processRes] = await Promise.all([
-      api.lines.getLines({ page_size: 1000 }),
+      api.lines.getLines({ line_type: 'PROD', page_size: 1000 }),
       api.processes.getProcesses({ is_active: true, page_size: 1000 }),
     ])
     lineOptions.value = lineRes.data?.results || lineRes.data || []
-    processOptions.value = processRes.data?.results || processRes.data || []
+    allProcesses.value = processRes.data?.results || processRes.data || []
   } catch (error) {
     console.error('マスタ取得に失敗:', error)
   }
@@ -657,7 +667,7 @@ const loadTemplateList = async () => {
     templates.value = res.data?.results || res.data || []
   } catch (error) {
     console.error('テンプレート一覧取得に失敗:', error)
-    alert('��ンプレート一覧の取得に失敗しました。')
+    alert('テンプレート一覧の取得に失敗しました。')
   } finally {
     loadingList.value = false
   }
@@ -672,7 +682,7 @@ const loadTemplateDetail = async (id) => {
     selectedTemplateId.value = id
   } catch (error) {
     console.error('テンプレート詳細取得に失敗:', error)
-    alert('テンプレート詳細���取得に失敗しました。')
+    alert('テンプレート詳細の取得に失敗しました。')
   } finally {
     detailLoading.value = false
   }
@@ -700,7 +710,7 @@ const toggleTemplateList = () => {
 
 const validateForm = () => {
   if (!form.value.line) {
-    alert('ラインは必須で��。')
+    alert('ラインは必須です。')
     return false
   }
   if (!form.value.process) {
@@ -708,7 +718,7 @@ const validateForm = () => {
     return false
   }
   if (!form.value.product) {
-    alert('��品を候補から選択��てください。')
+    alert('製品を候補から選択してください。')
     return false
   }
   return true
@@ -768,7 +778,7 @@ const confirmSubmitForReview = async () => {
     submitComment.value = ''
     alert('確認依頼を登録しました。')
   } catch (error) {
-    console.error('��認依頼に失敗:', error)
+    console.error('確認依頼に失敗:', error)
     alert('確認依頼に失敗しました。')
   } finally {
     actionLoading.value = false
@@ -785,7 +795,7 @@ const completeReview = async () => {
     await api.productChecksheets.review(form.value.id)
     await loadTemplateList()
     await loadTemplateDetail(form.value.id)
-    alert(`${label}を登録しました��`)
+    alert(`${label}を登録しました。`)
   } catch (error) {
     console.error('確認完了に失敗:', error)
     alert('確認完了に失敗しました。')
@@ -796,16 +806,16 @@ const completeReview = async () => {
 
 const approveTemplate = async () => {
   if (!form.value.id || !canApprove.value) return
-  const ok = window.confirm('部長承認します。よろしい��すか？')
+  const ok = window.confirm('部長承認します。よろしいですか？')
   if (!ok) return
   actionLoading.value = true
   try {
     await api.productChecksheets.approve(form.value.id)
     await loadTemplateList()
     await loadTemplateDetail(form.value.id)
-    alert('部長承認しまし���。')
+    alert('部長承認しました。')
   } catch (error) {
-    console.error('承��に失敗:', error)
+    console.error('承認に失敗:', error)
     alert('承認に失敗しました。')
   } finally {
     actionLoading.value = false
@@ -853,12 +863,33 @@ const reviseTemplate = async () => {
     const newId = response.data?.id
     await loadTemplateList()
     if (newId) await loadTemplateDetail(newId)
-    alert(`改訂版（v${response.data?.version}）を作成���ました。`)
+    alert(`改訂版（v${response.data?.version}）を作成しました。`)
   } catch (error) {
     console.error('改訂に失敗:', error)
     alert(error.response?.data?.detail || '改訂に失敗しました。')
   } finally {
     actionLoading.value = false
+  }
+}
+
+const downloadPreviewPdf = async () => {
+  if (!form.value.id) return
+  pdfLoading.value = true
+  try {
+    const res = await api.productChecksheets.previewPdf(form.value.id)
+    const url = URL.createObjectURL(res.data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `checksheet_template_${form.value.id}.pdf`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    console.error('PDF出力に失敗:', error)
+    alert('PDF出力に失敗しました。台紙画像が設定されているか確認してください。')
+  } finally {
+    pdfLoading.value = false
   }
 }
 
@@ -872,6 +903,14 @@ watch(
     await loadTemplateDetail(numericId)
   }
 )
+
+watch(() => form.value.line, () => {
+  form.value.process = ''
+  form.value.product = ''
+  productSearch.value = ''
+  selectedProductLabel.value = ''
+  productSuggestions.value = []
+})
 
 onMounted(async () => {
   if (!canView.value) return
