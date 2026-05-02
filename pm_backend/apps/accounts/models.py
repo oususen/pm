@@ -238,6 +238,7 @@ class UserPermission(models.Model):
         ('quality.product_checksheet_template', '品質: 製品チェックシート（台紙登録/配置編集）'),
         ('quality.product_checksheet_input', '品質: 製品チェックシート（現場入力）'),
         ('quality.product_checksheet_review', '品質: 製品チェックシート（品質確認）'),
+        ('quality.product_checksheet_batch_delete', '品質: チェックシートバッチ削除'),
         ('notifications', '通知'),
         ('notifications.create', '通知: 通知作成'),
         ('engineering_change', '設変'),

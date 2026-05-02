@@ -118,6 +118,39 @@ def active_template_for(line_id, process_id, product_id):
     )
 
 
+def active_templates_for_product(product_id):
+    """製品に紐づく全工程の承認済みテンプレートを返す（工程ごとに最新版のみ）"""
+    from django.db.models import Max
+    qs = (
+        ProductChecksheetTemplate.objects
+        .filter(
+            product_id=product_id,
+            is_active=True,
+            status=ProductChecksheetTemplate.STATUS_APPROVED,
+        )
+        .values("line_id", "process_id")
+        .annotate(max_version=Max("version"))
+    )
+    result = []
+    for entry in qs:
+        tmpl = (
+            ProductChecksheetTemplate.objects
+            .select_related("line", "process", "product")
+            .filter(
+                product_id=product_id,
+                line_id=entry["line_id"],
+                process_id=entry["process_id"],
+                version=entry["max_version"],
+                is_active=True,
+                status=ProductChecksheetTemplate.STATUS_APPROVED,
+            )
+            .first()
+        )
+        if tmpl:
+            result.append(tmpl)
+    return result
+
+
 def save_template_fields(template: ProductChecksheetTemplate, fields_payload):
     template.fields.all().delete()
     records = []

@@ -52,6 +52,9 @@ export const createProductChecksheetsAPI = (client) => ({
   prepareBatch(data) {
     return client.post('/product-checksheet-batches/prepare/', data)
   },
+  deleteBatch(id) {
+    return client.delete(`/product-checksheet-batches/${id}/`)
+  },
   listBatchRecords(batchId) {
     return client.get(`/product-checksheet-batches/${batchId}/records/`)
   },

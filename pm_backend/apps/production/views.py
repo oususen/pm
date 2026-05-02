@@ -792,11 +792,12 @@ class LinePlanViewSet(viewsets.ModelViewSet):
                         plan.plan_id,
                     )
 
-        # チェックシートバッチ自動生成
+        # チェックシートバッチ自動生成（製品の全工程テンプレート分を発行）
         try:
-            from quality.services_checksheet import active_template_for, prepare_batch as cs_prepare_batch
+            from quality.services_checksheet import active_templates_for_product, prepare_batch as cs_prepare_batch
             from masters.models import Process as ProcessModel
             process_cache = {}
+            processed_product_dates = set()
             for it in items:
                 product_id = it.get('product_id')
                 process_id = it.get('process_id')
@@ -807,24 +808,30 @@ class LinePlanViewSet(viewsets.ModelViewSet):
                 prod = product_cache.get(product_id)
                 if not prod or not getattr(prod, 'is_line_final_product', False):
                     continue
-                tmpl = active_template_for(line_id, process_id, product_id)
-                if not tmpl:
+                cache_key = (product_id, plan_date)
+                if cache_key in processed_product_dates:
                     continue
-                if process_id not in process_cache:
-                    try:
-                        process_cache[process_id] = ProcessModel.objects.get(id=process_id)
-                    except ProcessModel.DoesNotExist:
-                        continue
+                processed_product_dates.add(cache_key)
+                templates = active_templates_for_product(product_id)
+                if not templates:
+                    continue
                 plan_date_obj = parse_plan_date(plan_date)
-                cs_prepare_batch(
-                    template=tmpl,
-                    line=line_obj,
-                    process=process_cache[process_id],
-                    product=prod,
-                    quantity=plan_qty_val,
-                    plan_date=plan_date_obj,
-                    user=change_user,
-                )
+                for tmpl in templates:
+                    tmpl_process_id = tmpl.process_id
+                    if tmpl_process_id not in process_cache:
+                        try:
+                            process_cache[tmpl_process_id] = ProcessModel.objects.get(id=tmpl_process_id)
+                        except ProcessModel.DoesNotExist:
+                            continue
+                    cs_prepare_batch(
+                        template=tmpl,
+                        line=tmpl.line,
+                        process=process_cache[tmpl_process_id],
+                        product=prod,
+                        quantity=plan_qty_val,
+                        plan_date=plan_date_obj,
+                        user=change_user,
+                    )
         except Exception:
             logger.exception("チェックシートバッチ自動生成でエラー")
 

@@ -186,6 +186,7 @@ class ProductChecksheetRecordSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="batch.product.product_name", read_only=True)
     line_code = serializers.CharField(source="batch.line.line_code", read_only=True)
     process_code = serializers.CharField(source="batch.process.process_code", read_only=True)
+    plan_date = serializers.DateField(source="batch.plan_date", read_only=True)
     lot_no = serializers.CharField(source="batch.lot_no", read_only=True)
     quantity = serializers.IntegerField(source="batch.quantity", read_only=True)
     generated_pdf_url = serializers.SerializerMethodField()
@@ -215,6 +216,7 @@ class ProductChecksheetRecordSerializer(serializers.ModelSerializer):
             "product_name",
             "line_code",
             "process_code",
+            "plan_date",
             "lot_no",
             "quantity",
             "photos",
@@ -226,7 +228,7 @@ class ProductChecksheetRecordSerializer(serializers.ModelSerializer):
             "created_at", "updated_at",
             "product_code", "product_name",
             "line_code", "process_code",
-            "lot_no", "quantity", "photos",
+            "plan_date", "lot_no", "quantity", "photos",
         ]
 
     def get_generated_pdf_url(self, obj):

@@ -12,6 +12,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from accounts.views import _build_effective_permissions
 from masters.models import Line, Process, Product
 from production.models import ProductionOrder
 
@@ -826,6 +827,18 @@ class ProductChecksheetTaskListView(generics.ListAPIView):
         return queryset
 
 
+def _user_has_resource_permission(user, resource, level="edit"):
+    if user.is_superuser:
+        return True
+    perms = _build_effective_permissions(user)
+    for p in perms:
+        if p["resource"] == resource:
+            if level == "edit":
+                return bool(p.get("can_edit"))
+            return bool(p.get("can_view") or p.get("can_edit"))
+    return False
+
+
 class ProductChecksheetBatchViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = (
         ProductChecksheetBatch.objects.select_related(
@@ -908,6 +921,28 @@ class ProductChecksheetBatchViewSet(viewsets.ReadOnlyModelViewSet):
         records = batch.records.select_related("batch", "template").prefetch_related("photos").order_by("sequence_no")
         return Response(ProductChecksheetRecordSerializer(records, many=True).data)
 
+    def destroy(self, request, pk=None):
+        if not _user_has_resource_permission(request.user, "quality.product_checksheet_batch_delete", "edit"):
+            return Response(
+                {"detail": "バッチ削除の権限がありません。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        batch = self.get_object()
+        has_input = batch.records.filter(
+            status__in=[
+                ProductChecksheetRecord.STATUS_COMPLETED,
+                ProductChecksheetRecord.STATUS_APPROVED,
+            ]
+        ).exists()
+        if has_input:
+            return Response(
+                {"detail": "入力済みのレコードがあるため削除できません。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        batch.records.all().delete()
+        batch.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class ProductChecksheetRecordViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = (
@@ -931,6 +966,9 @@ class ProductChecksheetRecordViewSet(viewsets.ReadOnlyModelViewSet):
         batch_id = self.request.query_params.get("batch")
         product_id = self.request.query_params.get("product")
         status_value = self.request.query_params.get("status")
+        line_id = self.request.query_params.get("line")
+        process_id = self.request.query_params.get("process")
+        plan_date = self.request.query_params.get("plan_date")
         planned_ship_date = self.request.query_params.get("planned_ship_date")
         shipment_unit_no = self.request.query_params.get("shipment_unit_no")
         query = str(self.request.query_params.get("q") or "").strip()
@@ -940,6 +978,14 @@ class ProductChecksheetRecordViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(batch__product_id=product_id)
         if status_value:
             queryset = queryset.filter(status=status_value)
+        if line_id:
+            queryset = queryset.filter(batch__line_id=line_id)
+        if process_id:
+            queryset = queryset.filter(batch__process_id=process_id)
+        if plan_date:
+            parsed = parse_date(plan_date)
+            if parsed:
+                queryset = queryset.filter(batch__plan_date=parsed)
         if planned_ship_date:
             parsed = parse_date(planned_ship_date)
             if parsed:

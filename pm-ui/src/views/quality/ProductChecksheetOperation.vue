@@ -103,8 +103,15 @@
                 </span>
               </td>
               <td>{{ formatDateTime(b.created_at) }}</td>
-              <td>
+              <td class="action-cell">
                 <button class="btn-secondary btn-sm" @click="goToInput(b.id)">入力</button>
+                <button
+                  v-if="canDeleteBatch"
+                  class="btn-danger btn-sm"
+                  @click="deleteBatch(b)"
+                  :disabled="(b.completed_count ?? 0) > 0"
+                  :title="(b.completed_count ?? 0) > 0 ? '入力済みレコードがあるため削除不可' : 'バッチを削除'"
+                >削除</button>
               </td>
             </tr>
           </tbody>
@@ -191,6 +198,13 @@ const canView = computed(() => canAccessQuality('quality.product_checksheet_inpu
   'quality.product_checksheet_template',
   'quality',
 ]))
+
+const canDeleteBatch = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_superuser) return true
+  return hasPermission(user, 'quality.product_checksheet_batch_delete', 'edit')
+})
 
 const formatDateTime = (value) => {
   if (!value) return '-'
@@ -293,6 +307,20 @@ const prepareBatch = async () => {
     alert(`バッチ作成に失敗しました: ${error.response?.data?.detail || error.message}`)
   } finally {
     preparing.value = false
+  }
+}
+
+const deleteBatch = async (batch) => {
+  if ((batch.completed_count ?? 0) > 0) {
+    alert('入力済みレコードがあるため削除できません。')
+    return
+  }
+  if (!confirm(`バッチ ID:${batch.id}（${batch.product_code} / ${batch.process_code}）を削除しますか？`)) return
+  try {
+    await api.productChecksheets.deleteBatch(batch.id)
+    await loadBatches()
+  } catch (error) {
+    alert(`削除に失敗しました: ${error.response?.data?.detail || error.message}`)
   }
 }
 
@@ -451,4 +479,7 @@ onMounted(async () => {
 .btn-primary { background: #2563eb; color: #fff; border-color: #2563eb; }
 .btn-primary:disabled { background: #93c5fd; border-color: #93c5fd; cursor: not-allowed; }
 .btn-secondary { background: #fff; color: #2563eb; border-color: #2563eb; }
+.btn-danger { background: #dc2626; color: #fff; border-color: #dc2626; }
+.btn-danger:disabled { background: #fca5a5; border-color: #fca5a5; cursor: not-allowed; }
+.action-cell { display: flex; gap: 4px; }
 </style>

@@ -1322,7 +1322,9 @@ const isNonWorkingCalendarDay = (day) => {
 const isHolidayDate = (dateKey) => {
   if (!dateKey) return false
   const day = calendarDayMap.value[dateKey]
-  if (isNonWorkingCalendarDay(day)) return true
+  if (day) {
+    return isNonWorkingCalendarDay(day)
+  }
   const target = buildLocalDate(dateKey)
   const weekday = target.getDay()
   return weekday === 0 || weekday === 6

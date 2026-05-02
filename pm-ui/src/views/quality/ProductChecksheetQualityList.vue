@@ -13,7 +13,19 @@
     <section class="panel">
       <div class="filters">
         <input v-model="filters.q" type="text" placeholder="品番・ロット・入力者・確認者" />
-        <input v-model="filters.planned_ship_date" type="date" />
+        <select v-model="filters.line">
+          <option value="">ライン</option>
+          <option v-for="line in allLines" :key="line.id" :value="String(line.id)">
+            {{ [line.line_code, line.line_name].filter(Boolean).join(' ') || line.id }}
+          </option>
+        </select>
+        <select v-model="filters.process">
+          <option value="">工程</option>
+          <option v-for="process in filteredProcesses" :key="process.id" :value="String(process.id)">
+            {{ [process.process_code, process.process_name].filter(Boolean).join(' ') || process.id }}
+          </option>
+        </select>
+        <input v-model="filters.plan_date" type="date" placeholder="計画日" />
         <input v-model="filters.shipment_unit_no" type="number" min="1" placeholder="台目" />
         <select v-model="filters.status">
           <option value="">すべて</option>
@@ -33,6 +45,7 @@
             <th>製品</th>
             <th>ロット</th>
             <th>番号</th>
+            <th>計画日</th>
             <th>出荷日</th>
             <th>台目</th>
             <th>出荷分内</th>
@@ -47,6 +60,7 @@
             <td>{{ record.product_code }}</td>
             <td>{{ record.lot_no || '-' }}</td>
             <td>{{ record.sequence_no }}/{{ record.quantity }}</td>
+            <td>{{ record.plan_date || '-' }}</td>
             <td>{{ record.planned_ship_date || '-' }}</td>
             <td>{{ record.shipment_unit_no || '-' }}</td>
             <td>{{ record.shipment_sequence_no || '-' }}</td>
@@ -69,7 +83,7 @@
             </td>
           </tr>
           <tr v-if="!records.length">
-            <td colspan="10" class="empty-cell">対象データがありません。</td>
+            <td colspan="11" class="empty-cell">対象データがありません。</td>
           </tr>
         </tbody>
       </table>
@@ -83,16 +97,20 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
 
 const records = ref([])
+const allLines = ref([])
+const allProcesses = ref([])
 const filters = ref({
   q: '',
-  planned_ship_date: '',
+  line: '',
+  process: '',
+  plan_date: '',
   shipment_unit_no: '',
   status: 'COMPLETED',
 })
@@ -106,6 +124,28 @@ const canAccessQuality = (resource, level = 'view') => {
 }
 const canViewReview = computed(() => canAccessQuality('quality.product_checksheet_review', 'view'))
 const canEditReview = computed(() => canAccessQuality('quality.product_checksheet_review', 'edit'))
+
+const filteredProcesses = computed(() => {
+  if (!filters.value.line) return allProcesses.value
+  return allProcesses.value.filter((proc) => String(proc.line) === String(filters.value.line))
+})
+
+const loadMasters = async () => {
+  try {
+    const [lineRes, processRes] = await Promise.all([
+      api.lines.getLines({ page_size: 1000 }),
+      api.processes.getProcesses({ is_active: true, page_size: 1000 }),
+    ])
+    allLines.value = lineRes.data?.results || lineRes.data || []
+    allProcesses.value = processRes.data?.results || processRes.data || []
+  } catch (error) {
+    console.error('マスタ取得に失敗:', error)
+  }
+}
+
+watch(() => filters.value.line, () => {
+  filters.value.process = ''
+})
 
 const loadRecords = async () => {
   const params = {}
@@ -135,8 +175,9 @@ const statusLabel = (status) => {
   return '未入力'
 }
 
-onMounted(() => {
+onMounted(async () => {
   if (!canViewReview.value) return
+  await loadMasters()
   loadRecords()
 })
 </script>
