@@ -229,7 +229,12 @@
           </div>
         </div>
         <div class="modal-body">
-          <div v-for="block in modalVisibleBlocks" :key="'mb-'+block.id" class="process-section">
+          <div
+            v-for="block in modalVisibleBlocks"
+            :key="'mb-'+block.id"
+            class="process-section"
+            :class="{ 'ratio-4-1': block.sketch_image_url && !isBlockLockedForModal(block) && block.items?.length }"
+          >
             <div class="process-section-header" :class="{ locked: isBlockLockedForModal(block) }">
               <strong>{{ block.process_code }} {{ block.process_name }}</strong>
               <span v-if="getBlockProgress(block)" class="progress-text">
@@ -1042,6 +1047,11 @@ onMounted(async () => {
   border-radius: 6px;
   overflow: hidden;
 }
+.process-section.ratio-4-1 {
+  display: grid;
+  grid-template-rows: auto 4fr 1fr;
+  min-height: min(72dvh, 820px);
+}
 .process-section-header {
   display: flex;
   align-items: center;
@@ -1062,7 +1072,15 @@ onMounted(async () => {
   max-height: 340px;
   overflow: hidden;
 }
+.process-section.ratio-4-1 .sketch-placeholder {
+  max-height: none;
+  height: 100%;
+}
 .sketch-img { width: 100%; object-fit: contain; max-height: 340px; }
+.process-section.ratio-4-1 .sketch-img {
+  max-height: none;
+  height: 100%;
+}
 .sketch-overlay {
   position: absolute;
   inset: 0;
@@ -1096,6 +1114,10 @@ onMounted(async () => {
 
 /* チェック項目リスト */
 .items-list { padding: 6px 10px; }
+.process-section.ratio-4-1 .items-list {
+  height: 100%;
+  overflow: auto;
+}
 .item-row {
   display: flex;
   align-items: center;

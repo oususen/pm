@@ -145,9 +145,25 @@ def _draw_process_page(template, block, block_index, total_blocks):
     items = list(block.items.order_by("sort_order", "id"))
     sketch_fields = list(block.sketch_fields.order_by("sort_order", "id"))
     has_sketch = bool(block.sketch_image)
+    has_items = bool(items)
+
+    # 工程ページ内の縦レイアウト比率:
+    # 台紙:項目 = 4:1（両方ある場合）
+    content_bottom = PAGE_H - MARGIN
+    content_h = max(content_bottom - y, 200)
+    gap_between = 20
+    if has_sketch and has_items:
+        usable_h = max(content_h - gap_between, 120)
+        sketch_area_h = int(usable_h * 4 / 5)
+        table_area_h = usable_h - sketch_area_h
+    elif has_sketch:
+        sketch_area_h = max(content_h - 10, 120)
+        table_area_h = 0
+    else:
+        sketch_area_h = 0
+        table_area_h = max(content_h - 10, 120)
 
     if has_sketch:
-        sketch_area_h = 700
         sketch_area_w = PAGE_W - MARGIN * 2
 
         try:
@@ -157,7 +173,8 @@ def _draw_process_page(template, block, block_index, total_blocks):
             new_h = int(bg.height * scale)
             bg_resized = bg.resize((new_w, new_h), Image.LANCZOS)
             offset_x = MARGIN + (sketch_area_w - new_w) // 2
-            offset_y = y
+            # 3:2比率で確保した台紙エリア内に上下中央寄せ
+            offset_y = y + max((sketch_area_h - new_h) // 2, 0)
 
             bg_rgb = Image.new("RGB", bg_resized.size, "white")
             bg_rgb.paste(bg_resized, mask=bg_resized.split()[3] if bg_resized.mode == "RGBA" else None)
@@ -181,16 +198,18 @@ def _draw_process_page(template, block, block_index, total_blocks):
             mask = overlay.split()[3]
             img.paste(overlay_rgb, (offset_x, offset_y), mask)
 
-            y += new_h + 20
+            y += sketch_area_h + gap_between
         except Exception:
             draw.text((MARGIN + 20, y), "（台紙画像の読み込みに失敗）", fill="red", font=_font(18))
-            y += 40
+            y += 40 + (sketch_area_h if sketch_area_h > 40 else 0)
     elif sketch_fields:
         draw.text((MARGIN + 20, y), "（台紙画像未設定 — フィールド定義あり）", fill="#888888", font=_font(16))
         y += 30
 
     if items:
         y += 10
+        table_top = y
+        table_bottom = content_bottom if table_area_h <= 0 else min(content_bottom, table_top + table_area_h)
         font_th = _font(16, bold=True)
         font_td = _font(14)
         row_h = 30
@@ -225,7 +244,7 @@ def _draw_process_page(template, block, block_index, total_blocks):
         record_type_labels = {"CHECK": "チェック", "NUMERIC": "数値", "TEXT": "文字"}
 
         for idx, item in enumerate(items):
-            if y + row_h > PAGE_H - MARGIN:
+            if y + row_h > table_bottom:
                 draw.text((table_x, y + 4), "... 以下省略 ...", fill="#888888", font=font_td)
                 break
             cx = table_x
