@@ -4011,9 +4011,10 @@ const loadDailySettings = async () => {
     const settings = res.data?.results || res.data || []
     const settingsMap = {}
     settings.forEach((s) => {
+      const t = s.final_process_start_time
       settingsMap[s.plan_date] = {
         id: s.id,
-        final_process_start_time: s.final_process_start_time,
+        final_process_start_time: t ? t.slice(0, 5) : t,
         adjust_to_break_end: s.adjust_to_break_end,
       }
     })
