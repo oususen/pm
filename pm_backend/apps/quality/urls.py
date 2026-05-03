@@ -13,6 +13,11 @@ from .views_checksheet import (
     ProductChecksheetTaskListView,
     ProductChecksheetTemplateViewSet,
 )
+from .views_integrated_checksheet import (
+    IntegratedChecksheetBatchViewSet,
+    IntegratedChecksheetTemplateViewSet,
+    IntegratedChecksheetUnitViewSet,
+)
 
 router = DefaultRouter()
 router.register(
@@ -44,6 +49,21 @@ router.register(
     r"product-checksheet-records",
     ProductChecksheetRecordViewSet,
     basename="productchecksheets-record",
+)
+router.register(
+    r"integrated-checksheet-templates",
+    IntegratedChecksheetTemplateViewSet,
+    basename="integratedchecksheet-template",
+)
+router.register(
+    r"integrated-checksheet-batches",
+    IntegratedChecksheetBatchViewSet,
+    basename="integratedchecksheet-batch",
+)
+router.register(
+    r"integrated-checksheet-units",
+    IntegratedChecksheetUnitViewSet,
+    basename="integratedchecksheet-unit",
 )
 
 urlpatterns = [

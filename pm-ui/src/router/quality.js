@@ -65,6 +65,18 @@ const quality = [
     component: () => import("@/views/quality/ProductChecksheetQualityList.vue"),
     meta: { pageTitle: "製品チェックシート品質確認一覧" },
   },
+  {
+    path: "/quality/product-checksheet/integrated/templates",
+    name: "IntegratedChecksheetTemplateManager",
+    component: () => import("@/views/quality/IntegratedChecksheetTemplateManager.vue"),
+    meta: { pageTitle: "工程一体チェックシート テンプレート管理" },
+  },
+  {
+    path: "/quality/product-checksheet/integrated/operation",
+    name: "IntegratedChecksheetOperation",
+    component: () => import("@/views/quality/IntegratedChecksheetOperation.vue"),
+    meta: { pageTitle: "工程一体チェックシート チェック実施" },
+  },
 ];
 
 export default quality;

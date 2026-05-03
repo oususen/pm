@@ -2,6 +2,7 @@
   <div class="master-menu">
     <h2 class="page-title">品質チェックシート</h2>
 
+    <h3 class="section-title">A案: 台紙方式（現行）</h3>
     <div class="master-grid">
       <RouterLink v-if="canViewTemplate" to="/quality/product-checksheet/templates" class="master-tile">
         <div class="icon-box">📝</div>
@@ -17,8 +18,28 @@
       </RouterLink>
     </div>
 
+    <h3 class="section-title">B案: 工程一体方式（新規）</h3>
+    <div class="master-grid">
+      <RouterLink
+        v-if="canViewIntegratedTemplate"
+        to="/quality/product-checksheet/integrated/templates"
+        class="master-tile"
+      >
+        <div class="icon-box">B-T</div>
+        <div class="label">テンプレート管理</div>
+      </RouterLink>
+      <RouterLink
+        v-if="canViewIntegratedOperation"
+        to="/quality/product-checksheet/integrated/operation"
+        class="master-tile"
+      >
+        <div class="icon-box">B-O</div>
+        <div class="label">チェック実施</div>
+      </RouterLink>
+    </div>
+
     <p class="helper-text">
-      チェックシート台紙の作成・承認、製造時のチェック実施、品質確認を行います。
+      A案（台紙方式）とB案（工程一体方式）の機能に遷移します。
     </p>
   </div>
 </template>
@@ -52,5 +73,18 @@ const canViewOperation = computed(() =>
 )
 const canViewReview = computed(() =>
   canAccessQuality("quality.product_checksheet_review", "view", ["quality.product_checksheet_template"])
+)
+const canViewIntegratedTemplate = computed(() =>
+  canAccessQuality("quality.product_checksheet_template", "view", [
+    "quality.integrated_checksheet_template",
+    "quality",
+  ])
+)
+const canViewIntegratedOperation = computed(() =>
+  canAccessQuality("quality.product_checksheet_input", "view", [
+    "quality.integrated_checksheet_operation",
+    "quality.integrated_checksheet_template",
+    "quality",
+  ])
 )
 </script>

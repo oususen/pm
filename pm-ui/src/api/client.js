@@ -45,6 +45,7 @@ import { createPurchaseOrderProposalsAPI } from './resources/purchaseOrderPropos
 import { createPurchaseOrderApprovalConfigAPI } from './resources/purchaseOrderApprovalConfig'
 import { createQualityEquipmentInspectionsAPI } from './resources/qualityEquipmentInspections'
 import { createProductChecksheetsAPI } from './resources/productChecksheets'
+import { createIntegratedChecksheetsAPI } from './resources/integratedChecksheets'
 import { createOvertimeAPI } from './resources/overtime'
 import { createBrakeLineActualsAPI } from './resources/brakeLineActuals'
 import { createSpotLineActualsAPI } from './resources/spotLineActuals'
@@ -173,6 +174,7 @@ export default {
   purchaseOrderApprovalConfig: createPurchaseOrderApprovalConfigAPI(client),
   qualityEquipmentInspections: createQualityEquipmentInspectionsAPI(client),
   productChecksheets: createProductChecksheetsAPI(client),
+  integratedChecksheets: createIntegratedChecksheetsAPI(client),
   overtime: createOvertimeAPI(client),
   brakeLineActuals: createBrakeLineActualsAPI(client),
   spotLineActuals: createSpotLineActualsAPI(client),

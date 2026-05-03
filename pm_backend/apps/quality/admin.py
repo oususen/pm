@@ -51,3 +51,37 @@ class ProductChecksheetWorkflowLogAdmin(admin.ModelAdmin):
 
 
 admin.site.register(ProductChecksheetPhoto)
+
+
+from .models_integrated_checksheet import (
+    IntegratedChecksheetBatch,
+    IntegratedChecksheetItem,
+    IntegratedChecksheetProcessBlock,
+    IntegratedChecksheetTemplate,
+    IntegratedChecksheetUnit,
+)
+
+
+class IntegratedProcessBlockInline(admin.TabularInline):
+    model = IntegratedChecksheetProcessBlock
+    extra = 0
+
+
+class IntegratedItemInline(admin.TabularInline):
+    model = IntegratedChecksheetItem
+    extra = 0
+
+
+@admin.register(IntegratedChecksheetTemplate)
+class IntegratedChecksheetTemplateAdmin(admin.ModelAdmin):
+    list_display = ("product", "name", "version", "status", "is_active", "updated_at")
+    list_filter = ("status", "is_active")
+    search_fields = ("name", "product__product_code", "product__product_name")
+    inlines = [IntegratedProcessBlockInline]
+
+
+@admin.register(IntegratedChecksheetBatch)
+class IntegratedChecksheetBatchAdmin(admin.ModelAdmin):
+    list_display = ("product", "line", "plan_date", "quantity", "status", "created_at")
+    list_filter = ("status", "line")
+    search_fields = ("product__product_code", "lot_no")
