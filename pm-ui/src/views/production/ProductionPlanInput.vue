@@ -286,6 +286,13 @@
                   @click="clearDayPlan(c.key)"
                   title="この日の計画をクリアして順番を振り直す"
                 >×</button>
+                <button
+                  type="button"
+                  class="btn-day-plus"
+                  :disabled="processing || !selectedLine"
+                  @click="createIntegratedChecksheetForDay(c.key)"
+                  title="この日の計画から工程一体チェックシートを作成"
+                >＋</button>
               </div>
             </th>
           </tr>
@@ -1711,6 +1718,73 @@ const savePlan = async () => {
   } catch (e) {
     console.error('保存エラー', e)
     alert('保存に失敗しました。')
+  } finally {
+    processing.value = false
+  }
+}
+
+const getDailyTotalPlanQty = (daily) => {
+  if (!daily) return 0
+  let total = 0
+  const main = Number(daily.plan)
+  if (Number.isFinite(main) && main > 0) total += main
+  const lots = Array.isArray(daily.extraLots) ? daily.extraLots : []
+  lots.forEach((lot) => {
+    const qty = Number(lot?.plan_qty)
+    if (Number.isFinite(qty) && qty > 0) total += qty
+  })
+  return Math.floor(total)
+}
+
+const createIntegratedChecksheetForDay = async (dateKey) => {
+  if (!selectedLine.value) {
+    alert('ラインを選択してください。')
+    return
+  }
+  if (!dateKey) return
+  const ok = window.confirm('チェックシート作成しますか？')
+  if (!ok) return
+
+  const targets = rows.value
+    .map((row) => {
+      const daily = ensureDailyCell(row, dateKey)
+      const qty = getDailyTotalPlanQty(daily)
+      return {
+        product_id: row.product_id,
+        quantity: qty,
+      }
+    })
+    .filter((x) => x.product_id && x.quantity > 0)
+
+  if (!targets.length) {
+    alert('この日の計画数量がありません。')
+    return
+  }
+
+  processing.value = true
+  try {
+    let created = 0
+    const errors = []
+    for (const target of targets) {
+      try {
+        await api.integratedChecksheets.prepareBatch({
+          product: target.product_id,
+          line: selectedLine.value,
+          quantity: target.quantity,
+          plan_date: dateKey,
+          lot_no: '',
+        })
+        created += 1
+      } catch (e) {
+        const msg = e?.response?.data?.detail || e?.message || '作成失敗'
+        errors.push(`${target.product_id}: ${msg}`)
+      }
+    }
+    if (errors.length) {
+      alert(`チェックシート作成: ${created}件成功 / ${errors.length}件失敗\n${errors.join('\n')}`)
+    } else {
+      alert(`チェックシートを ${created} 件作成しました。`)
+    }
   } finally {
     processing.value = false
   }
@@ -4494,6 +4568,25 @@ thead tr.head-level2 th.sticky-col {
   background: #fee2e2;
 }
 .btn-day-clear:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn-day-plus {
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  border: 1px solid #22c55e;
+  border-radius: 3px;
+  background: #ecfdf5;
+  color: #15803d;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-weight: 700;
+}
+.btn-day-plus:hover:not(:disabled) {
+  background: #dcfce7;
+}
+.btn-day-plus:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
