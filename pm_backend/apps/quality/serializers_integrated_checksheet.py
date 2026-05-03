@@ -201,14 +201,25 @@ class IntegratedChecksheetBatchSerializer(serializers.ModelSerializer):
     completed_count = serializers.IntegerField(read_only=True, default=0)
     process_progress = serializers.SerializerMethodField()
 
+    leader_confirmed_by_name = serializers.SerializerMethodField()
+    supervisor_confirmed_by_name = serializers.SerializerMethodField()
+
     class Meta:
         model = IntegratedChecksheetBatch
         fields = [
             "id", "template", "product", "product_code", "product_name",
             "line", "line_code", "plan_date", "quantity", "lot_no",
             "status", "unit_count", "completed_count", "process_progress",
+            "leader_confirmed_by", "leader_confirmed_by_name", "leader_confirmed_at",
+            "supervisor_confirmed_by", "supervisor_confirmed_by_name", "supervisor_confirmed_at",
             "created_at", "updated_at",
         ]
+
+    def get_leader_confirmed_by_name(self, obj):
+        return _format_user_code_name(obj.leader_confirmed_by) if obj.leader_confirmed_by_id else ""
+
+    def get_supervisor_confirmed_by_name(self, obj):
+        return _format_user_code_name(obj.supervisor_confirmed_by) if obj.supervisor_confirmed_by_id else ""
 
     def get_process_progress(self, obj):
         blocks = list(

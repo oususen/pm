@@ -184,9 +184,13 @@ class IntegratedChecksheetBatch(models.Model):
 
     STATUS_OPEN = "OPEN"
     STATUS_COMPLETED = "COMPLETED"
+    STATUS_LEADER_CONFIRMED = "LEADER_CONFIRMED"
+    STATUS_SUPERVISOR_CONFIRMED = "SUPERVISOR_CONFIRMED"
     STATUS_CHOICES = [
         (STATUS_OPEN, "実施中"),
         (STATUS_COMPLETED, "完了"),
+        (STATUS_LEADER_CONFIRMED, "リーダ確認済"),
+        (STATUS_SUPERVISOR_CONFIRMED, "班長確認済"),
     ]
 
     template = models.ForeignKey(
@@ -199,6 +203,16 @@ class IntegratedChecksheetBatch(models.Model):
     quantity = models.PositiveIntegerField(verbose_name="台数")
     lot_no = models.CharField(max_length=100, blank=True, default="", verbose_name="ロットNo")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_OPEN, verbose_name="状態")
+    leader_confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+", verbose_name="リーダ確認者",
+    )
+    leader_confirmed_at = models.DateTimeField(null=True, blank=True, verbose_name="リーダ確認日時")
+    supervisor_confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+", verbose_name="班長確認者",
+    )
+    supervisor_confirmed_at = models.DateTimeField(null=True, blank=True, verbose_name="班長確認日時")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,
         on_delete=models.SET_NULL, related_name="+", verbose_name="作成者",

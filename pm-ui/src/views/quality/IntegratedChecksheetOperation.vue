@@ -30,6 +30,8 @@
           <option value="">すべて</option>
           <option value="OPEN">実施中</option>
           <option value="COMPLETED">完了</option>
+          <option value="LEADER_CONFIRMED">リーダ確認済</option>
+          <option value="SUPERVISOR_CONFIRMED">班長確認済</option>
         </select>
       </label>
     </section>
@@ -57,14 +59,14 @@
           <input type="number" v-model.number="newBatch.quantity" min="1" style="width:80px" />
         </label>
         <label>
-          計画日
+          最終工程計画日
           <input type="date" v-model="newBatch.plan_date" style="width:140px" />
         </label>
         <label>
           ロットNo
           <input type="text" v-model.trim="newBatch.lot_no" placeholder="任意" style="width:120px" />
         </label>
-        <button class="btn-primary" @click="prepareBatch" :disabled="preparing || !newBatch.product || !newBatch.line || !newBatch.quantity">
+        <button class="btn-primary" @click="prepareBatch" :disabled="preparing || !newBatch.product || !newBatch.line || !newBatch.quantity || !canEdit">
           {{ preparing ? '作成中...' : 'バッチ作成' }}
         </button>
       </div>
@@ -80,7 +82,7 @@
           <thead>
             <tr>
               <th>ID</th>
-              <th>計画日</th>
+              <th>最終工程計画日</th>
               <th>ライン</th>
               <th>製品</th>
               <th>ロットNo</th>
@@ -119,6 +121,19 @@
               <td>{{ formatDateTime(b.created_at) }}</td>
               <td class="action-cell">
                 <button class="btn-primary btn-sm" @click="openBatchDetail(b)">詳細</button>
+                <button
+                  v-if="isReviewMode && canLeaderConfirm(b)"
+                  class="btn-secondary btn-sm"
+                  :disabled="actionLoading"
+                  @click="leaderConfirm(b)"
+                >リーダ確認</button>
+                <button
+                  v-if="isReviewMode && canSupervisorConfirm(b)"
+                  class="btn-secondary btn-sm"
+                  :disabled="actionLoading"
+                  @click="supervisorConfirm(b)"
+                >班長確認</button>
+                <span v-if="b.status === 'SUPERVISOR_CONFIRMED'" class="status-chip ok">確認済</span>
               </td>
             </tr>
           </tbody>
@@ -131,7 +146,8 @@
       <div class="matrix-header">
         <h3 class="panel-title">
           {{ activeBatch.product_code }} {{ activeBatch.product_name }}
-          <span class="batch-meta">| ロット: {{ activeBatch.lot_no || '-' }} | 計画日: {{ activeBatch.plan_date || '-' }}</span>
+          <span class="batch-meta">| ロット: {{ activeBatch.lot_no || '-' }} | 最終工程計画日: {{ activeBatch.plan_date || '-' }}</span>
+          <span v-if="isReviewMode && reviewRoleLabel" class="batch-meta">| 確認: {{ reviewRoleLabel }}</span>
         </h3>
         <button class="btn-secondary btn-sm" @click="closeBatchDetail">閉じる</button>
       </div>
@@ -150,7 +166,7 @@
                 :key="'h-'+u.id"
                 class="th-unit"
                 :class="{ clickable: true }"
-                @click="openUnitModal(u)"
+                  @click="canEdit ? openUnitModal(u) : null"
               >
                 <div class="unit-header">
                   <span>{{ u.sequence_no }}</span>
@@ -183,7 +199,7 @@
                   :key="'c-'+item.id+'-'+u.id"
                   class="td-cell"
                   :class="cellClass(u, block, item)"
-                  @click="openUnitModal(u, block.id)"
+                  @click="canEdit ? openUnitModal(u, block.id) : null"
                 >
                   <template v-if="isBlockLocked(u, block)">
                     <span class="lock-icon">&#128274;</span>
@@ -220,7 +236,7 @@
               v-if="modalVisibleBlocks.length === 1 && !isBlockLockedForModal(modalVisibleBlocks[0]) && modalVisibleBlocks[0].items?.length"
               class="btn-primary btn-sm"
               @click="saveBlockChecks(modalVisibleBlocks[0])"
-              :disabled="savingBlock === modalVisibleBlocks[0].id"
+              :disabled="savingBlock === modalVisibleBlocks[0].id || !canEdit"
             >
               {{ savingBlock === modalVisibleBlocks[0].id ? '保存中...' : 'この工程を保存' }}
             </button>
@@ -265,11 +281,13 @@
                       class="judge-btn ok"
                       :class="{ active: modalResponses[item.id]?.judgement === 'OK' }"
                       @click="setJudgement(item.id, 'OK')"
+                      :disabled="!canEdit"
                     >OK</button>
                     <button
                       class="judge-btn ng"
                       :class="{ active: modalResponses[item.id]?.judgement === 'NG' }"
                       @click="setJudgement(item.id, 'NG')"
+                      :disabled="!canEdit"
                     >NG</button>
                   </template>
                   <!-- NUMERIC -->
@@ -280,6 +298,7 @@
                       class="numeric-input"
                       :value="modalResponses[item.id]?.numeric_value ?? ''"
                       @input="setNumeric(item.id, $event.target.value)"
+                      :disabled="!canEdit"
                       :placeholder="item.criteria || '数値'"
                     />
                     <span v-if="item.unit" class="unit-label">{{ item.unit }}</span>
@@ -291,6 +310,7 @@
                       class="text-input"
                       :value="modalResponses[item.id]?.text_value ?? ''"
                       @input="setText(item.id, $event.target.value)"
+                      :disabled="!canEdit"
                       :placeholder="item.criteria || 'テキスト'"
                     />
                   </template>
@@ -317,9 +337,11 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+const route = useRoute()
 
 // --- 権限 ---
 const canAccessQuality = (resource, level = 'view', aliases = []) => {
@@ -332,7 +354,32 @@ const canAccessQuality = (resource, level = 'view', aliases = []) => {
   if (hasSpecific) return candidates.some((c) => hasPermission(user, c, level))
   return hasPermission(user, 'quality', level)
 }
-const canView = computed(() => canAccessQuality('quality.integrated_checksheet', 'view', ['quality']))
+const isReviewMode = computed(() => route.name === 'IntegratedChecksheetReview')
+const canView = computed(() =>
+  canAccessQuality(
+    isReviewMode.value ? 'quality.integrated_checksheet_review' : 'quality.integrated_checksheet_operation',
+    'view',
+    [
+      'quality.integrated_checksheet_operation',
+      'quality.product_checksheet_input',
+      'quality.product_checksheet_review',
+      'quality.integrated_checksheet',
+      'quality',
+    ]
+  )
+)
+const canEdit = computed(() =>
+  canAccessQuality(
+    isReviewMode.value ? 'quality.integrated_checksheet_review' : 'quality.integrated_checksheet_operation',
+    'edit',
+    [
+      'quality.integrated_checksheet_operation',
+      'quality.product_checksheet_input',
+      'quality.integrated_checksheet',
+      'quality',
+    ]
+  )
+)
 
 // --- マスタ ---
 const allLines = ref([])
@@ -382,8 +429,10 @@ const preparing = ref(false)
 // --- バッチ詳細 ---
 const activeBatchId = ref(null)
 const activeBatch = ref(null)
+const reviewRole = ref('')
 const units = ref([])
 const loadingUnits = ref(false)
+const actionLoading = ref(false)
 const templateBlocks = ref([])
 
 // --- モーダル ---
@@ -399,6 +448,12 @@ const formatDateTime = (value) => {
   if (Number.isNaN(d.getTime())) return value
   return d.toLocaleString('ja-JP')
 }
+
+const reviewRoleLabel = computed(() => {
+  if (reviewRole.value === 'leader') return 'リーダ'
+  if (reviewRole.value === 'supervisor') return '班長'
+  return ''
+})
 
 const processProgressChips = (progressList) => {
   if (!Array.isArray(progressList) || !progressList.length) return [{ key: 'none', label: '-', done: false }]
@@ -420,6 +475,8 @@ const statusClass = (st) => {
     case 'COMPLETED': return 'completed'
     case 'APPROVED': return 'approved'
     case 'OPEN': return 'in-progress'
+    case 'LEADER_CONFIRMED': return 'completed'
+    case 'SUPERVISOR_CONFIRMED': return 'approved'
     default: return 'pending'
   }
 }
@@ -431,6 +488,8 @@ const statusLabel = (st) => {
     case 'COMPLETED': return '完了'
     case 'APPROVED': return '承認済'
     case 'OPEN': return '実施中'
+    case 'LEADER_CONFIRMED': return 'リーダ確認済'
+    case 'SUPERVISOR_CONFIRMED': return '班長確認済'
     default: return st
   }
 }
@@ -595,9 +654,46 @@ const openBatchDetail = async (batch) => {
   await loadBatchUnits(batch.id)
 }
 
+const canLeaderConfirm = (b) => ['OPEN', 'COMPLETED'].includes(b.status)
+const canSupervisorConfirm = (b) => b.status === 'LEADER_CONFIRMED'
+
+const leaderConfirm = async (batch) => {
+  if (!window.confirm('リーダ確認を実行します。全台目の必須項目が完了している必要があります。よろしいですか？')) return
+  actionLoading.value = true
+  try {
+    await api.integratedChecksheets.leaderConfirm(batch.id)
+    await loadBatches()
+    alert('リーダ確認しました。')
+  } catch (e) {
+    alert(`リーダ確認に失敗しました: ${e.response?.data?.detail || e.message}`)
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+const supervisorConfirm = async (batch) => {
+  if (!window.confirm('班長確認を実行します。よろしいですか？')) return
+  actionLoading.value = true
+  try {
+    await api.integratedChecksheets.supervisorConfirm(batch.id)
+    await loadBatches()
+    alert('班長確認しました。')
+  } catch (e) {
+    alert(`班長確認に失敗しました: ${e.response?.data?.detail || e.message}`)
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+const openReviewByRole = async (batch, role) => {
+  reviewRole.value = role || ''
+  await openBatchDetail(batch)
+}
+
 const closeBatchDetail = () => {
   activeBatchId.value = null
   activeBatch.value = null
+  reviewRole.value = ''
   units.value = []
   templateBlocks.value = []
 }
@@ -611,6 +707,7 @@ const refreshAll = () => {
 
 // --- バッチ作成 ---
 const prepareBatch = async () => {
+  if (!canEdit.value) return
   if (!newBatch.product || !newBatch.line || !newBatch.quantity) return
   preparing.value = true
   try {
@@ -675,6 +772,7 @@ const canMoveNextUnit = computed(() => {
 })
 
 const openUnitModal = (unit, blockId = null) => {
+  if (!canView.value) return
   modalUnit.value = unit
   modalSelectedBlockId.value = blockId || null
   // 既存チェック結果を modalResponses にマッピング
@@ -717,6 +815,7 @@ const closeModal = () => {
 }
 
 const setJudgement = (itemId, val) => {
+  if (!canEdit.value) return
   if (!modalResponses.value[itemId]) {
     modalResponses.value[itemId] = { judgement: '', numeric_value: null, text_value: '' }
   }
@@ -725,6 +824,7 @@ const setJudgement = (itemId, val) => {
 }
 
 const setNumeric = (itemId, val) => {
+  if (!canEdit.value) return
   if (!modalResponses.value[itemId]) {
     modalResponses.value[itemId] = { judgement: '', numeric_value: null, text_value: '' }
   }
@@ -732,6 +832,7 @@ const setNumeric = (itemId, val) => {
 }
 
 const setText = (itemId, val) => {
+  if (!canEdit.value) return
   if (!modalResponses.value[itemId]) {
     modalResponses.value[itemId] = { judgement: '', numeric_value: null, text_value: '' }
   }
@@ -740,7 +841,9 @@ const setText = (itemId, val) => {
 
 // 工程ブロック単位で保存
 const saveBlockChecks = async (block) => {
+  if (!canEdit.value) return
   if (!modalUnit.value) return
+  const savedUnitId = modalUnit.value.id
   savingBlock.value = block.id
   try {
     const checks = []
@@ -767,6 +870,13 @@ const saveBlockChecks = async (block) => {
     modalUnit.value = updatedUnit
     // バッチ一覧も更新
     loadBatches()
+
+    // 保存成功後、自動で次の一台へ移動（末尾はそのまま）
+    const currentIdx = units.value.findIndex((u) => u.id === savedUnitId)
+    if (currentIdx >= 0 && currentIdx + 1 < units.value.length) {
+      const nextUnit = units.value[currentIdx + 1]
+      if (nextUnit) openUnitModal(nextUnit, modalSelectedBlockId.value)
+    }
   } catch (error) {
     alert(`保存に失敗しました: ${error.response?.data?.detail || error.message}`)
   } finally {

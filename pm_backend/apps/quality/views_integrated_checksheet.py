@@ -403,7 +403,7 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
 class IntegratedChecksheetBatchViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = (
         IntegratedChecksheetBatch.objects
-        .select_related("template", "product", "line")
+        .select_related("template", "product", "line", "leader_confirmed_by", "supervisor_confirmed_by")
         .prefetch_related(
             "template__process_blocks__process",
             "template__process_blocks__items",
@@ -507,6 +507,65 @@ class IntegratedChecksheetBatchViewSet(viewsets.ReadOnlyModelViewSet):
         batch = self.get_queryset().get(pk=batch.pk)
         return Response(IntegratedChecksheetBatchSerializer(batch).data, status=status.HTTP_201_CREATED)
 
+    def _all_units_completed(self, batch):
+        """全台目の必須項目が完了しているか"""
+        blocks = list(
+            batch.template.process_blocks.prefetch_related("items").all()
+        )
+        required_item_ids = set()
+        for block in blocks:
+            for item in block.items.all():
+                if item.is_required:
+                    required_item_ids.add(item.id)
+        if not required_item_ids:
+            return True
+        for unit in batch.units.prefetch_related("checks").all():
+            checked_ids = set()
+            for check in unit.checks.all():
+                if check.judgement or check.numeric_value is not None or check.text_value:
+                    checked_ids.add(check.item_id)
+            if not required_item_ids.issubset(checked_ids):
+                return False
+        return True
+
+    @action(detail=True, methods=["post"])
+    def leader_confirm(self, request, pk=None):
+        batch = self.get_object()
+        if batch.status not in (
+            IntegratedChecksheetBatch.STATUS_OPEN,
+            IntegratedChecksheetBatch.STATUS_COMPLETED,
+        ):
+            return Response(
+                {"detail": f"現在のステータス「{batch.get_status_display()}」ではリーダ確認できません。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not self._all_units_completed(batch):
+            return Response(
+                {"detail": "全台目の必須項目が完了していません。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        batch.status = IntegratedChecksheetBatch.STATUS_LEADER_CONFIRMED
+        batch.leader_confirmed_by = request.user
+        batch.leader_confirmed_at = datetime.now()
+        batch.save(update_fields=["status", "leader_confirmed_by", "leader_confirmed_at", "updated_at"])
+        batch = self.get_queryset().get(pk=batch.pk)
+        return Response(IntegratedChecksheetBatchSerializer(batch).data)
+
+    @action(detail=True, methods=["post"])
+    def supervisor_confirm(self, request, pk=None):
+        batch = self.get_object()
+        if batch.status != IntegratedChecksheetBatch.STATUS_LEADER_CONFIRMED:
+            return Response(
+                {"detail": "リーダ確認済みのバッチのみ班長確認できます。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        batch.status = IntegratedChecksheetBatch.STATUS_SUPERVISOR_CONFIRMED
+        batch.supervisor_confirmed_by = request.user
+        batch.supervisor_confirmed_at = datetime.now()
+        batch.save(update_fields=["status", "supervisor_confirmed_by", "supervisor_confirmed_at", "updated_at"])
+        batch = self.get_queryset().get(pk=batch.pk)
+        return Response(IntegratedChecksheetBatchSerializer(batch).data)
+
 
 class IntegratedChecksheetUnitViewSet(viewsets.GenericViewSet):
     queryset = IntegratedChecksheetUnit.objects.all()
@@ -594,6 +653,7 @@ class IntegratedChecksheetUnitViewSet(viewsets.GenericViewSet):
             all_required_items.extend([it for it in block.items.all() if it.is_required])
 
         if not all_required_items:
+            self._update_batch_status(unit.batch)
             return
 
         checked_ids = set(
@@ -611,3 +671,26 @@ class IntegratedChecksheetUnitViewSet(viewsets.GenericViewSet):
         elif not all_done and unit.status == IntegratedChecksheetUnit.STATUS_PENDING:
             unit.status = IntegratedChecksheetUnit.STATUS_IN_PROGRESS
             unit.save(update_fields=["status"])
+
+        self._update_batch_status(unit.batch)
+
+    def _update_batch_status(self, batch):
+        total = batch.units.count()
+        if total == 0:
+            next_status = IntegratedChecksheetBatch.STATUS_OPEN
+        else:
+            completed = batch.units.filter(
+                status__in=[
+                    IntegratedChecksheetUnit.STATUS_COMPLETED,
+                    IntegratedChecksheetUnit.STATUS_APPROVED,
+                ]
+            ).count()
+            next_status = (
+                IntegratedChecksheetBatch.STATUS_COMPLETED
+                if completed >= total
+                else IntegratedChecksheetBatch.STATUS_OPEN
+            )
+
+        if batch.status != next_status:
+            batch.status = next_status
+            batch.save(update_fields=["status", "updated_at"])

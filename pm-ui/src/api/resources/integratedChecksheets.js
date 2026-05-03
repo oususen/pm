@@ -50,6 +50,12 @@ export const createIntegratedChecksheetsAPI = (client) => ({
   saveSketch(unitId, data) {
     return client.post(`/integrated-checksheet-units/${unitId}/save_sketch/`, data)
   },
+  leaderConfirm(batchId) {
+    return client.post(`/integrated-checksheet-batches/${batchId}/leader_confirm/`)
+  },
+  supervisorConfirm(batchId) {
+    return client.post(`/integrated-checksheet-batches/${batchId}/supervisor_confirm/`)
+  },
   previewPdf(templateId) {
     return client.get(`/integrated-checksheet-templates/${templateId}/preview_pdf/`, { responseType: 'blob' })
   },

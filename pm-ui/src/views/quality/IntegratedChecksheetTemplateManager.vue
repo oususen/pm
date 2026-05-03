@@ -4,7 +4,7 @@
       <h2 class="page-title">工程一体チェックシート テンプレート管理</h2>
       <div class="page-actions">
         <button class="btn-secondary" @click="loadTemplateList" :disabled="loadingList">更新</button>
-        <button class="btn-primary" @click="startNewTemplate" :disabled="saving || actionLoading">新規作成</button>
+        <button class="btn-primary" @click="startNewTemplate" :disabled="saving || actionLoading || !canEdit">新規作成</button>
       </div>
     </div>
 
@@ -182,7 +182,7 @@
           <!-- 工程ブロック -->
           <div class="section-header">
             <h4>工程ブロック</h4>
-            <button class="btn-secondary btn-sm" @click="addProcessBlock">ブロック追加</button>
+            <button class="btn-secondary btn-sm" @click="addProcessBlock" :disabled="!canEdit">ブロック追加</button>
           </div>
 
           <div v-if="!form.process_blocks.length" class="no-data">工程ブロックはまだありません。「ブロック追加」で追加してください。</div>
@@ -561,15 +561,23 @@ import { authState } from '@/auth'
 import { hasPermission } from '@/router'
 
 // --- 権限 ---
-const canAccessQuality = (resource, level = 'view') => {
+const canAccessQuality = (resource, level = 'view', aliases = []) => {
   const user = authState.user
   if (!user) return false
   if (user.is_superuser) return true
   const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
-  if (permissions.some((item) => item.resource === resource)) return hasPermission(user, resource, level)
+  const candidates = [resource, ...aliases]
+  if (permissions.some((item) => candidates.includes(item.resource))) {
+    return candidates.some((candidate) => hasPermission(user, candidate, level))
+  }
   return hasPermission(user, 'quality', level)
 }
-const canView = computed(() => canAccessQuality('quality', 'view'))
+const canView = computed(() =>
+  canAccessQuality('quality.integrated_checksheet_template', 'view', [
+    'quality.product_checksheet_template',
+    'quality',
+  ])
+)
 
 // --- 状態 ---
 const STATUS_LABELS = {
@@ -664,7 +672,12 @@ const createEmptyForm = () => ({
 })
 
 const form = ref(createEmptyForm())
-const canEdit = computed(() => canAccessQuality('quality', 'edit'))
+const canEdit = computed(() =>
+  canAccessQuality('quality.integrated_checksheet_template', 'edit', [
+    'quality.product_checksheet_template',
+    'quality',
+  ])
+)
 const currentUserId = computed(() => Number(authState.user?.id || 0))
 const normalizeStatus = (status) => String(status || '').trim().toUpperCase()
 const normalizedFormStatus = computed(() => normalizeStatus(form.value.status) || 'DRAFT')

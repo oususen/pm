@@ -36,6 +36,14 @@
         <div class="icon-box">B-O</div>
         <div class="label">チェック実施</div>
       </RouterLink>
+      <RouterLink
+        v-if="canViewIntegratedReview"
+        to="/quality/product-checksheet/integrated/review"
+        class="master-tile"
+      >
+        <div class="icon-box">B-Q</div>
+        <div class="label">作業者チェック確認</div>
+      </RouterLink>
     </div>
 
     <p class="helper-text">
@@ -75,15 +83,24 @@ const canViewReview = computed(() =>
   canAccessQuality("quality.product_checksheet_review", "view", ["quality.product_checksheet_template"])
 )
 const canViewIntegratedTemplate = computed(() =>
-  canAccessQuality("quality.product_checksheet_template", "view", [
-    "quality.integrated_checksheet_template",
+  canAccessQuality("quality.integrated_checksheet_template", "view", [
+    "quality.product_checksheet_template",
     "quality",
   ])
 )
 const canViewIntegratedOperation = computed(() =>
-  canAccessQuality("quality.product_checksheet_input", "view", [
+  canAccessQuality("quality.integrated_checksheet_operation", "view", [
+    "quality.product_checksheet_input",
     "quality.integrated_checksheet_operation",
     "quality.integrated_checksheet_template",
+    "quality",
+  ])
+)
+const canViewIntegratedReview = computed(() =>
+  canAccessQuality("quality.integrated_checksheet_review", "view", [
+    "quality.integrated_checksheet_operation",
+    "quality.product_checksheet_input",
+    "quality.product_checksheet_review",
     "quality",
   ])
 )

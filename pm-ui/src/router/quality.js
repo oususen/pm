@@ -77,6 +77,12 @@ const quality = [
     component: () => import("@/views/quality/IntegratedChecksheetOperation.vue"),
     meta: { pageTitle: "工程一体チェックシート チェック実施" },
   },
+  {
+    path: "/quality/product-checksheet/integrated/review",
+    name: "IntegratedChecksheetReview",
+    component: () => import("@/views/quality/IntegratedChecksheetOperation.vue"),
+    meta: { pageTitle: "工程一体チェックシート リーダー・班長確認" },
+  },
 ];
 
 export default quality;
