@@ -35,7 +35,7 @@ class IntegratedChecksheetTemplate(models.Model):
     is_active = models.BooleanField(default=True, verbose_name="有効")
     document_title = models.CharField(max_length=300, blank=True, default="", verbose_name="帳票タイトル")
     sheet_name = models.CharField(max_length=200, blank=True, default="", verbose_name="元シート名")
-    revision_notes = models.TextField(blank=True, default="", verbose_name="改訂内容")
+    revision_notes = models.TextField(default="", verbose_name="改訂内容")
     revision_date = models.DateField(null=True, blank=True, verbose_name="改訂日")
     effective_from = models.DateField(null=True, blank=True, verbose_name="運用開始日")
     reviewer_user = models.ForeignKey(

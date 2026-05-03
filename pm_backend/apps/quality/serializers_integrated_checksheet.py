@@ -11,21 +11,12 @@ from .models_integrated_checksheet import (
     IntegratedChecksheetUnit,
 )
 
-def _format_user_code_name(user):
+def _format_user_name(user):
     if not user:
         return ""
-    profile = getattr(user, "profile", None)
-    code = (
-        getattr(user, "employee_code", "")
-        or getattr(profile, "employee_code", "")
-        or ""
-    )
     last_name = (getattr(user, "last_name", "") or "").strip()
     first_name = (getattr(user, "first_name", "") or "").strip()
-    name = f"{last_name} {first_name}".strip() or user.get_full_name() or str(user)
-    if code and name:
-        return f"{code} {name}"
-    return code or name or ""
+    return f"{last_name} {first_name}".strip() or user.get_full_name() or str(user)
 
 
 class IntegratedChecksheetSketchFieldSerializer(serializers.ModelSerializer):
@@ -114,13 +105,13 @@ class IntegratedChecksheetTemplateSerializer(serializers.ModelSerializer):
         return obj.created_by.get_full_name() or str(obj.created_by) if obj.created_by else ""
 
     def get_reviewer_user_name(self, obj):
-        return _format_user_code_name(obj.reviewer_user)
+        return _format_user_name(obj.reviewer_user)
 
     def get_chief_user_name(self, obj):
-        return _format_user_code_name(obj.chief_user)
+        return _format_user_name(obj.chief_user)
 
     def get_approver_user_name(self, obj):
-        return _format_user_code_name(obj.approver_user)
+        return _format_user_name(obj.approver_user)
 
 
 class IntegratedChecksheetCheckSerializer(serializers.ModelSerializer):
@@ -216,10 +207,10 @@ class IntegratedChecksheetBatchSerializer(serializers.ModelSerializer):
         ]
 
     def get_leader_confirmed_by_name(self, obj):
-        return _format_user_code_name(obj.leader_confirmed_by) if obj.leader_confirmed_by_id else ""
+        return _format_user_name(obj.leader_confirmed_by) if obj.leader_confirmed_by_id else ""
 
     def get_supervisor_confirmed_by_name(self, obj):
-        return _format_user_code_name(obj.supervisor_confirmed_by) if obj.supervisor_confirmed_by_id else ""
+        return _format_user_name(obj.supervisor_confirmed_by) if obj.supervisor_confirmed_by_id else ""
 
     def get_process_progress(self, obj):
         blocks = list(

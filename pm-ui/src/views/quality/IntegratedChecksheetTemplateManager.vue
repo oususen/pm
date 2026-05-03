@@ -158,8 +158,8 @@
               <input v-model.trim="form.sheet_name" />
             </label>
             <label class="wide">
-              改訂内容
-              <textarea v-model.trim="form.revision_notes" rows="2" />
+              改訂内容 <span class="required">*</span>
+              <textarea v-model.trim="form.revision_notes" rows="2" required />
             </label>
             <label>
               改訂日
@@ -1189,6 +1189,10 @@ const persistCurrentTemplate = async () => {
   }
   if (!form.value.name) {
     alert('テンプレート名を入力してください。')
+    return null
+  }
+  if (!form.value.revision_notes) {
+    alert('改訂内容を入力してください。')
     return null
   }
 

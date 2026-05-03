@@ -68,17 +68,19 @@ def _draw_header_page(template):
         ("運用開始日", str(template.effective_from) if template.effective_from else ""),
     ]
 
-    reviewer_name = ""
-    if template.reviewer_user:
-        reviewer_name = template.reviewer_user.get_full_name() or str(template.reviewer_user)
-    chief_name = ""
-    if template.chief_user:
-        chief_name = template.chief_user.get_full_name() or str(template.chief_user)
-    approver_name = ""
-    if template.approver_user:
-        approver_name = template.approver_user.get_full_name() or str(template.approver_user)
+    def _user_display(u):
+        if not u:
+            return ""
+        last = (u.last_name or "").strip()
+        first = (u.first_name or "").strip()
+        return f"{last} {first}".strip() or str(u)
+
+    reviewer_name = _user_display(template.reviewer_user)
+    chief_name = _user_display(template.chief_user)
+    approver_name = _user_display(template.approver_user)
 
     rows.extend([
+        ("作成者", _user_display(template.created_by)),
         ("班長担当", reviewer_name),
         ("係長担当", chief_name),
         ("部長担当", approver_name),

@@ -2,7 +2,7 @@
   <div class="master-menu">
     <h2 class="page-title">品質チェックシート</h2>
 
-    <h3 class="section-title">A案: 台紙方式（現行）</h3>
+    <h3 class="section-title">A案: 台紙方式（工程別テンプレ）</h3>
     <div class="master-grid">
       <RouterLink v-if="canViewTemplate" to="/quality/product-checksheet/templates" class="master-tile">
         <div class="icon-box">📝</div>
@@ -14,26 +14,26 @@
       </RouterLink>
       <RouterLink v-if="canViewReview" to="/quality/product-checksheet/quality" class="master-tile">
         <div class="icon-box">✅</div>
-        <div class="label">品質確認</div>
+        <div class="label">結果確認</div>
       </RouterLink>
     </div>
 
-    <h3 class="section-title">B案: 工程一体方式（新規）</h3>
+    <h3 class="section-title">B案: 工程一体方式（工程一貫）</h3>
     <div class="master-grid">
       <RouterLink
         v-if="canViewIntegratedTemplate"
         to="/quality/product-checksheet/integrated/templates"
         class="master-tile"
       >
-        <div class="icon-box">B-T</div>
-        <div class="label">テンプレート管理</div>
+        <div class="icon-box">B-作成</div>
+        <div class="label">チェックシート作成</div>
       </RouterLink>
       <RouterLink
         v-if="canViewIntegratedOperation"
         to="/quality/product-checksheet/integrated/operation"
         class="master-tile"
       >
-        <div class="icon-box">B-O</div>
+        <div class="icon-box">B-実施</div>
         <div class="label">チェック実施</div>
       </RouterLink>
       <RouterLink
@@ -41,8 +41,8 @@
         to="/quality/product-checksheet/integrated/review"
         class="master-tile"
       >
-        <div class="icon-box">B-Q</div>
-        <div class="label">作業者チェック確認</div>
+        <div class="icon-box">B-確認</div>
+        <div class="label">チェック結果確認</div>
       </RouterLink>
     </div>
 
