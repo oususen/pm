@@ -1404,12 +1404,82 @@ class RoutingViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
 
 class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
-    queryset = RoutingStep.objects.all()
+    queryset = RoutingStep.objects.select_related(
+        'routing',
+        'process',
+        'line',
+        'supplier',
+        'output_product',
+        'source_bom_item',
+    ).all()
     serializer_class = RoutingStepSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['routing', 'process', 'line', 'supplier', 'time_unit', 'source_bom_item']
     ordering_fields = ['step_no']
     ordering = ['routing', 'step_no']
+
+    def _build_representative_child_ids(self, step_list):
+        if not step_list:
+            return set()
+
+        target_child_ids = {
+            int(step.output_product_id)
+            for step in step_list
+            if getattr(step, 'output_product_id', None)
+        }
+        if not target_child_ids:
+            return set()
+
+        step_code_to_product_id = {}
+        unresolved_codes = []
+        parent_ids = set()
+
+        root_routing = getattr(step_list[0], 'routing', None)
+        root_product_id = getattr(root_routing, 'product_id', None)
+        if root_product_id:
+            parent_ids.add(int(root_product_id))
+
+        for step in step_list:
+            pcode = str(getattr(step, 'output_product', None).product_code if getattr(step, 'output_product', None) else '').strip()
+            if pcode and step.output_product_id:
+                step_code_to_product_id[pcode] = int(step.output_product_id)
+
+        for step in step_list:
+            parent_code = str(getattr(step, 'remark', '') or '').strip()
+            if not parent_code:
+                continue
+            parent_id = step_code_to_product_id.get(parent_code)
+            if parent_id:
+                parent_ids.add(parent_id)
+            else:
+                unresolved_codes.append(parent_code)
+
+        if unresolved_codes:
+            for p in Product.objects.filter(product_code__in=list(set(unresolved_codes))).values('id'):
+                parent_ids.add(int(p['id']))
+
+        if not parent_ids:
+            return set()
+
+        representative_ids = set(
+            BOMItem.objects.filter(
+                bom__parent_product_id__in=list(parent_ids),
+                bom__is_coproduct=True,
+                is_coproduct_driver=True,
+                child_product_id__in=list(target_child_ids),
+            ).values_list('child_product_id', flat=True)
+        )
+        return representative_ids
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        representative_child_ids = set()
+        routing_id = self.request.query_params.get('routing')
+        if routing_id and self.action == 'list':
+            step_list = list(self.filter_queryset(self.get_queryset()))
+            representative_child_ids = self._build_representative_child_ids(step_list)
+        context['representative_child_ids'] = representative_child_ids
+        return context
 
     def _resolve_sync_target_bom(self, step: RoutingStep):
         if getattr(step, 'source_bom_item_id', None):

@@ -736,7 +736,6 @@ const fetchRepresentativeChildSet = async (stepList, routing) => {
 
   const { parentIds, unresolvedCodes } = collectRepresentativeParentIds(stepList, routing)
 
-  // remarkに書かれた親品番コードがstep内で解決できなかった場合、製品マスタから一括取得
   if (unresolvedCodes.length > 0) {
     const uniqueCodes = [...new Set(unresolvedCodes)]
     try {

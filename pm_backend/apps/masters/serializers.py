@@ -201,6 +201,11 @@ class RoutingStepSerializer(serializers.ModelSerializer):
     output_product_name = serializers.CharField(source='output_product.product_name', read_only=True)
     supplier_code = serializers.CharField(source='supplier.supplier_code', read_only=True)
     supplier_name = serializers.CharField(source='supplier.supplier_name', read_only=True)
+    source_bom_item_is_coproduct_driver = serializers.BooleanField(
+        source='source_bom_item.is_coproduct_driver',
+        read_only=True,
+        default=False,
+    )
     representative_part = serializers.SerializerMethodField()
     display_label = serializers.SerializerMethodField()
     usage_quantity = serializers.SerializerMethodField()
@@ -226,6 +231,10 @@ class RoutingStepSerializer(serializers.ModelSerializer):
         return " / ".join(parts)
 
     def get_representative_part(self, obj: RoutingStep) -> bool:
+        if getattr(obj, 'source_bom_item_id', None):
+            src = getattr(obj, 'source_bom_item', None)
+            if src is not None:
+                return bool(getattr(src, 'is_coproduct_driver', False))
         representative_ids = self.context.get('representative_child_ids') or set()
         if not obj.output_product_id:
             return False
