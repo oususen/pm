@@ -118,14 +118,18 @@ class IntegratedChecksheetCheckSerializer(serializers.ModelSerializer):
     item_name = serializers.CharField(source="item.item_name", read_only=True)
     record_type = serializers.CharField(source="item.record_type", read_only=True)
     process_block_id = serializers.IntegerField(source="item.process_block_id", read_only=True)
+    checked_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = IntegratedChecksheetCheck
         fields = [
             "id", "item", "item_name", "record_type", "process_block_id",
             "judgement", "numeric_value", "text_value",
-            "checked_by", "checked_at",
+            "checked_by", "checked_by_name", "checked_at",
         ]
+
+    def get_checked_by_name(self, obj):
+        return _format_user_name(obj.checked_by) if obj.checked_by_id else ""
 
 
 class IntegratedChecksheetSketchResponseSerializer(serializers.ModelSerializer):

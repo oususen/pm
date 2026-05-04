@@ -2,71 +2,83 @@
   <div class="page-container ics-operation" v-if="canView">
     <!-- ページヘッダー -->
     <div class="page-header">
-      <h2 class="page-title">工程一体チェックシート</h2>
+      <h2 class="page-title">{{ pageTitleText }}</h2>
       <div class="page-actions">
+        <button
+          v-if="isReviewMode"
+          class="btn-secondary"
+          @click="openNewBatchSection"
+        >新規バッチ</button>
         <button class="btn-secondary" @click="refreshAll" :disabled="loading">更新</button>
       </div>
     </div>
 
     <!-- フィルタパネル -->
     <section class="panel filter-panel">
-      <label>
-        ライン
-        <select v-model="selectedLine" :disabled="loading">
-          <option value="">全ライン</option>
-          <option v-for="l in lineOptions" :key="l.id" :value="l.id">{{ l.line_code }} - {{ l.line_name }}</option>
-        </select>
-      </label>
-      <label>
-        製品
-        <select v-model="selectedProduct" :disabled="loading">
-          <option value="">全製品</option>
-          <option v-for="p in filteredProductOptions" :key="p.id" :value="p.id">{{ p.product_code }} - {{ p.product_name }}</option>
-        </select>
-      </label>
-      <label>
-        ステータス
-        <select v-model="batchStatusFilter">
-          <option value="">すべて</option>
-          <option value="OPEN">実施中</option>
-          <option value="COMPLETED">完了</option>
-          <option value="LEADER_CONFIRMED">リーダ確認済</option>
-          <option value="SUPERVISOR_CONFIRMED">班長確認済</option>
-        </select>
-      </label>
+      <div class="prepare-form filter-form">
+        <label>
+          <span class="field-label">ライン</span>
+          <select v-model="selectedLine" :disabled="loading">
+            <option value="">全ライン</option>
+            <option v-for="l in lineOptions" :key="l.id" :value="l.id">{{ l.line_code }} - {{ l.line_name }}</option>
+          </select>
+        </label>
+        <label>
+          <span class="field-label">製品</span>
+          <select v-model="selectedProduct" :disabled="loading">
+            <option value="">全製品</option>
+            <option v-for="p in filteredProductOptions" :key="p.id" :value="p.id">{{ p.product_code }} - {{ p.product_name }}</option>
+          </select>
+        </label>
+        <label>
+          <span class="field-label">ステータス</span>
+          <select v-model="batchStatusFilter">
+            <option value="">すべて</option>
+            <option value="OPEN">実施中</option>
+            <option value="COMPLETED">完了</option>
+            <option value="LEADER_CONFIRMED">リーダ確認済</option>
+            <option value="SUPERVISOR_CONFIRMED">班長確認済</option>
+          </select>
+        </label>
+      </div>
     </section>
 
     <!-- 新規バッチ作成 -->
-    <section class="panel">
-      <h3 class="panel-title">新規バッチ作成</h3>
-      <div class="prepare-form">
+    <section v-if="isReviewMode" class="panel" ref="newBatchSectionRef">
+      <div class="panel-title-row">
+        <h3 class="panel-title">新規バッチ作成</h3>
+        <button class="btn-secondary btn-sm" @click="showNewBatchSection = !showNewBatchSection">
+          {{ showNewBatchSection ? '隠す' : '表示' }}
+        </button>
+      </div>
+      <div v-if="showNewBatchSection" class="prepare-form">
         <label>
-          ライン <span class="required-mark">*</span>
+          <span class="field-label">ライン <span class="required-mark">*</span></span>
           <select v-model="newBatch.line">
             <option value="">選択</option>
             <option v-for="l in lineOptions" :key="'nb-'+l.id" :value="l.id">{{ l.line_code }} - {{ l.line_name }}</option>
           </select>
         </label>
         <label>
-          製品 <span class="required-mark">*</span>
+          <span class="field-label">製品 <span class="required-mark">*</span></span>
           <select v-model="newBatch.product">
             <option value="">選択</option>
             <option v-for="p in newBatchProductOptions" :key="'nb-'+p.id" :value="p.id">{{ p.product_code }} - {{ p.product_name }}</option>
           </select>
         </label>
         <label>
-          台数 <span class="required-mark">*</span>
+          <span class="field-label">台数 <span class="required-mark">*</span></span>
           <input type="number" v-model.number="newBatch.quantity" min="1" style="width:80px" />
         </label>
         <label>
-          最終工程計画日
+          <span class="field-label">最終工程計画日 <span class="required-mark">*</span></span>
           <input type="date" v-model="newBatch.plan_date" style="width:140px" />
         </label>
         <label>
-          ロットNo
+          <span class="field-label">ロットNo</span>
           <input type="text" v-model.trim="newBatch.lot_no" placeholder="任意" style="width:120px" />
         </label>
-        <button class="btn-primary" @click="prepareBatch" :disabled="preparing || !newBatch.product || !newBatch.line || !newBatch.quantity || !canEdit">
+        <button class="btn-primary" @click="prepareBatch" :disabled="preparing || !newBatch.product || !newBatch.line || !newBatch.quantity || !newBatch.plan_date || !canEdit">
           {{ preparing ? '作成中...' : 'バッチ作成' }}
         </button>
       </div>
@@ -128,9 +140,9 @@
                   @click="leaderConfirm(b)"
                 >リーダ確認</button>
                 <button
-                  v-if="isReviewMode && canSupervisorConfirm(b)"
+                  v-if="isReviewMode && canShowSupervisorConfirm(b)"
                   class="btn-secondary btn-sm"
-                  :disabled="actionLoading"
+                  :disabled="actionLoading || !isSupervisorUser"
                   @click="supervisorConfirm(b)"
                 >班長確認</button>
                 <span v-if="b.status === 'SUPERVISOR_CONFIRMED'" class="status-chip ok">確認済</span>
@@ -179,9 +191,22 @@
             <template v-for="block in templateBlocks" :key="'blk-'+block.id">
               <!-- 工程ヘッダー行 -->
               <tr class="block-header-row">
-                <td :colspan="3 + units.length" class="block-header-cell">
-                  {{ block.process_code }} {{ block.process_name }}
-                  <span v-if="block.sketch_image_url" class="sketch-badge">略図あり</span>
+                <td :colspan="3" class="block-header-cell">
+                  <div class="block-header-inner">
+                    <span class="block-title-left">
+                      {{ block.process_code }} {{ block.process_name }}
+                      <span v-if="block.sketch_image_url" class="sketch-badge">略図あり</span>
+                    </span>
+                    <span class="block-title-right">確認者</span>
+                  </div>
+                </td>
+                <td
+                  v-for="u in units"
+                  :key="'bh-'+block.id+'-'+u.id"
+                  class="block-checker-cell"
+                  @click="canEdit ? openUnitModal(u, block.id) : null"
+                >
+                  {{ getBlockCheckerName(u, block.id) || '-' }}
                 </td>
               </tr>
               <!-- 各チェック項目行 -->
@@ -330,7 +355,7 @@
   </div>
 
   <div class="page-container" v-else>
-    <h2 class="page-title">工程一体チェックシート</h2>
+    <h2 class="page-title">{{ pageTitleText }}</h2>
     <p class="no-data">品質の閲覧権限がありません。</p>
   </div>
 </template>
@@ -355,6 +380,15 @@ const canAccessQuality = (resource, level = 'view', aliases = []) => {
   return hasPermission(user, 'quality', level)
 }
 const isReviewMode = computed(() => route.name === 'IntegratedChecksheetReview')
+const pageTitleText = computed(() => (
+  isReviewMode.value ? '製品チェックシート結果確認' : '製品チェックシート実施'
+))
+const isSupervisorUser = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_superuser) return true
+  return (user.profile?.role || '') === 'supervisor'
+})
 const canView = computed(() =>
   canAccessQuality(
     isReviewMode.value ? 'quality.integrated_checksheet_review' : 'quality.integrated_checksheet_operation',
@@ -425,6 +459,8 @@ const loading = computed(() => loadingBatches.value)
 // --- 新規バッチ ---
 const newBatch = reactive({ product: '', line: '', quantity: 1, plan_date: '', lot_no: '' })
 const preparing = ref(false)
+const showNewBatchSection = ref(true)
+const newBatchSectionRef = ref(null)
 
 // --- バッチ詳細 ---
 const activeBatchId = ref(null)
@@ -467,6 +503,19 @@ const processProgressChips = (progressList) => {
     }
   })
 }
+
+const getBlockCheckerName = (unit, blockId) => {
+  if (!unit?.checks || !Array.isArray(unit.checks)) return ''
+  const checks = unit.checks
+    .filter((c) => Number(c.process_block_id) === Number(blockId) && c.checked_by_name)
+    .sort((a, b) => {
+      const ta = a?.checked_at ? new Date(a.checked_at).getTime() : 0
+      const tb = b?.checked_at ? new Date(b.checked_at).getTime() : 0
+      return tb - ta
+    })
+  return checks[0]?.checked_by_name || ''
+}
+
 
 const statusClass = (st) => {
   switch (st) {
@@ -655,7 +704,7 @@ const openBatchDetail = async (batch) => {
 }
 
 const canLeaderConfirm = (b) => ['OPEN', 'COMPLETED'].includes(b.status)
-const canSupervisorConfirm = (b) => b.status === 'LEADER_CONFIRMED'
+const canShowSupervisorConfirm = (b) => b.status === 'LEADER_CONFIRMED'
 
 const leaderConfirm = async (batch) => {
   if (!window.confirm('リーダ確認を実行します。全台目の必須項目が完了している必要があります。よろしいですか？')) return
@@ -672,6 +721,10 @@ const leaderConfirm = async (batch) => {
 }
 
 const supervisorConfirm = async (batch) => {
+  if (!isSupervisorUser.value) {
+    alert('班長のみ班長確認を実行できます。')
+    return
+  }
   if (!window.confirm('班長確認を実行します。よろしいですか？')) return
   actionLoading.value = true
   try {
@@ -705,17 +758,31 @@ const refreshAll = () => {
   }
 }
 
+const openNewBatchSection = () => {
+  showNewBatchSection.value = true
+  newBatchSectionRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+const applyInitialFiltersFromQuery = async () => {
+  const lineIdFromQuery = route.query?.line_id ? String(route.query.line_id) : ''
+  if (!lineIdFromQuery) return
+  const exists = allLines.value.some((l) => String(l.id) === lineIdFromQuery)
+  if (!exists) return
+  selectedLine.value = lineIdFromQuery
+  await ensureLineFinalProducts(lineIdFromQuery)
+}
+
 // --- バッチ作成 ---
 const prepareBatch = async () => {
   if (!canEdit.value) return
-  if (!newBatch.product || !newBatch.line || !newBatch.quantity) return
+  if (!newBatch.product || !newBatch.line || !newBatch.quantity || !newBatch.plan_date) return
   preparing.value = true
   try {
     const res = await api.integratedChecksheets.prepareBatch({
       product: newBatch.product,
       line: newBatch.line,
       quantity: newBatch.quantity,
-      plan_date: newBatch.plan_date || null,
+      plan_date: newBatch.plan_date,
       lot_no: newBatch.lot_no,
     })
     const created = res.data
@@ -920,6 +987,7 @@ watch(() => newBatch.line, async () => {
 onMounted(async () => {
   if (!canView.value) return
   await loadMasters()
+  await applyInitialFiltersFromQuery()
   await loadBatches()
 })
 </script>
@@ -949,23 +1017,38 @@ onMounted(async () => {
   gap: 8px;
 }
 .panel-title { margin: 0; font-size: 15px; font-weight: 700; color: #0f172a; }
+.panel-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 .batch-meta { font-size: 13px; font-weight: 400; color: #6b7280; }
 
 /* フィルタ */
 .filter-panel {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 8px;
-  align-items: end;
+  display: block;
+}
+.filter-form {
+  justify-content: flex-start;
+}
+.filter-form label {
+  margin: 0;
+  width: auto;
+  flex: 0 0 auto;
 }
 .filter-panel label,
 .prepare-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 13px;
   font-weight: 500;
   color: #334155;
+}
+.field-label {
+  white-space: nowrap;
+  min-width: 56px;
 }
 .filter-panel select,
 .filter-panel input,
@@ -1083,7 +1166,28 @@ onMounted(async () => {
 
 /* マトリクス工程ヘッダー */
 .block-header-row td { background: #1e293b; color: #fff; font-weight: 700; font-size: 13px; padding: 4px 8px; }
-.block-header-cell { position: sticky; left: 0; }
+.block-header-cell {
+  position: sticky;
+  left: 0;
+}
+.block-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.block-title-left { display: inline-flex; align-items: center; gap: 6px; }
+.block-title-right { font-size: 11px; color: #cbd5e1; font-weight: 600; }
+.block-checker-cell {
+  background: #1e293b;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  min-width: 52px;
+  cursor: pointer;
+}
+.block-checker-cell:hover { background: #334155; color: #ffffff; }
 .sketch-badge { font-size: 10px; background: #fbbf24; color: #78350f; padding: 1px 6px; border-radius: 3px; margin-left: 6px; font-weight: 400; }
 
 /* セル状態 */

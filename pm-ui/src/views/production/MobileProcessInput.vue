@@ -4,7 +4,10 @@
       <h2>{{ pageTitle }}</h2>
       <div class="header-info">
         <span class="date">{{ currentDate }}</span>
-        <button class="btn-inspection-nav" @click="openEquipmentInspection">設備点検</button>
+        <div class="header-actions">
+          <button class="btn-inspection-nav btn-checksheet-nav" @click="openIntegratedChecksheetOperation">チェックシート実施</button>
+          <button class="btn-inspection-nav" @click="openEquipmentInspection">設備点検</button>
+        </div>
       </div>
     </div>
 
@@ -3361,6 +3364,19 @@ function openEquipmentInspection() {
   })
 }
 
+function openIntegratedChecksheetOperation() {
+  const lineId = selectedLineId.value || undefined
+  const processId = selectedProcessId.value || undefined
+  router.push({
+    path: '/quality/product-checksheet/integrated/operation',
+    query: {
+      source: 'mobile_process_input',
+      ...(lineId ? { line_id: String(lineId) } : {}),
+      ...(processId ? { process_id: String(processId) } : {}),
+    },
+  })
+}
+
 const restorePendingProductChecksheetInput = () => {
   const raw = sessionStorage.getItem('product-checksheet:mobile-process-input')
   if (!raw) return false
@@ -3511,9 +3527,19 @@ watch(
 
 .header-info {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
   font-size: 13px;
   color: #64748b;
+}
+.header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-checksheet-nav {
+  border-color: #2563eb;
+  color: #2563eb;
 }
 
 .section {

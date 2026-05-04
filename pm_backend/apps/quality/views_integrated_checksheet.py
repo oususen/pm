@@ -460,8 +460,8 @@ class IntegratedChecksheetBatchViewSet(viewsets.ReadOnlyModelViewSet):
         plan_date = request.data.get("plan_date")
         lot_no = request.data.get("lot_no", "")
 
-        if not product_id or not line_id or quantity <= 0:
-            return Response({"detail": "product, line, quantity は必須です。"}, status=status.HTTP_400_BAD_REQUEST)
+        if not product_id or not line_id or quantity <= 0 or not plan_date:
+            return Response({"detail": "product, line, quantity, plan_date は必須です。"}, status=status.HTTP_400_BAD_REQUEST)
 
         template = (
             IntegratedChecksheetTemplate.objects
@@ -494,7 +494,7 @@ class IntegratedChecksheetBatchViewSet(viewsets.ReadOnlyModelViewSet):
                 template=template,
                 product_id=product_id,
                 line_id=line_id,
-                plan_date=plan_date or None,
+                plan_date=plan_date,
                 quantity=quantity,
                 lot_no=lot_no,
                 created_by=request.user,
