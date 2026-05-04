@@ -2,7 +2,10 @@
   <div class="laser-actual-page" :class="[`mode-${activeTab}`]">
 
     <div class="tab-bar">
-      <button class="btn-inspection-nav" @click="openEquipmentInspection">設備点検</button>
+      <div class="tab-nav-actions">
+        <button class="btn-inspection-nav btn-checksheet-nav" @click="openIntegratedChecksheetOperation">チェックシート実施</button>
+        <button class="btn-inspection-nav" @click="openEquipmentInspection">設備点検</button>
+      </div>
       <div class="tab-buttons">
         <button
           type="button"
@@ -614,6 +617,39 @@ const localeCode = computed(() => getLocaleCode())
 
 function openEquipmentInspection() {
   router.push({ path: '/quality/equipment-inspection/operation' })
+}
+
+const resolveLaserLineId = async () => {
+  const laserEquipment = (Array.isArray(equipments.value) ? equipments.value : []).find(
+    (eq) => String(eq.line_name || '').includes('レーザ'),
+  )
+  const equipmentLineId = laserEquipment?.line_id || laserEquipment?.line || laserEquipment?.production_line || laserEquipment?.production_line_id
+  if (equipmentLineId) return String(equipmentLineId)
+
+  try {
+    const res = await api.lines.getProductionLines({ page_size: 500 })
+    const lines = normalizeList(res.data)
+    const laserLine = (Array.isArray(lines) ? lines : []).find((line) => {
+      const code = String(line.line_code || '')
+      const name = String(line.line_name || '')
+      return code.includes('LASER') || name.includes('レーザ')
+    })
+    if (laserLine?.id) return String(laserLine.id)
+  } catch (error) {
+    console.warn('レーザラインID解決に失敗:', error)
+  }
+  return ''
+}
+
+async function openIntegratedChecksheetOperation() {
+  const lineId = await resolveLaserLineId()
+  router.push({
+    path: '/quality/product-checksheet/integrated/operation',
+    query: {
+      source: 'laser_process_input',
+      ...(lineId ? { line_id: lineId } : {}),
+    },
+  })
 }
 
 const roundTo = (value, scale) => {
@@ -1843,6 +1879,15 @@ onMounted(async () => {
   font-size: 12px;
   white-space: nowrap;
   flex-shrink: 0;
+}
+.tab-nav-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-checksheet-nav {
+  border-color: #2563eb;
+  color: #2563eb;
 }
 .tab-buttons {
   display: flex;

@@ -79,7 +79,7 @@
           <!-- 基本情報 -->
           <div class="form-grid">
             <label>
-              ライン <span class="required-mark">*</span>
+              <span class="field-inline-label">ライン <span class="required-mark">*</span></span>
               <select v-model="form.line" :disabled="!!form.id">
                 <option value="">選択してください</option>
                 <option v-for="line in lineOptions" :key="line.id" :value="line.id">
@@ -88,7 +88,7 @@
               </select>
             </label>
             <label>
-              製品 <span class="required-mark">*</span>
+              <span class="field-inline-label">製品 <span class="required-mark">*</span></span>
               <div class="autocomplete">
                 <input
                   v-model="productSearch"
@@ -119,7 +119,7 @@
               </div>
             </label>
             <label>
-              テンプレート名 <span class="required-mark">*</span>
+              <span class="field-inline-label">テンプレート名 <span class="required-mark">*</span></span>
               <input v-model.trim="form.name" />
             </label>
             <label>
@@ -158,7 +158,7 @@
               <input v-model.trim="form.sheet_name" />
             </label>
             <label class="wide">
-              改訂内容 <span class="required">*</span>
+              <span class="field-inline-label">改訂内容 <span class="required-mark">*</span></span>
               <textarea v-model.trim="form.revision_notes" rows="2" required />
             </label>
             <label>
@@ -207,9 +207,9 @@
             </div>
 
             <div v-if="block._expanded" class="block-body">
-              <div class="form-grid">
+              <div class="form-grid block-form-grid">
                 <label>
-                  工程 <span class="required-mark">*</span>
+                  <span class="field-inline-label">工程 <span class="required-mark">*</span></span>
                   <select v-model="block.process">
                     <option value="">選択してください</option>
                     <option v-for="proc in availableProcessOptions" :key="proc.id" :value="proc.id">
@@ -218,10 +218,11 @@
                   </select>
                 </label>
                 <label>
-                  並び順
+                  <span class="field-inline-label">並び順</span>
                   <input type="number" v-model.number="block.sort_order" min="0" />
                 </label>
               </div>
+              <p class="order-warning">※重要: 並び順は工程順（ロック順）です。実際の工程順で設定してください。</p>
 
               <!-- チェック項目テーブル -->
               <div class="section-header">
@@ -301,7 +302,6 @@
 
               <div class="section-header">
                 <h5>台紙フィールド</h5>
-                <button class="btn-secondary btn-sm" @click="addSketchField(block)">フィールド追加</button>
               </div>
               <div class="table-wrap" v-if="block.sketch_fields && block.sketch_fields.length">
                 <table class="data-table compact item-table">
@@ -1652,6 +1652,22 @@ watch(
 .form-grid textarea:disabled {
   background: #f8fafc;
   color: #64748b;
+}
+.block-form-grid label {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.field-inline-label {
+  white-space: nowrap;
+  min-width: 56px;
+}
+.order-warning {
+  margin: -2px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #dc2626;
 }
 .check-line {
   flex-direction: row !important;

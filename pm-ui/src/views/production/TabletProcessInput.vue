@@ -2,6 +2,7 @@
   <div class="tablet-process-input">
     <div class="header">
       <h2>{{ t('tabletProcessInput.title') }}</h2>
+      <button class="btn-inspection-nav" @click="openIntegratedChecksheetOperation">チェックシート実施</button>
     </div>
 
     <div class="selectors">
@@ -75,9 +76,11 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
 import { t } from '@/i18n'
+const router = useRouter()
 
 const lines = ref([])
 const processes = ref([])
@@ -201,6 +204,19 @@ const toggleSupportMode = () => {
   selectedLineId.value = ownLines.value.length ? String(ownLines.value[0].id) : ''
 }
 
+const openIntegratedChecksheetOperation = () => {
+  const lineId = selectedLineId.value || undefined
+  const processId = primaryProcessId.value || undefined
+  router.push({
+    path: '/quality/product-checksheet/integrated/operation',
+    query: {
+      source: 'tablet_process_input',
+      ...(lineId ? { line_id: String(lineId) } : {}),
+      ...(processId ? { process_id: String(processId) } : {}),
+    },
+  })
+}
+
 onMounted(async () => {
   await ensureAuth()
   await Promise.all([loadLines(), loadProcesses()])
@@ -222,6 +238,10 @@ onMounted(async () => {
   border-radius: 8px;
   padding: 4px 12px;
   margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .header h2 {
@@ -229,6 +249,18 @@ onMounted(async () => {
   font-size: 20px;
   line-height: 1.1;
   color: #13315c;
+}
+.btn-inspection-nav {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #2563eb;
+  background: #fff;
+  color: #2563eb;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .selectors {
