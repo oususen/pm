@@ -5,6 +5,11 @@
       <h2 class="page-title">{{ pageTitleText }}</h2>
       <div class="page-actions">
         <button
+          v-if="showBackToProcessInput"
+          class="btn-secondary"
+          @click="backToProcessInput"
+        >工程作業入力へ戻る</button>
+        <button
           v-if="isReviewMode"
           class="btn-secondary"
           @click="openNewBatchSection"
@@ -18,7 +23,7 @@
       <div class="prepare-form filter-form">
         <label>
           <span class="field-label">ライン</span>
-          <select v-model="selectedLine" :disabled="loading">
+          <select v-model="selectedLine" :disabled="loading || isLineLockedFromRoute">
             <option value="">全ライン</option>
             <option v-for="l in lineOptions" :key="l.id" :value="l.id">{{ l.line_code }} - {{ l.line_name }}</option>
           </select>
@@ -200,14 +205,15 @@
                     <span class="block-title-right">確認者</span>
                   </div>
                 </td>
-                <td
-                  v-for="u in units"
-                  :key="'bh-'+block.id+'-'+u.id"
-                  class="block-checker-cell"
-                  @click="canEdit ? openUnitModal(u, block.id) : null"
-                >
-                  {{ getBlockCheckerName(u, block.id) || '-' }}
-                </td>
+              <td
+                v-for="u in units"
+                :key="'bh-'+block.id+'-'+u.id"
+                class="block-checker-cell"
+                :class="{ 'cell-disabled-by-process': isBlockedByPreferredProcess(block) }"
+                @click="canEdit && !isBlockedByPreferredProcess(block) ? openUnitModal(u, block.id) : null"
+              >
+                {{ getBlockCheckerName(u, block.id) || '-' }}
+              </td>
               </tr>
               <!-- 各チェック項目行 -->
               <tr v-for="item in block.items" :key="'item-'+item.id">
@@ -224,7 +230,7 @@
                   :key="'c-'+item.id+'-'+u.id"
                   class="td-cell"
                   :class="cellClass(u, block, item)"
-                  @click="canEdit ? openUnitModal(u, block.id) : null"
+                  @click="canEdit && !isBlockedByPreferredProcess(block) ? openUnitModal(u, block.id) : null"
                 >
                   <template v-if="isBlockLocked(u, block)">
                     <span class="lock-icon">&#128274;</span>
@@ -244,27 +250,8 @@
     <div v-if="modalUnit" class="modal-overlay" @click.self="closeModal">
       <div class="modal-content">
         <div class="modal-header">
-          <h3>台目 #{{ modalUnit.sequence_no }} 入力</h3>
+          <h3>チェック入力</h3>
           <div class="modal-header-actions">
-            <button
-              class="btn-secondary btn-sm"
-              @click="moveModalUnit(-1)"
-              :disabled="!canMovePrevUnit"
-            >前の一台</button>
-            <button
-              class="btn-secondary btn-sm"
-              @click="moveModalUnit(1)"
-              :disabled="!canMoveNextUnit"
-            >次の一台</button>
-            <span class="status-chip" :class="statusClass(modalHeaderStatusCode)">{{ modalHeaderStatusLabel }}</span>
-            <button
-              v-if="modalVisibleBlocks.length === 1 && !isBlockLockedForModal(modalVisibleBlocks[0]) && modalVisibleBlocks[0].items?.length"
-              class="btn-primary btn-sm"
-              @click="saveBlockChecks(modalVisibleBlocks[0])"
-              :disabled="savingBlock === modalVisibleBlocks[0].id || !canEdit"
-            >
-              {{ savingBlock === modalVisibleBlocks[0].id ? '保存中...' : 'この工程を保存' }}
-            </button>
             <button class="btn-secondary btn-sm" @click="closeModal">閉じる</button>
             <button class="btn-close" @click="closeModal">&times;</button>
           </div>
@@ -349,6 +336,31 @@
             </div>
 
           </div>
+          <div class="modal-save-bar">
+            <div class="modal-save-bar-main">
+              <span class="modal-unit-label">台目 #{{ modalUnit.sequence_no }} 入力</span>
+              <button
+                class="btn-secondary btn-sm"
+                @click="moveModalUnit(-1)"
+                :disabled="!canMovePrevUnit"
+              >前の一台</button>
+              <button
+                class="btn-secondary btn-sm"
+                @click="moveModalUnit(1)"
+                :disabled="!canMoveNextUnit"
+              >次の一台</button>
+              <span class="status-chip" :class="statusClass(modalHeaderStatusCode)">{{ modalHeaderStatusLabel }}</span>
+              <button
+                v-if="modalVisibleBlocks.length === 1 && !isBlockLockedForModal(modalVisibleBlocks[0]) && modalVisibleBlocks[0].items?.length"
+                class="btn-primary btn-sm"
+                @click="saveBlockChecks(modalVisibleBlocks[0])"
+                :disabled="savingBlock === modalVisibleBlocks[0].id || !canEdit"
+              >
+                {{ savingBlock === modalVisibleBlocks[0].id ? '保存中...' : 'この工程を保存' }}
+              </button>
+              <button class="btn-secondary btn-sm" @click="closeModal">閉じる</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -362,11 +374,12 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
 const route = useRoute()
+const router = useRouter()
 
 // --- 権限 ---
 const canAccessQuality = (resource, level = 'view', aliases = []) => {
@@ -470,6 +483,30 @@ const units = ref([])
 const loadingUnits = ref(false)
 const actionLoading = ref(false)
 const templateBlocks = ref([])
+const preferredProcessId = ref('')
+const lockedLineIdFromRoute = ref('')
+const isLineLockedFromRoute = computed(() => Boolean(lockedLineIdFromRoute.value))
+
+const processIdFromBlock = (block) => {
+  if (!block) return ''
+  return String(
+    block.process_id
+    ?? block.process
+    ?? block.production_process
+    ?? block.production_process_id
+    ?? block.process_master
+    ?? block.process_master_id
+    ?? ''
+  )
+}
+
+const isBlockedByPreferredProcess = (block) => {
+  const preferred = String(preferredProcessId.value || '')
+  if (!preferred) return false
+  const blockProcessId = processIdFromBlock(block)
+  if (!blockProcessId) return false
+  return blockProcessId !== preferred
+}
 
 // --- モーダル ---
 const modalUnit = ref(null)
@@ -609,6 +646,7 @@ const cellDisplay = (unit, item) => {
 }
 
 const cellClass = (unit, block, item) => {
+  if (isBlockedByPreferredProcess(block)) return 'cell-disabled-by-process'
   if (isBlockLocked(unit, block)) return 'cell-locked'
   const check = getCheckForItem(unit, item)
   if (!check) return 'cell-empty'
@@ -662,7 +700,8 @@ const loadBatches = async () => {
   loadingBatches.value = true
   try {
     const params = {}
-    if (selectedLine.value) params.line = selectedLine.value
+    const effectiveLineId = lockedLineIdFromRoute.value || selectedLine.value
+    if (effectiveLineId) params.line = effectiveLineId
     if (selectedProduct.value) params.product = selectedProduct.value
     if (batchStatusFilter.value) params.status = batchStatusFilter.value
     const res = await api.integratedChecksheets.listBatches(params)
@@ -763,8 +802,26 @@ const openNewBatchSection = () => {
   newBatchSectionRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
+const showBackToProcessInput = computed(() =>
+  String(route.query?.source || '') === 'mobile_process_input'
+)
+
+const backToProcessInput = () => {
+  const lineId = selectedLine.value || ''
+  const processId = preferredProcessId.value || ''
+  router.push({
+    path: '/production/mobile-process-input',
+    query: {
+      ...(lineId ? { line_id: String(lineId) } : {}),
+      ...(processId ? { process_id: String(processId) } : {}),
+    },
+  })
+}
+
 const applyInitialFiltersFromQuery = async () => {
+  preferredProcessId.value = route.query?.process_id ? String(route.query.process_id) : ''
   const lineIdFromQuery = route.query?.line_id ? String(route.query.line_id) : ''
+  lockedLineIdFromRoute.value = lineIdFromQuery || ''
   if (!lineIdFromQuery) return
   const exists = allLines.value.some((l) => String(l.id) === lineIdFromQuery)
   if (!exists) return
@@ -840,8 +897,17 @@ const canMoveNextUnit = computed(() => {
 
 const openUnitModal = (unit, blockId = null) => {
   if (!canView.value) return
+  let resolvedBlockId = blockId || null
+  if (!resolvedBlockId && preferredProcessId.value) {
+    const matched = templateBlocks.value.find((b) => !isBlockedByPreferredProcess(b))
+    if (matched?.id) resolvedBlockId = matched.id
+  }
+  if (resolvedBlockId) {
+    const targetBlock = templateBlocks.value.find((b) => Number(b.id) === Number(resolvedBlockId))
+    if (targetBlock && isBlockedByPreferredProcess(targetBlock)) return
+  }
   modalUnit.value = unit
-  modalSelectedBlockId.value = blockId || null
+  modalSelectedBlockId.value = resolvedBlockId
   // 既存チェック結果を modalResponses にマッピング
   const resp = {}
   if (unit.checks) {
@@ -1156,6 +1222,12 @@ onMounted(async () => {
 .td-type { position: sticky; left: 200px; z-index: 1; background: #fff; text-align: center; }
 .td-cell { text-align: center; cursor: pointer; min-width: 52px; }
 .td-cell:hover { background: #f0f4ff; }
+.td-cell.cell-disabled-by-process {
+  cursor: not-allowed;
+  background: #f3f4f6;
+  color: #9ca3af;
+}
+.td-cell.cell-disabled-by-process:hover { background: #f3f4f6; }
 
 .item-standard { font-size: 10px; color: #9ca3af; display: block; }
 
@@ -1188,6 +1260,15 @@ onMounted(async () => {
   cursor: pointer;
 }
 .block-checker-cell:hover { background: #334155; color: #ffffff; }
+.block-checker-cell.cell-disabled-by-process {
+  cursor: not-allowed;
+  background: #334155;
+  color: #94a3b8;
+}
+.block-checker-cell.cell-disabled-by-process:hover {
+  background: #334155;
+  color: #94a3b8;
+}
 .sketch-badge { font-size: 10px; background: #fbbf24; color: #78350f; padding: 1px 6px; border-radius: 3px; margin-left: 6px; font-weight: 400; }
 
 /* セル状態 */
@@ -1239,8 +1320,31 @@ onMounted(async () => {
   font-size: 16px;
   white-space: nowrap;
 }
-.modal-header-actions { display: flex; align-items: center; gap: 8px; }
+.modal-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .modal-body { flex: 1; overflow-y: auto; padding: 12px 16px; }
+.modal-save-bar {
+  position: sticky;
+  bottom: 0;
+  background: linear-gradient(to bottom, rgba(248, 250, 252, 0.75), #f8fafc 35%);
+  padding: 10px 0 4px;
+  margin-top: 8px;
+}
+.modal-save-bar-main {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.modal-unit-label {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-weight: 700;
+  color: #0f172a;
+  pointer-events: none;
+}
 
 @media (max-width: 1200px) {
   .modal-overlay { padding: 4px; }

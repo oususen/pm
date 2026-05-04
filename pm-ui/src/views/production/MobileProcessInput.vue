@@ -3404,6 +3404,13 @@ onMounted(async () => {
   await Promise.all([loadLines(), loadProcesses()])
   applyInitialLineSelection()
   if (restorePendingProductChecksheetInput()) return
+  const queryLineId = route.query.line_id
+  if (queryLineId) {
+    const exists = availableLines.value.some((line) => String(line.id) === String(queryLineId))
+    if (exists) {
+      selectedLineId.value = String(queryLineId)
+    }
+  }
   const queryProcessId = route.query.process_id
   if (queryProcessId) {
     selectedProcessId.value = String(queryProcessId)

@@ -63,6 +63,9 @@
 - 幅を固定しすぎない（`width: auto` + `flex: 0 0 auto` を基本）。
 - 画面幅が狭い場合は `flex-wrap: wrap` で折り返し、重なりを防ぐ。
 - ラベル幅は `field-label` の `min-width` で揃える。
+- 必須マーク `*` は必ずラベルと同一行に置く（別行に落とさない）。
+  - 推奨: `<span class="field-inline-label">項目名 <span class="required-mark">*</span></span>`
+  - 禁止: `*` を独立した行・独立した要素として配置すること。
 
 ## NG例
 - `label` を縦積みにする（`flex-direction: column`）。
