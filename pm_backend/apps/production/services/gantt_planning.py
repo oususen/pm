@@ -361,6 +361,34 @@ def _resolve_line_final_fallback_coproduct_step(
     return None
 
 
+def _resolve_line_final_fallback_cycle_step(
+    process_id: int,
+    steps_by_process: Dict[int, List[RoutingStep]],
+    bom_multiplier_map: Dict[int, Decimal],
+) -> Optional[RoutingStep]:
+    """
+    ライン最終品フォールバック時に、工程のサイクルタイム補完に使うRoutingStepを返す。
+    優先順位:
+    1. 出力品が当該最終品のBOM配下にあり、MINUTEかつduration_min>0 の工程
+    2. 上記が無ければ、MINUTEかつduration_min>0 の工程
+    """
+    candidates = _sort_routing_steps(steps_by_process.get(process_id, []))
+    preferred = []
+    fallback = []
+    for step in candidates:
+        if step.time_unit != 'MINUTE' or not step.duration_min or step.duration_min <= 0:
+            continue
+        fallback.append(step)
+        output_id = step.output_product_id
+        if output_id and output_id in bom_multiplier_map:
+            preferred.append(step)
+    if preferred:
+        return preferred[0]
+    if fallback:
+        return fallback[0]
+    return None
+
+
 def _sort_routing_steps(steps: List[RoutingStep]) -> List[RoutingStep]:
     return sorted(steps, key=lambda s: (s.step_no or 0, getattr(s, 'parallel_group', 1) or 1, s.id or 0))
 
@@ -404,6 +432,145 @@ def _pick_active_bom(
     if cache is not None:
         cache[key] = bom
     return bom
+
+
+def _resolve_coproduct_driver_child(
+    parent_product_id: int,
+    plan_date,
+    cache: Optional[Dict[Tuple[int, date], Optional[Tuple[int, float]]]] = None,
+) -> Optional[Tuple[int, float]]:
+    """
+    連産親品番から代表子品番（is_coproduct_driver=true）を解決する。
+    Returns:
+      (child_product_id, duration_min) / 見つからない場合は None
+    """
+    key = (parent_product_id, plan_date)
+    if cache is not None and key in cache:
+        return cache[key]
+
+    bom = (
+        BOM.objects.filter(
+            parent_product_id=parent_product_id,
+            is_coproduct=True,
+            is_active=True,
+            valid_from__lte=plan_date,
+        )
+        .filter(Q(valid_to__gte=plan_date) | Q(valid_to__isnull=True))
+        .order_by('-valid_from', '-id')
+        .first()
+    )
+    if not bom:
+        if cache is not None:
+            cache[key] = None
+        return None
+
+    item = (
+        BOMItem.objects.filter(
+            bom_id=bom.id,
+            is_coproduct_driver=True,
+        )
+        .order_by('id')
+        .first()
+    )
+    if not item:
+        if cache is not None:
+            cache[key] = None
+        return None
+
+    resolved = (item.child_product_id, float(item.duration_min or 0.0))
+    if cache is not None:
+        cache[key] = resolved
+    return resolved
+
+
+def _resolve_cycle_step_for_output_product(
+    process_id: int,
+    output_product_id: int,
+    steps_by_process: Dict[int, List[RoutingStep]],
+) -> Optional[RoutingStep]:
+    """同一工程内で output_product が一致するRoutingStepを優先選択する。"""
+    candidates = _sort_routing_steps(steps_by_process.get(process_id, []))
+    for step in candidates:
+        if step.output_product_id != output_product_id:
+            continue
+        if step.time_unit != 'MINUTE' or not step.duration_min or step.duration_min <= 0:
+            continue
+        return step
+    return None
+
+
+def _resolve_cycle_step_from_final_product_routing(
+    *,
+    line_id: int,
+    line_final_product_id: int,
+    process_id: int,
+    driver_child_id: int,
+    plan_date,
+    cache: Optional[Dict[Tuple[int, int, int, date], Optional[RoutingStep]]] = None,
+) -> Optional[RoutingStep]:
+    """
+    ライン最終品を子に持つ最終品BOMを起点に、
+    同工程かつ output_product=代表子品番 のルーティングステップを解決する。
+    """
+    key = (line_final_product_id, process_id, driver_child_id, plan_date)
+    if cache is not None and key in cache:
+        return cache[key]
+
+    final_product_ids = list(
+        BOMItem.objects.filter(
+            child_product_id=line_final_product_id,
+            bom__is_active=True,
+            bom__is_coproduct=False,
+            bom__valid_from__lte=plan_date,
+        )
+        .filter(Q(bom__valid_to__gte=plan_date) | Q(bom__valid_to__isnull=True))
+        .values_list('bom__parent_product_id', flat=True)
+        .distinct()
+    )
+    if not final_product_ids:
+        if cache is not None:
+            cache[key] = None
+        return None
+
+    day_start = datetime.combine(plan_date, time(0, 0))
+    day_end = datetime.combine(plan_date, time(23, 59, 59))
+
+    candidates = list(
+        RoutingStep.objects.filter(
+            line_id=line_id,
+            process_id=process_id,
+            output_product_id=driver_child_id,
+            time_unit='MINUTE',
+            duration_min__gt=0,
+            routing__is_active=True,
+            routing__product_id__in=final_product_ids,
+        )
+        .filter(
+            Q(routing__valid_from_datetime__isnull=True) | Q(routing__valid_from_datetime__lte=day_end)
+        )
+        .filter(
+            Q(routing__valid_to_datetime__isnull=True) | Q(routing__valid_to_datetime__gte=day_start)
+        )
+        .select_related('routing')
+    )
+    if not candidates:
+        if cache is not None:
+            cache[key] = None
+        return None
+
+    # is_default優先 → valid_from新しい順 → step_no小さい順 → id小さい順
+    candidates.sort(
+        key=lambda s: (
+            0 if getattr(s.routing, 'is_default', False) else 1,
+            -(getattr(s.routing, 'valid_from_datetime', None).timestamp() if getattr(s.routing, 'valid_from_datetime', None) else float('-inf')),
+            s.step_no or 0,
+            s.id or 0,
+        )
+    )
+    selected = candidates[0]
+    if cache is not None:
+        cache[key] = selected
+    return selected
 
 
 def _build_bom_multiplier_map(
@@ -789,6 +956,8 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
     _multiplier_cache: Dict[Tuple[int, date], Dict[int, Decimal]] = {}
     _active_bom_cache: Dict[Tuple[int, date], Optional[BOM]] = {}
     _bom_items_cache: Dict[int, List[BOMItem]] = {}
+    _coproduct_driver_cache: Dict[Tuple[int, date], Optional[Tuple[int, float]]] = {}
+    _cycle_from_final_routing_cache: Dict[Tuple[int, int, int, date], Optional[RoutingStep]] = {}
     # ライン最終品×工程の表示品マップ（ライン単位で1回だけ取得）
     display_product_map_by_final = _build_display_product_map_by_final(line_id)
 
@@ -833,24 +1002,88 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
             )
             # 工程別連産品マッピング: driver子品番をspecにセットし、後段で親(ST)表示へ置換させる
             for spec in process_specs:
-                driver_step = _resolve_line_final_fallback_coproduct_step(
+                resolved_from_display_map = False
+                mapped_product = display_product_map.get(int(spec.process_id)) if display_product_map else None
+                if mapped_product:
+                    driver_child = _resolve_coproduct_driver_child(
+                        mapped_product.id,
+                        obj.plan_date,
+                        cache=_coproduct_driver_cache,
+                    )
+                    if driver_child:
+                        driver_child_id, _driver_duration = driver_child
+                        driver_child_product = Product.objects.filter(id=driver_child_id).first()
+                        if driver_child_product:
+                            spec.output_product_id = driver_child_product.id
+                            spec.output_product_code = driver_child_product.product_code or ''
+                            spec.output_product_name = driver_child_product.product_name or ''
+                        final_routing_cycle_step = _resolve_cycle_step_from_final_product_routing(
+                            line_id=line_id,
+                            line_final_product_id=product.id,
+                            process_id=spec.process_id,
+                            driver_child_id=driver_child_id,
+                            plan_date=obj.plan_date,
+                            cache=_cycle_from_final_routing_cache,
+                        )
+                        if final_routing_cycle_step:
+                            spec.parallel_count = final_routing_cycle_step.parallel_count or 1
+                            spec.parallel_group = getattr(final_routing_cycle_step, 'parallel_group', 1) or 1
+                            spec.transfer_time_minutes = float(getattr(final_routing_cycle_step, 'transfer_time_minutes', 0.0))
+                            cycle_time_min, setup_time_min = _get_cycle_setup(final_routing_cycle_step, driver_child_id, obj.plan_date)
+                            if cycle_time_min > 0:
+                                spec.cycle_time_minutes = cycle_time_min
+                                spec.setup_time_minutes = setup_time_min
+                        explicit_cycle_step = _resolve_cycle_step_for_output_product(
+                            spec.process_id,
+                            driver_child_id,
+                            steps_by_process,
+                        )
+                        if (spec.cycle_time_minutes <= 0) and explicit_cycle_step:
+                            spec.parallel_count = explicit_cycle_step.parallel_count or 1
+                            spec.parallel_group = getattr(explicit_cycle_step, 'parallel_group', 1) or 1
+                            spec.transfer_time_minutes = float(getattr(explicit_cycle_step, 'transfer_time_minutes', 0.0))
+                            cycle_time_min, setup_time_min = _get_cycle_setup(explicit_cycle_step, driver_child_id, obj.plan_date)
+                            if cycle_time_min > 0:
+                                spec.cycle_time_minutes = cycle_time_min
+                                spec.setup_time_minutes = setup_time_min
+                        resolved_from_display_map = True
+
+                if not resolved_from_display_map:
+                    driver_step = _resolve_line_final_fallback_coproduct_step(
+                        spec.process_id,
+                        steps_by_process,
+                        coproduct_parent_map,
+                        multiplier_map,
+                    )
+                    if not driver_step:
+                        continue
+                    child = driver_step.output_product
+                    if not child:
+                        continue
+                    spec.output_product_id = child.id
+                    spec.output_product_code = child.product_code or ''
+                    spec.output_product_name = child.product_name or ''
+                    spec.parallel_count = driver_step.parallel_count or 1
+                    spec.parallel_group = getattr(driver_step, 'parallel_group', 1) or 1
+                    spec.transfer_time_minutes = float(getattr(driver_step, 'transfer_time_minutes', 0.0))
+                    cycle_time_min, setup_time_min = _get_cycle_setup(driver_step, child.id, obj.plan_date)
+                    if cycle_time_min > 0:
+                        spec.cycle_time_minutes = cycle_time_min
+                        spec.setup_time_minutes = setup_time_min
+            for spec in process_specs:
+                if spec.cycle_time_minutes > 0:
+                    continue
+                cycle_step = _resolve_line_final_fallback_cycle_step(
                     spec.process_id,
                     steps_by_process,
-                    coproduct_parent_map,
                     multiplier_map,
                 )
-                if not driver_step:
+                if not cycle_step:
                     continue
-                child = driver_step.output_product
-                if not child:
-                    continue
-                spec.output_product_id = child.id
-                spec.output_product_code = child.product_code or ''
-                spec.output_product_name = child.product_name or ''
-                spec.parallel_count = driver_step.parallel_count or 1
-                spec.parallel_group = getattr(driver_step, 'parallel_group', 1) or 1
-                spec.transfer_time_minutes = float(getattr(driver_step, 'transfer_time_minutes', 0.0))
-                cycle_time_min, setup_time_min = _get_cycle_setup(driver_step, child.id, obj.plan_date)
+                spec.parallel_count = cycle_step.parallel_count or 1
+                spec.parallel_group = getattr(cycle_step, 'parallel_group', 1) or 1
+                spec.transfer_time_minutes = float(getattr(cycle_step, 'transfer_time_minutes', 0.0))
+                cycle_time_min, setup_time_min = _get_cycle_setup(cycle_step, product.id, obj.plan_date)
                 if cycle_time_min > 0:
                     spec.cycle_time_minutes = cycle_time_min
                     spec.setup_time_minutes = setup_time_min
@@ -905,13 +1138,18 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
         for spec in process_specs:
             if not _is_coproduct_sub_process(spec, coproduct_parent_map):
                 continue
+            if spec.cycle_time_minutes <= 0:
+                raise ValidationError(
+                    f"連産工程のサイクルタイムを解決できませんでした: "
+                    f"line={line_id}, product={getattr(product, 'product_code', obj.product_id)}, "
+                    f"process={spec.process_code or spec.process_id}, output={spec.output_product_code or spec.output_product_id}"
+                )
             parent = coproduct_parent_map[spec.output_product_id]
             group_key = f"{plan_id}_{spec.process_id}_{parent.id}"
             qty_product_id = spec.output_product_id or obj.product_id
             process_qty = multiplier_map.get(qty_product_id, Decimal('1')) * obj.plan_qty
-            # 代表品のサイクルタイムを使用（driver_cycle_time_mapから取得）
-            driver_cycle_time = driver_cycle_time_map.get(parent.id, spec.cycle_time_minutes)
-            total_minutes = float(process_qty) * driver_cycle_time + (spec.setup_time_minutes or 0)
+            # 連産工程ではBOM側durationは使わず、RoutingStep由来のcycle_time_minutesのみ使用
+            total_minutes = float(process_qty) * spec.cycle_time_minutes + (spec.setup_time_minutes or 0)
             effective_minutes = total_minutes / max(spec.parallel_count, 1)
             group = coproduct_groups.get(group_key)
             if not group:
@@ -919,7 +1157,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                     'max_total_minutes': total_minutes,
                     'max_effective_minutes': effective_minutes,
                     'max_qty': process_qty,
-                    'cycle_time_minutes': driver_cycle_time,
+                    'cycle_time_minutes': spec.cycle_time_minutes,
                     'setup_time_minutes': spec.setup_time_minutes,
                     'order_spec': spec,
                 }
@@ -927,7 +1165,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
             group['order_spec'] = spec
             if total_minutes > group['max_total_minutes']:
                 group['max_total_minutes'] = total_minutes
-                group['cycle_time_minutes'] = driver_cycle_time
+                group['cycle_time_minutes'] = spec.cycle_time_minutes
                 group['setup_time_minutes'] = spec.setup_time_minutes
             if effective_minutes > group['max_effective_minutes']:
                 group['max_effective_minutes'] = effective_minutes

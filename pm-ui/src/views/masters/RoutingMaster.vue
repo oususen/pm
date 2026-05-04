@@ -112,6 +112,12 @@
       </section>
 
       <section class="panel step-panel">
+        <div v-if="loadingSteps" class="step-panel-overlay">
+          <div class="step-panel-overlay__content">
+            <span class="loading-spinner loading-spinner--lg"></span>
+            <div>代表部品判定をダウンロード中...</div>
+          </div>
+        </div>
         <h2 class="panel-title">
           工程一覧
           <span v-if="selectedRouting" class="panel-subtitle">
@@ -1388,6 +1394,52 @@ onMounted(async () => {
 .table-wrap {
   max-height: 72vh;
   overflow: auto;
+}
+
+.loading-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #d1d5db;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: routing-loading-spin 0.8s linear infinite;
+}
+
+.loading-spinner--lg {
+  width: 28px;
+  height: 28px;
+  border-width: 3px;
+}
+
+@keyframes routing-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.step-panel {
+  position: relative;
+}
+
+.step-panel-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(1px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.step-panel-overlay__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: #1f2937;
+  font-weight: 600;
 }
 
 .routing-header-form {

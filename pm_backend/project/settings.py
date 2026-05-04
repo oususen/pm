@@ -39,7 +39,7 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-_4wufh_x8tvr3%_0d%!r4b_&uv
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
 # Allow local access plus any comma-separated hosts from ALLOWED_HOSTS env
-_default_hosts = {"localhost", "127.0.0.1", "10.0.1.194", "10.0.1.232", "192.168.0.11", "192.168.0.9", "192.168.0.16", "192.168.0.22", "192.168.0.39", "192.168.0.15", "192.168.0.18", "192.168.0.19", "192.168.11.5"}
+_default_hosts = {"localhost", "127.0.0.1", "10.0.1.194", "10.0.1.232", "192.168.0.11", "192.168.0.12", "192.168.0.9", "192.168.0.16", "192.168.0.22", "192.168.0.39", "192.168.0.15", "192.168.0.18", "192.168.0.19", "192.168.11.5"}
 _env_hosts = {
     host.strip()
     for host in os.getenv("ALLOWED_HOSTS", "").split(",")

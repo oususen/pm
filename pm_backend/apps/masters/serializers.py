@@ -201,6 +201,7 @@ class RoutingStepSerializer(serializers.ModelSerializer):
     output_product_name = serializers.CharField(source='output_product.product_name', read_only=True)
     supplier_code = serializers.CharField(source='supplier.supplier_code', read_only=True)
     supplier_name = serializers.CharField(source='supplier.supplier_name', read_only=True)
+    representative_part = serializers.SerializerMethodField()
     display_label = serializers.SerializerMethodField()
     usage_quantity = serializers.SerializerMethodField()
 
@@ -223,6 +224,12 @@ class RoutingStepSerializer(serializers.ModelSerializer):
         if out_code:
             parts.append(f"-> {out_code}")
         return " / ".join(parts)
+
+    def get_representative_part(self, obj: RoutingStep) -> bool:
+        representative_ids = self.context.get('representative_child_ids') or set()
+        if not obj.output_product_id:
+            return False
+        return int(obj.output_product_id) in representative_ids
 
     def get_usage_quantity(self, obj: RoutingStep):
         if not obj.output_product_id:
