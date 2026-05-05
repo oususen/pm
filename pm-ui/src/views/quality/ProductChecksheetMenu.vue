@@ -44,6 +44,30 @@
         <div class="icon-box">B-確認</div>
         <div class="label">チェック結果確認</div>
       </RouterLink>
+      <RouterLink
+        v-if="canViewIntegratedDashboard"
+        to="/quality/product-checksheet/integrated/weekly-monthly"
+        class="master-tile"
+      >
+        <div class="icon-box">B-週月</div>
+        <div class="label">週・月確認</div>
+      </RouterLink>
+      <RouterLink
+        v-if="canViewIntegratedDashboard"
+        to="/quality/product-checksheet/integrated/trend-analysis"
+        class="master-tile"
+      >
+        <div class="icon-box">B-分析</div>
+        <div class="label">傾向確認・分析</div>
+      </RouterLink>
+      <RouterLink
+        v-if="canViewIntegratedDashboard"
+        to="/quality/product-checksheet/integrated/problem-tools"
+        class="master-tile"
+      >
+        <div class="icon-box">B-対応</div>
+        <div class="label">品質問題時ツール</div>
+      </RouterLink>
     </div>
 
     <p class="helper-text">
@@ -101,6 +125,15 @@ const canViewIntegratedReview = computed(() =>
     "quality.integrated_checksheet_operation",
     "quality.product_checksheet_input",
     "quality.product_checksheet_review",
+    "quality",
+  ])
+)
+const canViewIntegratedDashboard = computed(() =>
+  canAccessQuality("quality.integrated_checksheet_operation", "view", [
+    "quality.integrated_checksheet_review",
+    "quality.integrated_checksheet_template",
+    "quality.product_checksheet_review",
+    "quality.product_checksheet_input",
     "quality",
   ])
 )

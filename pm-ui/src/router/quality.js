@@ -83,6 +83,24 @@ const quality = [
     component: () => import("@/views/quality/IntegratedChecksheetOperation.vue"),
     meta: { pageTitle: "工程一体チェックシート リーダー・班長確認" },
   },
+  {
+    path: "/quality/product-checksheet/integrated/weekly-monthly",
+    name: "IntegratedChecksheetWeeklyMonthly",
+    component: () => import("@/views/quality/IntegratedChecksheetWeeklyMonthly.vue"),
+    meta: { pageTitle: "工程一体チェックシート 週・月確認" },
+  },
+  {
+    path: "/quality/product-checksheet/integrated/trend-analysis",
+    name: "IntegratedChecksheetTrendAnalysis",
+    component: () => import("@/views/quality/IntegratedChecksheetTrendAnalysis.vue"),
+    meta: { pageTitle: "工程一体チェックシート 傾向確認・分析" },
+  },
+  {
+    path: "/quality/product-checksheet/integrated/problem-tools",
+    name: "IntegratedChecksheetProblemTools",
+    component: () => import("@/views/quality/IntegratedChecksheetProblemTools.vue"),
+    meta: { pageTitle: "工程一体チェックシート 品質問題時ツール" },
+  },
 ];
 
 export default quality;
