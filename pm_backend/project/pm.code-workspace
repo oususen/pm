@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "../.."
+		},
+		{
+			"path": "../../../checksheet_workflow_django_v9"
+		}
+	],
+	"settings": {}
+}
