@@ -18,7 +18,9 @@ RUN apt-get update && apt-get install -y \
 
 # Python依存パッケージのインストール
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip uninstall -y opencv-python && \
+    pip install --no-cache-dir opencv-python-headless==4.12.0.88
 
 # アプリケーションコードをコピー
 COPY . .
