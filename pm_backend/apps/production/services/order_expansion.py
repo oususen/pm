@@ -63,9 +63,6 @@ class OrderExpansionService:
         """全マスタデータをメモリにプリフェッチ（N+1クエリ解消）"""
         from masters.models import Calendar, CalendarDay
 
-        for cd in CalendarDay.objects.all().only('calendar_id', 'target_date', 'is_working_day'):
-            self._calendar_day_cache[(cd.calendar_id, cd.target_date)] = cd.is_working_day
-
         for line in Line.objects.all().select_related():
             self._line_cache[line.id] = line
             self._line_calendar_cache[line.id] = line.calendar_id
@@ -113,6 +110,26 @@ class OrderExpansionService:
             calendar_code='daiso'
         ).values_list('id', flat=True).first()
         self._routed_product_ids = set(self._routing_by_product.keys())
+
+        max_lt = max(
+            (resolve_lead_days_for_step(s) for s in all_steps if s),
+            default=0,
+        )
+        due_dates = list(
+            OrderLine.objects.filter(
+                order__status='OPEN',
+                product_id__in=self._routed_product_ids,
+            ).values_list('due_date', flat=True)
+        )
+        if due_dates:
+            margin = timedelta(days=max_lt * 2 + 30)
+            date_min = min(due_dates) - margin
+            date_max = max(due_dates) + timedelta(days=30)
+            for cd in CalendarDay.objects.filter(
+                target_date__gte=date_min,
+                target_date__lte=date_max,
+            ).only('calendar_id', 'target_date', 'is_working_day'):
+                self._calendar_day_cache[(cd.calendar_id, cd.target_date)] = cd.is_working_day
 
     def expand_open_orders(self, clear_existing: bool = False) -> Dict[str, object]:
         """OPEN受注明細をライン需要に展開する。"""
