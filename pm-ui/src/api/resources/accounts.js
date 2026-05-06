@@ -71,4 +71,16 @@ export const createAccountsAPI = (client) => ({
   setUnitLineMappingsForLine(payload) {
     return client.post('/accounts/unit-line-mappings/set-for-line/', payload)
   },
+  getFavorites(params = {}) {
+    return client.get('/accounts/favorites/', { params })
+  },
+  createFavorite(data) {
+    return client.post('/accounts/favorites/', data)
+  },
+  updateFavorite(id, data) {
+    return client.patch(`/accounts/favorites/${id}/`, data)
+  },
+  deleteFavorite(id) {
+    return client.delete(`/accounts/favorites/${id}/`)
+  },
 })

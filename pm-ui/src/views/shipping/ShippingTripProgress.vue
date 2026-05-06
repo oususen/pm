@@ -26,6 +26,18 @@
           <option value="CLOSED">完了</option>
         </select>
       </label>
+      <label class="field">
+        <span>お気に入り</span>
+        <select v-model="selectedFavoriteId" @change="applyFavorite">
+          <option value="">選択</option>
+          <option v-for="fav in favorites" :key="fav.id" :value="String(fav.id)">{{ fav.name }}</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>登録名</span>
+        <input v-model.trim="favoriteName" type="text" placeholder="お気に入り名" />
+      </label>
+      <button class="btn favorite-btn" title="お気に入り登録" :disabled="loading" @click="saveFavorite">★</button>
       <button class="btn" :disabled="loading" @click="loadProgress">表示</button>
     </div>
 
@@ -112,6 +124,11 @@ const businessTypes = ref([])
 const dailySummary = ref([])
 const trips = ref([])
 const loading = ref(false)
+const favorites = ref([])
+const selectedFavoriteId = ref('')
+const favoriteName = ref('')
+
+const FAVORITE_SCREEN_KEY = 'shipping.trip_progress_summary'
 
 const statusLabel = (status) => {
   if (status === 'PLANNED') return '未着手'
@@ -131,6 +148,64 @@ const businessTypeLabel = (value) => {
     TIERA_WATANABE: 'ティエラ渡辺',
   }
   return map[value] || value
+}
+
+const toFavoritePayload = () => ({
+  dateFrom: String(dateFrom.value || ''),
+  dateTo: String(dateTo.value || ''),
+  businessType: String(businessType.value || ''),
+  statusFilter: String(statusFilter.value || ''),
+})
+
+const applyFavorite = () => {
+  const id = Number(selectedFavoriteId.value || 0)
+  if (!id) return
+  const target = favorites.value.find((item) => Number(item.id) === id)
+  if (!target) return
+  favoriteName.value = target.name || ''
+  const payload = target.payload || {}
+  dateFrom.value = String(payload.dateFrom || dateFrom.value || '')
+  dateTo.value = String(payload.dateTo || dateTo.value || '')
+  businessType.value = String(payload.businessType || '')
+  statusFilter.value = String(payload.statusFilter || '')
+  loadProgress()
+}
+
+const loadFavorites = async () => {
+  try {
+    const res = await api.accounts.getFavorites({ screen_key: FAVORITE_SCREEN_KEY, page_size: 200 })
+    favorites.value = Array.isArray(res.data) ? res.data : res.data?.results || []
+  } catch (e) {
+    console.error('お気に入り取得失敗:', e)
+  }
+}
+
+const saveFavorite = async () => {
+  const name = String(favoriteName.value || '').trim()
+  if (!name) {
+    alert('お気に入り名を入力してください。')
+    return
+  }
+  const payload = {
+    screen_key: FAVORITE_SCREEN_KEY,
+    name,
+    payload: toFavoritePayload(),
+  }
+  try {
+    const id = Number(selectedFavoriteId.value || 0)
+    if (id) {
+      await api.accounts.updateFavorite(id, payload)
+    } else {
+      await api.accounts.createFavorite(payload)
+    }
+    await loadFavorites()
+    const found = favorites.value.find((item) => item.name === name)
+    selectedFavoriteId.value = found ? String(found.id) : ''
+    alert('お気に入りを保存しました。')
+  } catch (e) {
+    const detail = e?.response?.data?.detail || e?.message || '保存に失敗しました。'
+    alert(`お気に入り保存エラー: ${detail}`)
+  }
 }
 
 const loadProgress = async () => {
@@ -158,7 +233,10 @@ const loadProgress = async () => {
   }
 }
 
-onMounted(loadProgress)
+onMounted(async () => {
+  await loadFavorites()
+  await loadProgress()
+})
 </script>
 
 <style scoped>
@@ -194,6 +272,14 @@ onMounted(loadProgress)
   background: #fff;
   border-radius: 6px;
   padding: 0 12px;
+}
+.favorite-btn {
+  background: #facc15;
+  border-color: #eab308;
+  color: #78350f;
+  font-weight: 700;
+  min-width: 34px;
+  padding: 0 10px;
 }
 .panel {
   background: #fff;

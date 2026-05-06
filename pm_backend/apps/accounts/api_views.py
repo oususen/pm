@@ -15,6 +15,7 @@ from .models import (
     PositionPermission,
     DepartmentPositionPermission,
     UserSmtpConfig,
+    UserFavorite,
 )
 from .serializers import (
     DepartmentSerializer,
@@ -24,6 +25,7 @@ from .serializers import (
     DepartmentPositionPermissionSerializer,
     UserSmtpConfigSerializer,
     UnitLineMappingSerializer,
+    UserFavoriteSerializer,
 )
 
 class DepartmentViewSet(viewsets.ModelViewSet):
@@ -381,3 +383,19 @@ class UserSmtpConfigViewSet(viewsets.ModelViewSet):
             return Response(serializer.data)
         except UserSmtpConfig.DoesNotExist:
             return Response({'detail': 'SMTP設定が見つかりません'}, status=404)
+
+
+class UserFavoriteViewSet(viewsets.ModelViewSet):
+    queryset = UserFavorite.objects.select_related('user')
+    serializer_class = UserFavoriteSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['screen_key']
+    ordering = ['screen_key', 'name', 'id']
+
+    def get_queryset(self):
+        user = self.request.user
+        return self.queryset.filter(user=user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)

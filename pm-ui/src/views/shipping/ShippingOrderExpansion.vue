@@ -23,9 +23,9 @@
                 <div class="meta-row"><span class="meta-label">顧客</span><span class="meta-value">{{ b.customer_display || "-" }}</span></div>
               </template>
               <template v-else>
-                <div class="meta-row"><span class="meta-label">Lv</span><span class="meta-value">{{ b.level }}</span></div>
                 <div class="meta-row"><span class="meta-label">品番</span><span class="meta-value">{{ b.product_code }}</span></div>
                 <div class="meta-row"><span class="meta-label">品名</span><span class="meta-value">{{ b.product_name || "-" }}</span></div>
+                <div class="meta-row"><span class="meta-label">ライン</span><span class="meta-value">{{ b.line_display || "-" }}</span></div>
                 <div class="meta-row"><span class="meta-label">工程</span><span class="meta-value">{{ b.process_display || "-" }}</span></div>
               </template>
             </div>
@@ -239,6 +239,22 @@ const flattenTree = (node, level = 0, acc = []) => {
   return acc;
 };
 
+const dedupeNodesByProduct = (nodes) => {
+  const byProduct = new Map();
+  nodes.forEach((node) => {
+    const pid = Number(node.product_id || 0);
+    if (!pid) return;
+    const existing = byProduct.get(pid);
+    if (!existing || node.level < existing.level) {
+      byProduct.set(pid, { ...node, key: `p-${pid}` });
+    }
+  });
+  return Array.from(byProduct.values()).sort((a, b) => {
+    if (a.level !== b.level) return a.level - b.level;
+    return String(a.product_code || "").localeCompare(String(b.product_code || ""));
+  });
+};
+
 const buildByProductDateMap = (rows, mapper) => {
   const map = new Map();
   rows.forEach((row) => {
@@ -263,6 +279,18 @@ const buildProcessByProductMap = (rows) => {
     const name = String(row.process_name || "").trim();
     const label = [code, name].filter(Boolean).join(" ");
     if (label) map.get(pid).add(label);
+  });
+  return map;
+};
+
+const buildLineByProductMap = (rows) => {
+  const map = new Map();
+  rows.forEach((row) => {
+    const pid = Number(row.product || 0);
+    if (!pid) return;
+    if (!map.has(pid)) map.set(pid, new Set());
+    const lineName = String(row.line_name || "").trim();
+    if (lineName) map.get(pid).add(lineName);
   });
   return map;
 };
@@ -375,7 +403,8 @@ const load = async () => {
 
     const bomTreeRes = await api.bomService.getBomTree(root.id);
     const tree = bomTreeRes.data || {};
-    const nodes = flattenTree(tree, 0, []);
+    const rawNodes = flattenTree(tree, 0, []);
+    const nodes = dedupeNodesByProduct(rawNodes);
     const productIds = Array.from(new Set(nodes.map((n) => n.product_id)));
 
     const [backlogsRes, demandsRes, rootOrderLines, shipmentActualsRes] = await Promise.all([
@@ -421,15 +450,18 @@ const load = async () => {
       },
     });
     const processMap = buildProcessByProductMap(backlogs);
+    const lineMap = buildLineByProductMap(backlogs);
 
     const mappedBlocks = nodes.map((n) => {
       const perBacklog = backlogMap.get(n.product_id) || {};
       const perDemand = demandMap.get(n.product_id) || {};
       const processSet = processMap.get(n.product_id) || new Set();
+      const lineSet = lineMap.get(n.product_id) || new Set();
       return {
         ...n,
         ...buildSeriesByDate(perBacklog, perDemand, columns.value),
         process_display: Array.from(processSet).join(", "),
+        line_display: Array.from(lineSet).join(", "),
       };
     });
 
@@ -446,6 +478,7 @@ const load = async () => {
         is_shipping_summary: true,
         customer_display: buildDisplayText(rootOrderLines, "customer_code", "customer_name"),
         ship_to_display: buildDisplayText(rootOrderLines, "ship_to_code"),
+        line_display: "-",
         process_display: "出荷進度照会",
       };
       blocks.value = [shippingSummaryBlock, ...mappedBlocks];

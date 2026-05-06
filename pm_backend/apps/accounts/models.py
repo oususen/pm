@@ -330,3 +330,25 @@ class DepartmentPositionPermission(models.Model):
     class Meta:
         db_table = 'accounts_department_position_permission'
         unique_together = [['department', 'position_name', 'resource']]
+
+
+class UserFavorite(models.Model):
+    """ユーザーごとのお気に入り保存設定"""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='favorites',
+    )
+    screen_key = models.CharField(max_length=100, verbose_name='画面キー')
+    name = models.CharField(max_length=100, verbose_name='お気に入り名')
+    payload = models.JSONField(default=dict, verbose_name='保存内容')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'accounts_user_favorite'
+        verbose_name = 'ユーザーお気に入り'
+        verbose_name_plural = 'ユーザーお気に入り'
+        unique_together = [['user', 'screen_key', 'name']]
+        ordering = ['screen_key', 'name', 'id']

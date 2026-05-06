@@ -30,6 +30,19 @@
           <option :value="60">60日</option>
           <option :value="90">90日</option>
         </select>
+        <select v-model="selectedFavoriteId" @change="applyFavorite">
+          <option value="">お気に入り選択</option>
+          <option v-for="fav in favorites" :key="fav.id" :value="String(fav.id)">
+            {{ fav.name }}
+          </option>
+        </select>
+        <input
+          type="text"
+          v-model.trim="favoriteName"
+          placeholder="お気に入り名"
+          style="min-width: 140px;"
+        />
+        <button type="button" class="favorite-star-btn" title="お気に入り登録" @click="saveFavorite" :disabled="loading">★</button>
         <button @click="load" :disabled="loading">更新</button>
       </div>
     </div>
@@ -234,6 +247,9 @@ const splitByShipTo = ref(true);
 const router = useRouter();
 const routingExpandStates = ref({});
 const productCacheByCode = new Map();
+const favorites = ref([]);
+const selectedFavoriteId = ref("");
+const favoriteName = ref("");
 
 const normalizeList = (payload) => {
   return Array.isArray(payload) ? payload : payload?.results || [];
@@ -689,7 +705,7 @@ const getProgressRate = (group, date) => {
 };
 
 const openOrderExpansionPage = (group) => {
-  router.push({
+  const resolved = router.resolve({
     name: "ShippingOrderExpansion",
     query: {
       product_code: group.product_code || "",
@@ -699,6 +715,7 @@ const openOrderExpansionPage = (group) => {
       horizon: String(horizon.value || 30),
     },
   });
+  window.open(resolved.href, "_blank", "noopener");
 };
 
 const getProductByCode = async (productCode) => {
@@ -976,6 +993,74 @@ const load = async () => {
   }
 };
 
+const FAVORITE_SCREEN_KEY = "shipping.progress";
+
+const toFavoritePayload = () => ({
+  productFilter: productFilter.value || "",
+  customerFilter: customerFilter.value || "",
+  shipToFilter: shipToFilter.value || "",
+  splitByShipTo: Boolean(splitByShipTo.value),
+  startDate: startDate.value || "",
+  horizon: Number(horizon.value || 30),
+});
+
+const applyFavoritePayload = (payload) => {
+  productFilter.value = String(payload?.productFilter || "");
+  customerFilter.value = String(payload?.customerFilter || "");
+  shipToFilter.value = String(payload?.shipToFilter || "");
+  splitByShipTo.value = Boolean(payload?.splitByShipTo ?? true);
+  startDate.value = String(payload?.startDate || startDate.value);
+  const nextHorizon = Number(payload?.horizon || 30);
+  horizon.value = [30, 60, 90].includes(nextHorizon) ? nextHorizon : 30;
+};
+
+const loadFavorites = async () => {
+  try {
+    const res = await api.accounts.getFavorites({ screen_key: FAVORITE_SCREEN_KEY, page_size: 200 });
+    favorites.value = Array.isArray(res.data) ? res.data : res.data?.results || [];
+  } catch (e) {
+    console.error("お気に入り取得失敗:", e);
+  }
+};
+
+const applyFavorite = () => {
+  const id = Number(selectedFavoriteId.value || 0);
+  if (!id) return;
+  const target = favorites.value.find((item) => Number(item.id) === id);
+  if (!target) return;
+  favoriteName.value = target.name || "";
+  applyFavoritePayload(target.payload || {});
+};
+
+const saveFavorite = async () => {
+  const name = String(favoriteName.value || "").trim();
+  if (!name) {
+    window.alert("お気に入り名を入力してください。");
+    return;
+  }
+  const payload = {
+    screen_key: FAVORITE_SCREEN_KEY,
+    name,
+    payload: toFavoritePayload(),
+  };
+
+  try {
+    const id = Number(selectedFavoriteId.value || 0);
+    if (id) {
+      await api.accounts.updateFavorite(id, payload);
+    } else {
+      await api.accounts.createFavorite(payload);
+    }
+    await loadFavorites();
+    const found = favorites.value.find((item) => item.name === name);
+    selectedFavoriteId.value = found ? String(found.id) : "";
+    window.alert("お気に入りを保存しました。");
+  } catch (e) {
+    const detail = e?.response?.data?.detail || e?.message || "保存に失敗しました。";
+    window.alert(`お気に入り保存エラー: ${detail}`);
+  }
+};
+
 const changePage = (page) => {
   const target = Math.min(Math.max(page, 1), totalPages.value);
   if (target === currentPage.value) return;
@@ -996,6 +1081,8 @@ watch(groups, () => {
     currentPage.value = totalPages.value;
   }
 });
+
+loadFavorites();
 
 </script>
 
@@ -1051,6 +1138,16 @@ watch(groups, () => {
 .page-actions button:disabled {
   background: #9ca3af;
   cursor: not-allowed;
+}
+.favorite-star-btn {
+  background: #facc15 !important;
+  border-color: #eab308 !important;
+  color: #78350f !important;
+  font-weight: 700;
+  min-width: 34px;
+}
+.favorite-star-btn:hover:not(:disabled) {
+  background: #eab308 !important;
 }
 
 .page-body {

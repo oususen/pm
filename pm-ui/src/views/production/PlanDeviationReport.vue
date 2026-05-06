@@ -30,6 +30,18 @@
           <option value="unplanned">計画外のみ</option>
           <option value="exclude_unplanned">計画外除外</option>
         </select>
+        <select v-model="selectedFavoriteId" @change="applyFavorite">
+          <option value="">お気に入り選択</option>
+          <option v-for="fav in favorites" :key="fav.id" :value="String(fav.id)">
+            {{ fav.name }}
+          </option>
+        </select>
+        <input
+          type="text"
+          v-model.trim="favoriteName"
+          placeholder="お気に入り名"
+        />
+        <button class="btn-favorite" title="お気に入り登録" @click="saveFavorite" :disabled="loading">★</button>
         <button class="btn-reload" @click="loadReport" :disabled="loading">更新</button>
         <button
           class="btn-confirm"
@@ -146,6 +158,11 @@ const processes = ref([])
 const laserDuplicates = ref([])
 const confirmation = ref(null)
 const confirming = ref(false)
+const favorites = ref([])
+const selectedFavoriteId = ref('')
+const favoriteName = ref('')
+
+const FAVORITE_SCREEN_KEY = 'production.plan_deviation_report'
 
 const filteredLines = computed(() => {
   if (!lineTypeFilter.value) return lines.value
@@ -202,6 +219,66 @@ async function loadProcesses(lineId) {
   } catch (e) {
     console.error('工程取得エラー:', e)
     processes.value = []
+  }
+}
+
+const toFavoritePayload = () => ({
+  targetDate: String(targetDate.value || ''),
+  lineTypeFilter: String(lineTypeFilter.value || ''),
+  selectedLineId: String(selectedLineId.value || ''),
+  selectedProcessId: String(selectedProcessId.value || ''),
+  statusFilter: String(statusFilter.value || ''),
+})
+
+async function applyFavorite() {
+  const id = Number(selectedFavoriteId.value || 0)
+  if (!id) return
+  const target = favorites.value.find((item) => Number(item.id) === id)
+  if (!target) return
+  favoriteName.value = target.name || ''
+  const payload = target.payload || {}
+  targetDate.value = String(payload.targetDate || targetDate.value || '')
+  lineTypeFilter.value = String(payload.lineTypeFilter || 'PROD')
+  selectedLineId.value = String(payload.selectedLineId || '')
+  await loadProcesses(selectedLineId.value)
+  selectedProcessId.value = String(payload.selectedProcessId || '')
+  statusFilter.value = String(payload.statusFilter || '')
+}
+
+async function loadFavorites() {
+  try {
+    const res = await api.accounts.getFavorites({ screen_key: FAVORITE_SCREEN_KEY, page_size: 200 })
+    favorites.value = Array.isArray(res.data) ? res.data : res.data?.results || []
+  } catch (e) {
+    console.error('お気に入り取得エラー:', e)
+  }
+}
+
+async function saveFavorite() {
+  const name = String(favoriteName.value || '').trim()
+  if (!name) {
+    alert('お気に入り名を入力してください。')
+    return
+  }
+  const payload = {
+    screen_key: FAVORITE_SCREEN_KEY,
+    name,
+    payload: toFavoritePayload(),
+  }
+  try {
+    const id = Number(selectedFavoriteId.value || 0)
+    if (id) {
+      await api.accounts.updateFavorite(id, payload)
+    } else {
+      await api.accounts.createFavorite(payload)
+    }
+    await loadFavorites()
+    const found = favorites.value.find((item) => item.name === name)
+    selectedFavoriteId.value = found ? String(found.id) : ''
+    alert('お気に入りを保存しました。')
+  } catch (e) {
+    const detail = e?.response?.data?.detail || e?.message || '保存に失敗しました。'
+    alert(`お気に入り保存エラー: ${detail}`)
   }
 }
 
@@ -275,6 +352,7 @@ async function confirmRecord() {
 
 onMounted(() => {
   loadLines()
+  loadFavorites()
   loadReport()
 })
 </script>
@@ -323,6 +401,27 @@ onMounted(() => {
   border-radius: 4px;
   cursor: pointer;
   font-size: 14px;
+}
+
+.btn-favorite {
+  padding: 6px 10px;
+  background: #facc15;
+  color: #78350f;
+  border: 1px solid #eab308;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  min-width: 34px;
+}
+
+.btn-favorite:hover {
+  background: #eab308;
+}
+
+.btn-favorite:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .btn-reload:hover {

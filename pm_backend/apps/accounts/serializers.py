@@ -12,6 +12,7 @@ from .models import (
     PositionPermission,
     DepartmentPositionPermission,
     UserSmtpConfig,
+    UserFavorite,
 )
 
 
@@ -152,6 +153,19 @@ class UnitLineMappingSerializer(serializers.ModelSerializer):
             'line_name',
             'sort_order',
             'is_default',
+            'created_at',
+            'updated_at',
+        ]
+
+
+class UserFavoriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserFavorite
+        fields = [
+            'id',
+            'screen_key',
+            'name',
+            'payload',
             'created_at',
             'updated_at',
         ]

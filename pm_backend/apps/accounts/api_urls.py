@@ -14,6 +14,7 @@ from .api_views import (
     UnitListView,
     UserSmtpConfigViewSet,
     UnitLineMappingViewSet,
+    UserFavoriteViewSet,
 )
 
 router = DefaultRouter()
@@ -30,5 +31,6 @@ router.register(r'teams', TeamListView, basename='team-list')
 router.register(r'units', UnitListView, basename='unit-list')
 router.register(r'smtp-configs', UserSmtpConfigViewSet)
 router.register(r'unit-line-mappings', UnitLineMappingViewSet)
+router.register(r'favorites', UserFavoriteViewSet)
 
 urlpatterns = router.urls

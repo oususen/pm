@@ -19,6 +19,20 @@
         <label>検索</label>
         <input v-model.trim="keyword" type="text" placeholder="品番" @keydown.enter="loadGrid" />
       </div>
+      <div class="field">
+        <label>お気に入り</label>
+        <select v-model="selectedFavoriteId" @change="applyFavorite">
+          <option value="">選択</option>
+          <option v-for="fav in favorites" :key="fav.id" :value="String(fav.id)">
+            {{ fav.name }}
+          </option>
+        </select>
+      </div>
+      <div class="field">
+        <label>登録名</label>
+        <input v-model.trim="favoriteName" type="text" placeholder="お気に入り名" />
+      </div>
+      <button class="btn favorite-btn" title="お気に入り登録" :disabled="loading || saving || importing" @click="saveFavorite">★</button>
       <button class="btn import-btn" :disabled="importing || loading" @click="importOrders">
         {{ importing ? '取込中...' : '取込' }}
       </button>
@@ -453,6 +467,10 @@ const sortEntries = (items = []) => {
 const targetDate = ref(formatLocalDate(new Date()))
 const horizonDays = ref(5)
 const keyword = ref('')
+const favorites = ref([])
+const selectedFavoriteId = ref('')
+const favoriteName = ref('')
+const FAVORITE_SCREEN_KEY = 'shipping.kubota_sakai_trip_planning'
 const loading = ref(false)
 const importing = ref(false)
 const saving = ref(false)
@@ -973,6 +991,11 @@ const exportPickupDetailPdf = async () => {
 }
 
 const save = async () => {
+  const validation = validateBeforeSave()
+  if (!validation.ok) {
+    const proceed = window.confirm(`${validation.message}\n\nこのまま保存しますか？`)
+    if (!proceed) return
+  }
   saving.value = true
   try {
     for (const dateKey of dateKeys.value) {
@@ -1007,6 +1030,50 @@ const save = async () => {
   } finally {
     saving.value = false
   }
+}
+
+const validateBeforeSave = () => {
+  let missingTruckCount = 0
+  let unassignedQtyCount = 0
+  const overloaded = []
+  const overloadedSet = new Set()
+
+  for (const dateKey of dateKeys.value) {
+    const previewList = previewSummaryByDate.value[dateKey] || summaryByDate.value[dateKey] || []
+    for (const row of mergedRows.value) {
+      for (const entry of entriesAt(row, dateKey)) {
+        const deliveryQty = parseIntegerQty(entry?.delivery_qty)
+        if (deliveryQty <= 0) continue
+        const validAllocations = (entry.allocations || []).filter(
+          (item) => item?.truck_id && parseIntegerQty(item?.qty) > 0,
+        )
+        if (!validAllocations.length) missingTruckCount += 1
+
+        const unassigned = parseNumber(entry?.unassigned_qty_preview)
+        if (unassigned > 0) unassignedQtyCount += 1
+      }
+    }
+
+    for (const item of previewList) {
+      const occ = parseNumber(item?.occupancy_percent)
+      if (occ > 95) {
+        const key = `${dateKey}-${item?.truck_id}`
+        if (overloadedSet.has(key)) continue
+        overloadedSet.add(key)
+        overloaded.push(`${dateKey} ${item?.truck_name || '便'} ${formatNumber(occ)}%`)
+      }
+    }
+  }
+
+  if (!missingTruckCount && !unassignedQtyCount && !overloaded.length) {
+    return { ok: true, message: '' }
+  }
+
+  const lines = ['保存前チェックで注意点があります。']
+  if (missingTruckCount) lines.push(`・便未選択: ${missingTruckCount}件`)
+  if (unassignedQtyCount) lines.push(`・未割付残あり: ${unassignedQtyCount}件`)
+  if (overloaded.length) lines.push(`・便占有率95%超: ${overloaded.join(' / ')}`)
+  return { ok: false, message: lines.join('\n') }
 }
 
 // ---- 擬似便対象製品 ----
@@ -1264,7 +1331,67 @@ const autoAssignTrips = async () => {
   }
 }
 
+const toFavoritePayload = () => ({
+  targetDate: String(targetDate.value || ''),
+  horizonDays: Number(horizonDays.value || 5),
+  keyword: String(keyword.value || ''),
+})
+
+const applyFavoritePayload = (payload) => {
+  targetDate.value = String(payload?.targetDate || formatLocalDate(new Date()))
+  const nextHorizon = Number(payload?.horizonDays || 5)
+  horizonDays.value = [5, 14, 31, 60, 90].includes(nextHorizon) ? nextHorizon : 5
+  keyword.value = String(payload?.keyword || '')
+}
+
+const loadFavorites = async () => {
+  try {
+    const res = await api.accounts.getFavorites({ screen_key: FAVORITE_SCREEN_KEY, page_size: 200 })
+    favorites.value = Array.isArray(res.data) ? res.data : res.data?.results || []
+  } catch (e) {
+    console.error('お気に入り取得失敗:', e)
+  }
+}
+
+const applyFavorite = () => {
+  const id = Number(selectedFavoriteId.value || 0)
+  if (!id) return
+  const target = favorites.value.find((item) => Number(item.id) === id)
+  if (!target) return
+  favoriteName.value = target.name || ''
+  applyFavoritePayload(target.payload || {})
+}
+
+const saveFavorite = async () => {
+  const name = String(favoriteName.value || '').trim()
+  if (!name) {
+    alert('お気に入り名を入力してください。')
+    return
+  }
+  const payload = {
+    screen_key: FAVORITE_SCREEN_KEY,
+    name,
+    payload: toFavoritePayload(),
+  }
+  try {
+    const id = Number(selectedFavoriteId.value || 0)
+    if (id) {
+      await api.accounts.updateFavorite(id, payload)
+    } else {
+      await api.accounts.createFavorite(payload)
+    }
+    await loadFavorites()
+    const found = favorites.value.find((item) => item.name === name)
+    selectedFavoriteId.value = found ? String(found.id) : ''
+    alert('お気に入りを保存しました。')
+  } catch (e) {
+    const detail = e?.response?.data?.detail || e?.message || '保存に失敗しました。'
+    alert(`お気に入り保存エラー: ${detail}`)
+  }
+}
+
 onMounted(async () => {
+  await loadFavorites()
   await loadGrid()
   await nextTick()
   setStickyTopValues()
@@ -1344,6 +1471,13 @@ onUnmounted(() => {
 .auto-assign-btn {
   background: #e0e7ff;
   border-color: #6366f1;
+}
+.favorite-btn {
+  background: #facc15;
+  border-color: #eab308;
+  color: #78350f;
+  font-weight: 700;
+  min-width: 34px;
 }
 .adj-badge {
   display: inline-flex;

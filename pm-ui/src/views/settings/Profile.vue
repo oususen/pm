@@ -55,6 +55,35 @@
             </button>
           </div>
         </form>
+
+        <div class="favorites-section">
+          <h3 class="section-title">お気に入り管理</h3>
+          <p class="section-note">各画面で登録したお気に入りを削除できます。</p>
+          <div v-if="favoriteLoading" class="favorites-loading">読込中...</div>
+          <div v-else-if="!favorites.length" class="favorites-empty">登録されたお気に入りはありません。</div>
+          <table v-else class="favorites-table">
+            <thead>
+              <tr>
+                <th>画面</th>
+                <th>名前</th>
+                <th>更新日時</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in favorites" :key="item.id">
+                <td>{{ item.screen_key }}</td>
+                <td>{{ item.name }}</td>
+                <td>{{ formatDateTime(item.updated_at) }}</td>
+                <td>
+                  <button type="button" class="btn danger" @click="deleteFavorite(item)" :disabled="favoriteLoading">
+                    削除
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </template>
     </div>
   </div>
@@ -76,8 +105,10 @@ const form = ref({
 })
 
 const loading = ref(false)
+const favoriteLoading = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
+const favorites = ref([])
 
 const canAccessByResource = (resource, level = 'view') => {
   const user = authState.user
@@ -111,6 +142,49 @@ const loadProfile = async () => {
     errorMessage.value = 'プロフィールの読み込みに失敗しました。'
     console.error('Profile load error:', error)
   }
+}
+
+const loadFavorites = async () => {
+  if (!canView.value) return
+  favoriteLoading.value = true
+  try {
+    const response = await api.accounts.getFavorites({ page_size: 500 })
+    favorites.value = Array.isArray(response.data) ? response.data : response.data?.results || []
+  } catch (error) {
+    console.error('Favorite load error:', error)
+  } finally {
+    favoriteLoading.value = false
+  }
+}
+
+const deleteFavorite = async (item) => {
+  if (!item?.id) return
+  const ok = window.confirm(`お気に入り「${item.name}」を削除しますか？`)
+  if (!ok) return
+
+  favoriteLoading.value = true
+  try {
+    await api.accounts.deleteFavorite(item.id)
+    await loadFavorites()
+    successMessage.value = 'お気に入りを削除しました。'
+  } catch (error) {
+    console.error('Favorite delete error:', error)
+    errorMessage.value = 'お気に入りの削除に失敗しました。'
+  } finally {
+    favoriteLoading.value = false
+  }
+}
+
+const formatDateTime = (value) => {
+  if (!value) return '-'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return '-'
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `${y}-${m}-${day} ${hh}:${mm}`
 }
 
 const saveProfile = async () => {
@@ -151,6 +225,7 @@ const saveProfile = async () => {
 onMounted(() => {
   if (canView.value) {
     loadProfile()
+    loadFavorites()
   }
 })
 </script>
@@ -240,5 +315,41 @@ onMounted(() => {
   background-color: #d4edda;
   color: #155724;
   border: 1px solid #c3e6cb;
+}
+.favorites-section {
+  margin-top: 28px;
+}
+.section-title {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+}
+.section-note {
+  margin: 0 0 10px 0;
+  color: #666;
+  font-size: 13px;
+}
+.favorites-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.favorites-table th,
+.favorites-table td {
+  border: 1px solid #ddd;
+  padding: 8px 10px;
+  text-align: left;
+}
+.favorites-table th {
+  background: #f8f8f8;
+}
+.favorites-empty,
+.favorites-loading {
+  color: #777;
+  font-size: 13px;
+}
+.btn.danger {
+  background: #dc3545;
+  color: #fff;
+  padding: 6px 10px;
 }
 </style>

@@ -79,6 +79,13 @@
 
     <h3 class="section-title">2. パレート図（上位不良要因）</h3>
     <div class="chart-wrap">
+      <div class="chart-control-row">
+        <label><span class="field-label">集計項目</span>
+          <select v-model="selectedParetoKey">
+            <option v-for="opt in groupingOptions" :key="`pareto-opt-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
+          </select>
+        </label>
+      </div>
       <div class="chart-title">要因別累積比率</div>
       <div v-for="row in paretoRows" :key="`p-${row.item}`" class="bar-row">
         <span class="bar-label">{{ row.item }}</span>
@@ -89,6 +96,13 @@
 
     <h3 class="section-title">3. ヒストグラム（日別NG件数分布）</h3>
     <div class="chart-wrap">
+      <div class="chart-control-row">
+        <label><span class="field-label">集計項目</span>
+          <select v-model="selectedHistogramKey">
+            <option v-for="opt in groupingOptions" :key="`hist-opt-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
+          </select>
+        </label>
+      </div>
       <div class="chart-title">日別件数の頻度</div>
       <div v-for="row in histogramRows" :key="`h-${row.bucket}`" class="bar-row">
         <span class="bar-label">{{ row.bucket }}</span>
@@ -99,6 +113,13 @@
 
     <h3 class="section-title">4. 散布図（台目とNG傾向）</h3>
     <div class="chart-wrap">
+      <div class="chart-control-row">
+        <label><span class="field-label">X軸</span>
+          <select v-model="selectedScatterXKey">
+            <option v-for="opt in numericGroupingOptions" :key="`scx-opt-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
+          </select>
+        </label>
+      </div>
       <svg :viewBox="`0 0 ${svgWidth} ${svgHeight}`" class="plot-svg">
         <line :x1="plot.left" :y1="plot.bottom" :x2="plot.right" :y2="plot.bottom" class="axis" />
         <line :x1="plot.left" :y1="plot.top" :x2="plot.left" :y2="plot.bottom" class="axis" />
@@ -115,6 +136,13 @@
 
     <h3 class="section-title">5. 管理図（日別NG件数）</h3>
     <div class="chart-wrap">
+      <div class="chart-control-row">
+        <label><span class="field-label">集計項目</span>
+          <select v-model="selectedControlKey">
+            <option v-for="opt in groupingOptions" :key="`ctl-opt-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
+          </select>
+        </label>
+      </div>
       <svg :viewBox="`0 0 ${svgWidth} ${svgHeight}`" class="plot-svg">
         <line :x1="plot.left" :y1="plot.bottom" :x2="plot.right" :y2="plot.bottom" class="axis" />
         <line :x1="plot.left" :y1="plot.top" :x2="plot.left" :y2="plot.bottom" class="axis" />
@@ -164,6 +192,119 @@
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <h3 class="section-title">補助グラフ（円グラフ・レーダーチャート）</h3>
+    <div class="dual-chart-wrap">
+      <div class="chart-wrap">
+        <div class="chart-control-row">
+          <label><span class="field-label">集計項目</span>
+            <select v-model="selectedPieKey">
+              <option v-for="opt in groupingOptions" :key="`pie-opt-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
+            </select>
+          </label>
+        </div>
+        <div class="chart-title">円グラフ（不良項目構成）</div>
+        <svg viewBox="0 0 320 240" class="pie-svg">
+          <g transform="translate(120 120)">
+            <path v-for="(slice, idx) in pieSlices" :key="`pie-${idx}`" :d="slice.d" :fill="slice.color" />
+          </g>
+        </svg>
+        <div class="mini-legend">
+          <div v-for="row in pieLegendRows" :key="`pl-${row.item}`" class="mini-legend-item">
+            <span class="swatch" :style="{ background: row.color }"></span>
+            <span>{{ row.item }}: {{ row.ratio.toFixed(1) }}%</span>
+          </div>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <div class="chart-title">レーダーチャート（層別バランス）</div>
+        <svg viewBox="0 0 320 240" class="radar-svg">
+          <g transform="translate(160 120)">
+            <polygon v-for="ring in radarRings" :key="`ring-${ring}`" :points="radarRingPoints(ring)" class="radar-ring" />
+            <line v-for="(axis, idx) in radarAxes" :key="`axis-${idx}`" x1="0" y1="0" :x2="axis.x" :y2="axis.y" class="radar-axis" />
+            <polygon :points="radarDataPoints" class="radar-data" />
+            <text v-for="(axis, idx) in radarAxes" :key="`label-${idx}`" :x="axis.labelX" :y="axis.labelY" class="radar-label">{{ axis.label }}</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+
+    <h3 class="section-title">追加グラフ（棒グラフ・折れ線グラフ）</h3>
+    <div class="dual-chart-wrap">
+      <div class="chart-wrap">
+        <div class="chart-control-row">
+          <label><span class="field-label">対象項目</span>
+            <select v-model="selectedBarTargetKey">
+              <option v-for="opt in groupingOptions" :key="`bar-opt-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
+            </select>
+          </label>
+          <label><span class="field-label">横軸</span>
+            <select v-model="selectedBarXAxisType">
+              <option value="category">カテゴリ</option>
+              <option value="rank">順位</option>
+            </select>
+          </label>
+          <label><span class="field-label">縦軸</span>
+            <select v-model="selectedBarYAxisType">
+              <option value="count">件数</option>
+              <option value="ratio">構成比(%)</option>
+            </select>
+          </label>
+        </div>
+        <div class="chart-title">棒グラフ（製品別NG件数 上位）</div>
+        <svg viewBox="0 0 320 240" class="plot-svg-small">
+          <line x1="30" y1="210" x2="300" y2="210" class="axis" />
+          <line x1="30" y1="20" x2="30" y2="210" class="axis" />
+          <text x="165" y="236" class="axis-label">横軸: {{ barAxisLabel }}</text>
+          <text x="12" y="14" class="axis-label">縦軸: {{ barYAxisTypeLabel }}</text>
+          <g v-for="tick in barYAxisTicks" :key="`bar-y-${tick.value}`">
+            <line x1="26" :y1="tick.y" x2="30" :y2="tick.y" class="axis-tick" />
+            <text x="24" :y="tick.y + 3" class="axis-tick-label">{{ tick.value }}</text>
+          </g>
+          <g v-for="(row, idx) in barRows" :key="`bar-${row.label}`">
+            <rect :x="38 + (idx * 52)" :y="210 - row.h" width="34" :height="row.h" class="bar-col" />
+            <text :x="55 + (idx * 52)" y="224" class="mini-axis-label">{{ row.label }}</text>
+          </g>
+        </svg>
+      </div>
+      <div class="chart-wrap">
+        <div class="chart-control-row">
+          <label><span class="field-label">対象項目</span>
+            <select v-model="selectedLineTargetKey">
+              <option v-for="opt in groupingOptions" :key="`line-opt-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
+            </select>
+          </label>
+          <label><span class="field-label">横軸</span>
+            <select v-model="selectedLineXAxisType">
+              <option value="sequence">時系列/ソート順</option>
+              <option value="category">カテゴリ</option>
+            </select>
+          </label>
+          <label><span class="field-label">縦軸</span>
+            <select v-model="selectedLineYAxisType">
+              <option value="count">件数</option>
+              <option value="cumulative">累積件数</option>
+            </select>
+          </label>
+        </div>
+        <div class="chart-title">折れ線グラフ（日別NG件数）</div>
+        <svg viewBox="0 0 320 240" class="plot-svg-small">
+          <line x1="30" y1="210" x2="300" y2="210" class="axis" />
+          <line x1="30" y1="20" x2="30" y2="210" class="axis" />
+          <text x="165" y="236" class="axis-label">横軸: {{ lineAxisLabel }}</text>
+          <text x="12" y="14" class="axis-label">縦軸: {{ lineYAxisTypeLabel }}</text>
+          <g v-for="tick in lineYAxisTicks" :key="`line-y-${tick.value}`">
+            <line x1="26" :y1="tick.y" x2="30" :y2="tick.y" class="axis-tick" />
+            <text x="24" :y="tick.y + 3" class="axis-tick-label">{{ tick.value }}</text>
+          </g>
+          <g v-for="tick in lineXAxisTicks" :key="`line-x-${tick.x}`">
+            <line :x1="tick.x" y1="210" :x2="tick.x" y2="214" class="axis-tick" />
+            <text :x="tick.x" y="224" class="mini-axis-label">{{ tick.label }}</text>
+          </g>
+          <polyline :points="linePointsSmall" class="line-main" />
+        </svg>
+      </div>
     </div>
 
     <h3 class="section-title">7. 特性要因図（入力補助）</h3>
@@ -220,6 +361,18 @@ const scatterXMax = ref(1)
 const scatterYMax = ref(1)
 const controlYMax = ref(1)
 const controlLinePoints = ref("")
+const pieLegendRows = ref([])
+const pieSlices = ref([])
+const radarDataPoints = ref("")
+const barRows = ref([])
+const linePointsSmall = ref("")
+const barAxisLabel = ref("製品")
+const lineAxisLabel = ref("発生日")
+const barYAxisTicks = ref([])
+const lineYAxisTicks = ref([])
+const lineXAxisTicks = ref([])
+const barYAxisTypeLabel = computed(() => (selectedBarYAxisType.value === "ratio" ? "構成比(%)" : "件数"))
+const lineYAxisTypeLabel = computed(() => (selectedLineYAxisType.value === "cumulative" ? "累積件数" : "件数"))
 const selectedLine = ref("")
 const selectedProcess = ref("")
 const selectedProduct = ref("")
@@ -227,6 +380,31 @@ const selectedPerson = ref("")
 const selectedUnit = ref("")
 const startDate = ref("")
 const endDate = ref("")
+const selectedParetoKey = ref("item")
+const selectedHistogramKey = ref("date")
+const selectedScatterXKey = ref("unit")
+const selectedControlKey = ref("date")
+const selectedPieKey = ref("item")
+const selectedBarTargetKey = ref("product")
+const selectedBarXAxisType = ref("category")
+const selectedBarYAxisType = ref("count")
+const selectedLineTargetKey = ref("date")
+const selectedLineXAxisType = ref("sequence")
+const selectedLineYAxisType = ref("count")
+
+const groupingOptions = [
+  { value: "item", label: "項目" },
+  { value: "line", label: "ライン" },
+  { value: "process", label: "工程" },
+  { value: "product", label: "製品" },
+  { value: "person", label: "作業者" },
+  { value: "unit", label: "台目" },
+  { value: "date", label: "発生日" },
+]
+const numericGroupingOptions = [
+  { value: "unit", label: "台目" },
+  { value: "batchId", label: "バッチ" },
+]
 
 const uniqueSorted = (rows, key) => [...new Set(rows.map((r) => r[key] || "未設定"))].sort((a, b) => String(a).localeCompare(String(b), "ja"))
 const lineOptions = computed(() => uniqueSorted(incidentRowsAll.value, "line"))
@@ -245,6 +423,17 @@ const filteredRows = computed(() => incidentRowsAll.value.filter((r) => {
   if (endDate.value && r.date > endDate.value) return false
   return true
 }))
+const radarRings = [0.25, 0.5, 0.75, 1]
+const radarLabels = ["ライン", "工程", "製品", "作業者", "台目"]
+const radarRadius = 72
+const radarAxes = radarLabels.map((label, idx) => {
+  const angle = (-Math.PI / 2) + ((Math.PI * 2 * idx) / radarLabels.length)
+  const x = Math.cos(angle) * radarRadius
+  const y = Math.sin(angle) * radarRadius
+  const labelX = Math.cos(angle) * (radarRadius + 16)
+  const labelY = Math.sin(angle) * (radarRadius + 16)
+  return { label, x, y, angle, labelX, labelY }
+})
 
 const scaleX = (x, max) => {
   const span = Math.max(Number(max || 1), 1)
@@ -258,6 +447,27 @@ const scaleY = (y, max) => {
 const toArray = (data) => data?.results || data || []
 const toDate = (v) => new Date(v || "")
 const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+const piePalette = ["#2563eb", "#16a34a", "#f59e0b", "#ef4444", "#7c3aed", "#0ea5a4", "#64748b"]
+const polarToXY = (angle, radius) => ({ x: Math.cos(angle) * radius, y: Math.sin(angle) * radius })
+const arcPath = (startAngle, endAngle, radius) => {
+  const p1 = polarToXY(startAngle, radius)
+  const p2 = polarToXY(endAngle, radius)
+  const large = endAngle - startAngle > Math.PI ? 1 : 0
+  return `M 0 0 L ${p1.x} ${p1.y} A ${radius} ${radius} 0 ${large} 1 ${p2.x} ${p2.y} Z`
+}
+const radarRingPoints = (ratio) => radarAxes.map((a) => {
+  const p = polarToXY(a.angle, radarRadius * ratio)
+  return `${p.x},${p.y}`
+}).join(" ")
+const normalizeValue = (row, key) => String(row[key] ?? "未設定")
+const groupCountMap = (rows, key) => {
+  const m = new Map()
+  rows.forEach((r) => {
+    const k = normalizeValue(r, key)
+    m.set(k, (m.get(k) || 0) + 1)
+  })
+  return m
+}
 
 const recomputeByRows = (rows) => {
   incidents.value = [...rows].sort((a, b) => b.ts - a.ts).slice(0, 100)
@@ -278,24 +488,43 @@ const recomputeByRows = (rows) => {
   recurrenceItems.value = [...factorMap.values()].filter((v) => v.count >= 2).sort((a, b) => b.count - a.count).slice(0, 20)
 
   const totalNg = rows.length || 1
-  const sortedFactors = [...factorMap.values()].sort((a, b) => b.count - a.count)
+  const sortedFactors = [...groupCountMap(rows, selectedParetoKey.value).entries()]
+    .map(([item, count]) => ({ item, count }))
+    .sort((a, b) => b.count - a.count)
+  const pieFactors = [...groupCountMap(rows, selectedPieKey.value).entries()]
+    .map(([item, count]) => ({ item, count }))
+    .sort((a, b) => b.count - a.count)
+  const pieTop = pieFactors.slice(0, 6)
+  pieLegendRows.value = pieTop.map((r, idx) => ({ item: r.item, ratio: (r.count / totalNg) * 100, color: piePalette[idx % piePalette.length] }))
+  let pieStart = -Math.PI / 2
+  pieSlices.value = pieLegendRows.value.map((r) => {
+    const sweep = (r.ratio / 100) * Math.PI * 2
+    const d = arcPath(pieStart, pieStart + sweep, 76)
+    pieStart += sweep
+    return { d, color: r.color }
+  })
   let cum = 0
   paretoRows.value = sortedFactors.slice(0, 10).map((v) => {
     cum += v.count
     return { item: v.item, ratio: (cum / totalNg) * 100 }
   })
   const histMap = new Map()
-  for (const [, count] of dayMap.entries()) {
+  const histogramBaseMap = groupCountMap(rows, selectedHistogramKey.value)
+  for (const [, count] of histogramBaseMap.entries()) {
     const bucket = count <= 2 ? "1-2件" : count <= 5 ? "3-5件" : count <= 10 ? "6-10件" : "11件以上"
     histMap.set(bucket, (histMap.get(bucket) || 0) + 1)
   }
   histogramRows.value = ["1-2件", "3-5件", "6-10件", "11件以上"].map((bucket) => ({ bucket, days: histMap.get(bucket) || 0 }))
-  const scatterMap = new Map()
-  rows.forEach((r) => scatterMap.set(r.unit, (scatterMap.get(r.unit) || 0) + 1))
-  scatterRows.value = [...scatterMap.entries()].map(([unit, count]) => ({ unit, count })).sort((a, b) => a.unit - b.unit).slice(0, 50)
+  const scatterMap = groupCountMap(rows, selectedScatterXKey.value)
+  scatterRows.value = [...scatterMap.entries()]
+    .map(([unit, count]) => ({ unit: Number(unit), count }))
+    .filter((r) => Number.isFinite(r.unit))
+    .sort((a, b) => a.unit - b.unit)
+    .slice(0, 50)
   scatterXMax.value = Math.max(...scatterRows.value.map((r) => r.unit), 1)
   scatterYMax.value = Math.max(...scatterRows.value.map((r) => r.count), 1)
-  const dayCounts = [...dayMap.entries()].map(([date, count]) => ({ date, count })).sort((a, b) => (a.date < b.date ? -1 : 1))
+  const controlBaseMap = groupCountMap(rows, selectedControlKey.value)
+  const dayCounts = [...controlBaseMap.entries()].map(([date, count]) => ({ date, count })).sort((a, b) => (a.date < b.date ? -1 : 1))
   const avg = dayCounts.reduce((s, r) => s + r.count, 0) / (dayCounts.length || 1)
   const variance = dayCounts.reduce((s, r) => s + ((r.count - avg) ** 2), 0) / (dayCounts.length || 1)
   const sigma = Math.sqrt(variance)
@@ -317,6 +546,64 @@ const recomputeByRows = (rows) => {
   const productMap = new Map()
   rows.forEach((r) => productMap.set(r.product, (productMap.get(r.product) || 0) + 1))
   stratificationProductRows.value = [...productMap.entries()].map(([product, count]) => ({ product, count, ratio: (count / totalNg) * 100 })).sort((a, b) => b.count - a.count)
+  const barBase = [...groupCountMap(rows, selectedBarTargetKey.value).entries()]
+    .map(([product, count]) => ({ product, count }))
+    .sort((a, b) => b.count - a.count)
+  const topProducts = barBase.slice(0, 5)
+  const maxProduct = Math.max(...topProducts.map((r) => (selectedBarYAxisType.value === "ratio" ? (r.count / totalNg) * 100 : r.count)), 1)
+  barAxisLabel.value = selectedBarXAxisType.value === "rank"
+    ? "順位"
+    : (groupingOptions.find((o) => o.value === selectedBarTargetKey.value)?.label || "分類")
+  barRows.value = topProducts.map((r) => ({
+    label: selectedBarXAxisType.value === "rank" ? `#${topProducts.findIndex((x) => x.product === r.product) + 1}` : String(r.product).slice(0, 5),
+    h: Math.max((((selectedBarYAxisType.value === "ratio" ? (r.count / totalNg) * 100 : r.count) / maxProduct) * 170), 2),
+  }))
+  barYAxisTicks.value = [0, 0.5, 1].map((r) => ({
+    value: Math.round(maxProduct * r * 10) / 10,
+    y: 210 - (170 * r),
+  }))
+  const lineBase = [...groupCountMap(rows, selectedLineTargetKey.value).entries()]
+    .map(([date, count]) => ({ date, count }))
+    .sort((a, b) => (selectedLineXAxisType.value === "category" ? (a.date < b.date ? -1 : 1) : (a.date < b.date ? -1 : 1)))
+    .slice(-14)
+  const lineDaily = lineBase.map((r, idx) => {
+    if (selectedLineYAxisType.value !== "cumulative") return r
+    return { ...r, count: lineBase.slice(0, idx + 1).reduce((s, v) => s + v.count, 0) }
+  })
+  const maxDaily = Math.max(...lineDaily.map((r) => r.count), 1)
+  lineAxisLabel.value = selectedLineXAxisType.value === "sequence"
+    ? "順序"
+    : (groupingOptions.find((o) => o.value === selectedLineTargetKey.value)?.label || "分類")
+  linePointsSmall.value = lineDaily.map((r, idx) => {
+    const x = 34 + ((idx / Math.max(lineDaily.length - 1, 1)) * 262)
+    const y = 210 - ((r.count / maxDaily) * 170)
+    return `${x},${y}`
+  }).join(" ")
+  lineYAxisTicks.value = [0, 0.5, 1].map((r) => ({
+    value: Math.round(maxDaily * r),
+    y: 210 - (170 * r),
+  }))
+  lineXAxisTicks.value = lineDaily.filter((_, idx) => idx === 0 || idx === lineDaily.length - 1 || idx === Math.floor(lineDaily.length / 2)).map((r, idx, arr) => {
+    const pos = arr.length <= 1 ? 0 : idx / (arr.length - 1)
+    return {
+      label: selectedLineXAxisType.value === "sequence" ? String(lineDaily.findIndex((x) => x.date === r.date) + 1) : String(r.date).slice(0, 5),
+      x: 34 + (262 * pos),
+    }
+  })
+  const toMax = (mapObj) => Math.max(...[...mapObj.values()], 0)
+  const radarRaw = [
+    toMax(lineMap),
+    toMax(processMap),
+    toMax(productMap),
+    toMax(peopleMap),
+    toMax(scatterMap),
+  ]
+  const radarBase = Math.max(...radarRaw, 1)
+  radarDataPoints.value = radarAxes.map((a, idx) => {
+    const r = (radarRaw[idx] / radarBase) * radarRadius
+    const p = polarToXY(a.angle, r)
+    return `${p.x},${p.y}`
+  }).join(" ")
   fishbone.value = {
     people: recurrenceItems.value[0]?.item || "作業者要因を確認",
     machine: incidents.value[0]?.process || "設備要因を確認",
@@ -353,7 +640,7 @@ const loadData = async () => {
             product: batch.product_code || "未設定",
             process: processNameById.get(check.process_block_id) || `工程${check.process_block_id}`,
             item: check.item_name || "未設定項目",
-            person: check.checked_by_name || "未設定",
+            person: check.checked_by_name || check.worker_name || check.worker_code || "未設定",
             unit: unit.sequence_no,
             batchId: batch.id,
           })
@@ -372,6 +659,21 @@ const loadData = async () => {
 onMounted(loadData)
 watch(filteredRows, (rows) => {
   recomputeByRows(rows)
+})
+watch([
+  selectedParetoKey,
+  selectedHistogramKey,
+  selectedScatterXKey,
+  selectedControlKey,
+  selectedPieKey,
+  selectedBarTargetKey,
+  selectedBarXAxisType,
+  selectedBarYAxisType,
+  selectedLineTargetKey,
+  selectedLineXAxisType,
+  selectedLineYAxisType,
+], () => {
+  recomputeByRows(filteredRows.value)
 })
 </script>
 
@@ -416,7 +718,25 @@ watch(filteredRows, (rows) => {
   width: 120px;
 }
 .chart-wrap { margin: 8px 0 12px; padding: 10px; border: 1px solid #dbe3ea; border-radius: 6px; background: #fff; }
+.chart-control-row { margin-bottom: 6px; }
+.chart-control-row label { display: inline-flex; align-items: center; gap: 6px; }
+.chart-control-row select { width: 140px; padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; }
 .chart-title { font-weight: 700; margin-bottom: 8px; color: #1f2937; }
+.dual-chart-wrap { display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 10px; }
+.pie-svg, .radar-svg { width: 100%; height: 240px; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; }
+.plot-svg-small { width: 100%; height: 240px; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; }
+.mini-legend { display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 4px 8px; margin-top: 8px; }
+.mini-legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #334155; }
+.swatch { width: 10px; height: 10px; border-radius: 2px; }
+.bar-col { fill: #2563eb; opacity: 0.85; }
+.mini-axis-label { font-size: 10px; fill: #334155; text-anchor: middle; }
+.axis-label { font-size: 10px; fill: #334155; text-anchor: middle; }
+.axis-tick { stroke: #94a3b8; stroke-width: 1; }
+.axis-tick-label { font-size: 9px; fill: #475569; text-anchor: end; }
+.radar-ring { fill: none; stroke: #cbd5e1; stroke-width: 1; }
+.radar-axis { stroke: #94a3b8; stroke-width: 1; }
+.radar-data { fill: rgba(37, 99, 235, 0.2); stroke: #2563eb; stroke-width: 2; }
+.radar-label { font-size: 11px; fill: #334155; text-anchor: middle; dominant-baseline: middle; }
 .bar-row { display: grid; grid-template-columns: 120px 1fr 56px; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 12px; }
 .bar-track { height: 14px; background: #eef2f7; border-radius: 999px; overflow: hidden; }
 .bar-fill { height: 100%; background: #dc2626; }
@@ -441,5 +761,6 @@ watch(filteredRows, (rows) => {
   .filter-form .field-unit select {
     width: 110px;
   }
+  .dual-chart-wrap { grid-template-columns: 1fr; }
 }
 </style>

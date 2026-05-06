@@ -25,6 +25,20 @@
         <label>一括入力開始日</label>
         <input v-model="bulkStartDate" :min="startDate" :max="bulkStartDateMax" type="date" />
       </div>
+      <div class="field">
+        <label>お気に入り</label>
+        <select v-model="selectedFavoriteId" @change="applyFavorite">
+          <option value="">選択</option>
+          <option v-for="fav in favorites" :key="fav.id" :value="String(fav.id)">
+            {{ fav.name }}
+          </option>
+        </select>
+      </div>
+      <div class="field">
+        <label>登録名</label>
+        <input v-model.trim="favoriteName" type="text" placeholder="お気に入り名" />
+      </div>
+      <button class="btn favorite-btn" title="お気に入り登録" :disabled="loading || saving || importing" @click="saveFavorite">★</button>
       <span v-if="lastAdjustedAt" class="lock-badge adj-badge">最新納期調整日: {{ formatAdjDate(lastAdjustedAt) }}</span>
       <span v-if="lockDate" class="lock-badge">{{ lockDate }} まで締め済</span>
       <span v-if="duePlanLockDate" class="lock-badge plan-lock">{{ duePlanLockDate }} まで計画ロック</span>
@@ -313,6 +327,10 @@ const emailCcManual = ref('')
 const emailSubject = ref('')
 const emailBody = ref('')
 const lastChangeSummary = ref([])
+const favorites = ref([])
+const selectedFavoriteId = ref('')
+const favoriteName = ref('')
+const FAVORITE_SCREEN_KEY = 'shipping.kubota_sakai_due_adjustment'
 
 const dateColumns = computed(() => {
   const base = new Date(`${startDate.value}T00:00:00`)
@@ -640,6 +658,70 @@ watch([startDate, horizonDays], () => {
   normalizeBulkStartDate()
 })
 
+const toFavoritePayload = () => ({
+  startDate: String(startDate.value || ''),
+  horizonDays: Number(horizonDays.value || 30),
+  keyword: String(keyword.value || ''),
+  keyword2: String(keyword2.value || ''),
+  bulkStartDate: String(bulkStartDate.value || ''),
+})
+
+const applyFavoritePayload = (payload) => {
+  startDate.value = String(payload?.startDate || formatLocalDate(new Date()))
+  const nextHorizon = Number(payload?.horizonDays || 30)
+  horizonDays.value = [7, 14, 30, 60].includes(nextHorizon) ? nextHorizon : 30
+  keyword.value = String(payload?.keyword || '')
+  keyword2.value = String(payload?.keyword2 || '')
+  bulkStartDate.value = String(payload?.bulkStartDate || startDate.value)
+  normalizeBulkStartDate()
+}
+
+const loadFavorites = async () => {
+  try {
+    const res = await api.accounts.getFavorites({ screen_key: FAVORITE_SCREEN_KEY, page_size: 200 })
+    favorites.value = Array.isArray(res.data) ? res.data : res.data?.results || []
+  } catch (e) {
+    console.error('お気に入り取得失敗:', e)
+  }
+}
+
+const applyFavorite = () => {
+  const id = Number(selectedFavoriteId.value || 0)
+  if (!id) return
+  const target = favorites.value.find((item) => Number(item.id) === id)
+  if (!target) return
+  favoriteName.value = target.name || ''
+  applyFavoritePayload(target.payload || {})
+}
+
+const saveFavorite = async () => {
+  const name = String(favoriteName.value || '').trim()
+  if (!name) {
+    alert('お気に入り名を入力してください。')
+    return
+  }
+  const payload = {
+    screen_key: FAVORITE_SCREEN_KEY,
+    name,
+    payload: toFavoritePayload(),
+  }
+  try {
+    const id = Number(selectedFavoriteId.value || 0)
+    if (id) {
+      await api.accounts.updateFavorite(id, payload)
+    } else {
+      await api.accounts.createFavorite(payload)
+    }
+    await loadFavorites()
+    const found = favorites.value.find((item) => item.name === name)
+    selectedFavoriteId.value = found ? String(found.id) : ''
+    alert('お気に入りを保存しました。')
+  } catch (e) {
+    const detail = e?.response?.data?.detail || e?.message || '保存に失敗しました。'
+    alert(`お気に入り保存エラー: ${detail}`)
+  }
+}
+
 const loadGrid = async () => {
   loading.value = true
   try {
@@ -889,6 +971,7 @@ const sendEmail = async () => {
 }
 
 onMounted(async () => {
+  await loadFavorites()
   normalizeBulkStartDate()
   await loadGrid()
   await nextTick()
@@ -964,6 +1047,13 @@ onMounted(async () => {
 .import-btn {
   background: #dbe8ff;
   border-color: #8daed6;
+}
+.favorite-btn {
+  background: #facc15;
+  border-color: #eab308;
+  color: #78350f;
+  font-weight: 700;
+  min-width: 34px;
 }
 .lock-badge.adj-badge {
   background: #e0f2fe;

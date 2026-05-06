@@ -114,6 +114,22 @@
         <button class="btn" :disabled="loading || !needsSearch" @click="loadSessions">検索</button>
         <button class="btn btn-secondary" :disabled="loading" @click="resetFilters">リセット</button>
       </div>
+      <div class="filter-row">
+        <label>お気に入り</label>
+        <select v-model="selectedFavoriteId" @change="applyFavorite">
+          <option value="">-- 選択 --</option>
+          <option v-for="fav in favorites" :key="fav.id" :value="String(fav.id)">
+            {{ fav.name }}
+          </option>
+        </select>
+      </div>
+      <div class="filter-row">
+        <label>登録名</label>
+        <input v-model.trim="favoriteName" type="text" placeholder="お気に入り名" />
+      </div>
+      <div class="actions">
+        <button class="btn favorite-star-btn" title="お気に入り登録" :disabled="loading" @click="saveFavorite">★</button>
+      </div>
       <div class="export-actions">
         <button class="btn btn-secondary" :disabled="loading || !sessions.length || needsSearch" @click="exportCsv">CSV出力</button>
         <button class="btn btn-secondary" :disabled="loading || !sessions.length || needsSearch" @click="exportExcel">Excel出力</button>
@@ -437,6 +453,9 @@ const status = ref('')
 const hasIssue = ref('')
 const unclosed = ref('')
 const excludeZeroProduction = ref('')
+const favorites = ref([])
+const selectedFavoriteId = ref('')
+const favoriteName = ref('')
 const targetLineCodesByTab = ref(createDefaultTargetLineCodesByTab())
 const targetLineSaveMessage = ref('')
 const mappingsByTab = ref(createDefaultMappingsByTab())
@@ -955,6 +974,89 @@ const resetFilters = async () => {
   await loadSessions()
 }
 
+const FAVORITE_SCREEN_KEY = 'production.record_inquiry'
+const FAVORITE_TAB_KEYS = ['tank', 'floor', 'blade', 'laser']
+
+const toFavoritePayload = () => ({
+  activeTab: String(activeTab.value || 'tank'),
+  startDate: String(startDate.value || ''),
+  endDate: String(endDate.value || ''),
+  dateSearchMode: String(dateSearchMode.value || 'plan'),
+  lineId: String(lineId.value || ''),
+  processId: String(processId.value || ''),
+  productCode: String(productCode.value || ''),
+  operatorName: String(operatorName.value || ''),
+  sessionType: String(sessionType.value || ''),
+  status: String(status.value || ''),
+  hasIssue: String(hasIssue.value || ''),
+  unclosed: String(unclosed.value || ''),
+  excludeZeroProduction: String(excludeZeroProduction.value || ''),
+})
+
+const applyFavoritePayload = (payload) => {
+  const nextTab = String(payload?.activeTab || 'tank')
+  activeTab.value = FAVORITE_TAB_KEYS.includes(nextTab) ? nextTab : 'tank'
+  startDate.value = String(payload?.startDate || defaultDateRange.start)
+  endDate.value = String(payload?.endDate || defaultDateRange.end)
+  const mode = String(payload?.dateSearchMode || 'plan')
+  dateSearchMode.value = mode === 'actual' ? 'actual' : 'plan'
+  lineId.value = String(payload?.lineId || '')
+  processId.value = String(payload?.processId || '')
+  productCode.value = String(payload?.productCode || '')
+  operatorName.value = String(payload?.operatorName || '')
+  sessionType.value = String(payload?.sessionType || '')
+  status.value = String(payload?.status || '')
+  hasIssue.value = String(payload?.hasIssue || '')
+  unclosed.value = String(payload?.unclosed || '')
+  excludeZeroProduction.value = String(payload?.excludeZeroProduction || '')
+}
+
+const loadFavorites = async () => {
+  try {
+    const res = await api.accounts.getFavorites({ screen_key: FAVORITE_SCREEN_KEY, page_size: 200 })
+    favorites.value = Array.isArray(res.data) ? res.data : res.data?.results || []
+  } catch (e) {
+    console.error('お気に入り取得失敗:', e)
+  }
+}
+
+const applyFavorite = () => {
+  const id = Number(selectedFavoriteId.value || 0)
+  if (!id) return
+  const target = favorites.value.find((item) => Number(item.id) === id)
+  if (!target) return
+  favoriteName.value = target.name || ''
+  applyFavoritePayload(target.payload || {})
+}
+
+const saveFavorite = async () => {
+  const name = String(favoriteName.value || '').trim()
+  if (!name) {
+    window.alert('お気に入り名を入力してください。')
+    return
+  }
+  const payload = {
+    screen_key: FAVORITE_SCREEN_KEY,
+    name,
+    payload: toFavoritePayload(),
+  }
+  try {
+    const id = Number(selectedFavoriteId.value || 0)
+    if (id) {
+      await api.accounts.updateFavorite(id, payload)
+    } else {
+      await api.accounts.createFavorite(payload)
+    }
+    await loadFavorites()
+    const found = favorites.value.find((item) => item.name === name)
+    selectedFavoriteId.value = found ? String(found.id) : ''
+    window.alert('お気に入りを保存しました。')
+  } catch (e) {
+    const detail = e?.response?.data?.detail || e?.message || '保存に失敗しました。'
+    window.alert(`お気に入り保存エラー: ${detail}`)
+  }
+}
+
 // フィルタが変更されたら再検索が必要な状態にする
 watch(
   [startDate, endDate, dateSearchMode, lineId, processId, productCode, sessionType, status, hasIssue, unclosed, excludeZeroProduction],
@@ -1352,6 +1454,7 @@ const exportPdf = () => {
 
 onMounted(async () => {
   await loadMasters()
+  await loadFavorites()
   await loadProductionRecordSettings()
   await loadMappingCandidates(settingsTargetTab.value)
 })
@@ -1490,6 +1593,12 @@ onMounted(async () => {
 .btn-secondary {
   border-color: #64748b;
   background: #64748b;
+}
+.favorite-star-btn {
+  border-color: #eab308;
+  background: #facc15;
+  color: #78350f;
+  min-width: 34px;
 }
 .loading,
 .error {
