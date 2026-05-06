@@ -41,7 +41,14 @@ from production.views_spot_line import SpotLinePlanView, SpotLineEquipmentsView,
 from production.views_gantt_display_product_map import GanttDisplayProductMapViewSet
 from production.views_plan_deviation_report import PlanDeviationReportView
 from production.views_record_confirmation import ProductionRecordConfirmationView
-from production.views_camera_actual import CameraAutoDetectView, CameraEventCreateView, CameraResultDailyView
+from production.views_camera_actual import (
+    CameraAutoDetectView,
+    CameraEventCreateView,
+    CameraResultDailyView,
+    CameraShapeTrainingStartView,
+    CameraShapeTrainingStatusView,
+    CameraShapeTrainingUploadView,
+)
 
 router = DefaultRouter()
 router.register(r'line-demands', LineDemandViewSet, basename='linedemand')
@@ -107,4 +114,7 @@ urlpatterns = [
     path('camera-events/', CameraEventCreateView.as_view(), name='camera-events'),
     path('camera-results-daily/', CameraResultDailyView.as_view(), name='camera-results-daily'),
     path('camera-auto-detect/', CameraAutoDetectView.as_view(), name='camera-auto-detect'),
+    path('camera-shape-training/upload-dataset/', CameraShapeTrainingUploadView.as_view(), name='camera-shape-training-upload'),
+    path('camera-shape-training/start/', CameraShapeTrainingStartView.as_view(), name='camera-shape-training-start'),
+    path('camera-shape-training/status/', CameraShapeTrainingStatusView.as_view(), name='camera-shape-training-status'),
 ]

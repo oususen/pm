@@ -59,6 +59,25 @@
     </div>
 
     <div class="panel">
+      <h3 class="sub-title">製品形状学習（PoC）</h3>
+      <div class="train-row">
+        <input type="file" accept=".zip" @change="onDatasetFileChange" />
+        <button type="button" @click="uploadDataset" :disabled="!datasetZipFile || trainingState === 'running'">データセットZIPアップロード</button>
+      </div>
+      <div class="train-row">
+        <label>epoch <input type="number" v-model.number="trainingEpochs" min="1" max="300" /></label>
+        <label>imgsz <input type="number" v-model.number="trainingImgsz" min="160" max="1920" step="32" /></label>
+        <button type="button" class="primary" @click="startShapeTraining" :disabled="trainingState === 'running'">学習開始</button>
+      </div>
+      <div class="train-status">
+        <div>状態: {{ trainingState }}</div>
+        <div>メッセージ: {{ trainingMessage || "-" }}</div>
+        <div>データセット: {{ trainingDatasetDir || "-" }}</div>
+        <div>モデル: {{ trainingModelPath || "-" }}</div>
+      </div>
+    </div>
+
+    <div class="panel">
       <div class="preview-wrap">
       <video ref="videoEl" autoplay playsinline muted class="preview"></video>
       <div class="cross-line"></div>
@@ -66,7 +85,7 @@
       <canvas ref="captureCanvasEl" class="hidden-canvas"></canvas>
       <div class="stats">
         <div>検知状態: {{ statusLabel }}</div>
-        <div>最新形状: {{ lastShapeCode || "-" }} / 一致: {{ lastShapeMatch ? "OK" : "NG" }}</div>
+        <div>期待形状: {{ expectedShapeCode || "-" }} / 推論: {{ lastShapeCode || "-" }} / 一致: {{ lastShapeMatch ? "OK" : "NG" }}</div>
         <div>セッション実績: {{ sessionCount }}</div>
         <div>セッション通過数: {{ sessionPassCount }}</div>
         <div>当日累計実績: {{ dailyCount }}</div>
@@ -99,6 +118,7 @@ const statusLabel = ref("待機中")
 const sessionCount = ref(0)
 const sessionPassCount = ref(0)
 const lastShapeCode = ref("")
+const expectedShapeCode = ref("")
 const lastShapeMatch = ref(false)
 const dailyCount = ref(0)
 const lastAcceptedAt = ref("")
@@ -121,8 +141,16 @@ let mediaStream = null
 let retryTimer = null
 let autoDetectTimer = null
 let autoDetectInFlight = false
+let trainingStatusTimer = null
 const autoSessionId = ref("")
 const autoDetectConsecutiveErrors = ref(0)
+const datasetZipFile = ref(null)
+const trainingEpochs = ref(30)
+const trainingImgsz = ref(640)
+const trainingState = ref("idle")
+const trainingMessage = ref("")
+const trainingDatasetDir = ref("")
+const trainingModelPath = ref("")
 
 const canStart = computed(() => Boolean(selectedLineId.value && selectedProcessId.value && selectedProductId.value))
 
@@ -207,6 +235,51 @@ const loadTuning = () => {
 
 const saveTuning = () => {
   localStorage.setItem(TUNE_STORAGE_KEY, JSON.stringify(tuning.value))
+}
+
+const onDatasetFileChange = (event) => {
+  const file = event?.target?.files?.[0]
+  datasetZipFile.value = file || null
+}
+
+const fetchTrainingStatus = async () => {
+  try {
+    const res = await api.cameraActuals.getShapeTrainingStatus()
+    trainingState.value = res.data.state || "idle"
+    trainingMessage.value = res.data.message || ""
+    trainingDatasetDir.value = res.data.dataset_dir || ""
+    trainingModelPath.value = res.data.model_path || ""
+  } catch (error) {
+    trainingMessage.value = extractApiErrorMessage(error, "学習状態の取得に失敗しました。")
+  }
+}
+
+const uploadDataset = async () => {
+  if (!datasetZipFile.value) return
+  const formData = new FormData()
+  formData.append("dataset_zip", datasetZipFile.value)
+  try {
+    await api.cameraActuals.uploadShapeDataset(formData)
+    datasetZipFile.value = null
+    trainingMessage.value = "データセットをアップロードしました。"
+    await fetchTrainingStatus()
+  } catch (error) {
+    trainingMessage.value = extractApiErrorMessage(error, "データセットアップロードに失敗しました。")
+  }
+}
+
+const startShapeTraining = async () => {
+  try {
+    await api.cameraActuals.startShapeTraining({
+      epochs: Number(trainingEpochs.value || 30),
+      imgsz: Number(trainingImgsz.value || 640),
+      base_model: "yolov8n.pt",
+    })
+    trainingMessage.value = "学習を開始しました。"
+    await fetchTrainingStatus()
+  } catch (error) {
+    trainingMessage.value = extractApiErrorMessage(error, "学習開始に失敗しました。")
+  }
 }
 
 const fetchMasters = async () => {
@@ -338,6 +411,7 @@ const runAutoDetectOnce = async () => {
     })
     const passCount = Number(res.data.pass_count || 0)
     const detectedCount = Number(res.data.detected_count || 0)
+    expectedShapeCode.value = String(res.data.expected_shape_code || "")
     lastShapeCode.value = String(res.data.shape_code || "")
     lastShapeMatch.value = Boolean(res.data.shape_match)
     sessionPassCount.value += passCount
@@ -412,8 +486,12 @@ onMounted(async () => {
   loadQueue()
   loadTuning()
   scheduleFlush()
+  trainingStatusTimer = setInterval(() => {
+    fetchTrainingStatus().catch(() => {})
+  }, 3000)
   try {
     await fetchMasters()
+    await fetchTrainingStatus()
   } catch (error) {
     errorMessage.value = "初期データの取得に失敗しました。"
   }
@@ -425,6 +503,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   stopCapture()
   if (retryTimer) clearInterval(retryTimer)
+  if (trainingStatusTimer) clearInterval(trainingStatusTimer)
 })
 watch(
   () => tuning.value.frame_interval_ms,
@@ -535,6 +614,32 @@ button.detect {
 .tuning-grid input {
   width: 90px;
   height: 28px;
+}
+.sub-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+.train-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.train-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.train-row input[type="number"] {
+  width: 88px;
+  height: 30px;
+}
+.train-status {
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
 }
 </style>
 

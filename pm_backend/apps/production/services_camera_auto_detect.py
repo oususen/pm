@@ -11,6 +11,8 @@ from pathlib import Path
 class DetectResult:
     detected_count: int
     pass_count: int
+    shape_code: str
+    shape_confidence: float | None
 
 
 class AutoDetectRuntime:
@@ -18,23 +20,31 @@ class AutoDetectRuntime:
 
     def __init__(self):
         self._model = None
+        self._model_source = ""
         self._model_lock = threading.Lock()
         self._state_lock = threading.Lock()
         self._sessions = {}
 
     def _load_model(self):
         with self._model_lock:
-            if self._model is not None:
-                return self._model
             # 権限制限環境でも動くよう、Ultralytics設定ディレクトリをプロジェクト配下へ固定
             settings_dir = Path(__file__).resolve().parents[3] / ".ultralytics"
             settings_dir.mkdir(parents=True, exist_ok=True)
             os.environ.setdefault("YOLO_CONFIG_DIR", str(settings_dir))
             try:
+                from .services_camera_shape_training import camera_shape_training_manager
+                model_path = camera_shape_training_manager.get_status().get("model_path") or ""
+            except Exception:
+                model_path = ""
+            source = model_path if model_path and Path(model_path).exists() else "yolov8n.pt"
+            if self._model is not None and self._model_source == source:
+                return self._model
+            try:
                 from ultralytics import YOLO
             except Exception as exc:
                 raise RuntimeError("ultralytics が未インストールのため自動検知を実行できません。") from exc
-            self._model = YOLO("yolov8n.pt")
+            self._model = YOLO(source)
+            self._model_source = source
             return self._model
 
     @staticmethod
@@ -63,24 +73,33 @@ class AutoDetectRuntime:
         except Exception:
             gray = None
         model = self._load_model()
+        using_default_model = str(self._model_source).endswith("yolov8n.pt")
         yolo_confidence = float(config.get("yolo_confidence", 0.5))
         result = model.predict(frame, verbose=False, conf=yolo_confidence)[0]
         boxes = result.boxes
 
         detections = []
+        top_shape_code = ""
+        top_shape_confidence = None
         if boxes is not None:
             cls_ids = boxes.cls.cpu().numpy() if boxes.cls is not None else []
+            confs = boxes.conf.cpu().numpy() if boxes.conf is not None else []
+            names = result.names or {}
             for idx, xyxy in enumerate(boxes.xyxy.cpu().numpy()):
-                # YOLO COCO class 0 = person。手だけ検知しにくいので人物枠の下半分を使う。
                 class_id = int(cls_ids[idx]) if idx < len(cls_ids) else -1
-                if class_id != 0:
+                conf = float(confs[idx]) if idx < len(confs) else 0.0
+                if not top_shape_code or (top_shape_confidence is not None and conf > top_shape_confidence):
+                    top_shape_code = str(names.get(class_id, class_id))
+                    top_shape_confidence = conf
+                # 既定モデル時のみ person で絞る。学習済みモデル時は全クラス対象。
+                if using_default_model and class_id != 0:
                     continue
                 x1, y1, x2, y2 = [float(v) for v in xyxy]
                 cx = (x1 + x2) / 2.0
                 person_bottom_ratio = float(config.get("person_bottom_ratio", 0.78))
                 min_y_ratio = float(config.get("min_y_ratio", 0.45))
                 cy = y1 + (y2 - y1) * person_bottom_ratio
-                if cy < height * min_y_ratio:
+                if using_default_model and cy < height * min_y_ratio:
                     continue
                 detections.append((cx, cy))
 
@@ -204,7 +223,12 @@ class AutoDetectRuntime:
                     session["motion_side"] = current_motion_side
                 session["last_gray"] = gray
 
-        return DetectResult(detected_count=len(detections), pass_count=pass_count)
+        return DetectResult(
+            detected_count=len(detections),
+            pass_count=pass_count,
+            shape_code=top_shape_code,
+            shape_confidence=top_shape_confidence,
+        )
 
 
 auto_detect_runtime = AutoDetectRuntime()

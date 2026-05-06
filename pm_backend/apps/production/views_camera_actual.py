@@ -2,6 +2,7 @@ from datetime import datetime
 
 from django.db import IntegrityError, transaction
 from django.db.models import F
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -13,6 +14,7 @@ from .serializers_camera_actual import (
     resolve_business_date,
 )
 from .services_camera_auto_detect import auto_detect_runtime
+from .services_camera_shape_training import camera_shape_training_manager
 
 
 def apply_camera_event(
@@ -136,9 +138,10 @@ class CameraAutoDetectView(APIView):
 
         total_count = None
         business_date = resolve_business_date(captured_at)
-        detected_shape_code = validated["product"].product_code
-        detected_shape_confidence = 0.9 if detect_result.detected_count > 0 else None
-        shape_match = bool(detect_result.detected_count > 0)
+        expected_shape_code = validated["product"].product_code
+        detected_shape_code = str(detect_result.shape_code or "")
+        detected_shape_confidence = detect_result.shape_confidence
+        shape_match = bool(detected_shape_code) and detected_shape_code == expected_shape_code
 
         for idx in range(detect_result.pass_count if shape_match else 0):
             camera_event_id = f"auto-{validated['session_id']}-{int(now_dt.timestamp() * 1000)}-{idx}"
@@ -169,6 +172,7 @@ class CameraAutoDetectView(APIView):
             {
                 "detected_count": detect_result.detected_count,
                 "pass_count": detect_result.pass_count,
+                "expected_shape_code": expected_shape_code,
                 "shape_code": detected_shape_code,
                 "shape_confidence": detected_shape_confidence,
                 "shape_match": shape_match,
@@ -230,3 +234,36 @@ class CameraResultDailyView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class CameraShapeTrainingUploadView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        dataset_zip = request.FILES.get("dataset_zip")
+        if not dataset_zip:
+            return Response({"detail": "dataset_zip は必須です。"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            dataset_dir = camera_shape_training_manager.upload_dataset_zip(dataset_zip)
+        except Exception as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"uploaded": True, "dataset_dir": dataset_dir}, status=status.HTTP_200_OK)
+
+
+class CameraShapeTrainingStartView(APIView):
+    def post(self, request):
+        epochs = int(request.data.get("epochs", 30))
+        imgsz = int(request.data.get("imgsz", 640))
+        base_model = request.data.get("base_model", "yolov8n.pt")
+        try:
+            camera_shape_training_manager.start_training(epochs=epochs, imgsz=imgsz, base_model=base_model)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except RuntimeError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response({"started": True}, status=status.HTTP_200_OK)
+
+
+class CameraShapeTrainingStatusView(APIView):
+    def get(self, request):
+        return Response(camera_shape_training_manager.get_status(), status=status.HTTP_200_OK)
