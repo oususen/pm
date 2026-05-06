@@ -196,3 +196,4 @@ onMounted(async () => {
 .btn-primary { background: #2563eb; color: #fff; }
 .btn-small { padding: 5px 8px; font-size: 12px; }
 </style>
+

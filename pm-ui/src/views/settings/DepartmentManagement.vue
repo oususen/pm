@@ -417,3 +417,4 @@ onMounted(loadAll)
 .head-leader   { background: #ede9fe; color: #5b21b6; }
 .head-empty    { color: #bbb; }
 </style>
+

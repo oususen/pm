@@ -63,6 +63,7 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { computed, onMounted, reactive, ref } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
@@ -71,7 +72,7 @@ import { hasPermission } from '@/router'
 const loading = ref(false)
 const saving = ref(false)
 const rows = ref([])
-const today = new Date().toISOString().slice(0, 10)
+const today = formatISODate(new Date())
 const startDate = ref(today)
 const endDate = ref(today)
 const productCode = ref('')
@@ -235,3 +236,7 @@ onMounted(load)
 .span-2 { grid-column: span 2; }
 .edit-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
 </style>
+
+
+
+

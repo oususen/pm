@@ -483,3 +483,4 @@ onMounted(async () => {
 .btn-danger:disabled { background: #fca5a5; border-color: #fca5a5; cursor: not-allowed; }
 .action-cell { display: flex; gap: 4px; }
 </style>
+

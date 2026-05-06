@@ -186,11 +186,12 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { computed, onMounted, reactive, ref } from "vue";
 import * as XLSX from "xlsx";
 import api from "@/api/client";
 
-const today = new Date().toISOString().slice(0, 10);
+const today = formatISODate(new Date());
 const baseDate = ref(today);
 const resolvingTargetPart = ref(false);
 const loadingTargetData = ref(false);
@@ -1037,3 +1038,7 @@ onMounted(() => {
   }
 }
 </style>
+
+
+
+

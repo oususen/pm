@@ -764,3 +764,4 @@ watch([
   .dual-chart-wrap { grid-template-columns: 1fr; }
 }
 </style>
+

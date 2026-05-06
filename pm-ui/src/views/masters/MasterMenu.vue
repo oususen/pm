@@ -92,3 +92,4 @@ const onTileClick = (event, tile) => {
   }
 }
 </script>
+

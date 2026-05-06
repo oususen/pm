@@ -815,3 +815,4 @@ onMounted(loadTrips)
   }
 }
 </style>
+

@@ -192,6 +192,7 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { ref, computed, onMounted, watch, defineProps, defineExpose, defineEmits } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api/client'
@@ -219,7 +220,7 @@ const TANK_PRODUCT_ORDER = [
 
 const route = useRoute()
 const selectedLine = ref('')
-const baseDate = ref(new Date().toISOString().slice(0, 10))
+const baseDate = ref(formatISODate(new Date()))
 const lines = ref([])
 const processGanttData = ref([])
 const mergeConsecutive = ref(false)
@@ -299,7 +300,7 @@ const displayDays = computed(() => {
   for (let offset = -2; offset <= 2; offset++) {
     const d = new Date(base)
     d.setDate(d.getDate() + offset)
-    days.push({ date: d.toISOString().slice(0, 10), label: formatDayLabel(d) })
+    days.push({ date: formatISODate(d), label: formatDayLabel(d) })
   }
   return days
 })
@@ -1210,7 +1211,7 @@ function buildDisplayDays(startStr, endStr) {
   const days = []
   const current = new Date(from)
   while (current <= to) {
-    days.push({ date: current.toISOString().slice(0, 10), label: formatDayLabel(current) })
+    days.push({ date: formatISODate(current), label: formatDayLabel(current) })
     current.setDate(current.getDate() + 1)
   }
   return days
@@ -1249,7 +1250,7 @@ function buildTimelineSlots(startDate, endDate) {
       key: current.toISOString(),
       dayLabel: current.getHours() === 0 ? formatDayLabel(current) : '',
       label: formatTime(current),
-      dayClass: getDayClass(current.toISOString().slice(0, 10)),
+      dayClass: getDayClass(formatISODate(current)),
     })
     current.setHours(current.getHours() + slotHours)
   }
@@ -2275,3 +2276,7 @@ onMounted(async () => {
   font-size: 14px;
 }
 </style>
+
+
+
+

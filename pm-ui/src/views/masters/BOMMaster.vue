@@ -702,6 +702,7 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { ref, onMounted, computed, h, defineComponent, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
@@ -1377,7 +1378,7 @@ const showNewDialog = () => {
   closeDetailsDialog()
   isEdit.value = false
   parentProductFilter.value = ''
-  const today = new Date().toISOString().split('T')[0]
+  const today = formatISODate(new Date())
   formData.value = {
     parent_product: '',
     version: 'v1',
@@ -1753,7 +1754,7 @@ const downloadBOMExcel = async (bom) => {
   try {
     const response = await api.boms.exportBOMExcel(bom.id)
     const productCode = getParentProductCode(bom)
-    const timestamp = new Date().toISOString().slice(0, 10)
+    const timestamp = formatISODate(new Date())
     const filename = `bom_tree_${productCode}_${timestamp}.xlsx`
     const url = URL.createObjectURL(response.data)
     const link = document.createElement('a')
@@ -2409,3 +2410,7 @@ const TreeBranch = defineComponent({
   color: #555;
 }
 </style>
+
+
+
+

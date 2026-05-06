@@ -110,3 +110,4 @@ const tiles = computed(() => allTiles.filter((tile) => canAccess(tile.resource))
   color: #4b5563;
 }
 </style>
+

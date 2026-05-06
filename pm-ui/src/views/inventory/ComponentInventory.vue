@@ -721,3 +721,4 @@ thead .date-col {
   margin-top: 6px;
 }
 </style>
+

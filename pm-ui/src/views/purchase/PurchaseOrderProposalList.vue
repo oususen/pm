@@ -123,6 +123,7 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api/client'
@@ -226,7 +227,7 @@ const deleteProposal = async (row) => {
 
 const openCreateDialog = () => {
   const today = new Date()
-  const ymd = today.toISOString().slice(0, 10)
+  const ymd = formatISODate(today)
   createForm.value = {
     supplier: '',
     order_date: ymd,
@@ -317,3 +318,7 @@ onMounted(async () => {
   gap: 8px;
 }
 </style>
+
+
+
+

@@ -1423,3 +1423,4 @@ const getCellClass = (group, date, rowKey) => {
   &:hover { background: #6d28d9; }
 }
 </style>
+

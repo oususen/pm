@@ -110,6 +110,7 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { computed, onMounted, ref } from 'vue'
 import axios from 'axios'
 import api from '@/api/client'
@@ -132,7 +133,7 @@ const prodOrderPath = '/production-orders/'
 
 const lines = ref([])
 const lineId = ref('')
-const targetDate = ref(new Date().toISOString().slice(0, 10))
+const targetDate = ref(formatISODate(new Date()))
 const orders = ref([])
 const keyword = ref('')
 const fixedProductsText = ref('YD60000441')
@@ -643,3 +644,7 @@ onMounted(() => {
   }
 }
 </style>
+
+
+
+

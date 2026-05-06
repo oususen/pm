@@ -263,6 +263,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
+import { formatISODate } from '@/utils/dateUtil';
 
 // 状態管理
 const targetDate = ref('');
@@ -286,7 +287,7 @@ const showPreview = ref(false);
 // 計算プロパティ
 const minDate = computed(() => {
   const today = new Date();
-  return today.toISOString().split('T')[0];
+  return formatISODate(today);
 });
 
 const countUniqueItems = (items) => {
@@ -435,7 +436,7 @@ const generatePDF = async () => {
 onMounted(() => {
   // 今日の日付をデフォルトに設定
   const today = new Date();
-  targetDate.value = today.toISOString().split('T')[0];
+  targetDate.value = formatISODate(today);
 });
 </script>
 
@@ -765,3 +766,4 @@ onMounted(() => {
   margin-top: 20px;
 }
 </style>
+

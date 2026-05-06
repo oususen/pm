@@ -167,3 +167,4 @@ const onTileClick = (event, tile) => {
   color: #64748b;
 }
 </style>
+

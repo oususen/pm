@@ -311,12 +311,13 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { computed, onMounted, ref, watch } from 'vue'
 import * as XLSX from 'xlsx'
 import api from '@/api/client'
 
 const today = new Date()
-const toDateStr = (d) => d.toISOString().slice(0, 10)
+const toDateStr = (d) => formatISODate(d)
 const addDays = (dateStr, days) => {
   const d = new Date(dateStr)
   d.setDate(d.getDate() + days)
@@ -1009,3 +1010,7 @@ onMounted(() => {
   }
 }
 </style>
+
+
+
+

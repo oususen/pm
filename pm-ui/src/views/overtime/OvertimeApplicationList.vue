@@ -584,3 +584,4 @@ onMounted(fetchList)
 .log-approved { background: #d1fae5; color: #065f46; }
 .log-rejected { background: #fee2e2; color: #dc2626; }
 </style>
+

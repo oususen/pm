@@ -257,3 +257,4 @@ watch([selectedLine, selectedProcess, selectedProduct, selectedPerson, selectedU
 .bar-fill.factor { background: #ea580c; }
 .bar-label, .bar-value { color: #334155; }
 </style>
+

@@ -1429,3 +1429,4 @@ onUnmounted(() => {
 .score-mid  { background: #fff3cd; color: #856404; }
 .score-low  { background: #f8d7da; color: #721c24; }
 </style>
+

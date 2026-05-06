@@ -332,3 +332,4 @@ onMounted(fetchSettings)
   margin-top: 20px;
 }
 </style>
+

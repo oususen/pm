@@ -114,6 +114,7 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
@@ -246,7 +247,7 @@ const selectRecord = (record) => {
     } else if (field.field_type === 'checkbox') {
       responses.value[field.key] = false
     } else {
-      responses.value[field.key] = field.field_type === 'date' ? new Date().toISOString().slice(0, 10) : ''
+      responses.value[field.key] = field.field_type === 'date' ? formatISODate(new Date()) : ''
     }
   })
   plannedShipDate.value = record.planned_ship_date || plannedShipDate.value || ''
@@ -376,3 +377,7 @@ onMounted(() => {
 .result-value { color: #111827; }
 @media (max-width: 900px) { .input-grid { grid-template-columns: 1fr; } }
 </style>
+
+
+
+

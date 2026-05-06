@@ -162,6 +162,7 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
@@ -180,7 +181,7 @@ const canEdit = computed(() => {
 const selectedSupplier = ref('')
 const purchaseLineId = ref('')
 const purchaseProcessId = ref('')
-const startDate = ref(new Date().toISOString().slice(0, 10))
+const startDate = ref(formatISODate(new Date()))
 const horizonDays = ref(30)
 const keyword = ref('')
 const gridWrapperRef = ref(null)
@@ -322,7 +323,7 @@ const savePlan = async () => {
     // JST(UTC+9)に変換し、8時区切りで業務日を算出
     const nowJst = new Date(Date.now() + 9 * 60 * 60 * 1000)
     if (nowJst.getUTCHours() < 8) nowJst.setUTCDate(nowJst.getUTCDate() - 1)
-    const today = nowJst.toISOString().slice(0, 10)
+    const today = formatISODate(nowJst)
     const recalcStartDate = startDate.value < today ? startDate.value : today
 
     const recalcRes = await api.lineBacklogs.recalculateInventory({
@@ -1283,3 +1284,7 @@ thead .sticky-col {
   opacity: 0.9;
 }
 </style>
+
+
+
+

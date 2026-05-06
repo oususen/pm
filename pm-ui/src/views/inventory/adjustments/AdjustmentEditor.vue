@@ -271,6 +271,7 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { onMounted, reactive, ref, computed } from "vue";
 import api from "@/api/client";
 
@@ -280,7 +281,7 @@ const props = defineProps({
   adjustType: { type: String, required: true },
 });
 
-const today = new Date().toISOString().slice(0, 10);
+const today = formatISODate(new Date());
 const adjustDate = ref(today);
 const displayStartDate = ref(today);
 const adjustmentDate = ref(today); // LTから自動計算される調整可能日（この行だけ入力可）
@@ -318,7 +319,7 @@ const recalcThenReload = async () => {
     await api.lineBacklogs.recalculateInventory({
       line_id: form.lineId,
       start_date: displayStartDate.value || today,
-      end_date: endDateObj.toISOString().slice(0, 10),
+      end_date: formatISODate(endDateObj),
     });
     await reload();
   } catch (e) {
@@ -359,7 +360,7 @@ const applyAndRecalc = async () => {
     await api.lineBacklogs.recalculateInventory({
       line_id: form.lineId,
       start_date: displayStartDate.value || today,
-      end_date: endDateObj.toISOString().slice(0, 10),
+      end_date: formatISODate(endDateObj),
     });
     actualStockToday.value = null;
     await reload();
@@ -478,7 +479,7 @@ const buildRows = () => {
   for (let i = 0; i < 30; i += 1) {
     const d = new Date(start);
     d.setDate(start.getDate() + i);
-    const key = d.toISOString().slice(0, 10);
+    const key = formatISODate(d);
     const saved = rowsByDate.value[key] || 0;
     const metrics = metricsByDate.value[key] || {};
     rows.push({
@@ -517,7 +518,7 @@ const loadHolidays = async (startDate, endDate) => {
   const start = new Date(startDate);
   const end = new Date(endDate);
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    const key = d.toISOString().slice(0, 10);
+    const key = formatISODate(d);
     if (isWeekend(key)) fallback.add(key);
   }
   try {
@@ -532,7 +533,7 @@ const loadHolidays = async (startDate, endDate) => {
     const days = Array.isArray(daysRes.data?.results) ? daysRes.data.results : Array.isArray(daysRes.data) ? daysRes.data : [];
     const displayedDateSet = new Set();
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      displayedDateSet.add(d.toISOString().slice(0, 10));
+      displayedDateSet.add(formatISODate(d));
     }
     const holidaySet = new Set(
       days
@@ -869,7 +870,7 @@ const reload = async () => {
     const startDate = displayStartDate.value || today;
     const endDateObj = new Date(startDate);
     endDateObj.setDate(endDateObj.getDate() + 29);
-    const endDate = endDateObj.toISOString().slice(0, 10);
+    const endDate = formatISODate(endDateObj);
     await loadHolidays(startDate, endDate);
 
     if (form.lineId && form.productId) {
@@ -1027,7 +1028,7 @@ const loadBatchProducts = async () => {
 const executeBatchRecalc = async () => {
   const endDateObj = new Date(today);
   endDateObj.setDate(endDateObj.getDate() + 30);
-  const endDate = endDateObj.toISOString().slice(0, 10);
+  const endDate = formatISODate(endDateObj);
 
   const isProgressType = props.adjustType === "PROGRESS" || props.adjustType === "PLANNED_PROGRESS";
 
@@ -1365,3 +1366,7 @@ onMounted(() => {
   }
 }
 </style>
+
+
+
+

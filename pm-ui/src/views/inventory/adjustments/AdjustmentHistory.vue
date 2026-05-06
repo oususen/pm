@@ -220,3 +220,4 @@ load()
 .badge-planned-stock { background: #e0e7ff; color: #4338ca; }
 .badge-planned-progress { background: #fef9c3; color: #854d0e; }
 </style>
+

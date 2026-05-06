@@ -200,6 +200,7 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { computed, onMounted, reactive, ref } from "vue";
 import { authState } from "@/auth";
 import { hasPermission } from "@/router";
@@ -494,7 +495,7 @@ const downloadCsv = () => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `設変過剰管理_${new Date().toISOString().slice(0, 10)}.csv`;
+  link.download = `設変過剰管理_${formatISODate(new Date())}.csv`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -662,3 +663,7 @@ select {
   font-weight: 700;
 }
 </style>
+
+
+
+

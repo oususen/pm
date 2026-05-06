@@ -197,6 +197,7 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
@@ -556,7 +557,7 @@ const buildFallbackOrderPdfFilename = () => {
   const orderDateRaw = String(proposal.value.order_date || '').replace(/-/g, '')
   const orderDate = /^\d{8}$/.test(orderDateRaw)
     ? orderDateRaw
-    : new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    : formatISODate(new Date()).replace(/-/g, '')
 
   const supplierCode = sanitizeFilePart(proposal.value.supplier_code, 'UNKNOWN')
   const totalAmount = Array.isArray(proposal.value.lines)
@@ -797,3 +798,7 @@ onMounted(async () => {
   gap: 8px;
 }
 </style>
+
+
+
+

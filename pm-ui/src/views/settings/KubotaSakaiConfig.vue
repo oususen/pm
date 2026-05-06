@@ -76,3 +76,4 @@ onMounted(load)
 .btn { padding: 6px 12px; border: 1px solid #b5c1d2; background: #fff; border-radius: 4px; cursor: pointer; }
 .btn.primary { background: #dff3e6; border-color: #8fc8a1; }
 </style>
+

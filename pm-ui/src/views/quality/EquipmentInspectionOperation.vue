@@ -224,6 +224,7 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { computed, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import api from "@/api/client"
@@ -241,7 +242,7 @@ const currentTemplate = ref(null)
 const isLocked = ref(false)
 
 const selectedSheetCode = ref(String(route.query.sheet_code || ""))
-const selectedDate = ref(String(route.query.date || new Date().toISOString().slice(0, 10)))
+const selectedDate = ref(String(route.query.date || formatISODate(new Date())))
 const sectionType = ref(String(route.query.section_type || "DAILY").toUpperCase())
 // 工程/ラインからの絞り込み用（実績入力画面から渡される）
 const filterProcessId = ref(route.query.process_id ? String(route.query.process_id) : null)
@@ -956,3 +957,7 @@ button:disabled {
   }
 }
 </style>
+
+
+
+

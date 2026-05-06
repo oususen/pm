@@ -367,3 +367,4 @@ onUnmounted(() => {
 .btn-danger { background: #fff; border-color: #dc2626; color: #dc2626; }
 @media (max-width: 980px) { .editor-grid { grid-template-columns: 1fr; } }
 </style>
+

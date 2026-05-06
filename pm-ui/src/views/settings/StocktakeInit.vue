@@ -91,6 +91,7 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { computed, ref } from "vue";
 import api from "@/api/client";
 import { authState } from "@/auth";
@@ -104,7 +105,7 @@ const getBusinessYesterday = () => {
   const offset = now.getHours() < 8 ? 2 : 1;
   const d = new Date(now);
   d.setDate(d.getDate() - offset);
-  return d.toISOString().slice(0, 10);
+  return formatISODate(d);
 };
 
 const stocktakeDate = ref("");
@@ -322,3 +323,7 @@ const initializeAll = async () => {
   font-size: 13px;
 }
 </style>
+
+
+
+

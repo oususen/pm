@@ -421,6 +421,7 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { computed, onMounted, ref, watch } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
@@ -485,7 +486,7 @@ const lines = ref([])
 const loadingLines = ref(false)
 const migrationLineId = ref('')
 const _nowJst = new Date(Date.now() + 9 * 60 * 60 * 1000)
-const migrationDate = ref(_nowJst.toISOString().slice(0, 10))
+const migrationDate = ref(formatISODate(_nowJst))
 const migrationDialogVisible = ref(false)
 const migrationCandidates = ref([])
 const checkingMigration = ref(false)
@@ -1706,3 +1707,7 @@ onMounted(async () => {
   }
 }
 </style>
+
+
+
+

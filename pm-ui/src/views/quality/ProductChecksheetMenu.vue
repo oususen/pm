@@ -138,3 +138,4 @@ const canViewIntegratedDashboard = computed(() =>
   ])
 )
 </script>
+

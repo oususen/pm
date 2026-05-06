@@ -221,6 +221,7 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { computed, onMounted, ref, watch } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
@@ -316,7 +317,7 @@ const closeSuggestions = () => { showSuggestions.value = false }
 const onProductBlur = () => { setTimeout(() => { showSuggestions.value = false }, 150) }
 
 const today = new Date()
-const toISODate = (d) => d.toISOString().slice(0, 10)
+const toISODate = (d) => formatISODate(d)
 const sessionId = ref('')
 const startDate = ref(toISODate(new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)))
 const endDate = ref(toISODate(new Date(today.getTime() + 24 * 60 * 60 * 1000)))
@@ -1022,3 +1023,7 @@ onMounted(async () => {
   right: 0;
 }
 </style>
+
+
+
+

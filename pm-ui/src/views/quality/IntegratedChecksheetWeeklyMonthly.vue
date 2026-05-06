@@ -302,3 +302,4 @@ watch([selectedLine, selectedProcess, selectedProduct, selectedPerson, selectedU
 .definition-title { font-weight: 700; margin-bottom: 4px; color: #1f2937; font-size: 12px; }
 .definition-list { margin: 0; padding-left: 18px; color: #334155; font-size: 12px; line-height: 1.5; }
 </style>
+

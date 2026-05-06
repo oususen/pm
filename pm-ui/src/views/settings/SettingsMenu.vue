@@ -108,3 +108,4 @@ const canAccessSetting = (resource, level = "view") => {
   return hasPermission(user, "settings", level);
 };
 </script>
+

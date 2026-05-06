@@ -50,3 +50,4 @@ const canViewMonthly = computed(() =>
   canAccessQuality("quality.equipment_inspection_monthly_review", "view", ["quality.equipment_inspection"])
 )
 </script>
+

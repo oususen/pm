@@ -41,12 +41,13 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { onMounted, ref } from 'vue'
 import api from '@/api/client'
 
 const loading = ref(false)
 const rows = ref([])
-const today = new Date().toISOString().slice(0, 10)
+const today = formatISODate(new Date())
 const startDate = ref(today)
 const endDate = ref(today)
 const productCode = ref('')
@@ -88,3 +89,7 @@ onMounted(load)
 .num { text-align: right; }
 .no-data { text-align: center; color: #64748b; }
 </style>
+
+
+
+

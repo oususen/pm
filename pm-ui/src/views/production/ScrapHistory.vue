@@ -225,6 +225,7 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
 
@@ -240,7 +241,7 @@ const decisioning = ref(false)
 const returnQty = ref(null)
 
 const today = new Date()
-const toISODate = (d) => d.toISOString().slice(0, 10)
+const toISODate = (d) => formatISODate(d)
 const startDate = ref(toISODate(new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000)))
 const endDate = ref(toISODate(new Date(today.getTime() + 24 * 60 * 60 * 1000)))
 const processId = ref('')
@@ -773,3 +774,7 @@ onMounted(() => {
   white-space: nowrap;
 }
 </style>
+
+
+
+

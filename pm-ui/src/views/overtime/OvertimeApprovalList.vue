@@ -533,3 +533,4 @@ onMounted(fetchList)
   flex-wrap: wrap;
 }
 </style>
+

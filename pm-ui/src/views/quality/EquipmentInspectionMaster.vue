@@ -542,6 +542,7 @@
 </template>
 
 <script setup>
+import { formatISODate } from '@/utils/dateUtil'
 import { computed, nextTick, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import * as XLSX from "xlsx"
@@ -922,7 +923,7 @@ const exportCurrentTemplateExcel = () => {
     .replace(/[\\/:*?"<>|]/g, "_")
     .trim()
   const safeStatus = String(statusText || "下書き").replace(/[\\/:*?"<>|]/g, "_").trim()
-  const datePart = new Date().toISOString().slice(0, 10)
+  const datePart = formatISODate(new Date())
 
   const rows = [
     [form.value.title || "設備点検表"],
@@ -2791,3 +2792,7 @@ button:disabled {
   }
 }
 </style>
+
+
+
+
