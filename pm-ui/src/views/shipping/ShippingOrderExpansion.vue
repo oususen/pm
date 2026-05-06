@@ -449,8 +449,9 @@ const load = async () => {
         cell.firm += Number(row.firm_qty || 0);
       },
     });
-    const processMap = buildProcessByProductMap(backlogs);
-    const lineMap = buildLineByProductMap(backlogs);
+    // ライン/工程表示はルーティング展開結果(LineDemand)を優先する
+    const processMap = buildProcessByProductMap(demands);
+    const lineMap = buildLineByProductMap(demands);
 
     const mappedBlocks = nodes.map((n) => {
       const perBacklog = backlogMap.get(n.product_id) || {};
