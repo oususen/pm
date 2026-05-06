@@ -25,6 +25,7 @@ from .models_laser_pattern import LaserPattern, LaserPatternComponent, LaserPatt
 from .models_laser_actual import LaserActual, LaserActualDetail
 from .models_record_confirmation import ProductionRecordConfirmation
 from .models_production import ProcessActual, ProductionOrder, StockAllocation
+from .models_camera_actual import CameraCountEvent, ProductionResultDaily
 
 
 class LineDemand(models.Model):

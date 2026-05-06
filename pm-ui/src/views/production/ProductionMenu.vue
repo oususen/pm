@@ -59,6 +59,13 @@ const hasMenuPermission = (resource, level) => {
 const tiles = computed(() => {
   const list = [
     {
+      to: "/production/camera-actual-input",
+      label: "実績入力（カメラ）",
+      icon: "📷",
+      required: "edit",
+      resource: "production.process_input",
+    },
+    {
       to: "/production/mobile-process-input",
       label: t("productionMenu.tiles.processInput"),
       icon: "📱",

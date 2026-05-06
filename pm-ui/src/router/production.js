@@ -148,6 +148,12 @@ const production = [
     meta: { pageTitle: "ライン稼働監視", manualPath: "生産/ライン稼働監視.md" },
   },
   {
+    path: "/production/camera-actual-input",
+    name: "CameraActualInput",
+    component: () => import("@/views/production/CameraActualInput.vue"),
+    meta: { pageTitle: "実績入力（カメラ）", manualPath: "生産/カメラ実績入力.md" },
+  },
+  {
     path: "/production/mobile-input",
     name: "MobileLineInput",
     component: () => import("@/views/production/MobileLineInput.vue"),

@@ -41,6 +41,7 @@ from production.views_spot_line import SpotLinePlanView, SpotLineEquipmentsView,
 from production.views_gantt_display_product_map import GanttDisplayProductMapViewSet
 from production.views_plan_deviation_report import PlanDeviationReportView
 from production.views_record_confirmation import ProductionRecordConfirmationView
+from production.views_camera_actual import CameraEventCreateView, CameraResultDailyView
 
 router = DefaultRouter()
 router.register(r'line-demands', LineDemandViewSet, basename='linedemand')
@@ -103,4 +104,6 @@ urlpatterns = [
     path('hokushin-delivery-all-pdf/', HokushinDeliveryAllPDFView.as_view(), name='hokushin-delivery-all-pdf'),
     path('plan-deviation-report/', PlanDeviationReportView.as_view(), name='plan-deviation-report'),
     path('record-confirmations/', ProductionRecordConfirmationView.as_view(), name='record-confirmations'),
+    path('camera-events/', CameraEventCreateView.as_view(), name='camera-events'),
+    path('camera-results-daily/', CameraResultDailyView.as_view(), name='camera-results-daily'),
 ]
