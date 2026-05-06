@@ -23,6 +23,8 @@ class CameraCountEvent(models.Model):
     business_date = models.DateField(verbose_name="業務日")
     device_id = models.CharField(max_length=128, blank=True, default="", verbose_name="端末ID")
     confidence = models.DecimalField(max_digits=6, decimal_places=4, null=True, blank=True, verbose_name="信頼度")
+    shape_code = models.CharField(max_length=64, blank=True, default="", verbose_name="形状コード")
+    shape_confidence = models.DecimalField(max_digits=6, decimal_places=4, null=True, blank=True, verbose_name="形状信頼度")
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_ACCEPTED, verbose_name="状態")
 
     class Meta:

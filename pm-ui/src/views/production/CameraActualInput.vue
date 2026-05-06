@@ -5,7 +5,7 @@
     <div class="panel">
       <div class="row">
         <label>ライン *</label>
-        <select v-model="selectedLineId" :disabled="isCapturing" @change="onLineChange">
+        <select v-model="selectedLineId" @change="onLineChange">
           <option value="">選択してください</option>
           <option v-for="line in lines" :key="line.id" :value="String(line.id)">
             {{ line.line_code }} - {{ line.line_name }}
@@ -31,24 +31,44 @@
         </select>
       </div>
       <div class="button-row">
+        <select v-model="captureMode" class="mode-select">
+          <option value="auto">自動検知（YOLO PoC）</option>
+          <option value="manual">手動検知（PoC）</option>
+        </select>
         <button type="button" class="primary" :disabled="!canStart || isCapturing" @click="startCapture">
           カメラ開始
         </button>
         <button type="button" :disabled="!isCapturing" @click="stopCapture">
           カメラ停止
         </button>
-        <button type="button" class="detect" :disabled="!isCapturing" @click="registerDetection">
+        <button v-if="captureMode === 'manual'" type="button" class="detect" :disabled="!isCapturing" @click="registerDetection">
           検知+1（PoC）
         </button>
       </div>
       <p v-if="errorMessage" class="error">{{ errorMessage }}</p>
+      <div class="tuning-grid">
+        <label>送信間隔ms <input type="number" v-model.number="tuning.frame_interval_ms" @change="saveTuning" /></label>
+        <label>ライン位置(0-1) <input type="number" step="0.01" v-model.number="tuning.line_position_ratio" @change="saveTuning" /></label>
+        <label>ライン余白(0-1) <input type="number" step="0.01" v-model.number="tuning.side_margin_ratio" @change="saveTuning" /></label>
+        <label>人物下側比率 <input type="number" step="0.01" v-model.number="tuning.person_bottom_ratio" @change="saveTuning" /></label>
+        <label>最低Y比率 <input type="number" step="0.01" v-model.number="tuning.min_y_ratio" @change="saveTuning" /></label>
+        <label>YOLO閾値 <input type="number" step="0.01" v-model.number="tuning.yolo_confidence" @change="saveTuning" /></label>
+        <label>重複防止秒 <input type="number" step="0.1" v-model.number="tuning.dedup_seconds" @change="saveTuning" /></label>
+        <label>動体閾値比率 <input type="number" step="0.001" v-model.number="tuning.motion_threshold_ratio" @change="saveTuning" /></label>
+      </div>
     </div>
 
     <div class="panel">
+      <div class="preview-wrap">
       <video ref="videoEl" autoplay playsinline muted class="preview"></video>
+      <div class="cross-line"></div>
+      </div>
+      <canvas ref="captureCanvasEl" class="hidden-canvas"></canvas>
       <div class="stats">
         <div>検知状態: {{ statusLabel }}</div>
+        <div>最新形状: {{ lastShapeCode || "-" }} / 一致: {{ lastShapeMatch ? "OK" : "NG" }}</div>
         <div>セッション実績: {{ sessionCount }}</div>
+        <div>セッション通過数: {{ sessionPassCount }}</div>
         <div>当日累計実績: {{ dailyCount }}</div>
         <div>未送信件数: {{ queue.length }}</div>
         <div>最終反映時刻: {{ lastAcceptedAt || "-" }}</div>
@@ -58,11 +78,12 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import api from "@/api/client"
 
 const QUEUE_STORAGE_KEY = "camera-actual-queue-v1"
 const DEVICE_STORAGE_KEY = "camera-actual-device-id-v1"
+const TUNE_STORAGE_KEY = "camera-actual-tuning-v1"
 
 const lines = ref([])
 const processes = ref([])
@@ -73,16 +94,35 @@ const selectedProcessId = ref("")
 const selectedProductId = ref("")
 
 const isCapturing = ref(false)
+const captureMode = ref("auto")
 const statusLabel = ref("待機中")
 const sessionCount = ref(0)
+const sessionPassCount = ref(0)
+const lastShapeCode = ref("")
+const lastShapeMatch = ref(false)
 const dailyCount = ref(0)
 const lastAcceptedAt = ref("")
 const errorMessage = ref("")
 const queue = ref([])
+const tuning = ref({
+  line_position_ratio: 0.5,
+  side_margin_ratio: 0.03,
+  person_bottom_ratio: 0.78,
+  min_y_ratio: 0.45,
+  yolo_confidence: 0.5,
+  dedup_seconds: 1.2,
+  motion_threshold_ratio: 0.01,
+  frame_interval_ms: 1200,
+})
 
 const videoEl = ref(null)
+const captureCanvasEl = ref(null)
 let mediaStream = null
 let retryTimer = null
+let autoDetectTimer = null
+let autoDetectInFlight = false
+const autoSessionId = ref("")
+const autoDetectConsecutiveErrors = ref(0)
 
 const canStart = computed(() => Boolean(selectedLineId.value && selectedProcessId.value && selectedProductId.value))
 
@@ -114,6 +154,25 @@ const buildEventId = () =>
     ? crypto.randomUUID()
     : `evt-${Date.now()}-${Math.floor(Math.random() * 100000)}`
 
+const buildAutoSessionId = () =>
+  typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `autosess-${Date.now()}-${Math.floor(Math.random() * 100000)}`
+
+const extractApiErrorMessage = (error, fallback) => {
+  const data = error?.response?.data
+  if (!data) return fallback
+  if (typeof data.detail === "string" && data.detail) return data.detail
+  if (Array.isArray(data.non_field_errors) && data.non_field_errors.length) return String(data.non_field_errors[0])
+  if (typeof data === "object") {
+    const firstKey = Object.keys(data)[0]
+    const firstVal = data[firstKey]
+    if (Array.isArray(firstVal) && firstVal.length) return `${firstKey}: ${firstVal[0]}`
+    if (typeof firstVal === "string" && firstVal) return `${firstKey}: ${firstVal}`
+  }
+  return fallback
+}
+
 const enqueue = (item) => {
   queue.value.push(item)
   localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(queue.value))
@@ -133,6 +192,21 @@ const loadQueue = () => {
   } catch (error) {
     queue.value = []
   }
+}
+
+const loadTuning = () => {
+  const raw = localStorage.getItem(TUNE_STORAGE_KEY)
+  if (!raw) return
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === "object") {
+      tuning.value = { ...tuning.value, ...parsed }
+    }
+  } catch {}
+}
+
+const saveTuning = () => {
+  localStorage.setItem(TUNE_STORAGE_KEY, JSON.stringify(tuning.value))
 }
 
 const fetchMasters = async () => {
@@ -217,12 +291,83 @@ const registerDetection = async () => {
 const stopCapture = () => {
   isCapturing.value = false
   statusLabel.value = "待機中"
+  autoDetectInFlight = false
+  if (autoDetectTimer) {
+    clearInterval(autoDetectTimer)
+    autoDetectTimer = null
+  }
   if (mediaStream) {
     mediaStream.getTracks().forEach((track) => track.stop())
     mediaStream = null
   }
   if (videoEl.value) {
     videoEl.value.srcObject = null
+  }
+}
+
+const captureFrameDataUrl = () => {
+  if (!videoEl.value || !captureCanvasEl.value) return ""
+  const video = videoEl.value
+  const canvas = captureCanvasEl.value
+  const width = video.videoWidth || 640
+  const height = video.videoHeight || 360
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext("2d")
+  if (!ctx) return ""
+  ctx.drawImage(video, 0, 0, width, height)
+  return canvas.toDataURL("image/jpeg", 0.7)
+}
+
+const runAutoDetectOnce = async () => {
+  if (!isCapturing.value || captureMode.value !== "auto" || autoDetectInFlight) return
+  if (!videoEl.value || videoEl.value.readyState < 2 || videoEl.value.videoWidth < 32 || videoEl.value.videoHeight < 32) return
+  const frameDataUrl = captureFrameDataUrl()
+  if (!frameDataUrl) return
+  autoDetectInFlight = true
+  try {
+    const res = await api.cameraActuals.autoDetect({
+      session_id: autoSessionId.value,
+      line_id: Number(selectedLineId.value),
+      process_id: Number(selectedProcessId.value),
+      product_id: Number(selectedProductId.value),
+      frame_data_url: frameDataUrl,
+      frame_captured_at: new Date().toISOString(),
+      device_id: getDeviceId(),
+      ...tuning.value,
+    })
+    const passCount = Number(res.data.pass_count || 0)
+    const detectedCount = Number(res.data.detected_count || 0)
+    lastShapeCode.value = String(res.data.shape_code || "")
+    lastShapeMatch.value = Boolean(res.data.shape_match)
+    sessionPassCount.value += passCount
+    sessionCount.value += passCount
+    dailyCount.value = Number(res.data.total_count || dailyCount.value)
+    statusLabel.value = detectedCount > 0
+      ? `検知 ${detectedCount}件 / 通過 +${passCount}件（累計 ${sessionPassCount.value}件）`
+      : `監視中（累計通過 ${sessionPassCount.value}件）`
+    if (passCount > 0) {
+      lastAcceptedAt.value = new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    }
+    errorMessage.value = ""
+    autoDetectConsecutiveErrors.value = 0
+  } catch (error) {
+    autoDetectConsecutiveErrors.value += 1
+    statusLabel.value = "自動検知エラー"
+    const detail = extractApiErrorMessage(error, "自動検知に失敗しました。")
+    errorMessage.value = detail
+    const shouldStop =
+      error?.response?.status === 503 ||
+      autoDetectConsecutiveErrors.value >= 3 ||
+      String(detail).includes("未インストール")
+    if (shouldStop && autoDetectTimer) {
+      clearInterval(autoDetectTimer)
+      autoDetectTimer = null
+      statusLabel.value = "自動検知停止"
+      errorMessage.value = `${detail} 自動送信を停止しました。依存導入後に再度「カメラ開始」を押してください。`
+    }
+  } finally {
+    autoDetectInFlight = false
   }
 }
 
@@ -239,7 +384,15 @@ const startCapture = async () => {
     isCapturing.value = true
     statusLabel.value = "取得中"
     sessionCount.value = 0
+    sessionPassCount.value = 0
+    autoDetectConsecutiveErrors.value = 0
+    autoSessionId.value = buildAutoSessionId()
     await refreshDailyCount()
+    if (captureMode.value === "auto") {
+      autoDetectTimer = setInterval(() => {
+        runAutoDetectOnce().catch(() => {})
+      }, Number(tuning.value.frame_interval_ms || 1200))
+    }
   } catch (error) {
     statusLabel.value = "エラー"
     errorMessage.value = "カメラ起動に失敗しました。端末権限を確認してください。"
@@ -257,6 +410,7 @@ const onProcessChange = () => {
 
 onMounted(async () => {
   loadQueue()
+  loadTuning()
   scheduleFlush()
   try {
     await fetchMasters()
@@ -272,6 +426,18 @@ onBeforeUnmount(() => {
   stopCapture()
   if (retryTimer) clearInterval(retryTimer)
 })
+watch(
+  () => tuning.value.frame_interval_ms,
+  (nextMs) => {
+    saveTuning()
+    if (!isCapturing.value || captureMode.value !== "auto") return
+    const intervalMs = Math.max(200, Number(nextMs || 1200))
+    if (autoDetectTimer) clearInterval(autoDetectTimer)
+    autoDetectTimer = setInterval(() => {
+      runAutoDetectOnce().catch(() => {})
+    }, intervalMs)
+  }
+)
 </script>
 
 <style scoped>
@@ -305,6 +471,9 @@ button {
   flex-wrap: wrap;
   margin-top: 8px;
 }
+.mode-select {
+  min-width: 190px;
+}
 button.primary {
   background: #0369a1;
   color: #fff;
@@ -325,6 +494,19 @@ button.detect {
   background: #111827;
   border-radius: 6px;
 }
+.preview-wrap {
+  position: relative;
+}
+.cross-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  background: rgba(239, 68, 68, 0.8);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
 .stats {
   margin-top: 8px;
   display: grid;
@@ -334,4 +516,29 @@ button.detect {
   color: #dc2626;
   margin: 0;
 }
+.hidden-canvas {
+  display: none;
+}
+.tuning-grid {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 6px 10px;
+}
+.tuning-grid label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  gap: 8px;
+}
+.tuning-grid input {
+  width: 90px;
+  height: 28px;
+}
 </style>
+
+
+
+
+

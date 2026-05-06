@@ -8,9 +8,73 @@ from rest_framework.views import APIView
 
 from .models_camera_actual import CameraCountEvent, ProductionResultDaily
 from .serializers_camera_actual import (
+    CameraAutoDetectSerializer,
     CameraEventCreateSerializer,
     resolve_business_date,
 )
+from .services_camera_auto_detect import auto_detect_runtime
+
+
+def apply_camera_event(
+    *,
+    camera_event_id,
+    line,
+    process,
+    product,
+    count,
+    event_at,
+    device_id="",
+    confidence=None,
+    shape_code="",
+    shape_confidence=None,
+):
+    """カメライベントを冪等で反映し、集計結果を返す。"""
+    business_date = resolve_business_date(event_at)
+    try:
+        with transaction.atomic():
+            CameraCountEvent.objects.create(
+                camera_event_id=camera_event_id,
+                line=line,
+                process=process,
+                product=product,
+                count=count,
+                event_at_client=event_at,
+                business_date=business_date,
+                device_id=device_id or "",
+                confidence=confidence,
+                shape_code=shape_code or "",
+                shape_confidence=shape_confidence,
+                status=CameraCountEvent.STATUS_ACCEPTED,
+            )
+            daily, _ = ProductionResultDaily.objects.select_for_update().get_or_create(
+                business_date=business_date,
+                line=line,
+                process=process,
+                product=product,
+                defaults={"actual_count": 0},
+            )
+            daily.actual_count = F("actual_count") + count
+            daily.save(update_fields=["actual_count", "updated_at"])
+            replayed = False
+    except IntegrityError:
+        event = CameraCountEvent.objects.filter(camera_event_id=camera_event_id).first()
+        if event and event.status != CameraCountEvent.STATUS_REPLAYED:
+            event.status = CameraCountEvent.STATUS_REPLAYED
+            event.save(update_fields=["status"])
+        replayed = True
+
+    total = ProductionResultDaily.objects.filter(
+        business_date=business_date,
+        line=line,
+        process=process,
+        product=product,
+    ).values_list("actual_count", flat=True).first() or 0
+    return {
+        "accepted": True,
+        "idempotent_replay": replayed,
+        "total_count": int(total),
+        "business_date": str(business_date),
+    }
 
 
 class CameraEventCreateView(APIView):
@@ -25,64 +89,90 @@ class CameraEventCreateView(APIView):
         line = validated["line"]
         process = validated["process"]
         product = validated["product"]
-        count = validated["count"]
-        business_date = validated["business_date"]
-
-        try:
-            with transaction.atomic():
-                event = CameraCountEvent.objects.create(
-                    camera_event_id=camera_event_id,
-                    line=line,
-                    process=process,
-                    product=product,
-                    count=count,
-                    event_at_client=validated["event_at"],
-                    business_date=business_date,
-                    device_id=validated.get("device_id", ""),
-                    confidence=validated.get("confidence"),
-                    status=CameraCountEvent.STATUS_ACCEPTED,
-                )
-                daily, _ = ProductionResultDaily.objects.select_for_update().get_or_create(
-                    business_date=business_date,
-                    line=line,
-                    process=process,
-                    product=product,
-                    defaults={"actual_count": 0},
-                )
-                daily.actual_count = F("actual_count") + count
-                daily.save(update_fields=["actual_count", "updated_at"])
-        except IntegrityError:
-            # 同一 camera_event_id の再送は成功扱いで非加算
-            event = CameraCountEvent.objects.filter(camera_event_id=camera_event_id).first()
-            if event and event.status != CameraCountEvent.STATUS_REPLAYED:
-                event.status = CameraCountEvent.STATUS_REPLAYED
-                event.save(update_fields=["status"])
-            total = ProductionResultDaily.objects.filter(
-                business_date=business_date,
-                line=line,
-                process=process,
-                product=product,
-            ).values_list("actual_count", flat=True).first() or 0
-            return Response(
-                {
-                    "accepted": True,
-                    "idempotent_replay": True,
-                    "total_count": int(total),
-                },
-                status=status.HTTP_200_OK,
-            )
-
-        refreshed = ProductionResultDaily.objects.get(
-            business_date=business_date,
+        data = apply_camera_event(
+            camera_event_id=camera_event_id,
             line=line,
             process=process,
             product=product,
+            count=validated["count"],
+            event_at=validated["event_at"],
+            device_id=validated.get("device_id", ""),
+            confidence=validated.get("confidence"),
+            shape_code=validated["product"].product_code,
+            shape_confidence=validated.get("confidence"),
         )
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class CameraAutoDetectView(APIView):
+    """フレームから自動検知し、通過時のみ実績を加算する。"""
+
+    def post(self, request):
+        serializer = CameraAutoDetectSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated = serializer.validated_data
+        now_dt = datetime.now()
+        captured_at = validated.get("frame_captured_at") or now_dt
+
+        try:
+            detect_result = auto_detect_runtime.process(
+                session_id=validated["session_id"],
+                frame_data_url=validated["frame_data_url"],
+                now_dt=now_dt,
+                config={
+                    "line_position_ratio": validated.get("line_position_ratio", 0.5),
+                    "side_margin_ratio": validated.get("side_margin_ratio", 0.03),
+                    "person_bottom_ratio": validated.get("person_bottom_ratio", 0.78),
+                    "min_y_ratio": validated.get("min_y_ratio", 0.45),
+                    "yolo_confidence": validated.get("yolo_confidence", 0.5),
+                    "dedup_seconds": validated.get("dedup_seconds", 1.2),
+                    "motion_threshold_ratio": validated.get("motion_threshold_ratio", 0.01),
+                },
+            )
+        except RuntimeError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except Exception as exc:
+            return Response({"detail": f"自動検知に失敗しました: {exc}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        total_count = None
+        business_date = resolve_business_date(captured_at)
+        detected_shape_code = validated["product"].product_code
+        detected_shape_confidence = 0.9 if detect_result.detected_count > 0 else None
+        shape_match = bool(detect_result.detected_count > 0)
+
+        for idx in range(detect_result.pass_count if shape_match else 0):
+            camera_event_id = f"auto-{validated['session_id']}-{int(now_dt.timestamp() * 1000)}-{idx}"
+            event_data = apply_camera_event(
+                camera_event_id=camera_event_id,
+                line=validated["line"],
+                process=validated["process"],
+                product=validated["product"],
+                count=1,
+                event_at=captured_at,
+                device_id=validated.get("device_id", ""),
+                confidence=0.9,
+                shape_code=detected_shape_code,
+                shape_confidence=detected_shape_confidence,
+            )
+            total_count = event_data["total_count"]
+            business_date = event_data["business_date"]
+
+        if total_count is None:
+            total_count = ProductionResultDaily.objects.filter(
+                business_date=business_date,
+                line=validated["line"],
+                process=validated["process"],
+                product=validated["product"],
+            ).values_list("actual_count", flat=True).first() or 0
+
         return Response(
             {
-                "accepted": True,
-                "idempotent_replay": False,
-                "total_count": int(refreshed.actual_count),
+                "detected_count": detect_result.detected_count,
+                "pass_count": detect_result.pass_count,
+                "shape_code": detected_shape_code,
+                "shape_confidence": detected_shape_confidence,
+                "shape_match": shape_match,
+                "total_count": int(total_count),
                 "business_date": str(business_date),
             },
             status=status.HTTP_200_OK,
@@ -103,6 +193,15 @@ class CameraResultDailyView(APIView):
                 {"detail": "line_id, process_id, product_id は必須です。"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        try:
+            line_id_int = int(line_id)
+            process_id_int = int(process_id)
+            product_id_int = int(product_id)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "line_id, process_id, product_id は整数で指定してください。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if business_date_str:
             try:
@@ -117,16 +216,16 @@ class CameraResultDailyView(APIView):
 
         row = ProductionResultDaily.objects.filter(
             business_date=business_date,
-            line_id=line_id,
-            process_id=process_id,
-            product_id=product_id,
+            line_id=line_id_int,
+            process_id=process_id_int,
+            product_id=product_id_int,
         ).first()
         return Response(
             {
                 "business_date": str(business_date),
-                "line_id": int(line_id),
-                "process_id": int(process_id),
-                "product_id": int(product_id),
+                "line_id": line_id_int,
+                "process_id": process_id_int,
+                "product_id": product_id_int,
                 "actual_count": int(row.actual_count) if row else 0,
             },
             status=status.HTTP_200_OK,
