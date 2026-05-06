@@ -43,6 +43,10 @@ dist/
 .DS_Store
 Thumbs.db
 
+# YOLO / Ultralytics
+*.pt
+.ultralytics/
+
 # Project specific
 pm_backend/__pycache__/
 pm_backend/masters/__pycache__/
