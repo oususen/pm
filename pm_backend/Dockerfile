@@ -20,7 +20,9 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 # ultralyticsがopencv-python(GUI)を引っ張るためheadlessに差し替え
-RUN pip uninstall -y opencv-python && pip install --no-cache-dir opencv-python-headless==4.12.0.88
+RUN pip uninstall -y opencv-python \
+    && pip install --no-cache-dir opencv-python-headless==4.12.0.88 \
+    && pip check
 
 # アプリケーションコードをコピー
 COPY . .
