@@ -31,7 +31,7 @@ erDiagram
       VARCHAR(30) product_code UNIQUE
       VARCHAR(100) product_name
       VARCHAR(100) product_name_halfwidth
-      ENUM category "ASSEMBLY,SINGLE,MATERIAL,PURCHASED"
+      ENUM category "ASSEMBLY,SINGLE,MATERIAL,PURCHASED,OUTSOURCED,UNKNOWN"
       VARCHAR(10) unit
       INT standard_lt_days
       INT self_lt_days

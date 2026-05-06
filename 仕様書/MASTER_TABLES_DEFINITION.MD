@@ -198,7 +198,7 @@
 | product_code | VARCHAR(30) UNIQUE | 品番コード |
 | product_name | VARCHAR(100) | 品名 |
 | product_name_halfwidth | VARCHAR(100) NULL | 品名半角 |
-| category | VARCHAR(20) NULL | 集合/単品/材料/購入品（実運用はENUM想定） |
+| category | VARCHAR(20) NULL | 集合/単品/材料/購入品/外作品/未定（実運用はENUM想定） |
 | unit | VARCHAR(10) | 単位 |
 | standard_lt_days | INT NULL | 完成品標準LT（日） |
 | image_url | VARCHAR(255) NULL | 画像URL |

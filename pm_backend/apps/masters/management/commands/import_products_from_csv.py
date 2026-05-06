@@ -64,6 +64,7 @@ class Command(BaseCommand):
             "単体部品": "SINGLE",
             "材料": "MATERIAL",
             "購入品": "PURCHASED",
+            "外作品": "OUTSOURCED",
         }
 
         created = 0

@@ -486,6 +486,7 @@ const categoryMap = {
   'SINGLE': '単品',
   'MATERIAL': '材料',
   'PURCHASED': '購入品',
+  'OUTSOURCED': '外作品',
   'UNKNOWN': '未定',
   '–¢’è': '未定', // 文字化けして保存された既存値も未定扱い
 }
@@ -495,6 +496,7 @@ const categoryOptions = [
   { value: 'SINGLE', label: '単品' },
   { value: 'MATERIAL', label: '材料' },
   { value: 'PURCHASED', label: '購入品' },
+  { value: 'OUTSOURCED', label: '外作品' },
   { value: 'UNKNOWN', label: '未定' },
 ]
 
