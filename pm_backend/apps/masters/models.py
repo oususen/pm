@@ -55,6 +55,21 @@ class Product(models.Model):
     size_width = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name='横(mm)')
     size_thickness = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True, verbose_name='厚さ(mm)')
 
+    TRANSFER_DESTINATION_CHOICES = [
+        ('INLINE', '社内ライン'),
+        ('INPAINT', '社内塗装'),
+        ('CWL', 'CWL'),
+        ('KOWA', '興和'),
+        ('DIRECT', '直納'),
+        ('OTHER', 'その他'),
+    ]
+    transfer_destination = models.CharField(
+        max_length=10,
+        choices=TRANSFER_DESTINATION_CHOICES,
+        null=True, blank=True,
+        verbose_name='移動先'
+    )
+
     # 出荷指示書用フィールド
     model_name = models.CharField(max_length=50, null=True, blank=True, verbose_name='機種名')
     product_group = models.ForeignKey('ProductGroup', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='製品グループ')

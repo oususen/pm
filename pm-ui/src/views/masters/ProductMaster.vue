@@ -131,6 +131,7 @@
               <th>グループ</th>
               <th>容器</th>
               <th>容器入り数</th>
+              <th>移動先</th>
               <th>最終品</th>
               <th>ライン最終品</th>
               <th>みなし組立</th>
@@ -152,6 +153,7 @@
               <td>{{ getProductGroupLabel(product.product_group) }}</td>
               <td>{{ getContainerLabel(product.used_container) }}</td>
               <td>{{ product.capacity ?? '-' }}</td>
+              <td>{{ getTransferDestLabel(product.transfer_destination) }}</td>
               <td>{{ product.is_final_product ? '最終' : '' }}</td>
               <td>{{ product.is_line_final_product ? 'はい' : '' }}</td>
               <td>{{ product.is_phantom ? 'はい' : 'いいえ' }}</td>
@@ -297,6 +299,15 @@
                 <div class="form-group">
                   <label>容器入り数</label>
                   <input v-model.number="formData.capacity" type="number" min="0" />
+                </div>
+                <div class="form-group">
+                  <label>移動先</label>
+                  <select v-model="formData.transfer_destination">
+                    <option :value="null">未設定</option>
+                    <option v-for="td in transferDestOptions" :key="td.value" :value="td.value">
+                      {{ td.label }}
+                    </option>
+                  </select>
                 </div>
                 <div class="form-group-section process-group-full">レーザ材料情報（重量 = 比重×縦×横×厚さ / 1,000,000 kg）</div>
                 <div class="form-group">
@@ -502,6 +513,18 @@ const categoryOptions = [
 
 const getCategoryLabel = (value) => categoryMap[value] || value
 
+const transferDestOptions = [
+  { value: 'INLINE', label: '社内ライン' },
+  { value: 'INPAINT', label: '社内塗装' },
+  { value: 'CWL', label: 'CWL' },
+  { value: 'KOWA', label: '興和' },
+  { value: 'DIRECT', label: '直納' },
+  { value: 'OTHER', label: 'その他' },
+]
+
+const transferDestMap = Object.fromEntries(transferDestOptions.map(o => [o.value, o.label]))
+const getTransferDestLabel = (value) => transferDestMap[value] || value || '-'
+
 const createEmptyFormData = () => ({
   product_code: '',
   product_name: '',
@@ -518,6 +541,7 @@ const createEmptyFormData = () => ({
   product_group: null,
   used_container: null,
   capacity: null,
+  transfer_destination: null,
   line: null,
   process: null,
   next_process: null,
@@ -551,6 +575,7 @@ const mapProductToFormData = (product, options = {}) => {
     product_group: source.product_group ?? null,
     used_container: source.used_container ?? null,
     capacity: source.capacity ?? null,
+    transfer_destination: source.transfer_destination ?? null,
     image_url: asCopy ? '' : (source.image_url || ''),
   }
 }
@@ -909,6 +934,7 @@ const saveProduct = async () => {
       model_name: formData.value.model_name || null,
       product_group: formData.value.product_group || null,
       used_container: formData.value.used_container || null,
+      transfer_destination: formData.value.transfer_destination || null,
       standard_lt_days: normalizeNumber(formData.value.standard_lt_days),
       order_lot_min: normalizeNumber(formData.value.order_lot_min),
       order_lot_multiple: Math.max(1, Number(formData.value.order_lot_multiple || 1)),
