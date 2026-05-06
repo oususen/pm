@@ -47,6 +47,7 @@ from production.views_camera_actual import (
     CameraResultDailyView,
     CameraShapeTrainingStartView,
     CameraShapeTrainingStatusView,
+    CameraShapeTrainingPhotoUploadView,
     CameraShapeTrainingUploadView,
 )
 
@@ -115,6 +116,7 @@ urlpatterns = [
     path('camera-results-daily/', CameraResultDailyView.as_view(), name='camera-results-daily'),
     path('camera-auto-detect/', CameraAutoDetectView.as_view(), name='camera-auto-detect'),
     path('camera-shape-training/upload-dataset/', CameraShapeTrainingUploadView.as_view(), name='camera-shape-training-upload'),
+    path('camera-shape-training/upload-photos/', CameraShapeTrainingPhotoUploadView.as_view(), name='camera-shape-training-upload-photos'),
     path('camera-shape-training/start/', CameraShapeTrainingStartView.as_view(), name='camera-shape-training-start'),
     path('camera-shape-training/status/', CameraShapeTrainingStatusView.as_view(), name='camera-shape-training-status'),
 ]

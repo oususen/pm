@@ -250,6 +250,21 @@ class CameraShapeTrainingUploadView(APIView):
         return Response({"uploaded": True, "dataset_dir": dataset_dir}, status=status.HTTP_200_OK)
 
 
+class CameraShapeTrainingPhotoUploadView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        label_name = request.data.get("label_name", "")
+        files = request.FILES.getlist("photos")
+        if not files:
+            return Response({"detail": "photos は必須です。"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            count = camera_shape_training_manager.append_raw_images(files, label_name=label_name)
+        except Exception as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"uploaded": True, "count": count}, status=status.HTTP_200_OK)
+
+
 class CameraShapeTrainingStartView(APIView):
     def post(self, request):
         epochs = int(request.data.get("epochs", 30))

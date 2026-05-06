@@ -65,6 +65,13 @@
         <button type="button" @click="uploadDataset" :disabled="!datasetZipFile || trainingState === 'running'">データセットZIPアップロード</button>
       </div>
       <div class="train-row">
+        <input type="file" accept="image/*" multiple @change="onPhotoFilesChange" />
+        <label>写真ラベル
+          <input type="text" v-model="photoLabelName" placeholder="製品コード" />
+        </label>
+        <button type="button" @click="uploadPhotos" :disabled="!photoFiles.length || trainingState === 'running'">写真をそのまま取込</button>
+      </div>
+      <div class="train-row">
         <label>epoch <input type="number" v-model.number="trainingEpochs" min="1" max="300" /></label>
         <label>imgsz <input type="number" v-model.number="trainingImgsz" min="160" max="1920" step="32" /></label>
         <button type="button" class="primary" @click="startShapeTraining" :disabled="trainingState === 'running'">学習開始</button>
@@ -145,6 +152,8 @@ let trainingStatusTimer = null
 const autoSessionId = ref("")
 const autoDetectConsecutiveErrors = ref(0)
 const datasetZipFile = ref(null)
+const photoFiles = ref([])
+const photoLabelName = ref("")
 const trainingEpochs = ref(30)
 const trainingImgsz = ref(640)
 const trainingState = ref("idle")
@@ -241,6 +250,9 @@ const onDatasetFileChange = (event) => {
   const file = event?.target?.files?.[0]
   datasetZipFile.value = file || null
 }
+const onPhotoFilesChange = (event) => {
+  photoFiles.value = Array.from(event?.target?.files || [])
+}
 
 const fetchTrainingStatus = async () => {
   try {
@@ -265,6 +277,26 @@ const uploadDataset = async () => {
     await fetchTrainingStatus()
   } catch (error) {
     trainingMessage.value = extractApiErrorMessage(error, "データセットアップロードに失敗しました。")
+  }
+}
+
+const uploadPhotos = async () => {
+  if (!photoFiles.value.length) return
+  const label = String(photoLabelName.value || "").trim()
+  if (!label) {
+    trainingMessage.value = "写真ラベル（製品コード）を入力してください。"
+    return
+  }
+  const formData = new FormData()
+  formData.append("label_name", label)
+  photoFiles.value.forEach((f) => formData.append("photos", f))
+  try {
+    const res = await api.cameraActuals.uploadShapePhotos(formData)
+    trainingMessage.value = `写真を ${res.data.count || 0} 枚取り込みました。`
+    photoFiles.value = []
+    await fetchTrainingStatus()
+  } catch (error) {
+    trainingMessage.value = extractApiErrorMessage(error, "写真取込に失敗しました。")
   }
 }
 
@@ -491,6 +523,8 @@ onMounted(async () => {
   }, 3000)
   try {
     await fetchMasters()
+    const firstProduct = (products.value || [])[0]
+    if (firstProduct?.product_code) photoLabelName.value = firstProduct.product_code
     await fetchTrainingStatus()
   } catch (error) {
     errorMessage.value = "初期データの取得に失敗しました。"
@@ -498,6 +532,10 @@ onMounted(async () => {
   if (queue.value.length) {
     flushQueue().catch(() => {})
   }
+})
+watch(selectedProductId, (nextId) => {
+  const p = products.value.find((x) => String(x.id) === String(nextId))
+  if (p?.product_code) photoLabelName.value = p.product_code
 })
 
 onBeforeUnmount(() => {

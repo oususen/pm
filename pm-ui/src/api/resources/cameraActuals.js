@@ -13,6 +13,11 @@ export const createCameraActualsAPI = (client) => ({
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+  uploadShapePhotos(formData) {
+    return client.post('/camera-shape-training/upload-photos/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
   startShapeTraining(data) {
     return client.post('/camera-shape-training/start/', data)
   },
