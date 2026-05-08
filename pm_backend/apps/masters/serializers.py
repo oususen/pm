@@ -206,8 +206,8 @@ class RoutingStepSerializer(serializers.ModelSerializer):
     line_name = serializers.CharField(source='line.line_name', read_only=True)
     output_product_code = serializers.CharField(source='output_product.product_code', read_only=True)
     output_product_name = serializers.CharField(source='output_product.product_name', read_only=True)
-    supplier_code = serializers.CharField(source='supplier.supplier_code', read_only=True)
-    supplier_name = serializers.CharField(source='supplier.supplier_name', read_only=True)
+    supplier_code = serializers.SerializerMethodField()
+    supplier_name = serializers.SerializerMethodField()
     source_bom_item_is_coproduct_driver = serializers.BooleanField(
         source='source_bom_item.is_coproduct_driver',
         read_only=True,
@@ -236,6 +236,22 @@ class RoutingStepSerializer(serializers.ModelSerializer):
         if out_code:
             parts.append(f"-> {out_code}")
         return " / ".join(parts)
+
+    def _resolve_display_supplier(self, obj: RoutingStep):
+        if getattr(obj, 'supplier_id', None):
+            return getattr(obj, 'supplier', None)
+        src = getattr(obj, 'source_bom_item', None)
+        if src and getattr(src, 'supplier_id', None):
+            return getattr(src, 'supplier', None)
+        return None
+
+    def get_supplier_code(self, obj: RoutingStep):
+        supplier = self._resolve_display_supplier(obj)
+        return getattr(supplier, 'supplier_code', None) if supplier else None
+
+    def get_supplier_name(self, obj: RoutingStep):
+        supplier = self._resolve_display_supplier(obj)
+        return getattr(supplier, 'supplier_name', None) if supplier else None
 
     def get_representative_part(self, obj: RoutingStep) -> bool:
         if getattr(obj, 'source_bom_item_id', None):
