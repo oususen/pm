@@ -313,8 +313,8 @@
               </select>
             </div>
             <div class="form-group">
-              <label>仕入先{{ itemForm.sourcing_type === 'BUY' ? ' *' : '' }}</label>
-              <select v-model="itemForm.supplier" :disabled="itemForm.sourcing_type === 'MAKE'" :required="itemForm.sourcing_type === 'BUY'">
+              <label>仕入先{{ itemForm.sourcing_type === 'BUY' || itemForm.sourcing_type === 'SUBCON' ? ' *' : '' }}</label>
+              <select v-model="itemForm.supplier" :disabled="itemForm.sourcing_type === 'MAKE'" :required="itemForm.sourcing_type === 'BUY' || itemForm.sourcing_type === 'SUBCON'">
                 <option value="">選択しない</option>
                 <option v-for="supplier in suppliers" :key="supplier.id" :value="supplier.id">
                   {{ supplier.supplier_name }}
@@ -322,8 +322,8 @@
               </select>
             </div>
             <div class="form-group">
-              <label>工程{{ itemForm.sourcing_type === 'MAKE' || itemForm.sourcing_type === 'SUBCON' ? ' *' : '' }}</label>
-              <select v-model="itemForm.process" :required="itemForm.sourcing_type === 'MAKE' || itemForm.sourcing_type === 'SUBCON'" :disabled="itemForm.sourcing_type === 'BUY'">
+              <label>工程{{ itemForm.sourcing_type === 'MAKE' ? ' *' : '' }}</label>
+              <select v-model="itemForm.process" :required="itemForm.sourcing_type === 'MAKE'" :disabled="itemForm.sourcing_type === 'BUY' || itemForm.sourcing_type === 'SUBCON'">
                 <option value="">選択してください</option>
                 <option v-for="proc in processes" :key="proc.id" :value="proc.id">
                   {{ proc.process_code }} - {{ proc.process_name }}
@@ -334,7 +334,7 @@
               <label>ライン{{ itemForm.sourcing_type === 'MAKE' ? ' *' : '' }}</label>
               <select
                 v-model="itemForm.line"
-                :disabled="itemForm.sourcing_type === 'BUY'"
+                :disabled="itemForm.sourcing_type === 'BUY' || itemForm.sourcing_type === 'SUBCON'"
                 :required="itemForm.sourcing_type === 'MAKE'"
               >
                 <option value="">選択しない</option>
@@ -356,12 +356,12 @@
               </select>
             </div>
             <div class="form-group">
-              <label>リードタイム(日){{ itemForm.sourcing_type === 'BUY' ? ' *' : '' }}</label>
+              <label>リードタイム(日){{ itemForm.sourcing_type === 'BUY' || itemForm.sourcing_type === 'SUBCON' ? ' *' : '' }}</label>
               <input
                 type="number"
                 min="0"
                 v-model.number="itemForm.lead_time_days"
-                :required="itemForm.sourcing_type === 'BUY'"
+                :required="itemForm.sourcing_type === 'BUY' || itemForm.sourcing_type === 'SUBCON'"
                 class="tall-number-input narrow-field"
               />
             </div>

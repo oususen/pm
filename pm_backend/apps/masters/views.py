@@ -953,6 +953,31 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         )
         return line_obj, process_obj
 
+    def _get_supplier_gaisaku_line_and_process(self, supplier):
+        """
+        外作品（SUBCON）用: 仕入先の仕入ラインと外作工程(G)を取得する。
+        購買と同様に仕入先コードのラインを使い、工程は外作工程(process_code='G')。
+        """
+        line_code = supplier.supplier_code
+        line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
+        if len(line_name) > 50:
+            line_name = line_name[:50]
+        line_obj, _ = Line.objects.get_or_create(
+            line_code=line_code,
+            defaults={
+                'line_name': line_name,
+                'line_type': 'PURCHASE',
+                'is_active': True,
+            }
+        )
+
+        try:
+            process_obj = Process.objects.get(process_code='G')
+        except Process.DoesNotExist:
+            raise ValueError('外作工程（process_code="G"）がマスタに存在しません。')
+
+        return line_obj, process_obj
+
     def _resolve_generated_routing_valid_from(self, raw_value):
         if isinstance(raw_value, datetime):
             return raw_value
@@ -1032,8 +1057,12 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 # BUY品はDAY単位でリードタイムを使用（time_unitが未設定ならDAYとみなす）
                 if it.time_unit not in ['MINUTE', 'DAY', None, '']:
                     return Response({'detail': f'Invalid time_unit on BOM item {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
+            elif it.sourcing_type == 'SUBCON' and it.supplier_id:
+                # SUBCON + 仕入先あり: 工程・ラインは自動設定（購買と同様）
+                if it.lead_time_days is None or it.lead_time_days < 0:
+                    return Response({'detail': f'リードタイム(日)を0以上で入力してください: {it.child_product.product_code}'}, status=status.HTTP_400_BAD_REQUEST)
             else:
-                # MAKE/SUBCONは工程が必須
+                # MAKE/SUBCON(仕入先なし)は工程が必須
                 if not it.process_id:
                     return Response({'detail': f'Process is required on BOM item {it.child_product.product_code} ({it.sourcing_type})'}, status=status.HTTP_400_BAD_REQUEST)
                 if it.time_unit not in ['MINUTE', 'DAY']:
@@ -1091,11 +1120,20 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             parallel_group = idx  # 通し番号で一意性を保証
             parent_product_code = parent_product.product_code if parent_product else ''
 
-            # BUY品の場合は仕入先ラインとPURCHASE工程を使用
+            # BUY品・SUBCON品(仕入先あり)は仕入先ラインを自動設定
             if item.sourcing_type == 'BUY' and item.supplier_id:
                 purchase_line, purchase_process = self._get_or_create_purchase_line_and_process(item.supplier)
                 step_process = purchase_process
                 step_line = purchase_line
+                step_time_unit = 'DAY'
+                step_lead_time_days = item.lead_time_days or 1
+                step_duration_min = None
+                step_remark = parent_product_code
+            elif item.sourcing_type == 'SUBCON' and item.supplier_id:
+                # 外作品: 購買と同様に仕入先ラインを使い、工程は外作工程(G)
+                gaisaku_line, gaisaku_process = self._get_supplier_gaisaku_line_and_process(item.supplier)
+                step_process = gaisaku_process
+                step_line = gaisaku_line
                 step_time_unit = 'DAY'
                 step_lead_time_days = item.lead_time_days or 1
                 step_duration_min = None

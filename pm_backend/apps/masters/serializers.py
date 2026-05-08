@@ -142,14 +142,21 @@ class BOMItemSerializer(serializers.ModelSerializer):
                 'child_product': '親製品と同じ製品は登録できません（自己参照BOM）。'
             })
 
-        if sourcing_type in ['MAKE', 'SUBCON'] and process is None:
-            raise serializers.ValidationError('自社製造/外注の場合、工程は必須です。')
+        supplier = attrs.get('supplier', getattr(self.instance, 'supplier', None))
 
-        # 工程時間の必須チェックは自社製造/外注のみ
-        if sourcing_type in ['MAKE', 'SUBCON']:
+        if sourcing_type == 'SUBCON':
+            # 外注は仕入先必須（工程・ラインはルーティング生成時に自動設定）
+            if supplier is None:
+                raise serializers.ValidationError('外注の場合、仕入先は必須です。')
+            lead_time_days = attrs.get('lead_time_days', getattr(self.instance, 'lead_time_days', 0))
+            if lead_time_days is None or lead_time_days < 0:
+                raise serializers.ValidationError('外注の場合、リードタイム(日)は0以上で入力してください。')
+        elif sourcing_type == 'MAKE':
+            if process is None:
+                raise serializers.ValidationError('自社製造の場合、工程は必須です。')
+            # 工程時間の必須チェック
             if time_unit not in ['MINUTE', 'DAY']:
                 raise serializers.ValidationError('時間単位は MINUTE か DAY を指定してください。')
-
             if time_unit == 'MINUTE':
                 duration_min = attrs.get('duration_min', getattr(self.instance, 'duration_min', None))
                 if duration_min is None or duration_min <= 0:
