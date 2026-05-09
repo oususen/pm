@@ -632,7 +632,7 @@
                 <td>{{ whereUsedSelfRow.is_final_product ? '最終品' : '' }}</td>
               </tr>
               <template v-for="item in whereUsedResults" :key="item.parent_product_id">
-                <tr>
+                <tr :style="getItemFinalColor(item) ? { background: getItemFinalColor(item) } : {}">
                   <td>{{ item.parent_product_code }} - {{ item.parent_product_name }}</td>
                   <td>{{ getCategoryLabel(item.category) }}</td>
                   <td>{{ item.quantity }}</td>
@@ -640,11 +640,13 @@
                   <td>{{ formatWhereUsedDestination(item) }}</td>
                   <td>{{ formatWhereUsedProcess(item) }}</td>
                   <td>{{ formatWhereUsedSelfLt(item) }}</td>
-                  <td>{{ item.is_final_product ? '最終品' : '' }}</td>
+                  <td>
+                    <span v-if="item.is_final_product" class="final-badge" :style="{ background: getFinalProductColor(item.parent_product_code) }">最終品</span>
+                  </td>
                 </tr>
                 <!-- 再帰結果の子要素（インデント表示） -->
                 <template v-if="whereUsedRecursive && item.parents && item.parents.length > 0">
-                  <tr v-for="(child, idx) in flattenParents(item.parents, 1)" :key="`${item.parent_product_id}-${idx}`" class="nested-row">
+                  <tr v-for="(child, idx) in flattenParents(item.parents, 1)" :key="`${item.parent_product_id}-${idx}`" class="nested-row" :style="child.final_product_code ? { background: getFinalProductColor(child.final_product_code) } : {}">
                     <td :style="{ paddingLeft: (child.level * 20 + 8) + 'px' }">
                       └ {{ child.parent_product_code }} - {{ child.parent_product_name }}
                     </td>
@@ -654,7 +656,9 @@
                     <td>{{ formatWhereUsedDestination(child) }}</td>
                     <td>{{ formatWhereUsedProcess(child) }}</td>
                     <td>{{ formatWhereUsedSelfLt(child) }}</td>
-                    <td>{{ child.is_final_product ? '最終品' : '' }}</td>
+                    <td>
+                      <span v-if="child.is_final_product" class="final-badge" :style="{ background: getFinalProductColor(child.parent_product_code) }">最終品</span>
+                    </td>
                   </tr>
                 </template>
               </template>
@@ -667,6 +671,7 @@
         </div>
 
         <div class="form-actions">
+          <button type="button" @click="exportWhereUsedCsv" class="btn-info" :disabled="!whereUsedResults.length">Excel出力</button>
           <button type="button" @click="closeWhereUsedDialog" class="btn-secondary">閉じる</button>
         </div>
       </div>
@@ -1740,15 +1745,114 @@ const fetchWhereUsed = async () => {
   }
 }
 
+const findFinalProductCodes = (node) => {
+  const codes = []
+  if (node.is_final_product) codes.push(node.parent_product_code)
+  if (node.parents && node.parents.length > 0) {
+    for (const p of node.parents) {
+      codes.push(...findFinalProductCodes(p))
+    }
+  }
+  return [...new Set(codes)]
+}
+
+const FINAL_PRODUCT_COLORS = [
+  '#e3f2fd', '#fce4ec', '#e8f5e9', '#fff3e0', '#f3e5f5',
+  '#e0f7fa', '#fff9c4', '#fbe9e7', '#e8eaf6', '#f1f8e9',
+]
+
+const allFinalProductCodes = computed(() => {
+  const codes = new Set()
+  for (const item of whereUsedResults.value) {
+    findFinalProductCodes(item).forEach(c => codes.add(c))
+  }
+  return Array.from(codes)
+})
+
+const getFinalProductColor = (code) => {
+  if (!code) return ''
+  const idx = allFinalProductCodes.value.indexOf(code)
+  if (idx < 0) return ''
+  return FINAL_PRODUCT_COLORS[idx % FINAL_PRODUCT_COLORS.length]
+}
+
+const getItemFinalColor = (item) => {
+  const codes = findFinalProductCodes(item)
+  return getFinalProductColor(codes[0] || null)
+}
+
 const flattenParents = (parents, level) => {
   const result = []
   for (const p of parents) {
-    result.push({ ...p, level })
+    const finalCode = p.is_final_product
+      ? p.parent_product_code
+      : (findFinalProductCodes(p)[0] || null)
+    result.push({ ...p, level, final_product_code: finalCode })
     if (p.parents && p.parents.length > 0) {
       result.push(...flattenParents(p.parents, level + 1))
     }
   }
   return result
+}
+
+const escCsv = (val) => {
+  if (val === null || val === undefined) return ''
+  const str = String(val)
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return '"' + str.replace(/"/g, '""') + '"'
+  }
+  return str
+}
+
+const exportWhereUsedCsv = () => {
+  if (!whereUsedResults.value.length) return
+  const selectedProduct = findProductById(whereUsedProductId.value)
+  const searchCode = selectedProduct?.product_code || ''
+  const searchName = selectedProduct?.product_name || ''
+
+  const bom = '﻿'
+  const lines = []
+  lines.push(['逆展開（Where Used）'].map(escCsv).join(','))
+  lines.push(['検索品', `${searchCode} - ${searchName}`].map(escCsv).join(','))
+  lines.push('')
+
+  const header = ['親製品', 'カテゴリ', '数量', '調達区分', '加工先', '加工工程', '自LT', '最終品']
+  lines.push(header.map(escCsv).join(','))
+
+  const pushRow = (item, prefix) => {
+    lines.push([
+      escCsv(`${prefix}${item.parent_product_code} - ${item.parent_product_name}`),
+      escCsv(getCategoryLabel(item.category)),
+      escCsv(item.quantity),
+      escCsv(getSourcingTypeLabel(item.sourcing_type)),
+      escCsv(formatWhereUsedDestination(item)),
+      escCsv(formatWhereUsedProcess(item)),
+      escCsv(formatWhereUsedSelfLt(item)),
+      escCsv(item.is_final_product ? '最終品' : ''),
+    ].join(','))
+  }
+
+  if (whereUsedSelfRow.value) {
+    pushRow(whereUsedSelfRow.value, '★ ')
+  }
+  for (const item of whereUsedResults.value) {
+    pushRow(item, '')
+    if (whereUsedRecursive.value && item.parents && item.parents.length > 0) {
+      for (const child of flattenParents(item.parents, 1)) {
+        const indent = '　'.repeat(child.level - 1) + '└ '
+        pushRow(child, indent)
+      }
+    }
+  }
+
+  const csvContent = bom + lines.join('\r\n')
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `逆展開_${searchCode}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 const downloadBOMExcel = async (bom) => {
@@ -2380,6 +2484,15 @@ const TreeBranch = defineComponent({
 
 .nested-row td:first-child {
   color: #666;
+}
+.final-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1a1a1a;
+  border: 1px solid rgba(0, 0, 0, 0.15);
 }
 
 .loading-text {
