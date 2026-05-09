@@ -299,14 +299,16 @@ const buildSeriesByDate = (perBacklog, perDemand, cols) => {
   const forecast = {};
   const firm = {};
   const planned = {};
+  const adjust = {};
   const progress = {};
   cols.forEach((d) => {
     forecast[d] = Number(perDemand[d]?.forecast || 0);
     firm[d] = Number(perDemand[d]?.firm || 0);
     planned[d] = Number(perBacklog[d]?.pp || 0);
+    adjust[d] = Number(perBacklog[d]?.adj || 0);
     progress[d] = Number(perBacklog[d]?.p || 0);
   });
-  return { forecast, firm, planned_progress: planned, progress };
+  return { forecast, firm, planned_progress: planned, adjust, progress };
 };
 
 const buildShippingSummarySeriesByOrderLines = (rows, cols) => {
@@ -436,9 +438,10 @@ const load = async () => {
     const shipmentActuals = normalizeList(shipmentActualsRes.data || []);
 
     const backlogMap = buildByProductDateMap(backlogs, {
-      init: () => ({ pp: 0, p: 0 }),
+      init: () => ({ pp: 0, adj: 0, p: 0 }),
       add: (cell, row) => {
-        cell.pp += Number(row.planned_progress_qty || 0);
+        cell.pp += Number(row.actual_qty || 0);
+        cell.adj += Number(row.adjust_qty || 0);
         cell.p += Number(row.progress_qty || 0);
       },
     });

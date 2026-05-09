@@ -28,7 +28,24 @@ FLOOR_PRODUCT_MAPPING = [
     {"product_code": "YD40007688", "number": "F", "label": "55US-6 KTEG",  "color": "#9370DB"},
 ]
 
-FLOOR_PRODUCT_CODES = [p["product_code"] for p in FLOOR_PRODUCT_MAPPING]
+# 新旧品番対応（新番号は旧番号へ正規化して同じ色・記号を使う）
+FLOOR_PRODUCT_ALIAS_MAP = {
+    "YD40008720": "YD40006245",
+    "YD40008750": "YD40006630",
+    "YD40008670": "YD40006237",
+    "YD40008650": "YD40006618",
+    "YD40008730": "YD40006842",
+    "YD40008760": "YD40007003",
+    "YD40008780": "YD40007243",
+    "YD40008790": "YD40007372",
+    "YD40008800": "YD40007722",
+    "YD40008770": "YD40007688",
+}
+
+FLOOR_PRODUCT_CODES = list({
+    *[p["product_code"] for p in FLOOR_PRODUCT_MAPPING],
+    *FLOOR_PRODUCT_ALIAS_MAP.keys(),
+})
 
 # 台車・便の設定
 ITEMS_PER_CART = 2      # 台車1台に積める個数
@@ -73,7 +90,12 @@ def _get_floor_qty_map(tiera, target_date):
         .values("product_code")
         .annotate(total_qty=Sum("quantity"))
     )
-    return {row["product_code"]: int(row["total_qty"] or 0) for row in qs}
+    qty_map = {}
+    for row in qs:
+        raw_code = row["product_code"]
+        canonical_code = FLOOR_PRODUCT_ALIAS_MAP.get(raw_code, raw_code)
+        qty_map[canonical_code] = qty_map.get(canonical_code, 0) + int(row["total_qty"] or 0)
+    return qty_map
 
 
 def _build_cart_layout(products_with_qty):
