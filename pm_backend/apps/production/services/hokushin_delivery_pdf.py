@@ -21,6 +21,7 @@ from orders.utils.calendar_utils import get_business_today
 
 from production.services.floor_shipping_pdf import (
     PRODUCT_ORDER,
+    PRODUCT_ORDER_LAP,
     _collect_floor_shipping_data,
     _get_calendar_id,
     _build_working_day_cache,
@@ -67,24 +68,27 @@ def _collect_items_for_delivery(
     target_date: date,
     product_names: Dict[str, str],
     include_all: bool = False,
+    product_order=None,
 ) -> List[Tuple[str, str, str, int, colors.Color]]:
     """納品書明細項目を取得
 
     Args:
         include_all: True なら数量0の製品も含める（納品書２用）
+        product_order: 製品順序リスト（省略時PRODUCT_ORDER）
 
     Returns:
         [(label, product_code, short_name, qty, label_color), ...]
     """
+    if product_order is None:
+        product_order = PRODUCT_ORDER
     items = []
     day_map = data_dict.get(target_date, {})
-    for code, label, label_color in PRODUCT_ORDER:
+    for code, label, label_color in product_order:
         qty = day_map.get(code, 0)
         if not include_all and qty <= 0:
             continue
         name = product_names.get(code, '')
         short_name = _extract_short_name(name)
-        # 末尾T除去（表示用）
         display_code = code[:-1] if code.endswith('T') else code
         items.append((label, display_code, short_name, qty, label_color))
     return items
@@ -234,6 +238,7 @@ def _resolve_hokushin_context(
     am_delivery_date: date = None,
     yoi_delivery_date: date = None,
     include_all: bool = False,
+    use_lap: bool = True,
 ):
     """北進塗装納品書用のコンテキストを構築
 
@@ -242,6 +247,9 @@ def _resolve_hokushin_context(
                 am_dispatch_date, yoi_dispatch_date,
                 am_items, yoi_items }
     """
+    product_order = PRODUCT_ORDER_LAP if use_lap else PRODUCT_ORDER
+    use_alias = not use_lap
+
     line = Line.objects.filter(id=line_id).first()
     if not line:
         raise ValueError('ライン未検出')
@@ -276,14 +284,12 @@ def _resolve_hokushin_context(
     fetch_end = max(all_dates) + timedelta(days=5)
 
     am_data, pm_data, product_names = _collect_floor_shipping_data(
-        line_id, fetch_start, fetch_end, calendar_id, cache
+        line_id, fetch_start, fetch_end, calendar_id, cache,
+        product_order=product_order, use_alias=use_alias,
     )
 
-    # AM便 明細: pm_data[am_delivery_date]（15時着 LT=0 → display_date = plan_date）
-    am_items = _collect_items_for_delivery(pm_data, am_delivery_date, product_names, include_all=include_all)
-
-    # 宵積み 明細: am_data[yoi_dispatch_date]（8時着 LT=1 → display_date = plan_date - 1営業日）
-    yoi_items = _collect_items_for_delivery(am_data, yoi_dispatch_date, product_names, include_all=include_all)
+    am_items = _collect_items_for_delivery(pm_data, am_delivery_date, product_names, include_all=include_all, product_order=product_order)
+    yoi_items = _collect_items_for_delivery(am_data, yoi_dispatch_date, product_names, include_all=include_all, product_order=product_order)
 
     return {
         'line': line,
@@ -430,3 +436,5 @@ def generate_hokushin_delivery_all_pdf(
 
     c.save()
     return buf.getvalue()
+
+

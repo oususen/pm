@@ -191,6 +191,13 @@
           :disabled="processing || !selectedLine"
         >配送明細</button>
         <button
+          v-if="canShowFloorDeliveryDetailPDFButton"
+          class="btn"
+          style="background: #C07000; color: #fff;"
+          @click="downloadFloorShippingLapPDF"
+          :disabled="processing || !selectedLine"
+        >配送明細(ラップ)</button>
+        <button
           v-if="canShowDeliveryDetailPDFButton"
           class="btn"
           style="background: #1f4e78; color: #fff;"
@@ -3005,6 +3012,30 @@ const downloadFloorShippingPDF = async () => {
     window.open(url, '_blank')
   } catch (e) {
     console.error('配送明細PDF生成エラー', e)
+    alert('PDF生成に失敗しました: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
+const downloadFloorShippingLapPDF = async () => {
+  const sourceLineId = floorShippingPdfSourceLineId.value
+  if (!sourceLineId) {
+    alert('フロア配送ラインが見つかりません。')
+    return
+  }
+  try {
+    const res = await api.client.get('/floor-shipping-lap-pdf/', {
+      params: {
+        line: sourceLineId,
+        start_date: startDate.value,
+        end_date: endDate.value,
+      },
+      responseType: 'blob',
+    })
+    const blob = new Blob([res.data], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank')
+  } catch (e) {
+    console.error('配送明細ラップPDF生成エラー', e)
     alert('PDF生成に失敗しました: ' + (e.response?.data?.detail || e.message))
   }
 }
