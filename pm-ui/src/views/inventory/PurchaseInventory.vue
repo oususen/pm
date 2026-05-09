@@ -1108,6 +1108,10 @@ onUpdated(() => {
 }
 .group-scroll {
   overflow-x: auto;
+  scrollbar-width: none;
+}
+.group-scroll::-webkit-scrollbar {
+  display: none;
 }
 .floating-x-scroll {
   position: sticky;

@@ -98,7 +98,7 @@
               </div>
 
               <div class="matrix-block">
-                <table class="matrix-table">
+                <table class="matrix-table" :style="{ minWidth: matrixMinWidth + 'px' }">
                   <thead>
                     <tr>
                       <th class="label-col">項目</th>
@@ -363,6 +363,8 @@ const columns = computed(() => {
   }
   return cols;
 });
+
+const matrixMinWidth = computed(() => 80 + columns.value.length * 60);
 
 const endDate = computed(() => {
   if (!columns.value.length) return startDate.value;
@@ -1163,6 +1165,8 @@ loadFavorites();
 }
 
 .pagination-area {
+  position: sticky;
+  left: 0;
   margin-top: 12px;
   display: flex;
   flex-direction: column;
@@ -1227,14 +1231,17 @@ loadFavorites();
   grid-template-columns: 240px 1fr;
   border: 1px solid #d1d5db;
   border-radius: 8px;
-  overflow: hidden;
   background: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 .info-block {
+  position: sticky;
+  left: 0;
+  z-index: 3;
   padding: 12px;
   border-right: 1px solid #e5e7eb;
   background: #f9fafb;
+  border-radius: 8px 0 0 8px;
 }
 .info-row {
   display: flex;
@@ -1331,12 +1338,11 @@ loadFavorites();
   font-weight: 700;
 }
 .matrix-block {
-  overflow: auto;
+  overflow: visible;
 }
 .matrix-table {
   border-collapse: collapse;
   width: 100%;
-  min-width: 800px;
 }
 .matrix-table th,
 .matrix-table td {
