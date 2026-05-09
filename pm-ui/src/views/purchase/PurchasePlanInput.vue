@@ -2,6 +2,25 @@
   <div class="plan-container">
     <h2 class="page-title">仕入れ計画</h2>
 
+    <div class="basis-tab-bar">
+      <button
+        type="button"
+        class="basis-tab-item"
+        :class="{ active: basisMode === 'inventory' }"
+        @click="basisMode = 'inventory'"
+      >
+        在庫基準
+      </button>
+      <button
+        type="button"
+        class="basis-tab-item"
+        :class="{ active: basisMode === 'progress' }"
+        @click="basisMode = 'progress'"
+      >
+        進度基準
+      </button>
+    </div>
+
     <div class="toolbar">
       <div class="toolbar-left">
         <div class="field">
@@ -56,7 +75,7 @@
             <th
               v-for="(c, colIdx) in dateColumns"
               :key="c.key"
-              colspan="7"
+              :colspan="isProgressMode ? 6 : 7"
               class="date-head day-end"
               :class="c.dayClass"
             >
@@ -65,13 +84,23 @@
           </tr>
           <tr class="head-level2">
             <template v-for="(c, colIdx) in dateColumns" :key="c.key">
-              <th class="mini" :class="c.dayClass">需要</th>
-              <th class="mini" :class="c.dayClass">実績</th>
-              <th class="mini" :class="c.dayClass">在庫</th>
-              <th class="mini" :class="c.dayClass">計画</th>
-              <th class="mini" :class="c.dayClass">計庫</th>
-              <th class="mini" :class="c.dayClass">進度</th>
-              <th class="mini day-end" :class="c.dayClass">計進</th>
+              <template v-if="isProgressMode">
+                <th class="mini" :class="c.dayClass">内示</th>
+                <th class="mini" :class="c.dayClass">確定</th>
+                <th class="mini" :class="c.dayClass">実績</th>
+                <th class="mini" :class="c.dayClass">計画</th>
+                <th class="mini" :class="c.dayClass">計進</th>
+                <th class="mini day-end" :class="c.dayClass">進度</th>
+              </template>
+              <template v-else>
+                <th class="mini" :class="c.dayClass">需要</th>
+                <th class="mini" :class="c.dayClass">実績</th>
+                <th class="mini" :class="c.dayClass">在庫</th>
+                <th class="mini" :class="c.dayClass">計画</th>
+                <th class="mini" :class="c.dayClass">計庫</th>
+                <th class="mini" :class="c.dayClass">進度</th>
+                <th class="mini day-end" :class="c.dayClass">計進</th>
+              </template>
             </template>
           </tr>
         </thead>
@@ -87,41 +116,73 @@
               <span class="product-info">{{ row.product_name || getProductName(row.product_id) }}</span>
             </td>
             <template v-for="(c, colIdx) in dateColumns" :key="c.key">
-              <td class="num" :class="c.dayClass">
-                <span class="readonly-value" :class="{ negative: isNegativeValue(row.daily?.[c.key]?.demand) }">{{ displayValue(row.daily?.[c.key]?.demand) }}</span>
-              </td>
-              <td class="num" :class="c.dayClass">
-                <span class="readonly-value" :class="{ negative: isNegativeValue(row.daily?.[c.key]?.actual) }">{{ displayValue(row.daily?.[c.key]?.actual) }}</span>
-              </td>
-              <td class="num stock" :class="c.dayClass">
-                <span class="readonly-value" :class="{ negative: isNegativeValue(getStockDisplay(row, colIdx)) }">{{ displayValue(getStockDisplay(row, colIdx)) }}</span>
-              </td>
-              <td class="num plan" :class="c.dayClass">
-                <input
-                  type="text"
-                  inputmode="decimal"
-                  :value="row.daily[c.key].plan === 0 || row.daily[c.key].plan === '' || row.daily[c.key].plan == null ? '' : row.daily[c.key].plan"
-                  @input="onPlanInput(row, c.key, $event.target.value)"
-                  :data-row="idx"
-                  :data-col="colIdx"
-                  @keydown="onCellKeydown($event, idx, colIdx)"
-                  :disabled="!canEdit || isPlanCellLocked(c.key)"
-                  :class="{ locked: isPlanCellLocked(c.key), negative: isNegativeValue(row.daily[c.key].plan) }"
-                />
-              </td>
-              <td class="num stock-plan" :class="c.dayClass">
-                <span class="readonly-value" :class="{ negative: isNegativeValue(getPlanStockDisplay(row, colIdx)) }">{{ displayValue(getPlanStockDisplay(row, colIdx)) }}</span>
-              </td>
-              <td class="num progress" :class="c.dayClass">
-                <span class="readonly-value" :class="{ negative: isNegativeValue(getProgressDisplay(row, colIdx)) }">{{ displayValue(getProgressDisplay(row, colIdx)) }}</span>
-              </td>
-              <td class="num planned-progress day-end" :class="c.dayClass">
-                <span class="readonly-value" :class="{ negative: isNegativeValue(getPlannedProgressDisplay(row, colIdx)) }">{{ displayValue(getPlannedProgressDisplay(row, colIdx)) }}</span>
-              </td>
+              <template v-if="isProgressMode">
+                <td class="num" :class="c.dayClass">
+                  <span class="readonly-value" :class="{ negative: isNegativeValue(row.daily?.[c.key]?.forecast) }">{{ displayValue(row.daily?.[c.key]?.forecast) }}</span>
+                </td>
+                <td class="num" :class="c.dayClass">
+                  <span class="readonly-value" :class="{ negative: isNegativeValue(row.daily?.[c.key]?.firm) }">{{ displayValue(row.daily?.[c.key]?.firm) }}</span>
+                </td>
+                <td class="num" :class="c.dayClass">
+                  <span class="readonly-value" :class="{ negative: isNegativeValue(row.daily?.[c.key]?.actual) }">{{ displayValue(row.daily?.[c.key]?.actual) }}</span>
+                </td>
+                <td class="num plan" :class="c.dayClass">
+                  <input
+                    type="text"
+                    inputmode="decimal"
+                    :value="row.daily[c.key].plan === 0 || row.daily[c.key].plan === '' || row.daily[c.key].plan == null ? '' : row.daily[c.key].plan"
+                    @input="onPlanInput(row, c.key, $event.target.value)"
+                    :data-row="idx"
+                    :data-col="colIdx"
+                    @keydown="onCellKeydown($event, idx, colIdx)"
+                    :disabled="!canEdit || isPlanCellLocked(c.key)"
+                    :class="{ locked: isPlanCellLocked(c.key), negative: isNegativeValue(row.daily[c.key].plan) }"
+                  />
+                </td>
+                <td class="num planned-progress" :class="c.dayClass">
+                  <span class="readonly-value" :class="{ negative: isNegativeValue(getPlannedProgressDisplay(row, colIdx)) }">{{ displayValue(getPlannedProgressDisplay(row, colIdx)) }}</span>
+                </td>
+                <td class="num progress day-end" :class="c.dayClass">
+                  <span class="readonly-value" :class="{ negative: isNegativeValue(getProgressDisplay(row, colIdx)) }">{{ displayValue(getProgressDisplay(row, colIdx)) }}</span>
+                </td>
+              </template>
+              <template v-else>
+                <td class="num" :class="c.dayClass">
+                  <span class="readonly-value" :class="{ negative: isNegativeValue(row.daily?.[c.key]?.demand) }">{{ displayValue(row.daily?.[c.key]?.demand) }}</span>
+                </td>
+                <td class="num" :class="c.dayClass">
+                  <span class="readonly-value" :class="{ negative: isNegativeValue(row.daily?.[c.key]?.actual) }">{{ displayValue(row.daily?.[c.key]?.actual) }}</span>
+                </td>
+                <td class="num stock" :class="c.dayClass">
+                  <span class="readonly-value" :class="{ negative: isNegativeValue(getStockDisplay(row, colIdx)) }">{{ displayValue(getStockDisplay(row, colIdx)) }}</span>
+                </td>
+                <td class="num plan" :class="c.dayClass">
+                  <input
+                    type="text"
+                    inputmode="decimal"
+                    :value="row.daily[c.key].plan === 0 || row.daily[c.key].plan === '' || row.daily[c.key].plan == null ? '' : row.daily[c.key].plan"
+                    @input="onPlanInput(row, c.key, $event.target.value)"
+                    :data-row="idx"
+                    :data-col="colIdx"
+                    @keydown="onCellKeydown($event, idx, colIdx)"
+                    :disabled="!canEdit || isPlanCellLocked(c.key)"
+                    :class="{ locked: isPlanCellLocked(c.key), negative: isNegativeValue(row.daily[c.key].plan) }"
+                  />
+                </td>
+                <td class="num stock-plan" :class="c.dayClass">
+                  <span class="readonly-value" :class="{ negative: isNegativeValue(getPlanStockDisplay(row, colIdx)) }">{{ displayValue(getPlanStockDisplay(row, colIdx)) }}</span>
+                </td>
+                <td class="num progress" :class="c.dayClass">
+                  <span class="readonly-value" :class="{ negative: isNegativeValue(getProgressDisplay(row, colIdx)) }">{{ displayValue(getProgressDisplay(row, colIdx)) }}</span>
+                </td>
+                <td class="num planned-progress day-end" :class="c.dayClass">
+                  <span class="readonly-value" :class="{ negative: isNegativeValue(getPlannedProgressDisplay(row, colIdx)) }">{{ displayValue(getPlannedProgressDisplay(row, colIdx)) }}</span>
+                </td>
+              </template>
             </template>
           </tr>
           <tr v-if="!filteredRows.length">
-            <td :colspan="3 + dateColumns.length * 7" class="no-data">データがありません</td>
+            <td :colspan="3 + dateColumns.length * (isProgressMode ? 6 : 7)" class="no-data">データがありません</td>
           </tr>
         </tbody>
       </table>
@@ -178,6 +239,9 @@ const canEdit = computed(() => {
   return hasPermission(user, 'purchase', 'edit')
 })
 
+const basisMode = ref('inventory')
+const isProgressMode = computed(() => basisMode.value === 'progress')
+
 const selectedSupplier = ref('')
 const purchaseLineId = ref('')
 const purchaseProcessId = ref('')
@@ -229,7 +293,7 @@ const dateColumns = computed(() => {
 
 const tableMinWidth = computed(() => {
   const fixedColsWidth = 40 + 187 + 100
-  const perDayWidth = 315
+  const perDayWidth = isProgressMode.value ? 270 : 315
   return fixedColsWidth + dateColumns.value.length * perDayWidth
 })
 
@@ -256,7 +320,7 @@ const isPlanCellLocked = (dateKey) => {
 const initDaily = () => {
   const daily = {}
   dateColumns.value.forEach((c) => {
-    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, progress: 0, planned_progress: 0, plan_base: 0, has_row: false }
+    daily[c.key] = { demand: 0, actual: 0, stock: 0, plan: '', plan_stock: 0, progress: 0, planned_progress: 0, plan_base: 0, has_row: false, forecast: 0, firm: 0 }
   })
   return daily
 }
@@ -697,13 +761,19 @@ const fetchAndApplyData = async (lineId) => {
     return
   }
 
-  // LineBacklogデータを取得（sequence_no=0の基礎データレコードのみ使用）
-  const backlogRes = await api.lineBacklogs.getLineBacklogs({
-    line: lineId,
-    product__in: productIds.join(','),
-    plan_date__gte: startDate.value,
-    plan_date__lte: endDate.value,
-  })
+  const [backlogRes, lineDemandRes] = await Promise.all([
+    api.lineBacklogs.getLineBacklogs({
+      line: lineId,
+      product__in: productIds.join(','),
+      plan_date__gte: startDate.value,
+      plan_date__lte: endDate.value,
+    }),
+    api.lineDemands.list({
+      line: lineId,
+      plan_date__gte: startDate.value,
+      plan_date__lte: endDate.value,
+    }),
+  ])
   const backlogs = backlogRes.data.results || backlogRes.data || []
 
   // 製品ごとにグルーピング
@@ -743,6 +813,17 @@ const fetchAndApplyData = async (lineId) => {
       row.daily[dateKey].plan = d.plan_qty === null || d.plan_qty === undefined ? '' : d.plan_qty === 0 ? '' : d.plan_qty
       row.daily[dateKey].plan_base = Number(d.plan_qty || 0)
     }
+  })
+
+  const demandData = lineDemandRes?.data?.results || lineDemandRes?.data || []
+  demandData.forEach((d) => {
+    if (!d.product) return
+    const row = grouped.get(d.product)
+    if (!row) return
+    const dateKey = d.plan_date
+    if (!row.daily[dateKey]) return
+    row.daily[dateKey].forecast += Number(d.forecast_qty || 0)
+    row.daily[dateKey].firm += Number(d.firm_qty || 0)
   })
 
   rows.value = Array.from(grouped.values())
@@ -892,9 +973,12 @@ const autoFillPlan = () => {
   rows.value.forEach((r) => {
     dateColumns.value.forEach((c) => {
       if (isPlanCellLocked(c.key)) return
-      const demand = r.daily[c.key]?.demand
-      if (demand !== null && demand !== undefined && Number(demand) !== 0) {
-        r.daily[c.key].plan = demand
+      const daily = r.daily[c.key]
+      const demandValue = isProgressMode.value
+        ? Number(daily?.forecast || 0) + Number(daily?.firm || 0)
+        : daily?.demand
+      if (demandValue !== null && demandValue !== undefined && Number(demandValue) !== 0) {
+        r.daily[c.key].plan = demandValue
       }
     })
   })
@@ -938,6 +1022,26 @@ const confirmChangeReason = () => {
   margin: 0 0 6px;
   font-size: 16px;
   font-weight: 700;
+}
+.basis-tab-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.basis-tab-item {
+  border: 1px solid #b9c5d6;
+  background: #f8fafc;
+  color: #1f2937;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.basis-tab-item.active {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
 }
 .notice-bar {
   font-size: 11px;
