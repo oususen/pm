@@ -113,6 +113,45 @@ class OrderLineViewSet(viewsets.ModelViewSet):
     ordering_fields = ['due_date', 'line_no']
     ordering = ['line_no']
 
+    @action(detail=False, methods=['get'], url_path='customer-product-codes')
+    def customer_product_codes(self, request):
+        customer_code = str(request.query_params.get('customer_code', '')).strip()
+        if not customer_code:
+            return Response(
+                {'detail': 'customer_code は必須です。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qs = self.get_queryset().filter(order__customer__customer_code=customer_code)
+
+        order_type = str(request.query_params.get('order_type', '')).strip().upper()
+        if order_type:
+            raw_values = [v.strip() for v in order_type.split(',') if v.strip()]
+            valid_values = [v for v in raw_values if v in {'FIRM', 'FORECAST'}]
+            if not valid_values:
+                return Response(
+                    {'customer_code': customer_code, 'order_type': order_type, 'count': 0, 'product_codes': []}
+                )
+            qs = qs.filter(
+                Q(order_type__in=valid_values) |
+                (Q(order_type__isnull=True) & Q(order__order_type__in=valid_values))
+            )
+
+        product_codes = list(
+            qs.exclude(product_code__isnull=True)
+              .exclude(product_code__exact='')
+              .values_list('product_code', flat=True)
+              .distinct()
+        )
+        return Response(
+            {
+                'customer_code': customer_code,
+                'order_type': order_type or None,
+                'count': len(product_codes),
+                'product_codes': sorted(product_codes),
+            }
+        )
+
 
 class StgOrderRawViewSet(viewsets.ModelViewSet):
     """受注取込ステージング（生データ）ViewSet"""

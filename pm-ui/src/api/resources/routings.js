@@ -60,4 +60,7 @@ export const createRoutingsAPI = (client) => ({
   getRoutingStepMaterials(params = {}) {
     return client.get('/routing-step-materials/', { params })
   },
+  getCoproductDriverChildProducts() {
+    return client.get('/routing-steps/coproduct-driver-child-products/')
+  },
 })

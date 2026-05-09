@@ -1456,6 +1456,16 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     ordering_fields = ['step_no']
     ordering = ['routing', 'step_no']
 
+    def _get_coproduct_driver_child_ids(self):
+        return set(
+            BOMItem.objects.filter(
+                bom__is_coproduct=True,
+                is_coproduct_driver=True,
+            ).exclude(
+                child_product_id__isnull=True
+            ).values_list('child_product_id', flat=True).distinct()
+        )
+
     def _build_representative_child_ids(self, step_list):
         if not step_list:
             return set()
@@ -1467,47 +1477,16 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         }
         if not target_child_ids:
             return set()
+        driver_ids = self._get_coproduct_driver_child_ids()
+        return {pid for pid in target_child_ids if pid in driver_ids}
 
-        step_code_to_product_id = {}
-        unresolved_codes = []
-        parent_ids = set()
-
-        root_routing = getattr(step_list[0], 'routing', None)
-        root_product_id = getattr(root_routing, 'product_id', None)
-        if root_product_id:
-            parent_ids.add(int(root_product_id))
-
-        for step in step_list:
-            pcode = str(getattr(step, 'output_product', None).product_code if getattr(step, 'output_product', None) else '').strip()
-            if pcode and step.output_product_id:
-                step_code_to_product_id[pcode] = int(step.output_product_id)
-
-        for step in step_list:
-            parent_code = str(getattr(step, 'remark', '') or '').strip()
-            if not parent_code:
-                continue
-            parent_id = step_code_to_product_id.get(parent_code)
-            if parent_id:
-                parent_ids.add(parent_id)
-            else:
-                unresolved_codes.append(parent_code)
-
-        if unresolved_codes:
-            for p in Product.objects.filter(product_code__in=list(set(unresolved_codes))).values('id'):
-                parent_ids.add(int(p['id']))
-
-        if not parent_ids:
-            return set()
-
-        representative_ids = set(
-            BOMItem.objects.filter(
-                bom__parent_product_id__in=list(parent_ids),
-                bom__is_coproduct=True,
-                is_coproduct_driver=True,
-                child_product_id__in=list(target_child_ids),
-            ).values_list('child_product_id', flat=True)
-        )
-        return representative_ids
+    @action(detail=False, methods=['get'], url_path='coproduct-driver-child-products')
+    def coproduct_driver_child_products(self, request):
+        ids = sorted(self._get_coproduct_driver_child_ids())
+        return Response({
+            'count': len(ids),
+            'child_product_ids': ids,
+        })
 
     def get_serializer_context(self):
         context = super().get_serializer_context()

@@ -79,6 +79,11 @@ export const createOrdersAPI = (client) => ({
     const query = { page_size: 10000, ...params }
     return client.get('/order-lines/', { params: query })
   },
+  getCustomerProductCodes(customerCode, params = {}) {
+    return client.get('/order-lines/customer-product-codes/', {
+      params: { customer_code: customerCode, ...params },
+    })
+  },
   createOrderLine(data) {
     return client.post('/order-lines/', data)
   },

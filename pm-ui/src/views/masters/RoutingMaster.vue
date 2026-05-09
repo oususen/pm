@@ -486,6 +486,7 @@ const loadingRoutingFinalLineMap = ref(false)
 const routingFinalLineIdByRoutingId = ref({})
 const loadingCustomerProductSet = ref(false)
 const customerProductCodeSet = ref(new Set())
+const coproductDriverChildProductIds = ref(new Set())
 const showCreateRow = ref(false)
 const creatingRouting = ref(false)
 const newRoutingDraft = ref({
@@ -742,101 +743,17 @@ const isRepresentativePart = (step) => {
   return representativeChildProductIds.value.has(Number(step.output_product))
 }
 
-const collectRepresentativeParentIds = (stepList, routing) => {
-  const parentIds = new Set()
-  const stepCodeToProductId = new Map()
-  const unresolvedCodes = []
-
-  stepList.forEach((step) => {
-    const pid = Number(step?.output_product)
-    const pcode = String(step?.output_product_code || '').trim()
-    if (Number.isFinite(pid) && pid > 0 && pcode) {
-      stepCodeToProductId.set(pcode, pid)
-    }
-  })
-
-  const rootProductId = Number(routing?.product)
-  if (Number.isFinite(rootProductId) && rootProductId > 0) {
-    parentIds.add(rootProductId)
+const fetchCoproductDriverChildProductIds = async () => {
+  try {
+    const res = await api.routings.getCoproductDriverChildProducts()
+    const ids = Array.isArray(res?.data?.child_product_ids) ? res.data.child_product_ids : []
+    coproductDriverChildProductIds.value = new Set(
+      ids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)
+    )
+  } catch (e) {
+    console.warn('連産品driver品番取得エラー:', e)
+    coproductDriverChildProductIds.value = new Set()
   }
-
-  stepList.forEach((step) => {
-    const parentCode = String(step?.remark || '').trim()
-    if (!parentCode) return
-    const parentId = stepCodeToProductId.get(parentCode)
-    if (Number.isFinite(parentId) && parentId > 0) {
-      parentIds.add(parentId)
-    } else {
-      unresolvedCodes.push(parentCode)
-    }
-  })
-
-  return { parentIds: Array.from(parentIds), unresolvedCodes }
-}
-
-const fetchRepresentativeChildSet = async (stepList, routing) => {
-  const targetChildIds = new Set(
-    stepList
-      .map((step) => Number(step?.output_product))
-      .filter((id) => Number.isFinite(id) && id > 0)
-  )
-  if (!targetChildIds.size) return new Set()
-
-  const { parentIds, unresolvedCodes } = collectRepresentativeParentIds(stepList, routing)
-
-  if (unresolvedCodes.length > 0) {
-    const uniqueCodes = [...new Set(unresolvedCodes)]
-    try {
-      const res = await api.products.getProductsByCodesIn(uniqueCodes)
-      const products = res?.data?.results || res?.data || []
-      products.forEach((p) => {
-        const pid = Number(p?.id)
-        if (Number.isFinite(pid) && pid > 0) {
-          parentIds.push(pid)
-        }
-      })
-    } catch (e) {
-      console.warn('代表部番用の親品番一括取得エラー:', e)
-    }
-  }
-
-  if (!parentIds.length) return new Set()
-
-  const representativeSet = new Set()
-
-  for (const parentId of parentIds) {
-    try {
-      const bomRes = await api.boms.getBOMs({
-        parent_product: parentId,
-        is_coproduct: true,
-        page_size: 100,
-      })
-      const bomRows = normalizeList(bomRes?.data)
-      for (const bomRow of bomRows) {
-        let bomItems = Array.isArray(bomRow?.items) ? bomRow.items : []
-        if (!bomItems.length && bomRow?.id) {
-          try {
-            const detailRes = await api.boms.getBOM(bomRow.id)
-            bomItems = Array.isArray(detailRes?.data?.items) ? detailRes.data.items : []
-          } catch (detailError) {
-            console.warn('連産品BOM明細取得エラー:', { parentId, bomId: bomRow.id, detailError })
-            continue
-          }
-        }
-        bomItems.forEach((item) => {
-          const childId = Number(item?.child_product)
-          if (!Number.isFinite(childId) || !targetChildIds.has(childId)) return
-          if (item?.is_coproduct_driver === true) {
-            representativeSet.add(childId)
-          }
-        })
-      }
-    } catch (error) {
-      console.warn('連産品BOM取得エラー:', { parentId, error })
-    }
-  }
-
-  return representativeSet
 }
 
 const resetDurationDrafts = (stepList) => {
@@ -1083,9 +1000,8 @@ const fetchStepsAndMaterials = async (routingId) => {
     // ルーティングID一括取得（ステップ数分のN+1リクエストを回避）
     // routing 指定時はサーバー側でページネーション無効化のため page_size 不要
     const routing = routings.value.find((item) => item.id === routingId)
-    const [matRes, representativeSet, bomQuantityMap] = await Promise.all([
+    const [matRes, bomQuantityMap] = await Promise.all([
       api.routings.getRoutingStepMaterials({ routing: routingId }),
-      fetchRepresentativeChildSet(stepList, routing),
       fetchBomQuantityMap(routing),
     ])
     if (stepLoadToken.value !== token) return
@@ -1098,7 +1014,11 @@ const fetchStepsAndMaterials = async (routingId) => {
       materialMap[sid].push(mat)
     })
     materialsByStepId.value = materialMap
-    representativeChildProductIds.value = representativeSet
+    representativeChildProductIds.value = new Set(
+      stepList
+        .map((step) => Number(step?.output_product))
+        .filter((id) => Number.isFinite(id) && coproductDriverChildProductIds.value.has(id))
+    )
     bomQuantityByChildId.value = bomQuantityMap
   } catch (error) {
     console.error('ルーティング工程取得エラー:', error)
@@ -1204,11 +1124,11 @@ const fetchCustomerProductCodeSet = async (customerCode) => {
   }
   loadingCustomerProductSet.value = true
   try {
-    const res = await api.orders.listOrderLines({ customer_code: customerCode })
-    const rows = normalizeList(res?.data)
+    const res = await api.orders.getCustomerProductCodes(customerCode)
+    const rows = Array.isArray(res?.data?.product_codes) ? res.data.product_codes : []
     const set = new Set(
       rows
-        .map((row) => String(row?.product_code || '').trim())
+        .map((code) => String(code || '').trim())
         .filter((code) => Boolean(code))
     )
     customerProductCodeSet.value = set
@@ -1417,6 +1337,7 @@ onMounted(async () => {
     fetchSuppliers(),
     fetchCustomers(),
     fetchRoutingFinalLineMap(),
+    fetchCoproductDriverChildProductIds(),
   ])
 })
 </script>
