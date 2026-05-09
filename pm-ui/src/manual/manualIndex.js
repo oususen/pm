@@ -90,6 +90,13 @@ export const manualSections = [
     ],
   },
   {
+    id: "quality",
+    title: "品質管理",
+    items: [
+      { title: "工程一体チェックシート", path: "品質/工程一体チェックシート.md" },
+    ],
+  },
+  {
     id: "engineeringChange",
     title: "設変管理",
     items: [{ title: "設変管理", path: "設変/設変管理.md" }],

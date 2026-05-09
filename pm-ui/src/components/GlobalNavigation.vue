@@ -386,19 +386,16 @@ const loadPendingTaskCount = async () => {
     return
   }
   try {
-    const [purchaseResponse, qualityResponse] = await Promise.all([
-      api.purchaseOrderProposals.listTasks({
-        assigned_to_me: true,
-        status: 'PENDING',
-      }),
-      api.qualityEquipmentInspections.listTasks({
-        assigned_to_me: true,
-        status: 'PENDING',
-      }),
+    const params = { assigned_to_me: true, status: 'PENDING' }
+    const [purchaseResponse, qualityResponse, icsResponse] = await Promise.all([
+      api.purchaseOrderProposals.listTasks(params),
+      api.qualityEquipmentInspections.listTasks(params),
+      api.integratedChecksheets.listTasks(params),
     ])
     const purchaseRows = Array.isArray(purchaseResponse.data) ? purchaseResponse.data : []
     const qualityRows = Array.isArray(qualityResponse.data) ? qualityResponse.data : []
-    pendingTaskCount.value = purchaseRows.length + qualityRows.length
+    const icsRows = Array.isArray(icsResponse.data) ? icsResponse.data : []
+    pendingTaskCount.value = purchaseRows.length + qualityRows.length + icsRows.length
   } catch (error) {
     console.error('タスク件数の取得に失敗しました:', error)
     pendingTaskCount.value = 0

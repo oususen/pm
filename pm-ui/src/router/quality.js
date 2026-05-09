@@ -69,37 +69,37 @@ const quality = [
     path: "/quality/product-checksheet/integrated/templates",
     name: "IntegratedChecksheetTemplateManager",
     component: () => import("@/views/quality/IntegratedChecksheetTemplateManager.vue"),
-    meta: { pageTitle: "工程一体チェックシート テンプレート管理" },
+    meta: { pageTitle: "工程一体チェックシート テンプレート管理", manualPath: "品質/工程一体チェックシート.md" },
   },
   {
     path: "/quality/product-checksheet/integrated/operation",
     name: "IntegratedChecksheetOperation",
     component: () => import("@/views/quality/IntegratedChecksheetOperation.vue"),
-    meta: { pageTitle: "工程一体チェックシート チェック実施" },
+    meta: { pageTitle: "工程一体チェックシート チェック実施", manualPath: "品質/工程一体チェックシート.md" },
   },
   {
     path: "/quality/product-checksheet/integrated/review",
     name: "IntegratedChecksheetReview",
     component: () => import("@/views/quality/IntegratedChecksheetOperation.vue"),
-    meta: { pageTitle: "工程一体チェックシート リーダー・班長確認" },
+    meta: { pageTitle: "工程一体チェックシート リーダー・班長確認", manualPath: "品質/工程一体チェックシート.md" },
   },
   {
     path: "/quality/product-checksheet/integrated/weekly-monthly",
     name: "IntegratedChecksheetWeeklyMonthly",
     component: () => import("@/views/quality/IntegratedChecksheetWeeklyMonthly.vue"),
-    meta: { pageTitle: "工程一体チェックシート 週・月確認" },
+    meta: { pageTitle: "工程一体チェックシート 週・月確認", manualPath: "品質/工程一体チェックシート.md" },
   },
   {
     path: "/quality/product-checksheet/integrated/trend-analysis",
     name: "IntegratedChecksheetTrendAnalysis",
     component: () => import("@/views/quality/IntegratedChecksheetTrendAnalysis.vue"),
-    meta: { pageTitle: "工程一体チェックシート 傾向確認・分析" },
+    meta: { pageTitle: "工程一体チェックシート 傾向確認・分析", manualPath: "品質/工程一体チェックシート.md" },
   },
   {
     path: "/quality/product-checksheet/integrated/problem-tools",
     name: "IntegratedChecksheetProblemTools",
     component: () => import("@/views/quality/IntegratedChecksheetProblemTools.vue"),
-    meta: { pageTitle: "工程一体チェックシート 品質問題時ツール" },
+    meta: { pageTitle: "工程一体チェックシート 品質問題時ツール", manualPath: "品質/工程一体チェックシート.md" },
   },
 ];
 

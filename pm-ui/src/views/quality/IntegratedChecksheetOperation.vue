@@ -1,8 +1,10 @@
 <template>
   <div class="page-container ics-operation" v-if="canView">
     <!-- ページヘッダー -->
-    <div class="page-header">
-      <h2 class="page-title">{{ pageTitleText }}</h2>
+    <div v-show="!activeBatch" class="page-header">
+      <h2 class="page-title">{{ pageTitleText }}
+        <span v-if="!isReviewMode" class="page-title-note">※チェックシート（バッチ作成）は生産計画画面またはチェック結果確認画面で行えます</span>
+      </h2>
       <div class="page-actions">
         <button
           v-if="showBackToProcessInput"
@@ -19,7 +21,7 @@
     </div>
 
     <!-- フィルタパネル -->
-    <section class="panel filter-panel">
+    <section v-show="!activeBatch" class="panel filter-panel">
       <div class="prepare-form filter-form">
         <label>
           <span class="field-label">ライン</span>
@@ -49,7 +51,7 @@
     </section>
 
     <!-- 新規バッチ作成 -->
-    <section v-if="isReviewMode" class="panel" ref="newBatchSectionRef">
+    <section v-if="isReviewMode && !activeBatch" class="panel" ref="newBatchSectionRef">
       <div class="panel-title-row">
         <h3 class="panel-title">新規バッチ作成</h3>
         <button class="btn-secondary btn-sm" @click="showNewBatchSection = !showNewBatchSection">
@@ -90,7 +92,7 @@
     </section>
 
     <!-- バッチ一覧 -->
-    <section class="panel">
+    <section v-show="!activeBatch" class="panel">
       <h3 class="panel-title">バッチ一覧</h3>
       <div v-if="loadingBatches" class="no-data">読込中...</div>
       <div v-else-if="!batches.length" class="no-data">該当するバッチはありません</div>
@@ -145,6 +147,18 @@
                   @click="leaderConfirm(b)"
                 >リーダ確認</button>
                 <button
+                  v-if="isReviewMode && canEditBatch(b)"
+                  class="btn-secondary btn-sm"
+                  :disabled="actionLoading"
+                  @click="openEditBatchDialog(b)"
+                >編集</button>
+                <button
+                  v-if="isReviewMode && canDeleteBatch(b)"
+                  class="btn-sm btn-delete-batch"
+                  :disabled="actionLoading"
+                  @click="deleteBatch(b)"
+                >削除</button>
+                <button
                   v-if="isReviewMode && canShowSupervisorConfirm(b)"
                   class="btn-secondary btn-sm"
                   :disabled="actionLoading || !isSupervisorUser"
@@ -166,7 +180,10 @@
           <span class="batch-meta">| ロット: {{ activeBatch.lot_no || '-' }} | 最終工程計画日: {{ activeBatch.plan_date || '-' }}</span>
           <span v-if="isReviewMode && reviewRoleLabel" class="batch-meta">| 確認: {{ reviewRoleLabel }}</span>
         </h3>
-        <button class="btn-secondary btn-sm" @click="closeBatchDetail">閉じる</button>
+        <div class="matrix-header-actions">
+          <button v-if="showBackToProcessInput" class="btn-secondary btn-sm" @click="backToProcessInput">工程作業入力へ戻る</button>
+          <button class="btn-secondary btn-sm" @click="closeBatchDetail">一覧に戻る</button>
+        </div>
       </div>
 
       <div v-if="loadingUnits" class="no-data">読込中...</div>
@@ -193,7 +210,7 @@
             </tr>
           </thead>
           <tbody>
-            <template v-for="block in templateBlocks" :key="'blk-'+block.id">
+            <template v-for="block in matrixVisibleBlocks" :key="'blk-'+block.id">
               <!-- 工程ヘッダー行 -->
               <tr class="block-header-row">
                 <td :colspan="3" class="block-header-cell">
@@ -274,7 +291,6 @@
             <!-- 略図プレースホルダー -->
             <div v-if="block.sketch_image_url && !isBlockLockedForModal(block)" class="sketch-placeholder">
               <img :src="block.sketch_image_url" alt="略図" class="sketch-img" />
-              <div class="sketch-overlay"><span>手書き入力は後日実装予定</span></div>
             </div>
 
             <!-- チェック項目 -->
@@ -308,22 +324,24 @@
                       type="number"
                       step="any"
                       class="numeric-input"
+                      :class="{ 'numeric-ok': modalResponses[item.id]?.judgement === 'OK' && item.criteria, 'numeric-ng': modalResponses[item.id]?.judgement === 'NG' && item.criteria }"
                       :value="modalResponses[item.id]?.numeric_value ?? ''"
                       @input="setNumeric(item.id, $event.target.value)"
                       :disabled="!canEdit"
                       :placeholder="item.criteria || '数値'"
                     />
                     <span v-if="item.unit" class="unit-label">{{ item.unit }}</span>
+                    <span v-if="modalResponses[item.id]?.judgement && item.criteria" class="auto-judge-badge" :class="modalResponses[item.id].judgement === 'OK' ? 'ok' : 'ng'">{{ modalResponses[item.id].judgement }}</span>
                   </template>
                   <!-- TEXT -->
                   <template v-else>
-                    <input
-                      type="text"
-                      class="text-input"
+                    <textarea
+                      class="text-input text-area"
                       :value="modalResponses[item.id]?.text_value ?? ''"
                       @input="setText(item.id, $event.target.value)"
                       :disabled="!canEdit"
                       :placeholder="item.criteria || 'テキスト'"
+                      rows="1"
                     />
                   </template>
                 </div>
@@ -364,6 +382,27 @@
         </div>
       </div>
     </div>
+
+    <!-- バッチ編集ダイアログ -->
+    <div v-if="editBatchDialog.visible" class="modal-backdrop" @click.self="editBatchDialog.visible = false">
+      <div class="modal-panel edit-batch-modal">
+        <h3 class="modal-title">バッチ編集</h3>
+        <div class="edit-batch-form">
+          <label>
+            <span class="field-label">計画日</span>
+            <input type="date" v-model="editBatchDialog.plan_date" />
+          </label>
+          <label>
+            <span class="field-label">台数</span>
+            <input type="number" min="1" v-model.number="editBatchDialog.quantity" />
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary btn-sm" @click="editBatchDialog.visible = false">キャンセル</button>
+          <button class="btn-primary btn-sm" :disabled="actionLoading" @click="submitEditBatch">保存</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="page-container" v-else>
@@ -382,7 +421,7 @@ const route = useRoute()
 const router = useRouter()
 
 // --- 権限 ---
-const canAccessQuality = (resource, level = 'view', aliases = []) => {
+const canAccessQuality = (resource, level = 'view', aliases = [], fallbackToQuality = true) => {
   const user = authState.user
   if (!user) return false
   if (user.is_superuser) return true
@@ -390,7 +429,7 @@ const canAccessQuality = (resource, level = 'view', aliases = []) => {
   const candidates = [resource, ...aliases]
   const hasSpecific = permissions.some((item) => candidates.includes(item.resource))
   if (hasSpecific) return candidates.some((c) => hasPermission(user, c, level))
-  return hasPermission(user, 'quality', level)
+  return fallbackToQuality ? hasPermission(user, 'quality', level) : false
 }
 const isReviewMode = computed(() => route.name === 'IntegratedChecksheetReview')
 const pageTitleText = computed(() => (
@@ -406,25 +445,30 @@ const canView = computed(() =>
   canAccessQuality(
     isReviewMode.value ? 'quality.integrated_checksheet_review' : 'quality.integrated_checksheet_operation',
     'view',
-    [
-      'quality.integrated_checksheet_operation',
-      'quality.product_checksheet_input',
-      'quality.product_checksheet_review',
-      'quality.integrated_checksheet',
-      'quality',
-    ]
+    isReviewMode.value
+      ? ['quality.product_checksheet_review']
+      : [
+          'quality.integrated_checksheet_operation',
+          'quality.product_checksheet_input',
+          'quality.integrated_checksheet',
+          'quality',
+        ],
+    !isReviewMode.value
   )
 )
 const canEdit = computed(() =>
   canAccessQuality(
     isReviewMode.value ? 'quality.integrated_checksheet_review' : 'quality.integrated_checksheet_operation',
     'edit',
-    [
-      'quality.integrated_checksheet_operation',
-      'quality.product_checksheet_input',
-      'quality.integrated_checksheet',
-      'quality',
-    ]
+    isReviewMode.value
+      ? ['quality.product_checksheet_review']
+      : [
+          'quality.integrated_checksheet_operation',
+          'quality.product_checksheet_input',
+          'quality.integrated_checksheet',
+          'quality',
+        ],
+    !isReviewMode.value
   )
 )
 
@@ -483,6 +527,10 @@ const units = ref([])
 const loadingUnits = ref(false)
 const actionLoading = ref(false)
 const templateBlocks = ref([])
+const matrixVisibleBlocks = computed(() => {
+  if (!preferredProcessId.value) return templateBlocks.value
+  return templateBlocks.value.filter((b) => !isBlockedByPreferredProcess(b))
+})
 const preferredProcessId = ref('')
 const lockedLineIdFromRoute = ref('')
 const isLineLockedFromRoute = computed(() => Boolean(lockedLineIdFromRoute.value))
@@ -654,6 +702,15 @@ const cellClass = (unit, block, item) => {
     if (check.judgement === 'OK') return 'cell-ok'
     if (check.judgement === 'NG') return 'cell-ng'
   }
+  if (item.record_type === 'NUMERIC' && check.numeric_value != null && item.criteria) {
+    const bounds = parseCriteria(item.criteria, item.standard)
+    if (bounds) {
+      const v = parseFloat(check.numeric_value)
+      const okMin = bounds.min === null || v >= bounds.min
+      const okMax = bounds.max === null || v <= bounds.max
+      return (okMin && okMax) ? 'cell-ok' : 'cell-ng'
+    }
+  }
   if (check.numeric_value != null || check.text_value) return 'cell-filled'
   return 'cell-empty'
 }
@@ -744,6 +801,54 @@ const openBatchDetail = async (batch) => {
 
 const canLeaderConfirm = (b) => ['OPEN', 'COMPLETED'].includes(b.status)
 const canShowSupervisorConfirm = (b) => b.status === 'LEADER_CONFIRMED'
+const canDeleteBatch = (b) => ['OPEN', 'COMPLETED'].includes(b.status)
+const canEditBatch = (b) => ['OPEN', 'COMPLETED'].includes(b.status)
+
+const editBatchDialog = ref({ visible: false, batchId: null, plan_date: '', quantity: 1 })
+
+const openEditBatchDialog = (batch) => {
+  editBatchDialog.value = {
+    visible: true,
+    batchId: batch.id,
+    plan_date: batch.plan_date || '',
+    quantity: batch.quantity || 1,
+  }
+}
+
+const submitEditBatch = async () => {
+  const d = editBatchDialog.value
+  if (!d.batchId) return
+  actionLoading.value = true
+  try {
+    await api.integratedChecksheets.editBatch(d.batchId, {
+      plan_date: d.plan_date || null,
+      quantity: d.quantity,
+    })
+    d.visible = false
+    await loadBatches()
+  } catch (e) {
+    alert(`編集に失敗しました: ${e.response?.data?.detail || e.message}`)
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+const deleteBatch = async (batch) => {
+  if (!window.confirm(`バッチ（${batch.line_code || '-'} / ${batch.product_code || '-'}, 計画日: ${batch.plan_date || '-'}, ロット: ${batch.lot_no || '-'}）を削除しますか？この操作は取り消せません。`)) return
+  actionLoading.value = true
+  try {
+    await api.integratedChecksheets.deleteBatch(batch.id)
+    if (activeBatch.value && activeBatch.value.id === batch.id) {
+      activeBatch.value = null
+    }
+    await loadBatches()
+    alert('バッチを削除しました。')
+  } catch (e) {
+    alert(`削除に失敗しました: ${e.response?.data?.detail || e.message}`)
+  } finally {
+    actionLoading.value = false
+  }
+}
 
 const leaderConfirm = async (batch) => {
   if (!window.confirm('リーダ確認を実行します。全台目の必須項目が完了している必要があります。よろしいですか？')) return
@@ -873,10 +978,9 @@ const modalHeaderStatusCode = computed(() => {
   if (isBlockLockedForModal(block)) return 'PENDING'
   const p = getBlockProgress(block)
   if (!p || Number(p.total || 0) <= 0) return 'PENDING'
+  if (p.complete) return 'COMPLETED'
   const done = Number(p.done || 0)
-  const total = Number(p.total || 0)
   if (done <= 0) return 'PENDING'
-  if (done >= total) return 'COMPLETED'
   return 'IN_PROGRESS'
 })
 const modalHeaderStatusLabel = computed(() => {
@@ -956,12 +1060,60 @@ const setJudgement = (itemId, val) => {
   modalResponses.value[itemId].judgement = modalResponses.value[itemId].judgement === val ? '' : val
 }
 
+const toHalfWidth = (s) => s.replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)).replace(/．/g, '.').replace(/＋/g, '+').replace(/－/g, '-')
+
+const parseCriteria = (criteria, standard) => {
+  if (!criteria) return null
+  const c = toHalfWidth(criteria).trim()
+  // 範囲: "300-360", "300~360", "300～360"
+  let m = c.match(/^([+-]?\d+\.?\d*)\s*[-~～]\s*([+-]?\d+\.?\d*)$/)
+  if (m) return { min: parseFloat(m[1]), max: parseFloat(m[2]) }
+  // 以上: ">=300", "≧300", "300以上"
+  m = c.match(/^[>≧][=＝]?\s*([+-]?\d+\.?\d*)$/) || c.match(/^([+-]?\d+\.?\d*)\s*以上$/)
+  if (m) return { min: parseFloat(m[1]), max: null }
+  // 以下: "<=360", "≦360", "360以下"
+  m = c.match(/^[<≦][=＝]?\s*([+-]?\d+\.?\d*)$/) || c.match(/^([+-]?\d+\.?\d*)\s*以下$/)
+  if (m) return { min: null, max: parseFloat(m[1]) }
+  // 公差: "±10" or "±10%"
+  m = c.match(/^[±]\s*(\d+\.?\d*)\s*(%?)$/)
+  if (m) {
+    const stdVal = parseFloat(toHalfWidth(String(standard || '')))
+    if (isNaN(stdVal)) return null
+    const tol = parseFloat(m[1])
+    if (m[2] === '%') {
+      const delta = stdVal * tol / 100
+      return { min: stdVal - delta, max: stdVal + delta }
+    }
+    return { min: stdVal - tol, max: stdVal + tol }
+  }
+  return null
+}
+
+const findItemForId = (itemId) => {
+  for (const block of templateBlocks.value) {
+    const item = block.items.find(i => i.id === itemId)
+    if (item) return item
+  }
+  return null
+}
+
 const setNumeric = (itemId, val) => {
   if (!canEdit.value) return
   if (!modalResponses.value[itemId]) {
     modalResponses.value[itemId] = { judgement: '', numeric_value: null, text_value: '' }
   }
-  modalResponses.value[itemId].numeric_value = val !== '' ? parseFloat(val) : null
+  const numVal = val !== '' ? parseFloat(val) : null
+  modalResponses.value[itemId].numeric_value = numVal
+  // 自動判定
+  const item = findItemForId(itemId)
+  if (item && numVal !== null && !isNaN(numVal)) {
+    const bounds = parseCriteria(item.criteria, item.standard)
+    if (bounds) {
+      const okMin = bounds.min === null || numVal >= bounds.min
+      const okMax = bounds.max === null || numVal <= bounds.max
+      modalResponses.value[itemId].judgement = (okMin && okMax) ? 'OK' : 'NG'
+    }
+  }
 }
 
 const setText = (itemId, val) => {
@@ -976,6 +1128,20 @@ const setText = (itemId, val) => {
 const saveBlockChecks = async (block) => {
   if (!canEdit.value) return
   if (!modalUnit.value) return
+
+  const missingItems = block.items.filter((item) => {
+    if (!item.is_required) return false
+    const r = modalResponses.value[item.id]
+    if (!r) return true
+    if (item.record_type === 'CHECK') return !r.judgement
+    if (item.record_type === 'NUMERIC') return r.numeric_value === null || r.numeric_value === '' || r.numeric_value === undefined
+    return !r.text_value
+  })
+  if (missingItems.length > 0) {
+    const names = missingItems.map((i) => i.item_name).join('、')
+    if (!window.confirm(`未確認の必須項目があります:\n${names}\n\nこのまま保存しますか？`)) return
+  }
+
   const savedUnitId = modalUnit.value.id
   savingBlock.value = block.id
   try {
@@ -988,6 +1154,7 @@ const saveBlockChecks = async (block) => {
         entry.judgement = r.judgement || ''
       } else if (item.record_type === 'NUMERIC') {
         entry.numeric_value = r.numeric_value
+        entry.judgement = r.judgement || ''
       } else {
         entry.text_value = r.text_value || ''
       }
@@ -1070,6 +1237,7 @@ onMounted(async () => {
 }
 .page-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
 .page-title { margin: 0; font-size: 20px; font-weight: 700; color: #0f172a; }
+.page-title-note { font-size: 12px; font-weight: 400; color: #2563eb; margin-left: 8px; }
 .page-actions { display: flex; gap: 8px; }
 
 /* パネル */
@@ -1196,6 +1364,15 @@ onMounted(async () => {
   align-items: center;
 }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn-delete-batch { background: #fff; color: #dc2626; border-color: #fca5a5; }
+.btn-delete-batch:hover:not(:disabled) { background: #fef2f2; }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal-panel { background: #fff; border-radius: 8px; box-shadow: 0 20px 60px rgba(15,23,42,0.25); padding: 16px 20px; min-width: 320px; }
+.modal-title { margin: 0 0 12px; font-size: 16px; font-weight: 700; }
+.edit-batch-form { display: flex; flex-direction: column; gap: 10px; }
+.edit-batch-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 500; color: #334155; }
+.edit-batch-form input { padding: 5px 7px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; }
+.modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; padding-top: 10px; border-top: 1px solid #e2e8f0; }
 .btn-primary { background: #2563eb; color: #fff; border-color: #2563eb; }
 .btn-primary:hover { background: #1d4ed8; }
 .btn-primary:disabled { background: #93c5fd; border-color: #93c5fd; cursor: not-allowed; }
@@ -1207,7 +1384,8 @@ onMounted(async () => {
 /* マトリクス */
 .matrix-panel { overflow: hidden; }
 .matrix-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
-.matrix-scroll { overflow: auto; max-height: calc(100vh - 420px); border: 1px solid #dde2ea; border-radius: 4px; }
+.matrix-header-actions { display: flex; gap: 6px; }
+.matrix-scroll { overflow: auto; max-height: calc(100vh - 160px); border: 1px solid #dde2ea; border-radius: 4px; }
 .matrix-table { border-collapse: collapse; }
 .matrix-table th, .matrix-table td { padding: 3px 6px; border: 1px solid #e5e7eb; font-size: 12px; white-space: nowrap; }
 .th-process { min-width: 60px; position: sticky; left: 0; z-index: 2; background: #f7f9fb; }
@@ -1474,7 +1652,13 @@ onMounted(async () => {
   width: 100px;
 }
 .text-input { width: 140px; }
+.text-area { resize: vertical; min-height: 32px; width: 400px; font-family: inherit; line-height: 1.5; }
 .unit-label { font-size: 12px; color: #6b7280; }
+.numeric-input.numeric-ok { border-color: #059669; background: #ecfdf5; }
+.numeric-input.numeric-ng { border-color: #dc2626; background: #fef2f2; }
+.auto-judge-badge { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 3px; }
+.auto-judge-badge.ok { background: #d1fae5; color: #065f46; }
+.auto-judge-badge.ng { background: #fee2e2; color: #991b1b; }
 
 /* ロック中メッセージ */
 .locked-message {
@@ -1486,4 +1670,3 @@ onMounted(async () => {
 }
 
 </style>
-

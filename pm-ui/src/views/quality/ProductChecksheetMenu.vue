@@ -82,7 +82,7 @@ import { RouterLink } from "vue-router"
 import { authState } from "@/auth"
 import { hasPermission } from "@/router"
 
-const canAccessQuality = (resource, level = "view", aliases = []) => {
+const canAccessQuality = (resource, level = "view", aliases = [], fallbackToQuality = true) => {
   const user = authState.user
   if (!user) return false
   if (user.is_superuser) return true
@@ -92,7 +92,7 @@ const canAccessQuality = (resource, level = "view", aliases = []) => {
   if (hasSpecific) {
     return candidates.some((candidate) => hasPermission(user, candidate, level))
   }
-  return hasPermission(user, "quality", level)
+  return fallbackToQuality ? hasPermission(user, "quality", level) : false
 }
 
 const canViewTemplate = computed(() => canAccessQuality("quality.product_checksheet_template", "view"))
@@ -122,11 +122,8 @@ const canViewIntegratedOperation = computed(() =>
 )
 const canViewIntegratedReview = computed(() =>
   canAccessQuality("quality.integrated_checksheet_review", "view", [
-    "quality.integrated_checksheet_operation",
-    "quality.product_checksheet_input",
     "quality.product_checksheet_review",
-    "quality",
-  ])
+  ], false)
 )
 const canViewIntegratedDashboard = computed(() =>
   canAccessQuality("quality.integrated_checksheet_operation", "view", [

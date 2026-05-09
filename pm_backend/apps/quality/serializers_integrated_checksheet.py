@@ -67,6 +67,20 @@ class IntegratedChecksheetProcessBlockSerializer(serializers.ModelSerializer):
         return ""
 
 
+class IntegratedChecksheetTemplateListSerializer(serializers.ModelSerializer):
+    """一覧用の軽量シリアライザ（process_blocks を含まない）"""
+    product_code = serializers.CharField(source="product.product_code", read_only=True)
+    product_name = serializers.CharField(source="product.product_name", read_only=True)
+
+    class Meta:
+        model = IntegratedChecksheetTemplate
+        fields = [
+            "id", "product", "product_code", "product_name",
+            "name", "version", "status", "is_active",
+            "updated_at",
+        ]
+
+
 class IntegratedChecksheetTemplateSerializer(serializers.ModelSerializer):
     process_blocks = IntegratedChecksheetProcessBlockSerializer(many=True, read_only=True)
     product_code = serializers.CharField(source="product.product_code", read_only=True)
@@ -167,13 +181,16 @@ class IntegratedChecksheetUnitSerializer(serializers.ModelSerializer):
             items = list(block.items.all())
             total = len(items)
             done = sum(1 for it in items if it.id in checks_by_item and _is_checked(checks_by_item[it.id]))
+            required_items = [it for it in items if it.is_required]
+            required_total = len(required_items)
+            required_done = sum(1 for it in required_items if it.id in checks_by_item and _is_checked(checks_by_item[it.id]))
             result.append({
                 "process_block_id": block.id,
                 "process_code": block.process.process_code,
                 "sort_order": block.sort_order,
                 "total": total,
                 "done": done,
-                "complete": total > 0 and done >= total,
+                "complete": required_total == 0 or required_done >= required_total,
             })
         return result
 
@@ -244,11 +261,11 @@ class IntegratedChecksheetBatchSerializer(serializers.ModelSerializer):
 
         result = []
         for block in blocks:
-            item_ids = {item.id for item in block.items.all()}
-            if not item_ids:
+            required_item_ids = {item.id for item in block.items.all() if item.is_required}
+            if not required_item_ids:
                 done_units = total_units
             else:
-                done_units = sum(1 for checked_ids in unit_checked_items if item_ids.issubset(checked_ids))
+                done_units = sum(1 for checked_ids in unit_checked_items if required_item_ids.issubset(checked_ids))
             result.append({
                 "process_block_id": block.id,
                 "process_code": block.process.process_code if block.process_id else "",

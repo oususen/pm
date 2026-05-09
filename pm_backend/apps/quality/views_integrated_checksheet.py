@@ -1,14 +1,15 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Count, Q
 from django.http import FileResponse
-from rest_framework import status, viewsets
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .models_integrated_checksheet import (
     IntegratedChecksheetBatch,
@@ -17,6 +18,7 @@ from .models_integrated_checksheet import (
     IntegratedChecksheetProcessBlock,
     IntegratedChecksheetSketchField,
     IntegratedChecksheetSketchResponse,
+    IntegratedChecksheetTask,
     IntegratedChecksheetTemplate,
     IntegratedChecksheetUnit,
 )
@@ -24,9 +26,51 @@ from .serializers_integrated_checksheet import (
     IntegratedChecksheetBatchSerializer,
     IntegratedChecksheetItemSerializer,
     IntegratedChecksheetProcessBlockSerializer,
+    IntegratedChecksheetTemplateListSerializer,
     IntegratedChecksheetTemplateSerializer,
     IntegratedChecksheetUnitSerializer,
 )
+
+def _display_name(user):
+    if not user:
+        return ""
+    last = (getattr(user, "last_name", "") or "").strip()
+    first = (getattr(user, "first_name", "") or "").strip()
+    return f"{last} {first}".strip() or user.get_full_name() or str(user)
+
+
+def _ics_task_due_date():
+    return (datetime.now() + timedelta(days=3)).date()
+
+
+def _create_ics_task(template, task_type, user):
+    if not user or not getattr(user, "id", None):
+        return
+    exists = IntegratedChecksheetTask.objects.filter(
+        template=template, task_type=task_type,
+        assigned_to=user, status=IntegratedChecksheetTask.STATUS_PENDING,
+    ).exists()
+    if exists:
+        return
+    IntegratedChecksheetTask.objects.create(
+        template=template, task_type=task_type,
+        assigned_to=user, status=IntegratedChecksheetTask.STATUS_PENDING,
+        due_date=_ics_task_due_date(),
+    )
+
+
+def _mark_ics_tasks_done(template, task_type):
+    IntegratedChecksheetTask.objects.filter(
+        template=template, task_type=task_type,
+        status=IntegratedChecksheetTask.STATUS_PENDING,
+    ).update(status=IntegratedChecksheetTask.STATUS_DONE, done_at=datetime.now())
+
+
+def _skip_all_ics_pending_tasks(template):
+    IntegratedChecksheetTask.objects.filter(
+        template=template, status=IntegratedChecksheetTask.STATUS_PENDING,
+    ).update(status=IntegratedChecksheetTask.STATUS_SKIPPED, done_at=datetime.now())
+
 
 def _role_rank(role):
     return {"worker": 1, "supervisor": 2, "chief": 3, "manager": 4, "admin": 5}.get(str(role or "").lower(), 0)
@@ -124,17 +168,23 @@ def _ensure_workflow_users(template, creator=None, persist=False):
 
 
 class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
-    queryset = (
-        IntegratedChecksheetTemplate.objects
-        .select_related("product", "line", "created_by", "reviewer_user", "chief_user", "approver_user")
-        .prefetch_related("process_blocks__process", "process_blocks__items", "process_blocks__sketch_fields")
-        .all()
-    )
+    queryset = IntegratedChecksheetTemplate.objects.all()
     serializer_class = IntegratedChecksheetTemplateSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         qs = super().get_queryset()
+        if self.action == "list":
+            qs = qs.select_related("product")
+        else:
+            qs = qs.select_related(
+                "product", "line", "created_by",
+                "reviewer_user", "chief_user", "approver_user",
+            ).prefetch_related(
+                "process_blocks__process",
+                "process_blocks__items",
+                "process_blocks__sketch_fields",
+            )
         product_id = self.request.query_params.get("product")
         line_id = self.request.query_params.get("line")
         status_val = self.request.query_params.get("status")
@@ -149,6 +199,11 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
             qs = qs.filter(is_active=is_active in ("true", "1", "True"))
         return qs
 
+    def get_serializer_class(self):
+        if self.action == "list":
+            return IntegratedChecksheetTemplateListSerializer
+        return IntegratedChecksheetTemplateSerializer
+
     def perform_create(self, serializer):
         template = serializer.save(created_by=self.request.user)
         _ensure_workflow_users(template, creator=self.request.user, persist=True)
@@ -156,6 +211,16 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         template = serializer.save()
         _ensure_workflow_users(template, creator=template.created_by or self.request.user, persist=True)
+
+    def perform_destroy(self, instance):
+        if instance.status not in (
+            IntegratedChecksheetTemplate.STATUS_DRAFT,
+            IntegratedChecksheetTemplate.STATUS_REJECTED,
+        ):
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError("下書き・差戻しのテンプレートのみ削除できます。")
+        _skip_all_ics_pending_tasks(instance)
+        instance.delete()
 
     @action(detail=True, methods=["post"])
     def submit_for_review(self, request, pk=None):
@@ -175,9 +240,11 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
                 {"detail": "班長担当が設定されていません。"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        _skip_all_ics_pending_tasks(template)
         template.status = IntegratedChecksheetTemplate.STATUS_SUPERVISOR_PENDING
         template.rejection_comment = ""
         template.save(update_fields=["status", "rejection_comment", "updated_at"])
+        _create_ics_task(template, IntegratedChecksheetTask.TASK_SUPERVISOR_REVIEW, template.reviewer_user)
         return Response(IntegratedChecksheetTemplateSerializer(
             self.get_queryset().get(pk=template.pk)
         ).data)
@@ -186,17 +253,33 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
     def review(self, request, pk=None):
         template = self.get_object()
         T = IntegratedChecksheetTemplate
+        TK = IntegratedChecksheetTask
         if template.status == T.STATUS_SUPERVISOR_PENDING:
+            if template.reviewer_user_id and template.reviewer_user_id != request.user.id:
+                return Response(
+                    {"detail": "班長担当者のみ確認できます。"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            _mark_ics_tasks_done(template, TK.TASK_SUPERVISOR_REVIEW)
             if template.chief_user_id:
                 template.status = T.STATUS_CHIEF_PENDING
+                _create_ics_task(template, TK.TASK_CHIEF_REVIEW, template.chief_user)
             elif template.approver_user_id:
                 template.status = T.STATUS_MANAGER_PENDING
+                _create_ics_task(template, TK.TASK_MANAGER_APPROVE, template.approver_user)
             else:
                 template.status = T.STATUS_APPROVED
                 template.is_active = True
         elif template.status == T.STATUS_CHIEF_PENDING:
+            if template.chief_user_id and template.chief_user_id != request.user.id:
+                return Response(
+                    {"detail": "係長担当者のみ確認できます。"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            _mark_ics_tasks_done(template, TK.TASK_CHIEF_REVIEW)
             if template.approver_user_id:
                 template.status = T.STATUS_MANAGER_PENDING
+                _create_ics_task(template, TK.TASK_MANAGER_APPROVE, template.approver_user)
             else:
                 template.status = T.STATUS_APPROVED
                 template.is_active = True
@@ -218,6 +301,11 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
                 {"detail": "部長承認待ちのテンプレートのみ承認できます。"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if template.approver_user_id and template.approver_user_id != request.user.id:
+            return Response(
+                {"detail": "部長担当者のみ承認できます。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         with transaction.atomic():
             IntegratedChecksheetTemplate.objects.filter(
                 product=template.product,
@@ -227,6 +315,7 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
             template.status = IntegratedChecksheetTemplate.STATUS_APPROVED
             template.is_active = True
             template.save(update_fields=["status", "is_active", "updated_at"])
+            _mark_ics_tasks_done(template, IntegratedChecksheetTask.TASK_MANAGER_APPROVE)
         return Response(IntegratedChecksheetTemplateSerializer(
             self.get_queryset().get(pk=template.pk)
         ).data)
@@ -234,19 +323,33 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def reject(self, request, pk=None):
         template = self.get_object()
+        T = IntegratedChecksheetTemplate
         if template.status not in (
-            IntegratedChecksheetTemplate.STATUS_SUPERVISOR_PENDING,
-            IntegratedChecksheetTemplate.STATUS_CHIEF_PENDING,
-            IntegratedChecksheetTemplate.STATUS_MANAGER_PENDING,
+            T.STATUS_SUPERVISOR_PENDING,
+            T.STATUS_CHIEF_PENDING,
+            T.STATUS_MANAGER_PENDING,
         ):
             return Response(
                 {"detail": "確認/承認待ちのテンプレートのみ差戻しできます。"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        expected_user_id = {
+            T.STATUS_SUPERVISOR_PENDING: template.reviewer_user_id,
+            T.STATUS_CHIEF_PENDING: template.chief_user_id,
+            T.STATUS_MANAGER_PENDING: template.approver_user_id,
+        }.get(template.status)
+        if expected_user_id and expected_user_id != request.user.id:
+            return Response(
+                {"detail": "担当者のみ差戻しできます。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         comment = str(request.data.get("comment") or "").strip()
+        _skip_all_ics_pending_tasks(template)
         template.status = IntegratedChecksheetTemplate.STATUS_REJECTED
         template.rejection_comment = comment
         template.save(update_fields=["status", "rejection_comment", "updated_at"])
+        if template.created_by_id:
+            _create_ics_task(template, IntegratedChecksheetTask.TASK_CREATOR_FIX, template.created_by)
         return Response(IntegratedChecksheetTemplateSerializer(
             self.get_queryset().get(pk=template.pk)
         ).data)
@@ -295,6 +398,10 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def save_structure(self, request, pk=None):
         """工程ブロック・項目・台紙フィールドを一括保存"""
+        import os
+
+        from django.core.files.base import ContentFile
+
         template = self.get_object()
         blocks_data = request.data.get("process_blocks", [])
         with transaction.atomic():
@@ -302,6 +409,7 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
             incoming_block_ids = set()
             for b_data in blocks_data:
                 block_id = b_data.get("id")
+                copy_source_block_id = b_data.get("copy_source_block_id")
                 block_defaults = {
                     "process_id": b_data["process"],
                     "sort_order": b_data.get("sort_order", 1),
@@ -325,6 +433,26 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
                         template=template, **block_defaults
                     )
                     incoming_block_ids.add(block.id)
+
+                if copy_source_block_id and not block_id:
+                    src_block = IntegratedChecksheetProcessBlock.objects.filter(id=copy_source_block_id).first()
+                    if src_block:
+                        if src_block.source_pdf and src_block.source_pdf.storage.exists(src_block.source_pdf.name):
+                            ext = os.path.splitext(src_block.source_pdf.name)[1]
+                            block.source_pdf.save(
+                                f"copy_{template.pk}_{block.id}{ext}",
+                                ContentFile(src_block.source_pdf.read()),
+                                save=False,
+                            )
+                        if src_block.sketch_image and src_block.sketch_image.storage.exists(src_block.sketch_image.name):
+                            ext = os.path.splitext(src_block.sketch_image.name)[1]
+                            block.sketch_image.save(
+                                f"copy_{template.pk}_{block.id}{ext}",
+                                ContentFile(src_block.sketch_image.read()),
+                                save=False,
+                            )
+                        if block.source_pdf or block.sketch_image:
+                            block.save()
 
                 items_data = b_data.get("items", [])
                 block.items.all().delete()
@@ -400,7 +528,10 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
         return Response(IntegratedChecksheetProcessBlockSerializer(block).data)
 
 
-class IntegratedChecksheetBatchViewSet(viewsets.ReadOnlyModelViewSet):
+class IntegratedChecksheetBatchViewSet(
+    mixins.DestroyModelMixin,
+    viewsets.ReadOnlyModelViewSet,
+):
     queryset = (
         IntegratedChecksheetBatch.objects
         .select_related("template", "product", "line", "leader_confirmed_by", "supervisor_confirmed_by")
@@ -413,6 +544,79 @@ class IntegratedChecksheetBatchViewSet(viewsets.ReadOnlyModelViewSet):
     )
     serializer_class = IntegratedChecksheetBatchSerializer
     permission_classes = [IsAuthenticated]
+
+    def perform_destroy(self, instance):
+        if instance.status in (
+            IntegratedChecksheetBatch.STATUS_LEADER_CONFIRMED,
+            IntegratedChecksheetBatch.STATUS_SUPERVISOR_CONFIRMED,
+        ):
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError("確認済みのバッチは削除できません。")
+        instance.delete()
+
+    @action(detail=True, methods=["post"])
+    def edit_batch(self, request, pk=None):
+        batch = self.get_object()
+        if batch.status in (
+            IntegratedChecksheetBatch.STATUS_LEADER_CONFIRMED,
+            IntegratedChecksheetBatch.STATUS_SUPERVISOR_CONFIRMED,
+        ):
+            return Response(
+                {"detail": "確認済みのバッチは編集できません。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        plan_date = request.data.get("plan_date")
+        new_quantity = request.data.get("quantity")
+        update_fields = ["updated_at"]
+
+        if plan_date is not None:
+            batch.plan_date = plan_date or None
+            update_fields.append("plan_date")
+
+        if new_quantity is not None:
+            new_quantity = int(new_quantity)
+            if new_quantity < 1:
+                return Response({"detail": "台数は1以上にしてください。"}, status=status.HTTP_400_BAD_REQUEST)
+            old_quantity = batch.quantity
+            with transaction.atomic():
+                if new_quantity > old_quantity:
+                    IntegratedChecksheetUnit.objects.bulk_create([
+                        IntegratedChecksheetUnit(batch=batch, sequence_no=seq)
+                        for seq in range(old_quantity + 1, new_quantity + 1)
+                    ])
+                elif new_quantity < old_quantity:
+                    remove_units = batch.units.filter(sequence_no__gt=new_quantity)
+                    has_data = remove_units.filter(
+                        Q(checks__isnull=False) | Q(sketch_responses__isnull=False)
+                    ).distinct().exists()
+                    if has_data:
+                        return Response(
+                            {"detail": f"台目{new_quantity + 1}以降にチェックデータがあるため削減できません。"},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    remove_units.delete()
+                batch.quantity = new_quantity
+                update_fields.append("quantity")
+                batch.save(update_fields=update_fields)
+                self._update_batch_status_helper(batch)
+        else:
+            batch.save(update_fields=update_fields)
+
+        batch = self.get_queryset().get(pk=batch.pk)
+        return Response(IntegratedChecksheetBatchSerializer(batch).data)
+
+    def _update_batch_status_helper(self, batch):
+        total = batch.units.count()
+        if total == 0:
+            next_status = IntegratedChecksheetBatch.STATUS_OPEN
+        else:
+            completed = batch.units.filter(
+                status__in=[IntegratedChecksheetUnit.STATUS_COMPLETED, IntegratedChecksheetUnit.STATUS_APPROVED]
+            ).count()
+            next_status = IntegratedChecksheetBatch.STATUS_COMPLETED if completed >= total else IntegratedChecksheetBatch.STATUS_OPEN
+        if batch.status != next_status:
+            batch.status = next_status
+            batch.save(update_fields=["status", "updated_at"])
 
     def get_queryset(self):
         qs = super().get_queryset().annotate(
@@ -694,3 +898,40 @@ class IntegratedChecksheetUnitViewSet(viewsets.GenericViewSet):
         if batch.status != next_status:
             batch.status = next_status
             batch.save(update_fields=["status", "updated_at"])
+
+
+class IntegratedChecksheetTaskListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        qs = IntegratedChecksheetTask.objects.select_related(
+            "template__product", "assigned_to",
+        ).order_by("status", "due_date", "-created_at")
+
+        if str(request.query_params.get("assigned_to_me", "true")).lower() in ("true", "1", "yes"):
+            qs = qs.filter(assigned_to=request.user)
+
+        task_type = request.query_params.get("task_type")
+        status_val = request.query_params.get("status")
+        if task_type:
+            qs = qs.filter(task_type=task_type)
+        if status_val:
+            qs = qs.filter(status=status_val)
+
+        data = []
+        for t in qs[:200]:
+            data.append({
+                "id": t.id,
+                "template_id": t.template_id,
+                "template_name": t.template.name if t.template else "",
+                "product_code": t.template.product.product_code if t.template and t.template.product else "",
+                "task_type": t.task_type,
+                "task_type_display": t.get_task_type_display(),
+                "assigned_to": t.assigned_to_id,
+                "assigned_to_name": _display_name(t.assigned_to),
+                "status": t.status,
+                "due_date": str(t.due_date) if t.due_date else None,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+                "done_at": t.done_at.isoformat() if t.done_at else None,
+            })
+        return Response(data)

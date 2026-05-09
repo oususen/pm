@@ -4,6 +4,7 @@
       <h2 class="page-title">工程一体チェックシート テンプレート管理</h2>
       <div class="page-actions">
         <button class="btn-secondary" @click="loadTemplateList" :disabled="loadingList">更新</button>
+        <button class="btn-secondary" @click="copyTemplate" :disabled="!form.id || saving || actionLoading || !canEdit">コピー作成</button>
         <button class="btn-primary" @click="startNewTemplate" :disabled="saving || actionLoading || !canEdit">新規作成</button>
       </div>
     </div>
@@ -364,6 +365,7 @@
             <button v-if="canApprove" class="btn-approve" @click="approveTemplate" :disabled="saving || actionLoading">部長承認</button>
             <button v-if="canReject" class="btn-reject" @click="rejectTemplate" :disabled="saving || actionLoading">差し戻し</button>
             <button v-if="canRevise" class="btn-revise" @click="reviseTemplate" :disabled="saving || actionLoading">改訂</button>
+            <button v-if="canDelete" class="btn-reject" @click="deleteTemplate" :disabled="saving || actionLoading">削除</button>
             <button class="btn-secondary" @click="cancelEdit">キャンセル</button>
           </div>
           <div v-if="form.status === 'REJECTED' && form.rejection_comment" class="rejection-banner">
@@ -556,6 +558,7 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
@@ -877,6 +880,43 @@ const startNewTemplate = () => {
   productSearch.value = ''
   selectedProductLabel.value = ''
   productSuggestions.value = []
+  editMode.value = true
+}
+
+const copyTemplate = () => {
+  if (!form.value.id) return
+  const src = form.value
+  form.value = {
+    ...JSON.parse(JSON.stringify(src)),
+    id: null,
+    product: '',
+    status: 'DRAFT',
+    version: 1,
+    is_active: true,
+    rejection_comment: '',
+    created_by_name: '',
+    process_blocks: src.process_blocks.map((b) => ({
+      ...JSON.parse(JSON.stringify(b)),
+      id: null,
+      _copy_source_block_id: b.id,
+      _uploadPending: null,
+      _uploadType: null,
+      _expanded: true,
+      _key: nextKey(),
+      items: b.items.map((item) => ({
+        ...JSON.parse(JSON.stringify(item)),
+        id: null,
+        _key: nextKey(),
+      })),
+      sketch_fields: (b.sketch_fields || []).map((sf) => ({
+        ...JSON.parse(JSON.stringify(sf)),
+        _key: nextKey(),
+      })),
+    })),
+  }
+  selectedTemplateId.value = null
+  productSearch.value = ''
+  selectedProductLabel.value = ''
   editMode.value = true
 }
 
@@ -1237,6 +1277,7 @@ const persistCurrentTemplate = async () => {
   // 工程ブロック・チェック項目の一括保存
   const blocksPayload = form.value.process_blocks.map((b) => ({
     id: b.id || undefined,
+    copy_source_block_id: b._copy_source_block_id || undefined,
     process: b.process,
     sort_order: b.sort_order,
     items: b.items.map((item) => ({
@@ -1293,22 +1334,39 @@ const canReview = computed(() => {
   if (!form.value.id || !canEdit.value) return false
   if (normalizedFormStatus.value === 'SUPERVISOR_PENDING') {
     const reviewerUserId = Number(form.value.reviewer_user || 0)
-    return reviewerUserId === 0 || reviewerUserId === currentUserId.value
+    return reviewerUserId > 0 && reviewerUserId === currentUserId.value
   }
   if (normalizedFormStatus.value === 'CHIEF_PENDING') {
     const chiefUserId = Number(form.value.chief_user || 0)
-    return chiefUserId === 0 || chiefUserId === currentUserId.value
+    return chiefUserId > 0 && chiefUserId === currentUserId.value
   }
   return false
 })
 const canApprove = computed(() => {
   if (!form.value.id || !canEdit.value || normalizedFormStatus.value !== 'MANAGER_PENDING') return false
   const approverUserId = Number(form.value.approver_user || 0)
-  return approverUserId === 0 || approverUserId === currentUserId.value
+  return approverUserId > 0 && approverUserId === currentUserId.value
 })
 const canReject = computed(() => canReview.value || canApprove.value)
 const canRevise = computed(() => form.value.id && canEdit.value && normalizedFormStatus.value === 'APPROVED')
+const canDelete = computed(() => form.value.id && canEdit.value && ['DRAFT', 'REJECTED'].includes(normalizedFormStatus.value))
 const reviewActionLabel = computed(() => (normalizedFormStatus.value === 'CHIEF_PENDING' ? '係長承認' : '班長承認'))
+
+const deleteTemplate = async () => {
+  if (!form.value.id || !canDelete.value) return
+  if (!window.confirm('このテンプレートを削除しますか？この操作は取り消せません。')) return
+  actionLoading.value = true
+  try {
+    await api.integratedChecksheets.deleteTemplate(form.value.id)
+    cancelEdit()
+    await loadTemplateList()
+    alert('テンプレートを削除しました。')
+  } catch (e) {
+    alert(`削除に失敗しました: ${e.response?.data?.detail || e.message}`)
+  } finally {
+    actionLoading.value = false
+  }
+}
 
 const submitForReview = async () => {
   if (!form.value.id || !canSubmitForReview.value) return
@@ -1343,15 +1401,16 @@ const confirmSubmitForReview = async () => {
 
 const reviewTemplate = async () => {
   if (!form.value.id || !canReview.value) return
-  if (!window.confirm(`${reviewActionLabel.value}します。よろしいですか？`)) return
+  const label = reviewActionLabel.value
+  if (!window.confirm(`${label}します。よろしいですか？`)) return
   actionLoading.value = true
   try {
     await api.integratedChecksheets.reviewTemplate(form.value.id)
     await loadTemplateList()
     await selectTemplate(form.value.id)
-    alert(`${reviewActionLabel.value}しました。`)
+    alert(`${label}しました。`)
   } catch (e) {
-    alert(`${reviewActionLabel.value}に失敗しました: ${e.response?.data?.detail || e.message}`)
+    alert(`${label}に失敗しました: ${e.response?.data?.detail || e.message}`)
   } finally {
     actionLoading.value = false
   }
@@ -1443,10 +1502,19 @@ const notImplementedAction = (label) => {
 }
 
 // --- 初期化 ---
+const route = useRoute()
+
 onMounted(async () => {
   if (!canView.value) return
   await loadMasters()
   await loadTemplateList()
+  const queryId = route.query.id
+  if (queryId) {
+    const id = Number(queryId)
+    if (id && templates.value.some((t) => t.id === id)) {
+      await selectTemplate(id)
+    }
+  }
 })
 
 watch(

@@ -34,8 +34,25 @@
       <input
         v-model.trim="searchText"
         class="search-input"
-        placeholder="品番コード / 品名 / ルーティングコードで検索"
+        placeholder="品番コードで検索"
       />
+      <select v-model="filterFinalLineId" class="line-select line-select--filter" :disabled="loadingLines || loadingRoutingFinalLineMap">
+        <option value="">最終工程ライン: すべて</option>
+        <option v-for="line in lines" :key="`flt-line-${line.id}`" :value="String(line.id)">
+          {{ line.line_code }} - {{ line.line_name }}
+        </option>
+      </select>
+      <input
+        v-model.trim="filterProductName"
+        class="search-input search-input--narrow"
+        placeholder="品名（部分一致）"
+      />
+      <select v-model="filterCustomerCode" class="line-select line-select--filter" :disabled="loadingCustomers || loadingCustomerProductSet">
+        <option value="">得意先: すべて</option>
+        <option v-for="customer in customerOptions" :key="`flt-customer-${customer.id}`" :value="customer.customer_code">
+          {{ customer.customer_code }} - {{ customer.customer_name }}
+        </option>
+      </select>
       <label class="checkbox-inline">
         <input v-model="onlyActive" type="checkbox" />
         有効のみ
@@ -78,8 +95,8 @@
       </button>
     </div>
 
-    <div class="split-layout">
-      <section class="panel routing-panel">
+    <div class="split-layout" :class="{ 'split-layout--single': !showRoutingList }">
+      <section v-show="showRoutingList" class="panel routing-panel">
         <h2 class="panel-title">ルーティング一覧</h2>
         <div class="table-wrap">
           <table class="data-table compact">
@@ -123,6 +140,9 @@
           <span v-if="selectedRouting" class="panel-subtitle">
             {{ productCode(selectedRouting) }} / {{ selectedRouting.routing_code }}
           </span>
+          <button class="btn-secondary btn-small panel-toggle-btn" @click="showRoutingList = !showRoutingList">
+            {{ showRoutingList ? '一覧を隠す' : '一覧を表示' }}
+          </button>
         </h2>
 
         <div v-if="!selectedRouting" class="empty-state">
@@ -455,8 +475,17 @@ const products = ref([])
 const loadingProducts = ref(false)
 const processes = ref([])
 const suppliers = ref([])
+const customers = ref([])
 const loadingProcesses = ref(false)
 const loadingSuppliers = ref(false)
+const loadingCustomers = ref(false)
+const filterFinalLineId = ref('')
+const filterProductName = ref('')
+const filterCustomerCode = ref('')
+const loadingRoutingFinalLineMap = ref(false)
+const routingFinalLineIdByRoutingId = ref({})
+const loadingCustomerProductSet = ref(false)
+const customerProductCodeSet = ref(new Set())
 const showCreateRow = ref(false)
 const creatingRouting = ref(false)
 const newRoutingDraft = ref({
@@ -467,6 +496,7 @@ const newRoutingDraft = ref({
   is_active: true,
 })
 const showCreateStepRow = ref(false)
+const showRoutingList = ref(true)
 const creatingStep = ref(false)
 const newStepDraft = ref({
   step_no: '',
@@ -566,15 +596,23 @@ const isRoutingHeaderDirty = computed(() => {
 
 const filteredRoutings = computed(() => {
   const q = searchText.value.toLowerCase()
+  const productNameQ = filterProductName.value.toLowerCase()
+  const selectedFinalLineId = String(filterFinalLineId.value || '')
+  const selectedCustomerCode = String(filterCustomerCode.value || '')
   return routings.value.filter((routing) => {
     if (onlyActive.value && !routing.is_active) return false
+    if (selectedFinalLineId) {
+      const finalLineId = String(routingFinalLineIdByRoutingId.value[routing.id] || '')
+      if (finalLineId !== selectedFinalLineId) return false
+    }
+    if (productNameQ) {
+      const pname = String(productName(routing) || '').toLowerCase()
+      if (!pname.includes(productNameQ)) return false
+    }
+    if (selectedCustomerCode && !customerProductCodeSet.value.has(String(productCode(routing) || ''))) return false
     if (!q) return true
-    const text = [
-      routing.routing_code,
-      productCode(routing),
-      productName(routing),
-    ].join(' ').toLowerCase()
-    return text.includes(q)
+    const code = String(productCode(routing) || '').toLowerCase()
+    return code.includes(q)
   })
 })
 const sortedProducts = computed(() => {
@@ -604,6 +642,15 @@ const supplierOptions = computed(() => {
     const right = `${b?.supplier_code || ''} ${b?.supplier_name || ''}`
     return left.localeCompare(right, 'ja')
   })
+})
+const customerOptions = computed(() => {
+  return [...customers.value]
+    .filter((c) => c?.is_active !== false)
+    .sort((a, b) => {
+      const left = `${a?.customer_code || ''} ${a?.customer_name || ''}`
+      const right = `${b?.customer_code || ''} ${b?.customer_name || ''}`
+      return left.localeCompare(right, 'ja')
+    })
 })
 const isCreateStepDisabled = computed(() => {
   if (!canEdit.value) return true
@@ -937,6 +984,57 @@ const fetchRoutings = async () => {
   }
 }
 
+const fetchRoutingFinalLineMap = async () => {
+  loadingRoutingFinalLineMap.value = true
+  try {
+    const perPage = 500
+    let page = 1
+    const all = []
+    while (true) {
+      const res = await api.routings.getRoutingSteps({ page, page_size: perPage })
+      const data = res?.data
+      if (Array.isArray(data)) {
+        all.push(...data)
+        break
+      }
+      const rows = normalizeList(data)
+      all.push(...rows)
+      if (!data?.next) break
+      page += 1
+    }
+    const byRouting = new Map()
+    for (const step of all) {
+      const routingId = Number(step?.routing)
+      if (!Number.isFinite(routingId) || !step?.line) continue
+      const current = byRouting.get(routingId)
+      if (!current) {
+        byRouting.set(routingId, step)
+        continue
+      }
+      const stepNo = Number(step?.step_no ?? 0)
+      const curStepNo = Number(current?.step_no ?? 0)
+      if (stepNo > curStepNo) {
+        byRouting.set(routingId, step)
+        continue
+      }
+      if (stepNo === curStepNo) {
+        const pg = Number(step?.parallel_group ?? 0)
+        const curPg = Number(current?.parallel_group ?? 0)
+        if (pg > curPg) byRouting.set(routingId, step)
+      }
+    }
+    const map = {}
+    byRouting.forEach((step, routingId) => {
+      map[routingId] = Number(step.line)
+    })
+    routingFinalLineIdByRoutingId.value = map
+  } catch (error) {
+    console.error('ルーティング最終工程ライン集計エラー:', error)
+  } finally {
+    loadingRoutingFinalLineMap.value = false
+  }
+}
+
 const fetchBomQuantityMap = async (routing) => {
   if (!routing?.product) return {}
   const bomRes = await api.boms.getBOMs({
@@ -1086,6 +1184,43 @@ const fetchSuppliers = async () => {
   }
 }
 
+const fetchCustomers = async () => {
+  loadingCustomers.value = true
+  try {
+    const res = await api.customers.getCustomers()
+    customers.value = normalizeList(res?.data)
+  } catch (error) {
+    console.error('得意先一覧取得エラー:', error)
+    alert('得意先一覧の取得に失敗しました。')
+  } finally {
+    loadingCustomers.value = false
+  }
+}
+
+const fetchCustomerProductCodeSet = async (customerCode) => {
+  if (!customerCode) {
+    customerProductCodeSet.value = new Set()
+    return
+  }
+  loadingCustomerProductSet.value = true
+  try {
+    const res = await api.orders.listOrderLines({ customer_code: customerCode })
+    const rows = normalizeList(res?.data)
+    const set = new Set(
+      rows
+        .map((row) => String(row?.product_code || '').trim())
+        .filter((code) => Boolean(code))
+    )
+    customerProductCodeSet.value = set
+  } catch (error) {
+    console.error('得意先別品番取得エラー:', error)
+    customerProductCodeSet.value = new Set()
+    alert('得意先別品番の取得に失敗しました。')
+  } finally {
+    loadingCustomerProductSet.value = false
+  }
+}
+
 const resetCreateStepDraft = () => {
   newStepDraft.value = {
     step_no: '',
@@ -1207,6 +1342,9 @@ watch(filteredRoutings, (list) => {
 watch(onlyActive, async () => {
   await fetchRoutings()
 })
+watch(filterCustomerCode, async (code) => {
+  await fetchCustomerProductCodeSet(code)
+})
 
 const fetchLines = async () => {
   loadingLines.value = true
@@ -1271,7 +1409,15 @@ const executeMigration = async () => {
 }
 
 onMounted(async () => {
-  await Promise.all([refreshAll(), fetchLines(), fetchProducts(), fetchProcesses(), fetchSuppliers()])
+  await Promise.all([
+    refreshAll(),
+    fetchLines(),
+    fetchProducts(),
+    fetchProcesses(),
+    fetchSuppliers(),
+    fetchCustomers(),
+    fetchRoutingFinalLineMap(),
+  ])
 })
 </script>
 
@@ -1348,6 +1494,10 @@ onMounted(async () => {
   border-radius: 6px;
 }
 
+.search-input--narrow {
+  width: 240px;
+}
+
 .checkbox-inline {
   display: flex;
   align-items: center;
@@ -1370,6 +1520,10 @@ onMounted(async () => {
   gap: 12px;
 }
 
+.split-layout--single {
+  grid-template-columns: 1fr;
+}
+
 .panel {
   border: 1px solid #dcdfe5;
   border-radius: 8px;
@@ -1382,6 +1536,9 @@ onMounted(async () => {
   padding: 10px 12px;
   border-bottom: 1px solid #eceff5;
   font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .panel-subtitle {
@@ -1498,6 +1655,10 @@ onMounted(async () => {
   font-size: 12px;
 }
 
+.panel-toggle-btn {
+  margin-left: auto;
+}
+
 .step-filter-row label {
   font-size: 13px;
   color: #374151;
@@ -1579,6 +1740,10 @@ onMounted(async () => {
   border-radius: 6px;
   font-size: 13px;
   min-width: 220px;
+}
+
+.line-select--filter {
+  min-width: 260px;
 }
 
 .btn-warning {

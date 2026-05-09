@@ -15,6 +15,7 @@ from .views_checksheet import (
 )
 from .views_integrated_checksheet import (
     IntegratedChecksheetBatchViewSet,
+    IntegratedChecksheetTaskListView,
     IntegratedChecksheetTemplateViewSet,
     IntegratedChecksheetUnitViewSet,
 )
@@ -69,5 +70,6 @@ router.register(
 urlpatterns = [
     path("equipment-inspection-tasks/", EquipmentInspectionTaskListView.as_view(), name="equipmentinspectiontask-list"),
     path("product-checksheet-tasks/", ProductChecksheetTaskListView.as_view(), name="productchecksheet-task-list"),
+    path("integrated-checksheet-tasks/", IntegratedChecksheetTaskListView.as_view(), name="integratedchecksheet-task-list"),
     path("", include(router.urls)),
 ]

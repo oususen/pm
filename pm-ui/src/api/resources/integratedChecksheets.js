@@ -11,6 +11,9 @@ export const createIntegratedChecksheetsAPI = (client) => ({
   updateTemplate(id, data) {
     return client.patch(`/integrated-checksheet-templates/${id}/`, data)
   },
+  deleteTemplate(id) {
+    return client.delete(`/integrated-checksheet-templates/${id}/`)
+  },
   approveTemplate(id) {
     return client.post(`/integrated-checksheet-templates/${id}/approve/`)
   },
@@ -38,6 +41,12 @@ export const createIntegratedChecksheetsAPI = (client) => ({
   getBatch(id) {
     return client.get(`/integrated-checksheet-batches/${id}/`)
   },
+  deleteBatch(id) {
+    return client.delete(`/integrated-checksheet-batches/${id}/`)
+  },
+  editBatch(id, data) {
+    return client.post(`/integrated-checksheet-batches/${id}/edit_batch/`, data)
+  },
   prepareBatch(data) {
     return client.post('/integrated-checksheet-batches/prepare/', data)
   },
@@ -58,5 +67,8 @@ export const createIntegratedChecksheetsAPI = (client) => ({
   },
   previewPdf(templateId) {
     return client.get(`/integrated-checksheet-templates/${templateId}/preview_pdf/`, { responseType: 'blob' })
+  },
+  listTasks(params = {}) {
+    return client.get('/integrated-checksheet-tasks/', { params })
   },
 })

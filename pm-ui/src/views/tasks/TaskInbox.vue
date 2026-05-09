@@ -207,6 +207,28 @@ const normalizeQualityTask = (row) => {
   }
 }
 
+const normalizeIntegratedCsTask = (row) => ({
+  row_key: `ics-${row.id}`,
+  module_code: "QUALITY",
+  module_label: "品質",
+  task_category: "INTEGRATED_CHECKSHEET",
+  task_category_label: "工程一体CS",
+  task_type: row.task_type,
+  task_type_label: qualityTaskTypeMap[row.task_type] || row.task_type_display || row.task_type,
+  status: row.status,
+  due_date: row.due_date || "",
+  created_at: row.created_at || "",
+  target_primary: row.product_code || "",
+  target_secondary: row.template_name || "",
+  action_label: "テンプレートへ",
+  navigate() {
+    router.push({
+      path: "/quality/product-checksheet/integrated/templates",
+      query: { id: String(row.template_id || "") },
+    })
+  },
+})
+
 const formatDateTime = (value) => {
   if (!value) return "-"
   const dt = new Date(value)
@@ -222,9 +244,10 @@ const fetchTasks = async () => {
       params.status = filters.value.status
     }
 
-    const [purchaseResponse, qualityResponse] = await Promise.all([
+    const [purchaseResponse, qualityResponse, icsResponse] = await Promise.all([
       api.purchaseOrderProposals.listTasks(params),
       api.qualityEquipmentInspections.listTasks(params),
+      api.integratedChecksheets.listTasks(params),
     ])
 
     const purchaseRows = Array.isArray(purchaseResponse.data)
@@ -233,7 +256,10 @@ const fetchTasks = async () => {
     const qualityRows = Array.isArray(qualityResponse.data)
       ? qualityResponse.data.map(normalizeQualityTask)
       : []
-    allRows.value = [...purchaseRows, ...qualityRows]
+    const icsRows = Array.isArray(icsResponse.data)
+      ? icsResponse.data.map(normalizeIntegratedCsTask)
+      : []
+    allRows.value = [...purchaseRows, ...qualityRows, ...icsRows]
   } catch (error) {
     console.error("タスク一覧取得に失敗:", error)
     allRows.value = []

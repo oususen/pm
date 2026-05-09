@@ -333,3 +333,51 @@ class IntegratedChecksheetSketchResponse(models.Model):
 
     def __str__(self):
         return f"#{self.unit.sequence_no} - {self.process_block.process.process_name}"
+
+
+class IntegratedChecksheetTask(models.Model):
+    """工程一体チェックシート承認タスク"""
+
+    TASK_SUPERVISOR_REVIEW = "SUPERVISOR_REVIEW"
+    TASK_CHIEF_REVIEW = "CHIEF_REVIEW"
+    TASK_MANAGER_APPROVE = "MANAGER_APPROVE"
+    TASK_CREATOR_FIX = "CREATOR_FIX"
+    TASK_TYPE_CHOICES = [
+        (TASK_SUPERVISOR_REVIEW, "班長確認"),
+        (TASK_CHIEF_REVIEW, "係長確認"),
+        (TASK_MANAGER_APPROVE, "部長承認"),
+        (TASK_CREATOR_FIX, "差戻し修正"),
+    ]
+
+    STATUS_PENDING = "PENDING"
+    STATUS_DONE = "DONE"
+    STATUS_SKIPPED = "SKIPPED"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "未対応"),
+        (STATUS_DONE, "完了"),
+        (STATUS_SKIPPED, "スキップ"),
+    ]
+
+    template = models.ForeignKey(
+        IntegratedChecksheetTemplate, on_delete=models.CASCADE,
+        related_name="tasks", verbose_name="テンプレート",
+    )
+    task_type = models.CharField(max_length=30, choices=TASK_TYPE_CHOICES, verbose_name="タスク種別")
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="integrated_checksheet_tasks",
+        verbose_name="担当者",
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING, verbose_name="状態")
+    due_date = models.DateField(null=True, blank=True, verbose_name="期限")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="作成日時")
+    done_at = models.DateTimeField(null=True, blank=True, verbose_name="完了日時")
+
+    class Meta:
+        db_table = "quality_integrated_cs_task"
+        verbose_name = "工程一体CSタスク"
+        verbose_name_plural = "工程一体CSタスク"
+
+    def __str__(self):
+        return f"{self.template} - {self.get_task_type_display()} -> {self.assigned_to}"
