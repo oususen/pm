@@ -484,6 +484,7 @@ const filterProductName = ref('')
 const filterCustomerCode = ref('')
 const loadingRoutingFinalLineMap = ref(false)
 const routingFinalLineIdByRoutingId = ref({})
+const routingFinalLineMapLoaded = ref(false)
 const loadingCustomerProductSet = ref(false)
 const customerProductCodeSet = ref(new Set())
 const coproductDriverChildProductIds = ref(new Set())
@@ -902,6 +903,7 @@ const fetchRoutings = async () => {
 }
 
 const fetchRoutingFinalLineMap = async () => {
+  if (routingFinalLineMapLoaded.value) return
   loadingRoutingFinalLineMap.value = true
   try {
     const perPage = 500
@@ -945,6 +947,7 @@ const fetchRoutingFinalLineMap = async () => {
       map[routingId] = Number(step.line)
     })
     routingFinalLineIdByRoutingId.value = map
+    routingFinalLineMapLoaded.value = true
   } catch (error) {
     console.error('ルーティング最終工程ライン集計エラー:', error)
   } finally {
@@ -1000,10 +1003,7 @@ const fetchStepsAndMaterials = async (routingId) => {
     // ルーティングID一括取得（ステップ数分のN+1リクエストを回避）
     // routing 指定時はサーバー側でページネーション無効化のため page_size 不要
     const routing = routings.value.find((item) => item.id === routingId)
-    const [matRes, bomQuantityMap] = await Promise.all([
-      api.routings.getRoutingStepMaterials({ routing: routingId }),
-      fetchBomQuantityMap(routing),
-    ])
+    const matRes = await api.routings.getRoutingStepMaterials({ routing: routingId })
     if (stepLoadToken.value !== token) return
 
     const allMaterials = normalizeList(matRes.data)
@@ -1019,7 +1019,15 @@ const fetchStepsAndMaterials = async (routingId) => {
         .map((step) => Number(step?.output_product))
         .filter((id) => Number.isFinite(id) && coproductDriverChildProductIds.value.has(id))
     )
-    bomQuantityByChildId.value = bomQuantityMap
+    bomQuantityByChildId.value = {}
+    fetchBomQuantityMap(routing)
+      .then((bomQuantityMap) => {
+        if (stepLoadToken.value !== token) return
+        bomQuantityByChildId.value = bomQuantityMap
+      })
+      .catch((error) => {
+        console.warn('BOM使用数量取得エラー:', error)
+      })
   } catch (error) {
     console.error('ルーティング工程取得エラー:', error)
     errorMessage.value = 'ルーティング工程の取得に失敗しました'
@@ -1262,6 +1270,10 @@ watch(filteredRoutings, (list) => {
 watch(onlyActive, async () => {
   await fetchRoutings()
 })
+watch(filterFinalLineId, async (lineId) => {
+  if (!lineId) return
+  await fetchRoutingFinalLineMap()
+})
 watch(filterCustomerCode, async (code) => {
   await fetchCustomerProductCodeSet(code)
 })
@@ -1336,7 +1348,6 @@ onMounted(async () => {
     fetchProcesses(),
     fetchSuppliers(),
     fetchCustomers(),
-    fetchRoutingFinalLineMap(),
     fetchCoproductDriverChildProductIds(),
   ])
 })
