@@ -89,6 +89,12 @@ const masters = [
     component: () => import("@/views/masters/KubotaSakaiTruckMaster.vue"),
     meta: { pageTitle: "クボタ堺便マスタ", resource: "masters.kubota_sakai_truck" },
   },
+  {
+    path: "/masters/where-used",
+    name: "WhereUsedPage",
+    component: () => import("@/views/masters/WhereUsedPage.vue"),
+    meta: { pageTitle: "逆展開（Where Used）", resource: "masters.bom" },
+  },
 ];
 
 export default masters;

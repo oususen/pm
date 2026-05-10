@@ -205,16 +205,20 @@
     <!-- 一括タブ -->
     <div class="batch-pane" v-if="activeTab === 'batch'">
       <div class="batch-toolbar">
+        <div class="batch-search-mode">
+          <label><input type="radio" v-model="batchSearchMode" value="process" /> 工程CD</label>
+          <label><input type="radio" v-model="batchSearchMode" value="line" /> ラインCD</label>
+        </div>
         <div class="row" style="max-width:400px">
-          <label>工程CD</label>
+          <label>{{ batchSearchMode === 'process' ? '工程CD' : 'ラインCD' }}</label>
           <input
-            v-model="batchProcessCode"
+            v-model="batchSearchCode"
             type="text"
-            placeholder="工程コードを入力"
+            :placeholder="batchSearchMode === 'process' ? '工程コードを入力' : 'ラインコードを入力'"
             @keyup.enter="loadBatchProducts"
           />
         </div>
-        <button class="btn" type="button" @click="batchRecalcThenReload" :disabled="batchWorking || !batchProcessCode">
+        <button class="btn" type="button" @click="batchRecalcThenReload" :disabled="batchWorking || !batchSearchCode">
           ① {{ guideStep1Btn }}
         </button>
         <button class="btn primary" type="button" @click="batchApplyAndRecalc" :disabled="batchWorking || !batchProducts.length || !hasBatchDiff">
@@ -225,7 +229,7 @@
       <div v-if="batchWorking" class="center">処理中...</div>
       <div v-else-if="batchError" class="center" style="color:#c00">{{ batchError }}</div>
       <div v-else-if="batchLineInfo">
-        <p class="batch-line-name">{{ batchLineInfo.process_code }} — {{ batchLineInfo.process_name }}</p>
+        <p class="batch-line-name">{{ batchInfoLabel }}</p>
         <p class="batch-guide">{{ guideActualLabel }}を入力すると差分が自動計算されます。② ボタンで一括保存・再計算されます。</p>
         <table class="grid">
           <thead>
@@ -233,6 +237,7 @@
               <th>品番</th>
               <th>品名</th>
               <th>ライン</th>
+              <th v-if="batchSearchMode === 'line'">工程CD</th>
               <th>調整対象日</th>
               <th>現在調整値</th>
               <th>{{ guideSystemLabel }}</th>
@@ -242,12 +247,13 @@
           </thead>
           <tbody>
             <tr v-if="!batchProducts.length">
-              <td colspan="8" class="center">品番が見つかりません</td>
+              <td :colspan="batchSearchMode === 'line' ? 9 : 8" class="center">品番が見つかりません</td>
             </tr>
             <tr v-for="(row, idx) in batchProducts" :key="`${row.product_id}-${row.line_id}`">
               <td>{{ row.product_code }}</td>
               <td>{{ row.product_name }}</td>
               <td>{{ row.line_code }}</td>
+              <td v-if="batchSearchMode === 'line'">{{ row.process_code || '-' }}</td>
               <td>{{ row.calc_start_date }}</td>
               <td>{{ row.adjust_qty }}</td>
               <td>{{ row.value_today !== null && row.value_today !== undefined ? row.value_today : '—' }}</td>
@@ -372,12 +378,23 @@ const applyAndRecalc = async () => {
 };
 
 // 一括タブ用
-const batchProcessCode = ref("");
+const batchSearchMode = ref("process");
+const batchSearchCode = ref("");
+const batchProcessCode = computed(() => batchSearchMode.value === 'process' ? batchSearchCode.value : '');
+const batchLineCode = computed(() => batchSearchMode.value === 'line' ? batchSearchCode.value : '');
 const batchLineInfo = ref(null);
 const batchProducts = ref([]);
 const batchActualInputs = ref({});  // 実在庫入力 {index: number}
 const batchWorking = ref(false);
 const batchError = ref("");
+const batchInfoLabel = computed(() => {
+  const info = batchLineInfo.value;
+  if (!info) return '';
+  if (batchSearchMode.value === 'line') {
+    return `${info.line_code} — ${info.line_name}`;
+  }
+  return `${info.process_code} — ${info.process_name}`;
+});
 
 // 行ごとの差分（実測値 - システム値）。同一品番が複数ラインに存在しうるためindexで管理
 const batchDiff = (row, idx) => {
@@ -1002,17 +1019,20 @@ const saveCurrentDate = async () => {
 };
 
 const loadBatchProducts = async () => {
-  if (!batchProcessCode.value) return;
+  if (!batchSearchCode.value) return;
   batchWorking.value = true;
   batchError.value = "";
   batchLineInfo.value = null;
   batchProducts.value = [];
   batchActualInputs.value = {};
   try {
-    const res = await api.lineBacklogs.getBatchAdjustInfo({
-      process_code: batchProcessCode.value,
-      adjust_type: props.adjustType,
-    });
+    const params = { adjust_type: props.adjustType };
+    if (batchSearchMode.value === 'line') {
+      params.line_code = batchSearchCode.value;
+    } else {
+      params.process_code = batchSearchCode.value;
+    }
+    const res = await api.lineBacklogs.getBatchAdjustInfo(params);
     batchLineInfo.value = res.data;
     batchProducts.value = res.data.products || [];
   } catch (e) {
@@ -1073,7 +1093,7 @@ const executeBatchRecalc = async () => {
 
 // ① 在庫/進度再計算 → 品番リスト再取得
 const batchRecalcThenReload = async () => {
-  if (!batchProcessCode.value) return;
+  if (!batchSearchCode.value) return;
   batchWorking.value = true;
   batchError.value = "";
   try {
@@ -1099,7 +1119,7 @@ const batchApplyAndRecalc = async () => {
         return api.lineBacklogAdjustments.save({
           line_code: row.line_code,
           product_code: row.product_code,
-          process_code: batchProcessCode.value,
+          process_code: row.process_code || batchProcessCode.value,
           plan_date: row.calc_start_date,
           adjust_type: props.adjustType,
           adjust_qty: totalAdjust,
@@ -1349,6 +1369,20 @@ onMounted(() => {
   align-items: flex-end;
   gap: 10px;
   margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.batch-search-mode {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-size: 13px;
+  padding-bottom: 4px;
+}
+.batch-search-mode label {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 3px;
 }
 .batch-line-name {
   margin: 0 0 6px;

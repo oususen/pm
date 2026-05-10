@@ -91,8 +91,8 @@
               <div class="info-row">
                 <span class="info-label">品番</span>
                 <span class="info-value">{{ g.product_code || '-' }}</span>
-                <button @click="toggleChildren(g)" class="expand-btn">
-                  {{ g.showChildren ? '▼' : '▶' }} BOM展開
+                <button @click="openWhereUsed(g)" class="expand-btn where-used-btn">
+                  ▶ 逆展開
                 </button>
               </div>
               <div class="info-row">
@@ -694,6 +694,12 @@ const toggleChildren = async (group) => {
   }
 };
 
+const openWhereUsed = (group) => {
+  if (!group.product_id) return
+  const url = `/masters/where-used?productId=${group.product_id}`
+  window.open(url, '_blank')
+};
+
 const reloadDemands = async () => {
   if (!purchaseLineId.value) return;
   const res = await api.lineBacklogs.getLineBacklogs(getBacklogParams());
@@ -1237,6 +1243,12 @@ onUpdated(() => {
 }
 .expand-btn:hover {
   background: #2563eb;
+}
+.where-used-btn {
+  background: #17a2b8;
+}
+.where-used-btn:hover {
+  background: #138496;
 }
 .children-list {
   padding: 12px;

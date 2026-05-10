@@ -4175,41 +4175,57 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='batch_adjust_info')
     def batch_adjust_info(self, request):
         """
-        工程上の全品番（ライン別）の調整対象日・現在調整値を返すAPI（一括調整用）。
+        工程またはライン上の全品番の調整対象日・現在調整値を返すAPI（一括調整用）。
 
         クエリパラメータ:
-            process_code: str (required)
+            process_code: str (process_code か line_code のいずれか必須)
+            line_code: str (process_code か line_code のいずれか必須)
             adjust_type: str (required) - STOCK / PLANNED_STOCK / PROGRESS / PLANNED_PROGRESS
         """
         from .inventory.inventory_calculator import _get_max_parent_bom_lead_time, _get_direct_parent_bom_lead_time
 
         process_code = (request.query_params.get('process_code') or '').strip()
+        line_code = (request.query_params.get('line_code') or '').strip()
         adjust_type = (request.query_params.get('adjust_type') or '').strip().upper()
 
-        if not process_code:
-            return Response({'detail': 'process_code is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not process_code and not line_code:
+            return Response({'detail': 'process_code or line_code is required'}, status=status.HTTP_400_BAD_REQUEST)
         if not adjust_type:
             return Response({'detail': 'adjust_type is required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        process = Process.objects.filter(process_code=process_code, is_active=True).first()
-        if not process:
-            return Response({'detail': f'工程が見つかりません: {process_code}'}, status=status.HTTP_404_NOT_FOUND)
+        process = None
+        line = None
+        if process_code:
+            process = Process.objects.filter(process_code=process_code, is_active=True).first()
+            if not process:
+                return Response({'detail': f'工程が見つかりません: {process_code}'}, status=status.HTTP_404_NOT_FOUND)
+        if line_code:
+            line = Line.objects.filter(line_code=line_code, is_active=True).first()
+            if not line:
+                return Response({'detail': f'ラインが見つかりません: {line_code}'}, status=status.HTTP_404_NOT_FOUND)
 
         # 在庫・計画在庫は直親LT、進度は累積LTを使用
         use_direct_lt = adjust_type in ('STOCK', 'PLANNED_STOCK')
 
-        # 工程上の (product, line) 組み合わせを取得（重複なし）
+        # (product, line, process) 組み合わせを取得（重複なし）
         from masters.models import Product as ProductModel
+        backlog_filter = {}
+        if process:
+            backlog_filter['process'] = process
+        if line:
+            backlog_filter['line'] = line
         pl_pairs = list(
-            LineBacklog.objects.filter(process=process)
-            .values('product_id', 'line_id')
+            LineBacklog.objects.filter(**backlog_filter)
+            .values('product_id', 'line_id', 'process_id')
             .distinct()
         )
         product_ids = list({row['product_id'] for row in pl_pairs})
         line_ids = list({row['line_id'] for row in pl_pairs})
+        process_ids = list({row['process_id'] for row in pl_pairs if row['process_id']})
 
         products = {p.id: p for p in ProductModel.objects.filter(id__in=product_ids)}
         lines = {l.id: l for l in Line.objects.filter(id__in=line_ids)}
+        processes_map = {p.id: p for p in Process.objects.filter(id__in=process_ids)} if process_ids else {}
 
         today = get_business_today()
         calendar_id = Calendar.objects.filter(calendar_code='daiso').values_list('id', flat=True).first()
@@ -4234,10 +4250,15 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     remaining -= 1
             return current
 
-        # 既存の調整値をまとめて取得（工程で絞る）
+        # 既存の調整値をまとめて取得
+        adj_filter = {'adjust_type': adjust_type}
+        if process:
+            adj_filter['process'] = process
+        if line:
+            adj_filter['line'] = line
         existing = {
             (a.product_id, a.line_id, str(a.plan_date)): a.adjust_qty
-            for a in LineBacklogAdjustment.objects.filter(process=process, adjust_type=adjust_type)
+            for a in LineBacklogAdjustment.objects.filter(**adj_filter)
         }
 
         # adjust_type に応じた今日の値フィールドを決定
@@ -4249,24 +4270,35 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         }
         value_field = value_field_map.get(adjust_type, 'stock_qty')
 
+        today_filter = {
+            'product_id__in': product_ids,
+            'plan_date': today,
+            'sequence_no': 0,
+        }
+        if process:
+            today_filter['process'] = process
+        if line:
+            today_filter['line'] = line
         today_values = {
             (lb.product_id, lb.line_id): getattr(lb, value_field)
-            for lb in LineBacklog.objects.filter(
-                process=process,
-                product_id__in=product_ids,
-                plan_date=today,
-                sequence_no=0,
-            )
+            for lb in LineBacklog.objects.filter(**today_filter)
         }
 
         results = []
+        seen = set()
         for row in pl_pairs:
             pid = row['product_id']
             lid = row['line_id']
-            product = products.get(pid)
-            line = lines.get(lid)
-            if not product or not line:
+            pair_key = (pid, lid)
+            if pair_key in seen:
                 continue
+            seen.add(pair_key)
+            product = products.get(pid)
+            line_obj = lines.get(lid)
+            if not product or not line_obj:
+                continue
+            proc_id = row.get('process_id')
+            proc_obj = processes_map.get(proc_id) if proc_id else None
             max_lt = _get_direct_parent_bom_lead_time(pid) if use_direct_lt else _get_max_parent_bom_lead_time(pid)
             target_date = calc_start(max_lt)
             results.append({
@@ -4274,8 +4306,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 'product_code': product.product_code,
                 'product_name': product.product_name,
                 'line_id': lid,
-                'line_code': line.line_code,
-                'line_name': line.line_name,
+                'line_code': line_obj.line_code,
+                'line_name': line_obj.line_name,
+                'process_code': proc_obj.process_code if proc_obj else '',
                 'calc_start_date': target_date.isoformat(),
                 'adjust_qty': existing.get((pid, lid, target_date.isoformat()), 0),
                 'value_today': today_values.get((pid, lid)),
@@ -4283,9 +4316,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         results.sort(key=lambda x: (x['product_code'], x['line_code']))
         return Response({
-            'process_id': process.id,
-            'process_code': process.process_code,
-            'process_name': process.process_name,
+            'process_id': process.id if process else None,
+            'process_code': process.process_code if process else '',
+            'process_name': process.process_name if process else '',
+            'line_id': line.id if line else None,
+            'line_code': line.line_code if line else '',
+            'line_name': line.line_name if line else '',
             'line_ids': line_ids,
             'products': results,
         })

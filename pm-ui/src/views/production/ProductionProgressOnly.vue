@@ -109,6 +109,7 @@
             <div class="info-row">
               <span class="info-label">品番</span>
               <span class="info-value">{{ g.product_code || "-" }}</span>
+              <button @click="openWhereUsed(g)" class="expand-btn where-used-btn">▶ 逆展開</button>
             </div>
             <div class="info-row">
               <span class="info-label">品名</span>
@@ -1007,6 +1008,11 @@ const formatLine = (group) => {
   return code || name || "-";
 };
 
+const openWhereUsed = (group) => {
+  if (!group.product_id) return
+  window.open(`/masters/where-used?productId=${group.product_id}`, '_blank')
+};
+
 const fmt = (n, showZero = false) => {
   if (n === null || n === undefined) return "";
   const num = Number(n);
@@ -1200,6 +1206,25 @@ const getCellClass = (group, date, rowKey) => {
 .info-value {
   color: #111827;
   margin-left: 8px;
+}
+.expand-btn {
+  margin-left: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.expand-btn:hover {
+  background: #2563eb;
+}
+.where-used-btn {
+  background: #17a2b8;
+}
+.where-used-btn:hover {
+  background: #138496;
 }
 .matrix-block {
   --fixed-left: 260px;
