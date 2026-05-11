@@ -35,9 +35,7 @@ services:
 
   # Scheduler (APScheduler - 定時タスク実行)
   pm-scheduler:
-    build:
-      context: ./pm_backend
-      dockerfile: Dockerfile
+    image: pm-pm-backend:latest
     container_name: pm_scheduler_prod
     restart: always
     environment:

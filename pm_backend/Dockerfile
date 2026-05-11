@@ -22,12 +22,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.txt
-# ultralyticsがopencv-python(GUI)を引っ張るためheadlessに差し替え
-# pip checkはultralytics依存メタデータの誤検知で失敗するため除外
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip uninstall -y opencv-python \
-    && pip install opencv-python-headless==4.12.0.88
-
 # アプリケーションコードをコピー
 COPY . .
 
