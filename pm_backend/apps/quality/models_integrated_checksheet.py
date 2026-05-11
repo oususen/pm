@@ -50,6 +50,9 @@ class IntegratedChecksheetTemplate(models.Model):
         settings.AUTH_USER_MODEL, null=True, blank=True,
         on_delete=models.SET_NULL, related_name="+", verbose_name="部長担当",
     )
+    reviewed_at = models.DateTimeField(null=True, blank=True, verbose_name="班長確認日時")
+    chief_reviewed_at = models.DateTimeField(null=True, blank=True, verbose_name="係長確認日時")
+    approved_at = models.DateTimeField(null=True, blank=True, verbose_name="部長承認日時")
     rejection_comment = models.TextField(blank=True, default="", verbose_name="差戻しコメント")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,
@@ -381,3 +384,57 @@ class IntegratedChecksheetTask(models.Model):
 
     def __str__(self):
         return f"{self.template} - {self.get_task_type_display()} -> {self.assigned_to}"
+
+
+class IntegratedChecksheetWorkflowLog(models.Model):
+    """工程一体チェックシートワークフロー履歴"""
+
+    ACTION_CREATED = "CREATED"
+    ACTION_UPDATED = "UPDATED"
+    ACTION_SUBMITTED = "SUBMITTED"
+    ACTION_SUPERVISOR_REVIEWED = "SUPERVISOR_REVIEWED"
+    ACTION_CHIEF_REVIEWED = "CHIEF_REVIEWED"
+    ACTION_APPROVED = "APPROVED"
+    ACTION_REJECTED = "REJECTED"
+
+    ACTION_CHOICES = [
+        (ACTION_CREATED, "作成"),
+        (ACTION_UPDATED, "更新"),
+        (ACTION_SUBMITTED, "確認依頼"),
+        (ACTION_SUPERVISOR_REVIEWED, "班長確認完了"),
+        (ACTION_CHIEF_REVIEWED, "係長承認完了"),
+        (ACTION_APPROVED, "部長承認"),
+        (ACTION_REJECTED, "差戻し"),
+    ]
+
+    template = models.ForeignKey(
+        IntegratedChecksheetTemplate,
+        on_delete=models.CASCADE,
+        related_name="workflow_logs",
+        verbose_name="テンプレート",
+    )
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES, verbose_name="操作")
+    from_status = models.CharField(max_length=20, blank=True, default="", verbose_name="遷移前")
+    to_status = models.CharField(max_length=20, blank=True, default="", verbose_name="遷移後")
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ics_template_workflow_logs",
+        verbose_name="操作ユーザー",
+    )
+    comment = models.TextField(blank=True, default="", verbose_name="コメント")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="作成日時")
+
+    class Meta:
+        db_table = "quality_integrated_cs_workflow_log"
+        verbose_name = "工程一体CSワークフロー履歴"
+        verbose_name_plural = "工程一体CSワークフロー履歴"
+        indexes = [
+            models.Index(fields=["template", "created_at"]),
+        ]
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return f"{self.template_id}:{self.action}"

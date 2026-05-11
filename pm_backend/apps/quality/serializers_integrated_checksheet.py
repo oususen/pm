@@ -9,6 +9,7 @@ from .models_integrated_checksheet import (
     IntegratedChecksheetSketchResponse,
     IntegratedChecksheetTemplate,
     IntegratedChecksheetUnit,
+    IntegratedChecksheetWorkflowLog,
 )
 
 def _format_user_name(user):
@@ -81,8 +82,24 @@ class IntegratedChecksheetTemplateListSerializer(serializers.ModelSerializer):
         ]
 
 
+class IntegratedChecksheetWorkflowLogSerializer(serializers.ModelSerializer):
+    actor_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = IntegratedChecksheetWorkflowLog
+        fields = [
+            "id", "action", "from_status", "to_status",
+            "actor", "actor_name", "comment", "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_actor_name(self, obj):
+        return _format_user_name(obj.actor)
+
+
 class IntegratedChecksheetTemplateSerializer(serializers.ModelSerializer):
     process_blocks = IntegratedChecksheetProcessBlockSerializer(many=True, read_only=True)
+    workflow_logs = IntegratedChecksheetWorkflowLogSerializer(many=True, read_only=True)
     product_code = serializers.CharField(source="product.product_code", read_only=True)
     product_name = serializers.CharField(source="product.product_name", read_only=True)
     line_code = serializers.SerializerMethodField()
@@ -105,7 +122,8 @@ class IntegratedChecksheetTemplateSerializer(serializers.ModelSerializer):
             "approver_user", "approver_user_name",
             "rejection_comment",
             "created_by", "created_by_name",
-            "process_blocks", "created_at", "updated_at",
+            "reviewed_at", "chief_reviewed_at", "approved_at",
+            "process_blocks", "workflow_logs", "created_at", "updated_at",
         ]
         read_only_fields = ["created_by"]
 

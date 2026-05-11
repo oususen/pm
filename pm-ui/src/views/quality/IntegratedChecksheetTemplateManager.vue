@@ -71,10 +71,22 @@
 
           <div class="status-row">
             <span class="status-chip" :class="statusClass(form.status)">{{ statusLabel(form.status) }}</span>
-            <span class="status-meta">作成者: {{ form.created_by_name || '-' }}</span>
-            <span class="status-meta">班長担当: {{ form.reviewer_user_name || '-' }}</span>
-            <span class="status-meta">係長担当: {{ form.chief_user_name || '-' }}</span>
-            <span class="status-meta">部長担当: {{ form.approver_user_name || '-' }}</span>
+            <span class="status-meta">
+              作成者: {{ form.created_by_name || '-' }}
+              <span v-if="form.created_at" class="status-date">（{{ formatDate(form.created_at) }}）</span>
+            </span>
+            <span class="status-meta">
+              班長担当: {{ form.reviewer_user_name || '-' }}
+              <span v-if="form.reviewed_at" class="status-date">（{{ formatDate(form.reviewed_at) }}）</span>
+            </span>
+            <span class="status-meta">
+              係長担当: {{ form.chief_user_name || '-' }}
+              <span v-if="form.chief_reviewed_at" class="status-date">（{{ formatDate(form.chief_reviewed_at) }}）</span>
+            </span>
+            <span class="status-meta">
+              部長担当: {{ form.approver_user_name || '-' }}
+              <span v-if="form.approved_at" class="status-date">（{{ formatDate(form.approved_at) }}）</span>
+            </span>
           </div>
 
           <!-- 基本情報 -->
@@ -370,6 +382,32 @@
           </div>
           <div v-if="form.status === 'REJECTED' && form.rejection_comment" class="rejection-banner">
             差戻しコメント: {{ form.rejection_comment }}
+          </div>
+
+          <div v-if="form.id && form.workflow_logs && form.workflow_logs.length" class="item-section">
+            <h4>ワークフロー履歴</h4>
+            <div class="table-wrap">
+              <table class="data-table compact">
+                <thead>
+                  <tr>
+                    <th>日時</th>
+                    <th>操作</th>
+                    <th>遷移</th>
+                    <th>実施者</th>
+                    <th>コメント</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="log in form.workflow_logs" :key="log.id">
+                    <td>{{ formatDateTime(log.created_at) }}</td>
+                    <td>{{ actionLabel(log.action) }}</td>
+                    <td>{{ transitionLabel(log.from_status, log.to_status) }}</td>
+                    <td>{{ log.actor_name || '-' }}</td>
+                    <td>{{ log.comment || '-' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </template>
 
@@ -671,6 +709,10 @@ const createEmptyForm = () => ({
   approver_user: null,
   approver_user_name: '',
   rejection_comment: '',
+  reviewed_at: null,
+  chief_reviewed_at: null,
+  approved_at: null,
+  workflow_logs: [],
   process_blocks: [],
 })
 
@@ -691,6 +733,28 @@ const formatDateTime = (value) => {
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
   return d.toLocaleString('ja-JP')
+}
+const formatDate = (value) => {
+  if (!value) return ''
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleDateString('ja-JP')
+}
+const ACTION_LABELS = {
+  CREATED: '作成', UPDATED: '更新', SUBMITTED: '確認依頼',
+  SUPERVISOR_REVIEWED: '班長確認完了', CHIEF_REVIEWED: '係長承認完了',
+  APPROVED: '部長承認', REJECTED: '差戻し',
+}
+const STATUS_LABELS_MAP = {
+  DRAFT: '下書き', SUPERVISOR_PENDING: '班長確認待ち',
+  CHIEF_PENDING: '係長承認待ち', MANAGER_PENDING: '部長承認待ち',
+  APPROVED: '承認済み', REJECTED: '差戻し',
+}
+const actionLabel = (action) => ACTION_LABELS[action] || action
+const transitionLabel = (from, to) => {
+  const f = STATUS_LABELS_MAP[from] || from || ''
+  const t = STATUS_LABELS_MAP[to] || to || ''
+  return f && t ? `${f} → ${t}` : t || f || '-'
 }
 
 const blockLabel = (block) => {
@@ -834,6 +898,11 @@ const selectTemplate = async (id) => {
       approver_user: data.approver_user || null,
       approver_user_name: data.approver_user_name || '',
       rejection_comment: data.rejection_comment || '',
+      created_at: data.created_at || null,
+      reviewed_at: data.reviewed_at || null,
+      chief_reviewed_at: data.chief_reviewed_at || null,
+      approved_at: data.approved_at || null,
+      workflow_logs: data.workflow_logs || [],
       process_blocks: (data.process_blocks || []).map((b) => ({
         id: b.id,
         process: b.process || '',
@@ -894,6 +963,10 @@ const copyTemplate = () => {
     version: 1,
     is_active: true,
     rejection_comment: '',
+    reviewed_at: null,
+    chief_reviewed_at: null,
+    approved_at: null,
+    workflow_logs: [],
     created_by_name: '',
     process_blocks: src.process_blocks.map((b) => ({
       ...JSON.parse(JSON.stringify(b)),
@@ -1687,6 +1760,10 @@ watch(
   font-size: 14px;
   font-weight: 500;
   color: #334155;
+}
+.status-date {
+  font-size: 12px;
+  color: #64748b;
 }
 .form-grid {
   display: grid;

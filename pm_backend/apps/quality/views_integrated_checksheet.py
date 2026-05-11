@@ -21,6 +21,7 @@ from .models_integrated_checksheet import (
     IntegratedChecksheetTask,
     IntegratedChecksheetTemplate,
     IntegratedChecksheetUnit,
+    IntegratedChecksheetWorkflowLog,
 )
 from .serializers_integrated_checksheet import (
     IntegratedChecksheetBatchSerializer,
@@ -37,6 +38,17 @@ def _display_name(user):
     last = (getattr(user, "last_name", "") or "").strip()
     first = (getattr(user, "first_name", "") or "").strip()
     return f"{last} {first}".strip() or user.get_full_name() or str(user)
+
+
+def _log_ics_workflow(template, action, actor=None, from_status="", to_status="", comment=""):
+    return IntegratedChecksheetWorkflowLog.objects.create(
+        template=template,
+        action=action,
+        actor=actor if actor and getattr(actor, "id", None) else None,
+        from_status=from_status or "",
+        to_status=to_status or "",
+        comment=comment or "",
+    )
 
 
 def _ics_task_due_date():
@@ -184,6 +196,7 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
                 "process_blocks__process",
                 "process_blocks__items",
                 "process_blocks__sketch_fields",
+                "workflow_logs__actor",
             )
         product_id = self.request.query_params.get("product")
         line_id = self.request.query_params.get("line")
@@ -207,10 +220,18 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         template = serializer.save(created_by=self.request.user)
         _ensure_workflow_users(template, creator=self.request.user, persist=True)
+        WL = IntegratedChecksheetWorkflowLog
+        _log_ics_workflow(template, WL.ACTION_CREATED, self.request.user,
+                          to_status=template.status)
 
     def perform_update(self, serializer):
+        old_status = serializer.instance.status
         template = serializer.save()
         _ensure_workflow_users(template, creator=template.created_by or self.request.user, persist=True)
+        WL = IntegratedChecksheetWorkflowLog
+        _log_ics_workflow(template, WL.ACTION_UPDATED, self.request.user,
+                          from_status=old_status, to_status=template.status,
+                          comment="テンプレート更新")
 
     def perform_destroy(self, instance):
         if instance.status not in (
@@ -241,10 +262,28 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         _skip_all_ics_pending_tasks(template)
+        old_status = template.status
         template.status = IntegratedChecksheetTemplate.STATUS_SUPERVISOR_PENDING
         template.rejection_comment = ""
-        template.save(update_fields=["status", "rejection_comment", "updated_at"])
+        template.reviewed_at = None
+        template.chief_reviewed_at = None
+        template.approved_at = None
+        template.save(update_fields=["status", "rejection_comment", "reviewed_at", "chief_reviewed_at", "approved_at", "updated_at"])
         _create_ics_task(template, IntegratedChecksheetTask.TASK_SUPERVISOR_REVIEW, template.reviewer_user)
+        parts = []
+        if template.reviewer_user:
+            parts.append(f"班長: {_display_name(template.reviewer_user)}")
+        if template.chief_user:
+            parts.append(f"係長: {_display_name(template.chief_user)}")
+        if template.approver_user:
+            parts.append(f"部長: {_display_name(template.approver_user)}")
+        comment = " / ".join(parts)
+        if request.data.get("comment"):
+            comment += f" {request.data['comment']}"
+        WL = IntegratedChecksheetWorkflowLog
+        _log_ics_workflow(template, WL.ACTION_SUBMITTED, request.user,
+                          from_status=old_status, to_status=template.status,
+                          comment=comment)
         return Response(IntegratedChecksheetTemplateSerializer(
             self.get_queryset().get(pk=template.pk)
         ).data)
@@ -254,6 +293,8 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
         template = self.get_object()
         T = IntegratedChecksheetTemplate
         TK = IntegratedChecksheetTask
+        WL = IntegratedChecksheetWorkflowLog
+        old_status = template.status
         if template.status == T.STATUS_SUPERVISOR_PENDING:
             if template.reviewer_user_id and template.reviewer_user_id != request.user.id:
                 return Response(
@@ -261,6 +302,7 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_403_FORBIDDEN,
                 )
             _mark_ics_tasks_done(template, TK.TASK_SUPERVISOR_REVIEW)
+            template.reviewed_at = datetime.now()
             if template.chief_user_id:
                 template.status = T.STATUS_CHIEF_PENDING
                 _create_ics_task(template, TK.TASK_CHIEF_REVIEW, template.chief_user)
@@ -270,6 +312,10 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
             else:
                 template.status = T.STATUS_APPROVED
                 template.is_active = True
+            template.save(update_fields=["status", "is_active", "reviewed_at", "updated_at"])
+            _log_ics_workflow(template, WL.ACTION_SUPERVISOR_REVIEWED, request.user,
+                              from_status=old_status, to_status=template.status,
+                              comment="班長確認完了")
         elif template.status == T.STATUS_CHIEF_PENDING:
             if template.chief_user_id and template.chief_user_id != request.user.id:
                 return Response(
@@ -277,18 +323,22 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_403_FORBIDDEN,
                 )
             _mark_ics_tasks_done(template, TK.TASK_CHIEF_REVIEW)
+            template.chief_reviewed_at = datetime.now()
             if template.approver_user_id:
                 template.status = T.STATUS_MANAGER_PENDING
                 _create_ics_task(template, TK.TASK_MANAGER_APPROVE, template.approver_user)
             else:
                 template.status = T.STATUS_APPROVED
                 template.is_active = True
+            template.save(update_fields=["status", "is_active", "chief_reviewed_at", "updated_at"])
+            _log_ics_workflow(template, WL.ACTION_CHIEF_REVIEWED, request.user,
+                              from_status=old_status, to_status=template.status,
+                              comment="係長承認完了")
         else:
             return Response(
                 {"detail": "班長確認待ち/係長確認待ちのテンプレートのみ確認完了できます。"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        template.save(update_fields=["status", "is_active", "updated_at"])
         return Response(IntegratedChecksheetTemplateSerializer(
             self.get_queryset().get(pk=template.pk)
         ).data)
@@ -306,6 +356,7 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
                 {"detail": "部長担当者のみ承認できます。"},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        old_status = template.status
         with transaction.atomic():
             IntegratedChecksheetTemplate.objects.filter(
                 product=template.product,
@@ -314,8 +365,13 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
             ).exclude(id=template.id).update(is_active=False)
             template.status = IntegratedChecksheetTemplate.STATUS_APPROVED
             template.is_active = True
-            template.save(update_fields=["status", "is_active", "updated_at"])
+            template.approved_at = datetime.now()
+            template.save(update_fields=["status", "is_active", "approved_at", "updated_at"])
             _mark_ics_tasks_done(template, IntegratedChecksheetTask.TASK_MANAGER_APPROVE)
+            WL = IntegratedChecksheetWorkflowLog
+            _log_ics_workflow(template, WL.ACTION_APPROVED, request.user,
+                              from_status=old_status, to_status=template.status,
+                              comment="部長承認完了")
         return Response(IntegratedChecksheetTemplateSerializer(
             self.get_queryset().get(pk=template.pk)
         ).data)
@@ -344,12 +400,17 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
         comment = str(request.data.get("comment") or "").strip()
+        old_status = template.status
         _skip_all_ics_pending_tasks(template)
         template.status = IntegratedChecksheetTemplate.STATUS_REJECTED
         template.rejection_comment = comment
         template.save(update_fields=["status", "rejection_comment", "updated_at"])
         if template.created_by_id:
             _create_ics_task(template, IntegratedChecksheetTask.TASK_CREATOR_FIX, template.created_by)
+        WL = IntegratedChecksheetWorkflowLog
+        _log_ics_workflow(template, WL.ACTION_REJECTED, request.user,
+                          from_status=old_status, to_status=template.status,
+                          comment=comment or "-")
         return Response(IntegratedChecksheetTemplateSerializer(
             self.get_queryset().get(pk=template.pk)
         ).data)
