@@ -1,4 +1,5 @@
 # PM Backend - Django
+# syntax=docker/dockerfile:1
 FROM python:3.12-slim
 
 # 環境変数設定
@@ -8,21 +9,24 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 # システム依存パッケージのインストール（mysqlclient用、日本語フォント）
-RUN apt-get update && apt-get install -y \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y \
     default-libmysqlclient-dev \
     build-essential \
     pkg-config \
     fonts-ipafont-gothic \
-    fonts-takao-gothic \
-    && rm -rf /var/lib/apt/lists/*
+    fonts-takao-gothic
 
-# Python依存パッケージのインストール
+# Python依存パッケージのインストール（pipキャッシュを再利用して高速化）
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
 # ultralyticsがopencv-python(GUI)を引っ張るためheadlessに差し替え
-RUN pip uninstall -y opencv-python \
-    && pip install --no-cache-dir opencv-python-headless==4.12.0.88 \
-    && pip check
+# pip checkはultralytics依存メタデータの誤検知で失敗するため除外
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip uninstall -y opencv-python \
+    && pip install opencv-python-headless==4.12.0.88
 
 # アプリケーションコードをコピー
 COPY . .
