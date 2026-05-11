@@ -892,6 +892,13 @@ const selectedProcess = computed(() =>
 )
 const filteredLines = computed(() => {
   const proc = selectedProcess.value
+  if (itemForm.value.sourcing_type === 'SUBCON') {
+    if (itemForm.value.line) {
+      const selectedLine = lines.value.filter((l) => `${l.id}` === `${itemForm.value.line}`)
+      return selectedLine.length ? selectedLine : lines.value
+    }
+    return lines.value
+  }
   if (proc?.line) {
     return lines.value.filter((l) => `${l.id}` === `${proc.line}`)
   }
@@ -1015,6 +1022,9 @@ const fetchProcesses = async () => {
   try {
     const response = await api.processes.getProcesses({ page_size: 1000 })
     processes.value = response.data.results || response.data
+    if (itemForm.value.sourcing_type === 'SUBCON') {
+      applySourcingSideEffects()
+    }
   } catch (error) {
     console.error('工程取得エラー:', error)
   }
@@ -1066,6 +1076,18 @@ const resetItemForm = () => {
   childProductFilter.value = ''
 }
 
+const getOutsourceProcessId = () => {
+  const outsourceProcessByName = processes.value.find((p) =>
+    String(p.process_name || '').includes('外作工程') ||
+    String(p.process_code || '').includes('外作工程') ||
+    String(p.process_name || '').includes('外作') ||
+    String(p.process_code || '').includes('外作')
+  )
+  if (outsourceProcessByName) return outsourceProcessByName.id
+  const outsourceProcessByFlag = processes.value.find((p) => p.is_outsource)
+  return outsourceProcessByFlag ? outsourceProcessByFlag.id : ''
+}
+
 const applySourcingSideEffects = () => {
   if (itemForm.value.sourcing_type === 'MAKE') {
     itemForm.value.supplier = ''
@@ -1073,9 +1095,16 @@ const applySourcingSideEffects = () => {
   }
   if (itemForm.value.sourcing_type === 'SUBCON') {
     if (!itemForm.value.time_unit) itemForm.value.time_unit = 'DAY'
-    if (!itemForm.value.process) {
-      const outsourceProcess = processes.value.find((p) => p.is_outsource)
-      if (outsourceProcess) itemForm.value.process = outsourceProcess.id
+    const outsourceProcessId = getOutsourceProcessId()
+    if (outsourceProcessId) itemForm.value.process = outsourceProcessId
+    if (itemForm.value.supplier) {
+      const supplier = suppliers.value.find((s) => `${s.id}` === `${itemForm.value.supplier}`)
+      const matchingLine = supplier && lines.value.find(
+        (l) => l.line_code === supplier.supplier_code && l.line_type === 'PURCHASE'
+      )
+      if (matchingLine) {
+        itemForm.value.line = matchingLine.id
+      }
     }
   }
   if (itemForm.value.sourcing_type === 'BUY') {
@@ -2042,6 +2071,13 @@ watch(
     } else if (itemForm.value.line && !lines.value.find((l) => l.id === itemForm.value.line)) {
       itemForm.value.line = ''
     }
+  }
+)
+
+watch(
+  () => itemForm.value.sourcing_type,
+  () => {
+    applySourcingSideEffects()
   }
 )
 
