@@ -1073,6 +1073,10 @@ const applySourcingSideEffects = () => {
   }
   if (itemForm.value.sourcing_type === 'SUBCON') {
     if (!itemForm.value.time_unit) itemForm.value.time_unit = 'DAY'
+    if (!itemForm.value.process) {
+      const outsourceProcess = processes.value.find((p) => p.is_outsource)
+      if (outsourceProcess) itemForm.value.process = outsourceProcess.id
+    }
   }
   if (itemForm.value.sourcing_type === 'BUY') {
     itemForm.value.process = ''
@@ -2025,7 +2029,16 @@ watch(
   (newProcess) => {
     const proc = processes.value.find((p) => `${p.id}` === `${newProcess}`)
     if (proc?.line) {
-      itemForm.value.line = proc.line
+      // SUBCON+仕入先設定済みなら仕入先のPURCHASEラインを優先
+      if (itemForm.value.sourcing_type === 'SUBCON' && itemForm.value.supplier) {
+        const supplier = suppliers.value.find((s) => `${s.id}` === `${itemForm.value.supplier}`)
+        const matchingLine = supplier && lines.value.find(
+          (l) => l.line_code === supplier.supplier_code && l.line_type === 'PURCHASE'
+        )
+        itemForm.value.line = matchingLine ? matchingLine.id : proc.line
+      } else {
+        itemForm.value.line = proc.line
+      }
     } else if (itemForm.value.line && !lines.value.find((l) => l.id === itemForm.value.line)) {
       itemForm.value.line = ''
     }
@@ -2043,6 +2056,22 @@ watch(
       !lines.value.find((l) => `${l.id}` === `${routingGenForm.value.final_line_id}`)
     ) {
       routingGenForm.value.final_line_id = ''
+    }
+  }
+)
+
+watch(
+  () => itemForm.value.supplier,
+  (supplierId) => {
+    if (!supplierId) return
+    if (itemForm.value.sourcing_type !== 'SUBCON') return
+    const supplier = suppliers.value.find((s) => `${s.id}` === `${supplierId}`)
+    if (!supplier) return
+    const matchingLine = lines.value.find(
+      (l) => l.line_code === supplier.supplier_code && l.line_type === 'PURCHASE'
+    )
+    if (matchingLine) {
+      itemForm.value.line = matchingLine.id
     }
   }
 )
