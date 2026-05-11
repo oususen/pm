@@ -1,6 +1,6 @@
 """
 日次計画乖離レポートAPI
-ガントチャート計画（LineGanttPlan）vs 実績（LineBacklog.actual_qty）の乖離を
+計画（LineBacklog.plan_qty）vs 実績（LineBacklog.actual_qty）の乖離を
 工程・製品ごとに集計する。
 """
 from collections import defaultdict
@@ -15,25 +15,7 @@ from orders.utils.calendar_utils import get_business_today, WorkingDayCalculator
 from masters.models import Line
 from production.models_laser_actual import LaserActual, LaserActualDetail
 from production.models_line_backlog import LineBacklog
-from production.models_line_gantt_plan import LineGanttPlan
 from production.models_record_confirmation import ProductionRecordConfirmation
-from production.models_record_inquiry_setting import ProductionRecordInquirySetting
-
-
-def _get_spot_line_ids():
-    """スポットライン設定からスポット対象ラインIDを取得"""
-    setting = ProductionRecordInquirySetting.objects.filter(
-        tab_key=ProductionRecordInquirySetting.TAB_SPOT
-    ).first()
-    if not setting:
-        return []
-    target_line_codes = setting.target_line_codes or []
-    if not target_line_codes:
-        return []
-    return list(
-        Line.objects.filter(line_code__in=target_line_codes, is_active=True)
-        .values_list('id', flat=True)
-    )
 
 
 def _get_previous_business_day():
@@ -49,7 +31,7 @@ class PlanDeviationReportView(APIView):
     計画乖離レポート
     GET /api/production/plan-deviation-report/?date=YYYY-MM-DD&line_id=X
 
-    ガントチャート上の計画（LineGanttPlan.processes_plan）と
+    LineBacklog(sequence_no>0).plan_qty と
     LineBacklog(sequence_no=0).actual_qty を比較し、乖離のある行を返す。
     """
 
@@ -73,95 +55,46 @@ class PlanDeviationReportView(APIView):
             except (ValueError, TypeError):
                 process_id = None
 
-        # スポットライン対象ID（LineBacklog から計画を取得する）
-        spot_line_ids = set(_get_spot_line_ids())
-
-        # ガントチャート計画を取得（スポットライン以外）
-        gantt_filter = Q(plan_date=target_date)
-        if line_id:
-            gantt_filter &= Q(line_id=line_id)
-        if line_type:
-            gantt_filter &= Q(line__line_type=line_type)
-        if spot_line_ids:
-            gantt_filter &= ~Q(line_id__in=spot_line_ids)
-
-        gantt_plans = LineGanttPlan.objects.filter(gantt_filter).select_related('line', 'product')
-
-        # 工程・製品別に計画数を集計
+        # 工程・製品別に計画数を集計（全ライン: LineBacklog sequence_no>0）
         # key: (line_id, process_id, product_id)
         plan_map = {}  # key -> plan_qty
         info_map = {}  # key -> {line_code, process_name, ...}
-        for gp in gantt_plans:
-            processes = gp.processes_plan or []
-            for pp in processes:
-                pp_process_id = pp.get('process_id')
-                output_product_id = pp.get('output_product_id') or gp.product_id
-                qty = pp.get('quantity', 0)
-                if not pp_process_id or not qty:
-                    continue
-                if process_id and pp_process_id != process_id:
-                    continue
+        plan_filter = Q(
+            plan_date=target_date,
+            sequence_no__gt=0,
+        )
+        if line_id:
+            plan_filter &= Q(line_id=line_id)
+        if line_type:
+            plan_filter &= Q(line__line_type=line_type)
+        if process_id:
+            plan_filter &= Q(process_id=process_id)
 
-                key = (gp.line_id, pp_process_id, output_product_id)
-                plan_map[key] = plan_map.get(key, 0) + int(qty)
-                if key not in info_map:
-                    info_map[key] = {
-                        'line_id': gp.line_id,
-                        'line_code': gp.line.line_code if gp.line else '',
-                        'line_name': gp.line.line_name if gp.line else '',
-                        'process_id': pp_process_id,
-                        'process_code': '',
-                        'process_name': pp.get('process_name', ''),
-                        'product_id': output_product_id,
-                        'product_code': pp.get('output_product_code', ''),
-                        'product_name': pp.get('output_product_name', ''),
-                    }
-
-        # スポットラインは LineBacklog(sequence_no>0) から計画を取得
-        if spot_line_ids:
-            spot_plan_filter = Q(
-                plan_date=target_date,
-                line_id__in=spot_line_ids,
-                sequence_no__gt=0,
+        for row in (
+            LineBacklog.objects
+            .filter(plan_filter)
+            .exclude(plan_qty=0)
+            .values(
+                'line_id', 'line__line_code', 'line__line_name',
+                'process_id', 'process__process_code', 'process__process_name',
+                'product_id', 'product__product_code', 'product__product_name',
+                'plan_qty',
             )
-            if line_id:
-                try:
-                    if int(line_id) not in spot_line_ids:
-                        spot_plan_filter &= Q(pk__in=[])  # 対象外
-                    else:
-                        spot_plan_filter &= Q(line_id=line_id)
-                except (ValueError, TypeError):
-                    pass
-            if line_type:
-                spot_plan_filter &= Q(line__line_type=line_type)
-            if process_id:
-                spot_plan_filter &= Q(process_id=process_id)
-
-            for row in (
-                LineBacklog.objects
-                .filter(spot_plan_filter)
-                .exclude(plan_qty=0)
-                .values(
-                    'line_id', 'line__line_code', 'line__line_name',
-                    'process_id', 'process__process_code', 'process__process_name',
-                    'product_id', 'product__product_code', 'product__product_name',
-                    'plan_qty',
-                )
-            ):
-                key = (row['line_id'], row['process_id'], row['product_id'])
-                plan_map[key] = plan_map.get(key, 0) + int(row['plan_qty'] or 0)
-                if key not in info_map:
-                    info_map[key] = {
-                        'line_id': row['line_id'],
-                        'line_code': row['line__line_code'],
-                        'line_name': row['line__line_name'],
-                        'process_id': row['process_id'],
-                        'process_code': row['process__process_code'],
-                        'process_name': row['process__process_name'],
-                        'product_id': row['product_id'],
-                        'product_code': row['product__product_code'],
-                        'product_name': row['product__product_name'],
-                    }
+        ):
+            key = (row['line_id'], row['process_id'], row['product_id'])
+            plan_map[key] = plan_map.get(key, 0) + int(row['plan_qty'] or 0)
+            if key not in info_map:
+                info_map[key] = {
+                    'line_id': row['line_id'],
+                    'line_code': row['line__line_code'],
+                    'line_name': row['line__line_name'],
+                    'process_id': row['process_id'],
+                    'process_code': row['process__process_code'],
+                    'process_name': row['process__process_name'],
+                    'product_id': row['product_id'],
+                    'product_code': row['product__product_code'],
+                    'product_name': row['product__product_name'],
+                }
 
         # 実績数取得（sequence_no=0）
         actual_filter = Q(plan_date=target_date, sequence_no=0)
