@@ -4714,6 +4714,17 @@ thead .sticky-col {
 }
 .plan-grid tbody td.name-col .product-info {
   padding: 0;
+  display: -webkit-box;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  word-break: break-all;
+  font-size: 11px;
+  line-height: 1.15;
+  text-align: center;
 }
 .row-controls {
   display: flex;
@@ -5405,4 +5416,3 @@ thead .sticky-col {
 }
 
 </style>
-

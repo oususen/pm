@@ -566,6 +566,7 @@ import { t, getLocaleCode } from '@/i18n'
 const route = useRoute()
 const router = useRouter()
 const localeCode = computed(() => getLocaleCode())
+const FLOOR_LINE_CODE = 'L2100'
 
 const processes = ref([])
 const lines = ref([])
@@ -621,6 +622,12 @@ const bomTreeCache = new Map()
 const relatedProductsCacheByProcess = new Map()
 let selectedCoproductNoticeRequestSeq = 0
 let plannedProductsRequestSeq = 0
+
+const shouldBlockBomService = (lineId = null, processId = null) => {
+  const targetLineId = String(lineId ?? selectedLineId.value ?? '').trim()
+  const targetProcessId = String(processId ?? selectedProcessId.value ?? '').trim()
+  return !filterCurrentTime.value && targetLineId === '81' && targetProcessId === '24'
+}
 
 const record = ref({
   record_type: '',
@@ -731,6 +738,12 @@ const availableLines = computed(() => {
   if (isSupportMode.value) return lines.value
   return ownLines.value
 })
+const selectedLineObj = computed(() =>
+  lines.value.find((line) => String(line.id) === String(selectedLineId.value)) || null
+)
+const isFloorLineSelected = computed(
+  () => String(selectedLineObj.value?.line_code || '').trim().toUpperCase() === FLOOR_LINE_CODE
+)
 
 const isScrapOnlyPage = computed(() => route.name === 'ScrapRecordInput')
 const isScrapRecord = computed(() => record.value.record_type === 'SCRAP')
@@ -1784,12 +1797,25 @@ const isStProductCode = (productCode) => {
 }
 
 const getBomTreeCached = async (productId) => {
+  if (shouldBlockBomService()) {
+    console.warn('[BOM BLOCKED] getBomTreeCached', {
+      lineId: selectedLineId.value,
+      processId: selectedProcessId.value,
+      productId,
+    })
+    return null
+  }
   const cacheKey = String(productId || '').trim()
   if (!cacheKey) return null
   if (bomTreeCache.has(cacheKey)) {
     return bomTreeCache.get(cacheKey)
   }
   try {
+    console.debug('[BOM CALL] getBomTreeCached', {
+      lineId: selectedLineId.value,
+      processId: selectedProcessId.value,
+      productId,
+    })
     const res = await api.bomService.getBomTree(productId)
     const tree = res?.data || null
     bomTreeCache.set(cacheKey, tree)
@@ -2492,6 +2518,65 @@ const ensureStartedProductsVisible = (items) => {
   return base
 }
 
+const filterFloorProductsByDisplayMap = async (lineId, processId, items, forceFloorMode = false) => {
+  if (filterCurrentTime.value) return Array.isArray(items) ? items : []
+  if (!forceFloorMode && !isFloorLineSelected.value) return Array.isArray(items) ? items : []
+  if (!lineId || !processId) return Array.isArray(items) ? items : []
+  try {
+    const res = await api.ganttDisplayProductMaps.getGanttDisplayProductMaps({
+      line: lineId,
+      process: processId,
+      page_size: 500,
+    })
+    const rows = res.data?.results || res.data || []
+    const allowedProductIds = new Set(
+      (Array.isArray(rows) ? rows : [])
+        .map((row) => String(row?.display_product || '').trim())
+        .filter(Boolean)
+    )
+    if (!allowedProductIds.size) return []
+    return (Array.isArray(items) ? items : []).filter((item) =>
+      allowedProductIds.has(String(item?.product || '').trim())
+    )
+  } catch (e) {
+    console.error('ガント表示品マップ取得エラー:', e)
+    return Array.isArray(items) ? items : []
+  }
+}
+
+const mergeMissingFloorMapProducts = async (lineId, processId, items) => {
+  if (filterCurrentTime.value) return Array.isArray(items) ? items : []
+  if (!lineId || !processId) return Array.isArray(items) ? items : []
+  try {
+    const res = await api.ganttDisplayProductMaps.getGanttDisplayProductMaps({
+      line: lineId,
+      process: processId,
+      page_size: 500,
+    })
+    const rows = Array.isArray(res.data?.results || res.data) ? (res.data?.results || res.data) : []
+    const base = Array.isArray(items) ? [...items] : []
+    const exists = new Set(base.map((it) => String(it?.product || '').trim()).filter(Boolean))
+    rows.forEach((row) => {
+      const productId = String(row?.display_product || '').trim()
+      if (!productId || exists.has(productId)) return
+      base.push({
+        plan_date: currentDateYmd.value,
+        product: row.display_product,
+        product_code: row.display_product_code || '',
+        product_name: row.display_product_name || '',
+        process: processId,
+        plan_qty: 0,
+        actual_qty: 0,
+      })
+      exists.add(productId)
+    })
+    return base
+  } catch (e) {
+    console.error('表示品マップ補完エラー:', e)
+    return Array.isArray(items) ? items : []
+  }
+}
+
 const applyTimeSlotFilter = () => {
   const slots = timeSlots.value || []
   let index = activeSlotIndex.value
@@ -2653,6 +2738,10 @@ const loadPlannedProducts = async () => {
     }
 
     let tempProducts = await fetchProcessPlanProductsFromBacklogs(lineId, processId)
+    const lineObj = lines.value.find((line) => String(line.id) === String(lineId)) || null
+    const lineCode = String(lineObj?.line_code || '').trim().toUpperCase()
+    const floorMapOnlyMode = !filterCurrentTime.value && lineCode === FLOOR_LINE_CODE
+    tempProducts = await filterFloorProductsByDisplayMap(lineId, processId, tempProducts, floorMapOnlyMode)
 
     // 時間帯スロットを構築し、デフォルトで現在時刻スロットを選択
     const slotResult = await buildPlanTimeSlots(lineId, processId, tempProducts)
@@ -2671,14 +2760,28 @@ const loadPlannedProducts = async () => {
       }
     })
 
-    // 連産親を補完し、連産品の子品番を除外（生産記録用）
-    const productsWithParents = await enrichCoproductParentsForList(tempProducts, processId)
-    if (requestSeq !== plannedProductsRequestSeq) return
-    const filteredForProduction = await filterCoproductChildrenFromList(productsWithParents)
-    if (requestSeq !== plannedProductsRequestSeq) return
+    let mapFilteredForProduction = []
+    if (floorMapOnlyMode) {
+      // フロアライン + 「現在時刻のみ」OFF時は、表示品マップにある製品のみをそのまま表示対象にする
+      mapFilteredForProduction = await mergeMissingFloorMapProducts(lineId, processId, tempProducts)
+      if (requestSeq !== plannedProductsRequestSeq) return
+    } else {
+      // 連産親を補完し、連産品の子品番を除外（生産記録用）
+      const productsWithParents = await enrichCoproductParentsForList(tempProducts, processId)
+      if (requestSeq !== plannedProductsRequestSeq) return
+      const filteredForProduction = await filterCoproductChildrenFromList(productsWithParents)
+      if (requestSeq !== plannedProductsRequestSeq) return
+      mapFilteredForProduction = await filterFloorProductsByDisplayMap(
+        lineId,
+        processId,
+        filteredForProduction,
+        floorMapOnlyMode
+      )
+      if (requestSeq !== plannedProductsRequestSeq) return
+    }
 
     // 生産記録用リスト（全時間帯）を保持
-    allPlanProducts.value = [...filteredForProduction]
+    allPlanProducts.value = [...mapFilteredForProduction]
 
     // 生産記録の体感速度を優先し、まず生産リストを先に反映
     applyTimeSlotFilter()
@@ -2692,24 +2795,33 @@ const loadPlannedProducts = async () => {
     }
 
     // 仕損品記録用リストは後続で構築（PRODUCTIONでは待たない）
-    const scrapLoadTask = (async () => {
-      await loadScrapProducts(processId, filteredForProduction, lineId)
-      if (requestSeq !== plannedProductsRequestSeq) return
-      allScrapProducts.value = [...scrapProducts.value]
-      if (record.value.record_type === 'SCRAP') {
-        applyTimeSlotFilter()
-        if (!productionProducts.value.length && !scrapProducts.value.length) {
-          loadManualProducts(processId)
-        }
-      }
-    })()
-
-    if (record.value.record_type === 'SCRAP') {
-      await scrapLoadTask
+    // フロアライン + 「現在時刻のみ」OFF で生産記録表示中は、重い仕損候補展開（BOM多段取得）を実行しない
+    const skipScrapBackgroundLoad = floorMapOnlyMode && record.value.record_type !== 'SCRAP'
+    if (skipScrapBackgroundLoad) {
+      allScrapProducts.value = []
+      scrapProducts.value = []
     } else {
-      scrapLoadTask.catch((err) => {
-        console.error('仕損品記録用製品リスト取得エラー:', err)
-      })
+      const scrapLoadTask = (async () => {
+        await loadScrapProducts(processId, mapFilteredForProduction, lineId, {
+          skipBomExpansion: floorMapOnlyMode,
+        })
+        if (requestSeq !== plannedProductsRequestSeq) return
+        allScrapProducts.value = [...scrapProducts.value]
+        if (record.value.record_type === 'SCRAP') {
+          applyTimeSlotFilter()
+          if (!productionProducts.value.length && !scrapProducts.value.length) {
+            loadManualProducts(processId)
+          }
+        }
+      })()
+
+      if (record.value.record_type === 'SCRAP') {
+        await scrapLoadTask
+      } else {
+        scrapLoadTask.catch((err) => {
+          console.error('仕損品記録用製品リスト取得エラー:', err)
+        })
+      }
     }
   } catch (error) {
     console.error('本日の計画取得エラー:', error)
@@ -2720,8 +2832,10 @@ const loadPlannedProducts = async () => {
   }
 }
 
-const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null) => {
+const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null, options = {}) => {
   try {
+    const skipBomExpansion = Boolean(options?.skipBomExpansion)
+    const forceBlockBom = shouldBlockBomService(fallbackLineId, processId)
     // 基本リスト（生産記録と同じ）から開始
     const scrapMap = new Map()
     baseProducts.forEach((it) => {
@@ -2819,6 +2933,22 @@ const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null)
       item.origin_process_id = info.process_id || null
     })
 
+    if (skipBomExpansion || forceBlockBom) {
+      if (forceBlockBom) {
+        console.warn('[BOM BLOCKED] loadScrapProducts', {
+          lineId: fallbackLineId,
+          processId,
+        })
+      }
+      scrapProducts.value = Array.from(scrapMap.values())
+      const idSet = new Set([
+        ...productionProducts.value.map((p) => p.product).filter(Boolean),
+        ...scrapProducts.value.map((p) => p.product).filter(Boolean),
+      ])
+      await loadProductImages(idSet)
+      return
+    }
+
     // 最終工程向け: output_product の直子部品をBOM階層1から補完（子はカテゴリで purchased / intermediate 判定）
     const bomCache = new Map()
     const addBomChildren = async (parentProductId) => {
@@ -2826,6 +2956,11 @@ const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null)
       const cacheKey = String(parentProductId)
       if (!bomCache.has(cacheKey)) {
         try {
+          console.debug('[BOM CALL] output_product children', {
+            lineId: fallbackLineId,
+            processId,
+            parentProductId,
+          })
           const treeRes = await api.bomService.getBomTree(parentProductId)
           bomCache.set(cacheKey, treeRes.data || null)
         } catch (err) {
@@ -2905,6 +3040,11 @@ const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null)
       .map((p) => p.id)
     for (const parentId of coproductParentIds) {
       try {
+        console.debug('[BOM CALL] coproduct children', {
+          lineId: fallbackLineId,
+          processId,
+          parentId,
+        })
         const treeRes = await api.bomService.getBomTree(parentId)
         const tree = treeRes.data
         if (!tree || !Array.isArray(tree.children)) continue
@@ -4215,4 +4355,3 @@ label {
   margin-top: 0;
 }
 </style>
-
