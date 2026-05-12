@@ -30,6 +30,9 @@
     <div class="tab-bar">
       <button class="tab-btn" :class="{ active: activeTab === 'daily' }" @click="activeTab = 'daily'">日別</button>
       <button class="tab-btn" :class="{ active: activeTab === 'period' }" @click="activeTab = 'period'">期間集計</button>
+      <span class="tab-actions">
+        <button class="btn btn-excel" @click="exportExcel">Excel出力</button>
+      </span>
     </div>
 
     <div v-if="loading" class="loading">読み込み中...</div>
@@ -71,13 +74,13 @@
               <td class="num-cell">{{ formatMetric(row.qtyTotal) }}</td>
               <td class="num-cell">{{ formatMetric(row.amountTotal) }}</td>
               <td class="num-cell">{{ formatMetric(row.sessionHours) }}</td>
-              <td class="num-cell heat-qty" :style="heatStyle(row.qtyIntensity)">{{ formatMetric(row.qtyTotal) }}</td>
-              <td class="num-cell">{{ row.qtyRank || '—' }}</td>
+              <td class="num-cell heat-qty" :style="heatStyle(row.sessionQtyIntensity)">{{ row.sessionThroughput != null ? formatMetric(row.sessionThroughput) : '—' }}</td>
+              <td class="num-cell">{{ row.sessionQtyRank || '—' }}</td>
               <td class="num-cell heat-rate" :style="heatStyle(row.rateIntensity)">{{ row.sessionRate != null ? formatMetric(row.sessionRate) : '—' }}</td>
               <td class="num-cell">{{ row.rateRank || '—' }}</td>
               <td class="num-cell section-divider">{{ row.attendanceHours > 0 ? formatMetric(row.attendanceHours) : '—' }}</td>
-              <td class="num-cell heat-qty" :style="heatStyle(row.qtyIntensity)">{{ formatMetric(row.qtyTotal) }}</td>
-              <td class="num-cell">{{ row.qtyRank || '—' }}</td>
+              <td class="num-cell heat-qty" :style="heatStyle(row.attendanceQtyIntensity)">{{ row.attendanceThroughput != null ? formatMetric(row.attendanceThroughput) : '—' }}</td>
+              <td class="num-cell">{{ row.attendanceQtyRank || '—' }}</td>
               <td class="num-cell heat-rate" :style="heatStyle(row.attendanceRateIntensity)">{{ row.attendanceRate != null ? formatMetric(row.attendanceRate) : '—' }}</td>
               <td class="num-cell">{{ row.attendanceRateRank || '—' }}</td>
               <td class="num-cell section-divider">{{ formatUtilization(row.sessionHours, row.attendanceHours) }}</td>
@@ -92,12 +95,12 @@
               <td class="num-cell">{{ formatMetric(periodTotal.qtyTotal) }}</td>
               <td class="num-cell">{{ formatMetric(periodTotal.amountTotal) }}</td>
               <td class="num-cell">{{ formatMetric(periodTotal.sessionHours) }}</td>
-              <td class="num-cell">{{ formatMetric(periodTotal.qtyTotal) }}</td>
+              <td class="num-cell">{{ periodTotal.sessionThroughput != null ? formatMetric(periodTotal.sessionThroughput) : '—' }}</td>
               <td class="num-cell">—</td>
               <td class="num-cell">{{ periodTotal.sessionRate != null ? formatMetric(periodTotal.sessionRate) : '—' }}</td>
               <td class="num-cell">—</td>
               <td class="num-cell section-divider">{{ periodTotal.attendanceHours > 0 ? formatMetric(periodTotal.attendanceHours) : '—' }}</td>
-              <td class="num-cell">{{ formatMetric(periodTotal.qtyTotal) }}</td>
+              <td class="num-cell">{{ periodTotal.attendanceThroughput != null ? formatMetric(periodTotal.attendanceThroughput) : '—' }}</td>
               <td class="num-cell">—</td>
               <td class="num-cell">{{ periodTotal.attendanceRate != null ? formatMetric(periodTotal.attendanceRate) : '—' }}</td>
               <td class="num-cell">—</td>
@@ -111,13 +114,13 @@
               <td class="num-cell">{{ formatMetric(row.qtyTotal) }}</td>
               <td class="num-cell">{{ formatMetric(row.amountTotal) }}</td>
               <td class="num-cell">{{ formatMetric(row.sessionHours) }}</td>
-              <td class="num-cell heat-qty" :style="heatStyle(row.qtyIntensity)">{{ formatMetric(row.qtyTotal) }}</td>
-              <td class="num-cell">{{ row.qtyRank || '—' }}</td>
+              <td class="num-cell heat-qty" :style="heatStyle(row.sessionQtyIntensity)">{{ row.sessionThroughput != null ? formatMetric(row.sessionThroughput) : '—' }}</td>
+              <td class="num-cell">{{ row.sessionQtyRank || '—' }}</td>
               <td class="num-cell heat-rate" :style="heatStyle(row.rateIntensity)">{{ row.sessionRate != null ? formatMetric(row.sessionRate) : '—' }}</td>
               <td class="num-cell">{{ row.rateRank || '—' }}</td>
               <td class="num-cell section-divider">{{ row.attendanceHours > 0 ? formatMetric(row.attendanceHours) : '—' }}</td>
-              <td class="num-cell heat-qty" :style="heatStyle(row.qtyIntensity)">{{ formatMetric(row.qtyTotal) }}</td>
-              <td class="num-cell">{{ row.qtyRank || '—' }}</td>
+              <td class="num-cell heat-qty" :style="heatStyle(row.attendanceQtyIntensity)">{{ row.attendanceThroughput != null ? formatMetric(row.attendanceThroughput) : '—' }}</td>
+              <td class="num-cell">{{ row.attendanceQtyRank || '—' }}</td>
               <td class="num-cell heat-rate" :style="heatStyle(row.attendanceRateIntensity)">{{ row.attendanceRate != null ? formatMetric(row.attendanceRate) : '—' }}</td>
               <td class="num-cell">{{ row.attendanceRateRank || '—' }}</td>
               <td class="num-cell section-divider">{{ formatUtilization(row.sessionHours, row.attendanceHours) }}</td>
@@ -137,6 +140,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import * as XLSX from 'xlsx'
 import api from '@/api/client'
 
 const today = new Date()
@@ -223,8 +227,10 @@ const dailyRows = computed(() => {
       amountTotal: Math.round(item.amountTotal * 100) / 100,
       sessionHours: Math.round(sessionHours * 1000) / 1000,
       attendanceHours: Math.round(attendanceHours * 1000) / 1000,
-      sessionRate: sessionHours > 0 ? Math.round((item.amountTotal / sessionHours) * 100) / 100 : null,
-      attendanceRate: attendanceHours > 0 ? Math.round((item.amountTotal / attendanceHours) * 100) / 100 : null,
+      sessionRate: sessionHours > 0 ? Math.round(item.amountTotal / sessionHours) : null,
+      attendanceRate: attendanceHours > 0 ? Math.round(item.amountTotal / attendanceHours) : null,
+      sessionThroughput: sessionHours > 0 ? Math.round(item.qtyTotal / sessionHours) : null,
+      attendanceThroughput: attendanceHours > 0 ? Math.round(item.qtyTotal / attendanceHours) : null,
     }
   })
 
@@ -232,11 +238,16 @@ const dailyRows = computed(() => {
   return applyDateRanking(out)
 })
 
-const filteredDailyRows = computed(() => dailyRows.value.filter((row) =>
-  (!filterTeam.value || row.team === filterTeam.value) &&
-  (!filterGroup.value || row.group === filterGroup.value) &&
-  (!filterName.value || row.name === filterName.value),
-))
+const filteredDailyRows = computed(() => {
+  const filtered = dailyRows.value
+    .filter((row) =>
+      (!filterTeam.value || row.team === filterTeam.value) &&
+      (!filterGroup.value || row.group === filterGroup.value) &&
+      (!filterName.value || row.name === filterName.value),
+    )
+    .map((row) => ({ ...row }))
+  return applyDateRanking(filtered)
+})
 
 const periodRows = computed(() => {
   const aggregate = new Map()
@@ -261,8 +272,10 @@ const periodRows = computed(() => {
   }
   const out = [...aggregate.values()].map((item) => ({
     ...item,
-    sessionRate: item.sessionHours > 0 ? Math.round((item.amountTotal / item.sessionHours) * 100) / 100 : null,
-    attendanceRate: item.attendanceHours > 0 ? Math.round((item.amountTotal / item.attendanceHours) * 100) / 100 : null,
+    sessionRate: item.sessionHours > 0 ? Math.round(item.amountTotal / item.sessionHours) : null,
+    attendanceRate: item.attendanceHours > 0 ? Math.round(item.amountTotal / item.attendanceHours) : null,
+    sessionThroughput: item.sessionHours > 0 ? Math.round(item.qtyTotal / item.sessionHours) : null,
+    attendanceThroughput: item.attendanceHours > 0 ? Math.round(item.qtyTotal / item.attendanceHours) : null,
   }))
   out.sort((a, b) => b.qtyTotal - a.qtyTotal)
   return applyDateRanking(out)
@@ -280,8 +293,10 @@ const periodTotal = computed(() => {
     amountTotal,
     sessionHours,
     attendanceHours,
-    sessionRate: sessionHours > 0 ? amountTotal / sessionHours : null,
-    attendanceRate: attendanceHours > 0 ? amountTotal / attendanceHours : null,
+    sessionRate: sessionHours > 0 ? Math.round(amountTotal / sessionHours) : null,
+    attendanceRate: attendanceHours > 0 ? Math.round(amountTotal / attendanceHours) : null,
+    sessionThroughput: sessionHours > 0 ? Math.round(qtyTotal / sessionHours) : null,
+    attendanceThroughput: attendanceHours > 0 ? Math.round(qtyTotal / attendanceHours) : null,
   }
 })
 
@@ -294,13 +309,26 @@ function applyDateRanking(inputRows) {
     byDate.get(key).push(row)
   }
   for (const dateRows of byDate.values()) {
-    const qtySorted = [...dateRows].sort((a, b) => Number(b.qtyTotal || 0) - Number(a.qtyTotal || 0))
-    let prevQty = null
-    let qtyRank = 0
-    qtySorted.forEach((row, idx) => {
-      if (prevQty === null || row.qtyTotal !== prevQty) qtyRank = idx + 1
-      row.qtyRank = qtyRank
-      prevQty = row.qtyTotal
+    const sessionQtySorted = [...dateRows]
+      .filter((row) => row.sessionThroughput != null)
+      .sort((a, b) => Number(b.sessionThroughput || 0) - Number(a.sessionThroughput || 0))
+    let prevSessionQty = null
+    let sessionQtyRank = 0
+    sessionQtySorted.forEach((row, idx) => {
+      if (prevSessionQty === null || row.sessionThroughput !== prevSessionQty) sessionQtyRank = idx + 1
+      row.sessionQtyRank = sessionQtyRank
+      prevSessionQty = row.sessionThroughput
+    })
+
+    const attendanceQtySorted = [...dateRows]
+      .filter((row) => row.attendanceThroughput != null)
+      .sort((a, b) => Number(b.attendanceThroughput || 0) - Number(a.attendanceThroughput || 0))
+    let prevAttendanceQty = null
+    let attendanceQtyRank = 0
+    attendanceQtySorted.forEach((row, idx) => {
+      if (prevAttendanceQty === null || row.attendanceThroughput !== prevAttendanceQty) attendanceQtyRank = idx + 1
+      row.attendanceQtyRank = attendanceQtyRank
+      prevAttendanceQty = row.attendanceThroughput
     })
 
     const rateSorted = [...dateRows].filter(row => row.sessionRate != null).sort((a, b) => b.sessionRate - a.sessionRate)
@@ -321,11 +349,13 @@ function applyDateRanking(inputRows) {
       prevAttendanceRate = row.attendanceRate
     })
 
-    const maxQty = Math.max(...dateRows.map((r) => Number(r.qtyTotal || 0)), 0)
+    const maxSessionQty = Math.max(...dateRows.map((r) => Number(r.sessionThroughput || 0)), 0)
+    const maxAttendanceQty = Math.max(...dateRows.map((r) => Number(r.attendanceThroughput || 0)), 0)
     const maxRate = Math.max(...dateRows.map((r) => Number(r.sessionRate || 0)), 0)
     const maxAttendanceRate = Math.max(...dateRows.map((r) => Number(r.attendanceRate || 0)), 0)
     dateRows.forEach((row) => {
-      row.qtyIntensity = maxQty > 0 ? Number(row.qtyTotal || 0) / maxQty : 0
+      row.sessionQtyIntensity = maxSessionQty > 0 && row.sessionThroughput != null ? Number(row.sessionThroughput || 0) / maxSessionQty : 0
+      row.attendanceQtyIntensity = maxAttendanceQty > 0 && row.attendanceThroughput != null ? Number(row.attendanceThroughput || 0) / maxAttendanceQty : 0
       row.rateIntensity = maxRate > 0 && row.sessionRate != null ? Number(row.sessionRate || 0) / maxRate : 0
       row.attendanceRateIntensity = maxAttendanceRate > 0 && row.attendanceRate != null ? Number(row.attendanceRate || 0) / maxAttendanceRate : 0
     })
@@ -506,6 +536,83 @@ async function load() {
   }
 }
 
+function exportExcel() {
+  const headerTop = [
+    '氏名', '班', 'グループ', '日付', '加工数合計', '加工費合計',
+    'セッションから', '', '', '', '',
+    '勤務時間から', '', '', '', '',
+    '稼働率',
+  ]
+  const headerBottom = [
+    '', '', '', '', '', '',
+    '加工時間(H)', '出来高', '出来高順', '加工費/H', '加工費/H順',
+    '出勤時間(H)', '出来高', '出来高順', '加工費/H', '加工費/H順',
+    '(加工時間/出勤時間)',
+  ]
+
+  const toRow = (r, dateLabel = r.date || '合計') => ([
+    r.name || '',
+    r.team || '',
+    r.group || '',
+    dateLabel,
+    Number(r.qtyTotal || 0),
+    Number(r.amountTotal || 0),
+    Number(r.sessionHours || 0),
+    r.sessionThroughput ?? '',
+    r.sessionQtyRank ?? '',
+    r.sessionRate ?? '',
+    r.rateRank ?? '',
+    Number(r.attendanceHours || 0),
+    r.attendanceThroughput ?? '',
+    r.attendanceQtyRank ?? '',
+    r.attendanceRate ?? '',
+    r.attendanceRateRank ?? '',
+    formatUtilization(r.sessionHours, r.attendanceHours),
+  ])
+
+  const data = []
+  if (activeTab.value === 'daily') {
+    for (const row of filteredDailyRows.value) data.push(toRow(row))
+  } else {
+    data.push(toRow({
+      name: '期間合計',
+      team: '',
+      group: '',
+      qtyTotal: periodTotal.value.qtyTotal,
+      amountTotal: periodTotal.value.amountTotal,
+      sessionHours: periodTotal.value.sessionHours,
+      sessionThroughput: periodTotal.value.sessionThroughput,
+      sessionQtyRank: '',
+      sessionRate: periodTotal.value.sessionRate,
+      rateRank: '',
+      attendanceHours: periodTotal.value.attendanceHours,
+      attendanceThroughput: periodTotal.value.attendanceThroughput,
+      attendanceQtyRank: '',
+      attendanceRate: periodTotal.value.attendanceRate,
+      attendanceRateRank: '',
+    }, '合計'))
+    for (const row of filteredPeriodRows.value) data.push(toRow(row, '合計'))
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet([headerTop, headerBottom, ...data])
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 1, c: 0 } },
+    { s: { r: 0, c: 1 }, e: { r: 1, c: 1 } },
+    { s: { r: 0, c: 2 }, e: { r: 1, c: 2 } },
+    { s: { r: 0, c: 3 }, e: { r: 1, c: 3 } },
+    { s: { r: 0, c: 4 }, e: { r: 1, c: 4 } },
+    { s: { r: 0, c: 5 }, e: { r: 1, c: 5 } },
+    { s: { r: 0, c: 6 }, e: { r: 0, c: 10 } },
+    { s: { r: 0, c: 11 }, e: { r: 0, c: 15 } },
+    { s: { r: 0, c: 16 }, e: { r: 0, c: 16 } },
+  ]
+  ws['!cols'] = [22, 10, 12, 12, 12, 12, 12, 14, 14, 14, 16, 12, 12, 14, 14, 16, 18].map((w) => ({ wch: w }))
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, activeTab.value === 'daily' ? '日別' : '期間集計')
+  const filename = `加工費集計_${activeTab.value === 'daily' ? '日別' : '期間集計'}_${dateFrom.value}_${dateTo.value}.xlsx`
+  XLSX.writeFile(wb, filename)
+}
+
 onMounted(load)
 </script>
 
@@ -523,6 +630,9 @@ onMounted(load)
 .tab-bar { display: flex; margin-bottom: 12px; border-bottom: 2px solid #e5e7eb; }
 .tab-btn { padding: 8px 24px; font-size: 14px; font-weight: 600; border: none; background: none; color: #6b7280; border-bottom: 2px solid transparent; margin-bottom: -2px; }
 .tab-btn.active { color: #40916c; border-bottom-color: #40916c; }
+.tab-actions { margin-left: auto; display: flex; align-items: center; }
+.btn-excel { background: #16a34a; color: #fff; padding: 5px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; }
+.btn-excel:hover { background: #15803d; }
 .stats-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .stats-table th { background: #f8fafc; border: 1px solid #e5e7eb; padding: 8px 10px; text-align: center; font-weight: 600; color: #374151; white-space: nowrap; }
 .stats-table td { border: 1px solid #e5e7eb; padding: 7px 10px; }
