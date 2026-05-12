@@ -511,10 +511,12 @@ async function load() {
       const date = app.work_date
       if (!name || !date) continue
       const h = parseFloat(app.hours ?? 0)
+      const midnightH = parseFloat(app.midnight_hours ?? 0)
+      const overtimeTotalH = Math.round((h + midnightH) * 10) / 10
       let workH = 0
       if (app.application_type === 'normal') workH = 8
-      else if (app.application_type === 'overtime') workH = Math.round((8 + h) * 10) / 10
-      else if (app.application_type === 'half_day_am') workH = Math.round((4 + h) * 10) / 10
+      else if (app.application_type === 'overtime') workH = Math.round((8 + overtimeTotalH) * 10) / 10
+      else if (app.application_type === 'half_day_am') workH = Math.round((4 + overtimeTotalH) * 10) / 10
       else if (app.application_type === 'holiday') workH = h > 0 ? h : (app.work_pattern_hours != null ? parseFloat(app.work_pattern_hours) : 8)
       else if (app.application_type === 'half_day_pm') workH = 4
 

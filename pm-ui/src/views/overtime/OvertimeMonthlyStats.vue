@@ -867,6 +867,8 @@ async function load() {
       const group = app.group_name || ''
       const applicantId = typeof app.applicant === 'object' ? app.applicant?.id : app.applicant
       const h = parseFloat(app.hours ?? 0)
+      const midnightH = parseFloat(app.midnight_hours ?? 0)
+      const overtimeTotalH = Math.round((h + midnightH) * 10) / 10
       const typeLabel = TYPE_LABELS[app.application_type] || app.application_type
 
       const dates = expandDays(app, nonWorkingDates)
@@ -892,11 +894,11 @@ async function load() {
         if (app.application_type === 'normal') {
           row.workH = 8
         } else if (app.application_type === 'overtime') {
-          row.workH = Math.round((8 + h) * 10) / 10
-          row.overtimeH = h
+          row.workH = Math.round((8 + overtimeTotalH) * 10) / 10
+          row.overtimeH = overtimeTotalH
         } else if (app.application_type === 'half_day_am') {
-          row.workH = Math.round((4 + h) * 10) / 10
-          row.overtimeH = h
+          row.workH = Math.round((4 + overtimeTotalH) * 10) / 10
+          row.overtimeH = overtimeTotalH
           row.halfDayAm = true
           row.paidLeaveCount = 0.5
         } else if (app.application_type === 'holiday') {
