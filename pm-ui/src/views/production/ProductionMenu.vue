@@ -111,7 +111,7 @@ const tiles = computed(() => {
     {
       to: "/production/laser-process-input",
       label: "レーザー実績入力",
-      icon: "🧱",
+      icon: "✳",
       category: "input",
       required: "edit",
       resource: "production.process_input",
@@ -119,7 +119,7 @@ const tiles = computed(() => {
     {
       to: "/production/brake-line-input",
       label: "ブレーキ実績入力",
-      icon: "🔧",
+      icon: "⤓",
       category: "input",
       required: "edit",
       resource: "production.process_input",
@@ -136,7 +136,7 @@ const tiles = computed(() => {
       to: "/production/product-photo-upload",
       label: t("productionMenu.tiles.productPhotoUpload"),
       icon: "🖼️",
-      category: "input",
+      category: "other",
       required: "edit",
       resource: "production.process_input",
     },
