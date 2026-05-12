@@ -276,6 +276,7 @@ const departmentTemplatePermissions = ref([])
   { value: 'production.scrap_record', label: '生産: 仕損品記録' },
   { value: 'production.plan_input', label: '生産: 生産計画入力' },
   { value: 'production.inventory', label: '生産: 在庫/残量一覧' },
+  { value: 'production.progress', label: '生産: 進度のみ' },
   { value: 'production.scrap_history', label: '生産: 仕損履歴' },
   { value: 'production.line_calendars', label: '生産: ライン勤務カレンダ' },
   { value: 'production.line_monitor', label: '生産: ライン稼働監視' },

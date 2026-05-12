@@ -534,10 +534,15 @@
       </button>
     </div>
 
-    <div v-if="selectedProcessId && recentRecords.length" class="recent-section">
+    <div v-if="selectedProcessId && recentRecordsForDisplay.length" class="recent-section">
       <h3 class="section-title">{{ t('processInput.recentRecords') }}</h3>
       <div class="record-list">
-        <div v-for="rec in recentRecords" :key="rec.id" class="record-item">
+        <div
+          v-for="rec in recentRecordsForDisplay"
+          :key="rec.id"
+          class="record-item"
+          :style="getRecentRecordColorStyle(rec)"
+        >
           <div class="record-time">
             <div class="record-date">{{ formatDate(rec.timestamp) }}</div>
             <div class="record-clock">{{ formatTime(rec.timestamp) }}</div>
@@ -546,7 +551,7 @@
             <div class="record-type__label">{{ getRecentRecordTypeLabel(rec) }}</div>
             <div v-if="rec.product_code" class="record-type__product">{{ rec.product_code }}</div>
           </div>
-          <div class="record-qty" v-if="rec.qty > 0">{{ rec.qty }}</div>
+          <div class="record-qty" v-if="rec.qty > 0">{{ formatRecentQtyWithPlan(rec) }}</div>
           <div class="record-state" v-if="rec.equipment_state">
             {{ rec.equipment_state_display }}
           </div>
@@ -1678,6 +1683,57 @@ const getRecentRecordTypeLabel = (rec) => {
   }
   return rec.record_type_display
 }
+
+const isCoproductChildRecord = (rec) => {
+  const parentRecordId = rec?.event_data?.coproduct_parent_record_id
+  return parentRecordId !== null && parentRecordId !== undefined && String(parentRecordId).trim() !== ''
+}
+
+const isEndOperatorActionRecord = (rec) => {
+  if (!rec || rec.record_type !== 'OPERATOR_ACTION') return false
+  const action = String(
+    rec?.event_data?.action ||
+    rec?.event_data?.operator_action ||
+    rec?.event_data?.action_type ||
+    ''
+  ).toUpperCase()
+  return action === 'END'
+}
+
+const recentRecordsForDisplay = computed(() => {
+  const items = Array.isArray(recentRecords.value) ? recentRecords.value : []
+  const endActionRecordIdsLinkedFromProduction = new Set(
+    items
+      .filter((rec) => rec?.record_type === 'PRODUCTION')
+      .map((rec) => rec?.event_data?.operator_action_record_id)
+      .filter((id) => id !== null && id !== undefined && String(id).trim() !== '')
+      .map((id) => String(id))
+  )
+  return items.filter((rec) => {
+    if (isCoproductChildRecord(rec)) return false
+    if (isEndOperatorActionRecord(rec) && endActionRecordIdsLinkedFromProduction.has(String(rec?.id))) return false
+    return true
+  })
+})
+
+const recentPlanQtyLookup = computed(() => {
+  const map = new Map()
+  const add = (productId, productCode, planQty) => {
+    const qty = toSafeNumber(planQty)
+    if (qty <= 0) return
+    const idKey = String(productId || '').trim()
+    const codeKey = String(productCode || '').trim()
+    if (idKey && !map.has(`id:${idKey}`)) map.set(`id:${idKey}`, qty)
+    if (codeKey && !map.has(`code:${codeKey}`)) map.set(`code:${codeKey}`, qty)
+  }
+  ;(Array.isArray(allPlanProducts.value) ? allPlanProducts.value : []).forEach((item) => {
+    add(item?.product, item?.product_code, item?.plan_qty)
+  })
+  ;(Array.isArray(currentProductList.value) ? currentProductList.value : []).forEach((item) => {
+    add(item?.product, item?.product_code, item?.plan_qty)
+  })
+  return map
+})
 
 const getOperatorActionProductId = (rec) => {
   if (!rec) return null
@@ -3400,6 +3456,73 @@ const formatTime = (timestamp) => {
 const formatNumber = (value) => {
   if (value === null || value === undefined) return '0'
   return Number(value).toLocaleString(localeCode.value)
+}
+
+const formatRecentQty = (value) => {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '0個'
+  const isInteger = Number.isInteger(num)
+  return `${num.toLocaleString(localeCode.value, isInteger ? {} : { maximumFractionDigits: 3 })}個`
+}
+
+const formatRecentValue = (value) => {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '0'
+  const isInteger = Number.isInteger(num)
+  return num.toLocaleString(localeCode.value, isInteger ? {} : { maximumFractionDigits: 3 })
+}
+
+const getRecentPlanQty = (rec) => {
+  const eventPlanQty = rec?.event_data?.plan_target?.plan_qty
+  if (eventPlanQty !== null && eventPlanQty !== undefined && Number.isFinite(Number(eventPlanQty))) {
+    return Number(eventPlanQty)
+  }
+  const productId = String(rec?.product ?? rec?.product_id ?? '').trim()
+  if (productId) {
+    const byId = recentPlanQtyLookup.value.get(`id:${productId}`)
+    if (Number.isFinite(byId)) return byId
+  }
+  const productCode = String(rec?.product_code || rec?.event_data?.plan_target?.product_code || '').trim()
+  if (productCode) {
+    const byCode = recentPlanQtyLookup.value.get(`code:${productCode}`)
+    if (Number.isFinite(byCode)) return byCode
+  }
+  return 0
+}
+
+const formatRecentQtyWithPlan = (rec) => {
+  const planQty = getRecentPlanQty(rec)
+  return `計画${formatRecentValue(planQty)} / 実績${formatRecentQty(rec?.qty)}`
+}
+
+const RECENT_RECORD_COLOR_PALETTE = [
+  { border: '#2563eb', bg: '#eff6ff' },
+  { border: '#059669', bg: '#ecfdf5' },
+  { border: '#d97706', bg: '#fffbeb' },
+  { border: '#7c3aed', bg: '#f5f3ff' },
+  { border: '#db2777', bg: '#fdf2f8' },
+  { border: '#0f766e', bg: '#f0fdfa' },
+  { border: '#b91c1c', bg: '#fef2f2' },
+]
+
+const hashString = (value) => {
+  const text = String(value || '')
+  let hash = 0
+  for (let i = 0; i < text.length; i += 1) {
+    hash = (hash * 31 + text.charCodeAt(i)) >>> 0
+  }
+  return hash
+}
+
+const getRecentRecordColorStyle = (rec) => {
+  const key = String(rec?.product_code || rec?.event_data?.plan_target?.product_code || '').trim()
+  if (!key) return null
+  const idx = hashString(key) % RECENT_RECORD_COLOR_PALETTE.length
+  const color = RECENT_RECORD_COLOR_PALETTE[idx]
+  return {
+    borderLeft: `4px solid ${color.border}`,
+    backgroundColor: color.bg,
+  }
 }
 
 const pageModeClass = computed(() => {
