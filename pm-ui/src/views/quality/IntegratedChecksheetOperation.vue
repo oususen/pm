@@ -16,7 +16,7 @@
           class="btn-secondary"
           @click="openNewBatchSection"
         >新規バッチ</button>
-        <button class="btn-secondary" @click="refreshAll" :disabled="loading">更新</button>
+        <button class="btn-secondary" @click="refreshAll" :disabled="loading">{{ t('common.update') }}</button>
       </div>
     </div>
 
@@ -24,23 +24,23 @@
     <section v-show="!activeBatch" class="panel filter-panel">
       <div class="prepare-form filter-form">
         <label>
-          <span class="field-label">ライン</span>
+          <span class="field-label">{{ t('integratedOperation.line') }}</span>
           <select v-model="selectedLine" :disabled="loading || isLineLockedFromRoute">
-            <option value="">全ライン</option>
+            <option value="">{{ t('integratedOperation.allLines') }}</option>
             <option v-for="l in lineOptions" :key="l.id" :value="l.id">{{ l.line_code }} - {{ l.line_name }}</option>
           </select>
         </label>
         <label>
-          <span class="field-label">製品</span>
+          <span class="field-label">{{ t('integratedOperation.product') }}</span>
           <select v-model="selectedProduct" :disabled="loading">
-            <option value="">全製品</option>
+            <option value="">{{ t('integratedOperation.allProducts') }}</option>
             <option v-for="p in filteredProductOptions" :key="p.id" :value="p.id">{{ p.product_code }} - {{ p.product_name }}</option>
           </select>
         </label>
         <label>
-          <span class="field-label">ステータス</span>
+          <span class="field-label">{{ t('integratedOperation.statusLabel') }}</span>
           <select v-model="batchStatusFilter">
-            <option value="">すべて</option>
+            <option value="">{{ t('integratedOperation.all') }}</option>
             <option value="OPEN">実施中</option>
             <option value="COMPLETED">完了</option>
             <option value="LEADER_CONFIRMED">リーダ確認済</option>
@@ -93,9 +93,9 @@
 
     <!-- バッチ一覧 -->
     <section v-show="!activeBatch" class="panel">
-      <h3 class="panel-title">バッチ一覧</h3>
-      <div v-if="loadingBatches" class="no-data">読込中...</div>
-      <div v-else-if="!batches.length" class="no-data">該当するバッチはありません</div>
+      <h3 class="panel-title">{{ t('integratedOperation.batchList') }}</h3>
+      <div v-if="loadingBatches" class="no-data">{{ t('integratedOperation.loading') }}</div>
+      <div v-else-if="!batches.length" class="no-data">{{ t('integratedOperation.noBatches') }}</div>
       <div v-else class="table-wrap">
         <table class="data-table compact">
           <thead>
@@ -139,7 +139,7 @@
               </td>
               <td>{{ formatDateTime(b.created_at) }}</td>
               <td class="action-cell">
-                <button class="btn-primary btn-sm" @click="openBatchDetail(b)">詳細</button>
+                <button class="btn-primary btn-sm" @click="openBatchDetail(b)">{{ t('integratedOperation.detail') }}</button>
                 <button
                   v-if="isReviewMode && canLeaderConfirm(b)"
                   class="btn-secondary btn-sm"
@@ -182,12 +182,12 @@
         </h3>
         <div class="matrix-header-actions">
           <button v-if="showBackToProcessInput" class="btn-secondary btn-sm" @click="backToProcessInput">工程作業入力へ戻る</button>
-          <button class="btn-secondary btn-sm" @click="closeBatchDetail">一覧に戻る</button>
+          <button class="btn-secondary btn-sm" @click="closeBatchDetail">{{ t('integratedOperation.backToList') }}</button>
         </div>
       </div>
 
-      <div v-if="loadingUnits" class="no-data">読込中...</div>
-      <div v-else-if="!units.length" class="no-data">台目データがありません</div>
+      <div v-if="loadingUnits" class="no-data">{{ t('integratedOperation.loading') }}</div>
+      <div v-else-if="!units.length" class="no-data">{{ t('integratedOperation.noUnits') }}</div>
       <div v-else class="matrix-scroll">
         <table class="data-table matrix-table">
           <thead>
@@ -205,6 +205,7 @@
                 <div class="unit-header">
                   <span>{{ u.sequence_no }}</span>
                   <span class="status-chip mini" :class="statusClass(u.status)">{{ statusShort(u.status) }}</span>
+                  <span v-if="shouldShowHoldMark(u)" class="unit-hold-mark">保</span>
                 </div>
               </th>
             </tr>
@@ -267,9 +268,9 @@
     <div v-if="modalUnit" class="modal-overlay" @click.self="closeModal">
       <div class="modal-content">
         <div class="modal-header">
-          <h3>チェック入力</h3>
+          <h3>{{ t('integratedOperation.checkInput') }}</h3>
           <div class="modal-header-actions">
-            <button class="btn-secondary btn-sm" @click="closeModal">閉じる</button>
+            <button class="btn-secondary btn-sm" @click="closeModal">{{ t('common.close') }}</button>
             <button class="btn-close" @click="closeModal">&times;</button>
           </div>
         </div>
@@ -285,7 +286,7 @@
               <span v-if="getBlockProgress(block)" class="progress-text">
                 {{ getBlockProgress(block).done }} / {{ getBlockProgress(block).total }}
               </span>
-              <span v-if="isBlockLockedForModal(block)" class="lock-label">前工程未完了のためロック中</span>
+              <span v-if="isBlockLockedForModal(block)" class="lock-label">{{ t('integratedOperation.lockedByPrevious') }}</span>
             </div>
 
             <!-- 略図プレースホルダー -->
@@ -317,6 +318,12 @@
                       @click="setJudgement(item.id, 'NG')"
                       :disabled="!canEdit"
                     >NG</button>
+                    <button
+                      class="judge-btn rework"
+                      :class="{ active: modalResponses[item.id]?.judgement === '修正流動' }"
+                      @click="setJudgement(item.id, '修正流動')"
+                      :disabled="!canEdit"
+                    >{{ t('integratedOperation.reworkFlow') }}</button>
                   </template>
                   <!-- NUMERIC -->
                   <template v-else-if="item.record_type === 'NUMERIC'">
@@ -350,7 +357,7 @@
 
             <!-- ロック中表示 -->
             <div v-else class="locked-message">
-              前工程の必須項目を全て完了してください
+              {{ t('integratedOperation.completePreviousRequired') }}
             </div>
 
           </div>
@@ -361,22 +368,28 @@
                 class="btn-secondary btn-sm"
                 @click="moveModalUnit(-1)"
                 :disabled="!canMovePrevUnit"
-              >前の一台</button>
+              >{{ t('integratedOperation.prevUnit') }}</button>
               <button
                 class="btn-secondary btn-sm"
                 @click="moveModalUnit(1)"
                 :disabled="!canMoveNextUnit"
-              >次の一台</button>
+              >{{ t('integratedOperation.nextUnit') }}</button>
               <span class="status-chip" :class="statusClass(modalHeaderStatusCode)">{{ modalHeaderStatusLabel }}</span>
               <button
                 v-if="modalVisibleBlocks.length === 1 && !isBlockLockedForModal(modalVisibleBlocks[0]) && modalVisibleBlocks[0].items?.length"
                 class="btn-primary btn-sm"
-                @click="saveBlockChecks(modalVisibleBlocks[0])"
+                @click="saveBlockChecks(modalVisibleBlocks[0], { hold: false })"
                 :disabled="savingBlock === modalVisibleBlocks[0].id || !canEdit"
               >
-                {{ savingBlock === modalVisibleBlocks[0].id ? '保存中...' : 'この工程を保存' }}
+                {{ savingBlock === modalVisibleBlocks[0].id ? t('common.saving') : t('integratedOperation.saveThisProcess') }}
               </button>
-              <button class="btn-secondary btn-sm" @click="closeModal">閉じる</button>
+              <button
+                v-if="modalVisibleBlocks.length === 1 && !isBlockLockedForModal(modalVisibleBlocks[0]) && modalVisibleBlocks[0].items?.length"
+                class="btn-secondary btn-sm btn-hold"
+                @click="saveBlockChecks(modalVisibleBlocks[0], { hold: true })"
+                :disabled="savingBlock === modalVisibleBlocks[0].id || !canEdit"
+              >{{ t('integratedOperation.hold') }}</button>
+              <button class="btn-secondary btn-sm" @click="closeModal">{{ t('common.close') }}</button>
             </div>
           </div>
         </div>
@@ -417,6 +430,7 @@ import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import { t } from '@/i18n'
 const route = useRoute()
 const router = useRouter()
 
@@ -433,7 +447,7 @@ const canAccessQuality = (resource, level = 'view', aliases = [], fallbackToQual
 }
 const isReviewMode = computed(() => route.name === 'IntegratedChecksheetReview')
 const pageTitleText = computed(() => (
-  isReviewMode.value ? '製品チェックシート結果確認' : '製品チェックシート実施'
+  isReviewMode.value ? t('integratedOperation.pageTitleReview') : t('integratedOperation.pageTitleWork')
 ))
 const isSupervisorUser = computed(() => {
   const user = authState.user
@@ -617,13 +631,13 @@ const statusClass = (st) => {
 
 const statusLabel = (st) => {
   switch (st) {
-    case 'PENDING': return '未着手'
-    case 'IN_PROGRESS': return '入力中'
-    case 'COMPLETED': return '完了'
-    case 'APPROVED': return '承認済'
-    case 'OPEN': return '実施中'
-    case 'LEADER_CONFIRMED': return 'リーダ確認済'
-    case 'SUPERVISOR_CONFIRMED': return '班長確認済'
+    case 'PENDING': return t('integratedOperation.status.pending')
+    case 'IN_PROGRESS': return t('integratedOperation.status.inProgress')
+    case 'COMPLETED': return t('integratedOperation.status.completed')
+    case 'APPROVED': return t('integratedOperation.status.approved')
+    case 'OPEN': return t('integratedOperation.status.open')
+    case 'LEADER_CONFIRMED': return t('integratedOperation.status.leaderConfirmed')
+    case 'SUPERVISOR_CONFIRMED': return t('integratedOperation.status.supervisorConfirmed')
     default: return st
   }
 }
@@ -685,6 +699,7 @@ const cellDisplay = (unit, item) => {
   if (item.record_type === 'CHECK') {
     if (check.judgement === 'OK') return '✓'
     if (check.judgement === 'NG') return '✗'
+    if (check.judgement === '修正流動') return '修正流動'
     return ''
   }
   if (item.record_type === 'NUMERIC') {
@@ -701,6 +716,7 @@ const cellClass = (unit, block, item) => {
   if (item.record_type === 'CHECK') {
     if (check.judgement === 'OK') return 'cell-ok'
     if (check.judgement === 'NG') return 'cell-ng'
+    if (check.judgement === '修正流動') return 'cell-rework'
   }
   if (item.record_type === 'NUMERIC' && check.numeric_value != null && item.criteria) {
     const bounds = parseCriteria(item.criteria, item.standard)
@@ -827,7 +843,7 @@ const submitEditBatch = async () => {
     d.visible = false
     await loadBatches()
   } catch (e) {
-    alert(`編集に失敗しました: ${e.response?.data?.detail || e.message}`)
+    alert(`${t('integratedOperation.alert.editFailed')}: ${e.response?.data?.detail || e.message}`)
   } finally {
     actionLoading.value = false
   }
@@ -842,9 +858,9 @@ const deleteBatch = async (batch) => {
       activeBatch.value = null
     }
     await loadBatches()
-    alert('バッチを削除しました。')
+    alert(t('integratedOperation.alert.batchDeleted'))
   } catch (e) {
-    alert(`削除に失敗しました: ${e.response?.data?.detail || e.message}`)
+    alert(`${t('integratedOperation.alert.deleteFailed')}: ${e.response?.data?.detail || e.message}`)
   } finally {
     actionLoading.value = false
   }
@@ -856,9 +872,9 @@ const leaderConfirm = async (batch) => {
   try {
     await api.integratedChecksheets.leaderConfirm(batch.id)
     await loadBatches()
-    alert('リーダ確認しました。')
+    alert(t('integratedOperation.alert.leaderConfirmed'))
   } catch (e) {
-    alert(`リーダ確認に失敗しました: ${e.response?.data?.detail || e.message}`)
+    alert(`${t('integratedOperation.alert.leaderConfirmFailed')}: ${e.response?.data?.detail || e.message}`)
   } finally {
     actionLoading.value = false
   }
@@ -866,7 +882,7 @@ const leaderConfirm = async (batch) => {
 
 const supervisorConfirm = async (batch) => {
   if (!isSupervisorUser.value) {
-    alert('班長のみ班長確認を実行できます。')
+    alert(t('integratedOperation.alert.supervisorOnly'))
     return
   }
   if (!window.confirm('班長確認を実行します。よろしいですか？')) return
@@ -874,9 +890,9 @@ const supervisorConfirm = async (batch) => {
   try {
     await api.integratedChecksheets.supervisorConfirm(batch.id)
     await loadBatches()
-    alert('班長確認しました。')
+    alert(t('integratedOperation.alert.supervisorConfirmed'))
   } catch (e) {
-    alert(`班長確認に失敗しました: ${e.response?.data?.detail || e.message}`)
+    alert(`${t('integratedOperation.alert.supervisorConfirmFailed')}: ${e.response?.data?.detail || e.message}`)
   } finally {
     actionLoading.value = false
   }
@@ -957,7 +973,7 @@ const prepareBatch = async () => {
     newBatch.lot_no = ''
     newBatch.plan_date = ''
   } catch (error) {
-    alert(`バッチ作成に失敗しました: ${error.response?.data?.detail || error.message}`)
+    alert(`${t('integratedOperation.alert.batchCreateFailed')}: ${error.response?.data?.detail || error.message}`)
   } finally {
     preparing.value = false
   }
@@ -1124,10 +1140,80 @@ const setText = (itemId, val) => {
   modalResponses.value[itemId].text_value = val
 }
 
+const hasMissingRequiredItems = (block) => {
+  if (!block || !Array.isArray(block.items)) return false
+  return block.items.some((item) => {
+    if (!item.is_required) return false
+    const r = modalResponses.value[item.id]
+    if (!r) return true
+    if (item.record_type === 'CHECK') return !r.judgement
+    if (item.record_type === 'NUMERIC') return r.numeric_value === null || r.numeric_value === '' || r.numeric_value === undefined
+    return !r.text_value
+  })
+}
+
+const getRequiredItemIdsForUnit = () => {
+  const ids = []
+  for (const block of templateBlocks.value) {
+    for (const item of block.items || []) {
+      if (item.is_required) ids.push(item.id)
+    }
+  }
+  return ids
+}
+
+const hasUnitMissingRequired = (unit) => {
+  if (!unit) return false
+  const requiredIds = getRequiredItemIdsForUnit()
+  if (!requiredIds.length) return false
+  const checkedIds = new Set()
+  for (const c of (unit.checks || [])) {
+    if (c.judgement || c.numeric_value !== null && c.numeric_value !== undefined || c.text_value) {
+      checkedIds.add(c.item)
+    }
+  }
+  return requiredIds.some((id) => !checkedIds.has(id))
+}
+
+const hasUnitAnyCheckValue = (unit) => {
+  if (!unit) return false
+  for (const c of (unit.checks || [])) {
+    if (c.judgement || c.numeric_value !== null && c.numeric_value !== undefined || c.text_value) {
+      return true
+    }
+  }
+  return false
+}
+
+const hasUnitHoldFlag = (unit) => {
+  if (!unit || !Array.isArray(unit.sketch_responses)) return false
+  return unit.sketch_responses.some((resp) => Boolean(resp?.field_responses?._hold))
+}
+
+const shouldShowHoldMark = (unit) => {
+  if (hasUnitHoldFlag(unit)) return true
+  return hasUnitAnyCheckValue(unit) && hasUnitMissingRequired(unit)
+}
+
+const getSketchPayloadForBlock = (unit, blockId, hold, holdReason = '') => {
+  const existing = (unit?.sketch_responses || []).find((resp) => Number(resp.process_block) === Number(blockId))
+  const drawingData = existing?.drawing_data && typeof existing.drawing_data === 'object' ? existing.drawing_data : {}
+  const fieldResponses = existing?.field_responses && typeof existing.field_responses === 'object' ? { ...existing.field_responses } : {}
+  fieldResponses._hold = Boolean(hold)
+  if (hold) {
+    fieldResponses._hold_reason = String(holdReason || '').trim()
+  } else {
+    delete fieldResponses._hold_reason
+  }
+  return { drawing_data: drawingData, field_responses: fieldResponses }
+}
+
 // 工程ブロック単位で保存
-const saveBlockChecks = async (block) => {
+const saveBlockChecks = async (block, options = {}) => {
   if (!canEdit.value) return
   if (!modalUnit.value) return
+  const hold = Boolean(options.hold)
+  let holdReason = ''
 
   const missingItems = block.items.filter((item) => {
     if (!item.is_required) return false
@@ -1139,7 +1225,23 @@ const saveBlockChecks = async (block) => {
   })
   if (missingItems.length > 0) {
     const names = missingItems.map((i) => i.item_name).join('、')
-    if (!window.confirm(`未確認の必須項目があります:\n${names}\n\nこのまま保存しますか？`)) return
+    if (!hold) {
+      alert(`${t('integratedOperation.alert.requiredMissing')}\n${names}\n\n${t('integratedOperation.alert.useHold')}`)
+      return
+    }
+  }
+  if (hold) {
+    while (!holdReason) {
+      const input = window.prompt(
+        `${t('integratedOperation.alert.holdIncomplete')}\n${t('integratedOperation.alert.holdReasonRequired')}`,
+        holdReason
+      )
+      if (input === null) return
+      holdReason = String(input || '').trim()
+      if (!holdReason) {
+        alert(t('integratedOperation.alert.holdReasonMandatory'))
+      }
+    }
   }
 
   const savedUnitId = modalUnit.value.id
@@ -1164,8 +1266,35 @@ const saveBlockChecks = async (block) => {
       process_block_id: block.id,
       checks,
     })
+    const sketchPayload = getSketchPayloadForBlock(modalUnit.value, block.id, hold, holdReason)
+    await api.integratedChecksheets.saveSketch(modalUnit.value.id, {
+      process_block_id: block.id,
+      drawing_data: sketchPayload.drawing_data,
+      field_responses: sketchPayload.field_responses,
+    })
     // モーダルのunitを更新
-    const updatedUnit = res.data
+    const updatedUnit = {
+      ...res.data,
+      sketch_responses: Array.isArray(modalUnit.value?.sketch_responses)
+        ? (() => {
+            const next = [...modalUnit.value.sketch_responses]
+            const idx = next.findIndex((resp) => Number(resp.process_block) === Number(block.id))
+            const patch = {
+              ...(idx >= 0 ? next[idx] : {}),
+              process_block: block.id,
+              drawing_data: sketchPayload.drawing_data,
+              field_responses: sketchPayload.field_responses,
+            }
+            if (idx >= 0) next[idx] = patch
+            else next.push(patch)
+            return next
+          })()
+        : [{
+            process_block: block.id,
+            drawing_data: sketchPayload.drawing_data,
+            field_responses: sketchPayload.field_responses,
+          }],
+    }
     updateUnitInList(updatedUnit)
     modalUnit.value = updatedUnit
     // バッチ一覧も更新
@@ -1178,7 +1307,7 @@ const saveBlockChecks = async (block) => {
       if (nextUnit) openUnitModal(nextUnit, modalSelectedBlockId.value)
     }
   } catch (error) {
-    alert(`保存に失敗しました: ${error.response?.data?.detail || error.message}`)
+    alert(`${t('integratedOperation.alert.saveFailed')}: ${error.response?.data?.detail || error.message}`)
   } finally {
     savingBlock.value = null
   }
@@ -1394,6 +1523,21 @@ onMounted(async () => {
 .th-unit { min-width: 52px; text-align: center; cursor: pointer; }
 .th-unit:hover { background: #dbeafe; }
 .unit-header { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.unit-hold-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
 
 .td-process { position: sticky; left: 0; z-index: 1; background: #fff; font-size: 11px; color: #6b7280; }
 .td-item { position: sticky; left: 60px; z-index: 1; background: #fff; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
@@ -1454,6 +1598,7 @@ onMounted(async () => {
 .cell-empty { color: #d1d5db; }
 .cell-ok { background: #ecfdf5; color: #059669; font-weight: 700; }
 .cell-ng { background: #fef2f2; color: #dc2626; font-weight: 700; }
+.cell-rework { background: #f5f3ff; color: #6d28d9; font-weight: 700; }
 .cell-filled { background: #f0fdf4; color: #166534; }
 .lock-icon { font-size: 12px; }
 
@@ -1642,6 +1787,9 @@ onMounted(async () => {
 .judge-btn.ok.active { background: #059669; color: #fff; border-color: #059669; }
 .judge-btn.ng { color: #dc2626; border-color: #fca5a5; }
 .judge-btn.ng.active { background: #dc2626; color: #fff; border-color: #dc2626; }
+.judge-btn.rework { color: #7c3aed; border-color: #c4b5fd; }
+.judge-btn.rework.active { background: #7c3aed; color: #fff; border-color: #7c3aed; }
+.btn-hold { border-color: #d97706; color: #b45309; }
 
 /* 数値・テキスト入力 */
 .numeric-input, .text-input {

@@ -267,9 +267,9 @@
                       <td><input v-model.trim="item.method" class="cell-input cell-sm" /></td>
                       <td>
                         <select v-model="item.record_type" class="cell-input">
-                          <option value="CHECK">CHECK</option>
-                          <option value="NUMERIC">NUMERIC</option>
-                          <option value="TEXT">TEXT</option>
+                          <option value="CHECK">チェック</option>
+                          <option value="NUMERIC">数値</option>
+                          <option value="TEXT">文字</option>
                         </select>
                       </td>
                       <td><input v-model.trim="item.unit" class="cell-input cell-xs" /></td>
@@ -2285,4 +2285,3 @@ watch(
   }
 }
 </style>
-
