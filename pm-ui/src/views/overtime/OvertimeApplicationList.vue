@@ -21,6 +21,10 @@
       </select>
       <button class="btn btn-secondary" @click="fetchList">検索</button>
       <button class="btn btn-pdf" @click="downloadPdf">PDF出力</button>
+      <label class="type-check-label">
+        <input type="checkbox" v-model="excludeRejected" />
+        却下除き
+      </label>
     </div>
     <div class="filters" v-if="applications.length">
       <select v-model="filterTeam" class="filter-select">
@@ -218,6 +222,7 @@ const filterGroup = ref('')
 const filterTypes = ref([])
 const filterName = ref('')
 const filterDate = ref('')
+const excludeRejected = ref(false)
 
 const TYPE_OPTIONS = [
   { value: 'overtime', label: '時間外' },
@@ -249,7 +254,8 @@ const filteredApplications = computed(() =>
     (!filterGroup.value || a.group_name === filterGroup.value) &&
     (!filterTypes.value.length || filterTypes.value.includes(a.application_type)) &&
     (!filterName.value || a.applicant_name === filterName.value) &&
-    (!filterDate.value || a.work_date === filterDate.value)
+    (!filterDate.value || a.work_date === filterDate.value) &&
+    (!excludeRejected.value || a.status !== 'rejected')
   )
 )
 const totalPages = computed(() => Math.ceil(filteredApplications.value.length / pageSize) || 1)
@@ -274,7 +280,7 @@ const filters = ref({
   status: '',
 })
 
-watch([filterTeam, filterGroup, filterTypes, filterName, filterDate, filters], () => {
+watch([filterTeam, filterGroup, filterTypes, filterName, filterDate, excludeRejected, filters], () => {
   currentPage.value = 1
 }, { deep: true })
 
