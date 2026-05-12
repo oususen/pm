@@ -26,6 +26,13 @@
           <option v-for="v in productOptions" :key="`prod-opt-${v}`" :value="v">{{ v }}</option>
         </select>
       </label>
+      <label>
+        <span class="field-label">項目</span>
+        <select v-model="selectedItem" :disabled="!isItemSelectable">
+          <option value="">すべて</option>
+          <option v-for="v in itemOptions" :key="`item-opt-${v}`" :value="v">{{ v }}</option>
+        </select>
+      </label>
       <label class="field-worker">
         <span class="field-label">作業者</span>
         <select v-model="selectedPerson">
@@ -376,6 +383,7 @@ const lineYAxisTypeLabel = computed(() => (selectedLineYAxisType.value === "cumu
 const selectedLine = ref("")
 const selectedProcess = ref("")
 const selectedProduct = ref("")
+const selectedItem = ref("")
 const selectedPerson = ref("")
 const selectedUnit = ref("")
 const startDate = ref("")
@@ -410,17 +418,24 @@ const uniqueSorted = (rows, key) => [...new Set(rows.map((r) => r[key] || "未�
 const lineOptions = computed(() => uniqueSorted(incidentRowsAll.value, "line"))
 const processOptions = computed(() => uniqueSorted(incidentRowsAll.value, "process"))
 const productOptions = computed(() => uniqueSorted(incidentRowsAll.value, "product"))
+const itemOptions = computed(() => {
+  if (!isItemSelectable.value) return []
+  const base = incidentRowsAll.value.filter((r) => r.product === selectedProduct.value && r.process === selectedProcess.value)
+  return uniqueSorted(base, "item")
+})
 const personOptions = computed(() => uniqueSorted(incidentRowsAll.value, "person"))
 const unitOptions = computed(() => uniqueSorted(incidentRowsAll.value, "unit"))
+const isItemSelectable = computed(() => Boolean(selectedProduct.value) && Boolean(selectedProcess.value))
 
 const filteredRows = computed(() => incidentRowsAll.value.filter((r) => {
+  if (startDate.value && r.date < startDate.value) return false
+  if (endDate.value && r.date > endDate.value) return false
   if (selectedLine.value && r.line !== selectedLine.value) return false
   if (selectedProcess.value && r.process !== selectedProcess.value) return false
   if (selectedProduct.value && r.product !== selectedProduct.value) return false
+  if (selectedItem.value && r.item !== selectedItem.value) return false
   if (selectedPerson.value && r.person !== selectedPerson.value) return false
   if (selectedUnit.value && String(r.unit) !== String(selectedUnit.value)) return false
-  if (startDate.value && r.date < startDate.value) return false
-  if (endDate.value && r.date > endDate.value) return false
   return true
 }))
 const radarRings = [0.25, 0.5, 0.75, 1]
@@ -657,6 +672,9 @@ const loadData = async () => {
 }
 
 onMounted(loadData)
+watch([selectedProduct, selectedProcess], () => {
+  if (!isItemSelectable.value) selectedItem.value = ""
+})
 watch(filteredRows, (rows) => {
   recomputeByRows(rows)
 })
