@@ -17,6 +17,12 @@
           <option v-for="code in uniqueMaterialCodes" :key="code" :value="code">{{ code }}</option>
         </select>
         <input
+          v-model.trim="filterFinishedProductCode"
+          type="text"
+          class="filter-input"
+          placeholder="完成品番号"
+        />
+        <input
           v-model="filterProcessTimeMin"
           type="number"
           step="0.1"
@@ -202,6 +208,7 @@ const saving = ref(false)
 const searchKeyword = ref('')
 const filterEquipment = ref('')
 const filterMaterial = ref('')
+const filterFinishedProductCode = ref('')
 const filterProcessTimeMin = ref('')
 const filterProcessTimeMax = ref('')
 const patterns = ref([])
@@ -265,6 +272,13 @@ const filteredPatterns = computed(() => {
     }
     if (filterEquipment.value && item.equipment_code !== filterEquipment.value) return false
     if (filterMaterial.value && item.material_code !== filterMaterial.value) return false
+    if (filterFinishedProductCode.value) {
+      const q = filterFinishedProductCode.value.toLowerCase()
+      const hasMatch = (item.finished_items || []).some((finished) =>
+        String(finished?.finished_product_code || '').toLowerCase().includes(q),
+      )
+      if (!hasMatch) return false
+    }
     const processTime = Number(item.process_time_min ?? 0)
     const minTime = Number(filterProcessTimeMin.value)
     const maxTime = Number(filterProcessTimeMax.value)
