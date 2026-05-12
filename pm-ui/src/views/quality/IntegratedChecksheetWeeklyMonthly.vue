@@ -49,6 +49,18 @@
         <span class="field-label">終了日</span>
         <input v-model="endDate" type="date" />
       </label>
+      <label>
+        <span class="field-label">お気に入り</span>
+        <select v-model="selectedFavoriteId" @change="applyFavorite">
+          <option value="">-- 選択 --</option>
+          <option v-for="fav in favorites" :key="fav.id" :value="String(fav.id)">{{ fav.name }}</option>
+        </select>
+      </label>
+      <label>
+        <span class="field-label">登録名</span>
+        <input v-model.trim="favoriteName" type="text" placeholder="お気に入り名" />
+      </label>
+      <button class="btn favorite-star-btn" title="お気に入り登録" :disabled="loading" @click="saveFavorite">★</button>
     </div>
 
     <h3 class="section-title">週次（直近4週）</h3>
@@ -134,6 +146,9 @@ const selectedPerson = ref("")
 const selectedUnit = ref("")
 const startDate = ref("")
 const endDate = ref("")
+const favorites = ref([])
+const selectedFavoriteId = ref("")
+const favoriteName = ref("")
 
 const toArray = (data) => data?.results || data || []
 const isJudged = (check) => check?.judgement === "OK" || check?.judgement === "NG"
@@ -157,6 +172,74 @@ const filteredRecords = computed(() => allRecords.value.filter((r) => {
   if (endDate.value && r.dateText > endDate.value) return false
   return true
 }))
+
+const FAVORITE_SCREEN_KEY = "quality.product_checksheet_integrated_weekly_monthly"
+
+const toFavoritePayload = () => ({
+  selectedLine: String(selectedLine.value || ""),
+  selectedProcess: String(selectedProcess.value || ""),
+  selectedProduct: String(selectedProduct.value || ""),
+  selectedPerson: String(selectedPerson.value || ""),
+  selectedUnit: String(selectedUnit.value || ""),
+  startDate: String(startDate.value || ""),
+  endDate: String(endDate.value || ""),
+})
+
+const applyFavoritePayload = (payload) => {
+  selectedLine.value = String(payload?.selectedLine || "")
+  selectedProcess.value = String(payload?.selectedProcess || "")
+  selectedProduct.value = String(payload?.selectedProduct || "")
+  selectedPerson.value = String(payload?.selectedPerson || "")
+  selectedUnit.value = String(payload?.selectedUnit || "")
+  startDate.value = String(payload?.startDate || "")
+  endDate.value = String(payload?.endDate || "")
+}
+
+const loadFavorites = async () => {
+  try {
+    const res = await api.accounts.getFavorites({ screen_key: FAVORITE_SCREEN_KEY, page_size: 200 })
+    favorites.value = Array.isArray(res.data) ? res.data : res.data?.results || []
+  } catch (e) {
+    console.error("お気に入り取得失敗:", e)
+  }
+}
+
+const applyFavorite = () => {
+  const id = Number(selectedFavoriteId.value || 0)
+  if (!id) return
+  const target = favorites.value.find((item) => Number(item.id) === id)
+  if (!target) return
+  favoriteName.value = target.name || ""
+  applyFavoritePayload(target.payload || {})
+}
+
+const saveFavorite = async () => {
+  const name = String(favoriteName.value || "").trim()
+  if (!name) {
+    window.alert("お気に入り名を入力してください。")
+    return
+  }
+  const payload = {
+    screen_key: FAVORITE_SCREEN_KEY,
+    name,
+    payload: toFavoritePayload(),
+  }
+  try {
+    const id = Number(selectedFavoriteId.value || 0)
+    if (id) {
+      await api.accounts.updateFavorite(id, payload)
+    } else {
+      await api.accounts.createFavorite(payload)
+    }
+    await loadFavorites()
+    const found = favorites.value.find((item) => item.name === name)
+    selectedFavoriteId.value = found ? String(found.id) : ""
+    window.alert("お気に入りを保存しました。")
+  } catch (e) {
+    const detail = e?.response?.data?.detail || e?.message || "保存に失敗しました。"
+    window.alert(`お気に入り保存エラー: ${detail}`)
+  }
+}
 
 const loadData = async () => {
   loading.value = true
@@ -280,7 +363,9 @@ const rebuildRows = () => {
     monthlyRows.value = ms
 }
 
-onMounted(loadData)
+onMounted(async () => {
+  await Promise.all([loadData(), loadFavorites()])
+})
 watch([selectedLine, selectedProcess, selectedProduct, selectedPerson, selectedUnit, startDate, endDate], rebuildRows)
 </script>
 
@@ -289,6 +374,19 @@ watch([selectedLine, selectedProcess, selectedProduct, selectedPerson, selectedU
 .prepare-form label { display: inline-flex; align-items: center; gap: 6px; margin: 0; width: auto; flex: 0 0 auto; }
 .field-label { white-space: nowrap; min-width: 56px; }
 .prepare-form select, .prepare-form input { padding: 5px 7px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; }
+.favorite-star-btn {
+  border: 1px solid #eab308;
+  background: #facc15;
+  color: #78350f;
+  min-width: 34px;
+  height: 31px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.favorite-star-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 .filter-form .field-worker select { width: 140px; }
 .filter-form .field-unit select { width: 110px; }
 .chart-wrap { margin: 8px 0 12px; padding: 10px; border: 1px solid #dbe3ea; border-radius: 6px; background: #fff; }
