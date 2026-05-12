@@ -22,6 +22,7 @@ class Product(models.Model):
     product_name_halfwidth = models.CharField(max_length=100, null=True, blank=True, verbose_name='品名半角')
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, null=True, blank=True, verbose_name='カテゴリ')
     unit = models.CharField(max_length=10, default='個', verbose_name='単位')
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True, verbose_name='単価')
     standard_lt_days = models.IntegerField(null=True, blank=True, verbose_name='標準LT(日)')
     image_url = models.CharField(max_length=255, null=True, blank=True, verbose_name='画像URL')
     line = models.ForeignKey('Line', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='ライン情報')

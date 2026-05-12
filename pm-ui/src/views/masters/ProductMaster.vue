@@ -124,6 +124,7 @@
               <th>品名</th>
               <th>カテゴリ</th>
               <th>単位</th>
+              <th>単価</th>
               <th>標準LT(日)</th>
               <th>最小発注数</th>
               <th>発注倍数</th>
@@ -146,6 +147,7 @@
               <td>{{ product.product_name }}</td>
               <td>{{ getCategoryLabel(product.category) }}</td>
               <td>{{ product.unit }}</td>
+              <td>{{ product.unit_price ?? '-' }}</td>
               <td>{{ product.standard_lt_days }}</td>
               <td>{{ product.order_lot_min ?? '-' }}</td>
               <td>{{ product.order_lot_multiple ?? 1 }}</td>
@@ -258,6 +260,10 @@
                 <div class="form-group">
                   <label>単位</label>
                   <input v-model="formData.unit" placeholder="個" />
+                </div>
+                <div class="form-group">
+                  <label>単価</label>
+                  <input v-model.number="formData.unit_price" type="number" min="0" step="0.01" />
                 </div>
                 <div class="form-group">
                   <label>標準LT(日)</label>
@@ -531,6 +537,7 @@ const createEmptyFormData = () => ({
   model_name: '',
   category: '',
   unit: '個',
+  unit_price: null,
   standard_lt_days: 0,
   order_lot_min: null,
   order_lot_multiple: 1,
@@ -944,6 +951,7 @@ const saveProduct = async () => {
       size_length: normalizeNumber(formData.value.size_length),
       size_width: normalizeNumber(formData.value.size_width),
       size_thickness: normalizeNumber(formData.value.size_thickness),
+      unit_price: normalizeNumber(formData.value.unit_price),
     }
     if (processMode.value === 'edit') {
       await api.products.updateProduct(payload.id, payload)
@@ -1515,4 +1523,3 @@ watch(
   padding: 4px 8px;
 }
 </style>
-

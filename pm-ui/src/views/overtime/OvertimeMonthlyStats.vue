@@ -35,6 +35,7 @@
     <div class="tab-bar">
       <button class="tab-btn" :class="{ active: activeTab === 'detail' }" @click="activeTab = 'detail'">詳細</button>
       <button class="tab-btn" :class="{ active: activeTab === 'summary' }" @click="activeTab = 'summary'">集計</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'productivity' }" @click="activeTab = 'productivity'">加工費集計</button>
     </div>
 
     <div v-if="loading" class="loading">読み込み中...</div>
@@ -54,7 +55,7 @@
           <table class="stats-table">
             <thead>
               <tr>
-                <th>氏名</th>
+                <th class="name-header">氏名</th>
                 <th>班</th>
                 <th>グループ</th>
                 <th>日付</th>
@@ -154,6 +155,48 @@
         </div>
       </template>
 
+      <template v-if="activeTab === 'productivity'">
+        <div class="summary-bar">
+          <span>{{ filteredProductivityRows.length }}件</span>
+          <span style="font-size:12px;color:#6b7280;">加工出来高はセッション実績数量合計</span>
+        </div>
+        <div class="table-wrap">
+          <table class="stats-table productivity-table">
+            <thead>
+              <tr>
+                <th class="name-header">氏名</th>
+                <th>班</th>
+                <th>グループ</th>
+                <th>日付</th>
+                <th>加工出来高</th>
+                <th>加工費合計</th>
+                <th>セッション時間(H)</th>
+                <th>時間当たり加工費(セッション)</th>
+                <th>出勤時間(H)</th>
+                <th>時間当たり加工費(出勤)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in filteredProductivityRows" :key="`${row.name}|${row.date}`">
+                <td class="name-cell">{{ row.name }}</td>
+                <td class="team-cell">{{ row.team || '—' }}</td>
+                <td class="team-cell">{{ row.group || '—' }}</td>
+                <td class="date-cell">{{ row.date }}</td>
+                <td class="num-cell">{{ formatMetric(row.qtyTotal) }}</td>
+                <td class="num-cell">{{ formatMetric(row.amountTotal) }}</td>
+                <td class="num-cell">{{ formatMetric(row.sessionHours) }}</td>
+                <td class="num-cell">{{ row.sessionRate != null ? formatMetric(row.sessionRate) : '—' }}</td>
+                <td class="num-cell">{{ row.attendanceHours > 0 ? formatMetric(row.attendanceHours) : '—' }}</td>
+                <td class="num-cell">{{ row.attendanceRate != null ? formatMetric(row.attendanceRate) : '—' }}</td>
+              </tr>
+              <tr v-if="!filteredProductivityRows.length">
+                <td colspan="10" class="empty">データがありません</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
       <!-- 編集モーダル -->
       <div v-if="editModal.visible" class="modal-overlay" @click.self="editModal.visible = false">
         <div class="modal-box">
@@ -203,6 +246,8 @@ const loading = ref(false)
 const rows = ref([])
 const allUsers = ref([])  // 全作業者リスト（申請なしの人も含む）
 const activeTab = ref('detail')
+const productionSessions = ref([])
+const unitPriceByCode = ref({})
 
 // サブフィルター
 const filterTeam = ref('')
@@ -231,6 +276,97 @@ const filteredRows = computed(() =>
       (filterPaidLeave.value === 'any' && r.paidLeaveCount > 0) ||
       (filterPaidLeave.value === 'none' && !r.paidLeaveCount))
   )
+)
+
+const normalizePersonName = (value) => String(value || '').replace(/\s+/g, '').toLowerCase()
+
+const userMetaByName = computed(() => {
+  const map = new Map()
+  for (const user of allUsers.value) {
+    const key = normalizePersonName(user.name)
+    if (!key) continue
+    map.set(key, { team: user.team || '', group: user.group || '' })
+  }
+  for (const row of rows.value) {
+    const key = normalizePersonName(row.name)
+    if (!key || map.has(key)) continue
+    map.set(key, { team: row.team || '', group: row.group || '' })
+  }
+  return map
+})
+
+const attendanceHoursByPersonDate = computed(() => {
+  const map = new Map()
+  for (const row of rows.value) {
+    const key = `${normalizePersonName(row.name)}|${row.date}`
+    map.set(key, (map.get(key) || 0) + Number(row.workH || 0))
+  }
+  return map
+})
+
+const productivityRows = computed(() => {
+  const aggregate = new Map()
+  for (const session of productionSessions.value) {
+    const nameRaw = String(session?.operator_name || '').trim()
+    const nameKey = normalizePersonName(nameRaw)
+    const date = String(session?.plan_date || session?.work_date || '').slice(0, 10)
+    if (!nameKey || !date) continue
+    const qty = Number(session?.production_qty || 0)
+    if (qty === 0) continue
+    const seconds = Math.max(Number(session?.effective_work_seconds || 0), 0)
+    const productCode = String(session?.product_code || '').trim()
+    const unitPrice = Number(unitPriceByCode.value[productCode] || 0)
+    const amount = qty * unitPrice
+    const key = `${nameKey}|${date}`
+    if (!aggregate.has(key)) {
+      aggregate.set(key, {
+        nameKey,
+        name: nameRaw || '—',
+        date,
+        qtyTotal: 0,
+        amountTotal: 0,
+        sessionSeconds: 0,
+      })
+    }
+    const target = aggregate.get(key)
+    target.qtyTotal += qty
+    target.amountTotal += amount
+    target.sessionSeconds += seconds
+    if (nameRaw && target.name === '—') target.name = nameRaw
+  }
+
+  const rowsOut = []
+  for (const item of aggregate.values()) {
+    const meta = userMetaByName.value.get(item.nameKey) || {}
+    const sessionHours = item.sessionSeconds / 3600
+    const attendanceHours = Number(attendanceHoursByPersonDate.value.get(`${item.nameKey}|${item.date}`) || 0)
+    rowsOut.push({
+      name: item.name,
+      team: meta.team || '',
+      group: meta.group || '',
+      date: item.date,
+      qtyTotal: Math.round(item.qtyTotal * 1000) / 1000,
+      amountTotal: Math.round(item.amountTotal * 100) / 100,
+      sessionHours: Math.round(sessionHours * 1000) / 1000,
+      attendanceHours: Math.round(attendanceHours * 1000) / 1000,
+      sessionRate: sessionHours > 0 ? Math.round((item.amountTotal / sessionHours) * 100) / 100 : null,
+      attendanceRate: attendanceHours > 0 ? Math.round((item.amountTotal / attendanceHours) * 100) / 100 : null,
+    })
+  }
+
+  rowsOut.sort((a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? -1 : 1
+    return a.name.localeCompare(b.name, 'ja')
+  })
+  return rowsOut
+})
+
+const filteredProductivityRows = computed(() =>
+  productivityRows.value.filter((row) =>
+    (!filterTeam.value || row.team === filterTeam.value) &&
+    (!filterGroup.value || row.group === filterGroup.value) &&
+    (!filterName.value || row.name === filterName.value),
+  ),
 )
 
 const TYPE_LABELS = {
@@ -420,8 +556,62 @@ function formatDateShort(dateStr) {
   return `${parts[1]}/${parts[2]}`
 }
 
+function formatMetric(value) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '—'
+  return num.toLocaleString('ja-JP', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+}
+
 const NEEDS_APPROVAL = new Set(['overtime', 'holiday', 'half_day_am'])
 const APPROVED_STATUSES = new Set(['approved_manager', 'approved_chief', 'approved_supervisor', 'approved_leader'])
+const COUNTABLE_END_ACTIONS = new Set(['END', 'PAUSE'])
+
+const loadProductionMetrics = async () => {
+  productionSessions.value = []
+  unitPriceByCode.value = {}
+  const sessionsRes = await api.processRealtime.getSessions({
+    limit: 10000,
+    plan_date_start: dateFrom.value,
+    plan_date_end: dateTo.value,
+  })
+  const sessions = Array.isArray(sessionsRes.data)
+    ? sessionsRes.data
+    : Array.isArray(sessionsRes.data?.results)
+      ? sessionsRes.data.results
+      : []
+
+  const countableSessions = sessions.filter((row) => {
+    if (String(row?.session_type || '') !== 'WORK') return false
+    const endAction = String(row?.end_action || '').toUpperCase()
+    return COUNTABLE_END_ACTIONS.has(endAction)
+  })
+  productionSessions.value = countableSessions
+
+  const productCodes = [...new Set(
+    countableSessions
+      .map((row) => String(row?.product_code || '').trim())
+      .filter(Boolean),
+  )]
+  if (!productCodes.length) return
+
+  const codePriceMap = {}
+  const chunkSize = 200
+  for (let i = 0; i < productCodes.length; i += chunkSize) {
+    const chunk = productCodes.slice(i, i + chunkSize)
+    const productsRes = await api.products.getProductsByCodesIn(chunk)
+    const products = Array.isArray(productsRes.data?.results)
+      ? productsRes.data.results
+      : Array.isArray(productsRes.data)
+        ? productsRes.data
+        : []
+    for (const p of products) {
+      const code = String(p?.product_code || '').trim()
+      if (!code) continue
+      codePriceMap[code] = Number(p?.unit_price || 0)
+    }
+  }
+  unitPriceByCode.value = codePriceMap
+}
 
 async function load() {
   loading.value = true
@@ -544,6 +734,8 @@ async function load() {
       return a.name.localeCompare(b.name, 'ja')
     })
     rows.value = result
+
+    await loadProductionMetrics()
   } catch (e) {
     console.error(e)
   } finally {
@@ -691,6 +883,7 @@ onMounted(load)
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  position: relative;
 }
 .stats-table th {
   background: #f8fafc;
@@ -706,6 +899,28 @@ onMounted(load)
   padding: 7px 12px;
 }
 .name-cell { font-weight: 600; white-space: nowrap; }
+.stats-table th.name-header {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: #f8fafc;
+}
+.stats-table td.name-cell {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #fff;
+}
+.stats-table tbody tr:hover td.name-cell {
+  background: #f9fafb;
+}
+.stats-table tfoot .name-cell,
+.stats-table tfoot .total-label {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: #f1f5f9;
+}
 .team-cell { color: #6b7280; white-space: nowrap; }
 .date-cell { white-space: nowrap; color: #374151; }
 .type-cell { white-space: nowrap; color: #374151; }
