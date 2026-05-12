@@ -40,6 +40,12 @@ const overtime = [
     component: () => import('@/views/overtime/OvertimeMonthlyStats.vue'),
     meta: { pageTitle: '月次労働時間統計' },
   },
+  {
+    path: '/overtime/productivity-stats',
+    name: 'OvertimeProductivityStats',
+    component: () => import('@/views/overtime/OvertimeProductivityStats.vue'),
+    meta: { pageTitle: '加工費集計' },
+  },
 ]
 
 export default overtime

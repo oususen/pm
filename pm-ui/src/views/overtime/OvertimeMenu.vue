@@ -23,6 +23,11 @@
         <div class="menu-label">月次統計</div>
         <div class="menu-desc">メンバーの月次労働時間を確認する</div>
       </RouterLink>
+      <RouterLink v-if="isApprover" to="/overtime/productivity-stats" class="menu-card productivity-card">
+        <div class="menu-icon">🏭</div>
+        <div class="menu-label">加工費集計</div>
+        <div class="menu-desc">日別と期間集計で加工費を確認する</div>
+      </RouterLink>
     </div>
   </div>
 </template>
@@ -100,6 +105,13 @@ onMounted(async () => {
 .stats-card:hover {
   border-color: #6d28d9;
   box-shadow: 0 4px 12px rgba(139, 92, 246, 0.15);
+}
+.productivity-card {
+  border-color: #0891b2;
+}
+.productivity-card:hover {
+  border-color: #0e7490;
+  box-shadow: 0 4px 12px rgba(8, 145, 178, 0.15);
 }
 .menu-icon {
   font-size: 40px;

@@ -35,7 +35,6 @@
     <div class="tab-bar">
       <button class="tab-btn" :class="{ active: activeTab === 'detail' }" @click="activeTab = 'detail'">詳細</button>
       <button class="tab-btn" :class="{ active: activeTab === 'summary' }" @click="activeTab = 'summary'">集計</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'productivity' }" @click="activeTab = 'productivity'">加工費集計</button>
     </div>
 
     <div v-if="loading" class="loading">読み込み中...</div>
@@ -151,48 +150,6 @@
                 <td class="num-cell total-col">{{ totals.workH }}</td>
               </tr>
             </tfoot>
-          </table>
-        </div>
-      </template>
-
-      <template v-if="activeTab === 'productivity'">
-        <div class="summary-bar">
-          <span>{{ filteredProductivityRows.length }}件</span>
-          <span style="font-size:12px;color:#6b7280;">加工出来高はセッション実績数量合計</span>
-        </div>
-        <div class="table-wrap">
-          <table class="stats-table productivity-table">
-            <thead>
-              <tr>
-                <th class="name-header">氏名</th>
-                <th>班</th>
-                <th>グループ</th>
-                <th>日付</th>
-                <th>加工出来高</th>
-                <th>加工費合計</th>
-                <th>セッション時間(H)</th>
-                <th>時間当たり加工費(セッション)</th>
-                <th>出勤時間(H)</th>
-                <th>時間当たり加工費(出勤)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in filteredProductivityRows" :key="`${row.name}|${row.date}`">
-                <td class="name-cell">{{ row.name }}</td>
-                <td class="team-cell">{{ row.team || '—' }}</td>
-                <td class="team-cell">{{ row.group || '—' }}</td>
-                <td class="date-cell">{{ row.date }}</td>
-                <td class="num-cell">{{ formatMetric(row.qtyTotal) }}</td>
-                <td class="num-cell">{{ formatMetric(row.amountTotal) }}</td>
-                <td class="num-cell">{{ formatMetric(row.sessionHours) }}</td>
-                <td class="num-cell">{{ row.sessionRate != null ? formatMetric(row.sessionRate) : '—' }}</td>
-                <td class="num-cell">{{ row.attendanceHours > 0 ? formatMetric(row.attendanceHours) : '—' }}</td>
-                <td class="num-cell">{{ row.attendanceRate != null ? formatMetric(row.attendanceRate) : '—' }}</td>
-              </tr>
-              <tr v-if="!filteredProductivityRows.length">
-                <td colspan="10" class="empty">データがありません</td>
-              </tr>
-            </tbody>
           </table>
         </div>
       </template>
@@ -354,6 +311,62 @@ const productivityRows = computed(() => {
     })
   }
 
+  // 日付別ランキング（出来高、時間当たり加工費）
+  const byDate = new Map()
+  for (const row of rowsOut) {
+    if (!byDate.has(row.date)) byDate.set(row.date, [])
+    byDate.get(row.date).push(row)
+  }
+  for (const dateRows of byDate.values()) {
+    const qtySorted = [...dateRows].sort((a, b) => b.qtyTotal - a.qtyTotal)
+    let prevQty = null
+    let qtyRank = 0
+    qtySorted.forEach((row, idx) => {
+      if (prevQty === null || row.qtyTotal !== prevQty) qtyRank = idx + 1
+      row.qtyRank = qtyRank
+      prevQty = row.qtyTotal
+    })
+
+    const rateSorted = [...dateRows]
+      .filter((row) => row.sessionRate != null)
+      .sort((a, b) => b.sessionRate - a.sessionRate)
+    let prevRate = null
+    let rateRank = 0
+    rateSorted.forEach((row, idx) => {
+      if (prevRate === null || row.sessionRate !== prevRate) rateRank = idx + 1
+      row.rateRank = rateRank
+      prevRate = row.sessionRate
+    })
+    dateRows.forEach((row) => {
+      if (row.rateRank == null) row.rateRank = null
+    })
+
+    const attendanceRateSorted = [...dateRows]
+      .filter((row) => row.attendanceRate != null)
+      .sort((a, b) => b.attendanceRate - a.attendanceRate)
+    let prevAttendanceRate = null
+    let attendanceRateRank = 0
+    attendanceRateSorted.forEach((row, idx) => {
+      if (prevAttendanceRate === null || row.attendanceRate !== prevAttendanceRate) attendanceRateRank = idx + 1
+      row.attendanceRateRank = attendanceRateRank
+      prevAttendanceRate = row.attendanceRate
+    })
+    dateRows.forEach((row) => {
+      if (row.attendanceRateRank == null) row.attendanceRateRank = null
+    })
+
+    const maxQty = Math.max(...dateRows.map((r) => Number(r.qtyTotal || 0)), 0)
+    const maxRate = Math.max(...dateRows.map((r) => Number(r.sessionRate || 0)), 0)
+    const maxAttendanceRate = Math.max(...dateRows.map((r) => Number(r.attendanceRate || 0)), 0)
+    dateRows.forEach((row) => {
+      row.qtyIntensity = maxQty > 0 ? Number(row.qtyTotal || 0) / maxQty : 0
+      row.rateIntensity = maxRate > 0 && row.sessionRate != null ? Number(row.sessionRate || 0) / maxRate : 0
+      row.attendanceRateIntensity = maxAttendanceRate > 0 && row.attendanceRate != null
+        ? Number(row.attendanceRate || 0) / maxAttendanceRate
+        : 0
+    })
+  }
+
   rowsOut.sort((a, b) => {
     if (a.date !== b.date) return a.date < b.date ? -1 : 1
     return a.name.localeCompare(b.name, 'ja')
@@ -362,11 +375,73 @@ const productivityRows = computed(() => {
 })
 
 const filteredProductivityRows = computed(() =>
-  productivityRows.value.filter((row) =>
-    (!filterTeam.value || row.team === filterTeam.value) &&
-    (!filterGroup.value || row.group === filterGroup.value) &&
-    (!filterName.value || row.name === filterName.value),
-  ),
+  {
+    const filtered = productivityRows.value
+      .filter((row) =>
+        (!filterTeam.value || row.team === filterTeam.value) &&
+        (!filterGroup.value || row.group === filterGroup.value) &&
+        (!filterName.value || row.name === filterName.value),
+      )
+      .map((row) => ({ ...row }))
+
+    // 表示条件で絞り込んだ後に、日別順位と濃淡を再計算する
+    const byDate = new Map()
+    for (const row of filtered) {
+      if (!byDate.has(row.date)) byDate.set(row.date, [])
+      byDate.get(row.date).push(row)
+    }
+    for (const dateRows of byDate.values()) {
+      const qtySorted = [...dateRows].sort((a, b) => b.qtyTotal - a.qtyTotal)
+      let prevQty = null
+      let qtyRank = 0
+      qtySorted.forEach((row, idx) => {
+        if (prevQty === null || row.qtyTotal !== prevQty) qtyRank = idx + 1
+        row.qtyRank = qtyRank
+        prevQty = row.qtyTotal
+      })
+
+      const rateSorted = [...dateRows]
+        .filter((row) => row.sessionRate != null)
+        .sort((a, b) => b.sessionRate - a.sessionRate)
+      let prevRate = null
+      let rateRank = 0
+      rateSorted.forEach((row, idx) => {
+        if (prevRate === null || row.sessionRate !== prevRate) rateRank = idx + 1
+        row.rateRank = rateRank
+        prevRate = row.sessionRate
+      })
+      dateRows.forEach((row) => {
+        if (row.rateRank == null) row.rateRank = null
+      })
+
+      const attendanceRateSorted = [...dateRows]
+        .filter((row) => row.attendanceRate != null)
+        .sort((a, b) => b.attendanceRate - a.attendanceRate)
+      let prevAttendanceRate = null
+      let attendanceRateRank = 0
+      attendanceRateSorted.forEach((row, idx) => {
+        if (prevAttendanceRate === null || row.attendanceRate !== prevAttendanceRate) attendanceRateRank = idx + 1
+        row.attendanceRateRank = attendanceRateRank
+        prevAttendanceRate = row.attendanceRate
+      })
+      dateRows.forEach((row) => {
+        if (row.attendanceRateRank == null) row.attendanceRateRank = null
+      })
+
+      const maxQty = Math.max(...dateRows.map((r) => Number(r.qtyTotal || 0)), 0)
+      const maxRate = Math.max(...dateRows.map((r) => Number(r.sessionRate || 0)), 0)
+      const maxAttendanceRate = Math.max(...dateRows.map((r) => Number(r.attendanceRate || 0)), 0)
+      dateRows.forEach((row) => {
+        row.qtyIntensity = maxQty > 0 ? Number(row.qtyTotal || 0) / maxQty : 0
+        row.rateIntensity = maxRate > 0 && row.sessionRate != null ? Number(row.sessionRate || 0) / maxRate : 0
+        row.attendanceRateIntensity = maxAttendanceRate > 0 && row.attendanceRate != null
+          ? Number(row.attendanceRate || 0) / maxAttendanceRate
+          : 0
+      })
+    }
+
+    return filtered
+  },
 )
 
 const TYPE_LABELS = {
@@ -562,29 +637,153 @@ function formatMetric(value) {
   return num.toLocaleString('ja-JP', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 }
 
+function formatUtilization(sessionHours, attendanceHours) {
+  const s = Number(sessionHours || 0)
+  const a = Number(attendanceHours || 0)
+  if (!Number.isFinite(s) || !Number.isFinite(a) || a <= 0) return '—'
+  const ratio = (s / a) * 100
+  return `${ratio.toLocaleString('ja-JP', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
+}
+
+function heatStyle(intensity) {
+  const v = Math.max(0, Math.min(Number(intensity || 0), 1))
+  if (v <= 0) return {}
+  const alpha = 0.22 + v * 0.48
+  return {
+    backgroundColor: `rgba(34, 197, 94, ${alpha.toFixed(3)})`,
+    fontWeight: v >= 0.85 ? 700 : 500,
+  }
+}
+
+const dateBandIndexMap = computed(() => {
+  const map = {}
+  const uniqueDates = [...new Set(filteredProductivityRows.value.map((row) => row.date))]
+  uniqueDates.forEach((date, idx) => {
+    map[date] = idx % 4
+  })
+  return map
+})
+
+function dateBandClass(date) {
+  const idx = dateBandIndexMap.value[date]
+  if (idx === 0) return 'date-band-0'
+  if (idx === 1) return 'date-band-1'
+  if (idx === 2) return 'date-band-2'
+  if (idx === 3) return 'date-band-3'
+  return ''
+}
+
+function isDateStart(index) {
+  if (index === 0) return true
+  const current = filteredProductivityRows.value[index]
+  const prev = filteredProductivityRows.value[index - 1]
+  if (!current || !prev) return false
+  return current.date !== prev.date
+}
+
 const NEEDS_APPROVAL = new Set(['overtime', 'holiday', 'half_day_am'])
 const APPROVED_STATUSES = new Set(['approved_manager', 'approved_chief', 'approved_supervisor', 'approved_leader'])
 const COUNTABLE_END_ACTIONS = new Set(['END', 'PAUSE'])
 
+const normalizeList = (payload) => {
+  if (Array.isArray(payload)) return payload
+  if (Array.isArray(payload?.results)) return payload.results
+  return []
+}
+
 const loadProductionMetrics = async () => {
   productionSessions.value = []
   unitPriceByCode.value = {}
-  const sessionsRes = await api.processRealtime.getSessions({
-    limit: 10000,
-    plan_date_start: dateFrom.value,
-    plan_date_end: dateTo.value,
-  })
-  const sessions = Array.isArray(sessionsRes.data)
-    ? sessionsRes.data
-    : Array.isArray(sessionsRes.data?.results)
-      ? sessionsRes.data.results
-      : []
 
-  const countableSessions = sessions.filter((row) => {
+  const [laserRes, brakeRes, pwsRes] = await Promise.all([
+    api.laserActuals.getLaserActuals({
+      page_size: 1000,
+      work_date__gte: dateFrom.value,
+      work_date__lte: dateTo.value,
+      ordering: '-work_date,-created_at',
+    }),
+    api.brakeLineActuals.getSessions({
+      start_date: dateFrom.value,
+      end_date: dateTo.value,
+    }),
+    api.processRealtime.getSessions({
+      limit: 10000,
+      plan_date_start: dateFrom.value,
+      plan_date_end: dateTo.value,
+    }),
+  ])
+
+  const laserRecords = normalizeList(laserRes.data)
+  const brakeSessions = normalizeList(brakeRes.data)
+  const pwsSessions = normalizeList(pwsRes.data)
+
+  // レーザー: START/RESUME -> END/PAUSE を設備単位でペアリングして実作業秒を算出
+  const laserByEquipment = {}
+  for (const row of laserRecords) {
+    const key = row?.equipment_code || '__unknown__'
+    if (!laserByEquipment[key]) laserByEquipment[key] = []
+    laserByEquipment[key].push(row)
+  }
+  const laserDurationById = new Map()
+  for (const rows of Object.values(laserByEquipment)) {
+    const sorted = [...rows].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    let pendingStart = null
+    for (const row of sorted) {
+      const action = String(row?.operator_action || '').toUpperCase()
+      const isOpen = action === 'START' || action === 'RESUME'
+      if (isOpen) {
+        pendingStart = row
+      } else if (pendingStart) {
+        const diff = new Date(row.created_at) - new Date(pendingStart.created_at)
+        laserDurationById.set(row.id, Math.max(0, Math.round(diff / 1000)))
+        pendingStart = null
+      }
+    }
+  }
+
+  const laserItems = laserRecords.flatMap((row) => {
+    const action = String(row?.operator_action || '').toUpperCase()
+    if (!COUNTABLE_END_ACTIONS.has(action)) return []
+    const duration = laserDurationById.get(row?.id) || 0
+    const details = normalizeList(row?.details).filter(
+      (detail) => String(detail?.detail_type || '').toUpperCase() === 'COMPONENT',
+    )
+    const buildOne = (detail) => ({
+      id: row?.id,
+      record_source: 'LASER',
+      operator_name: row?.created_by_name || row?.updated_by_name || '—',
+      plan_date: row?.work_date || null,
+      work_date: row?.work_date || null,
+      product_code: detail?.product_code || '',
+      production_qty: Number(detail?.total_qty || 0),
+      effective_work_seconds: duration,
+      session_type: 'WORK',
+      end_action: action,
+    })
+    if (!details.length) return [buildOne(null)]
+    return details.map((detail) => buildOne(detail))
+  })
+
+  // ブレーキ系は専用セッションを採用
+  const brakeItems = brakeSessions.map((row) => ({
+    ...row,
+    record_source: 'BRAKE',
+  }))
+
+  // PWSはBRAKE/LASER由来を除外して重複防止
+  const pwsItems = pwsSessions.filter((row) => {
+    const source = String(row?.record_source || '').toUpperCase()
+    return source !== 'BRAKE' && source !== 'LASER'
+  })
+
+  const merged = [...laserItems, ...brakeItems, ...pwsItems]
+  const countableSessions = merged.filter((row) => {
     if (String(row?.session_type || '') !== 'WORK') return false
     const endAction = String(row?.end_action || '').toUpperCase()
-    return COUNTABLE_END_ACTIONS.has(endAction)
+    if (!COUNTABLE_END_ACTIONS.has(endAction)) return false
+    return Number(row?.production_qty || 0) !== 0
   })
+
   productionSessions.value = countableSessions
 
   const productCodes = [...new Set(
@@ -779,8 +978,8 @@ onMounted(load)
 
 <style scoped>
 .stats-page {
-  padding: 24px;
-  max-width: 1400px;
+  padding: 16px;
+  max-width: 1880px;
   margin: 0 auto;
 }
 .page-title {
@@ -930,6 +1129,40 @@ onMounted(load)
 .num-cell.leave { text-align: center; color: #2563eb; }
 .num-cell.total-col { font-weight: 700; color: #1f2a44; background: #f1f5f9; }
 .stats-table tbody tr:hover { background: #f9fafb; }
+.productivity-table {
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
+}
+.productivity-table th,
+.productivity-table td {
+  min-width: 96px;
+}
+.productivity-table .section-title {
+  text-align: center;
+  font-weight: 700;
+  color: #1f2a44;
+}
+.productivity-table .section-divider {
+  border-left: 2px solid #6b7280;
+}
+.productivity-table th.name-header,
+.productivity-table td.name-cell {
+  min-width: 200px;
+}
+.productivity-table th:nth-child(2),
+.productivity-table th:nth-child(3),
+.productivity-table th:nth-child(4),
+.productivity-table td:nth-child(2),
+.productivity-table td:nth-child(3),
+.productivity-table td:nth-child(4) {
+  min-width: 72px;
+}
+.productivity-table tbody tr.date-band-0 td { background-color: #eef6ff; }
+.productivity-table tbody tr.date-band-1 td { background-color: #eefcf0; }
+.productivity-table tbody tr.date-band-2 td { background-color: #fff5e8; }
+.productivity-table tbody tr.date-band-3 td { background-color: #f5f0ff; }
+.productivity-table tbody tr.date-start td { border-top: 2px solid #8fa6b3; }
 .total-row { background: #f1f5f9; font-weight: 700; }
 .total-row td { border-top: 2px solid #94a3b8; }
 .total-label { font-weight: 700; color: #1f2a44; padding-left: 12px; }
