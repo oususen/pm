@@ -169,6 +169,13 @@ const COUNTABLE_END_ACTIONS = new Set(['END', 'PAUSE'])
 
 const normalizeList = (payload) => Array.isArray(payload) ? payload : (Array.isArray(payload?.results) ? payload.results : [])
 const normalizePersonName = (value) => String(value || '').replace(/\s+/g, '').toLowerCase()
+const normalizeIsoSecond = (value) => {
+  const text = String(value || '').trim()
+  if (!text) return ''
+  const ms = Date.parse(text)
+  if (!Number.isFinite(ms)) return text
+  return new Date(ms).toISOString().slice(0, 19)
+}
 
 const teamOptions = computed(() => [...new Set(rows.value.map(r => r.team).filter(Boolean))].sort())
 const groupOptions = computed(() => [...new Set(rows.value.map(r => r.group).filter(Boolean))].sort())
@@ -468,14 +475,31 @@ async function loadProductionMetrics() {
     return source !== 'BRAKE' && source !== 'LASER'
   })
 
-  const countableSessions = [...laserItems, ...brakeItems, ...pwsItems].filter((row) => {
+  const rawCountableSessions = [...laserItems, ...brakeItems, ...pwsItems].filter((row) => {
     if (String(row?.session_type || '') !== 'WORK') return false
     if (!COUNTABLE_END_ACTIONS.has(String(row?.end_action || '').toUpperCase())) return false
     return Number(row?.production_qty || 0) !== 0
   })
-  productionSessions.value = countableSessions
+  const dedupedSessions = []
+  const seenKeys = new Set()
+  for (const row of rawCountableSessions) {
+    const key = [
+      String(row?.plan_date || row?.work_date || '').slice(0, 10),
+      normalizePersonName(row?.operator_name || ''),
+      String(row?.process_code || ''),
+      String(row?.product_code || '').trim(),
+      String(row?.end_action || '').toUpperCase(),
+      Number(row?.production_qty || 0),
+      normalizeIsoSecond(row?.started_at),
+      normalizeIsoSecond(row?.ended_at),
+    ].join('|')
+    if (seenKeys.has(key)) continue
+    seenKeys.add(key)
+    dedupedSessions.push(row)
+  }
+  productionSessions.value = dedupedSessions
 
-  const productCodes = [...new Set(countableSessions.map((row) => String(row?.product_code || '').trim()).filter(Boolean))]
+  const productCodes = [...new Set(dedupedSessions.map((row) => String(row?.product_code || '').trim()).filter(Boolean))]
   const codePriceMap = {}
   for (let i = 0; i < productCodes.length; i += 200) {
     const chunk = productCodes.slice(i, i + 200)
