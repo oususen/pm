@@ -99,17 +99,17 @@
           <div v-for="g in groups" :key="g.key" class="group-card">
             <div class="info-block">
             <div class="info-row">
+              <span class="info-label">品番</span>
+              <span class="info-value">{{ g.product_code || "-" }}</span>
+              <button @click="openWhereUsed(g)" class="expand-btn where-used-btn">▶ 逆展開</button>
+            </div>
+            <div class="info-row">
               <span class="info-label">ライン</span>
               <span class="info-value">{{ formatLine(g) }}</span>
             </div>
             <div class="info-row">
               <span class="info-label">工程</span>
               <span class="info-value">{{ g.process_code || "-" }} / {{ g.process_name || "-" }}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">品番</span>
-              <span class="info-value">{{ g.product_code || "-" }}</span>
-              <button @click="openWhereUsed(g)" class="expand-btn where-used-btn">▶ 逆展開</button>
             </div>
             <div class="info-row">
               <span class="info-label">品名</span>
@@ -1448,4 +1448,3 @@ const getCellClass = (group, date, rowKey) => {
   &:hover { background: #6d28d9; }
 }
 </style>
-

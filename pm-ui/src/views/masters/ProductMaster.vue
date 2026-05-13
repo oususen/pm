@@ -231,6 +231,10 @@
           </select>
           <button type="button" class="btn-secondary" @click="activeTab = 'list'">一覧で選択</button>
         </div>
+        <div v-if="processMode === 'create' && copySourceProduct" class="process-target-row">
+          <label>コピー元</label>
+          <div>{{ copySourceProduct.product_code }} - {{ copySourceProduct.product_name }}</div>
+        </div>
       </div>
 
       <div class="process-form-card">
@@ -597,6 +601,7 @@ const customers = ref([])
 const activeTab = ref('list')
 const processMode = ref('create')
 const processTargetId = ref(null)
+const copySourceProduct = ref(null)
 const currentPage = ref(1)
 const pageSize = ref(50)
 const totalCount = ref(0)
@@ -839,9 +844,11 @@ const openProcessTab = (mode = 'create', product = null) => {
   processMode.value = mode
   if (mode === 'create') {
     processTargetId.value = null
+    copySourceProduct.value = product
     formData.value = product ? mapProductToFormData(product, { asCopy: true }) : createEmptyFormData()
     return
   }
+  copySourceProduct.value = null
   processTargetId.value = product?.id ?? null
   formData.value = product ? mapProductToFormData(product) : createEmptyFormData()
 }
@@ -849,6 +856,7 @@ const openProcessTab = (mode = 'create', product = null) => {
 const changeProcessMode = (mode) => {
   if (mode !== 'view' && !canEdit.value) return
   processMode.value = mode
+  copySourceProduct.value = null
   if (mode === 'create') {
     processTargetId.value = null
     formData.value = createEmptyFormData()
