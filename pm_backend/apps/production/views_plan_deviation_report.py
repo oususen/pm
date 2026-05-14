@@ -10,7 +10,7 @@ from django.db.models import Q
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from masters.models import Calendar
+from masters.models import BOM, BOMItem, Calendar
 from orders.utils.calendar_utils import get_business_today, WorkingDayCalculator
 from masters.models import Line
 from production.models_laser_actual import LaserActual, LaserActualDetail
@@ -55,6 +55,20 @@ class PlanDeviationReportView(APIView):
             except (ValueError, TypeError):
                 process_id = None
 
+        # 連産品の除外対象を取得
+        active_coproduct_boms = BOM.objects.filter(is_coproduct=True, is_active=True)
+        # 1) 連産品BOMの親製品（仮想セット品番）
+        coproduct_parent_ids = set(
+            active_coproduct_boms.values_list('parent_product_id', flat=True)
+        )
+        # 2) 連産品の子で代表品でない製品
+        coproduct_non_driver_ids = set(
+            BOMItem.objects
+            .filter(bom__in=active_coproduct_boms, is_coproduct_driver=False)
+            .values_list('child_product_id', flat=True)
+        )
+        coproduct_exclude_ids = coproduct_parent_ids | coproduct_non_driver_ids
+
         # 工程・製品別に計画数を集計（全ライン: LineBacklog sequence_no>0）
         # key: (line_id, process_id, product_id)
         plan_map = {}  # key -> plan_qty
@@ -74,6 +88,7 @@ class PlanDeviationReportView(APIView):
             LineBacklog.objects
             .filter(plan_filter)
             .exclude(plan_qty=0)
+            .exclude(product_id__in=coproduct_exclude_ids)
             .values(
                 'line_id', 'line__line_code', 'line__line_name',
                 'process_id', 'process__process_code', 'process__process_name',
@@ -111,6 +126,7 @@ class PlanDeviationReportView(APIView):
             LineBacklog.objects
             .filter(actual_filter)
             .exclude(actual_qty=0)
+            .exclude(product_id__in=coproduct_exclude_ids)
             .values(
                 'line_id', 'line__line_code', 'line__line_name',
                 'process_id', 'process__process_code', 'process__process_name',
