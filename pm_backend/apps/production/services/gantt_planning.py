@@ -1533,5 +1533,80 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
             'processes_plan': serialized_plan,
         })
 
+    plans = _merge_consecutive_subprocess_entries(plans)
     logger.info('gantt_plans: generated_plans=%s', len(plans))
+    return plans
+
+
+def _merge_consecutive_subprocess_entries(plans):
+    """sequence_noが連続する同一サブ工程出力品のエントリを1つに統合する"""
+    if len(plans) <= 1:
+        return plans
+
+    sorted_plans = sorted(plans, key=lambda p: p.get('sequence_no') or 0)
+
+    proc_groups = {}
+    for plan in sorted_plans:
+        seq = plan.get('sequence_no') or 0
+        plan_date = plan.get('plan_date')
+        for proc in plan['processes_plan']:
+            key = (proc['process_id'], proc.get('output_product_id'), plan_date)
+            proc_groups.setdefault(key, []).append({
+                'plan': plan,
+                'sequence_no': seq,
+                'proc': proc,
+            })
+
+    merged_count = 0
+    for key, entries in proc_groups.items():
+        if len(entries) <= 1:
+            continue
+
+        entries.sort(key=lambda e: e['sequence_no'])
+
+        runs = []
+        current_run = [entries[0]]
+        for i in range(1, len(entries)):
+            if entries[i]['sequence_no'] == entries[i - 1]['sequence_no'] + 1:
+                current_run.append(entries[i])
+            else:
+                runs.append(current_run)
+                current_run = [entries[i]]
+        runs.append(current_run)
+
+        for run in runs:
+            if len(run) <= 1:
+                continue
+
+            first_proc = run[0]['proc']
+            for entry in run[1:]:
+                proc = entry['proc']
+                first_start = datetime.fromisoformat(first_proc['start_time'])
+                first_end = datetime.fromisoformat(first_proc['end_time'])
+                proc_start = datetime.fromisoformat(proc['start_time'])
+                proc_end = datetime.fromisoformat(proc['end_time'])
+                first_proc['start_time'] = min(first_start, proc_start).isoformat()
+                first_proc['end_time'] = max(first_end, proc_end).isoformat()
+                first_proc['quantity'] = float(first_proc['quantity']) + float(proc['quantity'])
+                first_proc['total_minutes_required'] = (
+                    float(first_proc.get('total_minutes_required', 0))
+                    + float(proc.get('total_minutes_required', 0))
+                )
+                first_proc['effective_minutes'] = (
+                    float(first_proc.get('effective_minutes', 0))
+                    + float(proc.get('effective_minutes', 0))
+                )
+                entry['plan']['processes_plan'].remove(proc)
+                merged_count += 1
+
+    if merged_count:
+        logger.info('gantt_plans: merged %s subprocess entries', merged_count)
+        for plan in plans:
+            procs = plan['processes_plan']
+            if procs:
+                all_starts = [datetime.fromisoformat(p['start_time']) for p in procs]
+                all_ends = [datetime.fromisoformat(p['end_time']) for p in procs]
+                plan['start_datetime'] = min(all_starts)
+                plan['end_datetime'] = max(all_ends)
+
     return plans
