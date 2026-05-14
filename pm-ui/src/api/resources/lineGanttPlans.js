@@ -24,4 +24,7 @@ export const createLineGanttPlansAPI = (client) => ({
   deleteProcess(payload) {
     return client.post('/line-gantt-plans/remove-process/', payload)
   },
+  calcEndTime(payload) {
+    return client.post('/line-gantt-plans/calc-end-time/', payload)
+  },
 })

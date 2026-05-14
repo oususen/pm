@@ -5062,6 +5062,28 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
 
         return Response({'updated': updated_count, 'change_logs': change_log_count})
 
+    @action(detail=False, methods=['post'], url_path='calc-end-time')
+    def calc_end_time(self, request):
+        """
+        稼働カレンダーを使って開始時刻+稼働分数から終了時刻を計算する。
+        期待payload: { line_id, start_time, working_minutes }
+        """
+        from .services.gantt_planning import LineWorkCalendar
+        line_id = request.data.get('line_id')
+        start_time_str = request.data.get('start_time')
+        working_minutes = request.data.get('working_minutes')
+        if not line_id or not start_time_str or working_minutes is None:
+            return Response({'detail': 'line_id, start_time, working_minutes are required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            line = Line.objects.get(pk=line_id)
+            start_dt = datetime.fromisoformat(start_time_str)
+            minutes = float(working_minutes)
+        except (Line.DoesNotExist, ValueError, TypeError) as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        calendar = LineWorkCalendar(line)
+        end_dt = calendar.add_working_minutes(start_dt, minutes)
+        return Response({'end_time': end_dt.isoformat()})
+
     @action(detail=False, methods=['post'], url_path='remove-process')
     def remove_process(self, request):
         """

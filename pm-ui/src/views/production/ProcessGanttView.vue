@@ -1463,7 +1463,7 @@ function openStartTimeEdit(bar) {
   }
 }
 
-function openQuantityEdit(bar) {
+async function openQuantityEdit(bar) {
   if (!bar) return
   if (mergeConsecutive.value) {
     alert('連結表示中は数量を編集できません。分解表示に切り替えてください。')
@@ -1482,6 +1482,27 @@ function openQuantityEdit(bar) {
     return
   }
   bar.planQty = parsed
+
+  if (bar.cycleTimeMinutes > 0 && parsed > 0 && selectedLine.value) {
+    try {
+      const totalMinutes = parsed * bar.cycleTimeMinutes + (bar.setupTimeMinutes || 0)
+      const effectiveMinutes = totalMinutes / bar.parallelCount
+      const res = await api.lineGanttPlans.calcEndTime({
+        line_id: Number(selectedLine.value),
+        start_time: toLocalISO(bar.startTime),
+        working_minutes: effectiveMinutes,
+      })
+      if (res.data?.end_time) {
+        bar.endTime = new Date(res.data.end_time)
+        bar.durationMs = bar.endTime.getTime() - bar.startTime.getTime()
+        bar.totalMinutesRequired = effectiveMinutes
+        bar.scheduleEdited = true
+      }
+    } catch (e) {
+      console.error('終了時刻の再計算に失敗しました', e)
+    }
+  }
+
   updateBarDisplay(bar)
   if (bar.isTemporary) {
     setStructureDirty(true)
@@ -1489,7 +1510,7 @@ function openQuantityEdit(bar) {
   } else {
     bar.quantityEdited = true
     setEditDirty(true)
-    alert('数量を変更しました。時間数量保存で確定してください。')
+    alert('数量・時間を変更しました。時間数量保存で確定してください。')
   }
 }
 
@@ -1593,6 +1614,9 @@ async function openManualAdd(proc, item, anchor) {
       quantityEdited: false,
       scheduleEdited: false,
       totalMinutesRequired: Math.max(durationMs / 60000, 0),
+      cycleTimeMinutes: 0,
+      setupTimeMinutes: 0,
+      parallelCount: 1,
       color: getBarColor(item.product_id),
       label: '',
       startLabel: '',
@@ -1703,6 +1727,9 @@ function buildProcessGantt(plans) {
           quantityEdited: false,
           scheduleEdited: false,
           totalMinutesRequired: Number(proc.total_minutes_required ?? 0),
+          cycleTimeMinutes: Number(proc.cycle_time_minutes ?? 0),
+          setupTimeMinutes: Number(proc.setup_time_minutes ?? 0),
+          parallelCount: Number(proc.parallel_count ?? 1) || 1,
           color: getBarColor(colorKey),
           label: '',
           startLabel: '',
