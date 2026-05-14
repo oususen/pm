@@ -26,6 +26,7 @@ from .serializers_process_realtime import (
     check_plan_overrun,
 )
 from .services.gantt_planning import LineWorkCalendar
+from .models_line_gantt_plan import LineGanttPlan
 from masters.models import Product, Process, Supplier, BOM
 from quality.models_scrap import ScrapRecordDetail, ScrapRecord
 from orders.utils.calendar_utils import get_business_today, DAY_BOUNDARY_HOUR
@@ -1352,3 +1353,58 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             'decided_at': sd.decided_at,
             'decided_by': sd.decided_by,
         })
+
+    @action(detail=False, methods=['get'], url_path='gantt-plan-qty')
+    def gantt_plan_qty(self, request):
+        """
+        ガントプラン(LineGanttPlan)から工程別・製品別の計画数を返す。
+        GET ?line_id=X&process_id=Y&dates=2026-05-13,2026-05-14
+        Response: { "STYD40006245-4001": {"2026-05-13": 56, ...}, ... }
+        """
+        line_id = request.query_params.get('line_id')
+        process_id = request.query_params.get('process_id')
+        dates_str = request.query_params.get('dates', '')
+        if not line_id or not process_id or not dates_str:
+            return Response({})
+
+        try:
+            process_id_int = int(process_id)
+        except (ValueError, TypeError):
+            return Response({})
+
+        date_list = []
+        for d in dates_str.split(','):
+            d = d.strip()
+            if d:
+                try:
+                    date_list.append(parse_date(d))
+                except Exception:
+                    pass
+        date_list = [d for d in date_list if d]
+        if not date_list:
+            return Response({})
+
+        plans = LineGanttPlan.objects.filter(
+            line_id=line_id,
+            plan_date__in=date_list,
+        )
+
+        result = {}
+        for plan in plans:
+            if not plan.processes_plan:
+                continue
+            for pp in plan.processes_plan:
+                if pp.get('process_id') != process_id_int:
+                    continue
+                product_code = pp.get('output_product_code', '')
+                qty = pp.get('quantity', 0)
+                if not product_code or not qty:
+                    continue
+                plan_date_str = str(plan.plan_date)
+                if product_code not in result:
+                    result[product_code] = {}
+                result[product_code][plan_date_str] = (
+                    result[product_code].get(plan_date_str, 0) + qty
+                )
+
+        return Response(result)

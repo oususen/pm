@@ -567,6 +567,7 @@ import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
 import { t, getLocaleCode } from '@/i18n'
+import { getBusinessDate, formatISODate } from '@/utils/dateUtil'
 
 const route = useRoute()
 const router = useRouter()
@@ -579,6 +580,7 @@ const selectedLineId = ref('')
 const selectedProcessId = ref('')
 const isSupportMode = ref(false)
 const recentRecords = ref([])
+const ganttPlanQtyMap = ref({})
 const submitting = ref(false)
 
 const apiBaseUrl =
@@ -2408,8 +2410,37 @@ const loadRecentRecords = async () => {
 
     const lastProduction = recentRecords.value.find(r => r.record_type === 'PRODUCTION' && r.product)
     defaultProductId.value = lastProduction ? lastProduction.product : defaultProductId.value
+
+    await loadGanttPlanQty()
   } catch (error) {
     console.error('最近の記録取得エラー:', error)
+  }
+}
+
+const loadGanttPlanQty = async () => {
+  if (!selectedLineId.value || !selectedProcessId.value) {
+    ganttPlanQtyMap.value = {}
+    return
+  }
+  const records = Array.isArray(recentRecords.value) ? recentRecords.value : []
+  const dateSet = new Set()
+  for (const rec of records) {
+    const ts = rec?.timestamp
+    if (ts) dateSet.add(formatISODate(getBusinessDate(new Date(ts))))
+  }
+  if (!dateSet.size) {
+    ganttPlanQtyMap.value = {}
+    return
+  }
+  try {
+    const res = await api.processRealtime.getGanttPlanQty({
+      line_id: selectedLineId.value,
+      process_id: selectedProcessId.value,
+      dates: [...dateSet].join(','),
+    })
+    ganttPlanQtyMap.value = res.data || {}
+  } catch {
+    ganttPlanQtyMap.value = {}
   }
 }
 
@@ -3473,6 +3504,14 @@ const formatRecentValue = (value) => {
 }
 
 const getRecentPlanQty = (rec) => {
+  const productCode = String(rec?.product_code || rec?.event_data?.plan_target?.product_code || '').trim()
+  if (productCode && rec?.timestamp) {
+    const bizDate = formatISODate(getBusinessDate(new Date(rec.timestamp)))
+    const byGantt = ganttPlanQtyMap.value?.[productCode]?.[bizDate]
+    if (byGantt !== null && byGantt !== undefined && Number.isFinite(Number(byGantt))) {
+      return Number(byGantt)
+    }
+  }
   const eventPlanQty = rec?.event_data?.plan_target?.plan_qty
   if (eventPlanQty !== null && eventPlanQty !== undefined && Number.isFinite(Number(eventPlanQty))) {
     return Number(eventPlanQty)
@@ -3482,7 +3521,6 @@ const getRecentPlanQty = (rec) => {
     const byId = recentPlanQtyLookup.value.get(`id:${productId}`)
     if (Number.isFinite(byId)) return byId
   }
-  const productCode = String(rec?.product_code || rec?.event_data?.plan_target?.product_code || '').trim()
   if (productCode) {
     const byCode = recentPlanQtyLookup.value.get(`code:${productCode}`)
     if (Number.isFinite(byCode)) return byCode

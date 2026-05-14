@@ -36,6 +36,9 @@ export function createProcessRealtimeAPI(client) {
     updateScrapDisposition(id, payload) {
       return client.post(`/process-realtime-records/${id}/scrap-disposition/`, payload)
     },
+    getGanttPlanQty(params = {}) {
+      return client.get('/process-realtime-records/gantt-plan-qty/', { params })
+    },
   }
 }
 
