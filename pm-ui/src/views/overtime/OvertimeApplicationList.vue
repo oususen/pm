@@ -1,8 +1,8 @@
 <template>
   <div class="ot-list-page">
     <div class="page-header">
-      <h1 class="page-title">残業申請 一覧</h1>
-      <RouterLink to="/overtime/apply" class="btn btn-primary">＋ 新規申請</RouterLink>
+      <h1 class="page-title">{{ t('overtimeList.pageTitle') }}</h1>
+      <RouterLink to="/overtime/apply" class="btn btn-primary">{{ t('overtimeList.newApplication') }}</RouterLink>
     </div>
 
     <!-- フィルター -->
@@ -11,66 +11,66 @@
       <span>〜</span>
       <input type="date" v-model="filters.work_date__lte" class="filter-input" />
       <select v-model="filters.status" class="filter-select">
-        <option value="">全ステータス</option>
-        <option value="draft">下書き</option>
-        <option value="submitted">申請中</option>
-        <option value="approved_supervisor">班長承認済み</option>
-        <option value="approved_chief">係長承認済み</option>
-        <option value="approved_manager">最終承認済み</option>
-        <option value="rejected">却下</option>
+        <option value="">{{ t('overtimeList.allStatus') }}</option>
+        <option value="draft">{{ t('overtimeList.status.draft') }}</option>
+        <option value="submitted">{{ t('overtimeList.status.submitted') }}</option>
+        <option value="approved_supervisor">{{ t('overtimeList.status.approvedSupervisor') }}</option>
+        <option value="approved_chief">{{ t('overtimeList.status.approvedChief') }}</option>
+        <option value="approved_manager">{{ t('overtimeList.status.approvedManager') }}</option>
+        <option value="rejected">{{ t('overtimeList.status.rejected') }}</option>
       </select>
-      <button class="btn btn-secondary" @click="fetchList">検索</button>
-      <button class="btn btn-pdf" @click="downloadPdf">PDF出力</button>
+      <button class="btn btn-secondary" @click="fetchList">{{ t('overtimeList.search') }}</button>
+      <button class="btn btn-pdf" @click="downloadPdf">{{ t('overtimeList.pdfExport') }}</button>
       <label class="type-check-label">
         <input type="checkbox" v-model="excludeRejected" />
-        却下除き
+        {{ t('overtimeList.excludeRejected') }}
       </label>
     </div>
     <div class="filters" v-if="applications.length">
       <select v-model="filterTeam" class="filter-select">
-        <option value="">全班</option>
-        <option v-for="t in teamOptions" :key="t" :value="t">{{ t }}</option>
+        <option value="">{{ t('overtimeList.allTeams') }}</option>
+        <option v-for="tm in teamOptions" :key="tm" :value="tm">{{ tm }}</option>
       </select>
       <select v-model="filterGroup" class="filter-select">
-        <option value="">全グループ</option>
+        <option value="">{{ t('overtimeList.allGroups') }}</option>
         <option v-for="g in groupOptions" :key="g" :value="g">{{ g }}</option>
       </select>
       <span class="type-checkboxes">
-        <label v-for="t in TYPE_OPTIONS" :key="t.value" class="type-check-label">
-          <input type="checkbox" :value="t.value" v-model="filterTypes" />
-          {{ t.label }}
+        <label v-for="tp in typeOptions" :key="tp.value" class="type-check-label">
+          <input type="checkbox" :value="tp.value" v-model="filterTypes" />
+          {{ tp.label }}
         </label>
       </span>
       <select v-model="filterName" class="filter-select">
-        <option value="">全員</option>
+        <option value="">{{ t('overtimeList.allMembers') }}</option>
         <option v-for="n in nameOptions" :key="n" :value="n">{{ n }}</option>
       </select>
       <select v-model="filterDate" class="filter-select">
-        <option value="">全日付</option>
+        <option value="">{{ t('overtimeList.allDates') }}</option>
         <option v-for="d in dateOptions" :key="d" :value="d">{{ d }}</option>
       </select>
     </div>
 
-    <div v-if="loading" class="loading">読み込み中...</div>
-    <div v-else-if="!applications.length" class="empty">申請がありません</div>
-    <div v-else-if="!filteredApplications.length" class="empty">条件に一致する申請はありません</div>
+    <div v-if="loading" class="loading">{{ t('overtimeList.loading') }}</div>
+    <div v-else-if="!applications.length" class="empty">{{ t('overtimeList.empty') }}</div>
+    <div v-else-if="!filteredApplications.length" class="empty">{{ t('overtimeList.emptyFilter') }}</div>
     <template v-else>
       <div class="table-wrap">
       <table class="ot-table">
         <thead>
           <tr>
-            <th>実施日</th>
-            <th>班</th>
-            <th>グループ</th>
-            <th>種別</th>
-            <th>申請者</th>
-            <th>勤務時間</th>
-            <th>残業時間帯</th>
-            <th>時間数</th>
-            <th>理由</th>
-            <th>ステータス</th>
-            <th>申請日時</th>
-            <th>操作</th>
+            <th>{{ t('overtimeList.col.workDate') }}</th>
+            <th>{{ t('overtimeList.col.team') }}</th>
+            <th>{{ t('overtimeList.col.group') }}</th>
+            <th>{{ t('overtimeList.col.type') }}</th>
+            <th>{{ t('overtimeList.col.applicant') }}</th>
+            <th>{{ t('overtimeList.col.workTime') }}</th>
+            <th>{{ t('overtimeList.col.overtimeRange') }}</th>
+            <th>{{ t('overtimeList.col.hours') }}</th>
+            <th>{{ t('overtimeList.col.reason') }}</th>
+            <th>{{ t('overtimeList.col.status') }}</th>
+            <th>{{ t('overtimeList.col.submittedAt') }}</th>
+            <th>{{ t('overtimeList.col.actions') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -81,13 +81,13 @@
             <td>{{ app.type_display }}</td>
             <td>
               <div>{{ app.applicant_name }}</div>
-              <div v-if="app.is_proxy_application" class="proxy-note">管理登録: {{ app.created_by_name }}</div>
+              <div v-if="app.is_proxy_application" class="proxy-note">{{ t('overtimeList.proxyNote', { name: app.created_by_name }) }}</div>
             </td>
             <td class="nowrap">{{ app.work_start_time || '-' }}{{ app.work_start_time ? ' 〜 ' + (app.scheduled_end_time || '-') : '' }}</td>
             <td class="nowrap">{{ app.start_time }} 〜 {{ app.end_time }}</td>
             <td class="num">
               {{ (Math.round((parseFloat(app.hours) + parseFloat(app.midnight_hours)) * 10) / 10) }}H
-              <span v-if="app.midnight_hours > 0" class="midnight-tag">深夜{{ app.midnight_hours }}H</span>
+              <span v-if="app.midnight_hours > 0" class="midnight-tag">{{ t('overtimeList.midnight', { hours: app.midnight_hours }) }}</span>
             </td>
             <td class="reason-cell">{{ app.reason || '-' }}</td>
             <td>
@@ -101,25 +101,25 @@
                 v-if="app.can_edit"
                 :to="`/overtime/apply/${app.id}`"
                 class="btn btn-sm btn-secondary"
-              >編集</RouterLink>
+              >{{ t('overtimeList.edit') }}</RouterLink>
               <button
                 v-if="app.can_edit"
                 class="btn btn-sm btn-danger"
                 @click="deleteApp(app)"
-              >{{ app.status === 'submitted' ? 'キャンセル' : '削除' }}</button>
+              >{{ app.status === 'submitted' ? t('overtimeList.cancel') : t('overtimeList.delete') }}</button>
               <button
                 class="btn btn-sm btn-ghost"
                 @click="openDetail(app)"
-              >詳細</button>
+              >{{ t('overtimeList.detail') }}</button>
             </td>
           </tr>
         </tbody>
         <tfoot>
           <tr class="total-row">
-            <td colspan="7" class="total-label">合計（{{ filteredApplications.length }}件）</td>
+            <td colspan="7" class="total-label">{{ t('overtimeList.total', { count: filteredApplications.length }) }}</td>
             <td class="num">
               <span class="total-hours">{{ totalHours }}H</span>
-              <span v-if="totalMidnight > 0" class="midnight-tag">深夜{{ totalMidnight }}H</span>
+              <span v-if="totalMidnight > 0" class="midnight-tag">{{ t('overtimeList.midnight', { hours: totalMidnight }) }}</span>
             </td>
             <td colspan="3"></td>
           </tr>
@@ -140,7 +140,7 @@
         </template>
         <button class="page-btn" :disabled="currentPage >= totalPages" @click="currentPage++">›</button>
         <button class="page-btn" :disabled="currentPage >= totalPages" @click="currentPage = totalPages">»</button>
-        <span class="page-info">{{ filteredApplications.length }}件中 {{ (currentPage-1)*pageSize+1 }}〜{{ Math.min(currentPage*pageSize, filteredApplications.length) }}件</span>
+        <span class="page-info">{{ t('overtimeList.pageInfo', { total: filteredApplications.length, from: (currentPage-1)*pageSize+1, to: Math.min(currentPage*pageSize, filteredApplications.length) }) }}</span>
       </div>
     </template>
 
@@ -148,46 +148,52 @@
     <div v-if="detailApp" class="modal-overlay" @click.self="detailApp = null">
       <div class="modal">
         <div class="modal-header">
-          <h2>申請詳細</h2>
+          <h2>{{ t('overtimeList.modal.title') }}</h2>
           <button class="modal-close" @click="detailApp = null">×</button>
         </div>
         <div class="modal-body">
           <table class="detail-table">
             <tbody>
-              <tr><th>実施日</th><td>{{ detailApp.work_date }}</td></tr>
-              <tr><th>種別</th><td>{{ detailApp.type_display }}</td></tr>
-              <tr v-if="detailApp.is_proxy_application"><th>管理登録者</th><td>{{ detailApp.created_by_name }}</td></tr>
+              <tr><th>{{ t('overtimeList.modal.workDate') }}</th><td>{{ detailApp.work_date }}</td></tr>
+              <tr><th>{{ t('overtimeList.modal.type') }}</th><td>{{ detailApp.type_display }}</td></tr>
+              <tr v-if="detailApp.is_proxy_application"><th>{{ t('overtimeList.modal.proxyApplicant') }}</th><td>{{ detailApp.created_by_name }}</td></tr>
               <tr v-if="detailApp.work_start_time || detailApp.scheduled_end_time">
-                <th>勤務時間</th>
-                <td>{{ detailApp.work_start_time || '-' }} 〜 {{ detailApp.scheduled_end_time || '-' }}（定時）</td>
+                <th>{{ t('overtimeList.modal.workTime') }}</th>
+                <td>{{ detailApp.work_start_time || '-' }} 〜 {{ detailApp.scheduled_end_time || '-' }}（{{ t('overtimeList.modal.scheduled') }}）</td>
               </tr>
-              <tr><th>残業時間帯</th><td>{{ detailApp.start_time }} 〜 {{ detailApp.end_time }}</td></tr>
+              <tr><th>{{ t('overtimeList.modal.overtimeRange') }}</th><td>{{ detailApp.start_time }} 〜 {{ detailApp.end_time }}</td></tr>
               <tr>
-                <th>時間数</th>
-                <td>{{ Math.round((parseFloat(detailApp.hours) + parseFloat(detailApp.midnight_hours)) * 10) / 10 }}H（深夜: {{ detailApp.midnight_hours }}H）</td>
+                <th>{{ t('overtimeList.modal.hours') }}</th>
+                <td>{{ Math.round((parseFloat(detailApp.hours) + parseFloat(detailApp.midnight_hours)) * 10) / 10 }}H（{{ t('overtimeList.modal.midnightHours') }}: {{ detailApp.midnight_hours }}H）</td>
               </tr>
-              <tr><th>理由</th><td>{{ detailApp.reason || '-' }}</td></tr>
-              <tr><th>ステータス</th><td>
+              <tr><th>{{ t('overtimeList.modal.reason') }}</th><td>{{ detailApp.reason || '-' }}</td></tr>
+              <tr><th>{{ t('overtimeList.modal.status') }}</th><td>
                 <span class="status-badge" :class="'status-' + detailApp.status">
                   {{ detailApp.status_display }}
                 </span>
               </td></tr>
               <tr v-if="detailApp.rejection_reason">
-                <th>却下理由</th>
+                <th>{{ t('overtimeList.modal.rejectionReason') }}</th>
                 <td class="rejection">{{ detailApp.rejection_reason }}</td>
               </tr>
               <tr v-if="detailApp.signature">
-                <th>サイン</th>
-                <td><img :src="detailApp.signature" alt="サイン" class="sign-img" /></td>
+                <th>{{ t('overtimeList.modal.sign') }}</th>
+                <td><img :src="detailApp.signature" alt="signature" class="sign-img" /></td>
               </tr>
             </tbody>
           </table>
 
           <div class="approval-log-section">
-            <h3>承認履歴</h3>
-            <div v-if="!detailApp.approval_logs.length" class="empty-log">まだ承認アクションはありません</div>
+            <h3>{{ t('overtimeList.modal.approvalLog') }}</h3>
+            <div v-if="!detailApp.approval_logs.length" class="empty-log">{{ t('overtimeList.modal.noLog') }}</div>
             <table v-else class="log-table">
-              <thead><tr><th>役割</th><th>承認者</th><th>状態</th><th>コメント</th><th>対応日時</th></tr></thead>
+              <thead><tr>
+                <th>{{ t('overtimeList.modal.logCol.role') }}</th>
+                <th>{{ t('overtimeList.modal.logCol.approver') }}</th>
+                <th>{{ t('overtimeList.modal.logCol.status') }}</th>
+                <th>{{ t('overtimeList.modal.logCol.comment') }}</th>
+                <th>{{ t('overtimeList.modal.logCol.actedAt') }}</th>
+              </tr></thead>
               <tbody>
                 <tr v-for="log in detailApp.approval_logs" :key="log.id">
                   <td>{{ log.role_display }}</td>
@@ -210,6 +216,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import api from '@/api/client'
+import { t } from '@/i18n'
 
 const applications = ref([])
 const loading = ref(false)
@@ -224,14 +231,18 @@ const filterName = ref('')
 const filterDate = ref('')
 const excludeRejected = ref(false)
 
-const TYPE_OPTIONS = [
-  { value: 'overtime', label: '時間外' },
-  { value: 'holiday', label: '休日出勤' },
-  { value: 'half_day_am', label: '午前半休' },
-  { value: 'half_day_pm', label: '午後半休' },
-  { value: 'paid_leave', label: '有給' },
-  { value: 'paid_leave_consec', label: '連続有給' },
+const TYPE_KEYS = [
+  { value: 'overtime', key: 'overtime.type.overtime' },
+  { value: 'holiday', key: 'overtime.type.holiday' },
+  { value: 'half_day_am', key: 'overtime.type.halfDayAm' },
+  { value: 'half_day_pm', key: 'overtime.type.halfDayPm' },
+  { value: 'paid_leave', key: 'overtime.type.paidLeave' },
+  { value: 'paid_leave_consec', key: 'overtime.type.paidLeaveConsec' },
 ]
+
+const typeOptions = computed(() =>
+  TYPE_KEYS.map(tk => ({ value: tk.value, label: t(tk.key) }))
+)
 
 const teamOptions = computed(() =>
   [...new Set(applications.value.map(a => a.team_name).filter(Boolean))].sort()
@@ -256,7 +267,11 @@ const filteredApplications = computed(() =>
     (!filterName.value || a.applicant_name === filterName.value) &&
     (!filterDate.value || a.work_date === filterDate.value) &&
     (!excludeRejected.value || a.status !== 'rejected')
-  )
+  ).sort((a, b) => {
+    const da = a.status === 'draft' ? 0 : 1
+    const db = b.status === 'draft' ? 0 : 1
+    return da - db
+  })
 )
 const totalPages = computed(() => Math.ceil(filteredApplications.value.length / pageSize) || 1)
 const pagedApplications = computed(() => {
@@ -308,30 +323,29 @@ function openDetail(app) {
 
 async function deleteApp(app) {
   const msg = app.status === 'submitted'
-    ? `${app.work_date} の申請を取り消しますか？（承認依頼も取り消されます）`
-    : `${app.work_date} の申請を削除しますか？`
+    ? t('overtimeList.confirm.cancel', { date: app.work_date })
+    : t('overtimeList.confirm.delete', { date: app.work_date })
   if (!confirm(msg)) return
   try {
     await api.overtime.deleteApplication(app.id)
     await fetchList()
   } catch (e) {
-    alert('削除に失敗しました: ' + (e.response?.data?.detail || e.message))
+    alert(t('overtimeList.error.deleteFailed') + (e.response?.data?.detail || e.message))
   }
 }
 
 async function downloadPdf() {
   try {
     const ids = filteredApplications.value.map(a => a.id).join(',')
-    if (!ids) { alert('出力する申請がありません'); return }
+    if (!ids) { alert(t('overtimeList.error.pdfEmpty')); return }
     const params = {
       ids,
-      team_name: filterTeam.value || '全班',
-      group_name: filterGroup.value || '全グループ',
+      team_name: filterTeam.value || t('overtimeList.allTeams'),
+      group_name: filterGroup.value || t('overtimeList.allGroups'),
     }
 
     const res = await api.overtime.exportPdf(params)
 
-    // Content-Disposition からファイル名を取得
     let filename = '残業申請書.pdf'
     const disposition = res.headers?.['content-disposition'] || ''
     const utf8Match = disposition.match(/filename\*=UTF-8''(.+)/)
@@ -351,7 +365,7 @@ async function downloadPdf() {
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
   } catch (e) {
-    alert('PDF出力に失敗しました: ' + (e.response?.data?.detail || e.message))
+    alert(t('overtimeList.error.pdfFailed') + (e.response?.data?.detail || e.message))
   }
 }
 
@@ -590,4 +604,3 @@ onMounted(fetchList)
 .log-approved { background: #d1fae5; color: #065f46; }
 .log-rejected { background: #fee2e2; color: #dc2626; }
 </style>
-
