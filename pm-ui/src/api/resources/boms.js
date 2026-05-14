@@ -54,6 +54,22 @@ export const createBomsAPI = (client) => ({
   exportBOMExcel(bomId) {
     return client.get(`/boms/${bomId}/export_excel/`, { responseType: 'blob' })
   },
+  downloadImportTemplateCsv() {
+    return client.get('/boms/import_template_csv/', { responseType: 'blob' })
+  },
+  downloadImportTemplateXlsx() {
+    return client.get('/boms/import_template_xlsx/', { responseType: 'blob' })
+  },
+  importBOMCsv(formData) {
+    return client.post('/boms/import_csv/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  },
+  importBOMCheck(formData) {
+    return client.post('/boms/import_check/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  },
 
   // BOM Items
   getBOMItems(params = {}) {

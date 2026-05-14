@@ -9,7 +9,12 @@ from django.core.files.storage import default_storage
 import django_filters
 import os
 import uuid
+import csv
+from io import StringIO
+from decimal import Decimal, InvalidOperation
 from datetime import date, datetime, timedelta
+from openpyxl import Workbook, load_workbook
+from openpyxl.worksheet.datavalidation import DataValidation
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact,
@@ -973,6 +978,712 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             'headers': headers,
             'rows': rows,
         })
+
+    @action(detail=False, methods=['get'], url_path='import_template_csv')
+    def import_template_csv(self, request):
+        headers = [
+            '完成品', '親品番', '子品番', '数量',
+            '工程コード', 'ラインコード', '調達区分', '仕入先コード',
+            'リードタイム(日)', '所要時間(分)', '時間単位'
+        ]
+        sample_rows = [
+            ['YD60000441', 'YD60000441', 'YD40000608S', '1', '4030', 'L2200', '自社製造', '', '0', '20', '分'],
+            ['YD60000441', 'YD40000608S', 'YD40000608', '1', '4053', 'L2200', '自社製造', '', '0', '20', '分'],
+            ['YD60000441', 'YD40000608', 'YD40000608H', '1', '4019', 'L2200', '自社製造', '', '0', '16', '分'],
+        ]
+        sio = StringIO()
+        writer = csv.writer(sio, lineterminator='\n')
+        writer.writerow(headers)
+        writer.writerows(sample_rows)
+        from django.http import HttpResponse
+        response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+        response['Content-Disposition'] = 'attachment; filename="bom_import_template.csv"'
+        response.write('\ufeff')
+        response.write(sio.getvalue())
+        return response
+
+    @action(detail=False, methods=['get'], url_path='import_template_xlsx')
+    def import_template_xlsx(self, request):
+        wb = Workbook()
+        ws_input = wb.active
+        ws_input.title = '入力用'
+
+        headers = [
+            '完成品', '親品番', '子品番', '数量',
+            '工程コード', 'ラインコード', '調達区分', '仕入先コード',
+            'リードタイム(日)', '所要時間(分)', '時間単位'
+        ]
+        ws_input.append(headers)
+        ws_input.append(['YD60000441', 'YD60000441', 'YD40000608S', 1, '4030', 'L2200', '自社製造', '', 0, 20, '分'])
+        ws_input.append(['YD60000441', 'YD40000608S', 'YD40000608', 1, '4053', 'L2200', '自社製造', '', 0, 20, '分'])
+        ws_input.append(['YD60000441', 'YD40000608', 'YD40000608H', 1, '4019', 'L2200', '自社製造', '', 0, 16, '分'])
+
+        # 調達区分は選択式（外注 / 購買 / 自社製造）
+        sourcing_validation = DataValidation(
+            type="list",
+            formula1='"外注,購買,自社製造"',
+            allow_blank=False
+        )
+        sourcing_validation.errorTitle = '入力エラー'
+        sourcing_validation.error = '調達区分は「外注 / 購買 / 自社製造」から選択してください。'
+        ws_input.add_data_validation(sourcing_validation)
+        sourcing_validation.add('G2:G5000')
+
+        # 時間単位は選択式（分 / 日）
+        time_unit_validation = DataValidation(
+            type="list",
+            formula1='"分,日"',
+            allow_blank=False
+        )
+        time_unit_validation.errorTitle = '入力エラー'
+        time_unit_validation.error = '時間単位は「分 / 日」から選択してください。'
+        ws_input.add_data_validation(time_unit_validation)
+        time_unit_validation.add('K2:K5000')
+
+        ws_guide = wb.create_sheet('使用説明')
+        guide_rows = [
+            ['項目', '内容'],
+            ['必須列', '親品番, 子品番, 数量, 調達区分 + 補足'],
+            ['任意列（現行取込ロジック）', '完成品'],
+            ['調達区分', '自社製造 / 購買 / 外注（MAKE / BUY / SUBCON も可）'],
+            ['時間単位', '分 または 日（MINUTE / DAY も可）'],
+            ['注意1', '親品番・子品番・工程コード・ラインコード・仕入先コードは、各マスタに存在するコードを指定してください。'],
+            ['注意2', '同じ版/有効開始日で既存BOMがある場合、取込はエラーになります。'],
+            ['注意3', '有効開始日・有効終了日・備考は取込画面で指定します。'],
+            ['', ''],
+            ['補足', ''],
+            ['調達区分', '追加必須列'],
+            ['自社製造', '工程コード, ラインコード, リードタイム(日), 所要時間(分), 時間単位'],
+            ['購入', '仕入先コード, リードタイム(日), 時間単位'],
+            ['外作', '仕入先コード, リードタイム(日), 時間単位'],
+        ]
+        for row in guide_rows:
+            ws_guide.append(row)
+
+        # 参照用マスタシート（DB値）
+        ws_process = wb.create_sheet('工程')
+        ws_process.append(['工程コード', '工程名', 'ラインコード', 'ライン名', '有効'])
+        for p in Process.objects.select_related('line').order_by('process_code'):
+            ws_process.append([
+                p.process_code,
+                p.process_name,
+                p.line.line_code if p.line else '',
+                p.line.line_name if p.line else '',
+                '有効' if p.is_active else '無効',
+            ])
+
+        ws_line = wb.create_sheet('ライン')
+        ws_line.append(['ラインコード', 'ライン名', 'ライン種別', '有効'])
+        for l in Line.objects.order_by('line_code'):
+            ws_line.append([
+                l.line_code,
+                l.line_name,
+                l.line_type or '',
+                '有効' if l.is_active else '無効',
+            ])
+
+        ws_supplier = wb.create_sheet('仕入先')
+        ws_supplier.append(['仕入先コード', '仕入先名', '有効'])
+        for s in Supplier.objects.order_by('supplier_code'):
+            supplier_active = getattr(s, 'is_active', True)
+            ws_supplier.append([
+                s.supplier_code,
+                s.supplier_name,
+                '有効' if supplier_active else '無効',
+            ])
+
+        from io import BytesIO
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        from django.http import HttpResponse
+        response = HttpResponse(
+            output.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename="bom_import_template.xlsx"'
+        return response
+
+    @action(detail=False, methods=['post'], parser_classes=[parsers.MultiPartParser, parsers.FormParser], url_path='import_csv')
+    def import_csv(self, request):
+        upload = request.FILES.get('file')
+        if not upload:
+            return Response({'detail': '取込ファイルがありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        version = str(request.data.get('version') or 'v1').strip() or 'v1'
+        completed_product_default = str(request.data.get('completed_product_code') or '').strip()
+        valid_from_raw = str(request.data.get('valid_from') or '').strip()
+        valid_to_raw = str(request.data.get('valid_to') or '').strip()
+        item_remark = str(request.data.get('remark') or '').strip()
+        is_active = str(request.data.get('is_active', 'true')).lower() in ['1', 'true', 'yes', 'on']
+
+        if not valid_from_raw:
+            return Response({'detail': '有効開始日を指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            valid_from = datetime.strptime(valid_from_raw, '%Y-%m-%d').date()
+        except ValueError:
+            return Response({'detail': '有効開始日は YYYY-MM-DD 形式で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+        valid_to = None
+        if valid_to_raw:
+            try:
+                valid_to = datetime.strptime(valid_to_raw, '%Y-%m-%d').date()
+            except ValueError:
+                return Response({'detail': '有効終了日は YYYY-MM-DD 形式で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+
+        raw = upload.read()
+        filename = (getattr(upload, 'name', '') or '').lower()
+        input_rows = []
+        fieldnames = []
+
+        if filename.endswith('.xlsx') or filename.endswith('.xlsm'):
+            from io import BytesIO
+            try:
+                wb = load_workbook(BytesIO(raw), data_only=True, read_only=True)
+                ws = wb[wb.sheetnames[0]]
+            except Exception:
+                return Response({'detail': 'Excelファイルの読み取りに失敗しました'}, status=status.HTTP_400_BAD_REQUEST)
+
+            excel_rows = list(ws.iter_rows(values_only=True))
+            if not excel_rows:
+                return Response({'detail': 'Excelファイルにデータがありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+            fieldnames = [str(v).strip() if v is not None else '' for v in excel_rows[0]]
+            for row in excel_rows[1:]:
+                if row is None:
+                    continue
+                if all((cell is None or str(cell).strip() == '') for cell in row):
+                    continue
+                row_dict = {}
+                for i, key in enumerate(fieldnames):
+                    if not key:
+                        continue
+                    value = row[i] if i < len(row) else ''
+                    row_dict[key] = '' if value is None else str(value).strip()
+                input_rows.append(row_dict)
+        else:
+            text = None
+            for enc in ('utf-8-sig', 'cp932', 'shift_jis', 'utf-8'):
+                try:
+                    text = raw.decode(enc)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if text is None:
+                return Response({'detail': 'CSV文字コードを判別できません（UTF-8/Shift_JISのみ対応）'}, status=status.HTTP_400_BAD_REQUEST)
+            reader = csv.DictReader(StringIO(text))
+            fieldnames = reader.fieldnames or []
+            input_rows = list(reader)
+
+        required_headers = ['親品番', '子品番', '数量', '調達区分']
+        missing = [h for h in required_headers if h not in fieldnames]
+        if missing:
+            return Response({'detail': f'必須ヘッダー不足: {", ".join(missing)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 1) 最優先で 品番存在チェック（M_PRODUCT=Product）
+        early_errors = []
+        early_product_codes = set()
+        for idx, row in enumerate(input_rows, start=2):
+            row_completed_code = str(row.get('完成品') or '').strip()
+            if row_completed_code and completed_product_default and row_completed_code != completed_product_default:
+                early_errors.append(
+                    f'{idx}行目: 完成品が不一致です（完成品列: {row_completed_code} / 画面入力: {completed_product_default}）'
+                )
+                continue
+            completed_code = row_completed_code or completed_product_default
+            parent_code = str(row.get('親品番') or '').strip()
+            child_code = str(row.get('子品番') or '').strip()
+            if not completed_code:
+                early_errors.append(f'{idx}行目: 完成品が未指定です（画面入力または完成品列を指定してください）')
+            if not parent_code:
+                early_errors.append(f'{idx}行目: 親品番が未指定です')
+            if not child_code:
+                early_errors.append(f'{idx}行目: 子品番が未指定です')
+            if completed_code:
+                early_product_codes.add(completed_code)
+            if parent_code:
+                early_product_codes.add(parent_code)
+            if child_code:
+                early_product_codes.add(child_code)
+
+        if early_errors:
+            return Response({'detail': 'チェックエラーがあります', 'errors': early_errors[:50]}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing_codes = set(Product.objects.filter(product_code__in=early_product_codes).values_list('product_code', flat=True))
+        for idx, row in enumerate(input_rows, start=2):
+            row_completed_code = str(row.get('完成品') or '').strip()
+            completed_code = row_completed_code or completed_product_default
+            parent_code = str(row.get('親品番') or '').strip()
+            child_code = str(row.get('子品番') or '').strip()
+            if completed_code and completed_code not in existing_codes:
+                early_errors.append(f'{idx}行目: 完成品が未登録です ({completed_code})')
+            if parent_code and parent_code not in existing_codes:
+                early_errors.append(f'{idx}行目: 親品番が未登録です ({parent_code})')
+            if child_code and child_code not in existing_codes:
+                early_errors.append(f'{idx}行目: 子品番が未登録です ({child_code})')
+
+        if early_errors:
+            return Response({'detail': 'チェックエラーがあります', 'errors': early_errors[:50]}, status=status.HTTP_400_BAD_REQUEST)
+
+        sourcing_map = {
+            '自社製造': 'MAKE', 'MAKE': 'MAKE',
+            '購買': 'BUY', '購入': 'BUY', 'BUY': 'BUY',
+            '外注': 'SUBCON', 'SUBCON': 'SUBCON',
+        }
+        time_unit_map = {'日': 'DAY', 'DAY': 'DAY', '分': 'MINUTE', 'MINUTE': 'MINUTE'}
+
+        row_errors = []
+        parsed_rows = []
+        for idx, row in enumerate(input_rows, start=2):
+            row_has_error = False
+            row_completed_code = str(row.get('完成品') or '').strip()
+            if row_completed_code and completed_product_default and row_completed_code != completed_product_default:
+                row_errors.append(
+                    f'{idx}行目: 完成品が不一致です（完成品列: {row_completed_code} / 画面入力: {completed_product_default}）'
+                )
+                continue
+            completed_code = row_completed_code or completed_product_default
+            parent_code = str(row.get('親品番') or '').strip()
+            child_code = str(row.get('子品番') or '').strip()
+            quantity_raw = str(row.get('数量') or '').strip()
+            if not completed_code:
+                row_errors.append(f'{idx}行目: 完成品が未指定です（画面入力または完成品列を指定してください）')
+                continue
+            if not parent_code or not child_code or not quantity_raw:
+                row_errors.append(f'{idx}行目: 必須項目不足（親品番/子品番/数量）')
+                continue
+            try:
+                qty = Decimal(quantity_raw)
+                if qty <= 0:
+                    raise InvalidOperation
+            except Exception:
+                row_errors.append(f'{idx}行目: 数量が不正です')
+                continue
+
+            sourcing_raw = str(row.get('調達区分') or '').strip()
+            sourcing_type = sourcing_map.get(sourcing_raw)
+            if not sourcing_raw:
+                row_errors.append(f'{idx}行目: 調達区分は必須です')
+                continue
+            if not sourcing_type:
+                row_errors.append(f'{idx}行目: 調達区分が不正です ({sourcing_raw})')
+                continue
+
+            lead_raw = str(row.get('リードタイム(日)') or '0').strip() or '0'
+            duration_raw = str(row.get('所要時間(分)') or '0').strip() or '0'
+            try:
+                lead_time_days = int(lead_raw)
+            except ValueError:
+                row_errors.append(f'{idx}行目: リードタイム(日)が不正です')
+                continue
+            try:
+                duration_min = int(duration_raw)
+            except ValueError:
+                row_errors.append(f'{idx}行目: 所要時間(分)が不正です')
+                continue
+            if lead_time_days < 0:
+                row_errors.append(f'{idx}行目: リードタイム(日)は0以上で入力してください')
+                continue
+            if duration_min < 0:
+                row_errors.append(f'{idx}行目: 所要時間(分)は0以上で入力してください')
+                continue
+
+            process_code = str(row.get('工程コード') or '').strip()
+            line_code = str(row.get('ラインコード') or '').strip()
+            supplier_code = str(row.get('仕入先コード') or '').strip()
+            time_unit_raw = str(row.get('時間単位') or '').strip()
+            time_unit = time_unit_map.get(time_unit_raw)
+
+            # 区分別必須チェック
+            if sourcing_type == 'MAKE':
+                if not process_code:
+                    row_errors.append(f'{idx}行目: 自社製造は工程コードが必須です')
+                    row_has_error = True
+                if not line_code:
+                    row_errors.append(f'{idx}行目: 自社製造はラインコードが必須です')
+                    row_has_error = True
+                if not time_unit_raw:
+                    row_errors.append(f'{idx}行目: 自社製造は時間単位が必須です')
+                    row_has_error = True
+                elif not time_unit:
+                    row_errors.append(f'{idx}行目: 時間単位は「分」または「日」を指定してください')
+                    row_has_error = True
+                elif time_unit == 'MINUTE' and duration_min <= 0:
+                    row_errors.append(f'{idx}行目: 自社製造で時間単位=分の場合、所要時間(分)を1以上で入力してください')
+                    row_has_error = True
+                elif time_unit == 'DAY' and lead_time_days <= 0:
+                    row_errors.append(f'{idx}行目: 自社製造で時間単位=日の場合、リードタイム(日)を1以上で入力してください')
+                    row_has_error = True
+            elif sourcing_type in ['BUY', 'SUBCON']:
+                if not supplier_code:
+                    row_errors.append(f'{idx}行目: {sourcing_raw}は仕入先コードが必須です')
+                    row_has_error = True
+                if not time_unit_raw:
+                    row_errors.append(f'{idx}行目: {sourcing_raw}は時間単位が必須です')
+                    row_has_error = True
+                elif time_unit != 'DAY':
+                    row_errors.append(f'{idx}行目: {sourcing_raw}は時間単位=日で入力してください')
+                    row_has_error = True
+                if lead_time_days <= 0:
+                    row_errors.append(f'{idx}行目: {sourcing_raw}はリードタイム(日)を1以上で入力してください')
+                    row_has_error = True
+                if process_code and sourcing_type == 'BUY':
+                    row_errors.append(f'{idx}行目: 購入は工程コードを指定できません')
+                    row_has_error = True
+                # SUBCON は工程任意。未入力時はGに補完
+                if sourcing_type == 'SUBCON' and not process_code:
+                    process_code = 'G'
+
+            if row_has_error:
+                continue
+
+            parsed_rows.append({
+                'row_no': idx,
+                'completed_code': completed_code,
+                'parent_code': parent_code,
+                'child_code': child_code,
+                'quantity': qty,
+                'process_code': process_code,
+                'line_code': line_code,
+                'sourcing_type': sourcing_type,
+                'supplier_code': supplier_code,
+                'lead_time_days': lead_time_days,
+                'duration_min': duration_min,
+                'time_unit': time_unit,
+            })
+
+        if row_errors:
+            return Response({'detail': 'CSV内容にエラーがあります', 'errors': row_errors[:30]}, status=status.HTTP_400_BAD_REQUEST)
+        if not parsed_rows:
+            return Response({'detail': '有効なデータ行がありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from django.db import transaction
+        with transaction.atomic():
+            product_codes = set()
+            process_codes = set()
+            line_codes = set()
+            supplier_codes = set()
+            for row in parsed_rows:
+                product_codes.add(row['child_code'])
+                if row['parent_code']:
+                    product_codes.add(row['parent_code'])
+                if row.get('completed_code'):
+                    product_codes.add(row['completed_code'])
+                if row['process_code']:
+                    process_codes.add(row['process_code'])
+                if row['line_code']:
+                    line_codes.add(row['line_code'])
+                if row['supplier_code']:
+                    supplier_codes.add(row['supplier_code'])
+
+            product_map = {p.product_code: p for p in Product.objects.filter(product_code__in=product_codes)}
+            process_map = {p.process_code: p for p in Process.objects.filter(process_code__in=process_codes)}
+            line_map = {l.line_code: l for l in Line.objects.filter(line_code__in=line_codes)}
+            supplier_map = {s.supplier_code: s for s in Supplier.objects.filter(supplier_code__in=supplier_codes)}
+
+            for row in parsed_rows:
+                if row['child_code'] not in product_map:
+                    row_errors.append(f"{row['row_no']}行目: 子品番が未登録です ({row['child_code']})")
+                if row['parent_code'] and row['parent_code'] not in product_map:
+                    row_errors.append(f"{row['row_no']}行目: 親品番が未登録です ({row['parent_code']})")
+                if row.get('completed_code') and row['completed_code'] not in product_map:
+                    row_errors.append(f"{row['row_no']}行目: 完成品が未登録です ({row['completed_code']})")
+                if row['process_code'] and row['process_code'] not in process_map:
+                    row_errors.append(f"{row['row_no']}行目: 工程コードが未登録です ({row['process_code']})")
+                if row['line_code'] and row['line_code'] not in line_map:
+                    row_errors.append(f"{row['row_no']}行目: ラインコードが未登録です ({row['line_code']})")
+                if row['supplier_code'] and row['supplier_code'] not in supplier_map:
+                    row_errors.append(f"{row['row_no']}行目: 仕入先コードが未登録です ({row['supplier_code']})")
+
+            if row_errors:
+                return Response({'detail': 'マスタ参照エラーがあります', 'errors': row_errors[:30]}, status=status.HTTP_400_BAD_REQUEST)
+
+            all_parent_codes = {
+                row['parent_code']
+                for row in parsed_rows
+                if row['parent_code']
+            }
+
+            created_boms = {}
+            created_item_count = 0
+            for parent_code in sorted(all_parent_codes):
+                parent_product = product_map[parent_code]
+                bom, created = BOM.objects.get_or_create(
+                    parent_product=parent_product,
+                    version=version,
+                    valid_from=valid_from,
+                    defaults={
+                        'valid_to': valid_to,
+                        'is_active': is_active,
+                    }
+                )
+                if not created:
+                    return Response(
+                        {'detail': f'BOMが既に存在します: {parent_code} / {version} / {valid_from}'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                created_boms[parent_code] = bom
+
+            for row in parsed_rows:
+                parent_code = row['parent_code']
+                parent_bom = created_boms.get(parent_code)
+                if not parent_bom:
+                    row_errors.append(f"{row['row_no']}行目: 親BOMを作成できませんでした ({parent_code})")
+                    continue
+                BOMItem.objects.create(
+                    bom=parent_bom,
+                    child_product=product_map[row['child_code']],
+                    quantity=row['quantity'],
+                    loss_rate=Decimal('0'),
+                    sourcing_type=row['sourcing_type'],
+                    supplier=supplier_map.get(row['supplier_code']),
+                    process=process_map.get(row['process_code']),
+                    line=line_map.get(row['line_code']),
+                    time_unit=row['time_unit'],
+                    lead_time_days=row['lead_time_days'],
+                    duration_min=row['duration_min'] if row['duration_min'] > 0 else None,
+                    remark=item_remark or None,
+                )
+                created_item_count += 1
+
+            if row_errors:
+                return Response({'detail': '取込中にエラーが発生しました', 'errors': row_errors[:30]}, status=status.HTTP_400_BAD_REQUEST)
+
+            return Response({
+                'message': 'BOMを取り込みました',
+                'created_boms': len(created_boms),
+                'created_items': created_item_count,
+            }, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'], parser_classes=[parsers.MultiPartParser, parsers.FormParser], url_path='import_check')
+    def import_check(self, request):
+        upload = request.FILES.get('file')
+        if not upload:
+            return Response({'detail': '取込ファイルがありません'}, status=status.HTTP_400_BAD_REQUEST)
+        version = str(request.data.get('version') or 'v1').strip() or 'v1'
+        completed_product_default = str(request.data.get('completed_product_code') or '').strip()
+        valid_from_raw = str(request.data.get('valid_from') or '').strip()
+        valid_from = None
+        if valid_from_raw:
+            try:
+                valid_from = datetime.strptime(valid_from_raw, '%Y-%m-%d').date()
+            except ValueError:
+                return Response({'detail': '有効開始日は YYYY-MM-DD 形式で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+
+        raw = upload.read()
+        filename = (getattr(upload, 'name', '') or '').lower()
+        input_rows = []
+        fieldnames = []
+
+        if filename.endswith('.xlsx') or filename.endswith('.xlsm'):
+            from io import BytesIO
+            try:
+                wb = load_workbook(BytesIO(raw), data_only=True, read_only=True)
+                ws = wb[wb.sheetnames[0]]
+            except Exception:
+                return Response({'detail': 'Excelファイルの読み取りに失敗しました'}, status=status.HTTP_400_BAD_REQUEST)
+            excel_rows = list(ws.iter_rows(values_only=True))
+            if not excel_rows:
+                return Response({'detail': 'Excelファイルにデータがありません'}, status=status.HTTP_400_BAD_REQUEST)
+            fieldnames = [str(v).strip() if v is not None else '' for v in excel_rows[0]]
+            for row in excel_rows[1:]:
+                if row is None or all((cell is None or str(cell).strip() == '') for cell in row):
+                    continue
+                row_dict = {}
+                for i, key in enumerate(fieldnames):
+                    if not key:
+                        continue
+                    value = row[i] if i < len(row) else ''
+                    row_dict[key] = '' if value is None else str(value).strip()
+                input_rows.append(row_dict)
+        else:
+            text = None
+            for enc in ('utf-8-sig', 'cp932', 'shift_jis', 'utf-8'):
+                try:
+                    text = raw.decode(enc)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if text is None:
+                return Response({'detail': 'CSV文字コードを判別できません（UTF-8/Shift_JISのみ対応）'}, status=status.HTTP_400_BAD_REQUEST)
+            reader = csv.DictReader(StringIO(text))
+            fieldnames = reader.fieldnames or []
+            input_rows = list(reader)
+
+        required_headers = ['親品番', '子品番', '数量', '調達区分']
+        missing = [h for h in required_headers if h not in fieldnames]
+        if missing:
+            return Response({'detail': f'必須ヘッダー不足: {", ".join(missing)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        sourcing_map = {
+            '自社製造': 'MAKE', 'MAKE': 'MAKE',
+            '購買': 'BUY', '購入': 'BUY', 'BUY': 'BUY',
+            '外注': 'SUBCON', 'SUBCON': 'SUBCON',
+        }
+        row_errors = []
+        checked_count = 0
+        parsed_rows = []
+        for idx, row in enumerate(input_rows, start=2):
+            row_has_error = False
+            parent_code = str(row.get('親品番') or '').strip()
+            child_code = str(row.get('子品番') or '').strip()
+            quantity_raw = str(row.get('数量') or '').strip()
+            row_completed_code = str(row.get('完成品') or '').strip()
+            if row_completed_code and completed_product_default and row_completed_code != completed_product_default:
+                row_errors.append(
+                    f'{idx}行目: 完成品が不一致です（完成品列: {row_completed_code} / 画面入力: {completed_product_default}）'
+                )
+                continue
+            completed_code = row_completed_code or completed_product_default
+            if not completed_code:
+                row_errors.append(f'{idx}行目: 完成品が未指定です（画面入力または完成品列を指定してください）')
+                continue
+            if not parent_code or not child_code or not quantity_raw:
+                row_errors.append(f'{idx}行目: 必須項目不足（親品番/子品番/数量）')
+                continue
+            try:
+                qty = Decimal(quantity_raw)
+                if qty <= 0:
+                    raise InvalidOperation
+            except Exception:
+                row_errors.append(f'{idx}行目: 数量が不正です')
+                continue
+
+            sourcing_raw = str(row.get('調達区分') or '').strip()
+            sourcing_type = sourcing_map.get(sourcing_raw)
+            if not sourcing_raw:
+                row_errors.append(f'{idx}行目: 調達区分は必須です')
+                continue
+            if not sourcing_type:
+                row_errors.append(f'{idx}行目: 調達区分が不正です ({sourcing_raw})')
+                continue
+
+            lead_raw = str(row.get('リードタイム(日)') or '0').strip() or '0'
+            duration_raw = str(row.get('所要時間(分)') or '0').strip() or '0'
+            try:
+                lead_time_days = int(lead_raw)
+            except ValueError:
+                row_errors.append(f'{idx}行目: リードタイム(日)が不正です')
+                continue
+            try:
+                duration_min = int(duration_raw)
+            except ValueError:
+                row_errors.append(f'{idx}行目: 所要時間(分)が不正です')
+                continue
+            if lead_time_days < 0:
+                row_errors.append(f'{idx}行目: リードタイム(日)は0以上で入力してください')
+                row_has_error = True
+            if duration_min < 0:
+                row_errors.append(f'{idx}行目: 所要時間(分)は0以上で入力してください')
+                row_has_error = True
+
+            process_code = str(row.get('工程コード') or '').strip()
+            line_code = str(row.get('ラインコード') or '').strip()
+            supplier_code = str(row.get('仕入先コード') or '').strip()
+            time_unit_raw = str(row.get('時間単位') or '').strip()
+            time_unit = {'日': 'DAY', 'DAY': 'DAY', '分': 'MINUTE', 'MINUTE': 'MINUTE'}.get(time_unit_raw)
+
+            if sourcing_type == 'MAKE':
+                if not process_code:
+                    row_errors.append(f'{idx}行目: 自社製造は工程コードが必須です')
+                    row_has_error = True
+                if not line_code:
+                    row_errors.append(f'{idx}行目: 自社製造はラインコードが必須です')
+                    row_has_error = True
+                if not time_unit_raw:
+                    row_errors.append(f'{idx}行目: 自社製造は時間単位が必須です')
+                    row_has_error = True
+                elif not time_unit:
+                    row_errors.append(f'{idx}行目: 時間単位は「分」または「日」を指定してください')
+                    row_has_error = True
+                elif time_unit == 'MINUTE' and duration_min <= 0:
+                    row_errors.append(f'{idx}行目: 自社製造で時間単位=分の場合、所要時間(分)を1以上で入力してください')
+                    row_has_error = True
+                elif time_unit == 'DAY' and lead_time_days <= 0:
+                    row_errors.append(f'{idx}行目: 自社製造で時間単位=日の場合、リードタイム(日)を1以上で入力してください')
+                    row_has_error = True
+            elif sourcing_type in ['BUY', 'SUBCON']:
+                if not supplier_code:
+                    row_errors.append(f'{idx}行目: {sourcing_raw}は仕入先コードが必須です')
+                    row_has_error = True
+                if not time_unit_raw:
+                    row_errors.append(f'{idx}行目: {sourcing_raw}は時間単位が必須です')
+                    row_has_error = True
+                elif time_unit != 'DAY':
+                    row_errors.append(f'{idx}行目: {sourcing_raw}は時間単位=日で入力してください')
+                    row_has_error = True
+                if lead_time_days <= 0:
+                    row_errors.append(f'{idx}行目: {sourcing_raw}はリードタイム(日)を1以上で入力してください')
+                    row_has_error = True
+                if process_code and sourcing_type == 'BUY':
+                    row_errors.append(f'{idx}行目: 購入は工程コードを指定できません')
+                    row_has_error = True
+
+            if row_has_error:
+                continue
+
+            parsed_rows.append({
+                'row_no': idx,
+                'completed_code': completed_code,
+                'parent_code': parent_code,
+                'child_code': child_code,
+                'process_code': process_code,
+                'line_code': line_code,
+                'supplier_code': supplier_code,
+            })
+            checked_count += 1
+
+        if row_errors:
+            return Response({'detail': 'チェックエラーがあります', 'errors': row_errors[:50]}, status=status.HTTP_400_BAD_REQUEST)
+
+        product_codes = set()
+        process_codes = set()
+        line_codes = set()
+        supplier_codes = set()
+        parent_codes = set()
+        for row in parsed_rows:
+            product_codes.add(row['child_code'])
+            product_codes.add(row['parent_code'])
+            if row.get('completed_code'):
+                product_codes.add(row['completed_code'])
+            parent_codes.add(row['parent_code'])
+            if row['process_code']:
+                process_codes.add(row['process_code'])
+            if row['line_code']:
+                line_codes.add(row['line_code'])
+            if row['supplier_code']:
+                supplier_codes.add(row['supplier_code'])
+
+        product_map = {p.product_code: p for p in Product.objects.filter(product_code__in=product_codes)}
+        process_map = {p.process_code: p for p in Process.objects.filter(process_code__in=process_codes)}
+        line_map = {l.line_code: l for l in Line.objects.filter(line_code__in=line_codes)}
+        supplier_map = {s.supplier_code: s for s in Supplier.objects.filter(supplier_code__in=supplier_codes)}
+
+        for row in parsed_rows:
+            if row['child_code'] not in product_map:
+                row_errors.append(f"{row['row_no']}行目: 子品番が未登録です ({row['child_code']})")
+            if row['parent_code'] not in product_map:
+                row_errors.append(f"{row['row_no']}行目: 親品番が未登録です ({row['parent_code']})")
+            if row.get('completed_code') and row['completed_code'] not in product_map:
+                row_errors.append(f"{row['row_no']}行目: 完成品が未登録です ({row['completed_code']})")
+            if row['process_code'] and row['process_code'] not in process_map:
+                row_errors.append(f"{row['row_no']}行目: 工程コードが未登録です ({row['process_code']})")
+            if row['line_code'] and row['line_code'] not in line_map:
+                row_errors.append(f"{row['row_no']}行目: ラインコードが未登録です ({row['line_code']})")
+            if row['supplier_code'] and row['supplier_code'] not in supplier_map:
+                row_errors.append(f"{row['row_no']}行目: 仕入先コードが未登録です ({row['supplier_code']})")
+
+        if valid_from:
+            for parent_code in sorted(parent_codes):
+                parent_product = product_map.get(parent_code)
+                if not parent_product:
+                    continue
+                if BOM.objects.filter(parent_product=parent_product, version=version, valid_from=valid_from).exists():
+                    row_errors.append(f'既存BOM重複: {parent_code} / {version} / {valid_from}')
+
+        if row_errors:
+            return Response({'detail': 'チェックエラーがあります', 'errors': row_errors[:50]}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'message': 'チェックOKです', 'checked_rows': checked_count}, status=status.HTTP_200_OK)
 
     def _collect_routing_items_recursive(
         self,

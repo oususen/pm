@@ -4,6 +4,9 @@
       <h1 class="page-title">構成マスタ（BOM）</h1>
       <div class="page-actions">
         <button @click="fetchBOMs" class="btn-primary">更新</button>
+        <button v-if="canEdit" @click="downloadBomImportTemplateXlsx" class="btn-secondary">取込テンプレートExcel</button>
+        <button v-if="canEdit" @click="downloadBomImportTemplate" class="btn-secondary">取込テンプレートCSV</button>
+        <button v-if="canEdit" @click="openBomImportDialog" class="btn-secondary">CSV取込</button>
         <button v-if="canEdit" @click="showNewDialog" class="btn-success">新規</button>
         <button @click="openWhereUsedDialog" class="btn-info">逆展開</button>
       </div>
@@ -133,6 +136,52 @@
 
       <div v-if="boms.length === 0" class="no-data">
         データがありません
+      </div>
+    </div>
+
+    <div v-if="showBomImportDialog" class="modal-overlay" @click.self="closeBomImportDialog">
+      <div class="modal-content">
+        <h2>BOM取込（CSV / Excel）</h2>
+        <div class="csv-format-note">
+          <strong>必須列:</strong> 親品番, 子品番, 数量, 調達区分
+          <br><small>区分別チェック実装済み: 自社製造は工程/ライン/時間単位/所要時間(分)必須、購入は仕入先/時間単位必須かつ工程不可、外作は仕入先/時間単位必須（工程空欄時はG自動補完）。</small>
+        </div>
+        <div class="form-group">
+          <label>取込ファイル *</label>
+          <input type="file" accept=".csv,.xlsx" @change="onBomCsvSelected" />
+        </div>
+        <div class="form-group">
+          <label>版 *</label>
+          <input v-model="bomImportForm.version" />
+        </div>
+        <div class="form-group">
+          <label>完成品（画面入力） *</label>
+          <input v-model="bomImportForm.completed_product_code" placeholder="例: YD60000441" />
+        </div>
+        <div class="form-group">
+          <label>有効開始日 *</label>
+          <input type="date" v-model="bomImportForm.valid_from" />
+        </div>
+        <div class="form-group">
+          <label>有効終了日</label>
+          <input type="date" v-model="bomImportForm.valid_to" />
+        </div>
+        <div class="form-group">
+          <label>備考（全明細共通）</label>
+          <input v-model="bomImportForm.remark" />
+        </div>
+        <div class="form-group">
+          <label><input type="checkbox" v-model="bomImportForm.is_active" /> 有効</label>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn-secondary" @click="executeBomImportCheck" :disabled="bomImporting || bomChecking">
+            {{ bomChecking ? 'チェック中...' : '取込前チェック' }}
+          </button>
+          <button type="button" class="btn-primary" @click="executeBomCsvImport" :disabled="bomImporting">
+            {{ bomImporting ? '取込中...' : '取込実行' }}
+          </button>
+          <button type="button" class="btn-secondary" @click="closeBomImportDialog">閉じる</button>
+        </div>
       </div>
     </div>
 
@@ -772,6 +821,18 @@ const showCopyDialog = ref(false)
 const copyNewParentProductId = ref('')
 const copyProductFilter = ref('')
 const canEdit = computed(() => canAccessMasterResource('masters.bom', 'edit'))
+const showBomImportDialog = ref(false)
+const bomImporting = ref(false)
+const bomChecking = ref(false)
+const bomImportFile = ref(null)
+const bomImportForm = ref({
+  version: 'v1',
+  completed_product_code: '',
+  valid_from: formatISODate(new Date()),
+  valid_to: '',
+  remark: '',
+  is_active: true,
+})
 
 const pad2 = (value) => String(value).padStart(2, '0')
 const buildDefaultRoutingValidFromLocal = () => {
@@ -989,6 +1050,122 @@ const fetchBOMs = async (page = 1) => {
   } catch (error) {
     console.error('BOM取得エラー:', error)
     alert('BOMデータの取得に失敗しました')
+  }
+}
+
+const downloadBomImportTemplate = async () => {
+  try {
+    const response = await api.boms.downloadImportTemplateCsv()
+    const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8-sig;' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = 'bom_import_template.csv'
+    link.click()
+    URL.revokeObjectURL(link.href)
+  } catch (error) {
+    console.error('BOMテンプレート取得エラー:', error)
+    alert('テンプレートCSVの取得に失敗しました')
+  }
+}
+
+const downloadBomImportTemplateXlsx = async () => {
+  try {
+    const response = await api.boms.downloadImportTemplateXlsx()
+    const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = 'bom_import_template.xlsx'
+    link.click()
+    URL.revokeObjectURL(link.href)
+  } catch (error) {
+    console.error('BOMテンプレートExcel取得エラー:', error)
+    alert('テンプレートExcelの取得に失敗しました')
+  }
+}
+
+const openBomImportDialog = () => {
+  bomImportFile.value = null
+  showBomImportDialog.value = true
+}
+
+const closeBomImportDialog = () => {
+  showBomImportDialog.value = false
+}
+
+const onBomCsvSelected = (event) => {
+  bomImportFile.value = event.target.files?.[0] || null
+}
+
+const executeBomCsvImport = async () => {
+  if (!bomImportFile.value) {
+    alert('取込ファイル（CSV/Excel）を選択してください')
+    return
+  }
+  if (!bomImportForm.value.valid_from) {
+    alert('有効開始日を入力してください')
+    return
+  }
+  if (!String(bomImportForm.value.completed_product_code || '').trim()) {
+    alert('完成品（画面入力）を入力してください')
+    return
+  }
+  bomImporting.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', bomImportFile.value)
+    fd.append('version', bomImportForm.value.version || 'v1')
+    fd.append('completed_product_code', bomImportForm.value.completed_product_code || '')
+    fd.append('valid_from', bomImportForm.value.valid_from)
+    fd.append('valid_to', bomImportForm.value.valid_to || '')
+    fd.append('remark', bomImportForm.value.remark || '')
+    fd.append('is_active', String(!!bomImportForm.value.is_active))
+    const res = await api.boms.importBOMCsv(fd)
+    alert(`${res.data.message}\nBOM: ${res.data.created_boms}件 / 明細: ${res.data.created_items}件`)
+    showBomImportDialog.value = false
+    fetchBOMs(1)
+  } catch (error) {
+    console.error('BOM取込エラー:', error)
+    const errors = error?.response?.data?.errors
+    const detail = error?.response?.data?.detail || '取込に失敗しました'
+    if (Array.isArray(errors) && errors.length) {
+      alert(`${detail}\n${errors.slice(0, 10).join('\n')}`)
+    } else {
+      alert(detail)
+    }
+  } finally {
+    bomImporting.value = false
+  }
+}
+
+const executeBomImportCheck = async () => {
+  if (!bomImportFile.value) {
+    alert('取込ファイル（CSV/Excel）を選択してください')
+    return
+  }
+  if (!String(bomImportForm.value.completed_product_code || '').trim()) {
+    alert('完成品（画面入力）を入力してください')
+    return
+  }
+  bomChecking.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', bomImportFile.value)
+    fd.append('completed_product_code', bomImportForm.value.completed_product_code || '')
+    fd.append('version', bomImportForm.value.version || 'v1')
+    fd.append('valid_from', bomImportForm.value.valid_from || '')
+    const res = await api.boms.importBOMCheck(fd)
+    alert(`${res.data.message}\nチェック件数: ${res.data.checked_rows}件`)
+  } catch (error) {
+    console.error('BOM取込チェックエラー:', error)
+    const errors = error?.response?.data?.errors
+    const detail = error?.response?.data?.detail || 'チェックに失敗しました'
+    if (Array.isArray(errors) && errors.length) {
+      alert(`${detail}\n${errors.slice(0, 15).join('\n')}`)
+    } else {
+      alert(detail)
+    }
+  } finally {
+    bomChecking.value = false
   }
 }
 
@@ -2589,7 +2766,3 @@ const TreeBranch = defineComponent({
   color: #555;
 }
 </style>
-
-
-
-
