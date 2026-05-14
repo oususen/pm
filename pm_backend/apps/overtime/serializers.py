@@ -197,9 +197,11 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
             if self.instance:
                 dup_qs = dup_qs.exclude(pk=self.instance.pk)
             if dup_qs.exists():
-                type_display = dict(OvertimeApplication.TYPE_CHOICES).get(app_type, app_type)
                 raise serializers.ValidationError(
-                    {'non_field_errors': [f'{work_date} に同じ種別（{type_display}）の申請がすでに存在します。']}
+                    {
+                        'detail_code': 'overtime.error.duplicateApplication',
+                        'detail': '申請したよ。重複申請はできません。'
+                    }
                 )
         # 時間外のみ start_time/end_time を必須（半休は時間外が任意）
         start_time = data.get('start_time', getattr(self.instance, 'start_time', None))

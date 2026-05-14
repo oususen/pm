@@ -785,6 +785,7 @@ class BrakeLineRecordView(APIView):
             product_code=product_code,
             equipment_id=equipment_id or None,
             operator=operator,
+            operator_user=request.user if getattr(request, 'user', None) and request.user.is_authenticated else None,
             operator_action=operator_action,
             operator_action_reason=operator_action_reason,
             qty=qty,

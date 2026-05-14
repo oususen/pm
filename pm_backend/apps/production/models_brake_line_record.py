@@ -1,4 +1,5 @@
 from django.db import models
+from django.conf import settings
 
 from masters.models import Equipment, Line, Process, Product
 
@@ -31,6 +32,14 @@ class BrakeLineRecord(models.Model):
     product_code = models.CharField(max_length=50, blank=True, default='', verbose_name='品番')
     equipment   = models.ForeignKey(Equipment, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='設備')
     operator    = models.CharField(max_length=100, blank=True, default='', verbose_name='作業者')
+    operator_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='brake_line_records',
+        verbose_name='作業者ユーザー',
+    )
     operator_action        = models.CharField(max_length=20, choices=OPERATOR_ACTION_CHOICES, verbose_name='アクション')
     operator_action_reason = models.CharField(max_length=200, blank=True, default='', verbose_name='理由')
     qty         = models.IntegerField(default=0, verbose_name='加工数（END時）')

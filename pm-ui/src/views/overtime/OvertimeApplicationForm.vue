@@ -269,6 +269,14 @@ const holidayWorkPatterns = computed(() =>
 )
 const selectedPatternBreaks = ref([])  // 選択中パターンの休憩時間リスト
 
+function resolveApiErrorMessage(data, fallbackMessage) {
+  const detailCode = data?.detail_code
+  if (detailCode && typeof detailCode === 'string' && detailCode.startsWith('overtime.error.')) {
+    return t(detailCode)
+  }
+  return data?.detail || data?.non_field_errors?.[0] || fallbackMessage
+}
+
 function buildApplicantLabel(user) {
   const fullName = `${user.last_name || ''} ${user.first_name || ''}`.trim() || user.username || `ID:${user.id}`
   const teamName = user.profile?.team_name || ''
@@ -562,7 +570,7 @@ async function saveDraft() {
     router.push('/overtime/list')
   } catch (e) {
     const data = e.response?.data
-    const apiMsg = data?.detail || data?.non_field_errors?.[0] || e.message
+    const apiMsg = resolveApiErrorMessage(data, e.message)
     errorMsg.value = t('overtime.error.saveFailed') + apiMsg
   } finally {
     saving.value = false
@@ -595,7 +603,7 @@ async function handleSubmit() {
     router.push('/overtime/list')
   } catch (e) {
     const data = e.response?.data
-    const apiMsg = data?.detail || data?.non_field_errors?.[0] || e.message
+    const apiMsg = resolveApiErrorMessage(data, e.message)
     errorMsg.value = t('overtime.error.submitFailed') + apiMsg
   } finally {
     saving.value = false

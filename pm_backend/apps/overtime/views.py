@@ -1,9 +1,11 @@
 from io import BytesIO
+import re
 
 from django.http import HttpResponse
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db.models import Q, CharField, F, Value
+from django.db.utils import OperationalError, ProgrammingError
 from django.db.models.functions import Coalesce, NullIf
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -15,6 +17,8 @@ import django_filters
 
 from .access import can_manage_application
 from .models import OvertimeApplication, OvertimeApprovalLog
+from production.models_process_work_session import ProcessWorkSession
+from production.models_brake_line_record import BrakeLineRecord
 from .serializers import OvertimeApplicationSerializer, build_media_absolute_url
 
 User = get_user_model()
@@ -29,6 +33,180 @@ STATUS_AFTER_APPROVE = {
     'chief': 'approved_chief',
     'manager': 'approved_manager',
 }
+
+
+def _build_operator_name_candidates(user):
+    """申請者に対応する作業者名候補を返す。"""
+    if not user:
+        return []
+    full_name = f"{user.last_name} {user.first_name}".strip()
+    reverse_full_name = f"{user.first_name} {user.last_name}".strip()
+    candidates = [
+        full_name,
+        reverse_full_name,
+        (user.username or '').strip(),
+    ]
+    # 空文字と重複を除外
+    return [name for i, name in enumerate(candidates) if name and name not in candidates[:i]]
+
+
+def _normalize_operator_text(value):
+    """作業者名の表記ゆれを吸収して比較するための正規化。"""
+    text = str(value or '').strip().lower()
+    if not text:
+        return ''
+    # 空白・括弧類を除去（半角/全角）
+    text = re.sub(r'[\s\u3000\(\)（）]', '', text)
+    return text
+
+
+def _normalize_ascii_token(value):
+    """
+    文字化けしても残りやすい英数字トークン（例: PROMWIJITNATTAWAT）を抽出する。
+    """
+    text = str(value or '').lower()
+    return re.sub(r'[^a-z0-9]+', '', text)
+
+
+def _build_operator_name_variants(user):
+    """作業者名の比較候補（表記ゆれ含む）を返す。"""
+    if not user:
+        return []
+    last_name = str(user.last_name or '').strip()
+    first_name = str(user.first_name or '').strip()
+    username = str(user.username or '').strip()
+    variants = [
+        f'{last_name} {first_name}'.strip(),
+        f'{first_name} {last_name}'.strip(),
+        f'{last_name}({first_name})'.strip('()'),
+        f'{last_name}（{first_name}）'.strip('（）'),
+        f'{last_name}{first_name}'.strip(),
+        username,
+    ]
+    unique = []
+    seen = set()
+    for raw in variants:
+        key = _normalize_operator_text(raw)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(raw)
+    return unique
+
+
+def _has_open_process_session(user):
+    """
+    ProcessWorkSession の未終了判定。
+    旧データ向けに operator_name の表記ゆれ比較も行う。
+    """
+    if not user:
+        return False
+    candidate_names = _build_operator_name_variants(user)
+    if not candidate_names:
+        return False
+
+    # まずは既存の完全一致で高速判定
+    if ProcessWorkSession.objects.filter(
+        session_type='WORK',
+        status='OPEN',
+        operator_name__in=candidate_names,
+    ).exists():
+        return True
+
+    # 表記ゆれ吸収判定（括弧・空白差分）
+    candidate_keys = {_normalize_operator_text(name) for name in candidate_names if name}
+    candidate_ascii_keys = {
+        _normalize_ascii_token(name)
+        for name in candidate_names
+        if _normalize_ascii_token(name)
+    }
+    open_rows = ProcessWorkSession.objects.filter(
+        session_type='WORK',
+        status='OPEN',
+    ).values('operator_name', 'start_record__operator_name', 'end_record__operator_name')
+    for row in open_rows:
+        for operator_name in (
+            row.get('operator_name'),
+            row.get('start_record__operator_name'),
+            row.get('end_record__operator_name'),
+        ):
+            normalized = _normalize_operator_text(operator_name)
+            if normalized in candidate_keys:
+                return True
+            ascii_key = _normalize_ascii_token(operator_name)
+            if ascii_key and len(ascii_key) >= 6 and ascii_key in candidate_ascii_keys:
+                return True
+    return False
+
+
+def _has_open_brake_or_spot_action(user):
+    """
+    ブレーキ/ナット（スポット）アクション実績の未終了を判定する。
+    同一キー（工程・品目・設備）の最新アクションが START/RESUME なら未終了扱い。
+    """
+    latest_action_by_item = {}
+
+    # 優先: ユーザーID一致（新規記録）
+    action_rows = []
+    if user and user.id:
+        try:
+            action_rows = list(
+                BrakeLineRecord.objects
+                .filter(operator_user_id=user.id)
+                .values('process_id', 'product_id', 'product_code', 'equipment_id', 'operator_action')
+                .order_by('-recorded_at', '-id')
+            )
+        except (OperationalError, ProgrammingError):
+            # operator_user カラム未反映DBでは名前判定へフォールバック
+            action_rows = []
+
+    # フォールバック: 旧データ（operator_user 未保存）だけ名前で補完
+    if not action_rows:
+        operator_name_candidates = _build_operator_name_variants(user)
+        if not operator_name_candidates:
+            return False
+        # 完全一致 + 表記ゆれ吸収（括弧・空白差分）
+        try:
+            legacy_rows = (
+                BrakeLineRecord.objects
+                .filter(operator_user__isnull=True)
+                .values('process_id', 'product_id', 'product_code', 'equipment_id', 'operator_action', 'operator')
+                .order_by('-recorded_at', '-id')
+            )
+        except (OperationalError, ProgrammingError):
+            # operator_user カラム未反映DBでは isnull 条件なしで旧判定
+            legacy_rows = (
+                BrakeLineRecord.objects
+                .values('process_id', 'product_id', 'product_code', 'equipment_id', 'operator_action', 'operator')
+                .order_by('-recorded_at', '-id')
+            )
+        candidate_keys = {_normalize_operator_text(name) for name in operator_name_candidates if name}
+        candidate_ascii_keys = {
+            _normalize_ascii_token(name)
+            for name in operator_name_candidates
+            if _normalize_ascii_token(name)
+        }
+        filtered_legacy_rows = []
+        for row in legacy_rows:
+            normalized = _normalize_operator_text(row.get('operator'))
+            ascii_key = _normalize_ascii_token(row.get('operator'))
+            if normalized in candidate_keys:
+                filtered_legacy_rows.append(row)
+                continue
+            if ascii_key and len(ascii_key) >= 6 and ascii_key in candidate_ascii_keys:
+                filtered_legacy_rows.append(row)
+        action_rows = filtered_legacy_rows
+
+    for row in action_rows:
+        product_key = row.get('product_id') or (row.get('product_code') or '').strip()
+        if not product_key:
+            continue
+        item_key = (row.get('process_id'), product_key, row.get('equipment_id'))
+        if item_key in latest_action_by_item:
+            continue
+        latest_action_by_item[item_key] = str(row.get('operator_action') or '').upper()
+
+    return any(action in {'START', 'RESUME'} for action in latest_action_by_item.values())
 
 
 def find_approvers_for_role(applicant, role):
@@ -279,6 +457,23 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
         if app.status not in ('draft', 'rejected'):
             return Response(
                 {'detail': '下書きまたは却下された申請のみ提出できます。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        has_open_session = _has_open_process_session(app.applicant)
+        if has_open_session:
+            return Response(
+                {
+                    'detail_code': 'overtime.error.openProcessSession',
+                    'detail': '加工実績に未終了のセッションがあります。セッションを終了してから申請してください。'
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if _has_open_brake_or_spot_action(app.applicant):
+            return Response(
+                {
+                    'detail_code': 'overtime.error.openBrakeSpotAction',
+                    'detail': 'ブレーキ・ナット実績に未終了のアクションがあります。終了してから申請してください。'
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
