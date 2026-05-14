@@ -253,6 +253,12 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             '購入品': 'PURCHASED',
             '外作品': 'OUTSOURCED',
         }
+        MANAGEMENT_UNIT_MAP = {
+            '日': 'DAY',
+            '分': 'MINUTE',
+            'DAY': 'DAY',
+            'MINUTE': 'MINUTE',
+        }
         items = request.data.get('items', [])
         if not items:
             return Response({'detail': 'データがありません'}, status=status.HTTP_400_BAD_REQUEST)
@@ -263,12 +269,49 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             ).values_list('product_code', flat=True)
         )
 
+        line_codes = {
+            str(i.get('line_code') or '').strip()
+            for i in items
+            if str(i.get('line_code') or '').strip()
+        }
+        process_codes = {
+            str(i.get('process_code') or '').strip()
+            for i in items
+            if str(i.get('process_code') or '').strip()
+        }
+        next_process_codes = {
+            str(i.get('next_process_code') or '').strip()
+            for i in items
+            if str(i.get('next_process_code') or '').strip()
+        }
+
+        line_map = {
+            line.line_code: line
+            for line in Line.objects.filter(line_code__in=line_codes)
+        }
+        process_map = {
+            process.process_code: process
+            for process in Process.objects.filter(
+                process_code__in=(process_codes | next_process_codes)
+            )
+        }
+
+        def parse_bool(raw_value):
+            value = str(raw_value or '').strip()
+            return value in ['1', 'true', 'True', 'TRUE', 'はい', '有', '○']
+
         to_create = []
         skipped = []
         for item in items:
             code = (item.get('product_code') or '').strip()
             name = (item.get('product_name') or '').strip()
             category_raw = (item.get('category') or '').strip()
+            line_code = (item.get('line_code') or '').strip()
+            process_code = (item.get('process_code') or '').strip()
+            next_process_code = (item.get('next_process_code') or '').strip()
+            management_unit_raw = (item.get('management_unit') or '').strip()
+            is_final_product_raw = item.get('is_final_product')
+            is_line_final_product_raw = item.get('is_line_final_product')
             if not code:
                 continue
             if code in existing_codes:
@@ -279,6 +322,12 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 product_code=code,
                 product_name=name or code,
                 category=category,
+                line=line_map.get(line_code),
+                process=process_map.get(process_code),
+                next_process=process_map.get(next_process_code),
+                management_unit=MANAGEMENT_UNIT_MAP.get(management_unit_raw) if management_unit_raw else None,
+                is_final_product=parse_bool(is_final_product_raw),
+                is_line_final_product=parse_bool(is_line_final_product_raw),
             ))
             existing_codes.add(code)
 

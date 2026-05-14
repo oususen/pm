@@ -441,7 +441,7 @@
 
         <div class="csv-format-note">
           <strong>CSVフォーマット（1行目はヘッダー）:</strong><br>
-          品名規格, 構成品番, 品番区分名<br>
+          品名規格, 構成品番, 品番区分名, ライン情報, 工程情報, 後工程, 管理区分, 最終品, ライン最終品<br>
           <small>品番区分名: 集合部品 / 単体部品 / 材料 / 購入品 / 外作品</small>
         </div>
 
@@ -460,6 +460,12 @@
                 <th>品番コード</th>
                 <th>品名規格</th>
                 <th>品番区分名</th>
+                <th>ライン情報</th>
+                <th>工程情報</th>
+                <th>後工程</th>
+                <th>管理区分</th>
+                <th>最終品</th>
+                <th>ライン最終品</th>
                 <th>登録カテゴリ</th>
               </tr>
             </thead>
@@ -468,6 +474,12 @@
                 <td>{{ row.product_code }}</td>
                 <td>{{ row.product_name }}</td>
                 <td>{{ row.category_raw }}</td>
+                <td>{{ row.line_code }}</td>
+                <td>{{ row.process_code }}</td>
+                <td>{{ row.next_process_code }}</td>
+                <td>{{ row.management_unit_raw }}</td>
+                <td>{{ row.is_final_product_raw }}</td>
+                <td>{{ row.is_line_final_product_raw }}</td>
                 <td>{{ getCategoryLabel(csvCategoryMap[row.category_raw] || 'UNKNOWN') }}</td>
               </tr>
             </tbody>
@@ -731,20 +743,47 @@ const parseCsv = (text) => {
   const lines = text.split(/\r?\n/).filter(l => l.trim())
   if (lines.length < 2) return
 
-  // ヘッダー行スキップ
+  const headerCols = lines[0].split(',').map(h => h.trim())
+  const headerIndex = {}
+  headerCols.forEach((name, idx) => {
+    headerIndex[name] = idx
+  })
+
+  const getValue = (cols, name, fallbackIndex = -1) => {
+    const idx = Object.prototype.hasOwnProperty.call(headerIndex, name) ? headerIndex[name] : fallbackIndex
+    if (idx < 0) return ''
+    return String(cols[idx] || '').trim()
+  }
+
   const rows = lines.slice(1)
   const seen = new Set()
   const result = []
 
   for (const line of rows) {
     const cols = line.split(',')
-    const productName = (cols[0] || '').trim()
-    const productCode = (cols[1] || '').trim()
-    const categoryRaw = (cols[2] || '').trim()
+    const productName = getValue(cols, '品名規格', 0)
+    const productCode = getValue(cols, '構成品番', 1)
+    const categoryRaw = getValue(cols, '品番区分名', 2)
+    const lineCode = getValue(cols, 'ライン情報', 3)
+    const processCode = getValue(cols, '工程情報', 4)
+    const nextProcessCode = getValue(cols, '後工程', 5)
+    const managementUnitRaw = getValue(cols, '管理区分', 6)
+    const isFinalProductRaw = getValue(cols, '最終品', 7)
+    const isLineFinalProductRaw = getValue(cols, 'ライン最終品', 8)
     if (!productCode) continue
     if (seen.has(productCode)) continue
     seen.add(productCode)
-    result.push({ product_code: productCode, product_name: productName, category_raw: categoryRaw })
+    result.push({
+      product_code: productCode,
+      product_name: productName,
+      category_raw: categoryRaw,
+      line_code: lineCode,
+      process_code: processCode,
+      next_process_code: nextProcessCode,
+      management_unit_raw: managementUnitRaw,
+      is_final_product_raw: isFinalProductRaw,
+      is_line_final_product_raw: isLineFinalProductRaw,
+    })
   }
   csvPreviewRows.value = result
   csvImportResult.value = null
@@ -758,6 +797,12 @@ const executeCsvImport = async () => {
       product_code: row.product_code,
       product_name: row.product_name,
       category: row.category_raw,
+      line_code: row.line_code,
+      process_code: row.process_code,
+      next_process_code: row.next_process_code,
+      management_unit: row.management_unit_raw,
+      is_final_product: row.is_final_product_raw,
+      is_line_final_product: row.is_line_final_product_raw,
     }))
     const res = await api.products.bulkImport(items)
     csvImportResult.value = res.data
