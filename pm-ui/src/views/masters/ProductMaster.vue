@@ -4,6 +4,7 @@
       <h1 class="page-title">製品マスタ</h1>
       <div class="page-actions">
         <button v-if="canEdit" @click="openLineFinalDialog" class="btn-secondary">ライン最終品 一括設定</button>
+        <button v-if="canEdit" @click="openCsvImport" class="btn-secondary">CSVインポート</button>
         <button @click="fetchProducts(1)" class="btn-primary">更新</button>
         <button @click="openProcessTab('create')" class="btn-success" :disabled="!canEdit">処理</button>
       </div>
@@ -433,6 +434,68 @@
         </form>
       </div>
     </div>
+    <!-- CSVインポートダイアログ -->
+    <div v-if="showCsvImportDialog" class="modal-overlay" @click.self="closeCsvImport">
+      <div class="modal-content csv-import-modal">
+        <h2>製品マスタ CSVインポート</h2>
+
+        <div class="csv-format-note">
+          <strong>CSVフォーマット（1行目はヘッダー）:</strong><br>
+          品名規格, 構成品番, 品番区分名<br>
+          <small>品番区分名: 集合部品 / 単体部品 / 材料 / 購入品 / 外作品</small>
+        </div>
+
+        <div class="form-group">
+          <label>CSVファイル</label>
+          <input type="file" accept=".csv" @change="onCsvSelected" />
+        </div>
+
+        <div v-if="csvPreviewRows.length > 0" class="csv-preview-area">
+          <div class="csv-preview-header">
+            プレビュー: {{ csvPreviewRows.length }}件（重複除外済み）
+          </div>
+          <table class="data-table csv-preview-table">
+            <thead>
+              <tr>
+                <th>品番コード</th>
+                <th>品名規格</th>
+                <th>品番区分名</th>
+                <th>登録カテゴリ</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, i) in csvPreviewRows" :key="i">
+                <td>{{ row.product_code }}</td>
+                <td>{{ row.product_name }}</td>
+                <td>{{ row.category_raw }}</td>
+                <td>{{ getCategoryLabel(csvCategoryMap[row.category_raw] || 'UNKNOWN') }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div v-if="csvImportResult" class="csv-result-area">
+          <span class="result-created">登録: {{ csvImportResult.created }}件</span>
+          <span class="result-skipped">スキップ(既存): {{ csvImportResult.skipped }}件</span>
+          <div v-if="csvImportResult.skipped_codes.length > 0" class="skipped-codes">
+            {{ csvImportResult.skipped_codes.join(', ') }}
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button
+            v-if="csvPreviewRows.length > 0 && !csvImportResult"
+            @click="executeCsvImport"
+            class="btn-primary"
+            :disabled="csvImporting"
+          >
+            {{ csvImporting ? 'インポート中...' : `${csvPreviewRows.length}件 登録実行` }}
+          </button>
+          <button @click="closeCsvImport" class="btn-secondary">閉じる</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ライン最終品 一括設定ダイアログ -->
     <div v-if="showLineFinalDialog" class="modal-overlay" @click.self="showLineFinalDialog = false">
       <div class="modal-content line-final-modal">
@@ -626,6 +689,85 @@ const processModeTitle = computed(() => {
   if (processMode.value === 'view') return '製品照会'
   return '製品新規作成'
 })
+
+// CSVインポート
+const showCsvImportDialog = ref(false)
+const csvPreviewRows = ref([])
+const csvImportResult = ref(null)
+const csvImporting = ref(false)
+const csvCategoryMap = {
+  '集合部品': 'ASSEMBLY',
+  '単体部品': 'SINGLE',
+  '材料': 'MATERIAL',
+  '購入品': 'PURCHASED',
+  '外作品': 'OUTSOURCED',
+}
+
+const openCsvImport = () => {
+  csvPreviewRows.value = []
+  csvImportResult.value = null
+  showCsvImportDialog.value = true
+}
+
+const closeCsvImport = () => {
+  showCsvImportDialog.value = false
+  if (csvImportResult.value?.created > 0) {
+    fetchProducts(1)
+  }
+}
+
+const onCsvSelected = (e) => {
+  const file = e.target.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = (ev) => {
+    const text = ev.target.result
+    parseCsv(text)
+  }
+  reader.readAsText(file, 'Shift_JIS')
+}
+
+const parseCsv = (text) => {
+  const lines = text.split(/\r?\n/).filter(l => l.trim())
+  if (lines.length < 2) return
+
+  // ヘッダー行スキップ
+  const rows = lines.slice(1)
+  const seen = new Set()
+  const result = []
+
+  for (const line of rows) {
+    const cols = line.split(',')
+    const productName = (cols[0] || '').trim()
+    const productCode = (cols[1] || '').trim()
+    const categoryRaw = (cols[2] || '').trim()
+    if (!productCode) continue
+    if (seen.has(productCode)) continue
+    seen.add(productCode)
+    result.push({ product_code: productCode, product_name: productName, category_raw: categoryRaw })
+  }
+  csvPreviewRows.value = result
+  csvImportResult.value = null
+}
+
+const executeCsvImport = async () => {
+  if (csvImporting.value) return
+  csvImporting.value = true
+  try {
+    const items = csvPreviewRows.value.map(row => ({
+      product_code: row.product_code,
+      product_name: row.product_name,
+      category: row.category_raw,
+    }))
+    const res = await api.products.bulkImport(items)
+    csvImportResult.value = res.data
+  } catch (error) {
+    console.error('CSVインポートエラー:', error)
+    alert('インポートに失敗しました')
+  } finally {
+    csvImporting.value = false
+  }
+}
 
 // ライン最終品一括設定
 const showLineFinalDialog = ref(false)
@@ -1529,5 +1671,72 @@ watch(
 .lf-table td,
 .lf-table th {
   padding: 4px 8px;
+}
+
+/* CSVインポートモーダル */
+.csv-import-modal {
+  min-width: 700px;
+  max-width: 900px;
+}
+
+.csv-format-note {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #0369a1;
+  margin-bottom: 16px;
+  line-height: 1.6;
+}
+
+.csv-preview-area {
+  margin: 12px 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.csv-preview-header {
+  font-size: 13px;
+  font-weight: 700;
+  color: #374151;
+  margin-bottom: 6px;
+}
+
+.csv-preview-table {
+  font-size: 12px;
+}
+
+.csv-preview-table td,
+.csv-preview-table th {
+  padding: 3px 8px;
+}
+
+.csv-result-area {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin: 12px 0;
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.result-created {
+  font-weight: 700;
+  color: #166534;
+}
+
+.result-skipped {
+  color: #6b7280;
+}
+
+.skipped-codes {
+  width: 100%;
+  font-size: 11px;
+  color: #9ca3af;
+  word-break: break-all;
 }
 </style>

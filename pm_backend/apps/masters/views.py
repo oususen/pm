@@ -243,6 +243,48 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         return Response({'updated': updated_count})
 
+    @action(detail=False, methods=['post'], url_path='bulk-import')
+    def bulk_import(self, request):
+        """CSVから製品を一括登録。既存品番はスキップ。"""
+        CATEGORY_MAP = {
+            '集合部品': 'ASSEMBLY',
+            '単体部品': 'SINGLE',
+            '材料': 'MATERIAL',
+            '購入品': 'PURCHASED',
+            '外作品': 'OUTSOURCED',
+        }
+        items = request.data.get('items', [])
+        if not items:
+            return Response({'detail': 'データがありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing_codes = set(
+            Product.objects.filter(
+                product_code__in=[i.get('product_code', '') for i in items]
+            ).values_list('product_code', flat=True)
+        )
+
+        to_create = []
+        skipped = []
+        for item in items:
+            code = (item.get('product_code') or '').strip()
+            name = (item.get('product_name') or '').strip()
+            category_raw = (item.get('category') or '').strip()
+            if not code:
+                continue
+            if code in existing_codes:
+                skipped.append(code)
+                continue
+            category = CATEGORY_MAP.get(category_raw, 'UNKNOWN')
+            to_create.append(Product(
+                product_code=code,
+                product_name=name or code,
+                category=category,
+            ))
+            existing_codes.add(code)
+
+        Product.objects.bulk_create(to_create)
+        return Response({'created': len(to_create), 'skipped': len(skipped), 'skipped_codes': skipped})
+
     @action(detail=True, methods=['get'], url_path='where-used')
     def where_used(self, request, pk=None):
         """
