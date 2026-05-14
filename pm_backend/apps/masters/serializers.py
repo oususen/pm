@@ -184,6 +184,17 @@ class BOMSerializer(serializers.ModelSerializer):
         model = BOM
         fields = '__all__'
 
+    def validate(self, attrs):
+        parent_product = attrs.get('parent_product', getattr(self.instance, 'parent_product', None))
+        version = attrs.get('version', getattr(self.instance, 'version', None))
+        if parent_product and version:
+            qs = BOM.objects.filter(parent_product=parent_product, version=version)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError('同一の親製品・版のBOMは既に存在します。既存BOMを編集してください。')
+        return attrs
+
     def get_parent_is_final(self, obj: BOM):
         if obj.parent_product_id:
             try:

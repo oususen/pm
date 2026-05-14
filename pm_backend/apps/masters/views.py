@@ -983,13 +983,13 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     def import_template_csv(self, request):
         headers = [
             '完成品', '親品番', '子品番', '数量',
-            '工程コード', 'ラインコード', '調達区分', '仕入先コード',
-            'リードタイム(日)', '所要時間(分)', '時間単位'
+            '工程コード', '工程名', 'ラインコード', 'ライン名', '調達区分', '仕入先コード', '仕入先名',
+            'ＬＴ(日)', '所要時間(分)', '時間単位'
         ]
         sample_rows = [
-            ['YD60000441', 'YD60000441', 'YD40000608S', '1', '4030', 'L2200', '自社製造', '', '0', '20', '分'],
-            ['YD60000441', 'YD40000608S', 'YD40000608', '1', '4053', 'L2200', '自社製造', '', '0', '20', '分'],
-            ['YD60000441', 'YD40000608', 'YD40000608H', '1', '4019', 'L2200', '自社製造', '', '0', '16', '分'],
+            ['YD60000441', 'YD60000441', 'YD40000608S', '1', '4030', '', 'L2200', '', '自社製造', '', '', '0', '20', '分'],
+            ['YD60000441', 'YD40000608S', 'YD40000608', '1', '4053', '', 'L2200', '', '自社製造', '', '', '0', '20', '分'],
+            ['YD60000441', 'YD40000608', 'YD40000608H', '1', '4019', '', 'L2200', '', '自社製造', '', '', '0', '16', '分'],
         ]
         sio = StringIO()
         writer = csv.writer(sio, lineterminator='\n')
@@ -1010,13 +1010,19 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         headers = [
             '完成品', '親品番', '子品番', '数量',
-            '工程コード', 'ラインコード', '調達区分', '仕入先コード',
-            'リードタイム(日)', '所要時間(分)', '時間単位'
+            '工程コード', '工程名', 'ラインコード', 'ライン名', '調達区分', '仕入先コード', '仕入先名',
+            'ＬＴ(日)', '所要時間(分)', '時間単位'
         ]
         ws_input.append(headers)
-        ws_input.append(['YD60000441', 'YD60000441', 'YD40000608S', 1, '4030', 'L2200', '自社製造', '', 0, 20, '分'])
-        ws_input.append(['YD60000441', 'YD40000608S', 'YD40000608', 1, '4053', 'L2200', '自社製造', '', 0, 20, '分'])
-        ws_input.append(['YD60000441', 'YD40000608', 'YD40000608H', 1, '4019', 'L2200', '自社製造', '', 0, 16, '分'])
+        ws_input.append(['YD60000441', 'YD60000441', 'YD40000608S', 1, '4030', '', 'L2200', '', '自社製造', '', '', 0, 20, '分'])
+        ws_input.append(['YD60000441', 'YD40000608S', 'YD40000608', 1, '4053', '', 'L2200', '', '自社製造', '', '', 0, 20, '分'])
+        ws_input.append(['YD60000441', 'YD40000608', 'YD40000608H', 1, '4019', '', 'L2200', '', '自社製造', '', '', 0, 16, '分'])
+
+        # 工程コード(E列)入力時に工程名(F列)を自動表示
+        for row_no in range(2, 5001):
+            ws_input[f'F{row_no}'] = f'=IFERROR(VLOOKUP(E{row_no},工程!A:B,2,FALSE),"")'
+            ws_input[f'H{row_no}'] = f'=IFERROR(VLOOKUP(G{row_no},ライン!A:B,2,FALSE),"")'
+            ws_input[f'K{row_no}'] = f'=IFERROR(VLOOKUP(J{row_no},仕入先!A:B,2,FALSE),"")'
 
         # 調達区分は選択式（外注 / 購買 / 自社製造）
         sourcing_validation = DataValidation(
@@ -1027,7 +1033,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         sourcing_validation.errorTitle = '入力エラー'
         sourcing_validation.error = '調達区分は「外注 / 購買 / 自社製造」から選択してください。'
         ws_input.add_data_validation(sourcing_validation)
-        sourcing_validation.add('G2:G5000')
+        sourcing_validation.add('I2:I5000')
 
         # 時間単位は選択式（分 / 日）
         time_unit_validation = DataValidation(
@@ -1038,7 +1044,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         time_unit_validation.errorTitle = '入力エラー'
         time_unit_validation.error = '時間単位は「分 / 日」から選択してください。'
         ws_input.add_data_validation(time_unit_validation)
-        time_unit_validation.add('K2:K5000')
+        time_unit_validation.add('N2:N5000')
 
         ws_guide = wb.create_sheet('使用説明')
         guide_rows = [
@@ -1047,15 +1053,15 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             ['任意列（現行取込ロジック）', '完成品'],
             ['調達区分', '自社製造 / 購買 / 外注（MAKE / BUY / SUBCON も可）'],
             ['時間単位', '分 または 日（MINUTE / DAY も可）'],
-            ['注意1', '親品番・子品番・工程コード・ラインコード・仕入先コードは、各マスタに存在するコードを指定してください。'],
+            ['注意1', '親品番・子品番・工程コード・ラインコード・仕入先コードは、各マスタに存在するコードを指定してください。工程名/ライン名/仕入先名はコードから自動表示されます。'],
             ['注意2', '同じ版/有効開始日で既存BOMがある場合、取込はエラーになります。'],
             ['注意3', '有効開始日・有効終了日・備考は取込画面で指定します。'],
             ['', ''],
             ['補足', ''],
             ['調達区分', '追加必須列'],
-            ['自社製造', '工程コード, ラインコード, リードタイム(日), 所要時間(分), 時間単位'],
-            ['購入', '仕入先コード, リードタイム(日), 時間単位'],
-            ['外作', '仕入先コード, リードタイム(日), 時間単位'],
+            ['自社製造', '工程コード, ラインコード, ＬＴ(日), 所要時間(分), 時間単位'],
+            ['購入', '仕入先コード, ＬＴ(日), 時間単位'],
+            ['外作', '仕入先コード, ＬＴ(日), 時間単位'],
         ]
         for row in guide_rows:
             ws_guide.append(row)
@@ -1112,6 +1118,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             return Response({'detail': '取込ファイルがありません'}, status=status.HTTP_400_BAD_REQUEST)
 
         version = str(request.data.get('version') or 'v1').strip() or 'v1'
+        use_existing_duplicates = str(request.data.get('use_existing_duplicates', 'false')).lower() in ['1', 'true', 'yes', 'on']
         completed_product_default = str(request.data.get('completed_product_code') or '').strip()
         valid_from_raw = str(request.data.get('valid_from') or '').strip()
         valid_to_raw = str(request.data.get('valid_to') or '').strip()
@@ -1269,7 +1276,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 row_errors.append(f'{idx}行目: 調達区分が不正です ({sourcing_raw})')
                 continue
 
-            lead_raw = str(row.get('リードタイム(日)') or '0').strip() or '0'
+            lead_raw = str(row.get('ＬＴ(日)') or row.get('リードタイム(日)') or '0').strip() or '0'
             duration_raw = str(row.get('所要時間(分)') or '0').strip() or '0'
             try:
                 lead_time_days = int(lead_raw)
@@ -1406,23 +1413,35 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
             created_boms = {}
             created_item_count = 0
+            duplicate_boms = []
             for parent_code in sorted(all_parent_codes):
                 parent_product = product_map[parent_code]
-                bom, created = BOM.objects.get_or_create(
+                bom = BOM.objects.filter(
                     parent_product=parent_product,
                     version=version,
-                    valid_from=valid_from,
-                    defaults={
-                        'valid_to': valid_to,
-                        'is_active': is_active,
-                    }
-                )
-                if not created:
-                    return Response(
-                        {'detail': f'BOMが既に存在します: {parent_code} / {version} / {valid_from}'},
-                        status=status.HTTP_400_BAD_REQUEST
+                ).order_by('-valid_from', '-id').first()
+                if bom:
+                    duplicate_boms.append(f'{parent_code} / {version}（既存開始日: {bom.valid_from}）')
+                    if not use_existing_duplicates:
+                        continue
+                else:
+                    bom = BOM.objects.create(
+                        parent_product=parent_product,
+                        version=version,
+                        valid_from=valid_from,
+                        valid_to=valid_to,
+                        is_active=is_active,
                     )
                 created_boms[parent_code] = bom
+
+            if duplicate_boms and not use_existing_duplicates:
+                return Response(
+                    {
+                        'detail': '既存BOM重複があります。再利用する場合は確認して実行してください。',
+                        'duplicate_boms': duplicate_boms[:50],
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
             for row in parsed_rows:
                 parent_code = row['parent_code']
@@ -1453,6 +1472,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 'message': 'BOMを取り込みました',
                 'created_boms': len(created_boms),
                 'created_items': created_item_count,
+                'reused_boms': len(duplicate_boms) if use_existing_duplicates else 0,
             }, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['post'], parser_classes=[parsers.MultiPartParser, parsers.FormParser], url_path='import_check')
@@ -1558,7 +1578,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 row_errors.append(f'{idx}行目: 調達区分が不正です ({sourcing_raw})')
                 continue
 
-            lead_raw = str(row.get('リードタイム(日)') or '0').strip() or '0'
+            lead_raw = str(row.get('ＬＴ(日)') or row.get('リードタイム(日)') or '0').strip() or '0'
             duration_raw = str(row.get('所要時間(分)') or '0').strip() or '0'
             try:
                 lead_time_days = int(lead_raw)
@@ -1673,17 +1693,31 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             if row['supplier_code'] and row['supplier_code'] not in supplier_map:
                 row_errors.append(f"{row['row_no']}行目: 仕入先コードが未登録です ({row['supplier_code']})")
 
-        if valid_from:
-            for parent_code in sorted(parent_codes):
-                parent_product = product_map.get(parent_code)
-                if not parent_product:
-                    continue
-                if BOM.objects.filter(parent_product=parent_product, version=version, valid_from=valid_from).exists():
-                    row_errors.append(f'既存BOM重複: {parent_code} / {version} / {valid_from}')
+        duplicate_boms = []
+        for parent_code in sorted(parent_codes):
+            parent_product = product_map.get(parent_code)
+            if not parent_product:
+                continue
+            exist_bom = BOM.objects.filter(
+                parent_product=parent_product,
+                version=version,
+            ).order_by('-valid_from', '-id').first()
+            if exist_bom:
+                duplicate_boms.append(f'{parent_code} / {version}（既存開始日: {exist_bom.valid_from}）')
 
         if row_errors:
             return Response({'detail': 'チェックエラーがあります', 'errors': row_errors[:50]}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({'message': 'チェックOKです', 'checked_rows': checked_count}, status=status.HTTP_200_OK)
+        message = 'チェックOKです'
+        if duplicate_boms:
+            message = 'チェックOK（既存BOM重複あり）'
+        return Response(
+            {
+                'message': message,
+                'checked_rows': checked_count,
+                'duplicate_boms': duplicate_boms[:50],
+            },
+            status=status.HTTP_200_OK
+        )
 
     def _collect_routing_items_recursive(
         self,

@@ -824,6 +824,7 @@ const canEdit = computed(() => canAccessMasterResource('masters.bom', 'edit'))
 const showBomImportDialog = ref(false)
 const bomImporting = ref(false)
 const bomChecking = ref(false)
+const bomImportUseExistingDuplicates = ref(false)
 const bomImportFile = ref(null)
 const bomImportForm = ref({
   version: 'v1',
@@ -1085,6 +1086,7 @@ const downloadBomImportTemplateXlsx = async () => {
 
 const openBomImportDialog = () => {
   bomImportFile.value = null
+  bomImportUseExistingDuplicates.value = false
   showBomImportDialog.value = true
 }
 
@@ -1111,16 +1113,41 @@ const executeBomCsvImport = async () => {
   }
   bomImporting.value = true
   try {
-    const fd = new FormData()
-    fd.append('file', bomImportFile.value)
-    fd.append('version', bomImportForm.value.version || 'v1')
-    fd.append('completed_product_code', bomImportForm.value.completed_product_code || '')
-    fd.append('valid_from', bomImportForm.value.valid_from)
-    fd.append('valid_to', bomImportForm.value.valid_to || '')
-    fd.append('remark', bomImportForm.value.remark || '')
-    fd.append('is_active', String(!!bomImportForm.value.is_active))
-    const res = await api.boms.importBOMCsv(fd)
-    alert(`${res.data.message}\nBOM: ${res.data.created_boms}件 / 明細: ${res.data.created_items}件`)
+    const buildImportFormData = (useExistingDuplicates) => {
+      const fd = new FormData()
+      fd.append('file', bomImportFile.value)
+      fd.append('version', bomImportForm.value.version || 'v1')
+      fd.append('completed_product_code', bomImportForm.value.completed_product_code || '')
+      fd.append('valid_from', bomImportForm.value.valid_from)
+      fd.append('valid_to', bomImportForm.value.valid_to || '')
+      fd.append('remark', bomImportForm.value.remark || '')
+      fd.append('is_active', String(!!bomImportForm.value.is_active))
+      fd.append('use_existing_duplicates', String(!!useExistingDuplicates))
+      return fd
+    }
+
+    let res
+    try {
+      res = await api.boms.importBOMCsv(buildImportFormData(bomImportUseExistingDuplicates.value))
+    } catch (error) {
+      const duplicateBoms = error?.response?.data?.duplicate_boms || []
+      if (Array.isArray(duplicateBoms) && duplicateBoms.length > 0) {
+        const preview = duplicateBoms.slice(0, 10).join('\n')
+        const useExisting = window.confirm(
+          `既存BOM重複があります。\n${preview}\n\n既存BOMを再利用して取込しますか？`
+        )
+        if (!useExisting) {
+          throw error
+        }
+        bomImportUseExistingDuplicates.value = true
+        res = await api.boms.importBOMCsv(buildImportFormData(true))
+      } else {
+        throw error
+      }
+    }
+
+    const reused = res?.data?.reused_boms || 0
+    alert(`${res.data.message}\nBOM: ${res.data.created_boms}件 / 明細: ${res.data.created_items}件 / 再利用: ${reused}件`)
     showBomImportDialog.value = false
     fetchBOMs(1)
   } catch (error) {
@@ -1154,7 +1181,18 @@ const executeBomImportCheck = async () => {
     fd.append('version', bomImportForm.value.version || 'v1')
     fd.append('valid_from', bomImportForm.value.valid_from || '')
     const res = await api.boms.importBOMCheck(fd)
-    alert(`${res.data.message}\nチェック件数: ${res.data.checked_rows}件`)
+    const duplicateBoms = res?.data?.duplicate_boms || []
+    if (duplicateBoms.length) {
+      const preview = duplicateBoms.slice(0, 10).join('\n')
+      const useExisting = window.confirm(
+        `既存BOM重複があります。\n${preview}\n\n既存BOMを再利用して取込しますか？`
+      )
+      bomImportUseExistingDuplicates.value = useExisting
+      alert(`チェック件数: ${res.data.checked_rows}件\n重複: ${duplicateBoms.length}件\n再利用設定: ${useExisting ? 'する' : 'しない'}`)
+    } else {
+      bomImportUseExistingDuplicates.value = false
+      alert(`${res.data.message}\nチェック件数: ${res.data.checked_rows}件`)
+    }
   } catch (error) {
     console.error('BOM取込チェックエラー:', error)
     const errors = error?.response?.data?.errors
