@@ -59,4 +59,7 @@ export const createProductsAPI = (client) => ({
   bulkUpdateLineFinal(updates) {
     return client.post('/products/bulk-update-line-final/', { updates })
   },
+  bulkImport(items) {
+    return client.post('/products/bulk-import/', { items })
+  },
 })
