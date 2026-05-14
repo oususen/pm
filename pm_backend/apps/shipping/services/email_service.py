@@ -193,7 +193,14 @@ class EmailService:
             with smtplib.SMTP(smtp_config['host'], smtp_config['port']) as server:
                 server.starttls()
                 server.login(smtp_config['user'], smtp_config['password'])
-                server.send_message(msg, to_addrs=recipients)
+                refused_recipients = server.send_message(msg, to_addrs=recipients)
+
+            if refused_recipients:
+                refused_list = ', '.join(refused_recipients.keys())
+                return {
+                    'success': False,
+                    'message': f'一部の宛先で送信に失敗しました: {refused_list}',
+                }
 
             return {
                 'success': True,
