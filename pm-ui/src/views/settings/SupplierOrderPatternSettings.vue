@@ -42,7 +42,7 @@
       <div v-if="patternRows.length === 0" class="no-data">データがありません</div>
 
       <div class="section-header mt">
-        <h2 class="section-title">仕入れ先スケジュール</h2>
+        <h2 class="section-title">仕入れ先割当</h2>
         <button class="btn-success btn-sm" @click="openNewSchedule">新規</button>
       </div>
       <table class="data-table">
