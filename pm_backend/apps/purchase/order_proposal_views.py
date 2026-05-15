@@ -39,6 +39,7 @@ from .models import (
     PurchaseOrderProposalApproval,
     PurchaseOrderProposalLine,
     PurchaseOrderTask,
+    SupplierOrderPattern,
     SupplierOrderSchedule,
 )
 from .serializers import (
@@ -47,6 +48,7 @@ from .serializers import (
     PurchaseOrderProposalLineSerializer,
     PurchaseOrderProposalListSerializer,
     PurchaseOrderTaskSerializer,
+    SupplierOrderPatternSerializer,
     SupplierOrderScheduleSerializer,
 )
 
@@ -239,19 +241,23 @@ def _nth_weekday_of_month(year: int, month: int, weekday: int, nth_week: int):
 
 
 def _generate_raw_pattern_dates(schedule: SupplierOrderSchedule, start_date: date, end_date: date):
-    pattern_type = schedule.pattern_type
-    if pattern_type == SupplierOrderSchedule.PATTERN_MONTHLY_DATE:
+    pattern = schedule.pattern
+    if not pattern:
+        return
+    recurrence = pattern.recurrence_type
+
+    if recurrence == SupplierOrderPattern.RECURRENCE_MONTHLY_DATE:
         for month_start in _iter_month_starts(start_date, end_date):
             last_day = monthrange(month_start.year, month_start.month)[1]
-            day = min(int(schedule.day_of_month or 1), last_day)
+            day = min(int(pattern.day_of_month or 1), last_day)
             raw = date(month_start.year, month_start.month, day)
             if start_date <= raw <= end_date:
                 yield raw
         return
 
-    if pattern_type == SupplierOrderSchedule.PATTERN_WEEKLY_NTH_DAY:
-        nth_week = int(schedule.nth_week or 0)
-        day_of_week = int(schedule.day_of_week or 0)
+    if recurrence == SupplierOrderPattern.RECURRENCE_MONTHLY_NTH_DOW:
+        nth_week = int(pattern.nth_week or 0)
+        day_of_week = int(pattern.day_of_week or 0)
         if not (1 <= nth_week <= 5 and 0 <= day_of_week <= 6):
             return
         for month_start in _iter_month_starts(start_date, end_date):
@@ -260,14 +266,21 @@ def _generate_raw_pattern_dates(schedule: SupplierOrderSchedule, start_date: dat
                 yield raw
         return
 
-    if pattern_type == SupplierOrderSchedule.PATTERN_EVERY_WEEK:
-        day_of_week = int(schedule.day_of_week or 0)
+    if recurrence == SupplierOrderPattern.RECURRENCE_WEEKLY:
+        day_of_week = int(pattern.day_of_week or 0)
         if not (0 <= day_of_week <= 6):
             return
         cursor = start_date
         while cursor <= end_date:
             if cursor.weekday() == day_of_week:
                 yield cursor
+            cursor = cursor + timedelta(days=1)
+        return
+
+    if recurrence == SupplierOrderPattern.RECURRENCE_EVERY_BUSINESS_DAY:
+        cursor = start_date
+        while cursor <= end_date:
+            yield cursor
             cursor = cursor + timedelta(days=1)
 
 
@@ -1128,7 +1141,7 @@ def run_auto_purchase_order_check():
     created_tasks = 0
     errors = []
     try:
-        schedules = SupplierOrderSchedule.objects.filter(is_enabled=True).select_related('supplier', 'supplier__calendar')
+        schedules = SupplierOrderSchedule.objects.filter(is_enabled=True).select_related('supplier', 'supplier__calendar', 'pattern')
 
         for schedule in schedules:
             try:
@@ -1191,20 +1204,60 @@ def run_auto_purchase_order_check():
     }
 
 
+class SupplierOrderPatternListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        queryset = SupplierOrderPattern.objects.all()
+        is_active = request.query_params.get('is_active')
+        if is_active in ('true', '1'):
+            queryset = queryset.filter(is_active=True)
+        serializer = SupplierOrderPatternSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        serializer = SupplierOrderPatternSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        obj = serializer.save()
+        return Response(SupplierOrderPatternSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+
+class SupplierOrderPatternDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request, pk: int):
+        obj = SupplierOrderPattern.objects.filter(pk=pk).first()
+        if not obj:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        serializer = SupplierOrderPatternSerializer(obj, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+    def delete(self, request, pk: int):
+        obj = SupplierOrderPattern.objects.filter(pk=pk).first()
+        if not obj:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        if obj.schedules.exists():
+            return Response(
+                {'detail': 'このパターンは発注スケジュールで使用中のため削除できません。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        obj.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class SupplierOrderScheduleListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        queryset = SupplierOrderSchedule.objects.select_related('supplier').order_by('supplier__supplier_code', 'id')
+        queryset = SupplierOrderSchedule.objects.select_related('supplier', 'pattern').order_by('supplier__supplier_code', 'id')
 
         supplier_id = request.query_params.get('supplier')
-        pattern_type = request.query_params.get('pattern_type')
         is_enabled = request.query_params.get('is_enabled')
 
         if supplier_id:
             queryset = queryset.filter(supplier_id=supplier_id)
-        if pattern_type:
-            queryset = queryset.filter(pattern_type=pattern_type)
         if is_enabled in ('true', 'false', '1', '0'):
             queryset = queryset.filter(is_enabled=is_enabled.lower() in ('true', '1'))
 

@@ -90,6 +90,12 @@ const settings = [
     meta: { pageTitle: "棚卸初期化", resource: "settings.stocktake_init" },
   },
   {
+    path: "/settings/supplier-order-pattern",
+    name: "SupplierOrderPatternSettings",
+    component: () => import("@/views/settings/SupplierOrderPatternSettings.vue"),
+    meta: { pageTitle: "発注パターン設定", resource: "settings.supplier_order_schedule" },
+  },
+  {
     path: "/settings/supplier-order-schedule",
     name: "SupplierOrderScheduleSettings",
     component: () => import("@/views/settings/SupplierOrderScheduleSettings.vue"),

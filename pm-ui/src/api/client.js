@@ -40,6 +40,7 @@ import { createLaserShiftRecordsAPI } from './resources/laserShiftRecords'
 import { createEngineeringChangesAPI } from './resources/engineeringChanges'
 import { createPurchaseActualsAPI } from './resources/purchaseActuals'
 import { createFujishojiDocumentAPI } from './resources/fujishojiDocument'
+import { createSupplierOrderPatternsAPI } from './resources/supplierOrderPatterns'
 import { createSupplierOrderSchedulesAPI } from './resources/supplierOrderSchedules'
 import { createPurchaseOrderProposalsAPI } from './resources/purchaseOrderProposals'
 import { createPurchaseOrderApprovalConfigAPI } from './resources/purchaseOrderApprovalConfig'
@@ -170,6 +171,7 @@ export default {
   engineeringChanges: createEngineeringChangesAPI(client),
   purchaseActuals: createPurchaseActualsAPI(client),
   fujishojiDocument: createFujishojiDocumentAPI(client),
+  supplierOrderPatterns: createSupplierOrderPatternsAPI(client),
   supplierOrderSchedules: createSupplierOrderSchedulesAPI(client),
   purchaseOrderProposals: createPurchaseOrderProposalsAPI(client),
   purchaseOrderApprovalConfig: createPurchaseOrderApprovalConfigAPI(client),

@@ -62,4 +62,12 @@ export const createProductsAPI = (client) => ({
   bulkImport(items) {
     return client.post('/products/bulk-import/', { items })
   },
+  downloadImportTemplateXlsx() {
+    return client.get('/products/import_template_xlsx/', { responseType: 'blob' })
+  },
+  importFile(formData) {
+    return client.post('/products/import_file/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
 })

@@ -7,6 +7,7 @@ from .models import (
     PurchaseOrderProposalLine,
     PurchaseOrderTask,
     PurchasePlanLockSetting,
+    SupplierOrderPattern,
     SupplierOrderSchedule,
 )
 
@@ -31,30 +32,28 @@ class PurchasePlanLockSettingSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'updated_at', 'updated_by']
 
 
-class SupplierOrderScheduleSerializer(serializers.ModelSerializer):
-    supplier_code = serializers.CharField(source='supplier.supplier_code', read_only=True)
-    supplier_name = serializers.CharField(source='supplier.supplier_name', read_only=True)
+class SupplierOrderPatternSerializer(serializers.ModelSerializer):
+    recurrence_type_display = serializers.CharField(source='get_recurrence_type_display', read_only=True)
 
     class Meta:
-        model = SupplierOrderSchedule
+        model = SupplierOrderPattern
         fields = [
             'id',
-            'supplier',
-            'supplier_code',
-            'supplier_name',
-            'pattern_type',
-            'nth_week',
+            'pattern_code',
+            'pattern_name',
+            'recurrence_type',
+            'recurrence_type_display',
             'day_of_week',
+            'nth_week',
             'day_of_month',
-            'lead_time_days',
-            'is_enabled',
+            'is_active',
             'note',
         ]
 
     def validate(self, attrs):
-        pattern_type = attrs.get('pattern_type', getattr(self.instance, 'pattern_type', None))
-        nth_week = attrs.get('nth_week', getattr(self.instance, 'nth_week', None))
+        recurrence_type = attrs.get('recurrence_type', getattr(self.instance, 'recurrence_type', None))
         day_of_week = attrs.get('day_of_week', getattr(self.instance, 'day_of_week', None))
+        nth_week = attrs.get('nth_week', getattr(self.instance, 'nth_week', None))
         day_of_month = attrs.get('day_of_month', getattr(self.instance, 'day_of_month', None))
 
         if day_of_week is not None and not (0 <= int(day_of_week) <= 6):
@@ -64,19 +63,41 @@ class SupplierOrderScheduleSerializer(serializers.ModelSerializer):
         if day_of_month is not None and not (1 <= int(day_of_month) <= 31):
             raise serializers.ValidationError({'day_of_month': '日付は1〜31で指定してください。'})
 
-        if pattern_type == SupplierOrderSchedule.PATTERN_WEEKLY_NTH_DAY:
+        if recurrence_type == SupplierOrderPattern.RECURRENCE_WEEKLY:
+            if day_of_week is None:
+                raise serializers.ValidationError({'day_of_week': '曜日を指定してください。'})
+        elif recurrence_type == SupplierOrderPattern.RECURRENCE_MONTHLY_DATE:
+            if day_of_month is None:
+                raise serializers.ValidationError({'day_of_month': '日付を指定してください。'})
+        elif recurrence_type == SupplierOrderPattern.RECURRENCE_MONTHLY_NTH_DOW:
             if nth_week is None:
                 raise serializers.ValidationError({'nth_week': '第N週を指定してください。'})
             if day_of_week is None:
                 raise serializers.ValidationError({'day_of_week': '曜日を指定してください。'})
-        elif pattern_type == SupplierOrderSchedule.PATTERN_MONTHLY_DATE:
-            if day_of_month is None:
-                raise serializers.ValidationError({'day_of_month': '日付を指定してください。'})
-        elif pattern_type == SupplierOrderSchedule.PATTERN_EVERY_WEEK:
-            if day_of_week is None:
-                raise serializers.ValidationError({'day_of_week': '曜日を指定してください。'})
 
         return attrs
+
+
+class SupplierOrderScheduleSerializer(serializers.ModelSerializer):
+    supplier_code = serializers.CharField(source='supplier.supplier_code', read_only=True)
+    supplier_name = serializers.CharField(source='supplier.supplier_name', read_only=True)
+    pattern_code = serializers.CharField(source='pattern.pattern_code', read_only=True)
+    pattern_name = serializers.CharField(source='pattern.pattern_name', read_only=True)
+
+    class Meta:
+        model = SupplierOrderSchedule
+        fields = [
+            'id',
+            'supplier',
+            'supplier_code',
+            'supplier_name',
+            'pattern',
+            'pattern_code',
+            'pattern_name',
+            'lead_time_days',
+            'is_enabled',
+            'note',
+        ]
 
 
 class PurchaseOrderProposalLineSerializer(serializers.ModelSerializer):

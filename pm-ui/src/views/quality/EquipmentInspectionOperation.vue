@@ -77,6 +77,7 @@
               <th class="col-no">No</th>
               <th>点検項目</th>
               <th>規格</th>
+              <th v-if="isQuarterlySection">判定基準</th>
               <th>方法</th>
               <th class="col-value">記録</th>
               <th class="col-judge">判定</th>
@@ -99,6 +100,7 @@
                 </div>
               </td>
               <td>{{ result.standard || "-" }}</td>
+              <td v-if="isQuarterlySection">{{ result.criteria || "-" }}</td>
               <td>{{ result.method || "-" }}</td>
               <td class="col-value">
                 <input
@@ -306,6 +308,7 @@ const canEdit = computed(() =>
 const isCompleted = computed(() => String(form.value.status || "").toUpperCase() === "COMPLETED")
 const canEditRecord = computed(() => canEdit.value && !isLocked.value && !isCompleted.value)
 const canEditComment = computed(() => canEdit.value && !isLocked.value)
+const isQuarterlySection = computed(() => String(sectionType.value || "").toUpperCase() === "QUARTERLY")
 const inspectionYearMonthLabel = computed(() => {
   const raw = String(selectedDate.value || "").trim()
   if (!raw) return "-"

@@ -17,7 +17,6 @@
           <tr>
             <th>仕入先</th>
             <th>パターン</th>
-            <th>条件</th>
             <th>LT(日)</th>
             <th>有効</th>
             <th>備考</th>
@@ -27,8 +26,7 @@
         <tbody>
           <tr v-for="row in rows" :key="row.id">
             <td>{{ row.supplier_code }} - {{ row.supplier_name }}</td>
-            <td>{{ patternLabel(row.pattern_type) }}</td>
-            <td>{{ patternCondition(row) }}</td>
+            <td>{{ row.pattern_code }} - {{ row.pattern_name }}</td>
             <td>{{ row.lead_time_days }}</td>
             <td>{{ row.is_enabled ? '有効' : '無効' }}</td>
             <td>{{ row.note }}</td>
@@ -57,27 +55,12 @@
           </div>
           <div class="form-group">
             <label>パターン *</label>
-            <select v-model="form.pattern_type" required :disabled="!canEditPage">
-              <option v-for="item in patternOptions" :key="item.value" :value="item.value">
-                {{ item.label }}
+            <select v-model="form.pattern" required :disabled="!canEditPage">
+              <option value="">選択してください</option>
+              <option v-for="p in patterns" :key="p.id" :value="p.id">
+                {{ p.pattern_code }} - {{ p.pattern_name }}
               </option>
             </select>
-          </div>
-          <div class="form-group" v-if="form.pattern_type === 'WEEKLY_NTH_DAY'">
-            <label>第N週 *</label>
-            <input v-model.number="form.nth_week" type="number" min="1" max="5" required :disabled="!canEditPage" />
-          </div>
-          <div class="form-group" v-if="['WEEKLY_NTH_DAY', 'EVERY_WEEK'].includes(form.pattern_type)">
-            <label>曜日 *</label>
-            <select v-model.number="form.day_of_week" required :disabled="!canEditPage">
-              <option v-for="item in dayOptions" :key="item.value" :value="item.value">
-                {{ item.label }}
-              </option>
-            </select>
-          </div>
-          <div class="form-group" v-if="form.pattern_type === 'MONTHLY_DATE'">
-            <label>日付 *</label>
-            <input v-model.number="form.day_of_month" type="number" min="1" max="31" required :disabled="!canEditPage" />
           </div>
           <div class="form-group">
             <label>リードタイム(日)</label>
@@ -111,32 +94,14 @@ import { hasPermission } from '@/router'
 
 const rows = ref([])
 const suppliers = ref([])
+const patterns = ref([])
 const showDialog = ref(false)
 const isEdit = ref(false)
-
-const patternOptions = [
-  { value: 'WEEKLY_NTH_DAY', label: '月の第N週の曜日' },
-  { value: 'MONTHLY_DATE', label: '毎月日付' },
-  { value: 'EVERY_WEEK', label: '毎週曜日' },
-]
-
-const dayOptions = [
-  { value: 0, label: '月' },
-  { value: 1, label: '火' },
-  { value: 2, label: '水' },
-  { value: 3, label: '木' },
-  { value: 4, label: '金' },
-  { value: 5, label: '土' },
-  { value: 6, label: '日' },
-]
 
 const form = ref({
   id: null,
   supplier: '',
-  pattern_type: 'WEEKLY_NTH_DAY',
-  nth_week: 1,
-  day_of_week: 0,
-  day_of_month: 1,
+  pattern: '',
   lead_time_days: 0,
   is_enabled: true,
   note: '',
@@ -166,27 +131,16 @@ const canEditPage = computed(() => {
   return canAccessByResource('settings.supplier_order_schedule', 'edit')
 })
 
-const patternLabel = (value) => {
-  const found = patternOptions.find((item) => item.value === value)
-  return found ? found.label : value
-}
-
-const dayLabel = (value) => {
-  const found = dayOptions.find((item) => item.value === Number(value))
-  return found ? found.label : value
-}
-
-const patternCondition = (row) => {
-  if (row.pattern_type === 'WEEKLY_NTH_DAY') return `第${row.nth_week} ${dayLabel(row.day_of_week)}`
-  if (row.pattern_type === 'MONTHLY_DATE') return `毎月${row.day_of_month}日`
-  if (row.pattern_type === 'EVERY_WEEK') return `毎週${dayLabel(row.day_of_week)}`
-  return ''
-}
-
 const fetchSuppliers = async () => {
   if (!canViewPage.value) return
   const response = await api.suppliers.getSuppliers()
   suppliers.value = response.data.results || response.data || []
+}
+
+const fetchPatterns = async () => {
+  if (!canViewPage.value) return
+  const response = await api.supplierOrderPatterns.list({ is_active: true })
+  patterns.value = response.data || []
 }
 
 const fetchSchedules = async () => {
@@ -201,10 +155,7 @@ const openNew = () => {
   form.value = {
     id: null,
     supplier: '',
-    pattern_type: 'WEEKLY_NTH_DAY',
-    nth_week: 1,
-    day_of_week: 0,
-    day_of_month: 1,
+    pattern: '',
     lead_time_days: 0,
     is_enabled: true,
     note: '',
@@ -223,33 +174,15 @@ const closeDialog = () => {
   showDialog.value = false
 }
 
-const buildPayload = () => {
+const save = async () => {
+  if (!canEditPage.value) return
   const payload = {
     supplier: form.value.supplier,
-    pattern_type: form.value.pattern_type,
+    pattern: form.value.pattern,
     lead_time_days: Number(form.value.lead_time_days || 0),
     is_enabled: Boolean(form.value.is_enabled),
     note: form.value.note || '',
-    nth_week: null,
-    day_of_week: null,
-    day_of_month: null,
   }
-  if (form.value.pattern_type === 'WEEKLY_NTH_DAY') {
-    payload.nth_week = Number(form.value.nth_week || 1)
-    payload.day_of_week = Number(form.value.day_of_week || 0)
-  }
-  if (form.value.pattern_type === 'MONTHLY_DATE') {
-    payload.day_of_month = Number(form.value.day_of_month || 1)
-  }
-  if (form.value.pattern_type === 'EVERY_WEEK') {
-    payload.day_of_week = Number(form.value.day_of_week || 0)
-  }
-  return payload
-}
-
-const save = async () => {
-  if (!canEditPage.value) return
-  const payload = buildPayload()
   if (isEdit.value) {
     await api.supplierOrderSchedules.update(form.value.id, payload)
   } else {
@@ -268,7 +201,7 @@ const remove = async (id) => {
 
 onMounted(async () => {
   if (!canViewPage.value) return
-  await Promise.all([fetchSuppliers(), fetchSchedules()])
+  await Promise.all([fetchSuppliers(), fetchPatterns(), fetchSchedules()])
 })
 </script>
 
@@ -300,4 +233,3 @@ onMounted(async () => {
   gap: 8px;
 }
 </style>
-

@@ -22,26 +22,50 @@ class PurchasePlanLockSetting(models.Model):
         return f'PurchasePlanLockSetting(lock_days={self.lock_days})'
 
 
-class SupplierOrderSchedule(models.Model):
-    PATTERN_WEEKLY_NTH_DAY = 'WEEKLY_NTH_DAY'
-    PATTERN_MONTHLY_DATE = 'MONTHLY_DATE'
-    PATTERN_EVERY_WEEK = 'EVERY_WEEK'
+class SupplierOrderPattern(models.Model):
+    RECURRENCE_WEEKLY = 'WEEKLY'
+    RECURRENCE_MONTHLY_DATE = 'MONTHLY_DATE'
+    RECURRENCE_MONTHLY_NTH_DOW = 'MONTHLY_NTH_DOW'
+    RECURRENCE_EVERY_BUSINESS_DAY = 'EVERY_BUSINESS_DAY'
 
-    PATTERN_TYPE_CHOICES = [
-        (PATTERN_WEEKLY_NTH_DAY, '月の第N週の曜日'),
-        (PATTERN_MONTHLY_DATE, '毎月日付'),
-        (PATTERN_EVERY_WEEK, '毎週曜日'),
+    RECURRENCE_TYPE_CHOICES = [
+        (RECURRENCE_WEEKLY, '毎週曜日'),
+        (RECURRENCE_MONTHLY_DATE, '毎月日付'),
+        (RECURRENCE_MONTHLY_NTH_DOW, '月の第N週の曜日'),
+        (RECURRENCE_EVERY_BUSINESS_DAY, '毎営業日'),
     ]
 
+    pattern_code = models.CharField(max_length=30, unique=True, verbose_name='パターンコード')
+    pattern_name = models.CharField(max_length=100, verbose_name='パターン名')
+    recurrence_type = models.CharField(max_length=30, choices=RECURRENCE_TYPE_CHOICES, verbose_name='繰返し種別')
+    day_of_week = models.SmallIntegerField(null=True, blank=True, verbose_name='曜日(0=月〜6=日)')
+    nth_week = models.SmallIntegerField(null=True, blank=True, verbose_name='第N週')
+    day_of_month = models.SmallIntegerField(null=True, blank=True, verbose_name='日付')
+    is_active = models.BooleanField(default=True, verbose_name='有効')
+    note = models.CharField(max_length=200, blank=True, default='', verbose_name='備考')
+
+    class Meta:
+        db_table = 'supplier_order_pattern'
+        ordering = ['pattern_code']
+
+    def __str__(self):
+        return f'{self.pattern_code} - {self.pattern_name}'
+
+
+class SupplierOrderSchedule(models.Model):
     supplier = models.ForeignKey(
         Supplier,
         on_delete=models.CASCADE,
         related_name='order_schedules',
     )
-    pattern_type = models.CharField(max_length=30, choices=PATTERN_TYPE_CHOICES)
-    nth_week = models.SmallIntegerField(null=True, blank=True)
-    day_of_week = models.SmallIntegerField(null=True, blank=True)
-    day_of_month = models.SmallIntegerField(null=True, blank=True)
+    pattern = models.ForeignKey(
+        SupplierOrderPattern,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='schedules',
+        verbose_name='発注パターン',
+    )
     lead_time_days = models.PositiveIntegerField(default=0)
     is_enabled = models.BooleanField(default=True)
     note = models.CharField(max_length=200, null=True, blank=True)
@@ -50,11 +74,10 @@ class SupplierOrderSchedule(models.Model):
         db_table = 'supplier_order_schedule'
         indexes = [
             models.Index(fields=['supplier', 'is_enabled']),
-            models.Index(fields=['pattern_type']),
         ]
 
     def __str__(self):
-        return f'{self.supplier_id}:{self.pattern_type}'
+        return f'{self.supplier_id}:{self.pattern_id}'
 
 
 class PurchaseOrderProposal(models.Model):

@@ -4,6 +4,7 @@
       <h1 class="page-title">製品マスタ</h1>
       <div class="page-actions">
         <button v-if="canEdit" @click="openLineFinalDialog" class="btn-secondary">ライン最終品 一括設定</button>
+        <button v-if="canEdit" @click="downloadProductImportTemplateXlsx" class="btn-secondary">取込テンプレートExcel</button>
         <button v-if="canEdit" @click="openCsvImport" class="btn-secondary">CSVインポート</button>
         <button @click="fetchProducts(1)" class="btn-primary">更新</button>
         <button @click="openProcessTab('create')" class="btn-success" :disabled="!canEdit">処理</button>
@@ -437,7 +438,7 @@
     <!-- CSVインポートダイアログ -->
     <div v-if="showCsvImportDialog" class="modal-overlay" @click.self="closeCsvImport">
       <div class="modal-content csv-import-modal">
-        <h2>製品マスタ CSVインポート</h2>
+        <h2>製品マスタ 取込（CSV / Excel）</h2>
 
         <div class="csv-format-note">
           <strong>CSVフォーマット（1行目はヘッダー）:</strong><br>
@@ -446,8 +447,8 @@
         </div>
 
         <div class="form-group">
-          <label>CSVファイル</label>
-          <input type="file" accept=".csv" @change="onCsvSelected" />
+          <label>取込ファイル</label>
+          <input type="file" accept=".csv,.xlsx" @change="onCsvSelected" />
         </div>
 
         <div v-if="csvPreviewRows.length > 0" class="csv-preview-area">
@@ -721,6 +722,26 @@ const openCsvImport = () => {
   showCsvImportDialog.value = true
 }
 
+const downloadProductImportTemplateXlsx = async () => {
+  try {
+    const res = await api.products.downloadImportTemplateXlsx()
+    const blob = new Blob([res.data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'product_import_template.xlsx'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+  } catch (error) {
+    console.error('製品テンプレートExcel取得エラー:', error)
+    alert('テンプレートExcelの取得に失敗しました')
+  }
+}
+
 const closeCsvImport = () => {
   showCsvImportDialog.value = false
   if (csvImportResult.value?.created > 0) {
@@ -731,6 +752,11 @@ const closeCsvImport = () => {
 const onCsvSelected = (e) => {
   const file = e.target.files?.[0]
   if (!file) return
+  const lowerName = String(file.name || '').toLowerCase()
+  if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xlsm')) {
+    executeFileImport(file)
+    return
+  }
   const reader = new FileReader()
   reader.onload = (ev) => {
     const text = ev.target.result
@@ -809,6 +835,24 @@ const executeCsvImport = async () => {
   } catch (error) {
     console.error('CSVインポートエラー:', error)
     alert('インポートに失敗しました')
+  } finally {
+    csvImporting.value = false
+  }
+}
+
+const executeFileImport = async (file) => {
+  if (csvImporting.value) return
+  csvImporting.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    const res = await api.products.importFile(fd)
+    csvImportResult.value = res.data
+    csvPreviewRows.value = []
+  } catch (error) {
+    console.error('Excelインポートエラー:', error)
+    const detail = error?.response?.data?.detail || 'インポートに失敗しました'
+    alert(detail)
   } finally {
     csvImporting.value = false
   }

@@ -248,9 +248,8 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         return Response({'updated': updated_count})
 
-    @action(detail=False, methods=['post'], url_path='bulk-import')
-    def bulk_import(self, request):
-        """CSVから製品を一括登録。既存品番はスキップ。"""
+    def _bulk_import_products(self, items):
+        """製品データを一括登録。既存品番はスキップ。"""
         CATEGORY_MAP = {
             '集合部品': 'ASSEMBLY',
             '単体部品': 'SINGLE',
@@ -264,9 +263,8 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             'DAY': 'DAY',
             'MINUTE': 'MINUTE',
         }
-        items = request.data.get('items', [])
         if not items:
-            return Response({'detail': 'データがありません'}, status=status.HTTP_400_BAD_REQUEST)
+            raise serializers.ValidationError({'detail': 'データがありません'})
 
         existing_codes = set(
             Product.objects.filter(
@@ -337,7 +335,168 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             existing_codes.add(code)
 
         Product.objects.bulk_create(to_create)
-        return Response({'created': len(to_create), 'skipped': len(skipped), 'skipped_codes': skipped})
+        return {'created': len(to_create), 'skipped': len(skipped), 'skipped_codes': skipped}
+
+    @action(detail=False, methods=['get'], url_path='import_template_xlsx')
+    def import_template_xlsx(self, request):
+        """製品インポート用Excelテンプレート（入力用＋使用説明＋工程＋ライン＋仕入先）"""
+        wb = Workbook()
+        ws = wb.active
+        ws.title = '入力用'
+
+        headers = [
+            '品名規格', '構成品番', '品番区分名',
+            'ライン情報', 'ライン名',
+            '工程情報', '工程名',
+            '後工程', '後工程名',
+            '管理区分', '最終品', 'ライン最終品'
+        ]
+        ws.append(headers)
+        ws.append(['', '', '', '', '', '', '', '', '', '', '', ''])
+
+        # 参照関数（2行目）
+        ws['E2'] = '=IFERROR(VLOOKUP(D2,ライン!A:B,2,FALSE),"")'
+        ws['G2'] = '=IFERROR(VLOOKUP(F2,工程!A:B,2,FALSE),"")'
+        ws['I2'] = '=IFERROR(VLOOKUP(H2,工程!A:B,2,FALSE),"")'
+
+        # 入力規則
+        dv_category = DataValidation(type='list', formula1='"集合部品,単体部品,材料,購入品,外作品"', allow_blank=True)
+        dv_unit = DataValidation(type='list', formula1='"分,日"', allow_blank=True)
+        dv_bool = DataValidation(type='list', formula1='"はい,いいえ"', allow_blank=True)
+        ws.add_data_validation(dv_category)
+        ws.add_data_validation(dv_unit)
+        ws.add_data_validation(dv_bool)
+        dv_category.add('C2:C2000')
+        dv_unit.add('J2:J2000')
+        dv_bool.add('K2:K2000')
+        dv_bool.add('L2:L2000')
+
+        # 説明シート
+        ws_guide = wb.create_sheet('使用説明')
+        ws_guide.append(['項目', '内容'])
+        ws_guide.append(['必須列', '構成品番'])
+        ws_guide.append(['推奨列', '品名規格, 品番区分名, ライン情報, 工程情報, 後工程, 管理区分, 最終品, ライン最終品'])
+        ws_guide.append(['品番区分名', '集合部品 / 単体部品 / 材料 / 購入品 / 外作品'])
+        ws_guide.append(['管理区分', '分 / 日'])
+        ws_guide.append(['最終品・ライン最終品', 'はい / いいえ'])
+        ws_guide.append(['注意1', 'ライン情報・工程情報・後工程は、それぞれマスタに存在するコードを入力してください。'])
+        ws_guide.append(['注意2', '同じ構成品番が複数行ある場合は、先頭行のみ取込対象です。'])
+        ws_guide.append(['注意3', '既存の構成品番はスキップされます。'])
+
+        # 工程シート
+        ws_process = wb.create_sheet('工程')
+        ws_process.append(['工程コード', '工程名'])
+        for p in Process.objects.order_by('process_code'):
+            ws_process.append([p.process_code, p.process_name])
+
+        # ラインシート
+        ws_line = wb.create_sheet('ライン')
+        ws_line.append(['ラインコード', 'ライン名'])
+        for l in Line.objects.order_by('line_code'):
+            ws_line.append([l.line_code, l.line_name])
+
+        # 仕入先シート
+        ws_supplier = wb.create_sheet('仕入先')
+        ws_supplier.append(['仕入先コード', '仕入先名'])
+        for s in Supplier.objects.order_by('supplier_code'):
+            ws_supplier.append([s.supplier_code, s.supplier_name])
+
+        from io import BytesIO
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+        from django.http import HttpResponse
+        response = HttpResponse(
+            output.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename="product_import_template.xlsx"'
+        return response
+
+    @action(detail=False, methods=['post'], parser_classes=[parsers.MultiPartParser, parsers.FormParser], url_path='import_file')
+    def import_file(self, request):
+        """製品CSV/Excel取込"""
+        upload = request.FILES.get('file')
+        if not upload:
+            return Response({'detail': '取込ファイルがありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        raw = upload.read()
+        filename = (getattr(upload, 'name', '') or '').lower()
+        input_rows = []
+        fieldnames = []
+
+        if filename.endswith('.xlsx') or filename.endswith('.xlsm'):
+            from io import BytesIO
+            try:
+                wb = load_workbook(BytesIO(raw), data_only=True, read_only=True)
+                ws = wb[wb.sheetnames[0]]
+            except Exception:
+                return Response({'detail': 'Excelファイルの読み取りに失敗しました'}, status=status.HTTP_400_BAD_REQUEST)
+            excel_rows = list(ws.iter_rows(values_only=True))
+            if not excel_rows:
+                return Response({'detail': 'Excelファイルにデータがありません'}, status=status.HTTP_400_BAD_REQUEST)
+            fieldnames = [str(v).strip() if v is not None else '' for v in excel_rows[0]]
+            for row in excel_rows[1:]:
+                if row is None or all((cell is None or str(cell).strip() == '') for cell in row):
+                    continue
+                row_dict = {}
+                for i, key in enumerate(fieldnames):
+                    if not key:
+                        continue
+                    value = row[i] if i < len(row) else ''
+                    row_dict[key] = '' if value is None else str(value).strip()
+                input_rows.append(row_dict)
+        else:
+            text = None
+            for enc in ('utf-8-sig', 'cp932', 'shift_jis', 'utf-8'):
+                try:
+                    text = raw.decode(enc)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if text is None:
+                return Response({'detail': 'CSV文字コードを判別できません（UTF-8/Shift_JISのみ対応）'}, status=status.HTTP_400_BAD_REQUEST)
+            reader = csv.DictReader(StringIO(text))
+            fieldnames = reader.fieldnames or []
+            input_rows = list(reader)
+
+        if not input_rows:
+            return Response({'detail': '取込データがありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        items = []
+        seen = set()
+        for row in input_rows:
+            product_code = str(row.get('構成品番') or '').strip()
+            if not product_code or product_code in seen:
+                continue
+            seen.add(product_code)
+            items.append({
+                'product_code': product_code,
+                'product_name': str(row.get('品名規格') or '').strip(),
+                'category': str(row.get('品番区分名') or '').strip(),
+                'line_code': str(row.get('ライン情報') or '').strip(),
+                'process_code': str(row.get('工程情報') or '').strip(),
+                'next_process_code': str(row.get('後工程') or '').strip(),
+                'management_unit': str(row.get('管理区分') or '').strip(),
+                'is_final_product': str(row.get('最終品') or '').strip(),
+                'is_line_final_product': str(row.get('ライン最終品') or '').strip(),
+            })
+
+        try:
+            result = self._bulk_import_products(items)
+        except serializers.ValidationError as e:
+            return Response(e.detail, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result)
+
+    @action(detail=False, methods=['post'], url_path='bulk-import')
+    def bulk_import(self, request):
+        """互換API: 既存のJSON配列取込"""
+        items = request.data.get('items', [])
+        try:
+            result = self._bulk_import_products(items)
+        except serializers.ValidationError as e:
+            return Response(e.detail, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result)
 
     @action(detail=True, methods=['get'], url_path='where-used')
     def where_used(self, request, pk=None):
