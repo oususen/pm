@@ -994,6 +994,9 @@ const groups = computed(() => {
     const aVirtual = Boolean(a?.is_virtual_set);
     const bVirtual = Boolean(b?.is_virtual_set);
     if (aVirtual !== bVirtual) return aVirtual ? 1 : -1;
+    if (props.mode === "purchase") {
+      return (a.product_code || "").localeCompare(b.product_code || "", "ja", { sensitivity: "base" });
+    }
     return compareBySpecialOrderThenProductCode(a, b, {
       codeGetter: (item) => item.product_code || "",
     });

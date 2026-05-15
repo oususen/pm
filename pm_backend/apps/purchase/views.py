@@ -1551,6 +1551,7 @@ class PurchaseReceivingView(APIView):
 
         supplier_id = request.query_params.get('supplier_id')
         target_date_str = request.query_params.get('target_date')
+        basis = request.query_params.get('basis', 'progress')
         if not supplier_id:
             return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1603,36 +1604,64 @@ class PurchaseReceivingView(APIView):
         purchase_process = Process.objects.filter(process_code='PURCHASE').first()
         items = []
         if line and coverage_dates:
-            qs = LineBacklog.objects.filter(
-                line=line,
-                plan_date__in=coverage_dates,
-                sequence_no=0,
-                order_qty__gt=0,
-            ).select_related('product')
-            if purchase_process:
-                qs = qs.filter(process=purchase_process)
-
+            from production.models import LineDemand
             product_map = {}
-            for b in qs:
-                pid = b.product_id
-                if pid not in product_map:
-                    td = b.product.transfer_destination if b.product else None
-                    td_label = dict(Product.TRANSFER_DESTINATION_CHOICES).get(td, '') if td else ''
-                    product_map[pid] = {
-                        'product_id': pid,
-                        'product_code': b.product.product_code if b.product else '',
-                        'product_name': b.product.product_name if b.product else '',
-                        'transfer_destination': td or '',
-                        'transfer_destination_label': td_label,
-                        'next_process_name': '',
-                        'expected_qty': 0,
-                        'actual_qty': 0,
-                        'daily': {},
-                    }
-                qty = int(b.order_qty or 0)
-                product_map[pid]['expected_qty'] += qty
-                key = b.plan_date.isoformat()
-                product_map[pid]['daily'][key] = product_map[pid]['daily'].get(key, 0) + qty
+
+            if basis == 'inventory':
+                qs = LineBacklog.objects.filter(
+                    line=line,
+                    plan_date__in=coverage_dates,
+                    sequence_no=1,
+                    plan_qty__gt=0,
+                ).select_related('product')
+                if purchase_process:
+                    qs = qs.filter(process=purchase_process)
+                for b in qs:
+                    pid = b.product_id
+                    if pid not in product_map:
+                        td = b.product.transfer_destination if b.product else None
+                        td_label = dict(Product.TRANSFER_DESTINATION_CHOICES).get(td, '') if td else ''
+                        product_map[pid] = {
+                            'product_id': pid,
+                            'product_code': b.product.product_code if b.product else '',
+                            'product_name': b.product.product_name if b.product else '',
+                            'transfer_destination': td or '',
+                            'transfer_destination_label': td_label,
+                            'next_process_name': '',
+                            'expected_qty': 0,
+                            'actual_qty': 0,
+                            'daily': {},
+                        }
+                    qty = int(b.plan_qty or 0)
+                    product_map[pid]['expected_qty'] += qty
+                    key = b.plan_date.isoformat()
+                    product_map[pid]['daily'][key] = product_map[pid]['daily'].get(key, 0) + qty
+            else:
+                demand_qs = LineDemand.objects.filter(
+                    line=line,
+                    plan_date__in=coverage_dates,
+                ).filter(Q(firm_qty__gt=0) | Q(forecast_qty__gt=0)).select_related('product')
+                for d in demand_qs:
+                    pid = d.product_id
+                    if pid not in product_map:
+                        prod = d.product
+                        td = prod.transfer_destination if prod else None
+                        td_label = dict(Product.TRANSFER_DESTINATION_CHOICES).get(td, '') if td else ''
+                        product_map[pid] = {
+                            'product_id': pid,
+                            'product_code': prod.product_code if prod else d.product_code,
+                            'product_name': prod.product_name if prod else '',
+                            'transfer_destination': td or '',
+                            'transfer_destination_label': td_label,
+                            'next_process_name': '',
+                            'expected_qty': 0,
+                            'actual_qty': 0,
+                            'daily': {},
+                        }
+                    qty = int(d.firm_qty or 0) + int(d.forecast_qty or 0)
+                    product_map[pid]['expected_qty'] += qty
+                    key = d.plan_date.isoformat()
+                    product_map[pid]['daily'][key] = product_map[pid]['daily'].get(key, 0) + qty
 
             if product_map:
                 actual_qs = LineBacklog.objects.filter(
@@ -1642,11 +1671,15 @@ class PurchaseReceivingView(APIView):
                     product_id__in=product_map.keys(),
                     actual_qty__gt=0,
                 )
-                if purchase_process:
-                    actual_qs = actual_qs.filter(process=purchase_process)
+                actual_by_pid_date = defaultdict(lambda: defaultdict(int))
                 for b in actual_qs:
-                    if b.product_id in product_map:
-                        product_map[b.product_id]['actual_qty'] += int(b.actual_qty or 0)
+                    actual_by_pid_date[b.product_id][b.plan_date] = max(
+                        actual_by_pid_date[b.product_id][b.plan_date],
+                        int(b.actual_qty or 0),
+                    )
+                for pid, date_map in actual_by_pid_date.items():
+                    if pid in product_map:
+                        product_map[pid]['actual_qty'] = sum(date_map.values())
                 from masters.models import Routing
                 product_ids = list(product_map.keys())
                 routings = Routing.objects.filter(

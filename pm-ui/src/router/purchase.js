@@ -27,13 +27,13 @@ const purchase = [
     path: "/purchase/supplier-calendar",
     name: "PurchaseSupplierCalendar",
     component: () => import("@/views/purchase/PurchaseSupplierCalendar.vue"),
-    meta: { pageTitle: "仕入れ先カレンダ", resource: "purchase" },
+    meta: { pageTitle: "仕入れ先カレンダ", manualPath: "仕入れ/仕入れ先カレンダ.md", resource: "purchase" },
   },
   {
     path: "/purchase/receiving",
     name: "PurchaseReceiving",
     component: () => import("@/views/purchase/PurchaseReceiving.vue"),
-    meta: { pageTitle: "仕入れ検収", resource: "purchase.receiving" },
+    meta: { pageTitle: "仕入れ検収", manualPath: "仕入れ/仕入れ検収.md", resource: "purchase.receiving" },
   },
   {
     path: "/purchase/actual-input",

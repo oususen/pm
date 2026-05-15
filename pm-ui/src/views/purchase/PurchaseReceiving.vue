@@ -23,6 +23,10 @@
         <span v-if="isDeliveryDay" class="delivery-badge yes">本日は納入日</span>
         <span v-else class="delivery-badge no">本日は納入日ではありません</span>
         <span v-if="nextDeliveryDate" class="next-delivery">次回納入日: {{ nextDeliveryDate }}</span>
+        <div class="btn-group basis-group">
+          <button :class="['btn-filter', { active: basis === 'progress' }]" @click="switchBasis('progress')">進度基準</button>
+          <button :class="['btn-filter', { active: basis === 'inventory' }]" @click="switchBasis('inventory')">在庫基準</button>
+        </div>
         <span v-if="rows.length" class="summary-count">{{ filteredRows.length }} / {{ rows.length }}件 / 実績{{ actualCount }}件</span>
       </div>
 
@@ -148,6 +152,7 @@ import api from '@/api/client'
 const suppliers = ref([])
 const selectedSupplier = ref('')
 const targetDate = ref(new Date().toISOString().slice(0, 10))
+const basis = ref('progress')
 const loading = ref(false)
 const saving = ref(false)
 const rows = ref([])
@@ -202,6 +207,11 @@ const fetchSuppliers = async () => {
   )
 }
 
+const switchBasis = (b) => {
+  basis.value = b
+  if (selectedSupplier.value) loadReceivingData()
+}
+
 const onSupplierChange = () => {
   rows.value = []
   coverageDates.value = []
@@ -230,6 +240,7 @@ const loadReceivingData = async () => {
       params: {
         supplier_id: selectedSupplier.value,
         target_date: targetDate.value,
+        basis: basis.value,
       },
     })
     const data = res.data
@@ -398,6 +409,7 @@ onMounted(fetchSuppliers)
 .delivery-badge.yes { background: #dcfce7; color: #166534; }
 .delivery-badge.no { background: #fef3c7; color: #92400e; }
 .next-delivery { color: #6366f1; font-weight: 500; }
+.basis-group { margin-left: 8px; }
 .summary-count { margin-left: auto; color: #334155; font-weight: 600; }
 .filter-bar {
   display: flex;

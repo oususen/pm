@@ -21,8 +21,51 @@
             </option>
           </select>
         </div>
-        <div class="calendar-label">
-          選択カレンダ: {{ selectedCalendarLabel }}
+        <div class="field inline-field">
+          <label>カレンダ</label>
+          <select v-model.number="selectedCalendarId" :disabled="!selectedSupplierId" @change="onCalendarChange">
+            <option value="">未割当</option>
+            <option v-for="c in calendars" :key="c.id" :value="c.id">
+              {{ c.calendar_code }} - {{ c.calendar_name }}
+            </option>
+          </select>
+          <button
+            class="btn primary"
+            @click="assignCalendar"
+            :disabled="!selectedSupplierId || !selectedCalendarId || assigning || !canEdit"
+          >
+            割当
+          </button>
+          <button
+            class="btn"
+            @click="unassignCalendar"
+            :disabled="!selectedSupplierId || !currentLineCalendarId || assigning || !canEdit"
+          >
+            割当解除
+          </button>
+        </div>
+        <div class="field inline-field">
+          <label>コピー</label>
+          <select v-model.number="copySourceCalendarId" :disabled="!selectedCalendarId || copying || !canEdit">
+            <option value="">コピー元を選択</option>
+            <option
+              v-for="c in copySourceCandidates"
+              :key="c.id"
+              :value="c.id"
+            >
+              {{ c.calendar_code }} - {{ c.calendar_name }}
+            </option>
+          </select>
+          <input type="date" v-model="copyStartDate" :disabled="!selectedCalendarId || copying || !canEdit" />
+          <span>〜</span>
+          <input type="date" v-model="copyEndDate" :disabled="!selectedCalendarId || copying || !canEdit" />
+          <button
+            class="btn"
+            @click="copyCalendarDays"
+            :disabled="!selectedCalendarId || !copySourceCalendarId || !copyStartDate || !copyEndDate || copying || !canEdit"
+          >
+            {{ copying ? 'コピー中...' : 'コピー実行' }}
+          </button>
         </div>
       </div>
     </div>
@@ -143,9 +186,15 @@ const selectedSupplierId = ref('')
 const selectedCalendarId = ref('')
 const showCreate = ref(false)
 const creating = ref(false)
+const assigning = ref(false)
+const currentLineCalendarId = ref('')
 const savingDateKey = ref('')
 const applyingWeekday = ref(false)
 const savingNoteDateKey = ref('')
+const copySourceCalendarId = ref('')
+const copyStartDate = ref('')
+const copyEndDate = ref('')
+const copying = ref(false)
 const weekdayNames = ['日', '月', '火', '水', '木', '金', '土']
 const weekdayChecks = ref([false, false, false, false, false, false, false])
 
@@ -169,11 +218,6 @@ const formatMonth = (dateObj) => {
   return `${y}年${m}月`
 }
 
-const selectedCalendarLabel = computed(() => {
-  const c = calendars.value.find((x) => x.id === selectedCalendarId.value)
-  return c ? `${c.calendar_code} - ${c.calendar_name}` : '未割当'
-})
-
 const monthTitle = computed(() => formatMonth(currentMonth.value))
 
 const monthRange = computed(() => {
@@ -189,6 +233,10 @@ const dayMap = computed(() => {
   }
   return map
 })
+
+const copySourceCandidates = computed(() =>
+  calendars.value.filter((c) => String(c.id) !== String(selectedCalendarId.value)),
+)
 
 const daisoDayMap = computed(() => {
   const map = new Map()
@@ -257,9 +305,15 @@ const supplierToLine = (supplierId) => {
   return lines.value.find((l) => l.line_code === supplier.supplier_code) || null
 }
 
+const onCalendarChange = async () => {
+  copySourceCalendarId.value = ''
+  await loadCalendarDays()
+}
+
 const onSupplierChange = async () => {
   const line = supplierToLine(selectedSupplierId.value)
   selectedCalendarId.value = line?.calendar || ''
+  currentLineCalendarId.value = line?.calendar || ''
   await Promise.all([loadCalendarDays(), loadDaisoCalendarDays()])
 }
 
@@ -299,7 +353,45 @@ const loadDaisoCalendarDays = async () => {
 
 const moveMonth = async (delta) => {
   currentMonth.value = new Date(currentMonth.value.getFullYear(), currentMonth.value.getMonth() + delta, 1)
+  const { start, end } = monthRange.value
+  copyStartDate.value = ymd(start)
+  copyEndDate.value = ymd(end)
   await Promise.all([loadCalendarDays(), loadDaisoCalendarDays()])
+}
+
+const copyCalendarDays = async () => {
+  if (!canEdit.value) return
+  if (!selectedCalendarId.value || !copySourceCalendarId.value || !copyStartDate.value || !copyEndDate.value) return
+  if (copyStartDate.value > copyEndDate.value) {
+    alert('コピー期間の開始日と終了日を確認してください。')
+    return
+  }
+  if (String(copySourceCalendarId.value) === String(selectedCalendarId.value)) {
+    alert('同じカレンダ同士はコピーできません。')
+    return
+  }
+
+  const src = calendars.value.find((c) => String(c.id) === String(copySourceCalendarId.value))
+  const dst = calendars.value.find((c) => String(c.id) === String(selectedCalendarId.value))
+  const srcLabel = src ? `${src.calendar_code} - ${src.calendar_name}` : `ID:${copySourceCalendarId.value}`
+  const dstLabel = dst ? `${dst.calendar_code} - ${dst.calendar_name}` : `ID:${selectedCalendarId.value}`
+  if (!confirm(`「${srcLabel}」から「${dstLabel}」へ ${copyStartDate.value}〜${copyEndDate.value} をコピーします。実行しますか？`)) return
+
+  copying.value = true
+  try {
+    const res = await api.calendars.copyCalendar(copySourceCalendarId.value, {
+      target_calendar_id: selectedCalendarId.value,
+      start_date: copyStartDate.value,
+      end_date: copyEndDate.value,
+    })
+    await loadCalendarDays()
+    alert(`コピーが完了しました。（${res.data?.copied ?? 0}件）`)
+  } catch (e) {
+    console.error('カレンダコピーエラー', e)
+    alert('コピーに失敗しました。')
+  } finally {
+    copying.value = false
+  }
 }
 
 const toggleWeekday = async (weekday, checked) => {
@@ -382,6 +474,7 @@ const createAndAssignCalendar = async () => {
     await loadCalendars()
     await loadLines()
     selectedCalendarId.value = calendar.id
+    currentLineCalendarId.value = calendar.id
     newCalendar.value = { code: '', name: '' }
     showCreate.value = false
     await loadCalendarDays()
@@ -391,6 +484,60 @@ const createAndAssignCalendar = async () => {
     alert('作成または割当に失敗しました。')
   } finally {
     creating.value = false
+  }
+}
+
+const assignCalendar = async () => {
+  if (!canEdit.value) return
+  if (!selectedSupplierId.value || !selectedCalendarId.value) return
+  const line = supplierToLine(selectedSupplierId.value)
+  if (!line) {
+    alert('仕入れ先に対応する購買ラインが見つかりません。')
+    return
+  }
+  if (line.calendar === selectedCalendarId.value) {
+    alert('既に同じカレンダが割当されています。')
+    return
+  }
+  const cal = calendars.value.find((c) => c.id === selectedCalendarId.value)
+  const calLabel = cal ? `${cal.calendar_code} - ${cal.calendar_name}` : ''
+  if (!confirm(`「${calLabel}」をこの仕入れ先に割り当てますか？`)) return
+
+  assigning.value = true
+  try {
+    await api.lines.patchLine(line.id, { calendar: selectedCalendarId.value })
+    await loadLines()
+    currentLineCalendarId.value = selectedCalendarId.value
+    await loadCalendarDays()
+    alert('カレンダを割り当てました。')
+  } catch (e) {
+    console.error('カレンダ割当エラー', e)
+    alert('割当に失敗しました。')
+  } finally {
+    assigning.value = false
+  }
+}
+
+const unassignCalendar = async () => {
+  if (!canEdit.value) return
+  if (!selectedSupplierId.value) return
+  const line = supplierToLine(selectedSupplierId.value)
+  if (!line) return
+  if (!confirm('カレンダの割当を解除しますか？ダイソウカレンダが既定値として使用されます。')) return
+
+  assigning.value = true
+  try {
+    await api.lines.patchLine(line.id, { calendar: null })
+    await loadLines()
+    selectedCalendarId.value = ''
+    currentLineCalendarId.value = ''
+    calendarDays.value = []
+    alert('割当を解除しました。')
+  } catch (e) {
+    console.error('カレンダ割当解除エラー', e)
+    alert('割当解除に失敗しました。')
+  } finally {
+    assigning.value = false
   }
 }
 
@@ -465,6 +612,9 @@ const saveDayNote = async (day, event) => {
 
 onMounted(async () => {
   await Promise.all([loadSuppliers(), loadLines(), loadCalendars()])
+  const { start, end } = monthRange.value
+  copyStartDate.value = ymd(start)
+  copyEndDate.value = ymd(end)
   await loadDaisoCalendarDays()
 })
 </script>
@@ -662,4 +812,3 @@ td.out .day-cell-btn {
   padding: 10px;
 }
 </style>
-
