@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">発注スケジュール設定</h1>
+      <h1 class="page-title">仕入れ先スケジュール設定</h1>
       <div class="page-actions">
         <button class="btn-primary" @click="fetchSchedules" :disabled="!canViewPage">更新</button>
         <button class="btn-success" @click="openNew" :disabled="!canEditPage">新規</button>
@@ -42,7 +42,7 @@
 
     <div v-if="showDialog" class="modal-overlay" @click.self="closeDialog">
       <div class="modal-content">
-        <h2>{{ isEdit ? '発注スケジュール編集' : '発注スケジュール新規作成' }}</h2>
+        <h2>{{ isEdit ? '仕入れ先スケジュール編集' : '仕入れ先スケジュール新規作成' }}</h2>
         <form @submit.prevent="save">
           <div class="form-group">
             <label>仕入先 *</label>

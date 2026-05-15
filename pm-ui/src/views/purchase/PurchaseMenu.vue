@@ -147,7 +147,7 @@ const tiles = computed(() => [
   },
   {
     to: "/settings/supplier-order-schedule",
-    label: "発注スケジュール設定",
+    label: "仕入れ先スケジュール設定",
     icon: "📅",
     category: "plan",
     required: "view",

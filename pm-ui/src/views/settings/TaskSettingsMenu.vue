@@ -56,8 +56,8 @@ const allTiles = [
   },
   {
     to: '/settings/supplier-order-schedule',
-    title: '発注スケジュール設定',
-    desc: '仕入先ごとの発注タイミングを設定します。',
+    title: '仕入れ先スケジュール設定',
+    desc: '仕入先ごとの納入タイミングを設定します。',
     resource: 'settings.supplier_order_schedule',
   },
   {
