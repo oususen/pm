@@ -98,6 +98,14 @@ const tiles = computed(() => [
     resource: "purchase.progress",
   },
   {
+    to: "/purchase/receiving",
+    label: "仕入れ検収",
+    icon: "📥",
+    category: "records",
+    required: "edit",
+    resource: "purchase.receiving",
+  },
+  {
     to: "/purchase/actual-input",
     label: "仕入れ実績入力",
     icon: "🧾",
@@ -131,7 +139,7 @@ const tiles = computed(() => [
   },
   {
     to: "/settings/supplier-order-pattern",
-    label: "発注パターン設定",
+    label: "納入パターン設定",
     icon: "🔄",
     category: "plan",
     required: "view",

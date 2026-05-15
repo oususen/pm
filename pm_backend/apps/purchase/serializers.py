@@ -43,37 +43,78 @@ class SupplierOrderPatternSerializer(serializers.ModelSerializer):
             'pattern_name',
             'recurrence_type',
             'recurrence_type_display',
-            'day_of_week',
-            'nth_week',
-            'day_of_month',
+            'days_of_week',
+            'nth_weeks',
+            'days_of_month',
+            'interval_days',
+            'start_date',
             'is_active',
             'note',
         ]
 
+    def _parse_days_of_week(self, value):
+        if not value:
+            return []
+        if isinstance(value, list):
+            return [int(d) for d in value]
+        return [int(d.strip()) for d in str(value).split(',') if d.strip()]
+
+    def _parse_csv_ints(self, value):
+        if not value:
+            return []
+        if isinstance(value, list):
+            return [int(d) for d in value]
+        return [int(d.strip()) for d in str(value).split(',') if d.strip()]
+
+    def _normalize_csv(self, attrs, field):
+        raw = attrs.get(field)
+        if isinstance(raw, list):
+            attrs[field] = ','.join(str(d) for d in raw)
+
     def validate(self, attrs):
         recurrence_type = attrs.get('recurrence_type', getattr(self.instance, 'recurrence_type', None))
-        day_of_week = attrs.get('day_of_week', getattr(self.instance, 'day_of_week', None))
-        nth_week = attrs.get('nth_week', getattr(self.instance, 'nth_week', None))
-        day_of_month = attrs.get('day_of_month', getattr(self.instance, 'day_of_month', None))
 
-        if day_of_week is not None and not (0 <= int(day_of_week) <= 6):
-            raise serializers.ValidationError({'day_of_week': '曜日は0(月)〜6(日)で指定してください。'})
-        if nth_week is not None and not (1 <= int(nth_week) <= 5):
-            raise serializers.ValidationError({'nth_week': '第N週は1〜5で指定してください。'})
-        if day_of_month is not None and not (1 <= int(day_of_month) <= 31):
-            raise serializers.ValidationError({'day_of_month': '日付は1〜31で指定してください。'})
+        self._normalize_csv(attrs, 'days_of_week')
+        self._normalize_csv(attrs, 'days_of_month')
+        self._normalize_csv(attrs, 'nth_weeks')
+
+        days_of_week_raw = attrs.get('days_of_week', getattr(self.instance, 'days_of_week', ''))
+        days_of_month_raw = attrs.get('days_of_month', getattr(self.instance, 'days_of_month', ''))
+        nth_weeks_raw = attrs.get('nth_weeks', getattr(self.instance, 'nth_weeks', ''))
+
+        days = self._parse_csv_ints(days_of_week_raw)
+        for d in days:
+            if not (0 <= d <= 6):
+                raise serializers.ValidationError({'days_of_week': '曜日は0(月)〜6(日)で指定してください。'})
+
+        months = self._parse_csv_ints(days_of_month_raw)
+        for d in months:
+            if not (1 <= d <= 31):
+                raise serializers.ValidationError({'days_of_month': '日付は1〜31で指定してください。'})
+
+        weeks = self._parse_csv_ints(nth_weeks_raw)
+        for w in weeks:
+            if not (1 <= w <= 5):
+                raise serializers.ValidationError({'nth_weeks': '第N週は1〜5で指定してください。'})
 
         if recurrence_type == SupplierOrderPattern.RECURRENCE_WEEKLY:
-            if day_of_week is None:
-                raise serializers.ValidationError({'day_of_week': '曜日を指定してください。'})
+            if not days:
+                raise serializers.ValidationError({'days_of_week': '曜日を1つ以上指定してください。'})
         elif recurrence_type == SupplierOrderPattern.RECURRENCE_MONTHLY_DATE:
-            if day_of_month is None:
-                raise serializers.ValidationError({'day_of_month': '日付を指定してください。'})
+            if not months:
+                raise serializers.ValidationError({'days_of_month': '日付を1つ以上指定してください。'})
         elif recurrence_type == SupplierOrderPattern.RECURRENCE_MONTHLY_NTH_DOW:
-            if nth_week is None:
-                raise serializers.ValidationError({'nth_week': '第N週を指定してください。'})
-            if day_of_week is None:
-                raise serializers.ValidationError({'day_of_week': '曜日を指定してください。'})
+            if not weeks:
+                raise serializers.ValidationError({'nth_weeks': '第N週を1つ以上指定してください。'})
+            if not days:
+                raise serializers.ValidationError({'days_of_week': '曜日を1つ以上指定してください。'})
+        elif recurrence_type == SupplierOrderPattern.RECURRENCE_EVERY_N_BUSINESS_DAYS:
+            interval_days = attrs.get('interval_days', getattr(self.instance, 'interval_days', None))
+            start_date = attrs.get('start_date', getattr(self.instance, 'start_date', None))
+            if not interval_days or interval_days < 1:
+                raise serializers.ValidationError({'interval_days': '間隔日数は1以上で指定してください。'})
+            if not start_date:
+                raise serializers.ValidationError({'start_date': '開始基準日を指定してください。'})
 
         return attrs
 

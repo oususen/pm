@@ -28,6 +28,7 @@ from .views import (
     PurchaseActualProgressView,
     PurchaseActualRegisterView,
     PurchasePlanLockSettingView,
+    PurchaseReceivingView,
 )
 
 urlpatterns = [
@@ -56,4 +57,5 @@ urlpatterns = [
     path('purchase-order-proposals/<int:pk>/auto_fill/', PurchaseOrderProposalAutoFillView.as_view(), name='purchase-order-proposal-auto-fill'),
     path('purchase-order-tasks/', PurchaseOrderTaskListView.as_view(), name='purchase-order-tasks'),
     path('purchase-order-approval-config/', PurchaseOrderApprovalConfigView.as_view(), name='purchase-order-approval-config'),
+    path('purchase-receiving/', PurchaseReceivingView.as_view(), name='purchase-receiving'),
 ]

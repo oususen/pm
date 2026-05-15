@@ -240,39 +240,51 @@ def _nth_weekday_of_month(year: int, month: int, weekday: int, nth_week: int):
     return date(year, month, day)
 
 
-def _generate_raw_pattern_dates(schedule: SupplierOrderSchedule, start_date: date, end_date: date):
+def _parse_csv_ints(value):
+    if not value:
+        return []
+    return [int(d.strip()) for d in str(value).split(',') if d.strip()]
+
+
+def _generate_raw_pattern_dates(schedule: SupplierOrderSchedule, start_date: date, end_date: date, calculator: WorkingDayCalculator = None):
     pattern = schedule.pattern
     if not pattern:
         return
     recurrence = pattern.recurrence_type
 
     if recurrence == SupplierOrderPattern.RECURRENCE_MONTHLY_DATE:
+        days_of_month = _parse_csv_ints(pattern.days_of_month)
+        if not days_of_month:
+            return
         for month_start in _iter_month_starts(start_date, end_date):
             last_day = monthrange(month_start.year, month_start.month)[1]
-            day = min(int(pattern.day_of_month or 1), last_day)
-            raw = date(month_start.year, month_start.month, day)
-            if start_date <= raw <= end_date:
-                yield raw
+            for dom in sorted(days_of_month):
+                day = min(dom, last_day)
+                raw = date(month_start.year, month_start.month, day)
+                if start_date <= raw <= end_date:
+                    yield raw
         return
 
     if recurrence == SupplierOrderPattern.RECURRENCE_MONTHLY_NTH_DOW:
-        nth_week = int(pattern.nth_week or 0)
-        day_of_week = int(pattern.day_of_week or 0)
-        if not (1 <= nth_week <= 5 and 0 <= day_of_week <= 6):
+        nth_weeks = _parse_csv_ints(pattern.nth_weeks)
+        days_of_week = _parse_csv_ints(pattern.days_of_week)
+        if not nth_weeks or not days_of_week:
             return
         for month_start in _iter_month_starts(start_date, end_date):
-            raw = _nth_weekday_of_month(month_start.year, month_start.month, day_of_week, nth_week)
-            if raw and start_date <= raw <= end_date:
-                yield raw
+            for nw in sorted(nth_weeks):
+                for dow in sorted(days_of_week):
+                    raw = _nth_weekday_of_month(month_start.year, month_start.month, dow, nw)
+                    if raw and start_date <= raw <= end_date:
+                        yield raw
         return
 
     if recurrence == SupplierOrderPattern.RECURRENCE_WEEKLY:
-        day_of_week = int(pattern.day_of_week or 0)
-        if not (0 <= day_of_week <= 6):
+        days_of_week = set(_parse_csv_ints(pattern.days_of_week))
+        if not days_of_week:
             return
         cursor = start_date
         while cursor <= end_date:
-            if cursor.weekday() == day_of_week:
+            if cursor.weekday() in days_of_week:
                 yield cursor
             cursor = cursor + timedelta(days=1)
         return
@@ -282,12 +294,43 @@ def _generate_raw_pattern_dates(schedule: SupplierOrderSchedule, start_date: dat
         while cursor <= end_date:
             yield cursor
             cursor = cursor + timedelta(days=1)
+        return
+
+    if recurrence == SupplierOrderPattern.RECURRENCE_EVERY_N_BUSINESS_DAYS:
+        interval = int(pattern.interval_days or 1)
+        ref_date = pattern.start_date
+        if not ref_date or interval < 1 or not calculator:
+            return
+        # 基準日から営業日をカウントし、interval営業日ごとの日を算出
+        if ref_date < start_date:
+            # 基準日→start_date間の営業日数を数えてオフセットを求める
+            d = ref_date
+            biz_count = 0
+            while d < start_date:
+                if calculator.is_working_day(d):
+                    biz_count += 1
+                d = d + timedelta(days=1)
+            remainder = biz_count % interval
+            skip = (interval - remainder) % interval
+        else:
+            # start_date <= ref_date: ref_dateから開始
+            skip = 0
+            start_date = ref_date
+
+        cursor = start_date
+        biz_count = 0
+        while cursor <= end_date:
+            if calculator.is_working_day(cursor):
+                if biz_count >= skip and (biz_count - skip) % interval == 0:
+                    yield cursor
+                biz_count += 1
+            cursor = cursor + timedelta(days=1)
 
 
 def _is_order_timing_today(schedule: SupplierOrderSchedule, today: date, daiso_calculator: WorkingDayCalculator) -> bool:
     window_start = today - timedelta(days=62)
     window_end = today + timedelta(days=62)
-    for raw_date in _generate_raw_pattern_dates(schedule, window_start, window_end):
+    for raw_date in _generate_raw_pattern_dates(schedule, window_start, window_end, daiso_calculator):
         shifted_date = _shift_to_previous_working_day(raw_date, daiso_calculator)
         if shifted_date == today:
             return True

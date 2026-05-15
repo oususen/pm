@@ -27,20 +27,24 @@ class SupplierOrderPattern(models.Model):
     RECURRENCE_MONTHLY_DATE = 'MONTHLY_DATE'
     RECURRENCE_MONTHLY_NTH_DOW = 'MONTHLY_NTH_DOW'
     RECURRENCE_EVERY_BUSINESS_DAY = 'EVERY_BUSINESS_DAY'
+    RECURRENCE_EVERY_N_BUSINESS_DAYS = 'EVERY_N_BUSINESS_DAYS'
 
     RECURRENCE_TYPE_CHOICES = [
         (RECURRENCE_WEEKLY, '毎週曜日'),
         (RECURRENCE_MONTHLY_DATE, '毎月日付'),
         (RECURRENCE_MONTHLY_NTH_DOW, '月の第N週の曜日'),
         (RECURRENCE_EVERY_BUSINESS_DAY, '毎営業日'),
+        (RECURRENCE_EVERY_N_BUSINESS_DAYS, 'N営業日ごと'),
     ]
 
     pattern_code = models.CharField(max_length=30, unique=True, verbose_name='パターンコード')
     pattern_name = models.CharField(max_length=100, verbose_name='パターン名')
     recurrence_type = models.CharField(max_length=30, choices=RECURRENCE_TYPE_CHOICES, verbose_name='繰返し種別')
-    day_of_week = models.SmallIntegerField(null=True, blank=True, verbose_name='曜日(0=月〜6=日)')
-    nth_week = models.SmallIntegerField(null=True, blank=True, verbose_name='第N週')
-    day_of_month = models.SmallIntegerField(null=True, blank=True, verbose_name='日付')
+    days_of_week = models.CharField(max_length=20, blank=True, default='', verbose_name='曜日(0=月〜6=日, カンマ区切り)')
+    nth_weeks = models.CharField(max_length=20, blank=True, default='', verbose_name='第N週(1〜5, カンマ区切り)')
+    days_of_month = models.CharField(max_length=100, blank=True, default='', verbose_name='日付(1〜31, カンマ区切り)')
+    interval_days = models.PositiveSmallIntegerField(null=True, blank=True, verbose_name='間隔営業日数')
+    start_date = models.DateField(null=True, blank=True, verbose_name='開始基準日')
     is_active = models.BooleanField(default=True, verbose_name='有効')
     note = models.CharField(max_length=200, blank=True, default='', verbose_name='備考')
 
@@ -64,7 +68,7 @@ class SupplierOrderSchedule(models.Model):
         null=True,
         blank=True,
         related_name='schedules',
-        verbose_name='発注パターン',
+        verbose_name='納入パターン',
     )
     lead_time_days = models.PositiveIntegerField(default=0)
     is_enabled = models.BooleanField(default=True)

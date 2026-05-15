@@ -30,6 +30,12 @@ const purchase = [
     meta: { pageTitle: "仕入れ先カレンダ", resource: "purchase" },
   },
   {
+    path: "/purchase/receiving",
+    name: "PurchaseReceiving",
+    component: () => import("@/views/purchase/PurchaseReceiving.vue"),
+    meta: { pageTitle: "仕入れ検収", resource: "purchase.receiving" },
+  },
+  {
     path: "/purchase/actual-input",
     name: "PurchaseActualInput",
     component: () => import("@/views/purchase/PurchaseActualInput.vue"),

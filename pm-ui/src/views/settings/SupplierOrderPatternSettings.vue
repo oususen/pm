@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">発注パターン設定</h1>
+      <h1 class="page-title">納入パターン設定</h1>
       <div class="page-actions">
         <button class="btn-primary" @click="fetchPatterns">更新</button>
         <button class="btn-success" @click="openNew">新規</button>
@@ -41,7 +41,7 @@
 
     <div v-if="showDialog" class="modal-overlay" @click.self="closeDialog">
       <div class="modal-content">
-        <h2>{{ isEdit ? '発注パターン編集' : '発注パターン新規作成' }}</h2>
+        <h2>{{ isEdit ? '納入パターン編集' : '納入パターン新規作成' }}</h2>
         <form @submit.prevent="save">
           <div class="form-group">
             <label>パターンコード *</label>
@@ -60,20 +60,39 @@
             </select>
           </div>
           <div class="form-group" v-if="form.recurrence_type === 'MONTHLY_NTH_DOW'">
-            <label>第N週 *</label>
-            <input v-model.number="form.nth_week" type="number" min="1" max="5" required />
+            <label>第N週 *（複数選択可）</label>
+            <div class="checkbox-row">
+              <label v-for="w in 5" :key="w" class="checkbox-item">
+                <input type="checkbox" :value="w" v-model="form.nth_weeks" />
+                第{{ w }}
+              </label>
+            </div>
           </div>
           <div class="form-group" v-if="['WEEKLY', 'MONTHLY_NTH_DOW'].includes(form.recurrence_type)">
-            <label>曜日 *</label>
-            <select v-model.number="form.day_of_week" required>
-              <option v-for="item in dayOptions" :key="item.value" :value="item.value">
+            <label>曜日 *（複数選択可）</label>
+            <div class="checkbox-row">
+              <label v-for="item in dayOptions" :key="item.value" class="checkbox-item">
+                <input type="checkbox" :value="item.value" v-model="form.days_of_week" />
                 {{ item.label }}
-              </option>
-            </select>
+              </label>
+            </div>
           </div>
           <div class="form-group" v-if="form.recurrence_type === 'MONTHLY_DATE'">
-            <label>日付 *</label>
-            <input v-model.number="form.day_of_month" type="number" min="1" max="31" required />
+            <label>日付 *（複数選択可）</label>
+            <div class="checkbox-row checkbox-row-wrap">
+              <label v-for="d in 31" :key="d" class="checkbox-item">
+                <input type="checkbox" :value="d" v-model="form.days_of_month" />
+                {{ d }}
+              </label>
+            </div>
+          </div>
+          <div class="form-group" v-if="form.recurrence_type === 'EVERY_N_BUSINESS_DAYS'">
+            <label>間隔営業日数 *</label>
+            <input v-model.number="form.interval_days" type="number" min="1" required placeholder="例: 2（2営業日ごと）" />
+          </div>
+          <div class="form-group" v-if="form.recurrence_type === 'EVERY_N_BUSINESS_DAYS'">
+            <label>開始基準日 *</label>
+            <input v-model="form.start_date" type="date" required />
           </div>
           <div class="form-group">
             <label>
@@ -108,6 +127,7 @@ const recurrenceOptions = [
   { value: 'MONTHLY_DATE', label: '毎月日付' },
   { value: 'MONTHLY_NTH_DOW', label: '月の第N週の曜日' },
   { value: 'EVERY_BUSINESS_DAY', label: '毎営業日' },
+  { value: 'EVERY_N_BUSINESS_DAYS', label: 'N営業日ごと' },
 ]
 
 const dayOptions = [
@@ -120,14 +140,22 @@ const dayOptions = [
   { value: 6, label: '日' },
 ]
 
+const parseCsvInts = (value) => {
+  if (!value) return []
+  if (Array.isArray(value)) return value.map(Number)
+  return String(value).split(',').filter(s => s.trim()).map(Number)
+}
+
 const defaultForm = () => ({
   id: null,
   pattern_code: '',
   pattern_name: '',
   recurrence_type: 'WEEKLY',
-  day_of_week: 0,
-  nth_week: 1,
-  day_of_month: 1,
+  days_of_week: [],
+  nth_weeks: [],
+  days_of_month: [],
+  interval_days: 2,
+  start_date: '',
   is_active: true,
   note: '',
 })
@@ -139,11 +167,22 @@ const dayLabel = (value) => {
   return found ? found.label : value
 }
 
+const daysLabel = (csv) => {
+  return parseCsvInts(csv).map(dayLabel).join('・')
+}
+
 const conditionLabel = (row) => {
-  if (row.recurrence_type === 'WEEKLY') return `毎週${dayLabel(row.day_of_week)}`
-  if (row.recurrence_type === 'MONTHLY_DATE') return `毎月${row.day_of_month}日`
-  if (row.recurrence_type === 'MONTHLY_NTH_DOW') return `第${row.nth_week} ${dayLabel(row.day_of_week)}`
+  if (row.recurrence_type === 'WEEKLY') return `毎週 ${daysLabel(row.days_of_week)}`
+  if (row.recurrence_type === 'MONTHLY_DATE') {
+    const days = parseCsvInts(row.days_of_month).join('・')
+    return `毎月 ${days}日`
+  }
+  if (row.recurrence_type === 'MONTHLY_NTH_DOW') {
+    const weeks = parseCsvInts(row.nth_weeks).map(w => `第${w}`).join('・')
+    return `${weeks} ${daysLabel(row.days_of_week)}`
+  }
   if (row.recurrence_type === 'EVERY_BUSINESS_DAY') return '毎営業日'
+  if (row.recurrence_type === 'EVERY_N_BUSINESS_DAYS') return `${row.interval_days}営業日ごと (基準: ${row.start_date})`
   return ''
 }
 
@@ -160,7 +199,12 @@ const openNew = () => {
 
 const openEdit = (row) => {
   isEdit.value = true
-  form.value = { ...row }
+  form.value = {
+    ...row,
+    days_of_week: parseCsvInts(row.days_of_week),
+    nth_weeks: parseCsvInts(row.nth_weeks),
+    days_of_month: parseCsvInts(row.days_of_month),
+  }
   showDialog.value = true
 }
 
@@ -175,17 +219,22 @@ const buildPayload = () => {
     recurrence_type: form.value.recurrence_type,
     is_active: Boolean(form.value.is_active),
     note: form.value.note || '',
-    nth_week: null,
-    day_of_week: null,
-    day_of_month: null,
+    nth_weeks: '',
+    days_of_week: '',
+    days_of_month: '',
   }
-  if (form.value.recurrence_type === 'WEEKLY') {
-    payload.day_of_week = Number(form.value.day_of_week)
-  } else if (form.value.recurrence_type === 'MONTHLY_DATE') {
-    payload.day_of_month = Number(form.value.day_of_month)
-  } else if (form.value.recurrence_type === 'MONTHLY_NTH_DOW') {
-    payload.nth_week = Number(form.value.nth_week)
-    payload.day_of_week = Number(form.value.day_of_week)
+  if (['WEEKLY', 'MONTHLY_NTH_DOW'].includes(form.value.recurrence_type)) {
+    payload.days_of_week = [...form.value.days_of_week].sort((a, b) => a - b).join(',')
+  }
+  if (form.value.recurrence_type === 'MONTHLY_DATE') {
+    payload.days_of_month = [...form.value.days_of_month].sort((a, b) => a - b).join(',')
+  }
+  if (form.value.recurrence_type === 'MONTHLY_NTH_DOW') {
+    payload.nth_weeks = [...form.value.nth_weeks].sort((a, b) => a - b).join(',')
+  }
+  if (form.value.recurrence_type === 'EVERY_N_BUSINESS_DAYS') {
+    payload.interval_days = Number(form.value.interval_days)
+    payload.start_date = form.value.start_date
   }
   return payload
 }
@@ -241,5 +290,20 @@ onMounted(fetchPatterns)
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+.checkbox-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.checkbox-row-wrap {
+  gap: 6px 12px;
+}
+.checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  white-space: nowrap;
 }
 </style>

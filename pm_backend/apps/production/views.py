@@ -2128,7 +2128,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         期待payload: { supplier_id or line_id, start_date?, end_date? }
         """
+        import time as _time
         from collections import defaultdict
+        _t0 = _time.perf_counter()
 
         supplier_id = request.data.get('supplier_id') or request.data.get('line_id')
         if not supplier_id:
@@ -2181,13 +2183,16 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         end_dt = _parse_optional_date(end_date)
         routing_source_q = build_effective_routing_range_q(start_dt, end_dt, prefix='routing__')
 
-        bom_items = BOMItem.objects.filter(
+        _t1 = _time.perf_counter()
+        logger.info('[pickup_purchase] setup: %.3fs', _t1 - _t0)
+
+        bom_items = list(BOMItem.objects.filter(
             sourcing_type__in=['BUY', 'SUBCON'],
             supplier_id=supplier_id,
             bom__is_active=True,
-        ).select_related('bom', 'bom__parent_product')
+        ).select_related('bom', 'bom__parent_product'))
         if requested_product_ids:
-            bom_items = bom_items.filter(child_product_id__in=requested_product_ids)
+            bom_items = [item for item in bom_items if item.child_product_id in requested_product_ids]
 
         parent_to_children = defaultdict(list)
         parent_ids = set()
@@ -2243,6 +2248,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             relation_keys.add(key)
             parent_to_children[source_parent_id].append((child_id, qty, lead_time_days))
 
+        _t2 = _time.perf_counter()
+        logger.info('[pickup_purchase] bom+routing scan: %.3fs (parents=%d, children=%d)', _t2 - _t1, len(parent_ids), len(child_ids))
+
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
             calendar_code='daiso'
         ).values_list('id', flat=True).first()
@@ -2260,17 +2268,18 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             for cal in cal_qs:
                 calendar_day_cache[cal.target_date] = cal.is_working_day
 
+        calendar_has_data = bool(calendar_day_cache)
+        if calendar_id and not calendar_has_data:
+            calendar_has_data = CalendarDay.objects.filter(calendar_id=calendar_id).exists()
+
         def is_working_day(check_date):
-            if calendar_id:
+            if calendar_id and calendar_has_data:
                 if check_date in calendar_day_cache:
                     return calendar_day_cache[check_date]
                 cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=check_date).first()
-                # 仕入先カレンダ運用:
-                # カレンダが設定されている場合、未登録日は「休み」とみなす。
                 is_work = cal.is_working_day if cal is not None else False
                 calendar_day_cache[check_date] = is_work
                 return is_work
-            # カレンダ未設定時は週末判定（月〜金を稼働日）を使う
             return check_date.weekday() < 5
 
         # 親計画の検索範囲を end_dt の「翌出勤日」まで延長する。
@@ -2309,6 +2318,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     Q(order_qty__gt=0, line__line_type='OUTSOURCE')
                 ).exclude(product__is_final_product=True)
             )
+
+        _t3 = _time.perf_counter()
+        logger.info('[pickup_purchase] calendar+parent_orders: %.3fs (parent_orders=%d)', _t3 - _t2, len(parent_orders))
 
         # 最終品の親数量は LineDemand を基準にする（社内ラインpickupと同じ）
         final_parent_ids = set(
@@ -2392,26 +2404,26 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 gantt_product_ids.add(final_id)
 
         def shift_business_days(target_date, days):
-            """
-            稼働日ベースで日付をシフトする（カレンダが無い場合は週末判定）。
-            days > 0 なら過去方向、days < 0 なら未来方向。
-            """
+            MAX_SCAN = 365
             if not days:
                 if is_working_day(target_date):
                     return target_date
                 current = target_date
-                while True:
+                for _ in range(MAX_SCAN):
                     current = current - timedelta(days=1)
                     if is_working_day(current):
                         return current
+                return target_date
 
             step = -1 if days > 0 else 1
             remaining = abs(int(days))
             current = target_date
-            while remaining > 0:
+            for _ in range(remaining * 3 + MAX_SCAN):
                 current = current + timedelta(days=step)
                 if is_working_day(current):
                     remaining -= 1
+                    if remaining <= 0:
+                        break
             return current
 
         demand_map = defaultdict(Decimal)
@@ -2473,6 +2485,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         if requested_product_ids:
             target_product_ids = set(requested_product_ids)
 
+        _t4 = _time.perf_counter()
+        logger.info('[pickup_purchase] demand calc: %.3fs (demand_map=%d, target_products=%d)', _t4 - _t3, len(demand_map), len(target_product_ids))
+
         existing_qs = LineBacklog.objects.filter(
             line_id=line_id,
             process_id=process_id,
@@ -2485,35 +2500,53 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         existing_map = {(obj.product_id, obj.plan_date): obj for obj in existing_qs}
 
+        _t5 = _time.perf_counter()
+        logger.info('[pickup_purchase] existing query: %.3fs (existing=%d)', _t5 - _t4, len(existing_map))
+
         created = 0
         updated = 0
+        to_create = []
+        to_update = []
 
         for (child_id, plan_date), demand in demand_map.items():
             qty_val = int(demand)
-            obj, is_created = LineBacklog.objects.update_or_create(
-                plan_date=plan_date,
-                process_id=process_id,
-                product_id=child_id,
-                line_id=line_id,
-                sequence_no=0,
-                defaults={
-                    'order_qty': qty_val,
-                    'demand_qty_plan': qty_val,
-                    'sequence_no': 0,
-                }
-            )
-            if is_created:
-                created += 1
+            existing_obj = existing_map.pop((child_id, plan_date), None)
+            if existing_obj:
+                if (existing_obj.order_qty or 0) != qty_val or (existing_obj.demand_qty_plan or 0) != qty_val:
+                    existing_obj.order_qty = qty_val
+                    existing_obj.demand_qty_plan = qty_val
+                    to_update.append(existing_obj)
+                    updated += 1
             else:
-                updated += 1
-            existing_map.pop((child_id, plan_date), None)
+                to_create.append(LineBacklog(
+                    plan_date=plan_date,
+                    process_id=process_id,
+                    product_id=child_id,
+                    line_id=line_id,
+                    sequence_no=0,
+                    order_qty=qty_val,
+                    demand_qty_plan=qty_val,
+                ))
+                created += 1
 
+        zero_update = []
         for obj in existing_map.values():
             if (obj.order_qty or 0) != 0 or (obj.demand_qty_plan or 0) != 0:
                 obj.order_qty = 0
                 obj.demand_qty_plan = 0
-                obj.save(update_fields=['order_qty', 'demand_qty_plan', 'updated_at'])
+                zero_update.append(obj)
                 updated += 1
+
+        if to_create:
+            LineBacklog.objects.bulk_create(to_create, batch_size=500, ignore_conflicts=True)
+        if to_update:
+            LineBacklog.objects.bulk_update(to_update, ['order_qty', 'demand_qty_plan'], batch_size=500)
+        if zero_update:
+            LineBacklog.objects.bulk_update(zero_update, ['order_qty', 'demand_qty_plan'], batch_size=500)
+
+        _t6 = _time.perf_counter()
+        logger.info('[pickup_purchase] DB write: %.3fs (created=%d, updated=%d, zeroed=%d)', _t6 - _t5, len(to_create), len(to_update), len(zero_update))
+        logger.info('[pickup_purchase] TOTAL: %.3fs', _t6 - _t0)
 
         return Response({'created': created, 'updated': updated, 'items': len(demand_map), 'line_id': line_id, 'process_id': process_id})
 
