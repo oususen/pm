@@ -45,6 +45,7 @@ export const manualSections = [
     title: "仕入れ管理",
     items: [
       { title: "発注提案システム", path: "仕入れ/発注提案システム.md" },
+      { title: "仕入れ検収", path: "仕入れ/仕入れ検収.md" },
       { title: "仕入れ在庫/残量一覧", path: "生産/仕入れ在庫残量一覧.md" },
     ],
   },

@@ -667,9 +667,9 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
                 id_list = [int(i) for i in ids_param.split(',') if i.strip()]
             except ValueError:
                 id_list = []
-            qs = self.get_queryset().filter(id__in=id_list).order_by('work_date', 'applicant_id')
+            qs = self.get_queryset().filter(id__in=id_list).order_by('applicant_sort_code', 'work_date', 'created_at', 'id')
         else:
-            qs = self.filter_queryset(self.get_queryset()).order_by('work_date', 'applicant_id')
+            qs = self.filter_queryset(self.get_queryset()).order_by('applicant_sort_code', 'work_date', 'created_at', 'id')
 
         filters = {
             'team_name': request.query_params.get('team_name', ''),
@@ -698,7 +698,7 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
             approval_logs__status='pending',
         ).select_related('applicant', 'created_by', 'team').prefetch_related(
             'approval_logs__approver'
-        ).distinct().order_by('work_date', 'created_at')
+        ).distinct().order_by('applicant__username', 'work_date', 'created_at', 'id')
 
         serializer = self.get_serializer(apps, many=True)
         return Response(serializer.data)
