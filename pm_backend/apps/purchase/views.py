@@ -1723,7 +1723,7 @@ class PurchaseReceivingView(APIView):
                 'product_id': product.id,
                 'record_type': 'PRODUCTION',
                 'qty': qty,
-                'operator_name': '',
+                'operator_name': getattr(request.user, 'username', '') if request.user and request.user.is_authenticated else '',
                 'remarks': item.get('note', ''),
                 'event_data': {
                     'source': 'PURCHASE_RECEIVING',
@@ -1791,3 +1791,44 @@ class PurchaseReceivingView(APIView):
             'detail': f'{len(created_ids)}件の検収を確定しました',
             'created_ids': created_ids,
         }, status=status.HTTP_201_CREATED)
+
+
+class PurchaseReceivingHistoryView(APIView):
+    def get(self, request):
+        supplier_id = request.query_params.get('supplier_id')
+        target_date_str = request.query_params.get('target_date')
+        if not supplier_id:
+            return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        supplier = Supplier.objects.filter(id=int(supplier_id)).first()
+        if not supplier:
+            return Response({'records': []})
+
+        line = Line.objects.filter(line_code=supplier.supplier_code).first()
+        line_id = line.id if line else None
+
+        qs = ProcessRealtimeRecord.objects.filter(
+            record_type='PRODUCTION',
+            event_data__source__in=['PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING'],
+        ).order_by('-timestamp')
+
+        if line_id:
+            qs = qs.filter(event_data__line_id=line_id)
+
+        if target_date_str:
+            target = date.fromisoformat(target_date_str)
+            qs = qs.filter(timestamp__date=target)
+
+        records = []
+        for r in qs[:100]:
+            records.append({
+                'id': r.id,
+                'timestamp': r.timestamp.strftime('%Y-%m-%d %H:%M') if r.timestamp else '',
+                'product_code': r.product_code or '',
+                'product_name': r.product_name or '',
+                'qty': int(r.qty or 0),
+                'operator_name': r.operator_name or '',
+                'remarks': r.remarks or '',
+            })
+
+        return Response({'records': records})

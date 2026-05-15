@@ -11,6 +11,8 @@
         </select>
         <input type="date" v-model="targetDate" @change="loadReceivingData" />
         <button class="btn-primary" @click="loadReceivingData" :disabled="!selectedSupplier">検収データ取得</button>
+        <button v-if="rows.length" class="btn-excel" @click="exportExcel">Excel出力</button>
+        <button v-if="selectedSupplier" class="btn-history" @click="toggleHistory">検収履歴</button>
       </div>
     </div>
 
@@ -21,6 +23,7 @@
         <span v-if="isDeliveryDay" class="delivery-badge yes">本日は納入日</span>
         <span v-else class="delivery-badge no">本日は納入日ではありません</span>
         <span v-if="nextDeliveryDate" class="next-delivery">次回納入日: {{ nextDeliveryDate }}</span>
+        <span v-if="rows.length" class="summary-count">{{ filteredRows.length }} / {{ rows.length }}件 / 実績{{ actualCount }}件</span>
       </div>
 
       <div v-if="rows.length" class="filter-bar">
@@ -46,12 +49,17 @@
           <button :class="['btn-filter', { active: filterHeld === 'no' }]" @click="filterHeld = 'no'">無</button>
         </div>
         <div class="btn-group">
+          <span class="filter-label">差異:</span>
+          <button :class="['btn-filter', { active: filterDiff === '' }]" @click="filterDiff = ''">全</button>
+          <button :class="['btn-filter', { active: filterDiff === 'yes' }]" @click="filterDiff = 'yes'">有</button>
+          <button :class="['btn-filter', { active: filterDiff === 'no' }]" @click="filterDiff = 'no'">無</button>
+        </div>
+        <div class="btn-group">
           <span class="filter-label">実績:</span>
           <button :class="['btn-filter', { active: filterActual === '' }]" @click="filterActual = ''">全</button>
           <button :class="['btn-filter', { active: filterActual === 'yes' }]" @click="filterActual = 'yes'">有</button>
           <button :class="['btn-filter', { active: filterActual === 'no' }]" @click="filterActual = 'no'">無</button>
         </div>
-        <span class="filter-count">{{ filteredRows.length }} / {{ rows.length }} 件</span>
       </div>
 
       <div v-if="loading" class="no-data">読み込み中...</div>
@@ -68,11 +76,12 @@
               <div class="dow">{{ formatDateParts(d).dow }}</div>
             </th>
             <th class="num col-recv">実数</th>
+            <th class="num col-diff">差異</th>
             <th class="col-note">備考</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in filteredRows" :key="row.product_id" :class="{ 'row-held': row.held }">
+          <tr v-for="row in filteredRows" :key="row.product_id" :class="{ 'row-held': row.held, 'row-done': !row.held && row.actual_qty > 0 && row.actual_qty === row.expected_qty }">
             <td class="col-code">
               {{ row.product_code }}
               <button class="btn-hold" :class="{ active: row.held }" @click="toggleHold(row)">数変更</button>
@@ -84,6 +93,7 @@
             <td class="num col-recv">
               <input type="number" v-model.number="row.received_qty" min="0" class="input-qty" />
             </td>
+            <td class="num col-diff" :class="{ 'diff-over': row.expected_qty - (row.actual_qty || 0) < 0, 'diff-short': row.expected_qty - (row.actual_qty || 0) > 0 }">{{ row.actual_qty ? row.expected_qty - row.actual_qty : '' }}</td>
             <td class="col-note">
               <input v-model="row.note" class="input-note" />
             </td>
@@ -95,7 +105,36 @@
       </div>
 
       <div v-if="filteredRows.length" class="form-actions">
-        <button class="btn-success" @click="saveReceiving" :disabled="saving">検収確定</button>
+        <button v-if="filterHeld !== 'yes'" class="btn-success" @click="saveReceiving" :disabled="saving">検収確定</button>
+        <button v-if="filterHeld === 'yes'" class="btn-held-confirm" @click="saveHeldReceiving" :disabled="saving">数変更検収確定</button>
+      </div>
+
+      <div v-if="showHistory" class="history-panel">
+        <h3 class="history-title">検収履歴</h3>
+        <div v-if="historyLoading" class="no-data">読み込み中...</div>
+        <table v-else-if="historyRows.length" class="data-table">
+          <thead>
+            <tr>
+              <th>日時</th>
+              <th>品番</th>
+              <th>品名</th>
+              <th class="num">数量</th>
+              <th>検収者</th>
+              <th>備考</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="h in historyRows" :key="h.id">
+              <td>{{ h.timestamp }}</td>
+              <td>{{ h.product_code }}</td>
+              <td>{{ h.product_name }}</td>
+              <td class="num">{{ h.qty }}</td>
+              <td>{{ h.operator_name }}</td>
+              <td>{{ h.remarks }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-else class="no-data">検収履歴がありません</div>
       </div>
     </div>
   </div>
@@ -103,6 +142,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import * as XLSX from 'xlsx'
 import api from '@/api/client'
 
 const suppliers = ref([])
@@ -121,6 +161,7 @@ const filterNextProcess = ref('')
 const filterActual = ref('')
 const filterProductCode = ref('')
 const filterHeld = ref('')
+const filterDiff = ref('')
 
 const destOptions = computed(() => {
   const set = new Set()
@@ -132,6 +173,7 @@ const nextProcessOptions = computed(() => {
   for (const r of rows.value) if (r.next_process_name) set.add(r.next_process_name)
   return [...set].sort()
 })
+const actualCount = computed(() => rows.value.filter((r) => r.actual_qty).length)
 const filteredRows = computed(() => {
   return rows.value.filter((r) => {
     if (filterDest.value && r.transfer_destination !== filterDest.value) return false
@@ -139,6 +181,8 @@ const filteredRows = computed(() => {
     if (filterProductCode.value && !r.product_code.toUpperCase().includes(filterProductCode.value.toUpperCase())) return false
     if (filterHeld.value === 'yes' && !r.held) return false
     if (filterHeld.value === 'no' && r.held) return false
+    if (filterDiff.value === 'yes' && r.actual_qty && r.actual_qty === r.expected_qty) return false
+    if (filterDiff.value === 'no' && (!r.actual_qty || r.actual_qty !== r.expected_qty)) return false
     if (filterActual.value === 'yes' && !r.actual_qty) return false
     if (filterActual.value === 'no' && r.actual_qty) return false
     return true
@@ -168,6 +212,7 @@ const onSupplierChange = () => {
   filterDest.value = ''
   filterNextProcess.value = ''
   filterHeld.value = ''
+  filterDiff.value = ''
   filterActual.value = ''
   if (selectedSupplier.value) loadReceivingData()
 }
@@ -212,6 +257,12 @@ const loadReceivingData = async () => {
 
 const saveReceiving = async () => {
   if (!rows.value.length) return
+  const targets = filteredRows.value.filter((r) => !r.held)
+  const withActual = targets.filter((r) => r.actual_qty)
+  if (withActual.length) {
+    const codes = withActual.map((r) => r.product_code).join(', ')
+    if (!confirm(`実績がある製品が${withActual.length}件あります:\n${codes}\n\n検収を続行しますか？`)) return
+  }
   saving.value = true
   try {
     await api.client.post('/purchase-receiving/', {
@@ -248,11 +299,78 @@ const loadHeldState = () => {
   try { return JSON.parse(localStorage.getItem(heldStorageKey()) || '{}') } catch { return {} }
 }
 
+const hasHeldRows = computed(() => rows.value.some((r) => r.held))
+
+const saveHeldReceiving = async () => {
+  const heldItems = filteredRows.value.filter((r) => r.held)
+  saving.value = true
+  try {
+    await api.client.post('/purchase-receiving/', {
+      supplier_id: selectedSupplier.value,
+      target_date: targetDate.value,
+      items: heldItems.map((r) => ({
+        product_id: r.product_id,
+        expected_qty: r.expected_qty,
+        received_qty: r.received_qty,
+        note: r.note || '',
+      })),
+    })
+    for (const r of heldItems) r.held = false
+    saveHeldState()
+    alert('数変更検収を確定しました。')
+    await loadReceivingData()
+  } catch (e) {
+    console.error('数変更検収確定エラー', e)
+    alert('数変更検収の確定に失敗しました。')
+  } finally {
+    saving.value = false
+  }
+}
+
+const showHistory = ref(false)
+const historyLoading = ref(false)
+const historyRows = ref([])
+
+const toggleHistory = async () => {
+  showHistory.value = !showHistory.value
+  if (!showHistory.value) return
+  historyLoading.value = true
+  try {
+    const res = await api.client.get('/purchase-receiving/history/', {
+      params: { supplier_id: selectedSupplier.value, target_date: targetDate.value },
+    })
+    historyRows.value = res.data.records || []
+  } catch (e) {
+    console.error('検収履歴取得エラー', e)
+  } finally {
+    historyLoading.value = false
+  }
+}
+
 const toggleHold = (row) => {
   row.held = !row.held
   if (row.held) row.received_qty = 0
   else row.received_qty = row.expected_qty
   saveHeldState()
+}
+
+const exportExcel = () => {
+  const header = ['品番', '品名', '予定', '実績', ...coverageDates.value.map((d) => { const p = formatDateParts(d); return `${p.date}(${p.dow})` }), '実数', '備考']
+  const data = filteredRows.value.map((r) => [
+    r.product_code,
+    r.product_name,
+    r.expected_qty,
+    r.actual_qty || '',
+    ...coverageDates.value.map((d) => r.daily[d] || ''),
+    r.received_qty,
+    r.note || '',
+  ])
+  const ws = XLSX.utils.aoa_to_sheet([header, ...data])
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, '仕入れ検収')
+  const supplier = suppliers.value.find((s) => s.id === selectedSupplier.value)
+  const name = supplier ? supplier.supplier_code : ''
+  XLSX.writeFile(wb, `仕入れ検収_${name}_${targetDate.value}.xlsx`)
 }
 
 onMounted(fetchSuppliers)
@@ -280,6 +398,7 @@ onMounted(fetchSuppliers)
 .delivery-badge.yes { background: #dcfce7; color: #166534; }
 .delivery-badge.no { background: #fef3c7; color: #92400e; }
 .next-delivery { color: #6366f1; font-weight: 500; }
+.summary-count { margin-left: auto; color: #334155; font-weight: 600; }
 .filter-bar {
   display: flex;
   align-items: center;
@@ -325,6 +444,11 @@ onMounted(fetchSuppliers)
 .col-name { min-width: 120px; }
 .col-total { min-width: 70px; font-weight: 700; }
 .col-actual { min-width: 60px; color: #2563eb; font-weight: 600; }
+.col-diff { min-width: 50px; }
+.diff-short { color: #dc2626; font-weight: 700; }
+.diff-over { color: #2563eb; font-weight: 700; }
+.row-done { background: #f1f5f9; }
+.row-done td { color: #94a3b8; }
 .col-date { min-width: 44px; color: #64748b; font-size: 12px; text-align: center; white-space: nowrap; }
 .col-date .dow { font-size: 11px; color: #94a3b8; }
 .col-recv { min-width: 80px; }
@@ -347,5 +471,42 @@ onMounted(fetchSuppliers)
   margin-top: 12px;
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
+}
+.btn-held-confirm {
+  padding: 6px 16px;
+  background: #f59e0b;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-held-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-history {
+  padding: 6px 16px;
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.history-panel {
+  margin-top: 16px;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+.history-title { margin: 0 0 8px; font-size: 14px; color: #334155; }
+.btn-excel {
+  padding: 6px 16px;
+  background: #059669;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
 }
 </style>
