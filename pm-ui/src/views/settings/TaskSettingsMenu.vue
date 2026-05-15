@@ -55,12 +55,6 @@ const allTiles = [
     resource: 'settings.scheduled_tasks',
   },
   {
-    to: '/settings/supplier-order-schedule',
-    title: '仕入れ先スケジュール設定',
-    desc: '仕入先ごとの納入タイミングを設定します。',
-    resource: 'settings.supplier_order_schedule',
-  },
-  {
     to: '/settings/purchase-order-approval',
     title: '承認者設定',
     desc: '発注提案書の承認レベル別ユーザーを設定します。',
