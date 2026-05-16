@@ -182,7 +182,7 @@ const normalizeConfig = (row) => ({
 })
 
 const fetchUsers = async () => {
-  const response = await api.accounts.getUsers({ page_size: 1000, is_active: true })
+  const response = await api.accounts.getUsers({ page_size: 1000 })
   users.value = response.data.results || response.data || []
 }
 

@@ -685,7 +685,7 @@
                   <td>{{ item.parent_product_code }} - {{ item.parent_product_name }}</td>
                   <td>{{ getCategoryLabel(item.category) }}</td>
                   <td>{{ item.quantity }}</td>
-                  <td>{{ getSourcingTypeLabel(item.sourcing_type) }}</td>
+                  <td>{{ getSourcingTypeLabel(getWhereUsedDisplaySourcingType(item)) }}</td>
                   <td>{{ formatWhereUsedDestination(item) }}</td>
                   <td>{{ formatWhereUsedProcess(item) }}</td>
                   <td>{{ formatWhereUsedSelfLt(item) }}</td>
@@ -701,7 +701,7 @@
                     </td>
                     <td>{{ getCategoryLabel(child.category) }}</td>
                     <td>{{ child.quantity }}</td>
-                    <td>{{ getSourcingTypeLabel(child.sourcing_type) }}</td>
+                    <td>{{ getSourcingTypeLabel(getWhereUsedDisplaySourcingType(child)) }}</td>
                     <td>{{ formatWhereUsedDestination(child) }}</td>
                     <td>{{ formatWhereUsedProcess(child) }}</td>
                     <td>{{ formatWhereUsedSelfLt(child) }}</td>
@@ -1582,8 +1582,18 @@ const findProcessById = (processId) => {
   return processes.value.find((process) => `${process.id}` === `${processId}`) || null
 }
 
+const getWhereUsedDisplaySourcingType = (item) => {
+  if (!item) return ''
+  const lineType = item.parent_line_type || item.line_type || ''
+  if (lineType === 'PURCHASE') return 'BUY'
+  if (lineType === 'OUTSOURCE') return 'SUBCON'
+  if (lineType) return 'MAKE'
+  return item.sourcing_type
+}
+
 const formatWhereUsedDestination = (item) => {
   if (!item) return ''
+  const sourcingType = getWhereUsedDisplaySourcingType(item)
   const parentProduct = findProductById(item.parent_product_id)
   const parentLineId = item.parent_line_id || parentProduct?.line || null
   const parentLineObj = findLineById(parentLineId)
@@ -1595,7 +1605,7 @@ const formatWhereUsedDestination = (item) => {
     return supplierLabel || parentLineLabel || '-'
   }
 
-  switch (item.sourcing_type) {
+  switch (sourcingType) {
     case 'BUY':
       return supplierLabel || parentLineLabel || '-'
     case 'SUBCON':
@@ -2072,7 +2082,7 @@ const exportWhereUsedCsv = () => {
       escCsv(`${prefix}${item.parent_product_code} - ${item.parent_product_name}`),
       escCsv(getCategoryLabel(item.category)),
       escCsv(item.quantity),
-      escCsv(getSourcingTypeLabel(item.sourcing_type)),
+      escCsv(getSourcingTypeLabel(getWhereUsedDisplaySourcingType(item))),
       escCsv(formatWhereUsedDestination(item)),
       escCsv(formatWhereUsedProcess(item)),
       escCsv(formatWhereUsedSelfLt(item)),

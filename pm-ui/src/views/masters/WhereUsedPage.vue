@@ -64,7 +64,7 @@
                 <td>{{ item.parent_product_code }} - {{ item.parent_product_name }}</td>
                 <td>{{ getCategoryLabel(item.category) }}</td>
                 <td>{{ item.quantity }}</td>
-                <td>{{ getSourcingTypeLabel(item.sourcing_type) }}</td>
+                <td>{{ getSourcingTypeLabel(getWhereUsedDisplaySourcingType(item)) }}</td>
                 <td>{{ formatDestination(item) }}</td>
                 <td>{{ formatProcess(item) }}</td>
                 <td>{{ item.parent_self_lt_days ?? '-' }}</td>
@@ -79,7 +79,7 @@
                   </td>
                   <td>{{ getCategoryLabel(child.category) }}</td>
                   <td>{{ child.quantity }}</td>
-                  <td>{{ getSourcingTypeLabel(child.sourcing_type) }}</td>
+                  <td>{{ getSourcingTypeLabel(getWhereUsedDisplaySourcingType(child)) }}</td>
                   <td>{{ formatDestination(child) }}</td>
                   <td>{{ formatProcess(child) }}</td>
                   <td>{{ child.parent_self_lt_days ?? '-' }}</td>
@@ -136,6 +136,14 @@ const sourcingTypeMap = {
 }
 const getCategoryLabel = (value) => categoryMap[value] || value || '-'
 const getSourcingTypeLabel = (value) => sourcingTypeMap[value] || value
+const getWhereUsedDisplaySourcingType = (item) => {
+  if (!item) return ''
+  const lineType = item.parent_line_type || item.line_type || ''
+  if (lineType === 'PURCHASE') return 'BUY'
+  if (lineType === 'OUTSOURCE') return 'SUBCON'
+  if (lineType) return 'MAKE'
+  return item.sourcing_type
+}
 
 const filteredProducts = computed(() => {
   const keyword = productFilter.value.trim().toLowerCase()
@@ -152,11 +160,12 @@ const formatCodeName = (code, name) => {
 
 const formatDestination = (item) => {
   if (!item) return ''
+  const sourcingType = getWhereUsedDisplaySourcingType(item)
   const lineLabel = formatCodeName(item.parent_line_code || item.line_code, item.parent_line_name || item.line_name)
   const supplierLabel = formatCodeName(item.supplier_code, item.supplier_name)
   const lineType = item.parent_line_type || item.line_type || ''
   if (lineType === 'OUTSOURCE') return supplierLabel || lineLabel || '-'
-  switch (item.sourcing_type) {
+  switch (sourcingType) {
     case 'BUY': return supplierLabel || lineLabel || '-'
     case 'SUBCON': return lineLabel || supplierLabel || '-'
     default: return lineLabel || supplierLabel || '-'
@@ -269,7 +278,7 @@ const exportCsv = () => {
       escCsv(`${prefix}${item.parent_product_code} - ${item.parent_product_name}`),
       escCsv(getCategoryLabel(item.category)),
       escCsv(item.quantity),
-      escCsv(getSourcingTypeLabel(item.sourcing_type)),
+      escCsv(getSourcingTypeLabel(getWhereUsedDisplaySourcingType(item))),
       escCsv(formatDestination(item)),
       escCsv(formatProcess(item)),
       escCsv(item.parent_self_lt_days ?? '-'),
