@@ -68,6 +68,8 @@ class OutsourceSplitSerializer(serializers.ModelSerializer):
     auto_material_supplied = serializers.SerializerMethodField()
     auto_process_completed = serializers.SerializerMethodField()
     auto_shipped = serializers.SerializerMethodField()
+    material_ordered_count = serializers.SerializerMethodField()
+    material_total_count = serializers.SerializerMethodField()
 
     class Meta:
         model = OutsourceSplit
@@ -92,6 +94,12 @@ class OutsourceSplitSerializer(serializers.ModelSerializer):
     def get_auto_shipped(self, obj):
         shipped = obj.shipments.aggregate(total=models.Sum('qty'))['total'] or 0
         return shipped >= obj.qty
+
+    def get_material_ordered_count(self, obj):
+        return obj.material_requirements.filter(ordered=True).count()
+
+    def get_material_total_count(self, obj):
+        return obj.material_requirements.count()
 
 
 class MaterialRequirementSerializer(serializers.ModelSerializer):

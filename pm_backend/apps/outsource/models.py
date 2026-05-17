@@ -180,6 +180,8 @@ class MaterialRequirement(models.Model):
     supplier_name = models.CharField('調達先', max_length=100, blank=True, default='')
     required_qty = models.DecimalField('必要数量', max_digits=12, decimal_places=4)
     supply_date = models.DateField('支給予定日')
+    ordered = models.BooleanField('発注済', default=False)
+    ordered_at = models.DateField('発注日', null=True, blank=True)
     supplied_qty = models.DecimalField('支給済数量', max_digits=12, decimal_places=4, default=0)
     supplied = models.BooleanField('支給完了', default=False)
     created_at = models.DateTimeField(auto_now_add=True)

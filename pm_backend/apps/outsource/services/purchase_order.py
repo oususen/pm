@@ -8,7 +8,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from outsource.models import MaterialRequirement
 
 
-def generate_purchase_orders(material_ids=None, unsupplied_only=True):
+def generate_purchase_orders(material_ids=None, unsupplied_only=True, unordered_only=False):
     """
     材料所要量からメーカ別注文書Excelを生成する。
     メーカ（調達先）ごとにシートを分けて出力。
@@ -16,7 +16,9 @@ def generate_purchase_orders(material_ids=None, unsupplied_only=True):
     qs = MaterialRequirement.objects.select_related('split', 'split__order')
     if material_ids:
         qs = qs.filter(id__in=material_ids)
-    if unsupplied_only:
+    if unordered_only:
+        qs = qs.filter(ordered=False)
+    elif unsupplied_only:
         qs = qs.filter(supplied=False)
     qs = qs.order_by('supplier_name', 'supply_date', 'material_code')
 
@@ -57,7 +59,7 @@ def generate_purchase_orders(material_ids=None, unsupplied_only=True):
         ws['A3'].font = Font(bold=True, size=12)
 
         ws['A4'] = f'発行日: {date.today().strftime("%Y/%m/%d")}'
-        ws['A5'] = f'発行元: ダイソー工業株式会社'
+        ws['A5'] = f'発行元: ダイソウ工業株式会社'
 
         # 材料を材料コード+支給日で集約
         agg = defaultdict(lambda: {
@@ -122,7 +124,7 @@ def generate_purchase_orders(material_ids=None, unsupplied_only=True):
         # 備考欄
         note_row = total_row + 2
         ws.cell(row=note_row, column=1, value='備考:')
-        ws.cell(row=note_row + 1, column=1, value='・無償支給材料として外作先へ支給いたします。')
+        ws.cell(row=note_row + 1, column=1, value='・納入希望日は材料コードごとに異なる場合があります。')
 
         # 列幅
         widths = [5, 18, 28, 10, 14, 30]

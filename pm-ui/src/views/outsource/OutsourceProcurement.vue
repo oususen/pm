@@ -1,12 +1,12 @@
 <template>
   <div class="page-container">
-    <h2 class="page-title">材料手配</h2>
+    <h2 class="page-title">材料手配（将来承認タスク実装予定）</h2>
 
     <div class="toolbar">
-      <select v-model="filterSupplied" @change="fetchMaterials" class="filter-select">
-        <option value="false">未支給のみ</option>
+      <select v-model="filterOrdered" @change="fetchMaterials" class="filter-select">
+        <option value="false">未発注のみ</option>
         <option value="">全て</option>
-        <option value="true">支給済のみ</option>
+        <option value="true">発注済のみ</option>
       </select>
       <button class="btn-month" @click="shiftMonth(-1)">◀ 前月</button>
       <label class="filter-label">塗装日:</label>
@@ -16,15 +16,25 @@
       <button class="btn-month" @click="shiftMonth(1)">次月 ▶</button>
       <div class="summary-badges" v-if="materials.length">
         <span class="badge badge-total">全{{ materials.length }}件</span>
-        <span class="badge badge-pending">未支給: {{ pendingCount }}件</span>
+        <span class="badge badge-pending">未発注: {{ pendingCount }}件</span>
         <span class="badge badge-overdue" v-if="overdueCount">期限超過: {{ overdueCount }}件</span>
       </div>
       <button
-        v-if="hasUnsupplied"
+        v-if="hasUnordered"
         class="btn-primary btn-export"
         :disabled="exporting"
         @click="exportPurchaseOrder"
       >{{ exporting ? '出力中...' : '注文書Excel出力' }}</button>
+    </div>
+
+    <!-- 選択アクションバー -->
+    <div v-if="selectedIds.length" class="action-bar">
+      <span class="action-count">{{ selectedIds.length }}件選択中</span>
+      <button class="btn-action btn-action-order" @click="orderSelected">選択を発注済にする</button>
+      <button class="btn-action btn-action-export" :disabled="exporting" @click="exportSelected">
+        {{ exporting ? '出力中...' : '選択分の注文書Excel出力' }}
+      </button>
+      <button class="btn-action btn-action-clear" @click="selectedIds = []">選択解除</button>
     </div>
 
     <!-- メーカ別表示 -->
@@ -32,12 +42,16 @@
       <div class="group-header">
         <span class="group-title">{{ group.supplier }}</span>
         <span class="group-count">{{ group.items.length }}品目 / 合計 {{ formatQty(group.totalQty) }}</span>
-        <button v-if="group.items.some(m => !m.supplied)" class="btn-supply-all" @click="supplyAll(group.items)">一括支給済</button>
+        <button v-if="group.items.some(m => !m.ordered)" class="btn-supply-all" @click="orderAll(group.items)">一括発注済</button>
       </div>
       <table class="data-table">
-        <thead><tr><th>支給予定日</th><th>材料コード</th><th>材料名称</th><th>必要数量</th><th>案件番号</th><th>品目名称</th><th>加工日</th><th>状態</th><th>操作</th></tr></thead>
+        <thead><tr>
+          <th class="col-check"><input type="checkbox" @change="toggleGroup(group, $event)" :checked="isGroupAllSelected(group)" /></th>
+          <th>支給予定日</th><th>材料コード</th><th>材料名称</th><th>必要数量</th><th>案件番号</th><th>品目名称</th><th>加工日</th><th>状態</th><th>操作</th>
+        </tr></thead>
         <tbody>
           <tr v-for="m in group.items" :key="m.id" :class="rowClass(m)">
+            <td class="text-center"><input type="checkbox" :value="m.id" v-model="selectedIds" /></td>
             <td :class="{ 'text-danger': isOverdue(m) }">{{ m.supply_date }}</td>
             <td>{{ m.material_code }}</td>
             <td>{{ m.material_name }}</td>
@@ -47,12 +61,12 @@
             <td>{{ m.process_date }}</td>
             <td class="text-center"><span :class="statusClass(m)">{{ statusText(m) }}</span></td>
             <td>
-              <button v-if="!m.supplied" class="btn-supply" @click="markSupplied(m)">支給済</button>
-              <button v-else class="btn-undo" @click="undoSupply(m)">取消</button>
+              <button v-if="!m.ordered" class="btn-supply" @click="markOrdered(m)">発注済</button>
+              <button v-else class="btn-undo" @click="undoOrder(m)">取消</button>
             </td>
           </tr>
         </tbody>
-        <tfoot><tr class="total-row"><td colspan="3">小計</td><td class="text-right">{{ formatQty(group.totalQty) }}</td><td colspan="5"></td></tr></tfoot>
+        <tfoot><tr class="total-row"><td colspan="4">小計</td><td class="text-right">{{ formatQty(group.totalQty) }}</td><td colspan="5"></td></tr></tfoot>
       </table>
     </div>
 
@@ -68,7 +82,8 @@ import api from '@/api/client'
 const materials = ref([])
 const loading = ref(false)
 const exporting = ref(false)
-const filterSupplied = ref('false')
+const filterOrdered = ref('false')
+const selectedIds = ref([])
 function monthRange(d) {
   const y = d.getFullYear(), m = d.getMonth()
   const from = `${y}-${String(m + 1).padStart(2, '0')}-01`
@@ -90,33 +105,33 @@ function shiftMonth(delta) {
 
 const today = new Date().toISOString().slice(0, 10)
 
-const pendingCount = computed(() => materials.value.filter(m => !m.supplied).length)
-const overdueCount = computed(() => materials.value.filter(m => !m.supplied && m.supply_date < today).length)
-const hasUnsupplied = computed(() => materials.value.some(m => !m.supplied))
+const pendingCount = computed(() => materials.value.filter(m => !m.ordered).length)
+const overdueCount = computed(() => materials.value.filter(m => !m.ordered && m.supply_date < today).length)
+const hasUnordered = computed(() => materials.value.some(m => !m.ordered))
 
 function formatQty(val) {
   const n = parseFloat(val)
   return Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
-function isOverdue(m) { return !m.supplied && m.supply_date < today }
+function isOverdue(m) { return !m.ordered && m.supply_date < today }
 
 function rowClass(m) {
-  if (m.supplied) return 'row-supplied'
+  if (m.ordered) return 'row-supplied'
   if (isOverdue(m)) return 'row-overdue'
   return ''
 }
 
 function statusClass(m) {
-  if (m.supplied) return 'st-done'
+  if (m.ordered) return 'st-done'
   if (isOverdue(m)) return 'st-overdue'
   return 'st-pending'
 }
 
 function statusText(m) {
-  if (m.supplied) return '支給済'
+  if (m.ordered) return '発注済'
   if (isOverdue(m)) return '期限超過'
-  return '未支給'
+  return '未発注'
 }
 
 const groupedBySupplier = computed(() => {
@@ -135,9 +150,10 @@ const groupedBySupplier = computed(() => {
 
 async function fetchMaterials() {
   loading.value = true
+  selectedIds.value = []
   try {
     const params = { ordering: 'supply_date' }
-    if (filterSupplied.value) params.supplied = filterSupplied.value
+    if (filterOrdered.value) params.ordered = filterOrdered.value
     if (paintingFrom.value) params.painting_date_from = paintingFrom.value
     if (paintingTo.value) params.painting_date_to = paintingTo.value
     const res = await api.outsource.getMaterials(params)
@@ -145,28 +161,65 @@ async function fetchMaterials() {
   } finally { loading.value = false }
 }
 
-async function markSupplied(m) {
+const todayDate = new Date().toISOString().slice(0, 10)
+
+async function markOrdered(m) {
   try {
-    await api.outsource.supplyMaterial(m.id, { supplied_qty: m.required_qty })
-    m.supplied = true; m.supplied_qty = m.required_qty
+    await api.outsource.updateMaterial(m.id, { ...m, ordered: true, ordered_at: todayDate })
+    m.ordered = true; m.ordered_at = todayDate
   } catch (err) { console.error(err) }
 }
 
-async function undoSupply(m) {
+async function undoOrder(m) {
   try {
-    await api.outsource.updateMaterial(m.id, { ...m, supplied: false, supplied_qty: 0 })
-    m.supplied = false; m.supplied_qty = 0
+    await api.outsource.updateMaterial(m.id, { ...m, ordered: false, ordered_at: null })
+    m.ordered = false; m.ordered_at = null
   } catch (err) { console.error(err) }
 }
 
-async function supplyAll(items) {
-  for (const m of items) { if (!m.supplied) await markSupplied(m) }
+async function orderAll(items) {
+  for (const m of items) { if (!m.ordered) await markOrdered(m) }
+}
+
+function isGroupAllSelected(group) {
+  return group.items.length > 0 && group.items.every(m => selectedIds.value.includes(m.id))
+}
+
+function toggleGroup(group, event) {
+  const ids = group.items.map(m => m.id)
+  if (event.target.checked) {
+    const newIds = ids.filter(id => !selectedIds.value.includes(id))
+    selectedIds.value = [...selectedIds.value, ...newIds]
+  } else {
+    selectedIds.value = selectedIds.value.filter(id => !ids.includes(id))
+  }
+}
+
+async function orderSelected() {
+  const targets = materials.value.filter(m => selectedIds.value.includes(m.id) && !m.ordered)
+  for (const m of targets) { await markOrdered(m) }
+  selectedIds.value = []
+}
+
+async function exportSelected() {
+  exporting.value = true
+  try {
+    const res = await api.outsource.generatePurchaseOrder({ material_ids: selectedIds.value })
+    const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `注文書_${new Date().toISOString().slice(0, 10)}.xlsx`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (err) { alert(err.response?.data?.error || '出力に失敗しました') }
+  finally { exporting.value = false }
 }
 
 async function exportPurchaseOrder() {
   exporting.value = true
   try {
-    const res = await api.outsource.generatePurchaseOrder({ unsupplied_only: true })
+    const res = await api.outsource.generatePurchaseOrder({ unordered_only: true })
     const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -210,6 +263,19 @@ onMounted(fetchMaterials)
 .group-title { font-size: 14px; }
 .group-count { color: #888; font-weight: 400; }
 .btn-supply-all { margin-left: auto; padding: 2px 10px; background: #e8f5e9; border: 1px solid #81c784; border-radius: 4px; cursor: pointer; font-size: 11px; }
+.col-check { width: 30px; text-align: center; }
+
+.action-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; margin-bottom: 8px;
+  background: #fff8e1; border: 1px solid #ffe082; border-radius: 4px;
+}
+.action-count { font-size: 12px; font-weight: 600; color: #e65100; }
+.btn-action { padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; border: 1px solid; }
+.btn-action-order { background: #e8f5e9; border-color: #81c784; color: #2e7d32; }
+.btn-action-export { background: #e3f2fd; border-color: #90caf9; color: #1565c0; }
+.btn-action-export:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-action-clear { background: #f5f5f5; border-color: #ccc; color: #666; }
 
 .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .data-table th, .data-table td { border: 1px solid #ddd; padding: 3px 8px; white-space: nowrap; }

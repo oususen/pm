@@ -33,9 +33,10 @@
           <span class="toggle-icon">{{ expandedCases.has(group.case_no) ? '▼' : '▶' }}</span>
           <span class="group-title">{{ group.case_no }}</span>
           <span class="group-count">{{ group.item_name }} / {{ group.items.length }}材料</span>
+          <button v-if="group.items.some(m => !m.supplied)" class="btn-supply-all" @click.stop="supplyAll(group.items)">一括支給済</button>
         </div>
         <table v-if="expandedCases.has(group.case_no)" class="data-table">
-          <thead><tr><th>支給予定日</th><th>加工日</th><th>材料コード</th><th>材料名称</th><th>調達先</th><th>必要数量</th><th>状態</th></tr></thead>
+          <thead><tr><th>支給予定日</th><th>加工日</th><th>材料コード</th><th>材料名称</th><th>調達先</th><th>必要数量</th><th>状態</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="m in group.items" :key="m.id" :class="rowClass(m)">
               <td :class="{ 'text-danger': isOverdue(m) }">{{ m.supply_date }}</td>
@@ -45,6 +46,10 @@
               <td>{{ m.supplier_name || '-' }}</td>
               <td class="text-right">{{ formatQty(m.required_qty) }}</td>
               <td class="text-center"><span :class="statusClass(m)">{{ statusText(m) }}</span></td>
+              <td>
+                <button v-if="!m.supplied" class="btn-supply" @click="markSupplied(m)">支給済</button>
+                <button v-else class="btn-undo" @click="undoSupply(m)">取消</button>
+              </td>
             </tr>
           </tbody>
         </table>

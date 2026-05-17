@@ -25,6 +25,7 @@
           <th>数量</th>
           <th>塗装日</th>
           <th>ステータス</th>
+          <th>発注進捗</th>
           <th>支給進捗</th>
           <th>加工進捗</th>
           <th>出荷進捗</th>
@@ -38,6 +39,13 @@
           <td class="text-right">{{ o.order_qty }}</td>
           <td>{{ o.painting_date }}</td>
           <td><span class="status-badge" :class="'st-' + o.status">{{ statusLabel(o.status) }}</span></td>
+          <td>
+            <div class="progress-bar-container" v-if="o.splits && o.splits.length">
+              <div class="progress-bar bar-order" :style="{ width: orderPct(o) + '%' }"></div>
+              <span class="progress-text">{{ orderPct(o) }}%</span>
+            </div>
+            <span v-else>-</span>
+          </td>
           <td>
             <div class="progress-bar-container" v-if="o.splits && o.splits.length">
               <div class="progress-bar bar-supply" :style="{ width: supplyPct(o) + '%' }"></div>
@@ -143,6 +151,14 @@ const editingOrder = ref(null)
 const STATUS_MAP = { IMPORTED: '取込済', SENT_TO_SUB: '展開送付済', SPLIT_REGISTERED: '分割登録済', IN_PROGRESS: '加工中', COMPLETED: '完了' }
 function statusLabel(s) { return STATUS_MAP[s] || s }
 
+function orderPct(order) {
+  if (!order.splits || !order.splits.length) return 0
+  const done = order.splits.filter(s => s.material_total_count > 0 && s.material_ordered_count >= s.material_total_count).length
+  const hasMaterials = order.splits.filter(s => s.material_total_count > 0).length
+  if (!hasMaterials) return 0
+  return Math.round((done / hasMaterials) * 100)
+}
+
 function supplyPct(order) {
   if (!order.splits || !order.splits.length) return 0
   const done = order.splits.filter(s => s.material_supplied || s.auto_material_supplied).length
@@ -238,6 +254,7 @@ onMounted(fetchOrders)
 
 .progress-bar-container { position: relative; width: 80px; height: 16px; background: #eee; border-radius: 8px; display: inline-block; }
 .progress-bar { height: 100%; border-radius: 8px; transition: width 0.3s; }
+.bar-order { background: #ab47bc; }
 .bar-supply { background: #42a5f5; }
 .bar-process { background: #66bb6a; }
 .bar-ship { background: #ffa726; }

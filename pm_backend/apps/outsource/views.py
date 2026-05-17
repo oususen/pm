@@ -182,12 +182,52 @@ class OutsourceSplitViewSet(viewsets.ModelViewSet):
             qs = qs.filter(order__painting_date__lte=painting_to)
         return qs
 
+    def perform_update(self, serializer):
+        split = serializer.save()
+        _sync_order_status(split.order)
+
+    def perform_create(self, serializer):
+        split = serializer.save()
+        _sync_order_status(split.order)
+
+
+def _sync_order_status(order):
+    """分割の進捗状況からorderステータスを自動更新"""
+    splits = order.splits.all()
+    if not splits.exists():
+        return
+
+    from django.db.models import Sum
+    all_shipped = True
+    any_active = False
+    for s in splits:
+        delivered = s.deliveries.aggregate(t=Sum('qty'))['t'] or 0
+        shipped = s.shipments.aggregate(t=Sum('qty'))['t'] or 0
+        has_ordered = s.material_requirements.filter(ordered=True).exists()
+        has_supplied = s.material_requirements.filter(supplied=True).exists()
+        if shipped < s.qty:
+            all_shipped = False
+        if (s.material_supplied or s.process_completed or s.shipped
+                or delivered > 0 or shipped > 0
+                or has_ordered or has_supplied):
+            any_active = True
+
+    new_status = order.status
+    if all_shipped:
+        new_status = 'COMPLETED'
+    elif any_active:
+        new_status = 'IN_PROGRESS'
+
+    if new_status != order.status and order.status in ('SPLIT_REGISTERED', 'IN_PROGRESS'):
+        order.status = new_status
+        order.save(update_fields=['status'])
+
 
 class MaterialRequirementViewSet(viewsets.ModelViewSet):
     queryset = MaterialRequirement.objects.select_related('split', 'split__order')
     serializer_class = MaterialRequirementSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ['supplied', 'material_code']
+    filterset_fields = ['supplied', 'ordered', 'material_code']
     ordering_fields = ['supply_date', 'material_code']
 
     def get_queryset(self):
@@ -200,6 +240,10 @@ class MaterialRequirementViewSet(viewsets.ModelViewSet):
             qs = qs.filter(split__order__painting_date__lte=painting_to)
         return qs
 
+    def perform_update(self, serializer):
+        material = serializer.save()
+        _sync_order_status(material.split.order)
+
     @action(detail=True, methods=['post'], url_path='supply')
     def supply(self, request, pk=None):
         """支給実績登録"""
@@ -208,17 +252,20 @@ class MaterialRequirementViewSet(viewsets.ModelViewSet):
         material.supplied_qty = supplied_qty
         material.supplied = True
         material.save()
+        _sync_order_status(material.split.order)
         return Response(MaterialRequirementSerializer(material).data)
 
     @action(detail=False, methods=['post'], url_path='purchase-order')
     def purchase_order(self, request):
         """メーカ別注文書Excel出力"""
         material_ids = request.data.get('material_ids', [])
-        unsupplied_only = request.data.get('unsupplied_only', True)
+        unsupplied_only = request.data.get('unsupplied_only', False)
+        unordered_only = request.data.get('unordered_only', True)
 
         output, supplier_list = generate_purchase_orders(
             material_ids=material_ids or None,
             unsupplied_only=unsupplied_only,
+            unordered_only=unordered_only,
         )
         if not output:
             return Response({'error': '対象材料がありません'}, status=status.HTTP_400_BAD_REQUEST)
@@ -255,6 +302,7 @@ class SubcontractorDeliveryViewSet(viewsets.ModelViewSet):
         if total_delivered >= split.qty:
             split.process_completed = True
             split.save(update_fields=['process_completed', 'updated_at'])
+        _sync_order_status(split.order)
 
     def perform_destroy(self, instance):
         split = instance.split
@@ -263,6 +311,7 @@ class SubcontractorDeliveryViewSet(viewsets.ModelViewSet):
         if total_delivered < split.qty:
             split.process_completed = False
             split.save(update_fields=['process_completed', 'updated_at'])
+        _sync_order_status(split.order)
 
 
 class CustomerShipmentViewSet(viewsets.ModelViewSet):
@@ -289,3 +338,4 @@ class CustomerShipmentViewSet(viewsets.ModelViewSet):
         if total_shipped >= split.qty:
             split.shipped = True
             split.save(update_fields=['shipped', 'updated_at'])
+        _sync_order_status(split.order)
