@@ -251,6 +251,7 @@ class MaterialRequirement(models.Model):
     supplier_name = models.CharField('調達先', max_length=100, blank=True, default='')
     required_qty = models.DecimalField('必要数量', max_digits=12, decimal_places=4)
     order_qty = models.DecimalField('発注数', max_digits=12, decimal_places=4, default=0)
+    material_due_date = models.DateField('材料納期', null=True, blank=True)
     supply_date = models.DateField('支給予定日')
     ordered = models.BooleanField('発注済', default=False)
     ordered_at = models.DateField('発注日', null=True, blank=True)

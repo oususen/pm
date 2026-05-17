@@ -42,6 +42,7 @@ const tileGroups = [
     title: '材料',
     tiles: [
       { key: 'procurement', icon: '🚚', label: '材料手配', to: '/outsource/procurement' },
+      { key: 'receiving', icon: '📥', label: '材料検収', to: '/outsource/material-receiving' },
       { key: 'materials', icon: '🔩', label: '材料支給', to: '/outsource/materials' },
     ],
   },

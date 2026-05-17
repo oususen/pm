@@ -10,6 +10,8 @@ from rest_framework.parsers import MultiPartParser, JSONParser
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from masters.models import Calendar
+from orders.utils.calendar_utils import subtract_working_days
 
 from .models import (
     Subcontractor, OutsourceItem, OutsourceBOM, OutsourceMaterial,
@@ -72,6 +74,13 @@ def _record_product_stock(item_code, item_name, qty_change, tx_type, tx_date, re
         ref_type=ref_type,
         ref_id=ref_id,
     )
+
+
+def _calc_material_due_date(supply_date, supplier=None):
+    daiso_calendar = Calendar.objects.filter(calendar_code__iexact='daiso').first()
+    supplier_calendar = getattr(supplier, 'calendar', None)
+    calc_calendar = supplier_calendar or daiso_calendar
+    return subtract_working_days(supply_date, 1, calc_calendar)
 
 
 class SubcontractorViewSet(viewsets.ModelViewSet):
@@ -268,13 +277,14 @@ def _sync_material_requirements_for_split(split):
     if not order.item:
         return
     supply_transport_lt = order.item.subcontractor.transport_lt_supply
-    bom_lines = OutsourceBOM.objects.filter(item=order.item)
+    bom_lines = OutsourceBOM.objects.select_related('supplier').filter(item=order.item)
     if not bom_lines.exists():
         return
 
     for bom in bom_lines:
         required_qty = Decimal(str(split.qty)) * bom.quantity_per
         supply_date = split.process_date - timedelta(days=supply_transport_lt)
+        material_due_date_default = _calc_material_due_date(supply_date, getattr(bom, 'supplier', None))
 
         mat = MaterialRequirement.objects.filter(
             split=split,
@@ -288,6 +298,7 @@ def _sync_material_requirements_for_split(split):
                 supplier_name=bom.supplier_name,
                 required_qty=required_qty,
                 order_qty=required_qty,
+                material_due_date=material_due_date_default,
                 supply_date=supply_date,
             )
             continue
@@ -299,8 +310,10 @@ def _sync_material_requirements_for_split(split):
         mat.material_name = bom.material_name
         mat.supplier_name = bom.supplier_name
         mat.required_qty = required_qty
+        if not mat.material_due_date:
+            mat.material_due_date = material_due_date_default
         mat.supply_date = supply_date
-        mat.save(update_fields=['material_name', 'supplier_name', 'required_qty', 'supply_date', 'updated_at'])
+        mat.save(update_fields=['material_name', 'supplier_name', 'required_qty', 'material_due_date', 'supply_date', 'updated_at'])
 
 
 def _sync_order_status(order):
@@ -340,7 +353,7 @@ class MaterialRequirementViewSet(viewsets.ModelViewSet):
     serializer_class = MaterialRequirementSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['supplied', 'ordered', 'shipment_planned', 'issued', 'material_code']
-    ordering_fields = ['supply_date', 'material_code']
+    ordering_fields = ['material_due_date', 'supply_date', 'material_code']
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -433,6 +446,28 @@ class MaterialRequirementViewSet(viewsets.ModelViewSet):
         )
         response['Content-Disposition'] = 'attachment; filename="purchase_order.xlsx"'
         return response
+
+    @action(detail=True, methods=['post'], url_path='receive')
+    def receive(self, request, pk=None):
+        """材料検収（入庫）"""
+        material = self.get_object()
+        qty = _to_int_qty(request.data.get('received_qty', 0))
+        tx_date = request.data.get('tx_date') or material.supply_date
+        reason = str(request.data.get('reason', '')).strip() or '材料検収'
+        if qty <= 0:
+            return Response({'error': '検収数量は1以上を指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+
+        MaterialStockTransaction.objects.create(
+            material_code=material.material_code,
+            material_name=material.material_name,
+            qty_change=qty,
+            tx_type='RECEIPT',
+            tx_date=tx_date,
+            reason=reason,
+            ref_type='material_requirement_receipt',
+            ref_id=material.id,
+        )
+        return Response({'ok': True})
 
 
 class SubcontractorDeliveryViewSet(viewsets.ModelViewSet):

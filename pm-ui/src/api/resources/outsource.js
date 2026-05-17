@@ -108,6 +108,9 @@ export const createOutsourceAPI = (client) => ({
   supplyMaterial(id, data = {}) {
     return client.post(`/outsource/materials/${id}/supply/`, data)
   },
+  receiveMaterial(id, data = {}) {
+    return client.post(`/outsource/materials/${id}/receive/`, data)
+  },
   generatePurchaseOrder(data = {}) {
     return client.post('/outsource/materials/purchase-order/', data, { responseType: 'blob' })
   },

@@ -63,18 +63,19 @@ def generate_purchase_orders(material_ids=None, unsupplied_only=True, unordered_
         ws['A4'] = f'発行日: {date.today().strftime("%Y/%m/%d")}'
         ws['A5'] = f'発行元: ダイソウ工業株式会社'
 
-        # 材料を材料コード+支給日で集約
+        # 材料を材料コード+材料納期で集約
         agg = defaultdict(lambda: {
             'material_code': '', 'material_name': '',
-            'total_qty': 0, 'supply_date': None, 'cases': set()
+            'total_qty': 0, 'material_due_date': None, 'cases': set()
         })
         for m in items:
-            key = (m.material_code, m.supply_date)
+            due_date = m.material_due_date or m.supply_date
+            key = (m.material_code, due_date)
             row = agg[key]
             row['material_code'] = m.material_code
             row['material_name'] = m.material_name
             row['total_qty'] += float(m.order_qty or 0)
-            row['supply_date'] = m.supply_date
+            row['material_due_date'] = due_date
             row['cases'].add(m.split.order.case_no)
 
         # テーブル
@@ -87,7 +88,7 @@ def generate_purchase_orders(material_ids=None, unsupplied_only=True, unordered_
             cell.alignment = center_align
 
         total_qty = 0
-        for idx, ((mat_code, sup_date), data) in enumerate(
+        for idx, ((mat_code, due_date), data) in enumerate(
             sorted(agg.items(), key=lambda x: (x[0][1], x[0][0])), 1
         ):
             row_num = 7 + idx
@@ -96,7 +97,7 @@ def generate_purchase_orders(material_ids=None, unsupplied_only=True, unordered_
                 data['material_code'],
                 data['material_name'],
                 data['total_qty'],
-                data['supply_date'],
+                data['material_due_date'],
                 ', '.join(sorted(data['cases'])),
             ]
             for col, val in enumerate(vals, 1):

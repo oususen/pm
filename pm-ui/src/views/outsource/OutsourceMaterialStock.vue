@@ -94,12 +94,12 @@
         </label>
       </div>
 
-      <div v-if="adjustMode === 'single'" class="prepare-form">
+      <div v-if="adjustMode === 'single'" class="prepare-form single-form">
         <label>
           <span class="field-label">品目選択</span>
           <select v-model="adjust.material_code" class="input input-lg" @change="onSelectSingleMaterial">
             <option value="">材料選択</option>
-            <option v-for="m in masterRows" :key="`m-${m.material_code}`" :value="m.material_code">
+            <option v-for="m in filteredMasterRows" :key="`m-${m.material_code}`" :value="m.material_code">
               {{ m.material_code }} | {{ m.material_name || '-' }}
             </option>
           </select>
@@ -109,8 +109,12 @@
           <input v-model="adjust.material_name" class="input input-lg" placeholder="材料名称" />
         </label>
         <label>
+          <span class="field-label">現在庫数</span>
+          <input :value="singleCurrentStock" class="input input-xs" readonly />
+        </label>
+        <label>
           <span class="field-label">増減数</span>
-          <input v-model.number="adjust.qty_change" type="number" class="input input-sm" placeholder="個" />
+          <input v-model.number="adjust.qty_change" type="number" class="input input-xs" placeholder="個" />
         </label>
         <label>
           <span class="field-label">日付</span>
@@ -120,7 +124,7 @@
           <span class="field-label">理由</span>
           <input v-model="adjust.reason" class="input input-lg" placeholder="棚卸調整理由（必須）" />
         </label>
-        <button class="btn-primary" @click="createAdjust">調整登録</button>
+        <button class="btn-primary compact-btn" @click="createAdjust">調整登録</button>
       </div>
 
       <div v-else>
@@ -194,6 +198,12 @@ const batchReason = ref('')
 
 const TX_MAP = { RECEIPT: '入庫', ISSUE: '出庫', ADJUST: '棚卸調整' }
 function txLabel(t) { return TX_MAP[t] || t }
+function normalizeSearchText(v) {
+  return String(v || '')
+    .toLowerCase()
+    .replace(/[－ー―‐]/g, '-')
+    .replace(/\s+/g, '')
+}
 
 const stockMap = computed(() => {
   const m = {}
@@ -214,13 +224,16 @@ const supplierOptions = computed(() => {
 })
 
 const filteredMasterRows = computed(() => {
-  const kw = adjustFilters.value.keyword.trim().toLowerCase()
+  const kw = normalizeSearchText(adjustFilters.value.keyword)
   return masterRows.value.filter((r) => {
-    if (adjustFilters.value.supplier_name && (r.supplier_name || '') !== adjustFilters.value.supplier_name) return false
+    if (
+      adjustFilters.value.supplier_name &&
+      (r.supplier_name || '').trim() !== adjustFilters.value.supplier_name.trim()
+    ) return false
     if (!kw) return true
     return (
-      (r.material_code || '').toLowerCase().includes(kw) ||
-      (r.material_name || '').toLowerCase().includes(kw)
+      normalizeSearchText(r.material_code).includes(kw) ||
+      normalizeSearchText(r.material_name).includes(kw)
     )
   })
 })
@@ -254,6 +267,11 @@ const filteredTxList = computed(() => {
   })
 })
 
+const singleCurrentStock = computed(() => {
+  if (!adjust.value.material_code) return 0
+  return stockMap.value[adjust.value.material_code] ?? 0
+})
+
 async function fetchSummary() {
   const res = await api.outsource.getMaterialStockSummary()
   summary.value = res.data || []
@@ -265,8 +283,20 @@ async function fetchTx() {
 }
 
 async function fetchMaterialMaster() {
-  const res = await api.outsource.getComponentMaterials()
-  materialMasterList.value = res.data.results || res.data
+  const all = []
+  let page = 1
+  while (true) {
+    const res = await api.outsource.getComponentMaterials({ page, page_size: 200 })
+    const data = res.data
+    if (Array.isArray(data)) {
+      materialMasterList.value = data
+      return
+    }
+    all.push(...(data.results || []))
+    if (!data.next) break
+    page += 1
+  }
+  materialMasterList.value = all
 }
 
 async function createAdjust() {
@@ -367,8 +397,14 @@ onMounted(async () => {
 .field-label { min-width: 56px; white-space: nowrap; font-size: 12px; color: #555; }
 .input { padding: 4px 7px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
 .input-sm { width: 120px; }
-.input-lg { width: 260px; }
+.input-xs { width: 92px; }
+.input-lg { width: 220px; }
 .btn-primary { padding: 5px 12px; border: none; background: #1976d2; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.single-form { gap: 6px; }
+.single-form .field-label { min-width: 46px; }
+.single-form .input-lg { width: 200px; }
+.single-form .input { padding: 3px 6px; }
+.compact-btn { padding: 4px 10px; }
 .section { margin-top: 8px; }
 .section h3 { font-size: 14px; margin: 0 0 6px; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }

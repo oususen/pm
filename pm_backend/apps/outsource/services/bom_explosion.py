@@ -2,6 +2,8 @@ from datetime import timedelta
 from decimal import Decimal
 
 from outsource.models import OutsourceOrder, OutsourceSplit, OutsourceBOM, MaterialRequirement
+from masters.models import Calendar
+from orders.utils.calendar_utils import subtract_working_days
 
 
 def explode_materials_for_order(order_id):
@@ -37,6 +39,7 @@ def explode_materials_for_order(order_id):
         return results
 
     supply_transport_lt = order.item.subcontractor.transport_lt_supply
+    daiso_calendar = Calendar.objects.filter(calendar_code__iexact='daiso').first()
 
     # 既存の材料所要量を削除（再生成）
     MaterialRequirement.objects.filter(split__order=order).delete()
@@ -45,6 +48,9 @@ def explode_materials_for_order(order_id):
         for bom in bom_lines:
             required_qty = Decimal(str(split.qty)) * bom.quantity_per
             supply_date = split.process_date - timedelta(days=supply_transport_lt)
+            supplier_calendar = getattr(getattr(bom, 'supplier', None), 'calendar', None)
+            calc_calendar = supplier_calendar or daiso_calendar
+            material_due_date = subtract_working_days(supply_date, 1, calc_calendar)
 
             MaterialRequirement.objects.create(
                 split=split,
@@ -52,6 +58,7 @@ def explode_materials_for_order(order_id):
                 material_name=bom.material_name,
                 supplier_name=bom.supplier_name,
                 required_qty=required_qty,
+                material_due_date=material_due_date,
                 supply_date=supply_date,
             )
             results['created_count'] += 1

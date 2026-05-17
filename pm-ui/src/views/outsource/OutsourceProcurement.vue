@@ -47,11 +47,19 @@
       <table class="data-table">
         <thead><tr>
           <th class="col-check"><input type="checkbox" @change="toggleGroup(group, $event)" :checked="isGroupAllSelected(group)" /></th>
-          <th>支給予定日</th><th>材料コード</th><th>材料名称</th><th>必要数量</th><th>在庫数</th><th>発注数</th><th>案件番号</th><th>品目名称</th><th>加工日</th><th>状態</th><th>操作</th>
+          <th>材料納期</th><th>支給予定日</th><th>材料コード</th><th>材料名称</th><th>必要数量</th><th>在庫数</th><th>発注数</th><th>案件番号</th><th>品目名称</th><th>加工日</th><th>状態</th><th>操作</th>
         </tr></thead>
         <tbody>
           <tr v-for="m in group.items" :key="m.id" :class="rowClass(m)">
             <td class="text-center"><input type="checkbox" :value="m.id" v-model="selectedIds" /></td>
+            <td>
+              <input
+                type="date"
+                class="date-input"
+                :value="m.material_due_date || m.supply_date"
+                @change="updateMaterialDueDate(m, $event)"
+              />
+            </td>
             <td :class="{ 'text-danger': isOverdue(m) }">{{ m.supply_date }}</td>
             <td>{{ m.material_code }}</td>
             <td>{{ m.material_name }}</td>
@@ -76,7 +84,7 @@
             </td>
           </tr>
         </tbody>
-        <tfoot><tr class="total-row"><td colspan="4">小計</td><td class="text-right">{{ formatQty(group.totalQty) }}</td><td colspan="6"></td></tr></tfoot>
+        <tfoot><tr class="total-row"><td colspan="5">小計</td><td class="text-right">{{ formatQty(group.totalQty) }}</td><td colspan="6"></td></tr></tfoot>
       </table>
     </div>
 
@@ -141,7 +149,8 @@ function orderedQtyOf(m) {
   return Number.isFinite(v) ? v : (parseFloat(m.required_qty) || 0)
 }
 
-function isOverdue(m) { return !m.ordered && m.supply_date < today }
+function dueDateOf(m) { return m.material_due_date || m.supply_date }
+function isOverdue(m) { return !m.ordered && dueDateOf(m) < today }
 
 function rowClass(m) {
   if (m.ordered) return 'row-supplied'
@@ -170,7 +179,7 @@ const groupedBySupplier = computed(() => {
     map[supplier].totalQty += parseFloat(m.required_qty)
   }
   for (const g of Object.values(map)) {
-    g.items.sort((a, b) => a.supply_date.localeCompare(b.supply_date) || a.material_code.localeCompare(b.material_code))
+    g.items.sort((a, b) => dueDateOf(a).localeCompare(dueDateOf(b)) || a.material_code.localeCompare(b.material_code))
   }
   return Object.values(map).sort((a, b) => a.supplier.localeCompare(b.supplier))
 })
@@ -179,7 +188,7 @@ async function fetchMaterials() {
   loading.value = true
   selectedIds.value = []
   try {
-    const params = { ordering: 'supply_date' }
+    const params = { ordering: 'material_due_date,supply_date' }
     if (filterOrdered.value) params.ordered = filterOrdered.value
     if (paintingFrom.value) params.painting_date_from = paintingFrom.value
     if (paintingTo.value) params.painting_date_to = paintingTo.value
@@ -227,6 +236,23 @@ async function updateOrderQty(m, event) {
     console.error(err)
     event.target.value = orderedQtyOf(m)
     alert('発注数の更新に失敗しました')
+  }
+}
+
+async function updateMaterialDueDate(m, event) {
+  const next = event.target.value
+  if (!next) {
+    event.target.value = m.material_due_date || m.supply_date
+    return
+  }
+  if (next === (m.material_due_date || m.supply_date)) return
+  try {
+    await api.outsource.patchMaterial(m.id, { material_due_date: next })
+    m.material_due_date = next
+  } catch (err) {
+    console.error(err)
+    event.target.value = m.material_due_date || m.supply_date
+    alert('材料納期の更新に失敗しました')
   }
 }
 
@@ -355,6 +381,13 @@ onMounted(fetchMaterials)
   border: 1px solid #ccc;
   border-radius: 4px;
   text-align: right;
+}
+.date-input {
+  width: 130px;
+  padding: 2px 6px;
+  font-size: 12px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
 }
 
 .empty-state, .loading { text-align: center; padding: 32px; color: #999; font-size: 14px; }
