@@ -1,12 +1,12 @@
 <template>
   <div class="page-container">
-    <h2 class="page-title">材料所要量</h2>
+    <h2 class="page-title">材料支給</h2>
 
     <div class="toolbar">
       <select v-model="filterSupplied" @change="fetchMaterials" class="filter-select">
-        <option value="false">未支給のみ</option>
+        <option value="false">未出庫のみ</option>
         <option value="">全て</option>
-        <option value="true">支給済のみ</option>
+        <option value="true">出庫済のみ</option>
       </select>
       <button class="btn-month" @click="shiftMonth(-1)">◀ 前月</button>
       <label class="filter-label">塗装日:</label>
@@ -21,7 +21,7 @@
       </select>
       <div class="summary-badges" v-if="materials.length">
         <span class="badge badge-total">全{{ materials.length }}件</span>
-        <span class="badge badge-pending">未支給: {{ pendingCount }}件</span>
+        <span class="badge badge-pending">未出庫: {{ pendingCount }}件</span>
         <span class="badge badge-overdue" v-if="overdueCount">期限超過: {{ overdueCount }}件</span>
       </div>
     </div>
@@ -33,7 +33,7 @@
           <span class="toggle-icon">{{ expandedCases.has(group.case_no) ? '▼' : '▶' }}</span>
           <span class="group-title">{{ group.case_no }}</span>
           <span class="group-count">{{ group.item_name }} / {{ group.items.length }}材料</span>
-          <button v-if="group.items.some(m => !m.supplied)" class="btn-supply-all" @click.stop="supplyAll(group.items)">一括支給済</button>
+          <button v-if="group.items.some(m => !m.issued)" class="btn-supply-all" @click.stop="issueAll(group.items)">一括出庫済</button>
         </div>
         <table v-if="expandedCases.has(group.case_no)" class="data-table">
           <thead><tr><th>支給予定日</th><th>加工日</th><th>材料コード</th><th>材料名称</th><th>調達先</th><th>必要数量</th><th>状態</th><th>操作</th></tr></thead>
@@ -47,8 +47,9 @@
               <td class="text-right">{{ formatQty(m.required_qty) }}</td>
               <td class="text-center"><span :class="statusClass(m)">{{ statusText(m) }}</span></td>
               <td>
-                <button v-if="!m.supplied" class="btn-supply" @click="markSupplied(m)">支給済</button>
-                <button v-else class="btn-undo" @click="undoSupply(m)">取消</button>
+                <button v-if="!m.shipment_planned" class="btn-plan" @click="markPlanned(m)">便計画済み</button>
+                <button v-else-if="!m.issued" class="btn-supply" @click="markIssued(m)">出庫済</button>
+                <button v-else class="btn-undo" @click="undoIssued(m)">出庫取消</button>
               </td>
             </tr>
           </tbody>
@@ -62,7 +63,7 @@
         <div class="group-header" :class="{ overdue: group.isOverdue, today: group.isToday }">
           <span class="group-title">{{ group.date }}</span>
           <span class="group-count">{{ group.items.length }}件</span>
-          <button v-if="group.items.some(m => !m.supplied)" class="btn-supply-all" @click="supplyAll(group.items)">一括支給済</button>
+          <button v-if="group.items.some(m => !m.issued)" class="btn-supply-all" @click="issueAll(group.items)">一括出庫済</button>
         </div>
         <table class="data-table">
           <thead><tr><th>案件番号</th><th>品目名称</th><th>加工日</th><th>材料コード</th><th>材料名称</th><th>調達先</th><th>必要数量</th><th>状態</th><th>操作</th></tr></thead>
@@ -77,8 +78,9 @@
               <td class="text-right">{{ formatQty(m.required_qty) }}</td>
               <td class="text-center"><span :class="statusClass(m)">{{ statusText(m) }}</span></td>
               <td>
-                <button v-if="!m.supplied" class="btn-supply" @click="markSupplied(m)">支給済</button>
-                <button v-else class="btn-undo" @click="undoSupply(m)">取消</button>
+                <button v-if="!m.shipment_planned" class="btn-plan" @click="markPlanned(m)">便計画済み</button>
+                <button v-else-if="!m.issued" class="btn-supply" @click="markIssued(m)">出庫済</button>
+                <button v-else class="btn-undo" @click="undoIssued(m)">出庫取消</button>
               </td>
             </tr>
           </tbody>
@@ -105,7 +107,7 @@
       </table>
     </div>
 
-    <div v-if="!materials.length && !loading" class="empty-state">材料所要量データがありません</div>
+    <div v-if="!materials.length && !loading" class="empty-state">材料支給データがありません</div>
     <div v-if="loading" class="loading">読み込み中...</div>
   </div>
 </template>
@@ -156,32 +158,34 @@ function toggleCase(caseNo) {
   expandedCases.value = new Set(expandedCases.value)
 }
 
-const pendingCount = computed(() => materials.value.filter(m => !m.supplied).length)
-const overdueCount = computed(() => materials.value.filter(m => !m.supplied && m.supply_date < today).length)
+const pendingCount = computed(() => materials.value.filter(m => !m.issued).length)
+const overdueCount = computed(() => materials.value.filter(m => !m.issued && m.supply_date < today).length)
 
 function formatQty(val) {
   const n = parseFloat(val)
   return Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
-function isOverdue(m) { return !m.supplied && m.supply_date < today }
+function isOverdue(m) { return !m.issued && m.supply_date < today }
 
 function rowClass(m) {
-  if (m.supplied) return 'row-supplied'
+  if (m.issued) return 'row-supplied'
   if (isOverdue(m)) return 'row-overdue'
   return ''
 }
 
 function statusClass(m) {
-  if (m.supplied) return 'st-done'
+  if (m.issued) return 'st-done'
+  if (m.shipment_planned) return 'st-planned'
   if (isOverdue(m)) return 'st-overdue'
   return 'st-pending'
 }
 
 function statusText(m) {
-  if (m.supplied) return '支給済'
+  if (m.issued) return '出庫済'
+  if (m.shipment_planned) return '便計画済み'
   if (isOverdue(m)) return '期限超過'
-  return '未支給'
+  return '未対応'
 }
 
 // 案件別
@@ -240,7 +244,7 @@ async function fetchMaterials() {
   loading.value = true
   try {
     const params = { ordering: 'supply_date' }
-    if (filterSupplied.value) params.supplied = filterSupplied.value
+    if (filterSupplied.value) params.issued = filterSupplied.value
     if (paintingFrom.value) params.painting_date_from = paintingFrom.value
     if (paintingTo.value) params.painting_date_to = paintingTo.value
     const res = await api.outsource.getMaterials(params)
@@ -248,22 +252,43 @@ async function fetchMaterials() {
   } finally { loading.value = false }
 }
 
-async function markSupplied(m) {
+async function markPlanned(m) {
+  try {
+    await api.outsource.patchMaterial(m.id, { shipment_planned: true })
+    m.shipment_planned = true
+  } catch (err) { console.error(err) }
+}
+
+async function markIssued(m) {
   try {
     await api.outsource.supplyMaterial(m.id, { supplied_qty: m.required_qty })
-    m.supplied = true; m.supplied_qty = m.required_qty
+    m.shipment_planned = true
+    m.issued = true
+    m.supplied = true
+    m.supplied_qty = m.required_qty
   } catch (err) { console.error(err) }
 }
 
-async function undoSupply(m) {
+async function undoIssued(m) {
   try {
-    await api.outsource.updateMaterial(m.id, { supplied: false, supplied_qty: 0 })
-    m.supplied = false; m.supplied_qty = 0
+    await api.outsource.patchMaterial(m.id, {
+      shipment_planned: false,
+      issued: false,
+      supplied: false,
+      supplied_qty: 0,
+    })
+    m.shipment_planned = false
+    m.issued = false
+    m.supplied = false
+    m.supplied_qty = 0
   } catch (err) { console.error(err) }
 }
 
-async function supplyAll(items) {
-  for (const m of items) { if (!m.supplied) await markSupplied(m) }
+async function issueAll(items) {
+  for (const m of items) {
+    if (!m.shipment_planned) await markPlanned(m)
+    if (!m.issued) await markIssued(m)
+  }
 }
 
 onMounted(fetchMaterials)
@@ -313,9 +338,11 @@ onMounted(fetchMaterials)
 .row-overdue { background: #fff8e1; }
 
 .st-done { color: #2e7d32; font-size: 11px; font-weight: 600; }
+.st-planned { color: #1565c0; font-size: 11px; font-weight: 600; }
 .st-pending { color: #e65100; font-size: 11px; }
 .st-overdue { color: #c62828; font-size: 11px; font-weight: 600; }
 
+.btn-plan { padding: 2px 8px; background: #e3f2fd; border: 1px solid #90caf9; border-radius: 4px; cursor: pointer; font-size: 11px; }
 .btn-supply { padding: 2px 8px; background: #e8f5e9; border: 1px solid #81c784; border-radius: 4px; cursor: pointer; font-size: 11px; }
 .btn-undo { padding: 2px 8px; background: #f5f5f5; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 11px; color: #888; }
 

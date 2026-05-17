@@ -75,10 +75,8 @@ def import_fb_csv(file_content, encoding='utf-8-sig'):
                 status='IMPORTED',
             )
 
-            # 品目マスタがあれば制約条件を計算
-            if item:
-                order.calculate_constraints()
-                order.save()
+            # 受注取込時点では制約日を計算しない
+            # （材料発注前のため、最早着手日は確定値として扱わない）
 
             results['created'].append({
                 'row': row_num,
@@ -88,10 +86,10 @@ def import_fb_csv(file_content, encoding='utf-8-sig'):
                 'qty': order_qty,
             })
 
-        except (ValueError, KeyError) as e:
+        except Exception as e:
             results['errors'].append({
                 'row': row_num,
-                'message': str(e),
+                'message': f'{type(e).__name__}: {e}',
                 'data': row,
             })
 

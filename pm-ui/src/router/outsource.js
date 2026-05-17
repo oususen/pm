@@ -39,7 +39,19 @@ const outsource = [
     path: "/outsource/materials",
     name: "OutsourceMaterialList",
     component: () => import("@/views/outsource/OutsourceMaterialList.vue"),
-    meta: { pageTitle: "材料所要量一覧", resource: "outsource" },
+    meta: { pageTitle: "材料支給", resource: "outsource" },
+  },
+  {
+    path: "/outsource/material-stock",
+    name: "OutsourceMaterialStock",
+    component: () => import("@/views/outsource/OutsourceMaterialStock.vue"),
+    meta: { pageTitle: "材料在庫", resource: "outsource" },
+  },
+  {
+    path: "/outsource/product-stock",
+    name: "OutsourceProductStock",
+    component: () => import("@/views/outsource/OutsourceProductStock.vue"),
+    meta: { pageTitle: "完成品在庫", resource: "outsource" },
   },
   {
     path: "/outsource/procurement",

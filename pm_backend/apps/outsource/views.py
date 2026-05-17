@@ -1,6 +1,9 @@
 from io import BytesIO
+from datetime import timedelta
+from decimal import Decimal
 
 from django.http import HttpResponse
+from django.db import models
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, JSONParser
@@ -12,6 +15,7 @@ from .models import (
     Subcontractor, OutsourceItem, OutsourceBOM, OutsourceMaterial,
     OutsourceOrder, OutsourceSplit, MaterialRequirement,
     SubcontractorDelivery, CustomerShipment,
+    MaterialStockTransaction, ProductStockTransaction,
 )
 from .serializers import (
     SubcontractorSerializer,
@@ -23,12 +27,51 @@ from .serializers import (
     MaterialRequirementSerializer,
     SubcontractorDeliverySerializer,
     CustomerShipmentSerializer,
+    MaterialStockTransactionSerializer,
+    ProductStockTransactionSerializer,
 )
 from .services.csv_import import import_fb_csv
 from .services.excel_export import generate_split_plan_excel
 from .services.excel_import import import_split_plan_excel
 from .services.bom_explosion import explode_materials_for_order, explode_materials_for_orders
 from .services.purchase_order import generate_purchase_orders
+
+
+def _to_int_qty(value):
+    try:
+        return int(Decimal(str(value)))
+    except Exception:
+        return 0
+
+
+def _record_material_stock_issue(material, qty, reason, ref_type, ref_id):
+    if qty == 0:
+        return
+    MaterialStockTransaction.objects.create(
+        material_code=material.material_code,
+        material_name=material.material_name,
+        qty_change=-abs(int(qty)),
+        tx_type='ISSUE',
+        tx_date=material.supply_date,
+        reason=reason,
+        ref_type=ref_type,
+        ref_id=ref_id,
+    )
+
+
+def _record_product_stock(item_code, item_name, qty_change, tx_type, tx_date, reason, ref_type, ref_id):
+    if qty_change == 0:
+        return
+    ProductStockTransaction.objects.create(
+        item_code=item_code,
+        item_name=item_name,
+        qty_change=int(qty_change),
+        tx_type=tx_type,
+        tx_date=tx_date,
+        reason=reason,
+        ref_type=ref_type,
+        ref_id=ref_id,
+    )
 
 
 class SubcontractorViewSet(viewsets.ModelViewSet):
@@ -94,7 +137,13 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
 
         encoding = request.data.get('encoding', 'shift_jis')
         content = file.read()
-        results = import_fb_csv(content, encoding=encoding)
+        try:
+            results = import_fb_csv(content, encoding=encoding)
+        except Exception as e:
+            return Response(
+                {'error': f'CSV取込でエラーが発生しました: {type(e).__name__}: {e}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         return Response({
             'created_count': len(results['created']),
@@ -109,7 +158,14 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
         order = self.get_object()
         if not order.item:
             return Response({'error': '品目マスタが未紐付けです'}, status=status.HTTP_400_BAD_REQUEST)
-        order.calculate_constraints()
+        try:
+            outsource_expand_days = int(request.data.get('outsource_expand_days') or 0)
+            internal_approval_days = int(request.data.get('internal_approval_days') or 0)
+            business_process_days = int(request.data.get('business_process_days') or 0)
+        except (TypeError, ValueError):
+            return Response({'error': '発注LT入力は整数で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+        extra_order_lt = outsource_expand_days + internal_approval_days + business_process_days
+        order.calculate_constraints(extra_order_lt=extra_order_lt)
         order.save()
         return Response(OutsourceOrderSerializer(order).data)
 
@@ -192,12 +248,59 @@ class OutsourceSplitViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_update(self, serializer):
+        before = serializer.instance
+        old_process_date = before.process_date
+        old_qty = before.qty
+
         split = serializer.save()
+        # 分割の加工日・数量変更時は、未出庫分の材料所要量を再計算して追従
+        if split.process_date != old_process_date or split.qty != old_qty:
+            _sync_material_requirements_for_split(split)
         _sync_order_status(split.order)
 
     def perform_create(self, serializer):
         split = serializer.save()
         _sync_order_status(split.order)
+
+
+def _sync_material_requirements_for_split(split):
+    order = split.order
+    if not order.item:
+        return
+    supply_transport_lt = order.item.subcontractor.transport_lt_supply
+    bom_lines = OutsourceBOM.objects.filter(item=order.item)
+    if not bom_lines.exists():
+        return
+
+    for bom in bom_lines:
+        required_qty = Decimal(str(split.qty)) * bom.quantity_per
+        supply_date = split.process_date - timedelta(days=supply_transport_lt)
+
+        mat = MaterialRequirement.objects.filter(
+            split=split,
+            material_code=bom.material_code,
+        ).first()
+        if not mat:
+            MaterialRequirement.objects.create(
+                split=split,
+                material_code=bom.material_code,
+                material_name=bom.material_name,
+                supplier_name=bom.supplier_name,
+                required_qty=required_qty,
+                order_qty=required_qty,
+                supply_date=supply_date,
+            )
+            continue
+
+        # 出庫済みは履歴保護のため更新しない
+        if mat.issued:
+            continue
+
+        mat.material_name = bom.material_name
+        mat.supplier_name = bom.supplier_name
+        mat.required_qty = required_qty
+        mat.supply_date = supply_date
+        mat.save(update_fields=['material_name', 'supplier_name', 'required_qty', 'supply_date', 'updated_at'])
 
 
 def _sync_order_status(order):
@@ -236,7 +339,7 @@ class MaterialRequirementViewSet(viewsets.ModelViewSet):
     queryset = MaterialRequirement.objects.select_related('split', 'split__order')
     serializer_class = MaterialRequirementSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ['supplied', 'ordered', 'material_code']
+    filterset_fields = ['supplied', 'ordered', 'shipment_planned', 'issued', 'material_code']
     ordering_fields = ['supply_date', 'material_code']
 
     def get_queryset(self):
@@ -250,7 +353,42 @@ class MaterialRequirementViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_update(self, serializer):
+        before = serializer.instance
+        was_issued = before.issued
+        before_qty = _to_int_qty(before.supplied_qty or before.required_qty)
         material = serializer.save()
+        if material.issued and not material.supplied:
+            material.supplied = True
+            if not material.supplied_qty:
+                material.supplied_qty = material.required_qty
+            material.save(update_fields=['supplied', 'supplied_qty', 'updated_at'])
+        elif not material.issued and material.supplied:
+            material.supplied = False
+            material.supplied_qty = 0
+            material.save(update_fields=['supplied', 'supplied_qty', 'updated_at'])
+
+        now_issued = material.issued
+        if not was_issued and now_issued:
+            issue_qty = _to_int_qty(material.supplied_qty or material.required_qty)
+            _record_material_stock_issue(
+                material,
+                issue_qty,
+                '材料支給画面で出庫済み',
+                'material_requirement_issue',
+                material.id,
+            )
+        elif was_issued and not now_issued:
+            # 出庫取消は逆仕訳（在庫戻し）
+            MaterialStockTransaction.objects.create(
+                material_code=material.material_code,
+                material_name=material.material_name,
+                qty_change=abs(before_qty),
+                tx_type='ADJUST',
+                tx_date=material.supply_date,
+                reason='出庫取消',
+                ref_type='material_requirement_issue_cancel',
+                ref_id=material.id,
+            )
         _sync_order_status(material.split.order)
 
     @action(detail=True, methods=['post'], url_path='supply')
@@ -259,8 +397,18 @@ class MaterialRequirementViewSet(viewsets.ModelViewSet):
         material = self.get_object()
         supplied_qty = request.data.get('supplied_qty', material.required_qty)
         material.supplied_qty = supplied_qty
+        material.shipment_planned = True
+        material.issued = True
         material.supplied = True
         material.save()
+        issue_qty = _to_int_qty(material.supplied_qty or material.required_qty)
+        _record_material_stock_issue(
+            material,
+            issue_qty,
+            '材料支給画面で出庫済み',
+            'material_requirement_supply',
+            material.id,
+        )
         _sync_order_status(material.split.order)
         return Response(MaterialRequirementSerializer(material).data)
 
@@ -307,14 +455,65 @@ class SubcontractorDeliveryViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         delivery = serializer.save()
         split = delivery.split
+        _record_product_stock(
+            split.order.item_code,
+            split.order.item_name,
+            delivery.qty,
+            'RECEIPT',
+            delivery.delivery_date,
+            '外作先納入による入庫',
+            'subcontractor_delivery',
+            delivery.id,
+        )
         total_delivered = sum(d.qty for d in split.deliveries.all())
         if total_delivered >= split.qty:
             split.process_completed = True
             split.save(update_fields=['process_completed', 'updated_at'])
         _sync_order_status(split.order)
 
+    def perform_update(self, serializer):
+        before = serializer.instance
+        old_qty = before.qty
+        old_date = before.delivery_date
+        delivery = serializer.save()
+        split = delivery.split
+        qty_diff = delivery.qty - old_qty
+        if qty_diff != 0:
+            _record_product_stock(
+                split.order.item_code,
+                split.order.item_name,
+                qty_diff,
+                'RECEIPT',
+                delivery.delivery_date,
+                '外作先納入修正',
+                'subcontractor_delivery_update',
+                delivery.id,
+            )
+        elif delivery.delivery_date != old_date:
+            _record_product_stock(
+                split.order.item_code,
+                split.order.item_name,
+                0,
+                'RECEIPT',
+                delivery.delivery_date,
+                '外作先納入日修正',
+                'subcontractor_delivery_update',
+                delivery.id,
+            )
+        _sync_order_status(split.order)
+
     def perform_destroy(self, instance):
         split = instance.split
+        _record_product_stock(
+            split.order.item_code,
+            split.order.item_name,
+            -instance.qty,
+            'ADJUST',
+            instance.delivery_date,
+            '外作先納入削除',
+            'subcontractor_delivery_delete',
+            instance.id,
+        )
         instance.delete()
         total_delivered = sum(d.qty for d in split.deliveries.all())
         if total_delivered < split.qty:
@@ -343,8 +542,124 @@ class CustomerShipmentViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         shipment = serializer.save()
         split = shipment.split
+        _record_product_stock(
+            split.order.item_code,
+            split.order.item_name,
+            -shipment.qty,
+            'SHIP',
+            shipment.shipment_date,
+            '顧客出荷による出庫',
+            'customer_shipment',
+            shipment.id,
+        )
         total_shipped = sum(s.qty for s in split.shipments.all())
         if total_shipped >= split.qty:
             split.shipped = True
             split.save(update_fields=['shipped', 'updated_at'])
         _sync_order_status(split.order)
+
+    def perform_update(self, serializer):
+        before = serializer.instance
+        old_qty = before.qty
+        shipment = serializer.save()
+        split = shipment.split
+        qty_diff = shipment.qty - old_qty
+        if qty_diff != 0:
+            _record_product_stock(
+                split.order.item_code,
+                split.order.item_name,
+                -qty_diff,
+                'SHIP',
+                shipment.shipment_date,
+                '顧客出荷修正',
+                'customer_shipment_update',
+                shipment.id,
+            )
+        _sync_order_status(split.order)
+
+    def perform_destroy(self, instance):
+        split = instance.split
+        _record_product_stock(
+            split.order.item_code,
+            split.order.item_name,
+            instance.qty,
+            'ADJUST',
+            instance.shipment_date,
+            '顧客出荷削除',
+            'customer_shipment_delete',
+            instance.id,
+        )
+        instance.delete()
+        total_shipped = sum(s.qty for s in split.shipments.all())
+        if total_shipped < split.qty:
+            split.shipped = False
+            split.save(update_fields=['shipped', 'updated_at'])
+        _sync_order_status(split.order)
+
+
+class MaterialStockTransactionViewSet(viewsets.ModelViewSet):
+    queryset = MaterialStockTransaction.objects.all()
+    serializer_class = MaterialStockTransactionSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['material_code', 'tx_type']
+    search_fields = ['material_code', 'material_name', 'reason']
+    ordering_fields = ['tx_date', 'created_at', 'material_code']
+    http_method_names = ['get', 'post', 'head', 'options']
+
+    @action(detail=False, methods=['get'], url_path='summary')
+    def summary(self, request):
+        rows = (
+            MaterialStockTransaction.objects
+            .values('material_code', 'material_name')
+            .annotate(stock_qty=models.Sum('qty_change'))
+            .order_by('material_code')
+        )
+        return Response(list(rows))
+
+    def create(self, request, *args, **kwargs):
+        data = request.data.copy()
+        qty_change = int(data.get('qty_change', 0))
+        reason = str(data.get('reason', '')).strip()
+        if qty_change == 0:
+            return Response({'error': '数量は0以外を指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+        if not reason:
+            return Response({'error': '棚卸調整理由は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+        data['tx_type'] = 'ADJUST'
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class ProductStockTransactionViewSet(viewsets.ModelViewSet):
+    queryset = ProductStockTransaction.objects.all()
+    serializer_class = ProductStockTransactionSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['item_code', 'tx_type']
+    search_fields = ['item_code', 'item_name', 'reason']
+    ordering_fields = ['tx_date', 'created_at', 'item_code']
+    http_method_names = ['get', 'post', 'head', 'options']
+
+    @action(detail=False, methods=['get'], url_path='summary')
+    def summary(self, request):
+        rows = (
+            ProductStockTransaction.objects
+            .values('item_code', 'item_name')
+            .annotate(stock_qty=models.Sum('qty_change'))
+            .order_by('item_code')
+        )
+        return Response(list(rows))
+
+    def create(self, request, *args, **kwargs):
+        data = request.data.copy()
+        qty_change = int(data.get('qty_change', 0))
+        reason = str(data.get('reason', '')).strip()
+        if qty_change == 0:
+            return Response({'error': '数量は0以外を指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+        if not reason:
+            return Response({'error': '棚卸調整理由は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+        data['tx_type'] = 'ADJUST'
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)

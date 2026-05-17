@@ -2,7 +2,12 @@
   <div class="page-container">
     <div class="page-header">
       <h2 class="page-title">案件詳細: {{ order?.case_no }}</h2>
-      <RouterLink to="/outsource/orders" class="btn-back">← 一覧へ</RouterLink>
+      <div class="header-actions">
+        <button class="btn-recalc" :disabled="loading || recalculating || !order?.id" @click="recalculateConstraints">
+          {{ recalculating ? '再計算中...' : '制約日を再計算' }}
+        </button>
+        <RouterLink to="/outsource/orders" class="btn-back">← 一覧へ</RouterLink>
+      </div>
     </div>
 
     <div v-if="order" class="detail-content">
@@ -15,6 +20,11 @@
         <div class="info-item"><span class="info-label">ステータス</span><span class="status-badge" :class="'st-' + order.status">{{ STATUS_MAP[order.status] || order.status }}</span></div>
         <div class="info-item"><span class="info-label">最早着手日</span><span>{{ order.earliest_start || '未計算' }}</span></div>
         <div class="info-item"><span class="info-label">最遅完了日</span><span>{{ order.latest_finish || '未計算' }}</span></div>
+      </div>
+      <div class="constraint-note">
+        <div>注: 最遅完了日 = 塗装日 - 顧客納入LT（営業日）</div>
+        <div>注: 最早着手日 = 業務日付 + 材料調達LT + 支給運送LT（営業日）</div>
+        <div>注: 営業日計算は調達先カレンダ優先、未設定時はDAISOカレンダを使用</div>
       </div>
 
       <div v-if="order.splits && order.splits.length" class="splits-section">
@@ -92,6 +102,7 @@ const STATUS_MAP = {
 
 const order = ref(null)
 const loading = ref(false)
+const recalculating = ref(false)
 const editingId = ref(null)
 const editForm = ref({ process_date: '', qty: 0 })
 
@@ -135,6 +146,19 @@ async function fetchOrder() {
   }
 }
 
+async function recalculateConstraints() {
+  if (!order.value?.id) return
+  recalculating.value = true
+  try {
+    await api.outsource.calculateConstraints(order.value.id)
+    await fetchOrder()
+  } catch (err) {
+    alert(err.response?.data?.error || '再計算に失敗しました')
+  } finally {
+    recalculating.value = false
+  }
+}
+
 onMounted(fetchOrder)
 </script>
 
@@ -142,6 +166,16 @@ onMounted(fetchOrder)
 .page-container { padding: 16px; }
 .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .page-title { font-size: 18px; }
+.header-actions { display: flex; align-items: center; gap: 8px; }
+.btn-recalc {
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid #81c784;
+  border-radius: 4px;
+  background: #e8f5e9;
+  cursor: pointer;
+}
+.btn-recalc:disabled { opacity: 0.6; cursor: not-allowed; }
 .btn-back { font-size: 13px; color: #1976d2; text-decoration: none; }
 
 .info-grid {
@@ -152,6 +186,12 @@ onMounted(fetchOrder)
 }
 .info-item { display: flex; gap: 8px; font-size: 13px; padding: 4px 0; }
 .info-label { font-weight: 600; min-width: 80px; color: #555; }
+.constraint-note {
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #666;
+  line-height: 1.5;
+}
 
 .splits-section { margin-top: 16px; }
 .splits-section h3 { font-size: 14px; margin-bottom: 8px; }

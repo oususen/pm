@@ -25,6 +25,8 @@ def generate_purchase_orders(material_ids=None, unsupplied_only=True, unordered_
     # メーカ別にグループ化
     by_supplier = defaultdict(list)
     for m in qs:
+        if float(m.order_qty or 0) <= 0:
+            continue
         supplier = m.supplier_name or '調達先未設定'
         by_supplier[supplier].append(m)
 
@@ -71,7 +73,7 @@ def generate_purchase_orders(material_ids=None, unsupplied_only=True, unordered_
             row = agg[key]
             row['material_code'] = m.material_code
             row['material_name'] = m.material_name
-            row['total_qty'] += float(m.required_qty)
+            row['total_qty'] += float(m.order_qty or 0)
             row['supply_date'] = m.supply_date
             row['cases'].add(m.split.order.case_no)
 

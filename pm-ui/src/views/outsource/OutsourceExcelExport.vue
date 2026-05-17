@@ -17,6 +17,34 @@
       <button class="btn-primary" :disabled="!selectedIds.length || exporting" @click="doExport">
         {{ exporting ? '出力中...' : `Excel出力（${selectedIds.length}件）` }}
       </button>
+      <button class="btn-secondary" :disabled="!selectedIds.length || recalculating" @click="recalculateSelected">
+        {{ recalculating ? '再計算中...' : `選択行を再計算（${selectedIds.length}件）` }}
+      </button>
+    </div>
+
+    <div v-if="showRecalcDialog" class="dialog-overlay">
+      <div class="dialog-card">
+        <h3 class="dialog-title">再計算条件入力</h3>
+        <div class="dialog-row">
+          <label>外作先展開日数</label>
+          <input type="number" min="0" step="1" v-model.number="recalcForm.outsource_expand_days" />
+        </div>
+        <div class="dialog-row">
+          <label>社内承認日数</label>
+          <input type="number" min="0" step="1" v-model.number="recalcForm.internal_approval_days" />
+        </div>
+        <div class="dialog-row">
+          <label>業務処理日数</label>
+          <input type="number" min="0" step="1" v-model.number="recalcForm.business_process_days" />
+        </div>
+        <div class="dialog-note">
+          発注LT = 外作先展開日数 + 社内承認日数 + 業務処理日数
+        </div>
+        <div class="dialog-actions">
+          <button class="btn-month" @click="showRecalcDialog = false">キャンセル</button>
+          <button class="btn-secondary" :disabled="recalculating" @click="confirmRecalculate">この条件で再計算</button>
+        </div>
+      </div>
     </div>
 
     <table class="data-table" v-if="orders.length">
@@ -28,6 +56,9 @@
           <th>品目名称</th>
           <th>数量</th>
           <th>塗装日</th>
+          <th>調達最長LT</th>
+          <th>材料コード</th>
+          <th>調達先</th>
           <th>最早着手</th>
           <th>最遅完了</th>
           <th>ステータス</th>
@@ -41,6 +72,9 @@
           <td>{{ o.item_name }}</td>
           <td class="text-right">{{ o.order_qty }}</td>
           <td>{{ o.painting_date }}</td>
+          <td>{{ o.max_procurement_lt ?? '-' }}</td>
+          <td>{{ o.max_procurement_material_code || '-' }}</td>
+          <td>{{ o.max_procurement_supplier_name || '-' }}</td>
           <td>{{ o.earliest_start || '-' }}</td>
           <td>{{ o.latest_finish || '-' }}</td>
           <td>{{ statusLabel(o.status) }}</td>
@@ -80,6 +114,13 @@ const selectedIds = ref([])
 const filterStatus = ref('IMPORTED')
 const loading = ref(false)
 const exporting = ref(false)
+const recalculating = ref(false)
+const showRecalcDialog = ref(false)
+const recalcForm = ref({
+  outsource_expand_days: 0,
+  internal_approval_days: 0,
+  business_process_days: 0,
+})
 
 const allSelected = computed(() => orders.value.length > 0 && selectedIds.value.length === orders.value.length)
 
@@ -122,6 +163,25 @@ async function doExport() {
   }
 }
 
+async function recalculateSelected() {
+  showRecalcDialog.value = true
+}
+
+async function confirmRecalculate() {
+  recalculating.value = true
+  try {
+    await Promise.all(
+      selectedIds.value.map(id => api.outsource.calculateConstraints(id, recalcForm.value))
+    )
+    showRecalcDialog.value = false
+    await fetchOrders()
+  } catch (e) {
+    alert(e.response?.data?.error || '再計算に失敗しました')
+  } finally {
+    recalculating.value = false
+  }
+}
+
 onMounted(fetchOrders)
 </script>
 
@@ -137,10 +197,33 @@ onMounted(fetchOrders)
 .btn-month:hover { background: #e3f2fd; }
 .btn-primary { padding: 6px 16px; background: #1976d2; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-secondary { padding: 6px 12px; background: #e8f5e9; color: #2e7d32; border: 1px solid #81c784; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .data-table th, .data-table td { border: 1px solid #ddd; padding: 4px 8px; }
 .data-table th { background: #f5f5f5; }
 .text-right { text-align: right; }
 .case-no { font-family: monospace; font-size: 11px; }
 .empty-state { text-align: center; padding: 32px; color: #999; }
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+.dialog-card {
+  width: 420px;
+  background: #fff;
+  border-radius: 8px;
+  padding: 14px;
+}
+.dialog-title { font-size: 15px; margin-bottom: 10px; }
+.dialog-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.dialog-row label { width: 130px; font-size: 12px; color: #555; }
+.dialog-row input { width: 120px; padding: 3px 6px; border: 1px solid #ccc; border-radius: 4px; }
+.dialog-note { font-size: 12px; color: #666; margin: 6px 0 10px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 </style>

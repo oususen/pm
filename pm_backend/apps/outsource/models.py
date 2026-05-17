@@ -1,5 +1,6 @@
 from django.db import models
-from masters.models import Supplier
+from masters.models import Supplier, Calendar
+from orders.utils.calendar_utils import add_working_days, subtract_working_days, get_business_today
 
 
 class Subcontractor(models.Model):
@@ -20,7 +21,6 @@ class Subcontractor(models.Model):
 
     def __str__(self):
         return self.name
-
 
 class OutsourceItem(models.Model):
     """外作品目マスタ"""
@@ -82,6 +82,13 @@ class OutsourceMaterial(models.Model):
             supplier=self.supplier,
             supplier_name=self.supplier_name,
             procurement_lt=self.procurement_lt,
+        )
+        # 既存の材料所要量にも調達先変更を反映（未出庫分のみ）
+        MaterialRequirement.objects.filter(
+            material_code=self.material_code,
+            supplied=False,
+        ).update(
+            supplier_name=self.supplier_name,
         )
 
     def __str__(self):
@@ -170,25 +177,41 @@ class OutsourceOrder(models.Model):
     def __str__(self):
         return f'{self.case_no} ({self.item_name})'
 
-    def calculate_constraints(self):
+    def calculate_constraints(self, extra_order_lt=0):
         """制約条件を計算: 最早着手日・最遅完了日"""
-        from datetime import timedelta
-
         if not self.item:
             return
 
-        # 最遅完了日 = 塗装日 - 顧客納入LT（運送）
-        self.latest_finish = self.painting_date - timedelta(days=self.item.customer_delivery_lt)
+        # 既定カレンダ（未設定時フォールバック）
+        daiso_calendar = Calendar.objects.filter(calendar_code__iexact='daiso').first()
 
-        # 最早着手日 = 今日 + MAX(BOM内材料調達LT) + 支給運送LT
-        max_proc_lt = self.item.bom_lines.aggregate(
-            max_lt=models.Max('procurement_lt')
-        )['max_lt'] or 0
+        # 最遅完了日 = 塗装日 - 運送LT（顧客納入）※DAISOカレンダで営業日逆算
+        self.latest_finish = subtract_working_days(
+            self.painting_date,
+            int(self.item.customer_delivery_lt or 0),
+            daiso_calendar,
+        )
+
+        # 最早着手日 = 今日 + 材料調達LT + 支給運送LT
+        # 調達先カレンダがあれば優先、なければDAISOカレンダを使用
+        bom_lines = self.item.bom_lines.select_related('supplier').all()
         supply_transport_lt = self.item.subcontractor.transport_lt_supply
+        business_today = get_business_today()
+        candidates = []
+        for bom in bom_lines:
+            supplier_calendar = getattr(getattr(bom, 'supplier', None), 'calendar', None)
+            calc_calendar = supplier_calendar or daiso_calendar
+            total_days = int(bom.procurement_lt or 0) + int(supply_transport_lt or 0) + int(extra_order_lt or 0)
+            candidates.append(add_working_days(business_today, total_days, calc_calendar))
 
-        from datetime import date
-        today = date.today()
-        self.earliest_start = today + timedelta(days=max_proc_lt + supply_transport_lt)
+        if candidates:
+            self.earliest_start = max(candidates)
+        else:
+            self.earliest_start = add_working_days(
+                business_today,
+                int(supply_transport_lt or 0) + int(extra_order_lt or 0),
+                daiso_calendar,
+            )
 
 
 class OutsourceSplit(models.Model):
@@ -227,9 +250,12 @@ class MaterialRequirement(models.Model):
     material_name = models.CharField('材料名称', max_length=200)
     supplier_name = models.CharField('調達先', max_length=100, blank=True, default='')
     required_qty = models.DecimalField('必要数量', max_digits=12, decimal_places=4)
+    order_qty = models.DecimalField('発注数', max_digits=12, decimal_places=4, default=0)
     supply_date = models.DateField('支給予定日')
     ordered = models.BooleanField('発注済', default=False)
     ordered_at = models.DateField('発注日', null=True, blank=True)
+    shipment_planned = models.BooleanField('便計画済み', default=False)
+    issued = models.BooleanField('出庫済み', default=False)
     supplied_qty = models.DecimalField('支給済数量', max_digits=12, decimal_places=4, default=0)
     supplied = models.BooleanField('支給完了', default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -287,3 +313,59 @@ class CustomerShipment(models.Model):
 
     def __str__(self):
         return f'{self.split.order.case_no} #{self.split.sequence} 出荷 {self.shipment_date}'
+
+
+class MaterialStockTransaction(models.Model):
+    """材料在庫トランザクション（総量管理）"""
+    TX_TYPE_CHOICES = [
+        ('RECEIPT', '入庫'),
+        ('ISSUE', '出庫'),
+        ('ADJUST', '棚卸調整'),
+    ]
+
+    material_code = models.CharField('材料コード', max_length=50, db_index=True)
+    material_name = models.CharField('材料名称', max_length=200, blank=True, default='')
+    qty_change = models.IntegerField('増減数量（個）')
+    tx_type = models.CharField('区分', max_length=20, choices=TX_TYPE_CHOICES)
+    tx_date = models.DateField('取引日')
+    reason = models.CharField('理由', max_length=200, blank=True, default='')
+    ref_type = models.CharField('参照種別', max_length=50, blank=True, default='')
+    ref_id = models.IntegerField('参照ID', null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'outsource_material_stock_tx'
+        verbose_name = '材料在庫トランザクション'
+        verbose_name_plural = '材料在庫トランザクション'
+        ordering = ['-tx_date', '-id']
+
+    def __str__(self):
+        return f'{self.material_code} {self.qty_change:+d}'
+
+
+class ProductStockTransaction(models.Model):
+    """完成品在庫トランザクション（総量管理）"""
+    TX_TYPE_CHOICES = [
+        ('RECEIPT', '入庫'),
+        ('SHIP', '出庫'),
+        ('ADJUST', '棚卸調整'),
+    ]
+
+    item_code = models.CharField('品目コード', max_length=50, db_index=True)
+    item_name = models.CharField('品目名称', max_length=200, blank=True, default='')
+    qty_change = models.IntegerField('増減数量（個）')
+    tx_type = models.CharField('区分', max_length=20, choices=TX_TYPE_CHOICES)
+    tx_date = models.DateField('取引日')
+    reason = models.CharField('理由', max_length=200, blank=True, default='')
+    ref_type = models.CharField('参照種別', max_length=50, blank=True, default='')
+    ref_id = models.IntegerField('参照ID', null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'outsource_product_stock_tx'
+        verbose_name = '完成品在庫トランザクション'
+        verbose_name_plural = '完成品在庫トランザクション'
+        ordering = ['-tx_date', '-id']
+
+    def __str__(self):
+        return f'{self.item_code} {self.qty_change:+d}'

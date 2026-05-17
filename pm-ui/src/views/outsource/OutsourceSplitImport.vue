@@ -25,7 +25,7 @@
         <div v-if="result.updated && result.updated.length" class="updated-list">
           <h4>更新された案件</h4>
           <table class="data-table">
-            <thead><tr><th>案件番号</th><th>分割数</th><th>合計数量</th><th>材料所要量</th></tr></thead>
+            <thead><tr><th>案件番号</th><th>分割数</th><th>合計数量</th><th>材料支給</th></tr></thead>
             <tbody>
               <tr v-for="u in result.updated" :key="u.case_no">
                 <td>{{ u.case_no }}</td>

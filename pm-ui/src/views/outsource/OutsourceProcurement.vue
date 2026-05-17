@@ -47,7 +47,7 @@
       <table class="data-table">
         <thead><tr>
           <th class="col-check"><input type="checkbox" @change="toggleGroup(group, $event)" :checked="isGroupAllSelected(group)" /></th>
-          <th>支給予定日</th><th>材料コード</th><th>材料名称</th><th>必要数量</th><th>案件番号</th><th>品目名称</th><th>加工日</th><th>状態</th><th>操作</th>
+          <th>支給予定日</th><th>材料コード</th><th>材料名称</th><th>必要数量</th><th>在庫数</th><th>発注数</th><th>案件番号</th><th>品目名称</th><th>加工日</th><th>状態</th><th>操作</th>
         </tr></thead>
         <tbody>
           <tr v-for="m in group.items" :key="m.id" :class="rowClass(m)">
@@ -56,6 +56,16 @@
             <td>{{ m.material_code }}</td>
             <td>{{ m.material_name }}</td>
             <td class="text-right">{{ formatQty(m.required_qty) }}</td>
+            <td class="text-right">{{ formatQty(stockQtyOf(m.material_code)) }}</td>
+            <td>
+              <input
+                type="number"
+                step="1"
+                class="qty-input"
+                :value="orderedQtyOf(m)"
+                @change="updateOrderQty(m, $event)"
+              />
+            </td>
             <td class="case-no">{{ m.case_no }}</td>
             <td>{{ m.item_name }}</td>
             <td>{{ m.process_date }}</td>
@@ -66,11 +76,11 @@
             </td>
           </tr>
         </tbody>
-        <tfoot><tr class="total-row"><td colspan="4">小計</td><td class="text-right">{{ formatQty(group.totalQty) }}</td><td colspan="5"></td></tr></tfoot>
+        <tfoot><tr class="total-row"><td colspan="4">小計</td><td class="text-right">{{ formatQty(group.totalQty) }}</td><td colspan="6"></td></tr></tfoot>
       </table>
     </div>
 
-    <div v-if="!materials.length && !loading" class="empty-state">材料所要量データがありません</div>
+    <div v-if="!materials.length && !loading" class="empty-state">材料支給データがありません</div>
     <div v-if="loading" class="loading">読み込み中...</div>
   </div>
 </template>
@@ -80,6 +90,7 @@ import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
 
 const materials = ref([])
+const materialStockMap = ref({})
 const loading = ref(false)
 const exporting = ref(false)
 const filterOrdered = ref('false')
@@ -119,6 +130,15 @@ const hasUnordered = computed(() => materials.value.some(m => !m.ordered))
 function formatQty(val) {
   const n = parseFloat(val)
   return Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 })
+}
+
+function stockQtyOf(materialCode) {
+  return materialStockMap.value[materialCode] ?? 0
+}
+
+function orderedQtyOf(m) {
+  const v = parseFloat(m.order_qty)
+  return Number.isFinite(v) ? v : (parseFloat(m.required_qty) || 0)
 }
 
 function isOverdue(m) { return !m.ordered && m.supply_date < today }
@@ -163,8 +183,16 @@ async function fetchMaterials() {
     if (filterOrdered.value) params.ordered = filterOrdered.value
     if (paintingFrom.value) params.painting_date_from = paintingFrom.value
     if (paintingTo.value) params.painting_date_to = paintingTo.value
-    const res = await api.outsource.getMaterials(params)
-    materials.value = res.data.results || res.data
+    const [matRes, stockRes] = await Promise.all([
+      api.outsource.getMaterials(params),
+      api.outsource.getMaterialStockSummary(),
+    ])
+    materials.value = matRes.data.results || matRes.data
+    const map = {}
+    for (const row of (stockRes.data || [])) {
+      map[row.material_code] = parseFloat(row.stock_qty || 0)
+    }
+    materialStockMap.value = map
   } finally { loading.value = false }
 }
 
@@ -172,16 +200,34 @@ const todayDate = formatLocalDate()
 
 async function markOrdered(m) {
   try {
-    await api.outsource.updateMaterial(m.id, { ordered: true, ordered_at: todayDate })
+    await api.outsource.patchMaterial(m.id, { ordered: true, ordered_at: todayDate })
     m.ordered = true; m.ordered_at = todayDate
   } catch (err) { console.error(err) }
 }
 
 async function undoOrder(m) {
   try {
-    await api.outsource.updateMaterial(m.id, { ordered: false, ordered_at: null })
+    await api.outsource.patchMaterial(m.id, { ordered: false, ordered_at: null })
     m.ordered = false; m.ordered_at = null
   } catch (err) { console.error(err) }
+}
+
+async function updateOrderQty(m, event) {
+  const next = Number(event.target.value)
+  if (!Number.isFinite(next) || next < 0) {
+    event.target.value = orderedQtyOf(m)
+    return
+  }
+  const val = Math.trunc(next)
+  if (val === Number(m.order_qty ?? m.required_qty ?? 0)) return
+  try {
+    await api.outsource.patchMaterial(m.id, { order_qty: val })
+    m.order_qty = val
+  } catch (err) {
+    console.error(err)
+    event.target.value = orderedQtyOf(m)
+    alert('発注数の更新に失敗しました')
+  }
 }
 
 async function orderAll(items) {
@@ -302,6 +348,14 @@ onMounted(fetchMaterials)
 
 .btn-supply { padding: 2px 8px; background: #e8f5e9; border: 1px solid #81c784; border-radius: 4px; cursor: pointer; font-size: 11px; }
 .btn-undo { padding: 2px 8px; background: #f5f5f5; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 11px; color: #888; }
+.qty-input {
+  width: 90px;
+  padding: 2px 6px;
+  font-size: 12px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  text-align: right;
+}
 
 .empty-state, .loading { text-align: center; padding: 32px; color: #999; font-size: 14px; }
 </style>

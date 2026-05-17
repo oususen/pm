@@ -68,8 +68,8 @@ export const createOutsourceAPI = (client) => ({
   importCSV(formData) {
     return client.post('/outsource/orders/import-csv/', formData)
   },
-  calculateConstraints(id) {
-    return client.post(`/outsource/orders/${id}/calculate-constraints/`)
+  calculateConstraints(id, data = {}) {
+    return client.post(`/outsource/orders/${id}/calculate-constraints/`, data)
   },
   exportExcel(orderIds) {
     return client.post('/outsource/orders/export-excel/', { order_ids: orderIds }, { responseType: 'blob' })
@@ -102,6 +102,9 @@ export const createOutsourceAPI = (client) => ({
   updateMaterial(id, data) {
     return client.put(`/outsource/materials/${id}/`, data)
   },
+  patchMaterial(id, data) {
+    return client.patch(`/outsource/materials/${id}/`, data)
+  },
   supplyMaterial(id, data = {}) {
     return client.post(`/outsource/materials/${id}/supply/`, data)
   },
@@ -129,5 +132,27 @@ export const createOutsourceAPI = (client) => ({
   },
   deleteShipment(id) {
     return client.delete(`/outsource/shipments/${id}/`)
+  },
+
+  // 材料在庫
+  getMaterialStockTx(params = {}) {
+    return client.get('/outsource/material-stock/', { params })
+  },
+  getMaterialStockSummary(params = {}) {
+    return client.get('/outsource/material-stock/summary/', { params })
+  },
+  createMaterialStockAdjust(data) {
+    return client.post('/outsource/material-stock/', data)
+  },
+
+  // 完成品在庫
+  getProductStockTx(params = {}) {
+    return client.get('/outsource/product-stock/', { params })
+  },
+  getProductStockSummary(params = {}) {
+    return client.get('/outsource/product-stock/summary/', { params })
+  },
+  createProductStockAdjust(data) {
+    return client.post('/outsource/product-stock/', data)
   },
 })

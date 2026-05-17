@@ -4,6 +4,7 @@ from .models import (
     Subcontractor, OutsourceItem, OutsourceBOM, OutsourceMaterial,
     OutsourceOrder, OutsourceSplit, MaterialRequirement,
     SubcontractorDelivery, CustomerShipment,
+    MaterialStockTransaction, ProductStockTransaction,
 )
 
 
@@ -136,6 +137,9 @@ class OutsourceOrderSerializer(serializers.ModelSerializer):
 
 class OutsourceOrderListSerializer(serializers.ModelSerializer):
     split_count = serializers.IntegerField(source='splits.count', read_only=True)
+    max_procurement_lt = serializers.SerializerMethodField()
+    max_procurement_material_code = serializers.SerializerMethodField()
+    max_procurement_supplier_name = serializers.SerializerMethodField()
 
     class Meta:
         model = OutsourceOrder
@@ -143,4 +147,35 @@ class OutsourceOrderListSerializer(serializers.ModelSerializer):
             'id', 'case_no', 'item_code', 'item_name', 'order_qty',
             'painting_name', 'painting_date', 'earliest_start', 'latest_finish',
             'status', 'imported_at', 'split_count',
+            'max_procurement_lt', 'max_procurement_material_code', 'max_procurement_supplier_name',
         ]
+
+    def _get_max_lt_bom(self, obj):
+        item = getattr(obj, 'item', None)
+        if not item:
+            return None
+        return item.bom_lines.order_by('-procurement_lt', 'material_code').first()
+
+    def get_max_procurement_lt(self, obj):
+        bom = self._get_max_lt_bom(obj)
+        return int(bom.procurement_lt) if bom else None
+
+    def get_max_procurement_material_code(self, obj):
+        bom = self._get_max_lt_bom(obj)
+        return bom.material_code if bom else ''
+
+    def get_max_procurement_supplier_name(self, obj):
+        bom = self._get_max_lt_bom(obj)
+        return bom.supplier_name if bom else ''
+
+
+class MaterialStockTransactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MaterialStockTransaction
+        fields = '__all__'
+
+
+class ProductStockTransactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductStockTransaction
+        fields = '__all__'

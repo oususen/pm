@@ -196,13 +196,17 @@ IMPORTED → SENT_TO_SUB → SPLIT_REGISTERED → IN_PROGRESS → COMPLETED
 | supply_date | DateField | 支給予定日（加工日 - 支給運送LT） |
 | ordered | BooleanField | 発注済フラグ（材料メーカーへ発注したか） |
 | ordered_at | DateField | 発注日 |
+| shipment_planned | BooleanField | 便計画済みフラグ（支給予定便に載せたか） |
+| issued | BooleanField | 出庫済みフラグ（倉庫から出庫したか） |
 | supplied_qty | DecimalField | 支給済数量 |
 | supplied | BooleanField | 支給完了フラグ（外作先へ支給したか） |
 
-**2つの状態の違い:**
+**3つの状態の違い:**
 
 - `ordered`: 材料メーカーへの発注状態（材料手配画面で管理）
-- `supplied`: 外作先への支給状態（材料所要量画面で管理）
+- `shipment_planned`: 支給便への計画搭載状態（材料所要量画面で管理）
+- `issued`: 出庫状態（材料所要量画面で管理）
+- `supplied`: 既存互換フラグ（`issued` と同期）
 
 テーブル名: `outsource_material_requirement`
 
