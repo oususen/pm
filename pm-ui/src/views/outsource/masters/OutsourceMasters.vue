@@ -27,7 +27,7 @@
         <tbody>
           <tr v-for="s in subcontractors" :key="s.id">
             <td>{{ s.name }}</td>
-            <td>{{ s.daily_capacity }}</td>
+            <td>{{ s.daily_capacity ?? '-' }}</td>
             <td>{{ s.transport_lt_supply }}日</td>
             <td>{{ s.transport_lt_delivery }}日</td>
             <td><button class="btn-edit" @click="editSub(s)">編集</button></td>
@@ -45,15 +45,17 @@
           <option value="">外作先選択</option>
           <option v-for="s in subcontractors" :key="s.id" :value="s.id">{{ s.name }}</option>
         </select>
-        <input v-model.number="itemForm.customer_delivery_lt" placeholder="顧客納入LT" type="number" class="input input-sm" />
+        <label class="field-label">納入LT</label>
+        <input v-model.number="itemForm.customer_delivery_lt" placeholder="日数" type="number" class="input input-sm" />
         <button class="btn-primary" @click="saveItem">{{ itemForm.id ? '更新' : '追加' }}</button>
         <button v-if="itemForm.id" class="btn-cancel" @click="resetItemForm">取消</button>
       </div>
       <table class="data-table">
-        <thead><tr><th>品目コード</th><th>品目名称</th><th>外作先</th><th>顧客納入LT</th><th>操作</th></tr></thead>
+        <thead><tr><th>品目コード</th><th>品番</th><th>品名</th><th>外作先</th><th>顧客納入LT</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="it in items" :key="it.id">
             <td>{{ it.item_code }}</td>
+            <td>{{ it.product_number }}</td>
             <td>{{ it.item_name }}</td>
             <td>{{ it.subcontractor_name }}</td>
             <td>{{ it.customer_delivery_lt }}日</td>
@@ -74,9 +76,14 @@
       <div v-if="bomFilter" class="form-row">
         <input v-model="bomForm.material_code" placeholder="材料コード" class="input" />
         <input v-model="bomForm.material_name" placeholder="材料名称" class="input" />
+        <label class="field-label">員数</label>
         <input v-model.number="bomForm.quantity_per" placeholder="員数" type="number" step="0.0001" class="input input-sm" />
-        <input v-model="bomForm.supplier_name" placeholder="調達先" class="input" />
-        <input v-model.number="bomForm.procurement_lt" placeholder="調達LT(日)" type="number" class="input input-sm" />
+        <select v-model="bomForm.supplier" class="input">
+          <option :value="null">調達先選択</option>
+          <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.supplier_name }}</option>
+        </select>
+        <label class="field-label">調達LT</label>
+        <input v-model.number="bomForm.procurement_lt" placeholder="日数" type="number" class="input input-sm" />
         <button class="btn-primary" @click="saveBOM">{{ bomForm.id ? '更新' : '追加' }}</button>
         <button v-if="bomForm.id" class="btn-cancel" @click="resetBOMForm">取消</button>
       </div>
@@ -86,8 +93,8 @@
           <tr v-for="b in bomLines" :key="b.id">
             <td>{{ b.material_code }}</td>
             <td>{{ b.material_name }}</td>
-            <td>{{ b.quantity_per }}</td>
-            <td>{{ b.supplier_name }}</td>
+            <td>{{ formatQty(b.quantity_per) }}</td>
+            <td>{{ b.supplier_display || b.supplier_name }}</td>
             <td>{{ b.procurement_lt }}日</td>
             <td>
               <button class="btn-edit" @click="editBOM(b)">編集</button>
@@ -111,6 +118,11 @@ const tabs = [
 ]
 const activeTab = ref('subcontractor')
 
+function formatQty(val) {
+  const n = parseFloat(val)
+  return Number.isInteger(n) ? n : n.toFixed(2)
+}
+
 // 外作先
 const subcontractors = ref([])
 const subForm = ref({ name: '', daily_capacity: null, transport_lt_supply: 1, transport_lt_delivery: 1 })
@@ -123,10 +135,12 @@ async function fetchSubs() {
   subcontractors.value = res.data.results || res.data
 }
 async function saveSub() {
-  if (subForm.value.id) {
-    await api.outsource.updateSubcontractor(subForm.value.id, subForm.value)
+  const data = { ...subForm.value }
+  if (data.daily_capacity === '' || data.daily_capacity === undefined) data.daily_capacity = null
+  if (data.id) {
+    await api.outsource.updateSubcontractor(data.id, data)
   } else {
-    await api.outsource.createSubcontractor(subForm.value)
+    await api.outsource.createSubcontractor(data)
   }
   resetSubForm()
   await fetchSubs()
@@ -153,12 +167,19 @@ async function saveItem() {
   await fetchItems()
 }
 
+// 仕入れ先マスタ（既存）
+const suppliers = ref([])
+async function fetchSuppliers() {
+  const res = await api.suppliers.getSuppliers()
+  suppliers.value = res.data.results || res.data
+}
+
 // BOM
 const bomFilter = ref('')
 const bomLines = ref([])
-const bomForm = ref({ material_code: '', material_name: '', quantity_per: 1, supplier_name: '', procurement_lt: 7 })
+const bomForm = ref({ material_code: '', material_name: '', quantity_per: 1, supplier: null, procurement_lt: 7 })
 
-function resetBOMForm() { bomForm.value = { material_code: '', material_name: '', quantity_per: 1, supplier_name: '', procurement_lt: 7 } }
+function resetBOMForm() { bomForm.value = { material_code: '', material_name: '', quantity_per: 1, supplier: null, procurement_lt: 7 } }
 function editBOM(b) { bomForm.value = { ...b } }
 
 async function fetchBOM() {
@@ -183,8 +204,7 @@ async function deleteBOM(id) {
 }
 
 onMounted(async () => {
-  await fetchSubs()
-  await fetchItems()
+  await Promise.all([fetchSubs(), fetchItems(), fetchSuppliers()])
 })
 </script>
 
@@ -207,6 +227,7 @@ onMounted(async () => {
 .form-row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
 .input { padding: 4px 8px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
 .input-sm { width: 80px; }
+.field-label { font-size: 12px; color: #555; }
 .input-lg { width: 200px; }
 
 .btn-primary { padding: 4px 12px; background: #1976d2; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }

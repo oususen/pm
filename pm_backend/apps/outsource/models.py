@@ -1,4 +1,5 @@
 from django.db import models
+from masters.models import Supplier
 
 
 class Subcontractor(models.Model):
@@ -24,6 +25,7 @@ class Subcontractor(models.Model):
 class OutsourceItem(models.Model):
     """外作品目マスタ"""
     item_code = models.CharField('品目コード', max_length=50, unique=True)
+    product_number = models.CharField('品番', max_length=20, blank=True, default='')
     item_name = models.CharField('品目名称', max_length=200)
     subcontractor = models.ForeignKey(
         Subcontractor, on_delete=models.PROTECT,
@@ -39,6 +41,13 @@ class OutsourceItem(models.Model):
         verbose_name = '外作品目'
         verbose_name_plural = '外作品目'
 
+    def save(self, *args, **kwargs):
+        if self.item_code and not self.product_number:
+            code = self.item_code.lstrip('B')
+            if len(code) >= 10:
+                self.product_number = f'{code[:6]}-{code[6:10]}'
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f'{self.item_code} {self.item_name}'
 
@@ -53,7 +62,11 @@ class OutsourceBOM(models.Model):
     material_name = models.CharField('材料名称', max_length=200)
     quantity_per = models.DecimalField('員数（親1個あたり）', max_digits=10, decimal_places=4, default=1)
     unit = models.CharField('単位', max_length=20, default='個')
-    supplier_name = models.CharField('調達先名', max_length=100, blank=True, default='')
+    supplier = models.ForeignKey(
+        Supplier, on_delete=models.SET_NULL,
+        verbose_name='調達先', null=True, blank=True
+    )
+    supplier_name = models.CharField('調達先名（自動）', max_length=100, blank=True, default='')
     procurement_lt = models.IntegerField('材料調達LT（日数）', default=7)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -63,6 +76,11 @@ class OutsourceBOM(models.Model):
         verbose_name = '外作BOM'
         verbose_name_plural = '外作BOM'
         unique_together = ['item', 'material_code']
+
+    def save(self, *args, **kwargs):
+        if self.supplier:
+            self.supplier_name = self.supplier.supplier_name
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f'{self.item.item_code} → {self.material_code}'

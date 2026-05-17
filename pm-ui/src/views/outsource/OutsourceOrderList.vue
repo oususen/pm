@@ -14,10 +14,12 @@
         <option value="IN_PROGRESS">加工中</option>
         <option value="COMPLETED">完了</option>
       </select>
+      <button class="btn-month" @click="shiftMonth(-1)">◀ 前月</button>
       <label class="filter-label">塗装日:</label>
       <input type="date" v-model="paintingFrom" @change="fetchOrders" class="filter-date" />
       <span class="filter-sep">〜</span>
       <input type="date" v-model="paintingTo" @change="fetchOrders" class="filter-date" />
+      <button class="btn-month" @click="shiftMonth(1)">次月 ▶</button>
       <input
         v-model="searchText"
         @input="debouncedFetch"
@@ -71,8 +73,24 @@ const router = useRouter()
 const orders = ref([])
 const loading = ref(false)
 const filterStatus = ref('')
-const paintingFrom = ref('')
-const paintingTo = ref('')
+function monthRange(d) {
+  const y = d.getFullYear(), m = d.getMonth()
+  const from = `${y}-${String(m + 1).padStart(2, '0')}-01`
+  const to = `${y}-${String(m + 1).padStart(2, '0')}-${String(new Date(y, m + 1, 0).getDate()).padStart(2, '0')}`
+  return { from, to }
+}
+const { from: initFrom, to: initTo } = monthRange(new Date())
+const paintingFrom = ref(initFrom)
+const paintingTo = ref(initTo)
+
+function shiftMonth(delta) {
+  const d = new Date(paintingFrom.value + 'T00:00:00')
+  d.setMonth(d.getMonth() + delta)
+  const { from, to } = monthRange(d)
+  paintingFrom.value = from
+  paintingTo.value = to
+  fetchOrders()
+}
 const searchText = ref('')
 
 let debounceTimer = null
@@ -139,6 +157,8 @@ onMounted(fetchOrders)
 .filter-label { font-size: 12px; color: #555; }
 .filter-date { padding: 3px 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px; width: 130px; }
 .filter-sep { font-size: 12px; color: #888; }
+.btn-month { padding: 3px 8px; font-size: 11px; border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer; }
+.btn-month:hover { background: #e3f2fd; }
 .search-input { width: 220px; }
 
 .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }

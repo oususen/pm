@@ -14,6 +14,8 @@ class SubcontractorSerializer(serializers.ModelSerializer):
 
 
 class OutsourceBOMSerializer(serializers.ModelSerializer):
+    supplier_display = serializers.CharField(source='supplier.supplier_name', read_only=True, default='')
+
     class Meta:
         model = OutsourceBOM
         fields = '__all__'
@@ -35,7 +37,7 @@ class OutsourceItemListSerializer(serializers.ModelSerializer):
     class Meta:
         model = OutsourceItem
         fields = [
-            'id', 'item_code', 'item_name', 'subcontractor', 'subcontractor_name',
+            'id', 'item_code', 'product_number', 'item_name', 'subcontractor', 'subcontractor_name',
             'customer_delivery_lt', 'is_active', 'bom_count',
         ]
 
@@ -63,6 +65,9 @@ class CustomerShipmentSerializer(serializers.ModelSerializer):
 class OutsourceSplitSerializer(serializers.ModelSerializer):
     delivered_qty = serializers.SerializerMethodField()
     shipped_qty = serializers.SerializerMethodField()
+    auto_material_supplied = serializers.SerializerMethodField()
+    auto_process_completed = serializers.SerializerMethodField()
+    auto_shipped = serializers.SerializerMethodField()
 
     class Meta:
         model = OutsourceSplit
@@ -73,6 +78,20 @@ class OutsourceSplitSerializer(serializers.ModelSerializer):
 
     def get_shipped_qty(self, obj):
         return obj.shipments.aggregate(total=models.Sum('qty'))['total'] or 0
+
+    def get_auto_material_supplied(self, obj):
+        reqs = obj.material_requirements.all()
+        if not reqs.exists():
+            return False
+        return all(r.supplied for r in reqs)
+
+    def get_auto_process_completed(self, obj):
+        delivered = obj.deliveries.aggregate(total=models.Sum('qty'))['total'] or 0
+        return delivered >= obj.qty
+
+    def get_auto_shipped(self, obj):
+        shipped = obj.shipments.aggregate(total=models.Sum('qty'))['total'] or 0
+        return shipped >= obj.qty
 
 
 class MaterialRequirementSerializer(serializers.ModelSerializer):
