@@ -158,4 +158,9 @@ export const createOutsourceAPI = (client) => ({
   createProductStockAdjust(data) {
     return client.post('/outsource/product-stock/', data)
   },
+
+  // 分割計画取込履歴
+  getSplitImportLogs(params = {}) {
+    return client.get('/outsource/split-import-logs/', { params })
+  },
 })

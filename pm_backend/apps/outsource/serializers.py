@@ -5,6 +5,7 @@ from .models import (
     OutsourceOrder, OutsourceSplit, MaterialRequirement,
     SubcontractorDelivery, CustomerShipment,
     MaterialStockTransaction, ProductStockTransaction,
+    SplitImportLog,
 )
 
 
@@ -167,6 +168,12 @@ class OutsourceOrderListSerializer(serializers.ModelSerializer):
     def get_max_procurement_supplier_name(self, obj):
         bom = self._get_max_lt_bom(obj)
         return bom.supplier_name if bom else ''
+
+
+class SplitImportLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SplitImportLog
+        fields = '__all__'
 
 
 class MaterialStockTransactionSerializer(serializers.ModelSerializer):

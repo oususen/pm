@@ -14,6 +14,12 @@
       <span class="filter-sep">〜</span>
       <input type="date" v-model="paintingTo" @change="fetchMaterials" class="filter-date" />
       <button class="btn-month" @click="shiftMonth(1)">次月 ▶</button>
+      <input
+        v-model="searchText"
+        @input="debouncedFetch"
+        placeholder="案件番号・品目名・材料コード"
+        class="search-input"
+      />
       <div class="summary-badges" v-if="materials.length">
         <span class="badge badge-total">全{{ materials.length }}件</span>
         <span class="badge badge-pending">未発注: {{ pendingCount }}件</span>
@@ -102,7 +108,14 @@ const materialStockMap = ref({})
 const loading = ref(false)
 const exporting = ref(false)
 const filterOrdered = ref('false')
+const searchText = ref('')
 const selectedIds = ref([])
+
+let debounceTimer = null
+function debouncedFetch() {
+  clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(fetchMaterials, 300)
+}
 function monthRange(d) {
   const y = d.getFullYear(), m = d.getMonth()
   const from = `${y}-${String(m + 1).padStart(2, '0')}-01`
@@ -192,6 +205,7 @@ async function fetchMaterials() {
     if (filterOrdered.value) params.ordered = filterOrdered.value
     if (paintingFrom.value) params.painting_date_from = paintingFrom.value
     if (paintingTo.value) params.painting_date_to = paintingTo.value
+    if (searchText.value.trim()) params.search = searchText.value.trim()
     const [matRes, stockRes] = await Promise.all([
       api.outsource.getMaterials(params),
       api.outsource.getMaterialStockSummary(),
@@ -324,6 +338,7 @@ onMounted(fetchMaterials)
 .filter-sep { font-size: 12px; color: #888; }
 .btn-month { padding: 3px 8px; font-size: 11px; border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer; }
 .btn-month:hover { background: #e3f2fd; }
+.search-input { padding: 4px 8px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; width: 220px; }
 .btn-primary { padding: 6px 16px; background: #1976d2; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-export { margin-left: auto; }

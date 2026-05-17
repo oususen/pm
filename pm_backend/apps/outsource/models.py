@@ -272,6 +272,26 @@ class MaterialRequirement(models.Model):
         return f'{self.split.order.case_no} - {self.material_code} ({self.supply_date})'
 
 
+class SplitImportLog(models.Model):
+    """分割計画取込履歴"""
+    file_name = models.CharField('ファイル名', max_length=255)
+    updated_count = models.IntegerField('更新件数', default=0)
+    warning_count = models.IntegerField('警告件数', default=0)
+    error_count = models.IntegerField('エラー件数', default=0)
+    detail = models.JSONField('取込詳細', default=dict)
+    imported_by = models.CharField('取込者', max_length=100, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'outsource_split_import_log'
+        verbose_name = '分割計画取込履歴'
+        verbose_name_plural = '分割計画取込履歴'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.file_name} ({self.created_at:%Y-%m-%d %H:%M})'
+
+
 class SubcontractorDelivery(models.Model):
     """外作先納入（受入記録）"""
     split = models.ForeignKey(

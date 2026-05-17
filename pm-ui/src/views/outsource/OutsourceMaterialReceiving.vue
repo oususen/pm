@@ -11,10 +11,10 @@
       <input v-model="paintingFrom" type="date" class="input" @change="fetchRows" />
       <span>〜</span>
       <input v-model="paintingTo" type="date" class="input" @change="fetchRows" />
-      <label>支給予定日:</label>
-      <select v-model="supplyDateFilter" class="input">
+      <label>納期日:</label>
+      <select v-model="supplyDateFilter" class="input" @change="fetchRows">
         <option value="">全て</option>
-        <option v-for="d in supplyDateOptions" :key="d" :value="d">{{ d }}</option>
+        <option v-for="d in dueDateOptions" :key="d" :value="d">{{ d }}</option>
       </select>
       <input v-model="keyword" class="input input-lg" placeholder="材料コード・材料名・案件番号" />
     </div>
@@ -22,7 +22,7 @@
     <table v-if="filteredRows.length" class="data-table">
       <thead>
         <tr>
-          <th>支給予定日</th>
+          <th>納期日</th>
           <th>材料コード</th>
           <th>材料名称</th>
           <th>調達先</th>
@@ -36,7 +36,7 @@
       </thead>
       <tbody>
         <tr v-for="r in filteredRows" :key="r.id">
-          <td>{{ r.supply_date }}</td>
+          <td>{{ r.material_due_date || r.supply_date }}</td>
           <td>{{ r.material_code }}</td>
           <td>{{ r.material_name }}</td>
           <td>{{ r.supplier_name || '-' }}</td>
@@ -83,21 +83,35 @@ const paintingFrom = ref(from)
 const paintingTo = ref(to)
 const supplyDateFilter = ref(today())
 
-const supplyDateOptions = computed(() => {
-  const set = new Set()
-  for (const r of rows.value) {
-    const d = String(r.supply_date || '')
-    if (d) set.add(d)
+function addWorkingDays(dateStr, days) {
+  const d = new Date(dateStr + 'T00:00:00')
+  let remaining = Math.abs(days)
+  const direction = days >= 0 ? 1 : -1
+  while (remaining > 0) {
+    d.setDate(d.getDate() + direction)
+    const dow = d.getDay()
+    if (dow !== 0 && dow !== 6) remaining--
   }
-  set.add(today())
-  return Array.from(set).sort()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+const dueDateOptions = computed(() => {
+  const t = today()
+  const dates = [
+    addWorkingDays(t, -2),
+    addWorkingDays(t, -1),
+    t,
+    addWorkingDays(t, 1),
+    addWorkingDays(t, 2),
+  ]
+  return [...new Set(dates)].sort()
 })
 
 const filteredRows = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   return rows.value.filter((r) => {
-    const supplyDate = String(r.supply_date || '')
-    if (supplyDateFilter.value && supplyDate !== supplyDateFilter.value) return false
+    const dueDate = String(r.material_due_date || r.supply_date || '')
+    if (supplyDateFilter.value && dueDate !== supplyDateFilter.value) return false
     if (!kw) return true
     return (
       String(r.material_code || '').toLowerCase().includes(kw) ||

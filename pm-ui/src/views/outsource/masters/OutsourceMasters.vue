@@ -40,7 +40,7 @@
     <div v-if="activeTab === 'item'" class="tab-content">
       <div class="form-row">
         <input v-model="itemForm.item_code" placeholder="品目コード" class="input" />
-        <input v-model="itemForm.item_name" placeholder="品目名称" class="input input-lg" />
+        <input v-model="itemForm.item_name" placeholder="品名" class="input input-lg" />
         <select v-model.number="itemForm.subcontractor" class="input">
           <option value="">外作先選択</option>
           <option v-for="s in subcontractors" :key="s.id" :value="s.id">{{ s.name }}</option>
@@ -108,8 +108,8 @@
     <div v-if="activeTab === 'bom'" class="tab-content">
       <div class="form-row">
         <select v-model.number="bomFilter" @change="fetchBOM" class="input">
-          <option value="">品目選択</option>
-          <option v-for="it in items" :key="it.id" :value="it.id">{{ it.item_code }} {{ it.item_name }}</option>
+          <option value="">品番選択</option>
+          <option v-for="it in items" :key="it.id" :value="it.id">{{ it.product_number || it.item_code }} {{ it.item_name }}</option>
         </select>
       </div>
       <div v-if="bomFilter" class="form-row">

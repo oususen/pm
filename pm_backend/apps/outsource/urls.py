@@ -14,6 +14,7 @@ router.register(r'outsource/deliveries', views.SubcontractorDeliveryViewSet)
 router.register(r'outsource/shipments', views.CustomerShipmentViewSet)
 router.register(r'outsource/material-stock', views.MaterialStockTransactionViewSet)
 router.register(r'outsource/product-stock', views.ProductStockTransactionViewSet)
+router.register(r'outsource/split-import-logs', views.SplitImportLogViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),

@@ -18,6 +18,7 @@ from .models import (
     OutsourceOrder, OutsourceSplit, MaterialRequirement,
     SubcontractorDelivery, CustomerShipment,
     MaterialStockTransaction, ProductStockTransaction,
+    SplitImportLog,
 )
 from .serializers import (
     SubcontractorSerializer,
@@ -31,6 +32,7 @@ from .serializers import (
     CustomerShipmentSerializer,
     MaterialStockTransactionSerializer,
     ProductStockTransactionSerializer,
+    SplitImportLogSerializer,
 )
 from .services.csv_import import import_fb_csv
 from .services.excel_export import generate_split_plan_excel
@@ -223,6 +225,19 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
             except OutsourceOrder.DoesNotExist:
                 pass
 
+        username = ''
+        if request.user and request.user.is_authenticated:
+            username = f'{request.user.last_name} {request.user.first_name}'.strip() or request.user.username
+
+        SplitImportLog.objects.create(
+            file_name=file.name or '',
+            updated_count=len(results['updated']),
+            warning_count=len(results['warnings']),
+            error_count=len(results['errors']),
+            detail=results,
+            imported_by=username,
+        )
+
         return Response({
             'updated_count': len(results['updated']),
             'error_count': len(results['errors']),
@@ -351,8 +366,9 @@ def _sync_order_status(order):
 class MaterialRequirementViewSet(viewsets.ModelViewSet):
     queryset = MaterialRequirement.objects.select_related('split', 'split__order')
     serializer_class = MaterialRequirementSerializer
-    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['supplied', 'ordered', 'shipment_planned', 'issued', 'material_code']
+    search_fields = ['material_code', 'material_name', 'split__order__case_no', 'split__order__item_name']
     ordering_fields = ['material_due_date', 'supply_date', 'material_code']
 
     def get_queryset(self):
@@ -698,3 +714,10 @@ class ProductStockTransactionViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class SplitImportLogViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = SplitImportLog.objects.all()
+    serializer_class = SplitImportLogSerializer
+    filter_backends = [OrderingFilter]
+    ordering_fields = ['created_at']

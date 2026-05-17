@@ -144,7 +144,14 @@ def import_split_plan_excel(file_content):
                     'message': f"加工日 {s['process_date']} が最遅完了日 {order.latest_finish} より後です",
                 })
 
-        # 既存分割を削除して再作成
+        # 既存分割がある場合は上書き警告
+        existing_count = order.splits.count()
+        if existing_count > 0:
+            results['warnings'].append({
+                'row': row_idx,
+                'case_no': case_no,
+                'message': f'既存の分割計画({existing_count}件)を上書きします',
+            })
         order.splits.all().delete()
         for seq, s in enumerate(splits_data, 1):
             OutsourceSplit.objects.create(

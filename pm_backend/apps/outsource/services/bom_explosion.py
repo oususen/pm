@@ -1,4 +1,3 @@
-from datetime import timedelta
 from decimal import Decimal
 
 from outsource.models import OutsourceOrder, OutsourceSplit, OutsourceBOM, MaterialRequirement
@@ -47,7 +46,7 @@ def explode_materials_for_order(order_id):
     for split in splits:
         for bom in bom_lines:
             required_qty = Decimal(str(split.qty)) * bom.quantity_per
-            supply_date = split.process_date - timedelta(days=supply_transport_lt)
+            supply_date = subtract_working_days(split.process_date, supply_transport_lt, daiso_calendar)
             supplier_calendar = getattr(getattr(bom, 'supplier', None), 'calendar', None)
             calc_calendar = supplier_calendar or daiso_calendar
             material_due_date = subtract_working_days(supply_date, 1, calc_calendar)

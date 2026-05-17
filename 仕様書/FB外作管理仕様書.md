@@ -193,6 +193,7 @@ IMPORTED → SENT_TO_SUB → SPLIT_REGISTERED → IN_PROGRESS → COMPLETED
 | material_name | CharField | 材料名称 |
 | supplier_name | CharField | 調達先名 |
 | required_qty | DecimalField | 必要数量 |
+| material_due_date | DateField | 材料納期（調達先→弊社の希望納期） |
 | supply_date | DateField | 支給予定日（加工日 - 支給運送LT） |
 | ordered | BooleanField | 発注済フラグ（材料メーカーへ発注したか） |
 | ordered_at | DateField | 発注日 |
@@ -207,6 +208,16 @@ IMPORTED → SENT_TO_SUB → SPLIT_REGISTERED → IN_PROGRESS → COMPLETED
 - `shipment_planned`: 支給便への計画搭載状態（材料所要量画面で管理）
 - `issued`: 出庫状態（材料所要量画面で管理）
 - `supplied`: 既存互換フラグ（`issued` と同期）
+
+**日付の意味:**
+
+- `material_due_date`: 材料メーカーから弊社に入る希望日（材料手配で管理）
+- `supply_date`: 弊社から外作先へ支給する予定日（材料支給で管理）
+
+**材料納期の初期計算ルール:**
+
+- `material_due_date` は `supply_date` から営業日1日逆算
+- 営業日カレンダは **調達先カレンダ優先、未設定時は `daiso` カレンダ** を使用
 
 テーブル名: `outsource_material_requirement`
 
@@ -357,8 +368,23 @@ B850070311091,FBR-ﾒｲﾝﾌﾚｰﾑRﾌﾞｸﾐ,FBR GY,2026/6/9,150
 **機能:**
 
 - メーカ別（調達先別）グループ表示
+- `材料納期` と `支給予定日` を分離表示
+- `材料納期` の個別編集（行単位）
 - 注文書Excel出力（メーカ別）
 - 塗装日期間フィルタ（当月初期値＋前月/次月ボタン）
+
+**注文書Excelの納入希望日:**
+
+- 出力項目「納入希望日」は `material_due_date` を使用する
+
+### 6.5.1 材料検収画面
+
+**機能:**
+
+- 材料所要量を行単位で表示し、材料検収（入庫）を登録
+- 発注済/全件の絞込、塗装日期間フィルタ、支給予定日フィルタ、キーワード検索
+- `検収済` 累計数量表示（在庫トランザクション集計）
+- 行ごとに `今回検収` / `検収日` / `理由` を入力して登録
 
 ### 6.6 納入・出荷管理画面
 
@@ -403,6 +429,7 @@ B850070311091,FBR-ﾒｲﾝﾌﾚｰﾑRﾌﾞｸﾐ,FBR GY,2026/6/9,150
 | PUT | /api/outsource/splits/{id}/ | 分割計画更新 |
 | GET | /api/outsource/materials/ | 材料所要量一覧（塗装日期間フィルタ対応） |
 | POST | /api/outsource/materials/{id}/supply/ | 支給実績登録 |
+| POST | /api/outsource/materials/{id}/receive/ | 材料検収（入庫）登録 |
 | POST | /api/outsource/materials/purchase-order/ | メーカ別注文書Excel出力 |
 | GET | /api/outsource/deliveries/ | 外作先納入一覧（塗装日期間フィルタ対応） |
 | POST | /api/outsource/deliveries/ | 外作先納入登録 |
@@ -450,6 +477,7 @@ pm-ui/src/router/outsource.js    # 新規ルーター
 /outsource/splits/import          # 分割計画取込
 /outsource/materials              # 材料所要量一覧（案件別/支給日別/材料別集約）
 /outsource/procurement            # 材料手配（メーカ別表示＋注文書Excel出力）
+/outsource/material-receiving     # 材料検収（入庫登録）
 /outsource/delivery               # 納入・出荷管理（外作先受入/顧客出荷）
 /outsource/progress               # 進捗管理
 /outsource/masters                # マスタ管理（外作先/品目/BOMタブ切替）
@@ -467,6 +495,7 @@ pm-ui/src/views/outsource/
 ├── OutsourceSplitImport.vue      # 分割計画取込
 ├── OutsourceMaterialList.vue     # 材料所要量一覧
 ├── OutsourceProcurement.vue      # 材料手配（メーカ別＋注文書Excel出力）
+├── OutsourceMaterialReceiving.vue # 材料検収（入庫登録）
 ├── OutsourceDelivery.vue         # 納入・出荷管理（タブ: 外作先納入/顧客出荷）
 ├── OutsourceProgress.vue         # 進捗管理
 └── masters/

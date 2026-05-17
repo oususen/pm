@@ -50,6 +50,23 @@ export const manualSections = [
     ],
   },
   {
+    id: "fbOutsource",
+    title: "FB外作管理",
+    items: [
+      { title: "FB外作管理 全体", path: "FB/FB外作管理.md" },
+      { title: "外作 受注取込・受注一覧", path: "FB/外作_受注取込と受注一覧.md" },
+      { title: "外作 案件詳細", path: "FB/外作_案件詳細.md" },
+      { title: "外作 外作先展開Excel出力", path: "FB/外作_外作先展開Excel出力.md" },
+      { title: "外作 分割計画取込", path: "FB/外作_分割計画取込.md" },
+      { title: "外作 材料手配・材料検収", path: "FB/外作_材料手配と材料検収.md" },
+      { title: "外作 材料支給", path: "FB/外作_材料支給.md" },
+      { title: "外作 材料在庫・完成品在庫", path: "FB/外作_在庫管理.md" },
+      { title: "外作 納入・出荷管理", path: "FB/外作_納入出荷管理.md" },
+      { title: "外作 進捗管理", path: "FB/外作_進捗管理.md" },
+      { title: "外作 マスタ管理", path: "FB/外作_マスタ管理.md" },
+    ],
+  },
+  {
     id: "inventory",
     title: "在庫管理",
     items: [
