@@ -137,7 +137,14 @@ function shiftMonth(delta) {
 }
 const viewMode = ref('byCase')
 
-const today = new Date().toISOString().slice(0, 10)
+function formatLocalDate(date = new Date()) {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+const today = formatLocalDate()
 const expandedCases = ref(new Set())
 
 function toggleCase(caseNo) {
@@ -250,7 +257,7 @@ async function markSupplied(m) {
 
 async function undoSupply(m) {
   try {
-    await api.outsource.updateMaterial(m.id, { ...m, supplied: false, supplied_qty: 0 })
+    await api.outsource.updateMaterial(m.id, { supplied: false, supplied_qty: 0 })
     m.supplied = false; m.supplied_qty = 0
   } catch (err) { console.error(err) }
 }

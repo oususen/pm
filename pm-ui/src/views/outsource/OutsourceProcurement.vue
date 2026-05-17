@@ -103,7 +103,14 @@ function shiftMonth(delta) {
   fetchMaterials()
 }
 
-const today = new Date().toISOString().slice(0, 10)
+function formatLocalDate(date = new Date()) {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+const today = formatLocalDate()
 
 const pendingCount = computed(() => materials.value.filter(m => !m.ordered).length)
 const overdueCount = computed(() => materials.value.filter(m => !m.ordered && m.supply_date < today).length)
@@ -161,18 +168,18 @@ async function fetchMaterials() {
   } finally { loading.value = false }
 }
 
-const todayDate = new Date().toISOString().slice(0, 10)
+const todayDate = formatLocalDate()
 
 async function markOrdered(m) {
   try {
-    await api.outsource.updateMaterial(m.id, { ...m, ordered: true, ordered_at: todayDate })
+    await api.outsource.updateMaterial(m.id, { ordered: true, ordered_at: todayDate })
     m.ordered = true; m.ordered_at = todayDate
   } catch (err) { console.error(err) }
 }
 
 async function undoOrder(m) {
   try {
-    await api.outsource.updateMaterial(m.id, { ...m, ordered: false, ordered_at: null })
+    await api.outsource.updateMaterial(m.id, { ordered: false, ordered_at: null })
     m.ordered = false; m.ordered_at = null
   } catch (err) { console.error(err) }
 }
@@ -209,7 +216,7 @@ async function exportSelected() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `注文書_${new Date().toISOString().slice(0, 10)}.xlsx`
+    a.download = `注文書_${formatLocalDate()}.xlsx`
     a.click()
     URL.revokeObjectURL(url)
   } catch (err) { alert(err.response?.data?.error || '出力に失敗しました') }
@@ -224,7 +231,7 @@ async function exportPurchaseOrder() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `注文書_${new Date().toISOString().slice(0, 10)}.xlsx`
+    a.download = `注文書_${formatLocalDate()}.xlsx`
     a.click()
     URL.revokeObjectURL(url)
   } catch (err) { alert(err.response?.data?.error || '出力に失敗しました') }

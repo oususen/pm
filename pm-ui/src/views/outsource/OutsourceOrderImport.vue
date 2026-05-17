@@ -89,14 +89,38 @@ function onFileSelect(e) {
 }
 
 function parsePreview(f) {
+  const parseCsvLine = (line) => {
+    const cols = []
+    let cur = ''
+    let inQuotes = false
+    for (let i = 0; i < line.length; i += 1) {
+      const ch = line[i]
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          cur += '"'
+          i += 1
+        } else {
+          inQuotes = !inQuotes
+        }
+      } else if (ch === ',' && !inQuotes) {
+        cols.push(cur.trim())
+        cur = ''
+      } else {
+        cur += ch
+      }
+    }
+    cols.push(cur.trim())
+    return cols
+  }
+
   const reader = new FileReader()
   reader.onload = (e) => {
     const text = e.target.result
-    const lines = text.split('\n').filter(l => l.trim())
+    const lines = text.split(/\r?\n/).filter(l => l.trim())
     if (lines.length < 2) return
 
     preview.value = lines.slice(1).map(line => {
-      const cols = line.split(',')
+      const cols = parseCsvLine(line)
       const item_code = cols[0]?.trim() || ''
       const painting_date = cols[3]?.trim() || ''
       const datePart = painting_date.replace(/\//g, '')

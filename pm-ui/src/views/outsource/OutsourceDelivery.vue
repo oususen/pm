@@ -59,7 +59,7 @@
                 <td>
                   <input v-if="tab === 'delivery'" type="text" v-model="split._person" placeholder="検収者" class="inline-name" />
                   <input v-else type="text" v-model="split._person" placeholder="担当者" class="inline-name" />
-                  <button class="btn-reg" @click="submitInline(order, split)" :disabled="!split._qty || !split._person">登録</button>
+                  <button class="btn-reg" @click="submitInline(order, split)" :disabled="!canSubmitSplit(split)">登録</button>
                 </td>
               </tr>
               <!-- 登録済み明細 -->
@@ -82,7 +82,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 
@@ -120,7 +120,14 @@ const orders = ref([])
 const deliveries = ref([])
 const shipments = ref([])
 
-const today = new Date().toISOString().slice(0, 10)
+function formatLocalDate(date = new Date()) {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+const today = formatLocalDate()
 const currentUserName = computed(() => {
   const u = authState.user
   if (!u) return ''
@@ -241,18 +248,29 @@ async function fetchData() {
 
 async function submitInline(order, split) {
   try {
+    const remaining = splitRemaining(split)
+    const qty = Number(split._qty)
+    if (!Number.isFinite(qty) || qty <= 0) {
+      alert('数量は1以上を入力してください')
+      return
+    }
+    if (qty > remaining) {
+      alert(`残数(${remaining})を超える数量は登録できません`)
+      return
+    }
+
     if (tab.value === 'delivery') {
       await api.outsource.createDelivery({
         split: split.id,
         delivery_date: split._date,
-        qty: split._qty,
+        qty,
         inspector: split._person,
       })
     } else {
       await api.outsource.createShipment({
         split: split.id,
         shipment_date: split._date,
-        qty: split._qty,
+        qty,
         person: split._person,
       })
     }
@@ -262,6 +280,12 @@ async function submitInline(order, split) {
   } catch (err) { alert(err.response?.data?.detail || '登録に失敗しました') }
 }
 
+function canSubmitSplit(split) {
+  const qty = Number(split._qty)
+  const remaining = splitRemaining(split)
+  return !!split._person && Number.isFinite(qty) && qty > 0 && qty <= remaining
+}
+
 async function deleteRecord(rec) {
   if (!confirm('削除しますか？')) return
   if (rec.type === 'delivery') await api.outsource.deleteDelivery(rec.id)
@@ -269,7 +293,6 @@ async function deleteRecord(rec) {
   await fetchData()
 }
 
-watch(tab, () => {})
 onMounted(fetchData)
 </script>
 
