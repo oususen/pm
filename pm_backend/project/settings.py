@@ -74,6 +74,7 @@ INSTALLED_APPS = [
     'notifications',
     'overtime',
     'system_settings',
+    'outsource',
 ]
 
 MIDDLEWARE = [

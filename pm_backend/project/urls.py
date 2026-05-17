@@ -32,6 +32,7 @@ urlpatterns = [
     path('api/', include('notifications.urls')),
     path('api/', include('overtime.urls')),
     path('api/', include('system_settings.urls')),
+    path('api/', include('outsource.urls')),
 ]
 
 if settings.DEBUG:

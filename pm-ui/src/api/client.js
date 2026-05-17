@@ -58,6 +58,7 @@ import { createKubotaSakaiDueAdjustmentsAPI } from './resources/kubotaSakaiDueAd
 import { createKubotaSakaiTripAssignmentsAPI } from './resources/kubotaSakaiTripAssignments'
 import { createShippingTripsAPI } from './resources/shippingTrips'
 import { createCameraActualsAPI } from './resources/cameraActuals'
+import { createOutsourceAPI } from './resources/outsource'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
@@ -190,5 +191,6 @@ export default {
   kubotaSakaiTripAssignments: createKubotaSakaiTripAssignmentsAPI(client),
   shippingTrips: createShippingTripsAPI(client),
   cameraActuals: createCameraActualsAPI(client),
+  outsource: createOutsourceAPI(client),
   client,
 }
