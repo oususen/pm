@@ -4,6 +4,7 @@ from . import views
 
 router = DefaultRouter()
 router.register(r'outsource/subcontractors', views.SubcontractorViewSet)
+router.register(r'outsource/component-materials', views.OutsourceMaterialViewSet)
 router.register(r'outsource/items', views.OutsourceItemViewSet)
 router.register(r'outsource/bom', views.OutsourceBOMViewSet)
 router.register(r'outsource/orders', views.OutsourceOrderViewSet)

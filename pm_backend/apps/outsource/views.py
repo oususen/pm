@@ -9,12 +9,13 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
 from .models import (
-    Subcontractor, OutsourceItem, OutsourceBOM,
+    Subcontractor, OutsourceItem, OutsourceBOM, OutsourceMaterial,
     OutsourceOrder, OutsourceSplit, MaterialRequirement,
     SubcontractorDelivery, CustomerShipment,
 )
 from .serializers import (
     SubcontractorSerializer,
+    OutsourceMaterialSerializer,
     OutsourceItemSerializer, OutsourceItemListSerializer,
     OutsourceBOMSerializer,
     OutsourceOrderSerializer, OutsourceOrderListSerializer,
@@ -33,6 +34,14 @@ from .services.purchase_order import generate_purchase_orders
 class SubcontractorViewSet(viewsets.ModelViewSet):
     queryset = Subcontractor.objects.all()
     serializer_class = SubcontractorSerializer
+
+
+class OutsourceMaterialViewSet(viewsets.ModelViewSet):
+    queryset = OutsourceMaterial.objects.select_related('supplier')
+    serializer_class = OutsourceMaterialSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter]
+    filterset_fields = ['is_active', 'supplier']
+    search_fields = ['material_code', 'material_name']
 
 
 class OutsourceItemViewSet(viewsets.ModelViewSet):

@@ -17,8 +17,8 @@
       <div class="form-row">
         <input v-model="subForm.name" placeholder="外作先名" class="input" />
         <input v-model.number="subForm.daily_capacity" placeholder="日キャパ" type="number" class="input input-sm" />
-        <input v-model.number="subForm.transport_lt_supply" placeholder="支給運送LT" type="number" class="input input-sm" />
-        <input v-model.number="subForm.transport_lt_delivery" placeholder="完成品運送LT" type="number" class="input input-sm" />
+        <input v-model.number="subForm.transport_lt_supply" placeholder="支給運送LT" type="number" class="input input-md" />
+        <input v-model.number="subForm.transport_lt_delivery" placeholder="完成品運送LT" type="number" class="input input-md" />
         <button class="btn-primary" @click="saveSub">{{ subForm.id ? '更新' : '追加' }}</button>
         <button v-if="subForm.id" class="btn-cancel" @click="resetSubForm">取消</button>
       </div>
@@ -65,6 +65,45 @@
       </table>
     </div>
 
+    <!-- 構成品マスタ -->
+    <div v-if="activeTab === 'component'" class="tab-content">
+      <div class="form-row">
+        <input v-model="compFilterSearch" @input="fetchComponents" placeholder="コード検索" class="input" />
+        <select v-model="compFilterSupplier" @change="fetchComponents" class="input">
+          <option value="">全調達先</option>
+          <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.supplier_name }}</option>
+        </select>
+        <span class="badge badge-total" v-if="componentMaterials.length">{{ componentMaterials.length }}件</span>
+      </div>
+      <div class="form-row">
+        <input v-model="compForm.material_code" placeholder="材料コード" class="input" />
+        <input v-model="compForm.material_name" placeholder="材料名称" class="input input-lg" />
+        <select v-model="compForm.supplier" class="input">
+          <option :value="null">調達先選択</option>
+          <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.supplier_name }}</option>
+        </select>
+        <label class="field-label">調達LT</label>
+        <input v-model.number="compForm.procurement_lt" placeholder="日数" type="number" class="input input-sm" />
+        <button class="btn-primary" @click="saveComp">{{ compForm.id ? '更新' : '追加' }}</button>
+        <button v-if="compForm.id" class="btn-cancel" @click="resetCompForm">取消</button>
+      </div>
+      <table v-if="componentMaterials.length" class="data-table">
+        <thead><tr><th>材料コード</th><th>材料名称</th><th>調達先</th><th>調達LT</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr v-for="c in componentMaterials" :key="c.id">
+            <td>{{ c.material_code }}</td>
+            <td>{{ c.material_name }}</td>
+            <td>{{ c.supplier_display || c.supplier_name || '-' }}</td>
+            <td>{{ c.procurement_lt }}日</td>
+            <td>
+              <button class="btn-edit" @click="editComp(c)">編集</button>
+              <button class="btn-del" @click="deleteComp(c.id)">削除</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
     <!-- BOM -->
     <div v-if="activeTab === 'bom'" class="tab-content">
       <div class="form-row">
@@ -74,16 +113,12 @@
         </select>
       </div>
       <div v-if="bomFilter" class="form-row">
-        <input v-model="bomForm.material_code" placeholder="材料コード" class="input" />
-        <input v-model="bomForm.material_name" placeholder="材料名称" class="input" />
+        <select v-model.number="bomForm.material" class="input">
+          <option :value="null">構成品選択</option>
+          <option v-for="c in componentMaterials" :key="c.id" :value="c.id">{{ c.material_code }} {{ c.material_name }}</option>
+        </select>
         <label class="field-label">員数</label>
         <input v-model.number="bomForm.quantity_per" placeholder="員数" type="number" step="0.0001" class="input input-sm" />
-        <select v-model="bomForm.supplier" class="input">
-          <option :value="null">調達先選択</option>
-          <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.supplier_name }}</option>
-        </select>
-        <label class="field-label">調達LT</label>
-        <input v-model.number="bomForm.procurement_lt" placeholder="日数" type="number" class="input input-sm" />
         <button class="btn-primary" @click="saveBOM">{{ bomForm.id ? '更新' : '追加' }}</button>
         <button v-if="bomForm.id" class="btn-cancel" @click="resetBOMForm">取消</button>
       </div>
@@ -114,6 +149,7 @@ import api from '@/api/client'
 const tabs = [
   { id: 'subcontractor', label: '外作先' },
   { id: 'item', label: '品目' },
+  { id: 'component', label: '構成品' },
   { id: 'bom', label: 'BOM' },
 ]
 const activeTab = ref('subcontractor')
@@ -125,9 +161,9 @@ function formatQty(val) {
 
 // 外作先
 const subcontractors = ref([])
-const subForm = ref({ name: '', daily_capacity: null, transport_lt_supply: 1, transport_lt_delivery: 1 })
+const subForm = ref({ name: '', daily_capacity: null, transport_lt_supply: null, transport_lt_delivery: null })
 
-function resetSubForm() { subForm.value = { name: '', daily_capacity: null, transport_lt_supply: 1, transport_lt_delivery: 1 } }
+function resetSubForm() { subForm.value = { name: '', daily_capacity: null, transport_lt_supply: null, transport_lt_delivery: null } }
 function editSub(s) { subForm.value = { ...s } }
 
 async function fetchSubs() {
@@ -174,12 +210,43 @@ async function fetchSuppliers() {
   suppliers.value = res.data.results || res.data
 }
 
+// 構成品
+const componentMaterials = ref([])
+const compFilterSearch = ref('')
+const compFilterSupplier = ref('')
+const compForm = ref({ material_code: '', material_name: '', supplier: null, procurement_lt: 7 })
+
+function resetCompForm() { compForm.value = { material_code: '', material_name: '', supplier: null, procurement_lt: 7 } }
+function editComp(c) { compForm.value = { ...c } }
+
+async function fetchComponents() {
+  const params = {}
+  if (compFilterSearch.value) params.search = compFilterSearch.value
+  if (compFilterSupplier.value) params.supplier = compFilterSupplier.value
+  const res = await api.outsource.getComponentMaterials(params)
+  componentMaterials.value = res.data.results || res.data
+}
+async function saveComp() {
+  if (compForm.value.id) {
+    await api.outsource.updateComponentMaterial(compForm.value.id, compForm.value)
+  } else {
+    await api.outsource.createComponentMaterial(compForm.value)
+  }
+  resetCompForm()
+  await fetchComponents()
+}
+async function deleteComp(id) {
+  if (!confirm('削除しますか？')) return
+  await api.outsource.deleteComponentMaterial(id)
+  await fetchComponents()
+}
+
 // BOM
 const bomFilter = ref('')
 const bomLines = ref([])
-const bomForm = ref({ material_code: '', material_name: '', quantity_per: 1, supplier: null, procurement_lt: 7 })
+const bomForm = ref({ material: null, quantity_per: 1 })
 
-function resetBOMForm() { bomForm.value = { material_code: '', material_name: '', quantity_per: 1, supplier: null, procurement_lt: 7 } }
+function resetBOMForm() { bomForm.value = { material: null, quantity_per: 1 } }
 function editBOM(b) { bomForm.value = { ...b } }
 
 async function fetchBOM() {
@@ -204,7 +271,7 @@ async function deleteBOM(id) {
 }
 
 onMounted(async () => {
-  await Promise.all([fetchSubs(), fetchItems(), fetchSuppliers()])
+  await Promise.all([fetchSubs(), fetchItems(), fetchSuppliers(), fetchComponents()])
 })
 </script>
 
@@ -227,6 +294,7 @@ onMounted(async () => {
 .form-row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
 .input { padding: 4px 8px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
 .input-sm { width: 80px; }
+.input-md { width: 120px; }
 .field-label { font-size: 12px; color: #555; }
 .input-lg { width: 200px; }
 
@@ -234,6 +302,9 @@ onMounted(async () => {
 .btn-cancel { padding: 4px 12px; background: #eee; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
 .btn-edit { padding: 2px 8px; background: #fff3e0; border: 1px solid #ffb74d; border-radius: 4px; cursor: pointer; font-size: 11px; }
 .btn-del { padding: 2px 8px; background: #fbe9e7; border: 1px solid #ef9a9a; border-radius: 4px; cursor: pointer; font-size: 11px; margin-left: 4px; }
+
+.badge { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+.badge-total { background: #e3f2fd; color: #1565c0; }
 
 .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .data-table th, .data-table td { border: 1px solid #ddd; padding: 4px 8px; }

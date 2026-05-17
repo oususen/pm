@@ -1,7 +1,7 @@
 from django.db import models
 from rest_framework import serializers
 from .models import (
-    Subcontractor, OutsourceItem, OutsourceBOM,
+    Subcontractor, OutsourceItem, OutsourceBOM, OutsourceMaterial,
     OutsourceOrder, OutsourceSplit, MaterialRequirement,
     SubcontractorDelivery, CustomerShipment,
 )
@@ -10,6 +10,14 @@ from .models import (
 class SubcontractorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Subcontractor
+        fields = '__all__'
+
+
+class OutsourceMaterialSerializer(serializers.ModelSerializer):
+    supplier_display = serializers.CharField(source='supplier.supplier_name', read_only=True, default='')
+
+    class Meta:
+        model = OutsourceMaterial
         fields = '__all__'
 
 

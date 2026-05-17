@@ -52,11 +52,52 @@ class OutsourceItem(models.Model):
         return f'{self.item_code} {self.item_name}'
 
 
+class OutsourceMaterial(models.Model):
+    """構成品マスタ"""
+    material_code = models.CharField('材料コード', max_length=50, unique=True)
+    material_name = models.CharField('材料名称', max_length=200)
+    supplier = models.ForeignKey(
+        Supplier, on_delete=models.SET_NULL,
+        verbose_name='調達先', null=True, blank=True
+    )
+    supplier_name = models.CharField('調達先名（自動）', max_length=100, blank=True, default='')
+    procurement_lt = models.IntegerField('調達LT（日数）', default=7)
+    is_active = models.BooleanField('有効', default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'outsource_material'
+        verbose_name = '構成品'
+        verbose_name_plural = '構成品'
+        ordering = ['material_code']
+
+    def save(self, *args, **kwargs):
+        if self.supplier:
+            self.supplier_name = self.supplier.supplier_name
+        super().save(*args, **kwargs)
+        self.bom_usages.update(
+            material_code=self.material_code,
+            material_name=self.material_name,
+            supplier=self.supplier,
+            supplier_name=self.supplier_name,
+            procurement_lt=self.procurement_lt,
+        )
+
+    def __str__(self):
+        return f'{self.material_code} {self.material_name}'
+
+
 class OutsourceBOM(models.Model):
     """外作BOM（品目→材料）"""
     item = models.ForeignKey(
         OutsourceItem, on_delete=models.CASCADE,
         verbose_name='親品目', related_name='bom_lines'
+    )
+    material = models.ForeignKey(
+        OutsourceMaterial, on_delete=models.PROTECT,
+        verbose_name='構成品', related_name='bom_usages',
+        null=True, blank=True
     )
     material_code = models.CharField('材料コード', max_length=50)
     material_name = models.CharField('材料名称', max_length=200)
@@ -78,6 +119,13 @@ class OutsourceBOM(models.Model):
         unique_together = ['item', 'material_code']
 
     def save(self, *args, **kwargs):
+        if self.material:
+            self.material_code = self.material.material_code
+            self.material_name = self.material.material_name
+            if not self.supplier and self.material.supplier:
+                self.supplier = self.material.supplier
+            if self.procurement_lt == 7 and self.material.procurement_lt:
+                self.procurement_lt = self.material.procurement_lt
         if self.supplier:
             self.supplier_name = self.supplier.supplier_name
         super().save(*args, **kwargs)

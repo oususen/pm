@@ -111,19 +111,40 @@ CSVの1行 = 1案件として管理。案件番号 = 塗装日＋品目コード
 
 **品番自動導出ルール:** item_codeの先頭Bを除去し、先頭6桁-次4桁（例: `B852950421091` → `852950-4210`）。save時に自動設定。
 
+#### OutsourceMaterial（構成品マスタ）
+
+材料をあらかじめ登録し、BOM作成時にドロップダウンから選択する。
+
+| フィールド | 型 | 説明 |
+|-----------|------|------|
+| id | AutoField | PK |
+| material_code | CharField | 材料コード（ユニーク） |
+| material_name | CharField | 材料名称 |
+| supplier | FK(m_supplier) | 調達先（既存仕入先マスタ参照） |
+| supplier_name | CharField | 調達先名（save時に自動同期） |
+| procurement_lt | IntegerField | 調達LT（日数） |
+| is_active | BooleanField | 有効フラグ |
+
+テーブル名: `outsource_material`
+
+**マスタ変更時の連動:** 構成品マスタのsave時に、紐付く全BOM行の材料コード・名称・調達先・調達LTを自動更新する。
+
 #### OutsourceBOM（外作BOM）
 
 | フィールド | 型 | 説明 |
 |-----------|------|------|
 | id | AutoField | PK |
 | item | FK(OutsourceItem) | 親品目 |
-| material_code | CharField | 材料コード |
-| material_name | CharField | 材料名称 |
+| material | FK(OutsourceMaterial) | 構成品（ドロップダウン選択） |
+| material_code | CharField | 材料コード（構成品から自動セット） |
+| material_name | CharField | 材料名称（構成品から自動セット） |
 | quantity_per | DecimalField | 員数（親1個あたり） |
 | unit | CharField | 単位 |
-| supplier | FK(m_supplier) | 調達先（既存仕入先マスタ参照） |
-| supplier_name | CharField | 調達先名（save時に自動同期） |
-| procurement_lt | IntegerField | 材料調達LT（日数）※材料ごとに異なる |
+| supplier | FK(m_supplier) | 調達先（構成品から自動セット） |
+| supplier_name | CharField | 調達先名（構成品から自動セット） |
+| procurement_lt | IntegerField | 材料調達LT（日数）（構成品から自動セット） |
+
+**BOM登録フロー:** 構成品をドロップダウンから選択 → 員数のみ入力 → 保存時にmaterial_code/name/supplier/procurement_ltを構成品マスタから自動セット
 
 ### 5.2 トランザクション系
 
@@ -230,7 +251,10 @@ OutsourceItem ─┤
   │            │
   │ BOM(1:N)   │
   ▼            │
-OutsourceBOM   │
+OutsourceBOM ◄── FK(material)
+  │            │
+  │            │
+OutsourceMaterial（構成品マスタ）
                │
 OutsourceOrder ◄── FK(item)
   │
@@ -250,8 +274,9 @@ OutsourceSplit
 | テーブル名 | モデル名 | 区分 | 説明 |
 |-----------|---------|------|------|
 | outsource_subcontractor | Subcontractor | マスタ | 外作先マスタ |
+| outsource_material | OutsourceMaterial | マスタ | 構成品マスタ |
 | outsource_item | OutsourceItem | マスタ | 外作品目マスタ |
-| outsource_bom | OutsourceBOM | マスタ | 外作BOM（品目→材料） |
+| outsource_bom | OutsourceBOM | マスタ | 外作BOM（品目→構成品） |
 | outsource_order | OutsourceOrder | トランザクション | 受注案件 |
 | outsource_split | OutsourceSplit | トランザクション | 分割計画 |
 | outsource_material_requirement | MaterialRequirement | トランザクション | 材料所要量 |
@@ -348,7 +373,7 @@ B850070311091,FBR-ﾒｲﾝﾌﾚｰﾑRﾌﾞｸﾐ,FBR GY,2026/6/9,150
 **機能:**
 
 - 案件別進捗一覧
-- 3列プログレスバー: 支給進捗（青）/ 加工進捗（緑）/ 出荷進捗（オレンジ）
+- 4列プログレスバー: 発注進捗（紫）/ 支給進捗（青）/ 加工進捗（緑）/ 出荷進捗（オレンジ）
 - 進捗自動判定（実績データから）:
   - 材料支給: 該当分割の材料所要量が全て支給完了 → 自動ON
   - 加工完了: 受入数量合計 ≥ 分割数量 → 自動ON
@@ -382,6 +407,7 @@ B850070311091,FBR-ﾒｲﾝﾌﾚｰﾑRﾌﾞｸﾐ,FBR GY,2026/6/9,150
 | POST | /api/outsource/shipments/ | 顧客出荷登録 |
 | DELETE | /api/outsource/shipments/{id}/ | 顧客出荷削除 |
 | GET | /api/outsource/subcontractors/ | 外作先マスタCRUD |
+| GET | /api/outsource/component-materials/ | 構成品マスタCRUD（検索・調達先フィルタ対応） |
 | GET | /api/outsource/items/ | 品目マスタCRUD |
 | GET | /api/outsource/bom/ | BOMマスタCRUD |
 
@@ -440,7 +466,7 @@ pm-ui/src/views/outsource/
 ├── OutsourceDelivery.vue         # 納入・出荷管理（タブ: 外作先納入/顧客出荷）
 ├── OutsourceProgress.vue         # 進捗管理
 └── masters/
-    └── OutsourceMasters.vue      # マスタ管理（外作先/品目/BOMタブ切替）
+    └── OutsourceMasters.vue      # マスタ管理（外作先/品目/構成品/BOMタブ切替）
 ```
 
 ---

@@ -13,6 +13,20 @@ export const createOutsourceAPI = (client) => ({
     return client.delete(`/outsource/subcontractors/${id}/`)
   },
 
+  // 構成品マスタ
+  getComponentMaterials(params = {}) {
+    return client.get('/outsource/component-materials/', { params })
+  },
+  createComponentMaterial(data) {
+    return client.post('/outsource/component-materials/', data)
+  },
+  updateComponentMaterial(id, data) {
+    return client.put(`/outsource/component-materials/${id}/`, data)
+  },
+  deleteComponentMaterial(id) {
+    return client.delete(`/outsource/component-materials/${id}/`)
+  },
+
   // 外作品目マスタ
   getItems(params = {}) {
     return client.get('/outsource/items/', { params })
