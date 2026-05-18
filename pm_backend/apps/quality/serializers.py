@@ -267,6 +267,8 @@ class EquipmentInspectionTemplateSerializer(serializers.ModelSerializer):
     line_ids = serializers.PrimaryKeyRelatedField(
         source="lines", many=True, read_only=True
     )
+    process_options = serializers.SerializerMethodField()
+    line_options = serializers.SerializerMethodField()
 
     class Meta:
         model = EquipmentInspectionTemplate
@@ -284,8 +286,10 @@ class EquipmentInspectionTemplateSerializer(serializers.ModelSerializer):
             "is_active",
             "processes",
             "process_ids",
+            "process_options",
             "lines",
             "line_ids",
+            "line_options",
             "created_by",
             "created_by_name",
             "reviewer_user",
@@ -349,6 +353,31 @@ class EquipmentInspectionTemplateSerializer(serializers.ModelSerializer):
 
     def get_approved_by_name(self, obj):
         return _user_display_name(obj.approved_by)
+
+    def get_process_options(self, obj):
+        options = []
+        for process in obj.processes.all().order_by("process_code"):
+            options.append(
+                {
+                    "id": process.id,
+                    "process_code": process.process_code,
+                    "process_name": process.process_name,
+                    "line_id": process.line_id,
+                }
+            )
+        return options
+
+    def get_line_options(self, obj):
+        options = []
+        for line in obj.lines.all().order_by("line_code"):
+            options.append(
+                {
+                    "id": line.id,
+                    "line_code": line.line_code,
+                    "line_name": line.line_name,
+                }
+            )
+        return options
 
     def _save_items(self, template, items_data):
         template.items.all().delete()

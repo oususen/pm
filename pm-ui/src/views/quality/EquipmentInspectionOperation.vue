@@ -3,6 +3,13 @@
     <div class="page-header">
       <h2 class="page-title">点検実施</h2>
       <div class="page-actions">
+        <button
+          v-if="showBackToProcessInput"
+          class="btn-secondary"
+          @click="backToProcessInput"
+        >
+          工程作業入力へ戻る
+        </button>
         <button class="btn-secondary" @click="loadTemplates" :disabled="loadingOptions || loadingRecord">
           テンプレート更新
         </button>
@@ -13,6 +20,27 @@
     </div>
 
     <section class="panel filter-panel">
+      <label>
+        ライン
+        <select
+          v-model="selectedLineId"
+          :disabled="loadingOptions || loadingRecord || isLineLockedFromRoute"
+        >
+          <option value="">すべて</option>
+          <option v-for="line in lineOptions" :key="line.id" :value="String(line.id)">
+            {{ formatLineOptionLabel(line) }}
+          </option>
+        </select>
+      </label>
+      <label>
+        工程
+        <select v-model="selectedProcessId" :disabled="loadingOptions || loadingRecord">
+          <option value="">すべて</option>
+          <option v-for="process in filteredProcessOptions" :key="process.id" :value="String(process.id)">
+            {{ formatProcessOptionLabel(process) }}
+          </option>
+        </select>
+      </label>
       <label>
         設備
         <select v-model="selectedSheetCode" :disabled="loadingOptions || loadingRecord">
@@ -242,6 +270,8 @@ const loadingOptions = ref(false)
 const loadingRecord = ref(false)
 const saving = ref(false)
 const templateOptions = ref([])
+const lineOptions = ref([])
+const processOptions = ref([])
 const currentTemplate = ref(null)
 const isLocked = ref(false)
 
@@ -249,8 +279,8 @@ const selectedSheetCode = ref(String(route.query.sheet_code || ""))
 const selectedDate = ref(String(route.query.date || formatISODate(new Date())))
 const sectionType = ref(String(route.query.section_type || "DAILY").toUpperCase())
 // 工程/ラインからの絞り込み用（実績入力画面から渡される）
-const filterProcessId = ref(route.query.process_id ? String(route.query.process_id) : null)
-const filterLineId = ref(route.query.line_id ? String(route.query.line_id) : null)
+const selectedProcessId = ref(route.query.process_id ? String(route.query.process_id) : "")
+const selectedLineId = ref(route.query.line_id ? String(route.query.line_id) : "")
 
 const createAttachment = (raw = {}) => ({
   local_key: raw.local_key || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -311,6 +341,26 @@ const isCompleted = computed(() => String(form.value.status || "").toUpperCase()
 const canEditRecord = computed(() => canEdit.value && !isLocked.value && !isCompleted.value)
 const canEditComment = computed(() => canEdit.value && !isLocked.value)
 const isQuarterlySection = computed(() => String(sectionType.value || "").toUpperCase() === "QUARTERLY")
+const showBackToProcessInput = computed(() => {
+  const source = String(route.query?.source || "").trim()
+  if (source === "mobile_process_input") return true
+  return Boolean(String(selectedLineId.value || "").trim() || String(selectedProcessId.value || "").trim())
+})
+const isLineLockedFromRoute = computed(() =>
+  Boolean(String(route.query?.line_id || "").trim())
+)
+const filteredProcessOptions = computed(() => {
+  if (!selectedLineId.value) return processOptions.value
+  const lineMatched = processOptions.value.filter((process) => {
+    const processLineId = process?.line ?? process?.line_id ?? ""
+    return String(processLineId) === String(selectedLineId.value)
+  })
+  if (!selectedProcessId.value) return lineMatched
+  const hasSelected = lineMatched.some((process) => String(process.id) === String(selectedProcessId.value))
+  if (hasSelected) return lineMatched
+  const selectedProcess = processOptions.value.find((process) => String(process.id) === String(selectedProcessId.value))
+  return selectedProcess ? [...lineMatched, selectedProcess] : lineMatched
+})
 const inspectionYearMonthLabel = computed(() => {
   const raw = String(selectedDate.value || "").trim()
   if (!raw) return "-"
@@ -337,6 +387,24 @@ const recordTypeLabel = (value) => {
   if (value === "NUMERIC") return "数値"
   if (value === "TEXT") return "文字"
   return "チェック"
+}
+
+const formatLineOptionLabel = (line) => {
+  const code = String(line?.line_code || "").trim()
+  const name = String(line?.line_name || "").trim()
+  if (code && name) return `${code} - ${name}`
+  if (name) return name
+  if (code) return code
+  return `ID:${line?.id ?? ""}`
+}
+
+const formatProcessOptionLabel = (process) => {
+  const code = String(process?.process_code || "").trim()
+  const name = String(process?.process_name || "").trim()
+  if (code && name) return `${code} - ${name}`
+  if (name) return name
+  if (code) return code
+  return `ID:${process?.id ?? ""}`
 }
 
 const formatDateTime = (value) => {
@@ -538,8 +606,164 @@ const syncQuery = () => {
       sheet_code: selectedSheetCode.value || undefined,
       date: selectedDate.value || undefined,
       section_type: sectionType.value || undefined,
+      process_id: selectedProcessId.value || undefined,
+      line_id: selectedLineId.value || undefined,
+      source: route.query?.source ? String(route.query.source) : undefined,
     },
   })
+}
+
+const backToProcessInput = () => {
+  const lineId = selectedLineId.value || ""
+  const processId = selectedProcessId.value || ""
+  router.push({
+    path: "/production/mobile-process-input",
+    query: {
+      ...(lineId ? { line_id: String(lineId) } : {}),
+      ...(processId ? { process_id: String(processId) } : {}),
+    },
+  })
+}
+
+const loadFilterOptions = async () => {
+  try {
+    const [linesRes, processesRes] = await Promise.all([
+      api.lines.list({}),
+      api.processes.list({}),
+    ])
+    lineOptions.value = Array.isArray(linesRes.data) ? linesRes.data : linesRes.data?.results || []
+    processOptions.value = Array.isArray(processesRes.data) ? processesRes.data : processesRes.data?.results || []
+  } catch (error) {
+    console.warn("ライン/工程候補の取得に失敗:", error)
+    lineOptions.value = []
+    processOptions.value = []
+  }
+
+  if (selectedLineId.value) {
+    const exists = lineOptions.value.some((line) => String(line.id) === String(selectedLineId.value))
+    if (!exists) {
+      try {
+        const res = await api.lines.get(selectedLineId.value)
+        if (res?.data?.id !== undefined && res?.data?.id !== null) {
+          lineOptions.value = [...lineOptions.value, res.data]
+        }
+      } catch (error) {
+        console.warn("ライン候補の補完取得に失敗:", error)
+        lineOptions.value = [
+          ...lineOptions.value,
+          { id: selectedLineId.value, line_code: `ID:${selectedLineId.value}`, line_name: "（候補未取得）" },
+        ]
+      }
+    }
+  }
+
+  if (selectedProcessId.value) {
+    const exists = processOptions.value.some((process) => String(process.id) === String(selectedProcessId.value))
+    if (!exists) {
+      try {
+        const res = await api.processes.get(selectedProcessId.value)
+        if (res?.data?.id !== undefined && res?.data?.id !== null) {
+          processOptions.value = [...processOptions.value, res.data]
+        }
+      } catch (error) {
+        console.warn("工程候補の補完取得に失敗:", error)
+        processOptions.value = [
+          ...processOptions.value,
+          { id: selectedProcessId.value, process_code: `ID:${selectedProcessId.value}`, process_name: "（候補未取得）", line: selectedLineId.value || null },
+        ]
+      }
+    }
+  }
+}
+
+const mergeFilterOptionsFromTemplates = (rows = []) => {
+  const lineMap = new Map(lineOptions.value.map((line) => [String(line.id), line]))
+  const processMap = new Map(processOptions.value.map((process) => [String(process.id), process]))
+
+  rows.forEach((row) => {
+    const rowLines = Array.isArray(row?.line_options) ? row.line_options : []
+    rowLines.forEach((line) => {
+      const key = String(line?.id || "")
+      if (!key || lineMap.has(key)) return
+      lineMap.set(key, {
+        id: line.id,
+        line_code: line.line_code || `ID:${line.id}`,
+        line_name: line.line_name || "",
+      })
+    })
+
+    const rowProcesses = Array.isArray(row?.process_options) ? row.process_options : []
+    rowProcesses.forEach((process) => {
+      const key = String(process?.id || "")
+      if (!key || processMap.has(key)) return
+      processMap.set(key, {
+        id: process.id,
+        process_code: process.process_code || `ID:${process.id}`,
+        process_name: process.process_name || "",
+        line: process.line_id ?? null,
+      })
+    })
+  })
+
+  lineOptions.value = Array.from(lineMap.values())
+  processOptions.value = Array.from(processMap.values())
+}
+
+const hydrateFiltersFromEquipment = async () => {
+  const sheetCode = String(selectedSheetCode.value || "").trim()
+  if (!sheetCode) return
+  try {
+    const res = await api.equipments.list({ equipment_code: sheetCode })
+    const rows = Array.isArray(res.data) ? res.data : res.data?.results || []
+    const equipment = rows.find((row) => String(row?.equipment_code || "").trim() === sheetCode) || rows[0]
+    if (!equipment) return
+
+    const lineId = equipment.line ?? equipment.line_id ?? ""
+    if (lineId) {
+      const nextLine = {
+        id: lineId,
+        line_code: equipment.line_code || "",
+        line_name: equipment.line_name || "",
+      }
+      const index = lineOptions.value.findIndex((line) => String(line.id) === String(lineId))
+      if (index >= 0) {
+        const current = lineOptions.value[index] || {}
+        lineOptions.value[index] = {
+          ...current,
+          line_code: nextLine.line_code || current.line_code || "",
+          line_name: nextLine.line_name || current.line_name || "",
+        }
+      } else {
+        lineOptions.value = [...lineOptions.value, nextLine]
+      }
+      if (!selectedLineId.value) selectedLineId.value = String(lineId)
+    }
+
+    const processId = equipment.process ?? equipment.process_id ?? ""
+    if (processId) {
+      const nextProcess = {
+        id: processId,
+        process_code: equipment.process_code || "",
+        process_name: equipment.process_name || "",
+        line: lineId || null,
+      }
+      const index = processOptions.value.findIndex((process) => String(process.id) === String(processId))
+      if (index >= 0) {
+        const current = processOptions.value[index] || {}
+        processOptions.value[index] = {
+          ...current,
+          process_code: nextProcess.process_code || current.process_code || "",
+          process_name: nextProcess.process_name || current.process_name || "",
+          line: nextProcess.line || current.line || current.line_id || null,
+        }
+      } else {
+        processOptions.value = [...processOptions.value, nextProcess]
+      }
+      if (!selectedProcessId.value) selectedProcessId.value = String(processId)
+    }
+  } catch (error) {
+    console.warn("設備からのライン/工程補完に失敗:", error)
+  }
 }
 
 const loadTemplates = async () => {
@@ -551,18 +775,21 @@ const loadTemplates = async () => {
     }
 
     let rows = []
-    if (filterProcessId.value) {
+    if (selectedProcessId.value) {
       // 工程に紐付く設備を優先
-      rows = await fetchOptions({ process_id: filterProcessId.value })
+      rows = await fetchOptions({ process_id: selectedProcessId.value })
       // 該当なければラインにフォールバック
-      if (!rows.length && filterLineId.value) {
-        rows = await fetchOptions({ line_id: filterLineId.value })
+      if (!rows.length && selectedLineId.value) {
+        rows = await fetchOptions({ line_id: selectedLineId.value })
       }
-    } else if (filterLineId.value) {
-      rows = await fetchOptions({ line_id: filterLineId.value })
+    } else if (selectedLineId.value) {
+      rows = await fetchOptions({ line_id: selectedLineId.value })
     } else {
       rows = await fetchOptions({})
     }
+
+    mergeFilterOptionsFromTemplates(rows)
+    await hydrateFiltersFromEquipment()
 
     templateOptions.value = [...rows].sort((a, b) => {
       return String(a.sheet_code || "").localeCompare(String(b.sheet_code || ""), "ja")
@@ -671,8 +898,24 @@ watch([selectedSheetCode, selectedDate, sectionType], async () => {
   }
 })
 
+watch([selectedLineId, selectedProcessId], async () => {
+  if (!canView.value) return
+  syncQuery()
+  await loadTemplates()
+})
+
+watch(selectedLineId, (lineId) => {
+  if (!lineId) return
+  if (!selectedProcessId.value) return
+  const exists = filteredProcessOptions.value.some((process) => String(process.id) === String(selectedProcessId.value))
+  if (!exists) {
+    selectedProcessId.value = ""
+  }
+})
+
 onMounted(async () => {
   if (!canView.value) return
+  await loadFilterOptions()
   await loadTemplates()
   if (selectedSheetCode.value && selectedDate.value) {
     await loadPreparedRecord()
@@ -965,7 +1208,3 @@ button:disabled {
   }
 }
 </style>
-
-
-
-
