@@ -839,7 +839,11 @@ const filteredListItems = computed(() => {
       return code.includes(keyword) || name.includes(keyword)
     })
   }
-  return items
+  return [...items].sort((a, b) => {
+    const planDiff = toSafeNumber(b.plan_qty) - toSafeNumber(a.plan_qty)
+    if (planDiff !== 0) return planDiff
+    return toSafeNumber(b.actual_qty) - toSafeNumber(a.actual_qty)
+  })
 })
 
 const pagedItems = computed(() => {
