@@ -245,6 +245,16 @@ const production = [
     meta: { pageTitle: "スポット実績入力", manualPath: "生産/スポット実績入力.md" },
   },
   {
+    path: "/production/desktop-process-input",
+    name: "DesktopProcessInput",
+    component: () => import("@/views/production/DesktopProcessInput.vue"),
+    meta: {
+      pageTitle: "工程作業記録（デスクトップ）",
+      allowedRecordTypes: ["PRODUCTION", "EQUIPMENT_STATE"],
+      manualPath: "生産/工程作業入力.md",
+    },
+  },
+  {
     path: "/production/product-photo-upload",
     name: "ProductPhotoUpload",
     component: () => import("@/views/production/ProductPhotoUpload.vue"),

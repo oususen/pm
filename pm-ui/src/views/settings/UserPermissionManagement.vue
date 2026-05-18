@@ -413,7 +413,11 @@ const permissionResources = [
   { value: 'quality.integrated_checksheet_operation', label: '品質: 工程一体チェックシート（チェック実施）' },
   { value: 'quality.integrated_checksheet_review', label: '品質: 工程一体チェックシート（確認）' },
   { value: 'notifications', label: '通知作成' },
+  { value: 'notifications.create', label: '通知: 通知作成' },
+  { value: 'quality.equipment_inspection', label: '品質: 設備点検実施（旧キー互換）' },
+  { value: 'quality.product_checksheet_batch_delete', label: '品質: チェックシートバッチ削除' },
   { value: 'engineering_change', label: '設変' },
+  { value: 'outsource', label: 'FB外作管理' },
   { value: 'masters', label: 'マスタ' },
   { value: 'masters.product', label: 'マスタ: 品番マスタ' },
   { value: 'masters.product_group', label: 'マスタ: 製品グループ' },
@@ -432,6 +436,7 @@ const permissionResources = [
   { value: 'settings', label: '設定' },
   { value: 'settings.profile', label: '設定: プロフィール編集' },
   { value: 'settings.users', label: '設定: ユーザー管理' },
+  { value: 'settings.departments', label: '設定: 組織管理' },
   { value: 'settings.user_permissions', label: '設定: ユーザー権限編集' },
   { value: 'settings.permission_templates', label: '設定: 権限テンプレート' },
   { value: 'settings.smtp', label: '設定: SMTP設定' },
@@ -443,6 +448,7 @@ const permissionResources = [
   { value: 'settings.stocktake_init', label: '設定: 棚卸初期化' },
   { value: 'settings.lock_date', label: '設定: 締め日管理' },
   { value: 'settings.kubota_sakai_config', label: '設定: クボタ堺便計画設定' },
+  { value: 'users', label: 'ユーザー管理' },
   { value: 'manual', label: 'マニュアル' },
 ]
 
@@ -1341,4 +1347,3 @@ watch(filterTeamId, () => {
   }
 }
 </style>
-
