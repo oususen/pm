@@ -220,7 +220,7 @@ const normalizeIntegratedCsTask = (row) => ({
   created_at: row.created_at || "",
   target_primary: row.product_code || "",
   target_secondary: row.template_name || "",
-  action_label: "テンプレートへ",
+  action_label: "製品チェックシートへ",
   navigate() {
     router.push({
       path: "/quality/product-checksheet/integrated/templates",
@@ -308,4 +308,3 @@ onMounted(async () => {
   gap: 8px;
 }
 </style>
-
