@@ -130,8 +130,6 @@
       <div class="col-list">
         <div class="list-header">
           <span class="list-count">{{ filteredListItems.length }}件</span>
-        </div>
-        <div class="list-filter">
           <input
             v-model.trim="productCodeFilter"
             class="list-filter-input"
@@ -425,16 +423,16 @@
             class="recent-item"
             :style="getRecentRecordColorStyle(rec)"
           >
-            <div class="recent-time">
-              <div class="recent-date">{{ formatDate(rec.timestamp) }}</div>
-              <div class="recent-clock">{{ formatTime(rec.timestamp) }}</div>
+            <div class="recent-row1">
+              <span class="recent-date">{{ formatShortDate(rec.timestamp) }}</span>
+              <span class="recent-clock">{{ formatTime(rec.timestamp) }}</span>
+              <span class="recent-qty" v-if="rec.qty > 0">{{ formatRecentQtyShort(rec) }}</span>
+              <span class="recent-state" v-if="rec.equipment_state">{{ rec.equipment_state_display }}</span>
             </div>
-            <div class="recent-type">
-              <div class="recent-type-label">{{ getRecentRecordTypeLabel(rec) }}</div>
-              <div v-if="rec.product_code" class="recent-product">{{ rec.product_code }}</div>
+            <div class="recent-row2">
+              <span class="recent-type-label">{{ getRecentRecordTypeLabel(rec) }}</span>
+              <span v-if="rec.product_code" class="recent-product">{{ rec.product_code }}</span>
             </div>
-            <div class="recent-qty" v-if="rec.qty > 0">{{ formatRecentQtyWithPlan(rec) }}</div>
-            <div class="recent-state" v-if="rec.equipment_state">{{ rec.equipment_state_display }}</div>
           </div>
         </div>
         <div v-else class="empty-recent">記録なし</div>
@@ -523,7 +521,7 @@ let selectedCoproductNoticeRequestSeq = 0
 let plannedProductsRequestSeq = 0
 
 // ページネーション（SpotLineInput風）
-const PAGE_SIZE = 10
+const PAGE_SIZE = 8
 const currentPage = ref(1)
 const productCodeFilter = ref('')
 
@@ -1165,6 +1163,10 @@ const formatTime = (timestamp) => {
   const date = new Date(timestamp)
   return date.toLocaleTimeString(localeCode.value, { hour: '2-digit', minute: '2-digit' })
 }
+const formatShortDate = (timestamp) => {
+  const d = new Date(timestamp)
+  return `${d.getMonth() + 1}/${d.getDate()}`
+}
 const formatNumber = (value) => {
   if (value === null || value === undefined) return '0'
   return Number(value).toLocaleString(localeCode.value)
@@ -1200,6 +1202,7 @@ const getRecentRecordTypeLabel = (rec) => {
     const action = rec.event_data?.action || rec.event_data?.operator_action || rec.event_data?.action_type || ''
     return getOperatorActionLabel(action) || t('processInput.recordType.operatorAction')
   }
+  if (rec.record_type === 'PRODUCTION') return '完成'
   return rec.record_type_display
 }
 const isCoproductChildRecord = (rec) => {
@@ -1258,6 +1261,10 @@ const getRecentPlanQty = (rec) => {
 const formatRecentQtyWithPlan = (rec) => {
   const planQty = getRecentPlanQty(rec)
   return `計画${formatRecentValue(planQty)} / 実績${formatRecentQty(rec?.qty)}`
+}
+const formatRecentQtyShort = (rec) => {
+  const planQty = getRecentPlanQty(rec)
+  return `計${formatRecentValue(planQty)}/実${formatRecentValue(rec?.qty)}`
 }
 
 const RECENT_RECORD_COLOR_PALETTE = [
@@ -2701,12 +2708,11 @@ onMounted(async () => {
 .equip-state-btn.state-maintenance.active { border-color: #f59e0b; background: #fffbeb; color: #f59e0b; }
 
 /* 製品リスト列 */
-.list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-.list-count { font-size: 12px; color: #888; }
-.list-filter { margin-bottom: 8px; }
+.list-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.list-count { font-size: 12px; color: #888; white-space: nowrap; }
 .list-filter-input {
-  width: 100%; height: 32px; padding: 0 8px; border: 1px solid #ccc;
-  border-radius: 4px; font-size: 13px; box-sizing: border-box;
+  flex: 1; height: 28px; padding: 0 6px; border: 1px solid #ccc;
+  border-radius: 4px; font-size: 12px; box-sizing: border-box; min-width: 0;
 }
 .plan-list { display: flex; flex-direction: column; gap: 4px; }
 .plan-item {
@@ -2719,11 +2725,11 @@ onMounted(async () => {
 .plan-item.current-processing { border-color: #16a34a; background: #f0fdf4; }
 .plan-item.temp-ended { opacity: 0.6; }
 .item-grid {
-  display: grid; grid-template-columns: 1fr auto; gap: 0 8px;
+  display: grid; grid-template-columns: 1fr auto; gap: 0 6px;
   flex: 1; min-width: 0;
 }
 .item-code { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.item-plan { font-size: 12px; color: #555; text-align: right; white-space: nowrap; }
+.item-plan { font-size: 11px; color: #555; text-align: right; white-space: nowrap; }
 .item-sub { font-size: 10px; color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-actual { font-size: 10px; color: #555; text-align: right; white-space: nowrap; }
 .item-actual.done { color: #16a34a; font-weight: 700; }
@@ -2854,19 +2860,18 @@ onMounted(async () => {
 }
 
 /* 最近の記録列 */
-.recent-list { display: flex; flex-direction: column; gap: 6px; }
+.recent-list { display: flex; flex-direction: column; gap: 4px; }
 .recent-item {
-  display: grid; grid-template-columns: 50px 1fr auto; gap: 4px; align-items: center;
-  padding: 6px 8px; background: #f8fafc; border-radius: 6px; font-size: 12px;
+  padding: 4px 6px; background: #f8fafc; border-radius: 6px; font-size: 11px;
 }
-.recent-time { font-weight: 600; color: #64748b; display: flex; flex-direction: column; }
-.recent-date { font-size: 10px; color: #94a3b8; }
-.recent-clock { font-size: 12px; }
-.recent-type { color: #1f2a44; min-width: 0; }
-.recent-type-label { font-weight: 600; font-size: 11px; }
-.recent-product { margin-top: 1px; font-size: 11px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.recent-qty { font-weight: 700; color: #16a34a; font-size: 11px; white-space: nowrap; }
-.recent-state { font-weight: 600; color: #4a7ae5; font-size: 11px; }
+.recent-row1 { display: flex; gap: 6px; align-items: baseline; }
+.recent-row2 { display: flex; gap: 6px; align-items: baseline; margin-top: 1px; }
+.recent-date { color: #64748b; font-weight: 600; white-space: nowrap; }
+.recent-clock { color: #1f2a44; font-weight: 600; white-space: nowrap; }
+.recent-qty { color: #16a34a; font-weight: 700; white-space: nowrap; margin-left: auto; }
+.recent-state { color: #4a7ae5; font-weight: 600; white-space: nowrap; margin-left: auto; }
+.recent-type-label { font-weight: 600; color: #1f2a44; white-space: nowrap; }
+.recent-product { color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .empty-recent { text-align: center; padding: 24px 0; color: #aaa; font-size: 12px; }
 
 /* トースト */
@@ -2882,12 +2887,16 @@ onMounted(async () => {
 
 /* レスポンシブ */
 @media (max-width: 1180px) {
-  .four-col-layout { grid-template-columns: 150px 220px minmax(0, 1fr) 180px; }
-  .col-controls, .col-list, .col-form, .col-recent { padding: 10px; }
+  .four-col-layout { grid-template-columns: 140px 210px minmax(0, 1fr) 160px; }
+  .col-controls, .col-list, .col-form, .col-recent { padding: 8px; }
 }
 @media (max-width: 1024px) {
+  .four-col-layout { grid-template-columns: 120px 180px minmax(0, 1fr) 140px; }
+  .col-controls, .col-list, .col-form, .col-recent { padding: 6px; }
+}
+@media (max-width: 860px) {
   .four-col-layout {
-    grid-template-columns: 140px 200px minmax(0, 1fr);
+    grid-template-columns: 110px 160px minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
   }
   .col-controls { grid-row: 1; grid-column: 1; }
@@ -2897,13 +2906,13 @@ onMounted(async () => {
   .col-recent .recent-list { display: flex; flex-wrap: wrap; gap: 4px; }
   .col-recent .recent-item { flex: 0 0 auto; }
 }
-@media (max-width: 860px) {
+@media (max-width: 680px) {
   .four-col-layout {
     grid-template-columns: minmax(0, 1fr);
     overflow-y: auto;
   }
   .col-controls, .col-list, .col-form, .col-recent {
-    overflow: visible; border-right: none; border-bottom: 1px solid #dde1e8; padding: 10px;
+    overflow: visible; border-right: none; border-bottom: 1px solid #dde1e8; padding: 8px;
     grid-row: auto; grid-column: auto;
   }
   .col-recent { border-bottom: none; max-height: none; }
