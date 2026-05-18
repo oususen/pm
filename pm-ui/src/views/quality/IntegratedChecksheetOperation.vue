@@ -104,6 +104,7 @@
               <th>最終工程計画日</th>
               <th>ライン</th>
               <th>製品</th>
+              <th>テンプレート名</th>
               <th>ロットNo</th>
               <th>台数</th>
               <th>進捗</th>
@@ -119,6 +120,7 @@
               <td>{{ b.plan_date || '-' }}</td>
               <td>{{ b.line_code || '-' }}</td>
               <td>{{ b.product_code || '-' }}</td>
+              <td>{{ b.template_name || '-' }}</td>
               <td>{{ b.lot_no || '-' }}</td>
               <td>{{ b.quantity }}</td>
               <td>{{ b.completed_count ?? 0 }} / {{ b.quantity }}</td>
@@ -177,7 +179,7 @@
       <div class="matrix-header">
         <h3 class="panel-title">
           {{ activeBatch.product_code }} {{ activeBatch.product_name }}
-          <span class="batch-meta">| ロット: {{ activeBatch.lot_no || '-' }} | 最終工程計画日: {{ activeBatch.plan_date || '-' }}</span>
+          <span class="batch-meta">| {{ activeBatch.template_name || '-' }} | ロット: {{ activeBatch.lot_no || '-' }} | 最終工程計画日: {{ activeBatch.plan_date || '-' }}</span>
           <span v-if="isReviewMode && reviewRoleLabel" class="batch-meta">| 確認: {{ reviewRoleLabel }}</span>
         </h3>
         <div class="matrix-header-actions">

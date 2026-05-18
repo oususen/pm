@@ -227,6 +227,7 @@ class IntegratedChecksheetBatchSerializer(serializers.ModelSerializer):
     product_code = serializers.CharField(source="product.product_code", read_only=True)
     product_name = serializers.CharField(source="product.product_name", read_only=True)
     line_code = serializers.CharField(source="line.line_code", read_only=True)
+    template_name = serializers.CharField(source="template.name", read_only=True, default="")
     unit_count = serializers.IntegerField(read_only=True, default=0)
     completed_count = serializers.IntegerField(read_only=True, default=0)
     process_progress = serializers.SerializerMethodField()
@@ -237,7 +238,7 @@ class IntegratedChecksheetBatchSerializer(serializers.ModelSerializer):
     class Meta:
         model = IntegratedChecksheetBatch
         fields = [
-            "id", "template", "product", "product_code", "product_name",
+            "id", "template", "template_name", "product", "product_code", "product_name",
             "line", "line_code", "plan_date", "quantity", "lot_no",
             "status", "unit_count", "completed_count", "process_progress",
             "leader_confirmed_by", "leader_confirmed_by_name", "leader_confirmed_at",
