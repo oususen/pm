@@ -3,19 +3,19 @@
     <!-- ページヘッダー -->
     <div v-show="!activeBatch" class="page-header">
       <h2 class="page-title">{{ pageTitleText }}
-        <span v-if="!isReviewMode" class="page-title-note">※チェックシート（バッチ作成）は生産計画画面またはチェック結果確認画面で行えます</span>
+        <span v-if="!isReviewMode" class="page-title-note">{{ t('integratedOperation.pageNote') }}</span>
       </h2>
       <div class="page-actions">
         <button
           v-if="showBackToProcessInput"
           class="btn-secondary"
           @click="backToProcessInput"
-        >工程作業入力へ戻る</button>
+        >{{ t('integratedOperation.btn.backToProcessInput') }}</button>
         <button
           v-if="isReviewMode"
           class="btn-secondary"
           @click="openNewBatchSection"
-        >新規バッチ</button>
+        >{{ t('integratedOperation.btn.newBatch') }}</button>
         <button class="btn-secondary" @click="refreshAll" :disabled="loading">{{ t('common.update') }}</button>
       </div>
     </div>
@@ -41,10 +41,10 @@
           <span class="field-label">{{ t('integratedOperation.statusLabel') }}</span>
           <select v-model="batchStatusFilter">
             <option value="">{{ t('integratedOperation.all') }}</option>
-            <option value="OPEN">実施中</option>
-            <option value="COMPLETED">完了</option>
-            <option value="LEADER_CONFIRMED">リーダ確認済</option>
-            <option value="SUPERVISOR_CONFIRMED">班長確認済</option>
+            <option value="OPEN">{{ t('integratedOperation.status.open') }}</option>
+            <option value="COMPLETED">{{ t('integratedOperation.status.completed') }}</option>
+            <option value="LEADER_CONFIRMED">{{ t('integratedOperation.status.leaderConfirmed') }}</option>
+            <option value="SUPERVISOR_CONFIRMED">{{ t('integratedOperation.status.supervisorConfirmed') }}</option>
           </select>
         </label>
       </div>
@@ -53,40 +53,40 @@
     <!-- 新規バッチ作成 -->
     <section v-if="isReviewMode && !activeBatch" class="panel" ref="newBatchSectionRef">
       <div class="panel-title-row">
-        <h3 class="panel-title">新規バッチ作成</h3>
+        <h3 class="panel-title">{{ t('integratedOperation.newBatchTitle') }}</h3>
         <button class="btn-secondary btn-sm" @click="showNewBatchSection = !showNewBatchSection">
-          {{ showNewBatchSection ? '隠す' : '表示' }}
+          {{ showNewBatchSection ? t('integratedOperation.btn.hide') : t('integratedOperation.btn.show') }}
         </button>
       </div>
       <div v-if="showNewBatchSection" class="prepare-form">
         <label>
-          <span class="field-label">ライン <span class="required-mark">*</span></span>
+          <span class="field-label">{{ t('integratedOperation.col.line') }} <span class="required-mark">*</span></span>
           <select v-model="newBatch.line">
-            <option value="">選択</option>
+            <option value="">{{ t('integratedOperation.field.select') }}</option>
             <option v-for="l in lineOptions" :key="'nb-'+l.id" :value="l.id">{{ l.line_code }} - {{ l.line_name }}</option>
           </select>
         </label>
         <label>
-          <span class="field-label">製品 <span class="required-mark">*</span></span>
+          <span class="field-label">{{ t('integratedOperation.col.product') }} <span class="required-mark">*</span></span>
           <select v-model="newBatch.product">
-            <option value="">選択</option>
+            <option value="">{{ t('integratedOperation.field.select') }}</option>
             <option v-for="p in newBatchProductOptions" :key="'nb-'+p.id" :value="p.id">{{ p.product_code }} - {{ p.product_name }}</option>
           </select>
         </label>
         <label>
-          <span class="field-label">台数 <span class="required-mark">*</span></span>
+          <span class="field-label">{{ t('integratedOperation.col.quantity') }} <span class="required-mark">*</span></span>
           <input type="number" v-model.number="newBatch.quantity" min="1" style="width:80px" />
         </label>
         <label>
-          <span class="field-label">最終工程計画日 <span class="required-mark">*</span></span>
+          <span class="field-label">{{ t('integratedOperation.col.planDate') }} <span class="required-mark">*</span></span>
           <input type="date" v-model="newBatch.plan_date" style="width:140px" />
         </label>
         <label>
-          <span class="field-label">ロットNo</span>
-          <input type="text" v-model.trim="newBatch.lot_no" placeholder="任意" style="width:120px" />
+          <span class="field-label">{{ t('integratedOperation.col.lotNo') }}</span>
+          <input type="text" v-model.trim="newBatch.lot_no" :placeholder="t('integratedOperation.field.optional')" style="width:120px" />
         </label>
         <button class="btn-primary" @click="prepareBatch" :disabled="preparing || !newBatch.product || !newBatch.line || !newBatch.quantity || !newBatch.plan_date || !canEdit">
-          {{ preparing ? '作成中...' : 'バッチ作成' }}
+          {{ preparing ? t('integratedOperation.btn.creating') : t('integratedOperation.btn.createBatch') }}
         </button>
       </div>
     </section>
@@ -100,18 +100,18 @@
         <table class="data-table compact">
           <thead>
             <tr>
-              <th>ID</th>
-              <th>最終工程計画日</th>
-              <th>ライン</th>
-              <th>製品</th>
-              <th>テンプレート名</th>
-              <th>ロットNo</th>
-              <th>台数</th>
-              <th>進捗</th>
-              <th>工程別進捗</th>
-              <th>状態</th>
-              <th>作成日時</th>
-              <th>操作</th>
+              <th>{{ t('integratedOperation.col.id') }}</th>
+              <th>{{ t('integratedOperation.col.planDate') }}</th>
+              <th>{{ t('integratedOperation.col.line') }}</th>
+              <th>{{ t('integratedOperation.col.product') }}</th>
+              <th>{{ t('integratedOperation.col.templateName') }}</th>
+              <th>{{ t('integratedOperation.col.lotNo') }}</th>
+              <th>{{ t('integratedOperation.col.quantity') }}</th>
+              <th>{{ t('integratedOperation.col.progress') }}</th>
+              <th>{{ t('integratedOperation.col.processProgress') }}</th>
+              <th>{{ t('integratedOperation.col.status') }}</th>
+              <th>{{ t('integratedOperation.col.createdAt') }}</th>
+              <th>{{ t('integratedOperation.col.actions') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -147,26 +147,26 @@
                   class="btn-secondary btn-sm"
                   :disabled="actionLoading"
                   @click="leaderConfirm(b)"
-                >リーダ確認</button>
+                >{{ t('integratedOperation.btn.leaderConfirm') }}</button>
                 <button
                   v-if="isReviewMode && canEditBatch(b)"
                   class="btn-secondary btn-sm"
                   :disabled="actionLoading"
                   @click="openEditBatchDialog(b)"
-                >編集</button>
+                >{{ t('integratedOperation.btn.edit') }}</button>
                 <button
                   v-if="isReviewMode && canDeleteBatch(b)"
                   class="btn-sm btn-delete-batch"
                   :disabled="actionLoading"
                   @click="deleteBatch(b)"
-                >削除</button>
+                >{{ t('integratedOperation.btn.delete') }}</button>
                 <button
                   v-if="isReviewMode && canShowSupervisorConfirm(b)"
                   class="btn-secondary btn-sm"
                   :disabled="actionLoading || !isSupervisorUser"
                   @click="supervisorConfirm(b)"
-                >班長確認</button>
-                <span v-if="b.status === 'SUPERVISOR_CONFIRMED'" class="status-chip ok">確認済</span>
+                >{{ t('integratedOperation.btn.supervisorConfirm') }}</button>
+                <span v-if="b.status === 'SUPERVISOR_CONFIRMED'" class="status-chip ok">{{ t('integratedOperation.btn.confirmed') }}</span>
               </td>
             </tr>
           </tbody>
