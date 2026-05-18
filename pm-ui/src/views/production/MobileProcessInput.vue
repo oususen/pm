@@ -606,6 +606,7 @@ const manualProductsLoaded = ref(false)
 const manualProductsProcessId = ref(null)
 const allPlanProducts = ref([])
 const productionProducts = ref([])
+const actualQtyByProductFromBacklog = ref(new Map())
 const scrapProducts = ref([])
 const allScrapProducts = ref([])
 const scrapRelationFilter = ref('')
@@ -1486,6 +1487,22 @@ const mergeProductionProductsByProduct = (items) => {
   return Array.from(mergedMap.values())
 }
 
+const buildPlanQtyMapFromSlots = (slots, processId) => {
+  const qtyMap = new Map()
+  const source = Array.isArray(slots) ? slots : []
+  source.forEach((slot) => {
+    const items = Array.isArray(slot?.items) ? slot.items : []
+    items.forEach((item) => {
+      const productId = item?.product
+      if (productId === null || productId === undefined || productId === '') return
+      const key = `${productId}_${processId}`
+      const next = toSafeNumber(qtyMap.get(key)) + toSafeNumber(item?.plan_qty)
+      qtyMap.set(key, next)
+    })
+  })
+  return qtyMap
+}
+
 const buildTotalActualByProduct = (items) => {
   const totalMap = new Map()
   ;(Array.isArray(items) ? items : []).forEach((item) => {
@@ -1532,7 +1549,9 @@ const applySlotActualProgress = (slotItems, planBeforeMap, totalActualMap) => {
 
 const getPlanQtyState = (item) => {
   const planQty = toSafeNumber(item?.plan_qty)
-  const actualQty = toSafeNumber(item?.actual_qty)
+  const actualQty = toSafeNumber(
+    actualQtyByProductFromBacklog.value.get(String(item?.product || '')) ?? item?.actual_qty
+  )
   if (planQty > 0 && actualQty === planQty) {
     return 'done'
   }
@@ -1545,7 +1564,9 @@ const getPlanQtyState = (item) => {
 const getPlanQtyBadgeLabel = (item) => {
   const state = getPlanQtyState(item)
   const planQty = toSafeNumber(item?.plan_qty)
-  const actualQty = toSafeNumber(item?.actual_qty)
+  const actualQty = toSafeNumber(
+    actualQtyByProductFromBacklog.value.get(String(item?.product || '')) ?? item?.actual_qty
+  )
   if (state === 'done') {
     return t('processInput.planQtyDone')
   }
@@ -2835,8 +2856,18 @@ const loadPlannedProducts = async () => {
     if (requestSeq !== plannedProductsRequestSeq) return
     timeSlots.value = slotResult.slots
     activeSlotIndex.value = slotResult.activeIndex
+    const ganttPlanQtyMap = buildPlanQtyMapFromSlots(slotResult.slots, processId)
 
     const actualLookup = buildActualQtyLookupByProductProcess(tempProducts, processId)
+    const backlogActualByProduct = new Map()
+    actualLookup.forEach((qty, key) => {
+      const productId = String(key).split('_')[0]
+      if (!productId) return
+      const current = toSafeNumber(backlogActualByProduct.get(productId))
+      const next = toSafeNumber(qty)
+      if (next > current) backlogActualByProduct.set(productId, next)
+    })
+    actualQtyByProductFromBacklog.value = backlogActualByProduct
     tempProducts = (Array.isArray(tempProducts) ? tempProducts : []).map((it) => {
       const key = `${it?.product}_${processId}`
       return {
@@ -2866,6 +2897,15 @@ const loadPlannedProducts = async () => {
       )
       if (requestSeq !== plannedProductsRequestSeq) return
     }
+
+    // 計画数は t_line_gantt_plan（時間帯スロット）由来で最終確定する
+    mapFilteredForProduction = mapFilteredForProduction.map((item) => {
+      const key = `${item?.product}_${processId}`
+      return {
+        ...item,
+        plan_qty: ganttPlanQtyMap.has(key) ? toSafeNumber(ganttPlanQtyMap.get(key)) : 0,
+      }
+    })
 
     // 生産記録用リスト（全時間帯）を保持
     allPlanProducts.value = [...mapFilteredForProduction]
