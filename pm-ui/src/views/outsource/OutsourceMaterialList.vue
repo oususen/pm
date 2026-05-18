@@ -14,13 +14,18 @@
       <span class="filter-sep">〜</span>
       <input type="date" v-model="paintingTo" @change="fetchMaterials" class="filter-date" />
       <button class="btn-month" @click="shiftMonth(1)">次月 ▶</button>
+      <label class="filter-label">支給日:</label>
+      <select v-model="supplyDateFilter" class="filter-select" @change="fetchMaterials">
+        <option value="">全て</option>
+        <option v-for="d in supplyDateOptions" :key="d" :value="d">{{ d }}</option>
+      </select>
       <select v-model="viewMode" class="filter-select">
         <option value="byCase">案件別</option>
         <option value="byDate">支給日別</option>
         <option value="byMaterial">材料別集約</option>
       </select>
-      <div class="summary-badges" v-if="materials.length">
-        <span class="badge badge-total">全{{ materials.length }}件</span>
+      <div class="summary-badges" v-if="filteredMaterials.length">
+        <span class="badge badge-total">全{{ filteredMaterials.length }}件</span>
         <span class="badge badge-pending">未出庫: {{ pendingCount }}件</span>
         <span class="badge badge-overdue" v-if="overdueCount">期限超過: {{ overdueCount }}件</span>
       </div>
@@ -66,12 +71,13 @@
           <button v-if="group.items.some(m => !m.issued)" class="btn-supply-all" @click="issueAll(group.items)">一括出庫済</button>
         </div>
         <table class="data-table">
-          <thead><tr><th>案件番号</th><th>品目名称</th><th>加工日</th><th>材料コード</th><th>材料名称</th><th>調達先</th><th>必要数量</th><th>状態</th><th>操作</th></tr></thead>
+          <thead><tr><th>案件番号</th><th>品目名称</th><th>加工日</th><th>支給予定日</th><th>材料コード</th><th>材料名称</th><th>調達先</th><th>必要数量</th><th>状態</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="m in group.items" :key="m.id" :class="rowClass(m)">
               <td class="case-no">{{ m.case_no }}</td>
               <td>{{ m.item_name }}</td>
               <td>{{ m.process_date }}</td>
+              <td :class="{ 'text-danger': isOverdue(m) }">{{ m.supply_date }}</td>
               <td>{{ m.material_code }}</td>
               <td>{{ m.material_name }}</td>
               <td>{{ m.supplier_name || '-' }}</td>
@@ -107,7 +113,7 @@
       </table>
     </div>
 
-    <div v-if="!materials.length && !loading" class="empty-state">材料支給データがありません</div>
+    <div v-if="!filteredMaterials.length && !loading" class="empty-state">材料支給データがありません</div>
     <div v-if="loading" class="loading">読み込み中...</div>
   </div>
 </template>
@@ -125,8 +131,10 @@ function monthRange(d) {
   const to = `${y}-${String(m + 1).padStart(2, '0')}-${String(new Date(y, m + 1, 0).getDate()).padStart(2, '0')}`
   return { from, to }
 }
-const { from: initFrom, to: initTo } = monthRange(new Date())
-const paintingFrom = ref(initFrom)
+const twoMonthsLater = new Date()
+twoMonthsLater.setMonth(twoMonthsLater.getMonth() + 2)
+const { to: initTo } = monthRange(twoMonthsLater)
+const paintingFrom = ref(formatLocalDate())
 const paintingTo = ref(initTo)
 
 function shiftMonth(delta) {
@@ -138,6 +146,19 @@ function shiftMonth(delta) {
   fetchMaterials()
 }
 const viewMode = ref('byCase')
+const supplyDateFilter = ref('')
+
+function addWorkingDays(dateStr, days) {
+  const d = new Date(dateStr + 'T00:00:00')
+  let remaining = Math.abs(days)
+  const direction = days >= 0 ? 1 : -1
+  while (remaining > 0) {
+    d.setDate(d.getDate() + direction)
+    const dow = d.getDay()
+    if (dow !== 0 && dow !== 6) remaining--
+  }
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 function formatLocalDate(date = new Date()) {
   const y = date.getFullYear()
@@ -158,8 +179,25 @@ function toggleCase(caseNo) {
   expandedCases.value = new Set(expandedCases.value)
 }
 
-const pendingCount = computed(() => materials.value.filter(m => !m.issued).length)
-const overdueCount = computed(() => materials.value.filter(m => !m.issued && m.supply_date < today).length)
+const supplyDateOptions = computed(() => {
+  const t = today
+  const dates = [
+    addWorkingDays(t, -2),
+    addWorkingDays(t, -1),
+    t,
+    addWorkingDays(t, 1),
+    addWorkingDays(t, 2),
+  ]
+  return [...new Set(dates)].sort()
+})
+
+const filteredMaterials = computed(() => {
+  if (!supplyDateFilter.value) return materials.value
+  return materials.value.filter(m => m.supply_date === supplyDateFilter.value)
+})
+
+const pendingCount = computed(() => filteredMaterials.value.filter(m => !m.issued).length)
+const overdueCount = computed(() => filteredMaterials.value.filter(m => !m.issued && m.supply_date < today).length)
 
 function formatQty(val) {
   const n = parseFloat(val)
@@ -191,7 +229,7 @@ function statusText(m) {
 // 案件別
 const groupedByCase = computed(() => {
   const map = {}
-  for (const m of materials.value) {
+  for (const m of filteredMaterials.value) {
     const key = m.case_no
     if (!map[key]) map[key] = { case_no: m.case_no, item_name: m.item_name, items: [] }
     map[key].items.push(m)
@@ -205,7 +243,7 @@ const groupedByCase = computed(() => {
 // 支給日別
 const groupedByDate = computed(() => {
   const map = {}
-  for (const m of materials.value) {
+  for (const m of filteredMaterials.value) {
     const d = m.supply_date
     if (!map[d]) map[d] = { date: d, items: [], isOverdue: d < today, isToday: d === today }
     map[d].items.push(m)
@@ -216,7 +254,7 @@ const groupedByDate = computed(() => {
 // 材料別集約
 const aggregatedByMaterial = computed(() => {
   const map = {}
-  for (const m of materials.value) {
+  for (const m of filteredMaterials.value) {
     const key = m.material_code
     if (!map[key]) {
       map[key] = {

@@ -59,7 +59,7 @@ def _parse_date(val, reference_date=None):
     return None
 
 
-def import_split_plan_excel(file_content):
+def import_split_plan_excel(file_content, dry_run=False):
     """
     外作先が記入した分割計画Excelを取り込む。
 
@@ -67,9 +67,10 @@ def import_split_plan_excel(file_content):
         案件番号 | 品目コード | 品目名称 | 受注数量 | 塗装名 | 塗装日 |
         最早着手日 | 最遅完了日 | 加工日1 | 数量1 | 加工日2 | 数量2 | ...
 
-    戻り値: { 'updated': [...], 'errors': [...], 'warnings': [...] }
+    dry_run=True: パース・バリデーションのみ（DB変更なし）
+    戻り値: { 'updated': [...], 'errors': [...], 'warnings': [], 'has_overwrite': bool }
     """
-    results = {'updated': [], 'errors': [], 'warnings': []}
+    results = {'updated': [], 'errors': [], 'warnings': [], 'has_overwrite': False}
 
     wb = load_workbook(file_content, data_only=True)
     ws = wb.active
@@ -147,23 +148,24 @@ def import_split_plan_excel(file_content):
         # 既存分割がある場合は上書き警告
         existing_count = order.splits.count()
         if existing_count > 0:
+            results['has_overwrite'] = True
             results['warnings'].append({
                 'row': row_idx,
                 'case_no': case_no,
-                'message': f'既存の分割計画({existing_count}件)を上書きします',
+                'message': f'既存の分割計画({existing_count}件)があります。上書きしますか？',
             })
-        order.splits.all().delete()
-        for seq, s in enumerate(splits_data, 1):
-            OutsourceSplit.objects.create(
-                order=order,
-                sequence=seq,
-                process_date=s['process_date'],
-                qty=s['qty'],
-            )
 
-        # ステータス更新
-        order.status = 'SPLIT_REGISTERED'
-        order.save()
+        if not dry_run:
+            order.splits.all().delete()
+            for seq, s in enumerate(splits_data, 1):
+                OutsourceSplit.objects.create(
+                    order=order,
+                    sequence=seq,
+                    process_date=s['process_date'],
+                    qty=s['qty'],
+                )
+            order.status = 'SPLIT_REGISTERED'
+            order.save()
 
         results['updated'].append({
             'row': row_idx,

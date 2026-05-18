@@ -201,19 +201,33 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='import-split-excel', parser_classes=[MultiPartParser])
     def import_split_excel(self, request):
-        """分割計画Excel取込"""
+        """分割計画Excel取込（上書き対象がある場合はconfirm必須）"""
         file = request.FILES.get('file')
         if not file:
             return Response({'error': 'ファイルが指定されていません'}, status=status.HTTP_400_BAD_REQUEST)
 
+        confirm = request.data.get('confirm', '') == 'true'
+        file_bytes = BytesIO(file.read())
+
         import traceback
         try:
-            results = import_split_plan_excel(BytesIO(file.read()))
+            if not confirm:
+                preview = import_split_plan_excel(file_bytes, dry_run=True)
+                if preview.get('has_overwrite'):
+                    return Response({
+                        'needs_confirm': True,
+                        'updated_count': len(preview['updated']),
+                        'error_count': len(preview['errors']),
+                        'warning_count': len(preview['warnings']),
+                        **preview,
+                    })
+                file_bytes.seek(0)
+
+            results = import_split_plan_excel(file_bytes, dry_run=False)
         except Exception as e:
             traceback.print_exc()
             return Response({'error': f'{type(e).__name__}: {e}'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 分割計画登録済みの案件に対してBOM展開を実行
         for item in results['updated']:
             try:
                 order = OutsourceOrder.objects.get(case_no=item['case_no'])

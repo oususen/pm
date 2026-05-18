@@ -19,6 +19,19 @@
       </div>
       <p class="help-text">外作先から返却された分割計画Excelを取り込みます。BOM展開も同時に実行されます。</p>
 
+      <div v-if="confirmData" class="confirm-section">
+        <h3>上書き確認</h3>
+        <div v-for="(w, i) in confirmData.warnings.filter(x => x.message.includes('上書き'))" :key="i" class="warning-item">
+          [{{ w.case_no }}]: {{ w.message }}
+        </div>
+        <div class="confirm-actions">
+          <button class="btn-danger" :disabled="importing" @click="doConfirmedImport">
+            {{ importing ? '取込中...' : '上書き実行' }}
+          </button>
+          <button class="btn-cancel" @click="confirmData = null">キャンセル</button>
+        </div>
+      </div>
+
       <div v-if="result" class="result-section">
         <h3>取込結果</h3>
         <div class="result-summary">
@@ -126,22 +139,55 @@ const tab = ref('import')
 const file = ref(null)
 const importing = ref(false)
 const result = ref(null)
+const confirmData = ref(null)
 const logs = ref([])
 const expandedId = ref(null)
 
 function onFileSelect(e) {
   file.value = e.target.files[0] || null
   result.value = null
+  confirmData.value = null
 }
 
 async function doImport() {
   if (!file.value) return
   importing.value = true
   result.value = null
+  confirmData.value = null
 
   try {
     const formData = new FormData()
     formData.append('file', file.value)
+    const res = await api.outsource.importSplitExcel(formData)
+    if (res.data.needs_confirm) {
+      confirmData.value = res.data
+    } else {
+      result.value = res.data
+    }
+  } catch (err) {
+    result.value = {
+      updated_count: 0,
+      warning_count: 0,
+      error_count: 1,
+      updated: [],
+      warnings: [],
+      errors: [{ row: 0, case_no: '-', message: err.response?.data?.error || err.message }],
+    }
+  } finally {
+    importing.value = false
+  }
+}
+
+async function doConfirmedImport() {
+  if (!file.value) return
+  importing.value = true
+  confirmData.value = null
+  result.value = null
+
+  try {
+    const formData = new FormData()
+    formData.append('file', file.value)
+    formData.append('confirm', 'true')
     const res = await api.outsource.importSplitExcel(formData)
     result.value = res.data
   } catch (err) {
@@ -214,6 +260,12 @@ function formatDateTime(iso) {
 .warning-item { color: #e65100; font-size: 12px; padding: 2px 0; }
 .error-item { color: #c62828; font-size: 12px; padding: 2px 0; }
 
+.confirm-section { margin-top: 16px; padding: 12px; background: #fff3e0; border: 1px solid #ffcc80; border-radius: 4px; }
+.confirm-section h3 { font-size: 14px; margin-bottom: 8px; color: #e65100; }
+.confirm-actions { margin-top: 10px; display: flex; gap: 8px; }
+.btn-danger { padding: 6px 16px; background: #d32f2f; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
+.btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-cancel { padding: 6px 16px; background: #e0e0e0; color: #333; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
 .btn-detail { padding: 2px 8px; background: #e3f2fd; border: 1px solid #90caf9; border-radius: 4px; cursor: pointer; font-size: 11px; }
 .detail-row td { background: #fafafa; }
 .detail-section { margin: 4px 0; font-size: 12px; }

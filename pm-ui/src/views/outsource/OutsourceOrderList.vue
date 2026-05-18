@@ -79,8 +79,11 @@ function monthRange(d) {
   const to = `${y}-${String(m + 1).padStart(2, '0')}-${String(new Date(y, m + 1, 0).getDate()).padStart(2, '0')}`
   return { from, to }
 }
-const { from: initFrom, to: initTo } = monthRange(new Date())
-const paintingFrom = ref(initFrom)
+const now = new Date()
+const twoMonthsLater = new Date()
+twoMonthsLater.setMonth(twoMonthsLater.getMonth() + 2)
+const { to: initTo } = monthRange(twoMonthsLater)
+const paintingFrom = ref(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`)
 const paintingTo = ref(initTo)
 
 function shiftMonth(delta) {
