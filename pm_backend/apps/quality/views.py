@@ -203,6 +203,24 @@ def _get_calendar_for_equipment(sheet_code):
     return Calendar.objects.filter(calendar_code="daiso").first()
 
 
+def _equipment_context(sheet_code):
+    equipment = (
+        Equipment.objects.filter(equipment_code=sheet_code)
+        .select_related("line", "process")
+        .first()
+    )
+    if not equipment:
+        return {}
+    return {
+        "line_id": equipment.line_id,
+        "line_code": equipment.line.line_code if equipment.line else "",
+        "line_name": equipment.line.line_name if equipment.line else "",
+        "process_id": equipment.process_id,
+        "process_code": equipment.process.process_code if equipment.process else "",
+        "process_name": equipment.process.process_name if equipment.process else "",
+    }
+
+
 def _is_frequency_required(frequency, operation_date, calendar):
     """頻度に応じて、operation_dateが該当日かを判定する"""
     if not frequency or not calendar:
@@ -1194,6 +1212,7 @@ class EquipmentInspectionRecordViewSet(viewsets.ModelViewSet):
                 {
                     "is_locked": locked,
                     "current_template": _template_summary(current_template or record.template),
+                    "equipment_context": _equipment_context(sheet_code),
                     "record": serializer.data,
                 }
             )
@@ -1215,6 +1234,7 @@ class EquipmentInspectionRecordViewSet(viewsets.ModelViewSet):
             {
                 "is_locked": locked,
                 "current_template": _template_summary(current_template),
+                "equipment_context": _equipment_context(sheet_code),
                 "record": payload,
             }
         )

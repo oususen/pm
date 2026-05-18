@@ -766,6 +766,54 @@ const hydrateFiltersFromEquipment = async () => {
   }
 }
 
+const applyEquipmentContext = (context = {}) => {
+  if (!context || typeof context !== "object") return
+
+  const lineId = context.line_id ? String(context.line_id) : ""
+  if (lineId) {
+    const index = lineOptions.value.findIndex((line) => String(line.id) === lineId)
+    const next = {
+      id: context.line_id,
+      line_code: context.line_code || "",
+      line_name: context.line_name || "",
+    }
+    if (index >= 0) {
+      const current = lineOptions.value[index] || {}
+      lineOptions.value[index] = {
+        ...current,
+        line_code: next.line_code || current.line_code || "",
+        line_name: next.line_name || current.line_name || "",
+      }
+    } else {
+      lineOptions.value = [...lineOptions.value, next]
+    }
+    selectedLineId.value = lineId
+  }
+
+  const processId = context.process_id ? String(context.process_id) : ""
+  if (processId) {
+    const index = processOptions.value.findIndex((process) => String(process.id) === processId)
+    const next = {
+      id: context.process_id,
+      process_code: context.process_code || "",
+      process_name: context.process_name || "",
+      line: context.line_id ?? null,
+    }
+    if (index >= 0) {
+      const current = processOptions.value[index] || {}
+      processOptions.value[index] = {
+        ...current,
+        process_code: next.process_code || current.process_code || "",
+        process_name: next.process_name || current.process_name || "",
+        line: next.line || current.line || current.line_id || null,
+      }
+    } else {
+      processOptions.value = [...processOptions.value, next]
+    }
+    selectedProcessId.value = processId
+  }
+}
+
 const loadTemplates = async () => {
   loadingOptions.value = true
   try {
@@ -814,6 +862,7 @@ const loadPreparedRecord = async () => {
       operation_date: selectedDate.value,
       section_type: sectionType.value,
     })
+    applyEquipmentContext(response.data?.equipment_context || {})
     currentTemplate.value = response.data?.current_template || null
     isLocked.value = Boolean(response.data?.is_locked)
     form.value = normalizeRecord(response.data?.record || createEmptyForm())
