@@ -152,26 +152,15 @@
             }"
             @click="selectPlannedProduct(item)"
           >
-            <div class="item-avatar" :style="{ backgroundColor: avatarColor(item.product_code || '') }">
-              {{ (item.product_code || '').slice(0, 2) }}
-            </div>
-            <div class="item-info">
+            <div class="item-grid">
               <div class="item-code">{{ item.product_code || t('processInput.unsetProductCode') }}</div>
+              <div class="item-plan">計{{ formatNumber(toSafeNumber(item.plan_qty)) }}</div>
               <div class="item-sub">{{ item.product_name || '' }}</div>
+              <div class="item-actual" :class="{ over: getPlanQtyState(item) === 'over', done: getPlanQtyState(item) === 'done' }">実{{ formatNumber(toSafeNumber(item.actual_qty)) }}</div>
             </div>
-            <div class="item-badges">
-              <span
-                v-if="item.plan_qty != null"
-                class="plan-qty-badge"
-                :class="{
-                  done: getPlanQtyState(item) === 'done',
-                  over: getPlanQtyState(item) === 'over',
-                }"
-              >{{ t('processInput.planQtyBadge', { qty: getPlanQtyBadgeLabel(item) }) }}</span>
-              <span v-if="isTempEndedProduct(item.product)" class="status-badge temp-end">
-                {{ t('processInput.tempEndBadge') }}
-              </span>
-            </div>
+            <span v-if="isTempEndedProduct(item.product)" class="status-badge temp-end">
+              {{ t('processInput.tempEndBadge') }}
+            </span>
           </div>
           <div v-if="filteredListItems.length === 0 && !manualProduct" class="empty-list">
             対象品番がありません
@@ -516,6 +505,8 @@ const showDone = ref(false)
 const showTomorrow = ref(false)
 const showYesterday = ref(false)
 const calendarWorkingDays = ref(null)
+const actualQtyByProductFromBacklog = ref(new Map())
+const actualQtyByProductCodeFromBacklog = ref(new Map())
 const timeSlots = ref([])
 const activeSlotIndex = ref(null)
 const selectedOperatorAction = ref('')
@@ -878,12 +869,6 @@ const selectedProductName = computed(() =>
 // ──────────────────────────────
 // アバターカラー
 // ──────────────────────────────
-const AVATAR_COLORS = ['#4e7cbf', '#7b5ea7', '#2e9688', '#c0714f', '#5e9e5e', '#c0954f', '#6a7fc0']
-const avatarColor = (code) => {
-  let h = 0
-  for (let i = 0; i < code.length; i++) h = (h * 31 + code.charCodeAt(i)) & 0xffffffff
-  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length]
-}
 
 // ──────────────────────────────
 // 作業状態
@@ -2032,6 +2017,39 @@ const buildActualQtyLookupByProductProcess = (items, processId) => {
   return qtyMap
 }
 
+const buildPlanQtyMapFromSlots = (slots, processId) => {
+  const qtyMap = new Map()
+  ;(Array.isArray(slots) ? slots : []).forEach((slot) => {
+    ;(Array.isArray(slot?.items) ? slot.items : []).forEach((item) => {
+      const productId = item?.product
+      if (productId === null || productId === undefined || productId === '') return
+      const key = `${productId}_${processId}`
+      qtyMap.set(key, toSafeNumber(qtyMap.get(key)) + toSafeNumber(item?.plan_qty))
+    })
+  })
+  return qtyMap
+}
+
+const buildActualQtyLookupByProductCode = (items) => {
+  const result = new Map()
+  ;(Array.isArray(items) ? items : []).forEach((item) => {
+    if (!item) return
+    const code = String(item.product_code || '').trim()
+    if (!code) return
+    const qty = toSafeNumber(item.actual_qty)
+    const seqRaw = item.sequence_no
+    const seqNo = seqRaw === null || seqRaw === undefined || seqRaw === '' ? null : Number(seqRaw)
+    const priority = seqNo === 0 ? 2 : 1
+    const current = result.get(code)
+    if (!current || priority > current.priority || (priority === current.priority && qty > current.qty)) {
+      result.set(code, { qty, priority })
+    }
+  })
+  const qtyMap = new Map()
+  result.forEach((value, key) => qtyMap.set(key, value.qty))
+  return qtyMap
+}
+
 const ensureStartedProductsVisible = (items) => {
   const base = [...(Array.isArray(items) ? items : [])]
   if (!startedProductIdsLoaded.value || !startedProductIds.value?.size) return base
@@ -2324,6 +2342,8 @@ const loadPlannedProducts = async () => {
   invalidateSelectedCoproductNotice()
   productionProducts.value = []; scrapProducts.value = []; allPlanProducts.value = []; allScrapProducts.value = []
   timeSlots.value = []; activeSlotIndex.value = null
+  actualQtyByProductFromBacklog.value = new Map()
+  actualQtyByProductCodeFromBacklog.value = new Map()
   try {
     const process = processes.value.find(p => String(p.id) === String(selectedProcessId.value))
     const lineId = process?.line; if (!lineId) return
@@ -2343,7 +2363,19 @@ const loadPlannedProducts = async () => {
     const slotResult = await buildPlanTimeSlots(lineId, processId, tempProducts)
     if (requestSeq !== plannedProductsRequestSeq) return
     timeSlots.value = slotResult.slots; activeSlotIndex.value = slotResult.activeIndex
+    const ganttPlanQtyMap = buildPlanQtyMapFromSlots(slotResult.slots, processId)
+
     const actualLookup = buildActualQtyLookupByProductProcess(tempProducts, processId)
+    actualQtyByProductCodeFromBacklog.value = buildActualQtyLookupByProductCode(tempProducts)
+    const backlogActualByProduct = new Map()
+    actualLookup.forEach((qty, key) => {
+      const productId = String(key).split('_')[0]
+      if (!productId) return
+      const current = toSafeNumber(backlogActualByProduct.get(productId))
+      const next = toSafeNumber(qty)
+      if (next > current) backlogActualByProduct.set(productId, next)
+    })
+    actualQtyByProductFromBacklog.value = backlogActualByProduct
     tempProducts = (Array.isArray(tempProducts) ? tempProducts : []).map((it) => {
       const key = `${it?.product}_${processId}`
       return { ...it, actual_qty: actualLookup.has(key) ? toSafeNumber(actualLookup.get(key)) : toSafeNumber(it?.actual_qty) }
@@ -2360,6 +2392,19 @@ const loadPlannedProducts = async () => {
       mapFilteredForProduction = await filterFloorProductsByDisplayMap(lineId, processId, filteredForProduction, floorMapOnlyMode)
       if (requestSeq !== plannedProductsRequestSeq) return
     }
+
+    mapFilteredForProduction = mapFilteredForProduction.map((item) => {
+      const key = `${item?.product}_${processId}`
+      return { ...item, plan_qty: ganttPlanQtyMap.has(key) ? toSafeNumber(ganttPlanQtyMap.get(key)) : 0 }
+    })
+
+    const dedupMap = new Map()
+    mapFilteredForProduction.forEach((item) => {
+      const key = String(item?.product || '')
+      if (key && !dedupMap.has(key)) dedupMap.set(key, item)
+    })
+    mapFilteredForProduction = Array.from(dedupMap.values())
+
     allPlanProducts.value = [...mapFilteredForProduction]
     applyTimeSlotFilter()
     if (productionProducts.value.length === 1 && productionProducts.value[0].product) defaultProductId.value = productionProducts.value[0].product
@@ -2673,20 +2718,16 @@ onMounted(async () => {
 .plan-item.selected { border-color: #4e7cbf; background: #e8f0fb; }
 .plan-item.current-processing { border-color: #16a34a; background: #f0fdf4; }
 .plan-item.temp-ended { opacity: 0.6; }
-.item-avatar {
-  width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center;
-  justify-content: center; color: #fff; font-size: 10px; font-weight: 700; flex-shrink: 0;
+.item-grid {
+  display: grid; grid-template-columns: 1fr auto; gap: 0 8px;
+  flex: 1; min-width: 0;
 }
-.item-info { flex: 1; min-width: 0; }
-.item-code { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.item-sub { font-size: 10px; color: #666; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.item-badges { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; }
-.plan-qty-badge {
-  font-size: 10px; background: #e8f5e9; color: #388e3c; border-radius: 4px;
-  padding: 1px 5px; font-weight: 700; white-space: nowrap;
-}
-.plan-qty-badge.done { background: #ef4444; color: #fff; }
-.plan-qty-badge.over { background: #ef4444; color: #fff; }
+.item-code { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-plan { font-size: 12px; color: #555; text-align: right; white-space: nowrap; }
+.item-sub { font-size: 10px; color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-actual { font-size: 10px; color: #555; text-align: right; white-space: nowrap; }
+.item-actual.done { color: #16a34a; font-weight: 700; }
+.item-actual.over { color: #ef4444; font-weight: 700; }
 .status-badge { font-size: 9px; border-radius: 4px; padding: 1px 4px; font-weight: 700; }
 .status-badge.temp-end { background: #94a3b8; color: #fff; }
 .empty-list { text-align: center; padding: 24px 0; color: #aaa; font-size: 13px; }
@@ -2841,15 +2882,20 @@ onMounted(async () => {
 
 /* レスポンシブ */
 @media (max-width: 1180px) {
-  .four-col-layout { grid-template-columns: 160px 220px minmax(0, 1fr) 180px; }
+  .four-col-layout { grid-template-columns: 150px 220px minmax(0, 1fr) 180px; }
   .col-controls, .col-list, .col-form, .col-recent { padding: 10px; }
 }
 @media (max-width: 1024px) {
   .four-col-layout {
-    grid-template-columns: 150px 220px minmax(0, 1fr);
+    grid-template-columns: 140px 200px minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
   }
-  .col-recent { border-top: 1px solid #dde1e8; }
+  .col-controls { grid-row: 1; grid-column: 1; }
+  .col-list { grid-row: 1; grid-column: 2; }
+  .col-form { grid-row: 1; grid-column: 3; }
+  .col-recent { grid-row: 2; grid-column: 1 / -1; border-top: 1px solid #dde1e8; border-right: none; max-height: 200px; }
+  .col-recent .recent-list { display: flex; flex-wrap: wrap; gap: 4px; }
+  .col-recent .recent-item { flex: 0 0 auto; }
 }
 @media (max-width: 860px) {
   .four-col-layout {
@@ -2858,7 +2904,9 @@ onMounted(async () => {
   }
   .col-controls, .col-list, .col-form, .col-recent {
     overflow: visible; border-right: none; border-bottom: 1px solid #dde1e8; padding: 10px;
+    grid-row: auto; grid-column: auto;
   }
-  .col-recent { border-bottom: none; }
+  .col-recent { border-bottom: none; max-height: none; }
+  .col-recent .recent-list { display: flex; flex-direction: column; }
 }
 </style>
