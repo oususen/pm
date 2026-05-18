@@ -20,19 +20,26 @@ from reportlab.pdfgen import canvas
 from masters.models import Calendar, CalendarDay, Line, Product
 from production.models_line_backlog import LineBacklog
 
+
+def _cmyk(hex_color: str):
+    """RGB16進色をCMYKColorへ変換（印刷時の色再現を安定化）"""
+    r, g, b = colors.HexColor(hex_color).rgb()
+    c, m, y, k = colors.rgb2cmyk(r, g, b)
+    return colors.CMYKColor(c, m, y, k)
+
 # 製品順序 + ラベル + ラベル色
 PRODUCT_ORDER = [
-    ('YD40006245T', '[1]', colors.HexColor('#0070C0')),      # 青
-    ('YD40006630T', '[2]', colors.HexColor('#00B050')),      # 緑
-    ('YD40006237T', '[3]', colors.HexColor('#FF0000')),      # 赤
-    ('YD40006618T', '[4]', colors.HexColor('#0070C0')),      # 青
-    ('YD40006842T', '[A]', colors.HexColor('#D2691E')),      # チョコレート色
-    ('YD40007003T', '[B]', colors.HexColor('#808080')),      # グレー
+    ('YD40006245T', '[1]', _cmyk('#0070C0')),      # 青
+    ('YD40006630T', '[2]', _cmyk('#00B050')),      # 緑
+    ('YD40006237T', '[3]', _cmyk('#FF0000')),      # 赤
+    ('YD40006618T', '[4]', _cmyk('#0070C0')),      # 青
+    ('YD40006842T', '[A]', _cmyk('#D2691E')),      # チョコレート色
+    ('YD40007003T', '[B]', _cmyk('#808080')),      # グレー
     ('YD40007243T', '[C]', colors.black),                     # 黒
-    ('YD40007372T', '[D]', colors.HexColor('#FF69B4')),      # 桃
-    ('YD40007722T', '[E]', colors.HexColor('#800080')),      # 紫
-    ('YD40007688T', '[F]', colors.HexColor('#FF0000')),      # 赤
-    ('YD40002946T', '[5]', colors.HexColor('#FF8C00')),      # オレンジ
+    ('YD40007372T', '[D]', _cmyk('#FF69B4')),      # 桃
+    ('YD40007722T', '[E]', _cmyk('#800080')),      # 紫
+    ('YD40007688T', '[F]', _cmyk('#FF0000')),      # 赤
+    ('YD40002946T', '[5]', _cmyk('#FF8C00')),      # オレンジ
 ]
 
 PRODUCT_ALIAS_MAP = {
@@ -50,27 +57,27 @@ PRODUCT_ALIAS_MAP = {
 
 # ラップ期間用: 旧品番の直後に新品番を並べる
 PRODUCT_ORDER_LAP = [
-    ('YD40006245T', '[1]旧', colors.HexColor('#0070C0')),
-    ('YD40008720T', '[1]新', colors.HexColor('#0070C0')),
-    ('YD40006630T', '[2]旧', colors.HexColor('#00B050')),
-    ('YD40008750T', '[2]新', colors.HexColor('#00B050')),
-    ('YD40006237T', '[3]旧', colors.HexColor('#FF0000')),
-    ('YD40008670T', '[3]新', colors.HexColor('#FF0000')),
-    ('YD40006618T', '[4]旧', colors.HexColor('#0070C0')),
-    ('YD40008650T', '[4]新', colors.HexColor('#0070C0')),
-    ('YD40006842T', '[A]旧', colors.HexColor('#D2691E')),
-    ('YD40008730T', '[A]新', colors.HexColor('#D2691E')),
-    ('YD40007003T', '[B]旧', colors.HexColor('#808080')),
-    ('YD40008760T', '[B]新', colors.HexColor('#808080')),
+    ('YD40006245T', '[1]旧', _cmyk('#0070C0')),
+    ('YD40008720T', '[1]新', _cmyk('#0070C0')),
+    ('YD40006630T', '[2]旧', _cmyk('#00B050')),
+    ('YD40008750T', '[2]新', _cmyk('#00B050')),
+    ('YD40006237T', '[3]旧', _cmyk('#FF0000')),
+    ('YD40008670T', '[3]新', _cmyk('#FF0000')),
+    ('YD40006618T', '[4]旧', _cmyk('#0070C0')),
+    ('YD40008650T', '[4]新', _cmyk('#0070C0')),
+    ('YD40006842T', '[A]旧', _cmyk('#D2691E')),
+    ('YD40008730T', '[A]新', _cmyk('#D2691E')),
+    ('YD40007003T', '[B]旧', _cmyk('#808080')),
+    ('YD40008760T', '[B]新', _cmyk('#808080')),
     ('YD40007243T', '[C]旧', colors.black),
     ('YD40008780T', '[C]新', colors.black),
-    ('YD40007372T', '[D]旧', colors.HexColor('#FF69B4')),
-    ('YD40008790T', '[D]新', colors.HexColor('#FF69B4')),
-    ('YD40007722T', '[E]旧', colors.HexColor('#800080')),
-    ('YD40008800T', '[E]新', colors.HexColor('#800080')),
-    ('YD40007688T', '[F]旧', colors.HexColor('#FF0000')),
-    ('YD40008770T', '[F]新', colors.HexColor('#FF0000')),
-    ('YD40002946T', '[5]',   colors.HexColor('#FF8C00')),
+    ('YD40007372T', '[D]旧', _cmyk('#FF69B4')),
+    ('YD40008790T', '[D]新', _cmyk('#FF69B4')),
+    ('YD40007722T', '[E]旧', _cmyk('#800080')),
+    ('YD40008800T', '[E]新', _cmyk('#800080')),
+    ('YD40007688T', '[F]旧', _cmyk('#FF0000')),
+    ('YD40008770T', '[F]新', _cmyk('#FF0000')),
+    ('YD40002946T', '[5]',   _cmyk('#FF8C00')),
 ]
 
 PM_SEQUENCE_THRESHOLD = 50
@@ -79,14 +86,14 @@ JPN_WEEKDAYS = ['月', '火', '水', '木', '金', '土', '日']
 # 色定義
 COLOR_HEADER_BG = colors.white
 COLOR_HEADER_TEXT = colors.black
-COLOR_SECTION_15 = colors.HexColor('#FFC000')  # 15時着ヘッダ（オレンジ系）
-COLOR_SECTION_08 = colors.HexColor('#70AD47')  # 8時着ヘッダ（緑系）
-COLOR_TOTAL_BG = colors.HexColor('#D9E2F3')
-COLOR_GRAND_TOTAL_BG = colors.HexColor('#B4C6E7')
-COLOR_WEEKEND_BG = colors.HexColor('#FDE9E9')  # 休日列（薄赤）
+COLOR_SECTION_15 = _cmyk('#FFC000')  # 15時着ヘッダ（オレンジ系）
+COLOR_SECTION_08 = _cmyk('#70AD47')  # 8時着ヘッダ（緑系）
+COLOR_TOTAL_BG = _cmyk('#D9E2F3')
+COLOR_GRAND_TOTAL_BG = _cmyk('#B4C6E7')
+COLOR_WEEKEND_BG = _cmyk('#FDE9E9')  # 休日列（薄赤）
 COLOR_ROW_ODD_BG = colors.white
-COLOR_ROW_EVEN_BG = colors.HexColor('#F7F3E8')
-COLOR_GRID = colors.HexColor('#808080')
+COLOR_ROW_EVEN_BG = _cmyk('#F7F3E8')
+COLOR_GRID = _cmyk('#808080')
 SECTION_TITLE_15 = '１５時着（午前便　AM１１：３０頃）'
 SECTION_TITLE_08 = '８時着（午後便　PM18：３０頃）'
 PAGE_DAYS = 14

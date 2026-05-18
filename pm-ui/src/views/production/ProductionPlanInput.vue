@@ -3016,7 +3016,13 @@ const downloadFloorShippingPDF = async () => {
     })
     const blob = new Blob([res.data], { type: 'application/pdf' })
     const url = URL.createObjectURL(blob)
-    window.open(url, '_blank')
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `フロア配送明細_${startDate.value}_${endDate.value}.pdf`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
   } catch (e) {
     console.error('配送明細PDF生成エラー', e)
     alert('PDF生成に失敗しました: ' + (e.response?.data?.detail || e.message))
@@ -3040,7 +3046,13 @@ const downloadFloorShippingLapPDF = async () => {
     })
     const blob = new Blob([res.data], { type: 'application/pdf' })
     const url = URL.createObjectURL(blob)
-    window.open(url, '_blank')
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `フロア配送明細_ラップ_${startDate.value}_${endDate.value}.pdf`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
   } catch (e) {
     console.error('配送明細ラップPDF生成エラー', e)
     alert('PDF生成に失敗しました: ' + (e.response?.data?.detail || e.message))
