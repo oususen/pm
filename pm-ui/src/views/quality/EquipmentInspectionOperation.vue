@@ -79,6 +79,7 @@
               <th>規格</th>
               <th v-if="isQuarterlySection">判定基準</th>
               <th>方法</th>
+              <th>確認頻度</th>
               <th class="col-value">記録</th>
               <th class="col-judge">判定</th>
               <th>コメント</th>
@@ -89,19 +90,20 @@
             <tr
               v-for="result in form.results"
               :key="result.local_key"
-              :class="{ 'row-ng': result.judgement === 'NG' }"
+              :class="{ 'row-ng': result.judgement === 'NG', 'row-optional': !result.is_required }"
             >
               <td class="col-no">{{ result.inspection_no || "-" }}</td>
               <td>
                 <div class="item-name">{{ result.item_name }}</div>
                 <div class="item-meta">
-                  {{ result.frequency || "-" }} / {{ recordTypeLabel(result.record_type) }}
+                  {{ recordTypeLabel(result.record_type) }}
                   <span v-if="result.unit"> / {{ result.unit }}</span>
                 </div>
               </td>
               <td>{{ result.standard || "-" }}</td>
               <td v-if="isQuarterlySection">{{ result.criteria || "-" }}</td>
               <td>{{ result.method || "-" }}</td>
+              <td>{{ result.frequency || "-" }}</td>
               <td class="col-value">
                 <input
                   v-if="result.record_type === 'NUMERIC'"
@@ -832,6 +834,9 @@ onMounted(async () => {
 }
 .row-ng {
   background: #fff5f5;
+}
+.row-optional {
+  opacity: 0.6;
 }
 .record-actions {
   display: flex;

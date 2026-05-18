@@ -249,8 +249,8 @@
                   <th class="col-no">No</th>
                   <th>点検項目</th>
                   <th>規格</th>
-                  <th>確認頻度</th>
                   <th>方法</th>
+                  <th>確認頻度</th>
                   <th>記録種別</th>
                   <th>単位</th>
                   <th>判定基準</th>
@@ -276,8 +276,14 @@
                     <textarea class="auto-grow-textarea" v-model="item.item_name" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" />
                   </td>
                   <td><textarea class="auto-grow-textarea" v-model="item.standard" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
-                  <td><input v-model="item.frequency" :disabled="!canEditFields" /></td>
                   <td><textarea class="auto-grow-textarea" v-model="item.method" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
+                  <td>
+                    <select :value="frequencySelectValue(item)" :disabled="!canEditFields" @change="onFrequencySelect(item, $event)">
+                      <option v-for="opt in FREQUENCY_OPTIONS" :key="opt" :value="opt">{{ opt }}</option>
+                      <option value="__custom__">その他</option>
+                    </select>
+                    <input v-if="frequencySelectValue(item) === '__custom__'" v-model="item.frequency" :disabled="!canEditFields" placeholder="頻度を入力" style="margin-top:2px" />
+                  </td>
                   <td>
                     <select v-model="item.record_type" :disabled="!canEditFields">
                       <option value="CHECK">チェック</option>
@@ -307,8 +313,8 @@
                     {{ item.item_name }}
                   </td>
                   <td>{{ item.standard }}</td>
-                  <td>{{ item.frequency }}</td>
                   <td>{{ item.method }}</td>
+                  <td>{{ item.frequency }}</td>
                   <td>{{ recordTypeLabel(item.record_type) }}</td>
                   <td>{{ item.unit }}</td>
                   <td>{{ item.criteria }}</td>
@@ -340,6 +346,7 @@
                   <th>項目</th>
                   <th>規格（設定）</th>
                   <th>参考値/単位</th>
+                  <th>確認頻度</th>
                   <th>判定基準</th>
                   <th>記録種別</th>
                   <th>有効</th>
@@ -355,6 +362,13 @@
                   </td>
                   <td><textarea class="auto-grow-textarea" v-model="item.standard" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
                   <td><textarea class="auto-grow-textarea" v-model="item.method" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
+                  <td>
+                    <select :value="frequencySelectValue(item)" :disabled="!canEditFields" @change="onFrequencySelect(item, $event)">
+                      <option v-for="opt in FREQUENCY_OPTIONS" :key="opt" :value="opt">{{ opt }}</option>
+                      <option value="__custom__">その他</option>
+                    </select>
+                    <input v-if="frequencySelectValue(item) === '__custom__'" v-model="item.frequency" :disabled="!canEditFields" placeholder="頻度を入力" style="margin-top:2px" />
+                  </td>
                   <td><textarea class="auto-grow-textarea" v-model="item.criteria" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
                   <td>
                     <select v-model="item.record_type" :disabled="!canEditFields">
@@ -382,6 +396,7 @@
                   </td>
                   <td>{{ item.standard }}</td>
                   <td>{{ item.method }}</td>
+                  <td>{{ item.frequency }}</td>
                   <td>{{ item.criteria }}</td>
                   <td>{{ recordTypeLabel(item.record_type) }}</td>
                   <td colspan="2"></td>
@@ -576,6 +591,23 @@ const RECORD_TYPE_LABELS = {
   CHECK: "チェック",
   NUMERIC: "数値",
   TEXT: "文字",
+}
+
+const FREQUENCY_OPTIONS = ["始業時", "週初め", "週末", "月初め", "月末"]
+function isPresetFrequency(val) {
+  return FREQUENCY_OPTIONS.includes(val)
+}
+function onFrequencySelect(item, ev) {
+  const v = ev.target.value
+  if (v === "__custom__") {
+    item.frequency = ""
+  } else {
+    item.frequency = v
+  }
+}
+function frequencySelectValue(item) {
+  if (!item.frequency) return "__custom__"
+  return isPresetFrequency(item.frequency) ? item.frequency : "__custom__"
 }
 
 const route = useRoute()
@@ -941,13 +973,13 @@ const exportCurrentTemplateExcel = () => {
     ["出力日時", exportedAt],
     [],
     ["日次点検項目"],
-    ["No", "点検項目", "規格", "確認頻度", "方法", "記録種別", "単位", "判定基準"],
+    ["No", "点検項目", "規格", "方法", "確認頻度", "記録種別", "単位", "判定基準"],
     ...dailyItems.value.map((item) => [
       item.inspection_no || "",
       item.item_name || "",
       item.standard || "",
-      item.frequency || "",
       item.method || "",
+      item.frequency || "",
       recordTypeLabel(item.record_type),
       item.unit || "",
       item.criteria || "",
@@ -1004,8 +1036,8 @@ const printCurrentTemplate = () => {
       <col style="width: 22px;" />
       <col style="width: 170px;" />
       <col style="width: 150px;" />
+      <col style="width: 200px;" />
       <col style="width: 46px;" />
-      <col style="width: 170px;" />
       ${dayNumbers.map(() => '<col style="width: 14px;" />').join("")}
     </colgroup>
   `
@@ -1017,8 +1049,8 @@ const printCurrentTemplate = () => {
         <td class="no-cell">${escapeHtml(item.inspection_no || "")}</td>
         <td>${toPrintCell(item.item_name)}</td>
         <td>${toPrintCell(item.standard)}</td>
-        <td>${toPrintCell(item.frequency)}</td>
         <td>${toPrintCell(item.method)}</td>
+        <td>${toPrintCell(item.frequency)}</td>
         ${emptyDayCellsHtml}
       </tr>
     `
@@ -1063,8 +1095,8 @@ const printCurrentTemplate = () => {
         .inspection-table .no-head, .inspection-table .no-cell { width: 24px; text-align: center; }
         .inspection-table .item-head { width: 200px; }
         .inspection-table .std-head { width: 180px; }
-        .inspection-table .freq-head { width: 46px; text-align: center; }
         .inspection-table .method-head { width: 200px; }
+        .inspection-table .freq-head { width: 46px; text-align: center; }
         .inspection-table .day-head { width: 2.5px; padding: 0; text-align: center; font-size: 6px; font-weight: 700; }
         .inspection-table .check-cell { width: 2.5px; padding: 0; height: 19px; }
         .inspection-table .supervisor-title-space { border-right: 1px solid #111827; }
@@ -1124,8 +1156,8 @@ const printCurrentTemplate = () => {
               <th class="no-head">No</th>
               <th class="item-head">点検項目</th>
               <th class="std-head">規格</th>
-              <th class="freq-head">確認頻度</th>
               <th class="method-head">方法</th>
+              <th class="freq-head">確認頻度</th>
               ${dayHeaderHtml}
             </tr>
           </thead>
@@ -2792,7 +2824,6 @@ button:disabled {
   }
 }
 </style>
-
 
 
 

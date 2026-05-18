@@ -13,6 +13,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from masters.models import Calendar, CalendarDay, Equipment
 from notifications.models import Notification
 
 from .models import (
@@ -194,7 +195,72 @@ def _record_missing_required_count(record):
     return count
 
 
+def _get_calendar_for_equipment(sheet_code):
+    """設備のライン→カレンダー、なければdaisoカレンダーを返す"""
+    equipment = Equipment.objects.filter(equipment_code=sheet_code).select_related("line__calendar").first()
+    if equipment and equipment.line and equipment.line.calendar:
+        return equipment.line.calendar
+    return Calendar.objects.filter(calendar_code="daiso").first()
+
+
+def _is_frequency_required(frequency, operation_date, calendar):
+    """頻度に応じて、operation_dateが該当日かを判定する"""
+    if not frequency or not calendar:
+        return True
+
+    freq = frequency.strip()
+    PRESET_FREQUENCIES = {"始業時", "週初め", "週末", "月初め", "月末"}
+    if freq not in PRESET_FREQUENCIES:
+        return True
+
+    if freq == "始業時":
+        return CalendarDay.objects.filter(
+            calendar=calendar, target_date=operation_date, is_working_day=True
+        ).exists()
+
+    if freq in ("週初め", "週末"):
+        iso_cal = operation_date.isocalendar()
+        week_start = operation_date - timedelta(days=operation_date.weekday())
+        week_end = week_start + timedelta(days=6)
+        week_working_days = list(
+            CalendarDay.objects.filter(
+                calendar=calendar,
+                target_date__gte=week_start,
+                target_date__lte=week_end,
+                is_working_day=True,
+            ).order_by("target_date").values_list("target_date", flat=True)
+        )
+        if not week_working_days:
+            return False
+        if freq == "週初め":
+            return operation_date == week_working_days[0]
+        else:
+            return operation_date == week_working_days[-1]
+
+    if freq in ("月初め", "月末"):
+        month_start = operation_date.replace(day=1)
+        next_month = (month_start + timedelta(days=32)).replace(day=1)
+        month_end = next_month - timedelta(days=1)
+        month_working_days = list(
+            CalendarDay.objects.filter(
+                calendar=calendar,
+                target_date__gte=month_start,
+                target_date__lte=month_end,
+                is_working_day=True,
+            ).order_by("target_date").values_list("target_date", flat=True)
+        )
+        if not month_working_days:
+            return False
+        if freq == "月初め":
+            return operation_date == month_working_days[0]
+        else:
+            return operation_date == month_working_days[-1]
+
+    return True
+
+
 def _build_default_record_payload(template, operation_date, section_type, user, request):
+    calendar = _get_calendar_for_equipment(template.sheet_code)
     items = (
         template.items.filter(section_type=section_type, is_active=True)
         .prefetch_related("attachments")
@@ -207,6 +273,7 @@ def _build_default_record_payload(template, operation_date, section_type, user, 
             many=True,
             context={"request": request},
         )
+        required = item.is_required and _is_frequency_required(item.frequency, operation_date, calendar)
         results.append(
             {
                 "id": None,
@@ -220,7 +287,7 @@ def _build_default_record_payload(template, operation_date, section_type, user, 
                 "record_type": item.record_type,
                 "unit": item.unit,
                 "criteria": item.criteria,
-                "is_required": item.is_required,
+                "is_required": required,
                 "numeric_value": None,
                 "text_value": "",
                 "judgement": "",
