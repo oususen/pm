@@ -400,7 +400,25 @@ class RoutingStepAdmin(admin.ModelAdmin):
 class RoutingAdmin(admin.ModelAdmin):
     change_form_template = 'admin/masters/routing/change_form.html'
     list_display = ['product_display', 'routing_code', 'is_default', 'is_active']
-    list_filter = ['is_active', 'is_default']
+    # ルーティング名（routing_code）での絞り込みを追加
+    class RoutingCodeFilter(admin.SimpleListFilter):
+        title = 'ルーティング名'
+        parameter_name = 'routing_code'
+
+        def lookups(self, request, model_admin):
+            qs = Routing.objects.order_by('routing_code').values_list('routing_code', flat=True).distinct()
+            # 既存の上限を解除して全候補を返す（項目数が非常に多い場合は検索で代替してください）
+            choices = list(qs)
+            return [(c, c) for c in choices if c]
+
+        def queryset(self, request, queryset):
+            value = self.value()
+            if value:
+                return queryset.filter(routing_code=value)
+            return queryset
+
+    list_filter = ['is_active', 'is_default', RoutingCodeFilter]
+    search_fields = ['routing_code', 'description', 'product__product_code']
     inlines = [RoutingStepInline]
     actions = ['export_excel']
 

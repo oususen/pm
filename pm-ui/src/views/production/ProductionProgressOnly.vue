@@ -1007,7 +1007,7 @@ const groups = computed(() => {
 const formatLine = (group) => {
   const code = group.line_code || "";
   const name = group.line_name || "";
-  if (code && name) return `${code} ${name}`;
+  if (code && name) return name.includes(code) ? name : `${code} ${name}`;
   return code || name || "-";
 };
 
