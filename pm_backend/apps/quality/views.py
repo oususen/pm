@@ -732,9 +732,8 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
             if not template.created_by_id:
                 template.created_by = request.user
 
-            # 提出時の点検項目スナップショットを保存（差し戻し後の再提出時に差分比較用）
-            # 差し戻し後の再提出時は前回のスナップショットを維持（上長が前回提出時との差分を確認できるように）
-            if prev_status != EquipmentInspectionTemplate.STATUS_REJECTED or not template.submitted_items_snapshot:
+            # 初回提出時のみスナップショット未設定なら保存（差し戻し再提出時は reject 時点の基準を維持）
+            if not template.submitted_items_snapshot:
                 snapshot = list(
                     template.items.order_by("section_type", "display_order").values(
                         "section_type", "display_order", "inspection_no",
@@ -929,6 +928,14 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
         comment = str(request.data.get("comment") or "").strip()
         with transaction.atomic():
             prev_status = template.status
+            # 差し戻し時点の項目を次回再提出の比較基準として保存する
+            template.submitted_items_snapshot = list(
+                template.items.order_by("section_type", "display_order").values(
+                    "section_type", "display_order", "inspection_no",
+                    "item_name", "standard", "frequency", "method",
+                    "record_type", "unit", "criteria", "is_required", "is_active",
+                )
+            )
             template.status = EquipmentInspectionTemplate.STATUS_REJECTED
             template.rejection_comment = comment
             template.save()

@@ -774,11 +774,28 @@ const showDiff = computed(() => diffBaseItems.value.length > 0)
 // 差分の種別ラベル（改訂 vs 修正）
 const diffLabel = computed(() => isSnapshotDiff.value ? "修正" : "改訂")
 
+const isSameItem = (a, b) => {
+  const sectionA = String(a?.section_type || "")
+  const sectionB = String(b?.section_type || "")
+  if (sectionA !== sectionB) return false
+
+  const idA = Number(a?.id || 0)
+  const idB = Number(b?.id || 0)
+  if (idA > 0 && idB > 0) return idA === idB
+
+  const noA = Number(a?.inspection_no || 0)
+  const noB = Number(b?.inspection_no || 0)
+  if (noA > 0 && noB > 0) return noA === noB
+
+  const nameA = String(a?.item_name || "").trim()
+  const nameB = String(b?.item_name || "").trim()
+  if (nameA && nameB) return nameA === nameB
+
+  return false
+}
+
 const findPrevItem = (item) => {
-  // item_nameで照合（番号は表示用で再採番されるため識別子として使わない）
-  return diffBaseItems.value.find(
-    (p) => p.section_type === item.section_type && p.item_name === item.item_name
-  ) || null
+  return diffBaseItems.value.find((p) => isSameItem(p, item)) || null
 }
 const itemDiffStatus = (item) => {
   if (!showDiff.value) return null
@@ -792,9 +809,7 @@ const itemDiffStatus = (item) => {
 const deletedItems = computed(() => {
   if (!showDiff.value) return []
   return diffBaseItems.value.filter((prev) =>
-    !form.value.items.some(
-      (cur) => cur.section_type === prev.section_type && cur.item_name === prev.item_name
-    )
+    !form.value.items.some((cur) => isSameItem(cur, prev))
   )
 })
 
@@ -2870,6 +2885,4 @@ button:disabled {
   }
 }
 </style>
-
-
 
