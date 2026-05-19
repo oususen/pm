@@ -23,6 +23,9 @@
         >
           {{ isListHidden ? "一覧表示" : "一覧隠す" }}
         </button>
+        <button class="btn-secondary" @click="copyTemplate" :disabled="!form.id || saving || actionLoading || !canEdit">
+          コピー作成
+        </button>
         <button class="btn-primary" @click="startNewTemplate" :disabled="saving || actionLoading">
           新規作成
         </button>
@@ -2036,6 +2039,49 @@ const selectTemplate = async (id) => {
     query: { ...route.query, id: String(id) },
   })
   await loadTemplateDetail(id)
+}
+
+const copyTemplate = async () => {
+  if (!form.value.id) return
+  const src = JSON.parse(JSON.stringify(form.value))
+  if (route.query.id) {
+    await router.replace({ path: route.path, query: {} })
+  }
+  form.value = {
+    ...src,
+    id: null,
+    sheet_code: '',
+    sheet_name: '',
+    status: 'DRAFT',
+    version: 1,
+    is_active: true,
+    rejection_comment: '',
+    created_at: '',
+    created_by: null,
+    created_by_name: '',
+    reviewer_user_name: '',
+    chief_user_name: '',
+    approver_user_name: '',
+    reviewed_at: '',
+    chief_reviewed_at: '',
+    approved_at: '',
+    workflow_logs: [],
+    items: src.items.map((item) => ({
+      ...item,
+      id: null,
+      local_key: createLocalKey(),
+      attachments: (item.attachments || []).map((att) => ({
+        ...att,
+        id: null,
+        local_key: createLocalKey(),
+      })),
+    })),
+  }
+  selectedTemplateId.value = null
+  isListHidden.value = true
+  prevVersionItems.value = []
+  await nextTick()
+  resizeAllTextareas()
 }
 
 const startNewTemplate = async () => {
