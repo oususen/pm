@@ -468,6 +468,16 @@ const parseNumericRuleText = (value) => {
     }
   }
 
+  const rangeDelimMatch = text.match(/(\d+(?:\.\d+)?)\s*[～~\-]\s*(\d+(?:\.\d+)?)/)
+  if (rangeDelimMatch) {
+    let low = toNumericValue(rangeDelimMatch[1])
+    let high = toNumericValue(rangeDelimMatch[2])
+    if (low !== null && high !== null) {
+      if (low > high) [low, high] = [high, low]
+      return { type: "range", min: low, max: high }
+    }
+  }
+
   const minMatch = text.match(/([-+]?\d+(?:\.\d+)?)以上/)
   if (minMatch) {
     const minimum = toNumericValue(minMatch[1])

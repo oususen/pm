@@ -96,6 +96,15 @@ def _parse_numeric_rule_text(value):
                 "max": center + tolerance,
             }
 
+    range_delim_match = re.search(r"(\d+(?:\.\d+)?)\s*[～~\-]\s*(\d+(?:\.\d+)?)", text)
+    if range_delim_match:
+        low = _to_decimal(range_delim_match.group(1))
+        high = _to_decimal(range_delim_match.group(2))
+        if low is not None and high is not None:
+            if low > high:
+                low, high = high, low
+            return {"type": "range", "min": low, "max": high}
+
     min_match = re.search(r"([-+]?\d+(?:\.\d+)?)以上", text)
     if min_match:
         minimum = _to_decimal(min_match.group(1))
