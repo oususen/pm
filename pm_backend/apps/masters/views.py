@@ -2722,7 +2722,7 @@ class MobileDeviceViewSet(viewsets.ModelViewSet):
         from openpyxl import load_workbook
         wb = load_workbook(file, read_only=True)
         ws = wb.active
-        rows = list(ws.iter_rows(min_row=7, values_only=True))
+        rows = list(ws.iter_rows(min_row=2, values_only=True))
         created = 0
         updated = 0
         for row in rows:
@@ -2781,14 +2781,13 @@ class MobileDeviceViewSet(viewsets.ModelViewSet):
             devices = MobileDevice.objects.filter(status=MobileDevice.STATUS_ACTIVE).order_by('management_no')
 
         from django.http import HttpResponse
-        resp = HttpResponse(content_type='text/csv; charset=utf-8-sig')
-        resp['Content-Disposition'] = 'attachment; filename="tepra_labels.csv"'
-        writer = csv.writer(resp)
-        writer.writerow(['ラベル'])
+        buf = StringIO()
+        writer = csv.writer(buf)
         for dev in devices:
-            purchase = dev.purchase_date.strftime('%Y/%m') if dev.purchase_date else ''
-            label = f"{dev.management_no}  {dev.manufacturer}  {purchase}  {dev.location}  {dev.manager_name}"
-            writer.writerow([label])
+            purchase = str(dev.purchase_date or '')
+            writer.writerow([dev.management_no, dev.manufacturer, f"'{purchase}" if purchase else '', dev.location, dev.manager_name])
+        resp = HttpResponse(buf.getvalue().encode('cp932'), content_type='text/csv; charset=shift_jis')
+        resp['Content-Disposition'] = 'attachment; filename="tepra_labels.csv"'
         return resp
 
     @action(detail=False, methods=['get'])
