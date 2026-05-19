@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 
@@ -668,3 +669,73 @@ class Contact(models.Model):
 
     def __str__(self):
         return f"{self.company_name} - {self.contact_person or '担当者未設定'}"
+
+
+class MobileDevice(models.Model):
+    STATUS_ACTIVE = 'ACTIVE'
+    STATUS_IDLE = 'IDLE'
+    STATUS_DISPOSED = 'DISPOSED'
+    STATUS_CHOICES = [
+        (STATUS_ACTIVE, '使用中'),
+        (STATUS_IDLE, '遊休'),
+        (STATUS_DISPOSED, '廃却'),
+    ]
+    TYPE_TABLET = 'T'
+    TYPE_SMARTPHONE = 'S'
+    TYPE_CHOICES = [
+        (TYPE_TABLET, 'タブレット'),
+        (TYPE_SMARTPHONE, 'スマートフォン'),
+    ]
+
+    management_no = models.CharField(max_length=20, unique=True, verbose_name='管理No.')
+    device_type = models.CharField(max_length=1, choices=TYPE_CHOICES, verbose_name='種別')
+    manufacturer = models.CharField(max_length=100, verbose_name='製造元')
+    model_number = models.CharField(max_length=100, verbose_name='型番')
+    serial_number = models.CharField(max_length=100, blank=True, default='', verbose_name='S/N')
+    purchase_date = models.CharField(max_length=20, blank=True, default='', verbose_name='導入年月')
+    location = models.CharField(max_length=200, verbose_name='配置場所')
+    manager_name = models.CharField(max_length=100, verbose_name='管理責任者')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_ACTIVE, verbose_name='状態')
+    idle_date = models.DateField(null=True, blank=True, verbose_name='遊休化年月')
+    disposed_date = models.DateField(null=True, blank=True, verbose_name='管理除外年月')
+    note = models.TextField(blank=True, default='', verbose_name='備考')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='登録日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        verbose_name = '携帯端末'
+        verbose_name_plural = '携帯端末'
+        ordering = ['-management_no']
+
+    def __str__(self):
+        return f"{self.management_no} {self.manufacturer} {self.model_number}"
+
+
+class MobileDeviceInventory(models.Model):
+    RESULT_OK = 'OK'
+    RESULT_MISMATCH = 'MISMATCH'
+    RESULT_LOST = 'LOST'
+    RESULT_BROKEN = 'BROKEN'
+    RESULT_CHOICES = [
+        (RESULT_OK, '合格'),
+        (RESULT_MISMATCH, '不一致'),
+        (RESULT_LOST, '紛失'),
+        (RESULT_BROKEN, '故障'),
+    ]
+
+    device = models.ForeignKey(MobileDevice, on_delete=models.CASCADE, related_name='inventories', verbose_name='端末')
+    inventory_date = models.DateField(verbose_name='棚卸日')
+    checked_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, verbose_name='確認者')
+    result = models.CharField(max_length=10, choices=RESULT_CHOICES, verbose_name='結果')
+    note = models.TextField(blank=True, default='', verbose_name='備考')
+    approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='device_inventory_approvals', verbose_name='承認者')
+    approved_at = models.DateTimeField(null=True, blank=True, verbose_name='承認日時')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='登録日時')
+
+    class Meta:
+        verbose_name = '端末棚卸記録'
+        verbose_name_plural = '端末棚卸記録'
+        ordering = ['-inventory_date', 'device__management_no']
+
+    def __str__(self):
+        return f"{self.device.management_no} - {self.inventory_date}"

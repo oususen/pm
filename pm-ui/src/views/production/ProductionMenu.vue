@@ -287,6 +287,14 @@ const tiles = computed(() => {
       required: "view",
       resource: "production",
     },
+    {
+      to: "/masters/mobile-device",
+      label: "携帯端末管理",
+      icon: "📱",
+      category: "other",
+      required: "view",
+      resource: "masters.mobile_device",
+    },
   ];
 
   return list.map((tile) => ({

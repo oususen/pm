@@ -95,6 +95,12 @@ const masters = [
     component: () => import("@/views/masters/WhereUsedPage.vue"),
     meta: { pageTitle: "逆展開（Where Used）", resource: "masters.bom" },
   },
+  {
+    path: "/masters/mobile-device",
+    name: "MobileDeviceMaster",
+    component: () => import("@/views/masters/MobileDeviceMaster.vue"),
+    meta: { pageTitle: "携帯端末管理", resource: "masters.mobile_device" },
+  },
 ];
 
 export default masters;

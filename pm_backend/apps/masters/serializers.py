@@ -3,7 +3,7 @@ from django.db.models import Sum
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact,
-    KubotaSakaiTruck
+    KubotaSakaiTruck, MobileDevice, MobileDeviceInventory
 )
 
 def build_media_absolute_url(request, raw_url):
@@ -373,3 +373,29 @@ class ContactSerializer(serializers.ModelSerializer):
     class Meta:
         model = Contact
         fields = '__all__'
+
+
+class MobileDeviceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MobileDevice
+        fields = '__all__'
+
+
+class MobileDeviceInventorySerializer(serializers.ModelSerializer):
+    management_no = serializers.CharField(source='device.management_no', read_only=True)
+    checked_by_name = serializers.SerializerMethodField()
+    approved_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MobileDeviceInventory
+        fields = '__all__'
+
+    def get_checked_by_name(self, obj):
+        if obj.checked_by:
+            return obj.checked_by.get_full_name() or obj.checked_by.username
+        return ''
+
+    def get_approved_by_name(self, obj):
+        if obj.approved_by:
+            return obj.approved_by.get_full_name() or obj.approved_by.username
+        return ''

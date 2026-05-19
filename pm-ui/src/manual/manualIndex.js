@@ -120,6 +120,14 @@ export const manualSections = [
     items: [{ title: "設変管理", path: "設変/設変管理.md" }],
   },
   {
+    id: "deviceManagement",
+    title: "端末管理",
+    items: [
+      { title: "携帯端末管理規定", path: "端末管理/携帯端末管理規定.md" },
+      { title: "携帯端末棚卸規定", path: "端末管理/携帯端末棚卸規定.md" },
+    ],
+  },
+  {
     id: "settings",
     title: "設定",
     items: [

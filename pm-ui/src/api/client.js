@@ -26,6 +26,7 @@ import { createBomServiceAPI } from './resources/bomService'
 import { createAuthAPI } from './resources/auth'
 import { createAccountsAPI } from './resources/accounts'
 import { createContactsAPI } from './resources/contacts'
+import { createMobileDevicesAPI } from './resources/mobileDevices'
 import { createSmtpConfigsAPI } from './resources/smtpConfigs'
 import { createPurchasePlanLockSettingAPI } from './resources/purchasePlanLockSetting'
 import { createProductionPlanLockSettingAPI } from './resources/productionPlanLockSetting'
@@ -158,6 +159,7 @@ export default {
   auth: createAuthAPI(client),
   accounts: createAccountsAPI(client),
   contacts: createContactsAPI(client),
+  mobileDevices: createMobileDevicesAPI(client),
   smtpConfigs: createSmtpConfigsAPI(client),
   purchasePlanLockSetting: createPurchasePlanLockSettingAPI(client),
   productionPlanLockSetting: createProductionPlanLockSettingAPI(client),

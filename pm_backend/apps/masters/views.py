@@ -18,14 +18,14 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact,
-    KubotaSakaiTruck
+    KubotaSakaiTruck, MobileDevice, MobileDeviceInventory
 )
 from .serializers import (
     ProductSerializer, CustomerSerializer, ProcessSerializer, LineSerializer,
     SupplierSerializer, CalendarSerializer, CalendarDaySerializer, WorkPatternSerializer, BreakTimeSerializer,
     BOMSerializer, BOMItemSerializer, RoutingSerializer, RoutingListSerializer, RoutingStepSerializer,
     RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer, EquipmentSerializer, ContactSerializer,
-    KubotaSakaiTruckSerializer
+    KubotaSakaiTruckSerializer, MobileDeviceSerializer, MobileDeviceInventorySerializer
 )
 from .services.routing_service import build_effective_routing_q, resolve_effective_routing
 from accounts.permissions import HasResourcePermissionOrReadOnly
@@ -2660,3 +2660,290 @@ class ContactViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     search_fields = ['company_name', 'contact_person', 'email']
     ordering_fields = ['display_order', 'created_at']
     ordering = ['display_order', 'id']
+
+
+# ---- 携帯端末管理 ----
+
+class MobileDeviceFilter(django_filters.FilterSet):
+    status = django_filters.CharFilter(field_name='status')
+    device_type = django_filters.CharFilter(field_name='device_type')
+    manager_name = django_filters.CharFilter(field_name='manager_name', lookup_expr='icontains')
+
+    class Meta:
+        model = MobileDevice
+        fields = ['status', 'device_type', 'manager_name']
+
+
+class MobileDeviceViewSet(viewsets.ModelViewSet):
+    queryset = MobileDevice.objects.all()
+    serializer_class = MobileDeviceSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = MobileDeviceFilter
+    search_fields = ['management_no', 'manufacturer', 'model_number', 'serial_number', 'location', 'manager_name']
+    ordering_fields = ['management_no', 'created_at']
+    ordering = ['-management_no']
+
+    @action(detail=False, methods=['post'], parser_classes=[parsers.MultiPartParser, parsers.FormParser])
+    def import_excel(self, request):
+        file = request.FILES.get('file')
+        if not file:
+            return Response({'detail': 'ファイルが必要です'}, status=status.HTTP_400_BAD_REQUEST)
+        from openpyxl import load_workbook
+        wb = load_workbook(file, read_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(min_row=7, values_only=True))
+        created = 0
+        updated = 0
+        for row in rows:
+            mgmt_no = str(row[0] or '').strip()
+            if not mgmt_no:
+                continue
+            device_type = MobileDevice.TYPE_TABLET if mgmt_no.endswith('T') else MobileDevice.TYPE_SMARTPHONE
+            defaults = {
+                'device_type': device_type,
+                'manufacturer': str(row[1] or '').strip(),
+                'model_number': str(row[2] or '').strip(),
+                'serial_number': str(row[3] or '').strip(),
+                'purchase_date': str(row[4] or '').strip(),
+                'location': str(row[5] or '').strip(),
+                'manager_name': str(row[6] or '').strip(),
+                'note': str(row[9] or '').strip() if len(row) > 9 else '',
+            }
+            _, is_created = MobileDevice.objects.update_or_create(
+                management_no=mgmt_no, defaults=defaults
+            )
+            if is_created:
+                created += 1
+            else:
+                updated += 1
+        return Response({'created': created, 'updated': updated})
+
+    @action(detail=False, methods=['get'])
+    def export_excel(self, request):
+        from openpyxl import Workbook
+        from django.http import HttpResponse
+        wb = Workbook()
+        ws = wb.active
+        ws.title = '台帳'
+        headers = ['管理№', '製造元', '型番', 'S/N', '導入年月', '配置場所', '管理責任者', '遊休化年月', '管理除外年月', '備考']
+        ws.append(headers)
+        for d in MobileDevice.objects.all().order_by('-management_no'):
+            ws.append([
+                d.management_no, d.manufacturer, d.model_number, d.serial_number,
+                d.purchase_date, d.location, d.manager_name,
+                str(d.idle_date) if d.idle_date else '',
+                str(d.disposed_date) if d.disposed_date else '',
+                d.note,
+            ])
+        resp = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        resp['Content-Disposition'] = 'attachment; filename="mobile_devices.xlsx"'
+        wb.save(resp)
+        return resp
+
+    @action(detail=False, methods=['get'])
+    def print_labels(self, request):
+        ids = request.query_params.get('ids', '')
+        if ids:
+            id_list = [int(x) for x in ids.split(',') if x.strip().isdigit()]
+            devices = MobileDevice.objects.filter(id__in=id_list).order_by('management_no')
+        else:
+            devices = MobileDevice.objects.filter(status=MobileDevice.STATUS_ACTIVE).order_by('management_no')
+
+        from django.http import HttpResponse
+        resp = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+        resp['Content-Disposition'] = 'attachment; filename="tepra_labels.csv"'
+        writer = csv.writer(resp)
+        writer.writerow(['ラベル'])
+        for dev in devices:
+            purchase = dev.purchase_date.strftime('%Y/%m') if dev.purchase_date else ''
+            label = f"{dev.management_no}  {dev.manufacturer}  {purchase}  {dev.location}  {dev.manager_name}"
+            writer.writerow([label])
+        return resp
+
+    @action(detail=False, methods=['get'])
+    def inventory_checklist(self, request):
+        from io import BytesIO
+        from django.http import HttpResponse
+        from reportlab.lib.units import mm
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.pdfgen import canvas as pdf_canvas
+        from apps.shipping.services.shipping_pdf_generator import register_japanese_fonts
+
+        register_japanese_fonts()
+
+        devices = list(
+            MobileDevice.objects.exclude(status=MobileDevice.STATUS_DISPOSED)
+            .order_by('management_no')
+        )
+
+        buf = BytesIO()
+        page_w, page_h = landscape(A4)
+        c = pdf_canvas.Canvas(buf, pagesize=landscape(A4))
+
+        margin_x = 12 * mm
+        margin_y = 12 * mm
+        row_h = 8 * mm
+        header_h = 8 * mm
+        title_h = 18 * mm
+
+        check_cols = ['現物', 'ラベル', '管理No.', '配置場所', '動作']
+        data_cols = [
+            ('管理No.', 22 * mm),
+            ('種別', 16 * mm),
+            ('製造元', 22 * mm),
+            ('型番', 22 * mm),
+            ('配置場所', 35 * mm),
+            ('管理責任者', 20 * mm),
+        ]
+        check_w = 14 * mm
+        note_w = 30 * mm
+        result_w = 14 * mm
+
+        data_total = sum(w for _, w in data_cols)
+        table_w = data_total + len(check_cols) * check_w + result_w + note_w
+
+        usable_h = page_h - margin_y * 2 - title_h - header_h
+        rows_per_page = int(usable_h / row_h)
+
+        today_str = date.today().strftime('%Y/%m/%d')
+
+        def draw_page(page_devices, page_num, total_pages):
+            top_y = page_h - margin_y
+
+            c.setFont('MSGothic', 14)
+            c.drawString(margin_x, top_y - 10 * mm, '携帯端末 棚卸チェックシート')
+            c.setFont('MSGothic', 8)
+            c.drawString(margin_x + 160 * mm, top_y - 5 * mm, f'棚卸日:                    確認者:')
+            c.drawString(margin_x + 160 * mm, top_y - 11 * mm, f'出力日: {today_str}    {page_num}/{total_pages}頁')
+
+            y = top_y - title_h
+
+            c.setFont('MSGothic', 6.5)
+            c.setFillColorRGB(0.95, 0.95, 0.95)
+            c.rect(margin_x, y - header_h, table_w, header_h, fill=1)
+            c.setFillColorRGB(0, 0, 0)
+
+            x = margin_x
+            for label, w in data_cols:
+                c.drawString(x + 1.5 * mm, y - header_h + 2.5 * mm, label)
+                x += w
+            for ck in check_cols:
+                c.drawString(x + 1 * mm, y - header_h + 2.5 * mm, ck)
+                x += check_w
+            c.drawString(x + 1 * mm, y - header_h + 2.5 * mm, '結果')
+            x += result_w
+            c.drawString(x + 1 * mm, y - header_h + 2.5 * mm, '備考')
+
+            c.setStrokeColorRGB(0.6, 0.6, 0.6)
+            c.rect(margin_x, y - header_h, table_w, header_h)
+            x = margin_x
+            for _, w in data_cols:
+                x += w
+                c.line(x, y, x, y - header_h)
+            for _ in check_cols:
+                x += check_w
+                c.line(x, y, x, y - header_h)
+            x += result_w
+            c.line(x, y, x, y - header_h)
+
+            y -= header_h
+
+            c.setFont('MSGothic', 6.5)
+            for dev in page_devices:
+                c.setStrokeColorRGB(0.7, 0.7, 0.7)
+                c.rect(margin_x, y - row_h, table_w, row_h)
+
+                x = margin_x
+                type_label = 'タブレット' if dev.device_type == MobileDevice.TYPE_TABLET else 'スマホ'
+                vals = [dev.management_no, type_label, dev.manufacturer, dev.model_number, dev.location, dev.manager_name]
+                for i, (_, w) in enumerate(data_cols):
+                    text = str(vals[i] or '')
+                    max_chars = int(w / (2.2 * mm))
+                    if len(text) > max_chars:
+                        text = text[:max_chars - 1] + '…'
+                    c.drawString(x + 1.5 * mm, y - row_h + 2.5 * mm, text)
+                    c.line(x + w, y, x + w, y - row_h)
+                    x += w
+
+                for _ in check_cols:
+                    c.rect(x + 4 * mm, y - row_h + 2 * mm, 4 * mm, 4 * mm)
+                    c.line(x + check_w, y, x + check_w, y - row_h)
+                    x += check_w
+
+                c.line(x + result_w, y, x + result_w, y - row_h)
+
+                y -= row_h
+
+        total_pages = max(1, (len(devices) + rows_per_page - 1) // rows_per_page)
+        for p in range(total_pages):
+            if p > 0:
+                c.showPage()
+            start = p * rows_per_page
+            end = start + rows_per_page
+            draw_page(devices[start:end], p + 1, total_pages)
+
+        c.save()
+        buf.seek(0)
+        resp = HttpResponse(buf.read(), content_type='application/pdf')
+        resp['Content-Disposition'] = 'inline; filename="device_inventory_checklist.pdf"'
+        return resp
+
+
+class ManualDocumentViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+
+    MANUAL_DIR = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+        'pm-ui', 'public', 'manual'
+    )
+
+    def _resolve_path(self, doc_path):
+        from pathlib import Path
+        safe = Path(self.MANUAL_DIR).joinpath(doc_path).resolve()
+        if not str(safe).startswith(str(Path(self.MANUAL_DIR).resolve())):
+            return None
+        return safe
+
+    @action(detail=False, methods=['get'], url_path='read')
+    def read_doc(self, request):
+        doc_path = request.query_params.get('path', '')
+        if not doc_path:
+            return Response({'detail': 'path required'}, status=status.HTTP_400_BAD_REQUEST)
+        fpath = self._resolve_path(doc_path)
+        if not fpath or not fpath.exists():
+            return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+        content = fpath.read_text(encoding='utf-8')
+        return Response({'path': doc_path, 'content': content})
+
+    @action(detail=False, methods=['post'], url_path='write')
+    def write_doc(self, request):
+        doc_path = request.data.get('path', '')
+        content = request.data.get('content', '')
+        if not doc_path:
+            return Response({'detail': 'path required'}, status=status.HTTP_400_BAD_REQUEST)
+        fpath = self._resolve_path(doc_path)
+        if not fpath:
+            return Response({'detail': 'invalid path'}, status=status.HTTP_400_BAD_REQUEST)
+        fpath.parent.mkdir(parents=True, exist_ok=True)
+        fpath.write_text(content, encoding='utf-8')
+        return Response({'path': doc_path, 'saved': True})
+
+
+class MobileDeviceInventoryFilter(django_filters.FilterSet):
+    device = django_filters.NumberFilter(field_name='device_id')
+    inventory_date = django_filters.DateFilter(field_name='inventory_date')
+    result = django_filters.CharFilter(field_name='result')
+
+    class Meta:
+        model = MobileDeviceInventory
+        fields = ['device', 'inventory_date', 'result']
+
+
+class MobileDeviceInventoryViewSet(viewsets.ModelViewSet):
+    queryset = MobileDeviceInventory.objects.select_related('device', 'checked_by', 'approved_by').all()
+    serializer_class = MobileDeviceInventorySerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_class = MobileDeviceInventoryFilter
+    ordering = ['-inventory_date', 'device__management_no']
