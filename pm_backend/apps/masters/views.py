@@ -2922,10 +2922,12 @@ class MobileDeviceViewSet(viewsets.ModelViewSet):
 class ManualDocumentViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
-    MANUAL_DIR = os.path.join(
+    _DEV_MANUAL_DIR = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
         'pm-ui', 'public', 'manual'
     )
+    _DOCKER_MANUAL_DIR = '/app/manual'
+    MANUAL_DIR = _DOCKER_MANUAL_DIR if os.path.isdir(_DOCKER_MANUAL_DIR) else _DEV_MANUAL_DIR
 
     def _resolve_path(self, doc_path):
         from pathlib import Path

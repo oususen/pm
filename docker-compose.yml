@@ -23,6 +23,7 @@ services:
       - ./pm_backend/media:/app/media
       - pm_static_volume:/app/staticfiles
       - ./output:/app/output
+      - ./pm-ui/public/manual:/app/manual
     command: >
       sh -c "python manage.py migrate &&
              python manage.py collectstatic --noinput &&
