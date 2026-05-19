@@ -77,6 +77,86 @@ def _adjust_backlog_actual_for_session(session_obj, delta_qty):
     backlog.save(update_fields=['actual_qty'])
 
 
+def _adjust_coproduct_children_backlog(session_obj, delta_qty):
+    """連産品の子製品のLineBacklog.actual_qtyにデルタを反映する。"""
+    if not session_obj or not delta_qty:
+        return
+    if not session_obj.product_id or not session_obj.process_id or not session_obj.plan_date:
+        return
+
+    line = getattr(session_obj.process, 'line', None)
+    if not line:
+        return
+
+    coproduct_boms = BOM.objects.filter(
+        parent_product_id=session_obj.product_id,
+        is_active=True,
+        is_coproduct=True,
+    ).prefetch_related('items__child_product')
+
+    for bom in coproduct_boms:
+        for item in bom.items.select_related('child_product').all():
+            child_product = item.child_product
+            if not child_product:
+                continue
+            child_delta = int(round(Decimal(str(delta_qty)) * (item.quantity or 0)))
+            if child_delta == 0:
+                continue
+
+            backlog, _created = LineBacklog.objects.get_or_create(
+                line=line,
+                process_id=session_obj.process_id,
+                product_id=child_product.id,
+                plan_date=session_obj.plan_date,
+                sequence_no=0,
+                defaults={
+                    'order_qty': 0,
+                    'plan_qty': 0,
+                    'actual_qty': 0,
+                    'stock_qty': 0,
+                    'planned_stock_qty': 0,
+                    'adjust_qty': 0,
+                    'scrap_qty': 0,
+                    'actual_shipment_qty': 0,
+                }
+            )
+            backlog.actual_qty = (backlog.actual_qty or 0) + child_delta
+            backlog.save(update_fields=['actual_qty'])
+
+
+def _update_coproduct_children_records(session_obj, new_parent_qty):
+    """連産品の子製品のProcessRealtimeRecord.qtyをBOM比率に基づき更新する。"""
+    if not session_obj or not session_obj.product_id:
+        return
+
+    coproduct_boms = BOM.objects.filter(
+        parent_product_id=session_obj.product_id,
+        is_active=True,
+        is_coproduct=True,
+    ).prefetch_related('items__child_product')
+
+    bom_ratio_map = {}
+    for bom in coproduct_boms:
+        for item in bom.items.select_related('child_product').all():
+            if item.child_product_id:
+                bom_ratio_map[item.child_product_id] = item.quantity or Decimal('0')
+
+    if not bom_ratio_map:
+        return
+
+    child_records = ProcessRealtimeRecord.objects.filter(
+        record_type='PRODUCTION',
+        event_data__work_session_id=session_obj.id,
+        product_id__in=list(bom_ratio_map.keys()),
+    )
+
+    for record in child_records:
+        ratio = bom_ratio_map.get(record.product_id)
+        if ratio is not None:
+            record.qty = Decimal(str(new_parent_qty)) * ratio
+            record.save(update_fields=['qty'])
+
+
 def _adjust_backlog_scrap_for_session(session_obj, delta_qty):
     """LineBacklog.scrap_qty にデルタを反映する（仕損数量変更用）。"""
     if not session_obj or not delta_qty:
@@ -156,7 +236,7 @@ def _apply_delta_to_inventory_and_progress(session, delta):
                 continue
             child_product_ids.add(int(child_id))
             
-            child_delta = int(Decimal(str(delta)) * qty_per)
+            child_delta = int(round(Decimal(str(delta)) * qty_per))
             if child_delta == 0:
                 continue
 
@@ -741,6 +821,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             )
             if production_qty:
                 _adjust_backlog_actual_for_session(session, int(production_qty))
+                _adjust_coproduct_children_backlog(session, int(production_qty))
                 _apply_delta_to_inventory_and_progress(session, int(production_qty))
 
         serializer = ProcessWorkSessionSerializer(session)
@@ -759,6 +840,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 ) else 0
                 if old_qty:
                     _adjust_backlog_actual_for_session(session, -old_qty)
+                    _adjust_coproduct_children_backlog(session, -old_qty)
                     _apply_delta_to_inventory_and_progress(session, -old_qty)
 
                 ProcessRealtimeRecord.objects.filter(
@@ -836,6 +918,8 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
 
             if delta:
                 _adjust_backlog_actual_for_session(session, delta)
+                _adjust_coproduct_children_backlog(session, delta)
+                _update_coproduct_children_records(session, production_qty)
                 _apply_delta_to_inventory_and_progress(session, delta)
 
             if defect_delta:
