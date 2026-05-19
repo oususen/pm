@@ -2002,6 +2002,36 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         if not routing_items_info:
             return Response({'detail': f'No {item_types} items found in this BOM tree. Nothing to generate.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # BOMに重複部品がないかチェック（RoutingStepMaterialのunique制約違反を事前に防ぐ）
+        boms_to_check = set()
+        for _, _, item, _ in routing_items_info:
+            child_bom = self._pick_child_bom(item.child_product)
+            if child_bom:
+                boms_to_check.add(child_bom.id)
+        duplicate_errors = []
+        for bom_id in boms_to_check:
+            items_in_bom = BOMItem.objects.filter(bom_id=bom_id).values_list('child_product_id', flat=True)
+            seen, duplicates = set(), set()
+            for pid in items_in_bom:
+                if pid in seen:
+                    duplicates.add(pid)
+                seen.add(pid)
+            if duplicates:
+                from .models import BOM as BOMModel
+                b = BOMModel.objects.select_related('parent_product').get(id=bom_id)
+                dup_codes = list(
+                    BOMItem.objects.filter(bom_id=bom_id, child_product_id__in=duplicates)
+                    .values_list('child_product__product_code', flat=True).distinct()
+                )
+                duplicate_errors.append(
+                    f'BOM「{b.parent_product.product_code}」に重複部品があります: {", ".join(dup_codes)}'
+                )
+        if duplicate_errors:
+            return Response(
+                {'detail': 'BOMに重複部品があるためルーティングを生成できません。\n' + '\n'.join(duplicate_errors)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Optional final step (manual input)
         final_process_id = request.data.get('final_process_id')
         final_line_id = request.data.get('final_line_id')
