@@ -291,6 +291,7 @@
                     <select v-model="item.record_type" :disabled="!canEditFields">
                       <option value="CHECK">チェック</option>
                       <option value="NUMERIC">数値</option>
+                      <option value="PHOTO_NUMERIC">写真＋数値</option>
                       <option value="TEXT">文字</option>
                     </select>
                   </td>
@@ -377,6 +378,7 @@
                     <select v-model="item.record_type" :disabled="!canEditFields">
                       <option value="CHECK">チェック</option>
                       <option value="NUMERIC">数値</option>
+                      <option value="PHOTO_NUMERIC">写真＋数値</option>
                       <option value="TEXT">文字</option>
                     </select>
                   </td>
@@ -593,6 +595,7 @@ const ACTION_LABELS = {
 const RECORD_TYPE_LABELS = {
   CHECK: "チェック",
   NUMERIC: "数値",
+  PHOTO_NUMERIC: "写真＋数値",
   TEXT: "文字",
 }
 
@@ -1435,6 +1438,7 @@ const normalizeImportHeader = (value) => {
 const normalizeRecordTypeFromExcel = (value) => {
   const text = String(value || "").trim()
   if (!text) return "CHECK"
+  if ((text.includes("写真") && text.includes("数")) || text.includes("PHOTO_NUMERIC")) return "PHOTO_NUMERIC"
   if (text.includes("数")) return "NUMERIC"
   if (text.includes("文") || text.includes("テキスト")) return "TEXT"
   if (text.includes("CHECK") || text.includes("チェック")) return "CHECK"
@@ -2885,4 +2889,7 @@ button:disabled {
   }
 }
 </style>
+
+
+
 

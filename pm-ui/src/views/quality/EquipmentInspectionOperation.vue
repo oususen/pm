@@ -133,15 +133,28 @@
               <td>{{ result.method || "-" }}</td>
               <td>{{ result.frequency || "-" }}</td>
               <td class="col-value">
-                <input
-                  v-if="result.record_type === 'NUMERIC'"
-                  type="number"
-                  step="0.001"
-                  v-model="result.numeric_value"
-                  :class="{ 'input-invalid': isNumericOutOfSpec(result) }"
-                  :disabled="!canEditRecord"
-                  @input="handleNumericInput(result)"
-                />
+                <template v-if="isNumericRecordType(result.record_type)">
+                  <input
+                    type="number"
+                    step="0.001"
+                    v-model="result.numeric_value"
+                    :class="{ 'input-invalid': isNumericOutOfSpec(result) }"
+                    :disabled="!canEditRecord"
+                    @input="handleNumericInput(result)"
+                  />
+                  <div v-if="result.record_type === 'PHOTO_NUMERIC'" class="photo-input-wrap">
+                    <input type="file" accept="image/*" capture="environment" :disabled="!canEditRecord" @change="uploadResultPhoto($event, result)" />
+                    <div v-if="result.photo_url" class="photo-action-row">
+                      <button type="button" class="btn-secondary btn-sm" @click="toggleResultPhotoPreview(result)">
+                        {{ result.photo_preview_visible ? "プレビュー閉じる" : "プレビュー" }}
+                      </button>
+                      <button type="button" class="btn-secondary btn-sm" :disabled="!canEditRecord" @click="removeResultPhoto(result)">写真削除</button>
+                    </div>
+                    <div v-if="result.photo_url && result.photo_preview_visible" class="photo-preview-wrap">
+                      <img :src="result.photo_url" alt="計測写真" class="result-photo-preview" />
+                    </div>
+                  </div>
+                </template>
                 <textarea
                   v-else-if="result.record_type === 'TEXT'"
                   v-model="result.text_value"
@@ -385,9 +398,11 @@ const statusLabel = (value) => {
 
 const recordTypeLabel = (value) => {
   if (value === "NUMERIC") return "数値"
+  if (value === "PHOTO_NUMERIC") return "写真＋数値"
   if (value === "TEXT") return "文字"
   return "チェック"
 }
+const isNumericRecordType = (value) => ["NUMERIC", "PHOTO_NUMERIC"].includes(String(value || "").toUpperCase())
 
 const formatLineOptionLabel = (line) => {
   const code = String(line?.line_code || "").trim()
@@ -498,7 +513,7 @@ const parseNumericRuleText = (value) => {
 }
 
 const parseNumericRule = (result) => {
-  if (!result || result.record_type !== "NUMERIC") return null
+  if (!result || !isNumericRecordType(result.record_type)) return null
   for (const candidate of [result.criteria, result.standard]) {
     const rule = parseNumericRuleText(candidate)
     if (rule) return rule
@@ -507,7 +522,7 @@ const parseNumericRule = (result) => {
 }
 
 const numericValueWithinRule = (result) => {
-  if (!result || result.record_type !== "NUMERIC") return null
+  if (!result || !isNumericRecordType(result.record_type)) return null
   const numericValue = toNumericValue(result.numeric_value)
   if (numericValue === null) return null
   const rule = parseNumericRule(result)
@@ -521,15 +536,19 @@ const numericValueWithinRule = (result) => {
 const isNumericOutOfSpec = (result) => numericValueWithinRule(result) === false
 
 const canSelectOk = (result) => {
-  if (!result || result.record_type !== "NUMERIC") return true
+  if (!result || !isNumericRecordType(result.record_type)) return true
   if (toNumericValue(result.numeric_value) === null) return false
+  if (result.record_type === "PHOTO_NUMERIC" && !String(result.photo_url || "").trim()) return false
   return numericValueWithinRule(result) !== false
 }
 
 const okButtonTitle = (result) => {
-  if (!result || result.record_type !== "NUMERIC") return ""
+  if (!result || !isNumericRecordType(result.record_type)) return ""
   if (toNumericValue(result.numeric_value) === null) {
     return "測定値を入力してください。"
+  }
+  if (result.record_type === "PHOTO_NUMERIC" && !String(result.photo_url || "").trim()) {
+    return "写真をアップロードしてください。"
   }
   if (numericValueWithinRule(result) === false) {
     return "測定値が規格を満たしていないためOKにできません。"
@@ -570,6 +589,8 @@ const normalizeRecord = (raw) => ({
         criteria: result.criteria || "",
         is_required: Boolean(result.is_required),
         numeric_value: result.numeric_value ?? "",
+        photo_url: result.photo_url || "",
+        photo_preview_visible: false,
         text_value: result.text_value || "",
         judgement: result.judgement || "",
         comment: result.comment || "",
@@ -602,7 +623,8 @@ const buildPayload = (targetStatus) => ({
     unit: String(result.unit || ""),
     criteria: String(result.criteria || ""),
     is_required: Boolean(result.is_required),
-    numeric_value: result.record_type === "NUMERIC" && result.numeric_value !== "" ? result.numeric_value : null,
+    numeric_value: isNumericRecordType(result.record_type) && result.numeric_value !== "" ? result.numeric_value : null,
+    photo_url: result.record_type === "PHOTO_NUMERIC" ? String(result.photo_url || "") : "",
     text_value: result.record_type === "TEXT" ? String(result.text_value || "") : "",
     judgement: String(result.judgement || "").trim().toUpperCase(),
     comment: String(result.comment || ""),
@@ -897,12 +919,40 @@ const setJudgement = (result, value) => {
 }
 
 const handleNumericInput = (result) => {
-  if (!result || result.record_type !== "NUMERIC") return
+  if (!result || !isNumericRecordType(result.record_type)) return
   if (result.judgement === "OK" && !canSelectOk(result)) {
     result.judgement = ""
   }
 }
 
+
+const uploadResultPhoto = async (event, result) => {
+  const file = event?.target?.files?.[0]
+  if (!file || !result) return
+  try {
+    const formData = new FormData()
+    formData.append("file", file)
+    const response = await api.qualityEquipmentInspections.uploadAttachmentImage(formData)
+    result.photo_url = String(response.data?.image_url || "")
+    result.photo_preview_visible = false
+  } catch (error) {
+    console.error("計測写真アップロードに失敗:", error)
+    alert("写真アップロードに失敗しました。")
+  } finally {
+    if (event?.target) event.target.value = ""
+  }
+}
+
+const removeResultPhoto = (result) => {
+  if (!result) return
+  result.photo_url = ""
+  result.photo_preview_visible = false
+}
+
+const toggleResultPhotoPreview = (result) => {
+  if (!result || !String(result.photo_url || "").trim()) return
+  result.photo_preview_visible = !Boolean(result.photo_preview_visible)
+}
 const saveRecord = async (targetStatus) => {
   if (!canEditComment.value) return
   if (!selectedSheetCode.value || !selectedDate.value) {
@@ -1104,6 +1154,29 @@ onMounted(async () => {
   color: #475569;
   font-size: 12px;
 }
+.photo-input-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.photo-action-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.photo-preview-wrap {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 6px;
+  background: #f8fafc;
+}
+.result-photo-preview {
+  display: block;
+  width: min(360px, 100%);
+  max-height: 260px;
+  object-fit: contain;
+  border-radius: 4px;
+}
 .judge-buttons {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1267,3 +1340,4 @@ button:disabled {
   }
 }
 </style>
+

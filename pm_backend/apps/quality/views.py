@@ -178,8 +178,11 @@ def _record_missing_required_count(record):
     for result in record.results.all():
         if not result.is_required:
             continue
-        if result.record_type == EquipmentInspectionItem.RECORD_NUMERIC:
+        if result.record_type in (EquipmentInspectionItem.RECORD_NUMERIC, EquipmentInspectionItem.RECORD_PHOTO_NUMERIC):
             if result.numeric_value is None:
+                count += 1
+                continue
+            if result.record_type == EquipmentInspectionItem.RECORD_PHOTO_NUMERIC and not str(result.photo_url or "").strip():
                 count += 1
                 continue
         elif result.record_type == EquipmentInspectionItem.RECORD_TEXT:

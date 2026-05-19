@@ -149,10 +149,12 @@ class EquipmentInspectionItem(models.Model):
 
     RECORD_CHECK = "CHECK"
     RECORD_NUMERIC = "NUMERIC"
+    RECORD_PHOTO_NUMERIC = "PHOTO_NUMERIC"
     RECORD_TEXT = "TEXT"
     RECORD_CHOICES = [
         (RECORD_CHECK, "チェック"),
         (RECORD_NUMERIC, "数値"),
+        (RECORD_PHOTO_NUMERIC, "写真＋数値"),
         (RECORD_TEXT, "文字"),
     ]
 
@@ -341,6 +343,7 @@ class EquipmentInspectionResult(models.Model):
         verbose_name="数値記録",
     )
     text_value = models.TextField(blank=True, default="", verbose_name="文字記録")
+    photo_url = models.CharField(max_length=255, blank=True, default="", verbose_name="写真記録URL")
     judgement = models.CharField(
         max_length=10,
         choices=JUDGEMENT_CHOICES,

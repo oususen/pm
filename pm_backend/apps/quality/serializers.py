@@ -121,7 +121,10 @@ def _parse_numeric_rule_text(value):
 
 
 def _parse_numeric_rule(result_data):
-    if str(result_data.get("record_type") or "").strip().upper() != EquipmentInspectionItem.RECORD_NUMERIC:
+    if str(result_data.get("record_type") or "").strip().upper() not in {
+        EquipmentInspectionItem.RECORD_NUMERIC,
+        EquipmentInspectionItem.RECORD_PHOTO_NUMERIC,
+    }:
         return None
 
     for candidate in (result_data.get("criteria"), result_data.get("standard")):
@@ -153,6 +156,8 @@ def _has_result_value(result_data):
     record_type = str(result_data.get("record_type") or EquipmentInspectionItem.RECORD_CHECK).strip().upper()
     if record_type == EquipmentInspectionItem.RECORD_NUMERIC:
         return result_data.get("numeric_value") is not None
+    if record_type == EquipmentInspectionItem.RECORD_PHOTO_NUMERIC:
+        return result_data.get("numeric_value") is not None and bool(str(result_data.get("photo_url") or "").strip())
     if record_type == EquipmentInspectionItem.RECORD_TEXT:
         return bool(str(result_data.get("text_value") or "").strip())
     return _normalize_judgement(result_data.get("judgement")) in {
@@ -469,6 +474,7 @@ class EquipmentInspectionResultSerializer(serializers.ModelSerializer):
             "criteria",
             "is_required",
             "numeric_value",
+            "photo_url",
             "text_value",
             "judgement",
             "comment",
@@ -555,6 +561,7 @@ class EquipmentInspectionRecordSerializer(serializers.ModelSerializer):
                 {
                     "record_type": result.record_type,
                     "numeric_value": result.numeric_value,
+                    "photo_url": result.photo_url,
                     "text_value": result.text_value,
                     "judgement": result.judgement,
                 }
@@ -588,6 +595,7 @@ class EquipmentInspectionRecordSerializer(serializers.ModelSerializer):
                 result_payload["display_order"] = index
             if result_payload.get("numeric_value") in ("", None):
                 result_payload["numeric_value"] = None
+            result_payload["photo_url"] = str(result_payload.get("photo_url") or "")
             result_payload["text_value"] = str(result_payload.get("text_value") or "")
             if _has_result_value(result_payload):
                 result_payload["measured_at"] = result_payload.get("measured_at") or now
@@ -626,6 +634,7 @@ class EquipmentInspectionRecordSerializer(serializers.ModelSerializer):
             {
                 "record_type": result.record_type,
                 "numeric_value": result.numeric_value,
+                "photo_url": result.photo_url,
                 "text_value": result.text_value,
                 "judgement": result.judgement,
                 "is_required": result.is_required,
