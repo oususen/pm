@@ -79,9 +79,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useAPI } from '@/api/client'
-
-const api = useAPI()
+import api from '@/api/client'
 const loading = ref(false)
 const saving = ref(false)
 const rows = ref([])
