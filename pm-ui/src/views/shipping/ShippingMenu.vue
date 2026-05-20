@@ -41,11 +41,12 @@ import { authState } from "@/auth";
 import { hasPermission } from "@/router";
 
 const PERMISSION_MODE = "hide"; // "disable" or "hide"
-const SECTION_ORDER = ["shipping_ops", "documents", "trip", "other"];
+const SECTION_ORDER = ["shipping_ops", "documents", "trip", "settings", "other"];
 const SECTION_LABELS = {
   shipping_ops: "出荷業務",
   documents: "帳票",
   trip: "便計画・進捗",
+  settings: "設定",
   other: "その他",
 };
 
@@ -160,6 +161,14 @@ const tiles = computed(() => [
     category: "trip",
     required: "view",
     resource: "shipping.trip_progress_summary",
+  },
+  {
+    to: "/shipping/ship-to-lead-time",
+    label: "納入地別出荷加算日数",
+    icon: "⚙️",
+    category: "settings",
+    required: "view",
+    resource: "shipping.ship_to_lead_time",
   },
 ].map((tile) => ({
   ...tile,

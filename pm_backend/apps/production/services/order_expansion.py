@@ -58,6 +58,8 @@ class OrderExpansionService:
         self._bom_by_parent: Dict[int, List[BOM]] = {}
         self._default_calendar_id: int | None = None
         self._routed_product_ids: set[int] = set()
+        self._ship_to_additional_days: Dict[Tuple[int, str], int] = {}
+        self._customer_calendar_cache: Dict[int, int | None] = {}
 
     def _prefetch_all(self):
         """全マスタデータをメモリにプリフェッチ（N+1クエリ解消）"""
@@ -110,6 +112,14 @@ class OrderExpansionService:
             calendar_code='daiso'
         ).values_list('id', flat=True).first()
         self._routed_product_ids = set(self._routing_by_product.keys())
+
+        from shipping.models import ShipToLeadTime
+        from masters.models import Customer
+        for stlt in ShipToLeadTime.objects.filter(is_active=True).select_related('customer'):
+            key = (stlt.customer_id, (stlt.ship_to_code or '').strip())
+            self._ship_to_additional_days[key] = stlt.additional_days
+        for customer in Customer.objects.filter(calendar__isnull=False).select_related('calendar'):
+            self._customer_calendar_cache[customer.id] = customer.calendar_id
 
         max_lt = max(
             (resolve_lead_days_for_step(s) for s in all_steps if s),
@@ -187,7 +197,7 @@ class OrderExpansionService:
         queryset = OrderLine.objects.filter(
             order__status='OPEN',
             product_id__in=self._routed_product_ids,
-        ).select_related('order', 'product')
+        ).select_related('order', 'order__customer', 'product')
         if order_type:
             queryset = queryset.filter(order__order_type=order_type)
         if is_expanded is not None:
@@ -444,6 +454,13 @@ class OrderExpansionService:
                 correction_by_product[product_id] = Decimal('1')
 
         required_date = order_line.due_date
+        customer_id = order_line.order.customer_id if order_line.order else None
+        ship_to_code = (order_line.ship_to_code or '').strip()
+        if customer_id and ship_to_code:
+            additional_days = self._ship_to_additional_days.get((customer_id, ship_to_code))
+            if additional_days:
+                cal_id = self._customer_calendar_cache.get(customer_id) or self._default_calendar_id
+                required_date = self._shift_business_days(cal_id, required_date, additional_days)
         final_required_date = required_date
 
         path_step_map = {

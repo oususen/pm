@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from masters.models import Customer, Product
 from orders.core.models import KubotaSakaiDueAdjustment, KubotaSakaiTripAssignment
-from .models import ShipmentActual, ShipmentActualHistory
+from .models import ShipmentActual, ShipmentActualHistory, ShipToLeadTime
 
 
 class ShipmentActualSerializer(serializers.ModelSerializer):
@@ -77,6 +77,20 @@ class ShipmentActualHistorySerializer(serializers.ModelSerializer):
             'quantity', 'remark', 'created_at',
         ]
         read_only_fields = ['id', 'created_at']
+
+
+class ShipToLeadTimeSerializer(serializers.ModelSerializer):
+    customer_code = serializers.CharField(source='customer.customer_code', read_only=True)
+    customer_name = serializers.CharField(source='customer.customer_name', read_only=True)
+
+    class Meta:
+        model = ShipToLeadTime
+        fields = [
+            'id', 'customer', 'customer_code', 'customer_name',
+            'ship_to_code', 'ship_to_name', 'additional_days',
+            'is_active', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'customer_code', 'customer_name', 'created_at', 'updated_at']
 
 
 class KubotaSakaiDueAdjustmentSerializer(serializers.ModelSerializer):

@@ -79,6 +79,12 @@ const shipping = [
     component: () => import("@/views/shipping/ShippingTripProgress.vue"),
     meta: { pageTitle: "便進捗サマリー", resource: "shipping.trip_progress_summary" },
   },
+  {
+    path: "/shipping/ship-to-lead-time",
+    name: "ShipToLeadTimeSetting",
+    component: () => import("@/views/shipping/ShipToLeadTimeSetting.vue"),
+    meta: { pageTitle: "納入地別出荷加算日数", resource: "shipping.ship_to_lead_time" },
+  },
 ];
 
 export default shipping;

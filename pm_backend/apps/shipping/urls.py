@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from shipping.views import ShipmentActualViewSet
+from shipping.views import ShipmentActualViewSet, ShipToLeadTimeViewSet
 from shipping.views_kubota_sakai_due_adjustment import KubotaSakaiDueAdjustmentViewSet
 from shipping.views_kubota_sakai_trip_assignment import (
     KubotaSakaiPickupDetailPdfView,
@@ -36,6 +36,7 @@ from shipping.views_hirakata_pickup import (
 router = DefaultRouter()
 router.register(r'shipment-actuals', ShipmentActualViewSet, basename='shipmentactual')
 router.register(r'kubota-sakai-due-adjustments', KubotaSakaiDueAdjustmentViewSet, basename='kubotasakaidueadjustment')
+router.register(r'ship-to-lead-times', ShipToLeadTimeViewSet, basename='shiptoleadtime')
 urlpatterns = [
     path('', include(router.urls)),
     # クボタ堺便計画（APIView: GET=grid, POST=save）

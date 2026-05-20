@@ -68,6 +68,30 @@ class ShipmentActualHistory(models.Model):
         return f"{self.shipment_actual_id} {self.action} {self.shipment_date}"
 
 
+class ShipToLeadTime(models.Model):
+    """納入地別出荷加算日数"""
+    id = models.BigAutoField(primary_key=True)
+    customer = models.ForeignKey(
+        Customer, on_delete=models.CASCADE, verbose_name='顧客'
+    )
+    ship_to_code = models.CharField(max_length=40, verbose_name='納入先コード')
+    ship_to_name = models.CharField(max_length=100, blank=True, default='', verbose_name='納入地名')
+    additional_days = models.PositiveIntegerField(default=0, verbose_name='出荷加算日数')
+    is_active = models.BooleanField(default=True, verbose_name='有効')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'm_ship_to_lead_time'
+        verbose_name = '納入地別出荷加算日数'
+        verbose_name_plural = '納入地別出荷加算日数'
+        unique_together = [('customer', 'ship_to_code')]
+        ordering = ['customer__customer_code', 'ship_to_code']
+
+    def __str__(self):
+        return f"{self.customer.customer_code} {self.ship_to_code}({self.ship_to_name}) +{self.additional_days}日"
+
+
 class DeliveryProgress(models.Model):
     """出荷進捗（出荷指示書用）"""
     id = models.BigAutoField(primary_key=True)

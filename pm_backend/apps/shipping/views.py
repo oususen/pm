@@ -5,8 +5,8 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
-from .models import ShipmentActual, ShipmentActualHistory
-from .serializers import ShipmentActualHistorySerializer, ShipmentActualSerializer
+from .models import ShipmentActual, ShipmentActualHistory, ShipToLeadTime
+from .serializers import ShipmentActualHistorySerializer, ShipmentActualSerializer, ShipToLeadTimeSerializer
 
 
 class ShipmentActualFilter(django_filters.FilterSet):
@@ -65,3 +65,12 @@ class ShipmentActualViewSet(viewsets.ModelViewSet):
         ).order_by('-id')
         serializer = ShipmentActualHistorySerializer(histories, many=True)
         return Response(serializer.data)
+
+
+class ShipToLeadTimeViewSet(viewsets.ModelViewSet):
+    """納入地別出荷加算日数ViewSet"""
+    queryset = ShipToLeadTime.objects.select_related('customer').all()
+    serializer_class = ShipToLeadTimeSerializer
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['customer', 'is_active']
+    ordering = ['customer__customer_code', 'ship_to_code']
