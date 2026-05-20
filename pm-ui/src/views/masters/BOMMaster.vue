@@ -945,6 +945,7 @@ const itemForm = ref({
   remark: ''
 })
 const editingItemId = ref(null)
+const originalSourcingType = ref('')
 const bomItemsRequestToken = ref(0)
 const childProductFilter = ref('')
 const parentProductFilter = ref('')
@@ -1288,6 +1289,7 @@ const resetItemForm = () => {
     remark: ''
   }
   editingItemId.value = null
+  originalSourcingType.value = ''
   childProductFilter.value = ''
 }
 
@@ -2141,6 +2143,7 @@ const downloadTreeExcel = async () => {
 const startEditItem = (item) => {
   if (!canEdit.value) return
   editingItemId.value = item.id
+  originalSourcingType.value = item.sourcing_type || ''
   itemForm.value = {
     child_product: item.child_product,
     quantity: normalizeQuantityValue(item.quantity) ?? 1,
@@ -2220,8 +2223,16 @@ const saveBOMItem = async () => {
 
   try {
     if (editingItemId.value) {
+      const sourcingTypeChanged = !!originalSourcingType.value && originalSourcingType.value !== itemForm.value.sourcing_type
+      if (sourcingTypeChanged) {
+        const ok = window.confirm('加工区分は変更でいいですか？')
+        if (!ok) return
+      }
       await api.boms.updateBOMItem(editingItemId.value, payload)
       alert('明細を更新しました')
+      if (sourcingTypeChanged) {
+        alert('ルーティングを手動で直してください')
+      }
     } else {
       await api.boms.createBOMItem(payload)
       alert('明細を追加しました')

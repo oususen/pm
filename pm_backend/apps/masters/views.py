@@ -2735,6 +2735,48 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     ordering_fields = ['created_at']
     ordering = ['id']
 
+    def _get_or_create_purchase_line_and_process(self, supplier):
+        if not supplier:
+            return None, None
+
+        line_code = supplier.supplier_code
+        line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
+        if len(line_name) > 50:
+            line_name = line_name[:50]
+        line_obj, _ = Line.objects.get_or_create(
+            line_code=line_code,
+            defaults={
+                'line_name': line_name,
+                'line_type': 'PURCHASE',
+                'is_active': True,
+            }
+        )
+
+        process_obj = Process.objects.filter(process_code='K').first()
+
+        return line_obj, process_obj
+
+    def _get_supplier_gaisaku_line_and_process(self, supplier):
+        if not supplier:
+            return None, None
+
+        line_code = supplier.supplier_code
+        line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
+        if len(line_name) > 50:
+            line_name = line_name[:50]
+        line_obj, _ = Line.objects.get_or_create(
+            line_code=line_code,
+            defaults={
+                'line_name': line_name,
+                'line_type': 'PURCHASE',
+                'is_active': True,
+            }
+        )
+
+        process_obj = Process.objects.filter(process_code='G').first()
+
+        return line_obj, process_obj
+
     def _select_sync_target_steps(self, bom_item: BOMItem):
         fk_qs = RoutingStep.objects.filter(source_bom_item_id=bom_item.id)
         if fk_qs.exists():
@@ -2778,6 +2820,49 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         for step in steps:
             changed_fields = []
 
+            if any(name in field_names for name in ('supplier', 'sourcing_type', 'process', 'line', 'time_unit')):
+                if bom_item.sourcing_type == 'BUY' and bom_item.supplier_id:
+                    line_obj, process_obj = self._get_or_create_purchase_line_and_process(bom_item.supplier)
+                    if step.line_id != getattr(line_obj, 'id', None):
+                        step.line = line_obj
+                        changed_fields.append('line')
+                    if process_obj and step.process_id != process_obj.id:
+                        step.process = process_obj
+                        changed_fields.append('process')
+                    if step.supplier_id != bom_item.supplier_id:
+                        step.supplier = bom_item.supplier
+                        changed_fields.append('supplier')
+                    if step.time_unit != 'DAY':
+                        step.time_unit = 'DAY'
+                        changed_fields.append('time_unit')
+                elif bom_item.sourcing_type == 'SUBCON' and bom_item.supplier_id:
+                    line_obj, process_obj = self._get_supplier_gaisaku_line_and_process(bom_item.supplier)
+                    if step.line_id != getattr(line_obj, 'id', None):
+                        step.line = line_obj
+                        changed_fields.append('line')
+                    if process_obj and step.process_id != process_obj.id:
+                        step.process = process_obj
+                        changed_fields.append('process')
+                    if step.supplier_id != bom_item.supplier_id:
+                        step.supplier = bom_item.supplier
+                        changed_fields.append('supplier')
+                    if step.time_unit != 'DAY':
+                        step.time_unit = 'DAY'
+                        changed_fields.append('time_unit')
+                else:
+                    if step.process_id != bom_item.process_id:
+                        step.process = bom_item.process
+                        changed_fields.append('process')
+                    if step.line_id != bom_item.line_id:
+                        step.line = bom_item.line
+                        changed_fields.append('line')
+                    if step.supplier_id != bom_item.supplier_id:
+                        step.supplier = bom_item.supplier
+                        changed_fields.append('supplier')
+                    if bom_item.time_unit and step.time_unit != bom_item.time_unit:
+                        step.time_unit = bom_item.time_unit
+                        changed_fields.append('time_unit')
+
             if 'lead_time_days' in field_names:
                 item_lt = int(getattr(bom_item, 'lead_time_days', 0) or 0)
                 step_lt = int(getattr(step, 'lead_time_days', 0) or 0)
@@ -2796,7 +2881,11 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 step.save(update_fields=changed_fields + ['updated_at'])
 
     def perform_update(self, serializer):
-        sync_fields = [key for key in ('lead_time_days', 'duration_min') if key in serializer.validated_data]
+        sync_fields = [
+            key for key in (
+                'lead_time_days', 'duration_min', 'supplier', 'sourcing_type', 'process', 'line', 'time_unit',
+            ) if key in serializer.validated_data
+        ]
         item = serializer.save()
         if sync_fields:
             self._sync_item_fields_to_routing(item, sync_fields)
