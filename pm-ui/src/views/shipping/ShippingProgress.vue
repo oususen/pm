@@ -239,6 +239,7 @@ const error = ref("");
 const searched = ref(false);
 const orderLines = ref([]);
 const shipmentActuals = ref([]);
+const shipToLeadTimeMap = ref(new Map());
 const holidays = ref(new Set());
 const daisoCalendarId = ref(null);
 const currentPage = ref(1);
@@ -450,7 +451,12 @@ const groups = computed(() => {
     }
 
     // due_dateはAPIから文字列で返されるので、new Date()を通さない
-    const dueDate = order.due_date ? order.due_date.slice(0, 10) : "";
+    let dueDate = order.due_date ? order.due_date.slice(0, 10) : "";
+    const ltKey = `${order.customer_code || ""}__${(order.ship_to_code || "").trim()}`;
+    const addDaysVal = shipToLeadTimeMap.value.get(ltKey);
+    if (addDaysVal > 0) {
+      dueDate = shiftBusinessDays(dueDate, -addDaysVal);
+    }
     const productCode = order.product_code;
     const customerCode = order.customer_code || "";
     const customerName = order.customer_name || "";
@@ -965,6 +971,20 @@ const load = async () => {
   searched.value = true;
   routingExpandStates.value = {};
   try {
+    // 納入地別出荷加算日数を取得
+    try {
+      const ltRes = await api.shipToLeadTimes.getAll({ is_active: true })
+      const ltRows = normalizeList(ltRes.data || [])
+      const m = new Map()
+      for (const row of ltRows) {
+        m.set(`${row.customer_code || ""}__${(row.ship_to_code || "").trim()}`, row.additional_days || 0)
+      }
+      shipToLeadTimeMap.value = m
+    } catch (e) {
+      console.error("出荷加算日数取得エラー:", e)
+    }
+
+    await loadHolidayColumns();
     orderLines.value = await fetchAllOpenOrderLines();
     const shipmentActualsRes = await api.shipmentActuals.getShipmentActuals({
       shipment_date__gte: startDate.value,
@@ -975,7 +995,6 @@ const load = async () => {
       page_size: 10000,
     });
     shipmentActuals.value = normalizeList(shipmentActualsRes.data || []);
-    await loadHolidayColumns();
     // 開始日は初期値（今日の日付）のまま
     // 理由：過去のデータがある場合でも、現在から未来を表示したい
     // ユーザーは手動で開始日を変更して過去のデータも確認できる
