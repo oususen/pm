@@ -73,6 +73,7 @@
           <tr>
             <th class="col-code">品番</th>
             <th class="col-name">品名</th>
+            <th class="col-dest">移動先</th>
             <th class="num col-total">予定</th>
             <th class="num col-actual">実績</th>
             <th v-for="d in coverageDates" :key="d" class="num col-date">
@@ -91,6 +92,7 @@
               <button class="btn-hold" :class="{ active: row.held }" @click="toggleHold(row)">数変更</button>
             </td>
             <td class="col-name">{{ row.product_name }}</td>
+            <td class="col-dest">{{ row.transfer_destination_label || '' }}</td>
             <td class="num col-total bold">{{ row.expected_qty }}</td>
             <td class="num col-actual">{{ row.actual_qty || '' }}</td>
             <td v-for="d in coverageDates" :key="d" class="num col-date">{{ row.daily[d] || '' }}</td>

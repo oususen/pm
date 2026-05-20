@@ -2717,7 +2717,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             ])
 
         product_code = bom.parent_product.product_code if bom.parent_product else str(bom.id)
-        filename = f"bom_tree_{product_code}.xlsx"
+        filename = f"{product_code}.xlsx"
 
         response = HttpResponse(
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'

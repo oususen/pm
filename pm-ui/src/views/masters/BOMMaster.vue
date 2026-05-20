@@ -2117,8 +2117,7 @@ const downloadBOMExcel = async (bom) => {
   try {
     const response = await api.boms.exportBOMExcel(bom.id)
     const productCode = getParentProductCode(bom)
-    const timestamp = formatISODate(new Date())
-    const filename = `bom_tree_${productCode}_${timestamp}.xlsx`
+    const filename = `${productCode}.xlsx`
     const url = URL.createObjectURL(response.data)
     const link = document.createElement('a')
     link.setAttribute('href', url)
