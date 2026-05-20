@@ -337,6 +337,400 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         Product.objects.bulk_create(to_create)
         return {'created': len(to_create), 'skipped': len(skipped), 'skipped_codes': skipped}
 
+    def _bulk_update_products(self, items):
+        """品番コードで照合し、既存製品の情報を一括更新。空欄の項目はスキップ（上書きしない）。"""
+        CATEGORY_MAP = {
+            '集合部品': 'ASSEMBLY', '組立品': 'ASSEMBLY',
+            '単体部品': 'SINGLE', '単品': 'SINGLE',
+            '材料': 'MATERIAL',
+            '購入品': 'PURCHASED',
+            '外作品': 'OUTSOURCED',
+        }
+        MANAGEMENT_UNIT_MAP = {
+            '日': 'DAY', '分': 'MINUTE', 'DAY': 'DAY', 'MINUTE': 'MINUTE',
+        }
+        TRANSFER_DEST_MAP = {
+            '社内ライン': 'INLINE', '社内塗装': 'INPAINT',
+            'CWL': 'CWL', '興和': 'KOWA', '直納': 'DIRECT', 'その他': 'OTHER',
+        }
+        if not items:
+            raise serializers.ValidationError({'detail': 'データがありません'})
+
+        codes = [str(i.get('product_code') or '').strip() for i in items]
+        codes = [c for c in codes if c]
+        existing_products = {
+            p.product_code: p
+            for p in Product.objects.filter(product_code__in=codes)
+        }
+
+        line_codes = {str(i.get('line_code') or '').strip() for i in items if str(i.get('line_code') or '').strip()}
+        all_process_codes = set()
+        for i in items:
+            for key in ('process_code', 'next_process_code'):
+                val = str(i.get(key) or '').strip()
+                if val:
+                    all_process_codes.add(val)
+        group_codes = {str(i.get('product_group_code') or '').strip() for i in items if str(i.get('product_group_code') or '').strip()}
+
+        line_map = {l.line_code: l for l in Line.objects.filter(line_code__in=line_codes)} if line_codes else {}
+        process_map = {p.process_code: p for p in Process.objects.filter(process_code__in=all_process_codes)} if all_process_codes else {}
+        group_map = {g.group_code: g for g in ProductGroup.objects.filter(group_code__in=group_codes)} if group_codes else {}
+
+        def parse_bool(raw):
+            val = str(raw or '').strip()
+            if val in ('1', 'true', 'True', 'TRUE', 'はい', '有', '○'):
+                return True
+            if val in ('0', 'false', 'False', 'FALSE', 'いいえ', '無', '×'):
+                return False
+            return None
+
+        def to_decimal_or_none(raw):
+            val = str(raw or '').strip()
+            if not val:
+                return None
+            try:
+                return Decimal(val)
+            except (InvalidOperation, ValueError):
+                return None
+
+        def to_int_or_none(raw):
+            val = str(raw or '').strip()
+            if not val:
+                return None
+            try:
+                return int(float(val))
+            except (ValueError, TypeError):
+                return None
+
+        updated = []
+        not_found = []
+        for item in items:
+            code = str(item.get('product_code') or '').strip()
+            if not code:
+                continue
+            product = existing_products.get(code)
+            if not product:
+                not_found.append(code)
+                continue
+
+            changed_fields = []
+
+            # 品名
+            val = str(item.get('product_name') or '').strip()
+            if val:
+                product.product_name = val
+                changed_fields.append('product_name')
+
+            # カテゴリ
+            val = str(item.get('category') or '').strip()
+            if val:
+                mapped = CATEGORY_MAP.get(val, val if val in dict(Product.CATEGORY_CHOICES) else None)
+                if mapped:
+                    product.category = mapped
+                    changed_fields.append('category')
+
+            # 単位
+            val = str(item.get('unit') or '').strip()
+            if val:
+                product.unit = val
+                changed_fields.append('unit')
+
+            # 単価
+            dec = to_decimal_or_none(item.get('unit_price'))
+            if dec is not None:
+                product.unit_price = dec
+                changed_fields.append('unit_price')
+
+            # 標準LT
+            lt = to_int_or_none(item.get('standard_lt_days'))
+            if lt is not None:
+                product.standard_lt_days = lt
+                changed_fields.append('standard_lt_days')
+
+            # 自工程LT
+            lt = to_int_or_none(item.get('self_lt_days'))
+            if lt is not None:
+                product.self_lt_days = lt
+                changed_fields.append('self_lt_days')
+
+            # ライン
+            val = str(item.get('line_code') or '').strip()
+            if val:
+                line_obj = line_map.get(val)
+                if line_obj:
+                    product.line = line_obj
+                    changed_fields.append('line')
+
+            # 工程
+            val = str(item.get('process_code') or '').strip()
+            if val:
+                proc_obj = process_map.get(val)
+                if proc_obj:
+                    product.process = proc_obj
+                    changed_fields.append('process')
+
+            # 後工程
+            val = str(item.get('next_process_code') or '').strip()
+            if val:
+                proc_obj = process_map.get(val)
+                if proc_obj:
+                    product.next_process = proc_obj
+                    changed_fields.append('next_process')
+
+            # 管理区分
+            val = str(item.get('management_unit') or '').strip()
+            if val:
+                mapped = MANAGEMENT_UNIT_MAP.get(val)
+                if mapped:
+                    product.management_unit = mapped
+                    changed_fields.append('management_unit')
+
+            # 最終品
+            b = parse_bool(item.get('is_final_product'))
+            if b is not None:
+                product.is_final_product = b
+                changed_fields.append('is_final_product')
+
+            # ライン最終品
+            b = parse_bool(item.get('is_line_final_product'))
+            if b is not None:
+                product.is_line_final_product = b
+                changed_fields.append('is_line_final_product')
+
+            # 機種名
+            val = str(item.get('model_name') or '').strip()
+            if val:
+                product.model_name = val
+                changed_fields.append('model_name')
+
+            # 製品グループ
+            val = str(item.get('product_group_code') or '').strip()
+            if val:
+                grp = group_map.get(val)
+                if grp:
+                    product.product_group = grp
+                    changed_fields.append('product_group')
+
+            # 移動先
+            val = str(item.get('transfer_destination') or '').strip()
+            if val:
+                mapped = TRANSFER_DEST_MAP.get(val, val if val in dict(Product.TRANSFER_DESTINATION_CHOICES) else None)
+                if mapped:
+                    product.transfer_destination = mapped
+                    changed_fields.append('transfer_destination')
+
+            # 比重
+            dec = to_decimal_or_none(item.get('specific_gravity'))
+            if dec is not None:
+                product.specific_gravity = dec
+                changed_fields.append('specific_gravity')
+
+            # 寸法
+            for field_key, attr in [('size_length', 'size_length'), ('size_width', 'size_width'), ('size_thickness', 'size_thickness')]:
+                dec = to_decimal_or_none(item.get(field_key))
+                if dec is not None:
+                    setattr(product, attr, dec)
+                    changed_fields.append(attr)
+
+            # 発注倍数
+            v = to_int_or_none(item.get('order_lot_multiple'))
+            if v is not None:
+                product.order_lot_multiple = v
+                changed_fields.append('order_lot_multiple')
+
+            # 最小発注数
+            v = to_int_or_none(item.get('order_lot_min'))
+            if v is not None:
+                product.order_lot_min = v
+                changed_fields.append('order_lot_min')
+
+            # 容器入り数
+            v = to_int_or_none(item.get('capacity'))
+            if v is not None:
+                product.capacity = v
+                changed_fields.append('capacity')
+
+            if changed_fields:
+                changed_fields.append('updated_at')
+                product.save(update_fields=changed_fields)
+                updated.append(code)
+
+        return {'updated': len(updated), 'not_found': len(not_found), 'not_found_codes': not_found}
+
+    @action(detail=False, methods=['post'], parser_classes=[parsers.MultiPartParser, parsers.FormParser], url_path='bulk_update_import')
+    def bulk_update_import(self, request):
+        """既存製品の一括更新取込（CSV/Excel）"""
+        upload = request.FILES.get('file')
+        if not upload:
+            return Response({'detail': '取込ファイルがありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        raw = upload.read()
+        filename = (getattr(upload, 'name', '') or '').lower()
+        input_rows = []
+
+        HEADER_MAP = {
+            '構成品番': 'product_code', '品番コード': 'product_code', '品番': 'product_code',
+            '品名規格': 'product_name', '品名': 'product_name',
+            '品番区分名': 'category', 'カテゴリ': 'category',
+            '単位': 'unit',
+            '単価': 'unit_price',
+            '標準LT': 'standard_lt_days', '標準LT(日)': 'standard_lt_days',
+            '自工程LT': 'self_lt_days', '自工程LT(日)': 'self_lt_days',
+            'ライン情報': 'line_code', 'ラインコード': 'line_code',
+            '工程情報': 'process_code', '工程コード': 'process_code',
+            '後工程': 'next_process_code',
+            '管理区分': 'management_unit',
+            '最終品': 'is_final_product',
+            'ライン最終品': 'is_line_final_product',
+            '機種名': 'model_name',
+            '製品グループ': 'product_group_code', 'グループコード': 'product_group_code',
+            '移動先': 'transfer_destination',
+            '比重': 'specific_gravity', '比重(g/cm³)': 'specific_gravity',
+            '縦': 'size_length', '縦(mm)': 'size_length',
+            '横': 'size_width', '横(mm)': 'size_width',
+            '厚さ': 'size_thickness', '厚さ(mm)': 'size_thickness',
+            '発注倍数': 'order_lot_multiple',
+            '最小発注数': 'order_lot_min',
+            '容器入り数': 'capacity',
+        }
+
+        if filename.endswith('.xlsx') or filename.endswith('.xlsm'):
+            from io import BytesIO
+            try:
+                wb = load_workbook(BytesIO(raw), data_only=True, read_only=True)
+                ws = wb[wb.sheetnames[0]]
+            except Exception:
+                return Response({'detail': 'Excelファイルの読み取りに失敗しました'}, status=status.HTTP_400_BAD_REQUEST)
+            excel_rows = list(ws.iter_rows(values_only=True))
+            if not excel_rows:
+                return Response({'detail': 'データがありません'}, status=status.HTTP_400_BAD_REQUEST)
+            raw_headers = [str(v).strip() if v is not None else '' for v in excel_rows[0]]
+            mapped_headers = [HEADER_MAP.get(h, h) for h in raw_headers]
+            for row in excel_rows[1:]:
+                if row is None or all((cell is None or str(cell).strip() == '') for cell in row):
+                    continue
+                row_dict = {}
+                for i, key in enumerate(mapped_headers):
+                    if not key:
+                        continue
+                    value = row[i] if i < len(row) else ''
+                    row_dict[key] = '' if value is None else str(value).strip()
+                input_rows.append(row_dict)
+        else:
+            text = None
+            for enc in ('utf-8-sig', 'cp932', 'shift_jis', 'utf-8'):
+                try:
+                    text = raw.decode(enc)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if text is None:
+                return Response({'detail': 'CSV文字コードを判別できません'}, status=status.HTTP_400_BAD_REQUEST)
+            reader = csv.DictReader(StringIO(text))
+            for row in reader:
+                mapped_row = {}
+                for orig_key, val in row.items():
+                    mapped_key = HEADER_MAP.get(orig_key.strip(), orig_key.strip())
+                    mapped_row[mapped_key] = str(val or '').strip()
+                input_rows.append(mapped_row)
+
+        if not input_rows:
+            return Response({'detail': '取込データがありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        seen = set()
+        items = []
+        for row in input_rows:
+            code = str(row.get('product_code') or '').strip()
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            items.append(row)
+
+        try:
+            result = self._bulk_update_products(items)
+        except serializers.ValidationError as e:
+            return Response(e.detail, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result)
+
+    @action(detail=False, methods=['get'], url_path='update_import_template_xlsx')
+    def update_import_template_xlsx(self, request):
+        """更新取込用Excelテンプレート（全項目＋参照シート付き）"""
+        wb = Workbook()
+        ws = wb.active
+        ws.title = '入力用'
+
+        headers = [
+            '構成品番', '品名規格', '品番区分名',
+            'ライン情報', 'ライン名',
+            '工程情報', '工程名',
+            '後工程', '後工程名',
+            '管理区分', '最終品', 'ライン最終品',
+            '単位', '単価', '標準LT(日)', '自工程LT(日)',
+            '機種名', '製品グループ', 'グループ名',
+            '移動先',
+            '比重(g/cm³)', '縦(mm)', '横(mm)', '厚さ(mm)',
+            '発注倍数', '最小発注数', '容器入り数',
+        ]
+        ws.append(headers)
+        ws.append([''] * len(headers))
+
+        ws['E2'] = '=IFERROR(VLOOKUP(D2,ライン!A:B,2,FALSE),"")'
+        ws['G2'] = '=IFERROR(VLOOKUP(F2,工程!A:B,2,FALSE),"")'
+        ws['I2'] = '=IFERROR(VLOOKUP(H2,工程!A:B,2,FALSE),"")'
+        ws['S2'] = '=IFERROR(VLOOKUP(R2,製品グループ!A:B,2,FALSE),"")'
+
+        dv_category = DataValidation(type='list', formula1='"集合部品,単体部品,材料,購入品,外作品"', allow_blank=True)
+        dv_unit_mgmt = DataValidation(type='list', formula1='"日,分"', allow_blank=True)
+        dv_bool = DataValidation(type='list', formula1='"はい,いいえ"', allow_blank=True)
+        dv_transfer = DataValidation(type='list', formula1='"社内ライン,社内塗装,CWL,興和,直納,その他"', allow_blank=True)
+        ws.add_data_validation(dv_category)
+        ws.add_data_validation(dv_unit_mgmt)
+        ws.add_data_validation(dv_bool)
+        ws.add_data_validation(dv_transfer)
+        dv_category.add('C2:C5000')
+        dv_unit_mgmt.add('J2:J5000')
+        dv_bool.add('K2:K5000')
+        dv_bool.add('L2:L5000')
+        dv_transfer.add('T2:T5000')
+
+        ws_guide = wb.create_sheet('使用説明')
+        ws_guide.append(['項目', '内容'])
+        ws_guide.append(['用途', '既存製品の情報を一括更新します（新規登録はされません）'])
+        ws_guide.append(['必須列', '構成品番（照合キー）'])
+        ws_guide.append(['空欄の扱い', '空欄の列は元の値を維持します（上書きしません）'])
+        ws_guide.append(['品番区分名', '集合部品 / 単体部品 / 材料 / 購入品 / 外作品'])
+        ws_guide.append(['管理区分', '日 / 分'])
+        ws_guide.append(['最終品・ライン最終品', 'はい / いいえ'])
+        ws_guide.append(['移動先', '社内ライン / 社内塗装 / CWL / 興和 / 直納 / その他'])
+        ws_guide.append(['注意', '存在しない品番コードはスキップされます。'])
+
+        ws_process = wb.create_sheet('工程')
+        ws_process.append(['工程コード', '工程名'])
+        for p in Process.objects.order_by('process_code'):
+            ws_process.append([p.process_code, p.process_name])
+
+        ws_line = wb.create_sheet('ライン')
+        ws_line.append(['ラインコード', 'ライン名'])
+        for l in Line.objects.order_by('line_code'):
+            ws_line.append([l.line_code, l.line_name])
+
+        ws_group = wb.create_sheet('製品グループ')
+        ws_group.append(['グループコード', 'グループ名'])
+        for g in ProductGroup.objects.order_by('group_code'):
+            ws_group.append([g.group_code, g.group_name])
+
+        from io import BytesIO
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+        from django.http import HttpResponse
+        response = HttpResponse(
+            output.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename="product_update_template.xlsx"'
+        return response
+
     @action(detail=False, methods=['get'], url_path='import_template_xlsx')
     def import_template_xlsx(self, request):
         """製品インポート用Excelテンプレート（入力用＋使用説明＋工程＋ライン＋仕入先）"""

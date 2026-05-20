@@ -6,6 +6,8 @@
         <button v-if="canEdit" @click="openLineFinalDialog" class="btn-secondary">ライン最終品 一括設定</button>
         <button v-if="canEdit" @click="downloadProductImportTemplateXlsx" class="btn-secondary">取込テンプレートExcel</button>
         <button v-if="canEdit" @click="openCsvImport" class="btn-secondary">CSVインポート</button>
+        <button v-if="canEdit" @click="downloadUpdateImportTemplateXlsx" class="btn-secondary">更新テンプレートExcel</button>
+        <button v-if="canEdit" @click="openUpdateImport" class="btn-secondary">更新取込</button>
         <button @click="fetchProducts(1)" class="btn-primary">更新</button>
         <button @click="openProcessTab('create')" class="btn-success" :disabled="!canEdit">処理</button>
       </div>
@@ -509,6 +511,36 @@
       </div>
     </div>
 
+    <!-- 更新取込ダイアログ -->
+    <div v-if="showUpdateImportDialog" class="modal-overlay" @click.self="showUpdateImportDialog = false">
+      <div class="modal-content csv-import-modal">
+        <h2>製品マスタ 更新取込（CSV / Excel）</h2>
+
+        <div class="csv-format-note">
+          <strong>品番コードで既存製品を照合し、情報を上書き更新します。</strong><br>
+          <small>空欄の列はスキップ（元の値を維持）します。</small><br>
+          <small>対応列: 構成品番(必須), 品名規格, 品番区分名, 単位, 単価, 標準LT, 自工程LT, ライン情報, 工程情報, 後工程, 管理区分, 最終品, ライン最終品, 機種名, 製品グループ, 移動先, 比重, 縦, 横, 厚さ, 発注倍数, 最小発注数, 容器入り数</small>
+        </div>
+
+        <div class="form-group">
+          <label>取込ファイル</label>
+          <input type="file" accept=".csv,.xlsx,.xlsm" @change="onUpdateFileSelected" />
+        </div>
+
+        <div v-if="updateImportResult" class="csv-result-area">
+          <span class="result-created">更新: {{ updateImportResult.updated }}件</span>
+          <span class="result-skipped">未登録(スキップ): {{ updateImportResult.not_found }}件</span>
+          <div v-if="updateImportResult.not_found_codes && updateImportResult.not_found_codes.length > 0" class="skipped-codes">
+            {{ updateImportResult.not_found_codes.join(', ') }}
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button @click="closeUpdateImport" class="btn-secondary">閉じる</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ライン最終品 一括設定ダイアログ -->
     <div v-if="showLineFinalDialog" class="modal-overlay" @click.self="showLineFinalDialog = false">
       <div class="modal-content line-final-modal">
@@ -855,6 +887,63 @@ const executeFileImport = async (file) => {
     alert(detail)
   } finally {
     csvImporting.value = false
+  }
+}
+
+// 更新取込
+const showUpdateImportDialog = ref(false)
+const updateImportResult = ref(null)
+const updateImporting = ref(false)
+
+const downloadUpdateImportTemplateXlsx = async () => {
+  try {
+    const res = await api.products.downloadUpdateImportTemplateXlsx()
+    const blob = new Blob([res.data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'product_update_template.xlsx'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+  } catch (error) {
+    console.error('更新テンプレートExcel取得エラー:', error)
+    alert('テンプレートExcelの取得に失敗しました')
+  }
+}
+
+const openUpdateImport = () => {
+  updateImportResult.value = null
+  showUpdateImportDialog.value = true
+}
+
+const closeUpdateImport = () => {
+  showUpdateImportDialog.value = false
+  if (updateImportResult.value?.updated > 0) {
+    fetchProducts(1)
+  }
+}
+
+const onUpdateFileSelected = async (e) => {
+  const file = e.target.files?.[0]
+  if (!file) return
+  if (updateImporting.value) return
+  updateImporting.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    const res = await api.products.bulkUpdateImport(fd)
+    updateImportResult.value = res.data
+  } catch (error) {
+    console.error('更新取込エラー:', error)
+    const detail = error?.response?.data?.detail || '更新取込に失敗しました'
+    alert(detail)
+  } finally {
+    updateImporting.value = false
+    if (e?.target) e.target.value = ''
   }
 }
 

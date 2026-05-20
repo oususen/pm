@@ -70,4 +70,12 @@ export const createProductsAPI = (client) => ({
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+  downloadUpdateImportTemplateXlsx() {
+    return client.get('/products/update_import_template_xlsx/', { responseType: 'blob' })
+  },
+  bulkUpdateImport(formData) {
+    return client.post('/products/bulk_update_import/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
 })
