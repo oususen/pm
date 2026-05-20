@@ -214,6 +214,7 @@ class UserPermission(models.Model):
         ('purchase.plan_input', '仕入: 仕入れ計画'),
         ('purchase.inventory', '仕入: 在庫/残量'),
         ('purchase.progress', '仕入: 仕入れ進度'),
+        ('purchase.receiving', '仕入: 仕入れ検収'),
         ('purchase.actual_input', '仕入: 仕入れ実績入力'),
         ('purchase.actual_inquiry', '仕入: 納入実績照会'),
         ('purchase.supplier_calendar', '仕入: 仕入れ先カレンダ'),

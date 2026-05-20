@@ -385,6 +385,7 @@ const permissionResources = [
   { value: 'purchase.plan_input', label: '仕入: 仕入れ計画' },
   { value: 'purchase.inventory', label: '仕入: 在庫/残量' },
   { value: 'purchase.progress', label: '仕入: 仕入れ進度' },
+  { value: 'purchase.receiving', label: '仕入: 仕入れ検収' },
   { value: 'purchase.actual_input', label: '仕入: 仕入れ実績入力' },
   { value: 'purchase.actual_inquiry', label: '仕入: 納入実績照会' },
   { value: 'purchase.supplier_calendar', label: '仕入: 仕入れ先カレンダ' },
