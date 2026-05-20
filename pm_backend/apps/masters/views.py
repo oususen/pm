@@ -18,7 +18,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact,
-    KubotaSakaiTruck, MobileDevice, MobileDeviceInventory
+    KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument
 )
 from .serializers import (
     ProductSerializer, CustomerSerializer, ProcessSerializer, LineSerializer,
@@ -2922,43 +2922,28 @@ class MobileDeviceViewSet(viewsets.ModelViewSet):
 class ManualDocumentViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
-    _DEV_MANUAL_DIR = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
-        'pm-ui', 'public', 'manual'
-    )
-    _DOCKER_MANUAL_DIR = '/app/manual'
-    MANUAL_DIR = _DOCKER_MANUAL_DIR if os.path.isdir(_DOCKER_MANUAL_DIR) else _DEV_MANUAL_DIR
-
-    def _resolve_path(self, doc_path):
-        from pathlib import Path
-        safe = Path(self.MANUAL_DIR).joinpath(doc_path).resolve()
-        if not str(safe).startswith(str(Path(self.MANUAL_DIR).resolve())):
-            return None
-        return safe
-
     @action(detail=False, methods=['get'], url_path='read')
     def read_doc(self, request):
-        doc_path = request.query_params.get('path', '')
-        if not doc_path:
+        doc_key = request.query_params.get('path', '')
+        if not doc_key:
             return Response({'detail': 'path required'}, status=status.HTTP_400_BAD_REQUEST)
-        fpath = self._resolve_path(doc_path)
-        if not fpath or not fpath.exists():
+        try:
+            doc = ManualDocument.objects.get(doc_key=doc_key)
+        except ManualDocument.DoesNotExist:
             return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
-        content = fpath.read_text(encoding='utf-8')
-        return Response({'path': doc_path, 'content': content})
+        return Response({'path': doc_key, 'content': doc.content})
 
     @action(detail=False, methods=['post'], url_path='write')
     def write_doc(self, request):
-        doc_path = request.data.get('path', '')
+        doc_key = request.data.get('path', '')
         content = request.data.get('content', '')
-        if not doc_path:
+        if not doc_key:
             return Response({'detail': 'path required'}, status=status.HTTP_400_BAD_REQUEST)
-        fpath = self._resolve_path(doc_path)
-        if not fpath:
-            return Response({'detail': 'invalid path'}, status=status.HTTP_400_BAD_REQUEST)
-        fpath.parent.mkdir(parents=True, exist_ok=True)
-        fpath.write_text(content, encoding='utf-8')
-        return Response({'path': doc_path, 'saved': True})
+        doc, _ = ManualDocument.objects.update_or_create(
+            doc_key=doc_key,
+            defaults={'content': content, 'updated_by': request.user},
+        )
+        return Response({'path': doc_key, 'saved': True})
 
 
 class MobileDeviceInventoryFilter(django_filters.FilterSet):

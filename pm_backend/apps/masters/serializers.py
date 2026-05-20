@@ -3,7 +3,7 @@ from django.db.models import Sum
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact,
-    KubotaSakaiTruck, MobileDevice, MobileDeviceInventory
+    KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument
 )
 
 def build_media_absolute_url(request, raw_url):
@@ -398,4 +398,17 @@ class MobileDeviceInventorySerializer(serializers.ModelSerializer):
     def get_approved_by_name(self, obj):
         if obj.approved_by:
             return obj.approved_by.get_full_name() or obj.approved_by.username
+        return ''
+
+
+class ManualDocumentSerializer(serializers.ModelSerializer):
+    updated_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ManualDocument
+        fields = '__all__'
+
+    def get_updated_by_name(self, obj):
+        if obj.updated_by:
+            return obj.updated_by.get_full_name() or obj.updated_by.username
         return ''

@@ -739,3 +739,22 @@ class MobileDeviceInventory(models.Model):
 
     def __str__(self):
         return f"{self.device.management_no} - {self.inventory_date}"
+
+
+class ManualDocument(models.Model):
+    doc_key = models.CharField(max_length=200, unique=True, verbose_name='ドキュメントキー')
+    title = models.CharField(max_length=200, blank=True, default='', verbose_name='タイトル')
+    content = models.TextField(blank=True, default='', verbose_name='本文(Markdown)')
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='最終更新者'
+    )
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='最終更新日時')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+
+    class Meta:
+        verbose_name = 'マニュアルドキュメント'
+        verbose_name_plural = 'マニュアルドキュメント'
+        ordering = ['doc_key']
+
+    def __str__(self):
+        return self.doc_key
