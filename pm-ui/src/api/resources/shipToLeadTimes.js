@@ -11,4 +11,7 @@ export const createShipToLeadTimesAPI = (client) => ({
   delete(id) {
     return client.delete(`/ship-to-lead-times/${id}/`)
   },
+  getShipToCodes(customerId) {
+    return client.get('/ship-to-lead-times/ship-to-codes/', { params: { customer_id: customerId } })
+  },
 })

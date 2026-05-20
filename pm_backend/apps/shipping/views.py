@@ -74,3 +74,20 @@ class ShipToLeadTimeViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['customer', 'is_active']
     ordering = ['customer__customer_code', 'ship_to_code']
+
+    @action(detail=False, methods=['get'], url_path='ship-to-codes')
+    def ship_to_codes(self, request):
+        """顧客IDから受注データ上の納入先コード一覧を返す"""
+        customer_id = request.query_params.get('customer_id')
+        if not customer_id:
+            return Response([])
+        from orders.core.models import StgOrderDaily
+        codes = (
+            StgOrderDaily.objects
+            .filter(customer_id=customer_id, ship_to_code__isnull=False)
+            .exclude(ship_to_code='')
+            .values_list('ship_to_code', flat=True)
+            .distinct()
+            .order_by('ship_to_code')
+        )
+        return Response(list(codes))

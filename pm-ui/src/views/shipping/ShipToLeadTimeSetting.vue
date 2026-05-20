@@ -51,7 +51,11 @@
         </div>
         <div class="form-group">
           <label>納入先コード</label>
-          <input v-model="form.ship_to_code" :disabled="!!editingId" />
+          <select v-model="form.ship_to_code" :disabled="!!editingId" v-if="shipToCodes.length">
+            <option value="">選択してください</option>
+            <option v-for="code in shipToCodes" :key="code" :value="code">{{ code }}</option>
+          </select>
+          <input v-else v-model="form.ship_to_code" :disabled="!!editingId" placeholder="受注データなし（手入力）" />
         </div>
         <div class="form-group">
           <label>納入地名</label>
@@ -78,15 +82,27 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import api from '@/api/client'
 const loading = ref(false)
 const saving = ref(false)
 const rows = ref([])
 const customers = ref([])
+const shipToCodes = ref([])
 const showDialog = ref(false)
 const editingId = ref(null)
 const form = ref({ customer: '', ship_to_code: '', ship_to_name: '', additional_days: 0, is_active: true })
+
+watch(() => form.value.customer, async (customerId) => {
+  shipToCodes.value = []
+  if (!customerId || editingId.value) return
+  try {
+    const res = await api.shipToLeadTimes.getShipToCodes(customerId)
+    shipToCodes.value = res.data || []
+  } catch (e) {
+    console.error('納入先コード取得エラー:', e)
+  }
+})
 
 const fetchData = async () => {
   loading.value = true
