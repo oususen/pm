@@ -27,7 +27,7 @@ const settings = [
     path: "/settings/permission-templates",
     name: "PermissionTemplates",
     component: () => import("@/views/settings/PermissionTemplates.vue"),
-    meta: { pageTitle: "権限テンプレート", resource: "settings.permission_templates" },
+    meta: { pageTitle: "権限テンプレート", manualPath: "設定/権限設定.md", resource: "settings.permission_templates" },
   },
   {
     path: "/settings/smtp",
