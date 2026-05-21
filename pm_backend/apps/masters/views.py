@@ -18,14 +18,14 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact,
-    KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument
+    KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping
 )
 from .serializers import (
     ProductSerializer, CustomerSerializer, ProcessSerializer, LineSerializer,
     SupplierSerializer, CalendarSerializer, CalendarDaySerializer, WorkPatternSerializer, BreakTimeSerializer,
     BOMSerializer, BOMItemSerializer, RoutingSerializer, RoutingListSerializer, RoutingStepSerializer,
     RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer, EquipmentSerializer, ContactSerializer,
-    KubotaSakaiTruckSerializer, MobileDeviceSerializer, MobileDeviceInventorySerializer
+    KubotaSakaiTruckSerializer, MobileDeviceSerializer, MobileDeviceInventorySerializer, ProductCodeMappingSerializer
 )
 from .services.routing_service import build_effective_routing_q, resolve_effective_routing
 from accounts.permissions import HasResourcePermissionOrReadOnly
@@ -950,6 +950,16 @@ class ProductGroupViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     search_fields = ['group_code', 'group_name']
     ordering_fields = ['group_code', 'created_at']
     ordering = ['group_code']
+
+
+class ProductCodeMappingViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
+    queryset = ProductCodeMapping.objects.all()
+    serializer_class = ProductCodeMappingSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_active']
+    search_fields = ['source_product_code', 'target_product_code', 'note']
+    ordering_fields = ['source_product_code', 'updated_at', 'created_at']
+    ordering = ['source_product_code']
 
 
 class ContainerCapacityViewSet(MastersPermissionMixin, viewsets.ModelViewSet):

@@ -91,6 +91,26 @@ class Product(models.Model):
         return f"{self.product_code} - {self.product_name}"
 
 
+class ProductCodeMapping(models.Model):
+    """品番変換マスタ（全体適用）"""
+    id = models.BigAutoField(primary_key=True)
+    source_product_code = models.CharField(max_length=30, unique=True, verbose_name='変換元品番')
+    target_product_code = models.CharField(max_length=30, verbose_name='変換先品番')
+    is_active = models.BooleanField(default=True, verbose_name='有効')
+    note = models.CharField(max_length=200, blank=True, default='', verbose_name='備考')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'm_product_code_mapping'
+        verbose_name = '品番変換'
+        verbose_name_plural = '品番変換'
+        ordering = ['source_product_code']
+
+    def __str__(self):
+        return f"{self.source_product_code} -> {self.target_product_code}"
+
+
 class Customer(models.Model):
     """得意先マスタ"""
     id = models.BigAutoField(primary_key=True)

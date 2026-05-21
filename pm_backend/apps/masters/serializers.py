@@ -3,7 +3,7 @@ from django.db.models import Sum
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact,
-    KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument
+    KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping
 )
 
 def build_media_absolute_url(request, raw_url):
@@ -42,6 +42,12 @@ class ProductSerializer(serializers.ModelSerializer):
 class ProductGroupSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductGroup
+        fields = '__all__'
+
+
+class ProductCodeMappingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductCodeMapping
         fields = '__all__'
 
 

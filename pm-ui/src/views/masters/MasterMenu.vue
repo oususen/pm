@@ -23,6 +23,7 @@
           >
             <div class="icon-box">{{ tile.icon }}</div>
             <div class="label">{{ tile.label }}</div>
+            <div v-if="tile.description" class="description">{{ tile.description }}</div>
           </RouterLink>
         </div>
       </section>
@@ -76,6 +77,7 @@ const hasMenuPermission = (resource, level) => {
 const tiles = computed(() => {
   const list = [
     { to: '/masters/product', label: '品番マスタ', icon: '📦', category: 'product', required: 'view', resource: 'masters.product' },
+    { to: '/masters/product-code-mapping', label: '品番変換マスタ', icon: '🔁', description: '受注品番を社内計画品番へ変換する設定', category: 'product', required: 'view', resource: 'masters.product' },
     { to: '/masters/product-group', label: '製品グループ', icon: '📋', category: 'product', required: 'view', resource: 'masters.product_group' },
     { to: '/masters/container-capacity', label: '容器マスタ', icon: '🗃️', category: 'product', required: 'view', resource: 'masters.container_capacity' },
     { to: '/masters/equipment', label: '設備マスタ', icon: '🛠️', category: 'structure', required: 'view', resource: 'masters.equipment' },
@@ -165,6 +167,11 @@ const onTileClick = (event, tile) => {
 }
 .master-tile .label {
   font-weight: 700;
+}
+.master-tile .description {
+  font-size: 11px;
+  color: #b91c1c;
+  line-height: 1.3;
 }
 .master-tile.is-disabled {
   opacity: 0.5;

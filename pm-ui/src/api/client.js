@@ -6,6 +6,7 @@ import { createProcessesAPI } from './resources/processes'
 import { createLinesAPI } from './resources/lines'
 import { createSuppliersAPI } from './resources/suppliers'
 import { createProductGroupsAPI } from './resources/productGroups'
+import { createProductCodeMappingsAPI } from './resources/productCodeMappings'
 import { createContainerCapacitiesAPI } from './resources/containerCapacities'
 import { createEquipmentsAPI } from './resources/equipments'
 import { createCalendarsAPI } from './resources/calendars'
@@ -134,6 +135,7 @@ const bomsAPI = createBomsAPI(client)
 export default {
   products: createProductsAPI(client),
   productGroups: createProductGroupsAPI(client),
+  productCodeMappings: createProductCodeMappingsAPI(client),
   containerCapacities: createContainerCapacitiesAPI(client),
   equipments: createEquipmentsAPI(client),
   customers: createCustomersAPI(client),

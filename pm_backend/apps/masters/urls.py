@@ -3,7 +3,7 @@ from .views import (
     ProductViewSet, CustomerViewSet, ProcessViewSet, LineViewSet, ProductionLineViewSet,
     SupplierViewSet, CalendarViewSet, CalendarDayViewSet, WorkPatternViewSet, BreakTimeViewSet,
     BOMViewSet, BOMItemViewSet, RoutingViewSet, RoutingStepViewSet,
-    RoutingStepMaterialViewSet, ProductGroupViewSet, ContainerCapacityViewSet, EquipmentViewSet, ContactViewSet,
+    RoutingStepMaterialViewSet, ProductGroupViewSet, ProductCodeMappingViewSet, ContainerCapacityViewSet, EquipmentViewSet, ContactViewSet,
     KubotaSakaiTruckViewSet, MobileDeviceViewSet, MobileDeviceInventoryViewSet,
     ManualDocumentViewSet
 )
@@ -11,6 +11,7 @@ from .views import (
 router = DefaultRouter()
 router.register(r'products', ProductViewSet)
 router.register(r'product-groups', ProductGroupViewSet)
+router.register(r'product-code-mappings', ProductCodeMappingViewSet)
 router.register(r'container-capacities', ContainerCapacityViewSet)
 router.register(r'equipments', EquipmentViewSet)
 router.register(r'customers', CustomerViewSet)

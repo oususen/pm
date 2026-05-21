@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from django.db import transaction
 from orders.core.models import StgOrderRawTiera, StgOrderDaily
-from masters.models import Customer, Product
+from masters.models import Customer, Product, ProductCodeMapping
 
 
 class TieraKakuteiImportService:
@@ -34,11 +34,6 @@ class TieraKakuteiImportService:
     COL_C_TABLE_NO = 43    # C表No/不良通知Ｎｏ
     COL_SUPPLIER_CODE = 2  # サプライヤコード
     EXPECTED_SUPPLIER_CODE = 'E820T2'
-
-    # 受注品番→計画品番変換マップ（顧客品番と社内計画品番が異なる場合）
-    PRODUCT_CODE_MAP = {
-        'YD40006696': 'YD40006696_TATA',
-    }
 
     def __init__(self):
         self.errors = []
@@ -307,6 +302,11 @@ class TieraKakuteiImportService:
             daily_records = []
             error_count = 0
 
+            code_map = {
+                row.source_product_code: row.target_product_code
+                for row in ProductCodeMapping.objects.filter(is_active=True)
+            }
+
             for raw in raw_records_with_ids:
                 if not raw.product_code or not raw.due_date or not raw.quantity:
                     raw.parse_status = 'ERROR'
@@ -316,8 +316,8 @@ class TieraKakuteiImportService:
                     continue
 
                 try:
-                    # 受注品番→計画品番変換（PRODUCT_CODE_MAPに定義がある場合）
-                    plan_product_code = self.PRODUCT_CODE_MAP.get(raw.product_code, raw.product_code)
+                    # 受注品番→計画品番変換（品番変換マスタに定義がある場合）
+                    plan_product_code = code_map.get(raw.product_code, raw.product_code)
 
                     # Auto-register product if not exists
                     product_name_for_master = raw.product_name if raw.product_name else plan_product_code
