@@ -142,71 +142,134 @@ def _has_open_process_session(user):
 def _has_open_brake_or_spot_action(user):
     """
     ブレーキ/ナット（スポット）アクション実績の未終了を判定する。
-    同一キー（工程・品目・設備）の最新アクションが START/RESUME なら未終了扱い。
+    同一キー（工程・品目・設備）の最新アクションが START/RESUME かつ
+    その START/RESUME を行ったのが対象ユーザーなら未終了扱い。
+    他ユーザーが同キーを END していれば終了済みとみなす。
+    戻り値: (bool, list[dict]) — 未終了有無と、未終了アイテムの詳細リスト
     """
-    latest_action_by_item = {}
+    _DISPLAY_FIELDS = [
+        'id', 'plan_date',
+        'process_id', 'process__process_name',
+        'product_id', 'product_code', 'product__product_name',
+        'equipment_id', 'equipment__equipment_name',
+        'operator_action', 'operator_user_id',
+    ]
 
-    # 優先: ユーザーID一致（新規記録）
-    action_rows = []
+    # Step 1: 対象ユーザーが関わったキー（工程・品目・設備）を特定
+    user_item_keys = set()
+    user_rows_by_key = {}
+
     if user and user.id:
         try:
-            action_rows = list(
+            user_action_rows = list(
                 BrakeLineRecord.objects
-                .filter(operator_user_id=user.id)
-                .values('process_id', 'product_id', 'product_code', 'equipment_id', 'operator_action')
+                .filter(operator_user_id=user.id, operator_action__in=['START', 'RESUME'])
+                .values(*_DISPLAY_FIELDS)
                 .order_by('-recorded_at', '-id')
             )
         except (OperationalError, ProgrammingError):
-            # operator_user カラム未反映DBでは名前判定へフォールバック
-            action_rows = []
+            user_action_rows = []
+
+        for row in user_action_rows:
+            product_key = row.get('product_id') or (row.get('product_code') or '').strip()
+            if not product_key:
+                continue
+            item_key = (row.get('process_id'), product_key, row.get('equipment_id'))
+            if item_key not in user_item_keys:
+                user_item_keys.add(item_key)
+                user_rows_by_key[item_key] = row
 
     # フォールバック: 旧データ（operator_user 未保存）だけ名前で補完
-    if not action_rows:
+    if not user_item_keys:
         operator_name_candidates = _build_operator_name_variants(user)
         if not operator_name_candidates:
-            return False
-        # 完全一致 + 表記ゆれ吸収（括弧・空白差分）
-        try:
-            legacy_rows = (
-                BrakeLineRecord.objects
-                .filter(operator_user__isnull=True)
-                .values('process_id', 'product_id', 'product_code', 'equipment_id', 'operator_action', 'operator')
-                .order_by('-recorded_at', '-id')
-            )
-        except (OperationalError, ProgrammingError):
-            # operator_user カラム未反映DBでは isnull 条件なしで旧判定
-            legacy_rows = (
-                BrakeLineRecord.objects
-                .values('process_id', 'product_id', 'product_code', 'equipment_id', 'operator_action', 'operator')
-                .order_by('-recorded_at', '-id')
-            )
+            return False, []
         candidate_keys = {_normalize_operator_text(name) for name in operator_name_candidates if name}
         candidate_ascii_keys = {
             _normalize_ascii_token(name)
             for name in operator_name_candidates
             if _normalize_ascii_token(name)
         }
-        filtered_legacy_rows = []
+        try:
+            legacy_rows = (
+                BrakeLineRecord.objects
+                .filter(operator_user__isnull=True, operator_action__in=['START', 'RESUME'])
+                .values(*_DISPLAY_FIELDS, 'operator')
+                .order_by('-recorded_at', '-id')
+            )
+        except (OperationalError, ProgrammingError):
+            legacy_rows = (
+                BrakeLineRecord.objects
+                .filter(operator_action__in=['START', 'RESUME'])
+                .values(*_DISPLAY_FIELDS, 'operator')
+                .order_by('-recorded_at', '-id')
+            )
         for row in legacy_rows:
             normalized = _normalize_operator_text(row.get('operator'))
             ascii_key = _normalize_ascii_token(row.get('operator'))
-            if normalized in candidate_keys:
-                filtered_legacy_rows.append(row)
+            matched = (normalized in candidate_keys) or (
+                ascii_key and len(ascii_key) >= 6 and ascii_key in candidate_ascii_keys
+            )
+            if not matched:
                 continue
-            if ascii_key and len(ascii_key) >= 6 and ascii_key in candidate_ascii_keys:
-                filtered_legacy_rows.append(row)
-        action_rows = filtered_legacy_rows
+            product_key = row.get('product_id') or (row.get('product_code') or '').strip()
+            if not product_key:
+                continue
+            item_key = (row.get('process_id'), product_key, row.get('equipment_id'))
+            if item_key not in user_item_keys:
+                user_item_keys.add(item_key)
+                user_rows_by_key[item_key] = row
 
-    for row in action_rows:
+    if not user_item_keys:
+        return False, []
+
+    # Step 2: 各キーの全ユーザー含む最新アクションを確認
+    from django.db.models import Q
+    key_filter = Q()
+    for (proc_id, prod_key, eq_id) in user_item_keys:
+        q = Q(process_id=proc_id, equipment_id=eq_id)
+        if isinstance(prod_key, int):
+            q &= Q(product_id=prod_key)
+        else:
+            q &= Q(product_code=prod_key)
+        key_filter |= q
+
+    all_rows = (
+        BrakeLineRecord.objects
+        .filter(key_filter)
+        .values(*_DISPLAY_FIELDS)
+        .order_by('-recorded_at', '-id')
+    )
+
+    global_latest_by_key = {}
+    for row in all_rows:
         product_key = row.get('product_id') or (row.get('product_code') or '').strip()
         if not product_key:
             continue
         item_key = (row.get('process_id'), product_key, row.get('equipment_id'))
-        if item_key in latest_action_by_item:
-            continue
-        latest_action_by_item[item_key] = str(row.get('operator_action') or '').upper()
+        if item_key not in global_latest_by_key:
+            global_latest_by_key[item_key] = row
 
-    return any(action in {'START', 'RESUME'} for action in latest_action_by_item.values())
+    open_items = []
+    for item_key in user_item_keys:
+        latest = global_latest_by_key.get(item_key)
+        if not latest:
+            continue
+        action = str(latest.get('operator_action') or '').upper()
+        if action in {'START', 'RESUME'}:
+            user_row = user_rows_by_key[item_key]
+            plan_date = user_row.get('plan_date')
+            open_items.append({
+                'id': user_row.get('id'),
+                'plan_date': plan_date.isoformat() if hasattr(plan_date, 'isoformat') else str(plan_date or ''),
+                'process_name': user_row.get('process__process_name') or '',
+                'product_code': user_row.get('product_code') or '',
+                'product_name': user_row.get('product__product_name') or '',
+                'equipment_name': user_row.get('equipment__equipment_name') or '',
+                'action': action,
+            })
+
+    return bool(open_items), open_items
 
 
 def find_approvers_for_role(applicant, role):
@@ -468,11 +531,13 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if _has_open_brake_or_spot_action(app.applicant):
+        has_open_action, open_items = _has_open_brake_or_spot_action(app.applicant)
+        if has_open_action:
             return Response(
                 {
                     'detail_code': 'overtime.error.openBrakeSpotAction',
-                    'detail': 'ブレーキ・ナット実績に未終了のアクションがあります。終了してから申請してください。'
+                    'detail': 'ブレーキ・ナット実績に未終了のアクションがあります。終了してから申請してください。',
+                    'open_items': open_items,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )

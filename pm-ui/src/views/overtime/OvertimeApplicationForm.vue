@@ -146,7 +146,15 @@
         </div>
       </div>
 
-      <div v-if="errorMsg" class="error-msg">{{ errorMsg }}</div>
+      <div v-if="errorMsg" class="error-msg">
+        {{ errorMsg }}
+        <ul v-if="openItems.length" class="open-items-list">
+          <li v-for="(item, idx) in openItems" :key="idx">
+            #{{ item.id }} {{ item.plan_date }} — {{ item.process_name }} / {{ item.product_code }} {{ item.product_name }}
+            <template v-if="item.equipment_name"> / {{ item.equipment_name }}</template>
+          </li>
+        </ul>
+      </div>
 
       <div class="form-actions">
         <button type="button" class="btn btn-secondary" @click="saveDraft" :disabled="saving">
@@ -245,6 +253,7 @@ const isConsecutive = computed(() => form.value.application_type === 'paid_leave
 const canSelectApplicant = computed(() => canProxyRole.value && !SELF_ONLY_TYPES.has(form.value.application_type))
 const saving = ref(false)
 const errorMsg = ref('')
+const openItems = ref([])
 const applicantOptions = ref([])
 
 const form = ref({
@@ -588,6 +597,7 @@ async function handleSubmit() {
   }
   saving.value = true
   errorMsg.value = ''
+  openItems.value = []
   try {
     const payload = normalizedPayload()
     let appId = props.id
@@ -605,6 +615,7 @@ async function handleSubmit() {
     const data = e.response?.data
     const apiMsg = resolveApiErrorMessage(data, e.message)
     errorMsg.value = t('overtime.error.submitFailed') + apiMsg
+    openItems.value = data?.open_items || []
   } finally {
     saving.value = false
   }
@@ -745,6 +756,12 @@ async function handleSubmit() {
   padding: 10px 12px;
   background: #fef2f2;
   border-radius: 6px;
+}
+.open-items-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
 }
 .half-day-note {
   margin: 0 0 4px;
