@@ -50,6 +50,28 @@
             <option value="APPROVED">承認済み</option>
             <option value="REJECTED">差戻し</option>
           </select>
+          <select v-model="listFilter.unit_id" class="list-filter-select" @change="onUnitFilterChange">
+            <option value="">グループ：すべて</option>
+            <option v-for="u in unitOptions" :key="u.id" :value="u.id">{{ u.name }}</option>
+          </select>
+          <select v-model="listFilter.line_id" class="list-filter-select">
+            <option value="">ライン：すべて</option>
+            <option v-for="l in filterLineOptions" :key="l.id" :value="l.id">
+              {{ l.line_code }} - {{ l.line_name }}
+            </option>
+          </select>
+          <select v-model="listFilter.process_id" class="list-filter-select">
+            <option value="">工程：すべて</option>
+            <option v-for="p in processOptions" :key="p.id" :value="p.id">
+              {{ p.process_code }} - {{ p.process_name }}
+            </option>
+          </select>
+          <select v-model="listFilter.sheet_code" class="list-filter-select">
+            <option value="">設備：すべて</option>
+            <option v-for="e in equipmentOptions" :key="e.equipment_code" :value="e.equipment_code">
+              {{ e.equipment_code }} - {{ e.equipment_name || '名称未設定' }}
+            </option>
+          </select>
         </div>
         <div class="table-wrap">
           <table class="data-table compact">
@@ -636,7 +658,9 @@ const rejectDialogVisible = ref(false)
 const rejectComment = ref("")
 const submitDialogVisible = ref(false)
 const submitComment = ref("")
-const listFilter = ref({ keyword: "", status: "" })
+const listFilter = ref({ keyword: "", status: "", unit_id: "", line_id: "", process_id: "", sheet_code: "" })
+const unitOptions = ref([])
+const unitLineMappings = ref([])
 const prevVersionItems = ref([])
 const operationExcelInput = ref(null)
 const excelImportLoading = ref(false)
@@ -745,14 +769,57 @@ const selectedProcessTags = computed(() =>
 const selectedLineTags = computed(() =>
   lineOptions.value.filter((l) => (form.value.lines || []).map(Number).includes(Number(l.id)))
 )
+const unitLineIdsMap = computed(() => {
+  const map = {}
+  for (const m of unitLineMappings.value) {
+    const uid = Number(m.unit)
+    if (!map[uid]) map[uid] = []
+    map[uid].push(Number(m.line))
+  }
+  return map
+})
+
+const filterLineOptions = computed(() => {
+  const uid = Number(listFilter.value.unit_id || 0)
+  if (!uid) return lineOptions.value
+  const ids = unitLineIdsMap.value[uid] || []
+  return lineOptions.value.filter(l => ids.includes(Number(l.id)))
+})
+
+const onUnitFilterChange = () => {
+  const uid = Number(listFilter.value.unit_id || 0)
+  if (!uid) return
+  const lid = Number(listFilter.value.line_id || 0)
+  if (!lid) return
+  const ids = unitLineIdsMap.value[uid] || []
+  if (!ids.includes(lid)) listFilter.value.line_id = ""
+}
+
 const filteredTemplates = computed(() => {
   const kw = listFilter.value.keyword.trim().toLowerCase()
   const st = listFilter.value.status
+  const uid = Number(listFilter.value.unit_id || 0)
+  const lid = Number(listFilter.value.line_id || 0)
+  const pid = Number(listFilter.value.process_id || 0)
+  const sc = listFilter.value.sheet_code
   return templates.value.filter((row) => {
     if (st && row.status !== st) return false
     if (kw) {
       const haystack = `${row.sheet_code || ""} ${row.sheet_name || ""}`.toLowerCase()
       if (!haystack.includes(kw)) return false
+    }
+    if (sc && row.sheet_code !== sc) return false
+    if (pid) {
+      const procs = (row.processes || []).map(Number)
+      if (!procs.includes(pid)) return false
+    }
+    if (lid) {
+      const lns = (row.lines || []).map(Number)
+      if (!lns.includes(lid)) return false
+    } else if (uid) {
+      const groupLines = unitLineIdsMap.value[uid] || []
+      const lns = (row.lines || []).map(Number)
+      if (!lns.some(l => groupLines.includes(l))) return false
     }
     return true
   })
@@ -2004,6 +2071,19 @@ const loadProcessAndLineOptions = async () => {
   }
 }
 
+const loadUnitOptions = async () => {
+  try {
+    const [unitRes, mappingRes] = await Promise.all([
+      api.accounts.getUnits({ page_size: 20000 }),
+      api.accounts.getUnitLineMappings({ page_size: 20000 }),
+    ])
+    unitOptions.value = Array.isArray(unitRes.data) ? unitRes.data : (unitRes.data?.results || [])
+    unitLineMappings.value = Array.isArray(mappingRes.data) ? mappingRes.data : (mappingRes.data?.results || [])
+  } catch (error) {
+    console.error("グループ取得に失敗:", error)
+  }
+}
+
 const loadTemplateList = async () => {
   if (!canView.value) return
   loadingList.value = true
@@ -2324,7 +2404,7 @@ watch(
 
 onMounted(async () => {
   if (!canView.value) return
-  await Promise.all([loadEquipmentOptions(), loadProcessAndLineOptions()])
+  await Promise.all([loadEquipmentOptions(), loadProcessAndLineOptions(), loadUnitOptions()])
   await loadTemplateList()
 
   const routeTemplateId = Number(route.query.id || 0)
@@ -2377,24 +2457,25 @@ onMounted(async () => {
 }
 .list-filter-bar {
   display: flex;
-  gap: 8px;
-  padding: 6px 0 8px;
+  gap: 4px 6px;
+  padding: 4px 0 6px;
   flex-wrap: wrap;
 }
 .list-filter-input {
-  flex: 1 1 120px;
-  min-width: 100px;
-  padding: 4px 8px;
+  flex: 1 1 100px;
+  min-width: 80px;
+  padding: 3px 6px;
   border: 1px solid #cbd5e1;
   border-radius: 4px;
-  font-size: 13px;
+  font-size: 12px;
 }
 .list-filter-select {
-  flex: 0 0 auto;
-  padding: 4px 8px;
+  flex: 0 1 auto;
+  max-width: 180px;
+  padding: 3px 6px;
   border: 1px solid #cbd5e1;
   border-radius: 4px;
-  font-size: 13px;
+  font-size: 12px;
 }
 .required-mark {
   color: #dc2626;
