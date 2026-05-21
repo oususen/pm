@@ -104,7 +104,18 @@ class EquipmentInspectionTemplate(models.Model):
     approved_at = models.DateTimeField(null=True, blank=True, verbose_name="部長承認日時")
     rejection_comment = models.TextField(blank=True, default="", verbose_name="差戻しコメント")
     submitted_items_snapshot = models.JSONField(null=True, blank=True, verbose_name="提出時点検項目スナップショット")
+    SCHEDULE_MONTHLY = "MONTHLY"
+    SCHEDULE_WEEKDAY = "WEEKDAY"
+    SCHEDULE_TYPE_CHOICES = [
+        (SCHEDULE_MONTHLY, "月"),
+        (SCHEDULE_WEEKDAY, "曜日"),
+    ]
+
     measurement_months = models.JSONField(default=list, blank=True, verbose_name="定期実測対象月")
+    measurement_schedule_type = models.CharField(
+        max_length=10, choices=SCHEDULE_TYPE_CHOICES, default=SCHEDULE_MONTHLY, verbose_name="定期実測スケジュール種別"
+    )
+    measurement_weekdays = models.JSONField(default=list, blank=True, verbose_name="定期実測対象曜日")
 
     processes = models.ManyToManyField(
         "masters.Process",
@@ -171,6 +182,7 @@ class EquipmentInspectionItem(models.Model):
     standard = models.TextField(blank=True, default="", verbose_name="規格")
     frequency = models.CharField(max_length=50, blank=True, default="", verbose_name="確認頻度")
     method = models.TextField(blank=True, default="", verbose_name="方法")
+    confirmation_method = models.TextField(blank=True, default="", verbose_name="確認方法")
     record_type = models.CharField(max_length=20, choices=RECORD_CHOICES, default=RECORD_CHECK, verbose_name="記録種別")
     unit = models.CharField(max_length=30, blank=True, default="", verbose_name="単位")
     criteria = models.TextField(blank=True, default="", verbose_name="判定基準")
@@ -326,6 +338,7 @@ class EquipmentInspectionResult(models.Model):
     standard = models.TextField(blank=True, default="", verbose_name="規格")
     frequency = models.CharField(max_length=50, blank=True, default="", verbose_name="確認頻度")
     method = models.TextField(blank=True, default="", verbose_name="方法")
+    confirmation_method = models.TextField(blank=True, default="", verbose_name="確認方法")
     record_type = models.CharField(
         max_length=20,
         choices=EquipmentInspectionItem.RECORD_CHOICES,

@@ -354,11 +354,26 @@
         <div class="item-section">
           <div class="section-header">
             <h4>{{ quarterlyTitle }}</h4>
-            <div class="measurement-months-wrap" v-if="canEditFields">
+            <div class="measurement-schedule-wrap" v-if="canEditFields">
+              <label class="schedule-type-radio">
+                <input type="radio" value="MONTHLY" v-model="form.measurement_schedule_type" /> 月
+              </label>
+              <label class="schedule-type-radio">
+                <input type="radio" value="WEEKDAY" v-model="form.measurement_schedule_type" /> 曜日
+              </label>
+            </div>
+            <div class="measurement-months-wrap" v-if="canEditFields && form.measurement_schedule_type === 'MONTHLY'">
               <span class="measurement-months-label">対象月:</span>
               <label v-for="m in 12" :key="m" class="measurement-month-check">
                 <input type="checkbox" :checked="form.measurement_months.includes(m)" @change="toggleMeasurementMonth(m)" />
                 {{ m }}月
+              </label>
+            </div>
+            <div class="measurement-months-wrap" v-if="canEditFields && form.measurement_schedule_type === 'WEEKDAY'">
+              <span class="measurement-months-label">対象曜日:</span>
+              <label v-for="opt in WEEKDAY_OPTIONS" :key="opt.value" class="measurement-month-check">
+                <input type="checkbox" :checked="form.measurement_weekdays.includes(opt.value)" @change="toggleMeasurementWeekday(opt.value)" />
+                {{ opt.label }}
               </label>
             </div>
             <button class="btn-secondary btn-sm" @click="addItem('QUARTERLY')" :disabled="!canEditFields">
@@ -369,8 +384,10 @@
             <table class="data-table compact">
               <thead>
                 <tr>
+                  <th class="col-no">No</th>
                   <th>項目</th>
                   <th>規格（設定）</th>
+                  <th>確認方法</th>
                   <th>参考値/単位</th>
                   <th>確認頻度</th>
                   <th>判定基準</th>
@@ -381,12 +398,22 @@
               </thead>
               <tbody>
                 <tr v-for="item in quarterlyItems" :key="item.local_key" :class="{ 'diff-new': itemDiffStatus(item) === 'new', 'diff-changed': itemDiffStatus(item) === 'changed' }">
+                  <td class="col-no">
+                    <input
+                      class="no-input"
+                      type="number"
+                      min="1"
+                      v-model.number="item.inspection_no"
+                      :disabled="!canEditFields"
+                    />
+                  </td>
                   <td>
                     <span v-if="itemDiffStatus(item) === 'new'" class="diff-badge diff-badge-new">新規</span>
                     <span v-else-if="itemDiffStatus(item) === 'changed'" class="diff-badge diff-badge-changed">{{ diffLabel }}</span>
                     <textarea class="auto-grow-textarea" v-model="item.item_name" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" />
                   </td>
                   <td><textarea class="auto-grow-textarea" v-model="item.standard" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
+                  <td><textarea class="auto-grow-textarea" v-model="item.confirmation_method" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
                   <td><textarea class="auto-grow-textarea" v-model="item.method" rows="2" :disabled="!canEditFields" @input="resizeTextarea" @focus="resizeTextarea" /></td>
                   <td>
                     <select :value="frequencySelectValue(item)" :disabled="!canEditFields" @change="onFrequencySelect(item, $event)">
@@ -417,11 +444,13 @@
                   :key="`deleted-q-${item.item_name}`"
                   class="diff-deleted"
                 >
+                  <td class="col-no">{{ item.inspection_no }}</td>
                   <td>
                     <span class="diff-badge diff-badge-deleted">削除</span>
                     {{ item.item_name }}
                   </td>
                   <td>{{ item.standard }}</td>
+                  <td>{{ item.confirmation_method }}</td>
                   <td>{{ item.method }}</td>
                   <td>{{ item.frequency }}</td>
                   <td>{{ item.criteria }}</td>
@@ -694,6 +723,8 @@ const createEmptyForm = () => ({
   lines: [],
   items: [],
   measurement_months: [],
+  measurement_schedule_type: "MONTHLY",
+  measurement_weekdays: [],
   workflow_logs: [],
 })
 
@@ -1074,14 +1105,16 @@ const exportCurrentTemplateExcel = () => {
     ]),
     [],
     [quarterlyTitle.value],
-    ["項目", "規格（設定）", "参考値/単位", "判定基準", "記録種別", "単位"],
+    ["No", "項目", "規格（設定）", "確認方法", "参考値/単位", "確認頻度", "判定基準", "記録種別"],
     ...quarterlyItems.value.map((item) => [
+      item.inspection_no || "",
       item.item_name || "",
       item.standard || "",
+      item.confirmation_method || "",
       item.method || "",
+      item.frequency || "",
       item.criteria || "",
       recordTypeLabel(item.record_type),
-      item.unit || "",
     ]),
     ...(buildAttachmentAppendixRows().length ? [[], ["付表"]] : []),
     ...buildAttachmentAppendixRows(),
@@ -1149,8 +1182,10 @@ const printCurrentTemplate = () => {
     .map(
       (item) => `
       <tr>
+        <td class="no-cell">${escapeHtml(item.inspection_no || "")}</td>
         <td>${toPrintCell(item.item_name)}</td>
         <td>${toPrintCell(item.standard)}</td>
+        <td>${toPrintCell(item.confirmation_method)}</td>
         <td>${toPrintCell(item.method)}</td>
         <td></td>
         <td>${toPrintCell(item.criteria)}</td>
@@ -1258,15 +1293,17 @@ const printCurrentTemplate = () => {
         <table class="quarterly-table">
           <thead>
             <tr>
+              <th>No</th>
               <th>項目</th>
               <th>設定</th>
+              <th>確認方法</th>
               <th>参考値</th>
               <th>実測値</th>
               <th>判定基準</th>
             </tr>
           </thead>
           <tbody>
-            ${quarterlyRowsHtml || '<tr><td colspan="5">データなし</td></tr>'}
+            ${quarterlyRowsHtml || '<tr><td colspan="7">データなし</td></tr>'}
           </tbody>
         </table>
         <div class="footer">PM 設備点検表</div>
@@ -1377,7 +1414,24 @@ const quarterlyItems = computed(() =>
     .sort((a, b) => Number(a.display_order || 0) - Number(b.display_order || 0))
 )
 
+const WEEKDAY_OPTIONS = [
+  { value: "月", label: "月" },
+  { value: "火", label: "火" },
+  { value: "水", label: "水" },
+  { value: "木", label: "木" },
+  { value: "金", label: "金" },
+  { value: "土", label: "土" },
+  { value: "週末", label: "週末" },
+  { value: "週初め", label: "週初め" },
+]
+
 const quarterlyTitle = computed(() => {
+  const schedType = form.value.measurement_schedule_type
+  if (schedType === "WEEKDAY") {
+    const days = form.value.measurement_weekdays
+    if (!days || days.length === 0) return "定期実測項目"
+    return `定期実測項目（${days.join("・")}）`
+  }
   const months = form.value.measurement_months
   if (!months || months.length === 0) return "定期実測項目"
   return `定期実測項目（${months.map((m) => `${m}月`).join("・")}）`
@@ -1390,6 +1444,15 @@ const toggleMeasurementMonth = (month) => {
   } else {
     form.value.measurement_months.push(month)
     form.value.measurement_months.sort((a, b) => a - b)
+  }
+}
+
+const toggleMeasurementWeekday = (day) => {
+  const idx = form.value.measurement_weekdays.indexOf(day)
+  if (idx >= 0) {
+    form.value.measurement_weekdays.splice(idx, 1)
+  } else {
+    form.value.measurement_weekdays.push(day)
   }
 }
 
@@ -1415,11 +1478,12 @@ const addItem = (sectionType) => {
     local_key: createLocalKey(),
     section_type: sectionType,
     display_order: nextOrder,
-    inspection_no: sectionType === "DAILY" ? nextOrder : null,
+    inspection_no: nextOrder,
     item_name: "",
     standard: "",
     frequency: sectionType === "DAILY" ? "始業時" : "3ヶ月/1回",
     method: "",
+    confirmation_method: "",
     record_type: "CHECK",
     unit: "",
     criteria: "",
@@ -1548,7 +1612,8 @@ const buildImportHeaderMap = (headerRow) => {
     if (key.includes("点検項目") || key === "項目") map.item_name = index
     if (key.includes("規格") || key.includes("設定")) map.standard = index
     if (key.includes("確認頻度")) map.frequency = index
-    if (key.includes("方法") || key.includes("参考値単位") || key.includes("参考値")) map.method = index
+    if (key.includes("確認方法")) map.confirmation_method = index
+    else if (key.includes("方法") || key.includes("参考値単位") || key.includes("参考値")) map.method = index
     if (key.includes("記録種別")) map.record_type = index
     if (key === "単位") map.unit = index
     if (key.includes("判定基準")) map.criteria = index
@@ -1656,10 +1721,7 @@ const parseImportedRows = (rows, sectionType, defaults = {}) => {
       local_key: createLocalKey(),
       section_type: sectionType,
       display_order: sectionItems.length + 1,
-      inspection_no:
-        sectionType === "DAILY"
-          ? inspectionNoNum || sectionItems.length + 1
-          : null,
+      inspection_no: inspectionNoNum || sectionItems.length + 1,
       item_name: itemName,
       standard: String(row[headerMap.standard] || "").trim(),
       frequency:
@@ -1667,6 +1729,7 @@ const parseImportedRows = (rows, sectionType, defaults = {}) => {
           ? String(row[headerMap.frequency] || defaults.frequency || "始業時").trim()
           : String(row[headerMap.frequency] || defaults.frequency || "3ヶ月/1回").trim(),
       method: String(row[headerMap.method] || "").trim(),
+      confirmation_method: String(row[headerMap.confirmation_method] || "").trim(),
       record_type: normalizeRecordTypeFromExcel(row[headerMap.record_type]),
       unit: String(row[headerMap.unit] || "").trim(),
       criteria: String(row[headerMap.criteria] || "").trim(),
@@ -1955,6 +2018,8 @@ const toFormModel = (raw) => {
     rejection_comment: raw.rejection_comment || "",
     submitted_items_snapshot: Array.isArray(raw.submitted_items_snapshot) ? raw.submitted_items_snapshot : null,
     measurement_months: Array.isArray(raw.measurement_months) ? raw.measurement_months : [],
+    measurement_schedule_type: raw.measurement_schedule_type || "MONTHLY",
+    measurement_weekdays: Array.isArray(raw.measurement_weekdays) ? raw.measurement_weekdays : [],
     reviewed_at: raw.reviewed_at || "",
     chief_reviewed_at: raw.chief_reviewed_at || "",
     approved_at: raw.approved_at || "",
@@ -1972,6 +2037,7 @@ const toFormModel = (raw) => {
           standard: item.standard || "",
           frequency: item.frequency || "",
           method: item.method || "",
+          confirmation_method: item.confirmation_method || "",
           record_type: item.record_type || "CHECK",
           unit: item.unit || "",
           criteria: item.criteria || "",
@@ -2002,11 +2068,12 @@ const buildPayload = () => {
     .map((item) => ({
       section_type: item.section_type,
       display_order: Number(item.display_order || 1),
-      inspection_no: item.section_type === "DAILY" ? Number(item.inspection_no || 0) || null : null,
+      inspection_no: Number(item.inspection_no || 0) || null,
       item_name: String(item.item_name || "").trim(),
       standard: String(item.standard || "").trim(),
       frequency: String(item.frequency || "").trim(),
       method: String(item.method || "").trim(),
+      confirmation_method: String(item.confirmation_method || "").trim(),
       record_type: item.record_type || "CHECK",
       unit: String(item.unit || "").trim(),
       criteria: String(item.criteria || "").trim(),
@@ -2038,6 +2105,8 @@ const buildPayload = () => {
     processes: Array.isArray(form.value.processes) ? form.value.processes.map(Number) : [],
     lines: Array.isArray(form.value.lines) ? form.value.lines.map(Number) : [],
     measurement_months: Array.isArray(form.value.measurement_months) ? form.value.measurement_months : [],
+    measurement_schedule_type: form.value.measurement_schedule_type || "MONTHLY",
+    measurement_weekdays: Array.isArray(form.value.measurement_weekdays) ? form.value.measurement_weekdays : [],
     items: normalizedItems,
   }
 }
@@ -2792,6 +2861,24 @@ tr.diff-deleted td {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 6px;
+}
+.measurement-schedule-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+}
+.schedule-type-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.schedule-type-radio input[type="radio"] {
+  width: auto;
+  margin: 0;
 }
 .measurement-months-wrap {
   display: flex;

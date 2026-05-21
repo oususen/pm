@@ -305,6 +305,7 @@ def _build_default_record_payload(template, operation_date, section_type, user, 
                 "standard": item.standard,
                 "frequency": item.frequency,
                 "method": item.method,
+                "confirmation_method": item.confirmation_method,
                 "record_type": item.record_type,
                 "unit": item.unit,
                 "criteria": item.criteria,
@@ -1002,6 +1003,9 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
                 reviewer_user=template.reviewer_user,
                 chief_user=template.chief_user,
                 approver_user=template.approver_user,
+                measurement_months=template.measurement_months,
+                measurement_schedule_type=template.measurement_schedule_type,
+                measurement_weekdays=template.measurement_weekdays,
             )
             # 工程・ライン引き継ぎ
             new_template.processes.set(template.processes.all())

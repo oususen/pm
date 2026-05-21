@@ -105,6 +105,7 @@
               <th class="col-no">No</th>
               <th>点検項目</th>
               <th>規格</th>
+              <th v-if="isQuarterlySection">確認方法</th>
               <th v-if="isQuarterlySection">判定基準</th>
               <th>方法</th>
               <th>確認頻度</th>
@@ -129,6 +130,7 @@
                 </div>
               </td>
               <td>{{ result.standard || "-" }}</td>
+              <td v-if="isQuarterlySection">{{ result.confirmation_method || "-" }}</td>
               <td v-if="isQuarterlySection">{{ result.criteria || "-" }}</td>
               <td>{{ result.method || "-" }}</td>
               <td>{{ result.frequency || "-" }}</td>
