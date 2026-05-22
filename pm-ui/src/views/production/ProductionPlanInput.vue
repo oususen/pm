@@ -131,19 +131,6 @@
         </div>
       </div>
       <div v-show="!toolbarCollapsed" class="toolbar-right">
-        <div class="field">
-          <label>デフォルト開始時刻</label>
-          <input
-            type="text"
-            inputmode="numeric"
-            :value="finalProcessStartTime"
-            @input="onDefaultTimeInput($event.target.value)"
-            @blur="onDefaultTimeInput($event.target.value, true)"
-            placeholder="00:00"
-            maxlength="5"
-            title="日別設定がない場合に使用される開始時刻"
-          />
-        </div>
         <div class="field checkbox-field">
           <label>
             <input type="checkbox" v-model="adjustToBreakEnd" />
@@ -317,7 +304,7 @@
               <th class="mini stock-col" :class="c.dayClass">{{ isProgressMode ? '進度' : '在庫' }}</th>
               <th class="mini plan-col" :class="c.dayClass">計画</th>
               <th class="mini sequence-col" :class="c.dayClass">順</th>
-              <th class="mini stock-plan-col day-end" :class="c.dayClass">{{ isProgressMode ? '計進' : '計画在庫' }}</th>
+              <th class="mini stock-plan-col day-end" :class="c.dayClass">{{ isProgressMode ? '計進' : '計庫' }}</th>
             </template>
           </tr>
         </thead>
@@ -3290,7 +3277,7 @@ const exportToExcel = () => {
     if (isProgressMode.value) {
       header2.push('受注', '実績', '進度', '計画', '順', '計進')
     } else {
-      header2.push('需要', '実績', '在庫', '計画', '順序', '計画在庫')
+      header2.push('需要', '実績', '在庫', '計画', '順序', '計庫')
     }
   })
   linesOut.push(header1.map(escapeCsv).join(','))
@@ -3337,7 +3324,7 @@ const buildPrintTableHtml = () => {
     { key: 'plan', label: '計画', getValue: (row, daily, colIdx) => formatLotValues(daily, 'plan') },
     { key: 'sequence', label: '順序', getValue: (row, daily, colIdx) => formatLotValues(daily, 'sequence_no') },
     { key: 'stock', label: '在庫', getValue: (row, daily, colIdx) => displayValue(getStockDisplay(row, colIdx)) },
-    { key: 'plan_stock', label: '計画在庫', getValue: (row, daily, colIdx) => displayValue(getPlanStockDisplay(row, colIdx)) },
+    { key: 'plan_stock', label: '計庫', getValue: (row, daily, colIdx) => displayValue(getPlanStockDisplay(row, colIdx)) },
   ]
 
   const chunkDateColumns = () => {
@@ -4587,18 +4574,18 @@ thead tr.head-level2 th.sticky-col {
   white-space: nowrap;
 }
 .work-time-label {
-  font-size: 16px;
+  font-size: 11px;
   color: #dc2626;
   white-space: nowrap;
 }
 .time-input-inline {
   padding: 1px 2px;
-  font-size: 14px;
+  font-size: 11px;
   border: 1px solid #cbd5e1;
   border-radius: 2px;
-  width: 68px;
-  min-width: 68px;
-  max-width: 68px;
+  width: 45px;
+  min-width: 45px;
+  max-width: 45px;
   text-align: center;
   color: #15803d;
   -webkit-text-fill-color: #15803d;
@@ -4611,7 +4598,7 @@ thead tr.head-level2 th.sticky-col {
 }
 .btn-day-apply {
   padding: 0 4px;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.4;
   border: 1px solid #60a5fa;
   border-radius: 3px;
@@ -4630,7 +4617,7 @@ thead tr.head-level2 th.sticky-col {
 }
 .btn-day-clear {
   padding: 0 4px;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.4;
   border: 1px solid #f87171;
   border-radius: 3px;
@@ -4648,7 +4635,7 @@ thead tr.head-level2 th.sticky-col {
 }
 .btn-day-plus {
   padding: 0 4px;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.4;
   border: 1px solid #22c55e;
   border-radius: 3px;
