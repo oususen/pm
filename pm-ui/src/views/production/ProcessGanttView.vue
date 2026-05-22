@@ -147,10 +147,10 @@
                       backgroundColor: bar.color,
                     }"
                   >
-                    <span class="gantt-bar-label">
-                      <span class="plan-qty" @mousedown.stop @click.stop="openQuantityEdit(bar)">{{ formatQuantity(bar.planQty) }}</span>
+                    <span class="gantt-bar-label" @mousedown.stop @click.stop="openBarEdit(bar)">
+                      <span class="plan-qty">{{ formatQuantity(bar.planQty) }}</span>
                       <span class="qty-separator">|</span>
-                      <span class="start-time" @mousedown.stop @click.stop="openStartTimeEdit(bar)">{{ bar.startLabel }}</span>
+                      <span class="start-time">{{ bar.startLabel }}</span>
                       <span class="time-separator">-</span>
                       <span class="end-time">{{ bar.endLabel }}</span>
                       <span v-if="bar.durationLabel" class="duration">({{ bar.durationLabel }})</span>
@@ -187,6 +187,37 @@
     </div>
     <div v-else class="empty-message">
       ラインを選択して「読込」ボタンをクリックしてください
+    </div>
+    <div v-if="barEditDialog.visible" class="bar-edit-overlay" @click.self="closeBarEditDialog">
+      <div class="bar-edit-dialog">
+        <h4>ガント編集</h4>
+        <p v-if="barEditDialog.productCode" class="bar-edit-product">品番: {{ barEditDialog.productCode }}</p>
+        <div class="bar-edit-grid">
+          <label>数量<input v-model="barEditDialog.qty" type="text" placeholder="例: 30" /></label>
+          <label>日<input v-model="barEditDialog.day" type="text" placeholder="例: 502" /></label>
+          <label>時間<input v-model="barEditDialog.time" type="text" placeholder="例: 1120" /></label>
+        </div>
+        <div class="bar-edit-option-row">
+          <label class="bar-edit-check">
+            <input v-model="barEditDialog.cascadeBySeq" type="checkbox" />
+            同工程の後続SEQNOも時間を連鎖更新する
+          </label>
+        </div>
+        <p class="bar-edit-hint">日: MDD/MMDD（502=5月2日） 時間: HMM/HHMM（1120=11:20）</p>
+        <ol class="bar-edit-steps">
+          <li>入力ボックスにカーソルを合わせる</li>
+          <li>ダブルクリックで元の数値を全選択</li>
+          <li>新しい値を入力</li>
+          <li>Tabキーで次の入力枠へ移動</li>
+          <li>数量→日→時間をすべて入力</li>
+          <li>OKを押す</li>
+          <li>最後に「時間数量保存」で確定</li>
+        </ol>
+        <div class="bar-edit-actions">
+          <button class="btn" @click="closeBarEditDialog">キャンセル</button>
+          <button class="btn primary" @click="applyBarEditFromDialog">OK</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -250,6 +281,15 @@ const daisoCalendarId = ref(undefined)
 const processOutputCandidatesMap = ref({})
 const processCoproductChildMap = ref({})
 const processCodeMap = ref({})
+const barEditDialog = ref({
+  visible: false,
+  bar: null,
+  productCode: '',
+  qty: '',
+  day: '',
+  time: '',
+  cascadeBySeq: false,
+})
 const selectedLineObj = computed(() =>
   lines.value.find((l) => String(l.id) === String(selectedLine.value))
 )
@@ -1343,6 +1383,48 @@ function parseDateTimeInput(value) {
   return date
 }
 
+function parseCompactDayInput(value, fallbackDate) {
+  const raw = String(value ?? '').trim()
+  if (!/^\d{3,4}$/.test(raw)) return null
+  const monthPart = raw.length === 3 ? raw.slice(0, 1) : raw.slice(0, 2)
+  const dayPart = raw.length === 3 ? raw.slice(1) : raw.slice(2)
+  const month = Number(monthPart)
+  const day = Number(dayPart)
+  if (!Number.isInteger(month) || !Number.isInteger(day)) return null
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null
+  const year = fallbackDate?.getFullYear?.() ?? new Date().getFullYear()
+  const test = new Date(year, month - 1, day, 0, 0, 0, 0)
+  if (
+    Number.isNaN(test.getTime()) ||
+    test.getFullYear() !== year ||
+    test.getMonth() !== month - 1 ||
+    test.getDate() !== day
+  ) return null
+  return { year, month, day }
+}
+
+function parseCompactTimeInput(value) {
+  const raw = String(value ?? '').trim()
+  if (!/^\d{3,4}$/.test(raw)) return null
+  const hourPart = raw.length === 3 ? raw.slice(0, 1) : raw.slice(0, 2)
+  const minutePart = raw.slice(-2)
+  const hour = Number(hourPart)
+  const minute = Number(minutePart)
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return null
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
+  return { hour, minute }
+}
+
+function toCompactDayInput(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return ''
+  return `${date.getMonth() + 1}${pad2(date.getDate())}`
+}
+
+function toCompactTimeInput(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return ''
+  return `${date.getHours()}${pad2(date.getMinutes())}`
+}
+
 function roundToFiveMinutes(date) {
   const ms = date.getTime()
   const roundMs = 1000 * 60 * 5
@@ -1428,6 +1510,164 @@ function mergeBars(bars) {
   }
 
   return merged
+}
+
+async function openBarEdit(bar) {
+  if (!bar || !bar.startTime || !bar.durationMs) return
+  if (mergeConsecutive.value) {
+    alert('連結表示中は編集できません。分解表示に切り替えてください。')
+    return
+  }
+  if (bar.isTemporary) {
+    if (!ensureStructureCategoryAvailable()) return
+  } else if (!ensureEditCategoryAvailable(bar)) {
+    return
+  }
+
+  barEditDialog.value = {
+    visible: true,
+    bar,
+    productCode: findBarEntry(bar)?.item?.product_code || '',
+    qty: formatQuantity(bar.planQty),
+    day: toCompactDayInput(bar.startTime),
+    time: toCompactTimeInput(bar.startTime),
+  }
+}
+
+function closeBarEditDialog() {
+  barEditDialog.value.visible = false
+  barEditDialog.value.bar = null
+  barEditDialog.value.productCode = ''
+  barEditDialog.value.cascadeBySeq = false
+}
+
+async function cascadeFollowingBarsBySequence(baseBar) {
+  const baseSeq = Number(baseBar?.sequenceNo)
+  const processId = Number(baseBar?.processId)
+  if (!Number.isFinite(baseSeq) || !Number.isFinite(processId)) return
+
+  const targets = []
+  processGanttData.value.forEach((proc) => {
+    if (Number(proc.process_id) !== processId) return
+    proc.items.forEach((item) => {
+      item.bars.forEach((bar) => {
+        if (!bar || bar === baseBar || bar.isTemporary) return
+        const seq = Number(bar.sequenceNo)
+        if (!Number.isFinite(seq) || seq <= baseSeq) return
+        targets.push(bar)
+      })
+    })
+  })
+  if (!targets.length) return
+
+  targets.sort((a, b) => {
+    const aSeq = Number(a.sequenceNo)
+    const bSeq = Number(b.sequenceNo)
+    if (aSeq !== bSeq) return aSeq - bSeq
+    return a.startTime - b.startTime
+  })
+
+  let cursor = new Date(baseBar.endTime)
+  for (const bar of targets) {
+    const durationMs = Number(bar.durationMs || 0)
+    bar.startTime = new Date(cursor)
+
+    if (Number(bar.totalMinutesRequired) > 0 && selectedLine.value) {
+      try {
+        const res = await api.lineGanttPlans.calcEndTime({
+          line_id: Number(selectedLine.value),
+          start_time: toLocalISO(bar.startTime),
+          working_minutes: Number(bar.totalMinutesRequired),
+        })
+        if (res.data?.end_time) {
+          bar.endTime = new Date(res.data.end_time)
+          bar.durationMs = bar.endTime.getTime() - bar.startTime.getTime()
+        } else {
+          bar.endTime = new Date(bar.startTime.getTime() + Math.max(durationMs, 0))
+        }
+      } catch {
+        bar.endTime = new Date(bar.startTime.getTime() + Math.max(durationMs, 0))
+      }
+    } else {
+      bar.endTime = new Date(bar.startTime.getTime() + Math.max(durationMs, 0))
+    }
+
+    updateBarDisplay(bar)
+    bar.scheduleEdited = true
+    cursor = new Date(bar.endTime)
+  }
+}
+
+async function applyBarEditFromDialog() {
+  const bar = barEditDialog.value.bar
+  if (!bar) return
+  const qtyInput = String(barEditDialog.value.qty ?? '').trim()
+  const dayInput = String(barEditDialog.value.day ?? '').trim()
+  const timeInput = String(barEditDialog.value.time ?? '').trim()
+  const shouldCascade = !!barEditDialog.value.cascadeBySeq
+
+  const parsedQty = parseQuantityInput(qtyInput)
+  if (parsedQty === null) {
+    alert('数量の形式が正しくありません。例: 0 / 18 / 18.5')
+    return
+  }
+  const parsedDay = parseCompactDayInput(dayInput, bar.startTime)
+  if (!parsedDay) {
+    alert('日付の形式が正しくありません。例: 502（5月2日）')
+    return
+  }
+  const parsedTime = parseCompactTimeInput(timeInput)
+  if (!parsedTime) {
+    alert('時刻の形式が正しくありません。例: 1120（11:20）')
+    return
+  }
+  closeBarEditDialog()
+
+  const newStart = new Date(
+    parsedDay.year,
+    parsedDay.month - 1,
+    parsedDay.day,
+    parsedTime.hour,
+    parsedTime.minute,
+    0,
+    0
+  )
+  bar.planQty = parsedQty
+  bar.startTime = newStart
+  bar.endTime = new Date(newStart.getTime() + bar.durationMs)
+
+  if (bar.cycleTimeMinutes > 0 && parsedQty > 0 && selectedLine.value) {
+    try {
+      const totalMinutes = parsedQty * bar.cycleTimeMinutes + (bar.setupTimeMinutes || 0)
+      const effectiveMinutes = totalMinutes / bar.parallelCount
+      const res = await api.lineGanttPlans.calcEndTime({
+        line_id: Number(selectedLine.value),
+        start_time: toLocalISO(bar.startTime),
+        working_minutes: effectiveMinutes,
+      })
+      if (res.data?.end_time) {
+        bar.endTime = new Date(res.data.end_time)
+        bar.durationMs = bar.endTime.getTime() - bar.startTime.getTime()
+        bar.totalMinutesRequired = effectiveMinutes
+      }
+    } catch (e) {
+      console.error('終了時刻の再計算に失敗しました', e)
+    }
+  }
+
+  updateBarDisplay(bar)
+  if (shouldCascade) {
+    await cascadeFollowingBarsBySequence(bar)
+  }
+  if (bar.isTemporary) {
+    setStructureDirty(true)
+    alert('数量・時間を変更しました。追加削除保存で確定してください。')
+  } else {
+    bar.quantityEdited = true
+    bar.scheduleEdited = true
+    setEditDirty(true)
+    alert('数量・時間を変更しました。時間数量保存で確定してください。')
+  }
 }
 
 function openStartTimeEdit(bar) {
@@ -1730,6 +1970,7 @@ function buildProcessGantt(plans) {
           cycleTimeMinutes: Number(proc.cycle_time_minutes ?? 0),
           setupTimeMinutes: Number(proc.setup_time_minutes ?? 0),
           parallelCount: Number(proc.parallel_count ?? 1) || 1,
+          sequenceNo: plan.sequence_no != null ? Number(plan.sequence_no) : null,
           color: getBarColor(colorKey),
           label: '',
           startLabel: '',
@@ -2302,8 +2543,81 @@ onMounted(async () => {
   color: #6b7280;
   font-size: 14px;
 }
+.bar-edit-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12px;
+  z-index: 2100;
+}
+.bar-edit-dialog {
+  width: min(460px, calc(100vw - 24px));
+  background: #fff;
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
+}
+.bar-edit-dialog h4 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+.bar-edit-product {
+  margin: -4px 0 8px;
+  font-size: 13px;
+  color: #1f2937;
+  font-weight: 600;
+}
+.bar-edit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  align-items: end;
+}
+.bar-edit-grid label {
+  font-size: 12px;
+  color: #374151;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.bar-edit-grid input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 34px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0 8px;
+}
+.bar-edit-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+.bar-edit-option-row {
+  margin-top: 8px;
+}
+.bar-edit-check {
+  font-size: 12px;
+  color: #374151;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.bar-edit-actions {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.bar-edit-steps {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: #4b5563;
+  line-height: 1.45;
+}
 </style>
-
-
-
-
