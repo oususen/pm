@@ -279,6 +279,9 @@
             <template v-for="(c, colIdx) in dateColumns" :key="c.key">
               <th colspan="6" class="date-head day-end" :class="c.dayClass">
                 <div class="date-header-content-horizontal">
+                  <span v-if="getDayPlanTotal(c.key)" class="day-plan-total">計合:{{ getDayPlanTotal(c.key) }}</span>
+                  <span v-if="getDayDemandMovingAvg(c.key)" class="day-plan-avg">需5:{{ getDayDemandMovingAvg(c.key) }}</span>
+                  <span v-if="getDayDemandMovingAvg(c.key, 10)" class="day-plan-avg">需10:{{ getDayDemandMovingAvg(c.key, 10) }}</span>
                   <button
                     v-if="canShowFloorSpotAutoPlanButton"
                     type="button"
@@ -1738,6 +1741,45 @@ const getDailyTotalPlanQty = (daily) => {
     if (Number.isFinite(qty) && qty > 0) total += qty
   })
   return Math.floor(total)
+}
+
+const getDayPlanTotal = (dateKey) => {
+  let total = 0
+  rows.value.forEach((row) => {
+    const daily = row.daily?.[dateKey]
+    if (daily) total += getDailyTotalPlanQty(daily)
+  })
+  return total || ''
+}
+
+const DEMAND_EXCLUDE_CODES = ['YD40002683']
+
+const getDayDemandTotal = (dateKey) => {
+  let total = 0
+  rows.value.forEach((row) => {
+    const code = row.product_code || getProductCode(row.product_id)
+    if (DEMAND_EXCLUDE_CODES.includes(code)) return
+    const daily = row.daily?.[dateKey]
+    if (!daily) return
+    const val = Number(isProgressMode.value ? daily.line_demand_qty : daily.demand)
+    if (Number.isFinite(val) && val > 0) total += val
+  })
+  return total
+}
+
+const getDayDemandMovingAvg = (dateKey, days = 5) => {
+  const cols = dateColumns.value
+  const idx = cols.findIndex((c) => c.key === dateKey)
+  if (idx < 0) return ''
+  let sum = 0
+  let count = 0
+  for (let i = idx; i < cols.length && count < days; i++) {
+    if (isHolidayDate(cols[i].key)) continue
+    sum += getDayDemandTotal(cols[i].key)
+    count++
+  }
+  if (!count) return ''
+  return Math.round(sum / count)
 }
 
 const createIntegratedChecksheetForDay = async (dateKey) => {
@@ -4587,6 +4629,16 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
 }
 .plan-grid thead tr.head-level2 th {
   background: #e7edf7;
+}
+.day-plan-total {
+  font-weight: 700;
+  font-size: 11px;
+  color: #1a2140;
+}
+.day-plan-avg {
+  font-size: 11px;
+  font-weight: 700;
+  color: #000;
 }
 .plan-grid thead th.sat {
   background: #ffe8cc;
