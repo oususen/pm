@@ -5,6 +5,15 @@
       <label>開始日 <input v-model="startDate" type="date" /></label>
       <label>終了日 <input v-model="endDate" type="date" /></label>
       <label>品番 <input v-model.trim="productCode" type="text" /></label>
+      <label>
+        仕入れ先
+        <select v-model="supplierId">
+          <option value="">すべて</option>
+          <option v-for="s in suppliers" :key="s.id" :value="String(s.id)">
+            {{ s.supplier_code }} - {{ s.supplier_name }}
+          </option>
+        </select>
+      </label>
       <button class="btn" :disabled="loading" @click="load">検索</button>
     </div>
 
@@ -76,6 +85,8 @@ const today = formatISODate(new Date())
 const startDate = ref(today)
 const endDate = ref(today)
 const productCode = ref('')
+const supplierId = ref('')
+const suppliers = ref([])
 
 const editingId = ref(null)
 const form = reactive({
@@ -116,6 +127,7 @@ const load = async () => {
       start_date: startDate.value,
       end_date: endDate.value,
       product_code: productCode.value || undefined,
+      supplier_id: supplierId.value || undefined,
     })
     rows.value = Array.isArray(res.data) ? res.data : []
     if (editingId.value != null) {
@@ -127,6 +139,15 @@ const load = async () => {
     alert('納入実績の取得に失敗しました。')
   } finally {
     loading.value = false
+  }
+}
+
+const loadSuppliers = async () => {
+  try {
+    const res = await api.suppliers.getSuppliers({ page_size: 1000 })
+    suppliers.value = res.data?.results || res.data || []
+  } catch (_e) {
+    suppliers.value = []
   }
 }
 
@@ -204,7 +225,10 @@ const removeRow = async (row) => {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await loadSuppliers()
+  await load()
+})
 </script>
 
 <style scoped>
@@ -212,7 +236,7 @@ onMounted(load)
 .page-title { margin: 0 0 12px; font-size: 22px; }
 .filters { display: flex; gap: 10px; align-items: end; margin-bottom: 10px; flex-wrap: wrap; }
 .filters label { display: grid; gap: 4px; font-size: 13px; font-weight: 700; }
-.filters input { border: 1px solid #9ca3af; padding: 6px; min-width: 140px; }
+.filters input, .filters select { border: 1px solid #9ca3af; padding: 6px; min-width: 140px; }
 .btn { border: 1px solid #6d7478; background: #e5e5e5; padding: 6px 12px; font-weight: 700; }
 .btn:disabled { opacity: 0.5; cursor: default; }
 .btn.primary { background: #d7f0ff; }
