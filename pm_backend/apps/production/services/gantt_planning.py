@@ -17,6 +17,11 @@ logger = logging.getLogger(__name__)
 COPRODUCT_CHILD_DISPLAY_EXCEPTION_PRODUCT_CODES = {'YD40002683'}
 COPRODUCT_CHILD_DISPLAY_EXCEPTION_PROCESS_CODES = {'4001'}
 
+TANK_LINE_CODE = 'L2200'
+TANK_COMP_PROCESS_CODE = '4053'
+TANK_HAKOGUMI_PROCESS_CODE = '4019'
+TANK_HAKOGUMI_PREV_DAY_QTY = Decimal('2')
+
 @dataclass
 class ProcessSpec:
     process_id: int
@@ -215,6 +220,13 @@ class LineWorkCalendar:
             else:
                 current = self._get_next_working_start(work_date)
         return current
+
+    def is_registered_working_day(self, target_date) -> bool:
+        """CalendarDayに稼働日として登録されているか（未登録日はFalse）"""
+        cal = self._get_calendar_day(target_date)
+        if cal is None:
+            return False
+        return cal.is_working_day is not False
 
     def get_day_end(self, target_date):
         segments = self.get_segments(target_date)
@@ -817,6 +829,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
     if not line:
         raise ValueError('line_id not found')
     is_l2201_line = str(getattr(line, 'line_code', '') or '').strip().upper() == 'L2201'
+    is_tank_line = str(getattr(line, 'line_code', '') or '').strip().upper() == TANK_LINE_CODE
 
     # 日別設定を読み込み
     from ..models_line_daily_schedule_setting import LineDailyScheduleSetting
@@ -960,6 +973,8 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
     _cycle_from_final_routing_cache: Dict[Tuple[int, int, int, date], Optional[RoutingStep]] = {}
     # ライン最終品×工程の表示品マップ（ライン単位で1回だけ取得）
     display_product_map_by_final = _build_display_product_map_by_final(line_id)
+
+    tank_prev_day_plans = []
 
     plans = []
     for obj in base_plans:
@@ -1285,10 +1300,25 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 effective_minutes = entry['effective_minutes']
                 current_cycle_time = entry['cycle_time_minutes']
 
-                # 前のsequenceの同じ工程の終了時刻を考慮
                 process_key = (obj.plan_date, spec.process_id)
+                is_tank_special_proc = is_tank_line and spec.process_code in (TANK_COMP_PROCESS_CODE, TANK_HAKOGUMI_PROCESS_CODE)
 
-                if i == len(scheduled_specs) - 1:
+                if is_tank_special_proc:
+                    # タンクライン特例: コンプ/箱組は8:00開始チェーン方式
+                    tank_bw_effective = effective_minutes
+                    if (spec.process_code == TANK_HAKOGUMI_PROCESS_CODE
+                            and process_key not in previous_process_end_by_date):
+                        bw_qty = max(entry['process_qty'] - TANK_HAKOGUMI_PREV_DAY_QTY, Decimal('0'))
+                        bw_total = _calculate_total_minutes(spec, bw_qty)
+                        tank_bw_effective = bw_total / max(spec.parallel_count, 1)
+                    if process_key in previous_process_end_by_date:
+                        # SEQ2+: チェーン開始
+                        start_time = previous_process_end_by_date[process_key]
+                    else:
+                        # SEQ1: 8:00開始（固定）
+                        start_time = datetime.combine(obj.plan_date, time(8, 0))
+                    end_time = calendar.add_working_minutes(start_time, tank_bw_effective)
+                elif i == len(scheduled_specs) - 1:
                     # 最終工程: アンカー時刻に固定
                     start_time = anchor_dt
                     end_time = current_end_time
@@ -1306,8 +1336,8 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                     )
                     end_time = calendar.add_working_minutes(start_time, effective_minutes)
 
-                # 前のsequenceの終了時刻があれば、それ以降から開始する必要がある
-                if process_key in previous_process_end_by_date:
+                # 前のsequenceの終了時刻があれば、それ以降から開始（タンク特例は上で処理済み）
+                if not is_tank_special_proc and process_key in previous_process_end_by_date:
                     prev_process_end = previous_process_end_by_date[process_key]
                     if start_time < prev_process_end:
                         start_time = prev_process_end
@@ -1343,6 +1373,20 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 effective_minutes = entry['effective_minutes']
                 start_time = scheduled_times[i]['start']
                 end_time = scheduled_times[i]['end']
+
+                # タンクライン箱組特例: SEQ1は数量-2、2台分は前日ガント
+                process_key = (obj.plan_date, spec.process_id)
+                tank_hakogumi_first = (
+                    is_tank_line
+                    and spec.process_code == TANK_HAKOGUMI_PROCESS_CODE
+                    and process_key not in previous_process_end_by_date
+                )
+                tank_prev_qty = Decimal('0')
+                if tank_hakogumi_first:
+                    tank_prev_qty = min(TANK_HAKOGUMI_PREV_DAY_QTY, process_qty)
+                    process_qty = max(process_qty - tank_prev_qty, Decimal('0'))
+                    total_minutes = _calculate_total_minutes(spec, process_qty)
+                    effective_minutes = total_minutes / max(spec.parallel_count, 1)
 
                 output_product_id = spec.output_product_id
                 output_product_code = spec.output_product_code
@@ -1387,8 +1431,15 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 processes_plan.append(process_plan)
 
                 # この工程の終了時刻を記録（次のsequenceが同じ工程の直後から開始できるように）
-                process_key = (obj.plan_date, spec.process_id)
                 previous_process_end_by_date[process_key] = end_time
+
+                # タンクライン箱組: 前日ガントエントリ生成
+                if tank_hakogumi_first and tank_prev_qty > 0:
+                    _generate_tank_hakogumi_prev_day_entry(
+                        tank_prev_day_plans, calendar, spec, entry,
+                        tank_prev_qty, obj, product, plan_id, line_id,
+                        output_product_id, output_product_code, output_product_name,
+                    )
 
         else:
             # 前方スケジューリング（従来のロジック）
@@ -1403,15 +1454,39 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                     plan_id, i, spec.process_name, current_start_time
                 )
 
-                # 前のsequenceの同じ工程の終了時刻があれば、それ以降から開始
                 process_key = (obj.plan_date, spec.process_id)
-                if process_key in previous_process_end_by_date:
-                    prev_process_end = previous_process_end_by_date[process_key]
-                    current_start_time = max(current_start_time, prev_process_end)
-                    logger.info(
-                        'gantt_plans: plan_id=%s adjusted by prev_process_end=%s new_current_start_time=%s',
-                        plan_id, prev_process_end, current_start_time
+                is_tank_special_proc = is_tank_line and spec.process_code in (TANK_COMP_PROCESS_CODE, TANK_HAKOGUMI_PROCESS_CODE)
+                tank_hakogumi_first = False
+                tank_prev_qty = Decimal('0')
+
+                if is_tank_special_proc:
+                    # タンクライン特例: コンプ/箱組は8:00開始チェーン方式
+                    tank_hakogumi_first = (
+                        spec.process_code == TANK_HAKOGUMI_PROCESS_CODE
+                        and process_key not in previous_process_end_by_date
                     )
+                    if tank_hakogumi_first:
+                        tank_prev_qty = min(TANK_HAKOGUMI_PREV_DAY_QTY, process_qty)
+                        process_qty = max(process_qty - tank_prev_qty, Decimal('0'))
+                        total_minutes = _calculate_total_minutes(spec, process_qty)
+                        effective_minutes = total_minutes / max(spec.parallel_count, 1)
+
+                    if process_key in previous_process_end_by_date:
+                        # SEQ2+: チェーン＋上流工程の順序も考慮
+                        tank_start = previous_process_end_by_date[process_key]
+                        current_start_time = max(current_start_time, tank_start)
+                    else:
+                        # SEQ1: 8:00開始（固定）
+                        current_start_time = datetime.combine(obj.plan_date, time(8, 0))
+                else:
+                    # 通常: 前のsequenceの同じ工程の終了時刻があれば、それ以降から開始
+                    if process_key in previous_process_end_by_date:
+                        prev_process_end = previous_process_end_by_date[process_key]
+                        current_start_time = max(current_start_time, prev_process_end)
+                        logger.info(
+                            'gantt_plans: plan_id=%s adjusted by prev_process_end=%s new_current_start_time=%s',
+                            plan_id, prev_process_end, current_start_time
+                        )
 
                 lanes = _ensure_resource_lanes(resource_schedules, spec.process_id, spec.parallel_count)
                 start_time, end_time, lane_idx = _reserve_process_slot_forward(
@@ -1470,6 +1545,14 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
 
                 # この工程の終了時刻を記録（次のsequenceが同じ工程の直後から開始できるように）
                 previous_process_end_by_date[process_key] = end_time
+
+                # タンクライン箱組: 前日ガントエントリ生成
+                if tank_hakogumi_first and tank_prev_qty > 0:
+                    _generate_tank_hakogumi_prev_day_entry(
+                        tank_prev_day_plans, calendar, spec, entry,
+                        tank_prev_qty, obj, product, plan_id, line_id,
+                        output_product_id, output_product_code, output_product_name,
+                    )
 
                 # 次工程の開始時刻を計算（パイプライン処理を考慮）
                 if i + 1 < len(scheduled_specs):
@@ -1533,9 +1616,76 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
             'processes_plan': serialized_plan,
         })
 
+    # タンクライン箱組の前日ガントエントリを追加
+    if tank_prev_day_plans:
+        plans.extend(tank_prev_day_plans)
+        logger.info('gantt_plans: added %s tank hakogumi prev-day entries', len(tank_prev_day_plans))
+
     plans = _merge_consecutive_subprocess_entries(plans)
     logger.info('gantt_plans: generated_plans=%s', len(plans))
     return plans
+
+
+def _generate_tank_hakogumi_prev_day_entry(
+    tank_prev_day_plans, calendar, spec, entry,
+    tank_prev_qty, obj, product, plan_id, line_id,
+    output_product_id, output_product_code, output_product_name,
+):
+    """タンクライン箱組: 前日勤務終了から逆算して2台分のガントエントリを生成"""
+    prev_total_min = _calculate_total_minutes(spec, tank_prev_qty)
+    prev_effective_min = prev_total_min / max(spec.parallel_count, 1)
+    if prev_effective_min <= 0:
+        return
+
+    # 前営業日を検索（CalendarDayに稼働日として登録されている日のみ）
+    prev_day = obj.plan_date - timedelta(days=1)
+    while not calendar.is_registered_working_day(prev_day):
+        prev_day -= timedelta(days=1)
+        if (obj.plan_date - prev_day).days > 30:
+            logger.warning('gantt_plans: no working day found within 30 days before %s', obj.plan_date)
+            return
+
+    prev_day_end = calendar.get_day_end(prev_day)
+    prev_start = calendar.subtract_working_minutes(prev_day_end, prev_effective_min)
+
+    prev_plan_id = f"{plan_id}_hakogumi_prev"
+    prev_process_plan = {
+        'process_id': spec.process_id,
+        'process_name': spec.process_name,
+        'process_number': spec.process_number,
+        'parallel_group': spec.parallel_group,
+        'output_product_id': output_product_id,
+        'output_product_code': output_product_code,
+        'output_product_name': output_product_name,
+        'coproduct_group_key': None,
+        'coproduct_child_id': None,
+        'quantity': float(tank_prev_qty),
+        'cycle_time_minutes': entry['cycle_time_minutes'],
+        'setup_time_minutes': entry['setup_time_minutes'],
+        'total_minutes_required': prev_total_min,
+        'effective_minutes': prev_effective_min,
+        'parallel_count': spec.parallel_count,
+        'start_time': prev_start.isoformat(),
+        'end_time': prev_day_end.isoformat(),
+        'transfer_time_minutes': spec.transfer_time_minutes,
+        'is_continuous': True,
+    }
+
+    tank_prev_day_plans.append({
+        'plan_id': prev_plan_id,
+        'line_id': line_id,
+        'product_id': product.id,
+        'plan_date': prev_day,
+        'plan_qty': tank_prev_qty,
+        'sequence_no': obj.sequence_no,
+        'start_datetime': prev_start,
+        'end_datetime': prev_day_end,
+        'processes_plan': [prev_process_plan],
+    })
+    logger.info(
+        'gantt_plans: tank hakogumi prev-day entry: plan_id=%s date=%s start=%s end=%s qty=%s',
+        prev_plan_id, prev_day, prev_start, prev_day_end, tank_prev_qty,
+    )
 
 
 def _merge_consecutive_subprocess_entries(plans):
