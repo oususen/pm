@@ -246,9 +246,9 @@
         </colgroup>
         <thead>
           <tr class="head-level1">
-            <th rowspan="2" class="sticky-col number-col">No</th>
-            <th rowspan="2" class="sticky-col code-col">品番</th>
-            <th rowspan="2" class="sticky-col name-col">品名</th>
+            <th rowspan="3" class="sticky-col number-col">No</th>
+            <th rowspan="3" class="sticky-col code-col">品番</th>
+            <th rowspan="3" class="sticky-col name-col">品名</th>
             <th
               v-for="(c, colIdx) in dateColumns"
               :key="c.key"
@@ -272,30 +272,38 @@
                 <span v-if="getWorkTimeLabel(c.key)" class="work-time-label">
                   {{ getWorkTimeLabel(c.key) }}
                 </span>
-                <button
-                  v-if="canShowFloorSpotAutoPlanButton"
-                  type="button"
-                  class="btn-day-apply"
-                  :disabled="processing || !selectedLine || isPlanCellLocked(c.key)"
-                  @click="applyDemandToPlanForDay(c.key)"
-                  title="この日の需要を計画にセット"
-                >→</button>
-                <button
-                  type="button"
-                  class="btn-day-clear"
-                  :disabled="processing || !selectedLine"
-                  @click="clearDayPlan(c.key)"
-                  title="この日の計画をクリアして順番を振り直す"
-                >×</button>
-                <button
-                  type="button"
-                  class="btn-day-plus"
-                  :disabled="processing || !selectedLine"
-                  @click="createIntegratedChecksheetForDay(c.key)"
-                  title="この日の計画から工程一体チェックシートを作成"
-                >＋</button>
               </div>
             </th>
+          </tr>
+          <tr class="head-level1b">
+            <template v-for="(c, colIdx) in dateColumns" :key="c.key">
+              <th colspan="6" class="date-head day-end" :class="c.dayClass">
+                <div class="date-header-content-horizontal">
+                  <button
+                    v-if="canShowFloorSpotAutoPlanButton"
+                    type="button"
+                    class="btn-day-apply"
+                    :disabled="processing || !selectedLine || isPlanCellLocked(c.key)"
+                    @click="applyDemandToPlanForDay(c.key)"
+                    title="この日の需要を計画にセット"
+                  >→</button>
+                  <button
+                    type="button"
+                    class="btn-day-clear"
+                    :disabled="processing || !selectedLine"
+                    @click="clearDayPlan(c.key)"
+                    title="この日の計画をクリアして順番を振り直す"
+                  >×</button>
+                  <button
+                    type="button"
+                    class="btn-day-plus"
+                    :disabled="processing || !selectedLine"
+                    @click="createIntegratedChecksheetForDay(c.key)"
+                    title="この日の計画から工程一体チェックシートを作成"
+                  >＋</button>
+                </div>
+              </th>
+            </template>
           </tr>
           <tr class="head-level2">
             <template v-for="(c, colIdx) in dateColumns" :key="c.key">
@@ -408,7 +416,7 @@
                   <div
                     v-for="(lot, lotIdx) in row.daily?.[c.key]?.extraLots"
                     :key="lot.id || lotIdx"
-                    class="lot-item"
+                    class="lot-item lot-item-vertical"
                   >
                     <input
                       type="text"
@@ -1364,8 +1372,8 @@ const dateColumns = computed(() => {
   return cols
 })
 
-const DAY_COL_WIDTH = 54
-const SEQUENCE_COL_WIDTH = 27
+const DAY_COL_WIDTH = 40
+const SEQUENCE_COL_WIDTH = 25
 
 // テーブルの最小幅を計算して、縮みすぎを防ぐ
 const tableMinWidth = computed(() => {
@@ -4478,7 +4486,9 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
-  --header-row-height: 30px;
+  --header-row1-height: 24px;
+  --header-row2-height: 20px;
+  --header-row3-height: 18px;
 }
 .plan-grid th,
 .plan-grid td {
@@ -4499,6 +4509,14 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
   gap: 4px;
   align-items: center;
 }
+.lot-item-vertical {
+  flex-direction: column;
+  gap: 1px;
+  align-items: flex-end;
+}
+.lot-item-vertical .lot-remove {
+  padding: 0;
+}
 .lot-add,
 .lot-remove {
   padding: 2px 6px;
@@ -4515,17 +4533,26 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
 }
 .plan-grid thead tr.head-level1 th {
   top: 0;
+  height: var(--header-row1-height);
+  padding: 0 4px;
+}
+.plan-grid thead tr.head-level1b th {
+  top: calc(var(--header-row1-height) - 1px);
+  height: var(--header-row2-height);
+  padding: 0;
 }
 .plan-grid thead tr.head-level2 th {
-  top: var(--header-row-height);
-}
-.plan-grid thead tr.head-level2 th.mini {
-  padding: 0 !important;
+  top: calc(var(--header-row1-height) + var(--header-row2-height) - 2px);
+  height: var(--header-row3-height);
+  padding: 0;
 }
 .plan-grid thead th.sticky-col {
   z-index: 8;
 }
 .plan-grid thead tr.head-level1 th {
+  background: #cfd8ec;
+}
+.plan-grid thead tr.head-level1b th {
   background: #cfd8ec;
 }
 .plan-grid thead tr.head-level2 th {
@@ -4579,10 +4606,11 @@ thead tr.head-level2 th.sticky-col {
   white-space: nowrap;
 }
 .time-input-inline {
-  padding: 1px 2px;
+  padding: 0 2px;
   font-size: 11px;
   border: 1px solid #cbd5e1;
   border-radius: 2px;
+  height: 16px;
   width: 45px;
   min-width: 45px;
   max-width: 45px;
@@ -4652,22 +4680,22 @@ thead tr.head-level2 th.sticky-col {
   opacity: 0.4;
   cursor: not-allowed;
 }
-.mini {
+.plan-grid th.mini {
   text-align: center;
-  font-size: 14px;
-  min-width: 60px; /* サブ列の幅を縮小 */
+  font-size: 11px;
+  min-width: 40px;
 }
 .plan-grid .mini.demand-col,
 .plan-grid .mini.actual-col,
 .plan-grid .mini.stock-col,
 .plan-grid .mini.plan-col,
 .plan-grid .mini.stock-plan-col {
-  min-width: 54px;
+  min-width: 40px;
 }
 .plan-grid .mini.sequence-col {
-  min-width: 27px !important;
-  width: 27px !important;
-  max-width: 27px !important;
+  min-width: 25px !important;
+  width: 25px !important;
+  max-width: 25px !important;
 }
 .day-end {
   border-right: 4px solid #a2b0c5 !important;
@@ -4829,9 +4857,9 @@ thead .sticky-col {
   min-width: 40px;
 }
 .num.sequence {
-  min-width: 27px;
-  width: 27px;
-  max-width: 27px;
+  min-width: 25px;
+  width: 25px;
+  max-width: 25px;
 }
 .num input {
   width: 100%;
