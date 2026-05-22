@@ -232,7 +232,7 @@
     <div class="grid-wrapper" ref="gridWrapperRef">
       <table class="plan-grid" :style="{ minWidth: tableMinWidth + 'px' }">
         <colgroup>
-          <col style="width: 60px" />
+          <col style="width: 30px" />
           <col style="width: 135px" />
           <col style="width: 100px" />
           <template v-for="c in dateColumns" :key="`col-${c.key}`">
@@ -323,13 +323,7 @@
             :class="{ 'active-input-row': activeInputRowId === row.id }"
           >
             <td class="sticky-col number-col">
-              <div class="row-controls">
-                <span class="product-info">{{ idx + 1 }}</span>
-                <div class="reorder">
-                  <button class="mini-btn" @click="moveRow(row.id, -1)" :disabled="rowIndex(row.id) <= 0">↑</button>
-                  <button class="mini-btn" @click="moveRow(row.id, 1)" :disabled="rowIndex(row.id) >= rows.length - 1">↓</button>
-                </div>
-              </div>
+              <span class="product-info">{{ idx + 1 }}</span>
             </td>
             <td class="sticky-col code-col">
               <span class="product-info">{{ row.product_code || getProductCode(row.product_id) }}</span>
@@ -1377,7 +1371,7 @@ const SEQUENCE_COL_WIDTH = 25
 
 // テーブルの最小幅を計算して、縮みすぎを防ぐ
 const tableMinWidth = computed(() => {
-  const fixedColsWidth = 60 + 135 + 100 // No + 品番 + 品名
+  const fixedColsWidth = 30 + 135 + 100 // No + 品番 + 品名
   const perDayWidth = (DAY_COL_WIDTH * 5) + SEQUENCE_COL_WIDTH
   return fixedColsWidth + dateColumns.value.length * perDayWidth
 })
@@ -4493,9 +4487,9 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
 .plan-grid th,
 .plan-grid td {
   border: 1px solid #d7dfe8;
-  padding: 3px 6px;
+  padding: 2px 3px;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 500;
   color: #000;
 }
@@ -4545,6 +4539,16 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
   top: calc(var(--header-row1-height) + var(--header-row2-height) - 2px);
   height: var(--header-row3-height);
   padding: 0;
+  position: sticky;
+}
+.plan-grid thead tr.head-level2 th::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: #000;
 }
 .plan-grid thead th.sticky-col {
   z-index: 8;
@@ -4698,7 +4702,7 @@ thead tr.head-level2 th.sticky-col {
   max-width: 25px !important;
 }
 .day-end {
-  border-right: 4px solid #a2b0c5 !important;
+  border-right: 2px solid #000 !important;
 }
 .sticky-col {
   position: sticky;
@@ -4710,23 +4714,56 @@ thead .sticky-col {
   z-index: 8;
 }
 .number-col {
-  width: 60px;
-  min-width: 60px;
-  max-width: 60px;
+  width: 30px;
+  min-width: 30px;
+  max-width: 30px;
   text-align: center;
+  position: sticky;
+}
+.number-col::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: -1px;
+  width: 1px;
+  height: 100%;
+  background: #999;
+  z-index: 9;
 }
 .code-col {
-  left: 60px;
+  left: 30px;
   width: 135px;
   min-width: 135px;
   max-width: 135px;
+  position: sticky;
+}
+.code-col::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: -1px;
+  width: 1px;
+  height: 100%;
+  background: #999;
+  z-index: 9;
 }
 .name-col {
-  left: 195px;
+  left: 165px;
   width: 100px;
   min-width: 100px;
   max-width: 100px;
-  border-right: 2px solid #b5c1d2 !important;
+  border-right: none !important;
+  position: sticky;
+}
+.name-col::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: -2px;
+  width: 2px;
+  height: 100%;
+  background: #000;
+  z-index: 9;
 }
 .plan-grid tbody td.code-col {
   padding: 0 !important;
@@ -4802,6 +4839,10 @@ thead .sticky-col {
   background: #f1f5f9;
   color: #666;
   cursor: not-allowed;
+}
+.plan-grid tbody tr td {
+  border-top: 1px solid #000;
+  border-bottom: 1px solid #000;
 }
 .plan-grid tbody tr.active-input-row td {
   background: #fff7cf;
