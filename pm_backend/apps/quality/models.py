@@ -161,11 +161,13 @@ class EquipmentInspectionItem(models.Model):
     RECORD_CHECK = "CHECK"
     RECORD_NUMERIC = "NUMERIC"
     RECORD_PHOTO_NUMERIC = "PHOTO_NUMERIC"
+    RECORD_PHOTO = "PHOTO"
     RECORD_TEXT = "TEXT"
     RECORD_CHOICES = [
         (RECORD_CHECK, "チェック"),
         (RECORD_NUMERIC, "数値"),
         (RECORD_PHOTO_NUMERIC, "写真＋数値"),
+        (RECORD_PHOTO, "写真のみ"),
         (RECORD_TEXT, "文字"),
     ]
 

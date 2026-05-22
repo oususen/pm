@@ -158,6 +158,8 @@ def _has_result_value(result_data):
         return result_data.get("numeric_value") is not None
     if record_type == EquipmentInspectionItem.RECORD_PHOTO_NUMERIC:
         return result_data.get("numeric_value") is not None and bool(str(result_data.get("photo_url") or "").strip())
+    if record_type == EquipmentInspectionItem.RECORD_PHOTO:
+        return bool(str(result_data.get("photo_url") or "").strip())
     if record_type == EquipmentInspectionItem.RECORD_TEXT:
         return bool(str(result_data.get("text_value") or "").strip())
     return _normalize_judgement(result_data.get("judgement")) in {

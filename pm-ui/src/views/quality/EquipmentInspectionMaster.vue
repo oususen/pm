@@ -314,6 +314,7 @@
                       <option value="CHECK">チェック</option>
                       <option value="NUMERIC">数値</option>
                       <option value="PHOTO_NUMERIC">写真＋数値</option>
+                      <option value="PHOTO">写真のみ</option>
                       <option value="TEXT">文字</option>
                     </select>
                   </td>
@@ -428,6 +429,7 @@
                       <option value="CHECK">チェック</option>
                       <option value="NUMERIC">数値</option>
                       <option value="PHOTO_NUMERIC">写真＋数値</option>
+                      <option value="PHOTO">写真のみ</option>
                       <option value="TEXT">文字</option>
                     </select>
                   </td>
@@ -647,6 +649,7 @@ const RECORD_TYPE_LABELS = {
   CHECK: "チェック",
   NUMERIC: "数値",
   PHOTO_NUMERIC: "写真＋数値",
+  PHOTO: "写真のみ",
   TEXT: "文字",
 }
 
@@ -1587,6 +1590,7 @@ const normalizeRecordTypeFromExcel = (value) => {
   const text = String(value || "").trim()
   if (!text) return "CHECK"
   if ((text.includes("写真") && text.includes("数")) || text.includes("PHOTO_NUMERIC")) return "PHOTO_NUMERIC"
+  if ((text.includes("写真") && text.includes("のみ")) || text.includes("PHOTO")) return "PHOTO"
   if (text.includes("数")) return "NUMERIC"
   if (text.includes("文") || text.includes("テキスト")) return "TEXT"
   if (text.includes("CHECK") || text.includes("チェック")) return "CHECK"
@@ -3116,6 +3120,5 @@ button:disabled {
   }
 }
 </style>
-
 
 

@@ -157,6 +157,20 @@
                     </div>
                   </div>
                 </template>
+                <template v-else-if="isPhotoOnlyRecordType(result.record_type)">
+                  <div class="photo-input-wrap">
+                    <input type="file" accept="image/*" capture="environment" :disabled="!canEditRecord" @change="uploadResultPhoto($event, result)" />
+                    <div v-if="result.photo_url" class="photo-action-row">
+                      <button type="button" class="btn-secondary btn-sm" @click="toggleResultPhotoPreview(result)">
+                        {{ result.photo_preview_visible ? "プレビュー閉じる" : "プレビュー" }}
+                      </button>
+                      <button type="button" class="btn-secondary btn-sm" :disabled="!canEditRecord" @click="removeResultPhoto(result)">写真削除</button>
+                    </div>
+                    <div v-if="result.photo_url && result.photo_preview_visible" class="photo-preview-wrap">
+                      <img :src="result.photo_url" alt="計測写真" class="result-photo-preview" />
+                    </div>
+                  </div>
+                </template>
                 <textarea
                   v-else-if="result.record_type === 'TEXT'"
                   v-model="result.text_value"
@@ -401,10 +415,12 @@ const statusLabel = (value) => {
 const recordTypeLabel = (value) => {
   if (value === "NUMERIC") return "数値"
   if (value === "PHOTO_NUMERIC") return "写真＋数値"
+  if (value === "PHOTO") return "写真のみ"
   if (value === "TEXT") return "文字"
   return "チェック"
 }
 const isNumericRecordType = (value) => ["NUMERIC", "PHOTO_NUMERIC"].includes(String(value || "").toUpperCase())
+const isPhotoOnlyRecordType = (value) => String(value || "").toUpperCase() === "PHOTO"
 
 const formatLineOptionLabel = (line) => {
   const code = String(line?.line_code || "").trim()
@@ -538,14 +554,20 @@ const numericValueWithinRule = (result) => {
 const isNumericOutOfSpec = (result) => numericValueWithinRule(result) === false
 
 const canSelectOk = (result) => {
-  if (!result || !isNumericRecordType(result.record_type)) return true
+  if (!result) return true
+  if (isPhotoOnlyRecordType(result.record_type)) return Boolean(String(result.photo_url || "").trim())
+  if (!isNumericRecordType(result.record_type)) return true
   if (toNumericValue(result.numeric_value) === null) return false
   if (result.record_type === "PHOTO_NUMERIC" && !String(result.photo_url || "").trim()) return false
   return numericValueWithinRule(result) !== false
 }
 
 const okButtonTitle = (result) => {
-  if (!result || !isNumericRecordType(result.record_type)) return ""
+  if (!result) return ""
+  if (isPhotoOnlyRecordType(result.record_type) && !String(result.photo_url || "").trim()) {
+    return "写真をアップロードしてください。"
+  }
+  if (!isNumericRecordType(result.record_type)) return ""
   if (toNumericValue(result.numeric_value) === null) {
     return "測定値を入力してください。"
   }
@@ -626,7 +648,7 @@ const buildPayload = (targetStatus) => ({
     criteria: String(result.criteria || ""),
     is_required: Boolean(result.is_required),
     numeric_value: isNumericRecordType(result.record_type) && result.numeric_value !== "" ? result.numeric_value : null,
-    photo_url: result.record_type === "PHOTO_NUMERIC" ? String(result.photo_url || "") : "",
+    photo_url: ["PHOTO_NUMERIC", "PHOTO"].includes(String(result.record_type || "").toUpperCase()) ? String(result.photo_url || "") : "",
     text_value: result.record_type === "TEXT" ? String(result.text_value || "") : "",
     judgement: String(result.judgement || "").trim().toUpperCase(),
     comment: String(result.comment || ""),
@@ -1342,4 +1364,3 @@ button:disabled {
   }
 }
 </style>
-
