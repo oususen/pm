@@ -42,6 +42,10 @@ class LineProductDisplayOrderViewSet(viewsets.ModelViewSet):
                 product_code=item['product_code'],
                 display_order=item['display_order'],
                 context=context_key,
+                bg_color=item.get('bg_color', ''),
+                text_color=item.get('text_color', ''),
+                plan_bg_color=item.get('plan_bg_color', ''),
+                plan_text_color=item.get('plan_text_color', ''),
             )
             for item in items
         ]

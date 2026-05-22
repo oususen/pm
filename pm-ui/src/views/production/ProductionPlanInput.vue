@@ -627,33 +627,102 @@
     </div>
 
     <div v-if="showProductOrderDialog" class="modal-overlay" @click.self="showProductOrderDialog = false">
-      <div class="modal-content" style="width: 480px; max-height: 80vh; overflow-y: auto;">
+      <div class="modal-content" style="width: 820px; max-height: 80vh; overflow-y: auto;">
         <h2>製品表示順設定（{{ selectedLineLabel }}）</h2>
-        <p style="font-size: 12px; color: #666; margin: 0 0 8px;">
-          上下ボタンで表示順を変更し、保存してください。
-        </p>
-        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
-          <thead>
-            <tr>
-              <th style="width: 36px; padding: 4px 6px; border-bottom: 1px solid #d7dfe8; background: #f5f6fa; text-align: left;">#</th>
-              <th style="padding: 4px 6px; border-bottom: 1px solid #d7dfe8; background: #f5f6fa; text-align: left;">品番</th>
-              <th style="padding: 4px 6px; border-bottom: 1px solid #d7dfe8; background: #f5f6fa; text-align: left;">品名</th>
-              <th style="width: 70px; padding: 4px 6px; border-bottom: 1px solid #d7dfe8; background: #f5f6fa; text-align: center;">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(item, idx) in productOrderItems" :key="item.product_code"
-              :style="{ background: productOrderActiveCode === item.product_code ? '#dbeafe' : '' }">
-              <td style="padding: 4px 6px; border-bottom: 1px solid #e5e5e5;">{{ idx + 1 }}</td>
-              <td style="padding: 4px 6px; border-bottom: 1px solid #e5e5e5;">{{ item.product_code }}</td>
-              <td style="padding: 4px 6px; border-bottom: 1px solid #e5e5e5;">{{ item.product_name }}</td>
-              <td style="padding: 4px 6px; border-bottom: 1px solid #e5e5e5; text-align: center;">
-                <button class="mini-btn" @click="moveProductOrder(idx, -1)" :disabled="idx === 0">&uarr;</button>
-                <button class="mini-btn" @click="moveProductOrder(idx, 1)" :disabled="idx === productOrderItems.length - 1">&darr;</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div style="display: flex; gap: 16px;">
+          <div style="flex: 1; min-width: 0;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+              <thead>
+                <tr>
+                  <th style="width: 24px; padding: 3px 4px; border-bottom: 1px solid #d7dfe8; background: #f5f6fa;">#</th>
+                  <th style="padding: 3px 4px; border-bottom: 1px solid #d7dfe8; background: #f5f6fa; text-align: left;">品番</th>
+                  <th style="padding: 3px 4px; border-bottom: 1px solid #d7dfe8; background: #f5f6fa; text-align: left;">品名</th>
+                  <th style="width: 110px; padding: 3px 4px; border-bottom: 1px solid #d7dfe8; background: #f5f6fa; text-align: center;">行色 (R G B)</th>
+                  <th style="width: 110px; padding: 3px 4px; border-bottom: 1px solid #d7dfe8; background: #f5f6fa; text-align: center;">+色 (R G B)</th>
+                  <th style="width: 48px; padding: 3px 4px; border-bottom: 1px solid #d7dfe8; background: #f5f6fa; text-align: center;">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(item, idx) in productOrderItems" :key="item.product_code"
+                  :style="{
+                    background: productOrderActiveCode === item.product_code ? '#dbeafe'
+                      : item.bg_color ? item.bg_color : '',
+                  }">
+                  <td style="padding: 3px 4px; border-bottom: 1px solid #e5e5e5;">{{ idx + 1 }}</td>
+                  <td style="padding: 3px 4px; border-bottom: 1px solid #e5e5e5; font-size: 10px;">{{ item.product_code }}</td>
+                  <td style="padding: 3px 4px; border-bottom: 1px solid #e5e5e5;">
+                    {{ item.product_name }}
+                    <span v-if="item.plan_bg_color"
+                      style="display: inline-block; margin-left: 3px; width: 16px; height: 13px; border-radius: 2px; vertical-align: middle; font-size: 9px; text-align: center; line-height: 13px; border: 1px solid #aaa;"
+                      :style="{ background: item.plan_bg_color, color: item.plan_text_color || '#000' }"
+                    >+</span>
+                  </td>
+                  <td style="padding: 3px 4px; border-bottom: 1px solid #e5e5e5;">
+                    <div style="display: flex; align-items: center; gap: 2px;">
+                      <span style="display: inline-block; width: 14px; height: 14px; border: 1px solid #aaa; border-radius: 2px; flex-shrink: 0;"
+                        :style="{ background: item.bg_color || '#fff' }"></span>
+                      <input type="text" inputmode="numeric" :value="hexToR(item.bg_color)" @input="item.bg_color = setRgbChannel(item.bg_color, 'r', $event.target.value)" style="width: 28px; font-size: 9px; padding: 0; border: 1px solid #ccc; border-radius: 2px; text-align: center;" />
+                      <input type="text" inputmode="numeric" :value="hexToG(item.bg_color)" @input="item.bg_color = setRgbChannel(item.bg_color, 'g', $event.target.value)" style="width: 28px; font-size: 9px; padding: 0; border: 1px solid #ccc; border-radius: 2px; text-align: center;" />
+                      <input type="text" inputmode="numeric" :value="hexToB(item.bg_color)" @input="item.bg_color = setRgbChannel(item.bg_color, 'b', $event.target.value)" style="width: 28px; font-size: 9px; padding: 0; border: 1px solid #ccc; border-radius: 2px; text-align: center;" />
+                    </div>
+                  </td>
+                  <td style="padding: 3px 4px; border-bottom: 1px solid #e5e5e5;">
+                    <div style="display: flex; align-items: center; gap: 2px;">
+                      <span style="display: inline-block; width: 14px; height: 14px; border: 1px solid #aaa; border-radius: 2px; flex-shrink: 0;"
+                        :style="{ background: item.plan_bg_color || '#fff' }"></span>
+                      <input type="text" inputmode="numeric" :value="hexToR(item.plan_bg_color)" @input="item.plan_bg_color = setRgbChannel(item.plan_bg_color, 'r', $event.target.value)" style="width: 28px; font-size: 9px; padding: 0; border: 1px solid #ccc; border-radius: 2px; text-align: center;" />
+                      <input type="text" inputmode="numeric" :value="hexToG(item.plan_bg_color)" @input="item.plan_bg_color = setRgbChannel(item.plan_bg_color, 'g', $event.target.value)" style="width: 28px; font-size: 9px; padding: 0; border: 1px solid #ccc; border-radius: 2px; text-align: center;" />
+                      <input type="text" inputmode="numeric" :value="hexToB(item.plan_bg_color)" @input="item.plan_bg_color = setRgbChannel(item.plan_bg_color, 'b', $event.target.value)" style="width: 28px; font-size: 9px; padding: 0; border: 1px solid #ccc; border-radius: 2px; text-align: center;" />
+                    </div>
+                  </td>
+                  <td style="padding: 3px 4px; border-bottom: 1px solid #e5e5e5; text-align: center;">
+                    <button class="mini-btn" @click="moveProductOrder(idx, -1)" :disabled="idx === 0">&uarr;</button>
+                    <button class="mini-btn" @click="moveProductOrder(idx, 1)" :disabled="idx === productOrderItems.length - 1">&darr;</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="width: 170px; flex-shrink: 0; font-size: 11px; border-left: 1px solid #d7dfe8; padding-left: 12px;">
+            <div style="font-weight: 600; margin-bottom: 6px;">色サンプル</div>
+            <div style="margin-bottom: 8px;">
+              <div style="font-size: 10px; color: #666; margin-bottom: 3px;">行背景色</div>
+              <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px;">
+                <span style="display: inline-block; width: 16px; height: 16px; background: #bfdbfe; border: 1px solid #aaa; border-radius: 2px;"></span>
+                <span style="font-family: monospace; font-size: 10px;">191 219 254</span>
+                <span style="font-size: 10px; color: #666;">キャブ青</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px;">
+                <span style="display: inline-block; width: 16px; height: 16px; background: #bbf7d0; border: 1px solid #aaa; border-radius: 2px;"></span>
+                <span style="font-family: monospace; font-size: 10px;">187 247 208</span>
+                <span style="font-size: 10px; color: #666;">キャノピー緑</span>
+              </div>
+            </div>
+            <div>
+              <div style="font-size: 10px; color: #666; margin-bottom: 3px;">+ボタン色</div>
+              <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px;">
+                <span style="display: inline-block; width: 16px; height: 16px; background: #d4a574; border: 1px solid #aaa; border-radius: 2px;"></span>
+                <span style="font-family: monospace; font-size: 10px;">212 165 116</span>
+                <span style="font-size: 10px; color: #666;">A 茶</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px;">
+                <span style="display: inline-block; width: 16px; height: 16px; background: #bbbbbb; border: 1px solid #aaa; border-radius: 2px;"></span>
+                <span style="font-family: monospace; font-size: 10px;">187 187 187</span>
+                <span style="font-size: 10px; color: #666;">B グレー</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px;">
+                <span style="display: inline-block; width: 16px; height: 16px; background: #444444; border: 1px solid #aaa; border-radius: 2px;"></span>
+                <span style="font-family: monospace; font-size: 10px;">&nbsp;68 &nbsp;68 &nbsp;68</span>
+                <span style="font-size: 10px; color: #666;">C 濃灰</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px;">
+                <span style="display: inline-block; width: 16px; height: 16px; background: #fbbf24; border: 1px solid #aaa; border-radius: 2px;"></span>
+                <span style="font-family: monospace; font-size: 10px;">251 191 &nbsp;36</span>
+                <span style="font-size: 10px; color: #666;">D 黄</span>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="modal-actions">
           <button class="btn" @click="showProductOrderDialog = false">キャンセル</button>
           <button class="btn primary" @click="saveProductOrder" :disabled="productOrderSaving">保存</button>
@@ -1052,6 +1121,7 @@ const productOrderItems = ref([])
 const productOrderSaving = ref(false)
 const productOrderActiveCode = ref('')
 const productOrderCache = ref(new Map())
+const productColorCache = ref(new Map())
 const lineSettingsMessage = ref('')
 
 const lines = ref([])
@@ -1921,14 +1991,26 @@ const ROW_COLOR_MAP = {
   'YD40008770K': { bg: '#bfdbfe', color: '#000' },                                        // E: 未定
   'YD40008800K': { bg: '#bfdbfe', color: '#000' },                                        // F: 未定
 }
+const getProductColorFromCache = (code) => {
+  const line = selectedLineObj.value
+  if (!line) return null
+  const ctx = getDisplayOrderContext()
+  const cacheKey = `${line.id}__${ctx}`
+  const colorMap = productColorCache.value.get(cacheKey)
+  return colorMap?.get(code) || null
+}
 const getRowColorStyle = (row) => {
   const code = row.product_code || getProductCode(row.product_id)
+  const db = getProductColorFromCache(code)
+  if (db?.bg) return { backgroundColor: db.bg, color: db.color || '#000' }
   const c = ROW_COLOR_MAP[code]
   if (!c) return null
   return { backgroundColor: c.bg, color: c.color }
 }
 const getPlanCellStyle = (row) => {
   const code = row.product_code || getProductCode(row.product_id)
+  const db = getProductColorFromCache(code)
+  if (db?.planBg) return { backgroundColor: db.planBg, color: db.planColor || '#000' }
   const c = ROW_COLOR_MAP[code]
   if (!c?.planBg) return null
   return { backgroundColor: c.planBg, color: c.planColor || '#000' }
@@ -2838,6 +2920,23 @@ const confirmChangeReason = () => {
   showChangeReasonDialog.value = false
 }
 
+const hexToRgb = (hex) => {
+  if (!hex || hex.length < 7) return [0, 0, 0]
+  const n = parseInt(hex.slice(1), 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+const hexToR = (hex) => hexToRgb(hex)[0]
+const hexToG = (hex) => hexToRgb(hex)[1]
+const hexToB = (hex) => hexToRgb(hex)[2]
+const setRgbChannel = (hex, ch, val) => {
+  const [r, g, b] = hexToRgb(hex)
+  const v = Math.max(0, Math.min(255, Number(val) || 0))
+  const nr = ch === 'r' ? v : r
+  const ng = ch === 'g' ? v : g
+  const nb = ch === 'b' ? v : b
+  return `#${((1 << 24) | (nr << 16) | (ng << 8) | nb).toString(16).slice(1)}`
+}
+
 const getDisplayOrderContext = () => {
   if (activePlanTab.value === 'floor-shipping') return 'floor-shipping'
   return 'default'
@@ -2855,6 +2954,10 @@ const openProductOrderDialog = async () => {
     items.push({
       product_code: code,
       product_name: row.product_name || getProductName(row.product_id) || '',
+      bg_color: '',
+      text_color: '',
+      plan_bg_color: '',
+      plan_text_color: '',
     })
   }
   try {
@@ -2864,6 +2967,16 @@ const openProductOrderDialog = async () => {
     })
     const saved = res.data || []
     if (saved.length > 0) {
+      const savedMap = new Map(saved.map((s) => [s.product_code, s]))
+      items.forEach((item) => {
+        const s = savedMap.get(item.product_code)
+        if (s) {
+          item.bg_color = s.bg_color || ''
+          item.text_color = s.text_color || ''
+          item.plan_bg_color = s.plan_bg_color || ''
+          item.plan_text_color = s.plan_text_color || ''
+        }
+      })
       const orderMap = new Map(saved.map((s) => [s.product_code, s.display_order]))
       items.sort((a, b) => {
         const oa = orderMap.has(a.product_code) ? orderMap.get(a.product_code) : 99999
@@ -2899,10 +3012,26 @@ const saveProductOrder = async () => {
       items: productOrderItems.value.map((item, idx) => ({
         product_code: item.product_code,
         display_order: idx,
+        bg_color: item.bg_color && item.bg_color !== '#ffffff' ? item.bg_color : '',
+        text_color: item.text_color && item.text_color !== '#ffffff' ? item.text_color : '',
+        plan_bg_color: item.plan_bg_color && item.plan_bg_color !== '#ffffff' ? item.plan_bg_color : '',
+        plan_text_color: item.plan_text_color && item.plan_text_color !== '#ffffff' ? item.plan_text_color : '',
       })),
     })
     const cacheKey = `${selectedLine.value}__${ctx}`
     productOrderCache.value.set(cacheKey, productOrderItems.value.map((i) => i.product_code))
+    const colorMap = new Map()
+    productOrderItems.value.forEach((item) => {
+      if (item.bg_color || item.plan_bg_color) {
+        colorMap.set(item.product_code, {
+          bg: item.bg_color && item.bg_color !== '#ffffff' ? item.bg_color : '',
+          color: item.text_color && item.text_color !== '#ffffff' ? item.text_color : '#000',
+          planBg: item.plan_bg_color && item.plan_bg_color !== '#ffffff' ? item.plan_bg_color : '',
+          planColor: item.plan_text_color && item.plan_text_color !== '#ffffff' ? item.plan_text_color : '#000',
+        })
+      }
+    })
+    productColorCache.value.set(cacheKey, colorMap)
     rows.value = sortRowsForLine(rows.value)
     showProductOrderDialog.value = false
   } catch (e) {
@@ -3746,6 +3875,16 @@ const fetchAndApplyData = async () => {
     if (saved.length > 0) {
       const sorted = [...saved].sort((a, b) => a.display_order - b.display_order)
       productOrderCache.value.set(displayOrderCacheKey, sorted.map((s) => s.product_code))
+      const colorMap = new Map()
+      saved.forEach((s) => {
+        if (s.bg_color || s.plan_bg_color) {
+          colorMap.set(s.product_code, {
+            bg: s.bg_color || '', color: s.text_color || '#000',
+            planBg: s.plan_bg_color || '', planColor: s.plan_text_color || '#000',
+          })
+        }
+      })
+      if (colorMap.size > 0) productColorCache.value.set(displayOrderCacheKey, colorMap)
     }
   }
   currentLineRoutingFilterMode.value = lineRoutingFilter?.mode || 'fallback'

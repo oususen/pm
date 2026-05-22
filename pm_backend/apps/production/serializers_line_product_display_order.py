@@ -7,5 +7,7 @@ class LineProductDisplayOrderSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = LineProductDisplayOrder
-        fields = ['id', 'line', 'line_code', 'product_code', 'display_order', 'context', 'created_at', 'updated_at']
+        fields = ['id', 'line', 'line_code', 'product_code', 'display_order', 'context',
+                  'bg_color', 'text_color', 'plan_bg_color', 'plan_text_color',
+                  'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
