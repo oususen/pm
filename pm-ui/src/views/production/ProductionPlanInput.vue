@@ -321,6 +321,7 @@
             v-for="(row, idx) in filteredRows"
             :key="row.id"
             :class="{ 'active-input-row': activeInputRowId === row.id }"
+            :style="getRowColorStyle(row)"
           >
             <td class="sticky-col number-col">
               <span class="product-info">{{ idx + 1 }}</span>
@@ -388,7 +389,7 @@
                       :class="{ locked: isPlanCellLocked(c.key) }"
                     />
                   </div>
-                  <button class="mini-btn lot-add" type="button" @click="addExtraLot(row, c.key)" :disabled="isPlanCellLocked(c.key) || isHolidayDate(c.key) || (isFloorShippingDeliveryLine && row.daily?.[c.key]?.extraLots?.length >= 1)">+</button>
+                  <button class="mini-btn lot-add" type="button" @click="addExtraLot(row, c.key)" :disabled="isPlanCellLocked(c.key) || isHolidayDate(c.key) || (isFloorShippingDeliveryLine && row.daily?.[c.key]?.extraLots?.length >= 1)" :style="getPlanCellStyle(row)">+</button>
                 </div>
               </td>
               <td class="num sequence" :class="c.dayClass">
@@ -1800,6 +1801,31 @@ const getProductName = (id) => {
 const getProductCode = (id) => {
   const p = products.value.find((x) => x.id === id)
   return p ? p.product_code : ''
+}
+
+const ROW_COLOR_MAP = {
+  'YD40008720K': { bg: '#bfdbfe', color: '#000' },                                        // 1: キャブ U-5
+  'YD40008750K': { bg: '#bbf7d0', color: '#000' },                                        // 2: キャノピー U-5
+  'YD40008670K': { bg: '#bfdbfe', color: '#000' },                                        // 3: キャブ 55UR
+  'YD40008650K': { bg: '#bbf7d0', color: '#000' },                                        // 4: キャノピー 55UR
+  'YD40008730K': { bg: '#bfdbfe', color: '#000', planBg: '#d4a574', planColor: '#fff' },   // A: キャブ 5t-EN
+  'YD40008760K': { bg: '#bfdbfe', color: '#000', planBg: '#bbb', planColor: '#000' },      // B: キャブ 3t-EN
+  'YD40008780K': { bg: '#bfdbfe', color: '#000', planBg: '#444', planColor: '#fff' },      // C: キャブ U-5NA
+  'YD40008790K': { bg: '#bbf7d0', color: '#000', planBg: '#fbbf24', planColor: '#000' },   // D: キャノピー U-5NA
+  'YD40008770K': { bg: '#bfdbfe', color: '#000' },                                        // E: 未定
+  'YD40008800K': { bg: '#bfdbfe', color: '#000' },                                        // F: 未定
+}
+const getRowColorStyle = (row) => {
+  const code = row.product_code || getProductCode(row.product_id)
+  const c = ROW_COLOR_MAP[code]
+  if (!c) return null
+  return { backgroundColor: c.bg, color: c.color }
+}
+const getPlanCellStyle = (row) => {
+  const code = row.product_code || getProductCode(row.product_id)
+  const c = ROW_COLOR_MAP[code]
+  if (!c?.planBg) return null
+  return { backgroundColor: c.planBg, color: c.planColor || '#000' }
 }
 const getProductCodeTail5 = (row) => {
   const code = String(row?.product_code || getProductCode(row?.product_id) || '')
@@ -4936,6 +4962,18 @@ thead .sticky-col {
 }
 .stock-plan {
   background: #f1f7ff;
+}
+.plan-grid tbody tr[style] td {
+  background: inherit !important;
+  color: inherit !important;
+  border-color: #aaa !important;
+}
+.plan-grid tbody tr[style] td.day-end {
+  border-right: 3px solid #000 !important;
+}
+.plan-grid tbody tr[style] td.sticky-col {
+  background: inherit !important;
+  color: inherit !important;
 }
 .no-data {
   text-align: center;
