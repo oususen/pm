@@ -240,13 +240,16 @@
               <!-- チェック項目テーブル -->
               <div class="section-header">
                 <h5>チェック項目</h5>
-                <button class="btn-secondary btn-sm" @click="addItem(block)">項目追加</button>
+                <div class="section-actions">
+                  <button class="btn-secondary btn-sm" @click="openCopyItemsDialog(block)">他製品項目コピー追加</button>
+                  <button class="btn-secondary btn-sm" @click="addItem(block)">項目追加</button>
+                </div>
               </div>
               <div class="table-wrap" v-if="block.items.length">
                 <table class="data-table compact item-table">
                   <thead>
                     <tr>
-                      <th style="width: 30px">No</th>
+                      <th style="width: 70px">No</th>
                       <th>項目名</th>
                       <th>基準値</th>
                       <th>頻度</th>
@@ -260,7 +263,11 @@
                   </thead>
                   <tbody>
                     <tr v-for="(item, iIdx) in block.items" :key="item._key">
-                      <td>{{ iIdx + 1 }}</td>
+                      <td class="no-cell">
+                        <span class="no-label">{{ iIdx + 1 }}</span>
+                        <button class="btn-no-move" :disabled="iIdx === 0" @click="moveItemUp(block, iIdx)">↑</button>
+                        <button class="btn-no-move" :disabled="iIdx === block.items.length - 1" @click="moveItemDown(block, iIdx)">↓</button>
+                      </td>
                       <td><input v-model.trim="item.item_name" class="cell-input" /></td>
                       <td><input v-model.trim="item.standard" class="cell-input" /></td>
                       <td><input v-model.trim="item.frequency" class="cell-input cell-sm" /></td>
@@ -600,6 +607,32 @@
         </div>
       </div>
     </div>
+
+    <div v-if="copyItemsDialogVisible" class="modal-backdrop" @click.self="cancelCopyItemsDialog">
+      <div class="modal-panel reject-modal">
+        <div class="reject-modal-body">
+          <label class="reject-label">コピー元テンプレート</label>
+          <select v-model="copyItemsSourceTemplateId" class="cell-input">
+            <option :value="null">選択してください</option>
+            <option v-for="row in copySourceTemplateOptions" :key="row.id" :value="row.id">
+              {{ row.product_code || row.product_name || '-' }} / {{ row.name || '-' }} (v{{ row.version }})
+            </option>
+          </select>
+          <label class="reject-label" style="margin-top:10px;">コピー元工程</label>
+          <select v-model="copyItemsSourceBlockId" class="cell-input" :disabled="copyItemsSourceBlocksLoading || !copyItemsSourceBlocks.length">
+            <option :value="null">選択してください</option>
+            <option v-for="sourceBlock in copyItemsSourceBlocks" :key="sourceBlock.id" :value="sourceBlock.id">
+              {{ blockLabelFromProcessId(sourceBlock.process) }}
+            </option>
+          </select>
+          <p class="se-hint">選択した工程の項目を、現在の工程ブロック末尾に追加します。</p>
+        </div>
+        <div class="reject-modal-footer">
+          <button class="btn-secondary" @click="cancelCopyItemsDialog">キャンセル</button>
+          <button class="btn-approve" :disabled="copyItemsSourceBlocksLoading || !copyItemsSourceTemplateId || !copyItemsSourceBlockId" @click="confirmCopyItems">コピー追加</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="page-container" v-else>
@@ -673,6 +706,11 @@ const filteredTemplates = computed(() => {
   })
 })
 
+const copySourceTemplateOptions = computed(() => {
+  const currentId = Number(selectedTemplateId.value || 0)
+  return filteredTemplates.value.filter((row) => Number(row.id) !== currentId)
+})
+
 const availableProcessOptions = computed(() => {
   if (!form.value.line) return []
   return processOptions.value.filter((proc) => String(proc.line || '') === String(form.value.line))
@@ -699,6 +737,12 @@ const rejectDialogVisible = ref(false)
 const rejectComment = ref('')
 const submitDialogVisible = ref(false)
 const submitComment = ref('')
+const copyItemsDialogVisible = ref(false)
+const copyItemsTargetBlock = ref(null)
+const copyItemsSourceTemplateId = ref(null)
+const copyItemsSourceBlockId = ref(null)
+const copyItemsSourceBlocks = ref([])
+const copyItemsSourceBlocksLoading = ref(false)
 let itemKeySeq = 0
 const nextKey = () => `_k${++itemKeySeq}`
 
@@ -732,7 +776,7 @@ const createEmptyForm = () => ({
 
 const form = ref(createEmptyForm())
 const savedPayloadSnapshot = ref('')
-const UNSAVED_CHANGES_MESSAGE = '未保存の編集内容があります。保存せずに移動すると入力内容は失われます。移動しますか？'
+const UNSAVED_CHANGES_MESSAGE = '編集後保存せずに移動すると入力内容は失われます。移動しますか？未変更or保存した場合はOK、未保存の場合はキャンセルをクリックしてください'
 
 const buildComparablePayload = () => ({
   id: form.value.id || null,
@@ -1152,8 +1196,74 @@ const addItem = (block) => {
   })
 }
 
+const blockLabelFromProcessId = (processId) => {
+  const proc = processOptions.value.find((p) => String(p.id) === String(processId))
+  return proc ? `${proc.process_code} - ${proc.process_name}` : `工程ID: ${processId || '-'}`
+}
+
+const openCopyItemsDialog = (block) => {
+  copyItemsTargetBlock.value = block
+  copyItemsSourceTemplateId.value = null
+  copyItemsSourceBlockId.value = null
+  copyItemsSourceBlocks.value = []
+  copyItemsDialogVisible.value = true
+}
+
+const cancelCopyItemsDialog = () => {
+  copyItemsDialogVisible.value = false
+  copyItemsTargetBlock.value = null
+  copyItemsSourceTemplateId.value = null
+  copyItemsSourceBlockId.value = null
+  copyItemsSourceBlocks.value = []
+}
+
+const confirmCopyItems = () => {
+  const targetBlock = copyItemsTargetBlock.value
+  if (!targetBlock) return
+  const sourceBlock = copyItemsSourceBlocks.value.find((b) => Number(b.id) === Number(copyItemsSourceBlockId.value))
+  if (!sourceBlock) {
+    alert('コピー元工程を選択してください。')
+    return
+  }
+  const sourceItems = Array.isArray(sourceBlock.items) ? sourceBlock.items : []
+  if (!sourceItems.length) {
+    alert('コピー元工程に項目がありません。')
+    return
+  }
+  const copiedItems = sourceItems.map((item) => ({
+    id: null,
+    item_name: item.item_name || '',
+    standard: item.standard || '',
+    frequency: item.frequency || '',
+    method: item.method || '',
+    record_type: item.record_type || 'CHECK',
+    unit: item.unit || '',
+    criteria: item.criteria || '',
+    is_required: Boolean(item.is_required),
+    _key: nextKey(),
+  }))
+  targetBlock.items.push(...copiedItems)
+  cancelCopyItemsDialog()
+}
+
 const removeItem = (block, idx) => {
   block.items.splice(idx, 1)
+}
+
+const moveItemUp = (block, fromIdx) => {
+  const list = Array.isArray(block?.items) ? block.items : []
+  if (!list.length) return
+  if (fromIdx <= 0) return
+  const moved = list.splice(fromIdx, 1)[0]
+  list.splice(fromIdx - 1, 0, moved)
+}
+
+const moveItemDown = (block, fromIdx) => {
+  const list = Array.isArray(block?.items) ? block.items : []
+  if (!list.length) return
+  if (fromIdx >= list.length - 1) return
+  const moved = list.splice(fromIdx, 1)[0]
+  list.splice(fromIdx + 1, 0, moved)
 }
 
 const addSketchField = (block) => {
@@ -1562,9 +1672,16 @@ const saveStructure = async () => {
   try {
     const templateId = await persistCurrentTemplate()
     if (!templateId) return
-    // 再読込
+    // 一覧更新
     await loadTemplateList()
-    await selectTemplate(templateId)
+    const targetId = Number(templateId || 0)
+    const currentId = Number(selectedTemplateId.value || 0)
+    if (targetId > 0 && targetId !== currentId) {
+      await selectTemplate(targetId)
+    } else {
+      // 同一ID保存時は selectTemplate が早期 return するため、保存スナップショットを明示更新
+      markSavedSnapshot()
+    }
     alert('構造を保存しました。')
   } catch (e) {
     console.error('保存失敗:', e)
@@ -1838,6 +1955,27 @@ watch(
     window.removeEventListener('resize', updateSeFloatingScroll)
   }
 )
+
+watch(copyItemsSourceTemplateId, async (templateId) => {
+  copyItemsSourceBlockId.value = null
+  copyItemsSourceBlocks.value = []
+  if (!templateId) return
+  copyItemsSourceBlocksLoading.value = true
+  try {
+    const res = await api.integratedChecksheets.getTemplate(templateId)
+    const blocks = Array.isArray(res.data?.process_blocks) ? res.data.process_blocks : []
+    copyItemsSourceBlocks.value = blocks
+    const targetProcessId = copyItemsTargetBlock.value?.process
+    if (targetProcessId) {
+      const sameProcessBlock = blocks.find((b) => String(b.process) === String(targetProcessId))
+      if (sameProcessBlock?.id) copyItemsSourceBlockId.value = sameProcessBlock.id
+    }
+  } catch (e) {
+    alert(`コピー元工程の取得に失敗しました: ${e.response?.data?.detail || e.message}`)
+  } finally {
+    copyItemsSourceBlocksLoading.value = false
+  }
+})
 </script>
 
 <style scoped>
@@ -2110,6 +2248,11 @@ watch(
   font-weight: 700;
   color: #0f172a;
 }
+.section-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
 .no-data {
   color: #6b7280;
   padding: 8px 0;
@@ -2213,6 +2356,30 @@ watch(
 }
 .center {
   text-align: center;
+}
+.no-cell {
+  white-space: nowrap;
+  text-align: center;
+}
+.no-label {
+  display: inline-block;
+  min-width: 20px;
+}
+.btn-no-move {
+  margin-left: 3px;
+  width: 18px;
+  height: 18px;
+  border: 1px solid #cbd5e1;
+  border-radius: 3px;
+  background: #fff;
+  color: #334155;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.btn-no-move:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* アクションボタン */

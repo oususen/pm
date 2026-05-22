@@ -734,7 +734,7 @@ const createEmptyForm = () => ({
 const form = ref(createEmptyForm())
 const savedPayloadSnapshot = ref("")
 const isRestoringRouteQuery = ref(false)
-const UNSAVED_CHANGES_MESSAGE = "未保存の編集内容があります。保存せずに移動すると入力内容は失われます。移動しますか？"
+const UNSAVED_CHANGES_MESSAGE = "編集後保存せずに移動すると入力内容は失われます。移動しますか？未変更or保存した場合はOK、未保存の場合はキャンセルをクリックしてください"
 
 const createPayloadSnapshot = () => JSON.stringify(buildPayload())
 const markSavedSnapshot = () => {
@@ -2343,9 +2343,11 @@ const saveTemplateInternal = async () => {
     response = await api.qualityEquipmentInspections.create(payload)
   }
   const savedId = response.data?.id
+  const targetId = Number(savedId || form.value.id || 0)
   await loadTemplateList()
-  if (savedId) await loadTemplateDetail(savedId)
-  return savedId
+  if (targetId) await loadTemplateDetail(targetId)
+  else markSavedSnapshot()
+  return targetId || savedId
 }
 
 const saveTemplate = async () => {
@@ -3120,5 +3122,3 @@ button:disabled {
   }
 }
 </style>
-
-
