@@ -307,9 +307,9 @@
           </tr>
           <tr class="head-level2">
             <template v-for="(c, colIdx) in dateColumns" :key="c.key">
-              <th class="mini demand-col" :class="c.dayClass">{{ isProgressMode ? '受注' : '需要' }}</th>
-              <th class="mini actual-col" :class="c.dayClass">実績</th>
               <th class="mini stock-col" :class="c.dayClass">{{ isProgressMode ? '進度' : '在庫' }}</th>
+              <th class="mini actual-col" :class="c.dayClass">実績</th>
+              <th class="mini demand-col" :class="c.dayClass">{{ isProgressMode ? '受注' : '需要' }}</th>
               <th class="mini plan-col" :class="c.dayClass">計画</th>
               <th class="mini sequence-col" :class="c.dayClass">順</th>
               <th class="mini stock-plan-col day-end" :class="c.dayClass">{{ isProgressMode ? '計進' : '計庫' }}</th>
@@ -333,8 +333,8 @@
               <span class="product-info">{{ row.product_name || getProductName(row.product_id) }}</span>
             </td>
             <template v-for="(c, colIdx) in dateColumns" :key="c.key">
-              <td class="num demand" :class="c.dayClass">
-                <span class="readonly-value">{{ displayValue(isProgressMode ? row.daily?.[c.key]?.line_demand_qty : row.daily?.[c.key]?.demand) }}</span>
+              <td class="num stock" :class="c.dayClass">
+                <span class="readonly-value">{{ displayValue(isProgressMode ? row.daily?.[c.key]?.progress : getStockDisplay(row, colIdx)) }}</span>
               </td>
               <td class="num actual" :class="c.dayClass">
                 <input
@@ -352,8 +352,8 @@
                 />
                 <span v-else class="readonly-value">{{ displayValue(row.daily?.[c.key]?.actual) }}</span>
               </td>
-              <td class="num stock" :class="c.dayClass">
-                <span class="readonly-value">{{ displayValue(isProgressMode ? row.daily?.[c.key]?.progress : getStockDisplay(row, colIdx)) }}</span>
+              <td class="num demand" :class="c.dayClass">
+                <span class="readonly-value">{{ displayValue(isProgressMode ? row.daily?.[c.key]?.line_demand_qty : row.daily?.[c.key]?.demand) }}</span>
               </td>
               <td class="num plan" :class="c.dayClass">
                 <div class="lot-stack">
@@ -3303,9 +3303,9 @@ const exportToExcel = () => {
   const header2 = ['No', '品番']
   dateColumns.value.forEach(() => {
     if (isProgressMode.value) {
-      header2.push('受注', '実績', '進度', '計画', '順', '計進')
+      header2.push('進度', '実績', '受注', '計画', '順', '計進')
     } else {
-      header2.push('需要', '実績', '在庫', '計画', '順序', '計庫')
+      header2.push('在庫', '実績', '需要', '計画', '順序', '計庫')
     }
   })
   linesOut.push(header1.map(escapeCsv).join(','))
@@ -3340,18 +3340,18 @@ const buildPrintTableHtml = () => {
   `
 
   const metrics = isProgressMode.value ? [
-    { key: 'demand', label: '受注', getValue: (row, daily, colIdx) => displayValue(daily.line_demand_qty) },
-    { key: 'actual', label: '実績', getValue: (row, daily, colIdx) => displayValue(daily.actual) },
     { key: 'progress', label: '進度', getValue: (row, daily, colIdx) => displayValue(daily.progress) },
+    { key: 'actual', label: '実績', getValue: (row, daily, colIdx) => displayValue(daily.actual) },
+    { key: 'demand', label: '受注', getValue: (row, daily, colIdx) => displayValue(daily.line_demand_qty) },
     { key: 'plan', label: '計画', getValue: (row, daily, colIdx) => formatLotValues(daily, 'plan') },
     { key: 'sequence', label: '順', getValue: (row, daily, colIdx) => formatLotValues(daily, 'sequence_no') },
     { key: 'planned_progress', label: '計進', getValue: (row, daily, colIdx) => displayValue(daily.planned_progress) },
   ] : [
-    { key: 'demand', label: '計需', getValue: (row, daily, colIdx) => displayValue(daily.demand) },
+    { key: 'stock', label: '在庫', getValue: (row, daily, colIdx) => displayValue(getStockDisplay(row, colIdx)) },
     { key: 'actual', label: '実需', getValue: (row, daily, colIdx) => displayValue(daily.actual) },
+    { key: 'demand', label: '計需', getValue: (row, daily, colIdx) => displayValue(daily.demand) },
     { key: 'plan', label: '計画', getValue: (row, daily, colIdx) => formatLotValues(daily, 'plan') },
     { key: 'sequence', label: '順序', getValue: (row, daily, colIdx) => formatLotValues(daily, 'sequence_no') },
-    { key: 'stock', label: '在庫', getValue: (row, daily, colIdx) => displayValue(getStockDisplay(row, colIdx)) },
     { key: 'plan_stock', label: '計庫', getValue: (row, daily, colIdx) => displayValue(getPlanStockDisplay(row, colIdx)) },
   ]
 
