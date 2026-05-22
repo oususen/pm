@@ -279,9 +279,8 @@
             <template v-for="(c, colIdx) in dateColumns" :key="c.key">
               <th colspan="6" class="date-head day-end" :class="c.dayClass">
                 <div class="date-header-content-horizontal">
-                  <span v-if="getDayPlanTotal(c.key)" class="day-plan-total">計合:{{ getDayPlanTotal(c.key) }}</span>
-                  <span v-if="getDayDemandMovingAvg(c.key)" class="day-plan-avg">需5:{{ getDayDemandMovingAvg(c.key) }}</span>
-                  <span v-if="getDayDemandMovingAvg(c.key, 10)" class="day-plan-avg">需10:{{ getDayDemandMovingAvg(c.key, 10) }}</span>
+                  <span v-if="getDayDemandMovingAvg(c.key)" class="day-plan-avg">需五:{{ getDayDemandMovingAvg(c.key) }}</span>
+                  <span v-if="getDayDemandMovingAvg(c.key, 10)" class="day-plan-avg">需十:{{ getDayDemandMovingAvg(c.key, 10) }}</span>
                   <button
                     v-if="canShowFloorSpotAutoPlanButton"
                     type="button"
@@ -304,6 +303,7 @@
                     @click="createIntegratedChecksheetForDay(c.key)"
                     title="この日の計画から工程一体チェックシートを作成"
                   >＋</button>
+                  <span v-if="getDayPlanTotal(c.key)" class="day-plan-total">計合:{{ getDayPlanTotal(c.key) }}</span>
                 </div>
               </th>
             </template>
@@ -4633,7 +4633,8 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
 .day-plan-total {
   font-weight: 700;
   font-size: 11px;
-  color: #1a2140;
+  color: #c00;
+  margin-left: auto;
 }
 .day-plan-avg {
   font-size: 11px;
@@ -4684,7 +4685,7 @@ thead tr.head-level2 th.sticky-col {
 }
 .work-time-label {
   font-size: 11px;
-  color: #dc2626;
+  color: #000;
   white-space: nowrap;
 }
 .time-input-inline {
