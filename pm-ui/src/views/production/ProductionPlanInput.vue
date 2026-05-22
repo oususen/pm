@@ -4701,7 +4701,7 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
 }
 .plan-grid th,
 .plan-grid td {
-  border: 1px solid #d7dfe8;
+  border: 1px solid #a0aec0;
   padding: 2px 3px;
   white-space: nowrap;
   font-size: 11px;
@@ -5166,7 +5166,6 @@ thead .sticky-col {
 .plan-grid tbody tr[style] td {
   background: inherit !important;
   color: inherit !important;
-  border-color: #aaa !important;
 }
 .plan-grid tbody tr[style] td.day-end {
   border-right: 3px solid #000 !important;
