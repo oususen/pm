@@ -328,7 +328,7 @@
                     >{{ t('integratedOperation.reworkFlow') }}</button>
                   </template>
                   <!-- NUMERIC -->
-                  <template v-else-if="item.record_type === 'NUMERIC'">
+                  <template v-else-if="isNumericRecordType(item.record_type)">
                     <input
                       type="number"
                       step="any"
@@ -658,10 +658,15 @@ const recordTypeLabel = (rt) => {
   switch (rt) {
     case 'CHECK': return 'C'
     case 'NUMERIC': return 'N'
+    case 'PHOTO_NUMERIC': return '写+数'
+    case 'PHOTO': return '写'
     case 'TEXT': return 'T'
     default: return rt
   }
 }
+
+const isNumericRecordType = (recordType) => ['NUMERIC', 'PHOTO_NUMERIC'].includes(String(recordType || '').toUpperCase())
+const isPhotoOnlyRecordType = (recordType) => String(recordType || '').toUpperCase() === 'PHOTO'
 
 // --- 工程ロック判定 ---
 const getUnitProcessProgress = (unit) => {
@@ -704,8 +709,11 @@ const cellDisplay = (unit, item) => {
     if (check.judgement === '修正流動') return '修正流動'
     return ''
   }
-  if (item.record_type === 'NUMERIC') {
+  if (isNumericRecordType(item.record_type)) {
     return check.numeric_value != null ? check.numeric_value : ''
+  }
+  if (isPhotoOnlyRecordType(item.record_type)) {
+    return check.text_value ? '写真' : ''
   }
   return check.text_value || ''
 }
@@ -720,7 +728,7 @@ const cellClass = (unit, block, item) => {
     if (check.judgement === 'NG') return 'cell-ng'
     if (check.judgement === '修正流動') return 'cell-rework'
   }
-  if (item.record_type === 'NUMERIC' && check.numeric_value != null && item.criteria) {
+  if (isNumericRecordType(item.record_type) && check.numeric_value != null && item.criteria) {
     const bounds = parseCriteria(item.criteria, item.standard)
     if (bounds) {
       const v = parseFloat(check.numeric_value)
@@ -1149,7 +1157,7 @@ const hasMissingRequiredItems = (block) => {
     const r = modalResponses.value[item.id]
     if (!r) return true
     if (item.record_type === 'CHECK') return !r.judgement
-    if (item.record_type === 'NUMERIC') return r.numeric_value === null || r.numeric_value === '' || r.numeric_value === undefined
+    if (isNumericRecordType(item.record_type)) return r.numeric_value === null || r.numeric_value === '' || r.numeric_value === undefined
     return !r.text_value
   })
 }
@@ -1222,7 +1230,7 @@ const saveBlockChecks = async (block, options = {}) => {
     const r = modalResponses.value[item.id]
     if (!r) return true
     if (item.record_type === 'CHECK') return !r.judgement
-    if (item.record_type === 'NUMERIC') return r.numeric_value === null || r.numeric_value === '' || r.numeric_value === undefined
+    if (isNumericRecordType(item.record_type)) return r.numeric_value === null || r.numeric_value === '' || r.numeric_value === undefined
     return !r.text_value
   })
   if (missingItems.length > 0) {
@@ -1256,7 +1264,7 @@ const saveBlockChecks = async (block, options = {}) => {
       const entry = { item: item.id }
       if (item.record_type === 'CHECK') {
         entry.judgement = r.judgement || ''
-      } else if (item.record_type === 'NUMERIC') {
+      } else if (isNumericRecordType(item.record_type)) {
         entry.numeric_value = r.numeric_value
         entry.judgement = r.judgement || ''
       } else {

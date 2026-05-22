@@ -614,8 +614,8 @@
 
 <script setup>
 import { formatISODate } from '@/utils/dateUtil'
-import { computed, nextTick, onMounted, ref, watch } from "vue"
-import { useRoute, useRouter } from "vue-router"
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router"
 import * as XLSX from "xlsx"
 import api from "@/api/client"
 import { authState } from "@/auth"
@@ -729,6 +729,23 @@ const createEmptyForm = () => ({
 })
 
 const form = ref(createEmptyForm())
+const savedPayloadSnapshot = ref("")
+const isRestoringRouteQuery = ref(false)
+const UNSAVED_CHANGES_MESSAGE = "未保存の編集内容があります。保存せずに移動すると入力内容は失われます。移動しますか？"
+
+const createPayloadSnapshot = () => JSON.stringify(buildPayload())
+const markSavedSnapshot = () => {
+  savedPayloadSnapshot.value = createPayloadSnapshot()
+}
+const hasUnsavedChanges = computed(() => {
+  if (!canEditFields.value) return false
+  if (detailLoading.value || saving.value || actionLoading.value) return false
+  return createPayloadSnapshot() !== savedPayloadSnapshot.value
+})
+const confirmDiscardUnsavedChanges = () => {
+  if (!hasUnsavedChanges.value) return true
+  return window.confirm(UNSAVED_CHANGES_MESSAGE)
+}
 
 const equipmentSelectOptions = computed(() => {
   const options = Array.isArray(equipmentOptions.value) ? [...equipmentOptions.value] : []
@@ -2193,6 +2210,7 @@ const loadTemplateDetail = async (id) => {
     selectedTemplateId.value = id
     await resizeAllTextareas()
     await loadPrevVersion(form.value.sheet_code, form.value.version)
+    markSavedSnapshot()
   } catch (error) {
     console.error("設備点検テンプレート詳細取得に失敗:", error)
     alert("テンプレート詳細の取得に失敗しました。")
@@ -2202,14 +2220,18 @@ const loadTemplateDetail = async (id) => {
 }
 
 const selectTemplate = async (id) => {
+  const numericId = Number(id || 0)
+  if (!numericId || numericId === Number(selectedTemplateId.value || 0)) return
+  if (!confirmDiscardUnsavedChanges()) return
   await router.replace({
     path: route.path,
-    query: { ...route.query, id: String(id) },
+    query: { ...route.query, id: String(numericId) },
   })
-  await loadTemplateDetail(id)
+  await loadTemplateDetail(numericId)
 }
 
 const copyTemplate = async () => {
+  if (!confirmDiscardUnsavedChanges()) return
   if (!form.value.id) return
   const src = JSON.parse(JSON.stringify(form.value))
   if (route.query.id) {
@@ -2250,9 +2272,11 @@ const copyTemplate = async () => {
   prevVersionItems.value = []
   await nextTick()
   resizeAllTextareas()
+  markSavedSnapshot()
 }
 
 const startNewTemplate = async () => {
+  if (!confirmDiscardUnsavedChanges()) return
   if (route.query.id) {
     await router.replace({ path: route.path, query: {} })
   }
@@ -2261,6 +2285,7 @@ const startNewTemplate = async () => {
   form.value = createEmptyForm()
   prevVersionItems.value = []
   resizeAllTextareas()
+  markSavedSnapshot()
 }
 
 const toggleTemplateList = () => {
@@ -2463,15 +2488,44 @@ const reviseTemplate = async () => {
 watch(
   () => route.query.id,
   async (nextId) => {
+    if (isRestoringRouteQuery.value) return
     const numericId = Number(nextId || 0)
     if (!numericId || numericId === Number(selectedTemplateId.value || 0)) return
     const exists = templates.value.some((item) => Number(item.id) === numericId)
     if (!exists) return
+    if (!confirmDiscardUnsavedChanges()) {
+      try {
+        isRestoringRouteQuery.value = true
+        if (selectedTemplateId.value) {
+          await router.replace({ path: route.path, query: { ...route.query, id: String(selectedTemplateId.value) } })
+        } else {
+          await router.replace({ path: route.path, query: {} })
+        }
+      } finally {
+        isRestoringRouteQuery.value = false
+      }
+      return
+    }
     await loadTemplateDetail(numericId)
   }
 )
 
+onBeforeRouteLeave((to, from, next) => {
+  if (!confirmDiscardUnsavedChanges()) {
+    next(false)
+    return
+  }
+  next()
+})
+
+const handleBeforeUnload = (event) => {
+  if (!hasUnsavedChanges.value) return
+  event.preventDefault()
+  event.returnValue = ""
+}
+
 onMounted(async () => {
+  window.addEventListener("beforeunload", handleBeforeUnload)
   if (!canView.value) return
   await Promise.all([loadEquipmentOptions(), loadProcessAndLineOptions(), loadUnitOptions()])
   await loadTemplateList()
@@ -2485,6 +2539,11 @@ onMounted(async () => {
     await startNewTemplate()
   }
   await resizeAllTextareas()
+  markSavedSnapshot()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener("beforeunload", handleBeforeUnload)
 })
 </script>
 
@@ -3057,7 +3116,6 @@ button:disabled {
   }
 }
 </style>
-
 
 
 

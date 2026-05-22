@@ -269,6 +269,8 @@
                         <select v-model="item.record_type" class="cell-input">
                           <option value="CHECK">チェック</option>
                           <option value="NUMERIC">数値</option>
+                          <option value="PHOTO_NUMERIC">写真＋数値</option>
+                          <option value="PHOTO">写真のみ</option>
                           <option value="TEXT">文字</option>
                         </select>
                       </td>
@@ -508,11 +510,15 @@
           <div class="se-sheet-panel">
             <div class="se-toolbar">
               <span>{{ blockLabel(sketchEditorBlock) }}</span>
+              <label class="se-snap-toggle">
+                <input v-model="seSnapEnabled" type="checkbox" />
+                スナップ
+              </label>
               <button class="btn-secondary btn-sm" type="button" @click="seZoom = Math.max(0.3, seZoom - 0.1)">縮小</button>
               <span class="se-zoom-label">{{ Math.round(seZoom * 100) }}%</span>
               <button class="btn-secondary btn-sm" type="button" @click="seZoom = Math.min(3, seZoom + 0.1)">拡大</button>
             </div>
-            <div class="se-sheet-scroll">
+            <div class="se-sheet-scroll" ref="seSheetScrollRef" @scroll="onSeMainScroll">
               <div
                 class="se-stage"
                 :style="seStageStyle"
@@ -543,6 +549,14 @@
                   ></span>
                 </div>
               </div>
+            </div>
+            <div
+              v-if="seShowFloatingScroll"
+              class="se-floating-x-scroll"
+              ref="seFloatingScrollRef"
+              @scroll="onSeFloatingScroll"
+            >
+              <div class="se-floating-x-scroll-inner" :style="{ width: `${seFloatingInnerWidth}px` }"></div>
             </div>
           </div>
         </div>
@@ -595,8 +609,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
@@ -717,6 +731,60 @@ const createEmptyForm = () => ({
 })
 
 const form = ref(createEmptyForm())
+const savedPayloadSnapshot = ref('')
+const UNSAVED_CHANGES_MESSAGE = '未保存の編集内容があります。保存せずに移動すると入力内容は失われます。移動しますか？'
+
+const buildComparablePayload = () => ({
+  id: form.value.id || null,
+  product: form.value.product || '',
+  line: form.value.line || '',
+  name: form.value.name || '',
+  document_title: form.value.document_title || '',
+  sheet_name: form.value.sheet_name || '',
+  revision_date: form.value.revision_date || null,
+  revision_notes: form.value.revision_notes || '',
+  effective_from: form.value.effective_from || null,
+  version: Number(form.value.version || 1),
+  is_active: Boolean(form.value.is_active),
+  reviewer_user: form.value.reviewer_user || null,
+  chief_user: form.value.chief_user || null,
+  approver_user: form.value.approver_user || null,
+  process_blocks: (form.value.process_blocks || []).map((b) => ({
+    id: b.id || null,
+    copy_source_block_id: b._copy_source_block_id || null,
+    process: b.process || '',
+    sort_order: Number(b.sort_order || 0),
+    sketch_image_url: b.sketch_image_url || '',
+    source_pdf_url: b.source_pdf_url || '',
+    items: (b.items || []).map((item) => ({
+      id: item.id || null,
+      item_name: item.item_name || '',
+      standard: item.standard || '',
+      frequency: item.frequency || '',
+      method: item.method || '',
+      record_type: item.record_type || 'CHECK',
+      unit: item.unit || '',
+      criteria: item.criteria || '',
+      is_required: Boolean(item.is_required),
+    })),
+    sketch_fields: b.sketch_fields || [],
+  })),
+})
+
+const createPayloadSnapshot = () => JSON.stringify(buildComparablePayload())
+const markSavedSnapshot = () => {
+  savedPayloadSnapshot.value = createPayloadSnapshot()
+}
+const hasUnsavedChanges = computed(() => {
+  if (!editMode.value || !canEdit.value) return false
+  if (saving.value || actionLoading.value || pdfLoading.value) return false
+  return createPayloadSnapshot() !== savedPayloadSnapshot.value
+})
+const confirmDiscardUnsavedChanges = () => {
+  if (!hasUnsavedChanges.value) return true
+  return window.confirm(UNSAVED_CHANGES_MESSAGE)
+}
+
 const canEdit = computed(() =>
   canAccessQuality('quality.integrated_checksheet_template', 'edit', [
     'quality.product_checksheet_template',
@@ -873,9 +941,12 @@ const loadTemplateList = async () => {
 
 // --- テンプレート選択 ---
 const selectTemplate = async (id) => {
+  const numericId = Number(id || 0)
+  if (!numericId || numericId === Number(selectedTemplateId.value || 0)) return
+  if (!confirmDiscardUnsavedChanges()) return
   selectedTemplateId.value = id
   try {
-    const res = await api.integratedChecksheets.getTemplate(id)
+    const res = await api.integratedChecksheets.getTemplate(numericId)
     const data = res.data
     form.value = {
       id: data.id,
@@ -936,6 +1007,7 @@ const selectTemplate = async (id) => {
       productSearch.value = ''
     }
     editMode.value = true
+    markSavedSnapshot()
   } catch (e) {
     console.error('テンプレート詳細取得失敗:', e)
     alert('テンプレート詳細の取得に失敗しました。')
@@ -944,15 +1016,18 @@ const selectTemplate = async (id) => {
 
 // --- 新規作成 ---
 const startNewTemplate = () => {
+  if (!confirmDiscardUnsavedChanges()) return
   selectedTemplateId.value = null
   form.value = createEmptyForm()
   productSearch.value = ''
   selectedProductLabel.value = ''
   productSuggestions.value = []
   editMode.value = true
+  markSavedSnapshot()
 }
 
 const copyTemplate = () => {
+  if (!confirmDiscardUnsavedChanges()) return
   if (!form.value.id) return
   const src = form.value
   form.value = {
@@ -991,15 +1066,18 @@ const copyTemplate = () => {
   productSearch.value = ''
   selectedProductLabel.value = ''
   editMode.value = true
+  markSavedSnapshot()
 }
 
 const cancelEdit = () => {
+  if (!confirmDiscardUnsavedChanges()) return
   editMode.value = false
   selectedTemplateId.value = null
   form.value = createEmptyForm()
   productSearch.value = ''
   selectedProductLabel.value = ''
   productSuggestions.value = []
+  markSavedSnapshot()
 }
 
 // --- 工程ブロック色 ---
@@ -1145,6 +1223,14 @@ const seImgH = ref(600)
 const seDragState = ref(null)
 const seResizeState = ref(null)
 const seNewField = ref({ field_type: 'checkbox', label: 'チェック', key: '', required: false })
+const SNAP_GRID_SIZE = 8
+const SNAP_GUIDE_THRESHOLD = 6
+const seSnapEnabled = ref(true)
+const seSheetScrollRef = ref(null)
+const seFloatingScrollRef = ref(null)
+const seFloatingInnerWidth = ref(0)
+const seShowFloatingScroll = ref(false)
+let seSyncingScroll = false
 
 const openSketchEditor = (block) => {
   const url = block?.sketch_image_url
@@ -1169,6 +1255,8 @@ const closeSketchEditor = () => {
   sketchEditorBlock.value = null
   sketchEditorFields.value = []
   selectedFieldIdx.value = null
+  seShowFloatingScroll.value = false
+  seFloatingInnerWidth.value = 0
 }
 
 const applySketchEditor = () => {
@@ -1212,6 +1300,90 @@ const seDefaultSize = (type) => {
   return { width: 150, height: 34 }
 }
 
+const snapToGrid = (value) => {
+  return Math.round(Number(value || 0) / SNAP_GRID_SIZE) * SNAP_GRID_SIZE
+}
+
+const collectSnapCandidates = (targetField, axis) => {
+  const candidates = axis === 'x' ? [0, seImgW.value / 2, seImgW.value] : [0, seImgH.value / 2, seImgH.value]
+  sketchEditorFields.value.forEach((field) => {
+    if (field === targetField) return
+    const start = Number(axis === 'x' ? field.x : field.y) || 0
+    const size = Number(axis === 'x' ? field.width : field.height) || 0
+    candidates.push(start, start + (size / 2), start + size)
+  })
+  return candidates
+}
+
+const snapValueToCandidates = (value, size, candidates) => {
+  let snapped = value
+  let bestDistance = SNAP_GUIDE_THRESHOLD + 1
+  candidates.forEach((line) => {
+    const startDistance = Math.abs(value - line)
+    if (startDistance < bestDistance) {
+      bestDistance = startDistance
+      snapped = line
+    }
+    const centerDistance = Math.abs((value + (size / 2)) - line)
+    if (centerDistance < bestDistance) {
+      bestDistance = centerDistance
+      snapped = line - (size / 2)
+    }
+    const endDistance = Math.abs((value + size) - line)
+    if (endDistance < bestDistance) {
+      bestDistance = endDistance
+      snapped = line - size
+    }
+  })
+  return Math.round(snapped)
+}
+
+const applySnapPosition = (field, x, y) => {
+  const width = Number(field.width || 0)
+  const height = Number(field.height || 0)
+  const maxX = Math.max(0, seImgW.value - width)
+  const maxY = Math.max(0, seImgH.value - height)
+  if (!seSnapEnabled.value) {
+    return {
+      x: snapToGrid(Math.max(0, Math.min(x, maxX))),
+      y: snapToGrid(Math.max(0, Math.min(y, maxY))),
+    }
+  }
+  const snappedX = snapValueToCandidates(x, width, collectSnapCandidates(field, 'x'))
+  const snappedY = snapValueToCandidates(y, height, collectSnapCandidates(field, 'y'))
+  return {
+    x: Math.max(0, Math.min(snapToGrid(snappedX), maxX)),
+    y: Math.max(0, Math.min(snapToGrid(snappedY), maxY)),
+  }
+}
+
+const updateSeFloatingScroll = () => {
+  const main = seSheetScrollRef.value
+  const floating = seFloatingScrollRef.value
+  if (!main) return
+  seFloatingInnerWidth.value = Math.max(main.scrollWidth, main.clientWidth)
+  seShowFloatingScroll.value = main.scrollWidth > main.clientWidth + 1
+  if (floating) floating.scrollLeft = main.scrollLeft
+}
+
+const onSeMainScroll = () => {
+  const main = seSheetScrollRef.value
+  const floating = seFloatingScrollRef.value
+  if (!main || !floating || seSyncingScroll) return
+  seSyncingScroll = true
+  floating.scrollLeft = main.scrollLeft
+  seSyncingScroll = false
+}
+
+const onSeFloatingScroll = () => {
+  const main = seSheetScrollRef.value
+  const floating = seFloatingScrollRef.value
+  if (!main || !floating || seSyncingScroll) return
+  seSyncingScroll = true
+  main.scrollLeft = floating.scrollLeft
+  seSyncingScroll = false
+}
+
 const seUniqueKey = (base) => {
   const stem = String(base || `field_${sketchEditorFields.value.length + 1}`).trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_') || `field_${sketchEditorFields.value.length + 1}`
   const taken = new Set(sketchEditorFields.value.map((f) => f.key))
@@ -1223,15 +1395,15 @@ const seUniqueKey = (base) => {
 
 const handleStageClick = (e) => {
   const rect = e.currentTarget.getBoundingClientRect()
-  const x = Math.round((e.clientX - rect.left) / seZoom.value)
-  const y = Math.round((e.clientY - rect.top) / seZoom.value)
+  const x = snapToGrid((e.clientX - rect.left) / seZoom.value)
+  const y = snapToGrid((e.clientY - rect.top) / seZoom.value)
   const size = seDefaultSize(seNewField.value.field_type)
   const field = {
     key: seUniqueKey(seNewField.value.key || seNewField.value.label),
     label: seNewField.value.label || '項目',
     field_type: seNewField.value.field_type,
-    x: Math.max(0, Math.min(x, seImgW.value - size.width)),
-    y: Math.max(0, Math.min(y, seImgH.value - size.height)),
+    x: snapToGrid(Math.max(0, Math.min(x, seImgW.value - size.width))),
+    y: snapToGrid(Math.max(0, Math.min(y, seImgH.value - size.height))),
     width: size.width,
     height: size.height,
     required: Boolean(seNewField.value.required),
@@ -1275,14 +1447,17 @@ const startResizeField = (e, field) => {
 const seOnPointerMove = (e) => {
   if (seResizeState.value) {
     const s = seResizeState.value
-    s.field.width = Math.max(6, Math.round(s.originWidth + (e.clientX - s.startX) / seZoom.value))
-    s.field.height = Math.max(6, Math.round(s.originHeight + (e.clientY - s.startY) / seZoom.value))
+    s.field.width = Math.max(SNAP_GRID_SIZE, snapToGrid(s.originWidth + (e.clientX - s.startX) / seZoom.value))
+    s.field.height = Math.max(SNAP_GRID_SIZE, snapToGrid(s.originHeight + (e.clientY - s.startY) / seZoom.value))
     return
   }
   if (!seDragState.value) return
   const s = seDragState.value
-  s.field.x = Math.max(0, Math.round(s.originX + (e.clientX - s.startX) / seZoom.value))
-  s.field.y = Math.max(0, Math.round(s.originY + (e.clientY - s.startY) / seZoom.value))
+  const rawX = s.originX + (e.clientX - s.startX) / seZoom.value
+  const rawY = s.originY + (e.clientY - s.startY) / seZoom.value
+  const snapped = applySnapPosition(s.field, rawX, rawY)
+  s.field.x = snapped.x
+  s.field.y = snapped.y
 }
 
 const seStopAction = () => {
@@ -1576,8 +1751,24 @@ const notImplementedAction = (label) => {
 
 // --- 初期化 ---
 const route = useRoute()
+const router = useRouter()
+
+onBeforeRouteLeave((to, from, next) => {
+  if (!confirmDiscardUnsavedChanges()) {
+    next(false)
+    return
+  }
+  next()
+})
+
+const handleBeforeUnload = (event) => {
+  if (!hasUnsavedChanges.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
 
 onMounted(async () => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
   if (!canView.value) return
   await loadMasters()
   await loadTemplateList()
@@ -1588,7 +1779,30 @@ onMounted(async () => {
       await selectTemplate(id)
     }
   }
+  markSavedSnapshot()
 })
+
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+  window.removeEventListener('resize', updateSeFloatingScroll)
+})
+
+watch(
+  () => route.query.id,
+  async (nextId) => {
+    const numericId = Number(nextId || 0)
+    if (!numericId || numericId === Number(selectedTemplateId.value || 0)) return
+    if (!templates.value.some((t) => Number(t.id) === numericId)) return
+    if (!confirmDiscardUnsavedChanges()) {
+      await router.replace({
+        path: route.path,
+        query: { ...route.query, id: selectedTemplateId.value ? String(selectedTemplateId.value) : undefined },
+      })
+      return
+    }
+    await selectTemplate(numericId)
+  }
+)
 
 watch(
   () => form.value.line,
@@ -1601,6 +1815,27 @@ watch(
       )
       if (!valid) block.process = ''
     })
+  }
+)
+
+watch(
+  () => [sketchEditorBlock.value, seZoom.value, seImgW.value, seImgH.value, sketchEditorFields.value.length],
+  async () => {
+    if (!sketchEditorBlock.value) return
+    await nextTick()
+    updateSeFloatingScroll()
+  }
+)
+
+watch(
+  () => sketchEditorBlock.value,
+  (opened) => {
+    if (opened) {
+      window.addEventListener('resize', updateSeFloatingScroll)
+      nextTick(updateSeFloatingScroll)
+      return
+    }
+    window.removeEventListener('resize', updateSeFloatingScroll)
   }
 )
 </script>
@@ -2176,13 +2411,18 @@ watch(
   z-index: 1000;
   display: flex;
   justify-content: center;
-  align-items: stretch;
+  align-items: flex-start;
   padding: 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  overflow: auto;
 }
 .sketch-editor-modal {
   background: #fff;
   border-radius: 8px;
   width: 100%;
+  height: calc(100vh - 32px - env(safe-area-inset-bottom));
+  max-height: calc(100vh - 32px - env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
@@ -2231,8 +2471,26 @@ watch(
 /* 右: 台紙キャンバス */
 .se-sheet-panel { display: flex; flex-direction: column; min-height: 0; }
 .se-toolbar { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid #edf1f5; flex-shrink: 0; font-size: 13px; }
+.se-snap-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #374151; }
 .se-zoom-label { font-size: 12px; color: #6b7280; min-width: 36px; text-align: center; }
-.se-sheet-scroll { flex: 1; overflow: auto; background: #f8fafc; border: 1px solid #edf1f5; }
+.se-sheet-scroll {
+  flex: 1;
+  overflow: auto;
+  background: #f8fafc;
+  border: 1px solid #edf1f5;
+  padding-bottom: 14px;
+  box-sizing: border-box;
+}
+.se-floating-x-scroll {
+  height: 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-top: 1px solid #edf1f5;
+  background: #fff;
+}
+.se-floating-x-scroll-inner {
+  height: 1px;
+}
 .se-stage { position: relative; cursor: crosshair; }
 .se-sheet-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 

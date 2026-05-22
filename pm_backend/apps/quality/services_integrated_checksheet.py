@@ -243,7 +243,13 @@ def _draw_process_page(template, block, block_index, total_blocks):
             cx += col_w
         y += row_h
 
-        record_type_labels = {"CHECK": "チェック", "NUMERIC": "数値", "TEXT": "文字"}
+        record_type_labels = {
+            "CHECK": "チェック",
+            "NUMERIC": "数値",
+            "PHOTO_NUMERIC": "写真＋数値",
+            "PHOTO": "写真のみ",
+            "TEXT": "文字",
+        }
 
         for idx, item in enumerate(items):
             if y + row_h > table_bottom:
