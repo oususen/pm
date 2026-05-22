@@ -54,6 +54,7 @@ class IntegratedChecksheetTemplate(models.Model):
     chief_reviewed_at = models.DateTimeField(null=True, blank=True, verbose_name="係長確認日時")
     approved_at = models.DateTimeField(null=True, blank=True, verbose_name="部長承認日時")
     rejection_comment = models.TextField(blank=True, default="", verbose_name="差戻しコメント")
+    submitted_items_snapshot = models.JSONField(null=True, blank=True, verbose_name="提出時点検項目スナップショット")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,
         on_delete=models.SET_NULL, related_name="+", verbose_name="作成者",

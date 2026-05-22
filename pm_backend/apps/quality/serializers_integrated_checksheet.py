@@ -121,6 +121,7 @@ class IntegratedChecksheetTemplateSerializer(serializers.ModelSerializer):
             "chief_user", "chief_user_name",
             "approver_user", "approver_user_name",
             "rejection_comment",
+            "submitted_items_snapshot",
             "created_by", "created_by_name",
             "reviewed_at", "chief_reviewed_at", "approved_at",
             "process_blocks", "workflow_logs", "created_at", "updated_at",

@@ -84,6 +84,35 @@ def _skip_all_ics_pending_tasks(template):
     ).update(status=IntegratedChecksheetTask.STATUS_SKIPPED, done_at=datetime.now())
 
 
+def _build_ics_items_snapshot(template):
+    """差戻し後の再提出比較で使う、工程付きチェック項目スナップショットを作る。"""
+    snapshot = []
+    blocks = (
+        template.process_blocks
+        .select_related("process")
+        .prefetch_related("items")
+        .order_by("sort_order", "id")
+    )
+    for block in blocks:
+        for item in block.items.all().order_by("sort_order", "id"):
+            snapshot.append({
+                "id": item.id,
+                "process_block_id": block.id,
+                "process_id": block.process_id,
+                "process_sort_order": block.sort_order,
+                "sort_order": item.sort_order,
+                "item_name": item.item_name or "",
+                "standard": item.standard or "",
+                "frequency": item.frequency or "",
+                "method": item.method or "",
+                "record_type": item.record_type or IntegratedChecksheetItem.RECORD_CHECK,
+                "unit": item.unit or "",
+                "criteria": item.criteria or "",
+                "is_required": bool(item.is_required),
+            })
+    return snapshot
+
+
 def _role_rank(role):
     return {"worker": 1, "supervisor": 2, "chief": 3, "manager": 4, "admin": 5}.get(str(role or "").lower(), 0)
 
@@ -263,12 +292,18 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
             )
         _skip_all_ics_pending_tasks(template)
         old_status = template.status
+        # 初回提出時のみスナップショット未設定なら保存（差戻し再提出時は reject 時点基準を維持）
+        if not template.submitted_items_snapshot:
+            template.submitted_items_snapshot = _build_ics_items_snapshot(template)
         template.status = IntegratedChecksheetTemplate.STATUS_SUPERVISOR_PENDING
         template.rejection_comment = ""
         template.reviewed_at = None
         template.chief_reviewed_at = None
         template.approved_at = None
-        template.save(update_fields=["status", "rejection_comment", "reviewed_at", "chief_reviewed_at", "approved_at", "updated_at"])
+        template.save(update_fields=[
+            "status", "rejection_comment", "reviewed_at", "chief_reviewed_at",
+            "approved_at", "submitted_items_snapshot", "updated_at",
+        ])
         _create_ics_task(template, IntegratedChecksheetTask.TASK_SUPERVISOR_REVIEW, template.reviewer_user)
         parts = []
         if template.reviewer_user:
@@ -402,9 +437,11 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
         comment = str(request.data.get("comment") or "").strip()
         old_status = template.status
         _skip_all_ics_pending_tasks(template)
+        # 差戻し時点の項目を次回再提出の比較基準として保存する
+        template.submitted_items_snapshot = _build_ics_items_snapshot(template)
         template.status = IntegratedChecksheetTemplate.STATUS_REJECTED
         template.rejection_comment = comment
-        template.save(update_fields=["status", "rejection_comment", "updated_at"])
+        template.save(update_fields=["status", "rejection_comment", "submitted_items_snapshot", "updated_at"])
         if template.created_by_id:
             _create_ics_task(template, IntegratedChecksheetTask.TASK_CREATOR_FIX, template.created_by)
         WL = IntegratedChecksheetWorkflowLog

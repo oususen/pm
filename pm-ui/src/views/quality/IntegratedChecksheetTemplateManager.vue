@@ -90,6 +90,11 @@
           </div>
 
           <!-- 基本情報 -->
+          <div v-if="form.status === 'REJECTED' && form.rejection_comment" class="rejection-banner">
+            差戻しコメント（差戻し者: {{ rejectedByName || '-' }}）: {{ form.rejection_comment }}
+          </div>
+
+          <fieldset class="edit-fieldset" :disabled="!canEditContent">
           <div class="form-grid">
             <label>
               <span class="field-inline-label">ライン <span class="required-mark">*</span></span>
@@ -262,13 +267,21 @@
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="(item, iIdx) in block.items" :key="item._key">
+                    <tr
+                      v-for="(item, iIdx) in block.items"
+                      :key="item._key"
+                      :class="{ 'diff-new': itemDiffStatus(block, item) === 'new', 'diff-changed': itemDiffStatus(block, item) === 'changed' }"
+                    >
                       <td class="no-cell">
                         <span class="no-label">{{ iIdx + 1 }}</span>
                         <button class="btn-no-move" :disabled="iIdx === 0" @click="moveItemUp(block, iIdx)">↑</button>
                         <button class="btn-no-move" :disabled="iIdx === block.items.length - 1" @click="moveItemDown(block, iIdx)">↓</button>
                       </td>
-                      <td><input v-model.trim="item.item_name" class="cell-input" /></td>
+                      <td>
+                        <span v-if="itemDiffStatus(block, item) === 'new'" class="diff-badge diff-badge-new">新規</span>
+                        <span v-else-if="itemDiffStatus(block, item) === 'changed'" class="diff-badge diff-badge-changed">{{ diffLabel }}</span>
+                        <input v-model.trim="item.item_name" class="cell-input" />
+                      </td>
                       <td><input v-model.trim="item.standard" class="cell-input" /></td>
                       <td><input v-model.trim="item.frequency" class="cell-input cell-sm" /></td>
                       <td><input v-model.trim="item.method" class="cell-input cell-sm" /></td>
@@ -289,6 +302,25 @@
                       <td class="center">
                         <button class="btn-icon btn-icon-danger" title="削除" @click="removeItem(block, iIdx)">&#10005;</button>
                       </td>
+                    </tr>
+                    <tr
+                      v-for="deleted in deletedItemsByBlock(block)"
+                      :key="`deleted-${block._key}-${deleted.id || deleted.item_name || deleted.sort_order}`"
+                      class="diff-deleted"
+                    >
+                      <td class="no-cell">-</td>
+                      <td>
+                        <span class="diff-badge diff-badge-deleted">削除</span>
+                        {{ deleted.item_name || '(名称なし)' }}
+                      </td>
+                      <td>{{ deleted.standard || '-' }}</td>
+                      <td>{{ deleted.frequency || '-' }}</td>
+                      <td>{{ deleted.method || '-' }}</td>
+                      <td>{{ recordTypeLabel(deleted.record_type) }}</td>
+                      <td>{{ deleted.unit || '-' }}</td>
+                      <td>{{ deleted.criteria || '-' }}</td>
+                      <td class="center">{{ deleted.is_required ? '✔' : '-' }}</td>
+                      <td></td>
                     </tr>
                   </tbody>
                 </table>
@@ -372,6 +404,7 @@
               <div v-else class="no-data">台紙フィールドはまだありません。</div>
             </div>
           </div>
+          </fieldset>
 
           <!-- アクションボタン -->
           <div class="edit-actions">
@@ -389,10 +422,6 @@
             <button v-if="canDelete" class="btn-reject" @click="deleteTemplate" :disabled="saving || actionLoading">削除</button>
             <button class="btn-secondary" @click="cancelEdit">キャンセル</button>
           </div>
-          <div v-if="form.status === 'REJECTED' && form.rejection_comment" class="rejection-banner">
-            差戻しコメント: {{ form.rejection_comment }}
-          </div>
-
           <div v-if="form.id && form.workflow_logs && form.workflow_logs.length" class="item-section">
             <h4>ワークフロー履歴</h4>
             <div class="table-wrap">
@@ -771,6 +800,7 @@ const createEmptyForm = () => ({
   chief_reviewed_at: null,
   approved_at: null,
   workflow_logs: [],
+  submitted_items_snapshot: null,
   process_blocks: [],
 })
 
@@ -802,6 +832,7 @@ const buildComparablePayload = () => ({
     source_pdf_url: b.source_pdf_url || '',
     items: (b.items || []).map((item) => ({
       id: item.id || null,
+      sort_order: Number(item.sort_order || 0),
       item_name: item.item_name || '',
       standard: item.standard || '',
       frequency: item.frequency || '',
@@ -835,9 +866,95 @@ const canEdit = computed(() =>
     'quality',
   ])
 )
+const canEditContent = computed(() =>
+  canEdit.value && ['DRAFT', 'REJECTED'].includes(normalizedFormStatus.value)
+)
 const currentUserId = computed(() => Number(authState.user?.id || 0))
 const normalizeStatus = (status) => String(status || '').trim().toUpperCase()
 const normalizedFormStatus = computed(() => normalizeStatus(form.value.status) || 'DRAFT')
+const DIFF_FIELDS = ['sort_order', 'item_name', 'standard', 'frequency', 'method', 'record_type', 'unit', 'criteria', 'is_required']
+const PENDING_STATUSES = ['SUPERVISOR_PENDING', 'CHIEF_PENDING', 'MANAGER_PENDING']
+const isSnapshotDiff = computed(() => {
+  const snapshot = form.value.submitted_items_snapshot
+  if (!Array.isArray(snapshot) || !snapshot.length) return false
+  return PENDING_STATUSES.includes(normalizedFormStatus.value)
+})
+const diffBaseItems = computed(() => (isSnapshotDiff.value ? form.value.submitted_items_snapshot : []))
+const showDiff = computed(() => diffBaseItems.value.length > 0)
+const diffLabel = computed(() => (isSnapshotDiff.value ? '修正' : '改訂'))
+
+const norm = (v) => String(v ?? '').trim()
+
+const blockDiffCache = computed(() => {
+  const result = {}
+  const blocks = Array.isArray(form.value.process_blocks) ? form.value.process_blocks : []
+  for (const block of blocks) {
+    const processId = Number(block?.process || 0)
+    const prevList = diffBaseItems.value.filter((prev) => {
+      const prevProcess = Number(prev?.process_id || 0)
+      if (processId > 0 && prevProcess > 0) return prevProcess === processId
+      return true
+    })
+    const currentList = Array.isArray(block?.items) ? block.items : []
+    const usedPrev = new Set()
+    const curToPrev = new Map()
+
+    const tryMatch = (predicate) => {
+      currentList.forEach((cur) => {
+        if (curToPrev.has(cur._key)) return
+        const idx = prevList.findIndex((prev, pIdx) => !usedPrev.has(pIdx) && predicate(cur, prev))
+        if (idx >= 0) {
+          usedPrev.add(idx)
+          curToPrev.set(cur._key, prevList[idx])
+        }
+      })
+    }
+
+    // 1) 旧ID一致
+    tryMatch((cur, prev) => {
+      const curId = Number(cur?.id || 0)
+      const prevId = Number(prev?.id || 0)
+      return curId > 0 && prevId > 0 && curId === prevId
+    })
+    // 2) 項目名一致
+    tryMatch((cur, prev) => {
+      const curName = norm(cur?.item_name)
+      const prevName = norm(prev?.item_name)
+      return curName && prevName && curName === prevName
+    })
+
+    const deleted = prevList.filter((_, idx) => !usedPrev.has(idx))
+    result[block._key] = { curToPrev, deleted }
+  }
+  return result
+})
+
+const findPrevItem = (block, item) => blockDiffCache.value?.[block?._key]?.curToPrev?.get(item?._key) || null
+
+const itemDiffStatus = (block, item) => {
+  if (!showDiff.value) return null
+  const prev = findPrevItem(block, item)
+  if (!prev) return 'new'
+  for (const field of DIFF_FIELDS) {
+    if (String(item[field] ?? '') !== String(prev[field] ?? '')) return 'changed'
+  }
+  return null
+}
+
+const deletedItemsByBlock = (block) => {
+  if (!showDiff.value) return []
+  return blockDiffCache.value?.[block?._key]?.deleted || []
+}
+
+const recordTypeLabel = (recordType) => {
+  const v = String(recordType || '')
+  if (v === 'CHECK') return 'チェック'
+  if (v === 'NUMERIC') return '数値'
+  if (v === 'PHOTO_NUMERIC') return '写真＋数値'
+  if (v === 'PHOTO') return '写真のみ'
+  if (v === 'TEXT') return '文字'
+  return v || '-'
+}
 
 // --- ユーティリティ ---
 const formatDateTime = (value) => {
@@ -863,6 +980,16 @@ const STATUS_LABELS_MAP = {
   APPROVED: '承認済み', REJECTED: '差戻し',
 }
 const actionLabel = (action) => ACTION_LABELS[action] || action
+const rejectedByName = computed(() => {
+  const logs = Array.isArray(form.value.workflow_logs) ? form.value.workflow_logs : []
+  for (let i = logs.length - 1; i >= 0; i -= 1) {
+    const log = logs[i]
+    if (String(log?.action || '').toUpperCase() === 'REJECTED') {
+      return log?.actor_name || '-'
+    }
+  }
+  return '-'
+})
 const transitionLabel = (from, to) => {
   const f = STATUS_LABELS_MAP[from] || from || ''
   const t = STATUS_LABELS_MAP[to] || to || ''
@@ -1018,6 +1145,7 @@ const selectTemplate = async (id) => {
       chief_reviewed_at: data.chief_reviewed_at || null,
       approved_at: data.approved_at || null,
       workflow_logs: data.workflow_logs || [],
+      submitted_items_snapshot: Array.isArray(data.submitted_items_snapshot) ? data.submitted_items_snapshot : null,
       process_blocks: (data.process_blocks || []).map((b) => ({
         id: b.id,
         process: b.process || '',
@@ -1028,8 +1156,9 @@ const selectTemplate = async (id) => {
         _uploadType: null,
         _expanded: true,
         _key: nextKey(),
-        items: (b.items || []).map((item) => ({
+        items: (b.items || []).map((item, idx) => ({
           id: item.id,
+          sort_order: Number(item.sort_order || (idx + 1)),
           item_name: item.item_name || '',
           standard: item.standard || '',
           frequency: item.frequency || '',
@@ -1082,6 +1211,7 @@ const copyTemplate = () => {
     version: 1,
     is_active: true,
     rejection_comment: '',
+    submitted_items_snapshot: null,
     reviewed_at: null,
     chief_reviewed_at: null,
     approved_at: null,
@@ -1181,9 +1311,17 @@ const toggleBlock = (idx) => {
 }
 
 // --- チェック項目操作 ---
+const resequenceBlockItems = (block) => {
+  if (!Array.isArray(block?.items)) return
+  block.items.forEach((item, idx) => {
+    item.sort_order = idx + 1
+  })
+}
+
 const addItem = (block) => {
   block.items.push({
     id: null,
+    sort_order: (block.items?.length || 0) + 1,
     item_name: '',
     standard: '',
     frequency: '',
@@ -1194,6 +1332,7 @@ const addItem = (block) => {
     is_required: false,
     _key: nextKey(),
   })
+  resequenceBlockItems(block)
 }
 
 const blockLabelFromProcessId = (processId) => {
@@ -1232,6 +1371,7 @@ const confirmCopyItems = () => {
   }
   const copiedItems = sourceItems.map((item) => ({
     id: null,
+    sort_order: 0,
     item_name: item.item_name || '',
     standard: item.standard || '',
     frequency: item.frequency || '',
@@ -1243,11 +1383,13 @@ const confirmCopyItems = () => {
     _key: nextKey(),
   }))
   targetBlock.items.push(...copiedItems)
+  resequenceBlockItems(targetBlock)
   cancelCopyItemsDialog()
 }
 
 const removeItem = (block, idx) => {
   block.items.splice(idx, 1)
+  resequenceBlockItems(block)
 }
 
 const moveItemUp = (block, fromIdx) => {
@@ -1256,6 +1398,7 @@ const moveItemUp = (block, fromIdx) => {
   if (fromIdx <= 0) return
   const moved = list.splice(fromIdx, 1)[0]
   list.splice(fromIdx - 1, 0, moved)
+  resequenceBlockItems(block)
 }
 
 const moveItemDown = (block, fromIdx) => {
@@ -1264,6 +1407,7 @@ const moveItemDown = (block, fromIdx) => {
   if (fromIdx >= list.length - 1) return
   const moved = list.splice(fromIdx, 1)[0]
   list.splice(fromIdx + 1, 0, moved)
+  resequenceBlockItems(block)
 }
 
 const addSketchField = (block) => {
@@ -1640,6 +1784,7 @@ const persistCurrentTemplate = async () => {
     sort_order: b.sort_order,
     items: b.items.map((item) => ({
       id: item.id || undefined,
+      sort_order: Number(item.sort_order || 0),
       item_name: item.item_name,
       standard: item.standard,
       frequency: item.frequency,
@@ -2357,6 +2502,40 @@ watch(copyItemsSourceTemplateId, async (templateId) => {
 .center {
   text-align: center;
 }
+.diff-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+.diff-badge-new {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #86efac;
+}
+.diff-badge-changed {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+.diff-badge-deleted {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+tr.diff-new td {
+  background: #f0fdf4;
+}
+tr.diff-changed td {
+  background: #fffbeb;
+}
+tr.diff-deleted td {
+  background: #fef2f2;
+  color: #991b1b;
+}
 .no-cell {
   white-space: nowrap;
   text-align: center;
@@ -2398,6 +2577,12 @@ watch(copyItemsSourceTemplateId, async (templateId) => {
   border-radius: 6px;
   color: #991b1b;
   font-size: 13px;
+}
+.edit-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
 }
 
 /* ボタン共通 */
