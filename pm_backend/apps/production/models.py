@@ -26,6 +26,7 @@ from .models_laser_actual import LaserActual, LaserActualDetail
 from .models_record_confirmation import ProductionRecordConfirmation
 from .models_production import ProcessActual, ProductionOrder, StockAllocation
 from .models_camera_actual import CameraCountEvent, ProductionResultDaily
+from .models_line_product_display_order import LineProductDisplayOrder
 
 
 class LineDemand(models.Model):

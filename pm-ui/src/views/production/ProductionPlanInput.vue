@@ -158,6 +158,7 @@
           :disabled="processing || !rows.length || !selectedLine"
         >過去から再計算</button>
         <button class="btn" @click="savePlan" :disabled="processing || !rows.length || !selectedLine">保存</button>
+        <button class="btn" @click="openProductOrderDialog" :disabled="processing || !selectedLine || !rows.length">表示順</button>
         <button
           v-if="canShowFloorSpotAutoPlanButton"
           class="btn"
@@ -614,6 +615,41 @@
       </div>
     </div>
 
+    <div v-if="showProductOrderDialog" class="modal-overlay" @click.self="showProductOrderDialog = false">
+      <div class="modal-content" style="width: 480px; max-height: 80vh; overflow-y: auto;">
+        <h2>製品表示順設定（{{ selectedLineLabel }}）</h2>
+        <p style="font-size: 12px; color: #666; margin: 0 0 8px;">
+          上下ボタンで表示順を変更し、保存してください。
+        </p>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+          <thead>
+            <tr>
+              <th style="width: 36px; padding: 4px 6px; border-bottom: 1px solid #d7dfe8; background: #f5f6fa; text-align: left;">#</th>
+              <th style="padding: 4px 6px; border-bottom: 1px solid #d7dfe8; background: #f5f6fa; text-align: left;">品番</th>
+              <th style="padding: 4px 6px; border-bottom: 1px solid #d7dfe8; background: #f5f6fa; text-align: left;">品名</th>
+              <th style="width: 70px; padding: 4px 6px; border-bottom: 1px solid #d7dfe8; background: #f5f6fa; text-align: center;">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(item, idx) in productOrderItems" :key="item.product_code"
+              :style="{ background: productOrderActiveCode === item.product_code ? '#dbeafe' : '' }">
+              <td style="padding: 4px 6px; border-bottom: 1px solid #e5e5e5;">{{ idx + 1 }}</td>
+              <td style="padding: 4px 6px; border-bottom: 1px solid #e5e5e5;">{{ item.product_code }}</td>
+              <td style="padding: 4px 6px; border-bottom: 1px solid #e5e5e5;">{{ item.product_name }}</td>
+              <td style="padding: 4px 6px; border-bottom: 1px solid #e5e5e5; text-align: center;">
+                <button class="mini-btn" @click="moveProductOrder(idx, -1)" :disabled="idx === 0">&uarr;</button>
+                <button class="mini-btn" @click="moveProductOrder(idx, 1)" :disabled="idx === productOrderItems.length - 1">&darr;</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="modal-actions">
+          <button class="btn" @click="showProductOrderDialog = false">キャンセル</button>
+          <button class="btn primary" @click="saveProductOrder" :disabled="productOrderSaving">保存</button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="showExportDialog" class="modal-overlay" @click.self="closeExportDialog">
       <div class="modal-content export-modal">
         <h2>出力形式を選択してください</h2>
@@ -998,6 +1034,11 @@ const showChangeReasonDialog = ref(false)
 const showBulkActualDialog = ref(false)
 const bulkActualStartDate = ref('')
 const bulkActualEndDate = ref('')
+const showProductOrderDialog = ref(false)
+const productOrderItems = ref([])
+const productOrderSaving = ref(false)
+const productOrderActiveCode = ref('')
+const productOrderCache = ref(new Map())
 const lineSettingsMessage = ref('')
 
 const lines = ref([])
@@ -1917,6 +1958,24 @@ const getFloorShippingOrder = () => (
 
 const sortRowsForLine = (inputRows) => {
   const line = selectedLineObj.value
+  const ctx = getDisplayOrderContext()
+  const cacheKey = line ? `${line.id}__${ctx}` : ''
+
+  if (cacheKey && productOrderCache.value.has(cacheKey)) {
+    const orderList = productOrderCache.value.get(cacheKey)
+    const orderMap = new Map(orderList.map((code, idx) => [code, idx]))
+    const fallback = orderList.length + 1
+    return [...inputRows].sort((a, b) => {
+      const codeA = getRowProductCode(a)
+      const codeB = getRowProductCode(b)
+      const priA = orderMap.has(codeA) ? orderMap.get(codeA) : fallback
+      const priB = orderMap.has(codeB) ? orderMap.get(codeB) : fallback
+      if (priA !== priB) return priA - priB
+      return codeA.localeCompare(codeB)
+    })
+  }
+
+  // フォールバック: ハードコード配列
   if (activePlanTab.value === 'floor-shipping') {
     const orderList = getFloorShippingOrder()
     const orderMap = new Map(orderList.map((code, idx) => [code, idx]))
@@ -2756,6 +2815,81 @@ const confirmChangeReason = () => {
   showChangeReasonDialog.value = false
 }
 
+const getDisplayOrderContext = () => {
+  if (activePlanTab.value === 'floor-shipping') return 'floor-shipping'
+  return 'default'
+}
+
+const openProductOrderDialog = async () => {
+  if (!selectedLine.value) return
+  const ctx = getDisplayOrderContext()
+  const seen = new Set()
+  const items = []
+  for (const row of rows.value) {
+    const code = getRowProductCode(row)
+    if (!code || seen.has(code)) continue
+    seen.add(code)
+    items.push({
+      product_code: code,
+      product_name: row.product_name || getProductName(row.product_id) || '',
+    })
+  }
+  try {
+    const res = await api.lineProductDisplayOrders.getOrders({
+      line: selectedLine.value,
+      context: ctx,
+    })
+    const saved = res.data || []
+    if (saved.length > 0) {
+      const orderMap = new Map(saved.map((s) => [s.product_code, s.display_order]))
+      items.sort((a, b) => {
+        const oa = orderMap.has(a.product_code) ? orderMap.get(a.product_code) : 99999
+        const ob = orderMap.has(b.product_code) ? orderMap.get(b.product_code) : 99999
+        return oa - ob
+      })
+    }
+  } catch (e) {
+    console.error('表示順取得エラー', e)
+  }
+  productOrderItems.value = items
+  productOrderActiveCode.value = ''
+  showProductOrderDialog.value = true
+}
+
+const moveProductOrder = (idx, direction) => {
+  const newIdx = idx + direction
+  if (newIdx < 0 || newIdx >= productOrderItems.value.length) return
+  const arr = [...productOrderItems.value]
+  productOrderActiveCode.value = arr[idx].product_code
+  ;[arr[idx], arr[newIdx]] = [arr[newIdx], arr[idx]]
+  productOrderItems.value = arr
+}
+
+const saveProductOrder = async () => {
+  if (!selectedLine.value) return
+  productOrderSaving.value = true
+  const ctx = getDisplayOrderContext()
+  try {
+    await api.lineProductDisplayOrders.bulkSave({
+      line_id: selectedLine.value,
+      context: ctx,
+      items: productOrderItems.value.map((item, idx) => ({
+        product_code: item.product_code,
+        display_order: idx,
+      })),
+    })
+    const cacheKey = `${selectedLine.value}__${ctx}`
+    productOrderCache.value.set(cacheKey, productOrderItems.value.map((i) => i.product_code))
+    rows.value = sortRowsForLine(rows.value)
+    showProductOrderDialog.value = false
+  } catch (e) {
+    alert('保存に失敗しました。')
+    console.error('表示順保存エラー', e)
+  } finally {
+    productOrderSaving.value = false
+  }
+}
+
 const parseTimeParts = (value) => {
   if (!value) return null
   const parts = String(value).split(':')
@@ -3564,7 +3698,12 @@ const fetchAndApplyData = async () => {
         plan_date__lte: endDate.value,
       })
     : Promise.resolve(null)
-  const [backlogRes, planRes, lineRoutingFilter, lineDemandRes] = await Promise.all([
+  const displayOrderCtx = getDisplayOrderContext()
+  const displayOrderCacheKey = `${selectedLine.value}__${displayOrderCtx}`
+  const fetchDisplayOrder = productOrderCache.value.has(displayOrderCacheKey)
+    ? Promise.resolve(null)
+    : api.lineProductDisplayOrders.getOrders({ line: selectedLine.value, context: displayOrderCtx }).catch(() => null)
+  const [backlogRes, planRes, lineRoutingFilter, lineDemandRes, displayOrderRes] = await Promise.all([
     api.lineBacklogs.getLineBacklogs({
       line: selectedLine.value,
       plan_date__gte: startDate.value,
@@ -3577,7 +3716,15 @@ const fetchAndApplyData = async () => {
     }),
     fetchCurrentLineProductIdSet(selectedLine.value),
     fetchLineDemands,
+    fetchDisplayOrder,
   ])
+  if (displayOrderRes) {
+    const saved = displayOrderRes.data || []
+    if (saved.length > 0) {
+      const sorted = [...saved].sort((a, b) => a.display_order - b.display_order)
+      productOrderCache.value.set(displayOrderCacheKey, sorted.map((s) => s.product_code))
+    }
+  }
   currentLineRoutingFilterMode.value = lineRoutingFilter?.mode || 'fallback'
   const backlogData = backlogRes.data?.results || backlogRes.data || []
   const planData = planRes.data?.results || planRes.data || []

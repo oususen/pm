@@ -41,6 +41,7 @@ from production.views_services import BOMServiceViewSet, CRPViewSet
 from production.views_brake_line import BrakeLinePlanView, BrakeLineProductsView, BrakeLineEquipmentsView, BrakeLineActualAddView, BrakeLineRecordView, BrakeLineSessionView, BrakeLineSessionDetailView
 from production.views_spot_line import SpotLinePlanView, SpotLineEquipmentsView, SpotLineProductsView, SpotLineRecordView
 from production.views_gantt_display_product_map import GanttDisplayProductMapViewSet
+from production.views_line_product_display_order import LineProductDisplayOrderViewSet
 from production.views_plan_deviation_report import PlanDeviationReportView
 from production.views_record_confirmation import ProductionRecordConfirmationView
 from production.views_camera_actual import (
@@ -65,6 +66,7 @@ router.register(r'laser-patterns', LaserPatternViewSet, basename='laserpattern')
 router.register(r'laser-actuals', LaserActualViewSet, basename='laseractual')
 router.register(r'laser-shift-records', LaserShiftRecordViewSet, basename='lasershiftrecord')
 router.register(r'gantt-display-product-maps', GanttDisplayProductMapViewSet, basename='ganttdisplayproductmap')
+router.register(r'line-product-display-orders', LineProductDisplayOrderViewSet, basename='lineproductdisplayorder')
 
 # Execution endpoints
 router.register(r'stock-allocations', StockAllocationViewSet, basename='stockallocation')
