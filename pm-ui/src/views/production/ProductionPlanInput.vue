@@ -133,6 +133,12 @@
       <div v-show="!toolbarCollapsed" class="toolbar-right">
         <div class="field checkbox-field">
           <label>
+            <input type="checkbox" v-model="hideWeekends" @change="localStorage.setItem(HIDE_WEEKENDS_KEY, hideWeekends ? '1' : '0')" />
+            土日非表示
+          </label>
+        </div>
+        <div class="field checkbox-field">
+          <label>
             <input type="checkbox" v-model="adjustToBreakEnd" />
             休憩明けに補正
           </label>
@@ -231,18 +237,19 @@
     </div>
 
     <div class="grid-wrapper" ref="gridWrapperRef">
-      <table class="plan-grid" :style="{ minWidth: tableMinWidth + 'px' }">
+      <table class="plan-grid" :class="{ 'hide-weekends': hideWeekends }" :style="{ minWidth: tableMinWidth + 'px' }">
         <colgroup>
           <col style="width: 30px" />
           <col style="width: 135px" />
           <col style="width: 100px" />
-          <template v-for="c in dateColumns" :key="`col-${c.key}`">
+          <template v-for="c in visibleDateColumns" :key="`col-${c.key}`">
             <col :style="{ width: DAY_COL_WIDTH + 'px' }" />
             <col :style="{ width: DAY_COL_WIDTH + 'px' }" />
             <col :style="{ width: DAY_COL_WIDTH + 'px' }" />
             <col :style="{ width: DAY_COL_WIDTH + 'px' }" />
             <col :style="{ width: SEQUENCE_COL_WIDTH + 'px' }" />
             <col :style="{ width: DAY_COL_WIDTH + 'px' }" />
+            <col v-if="c.weekGap" style="width: 6px" />
           </template>
         </colgroup>
         <thead>
@@ -250,9 +257,8 @@
             <th rowspan="3" class="sticky-col number-col">No</th>
             <th rowspan="3" class="sticky-col code-col">品番</th>
             <th rowspan="3" class="sticky-col name-col">品名</th>
+            <template v-for="(c, colIdx) in visibleDateColumns" :key="c.key">
             <th
-              v-for="(c, colIdx) in dateColumns"
-              :key="c.key"
               colspan="6"
               class="date-head day-end"
               :class="c.dayClass"
@@ -275,9 +281,11 @@
                 </span>
               </div>
             </th>
+            <th v-if="c.weekGap" rowspan="3" class="week-gap"></th>
+            </template>
           </tr>
           <tr class="head-level1b">
-            <template v-for="(c, colIdx) in dateColumns" :key="c.key">
+            <template v-for="(c, colIdx) in visibleDateColumns" :key="c.key">
               <th colspan="6" class="date-head day-end" :class="c.dayClass">
                 <div class="date-header-content-horizontal">
                   <span v-if="getDayDemandMovingAvg(c.key)" class="day-plan-avg">需五:{{ getDayDemandMovingAvg(c.key) }}</span>
@@ -310,7 +318,7 @@
             </template>
           </tr>
           <tr class="head-level2">
-            <template v-for="(c, colIdx) in dateColumns" :key="c.key">
+            <template v-for="(c, colIdx) in visibleDateColumns" :key="c.key">
               <th class="mini stock-col" :class="c.dayClass">{{ isProgressMode ? '進度' : '在庫' }}</th>
               <th class="mini actual-col" :class="c.dayClass">実績</th>
               <th class="mini demand-col" :class="c.dayClass">{{ isProgressMode ? '受注' : '需要' }}</th>
@@ -336,7 +344,7 @@
             <td class="sticky-col name-col">
               <span class="product-info">{{ row.product_name || getProductName(row.product_id) }}</span>
             </td>
-            <template v-for="(c, colIdx) in dateColumns" :key="c.key">
+            <template v-for="(c, colIdx) in visibleDateColumns" :key="c.key">
               <td class="num stock" :class="c.dayClass">
                 <span class="readonly-value">{{ displayValue(isProgressMode ? row.daily?.[c.key]?.progress : getStockDisplay(row, colIdx)) }}</span>
               </td>
@@ -434,34 +442,37 @@
               <td class="num stock-plan day-end" :class="c.dayClass">
                 <span class="readonly-value">{{ displayValue(isProgressMode ? getPlannedProgressDisplay(row, colIdx) : getPlanStockDisplay(row, colIdx)) }}</span>
               </td>
+              <td v-if="c.weekGap" class="week-gap"></td>
             </template>
           </tr>
           <tr v-if="isFloorShippingDeliveryLine" class="cart-summary-row">
             <td class="sticky-col number-col"></td>
             <td class="sticky-col code-col cart-label" colspan="2">8時着台車数</td>
-            <template v-for="c in dateColumns" :key="'am-cart-' + c.key">
+            <template v-for="c in visibleDateColumns" :key="'am-cart-' + c.key">
               <td :class="c.dayClass"></td>
               <td :class="c.dayClass"></td>
               <td :class="c.dayClass"></td>
               <td class="num cart-value" :class="c.dayClass">{{ floorShippingCartCounts[c.key]?.am || '' }}</td>
               <td :class="c.dayClass"></td>
               <td :class="c.dayClass" class="day-end"></td>
+              <td v-if="c.weekGap" class="week-gap"></td>
             </template>
           </tr>
           <tr v-if="isFloorShippingDeliveryLine" class="cart-summary-row">
             <td class="sticky-col number-col"></td>
             <td class="sticky-col code-col cart-label" colspan="2">15時着台車数</td>
-            <template v-for="c in dateColumns" :key="'pm-cart-' + c.key">
+            <template v-for="c in visibleDateColumns" :key="'pm-cart-' + c.key">
               <td :class="c.dayClass"></td>
               <td :class="c.dayClass"></td>
               <td :class="c.dayClass"></td>
               <td class="num cart-value" :class="c.dayClass">{{ floorShippingCartCounts[c.key]?.pm || '' }}</td>
               <td :class="c.dayClass"></td>
               <td :class="c.dayClass" class="day-end"></td>
+              <td v-if="c.weekGap" class="week-gap"></td>
             </template>
           </tr>
           <tr v-if="!filteredRows.length">
-            <td :colspan="3 + dateColumns.length * 6" class="no-data">データがありません</td>
+            <td :colspan="3 + visibleDateColumns.length * 6 + visibleDateColumns.filter(c => c.weekGap).length" class="no-data">データがありません</td>
           </tr>
         </tbody>
       </table>
@@ -531,7 +542,7 @@
             <thead>
               <tr>
                 <th class="sticky-col load-process-col">工程</th>
-                <th v-for="c in dateColumns" :key="c.key" class="mini" :class="c.dayClass">
+                <th v-for="c in visibleDateColumns" :key="c.key" class="mini" :class="c.dayClass">
                   {{ c.label }}
                 </th>
               </tr>
@@ -539,12 +550,12 @@
             <tbody>
               <tr v-for="proc in processLoadRows" :key="proc.process_id">
                 <td class="sticky-col load-process-col">{{ proc.process_name || proc.process_id }}</td>
-                <td v-for="c in dateColumns" :key="c.key" class="num" :class="c.dayClass">
+                <td v-for="c in visibleDateColumns" :key="c.key" class="num" :class="c.dayClass">
                   <span class="readonly-value">{{ displayValue(formatLoad(proc.daily?.[c.key])) }}</span>
                 </td>
               </tr>
               <tr v-if="!processLoadRows.length">
-                <td :colspan="dateColumns.length + 1" class="no-data">表示する負荷データがありません</td>
+                <td :colspan="visibleDateColumns.length + 1" class="no-data">表示する負荷データがありません</td>
               </tr>
             </tbody>
           </table>
@@ -923,6 +934,8 @@ const router = useRouter()
 const selectedLine = ref('')
 const TOOLBAR_COLLAPSED_KEY = 'productionPlanInput.toolbarCollapsed'
 const toolbarCollapsed = ref(localStorage.getItem(TOOLBAR_COLLAPSED_KEY) === '1')
+const HIDE_WEEKENDS_KEY = 'productionPlanInput.hideWeekends'
+const hideWeekends = ref(localStorage.getItem(HIDE_WEEKENDS_KEY) === '1')
 const openManual = (path) => { window.open(`/manual?path=${encodeURIComponent(path)}`, '_blank') }
 const toggleToolbar = () => {
   toolbarCollapsed.value = !toolbarCollapsed.value
@@ -1401,7 +1414,7 @@ const dateColumns = computed(() => {
     const day = d.getDay()
     const label = `${d.getMonth() + 1}/${d.getDate()}(${weekday[day]})`
     const key = formatDateKey(d)
-    let dayClass = day === 0 ? 'sun' : day === 6 ? 'sat' : ''
+    let dayClass = day === 0 ? 'sun' : day === 6 ? 'sat' : day === 5 ? 'fri' : ''
     // カレンダ上の休日（祝日・GW等）も日曜と同じスタイルにする
     if (!dayClass && isHolidayDate(key)) {
       dayClass = 'sun'
@@ -1411,6 +1424,15 @@ const dateColumns = computed(() => {
   return cols
 })
 
+const visibleDateColumns = computed(() => {
+  if (!hideWeekends.value) return dateColumns.value
+  const filtered = dateColumns.value.filter(c => c.dayClass !== 'sat' && c.dayClass !== 'sun')
+  return filtered.map((c, i) => ({
+    ...c,
+    weekGap: hideWeekends.value && c.dayClass === 'fri' && i < filtered.length - 1
+  }))
+})
+
 const DAY_COL_WIDTH = 40
 const SEQUENCE_COL_WIDTH = 25
 
@@ -1418,13 +1440,14 @@ const SEQUENCE_COL_WIDTH = 25
 const tableMinWidth = computed(() => {
   const fixedColsWidth = 30 + 135 + 100 // No + 品番 + 品名
   const perDayWidth = (DAY_COL_WIDTH * 5) + SEQUENCE_COL_WIDTH
-  return fixedColsWidth + dateColumns.value.length * perDayWidth
+  const gapCount = visibleDateColumns.value.filter(c => c.weekGap).length
+  return fixedColsWidth + visibleDateColumns.value.length * perDayWidth + gapCount * 6
 })
 
 const loadTableMinWidth = computed(() => {
   const fixedColsWidth = 180
   const perDayWidth = 80
-  return fixedColsWidth + dateColumns.value.length * perDayWidth
+  return fixedColsWidth + visibleDateColumns.value.length * perDayWidth
 })
 
 const initDaily = () => {
@@ -4930,6 +4953,15 @@ thead tr.head-level2 th.sticky-col {
 .day-end {
   border-right: 2px solid #000 !important;
 }
+.week-gap {
+  width: 6px !important;
+  min-width: 6px !important;
+  max-width: 6px !important;
+  background: #f8a0a0 !important;
+  border-left: none !important;
+  border-right: none !important;
+  padding: 0 !important;
+}
 .sticky-col {
   position: sticky;
   left: 0;
@@ -5162,13 +5194,14 @@ thead .sticky-col {
 }
 .stock-plan {
   background: #f1f7ff;
+  padding-right: 0.5px !important;
 }
-.plan-grid tbody tr[style] td {
+.plan-grid tbody tr[style] td:not(.week-gap) {
   background: inherit !important;
   color: inherit !important;
 }
 .plan-grid tbody tr[style] td.day-end {
-  border-right: 3px solid #000 !important;
+  border-right: 2px solid #000 !important;
 }
 .plan-grid tbody tr[style] td.sticky-col {
   background: inherit !important;
