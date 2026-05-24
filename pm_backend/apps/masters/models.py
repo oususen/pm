@@ -224,10 +224,28 @@ class Supplier(models.Model):
 
 class Calendar(models.Model):
     """カレンダマスタ"""
+    CALENDAR_TYPE_CHOICES = [
+        ('INTERNAL', '社内'),
+        ('SUPPLIER', '仕入れ'),
+        ('COMPANY', '会社'),
+        ('CUSTOMER', '顧客'),
+        ('OTHER', 'その他'),
+    ]
     id = models.BigAutoField(primary_key=True)
     calendar_code = models.CharField(max_length=20, unique=True, verbose_name='カレンダコード')
     calendar_name = models.CharField(max_length=50, verbose_name='カレンダ名')
+    calendar_type = models.CharField(max_length=20, choices=CALENDAR_TYPE_CHOICES, default='OTHER', verbose_name='カレンダ区分')
+    is_line_assignable = models.BooleanField(default=True, verbose_name='ライン割当可')
+    is_supplier_assignable = models.BooleanField(default=True, verbose_name='仕入先割当可')
     description = models.TextField(null=True, blank=True, verbose_name='説明')
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='created_calendars', verbose_name='作成者'
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='updated_calendars', verbose_name='最終更新者'
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
 

@@ -23,7 +23,7 @@
           <label>ライン</label>
           <select v-model.number="selectedLine" @change="onLineChange">
             <option value="">未選択</option>
-            <option v-for="l in lines" :key="l.id" :value="l.id">
+            <option v-for="l in prodLines" :key="l.id" :value="l.id">
               {{ l.line_code }} - {{ l.line_name }}
             </option>
           </select>
@@ -32,14 +32,14 @@
           <label>割当カレンダ</label>
           <select v-model.number="selectedCalendar">
             <option value="">未選択</option>
-            <option v-for="c in calendars" :key="c.id" :value="c.id">
+            <option v-for="c in assignableCalendars" :key="c.id" :value="c.id">
               {{ c.calendar_code }} - {{ c.calendar_name }}
             </option>
           </select>
         </div>
         <div class="actions">
-          <button class="btn secondary" @click="showAssign = !showAssign" :disabled="!canEdit">
-            {{ showAssign ? '割当を隠す' : '割当設定' }}
+          <button class="btn primary" @click="assignCalendar" :disabled="!selectedLine || !selectedCalendar || savingAssign || !canEdit || isReadOnlyLine">
+            ラインに割当
           </button>
           <button class="btn" @click="loadCalendars">再読込</button>
         </div>
@@ -73,12 +73,6 @@
               <label>稼働分</label>
               <input type="number" v-model.number="range.workMinutes" min="0" :disabled="!canEdit || isReadOnlyLine" />
             </div>
-            <div class="field checkbox inline-check">
-              <label>
-                <input type="checkbox" v-model="range.isWorkingDay" :disabled="!canEdit || isReadOnlyLine" />
-                稼働日として登録
-              </label>
-            </div>
             <div class="field action-field">
               <label>&nbsp;</label>
               <button class="btn primary" @click="applyRange" :disabled="!selectedCalendar || applyingRange || !canEdit || isReadOnlyLine">
@@ -104,7 +98,7 @@
               <label>コピー先</label>
               <select v-model.number="copy.dstId" :disabled="!canEdit || isReadOnlyLine">
                 <option value="">選択</option>
-                <option v-for="c in calendars" :key="c.id" :value="c.id">
+                <option v-for="c in assignableCalendars" :key="c.id" :value="c.id">
                   {{ c.calendar_code }} - {{ c.calendar_name }}
                 </option>
               </select>
@@ -142,16 +136,6 @@
       </div>
     </div>
 
-    <div class="section" v-if="showAssign">
-      <div class="row compact">
-        <div class="field">
-          <label>ラインにカレンダ割当</label>
-          <button class="btn primary" @click="assignCalendar" :disabled="!selectedLine || !selectedCalendar || savingAssign || !canEdit || isReadOnlyLine">
-            ラインに割当
-          </button>
-        </div>
-      </div>
-    </div>
       </div>
 
       <div class="right-column">
@@ -260,7 +244,6 @@ const workPatterns = ref([])
 const daisoCalendarId = ref('')
 const daisoCalendarDays = ref([])
 const showCreator = ref(false)
-const showAssign = ref(false)
 
 const selectedLine = ref('')
 const selectedCalendar = ref('')
@@ -289,7 +272,6 @@ const range = ref({
   start: '',
   end: '',
   workMinutes: 480,
-  isWorkingDay: true,
   workPattern: '',
 })
 
@@ -363,6 +345,8 @@ const currentCalendarLabel = computed(() => {
 
 const selectedLineObj = computed(() => lines.value.find((l) => l.id === selectedLine.value) || null)
 const isReadOnlyLine = computed(() => String(selectedLineObj.value?.line_type || '').toUpperCase() === 'PURCHASE')
+const prodLines = computed(() => lines.value.filter((line) => String(line?.line_type || '').toUpperCase() === 'PROD'))
+const assignableCalendars = computed(() => calendars.value.filter((calendar) => calendar?.is_line_assignable !== false))
 
 const monthTitle = computed(() => formatMonth(currentMonth.value))
 
@@ -425,15 +409,14 @@ const cellClass = (day) => ({
 const loadLines = async () => {
   const res = await api.lines.getLines()
   const rows = res.data.results || res.data || []
-  // 社内ラインを上位、仕入ライン(PURCHASE)を下位に並べる
   lines.value = [...rows].sort((a, b) => {
-    const aPurchase = String(a?.line_type || '').toUpperCase() === 'PURCHASE'
-    const bPurchase = String(b?.line_type || '').toUpperCase() === 'PURCHASE'
-    if (aPurchase !== bPurchase) return aPurchase ? 1 : -1
     const aCode = String(a?.line_code || '')
     const bCode = String(b?.line_code || '')
     return aCode.localeCompare(bCode, 'ja')
   })
+  if (selectedLine.value && !prodLines.value.some((line) => line.id === selectedLine.value)) {
+    selectedLine.value = ''
+  }
   const line = lines.value.find((l) => l.id === selectedLine.value)
   if (line?.calendar) selectedCalendar.value = line.calendar
 }
@@ -441,6 +424,9 @@ const loadLines = async () => {
 const loadCalendars = async () => {
   const res = await api.calendars.getCalendars()
   calendars.value = res.data.results || res.data || []
+  if (selectedCalendar.value && !assignableCalendars.value.some((calendar) => calendar.id === selectedCalendar.value)) {
+    selectedCalendar.value = ''
+  }
 }
 
 const loadWorkPatterns = async () => {
@@ -455,7 +441,8 @@ const onPatternChange = () => {
 
 const onLineChange = async () => {
   const line = lines.value.find((l) => l.id === selectedLine.value)
-  selectedCalendar.value = line?.calendar || ''
+  const nextCalendar = line?.calendar || ''
+  selectedCalendar.value = assignableCalendars.value.some((calendar) => calendar.id === nextCalendar) ? nextCalendar : ''
   await loadCalendarDays()
 }
 
@@ -586,6 +573,8 @@ const createCalendar = async () => {
     const res = await api.calendars.createCalendar({
       calendar_code: newCalendar.value.code,
       calendar_name: newCalendar.value.name,
+      calendar_type: 'INTERNAL',
+      is_supplier_assignable: false,
     })
     const item = res.data
     calendars.value.push(item)

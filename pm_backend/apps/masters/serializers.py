@@ -99,6 +99,40 @@ class SupplierSerializer(serializers.ModelSerializer):
 
 
 class CalendarSerializer(serializers.ModelSerializer):
+    created_by_name = serializers.SerializerMethodField()
+    updated_by_name = serializers.SerializerMethodField()
+
+    @staticmethod
+    def _flags_by_type(calendar_type):
+        if calendar_type == 'INTERNAL':
+            return True, False
+        if calendar_type == 'SUPPLIER':
+            return False, True
+        if calendar_type in ('COMPANY', 'CUSTOMER'):
+            return False, False
+        return False, False
+
+    def validate(self, attrs):
+        calendar_type = attrs.get('calendar_type', getattr(self.instance, 'calendar_type', None))
+        if self.instance is None and not calendar_type:
+            raise serializers.ValidationError({'calendar_type': 'カレンダ区分は必須です。'})
+        is_line_assignable, is_supplier_assignable = self._flags_by_type(calendar_type)
+        attrs['is_line_assignable'] = is_line_assignable
+        attrs['is_supplier_assignable'] = is_supplier_assignable
+        return attrs
+
+    def get_created_by_name(self, obj):
+        user = getattr(obj, 'created_by', None)
+        if not user:
+            return ''
+        return user.get_full_name() or user.username or ''
+
+    def get_updated_by_name(self, obj):
+        user = getattr(obj, 'updated_by', None)
+        if not user:
+            return ''
+        return user.get_full_name() or user.username or ''
+
     class Meta:
         model = Calendar
         fields = '__all__'

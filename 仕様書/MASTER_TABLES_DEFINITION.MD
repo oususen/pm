@@ -385,6 +385,8 @@
 # 11. カレンダ `m_calendar` / `m_calendar_day`
 - `work_minutes` を持ち、日跨ぎ計算を支援。
 - `m_calendar_day.work_pattern_id` で勤務パターンを指定可能。
+- `m_calendar.is_line_assignable` で「生産ライン勤務カレンダに割当可能か」を管理する（得意先/仕入先/DAISOなどの共通カレンダを除外する用途）。
+- `m_calendar.is_supplier_assignable` で「仕入先カレンダに割当可能か」を管理する（DAISOや社内ライン専用カレンダを除外する用途）。
 - 勤務パターン: `m_work_pattern`（開始/終了時刻、説明）
 - 休憩: `m_break_time`（勤務パターンに対する休憩枠）
 

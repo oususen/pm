@@ -1190,6 +1190,14 @@ class CalendarViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     ordering_fields = ['calendar_code', 'created_at']
     ordering = ['calendar_code']
 
+    def perform_create(self, serializer):
+        user = self.request.user if getattr(self.request, 'user', None) and self.request.user.is_authenticated else None
+        serializer.save(created_by=user, updated_by=user)
+
+    def perform_update(self, serializer):
+        user = self.request.user if getattr(self.request, 'user', None) and self.request.user.is_authenticated else None
+        serializer.save(updated_by=user)
+
     @action(detail=True, methods=['post'], url_path='copy_to')
     def copy_to(self, request, pk=None):
         """指定期間のカレンダー日データを別カレンダーにコピーする"""
@@ -1255,7 +1263,11 @@ class CalendarDayViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = CalendarDay.objects.all()
     serializer_class = CalendarDaySerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ['calendar', 'is_working_day']
+    filterset_fields = {
+        'calendar': ['exact'],
+        'is_working_day': ['exact'],
+        'target_date': ['exact', 'gte', 'lte'],
+    }
     ordering_fields = ['target_date']
     ordering = ['target_date']
     pagination_class = None  # all days are returned to support range updates

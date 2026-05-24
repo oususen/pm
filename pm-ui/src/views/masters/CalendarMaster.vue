@@ -11,23 +11,54 @@
     <div class="main-layout">
       <div class="left-column section">
         <div class="card-title">カレンダ一覧</div>
+        <div class="filter-row">
+          <label>区分</label>
+          <select v-model="typeFilter">
+            <option value="">全て</option>
+            <option value="INTERNAL">社内</option>
+            <option value="SUPPLIER">仕入れ</option>
+            <option value="COMPANY">会社</option>
+            <option value="CUSTOMER">顧客</option>
+            <option value="OTHER">その他</option>
+          </select>
+          <label>コード</label>
+          <select v-model="codeFilter">
+            <option value="">全て</option>
+            <option v-for="code in codeOptions" :key="code" :value="code">{{ code }}</option>
+          </select>
+          <label>名称</label>
+          <select v-model="nameFilter">
+            <option value="">全て</option>
+            <option v-for="name in nameOptions" :key="name" :value="name">{{ name }}</option>
+          </select>
+        </div>
         <table class="data-table">
           <thead>
             <tr>
               <th>コード</th>
               <th>名称</th>
+              <th>区分</th>
+              <th>ライン割当</th>
+              <th>仕入先割当</th>
+              <th>作成者</th>
+              <th>最終編集者</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
             <tr
-              v-for="calendar in calendars"
+              v-for="calendar in filteredCalendars"
               :key="calendar.id"
               :class="{ selected: detailCalendar && detailCalendar.id === calendar.id }"
               @click="openDetail(calendar)"
             >
               <td>{{ calendar.calendar_code }}</td>
               <td>{{ calendar.calendar_name }}</td>
+              <td>{{ calendarTypeLabel(calendar.calendar_type) }}</td>
+              <td>{{ calendar.is_line_assignable ? '可' : '不可' }}</td>
+              <td>{{ calendar.is_supplier_assignable ? '可' : '不可' }}</td>
+              <td>{{ calendar.created_by_name || '-' }}</td>
+              <td>{{ calendar.updated_by_name || '-' }}</td>
               <td class="actions-inline">
                 <button v-if="canEdit" class="btn-sm" @click.stop="editCalendar(calendar)">編集</button>
                 <button v-if="canEdit" class="btn-sm btn-danger" @click.stop="deleteCalendar(calendar.id)">削除</button>
@@ -107,6 +138,17 @@
             <input v-model="formData.calendar_name" required :disabled="!canEdit" />
           </div>
           <div class="form-group">
+            <label>カレンダ区分 *</label>
+            <select v-model="formData.calendar_type" required :disabled="!canEdit">
+              <option value="">選択してください</option>
+              <option value="INTERNAL">社内</option>
+              <option value="SUPPLIER">仕入れ</option>
+              <option value="COMPANY">会社</option>
+              <option value="CUSTOMER">顧客</option>
+              <option value="OTHER">その他</option>
+            </select>
+          </div>
+          <div class="form-group">
             <label>説明</label>
             <textarea v-model="formData.description" rows="3" :disabled="!canEdit"></textarea>
           </div>
@@ -136,10 +178,16 @@ const savingDateKey = ref('')
 const savingNoteDateKey = ref('')
 const currentMonth = ref(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
 const canEdit = computed(() => canAccessMasterResource('masters.calendar', 'edit'))
+const typeFilter = ref('')
+const codeFilter = ref('')
+const nameFilter = ref('')
 
 const formData = ref({
   calendar_code: '',
   calendar_name: '',
+  calendar_type: '',
+  is_line_assignable: false,
+  is_supplier_assignable: false,
   description: ''
 })
 
@@ -155,6 +203,37 @@ const ymd = (dateObj) => {
 const currentCalendarLabel = computed(() => {
   if (!detailCalendar.value) return '未選択'
   return `${detailCalendar.value.calendar_code} - ${detailCalendar.value.calendar_name}`
+})
+
+const filteredCalendars = computed(() => {
+  return baseByType.value.filter((c) => {
+    if (codeFilter.value && String(c.calendar_code || '') !== codeFilter.value) return false
+    if (nameFilter.value && String(c.calendar_name || '') !== nameFilter.value) return false
+    return true
+  })
+})
+
+const calendarTypeLabel = (type) => {
+  if (type === 'INTERNAL') return '社内'
+  if (type === 'SUPPLIER') return '仕入れ'
+  if (type === 'COMPANY') return '会社'
+  if (type === 'CUSTOMER') return '顧客'
+  return 'その他'
+}
+
+const baseByType = computed(() => {
+  if (!typeFilter.value) return calendars.value
+  return calendars.value.filter((c) => c.calendar_type === typeFilter.value)
+})
+
+const codeOptions = computed(() => {
+  const values = baseByType.value.map((c) => String(c.calendar_code || '')).filter(Boolean)
+  return [...new Set(values)].sort((a, b) => a.localeCompare(b, 'ja'))
+})
+
+const nameOptions = computed(() => {
+  const values = baseByType.value.map((c) => String(c.calendar_name || '')).filter(Boolean)
+  return [...new Set(values)].sort((a, b) => a.localeCompare(b, 'ja'))
 })
 
 const monthTitle = computed(() => `${currentMonth.value.getFullYear()}年${currentMonth.value.getMonth() + 1}月`)
@@ -366,6 +445,9 @@ const showNewDialog = () => {
   formData.value = {
     calendar_code: '',
     calendar_name: '',
+    calendar_type: '',
+    is_line_assignable: false,
+    is_supplier_assignable: false,
     description: ''
   }
   showDialog.value = true
@@ -462,6 +544,26 @@ onMounted(async () => {
   font-size: 18px;
   font-weight: 700;
   margin-bottom: 8px;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.filter-row select {
+  min-width: 120px;
+  max-width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+}
+
+.filter-row label {
+  white-space: nowrap;
 }
 
 .hint {
@@ -628,6 +730,7 @@ td.out {
 }
 
 .form-group input,
+.form-group select,
 .form-group textarea {
   width: 100%;
   padding: 8px;

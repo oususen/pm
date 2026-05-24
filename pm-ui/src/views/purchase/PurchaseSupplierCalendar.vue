@@ -25,7 +25,7 @@
           <label>カレンダ</label>
           <select v-model.number="selectedCalendarId" :disabled="!selectedSupplierId" @change="onCalendarChange">
             <option value="">未割当</option>
-            <option v-for="c in calendars" :key="c.id" :value="c.id">
+            <option v-for="c in supplierAssignableCalendars" :key="c.id" :value="c.id">
               {{ c.calendar_code }} - {{ c.calendar_name }}
             </option>
           </select>
@@ -234,8 +234,9 @@ const dayMap = computed(() => {
   return map
 })
 
-const copySourceCandidates = computed(() =>
-  calendars.value.filter((c) => String(c.id) !== String(selectedCalendarId.value)),
+const copySourceCandidates = computed(() => calendars.value)
+const supplierAssignableCalendars = computed(() =>
+  calendars.value.filter((c) => c?.is_supplier_assignable !== false),
 )
 
 const daisoDayMap = computed(() => {
@@ -312,7 +313,8 @@ const onCalendarChange = async () => {
 
 const onSupplierChange = async () => {
   const line = supplierToLine(selectedSupplierId.value)
-  selectedCalendarId.value = line?.calendar || ''
+  const nextCalendarId = line?.calendar || ''
+  selectedCalendarId.value = supplierAssignableCalendars.value.some((c) => c.id === nextCalendarId) ? nextCalendarId : ''
   currentLineCalendarId.value = line?.calendar || ''
   await Promise.all([loadCalendarDays(), loadDaisoCalendarDays()])
 }
@@ -467,6 +469,7 @@ const createAndAssignCalendar = async () => {
     const calRes = await api.calendars.createCalendar({
       calendar_code: newCalendar.value.code,
       calendar_name: newCalendar.value.name,
+      calendar_type: 'SUPPLIER',
     })
     const calendar = calRes.data
     await api.lines.patchLine(line.id, { calendar: calendar.id })

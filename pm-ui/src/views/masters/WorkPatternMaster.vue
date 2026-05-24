@@ -92,6 +92,7 @@
             <td>{{ pattern.description }}</td>
             <td>
               <button v-if="canEdit" @click="editPattern(pattern)" class="btn-sm">編集</button>
+              <button v-if="canEdit" @click="copyPattern(pattern)" class="btn-sm">コピー</button>
               <button v-if="canEdit" @click="deletePattern(pattern.id)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
@@ -181,6 +182,23 @@ const editPattern = async (pattern) => {
   formData.value = {
     ...pattern,
     break_times: pattern.break_times ? [...pattern.break_times] : []
+  }
+  showForm.value = true
+}
+
+const copyPattern = (pattern) => {
+  if (!canEdit.value) return
+  isEdit.value = false
+  formData.value = {
+    ...pattern,
+    id: undefined,
+    pattern_code: '',
+    pattern_name: `${pattern.pattern_name || ''} コピー`,
+    break_times: (pattern.break_times || []).map((bt, idx) => ({
+      break_start: bt.break_start || '',
+      break_end: bt.break_end || '',
+      order: idx + 1
+    }))
   }
   showForm.value = true
 }
