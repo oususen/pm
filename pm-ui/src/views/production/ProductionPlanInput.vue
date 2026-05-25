@@ -1757,7 +1757,7 @@ const savePlan = async () => {
 
   const items = []
   console.log('保存対象の行数:', rows.value.length)
-  rows.value.forEach((r) => {
+  rows.value.forEach((r, rowIdx) => {
     console.log('保存チェック:', { product_id: r.product_id, process_id: r.process_id, product_code: r.product_code })
     if (!r.product_id || !r.process_id) {
       console.warn('スキップ: product_idまたはprocess_idがありません', r)
@@ -1785,6 +1785,7 @@ const savePlan = async () => {
           plan_date: c.key,
           plan_qty: lot.plan_qty === null ? 0 : lot.plan_qty,
           sequence_no: lot.sequence_no,
+          display_order: rowIdx,
         })
       })
     })
@@ -4209,13 +4210,48 @@ const applyDemandToPlanForDay = (dateKey) => {
 }
 
 const applyDemandToPlanForVisiblePeriod = () => {
+  const isTuesday = (dateKey) => {
+    const dt = new Date(`${dateKey}T00:00:00`)
+    return dt.getDay() === 2
+  }
+  const addDays = (dateKey, days) => {
+    const dt = new Date(`${dateKey}T00:00:00`)
+    dt.setDate(dt.getDate() + days)
+    const y = dt.getFullYear()
+    const m = String(dt.getMonth() + 1).padStart(2, '0')
+    const d = String(dt.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+  const isL2101 = () => String(selectedLineObj.value?.line_code || '').trim().toUpperCase() === 'L2101'
+  const isWeeklyTuesdaySpecialProduct = (row) => {
+    const code = String(row?.product_code || '')
+    return code === 'YD40006389' || code.endsWith('2361') || code.endsWith('2723')
+  }
+  const calcNextWedToNextTueDemand = (row, dateKey) => {
+    let total = 0
+    for (let offset = 1; offset <= 7; offset += 1) {
+      const targetKey = addDays(dateKey, offset)
+      const targetDaily = ensureDailyCell(row, targetKey)
+      const sourceQty = isProgressMode.value ? targetDaily.line_demand_qty : targetDaily.demand
+      const demandQtyRaw = Number(sourceQty || 0)
+      const demandQty = Number.isFinite(demandQtyRaw) ? Math.max(0, demandQtyRaw) : 0
+      total += demandQty
+    }
+    return total
+  }
+
   let autoPlanCount = 0
   rows.value.forEach((row) => {
     dateColumns.value.forEach((c) => {
       const daily = ensureDailyCell(row, c.key)
-      const sourceQty = isProgressMode.value ? daily.line_demand_qty : daily.demand
-      const demandQtyRaw = Number(sourceQty || 0)
-      const demandQty = Number.isFinite(demandQtyRaw) ? Math.max(0, demandQtyRaw) : 0
+      let demandQty = 0
+      if (isL2101() && isWeeklyTuesdaySpecialProduct(row) && isTuesday(c.key)) {
+        demandQty = calcNextWedToNextTueDemand(row, c.key)
+      } else {
+        const sourceQty = isProgressMode.value ? daily.line_demand_qty : daily.demand
+        const demandQtyRaw = Number(sourceQty || 0)
+        demandQty = Number.isFinite(demandQtyRaw) ? Math.max(0, demandQtyRaw) : 0
+      }
       daily.plan = demandQty > 0 ? demandQty : ''
       daily.sequence_no = ''
       daily.extraLots = []

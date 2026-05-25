@@ -1,7 +1,7 @@
 from rest_framework import viewsets, status
 from rest_framework.views import APIView
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, date
 from uuid import uuid4
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -633,6 +633,30 @@ class LinePlanViewSet(viewsets.ModelViewSet):
                 changed_by=change_user,
             )
 
+        indexed_items = list(enumerate(items))
+
+        def _to_int_or_none(value):
+            if value is None or value == '':
+                return None
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
+        def _item_sort_key(indexed_item):
+            original_idx, item = indexed_item
+            plan_date_raw = item.get('plan_date')
+            try:
+                plan_date_obj = parse_plan_date(plan_date_raw)
+            except Exception:
+                plan_date_obj = date.max
+            display_order = _to_int_or_none(item.get('display_order'))
+            if display_order is None:
+                display_order = 10**9
+            return (plan_date_obj, display_order, original_idx)
+
+        sorted_items = sorted(indexed_items, key=_item_sort_key)
+
         # トランザクション内で削除→作成を実行
         with transaction.atomic():
             if change_reason and affected_dates and affected_products:
@@ -681,7 +705,7 @@ class LinePlanViewSet(viewsets.ModelViewSet):
                 deleted_backlog = deleted_backlog_result[0] if deleted_backlog_result else 0
 
             # 4. 新規作成
-            for it in items:
+            for _original_idx, it in sorted_items:
                 try:
                     product_id = it.get('product_id')
                     process_id = it.get('process_id')
