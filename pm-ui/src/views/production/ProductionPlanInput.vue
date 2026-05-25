@@ -351,7 +351,10 @@
             </td>
             <template v-for="(c, colIdx) in visibleDateColumns" :key="c.key">
               <td class="num stock" :class="c.dayClass">
-                <span class="readonly-value">{{ displayValue(isProgressMode ? row.daily?.[c.key]?.progress : getStockDisplay(row, c.key)) }}</span>
+                <span
+                  class="readonly-value"
+                  :class="{ negative: isNegativeValue(isProgressMode ? row.daily?.[c.key]?.progress : getStockDisplay(row, c.key)) }"
+                >{{ displayValue(isProgressMode ? row.daily?.[c.key]?.progress : getStockDisplay(row, c.key)) }}</span>
               </td>
               <td class="num actual" :class="c.dayClass">
                 <input
@@ -445,7 +448,10 @@
                 </div>
               </td>
               <td class="num stock-plan day-end" :class="c.dayClass">
-                <span class="readonly-value">{{ displayValue(isProgressMode ? getPlannedProgressDisplay(row, c.key) : getPlanStockDisplay(row, c.key)) }}</span>
+                <span
+                  class="readonly-value"
+                  :class="{ negative: isNegativeValue(isProgressMode ? getPlannedProgressDisplay(row, c.key) : getPlanStockDisplay(row, c.key)) }"
+                >{{ displayValue(isProgressMode ? getPlannedProgressDisplay(row, c.key) : getPlanStockDisplay(row, c.key)) }}</span>
               </td>
               <td v-if="c.weekGap" class="week-gap"></td>
             </template>
@@ -2211,6 +2217,11 @@ const displayValue = (val) => {
 const toNumber = (value) => {
   const num = Number(value)
   return Number.isFinite(num) ? num : 0
+}
+
+const isNegativeValue = (value) => {
+  const num = Number(value)
+  return Number.isFinite(num) && num < 0
 }
 
 const getPlanQtyTotal = (daily) => {
@@ -5563,6 +5574,10 @@ thead .sticky-col {
   font-size: 13px;
   font-weight: 500;
   color: #000;
+}
+.readonly-value.negative {
+  color: #c00000;
+  font-weight: 700;
 }
 .stock {
   background: #f7f9fb;
