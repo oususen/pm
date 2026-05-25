@@ -346,7 +346,7 @@
             </td>
             <template v-for="(c, colIdx) in visibleDateColumns" :key="c.key">
               <td class="num stock" :class="c.dayClass">
-                <span class="readonly-value">{{ displayValue(isProgressMode ? row.daily?.[c.key]?.progress : getStockDisplay(row, colIdx)) }}</span>
+                <span class="readonly-value">{{ displayValue(isProgressMode ? row.daily?.[c.key]?.progress : getStockDisplay(row, c.key)) }}</span>
               </td>
               <td class="num actual" :class="c.dayClass">
                 <input
@@ -440,7 +440,7 @@
                 </div>
               </td>
               <td class="num stock-plan day-end" :class="c.dayClass">
-                <span class="readonly-value">{{ displayValue(isProgressMode ? getPlannedProgressDisplay(row, colIdx) : getPlanStockDisplay(row, colIdx)) }}</span>
+                <span class="readonly-value">{{ displayValue(isProgressMode ? getPlannedProgressDisplay(row, c.key) : getPlanStockDisplay(row, c.key)) }}</span>
               </td>
               <td v-if="c.weekGap" class="week-gap"></td>
             </template>
@@ -2152,8 +2152,18 @@ const getPlanQtyTotal = (daily) => {
 
 const getPlanDelta = (daily) => getPlanQtyTotal(daily) - toNumber(daily?.plan_base)
 
-const getPlanStockDisplay = (row, colIdx) => {
+const resolveColIdx = (colIdxOrDateKey) => {
+  if (typeof colIdxOrDateKey === 'number') return colIdxOrDateKey
+  if (typeof colIdxOrDateKey === 'string') {
+    return dateColumns.value.findIndex((c) => c.key === colIdxOrDateKey)
+  }
+  return -1
+}
+
+const getPlanStockDisplay = (row, colIdxOrDateKey) => {
   if (!row || !row.daily) return ''
+  const colIdx = resolveColIdx(colIdxOrDateKey)
+  if (colIdx < 0) return ''
   const cols = dateColumns.value
   let carry = null
   let delta = 0
@@ -2178,8 +2188,10 @@ const getPlanStockDisplay = (row, colIdx) => {
   return ''
 }
 
-const getPlannedProgressDisplay = (row, colIdx) => {
+const getPlannedProgressDisplay = (row, colIdxOrDateKey) => {
   if (!row || !row.daily) return ''
+  const colIdx = resolveColIdx(colIdxOrDateKey)
+  if (colIdx < 0) return ''
   const cols = dateColumns.value
   let delta = 0
   for (let i = 0; i <= colIdx; i += 1) {
@@ -2196,8 +2208,10 @@ const getPlannedProgressDisplay = (row, colIdx) => {
   return ''
 }
 
-const getStockDisplay = (row, colIdx) => {
+const getStockDisplay = (row, colIdxOrDateKey) => {
   if (!row || !row.daily) return ''
+  const colIdx = resolveColIdx(colIdxOrDateKey)
+  if (colIdx < 0) return ''
   const cols = dateColumns.value
   let carry = null
   for (let i = 0; i <= colIdx; i += 1) {
