@@ -4245,8 +4245,15 @@ const applyDemandToPlanForVisiblePeriod = () => {
     dateColumns.value.forEach((c) => {
       const daily = ensureDailyCell(row, c.key)
       let demandQty = 0
-      if (isL2101() && isWeeklyTuesdaySpecialProduct(row) && isTuesday(c.key)) {
-        demandQty = calcNextWedToNextTueDemand(row, c.key)
+      if (isL2101() && isWeeklyTuesdaySpecialProduct(row)) {
+        // 特例3品番は「火曜のみ計画作成」。
+        // 火曜: 翌日(水)〜翌週(火)の需要合算
+        // それ以外: 自動計画では計画を立てない
+        if (isTuesday(c.key)) {
+          demandQty = calcNextWedToNextTueDemand(row, c.key)
+        } else {
+          demandQty = 0
+        }
       } else {
         const sourceQty = isProgressMode.value ? daily.line_demand_qty : daily.demand
         const demandQtyRaw = Number(sourceQty || 0)
