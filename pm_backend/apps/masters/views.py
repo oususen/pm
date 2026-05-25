@@ -338,7 +338,7 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         return {'created': len(to_create), 'skipped': len(skipped), 'skipped_codes': skipped}
 
     def _bulk_update_products(self, items):
-        """品番コードで照合し、既存製品の情報を一括更新。空欄の項目はスキップ（上書きしない）。"""
+        """品番コードで照合し、既存は更新・未登録は新規作成（upsert）。空欄項目はスキップ。"""
         CATEGORY_MAP = {
             '集合部品': 'ASSEMBLY', '組立品': 'ASSEMBLY',
             '単体部品': 'SINGLE', '単品': 'SINGLE',
@@ -403,15 +403,20 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 return None
 
         updated = []
-        not_found = []
+        created = []
+        skipped = []
         for item in items:
             code = str(item.get('product_code') or '').strip()
             if not code:
                 continue
             product = existing_products.get(code)
-            if not product:
-                not_found.append(code)
-                continue
+            is_new = product is None
+            if is_new:
+                product = Product(
+                    product_code=code,
+                    product_name=code,
+                    category='UNKNOWN',
+                )
 
             changed_fields = []
 
@@ -550,16 +555,29 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 product.capacity = v
                 changed_fields.append('capacity')
 
-            if changed_fields:
+            if is_new:
+                product.save()
+                existing_products[code] = product
+                created.append(code)
+            elif changed_fields:
                 changed_fields.append('updated_at')
                 product.save(update_fields=changed_fields)
                 updated.append(code)
+            else:
+                skipped.append(code)
 
-        return {'updated': len(updated), 'not_found': len(not_found), 'not_found_codes': not_found}
+        return {
+            'created': len(created),
+            'updated': len(updated),
+            'skipped': len(skipped),
+            'created_codes': created,
+            'updated_codes': updated,
+            'skipped_codes': skipped,
+        }
 
     @action(detail=False, methods=['post'], parser_classes=[parsers.MultiPartParser, parsers.FormParser], url_path='bulk_update_import')
     def bulk_update_import(self, request):
-        """既存製品の一括更新取込（CSV/Excel）"""
+        """製品の一括取込（CSV/Excel, upsert: 既存更新＋未登録新規）"""
         upload = request.FILES.get('file')
         if not upload:
             return Response({'detail': '取込ファイルがありません'}, status=status.HTTP_400_BAD_REQUEST)
@@ -695,14 +713,14 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         ws_guide = wb.create_sheet('使用説明')
         ws_guide.append(['項目', '内容'])
-        ws_guide.append(['用途', '既存製品の情報を一括更新します（新規登録はされません）'])
+        ws_guide.append(['用途', '既存製品は更新、未登録品番は新規登録します'])
         ws_guide.append(['必須列', '構成品番（照合キー）'])
         ws_guide.append(['空欄の扱い', '空欄の列は元の値を維持します（上書きしません）'])
         ws_guide.append(['品番区分名', '集合部品 / 単体部品 / 材料 / 購入品 / 外作品'])
         ws_guide.append(['管理区分', '日 / 分'])
         ws_guide.append(['最終品・ライン最終品', 'はい / いいえ'])
         ws_guide.append(['移動先', '社内ライン / 社内塗装 / CWL / 興和 / 直納 / その他'])
-        ws_guide.append(['注意', '存在しない品番コードはスキップされます。'])
+        ws_guide.append(['注意', '同じ構成品番が複数行ある場合は先頭行のみ取込対象です。'])
 
         ws_process = wb.create_sheet('工程')
         ws_process.append(['工程コード', '工程名'])

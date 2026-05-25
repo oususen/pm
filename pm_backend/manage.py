@@ -7,7 +7,7 @@ from pathlib import Path
 
 def main():
     """Run administrative tasks."""
-    base_dir = Path(__file__).resolve().parent
+    base_dir = Path(__file__).absolute().parent
     apps_dir = base_dir / "apps"
     if str(apps_dir) not in sys.path:
         sys.path.insert(0, str(apps_dir))
