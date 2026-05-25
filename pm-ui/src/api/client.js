@@ -63,6 +63,7 @@ import { createShippingTripsAPI } from './resources/shippingTrips'
 import { createShipToLeadTimesAPI } from './resources/shipToLeadTimes'
 import { createCameraActualsAPI } from './resources/cameraActuals'
 import { createOutsourceAPI } from './resources/outsource'
+import { createAutoPlanAggregateSettingsAPI } from './resources/autoPlanAggregateSettings'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
@@ -200,5 +201,6 @@ export default {
   shipToLeadTimes: createShipToLeadTimesAPI(client),
   cameraActuals: createCameraActualsAPI(client),
   outsource: createOutsourceAPI(client),
+  autoPlanAggregateSettings: createAutoPlanAggregateSettingsAPI(client),
   client,
 }

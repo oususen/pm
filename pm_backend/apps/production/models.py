@@ -27,6 +27,7 @@ from .models_record_confirmation import ProductionRecordConfirmation
 from .models_production import ProcessActual, ProductionOrder, StockAllocation
 from .models_camera_actual import CameraCountEvent, ProductionResultDaily
 from .models_line_product_display_order import LineProductDisplayOrder
+from .models_auto_plan_aggregate_setting import AutoPlanAggregateSetting
 
 
 class LineDemand(models.Model):

@@ -171,6 +171,11 @@
           @click="doFloorSpotAutoPlan"
           :disabled="processing || !selectedLine"
         >自動計画</button>
+        <button
+          v-if="canShowFloorSpotAutoPlanButton"
+          class="btn"
+          @click="openAggregateSettingsDialog"
+        >まとめ設定</button>
         <button class="btn accent" @click="toggleProcessGantt" :disabled="processing || !selectedLine">
           {{ showProcessGantt ? 'ガント閉じ' : 'ガント表示' }}
         </button>
@@ -985,6 +990,72 @@
       <div class="recalc-modal-buttons">
         <button class="btn" @click="showRecalcWarning = false">キャンセル</button>
         <button class="btn primary" @click="showRecalcWarning = false; recalculateProgressFromPast()">続行</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- まとめ生産設定ダイアログ -->
+  <div v-if="showAggregateDialog" class="modal-overlay" @click.self="showAggregateDialog = false">
+    <div class="modal-content" style="max-width: 900px; width: 90%;">
+      <h2 style="margin: 0 0 10px; font-size: 16px;">まとめ生産設定 — {{ selectedLineLabel }}</h2>
+      <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+        <select v-model="aggForm.product" style="min-width: 240px; padding: 5px;">
+          <option value="">製品選択</option>
+          <option v-for="p in aggregateProductOptions" :key="p.product_id" :value="p.product_id">
+            {{ p.product_code }} - {{ p.product_name }}
+          </option>
+        </select>
+        <select v-model.number="aggForm.aggregate_weekday" style="padding: 5px;">
+          <option v-for="d in aggWeekdayOptions" :key="d.value" :value="d.value">{{ d.label }}</option>
+        </select>
+        <input v-model.number="aggForm.aggregate_days" type="number" min="1" max="31" style="width: 60px; padding: 5px;" />
+        <label style="font-size: 12px;"><input v-model="aggForm.is_active" type="checkbox" /> 有効</label>
+        <button class="btn primary" @click="saveAggregateSetting">{{ aggForm.id ? '更新' : '追加' }}</button>
+        <button v-if="aggForm.id" class="btn" @click="resetAggForm">取消</button>
+      </div>
+      <div style="max-height: 400px; overflow-y: auto; border: 1px solid #d7deea;">
+        <table class="data-table" style="width: 100%; border-collapse: collapse;">
+          <thead><tr>
+            <th style="padding: 6px;">製品</th>
+            <th style="padding: 6px;">まとめ生産日</th>
+            <th style="padding: 6px;">対象期間</th>
+            <th style="padding: 6px;">有効</th>
+            <th style="padding: 6px;">操作</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="r in aggRows" :key="r.id">
+              <td style="padding: 5px;">{{ r.product_code }} - {{ r.product_name }}</td>
+              <td style="padding: 5px;">{{ aggWeekdayLabel(r.aggregate_weekday) }}</td>
+              <td style="padding: 5px;">{{ r.aggregate_days }}日</td>
+              <td style="padding: 5px;">{{ r.is_active ? '有効' : '無効' }}</td>
+              <td style="padding: 5px; white-space: nowrap;">
+                <button class="btn" style="padding: 2px 6px; font-size: 11px;" @click="editAggRow(r)">編集</button>
+                <button class="btn" style="padding: 2px 6px; font-size: 11px; color: #b00;" @click="deleteAggRow(r.id)">削除</button>
+              </td>
+            </tr>
+            <tr v-if="aggRows.length === 0"><td colspan="5" style="text-align: center; color: #888; padding: 12px;">設定なし</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="margin: 8px 0 0; font-size: 11px; color: #888;">※ まとめ対象期間の需要は表示期間内のデータのみ使用します。表示期間末尾の曜日では需要が不足する場合があるため、対象期間分の余裕をもって表示期間を設定してください。</p>
+      <div style="text-align: right; margin-top: 10px;">
+        <button class="btn" @click="showAggregateDialog = false">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 自動計画確認ダイアログ -->
+  <div v-if="showAutoPlanConfirm" class="modal-overlay" @click.self="cancelAutoPlanConfirm">
+    <div class="modal-content" style="max-width: 480px;">
+      <h2 style="margin: 0 0 10px; font-size: 16px;">自動計画の確認</h2>
+      <p style="margin: 0 0 4px;">表示期間内の需要数を計画数へセットして自動計画を実行します。</p>
+      <p style="margin: 0 0 4px;">ライン: <strong>{{ autoPlanConfirmLine }}</strong></p>
+      <p style="margin: 0 0 8px;">期間: <strong>{{ autoPlanConfirmPeriod }}</strong></p>
+      <p style="margin: 0 0 10px;">需要取込→保存（工程展開・在庫計算・ガント生成）を実行します。</p>
+      <p style="margin: 0; color: #c00; font-weight: 700; font-size: 13px;">※ まとめ生産の対象期間は表示期間内のデータのみ使用します。表示期間末尾では需要が不足する場合があります。</p>
+      <div style="text-align: right; margin-top: 14px; display: flex; gap: 8px; justify-content: flex-end;">
+        <button class="btn" @click="cancelAutoPlanConfirm">キャンセル</button>
+        <button class="btn primary" @click="confirmAutoPlan">OK</button>
       </div>
     </div>
   </div>
@@ -4187,6 +4258,110 @@ const doFetchOnly = async () => {
   }
 }
 
+const autoPlanAggregateSettingsMap = ref({})
+
+const loadAutoPlanAggregateSettingsForSelectedLine = async () => {
+  if (!selectedLine.value) {
+    autoPlanAggregateSettingsMap.value = {}
+    return
+  }
+  const res = await api.autoPlanAggregateSettings.list({
+    line: selectedLine.value,
+    is_active: true,
+    page_size: 1000,
+  })
+  const rowsData = res?.data?.results || res?.data || []
+  const map = {}
+  ;(Array.isArray(rowsData) ? rowsData : []).forEach((row) => {
+    const code = String(row?.product_code || '').trim()
+    if (!code) return
+    map[code] = {
+      aggregate_weekday: Number(row.aggregate_weekday),
+      aggregate_days: Number(row.aggregate_days) || 7,
+    }
+  })
+  autoPlanAggregateSettingsMap.value = map
+}
+
+// まとめ生産設定ダイアログ
+const showAggregateDialog = ref(false)
+const aggRows = ref([])
+const aggWeekdayOptions = [
+  { value: 0, label: '日曜' }, { value: 1, label: '月曜' }, { value: 2, label: '火曜' },
+  { value: 3, label: '水曜' }, { value: 4, label: '木曜' }, { value: 5, label: '金曜' },
+  { value: 6, label: '土曜' },
+]
+const aggWeekdayLabel = (v) => aggWeekdayOptions.find((x) => x.value === Number(v))?.label || '-'
+const emptyAggForm = () => ({ id: null, product: '', aggregate_weekday: 2, aggregate_days: 7, is_active: true })
+const aggForm = ref(emptyAggForm())
+const resetAggForm = () => { aggForm.value = emptyAggForm() }
+
+const aggregateProductOptions = computed(() => {
+  const seen = new Set()
+  return rows.value
+    .filter((r) => {
+      const id = r.product_id
+      if (!id || seen.has(id)) return false
+      seen.add(id)
+      return true
+    })
+    .map((r) => ({
+      product_id: r.product_id,
+      product_code: r.product_code || getProductCode(r.product_id),
+      product_name: r.product_name || getProductName(r.product_id),
+    }))
+    .sort((a, b) => (a.product_code || '').localeCompare(b.product_code || ''))
+})
+
+const loadAggRows = async () => {
+  if (!selectedLine.value) { aggRows.value = []; return }
+  const res = await api.autoPlanAggregateSettings.list({ line: selectedLine.value, page_size: 1000 })
+  aggRows.value = res?.data?.results || res?.data || []
+}
+
+const openAggregateSettingsDialog = async () => {
+  resetAggForm()
+  await loadAggRows()
+  showAggregateDialog.value = true
+}
+
+const saveAggregateSetting = async () => {
+  if (!aggForm.value.product) { alert('製品を選択してください。'); return }
+  const payload = {
+    line: selectedLine.value,
+    product: aggForm.value.product,
+    aggregate_weekday: Number(aggForm.value.aggregate_weekday),
+    aggregate_days: Number(aggForm.value.aggregate_days),
+    is_active: !!aggForm.value.is_active,
+  }
+  try {
+    if (aggForm.value.id) {
+      await api.autoPlanAggregateSettings.update(aggForm.value.id, payload)
+    } else {
+      await api.autoPlanAggregateSettings.create(payload)
+    }
+    await loadAggRows()
+    resetAggForm()
+  } catch (e) {
+    alert(e?.response?.data?.detail || '保存に失敗しました。')
+  }
+}
+
+const editAggRow = (row) => {
+  aggForm.value = {
+    id: row.id, product: row.product,
+    aggregate_weekday: row.aggregate_weekday, aggregate_days: row.aggregate_days,
+    is_active: row.is_active,
+  }
+}
+
+const deleteAggRow = async (id) => {
+  if (!confirm('削除しますか？')) return
+  await api.autoPlanAggregateSettings.remove(id)
+  await loadAggRows()
+  if (aggForm.value.id === id) resetAggForm()
+}
+
 const applyDemandToPlanForDay = (dateKey) => {
   if (isPlanCellLocked(dateKey)) return
   rows.value.forEach((row) => {
@@ -4210,9 +4385,9 @@ const applyDemandToPlanForDay = (dateKey) => {
 }
 
 const applyDemandToPlanForVisiblePeriod = () => {
-  const isTuesday = (dateKey) => {
+  const getWeekday = (dateKey) => {
     const dt = new Date(`${dateKey}T00:00:00`)
-    return dt.getDay() === 2
+    return dt.getDay()
   }
   const addDays = (dateKey, days) => {
     const dt = new Date(`${dateKey}T00:00:00`)
@@ -4222,14 +4397,9 @@ const applyDemandToPlanForVisiblePeriod = () => {
     const d = String(dt.getDate()).padStart(2, '0')
     return `${y}-${m}-${d}`
   }
-  const isL2101 = () => String(selectedLineObj.value?.line_code || '').trim().toUpperCase() === 'L2101'
-  const isWeeklyTuesdaySpecialProduct = (row) => {
-    const code = String(row?.product_code || '')
-    return code === 'YD40006389' || code.endsWith('2361') || code.endsWith('2723')
-  }
-  const calcNextWedToNextTueDemand = (row, dateKey) => {
+  const calcAggregateDemand = (row, dateKey, days) => {
     let total = 0
-    for (let offset = 1; offset <= 7; offset += 1) {
+    for (let offset = 1; offset <= days; offset += 1) {
       const targetKey = addDays(dateKey, offset)
       const targetDaily = ensureDailyCell(row, targetKey)
       const sourceQty = isProgressMode.value ? targetDaily.line_demand_qty : targetDaily.demand
@@ -4245,12 +4415,15 @@ const applyDemandToPlanForVisiblePeriod = () => {
     dateColumns.value.forEach((c) => {
       const daily = ensureDailyCell(row, c.key)
       let demandQty = 0
-      if (isL2101() && isWeeklyTuesdaySpecialProduct(row)) {
-        // 特例3品番は「火曜のみ計画作成」。
-        // 火曜: 翌日(水)〜翌週(火)の需要合算
-        // それ以外: 自動計画では計画を立てない
-        if (isTuesday(c.key)) {
-          demandQty = calcNextWedToNextTueDemand(row, c.key)
+      const productCode = String(row?.product_code || '').trim()
+      const aggregateSetting = autoPlanAggregateSettingsMap.value[productCode]
+      if (aggregateSetting) {
+        const targetWeekday = Number.isFinite(aggregateSetting.aggregate_weekday) ? aggregateSetting.aggregate_weekday : 2
+        const days = Number.isFinite(aggregateSetting.aggregate_days) && aggregateSetting.aggregate_days > 0
+          ? Math.floor(aggregateSetting.aggregate_days)
+          : 7
+        if (getWeekday(c.key) === targetWeekday) {
+          demandQty = calcAggregateDemand(row, c.key, days)
         } else {
           demandQty = 0
         }
@@ -4268,20 +4441,32 @@ const applyDemandToPlanForVisiblePeriod = () => {
   return autoPlanCount
 }
 
+const showAutoPlanConfirm = ref(false)
+const autoPlanConfirmLine = ref('')
+const autoPlanConfirmPeriod = ref('')
+let autoPlanConfirmResolve = null
+
+const cancelAutoPlanConfirm = () => {
+  showAutoPlanConfirm.value = false
+  if (autoPlanConfirmResolve) { autoPlanConfirmResolve(false); autoPlanConfirmResolve = null }
+}
+const confirmAutoPlan = () => {
+  showAutoPlanConfirm.value = false
+  if (autoPlanConfirmResolve) { autoPlanConfirmResolve(true); autoPlanConfirmResolve = null }
+}
+
 const doFloorSpotAutoPlan = async () => {
   if (!selectedLine.value) return
   if (!canShowFloorSpotAutoPlanButton.value) return
-  const lineLabel = selectedLineLabel.value || `ID:${selectedLine.value}`
-  const confirmed = window.confirm(
-    `表示期間内の需要数を計画数へセットして自動計画を実行します。\n` +
-    `ライン: ${lineLabel}\n` +
-    `期間: ${startDate.value} ～ ${endDate.value}\n\n` +
-    `需要取込→保存（工程展開・在庫計算・ガント生成）を実行します。`
-  )
+  autoPlanConfirmLine.value = selectedLineLabel.value || `ID:${selectedLine.value}`
+  autoPlanConfirmPeriod.value = `${startDate.value} ～ ${endDate.value}`
+  showAutoPlanConfirm.value = true
+  const confirmed = await new Promise((resolve) => { autoPlanConfirmResolve = resolve })
   if (!confirmed) return
 
   processing.value = true
   try {
+    await loadAutoPlanAggregateSettingsForSelectedLine()
     await api.lineBacklogs.pickup({
       line_id: selectedLine.value,
       start_date: startDate.value,

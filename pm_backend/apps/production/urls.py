@@ -9,6 +9,7 @@ from production.views import (
     LineGanttPlanViewSet,
     LineDailyScheduleSettingViewSet,
     LineDefaultScheduleSettingViewSet,
+    AutoPlanAggregateSettingViewSet,
     ProductionPlanLockSettingView,
     ProductionRecordInquirySettingView,
     ScheduleConfigView,
@@ -62,6 +63,7 @@ router.register(r'line-backlogs', LineBacklogViewSet, basename='linebacklog')
 router.register(r'line-gantt-plans', LineGanttPlanViewSet, basename='lineganttplan')
 router.register(r'line-daily-schedule-settings', LineDailyScheduleSettingViewSet, basename='linedailyschedulesetting')
 router.register(r'line-default-schedule-settings', LineDefaultScheduleSettingViewSet, basename='linedefaultschedulesetting')
+router.register(r'auto-plan-aggregate-settings', AutoPlanAggregateSettingViewSet, basename='autoplanaggregatesetting')
 router.register(r'laser-patterns', LaserPatternViewSet, basename='laserpattern')
 router.register(r'laser-actuals', LaserActualViewSet, basename='laseractual')
 router.register(r'laser-shift-records', LaserShiftRecordViewSet, basename='lasershiftrecord')

@@ -10,6 +10,10 @@
         <div class="tile-title">ライン順序自動計画</div>
         <div class="tile-desc">実行順序を決めて自動計画を順次実行します。</div>
       </RouterLink>
+      <RouterLink to="/settings/auto-plan-aggregate" class="tile">
+        <div class="tile-title">まとめ生産設定</div>
+        <div class="tile-desc">ライン・製品ごとにまとめ生産日と対象期間を設定します。</div>
+      </RouterLink>
     </div>
   </div>
 </template>

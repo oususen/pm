@@ -74,7 +74,7 @@ const settings = [
   {
     path: "/settings/auto-plan",
     name: "AutoPlanMenu",
-    component: () => import("@/views/settings/AutoPlanSequenceSettings.vue"),
+    component: () => import("@/views/settings/AutoPlanMenu.vue"),
     meta: { pageTitle: "自動計画", resource: "settings.scheduled_tasks" },
   },
   {
@@ -82,6 +82,12 @@ const settings = [
     name: "AutoPlanSequenceSettings",
     component: () => import("@/views/settings/AutoPlanSequenceSettings.vue"),
     meta: { pageTitle: "自動計画順序設定", resource: "settings.scheduled_tasks" },
+  },
+  {
+    path: "/settings/auto-plan-aggregate",
+    name: "AutoPlanAggregateSettings",
+    component: () => import("@/views/settings/AutoPlanAggregateSettings.vue"),
+    meta: { pageTitle: "まとめ生産設定", resource: "settings.scheduled_tasks" },
   },
   {
     path: "/settings/stocktake-init",

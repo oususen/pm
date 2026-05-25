@@ -13,6 +13,7 @@ from .models_line_plan import LinePlan
 from .models_line_gantt_plan import LineGanttPlan
 from .models_line_daily_schedule_setting import LineDailyScheduleSetting
 from .models_line_default_schedule_setting import LineDefaultScheduleSetting
+from .models_auto_plan_aggregate_setting import AutoPlanAggregateSetting
 from .models_line_backlog_adjustment import LineBacklogAdjustment
 from .models_plan_change_log import ProductionPlanChangeLog
 from .models_plan_lock_setting import ProductionPlanLockSetting
@@ -1099,6 +1100,23 @@ class LineDefaultScheduleSettingSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at', 'updated_by',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'updated_by']
+
+
+class AutoPlanAggregateSettingSerializer(serializers.ModelSerializer):
+    line_code = serializers.CharField(source='line.line_code', read_only=True)
+    line_name = serializers.CharField(source='line.line_name', read_only=True)
+    product_code = serializers.CharField(source='product.product_code', read_only=True)
+    product_name = serializers.CharField(source='product.product_name', read_only=True)
+
+    class Meta:
+        model = AutoPlanAggregateSetting
+        fields = [
+            'id', 'line', 'line_code', 'line_name',
+            'product', 'product_code', 'product_name',
+            'aggregate_weekday', 'aggregate_days', 'is_active',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'updated_at']
 
 
 class ProductionPlanLockSettingSerializer(serializers.ModelSerializer):

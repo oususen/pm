@@ -28,6 +28,7 @@ from .models_production import StockAllocation, ProductionOrder, ProcessActual
 from .models_line_gantt_plan import LineGanttPlan
 from .models_line_daily_schedule_setting import LineDailyScheduleSetting
 from .models_line_default_schedule_setting import LineDefaultScheduleSetting
+from .models_auto_plan_aggregate_setting import AutoPlanAggregateSetting
 from .models_plan_change_log import ProductionPlanChangeLog
 from .models_plan_lock_setting import ProductionPlanLockSetting
 from .models_record_inquiry_setting import ProductionRecordInquirySetting
@@ -51,6 +52,7 @@ from .serializers import (
     LineGanttPlanSerializer,
     LineDailyScheduleSettingSerializer,
     LineDefaultScheduleSettingSerializer,
+    AutoPlanAggregateSettingSerializer,
     ProductionPlanLockSettingSerializer,
     ScheduleConfigSerializer,
     PurchaseActualReconcileReportSerializer,
@@ -5617,6 +5619,26 @@ class LineDefaultScheduleSettingViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK if not errors else status.HTTP_207_MULTI_STATUS,
         )
+
+
+class AutoPlanAggregateSettingViewSet(viewsets.ModelViewSet):
+    """自動計画まとめ生産設定ViewSet"""
+
+    queryset = AutoPlanAggregateSetting.objects.all().select_related('line', 'product')
+    serializer_class = AutoPlanAggregateSettingSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['line', 'product', 'is_active']
+    search_fields = ['line__line_code', 'line__line_name', 'product__product_code', 'product__product_name']
+    ordering_fields = ['line__line_code', 'product__product_code', 'aggregate_weekday', 'aggregate_days', 'updated_at']
+    ordering = ['line__line_code', 'product__product_code']
+
+    def perform_create(self, serializer):
+        user = self.request.user if getattr(self.request, 'user', None) and self.request.user.is_authenticated else None
+        serializer.save(updated_by=user)
+
+    def perform_update(self, serializer):
+        user = self.request.user if getattr(self.request, 'user', None) and self.request.user.is_authenticated else None
+        serializer.save(updated_by=user)
 
 
 class LaserPatternViewSet(viewsets.ModelViewSet):
