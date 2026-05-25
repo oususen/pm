@@ -32,7 +32,7 @@ def generate_split_plan_excel(order_ids):
 
     # ヘッダー行
     headers = [
-        '案件番号', '品目コード', '品目名称', '受注数量',
+        '案件番号', '品目コード', '品番', '品目名称', '受注数量',
         '塗装名', '塗装日', '最早着手日', '最遅完了日',
         '加工日1', '数量1', '加工日2', '数量2',
         '加工日3', '数量3', '加工日4', '数量4',
@@ -56,6 +56,7 @@ def generate_split_plan_excel(order_ids):
         data = [
             order.case_no,
             order.item_code,
+            (order.item.product_number if order.item else ''),
             order.item_name,
             order.order_qty,
             order.painting_name,
@@ -72,15 +73,16 @@ def generate_split_plan_excel(order_ids):
                 cell.number_format = 'YYYY/MM/DD'
 
         # 記入欄（黄色背景）: 加工日1〜5, 数量1〜5
-        for col in range(9, 19):
+        process_start_col = 10
+        for col in range(process_start_col, process_start_col + 10):
             cell = ws.cell(row=row_idx, column=col)
             cell.fill = input_fill
             cell.border = thin_border
-            if col % 2 == 0:  # 数量列
+            if (col - process_start_col) % 2 == 1:  # 数量列（加工日の次列）
                 cell.number_format = '#,##0'
 
     # 列幅調整
-    col_widths = [22, 16, 24, 8, 14, 12, 12, 12, 12, 8, 12, 8, 12, 8, 12, 8, 12, 8]
+    col_widths = [22, 16, 14, 24, 8, 14, 12, 12, 12, 12, 8, 12, 8, 12, 8, 12, 8, 12, 8]
     for i, w in enumerate(col_widths, 1):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
 

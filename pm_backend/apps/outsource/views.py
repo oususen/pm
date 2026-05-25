@@ -118,7 +118,7 @@ class OutsourceBOMViewSet(viewsets.ModelViewSet):
 
 
 class OutsourceOrderViewSet(viewsets.ModelViewSet):
-    queryset = OutsourceOrder.objects.prefetch_related('splits')
+    queryset = OutsourceOrder.objects.select_related('item').prefetch_related('splits')
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'painting_name']
     search_fields = ['case_no', 'item_code', 'item_name']
@@ -167,6 +167,11 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
     def calculate_constraints(self, request, pk=None):
         """制約条件を再計算"""
         order = self.get_object()
+        if not order.item and order.item_code:
+            matched_item = OutsourceItem.objects.filter(item_code=order.item_code).first()
+            if matched_item:
+                order.item = matched_item
+                order.save(update_fields=['item'])
         if not order.item:
             return Response({'error': '品目マスタが未紐付けです'}, status=status.HTTP_400_BAD_REQUEST)
         try:
@@ -224,6 +229,11 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
                 file_bytes.seek(0)
 
             results = import_split_plan_excel(file_bytes, dry_run=False)
+            if confirm:
+                for w in results.get('warnings', []):
+                    msg = w.get('message') or ''
+                    if '上書きしますか？' in msg:
+                        w['message'] = msg.replace('上書きしますか？', '上書きしました')
         except Exception as e:
             traceback.print_exc()
             return Response({'error': f'{type(e).__name__}: {e}'}, status=status.HTTP_400_BAD_REQUEST)

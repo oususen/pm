@@ -118,7 +118,7 @@
           <option v-for="c in componentMaterials" :key="c.id" :value="c.id">{{ c.material_code }} {{ c.material_name }}</option>
         </select>
         <label class="field-label">員数</label>
-        <input v-model.number="bomForm.quantity_per" placeholder="員数" type="number" step="0.0001" class="input input-sm" />
+        <input v-model.number="bomForm.quantity_per" placeholder="員数" type="number" step="1" min="1" class="input input-sm" />
         <button class="btn-primary" @click="saveBOM">{{ bomForm.id ? '更新' : '追加' }}</button>
         <button v-if="bomForm.id" class="btn-cancel" @click="resetBOMForm">取消</button>
       </div>
@@ -255,7 +255,21 @@ async function fetchBOM() {
   bomLines.value = res.data.results || res.data
 }
 async function saveBOM() {
-  const data = { ...bomForm.value, item: bomFilter.value }
+  const qty = Number(bomForm.value.quantity_per)
+  if (!Number.isInteger(qty) || qty <= 0) {
+    alert('員数は1以上の整数で入力してください。')
+    return
+  }
+
+  const selectedMaterial = componentMaterials.value.find((c) => c.id === bomForm.value.material)
+  const data = {
+    ...bomForm.value,
+    quantity_per: qty,
+    item: bomFilter.value,
+    material_code: bomForm.value.material_code || selectedMaterial?.material_code || '',
+    material_name: bomForm.value.material_name || selectedMaterial?.material_name || '',
+    supplier: bomForm.value.supplier ?? selectedMaterial?.supplier ?? null,
+  }
   if (bomForm.value.id) {
     await api.outsource.updateBOMLine(bomForm.value.id, data)
   } else {

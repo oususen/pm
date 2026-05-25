@@ -23,7 +23,7 @@
       <input
         v-model="searchText"
         @input="debouncedFetch"
-        placeholder="品目コード・名称で検索"
+        placeholder="品目コード・品番・名称で検索"
         class="search-input"
       />
     </div>
@@ -33,6 +33,7 @@
         <tr>
           <th>案件番号</th>
           <th>品目コード</th>
+          <th>品番</th>
           <th>品目名称</th>
           <th>数量</th>
           <th>塗装名</th>
@@ -47,6 +48,7 @@
         <tr v-for="o in orders" :key="o.id" @click="goDetail(o.id)" class="clickable-row">
           <td class="case-no">{{ o.case_no }}</td>
           <td>{{ o.item_code }}</td>
+          <td>{{ o.product_number || '-' }}</td>
           <td>{{ o.item_name }}</td>
           <td class="text-right">{{ o.order_qty }}</td>
           <td>{{ o.painting_name }}</td>

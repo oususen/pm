@@ -53,7 +53,9 @@
           <th><input type="checkbox" @change="toggleAll" :checked="allSelected" /></th>
           <th>案件番号</th>
           <th>品目コード</th>
+          <th>品番</th>
           <th>品目名称</th>
+          <th>BOM有無</th>
           <th>数量</th>
           <th>塗装日</th>
           <th>調達最長LT</th>
@@ -69,7 +71,9 @@
           <td><input type="checkbox" :value="o.id" v-model="selectedIds" /></td>
           <td class="case-no">{{ o.case_no }}</td>
           <td>{{ o.item_code }}</td>
+          <td>{{ o.product_number || '-' }}</td>
           <td>{{ o.item_name }}</td>
+          <td>{{ o.has_bom ? 'あり' : 'なし' }}</td>
           <td class="text-right">{{ o.order_qty }}</td>
           <td>{{ o.painting_date }}</td>
           <td>{{ o.max_procurement_lt ?? '-' }}</td>

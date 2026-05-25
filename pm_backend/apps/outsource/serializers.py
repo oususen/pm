@@ -138,6 +138,8 @@ class OutsourceOrderSerializer(serializers.ModelSerializer):
 
 class OutsourceOrderListSerializer(serializers.ModelSerializer):
     split_count = serializers.IntegerField(source='splits.count', read_only=True)
+    product_number = serializers.SerializerMethodField()
+    has_bom = serializers.SerializerMethodField()
     max_procurement_lt = serializers.SerializerMethodField()
     max_procurement_material_code = serializers.SerializerMethodField()
     max_procurement_supplier_name = serializers.SerializerMethodField()
@@ -145,14 +147,38 @@ class OutsourceOrderListSerializer(serializers.ModelSerializer):
     class Meta:
         model = OutsourceOrder
         fields = [
-            'id', 'case_no', 'item_code', 'item_name', 'order_qty',
+            'id', 'case_no', 'item_code', 'product_number', 'item_name', 'order_qty',
             'painting_name', 'painting_date', 'earliest_start', 'latest_finish',
-            'status', 'imported_at', 'split_count',
+            'status', 'imported_at', 'split_count', 'has_bom',
             'max_procurement_lt', 'max_procurement_material_code', 'max_procurement_supplier_name',
         ]
 
-    def _get_max_lt_bom(self, obj):
+    def _resolve_item(self, obj):
         item = getattr(obj, 'item', None)
+        if item:
+            return item
+        code = (obj.item_code or '').strip()
+        if not code:
+            return None
+        return OutsourceItem.objects.filter(item_code=code).first()
+
+    def get_product_number(self, obj):
+        item = self._resolve_item(obj)
+        if item and item.product_number:
+            return item.product_number
+        code = (obj.item_code or '').lstrip('B')
+        if len(code) >= 10:
+            return f'{code[:6]}-{code[6:10]}'
+        return ''
+
+    def get_has_bom(self, obj):
+        item = self._resolve_item(obj)
+        if not item:
+            return False
+        return item.bom_lines.exists()
+
+    def _get_max_lt_bom(self, obj):
+        item = self._resolve_item(obj)
         if not item:
             return None
         return item.bom_lines.order_by('-procurement_lt', 'material_code').first()

@@ -64,7 +64,7 @@ def import_split_plan_excel(file_content, dry_run=False):
     外作先が記入した分割計画Excelを取り込む。
 
     Excel構成:
-        案件番号 | 品目コード | 品目名称 | 受注数量 | 塗装名 | 塗装日 |
+        案件番号 | 品目コード | 品番 | 品目名称 | 受注数量 | 塗装名 | 塗装日 |
         最早着手日 | 最遅完了日 | 加工日1 | 数量1 | 加工日2 | 数量2 | ...
 
     dry_run=True: パース・バリデーションのみ（DB変更なし）
@@ -74,6 +74,11 @@ def import_split_plan_excel(file_content, dry_run=False):
 
     wb = load_workbook(file_content, data_only=True)
     ws = wb.active
+
+    header_row = [c.value for c in ws[1]]
+    process_start_idx = 8  # 0-indexed default: 最遅完了日の次
+    if '加工日1' in header_row:
+        process_start_idx = header_row.index('加工日1')
 
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
         if not row or not row[0]:
@@ -91,10 +96,10 @@ def import_split_plan_excel(file_content, dry_run=False):
             })
             continue
 
-        # 加工日・数量のペアを抽出（col 8以降: 加工日1, 数量1, 加工日2, 数量2, ...）
+        # 加工日・数量のペアを抽出（加工日1列以降: 加工日1, 数量1, 加工日2, 数量2, ...）
         splits_data = []
-        print(f'[DEBUG] row {row_idx}: case={case_no}, total_cols={len(row)}, raw_data={list(row[8:])}')
-        col_idx = 8  # 0-indexed: col 8 = 加工日1
+        print(f'[DEBUG] row {row_idx}: case={case_no}, total_cols={len(row)}, raw_data={list(row[process_start_idx:])}')
+        col_idx = process_start_idx
         while col_idx < len(row) - 1:
             process_date_val = row[col_idx]
             qty_val = row[col_idx + 1]
