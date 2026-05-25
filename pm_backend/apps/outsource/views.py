@@ -48,6 +48,13 @@ def _to_int_qty(value):
         return 0
 
 
+def _current_user_display(user):
+    if not user or not getattr(user, 'is_authenticated', False):
+        return 'system'
+    full_name = f"{getattr(user, 'last_name', '')} {getattr(user, 'first_name', '')}".strip()
+    return full_name or getattr(user, 'username', 'system')
+
+
 def _record_material_stock_issue(material, qty, reason, ref_type, ref_id):
     if qty == 0:
         return
@@ -388,7 +395,7 @@ def _sync_order_status(order):
 
 
 class MaterialRequirementViewSet(viewsets.ModelViewSet):
-    queryset = MaterialRequirement.objects.select_related('split', 'split__order')
+    queryset = MaterialRequirement.objects.select_related('split', 'split__order', 'split__order__item')
     serializer_class = MaterialRequirementSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['supplied', 'ordered', 'shipment_planned', 'issued', 'material_code']
@@ -409,7 +416,29 @@ class MaterialRequirementViewSet(viewsets.ModelViewSet):
         before = serializer.instance
         was_issued = before.issued
         before_qty = _to_int_qty(before.supplied_qty or before.required_qty)
+        was_planned = before.shipment_planned
         material = serializer.save()
+        user_name = _current_user_display(self.request.user)
+
+        update_fields = []
+        if not was_planned and material.shipment_planned and not material.shipment_planned_by:
+            material.shipment_planned_by = user_name
+            update_fields.append('shipment_planned_by')
+        elif was_planned and not material.shipment_planned and material.shipment_planned_by:
+            material.shipment_planned_by = ''
+            update_fields.append('shipment_planned_by')
+
+        if not was_issued and material.issued and not material.issued_by:
+            material.issued_by = user_name
+            update_fields.append('issued_by')
+        elif was_issued and not material.issued and material.issued_by:
+            material.issued_by = ''
+            update_fields.append('issued_by')
+
+        if update_fields:
+            update_fields.append('updated_at')
+            material.save(update_fields=update_fields)
+
         if material.issued and not material.supplied:
             material.supplied = True
             if not material.supplied_qty:
@@ -449,9 +478,12 @@ class MaterialRequirementViewSet(viewsets.ModelViewSet):
         """支給実績登録"""
         material = self.get_object()
         supplied_qty = request.data.get('supplied_qty', material.required_qty)
+        user_name = _current_user_display(request.user)
         material.supplied_qty = supplied_qty
         material.shipment_planned = True
+        material.shipment_planned_by = material.shipment_planned_by or user_name
         material.issued = True
+        material.issued_by = user_name
         material.supplied = True
         material.save()
         issue_qty = _to_int_qty(material.supplied_qty or material.required_qty)

@@ -5,6 +5,7 @@
     <div class="toolbar">
       <select v-model="filterSupplied" @change="fetchMaterials" class="filter-select">
         <option value="false">未出庫のみ</option>
+        <option value="planned">便計画済みのみ</option>
         <option value="">全て</option>
         <option value="true">出庫済のみ</option>
       </select>
@@ -37,11 +38,11 @@
         <div class="group-header clickable" @click="toggleCase(group.case_no)">
           <span class="toggle-icon">{{ expandedCases.has(group.case_no) ? '▼' : '▶' }}</span>
           <span class="group-title">{{ group.case_no }}</span>
-          <span class="group-count">{{ group.item_name }} / {{ group.items.length }}材料</span>
+          <span class="group-count">{{ group.product_number || '-' }} {{ group.item_name }} / {{ group.items.length }}材料</span>
           <button v-if="group.items.some(m => !m.issued)" class="btn-supply-all" @click.stop="issueAll(group.items)">一括出庫済</button>
         </div>
         <table v-if="expandedCases.has(group.case_no)" class="data-table">
-          <thead><tr><th>支給予定日</th><th>加工日</th><th>材料コード</th><th>材料名称</th><th>調達先</th><th>必要数量</th><th>状態</th><th>操作</th></tr></thead>
+          <thead><tr><th>支給予定日</th><th>加工日</th><th>材料コード</th><th>材料名称</th><th>調達先</th><th>必要数量</th><th>状態</th><th>操作者</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="m in group.items" :key="m.id" :class="rowClass(m)">
               <td :class="{ 'text-danger': isOverdue(m) }">{{ m.supply_date }}</td>
@@ -51,6 +52,7 @@
               <td>{{ m.supplier_name || '-' }}</td>
               <td class="text-right">{{ formatQty(m.required_qty) }}</td>
               <td class="text-center"><span :class="statusClass(m)">{{ statusText(m) }}</span></td>
+              <td>{{ operatorText(m) }}</td>
               <td>
                 <button v-if="!m.shipment_planned" class="btn-plan" @click="markPlanned(m)">便計画済み</button>
                 <button v-else-if="!m.issued" class="btn-supply" @click="markIssued(m)">出庫済</button>
@@ -71,7 +73,7 @@
           <button v-if="group.items.some(m => !m.issued)" class="btn-supply-all" @click="issueAll(group.items)">一括出庫済</button>
         </div>
         <table class="data-table">
-          <thead><tr><th>案件番号</th><th>品目名称</th><th>加工日</th><th>支給予定日</th><th>材料コード</th><th>材料名称</th><th>調達先</th><th>必要数量</th><th>状態</th><th>操作</th></tr></thead>
+          <thead><tr><th>案件番号</th><th>品目名称</th><th>加工日</th><th>支給予定日</th><th>材料コード</th><th>材料名称</th><th>調達先</th><th>必要数量</th><th>状態</th><th>操作者</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="m in group.items" :key="m.id" :class="rowClass(m)">
               <td class="case-no">{{ m.case_no }}</td>
@@ -83,6 +85,7 @@
               <td>{{ m.supplier_name || '-' }}</td>
               <td class="text-right">{{ formatQty(m.required_qty) }}</td>
               <td class="text-center"><span :class="statusClass(m)">{{ statusText(m) }}</span></td>
+              <td>{{ operatorText(m) }}</td>
               <td>
                 <button v-if="!m.shipment_planned" class="btn-plan" @click="markPlanned(m)">便計画済み</button>
                 <button v-else-if="!m.issued" class="btn-supply" @click="markIssued(m)">出庫済</button>
@@ -226,12 +229,20 @@ function statusText(m) {
   return '未対応'
 }
 
+function operatorText(m) {
+  const plannedBy = m.shipment_planned_by || '-'
+  const issuedBy = m.issued_by || '-'
+  if (m.issued) return `便:${plannedBy} / 出:${issuedBy}`
+  if (m.shipment_planned) return `便:${plannedBy}`
+  return '-'
+}
+
 // 案件別
 const groupedByCase = computed(() => {
   const map = {}
   for (const m of filteredMaterials.value) {
     const key = m.case_no
-    if (!map[key]) map[key] = { case_no: m.case_no, item_name: m.item_name, items: [] }
+    if (!map[key]) map[key] = { case_no: m.case_no, item_name: m.item_name, product_number: m.product_number, items: [] }
     map[key].items.push(m)
   }
   for (const g of Object.values(map)) {
@@ -282,7 +293,12 @@ async function fetchMaterials() {
   loading.value = true
   try {
     const params = { ordering: 'supply_date' }
-    if (filterSupplied.value) params.issued = filterSupplied.value
+    if (filterSupplied.value === 'planned') {
+      params.shipment_planned = 'true'
+      params.issued = 'false'
+    } else if (filterSupplied.value) {
+      params.issued = filterSupplied.value
+    }
     if (paintingFrom.value) params.painting_date_from = paintingFrom.value
     if (paintingTo.value) params.painting_date_to = paintingTo.value
     const res = await api.outsource.getMaterials(params)

@@ -115,12 +115,25 @@ class OutsourceSplitSerializer(serializers.ModelSerializer):
 class MaterialRequirementSerializer(serializers.ModelSerializer):
     case_no = serializers.CharField(source='split.order.case_no', read_only=True)
     item_name = serializers.CharField(source='split.order.item_name', read_only=True)
+    product_number = serializers.SerializerMethodField()
     process_date = serializers.DateField(source='split.process_date', read_only=True)
     painting_date = serializers.DateField(source='split.order.painting_date', read_only=True)
 
     class Meta:
         model = MaterialRequirement
         fields = '__all__'
+
+    def get_product_number(self, obj):
+        order = getattr(getattr(obj, 'split', None), 'order', None)
+        if not order:
+            return ''
+        item = getattr(order, 'item', None)
+        if item and item.product_number:
+            return item.product_number
+        code = (order.item_code or '').lstrip('B')
+        if len(code) >= 10:
+            return f'{code[:6]}-{code[6:10]}'
+        return ''
 
 
 class OutsourceOrderSerializer(serializers.ModelSerializer):
