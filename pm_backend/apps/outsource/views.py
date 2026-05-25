@@ -1,5 +1,5 @@
 from io import BytesIO
-from datetime import timedelta
+from datetime import timedelta, datetime
 from decimal import Decimal
 
 from django.http import HttpResponse
@@ -93,7 +93,7 @@ def _calc_material_due_date(supply_date, supplier=None):
 
 
 class SubcontractorViewSet(viewsets.ModelViewSet):
-    queryset = Subcontractor.objects.all()
+    queryset = Subcontractor.objects.all().order_by('id')
     serializer_class = SubcontractorSerializer
 
 
@@ -106,7 +106,7 @@ class OutsourceMaterialViewSet(viewsets.ModelViewSet):
 
 
 class OutsourceItemViewSet(viewsets.ModelViewSet):
-    queryset = OutsourceItem.objects.select_related('subcontractor').prefetch_related('bom_lines')
+    queryset = OutsourceItem.objects.select_related('subcontractor').prefetch_related('bom_lines').order_by('id')
     filter_backends = [DjangoFilterBackend, SearchFilter]
     filterset_fields = ['is_active', 'subcontractor']
     search_fields = ['item_code', 'item_name']
@@ -118,7 +118,7 @@ class OutsourceItemViewSet(viewsets.ModelViewSet):
 
 
 class OutsourceBOMViewSet(viewsets.ModelViewSet):
-    queryset = OutsourceBOM.objects.select_related('item')
+    queryset = OutsourceBOM.objects.select_related('item').order_by('id')
     serializer_class = OutsourceBOMSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['item']
@@ -249,10 +249,18 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
             try:
                 order = OutsourceOrder.objects.get(case_no=item['case_no'])
                 if order.item:
-                    bom_result = explode_materials_for_order(order.id)
-                    item['material_count'] = bom_result['created_count']
-                    if bom_result['errors']:
-                        item['bom_errors'] = bom_result['errors']
+                    try:
+                        bom_result = explode_materials_for_order(order.id)
+                        item['material_count'] = bom_result['created_count']
+                        if bom_result['errors']:
+                            item['bom_errors'] = bom_result['errors']
+                    except Exception as e:
+                        item['bom_errors'] = [f'BOM展開エラー: {type(e).__name__}: {e}']
+                        results['errors'].append({
+                            'row': item.get('row', '-'),
+                            'case_no': item['case_no'],
+                            'message': f'BOM展開エラー: {type(e).__name__}: {e}',
+                        })
             except OutsourceOrder.DoesNotExist:
                 pass
 
@@ -369,25 +377,29 @@ def _sync_order_status(order):
         return
 
     from django.db.models import Sum
+    today = datetime.now().date()
     all_shipped = True
     any_active = False
     for s in splits:
         delivered = s.deliveries.aggregate(t=Sum('qty'))['t'] or 0
         shipped = s.shipments.aggregate(t=Sum('qty'))['t'] or 0
-        has_ordered = s.material_requirements.filter(ordered=True).exists()
         has_supplied = s.material_requirements.filter(supplied=True).exists()
+        process_day_reached = bool(s.process_date and s.process_date <= today)
+        supplied_ready = bool(s.material_supplied or has_supplied)
+        started_by_schedule = process_day_reached and supplied_ready
         if shipped < s.qty:
             all_shipped = False
-        if (s.material_supplied or s.process_completed or s.shipped
+        if (s.process_completed or s.shipped
                 or delivered > 0 or shipped > 0
-                or has_ordered or has_supplied):
+                or started_by_schedule):
             any_active = True
 
-    new_status = order.status
     if all_shipped:
         new_status = 'COMPLETED'
     elif any_active:
         new_status = 'IN_PROGRESS'
+    else:
+        new_status = 'SPLIT_REGISTERED'
 
     if new_status != order.status and order.status in ('SPLIT_REGISTERED', 'IN_PROGRESS'):
         order.status = new_status
@@ -414,6 +426,12 @@ class MaterialRequirementViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         before = serializer.instance
+        requested_ordered = serializer.validated_data.get('ordered', before.ordered)
+        requested_order_qty = serializer.validated_data.get('order_qty', before.order_qty)
+        if requested_ordered and _to_int_qty(requested_order_qty) <= 0:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({'order_qty': '発注数は1以上を指定してください'})
+
         was_issued = before.issued
         before_qty = _to_int_qty(before.supplied_qty or before.required_qty)
         was_planned = before.shipment_planned

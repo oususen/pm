@@ -85,7 +85,7 @@
             <td>{{ m.process_date }}</td>
             <td class="text-center"><span :class="statusClass(m)">{{ statusText(m) }}</span></td>
             <td>
-              <button v-if="!m.ordered" class="btn-supply" @click="markOrdered(m)">発注済</button>
+              <button v-if="!m.ordered" class="btn-supply" :disabled="!canMarkOrdered(m)" @click="markOrdered(m)">発注済</button>
               <button v-else class="btn-undo" @click="undoOrder(m)">取消</button>
             </td>
           </tr>
@@ -165,6 +165,10 @@ function orderedQtyOf(m) {
   return Number.isFinite(v) ? v : (parseFloat(m.required_qty) || 0)
 }
 
+function canMarkOrdered(m) {
+  return Math.trunc(Number(orderedQtyOf(m)) || 0) >= 1
+}
+
 function dueDateOf(m) { return m.material_due_date || m.supply_date }
 function isOverdue(m) { return !m.ordered && dueDateOf(m) < today }
 
@@ -225,6 +229,10 @@ async function fetchMaterials() {
 const todayDate = formatLocalDate()
 
 async function markOrdered(m) {
+  if (!canMarkOrdered(m)) {
+    alert('発注数は1以上を指定してください')
+    return
+  }
   try {
     await api.outsource.patchMaterial(m.id, { ordered: true, ordered_at: todayDate })
     m.ordered = true; m.ordered_at = todayDate
@@ -274,7 +282,7 @@ async function updateMaterialDueDate(m, event) {
 }
 
 async function orderAll(items) {
-  for (const m of items) { if (!m.ordered) await markOrdered(m) }
+  for (const m of items) { if (!m.ordered && canMarkOrdered(m)) await markOrdered(m) }
 }
 
 function isGroupAllSelected(group) {
@@ -292,7 +300,7 @@ function toggleGroup(group, event) {
 }
 
 async function orderSelected() {
-  const targets = materials.value.filter(m => selectedIds.value.includes(m.id) && !m.ordered)
+  const targets = materials.value.filter(m => selectedIds.value.includes(m.id) && !m.ordered && canMarkOrdered(m))
   for (const m of targets) { await markOrdered(m) }
   selectedIds.value = []
 }
@@ -391,6 +399,7 @@ onMounted(fetchMaterials)
 .st-overdue { color: #c62828; font-size: 11px; font-weight: 600; }
 
 .btn-supply { padding: 2px 8px; background: #e8f5e9; border: 1px solid #81c784; border-radius: 4px; cursor: pointer; font-size: 11px; }
+.btn-supply:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-undo { padding: 2px 8px; background: #f5f5f5; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 11px; color: #888; }
 .qty-input {
   width: 90px;
