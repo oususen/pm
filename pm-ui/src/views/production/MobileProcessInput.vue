@@ -155,7 +155,7 @@
       <div v-if="record.record_type === 'SCRAP'" class="planned-cards">
         <div
           v-for="p in displayProductList"
-          :key="`${p.plan_date}-${p.product}-${p.process}`"
+          :key="`${p.plan_date}-${p.product}-${p.process}-${p.sequence_no || ''}`"
           class="planned-card"
           :class="{ active: record.product_id === p.product }"
           @click="selectPlannedProduct(p)"
@@ -181,8 +181,8 @@
       </div>
       <div v-else-if="currentProductList.length" class="planned-list">
         <button
-          v-for="p in displayProductList"
-          :key="`${p.plan_date}-${p.product}-${p.process}`"
+          v-for="(p, idx) in displayProductList"
+          :key="`${p.plan_date}-${p.product}-${p.process}-${p.sequence_no || ''}`"
           class="btn-planned"
           :class="{
             active: record.product_id === p.product,
@@ -191,7 +191,7 @@
           type="button"
           @click="selectPlannedProduct(p)"
         >
-          {{ p.product_code || t('processInput.unsetProductCode') }}
+          {{ getDisplayProductCode(p) }}
           <span
             v-if="p.plan_qty != null"
             class="plan-qty"
@@ -238,7 +238,7 @@
               <option value="">{{ t('processInput.selectProduct') }}</option>
               <option
                 v-for="p in displayProductList"
-                :key="`${p.plan_date}-${p.product_code}`"
+                :key="`${p.plan_date}-${p.product_code}-${p.sequence_no || ''}`"
                 :value="p.product"
               >
                 {{ p.product_code }} - {{ p.product_name || '' }}
@@ -1456,11 +1456,48 @@ const filterScrapCandidates = (list) => {
   return filtered
 }
 
+const getSequenceSortValue = (item) => {
+  const seqRaw = item?.sequence_no
+  const seqNo = seqRaw === null || seqRaw === undefined || seqRaw === '' ? null : Number(seqRaw)
+  if (!Number.isFinite(seqNo) || seqNo <= 0) return Number.POSITIVE_INFINITY
+  return seqNo
+}
+
+const dailyProductRankMap = computed(() => {
+  const allMerged = mergeProductionProductsByProduct(allPlanProducts.value)
+  const withPlan = allMerged.filter((p) => toSafeNumber(p?.plan_qty) > 0)
+  const sorted = [...withPlan].sort((a, b) => {
+    const seqDiff = getSequenceSortValue(a) - getSequenceSortValue(b)
+    if (seqDiff !== 0) return seqDiff
+    return String(a?.product_code || '').localeCompare(String(b?.product_code || ''))
+  })
+  const map = new Map()
+  sorted.forEach((p, i) => {
+    const key = productSeqKey(p)
+    if (key && !map.has(key)) map.set(key, i + 1)
+  })
+  return map
+})
+
+const getDisplayProductCode = (item) => {
+  const code = String(item?.product_code || '').trim() || ''
+  if (toSafeNumber(item?.plan_qty) <= 0) return code
+  const rank = dailyProductRankMap.value.get(productSeqKey(item))
+  if (!rank) return code
+  return `${rank} ${code}`
+}
+
 const displayProductList = computed(() => {
   if (record.value.record_type === 'SCRAP') {
     return filterScrapCandidates(scrapProducts.value)
   }
-  return currentProductList.value
+  return [...currentProductList.value].sort((a, b) => {
+    const seqDiff = getSequenceSortValue(a) - getSequenceSortValue(b)
+    if (seqDiff !== 0) return seqDiff
+    const planDiff = toSafeNumber(b.plan_qty) - toSafeNumber(a.plan_qty)
+    if (planDiff !== 0) return planDiff
+    return String(a?.product_code || '').localeCompare(String(b?.product_code || ''))
+  })
 })
 
 const toSafeNumber = (value) => {
@@ -1468,16 +1505,29 @@ const toSafeNumber = (value) => {
   return Number.isFinite(num) ? num : 0
 }
 
+const parseSeqNo = (raw) => {
+  if (raw === null || raw === undefined || raw === '') return null
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+const productSeqKey = (item) => {
+  const pid = String(item?.product || '')
+  const seq = parseSeqNo(item?.sequence_no)
+  return seq !== null ? `${pid}_seq${seq}` : pid
+}
+
 const mergeProductionProductsByProduct = (items) => {
   const mergedMap = new Map()
   ;(Array.isArray(items) ? items : []).forEach((item) => {
     if (!item || item.product === null || item.product === undefined || item.product === '') return
-    const key = String(item.product)
+    const key = productSeqKey(item)
     if (!mergedMap.has(key)) {
       mergedMap.set(key, {
         ...item,
         plan_qty: toSafeNumber(item.plan_qty),
         actual_qty: toSafeNumber(item.actual_qty),
+        sequence_no: parseSeqNo(item.sequence_no),
       })
       return
     }
@@ -1502,6 +1552,24 @@ const buildPlanQtyMapFromSlots = (slots, processId) => {
     })
   })
   return qtyMap
+}
+
+const buildSequenceMapFromSlots = (slots, processId) => {
+  const seqMap = new Map()
+  ;(Array.isArray(slots) ? slots : []).forEach((slot) => {
+    ;(Array.isArray(slot?.items) ? slot.items : []).forEach((item) => {
+      const productId = item?.product
+      if (productId === null || productId === undefined || productId === '') return
+      const seqRaw = item?.sequence_no
+      const seqNo = seqRaw === null || seqRaw === undefined || seqRaw === '' ? null : Number(seqRaw)
+      if (!Number.isFinite(seqNo) || seqNo <= 0) return
+      const key = `${productId}_${processId}`
+      const current = seqMap.get(key)
+      if (!Number.isFinite(current)) seqMap.set(key, seqNo)
+      else seqMap.set(key, Math.min(current, seqNo))
+    })
+  })
+  return seqMap
 }
 
 const buildTotalActualByProduct = (items) => {
@@ -2538,6 +2606,7 @@ const buildCurrentTimePlanItems = async (lineId, processId, existingItems = []) 
           process: processId,
           plan_qty: pp.quantity ?? plan.plan_qty ?? 0,
           actual_qty: actualQty,
+          sequence_no: plan.sequence_no ?? null,
         })
       })
     })
@@ -2586,6 +2655,7 @@ const buildPlanTimeSlots = async (lineId, processId, existingItems = []) => {
           actual_qty: actualQty,
           start,
           end,
+          sequence_no: plan.sequence_no ?? null,
         }
 
         const slotKey = `${start.toISOString()}_${end.toISOString()}`
@@ -2735,7 +2805,7 @@ const applyTimeSlotFilter = () => {
   const planBeforeMap = buildPlanBeforeActiveSlotByProduct(slots, index)
   const totalActualMap = buildTotalActualByProduct(allPlanProducts.value)
   const slotItems = applySlotActualProgress(mergedSlotItems, planBeforeMap, totalActualMap)
-  productionProducts.value = ensureStartedProductsVisible(slotItems)
+  productionProducts.value = [...slotItems]
 
   const slotProductIds = new Set(slotItems.map((p) => String(p.product)))
   let filteredScrap = allScrapProducts.value.filter((p) =>
@@ -2889,7 +2959,19 @@ const loadPlannedProducts = async () => {
     if (requestSeq !== plannedProductsRequestSeq) return
     timeSlots.value = slotResult.slots
     activeSlotIndex.value = slotResult.activeIndex
-    const ganttPlanQtyMap = buildPlanQtyMapFromSlots(slotResult.slots, processId)
+    const ganttEntriesByProduct = new Map()
+    ;(slotResult.slots || []).forEach((slot) => {
+      ;(Array.isArray(slot?.items) ? slot.items : []).forEach((item) => {
+        const productId = item?.product
+        if (productId === null || productId === undefined || productId === '') return
+        const seq = parseSeqNo(item?.sequence_no)
+        const pid = String(productId)
+        if (!ganttEntriesByProduct.has(pid)) ganttEntriesByProduct.set(pid, new Map())
+        const seqMap = ganttEntriesByProduct.get(pid)
+        const seqKey = seq !== null ? seq : 'none'
+        seqMap.set(seqKey, toSafeNumber(seqMap.get(seqKey)) + toSafeNumber(item?.plan_qty))
+      })
+    })
 
     const actualLookup = buildActualQtyLookupByProductProcess(tempProducts, processId)
     actualQtyByProductCodeFromBacklog.value = buildActualQtyLookupByProductCode(tempProducts)
@@ -2933,18 +3015,23 @@ const loadPlannedProducts = async () => {
     }
 
     // 計画数は t_line_gantt_plan（時間帯スロット）由来で最終確定する
-    mapFilteredForProduction = mapFilteredForProduction.map((item) => {
-      const key = `${item?.product}_${processId}`
-      return {
-        ...item,
-        plan_qty: ganttPlanQtyMap.has(key) ? toSafeNumber(ganttPlanQtyMap.get(key)) : 0,
+    const expanded = []
+    mapFilteredForProduction.forEach((item) => {
+      const pid = String(item?.product || '')
+      const entries = ganttEntriesByProduct.get(pid)
+      if (!entries || entries.size === 0) {
+        expanded.push({ ...item, plan_qty: 0 })
+        return
       }
+      entries.forEach((qty, seqKey) => {
+        expanded.push({ ...item, plan_qty: toSafeNumber(qty), sequence_no: seqKey === 'none' ? null : seqKey })
+      })
     })
+    mapFilteredForProduction = expanded
 
-    // backlogのseq=0/seq>0で同一製品が複数行あると計画数が重複合算されるため製品単位で重複除去
     const dedupMap = new Map()
     mapFilteredForProduction.forEach((item) => {
-      const key = String(item?.product || '')
+      const key = productSeqKey(item)
       if (key && !dedupMap.has(key)) dedupMap.set(key, item)
     })
     mapFilteredForProduction = Array.from(dedupMap.values())
