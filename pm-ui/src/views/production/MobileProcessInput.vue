@@ -147,6 +147,7 @@
             type="checkbox"
             v-model="filterCurrentTime"
             @change="onCurrentTimeToggle"
+            :disabled="isPlannedProductsLoading"
           />
           <span>{{ t('processInput.currentTimeOnly') }}</span>
         </label>
@@ -2355,8 +2356,11 @@ const toggleManualProduct = () => {
 }
 
 const onCurrentTimeToggle = () => {
-  // 取得済みデータで切替。スロット未取得時のみ再取得。
   if (!timeSlots.value.length && filterCurrentTime.value) {
+    loadPlannedProducts()
+    return
+  }
+  if (!filterCurrentTime.value && isFloorLineSelected.value) {
     loadPlannedProducts()
     return
   }
@@ -2940,7 +2944,6 @@ const loadPlannedProducts = async () => {
     const lineId = process?.line
     if (!lineId) return
     const processId = selectedProcessId.value
-
     // 現在時刻のみON時は、まず LINE_GANTT_PLANS を使って即時表示する
     if (filterCurrentTime.value) {
       const [currentSlotItemsResult, fastSlotResult] = await Promise.all([

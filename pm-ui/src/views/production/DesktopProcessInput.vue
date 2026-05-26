@@ -81,7 +81,7 @@
           </label>
           <label class="filter-item">
             <span class="toggle-label">現在時刻のみ</span>
-            <input type="checkbox" v-model="filterCurrentTime" class="toggle-input" @change="onCurrentTimeToggle" />
+            <input type="checkbox" v-model="filterCurrentTime" class="toggle-input" @change="onCurrentTimeToggle" :disabled="isPlannedProductsLoading" />
             <span class="toggle-track" :class="{ on: filterCurrentTime }"></span>
           </label>
         </div>
@@ -1641,6 +1641,7 @@ const toggleManualProduct = () => {
 
 const onCurrentTimeToggle = () => {
   if (!timeSlots.value.length && filterCurrentTime.value) { loadPlannedProducts(); return }
+  if (!filterCurrentTime.value && isFloorLineSelected.value) { loadPlannedProducts(); return }
   if (filterCurrentTime.value && activeSlotIndex.value === null && timeSlots.value.length) activeSlotIndex.value = 0
   applyTimeSlotFilter()
 }
