@@ -1218,6 +1218,10 @@ const getDisplayProductCode = (item) => {
 }
 
 const getSequenceSortValue = (item) => {
+  const ms = item?.gantt_start_ms
+  if (Number.isFinite(ms)) return ms
+  const start = item?.start
+  if (start instanceof Date && !isNaN(start.getTime())) return start.getTime()
   const seqRaw = item?.sequence_no
   const seqNo = seqRaw === null || seqRaw === undefined || seqRaw === '' ? null : Number(seqRaw)
   if (!Number.isFinite(seqNo) || seqNo <= 0) return Number.POSITIVE_INFINITY
@@ -2460,7 +2464,10 @@ const loadPlannedProducts = async () => {
         if (!ganttEntriesByProduct.has(pid)) ganttEntriesByProduct.set(pid, new Map())
         const seqMap = ganttEntriesByProduct.get(pid)
         const seqKey = seq !== null ? seq : 'none'
-        seqMap.set(seqKey, toSafeNumber(seqMap.get(seqKey)) + toSafeNumber(item?.plan_qty))
+        const prev = seqMap.get(seqKey)
+        const startMs = item?.start instanceof Date ? item.start.getTime() : Number.POSITIVE_INFINITY
+        if (!prev) { seqMap.set(seqKey, { qty: toSafeNumber(item?.plan_qty), startMs }) }
+        else { prev.qty += toSafeNumber(item?.plan_qty); prev.startMs = Math.min(prev.startMs, startMs) }
       })
     })
 
@@ -2500,8 +2507,8 @@ const loadPlannedProducts = async () => {
         expanded.push({ ...item, plan_qty: 0 })
         return
       }
-      entries.forEach((qty, seqKey) => {
-        expanded.push({ ...item, plan_qty: toSafeNumber(qty), sequence_no: seqKey === 'none' ? null : seqKey })
+      entries.forEach((entry, seqKey) => {
+        expanded.push({ ...item, plan_qty: toSafeNumber(entry.qty), sequence_no: seqKey === 'none' ? null : seqKey, gantt_start_ms: Number.isFinite(entry.startMs) ? entry.startMs : null })
       })
     })
     mapFilteredForProduction = expanded
