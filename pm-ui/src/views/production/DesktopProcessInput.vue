@@ -2210,7 +2210,7 @@ const applyTimeSlotFilter = () => {
 const buildCurrentTimePlanItems = async (lineId, processId, existingItems = []) => {
   try {
     const targetDate = currentDateYmd.value
-    const ganttRes = await api.lineGanttPlans.getLineGanttPlans({ line: lineId, plan_date__gte: targetDate, plan_date__lte: targetDate })
+    const ganttRes = await api.lineGanttPlans.getLineGanttPlans({ line: lineId, plan_date__gte: targetDate, plan_date__lte: targetDate, page_size: 1000 })
     const rawPlans = ganttRes.data?.results || ganttRes.data || []
     if (!Array.isArray(rawPlans) || !rawPlans.length) return { items: [], hasPlan: false }
     const actualLookup = buildActualQtyLookupByProductProcess(existingItems, processId)
@@ -2239,7 +2239,7 @@ const buildCurrentTimePlanItems = async (lineId, processId, existingItems = []) 
 const buildPlanTimeSlots = async (lineId, processId, existingItems = []) => {
   try {
     const targetDate = currentDateYmd.value
-    const ganttRes = await api.lineGanttPlans.getLineGanttPlans({ line: lineId, plan_date__gte: targetDate, plan_date__lte: targetDate })
+    const ganttRes = await api.lineGanttPlans.getLineGanttPlans({ line: lineId, plan_date__gte: targetDate, plan_date__lte: targetDate, page_size: 1000 })
     const rawPlans = ganttRes.data?.results || ganttRes.data || []
     if (!Array.isArray(rawPlans) || !rawPlans.length) return { slots: [], activeIndex: null }
     const actualLookup = buildActualQtyLookupByProductProcess(existingItems, processId)
@@ -2455,6 +2455,7 @@ const loadPlannedProducts = async () => {
     if (requestSeq !== plannedProductsRequestSeq) return
     timeSlots.value = slotResult.slots; activeSlotIndex.value = slotResult.activeIndex
     const ganttEntriesByProduct = new Map()
+    const ganttProductInfo = new Map()
     ;(slotResult.slots || []).forEach((slot) => {
       ;(Array.isArray(slot?.items) ? slot.items : []).forEach((item) => {
         const productId = item?.product
@@ -2462,6 +2463,7 @@ const loadPlannedProducts = async () => {
         const seq = parseSeqNo(item?.sequence_no)
         const pid = String(productId)
         if (!ganttEntriesByProduct.has(pid)) ganttEntriesByProduct.set(pid, new Map())
+        if (!ganttProductInfo.has(pid)) ganttProductInfo.set(pid, { product: productId, product_code: item?.product_code || '', product_name: item?.product_name || '' })
         const seqMap = ganttEntriesByProduct.get(pid)
         const seqKey = seq !== null ? seq : 'none'
         const prev = seqMap.get(seqKey)
@@ -2509,6 +2511,15 @@ const loadPlannedProducts = async () => {
       }
       entries.forEach((entry, seqKey) => {
         expanded.push({ ...item, plan_qty: toSafeNumber(entry.qty), sequence_no: seqKey === 'none' ? null : seqKey, gantt_start_ms: Number.isFinite(entry.startMs) ? entry.startMs : null })
+      })
+    })
+    const expandedPids = new Set(expanded.map((it) => String(it?.product || '')).filter(Boolean))
+    ganttEntriesByProduct.forEach((seqMap, pid) => {
+      if (expandedPids.has(pid)) return
+      const info = ganttProductInfo.get(pid)
+      if (!info) return
+      seqMap.forEach((entry, seqKey) => {
+        expanded.push({ plan_date: currentDateYmd.value, product: info.product, product_code: info.product_code, product_name: info.product_name, process: processId, plan_qty: toSafeNumber(entry.qty), actual_qty: 0, sequence_no: seqKey === 'none' ? null : seqKey, gantt_start_ms: Number.isFinite(entry.startMs) ? entry.startMs : null })
       })
     })
     mapFilteredForProduction = expanded
