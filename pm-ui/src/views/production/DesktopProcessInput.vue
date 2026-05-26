@@ -140,7 +140,7 @@
 
         <div class="plan-list" v-if="!isPlannedProductsLoading">
           <div
-            v-for="item in pagedItems"
+            v-for="(item, idx) in pagedItems"
             :key="`${item.plan_date}-${item.product}-${item.process}`"
             class="plan-item"
             :class="{
@@ -151,7 +151,7 @@
             @click="selectPlannedProduct(item)"
           >
             <div class="item-grid">
-              <div class="item-code">{{ item.product_code || t('processInput.unsetProductCode') }}</div>
+              <div class="item-code">{{ getDisplayProductCode(item, idx) }}</div>
               <div class="item-plan">計{{ formatNumber(toSafeNumber(item.plan_qty)) }}</div>
               <div class="item-sub">{{ item.product_name || '' }}</div>
               <div class="item-actual" :class="{ over: getPlanQtyState(item) === 'over', done: getPlanQtyState(item) === 'done' }">実{{ formatNumber(toSafeNumber(item.actual_qty)) }}</div>
@@ -168,7 +168,7 @@
           <div class="loading-text">読み込み中...</div>
         </div>
 
-        <div class="pagination">
+        <div v-if="!filterCurrentTime" class="pagination">
           <button class="page-btn" @click="goFirstPage" :disabled="currentPage === 1">⟨⟨</button>
           <button class="page-btn" @click="prevPage" :disabled="currentPage === 1">⟨</button>
           <span class="page-info">{{ pageStart }}-{{ pageEnd }}/{{ filteredListItems.length }}</span>
@@ -840,20 +840,25 @@ const filteredListItems = computed(() => {
     })
   }
   return [...items].sort((a, b) => {
+    const seqDiff = getSequenceSortValue(a) - getSequenceSortValue(b)
+    if (seqDiff !== 0) return seqDiff
     const planDiff = toSafeNumber(b.plan_qty) - toSafeNumber(a.plan_qty)
     if (planDiff !== 0) return planDiff
-    return toSafeNumber(b.actual_qty) - toSafeNumber(a.actual_qty)
+    return String(a?.product_code || '').localeCompare(String(b?.product_code || ''))
   })
 })
 
+const effectivePageSize = computed(() => (filterCurrentTime.value ? Math.max(filteredListItems.value.length, 1) : PAGE_SIZE))
+
 const pagedItems = computed(() => {
-  const start = (currentPage.value - 1) * PAGE_SIZE
-  return filteredListItems.value.slice(start, start + PAGE_SIZE)
+  const size = effectivePageSize.value
+  const start = (currentPage.value - 1) * size
+  return filteredListItems.value.slice(start, start + size)
 })
 
-const totalPages = computed(() => Math.max(1, Math.ceil(filteredListItems.value.length / PAGE_SIZE)))
-const pageStart = computed(() => filteredListItems.value.length === 0 ? 0 : (currentPage.value - 1) * PAGE_SIZE + 1)
-const pageEnd = computed(() => Math.min(currentPage.value * PAGE_SIZE, filteredListItems.value.length))
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredListItems.value.length / effectivePageSize.value)))
+const pageStart = computed(() => filteredListItems.value.length === 0 ? 0 : (currentPage.value - 1) * effectivePageSize.value + 1)
+const pageEnd = computed(() => Math.min(currentPage.value * effectivePageSize.value, filteredListItems.value.length))
 
 // 選択中の製品情報
 const selectedProductObj = computed(() => {
@@ -1186,6 +1191,20 @@ const formatRecentValue = (value) => {
   if (!Number.isFinite(num)) return '0'
   const isInteger = Number.isInteger(num)
   return num.toLocaleString(localeCode.value, isInteger ? {} : { maximumFractionDigits: 3 })
+}
+
+const getDisplayProductCode = (item, pageIdx = 0) => {
+  const code = String(item?.product_code || '').trim() || t('processInput.unsetProductCode')
+  if (toSafeNumber(item?.plan_qty) <= 0) return code
+  const displayNo = Math.max(1, (pageStart.value || 1) + Number(pageIdx || 0))
+  return `${displayNo} ${code}`
+}
+
+const getSequenceSortValue = (item) => {
+  const seqRaw = item?.sequence_no
+  const seqNo = seqRaw === null || seqRaw === undefined || seqRaw === '' ? null : Number(seqRaw)
+  if (!Number.isFinite(seqNo) || seqNo <= 0) return Number.POSITIVE_INFINITY
+  return seqNo
 }
 
 // ──────────────────────────────
@@ -1972,10 +1991,30 @@ const mergeProductionProductsByProduct = (items) => {
   ;(Array.isArray(items) ? items : []).forEach((item) => {
     if (!item || item.product === null || item.product === undefined || item.product === '') return
     const key = String(item.product)
-    if (!mergedMap.has(key)) { mergedMap.set(key, { ...item, plan_qty: toSafeNumber(item.plan_qty), actual_qty: toSafeNumber(item.actual_qty) }); return }
+    if (!mergedMap.has(key)) {
+      const seqRaw = item.sequence_no
+      const seqNo = seqRaw === null || seqRaw === undefined || seqRaw === '' ? null : Number(seqRaw)
+      mergedMap.set(key, {
+        ...item,
+        plan_qty: toSafeNumber(item.plan_qty),
+        actual_qty: toSafeNumber(item.actual_qty),
+        sequence_no: Number.isFinite(seqNo) && seqNo > 0 ? seqNo : null,
+      })
+      return
+    }
     const current = mergedMap.get(key)
     current.plan_qty = toSafeNumber(current.plan_qty) + toSafeNumber(item.plan_qty)
     current.actual_qty = Math.max(toSafeNumber(current.actual_qty), toSafeNumber(item.actual_qty))
+    const currentSeqRaw = current.sequence_no
+    const itemSeqRaw = item.sequence_no
+    const currentSeq = currentSeqRaw === null || currentSeqRaw === undefined || currentSeqRaw === '' ? null : Number(currentSeqRaw)
+    const itemSeq = itemSeqRaw === null || itemSeqRaw === undefined || itemSeqRaw === '' ? null : Number(itemSeqRaw)
+    const currentPositive = Number.isFinite(currentSeq) && currentSeq > 0
+    const itemPositive = Number.isFinite(itemSeq) && itemSeq > 0
+    if (itemPositive) {
+      if (!currentPositive) current.sequence_no = itemSeq
+      else current.sequence_no = Math.min(currentSeq, itemSeq)
+    }
   })
   return Array.from(mergedMap.values())
 }
@@ -2039,6 +2078,24 @@ const buildPlanQtyMapFromSlots = (slots, processId) => {
     })
   })
   return qtyMap
+}
+
+const buildSequenceMapFromSlots = (slots, processId) => {
+  const seqMap = new Map()
+  ;(Array.isArray(slots) ? slots : []).forEach((slot) => {
+    ;(Array.isArray(slot?.items) ? slot.items : []).forEach((item) => {
+      const productId = item?.product
+      if (productId === null || productId === undefined || productId === '') return
+      const seqRaw = item?.sequence_no
+      const seqNo = seqRaw === null || seqRaw === undefined || seqRaw === '' ? null : Number(seqRaw)
+      if (!Number.isFinite(seqNo) || seqNo <= 0) return
+      const key = `${productId}_${processId}`
+      const current = seqMap.get(key)
+      if (!Number.isFinite(current)) seqMap.set(key, seqNo)
+      else seqMap.set(key, Math.min(current, seqNo))
+    })
+  })
+  return seqMap
 }
 
 const buildActualQtyLookupByProductCode = (items) => {
@@ -2122,7 +2179,7 @@ const applyTimeSlotFilter = () => {
   const planBeforeMap = buildPlanBeforeActiveSlotByProduct(slots, index)
   const totalActualMap = buildTotalActualByProduct(allPlanProducts.value)
   const slotItems = applySlotActualProgress(mergedSlotItems, planBeforeMap, totalActualMap)
-  productionProducts.value = ensureStartedProductsVisible(slotItems)
+  productionProducts.value = [...slotItems]
   const slotProductIds = new Set(slotItems.map((p) => String(p.product)))
   let filteredScrap = allScrapProducts.value.filter((p) => slotProductIds.has(String(p.product)))
   if (!filteredScrap.length) filteredScrap = [...allScrapProducts.value]
@@ -2150,6 +2207,7 @@ const buildCurrentTimePlanItems = async (lineId, processId, existingItems = []) 
           plan_date: targetDate, product: productId, product_code: pp.output_product_code || plan.product_code || '',
           product_name: pp.output_product_name || plan.product_name || '', process: processId,
           plan_qty: pp.quantity ?? plan.plan_qty ?? 0, actual_qty: actualLookup.has(key) ? actualLookup.get(key) : 0,
+          sequence_no: plan.sequence_no ?? null,
         })
       })
     })
@@ -2177,6 +2235,7 @@ const buildPlanTimeSlots = async (lineId, processId, existingItems = []) => {
           plan_date: targetDate, product: productId, product_code: pp.output_product_code || plan.product_code || '',
           product_name: pp.output_product_name || plan.product_name || '', process: processId,
           plan_qty: pp.quantity ?? plan.plan_qty ?? 0, actual_qty: actualLookup.has(key) ? actualLookup.get(key) : 0, start, end,
+          sequence_no: plan.sequence_no ?? null,
         }
         const slotKey = `${start.toISOString()}_${end.toISOString()}`
         if (!slotMap.has(slotKey)) slotMap.set(slotKey, { start, end, items: [] })
@@ -2375,6 +2434,7 @@ const loadPlannedProducts = async () => {
     if (requestSeq !== plannedProductsRequestSeq) return
     timeSlots.value = slotResult.slots; activeSlotIndex.value = slotResult.activeIndex
     const ganttPlanQtyMap = buildPlanQtyMapFromSlots(slotResult.slots, processId)
+    const ganttSequenceMap = buildSequenceMapFromSlots(slotResult.slots, processId)
 
     const actualLookup = buildActualQtyLookupByProductProcess(tempProducts, processId)
     actualQtyByProductCodeFromBacklog.value = buildActualQtyLookupByProductCode(tempProducts)
@@ -2406,7 +2466,11 @@ const loadPlannedProducts = async () => {
 
     mapFilteredForProduction = mapFilteredForProduction.map((item) => {
       const key = `${item?.product}_${processId}`
-      return { ...item, plan_qty: ganttPlanQtyMap.has(key) ? toSafeNumber(ganttPlanQtyMap.get(key)) : 0 }
+      return {
+        ...item,
+        plan_qty: ganttPlanQtyMap.has(key) ? toSafeNumber(ganttPlanQtyMap.get(key)) : 0,
+        sequence_no: ganttSequenceMap.has(key) ? Number(ganttSequenceMap.get(key)) : item?.sequence_no ?? null,
+      }
     })
 
     const dedupMap = new Map()
@@ -2567,6 +2631,9 @@ watch(() => [record.value.product_id, record.value.product_code], () => { ensure
 watch(() => [selectedLineId.value, selectedProcessId.value], () => restoreEquipmentStateIfNeeded())
 
 watch(() => route.query.support_mode, () => applySupportModeFromQuery())
+watch(totalPages, (pages) => {
+  if (currentPage.value > pages) currentPage.value = pages
+})
 
 // ──────────────────────────────
 // 初期化

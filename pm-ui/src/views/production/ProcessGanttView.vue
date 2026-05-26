@@ -141,6 +141,7 @@
                   :data-quantity-edited="bar.quantityEdited ? '1' : ''"
                   @mousedown="onBarMouseDown($event, bar)"
                 >
+                  <span v-if="bar.isDaySeqStart" class="seq-marker start">s</span>
                   <div
                     class="gantt-bar"
                     :style="{
@@ -162,6 +163,7 @@
                       @click.stop="deleteBar(bar)"
                     >×</button>
                   </div>
+                  <span v-if="bar.isDaySeqEnd" class="seq-marker end">e</span>
                 </div>
                 <button
                   v-if="props.showAddAnchors"
@@ -478,6 +480,42 @@ const renderedProcessGantt = computed(() =>
     })),
   }))
 )
+
+const applyDailySeqMarkers = (procEntry) => {
+  const allBars = []
+  ;(procEntry?.items || []).forEach((item) => {
+    ;(item?.bars || []).forEach((bar) => {
+      bar.isDaySeqStart = false
+      bar.isDaySeqEnd = false
+      allBars.push(bar)
+    })
+  })
+  const days = Array.isArray(displayDays.value) ? displayDays.value : []
+  days.forEach((day) => {
+    const dayStart = new Date(`${day.date}T00:00:00`).getTime()
+    if (!Number.isFinite(dayStart)) return
+    const dayEnd = dayStart + (24 * 60 * 60 * 1000)
+    const candidates = allBars.filter((bar) => {
+      const seq = Number(bar?.sequenceNo)
+      if (!Number.isFinite(seq) || seq <= 0) return false
+      const startMs = new Date(bar?.startTime).getTime()
+      const endMs = new Date(bar?.endTime).getTime()
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return false
+      return !(startMs >= dayEnd || endMs <= dayStart)
+    })
+    if (!candidates.length) return
+    const minSeq = Math.min(...candidates.map((bar) => Number(bar.sequenceNo)))
+    const maxSeq = Math.max(...candidates.map((bar) => Number(bar.sequenceNo)))
+    const startBar = candidates
+      .filter((bar) => Number(bar.sequenceNo) === minSeq)
+      .sort((a, b) => a.startTime - b.startTime)[0]
+    const endBar = candidates
+      .filter((bar) => Number(bar.sequenceNo) === maxSeq)
+      .sort((a, b) => b.endTime - a.endTime)[0]
+    if (startBar) startBar.isDaySeqStart = true
+    if (endBar) endBar.isDaySeqEnd = true
+  })
+}
 
 const findBarEntry = (targetBar) => {
   for (const proc of processGanttData.value) {
@@ -2052,6 +2090,7 @@ function buildProcessGantt(plans) {
         updateBarDisplay(bar)
       })
     })
+    applyDailySeqMarkers(procEntry)
   })
 
   return Array.from(processMap.values()).sort((a, b) => {
@@ -2259,6 +2298,27 @@ onMounted(async () => {
 .process-sub {
   font-size: 12px;
   color: #6b7280;
+}
+.seq-marker {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffffff;
+  background: #dc2626;
+  border: 1px solid #b91c1c;
+  border-radius: 8px;
+  padding: 0 4px;
+  line-height: 1.2;
+  pointer-events: none;
+  z-index: 4;
+}
+.seq-marker.start {
+  left: -14px;
+}
+.seq-marker.end {
+  right: -14px;
 }
 .gantt-chart {
   --process-col-width: 150px;
