@@ -15,8 +15,10 @@ import logging
 import csv
 import io
 import math
+import json
 from django.http import HttpResponse
 from django.utils import timezone
+from system_settings.models import SystemSetting
 
 from .models import LineDemand
 from .inventory.lead_time_utils import resolve_lead_days_for_step
@@ -6465,6 +6467,7 @@ class ProductionPlanLockSettingView(APIView):
 
 
 class ProductionRecordInquirySettingView(APIView):
+    PROCESS_PREV_DAY_SHIFT_RULES_KEY = 'production.process_prev_day_shift_rules'
     TAB_KEYS = ['tank', 'floor', FLOOR_SHIPPING_TAB_KEY, 'blade', 'laser', 'brake', 'spot']
     DEFAULT_TARGET_LINE_CODES_BY_TAB = {
         'tank': ['L2200', 'L2201'],
@@ -6521,6 +6524,33 @@ class ProductionRecordInquirySettingView(APIView):
             })
         return normalized
 
+    def _normalize_prev_day_shift_rules(self, rows):
+        source = rows if isinstance(rows, list) else []
+        normalized = []
+        seen = set()
+        for row in source:
+            line_code = self._normalize((row or {}).get('lineCode'))
+            process_code = self._normalize((row or {}).get('processCode'))
+            shift_qty_raw = (row or {}).get('shiftQty', 0)
+            try:
+                shift_qty = int(float(shift_qty_raw))
+            except (TypeError, ValueError):
+                shift_qty = 0
+            if not line_code or not process_code:
+                continue
+            if shift_qty <= 0:
+                continue
+            key = f'{line_code}|{process_code}'
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append({
+                'lineCode': line_code,
+                'processCode': process_code,
+                'shiftQty': shift_qty,
+            })
+        return normalized
+
     def _build_response_payload(self):
         target_line_codes_by_tab = {
             key: list(self.DEFAULT_TARGET_LINE_CODES_BY_TAB.get(key, []))
@@ -6528,14 +6558,23 @@ class ProductionRecordInquirySettingView(APIView):
         }
         mappings_by_tab = {key: [] for key in self.TAB_KEYS}
 
+        special_rules = {'prev_day_shift_rules': []}
         rows = ProductionRecordInquirySetting.objects.filter(tab_key__in=self.TAB_KEYS)
         for row in rows:
             target_line_codes_by_tab[row.tab_key] = self._normalize_line_codes(row.target_line_codes)
             mappings_by_tab[row.tab_key] = self._normalize_mapping_rows(row.product_mappings)
+        rules_row = SystemSetting.objects.filter(key=self.PROCESS_PREV_DAY_SHIFT_RULES_KEY).first()
+        if rules_row:
+            try:
+                parsed = json.loads(rules_row.value or '[]')
+            except Exception:
+                parsed = []
+            special_rules['prev_day_shift_rules'] = self._normalize_prev_day_shift_rules(parsed)
 
         return {
             'target_line_codes_by_tab': target_line_codes_by_tab,
             'mappings_by_tab': mappings_by_tab,
+            'special_rules': special_rules,
         }
 
     def get(self, request):
@@ -6545,6 +6584,7 @@ class ProductionRecordInquirySettingView(APIView):
         payload = request.data if isinstance(request.data, dict) else {}
         raw_target = payload.get('target_line_codes_by_tab') if isinstance(payload.get('target_line_codes_by_tab'), dict) else {}
         raw_mappings = payload.get('mappings_by_tab') if isinstance(payload.get('mappings_by_tab'), dict) else {}
+        raw_special_rules = payload.get('special_rules') if isinstance(payload.get('special_rules'), dict) else {}
         user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
         existing_rows = {
             row.tab_key: row
@@ -6573,6 +6613,17 @@ class ProductionRecordInquirySettingView(APIView):
                 defaults={
                     'target_line_codes': target_line_codes,
                     'product_mappings': product_mappings,
+                    'updated_by': user,
+                },
+            )
+
+        if 'prev_day_shift_rules' in raw_special_rules:
+            rules = self._normalize_prev_day_shift_rules(raw_special_rules.get('prev_day_shift_rules'))
+            SystemSetting.objects.update_or_create(
+                key=self.PROCESS_PREV_DAY_SHIFT_RULES_KEY,
+                defaults={
+                    'value': json.dumps(rules, ensure_ascii=False),
+                    'description': 'ライン工程別の前日シフト台数設定',
                     'updated_by': user,
                 },
             )

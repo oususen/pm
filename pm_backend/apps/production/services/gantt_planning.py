@@ -2,12 +2,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, time, date
 from decimal import Decimal
 from typing import Dict, List, Optional, Tuple
+import json
 
 from django.db.models import Q
 import logging
 from rest_framework.exceptions import ValidationError
 
 from masters.models import RoutingStep, Line, Process, Calendar, CalendarDay, WorkPattern, BreakTime, BOM, BOMItem, Product
+from system_settings.models import SystemSetting
 from ..models_line_backlog import LineBacklog
 from ..models_line_plan import LinePlan
 from ..models_gantt_display_product_map import GanttDisplayProductMap
@@ -20,7 +22,34 @@ COPRODUCT_CHILD_DISPLAY_EXCEPTION_PROCESS_CODES = {'4001'}
 TANK_LINE_CODE = 'L2200'
 TANK_COMP_PROCESS_CODE = '4053'
 TANK_HAKOGUMI_PROCESS_CODE = '4019'
-TANK_HAKOGUMI_PREV_DAY_QTY = Decimal('2')
+PROCESS_PREV_DAY_SHIFT_RULES_KEY = 'production.process_prev_day_shift_rules'
+
+
+def _load_prev_day_shift_qty_by_line_process() -> Dict[Tuple[str, str], Decimal]:
+    row = SystemSetting.objects.filter(key=PROCESS_PREV_DAY_SHIFT_RULES_KEY).first()
+    if not row or not row.value:
+        return {}
+    try:
+        raw = json.loads(row.value)
+    except Exception:
+        return {}
+    if not isinstance(raw, list):
+        return {}
+    result: Dict[Tuple[str, str], Decimal] = {}
+    for item in raw:
+        line_code = str((item or {}).get('lineCode') or '').strip().upper()
+        process_code = str((item or {}).get('processCode') or '').strip().upper()
+        shift_qty_raw = (item or {}).get('shiftQty', 0)
+        if not line_code or not process_code:
+            continue
+        try:
+            shift_qty = Decimal(str(int(float(shift_qty_raw))))
+        except Exception:
+            continue
+        if shift_qty <= 0:
+            continue
+        result[(line_code, process_code)] = shift_qty
+    return result
 
 @dataclass
 class ProcessSpec:
@@ -829,7 +858,9 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
     if not line:
         raise ValueError('line_id not found')
     is_l2201_line = str(getattr(line, 'line_code', '') or '').strip().upper() == 'L2201'
-    is_tank_line = str(getattr(line, 'line_code', '') or '').strip().upper() == TANK_LINE_CODE
+    line_code_upper = str(getattr(line, 'line_code', '') or '').strip().upper()
+    is_tank_line = line_code_upper == TANK_LINE_CODE
+    prev_day_shift_qty_by_line_process = _load_prev_day_shift_qty_by_line_process()
 
     # 日別設定を読み込み
     from ..models_line_daily_schedule_setting import LineDailyScheduleSetting
@@ -1302,13 +1333,14 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
 
                 process_key = (obj.plan_date, spec.process_id)
                 is_tank_special_proc = is_tank_line and spec.process_code in (TANK_COMP_PROCESS_CODE, TANK_HAKOGUMI_PROCESS_CODE)
+                prev_day_shift_qty = prev_day_shift_qty_by_line_process.get((line_code_upper, str(spec.process_code or '').strip().upper()), Decimal('0'))
+                prev_day_shift_first = prev_day_shift_qty > 0 and process_key not in previous_process_end_by_date
 
                 if is_tank_special_proc:
                     # タンクライン特例: コンプ/箱組は8:00開始チェーン方式
                     tank_bw_effective = effective_minutes
-                    if (spec.process_code == TANK_HAKOGUMI_PROCESS_CODE
-                            and process_key not in previous_process_end_by_date):
-                        bw_qty = max(entry['process_qty'] - TANK_HAKOGUMI_PREV_DAY_QTY, Decimal('0'))
+                    if prev_day_shift_first:
+                        bw_qty = max(entry['process_qty'] - prev_day_shift_qty, Decimal('0'))
                         bw_total = _calculate_total_minutes(spec, bw_qty)
                         tank_bw_effective = bw_total / max(spec.parallel_count, 1)
                     if process_key in previous_process_end_by_date:
@@ -1323,6 +1355,10 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                     start_time = anchor_dt
                     end_time = current_end_time
                 else:
+                    if prev_day_shift_first:
+                        bw_qty = max(entry['process_qty'] - prev_day_shift_qty, Decimal('0'))
+                        bw_total = _calculate_total_minutes(spec, bw_qty)
+                        effective_minutes = bw_total / max(spec.parallel_count, 1)
                     # 後方パイプライン制約を適用
                     next_entry = scheduled_specs[i + 1]
                     next_start_time = scheduled_times[i + 1]['start']
@@ -1376,14 +1412,11 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
 
                 # タンクライン箱組特例: SEQ1は数量-2、2台分は前日ガント
                 process_key = (obj.plan_date, spec.process_id)
-                tank_hakogumi_first = (
-                    is_tank_line
-                    and spec.process_code == TANK_HAKOGUMI_PROCESS_CODE
-                    and process_key not in previous_process_end_by_date
-                )
+                prev_day_shift_qty = prev_day_shift_qty_by_line_process.get((line_code_upper, str(spec.process_code or '').strip().upper()), Decimal('0'))
+                prev_day_shift_first = prev_day_shift_qty > 0 and process_key not in previous_process_end_by_date
                 tank_prev_qty = Decimal('0')
-                if tank_hakogumi_first:
-                    tank_prev_qty = min(TANK_HAKOGUMI_PREV_DAY_QTY, process_qty)
+                if prev_day_shift_first:
+                    tank_prev_qty = min(prev_day_shift_qty, process_qty)
                     process_qty = max(process_qty - tank_prev_qty, Decimal('0'))
                     total_minutes = _calculate_total_minutes(spec, process_qty)
                     effective_minutes = total_minutes / max(spec.parallel_count, 1)
@@ -1434,8 +1467,8 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 previous_process_end_by_date[process_key] = end_time
 
                 # タンクライン箱組: 前日ガントエントリ生成
-                if tank_hakogumi_first and tank_prev_qty > 0:
-                    _generate_tank_hakogumi_prev_day_entry(
+                if prev_day_shift_first and tank_prev_qty > 0:
+                    _generate_prev_day_shift_entry(
                         tank_prev_day_plans, calendar, spec, entry,
                         tank_prev_qty, obj, product, plan_id, line_id,
                         output_product_id, output_product_code, output_product_name,
@@ -1456,21 +1489,18 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
 
                 process_key = (obj.plan_date, spec.process_id)
                 is_tank_special_proc = is_tank_line and spec.process_code in (TANK_COMP_PROCESS_CODE, TANK_HAKOGUMI_PROCESS_CODE)
-                tank_hakogumi_first = False
+                prev_day_shift_qty = prev_day_shift_qty_by_line_process.get((line_code_upper, str(spec.process_code or '').strip().upper()), Decimal('0'))
+                prev_day_shift_first = False
                 tank_prev_qty = Decimal('0')
+                if prev_day_shift_qty > 0 and process_key not in previous_process_end_by_date:
+                    prev_day_shift_first = True
+                    tank_prev_qty = min(prev_day_shift_qty, process_qty)
+                    process_qty = max(process_qty - tank_prev_qty, Decimal('0'))
+                    total_minutes = _calculate_total_minutes(spec, process_qty)
+                    effective_minutes = total_minutes / max(spec.parallel_count, 1)
 
                 if is_tank_special_proc:
                     # タンクライン特例: コンプ/箱組は8:00開始チェーン方式
-                    tank_hakogumi_first = (
-                        spec.process_code == TANK_HAKOGUMI_PROCESS_CODE
-                        and process_key not in previous_process_end_by_date
-                    )
-                    if tank_hakogumi_first:
-                        tank_prev_qty = min(TANK_HAKOGUMI_PREV_DAY_QTY, process_qty)
-                        process_qty = max(process_qty - tank_prev_qty, Decimal('0'))
-                        total_minutes = _calculate_total_minutes(spec, process_qty)
-                        effective_minutes = total_minutes / max(spec.parallel_count, 1)
-
                     if process_key in previous_process_end_by_date:
                         # SEQ2+: チェーン＋上流工程の順序も考慮
                         tank_start = previous_process_end_by_date[process_key]
@@ -1547,8 +1577,8 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 previous_process_end_by_date[process_key] = end_time
 
                 # タンクライン箱組: 前日ガントエントリ生成
-                if tank_hakogumi_first and tank_prev_qty > 0:
-                    _generate_tank_hakogumi_prev_day_entry(
+                if prev_day_shift_first and tank_prev_qty > 0:
+                    _generate_prev_day_shift_entry(
                         tank_prev_day_plans, calendar, spec, entry,
                         tank_prev_qty, obj, product, plan_id, line_id,
                         output_product_id, output_product_code, output_product_name,
@@ -1626,12 +1656,12 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
     return plans
 
 
-def _generate_tank_hakogumi_prev_day_entry(
+def _generate_prev_day_shift_entry(
     tank_prev_day_plans, calendar, spec, entry,
     tank_prev_qty, obj, product, plan_id, line_id,
     output_product_id, output_product_code, output_product_name,
 ):
-    """タンクライン箱組: 前日勤務終了から逆算して2台分のガントエントリを生成"""
+    """前日勤務終了から逆算して前日シフト分のガントエントリを生成"""
     prev_total_min = _calculate_total_minutes(spec, tank_prev_qty)
     prev_effective_min = prev_total_min / max(spec.parallel_count, 1)
     if prev_effective_min <= 0:

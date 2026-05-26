@@ -885,6 +885,30 @@
           <span>{{ line.line_code }} - {{ line.line_name }}</span>
         </label>
       </div>
+      <div class="settings-note" style="margin-top: 12px;">前日シフト台数設定（ライン×工程）</div>
+      <div class="settings-rule-editor">
+        <select v-model="prevDayShiftDraft.lineCode">
+          <option value="">ライン選択</option>
+          <option v-for="line in lines" :key="`shift-line-${line.id}`" :value="normalizeLineCode(line.line_code)">
+            {{ line.line_code }} - {{ line.line_name }}
+          </option>
+        </select>
+        <select v-model="prevDayShiftDraft.processCode">
+          <option value="">工程選択</option>
+          <option v-for="proc in processOptions" :key="`shift-proc-${proc.id}`" :value="normalizeProcessCode(proc.process_code)">
+            {{ proc.process_code }} - {{ proc.process_name }}
+          </option>
+        </select>
+        <input v-model.number="prevDayShiftDraft.shiftQty" type="number" min="1" step="1" placeholder="台数" />
+        <button class="btn" type="button" @click="addPrevDayShiftRule">追加</button>
+      </div>
+      <div class="settings-list settings-rules">
+        <div v-for="(rule, idx) in prevDayShiftRules" :key="`shift-rule-${rule.lineCode}-${rule.processCode}`" class="settings-rule-row">
+          <span>{{ rule.lineCode }} / {{ rule.processCode }} / 前日シフト {{ rule.shiftQty }}台</span>
+          <button class="btn" type="button" @click="removePrevDayShiftRule(idx)">削除</button>
+        </div>
+        <div v-if="!prevDayShiftRules.length" class="settings-note">設定なし</div>
+      </div>
       <div class="settings-actions">
         <button class="btn" type="button" @click="saveLineSettings">保存</button>
       </div>
@@ -1200,6 +1224,13 @@ const productOrderActiveCode = ref('')
 const productOrderCache = ref(new Map())
 const productColorCache = ref(new Map())
 const lineSettingsMessage = ref('')
+const prevDayShiftRules = ref([])
+const prevDayShiftDraft = ref({
+  lineCode: '',
+  processCode: '',
+  shiftQty: 2,
+})
+const processOptions = ref([])
 
 const lines = ref([])
 const products = ref([])
@@ -1316,9 +1347,30 @@ const floorShippingCartCounts = computed(() => {
 })
 const configurablePlanTabs = computed(() => planTabs.filter((tab) => operationalPlanTabs.includes(tab.key)))
 const normalizeLineCode = (value) => String(value || '').trim().toUpperCase()
+const normalizeProcessCode = (value) => String(value || '').trim().toUpperCase()
 const normalizeLineCodes = (values) => Array.from(new Set(
   (Array.isArray(values) ? values : []).map((value) => normalizeLineCode(value)).filter(Boolean),
 ))
+const normalizePrevDayShiftRules = (rows) => {
+  const source = Array.isArray(rows) ? rows : []
+  const seen = new Set()
+  const normalized = []
+  source.forEach((row) => {
+    const lineCode = normalizeLineCode(row?.lineCode)
+    const processCode = normalizeProcessCode(row?.processCode)
+    const shiftQty = Number(row?.shiftQty)
+    if (!lineCode || !processCode || !Number.isFinite(shiftQty) || shiftQty <= 0) return
+    const key = `${lineCode}|${processCode}`
+    if (seen.has(key)) return
+    seen.add(key)
+    normalized.push({
+      lineCode,
+      processCode,
+      shiftQty: Math.floor(shiftQty),
+    })
+  })
+  return normalized
+}
 const userUnitLines = computed(() => {
   const unitLines = authState.user?.profile?.unit_lines
   return Array.isArray(unitLines) ? unitLines : []
@@ -1415,6 +1467,7 @@ const loadLineCodesByTab = async () => {
   try {
     const res = await api.productionRecordSettings.getSettings()
     const dbSettings = res?.data?.target_line_codes_by_tab
+    const dbSpecialRules = res?.data?.special_rules
     if (!dbSettings || typeof dbSettings !== 'object' || Array.isArray(dbSettings)) return
     const merged = {}
     operationalPlanTabs.forEach((tabKey) => {
@@ -1424,6 +1477,7 @@ const loadLineCodesByTab = async () => {
       merged[tabKey] = normalizeLineCodes(Array.isArray(source) ? source : fallback)
     })
     lineCodesByTab.value = merged
+    prevDayShiftRules.value = normalizePrevDayShiftRules(dbSpecialRules?.prev_day_shift_rules)
     saveLineCodesByTab()
   } catch (e) {
     console.warn('ライン編集設定DB取得失敗', e)
@@ -1435,9 +1489,13 @@ const syncLineCodesByTabToServer = async () => {
       acc[tabKey] = getLineCodesForTab(tabKey)
       return acc
     }, {}),
+    special_rules: {
+      prev_day_shift_rules: normalizePrevDayShiftRules(prevDayShiftRules.value),
+    },
   }
   const res = await api.productionRecordSettings.saveSettings(payload)
   const dbSettings = res?.data?.target_line_codes_by_tab
+  const dbSpecialRules = res?.data?.special_rules
   if (!dbSettings || typeof dbSettings !== 'object' || Array.isArray(dbSettings)) return
   const normalized = {}
   operationalPlanTabs.forEach((tabKey) => {
@@ -1446,7 +1504,27 @@ const syncLineCodesByTabToServer = async () => {
     normalized[tabKey] = normalizeLineCodes(Array.isArray(source) ? source : fallback)
   })
   lineCodesByTab.value = normalized
+  prevDayShiftRules.value = normalizePrevDayShiftRules(dbSpecialRules?.prev_day_shift_rules)
   saveLineCodesByTab()
+}
+const addPrevDayShiftRule = () => {
+  const rule = {
+    lineCode: normalizeLineCode(prevDayShiftDraft.value.lineCode),
+    processCode: normalizeProcessCode(prevDayShiftDraft.value.processCode),
+    shiftQty: Number(prevDayShiftDraft.value.shiftQty),
+  }
+  const normalized = normalizePrevDayShiftRules([rule])
+  if (!normalized.length) {
+    alert('ライン・工程・台数を正しく入力してください。')
+    return
+  }
+  const merged = normalizePrevDayShiftRules([...prevDayShiftRules.value, ...normalized])
+  prevDayShiftRules.value = merged
+  lineSettingsMessage.value = ''
+}
+const removePrevDayShiftRule = (index) => {
+  prevDayShiftRules.value = prevDayShiftRules.value.filter((_, i) => i !== index)
+  lineSettingsMessage.value = ''
 }
 const isLineSelectedForTargetTab = (lineCode) => {
   const code = normalizeLineCode(lineCode)
@@ -2930,11 +3008,23 @@ const fetchProducts = async () => {
     .filter((p) => !p.is_phantom)
     .sort((a, b) => (a.product_code || '').localeCompare(b.product_code || ''))
 }
+const fetchProcessOptions = async () => {
+  const res = await api.processes.getProcesses({ page_size: 5000 })
+  const list = res?.data?.results || res?.data || []
+  processOptions.value = (Array.isArray(list) ? list : [])
+    .map((proc) => ({
+      id: proc.id,
+      process_code: String(proc.process_code || '').trim(),
+      process_name: String(proc.process_name || '').trim(),
+    }))
+    .filter((proc) => proc.process_code)
+    .sort((a, b) => a.process_code.localeCompare(b.process_code))
+}
 
 onMounted(async () => {
   try {
     await ensureAuth()
-    await Promise.all([fetchLines(), fetchProducts(), fetchLockSetting()])
+    await Promise.all([fetchLines(), fetchProducts(), fetchLockSetting(), fetchProcessOptions()])
     await loadData()
   } catch (e) {
     console.error('初期データ取得エラー', e)
@@ -4986,6 +5076,38 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
   margin-top: 12px;
   display: flex;
   gap: 8px;
+}
+.settings-rule-editor {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.settings-rule-editor select,
+.settings-rule-editor input {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  padding: 6px 8px;
+}
+.settings-rules {
+  margin-top: 6px;
+  margin-bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.settings-rule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #d7deea;
+  border-radius: 6px;
+  background: #f8fafc;
+  padding: 6px 8px;
+  font-size: 13px;
 }
 .settings-message {
   margin-top: 8px;
