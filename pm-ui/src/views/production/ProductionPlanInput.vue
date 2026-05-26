@@ -1507,7 +1507,7 @@ const syncLineCodesByTabToServer = async () => {
   prevDayShiftRules.value = normalizePrevDayShiftRules(dbSpecialRules?.prev_day_shift_rules)
   saveLineCodesByTab()
 }
-const addPrevDayShiftRule = () => {
+const addPrevDayShiftRule = async () => {
   const rule = {
     lineCode: normalizeLineCode(prevDayShiftDraft.value.lineCode),
     processCode: normalizeProcessCode(prevDayShiftDraft.value.processCode),
@@ -1521,10 +1521,30 @@ const addPrevDayShiftRule = () => {
   const merged = normalizePrevDayShiftRules([...prevDayShiftRules.value, ...normalized])
   prevDayShiftRules.value = merged
   lineSettingsMessage.value = ''
+  let dbSyncFailed = false
+  try {
+    await syncLineCodesByTabToServer()
+  } catch (e) {
+    dbSyncFailed = true
+    console.warn('前日シフト台数設定DB保存失敗', e)
+  }
+  lineSettingsMessage.value = dbSyncFailed
+    ? '前日シフト台数設定を追加しました。（DB同期は失敗しました）'
+    : '前日シフト台数設定を追加しました。'
 }
-const removePrevDayShiftRule = (index) => {
+const removePrevDayShiftRule = async (index) => {
   prevDayShiftRules.value = prevDayShiftRules.value.filter((_, i) => i !== index)
   lineSettingsMessage.value = ''
+  let dbSyncFailed = false
+  try {
+    await syncLineCodesByTabToServer()
+  } catch (e) {
+    dbSyncFailed = true
+    console.warn('前日シフト台数設定DB保存失敗', e)
+  }
+  lineSettingsMessage.value = dbSyncFailed
+    ? '前日シフト台数設定を削除しました。（DB同期は失敗しました）'
+    : '前日シフト台数設定を削除しました。'
 }
 const isLineSelectedForTargetTab = (lineCode) => {
   const code = normalizeLineCode(lineCode)
