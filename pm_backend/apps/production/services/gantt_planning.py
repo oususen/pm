@@ -1809,21 +1809,43 @@ def _generate_prev_day_shift_entry(
 
 
 def _merge_consecutive_subprocess_entries(plans):
-    """sequence_noが連続する同一サブ工程出力品のエントリを1つに統合する"""
+    """同一サブ工程出力品のうち、時間的に連続するエントリを1つに統合する"""
     if len(plans) <= 1:
         return plans
 
-    sorted_plans = sorted(plans, key=lambda p: p.get('sequence_no') or 0)
+    # 同一工程×同日で、時間帯にどの出力品が存在するかを事前に作る
+    process_slots = {}
+    for plan in plans:
+        plan_date = plan.get('plan_date')
+        for proc in plan['processes_plan']:
+            try:
+                start_dt = datetime.fromisoformat(proc['start_time'])
+                end_dt = datetime.fromisoformat(proc['end_time'])
+            except Exception:
+                continue
+            slot_key = (proc.get('process_id'), plan_date)
+            process_slots.setdefault(slot_key, []).append(
+                (start_dt, end_dt, proc.get('output_product_id'))
+            )
+
+    def _has_other_product_in_gap(process_id, plan_date, output_product_id, gap_start, gap_end):
+        """空き区間に同一工程の他製品が存在するか判定"""
+        if gap_end <= gap_start:
+            return False
+        for s, e, out_pid in process_slots.get((process_id, plan_date), []):
+            if out_pid == output_product_id:
+                continue
+            if s < gap_end and e > gap_start:
+                return True
+        return False
 
     proc_groups = {}
-    for plan in sorted_plans:
-        seq = plan.get('sequence_no') or 0
+    for plan in plans:
         plan_date = plan.get('plan_date')
         for proc in plan['processes_plan']:
             key = (proc['process_id'], proc.get('output_product_id'), plan_date)
             proc_groups.setdefault(key, []).append({
                 'plan': plan,
-                'sequence_no': seq,
                 'proc': proc,
             })
 
@@ -1832,12 +1854,26 @@ def _merge_consecutive_subprocess_entries(plans):
         if len(entries) <= 1:
             continue
 
-        entries.sort(key=lambda e: e['sequence_no'])
+        entries.sort(key=lambda e: datetime.fromisoformat(e['proc']['start_time']))
 
         runs = []
         current_run = [entries[0]]
         for i in range(1, len(entries)):
-            if entries[i]['sequence_no'] == entries[i - 1]['sequence_no'] + 1:
+            prev_proc = entries[i - 1]['proc']
+            curr_proc = entries[i]['proc']
+            prev_end = datetime.fromisoformat(prev_proc['end_time'])
+            curr_start = datetime.fromisoformat(curr_proc['start_time'])
+            # 接続/重なりは連続扱い
+            if curr_start <= prev_end:
+                current_run.append(entries[i])
+            # ギャップがあっても、その間に同一工程の他製品が無ければ連続扱い
+            elif not _has_other_product_in_gap(
+                prev_proc.get('process_id'),
+                key[2],
+                prev_proc.get('output_product_id'),
+                prev_end,
+                curr_start,
+            ):
                 current_run.append(entries[i])
             else:
                 runs.append(current_run)
