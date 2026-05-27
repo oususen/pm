@@ -48,6 +48,15 @@
         </table>
 
         <div v-if="settings.length === 0" class="no-data">データがありません</div>
+
+        <div v-if="canEdit" class="pw-section">
+          <h3 class="section-title">計画数編集用パスワード</h3>
+          <div class="pw-form">
+            <input v-model="planQtyPassword" type="password" class="form-input pw-input" placeholder="新しいパスワード" />
+            <button class="btn-primary" :disabled="!planQtyPassword" @click="savePlanQtyPassword">設定</button>
+          </div>
+          <div v-if="planQtyPwMsg" :class="planQtyPwError ? 'error-message' : 'success-message'">{{ planQtyPwMsg }}</div>
+        </div>
       </template>
     </div>
 
@@ -160,6 +169,24 @@ const createSetting = async () => {
     createError.value = msg
   } finally {
     loading.value = false
+  }
+}
+
+const planQtyPassword = ref('')
+const planQtyPwMsg = ref('')
+const planQtyPwError = ref(false)
+
+const savePlanQtyPassword = async () => {
+  if (!planQtyPassword.value) return
+  planQtyPwMsg.value = ''
+  planQtyPwError.value = false
+  try {
+    await api.systemSettings.setPlanQtyPassword({ password: planQtyPassword.value })
+    planQtyPwMsg.value = '計画数編集用パスワードを設定しました。'
+    planQtyPassword.value = ''
+  } catch (e) {
+    planQtyPwError.value = true
+    planQtyPwMsg.value = e?.response?.data?.detail || '設定に失敗しました。'
   }
 }
 
@@ -330,6 +357,24 @@ onMounted(fetchSettings)
   justify-content: flex-end;
   gap: 8px;
   margin-top: 20px;
+}
+.pw-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
+}
+.section-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.pw-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.pw-input {
+  width: 200px;
 }
 </style>
 

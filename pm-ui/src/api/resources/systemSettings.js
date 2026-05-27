@@ -7,4 +7,6 @@ export const createSystemSettingsAPI = (client) => ({
   create: (data) => client.post('/system-settings/detail/', data),
   // 複数キーをまとめて更新: { key: value, ... }
   updateByKey: (data) => client.patch('/system-settings/update-by-key/', data),
+  setPlanQtyPassword: (data) => client.post('/system-settings/set-plan-qty-password/', data),
+  verifyPlanQtyPassword: (data) => client.post('/system-settings/verify-plan-qty-password/', data),
 })

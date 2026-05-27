@@ -244,7 +244,14 @@
               <div class="current-actual">
                 <div class="stat-block">
                   <span class="stat-label">計画数</span>
-                  <span class="stat-value plan">{{ formatNumber(planStatus.planQty) }}</span>
+                  <span v-if="!editingPlanQty" class="stat-value plan clickable" @click="startEditPlanQty">{{ formatNumber(planStatus.planQty) }}</span>
+                  <span v-else class="plan-qty-edit">
+                    <input v-model.number="editPlanQtyValue" type="number" min="0" class="plan-qty-input" @keyup.enter="savePlanQty" @keyup.escape="cancelEditPlanQty" />
+                    <input v-if="!selectedPlanItem?.gantt_plan_id" v-model="editPlanStartTime" type="time" step="60" class="plan-time-input" />
+                    <input v-if="!selectedPlanItem?.gantt_plan_id" v-model="editPlanEndTime" type="time" step="60" class="plan-time-input" />
+                    <button class="plan-qty-btn save" @click="savePlanQty">保存</button>
+                    <button class="plan-qty-btn cancel" @click="cancelEditPlanQty">取消</button>
+                  </span>
                 </div>
                 <div class="stat-block">
                   <span class="stat-label">実績数</span>
@@ -1106,6 +1113,83 @@ const planStatus = computed(() => {
   const remainingAfterInput = Math.max(planQty - actualQty - currentInput, 0)
   return { planQty, actualQty, remaining, remainingAfterInput }
 })
+
+const editingPlanQty = ref(false)
+const editPlanQtyValue = ref(0)
+const editPlanStartTime = ref('08:00')
+const editPlanEndTime = ref('09:00')
+
+const selectedPlanItem = computed(() => {
+  const productId = record.value.product_id
+  if (!productId) return null
+  return productionProducts.value.find((p) => String(p.product) === String(productId)) || null
+})
+
+const startEditPlanQty = async () => {
+  const item = selectedPlanItem.value
+  if (!item) return
+  const pw = prompt('計画数を変更するにはパスワードを入力してください')
+  if (!pw) return
+  try {
+    await api.systemSettings.verifyPlanQtyPassword({ password: pw })
+  } catch (e) {
+    const detail = e?.response?.data?.detail || 'パスワードが正しくありません。'
+    alert(detail)
+    return
+  }
+  editPlanQtyValue.value = toSafeNumber(item.plan_qty)
+  if (!item.gantt_plan_id) {
+    const now = new Date()
+    const hh = String(now.getHours()).padStart(2, '0')
+    const mm = String(now.getMinutes()).padStart(2, '0')
+    editPlanStartTime.value = `${hh}:${mm}`
+    const endH = now.getHours() + 1
+    editPlanEndTime.value = `${String(endH % 24).padStart(2, '0')}:${mm}`
+  }
+  editingPlanQty.value = true
+}
+
+const cancelEditPlanQty = () => {
+  editingPlanQty.value = false
+}
+
+const savePlanQty = async () => {
+  const item = selectedPlanItem.value
+  if (!item) return
+  const qty = Math.max(Math.round(toSafeNumber(editPlanQtyValue.value)), 0)
+  const processId = selectedProcessId.value
+  const process = processes.value.find(p => String(p.id) === String(processId))
+  const lineId = process?.line
+  if (!lineId || !processId) return
+
+  try {
+    if (item.gantt_plan_id) {
+      await api.lineGanttPlans.bulkUpdate([{
+        plan_id: item.gantt_plan_id,
+        process_id: processId,
+        output_product_id: item.product,
+        quantity: qty,
+      }])
+    } else {
+      const planDate = currentDateYmd.value
+      const startTime = `${planDate}T${editPlanStartTime.value}:00`
+      const endTime = `${planDate}T${editPlanEndTime.value}:00`
+      await api.lineGanttPlans.manualAdd({
+        line_id: lineId,
+        process_id: processId,
+        output_product_id: item.product,
+        start_time: startTime,
+        end_time: endTime,
+        quantity: qty,
+      })
+    }
+    editingPlanQty.value = false
+    await loadPlannedProducts()
+  } catch (e) {
+    const detail = e?.response?.data?.detail || '計画数の保存に失敗しました。'
+    alert(detail)
+  }
+}
 
 const getPlanQtyState = (item) => {
   const planQty = toSafeNumber(item?.plan_qty)
@@ -2229,7 +2313,7 @@ const buildCurrentTimePlanItems = async (lineId, processId, existingItems = []) 
           plan_date: targetDate, product: productId, product_code: pp.output_product_code || plan.product_code || '',
           product_name: pp.output_product_name || plan.product_name || '', process: processId,
           plan_qty: pp.quantity ?? plan.plan_qty ?? 0, actual_qty: actualLookup.has(key) ? actualLookup.get(key) : 0,
-          sequence_no: plan.sequence_no ?? null,
+          sequence_no: plan.sequence_no ?? null, gantt_plan_id: plan.plan_id || null,
         })
       })
     })
@@ -2257,7 +2341,7 @@ const buildPlanTimeSlots = async (lineId, processId, existingItems = []) => {
           plan_date: targetDate, product: productId, product_code: pp.output_product_code || plan.product_code || '',
           product_name: pp.output_product_name || plan.product_name || '', process: processId,
           plan_qty: pp.quantity ?? plan.plan_qty ?? 0, actual_qty: actualLookup.has(key) ? actualLookup.get(key) : 0, start, end,
-          sequence_no: plan.sequence_no ?? null,
+          sequence_no: plan.sequence_no ?? null, gantt_plan_id: plan.plan_id || null,
         }
         const slotKey = `${start.toISOString()}_${end.toISOString()}`
         if (!slotMap.has(slotKey)) slotMap.set(slotKey, { start, end, items: [] })
@@ -2467,7 +2551,7 @@ const loadPlannedProducts = async () => {
         const seqKey = seq !== null ? seq : 'none'
         const prev = seqMap.get(seqKey)
         const startMs = item?.start instanceof Date ? item.start.getTime() : Number.POSITIVE_INFINITY
-        if (!prev) { seqMap.set(seqKey, { qty: toSafeNumber(item?.plan_qty), startMs }) }
+        if (!prev) { seqMap.set(seqKey, { qty: toSafeNumber(item?.plan_qty), startMs, gantt_plan_id: item?.gantt_plan_id || null }) }
         else { prev.qty += toSafeNumber(item?.plan_qty); prev.startMs = Math.min(prev.startMs, startMs) }
       })
     })
@@ -2509,7 +2593,7 @@ const loadPlannedProducts = async () => {
         return
       }
       entries.forEach((entry, seqKey) => {
-        expanded.push({ ...item, plan_qty: toSafeNumber(entry.qty), sequence_no: seqKey === 'none' ? null : seqKey, gantt_start_ms: Number.isFinite(entry.startMs) ? entry.startMs : null })
+        expanded.push({ ...item, plan_qty: toSafeNumber(entry.qty), sequence_no: seqKey === 'none' ? null : seqKey, gantt_start_ms: Number.isFinite(entry.startMs) ? entry.startMs : null, gantt_plan_id: entry.gantt_plan_id || null })
       })
     })
     mapFilteredForProduction = expanded
@@ -2912,6 +2996,14 @@ onMounted(async () => {
 .stat-value.actual { color: #2e9688; }
 .stat-value.remain { color: #c0714f; }
 .stat-value.remain.over { color: #388e3c; }
+.stat-value.clickable { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; }
+.stat-value.clickable:hover { color: #1d74d8; }
+.plan-qty-edit { display: inline-flex; align-items: center; gap: 4px; }
+.plan-qty-input { width: 70px; font-size: 16px; padding: 2px 4px; text-align: right; }
+.plan-time-input { width: 90px; font-size: 14px; padding: 2px 4px; }
+.plan-qty-btn { padding: 2px 8px; border: 1px solid #b8c3d6; border-radius: 4px; background: #fff; cursor: pointer; font-size: 13px; }
+.plan-qty-btn.save { background: #1d74d8; color: #fff; border-color: #1d74d8; }
+.plan-qty-btn.cancel { background: #f5f5f5; }
 .qty-input-area { display: flex; flex-direction: column; gap: 8px; }
 .qty-row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; }
 .qty-col { display: flex; flex-direction: column; gap: 4px; }
