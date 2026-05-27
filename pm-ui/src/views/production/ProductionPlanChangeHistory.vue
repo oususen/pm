@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">生産計画変更履歴</h1>
+      <h1 class="page-title">生産計画変更履歴 <button class="ds-btn" @click="showDataSource = true" title="データソース"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></button></h1>
       <div class="page-actions">
         <button class="btn-primary" :disabled="loading" @click="fetchLogs(1)">検索</button>
         <button class="btn-secondary" :disabled="loading" @click="resetFilters">リセット</button>
@@ -88,11 +88,28 @@
         </button>
       </div>
     </div>
+
+    <div v-if="showDataSource" class="ds-overlay" @click.self="showDataSource = false">
+      <div class="ds-modal">
+        <div class="ds-header">
+          <h3>データソース — 生産計画変更履歴</h3>
+          <button class="ds-close" @click="showDataSource = false">×</button>
+        </div>
+        <table class="ds-table">
+          <thead><tr><th>操作</th><th>テーブル</th><th>説明</th></tr></thead>
+          <tbody>
+            <tr><td>取得</td><td>production_plan_change_log</td><td>計画変更ログ（日付・品番・ライン・工程・変更前後数量・理由・変更者）</td></tr>
+          </tbody>
+        </table>
+        <p class="ds-note">※ この画面からの書き込みはありません。変更ログは計画数を変更する画面（工程実績等）から記録されます。</p>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+const showDataSource = ref(false)
 import api from '@/api/client'
 
 const loading = ref(false)
@@ -248,5 +265,18 @@ onMounted(async () => {
   font-size: 14px;
   color: #555;
 }
+.ds-btn { margin-left: 8px; padding: 4px 6px; border: 1px solid #94a3b8; border-radius: 4px; background: #f8fafc; color: #475569; cursor: pointer; vertical-align: middle; display: inline-flex; align-items: center; }
+.ds-btn:hover { background: #e2e8f0; }
+.ds-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+.ds-modal { background: #fff; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,.2); max-width: 700px; width: 90%; max-height: 80vh; overflow: auto; }
+.ds-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #e5e7eb; }
+.ds-header h3 { margin: 0; font-size: 15px; }
+.ds-close { border: none; background: none; font-size: 22px; cursor: pointer; color: #64748b; }
+.ds-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ds-table th, .ds-table td { padding: 8px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; }
+.ds-table th { background: #f8fafc; font-weight: 600; color: #374151; }
+.ds-table td:first-child { white-space: nowrap; font-weight: 500; color: #2563eb; }
+.ds-table td:nth-child(2) { font-family: monospace; font-size: 12px; color: #0f172a; }
+.ds-note { padding: 8px 18px 14px; margin: 0; font-size: 12px; color: #64748b; }
 </style>
 
