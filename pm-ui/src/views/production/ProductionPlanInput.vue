@@ -192,6 +192,13 @@
         <button
           v-if="canShowFloorDeliveryDetailPDFButton"
           class="btn"
+          style="background: #2E86C1; color: #fff;"
+          @click="downloadFloorShippingNewPDF"
+          :disabled="processing || !selectedLine"
+        >新配送明細</button>
+        <button
+          v-if="canShowFloorDeliveryDetailPDFButton"
+          class="btn"
           style="background: #C07000; color: #fff;"
           @click="downloadFloorShippingLapPDF"
           :disabled="processing || !selectedLine"
@@ -3694,6 +3701,36 @@ const downloadFloorShippingLapPDF = async () => {
     URL.revokeObjectURL(url)
   } catch (e) {
     console.error('配送明細ラップPDF生成エラー', e)
+    alert('PDF生成に失敗しました: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
+const downloadFloorShippingNewPDF = async () => {
+  const sourceLineId = floorShippingPdfSourceLineId.value
+  if (!sourceLineId) {
+    alert('フロア配送ラインが見つかりません。')
+    return
+  }
+  try {
+    const res = await api.client.get('/floor-shipping-new-pdf/', {
+      params: {
+        line: sourceLineId,
+        start_date: startDate.value,
+        end_date: endDate.value,
+      },
+      responseType: 'blob',
+    })
+    const blob = new Blob([res.data], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `フロア配送明細_新_${startDate.value}_${endDate.value}.pdf`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    console.error('新配送明細PDF生成エラー', e)
     alert('PDF生成に失敗しました: ' + (e.response?.data?.detail || e.message))
   }
 }

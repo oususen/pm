@@ -7753,6 +7753,42 @@ class FloorShippingPDFView(APIView):
         return response
 
 
+class FloorShippingNewPDFView(APIView):
+    """新品番ベースのフロア配送明細PDF"""
+
+    def get(self, request):
+        line_id = request.query_params.get('line')
+        start = request.query_params.get('start_date')
+        end = request.query_params.get('end_date')
+        if not line_id or not start or not end:
+            return Response(
+                {'detail': 'line, start_date, end_date は必須です'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            from datetime import datetime as dt
+            start_date = dt.strptime(start, '%Y-%m-%d').date()
+            end_date = dt.strptime(end, '%Y-%m-%d').date()
+        except ValueError:
+            return Response(
+                {'detail': '日付形式が不正です (YYYY-MM-DD)'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from production.services.floor_shipping_pdf import generate_floor_shipping_new_pdf
+        try:
+            pdf_bytes = generate_floor_shipping_new_pdf(int(line_id), start_date, end_date)
+        except Exception as e:
+            logger.exception('新配送明細PDF生成エラー')
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        from django.http import HttpResponse as DjangoHttpResponse
+        response = DjangoHttpResponse(pdf_bytes, content_type='application/pdf')
+        filename = f'フロア配送明細_新_{start}_{end}.pdf'
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response
+
+
 class FloorShippingLapPDFView(APIView):
     """フロア配送 ラップ期間用PDF（新旧品番併記、午前/午後各1ページ）"""
 
