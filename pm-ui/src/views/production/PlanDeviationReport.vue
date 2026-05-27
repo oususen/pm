@@ -1,7 +1,7 @@
 <template>
   <div class="plan-deviation-report">
     <div class="report-header">
-      <h2>計画乖離レポート <button class="ds-btn" @click="showDataSource = true" title="データソース"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></button></h2>
+      <h2>計画乖離レポート <button v-if="authState.user?.is_superuser" class="ds-btn" @click="showDataSource = true" title="データソース"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></button></h2>
       <div class="header-controls">
         <label>対象日:</label>
         <input type="date" v-model="targetDate" @change="loadReport" />
@@ -165,6 +165,7 @@
 import { ref, computed, onMounted } from 'vue'
 const showDataSource = ref(false)
 import api from '@/api/client'
+import { authState } from '@/auth'
 
 const targetDate = ref('')
 const lineTypeFilter = ref('PROD')
