@@ -7887,6 +7887,59 @@ class HokushinDeliveryListPDFView(APIView):
         return response
 
 
+class HokushinDeliveryListNewPDFView(APIView):
+    """新品番ベースの北進納入リストPDF"""
+
+    @staticmethod
+    def _resolve_creator_name(request) -> str:
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated:
+            return 'システム'
+        last_name = (getattr(user, 'last_name', '') or '').strip()
+        if last_name:
+            return last_name
+        username = (user.get_username() or '').strip()
+        if username:
+            return username
+        email = (getattr(user, 'email', '') or '').strip()
+        return email or 'システム'
+
+    def get(self, request):
+        line_id = request.query_params.get('line')
+        start = request.query_params.get('start_date')
+        end = request.query_params.get('end_date')
+        if not line_id or not start or not end:
+            return Response(
+                {'detail': 'line, start_date, end_date は必須です'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            from datetime import datetime as dt
+            start_date = dt.strptime(start, '%Y-%m-%d').date()
+            end_date = dt.strptime(end, '%Y-%m-%d').date()
+        except ValueError:
+            return Response(
+                {'detail': '日付形式が不正です (YYYY-MM-DD)'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from production.services.hokushin_delivery_list_pdf import generate_hokushin_delivery_list_new_pdf
+        try:
+            creator_name = self._resolve_creator_name(request)
+            pdf_bytes = generate_hokushin_delivery_list_new_pdf(
+                int(line_id), start_date, end_date, creator_name=creator_name,
+            )
+        except Exception as e:
+            logger.exception('新北進納入リストPDF生成エラー')
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        from django.http import HttpResponse as DjangoHttpResponse
+        response = DjangoHttpResponse(pdf_bytes, content_type='application/pdf')
+        filename = f'北進納入リスト_新_{start}_{end}.pdf'
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response
+
+
 class HokushinDeliveryListLapPDFView(APIView):
     """北進納入リスト ラップ期間用PDF（新旧品番併記、午前/午後各1ページ）"""
 

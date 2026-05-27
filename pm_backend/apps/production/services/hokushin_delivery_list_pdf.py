@@ -17,6 +17,8 @@ from production.models_line_backlog import LineBacklog
 from production.services.floor_shipping_pdf import (
     PRODUCT_ORDER,
     PRODUCT_ORDER_LAP,
+    PRODUCT_ORDER_NEW,
+    PRODUCT_ALIAS_MAP,
     JPN_WEEKDAYS,
     PM_SEQUENCE_THRESHOLD,
     COLOR_HEADER_BG,
@@ -32,6 +34,7 @@ from production.services.floor_shipping_pdf import (
     _get_calendar_id,
     _build_working_day_cache,
     _is_working_day,
+    _build_new_render_order,
 )
 
 
@@ -589,6 +592,226 @@ def generate_hokushin_delivery_list_lap_pdf(
         c.showPage()
 
         pm_totals = draw_section_page(page_dates, date_col_w, table_w, SECTION_TITLE_PM, COLOR_SECTION_PM, pm_data, '午後便')
+        c.showPage()
+
+    c.save()
+    buf.seek(0)
+    return buf.read()
+
+
+def generate_hokushin_delivery_list_new_pdf(
+    line_id: int,
+    start_date: date,
+    end_date: date,
+    creator_name: str = 'システム',
+) -> bytes:
+    """新品番ベースの北進納入リストPDF。新品番は常時表示、旧品番はデータありのみ表示。"""
+    _register_fonts()
+
+    line = Line.objects.filter(id=line_id).first()
+    if not line:
+        raise ValueError('ライン未検出')
+
+    calendar_id = _get_calendar_id(line)
+    cal_cache = _build_working_day_cache(calendar_id, start_date - timedelta(days=14), end_date + timedelta(days=14))
+    display_dates = _get_display_dates(start_date, end_date)
+
+    collection_order = list(PRODUCT_ORDER_NEW) + [
+        (code, label, color) for code, label, color in PRODUCT_ORDER
+        if code not in {c for c, _, _ in PRODUCT_ORDER_NEW}
+    ]
+    am_data, pm_data, product_names = _collect_hokushin_delivery_list_data(
+        line_id, start_date, end_date, calendar_id, cal_cache,
+        product_order=collection_order, use_alias=False,
+    )
+
+    render_order = _build_new_render_order(am_data, pm_data, display_dates)
+
+    buf = io.BytesIO()
+    page_size = landscape(A4)
+    c = canvas.Canvas(buf, pagesize=page_size)
+    page_w, page_h = page_size
+
+    margin_left = 8 * mm
+    margin_top = 10 * mm
+    margin_right = 8 * mm
+
+    font_name = 'MSGothic'
+    font_scale = 1.5
+    font_size_header = 8 * font_scale
+    font_size_cell = 8 * font_scale
+    font_size_title = 12 * font_scale
+
+    label_col_w = 58 * mm * (4 / 3)
+    row_h = 5 * mm
+    section_header_h = 5.5 * mm
+
+    output_date = datetime.now().date()
+    creator_label = str(creator_name or '').strip() or 'システム'
+
+    def draw_page_header(y_pos, page_dates):
+        c.setFont(font_name, font_size_title)
+        c.drawString(margin_left, y_pos, '株式会社北進塗装　竹岡工場長様')
+        y2 = y_pos - 5.5 * mm
+        c.setFont(font_name, 8 * font_scale)
+        c.setFillColor(colors.HexColor('#666666'))
+        right_text = f'ダイソウ工業　{creator_label}'
+        tw = c.stringWidth(right_text, font_name, 8 * font_scale)
+        c.drawString(page_w - margin_right - tw, y2, right_text)
+        if page_dates:
+            range_text = f'{page_dates[0].strftime("%Y/%m/%d")} ～ {page_dates[-1].strftime("%Y/%m/%d")}'
+            c.drawString(margin_left, y2 - 4.5 * mm, range_text)
+        created_text = output_date.strftime('%Y/%m/%d')
+        dw = c.stringWidth(created_text, font_name, 8 * font_scale)
+        c.drawString(page_w - margin_right - dw, y2 - 4.5 * mm, created_text)
+        c.setFillColor(colors.black)
+        return y_pos - 13 * mm
+
+    def draw_date_header(y_pos, page_dates, date_col_w):
+        x = margin_left
+        c.setFillColor(COLOR_HEADER_BG)
+        c.rect(x, y_pos - row_h, label_col_w, row_h, fill=1, stroke=0)
+        x += label_col_w
+        for day in page_dates:
+            is_weekend = day.weekday() >= 5
+            c.setFillColor(COLOR_WEEKEND_BG if is_weekend else COLOR_HEADER_BG)
+            c.rect(x, y_pos - row_h, date_col_w, row_h, fill=1, stroke=0)
+            c.setFillColor(COLOR_HEADER_TEXT)
+            c.setFont(font_name, font_size_header)
+            label = f'{day.month}/{day.day}'
+            tw = c.stringWidth(label, font_name, font_size_header)
+            c.drawString(x + (date_col_w - tw) / 2, y_pos - row_h + 1 * mm, label)
+            x += date_col_w
+        y_pos -= row_h
+        x = margin_left
+        c.setFillColor(COLOR_HEADER_BG)
+        c.rect(x, y_pos - row_h, label_col_w, row_h, fill=1, stroke=0)
+        x += label_col_w
+        for day in page_dates:
+            is_weekend = day.weekday() >= 5
+            c.setFillColor(COLOR_WEEKEND_BG if is_weekend else COLOR_HEADER_BG)
+            c.rect(x, y_pos - row_h, date_col_w, row_h, fill=1, stroke=0)
+            c.setFillColor(COLOR_HEADER_TEXT)
+            c.setFont(font_name, font_size_header)
+            weekday = JPN_WEEKDAYS[day.weekday()]
+            tw = c.stringWidth(weekday, font_name, font_size_header)
+            c.drawString(x + (date_col_w - tw) / 2, y_pos - row_h + 1 * mm, weekday)
+            x += date_col_w
+        return y_pos - row_h
+
+    def draw_section_header(y_pos, title, bg_color, table_w):
+        c.setFillColor(bg_color)
+        c.rect(margin_left, y_pos - section_header_h, table_w, section_header_h, fill=1, stroke=0)
+        c.setFillColor(colors.black)
+        c.setFont(font_name, font_size_header + 1)
+        c.drawString(margin_left + 2 * mm, y_pos - section_header_h + 1.5 * mm, title)
+        return y_pos - section_header_h
+
+    def draw_product_row(y_pos, product_code, label, name, data_by_date, page_dates, date_col_w, row_bg=None, label_color=None):
+        x = margin_left
+        if row_bg:
+            c.setFillColor(row_bg)
+            c.rect(x, y_pos - row_h, label_col_w, row_h, fill=1, stroke=0)
+        c.setStrokeColor(COLOR_GRID)
+        c.rect(x, y_pos - row_h, label_col_w, row_h, fill=0, stroke=1)
+        c.setFillColor(label_color or colors.black)
+        c.setFont(font_name, font_size_cell)
+        display_code = product_code[:-1] if str(product_code).endswith('T') else str(product_code)
+        short_name = _extract_short_name(name)
+        text = f'{label}{display_code}{short_name}' if short_name else f'{label}{display_code}'
+        c.drawString(x + 0.5 * mm, y_pos - row_h + 1 * mm, text)
+        x += label_col_w
+        for day in page_dates:
+            is_weekend = day.weekday() >= 5
+            bg = COLOR_WEEKEND_BG if is_weekend else row_bg
+            if bg:
+                c.setFillColor(bg)
+                c.rect(x, y_pos - row_h, date_col_w, row_h, fill=1, stroke=0)
+            c.setStrokeColor(COLOR_GRID)
+            c.rect(x, y_pos - row_h, date_col_w, row_h, fill=0, stroke=1)
+            qty = data_by_date.get(day, 0)
+            if qty > 0:
+                c.setFillColor(label_color or colors.black)
+                c.setFont(font_name, font_size_cell)
+                txt = str(qty)
+                tw = c.stringWidth(txt, font_name, font_size_cell)
+                c.drawString(x + date_col_w - tw - 1 * mm, y_pos - row_h + 1 * mm, txt)
+            x += date_col_w
+        return y_pos - row_h
+
+    def draw_total_row(y_pos, title, totals_by_date, page_dates, date_col_w, bg_color=COLOR_TOTAL_BG):
+        x = margin_left
+        c.setFillColor(bg_color)
+        c.rect(x, y_pos - row_h, label_col_w, row_h, fill=1, stroke=0)
+        c.setStrokeColor(COLOR_GRID)
+        c.rect(x, y_pos - row_h, label_col_w, row_h, fill=0, stroke=1)
+        c.setFillColor(colors.black)
+        c.setFont(font_name, font_size_cell + 1)
+        tw = c.stringWidth(title, font_name, font_size_cell + 1)
+        c.drawString(x + label_col_w - tw - 1 * mm, y_pos - row_h + 1 * mm, title)
+        x += label_col_w
+        for day in page_dates:
+            is_weekend = day.weekday() >= 5
+            c.setFillColor(COLOR_WEEKEND_BG if is_weekend else bg_color)
+            c.rect(x, y_pos - row_h, date_col_w, row_h, fill=1, stroke=0)
+            c.setStrokeColor(COLOR_GRID)
+            c.rect(x, y_pos - row_h, date_col_w, row_h, fill=0, stroke=1)
+            qty = totals_by_date.get(day, 0)
+            if qty > 0:
+                c.setFillColor(colors.black)
+                c.setFont(font_name, font_size_cell + 1)
+                txt = str(qty)
+                tw = c.stringWidth(txt, font_name, font_size_cell + 1)
+                c.drawString(x + date_col_w - tw - 1 * mm, y_pos - row_h + 1 * mm, txt)
+            x += date_col_w
+        return y_pos - row_h
+
+    def calc_section_totals(section_data, page_dates):
+        totals = {}
+        for day in page_dates:
+            totals[day] = sum(section_data.get(day, {}).get(code, 0) for code, _, _ in render_order)
+        return totals
+
+    for page_dates in _chunk_dates(display_dates, PAGE_DAYS):
+        date_col_w = max(
+            (page_w - margin_left - margin_right - label_col_w) / max(len(page_dates), 1),
+            12 * mm,
+        )
+        table_w = label_col_w + date_col_w * len(page_dates)
+
+        y = page_h - margin_top
+        y = draw_page_header(y, page_dates)
+        y = draw_date_header(y, page_dates, date_col_w)
+
+        y = draw_section_header(y, SECTION_TITLE_AM, COLOR_SECTION_AM, table_w)
+        for row_index, (product_code, label, label_color) in enumerate(render_order, start=1):
+            name = product_names.get(product_code, '')
+            row_data = {}
+            for day in page_dates:
+                qty = am_data.get(day, {}).get(product_code, 0)
+                if qty > 0:
+                    row_data[day] = qty
+            row_bg = COLOR_ROW_ODD_BG if row_index % 2 == 1 else COLOR_ROW_EVEN_BG
+            y = draw_product_row(y, product_code, label, name, row_data, page_dates, date_col_w, row_bg=row_bg, label_color=label_color)
+        am_totals = calc_section_totals(am_data, page_dates)
+        y = draw_total_row(y, '午前便合計', am_totals, page_dates, date_col_w)
+
+        y = draw_section_header(y, SECTION_TITLE_PM, COLOR_SECTION_PM, table_w)
+        for row_index, (product_code, label, label_color) in enumerate(render_order, start=1):
+            name = product_names.get(product_code, '')
+            row_data = {}
+            for day in page_dates:
+                qty = pm_data.get(day, {}).get(product_code, 0)
+                if qty > 0:
+                    row_data[day] = qty
+            row_bg = COLOR_ROW_ODD_BG if row_index % 2 == 1 else COLOR_ROW_EVEN_BG
+            y = draw_product_row(y, product_code, label, name, row_data, page_dates, date_col_w, row_bg=row_bg, label_color=label_color)
+        pm_totals = calc_section_totals(pm_data, page_dates)
+        y = draw_total_row(y, '午後便合計', pm_totals, page_dates, date_col_w)
+
+        grand_totals = {day: am_totals.get(day, 0) + pm_totals.get(day, 0) for day in page_dates}
+        y = draw_total_row(y, '総合計', grand_totals, page_dates, date_col_w, bg_color=COLOR_GRAND_TOTAL_BG)
+
         c.showPage()
 
     c.save()

@@ -213,6 +213,13 @@
         <button
           v-if="canShowDeliveryDetailPDFButton"
           class="btn"
+          style="background: #2E86C1; color: #fff;"
+          @click="downloadHokushinDeliveryListNewPDF"
+          :disabled="processing || !selectedLine"
+        >新納入リスト</button>
+        <button
+          v-if="canShowDeliveryDetailPDFButton"
+          class="btn"
           style="background: #C07000; color: #fff;"
           @click="downloadHokushinDeliveryListLapPDF"
           :disabled="processing || !selectedLine"
@@ -3755,6 +3762,30 @@ const downloadHokushinDeliveryListPDF = async () => {
     window.open(url, '_blank')
   } catch (e) {
     console.error('北進納入リストPDF生成エラー', e)
+    alert('PDF生成に失敗しました: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
+const downloadHokushinDeliveryListNewPDF = async () => {
+  const sourceLineId = floorShippingPdfSourceLineId.value
+  if (!sourceLineId) {
+    alert('フロア配送ラインが見つかりません。')
+    return
+  }
+  try {
+    const res = await api.client.get('/hokushin-delivery-list-new-pdf/', {
+      params: {
+        line: sourceLineId,
+        start_date: startDate.value,
+        end_date: endDate.value,
+      },
+      responseType: 'blob',
+    })
+    const blob = new Blob([res.data], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank')
+  } catch (e) {
+    console.error('新北進納入リストPDF生成エラー', e)
     alert('PDF生成に失敗しました: ' + (e.response?.data?.detail || e.message))
   }
 }
