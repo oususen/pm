@@ -246,7 +246,7 @@
                   <span class="stat-label">計画数</span>
                   <span v-if="!editingPlanQty" class="stat-value plan clickable" @click="startEditPlanQty">{{ formatNumber(planStatus.planQty) }}</span>
                   <span v-else class="plan-qty-edit">
-                    <input v-model.number="editPlanQtyValue" type="number" min="0" class="plan-qty-input" @keyup.enter="savePlanQty" @keyup.escape="cancelEditPlanQty" />
+                    <input v-model.number="editPlanQtyValue" type="number" min="0" class="plan-qty-input" @keyup.escape="cancelEditPlanQty" />
                     <input v-if="!selectedPlanItem?.gantt_plan_id" v-model="editPlanStartTime" type="time" step="60" class="plan-time-input" />
                     <input v-if="!selectedPlanItem?.gantt_plan_id" v-model="editPlanEndTime" type="time" step="60" class="plan-time-input" />
                     <button class="plan-qty-btn save" @click="savePlanQty">保存</button>

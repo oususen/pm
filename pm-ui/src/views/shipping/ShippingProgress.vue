@@ -1384,7 +1384,7 @@ loadFavorites();
 }
 .label-col {
   position: sticky;
-  left: 0;
+  left: 240px;
   background: #f9fafb;
   z-index: 2;
   text-align: left !important;

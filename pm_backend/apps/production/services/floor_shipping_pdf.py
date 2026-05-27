@@ -18,6 +18,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 from masters.models import Calendar, CalendarDay, Line, Product
+from production.models import LineDemand
 from production.models_line_backlog import LineBacklog
 
 
@@ -116,6 +117,7 @@ COLOR_GRID = _cmyk('#808080')
 SECTION_TITLE_15 = '１５時着（午前便　AM１１：３０頃）'
 SECTION_TITLE_08 = '８時着（午後便　PM18：３０頃）'
 PAGE_DAYS = 14
+TATA_PRODUCT_CODE = 'YD40006696_TATA'
 
 
 def _register_fonts():
@@ -218,6 +220,53 @@ def _get_display_dates(start_date, end_date):
 def _chunk_dates(dates, size):
     for i in range(0, len(dates), size):
         yield dates[i:i + size]
+
+
+def _collect_tata_shipping_data(
+    line_id: int,
+    start_date: date,
+    end_date: date,
+) -> Tuple[Dict[date, int], str]:
+    """
+    TATA専用品の出荷日別数量を取得する。
+    日付はシフトせず、line_backlog.plan_date をそのまま使用する。
+    """
+    tata_by_date: Dict[date, int] = {}
+    product_name = ''
+
+    # LineDemandを使用（出荷日=plan_date基準）
+    demand_rows = list(
+        LineDemand.objects
+        .filter(
+            line_id=line_id,
+            plan_date__gte=start_date,
+            plan_date__lte=end_date,
+            product_code=TATA_PRODUCT_CODE,
+        )
+        .values_list('plan_date', 'firm_qty', 'forecast_qty')
+    )
+
+    # 同一ラインに需要が無い場合、全ラインのLineDemandから拾う
+    if not demand_rows:
+        demand_rows = list(
+            LineDemand.objects
+            .filter(
+                plan_date__gte=start_date,
+                plan_date__lte=end_date,
+                product_code=TATA_PRODUCT_CODE,
+            )
+            .values_list('plan_date', 'firm_qty', 'forecast_qty')
+        )
+    for plan_d, firm_qty, forecast_qty in demand_rows:
+        firm = Decimal(str(firm_qty or 0))
+        forecast = Decimal(str(forecast_qty or 0))
+        qty = (firm + forecast) if (firm > 0 and forecast > 0) else (firm if firm > 0 else forecast)
+        tata_by_date[plan_d] = tata_by_date.get(plan_d, 0) + int(qty or 0)
+
+    p = Product.objects.filter(product_code=TATA_PRODUCT_CODE).first()
+    if p:
+        product_name = p.product_name or ''
+    return tata_by_date, product_name
 
 
 def _collect_floor_shipping_data(line_id, start_date, end_date, calendar_id, cal_cache,
@@ -802,6 +851,7 @@ def generate_floor_shipping_new_pdf(line_id: int, start_date: date, end_date: da
     )
 
     render_order = _build_new_render_order(am_data, pm_data, display_dates)
+    tata_data, tata_name = _collect_tata_shipping_data(line_id, start_date, end_date)
 
     # --- PDF描画 ---
     buf = io.BytesIO()
@@ -991,6 +1041,28 @@ def generate_floor_shipping_new_pdf(line_id: int, start_date: date, end_date: da
         for d in page_dates:
             grand_totals[d] = am_totals.get(d, 0) + pm_totals.get(d, 0)
         y = draw_total_row(y, '出荷数合計', grand_totals, page_dates, date_col_w, bg_color=COLOR_GRAND_TOTAL_BG)
+
+        # TATA専用セクション（既存明細の下に別描画）
+        y -= 1.5 * mm
+        y = draw_section_header(y, 'TATA出荷（加工日　ＬＴ１）', colors.HexColor('#E6F4EA'), table_w)
+        tata_data_for_page = {}
+        for d in page_dates:
+            q = tata_data.get(d, 0)
+            if q > 0:
+                tata_data_for_page[d] = q
+        y = draw_product_row(
+            y,
+            TATA_PRODUCT_CODE,
+            '[TATA]',
+            tata_name,
+            tata_data_for_page,
+            page_dates,
+            date_col_w,
+            row_bg=COLOR_ROW_ODD_BG,
+            label_color=colors.black,
+        )
+        tata_totals = {d: tata_data.get(d, 0) for d in page_dates}
+        y = draw_total_row(y, '合計', tata_totals, page_dates, date_col_w, bg_color=COLOR_TOTAL_BG)
 
         c.showPage()
     c.save()
