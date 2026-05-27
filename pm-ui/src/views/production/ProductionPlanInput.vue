@@ -909,6 +909,30 @@
         </div>
         <div v-if="!prevDayShiftRules.length" class="settings-note">設定なし</div>
       </div>
+      <div class="settings-note" style="margin-top: 12px;">ガント開始時刻設定（ライン×工程）</div>
+      <div class="settings-rule-editor">
+        <select v-model="ganttStartTimeDraft.lineCode">
+          <option value="">ライン選択</option>
+          <option v-for="line in lines" :key="`gst-line-${line.id}`" :value="normalizeLineCode(line.line_code)">
+            {{ line.line_code }} - {{ line.line_name }}
+          </option>
+        </select>
+        <select v-model="ganttStartTimeDraft.processCode">
+          <option value="">工程選択</option>
+          <option v-for="proc in processOptions" :key="`gst-proc-${proc.id}`" :value="normalizeProcessCode(proc.process_code)">
+            {{ proc.process_code }} - {{ proc.process_name }}
+          </option>
+        </select>
+        <input v-model="ganttStartTimeDraft.startTime" type="time" step="60" />
+        <button class="btn" type="button" @click="addGanttStartTimeRule">追加</button>
+      </div>
+      <div class="settings-list settings-rules">
+        <div v-for="(rule, idx) in ganttStartTimeRules" :key="`gst-rule-${rule.lineCode}-${rule.processCode}`" class="settings-rule-row">
+          <span>{{ rule.lineCode }} / {{ rule.processCode }} / 開始 {{ rule.startTime }}</span>
+          <button class="btn" type="button" @click="removeGanttStartTimeRule(idx)">削除</button>
+        </div>
+        <div v-if="!ganttStartTimeRules.length" class="settings-note">設定なし</div>
+      </div>
       <div class="settings-actions">
         <button class="btn" type="button" @click="saveLineSettings">保存</button>
       </div>
@@ -1230,6 +1254,12 @@ const prevDayShiftDraft = ref({
   processCode: '',
   shiftQty: 2,
 })
+const ganttStartTimeRules = ref([])
+const ganttStartTimeDraft = ref({
+  lineCode: '',
+  processCode: '',
+  startTime: '08:00',
+})
 const processOptions = ref([])
 
 const lines = ref([])
@@ -1371,6 +1401,24 @@ const normalizePrevDayShiftRules = (rows) => {
   })
   return normalized
 }
+const normalizeGanttStartTimeRules = (rows) => {
+  const source = Array.isArray(rows) ? rows : []
+  const seen = new Set()
+  const normalized = []
+  source.forEach((row) => {
+    const lineCode = normalizeLineCode(row?.lineCode)
+    const processCode = normalizeProcessCode(row?.processCode)
+    const startTime = String(row?.startTime || '').trim()
+    if (!lineCode || !processCode || !/^\d{2}:\d{2}$/.test(startTime)) return
+    const [hh, mm] = startTime.split(':').map((v) => Number(v))
+    if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return
+    const key = `${lineCode}|${processCode}`
+    if (seen.has(key)) return
+    seen.add(key)
+    normalized.push({ lineCode, processCode, startTime: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}` })
+  })
+  return normalized
+}
 const userUnitLines = computed(() => {
   const unitLines = authState.user?.profile?.unit_lines
   return Array.isArray(unitLines) ? unitLines : []
@@ -1478,6 +1526,7 @@ const loadLineCodesByTab = async () => {
     })
     lineCodesByTab.value = merged
     prevDayShiftRules.value = normalizePrevDayShiftRules(dbSpecialRules?.prev_day_shift_rules)
+    ganttStartTimeRules.value = normalizeGanttStartTimeRules(dbSpecialRules?.gantt_start_time_rules)
     saveLineCodesByTab()
   } catch (e) {
     console.warn('ライン編集設定DB取得失敗', e)
@@ -1491,6 +1540,7 @@ const syncLineCodesByTabToServer = async () => {
     }, {}),
     special_rules: {
       prev_day_shift_rules: normalizePrevDayShiftRules(prevDayShiftRules.value),
+      gantt_start_time_rules: normalizeGanttStartTimeRules(ganttStartTimeRules.value),
     },
   }
   const res = await api.productionRecordSettings.saveSettings(payload)
@@ -1505,6 +1555,7 @@ const syncLineCodesByTabToServer = async () => {
   })
   lineCodesByTab.value = normalized
   prevDayShiftRules.value = normalizePrevDayShiftRules(dbSpecialRules?.prev_day_shift_rules)
+  ganttStartTimeRules.value = normalizeGanttStartTimeRules(dbSpecialRules?.gantt_start_time_rules)
   saveLineCodesByTab()
 }
 const addPrevDayShiftRule = async () => {
@@ -1545,6 +1596,44 @@ const removePrevDayShiftRule = async (index) => {
   lineSettingsMessage.value = dbSyncFailed
     ? '前日シフト台数設定を削除しました。（DB同期は失敗しました）'
     : '前日シフト台数設定を削除しました。'
+}
+const addGanttStartTimeRule = async () => {
+  const rule = {
+    lineCode: normalizeLineCode(ganttStartTimeDraft.value.lineCode),
+    processCode: normalizeProcessCode(ganttStartTimeDraft.value.processCode),
+    startTime: String(ganttStartTimeDraft.value.startTime || '').trim(),
+  }
+  const normalized = normalizeGanttStartTimeRules([rule])
+  if (!normalized.length) {
+    alert('ライン・工程・開始時刻を正しく入力してください。')
+    return
+  }
+  ganttStartTimeRules.value = normalizeGanttStartTimeRules([...ganttStartTimeRules.value, ...normalized])
+  lineSettingsMessage.value = ''
+  let dbSyncFailed = false
+  try {
+    await syncLineCodesByTabToServer()
+  } catch (e) {
+    dbSyncFailed = true
+    console.warn('ガント開始時刻設定DB保存失敗', e)
+  }
+  lineSettingsMessage.value = dbSyncFailed
+    ? 'ガント開始時刻設定を追加しました。（DB同期は失敗しました）'
+    : 'ガント開始時刻設定を追加しました。'
+}
+const removeGanttStartTimeRule = async (index) => {
+  ganttStartTimeRules.value = ganttStartTimeRules.value.filter((_, i) => i !== index)
+  lineSettingsMessage.value = ''
+  let dbSyncFailed = false
+  try {
+    await syncLineCodesByTabToServer()
+  } catch (e) {
+    dbSyncFailed = true
+    console.warn('ガント開始時刻設定DB保存失敗', e)
+  }
+  lineSettingsMessage.value = dbSyncFailed
+    ? 'ガント開始時刻設定を削除しました。（DB同期は失敗しました）'
+    : 'ガント開始時刻設定を削除しました。'
 }
 const isLineSelectedForTargetTab = (lineCode) => {
   const code = normalizeLineCode(lineCode)

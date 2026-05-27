@@ -6468,6 +6468,7 @@ class ProductionPlanLockSettingView(APIView):
 
 class ProductionRecordInquirySettingView(APIView):
     PROCESS_PREV_DAY_SHIFT_RULES_KEY = 'production.process_prev_day_shift_rules'
+    PROCESS_GANTT_START_TIME_RULES_KEY = 'production.process_gantt_start_time_rules'
     TAB_KEYS = ['tank', 'floor', FLOOR_SHIPPING_TAB_KEY, 'blade', 'laser', 'brake', 'spot']
     DEFAULT_TARGET_LINE_CODES_BY_TAB = {
         'tank': ['L2200', 'L2201'],
@@ -6551,6 +6552,32 @@ class ProductionRecordInquirySettingView(APIView):
             })
         return normalized
 
+    def _normalize_gantt_start_time_rules(self, rows):
+        source = rows if isinstance(rows, list) else []
+        normalized = []
+        seen = set()
+        for row in source:
+            line_code = self._normalize((row or {}).get('lineCode'))
+            process_code = self._normalize((row or {}).get('processCode'))
+            start_time = str((row or {}).get('startTime') or '').strip()
+            if not line_code or not process_code:
+                continue
+            try:
+                parsed = datetime.strptime(start_time, '%H:%M').time()
+                start_time = parsed.strftime('%H:%M')
+            except (TypeError, ValueError):
+                continue
+            key = f'{line_code}|{process_code}'
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append({
+                'lineCode': line_code,
+                'processCode': process_code,
+                'startTime': start_time,
+            })
+        return normalized
+
     def _build_response_payload(self):
         target_line_codes_by_tab = {
             key: list(self.DEFAULT_TARGET_LINE_CODES_BY_TAB.get(key, []))
@@ -6558,7 +6585,7 @@ class ProductionRecordInquirySettingView(APIView):
         }
         mappings_by_tab = {key: [] for key in self.TAB_KEYS}
 
-        special_rules = {'prev_day_shift_rules': []}
+        special_rules = {'prev_day_shift_rules': [], 'gantt_start_time_rules': []}
         rows = ProductionRecordInquirySetting.objects.filter(tab_key__in=self.TAB_KEYS)
         for row in rows:
             target_line_codes_by_tab[row.tab_key] = self._normalize_line_codes(row.target_line_codes)
@@ -6570,6 +6597,13 @@ class ProductionRecordInquirySettingView(APIView):
             except Exception:
                 parsed = []
             special_rules['prev_day_shift_rules'] = self._normalize_prev_day_shift_rules(parsed)
+        start_time_row = SystemSetting.objects.filter(key=self.PROCESS_GANTT_START_TIME_RULES_KEY).first()
+        if start_time_row:
+            try:
+                parsed = json.loads(start_time_row.value or '[]')
+            except Exception:
+                parsed = []
+            special_rules['gantt_start_time_rules'] = self._normalize_gantt_start_time_rules(parsed)
 
         return {
             'target_line_codes_by_tab': target_line_codes_by_tab,
@@ -6624,6 +6658,16 @@ class ProductionRecordInquirySettingView(APIView):
                 defaults={
                     'value': json.dumps(rules, ensure_ascii=False),
                     'description': 'ライン工程別の前日シフト台数設定',
+                    'updated_by': user,
+                },
+            )
+        if 'gantt_start_time_rules' in raw_special_rules:
+            rules = self._normalize_gantt_start_time_rules(raw_special_rules.get('gantt_start_time_rules'))
+            SystemSetting.objects.update_or_create(
+                key=self.PROCESS_GANTT_START_TIME_RULES_KEY,
+                defaults={
+                    'value': json.dumps(rules, ensure_ascii=False),
+                    'description': 'ライン工程別のガント開始時刻設定',
                     'updated_by': user,
                 },
             )
