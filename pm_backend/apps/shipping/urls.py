@@ -23,6 +23,8 @@ from shipping.views_fujishoji_document import (
     get_fujishoji_available_dates,
     get_fujishoji_document_data,
     generate_fujishoji_pdf_api,
+    get_fujishoji_document_config,
+    save_fujishoji_document_config,
 )
 from shipping.views_hirakata_pickup import (
     generate_hirakata_pickup_pdf,
@@ -54,6 +56,8 @@ urlpatterns = [
     path('shipping/generate-pdf/', generate_shipping_order_pdf_api, name='shipping-generate-pdf'),
     # 富士商事出荷指示書API
     path('shipping/fujishoji-document/available-dates/', get_fujishoji_available_dates, name='fujishoji-available-dates'),
+    path('shipping/fujishoji-document/config/', get_fujishoji_document_config, name='fujishoji-document-config'),
+    path('shipping/fujishoji-document/config/save/', save_fujishoji_document_config, name='fujishoji-document-config-save'),
     path('shipping/fujishoji-document/generate-pdf/', generate_fujishoji_pdf_api, name='fujishoji-document-pdf'),
     path('shipping/fujishoji-document/<str:target_date_str>/', get_fujishoji_document_data, name='fujishoji-document-data'),
     # Hirakata pickup APIs

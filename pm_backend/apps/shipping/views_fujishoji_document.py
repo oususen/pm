@@ -12,20 +12,21 @@ from django.http import JsonResponse, FileResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.db.models import Q, Sum
+from system_settings.models import SystemSetting
 
 # フロア製品の固定マッピング（製品コード → 番号・俗称・色）
 FLOOR_PRODUCT_MAPPING = [
-    {"product_code": "YD40006245", "number": "1", "label": "U-5 CAB",      "color": "#FFB6C1"},
-    {"product_code": "YD40006630", "number": "2", "label": "U-5 CANOPY",   "color": "#87CEEB"},
-    {"product_code": "YD40006237", "number": "3", "label": "55UR CAB",     "color": "#90EE90"},
-    {"product_code": "YD40006618", "number": "4", "label": "55UR CANOPY",  "color": "#FFD700"},
-    {"product_code": "YD40002946", "number": "5", "label": "30/40UR",      "color": "#FFA500"},
-    {"product_code": "YD40006842", "number": "A", "label": "5t-EN CAB",    "color": "#CD853F"},
-    {"product_code": "YD40007003", "number": "B", "label": "3t-EN CAB",    "color": "#D3D3D3"},
-    {"product_code": "YD40007243", "number": "C", "label": "U-5NA CAB",    "color": "#4682B4"},
-    {"product_code": "YD40007372", "number": "D", "label": "U-5NA CANOPY", "color": "#2F4F4F"},
-    {"product_code": "YD40007722", "number": "E", "label": "U-6EN 5tKTEG","color": "#FF6347"},
-    {"product_code": "YD40007688", "number": "F", "label": "55US-6 KTEG",  "color": "#9370DB"},
+    {"product_code": "YD40006245", "new_product_code": "YD40008720", "number": "1", "new_number": "1+", "label": "U-5 CAB",      "color": "#FFB6C1"},
+    {"product_code": "YD40006630", "new_product_code": "YD40008750", "number": "2", "new_number": "2+", "label": "U-5 CANOPY",   "color": "#87CEEB"},
+    {"product_code": "YD40006237", "new_product_code": "YD40008670", "number": "3", "new_number": "3+", "label": "55UR CAB",     "color": "#90EE90"},
+    {"product_code": "YD40006618", "new_product_code": "YD40008650", "number": "4", "new_number": "4+", "label": "55UR CANOPY",  "color": "#FFD700"},
+    {"product_code": "YD40002946", "new_product_code": "YD40002946", "number": "5", "new_number": "5",  "label": "30/40UR",      "color": "#FFA500"},
+    {"product_code": "YD40006842", "new_product_code": "YD40008730", "number": "A", "new_number": "A+", "label": "5t-EN CAB",    "color": "#CD853F"},
+    {"product_code": "YD40007003", "new_product_code": "YD40008760", "number": "B", "new_number": "B+", "label": "3t-EN CAB",    "color": "#D3D3D3"},
+    {"product_code": "YD40007243", "new_product_code": "YD40008780", "number": "C", "new_number": "C+", "label": "U-5NA CAB",    "color": "#4682B4"},
+    {"product_code": "YD40007372", "new_product_code": "YD40008790", "number": "D", "new_number": "D+", "label": "U-5NA CANOPY", "color": "#2F4F4F"},
+    {"product_code": "YD40007722", "new_product_code": "YD40008800", "number": "E", "new_number": "E+", "label": "U-6EN 5tKTEG","color": "#FF6347"},
+    {"product_code": "YD40007688", "new_product_code": "YD40008770", "number": "F", "new_number": "F+", "label": "55US-6 KTEG",  "color": "#9370DB"},
 ]
 
 # 新旧品番対応（新番号は旧番号へ正規化して同じ色・記号を使う）
@@ -41,6 +42,7 @@ FLOOR_PRODUCT_ALIAS_MAP = {
     "YD40008800": "YD40007722",
     "YD40008770": "YD40007688",
 }
+FUJISHOJI_CODE_SWITCH_DATE_KEY = "shipping.fujishoji_new_code_switch_date"
 
 FLOOR_PRODUCT_CODES = list({
     *[p["product_code"] for p in FLOOR_PRODUCT_MAPPING],
@@ -50,6 +52,37 @@ FLOOR_PRODUCT_CODES = list({
 # 台車・便の設定
 ITEMS_PER_CART = 2      # 台車1台に積める個数
 CARTS_PER_TRIP = 14     # 1便あたりの台車数
+
+
+def _get_switch_date():
+    row = SystemSetting.objects.filter(key=FUJISHOJI_CODE_SWITCH_DATE_KEY).first()
+    if not row or not row.value:
+        return None
+    try:
+        return datetime.strptime(str(row.value).strip(), "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def _use_new_product_codes(target_date):
+    switch_date = _get_switch_date()
+    if not switch_date:
+        return False
+    return target_date >= switch_date
+
+
+def _to_display_mapping(use_new_codes):
+    rows = []
+    for p in FLOOR_PRODUCT_MAPPING:
+        rows.append({
+            "product_code": p["new_product_code"] if use_new_codes else p["product_code"],
+            "number": p["new_number"] if use_new_codes else p["number"],
+            "label": p["label"],
+            "color": p["color"],
+            "old_product_code": p["product_code"],
+            "new_product_code": p["new_product_code"],
+        })
+    return rows
 
 
 def _resolve_creator_name(request) -> str:
@@ -134,6 +167,48 @@ def _build_cart_layout(products_with_qty):
 
 
 @require_http_methods(["GET"])
+def get_fujishoji_document_config(request):
+    """
+    富士商事出荷指示書設定（新品番切替日）を返す。
+    """
+    switch_date = _get_switch_date()
+    return JsonResponse({
+        "new_code_switch_date": switch_date.isoformat() if switch_date else ""
+    })
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def save_fujishoji_document_config(request):
+    """
+    富士商事出荷指示書設定（新品番切替日）を保存する。
+    Body: { "new_code_switch_date": "YYYY-MM-DD" | "" }
+    """
+    import json
+    try:
+        body = json.loads(request.body or "{}")
+    except Exception:
+        return JsonResponse({"error": "リクエスト形式が不正です"}, status=400)
+
+    raw_date = str(body.get("new_code_switch_date") or "").strip()
+    if raw_date:
+        try:
+            datetime.strptime(raw_date, "%Y-%m-%d")
+        except ValueError:
+            return JsonResponse({"error": "日付形式が不正です（YYYY-MM-DD）"}, status=400)
+
+    SystemSetting.objects.update_or_create(
+        key=FUJISHOJI_CODE_SWITCH_DATE_KEY,
+        defaults={
+            "value": raw_date,
+            "description": "富士商事出荷指示書の新品番切替日",
+            "updated_by": request.user if getattr(request, "user", None) and request.user.is_authenticated else None,
+        },
+    )
+    return JsonResponse({"new_code_switch_date": raw_date})
+
+
+@require_http_methods(["GET"])
 def get_fujishoji_available_dates(request):
     """
     富士商事出荷指示書の利用可能日付一覧（フロア製品の受注がある日）を返す。
@@ -204,12 +279,14 @@ def get_fujishoji_document_data(request, target_date_str):
 
         # 指定日のフロア製品受注明細を集計（OPEN + FIRM のみ）
         qty_map = _get_floor_qty_map(tiera, target_date)
+        use_new_codes = _use_new_product_codes(target_date)
+        display_mapping = _to_display_mapping(use_new_codes)
 
         # マッピング順に整形
         import math
         products = []
-        for p in FLOOR_PRODUCT_MAPPING:
-            qty = qty_map.get(p["product_code"], 0)
+        for p in display_mapping:
+            qty = qty_map.get(p["old_product_code"], 0)
             carts = math.ceil(qty / ITEMS_PER_CART) if qty > 0 else 0
             products.append({
                 "product_code": p["product_code"],
@@ -218,6 +295,8 @@ def get_fujishoji_document_data(request, target_date_str):
                 "color": p["color"],
                 "qty": qty,
                 "carts": carts,
+                "old_product_code": p["old_product_code"],
+                "new_product_code": p["new_product_code"],
             })
 
         # 台車レイアウト生成
@@ -230,6 +309,8 @@ def get_fujishoji_document_data(request, target_date_str):
             "trip2": trips[1],
             "carts_per_trip": CARTS_PER_TRIP,
             "items_per_cart": ITEMS_PER_CART,
+            "use_new_product_codes": use_new_codes,
+            "new_code_switch_date": _get_switch_date().isoformat() if _get_switch_date() else "",
         })
 
     except Exception as e:
@@ -267,10 +348,12 @@ def generate_fujishoji_pdf_api(request):
         tiera = Customer.objects.get(customer_code="000001")
         # 受注数集計（OPEN + FIRM のみ）
         qty_map = _get_floor_qty_map(tiera, target_date)
+        use_new_codes = _use_new_product_codes(target_date)
+        display_mapping = _to_display_mapping(use_new_codes)
 
         products = []
-        for p in FLOOR_PRODUCT_MAPPING:
-            qty = qty_map.get(p["product_code"], 0)
+        for p in display_mapping:
+            qty = qty_map.get(p["old_product_code"], 0)
             carts = math.ceil(qty / ITEMS_PER_CART) if qty > 0 else 0
             products.append({**p, "qty": qty, "carts": carts})
 
@@ -283,6 +366,8 @@ def generate_fujishoji_pdf_api(request):
             "carts_per_trip": CARTS_PER_TRIP,
             "items_per_cart": ITEMS_PER_CART,
             "creator_name": creator_name,
+            "use_new_product_codes": use_new_codes,
+            "new_code_switch_date": _get_switch_date().isoformat() if _get_switch_date() else "",
         }
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:

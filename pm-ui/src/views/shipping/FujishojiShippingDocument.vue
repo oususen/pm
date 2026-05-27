@@ -24,6 +24,24 @@
           </div>
         </div>
 
+        <div class="form-group">
+          <label for="switch-date">新品番切替日</label>
+          <div class="date-selector">
+            <input
+              id="switch-date"
+              v-model="newCodeSwitchDate"
+              type="date"
+              class="form-control"
+            />
+            <button @click="saveSwitchDate" class="btn btn-secondary" :disabled="loading">
+              保存
+            </button>
+          </div>
+          <small class="help-text">
+            指定日以降の出荷指示書で新品番を表示します（未設定時は旧品番表示）。
+          </small>
+        </div>
+
         <!-- 利用可能な日付チップ -->
         <div v-if="availableDates.length > 0" class="available-dates">
           <h4>利用可能な日付（フロア製品受注あり）</h4>
@@ -195,7 +213,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
 
 const targetDate     = ref('')
@@ -206,25 +224,20 @@ const successMessage = ref('')
 const availableDates = ref([])
 const docData        = ref(null)
 const showPreview    = ref(false)
+const newCodeSwitchDate = ref('')
 
 const CARTS_PER_TRIP = 14
 
-// 凡例グループ（固定）
-const legendLeft  = [
-  { product_code: "YD40006245", number: "1", label: "U-5 CAB",       color: "#FFB6C1" },
-  { product_code: "YD40006630", number: "2", label: "U-5 CANOPY",    color: "#87CEEB" },
-  { product_code: "YD40006237", number: "3", label: "55UR CAB",      color: "#90EE90" },
-  { product_code: "YD40006618", number: "4", label: "55UR CANOPY",   color: "#FFD700" },
-  { product_code: "YD40002946", number: "5", label: "30/40UR",       color: "#FFA500" },
-]
-const legendRight = [
-  { product_code: "YD40006842", number: "A", label: "5t-EN CAB",     color: "#CD853F" },
-  { product_code: "YD40007003", number: "B", label: "3t-EN CAB",     color: "#D3D3D3" },
-  { product_code: "YD40007243", number: "C", label: "U-5NA CAB",     color: "#4682B4" },
-  { product_code: "YD40007372", number: "D", label: "U-5NA CANOPY",  color: "#2F4F4F" },
-  { product_code: "YD40007722", number: "E", label: "U-6EN 5tKTEG", color: "#FF6347" },
-  { product_code: "YD40007688", number: "F", label: "55US-6 KTEG",   color: "#9370DB" },
-]
+const legendLeft = computed(() => {
+  const products = docData.value?.products || []
+  const leftNums = new Set(['1', '2', '3', '4', '5'])
+  return products.filter((p) => leftNums.has(String(p.number || '').replace('+', '')))
+})
+const legendRight = computed(() => {
+  const products = docData.value?.products || []
+  const rightNums = new Set(['A', 'B', 'C', 'D', 'E', 'F'])
+  return products.filter((p) => rightNums.has(String(p.number || '').replace('+', '')))
+})
 
 const overCount = computed(() => {
   if (!docData.value) return 0
@@ -304,6 +317,32 @@ const loadAvailableDates = async () => {
   } finally { loading.value = false }
 }
 
+const loadConfig = async () => {
+  try {
+    const res = await api.fujishojiDocument.getConfig()
+    newCodeSwitchDate.value = res.data?.new_code_switch_date || ''
+  } catch (_e) {
+    // 設定取得失敗時は画面操作を止めない
+  }
+}
+
+const saveSwitchDate = async () => {
+  loading.value = true
+  errorMessage.value = ''
+  successMessage.value = ''
+  try {
+    const res = await api.fujishojiDocument.saveConfig({
+      new_code_switch_date: newCodeSwitchDate.value || '',
+    })
+    newCodeSwitchDate.value = res.data?.new_code_switch_date || ''
+    successMessage.value = '新品番切替日を保存しました'
+  } catch (e) {
+    errorMessage.value = '切替日保存に失敗しました: ' + (e.response?.data?.error || e.message)
+  } finally {
+    loading.value = false
+  }
+}
+
 const selectDate = (date) => {
   targetDate.value = date
   errorMessage.value = ''
@@ -347,6 +386,10 @@ const downloadPdf = async () => {
     errorMessage.value = 'PDF生成に失敗しました: ' + (e.response?.data?.error || e.message)
   } finally { pdfLoading.value = false }
 }
+
+onMounted(() => {
+  loadConfig()
+})
 </script>
 
 <style scoped>
@@ -361,6 +404,7 @@ const downloadPdf = async () => {
 
 .form-group { margin-bottom: 20px; }
 .form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: #555; }
+.help-text { display: block; margin-top: 6px; color: #666; font-size: 12px; }
 .form-control { padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
 .date-selector { display: flex; gap: 10px; align-items: center; }
 .date-selector input { max-width: 200px; }

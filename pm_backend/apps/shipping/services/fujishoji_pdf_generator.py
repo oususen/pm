@@ -261,6 +261,9 @@ def generate_fujishoji_pdf(
     # ── データ準備 ──
     trip1           = doc_data.get("trip1", [])
     trip2           = doc_data.get("trip2", [])
+    legend_products = doc_data.get("products", []) or FLOOR_PRODUCT_MAPPING
+    legend_left = [p for p in legend_products if str(p.get("number", "")).replace("+", "") in ("1", "2", "3", "4", "5")]
+    legend_right = [p for p in legend_products if str(p.get("number", "")).replace("+", "") in ("A", "B", "C", "D", "E", "F")]
     target_date_str = doc_data.get("date")
     try:
         target_date = datetime.strptime(target_date_str, "%Y-%m-%d").date() if target_date_str else None
@@ -336,17 +339,17 @@ def generate_fujishoji_pdf(
         return f"[{p['number']}]{p['product_code']}  ({p['label']})"
 
     left_w = min(
-        max(c.stringWidth(_legend_text(p), legend_font_name, legend_font_size) for p in LEGEND_LEFT) + 3 * mm,
+        max(c.stringWidth(_legend_text(p), legend_font_name, legend_font_size) for p in legend_left) + 3 * mm,
         leg_col_max_w,
     )
     right_w = min(
-        max(c.stringWidth(_legend_text(p), legend_font_name, legend_font_size) for p in LEGEND_RIGHT) + 3 * mm,
+        max(c.stringWidth(_legend_text(p), legend_font_name, legend_font_size) for p in legend_right) + 3 * mm,
         leg_col_max_w,
     )
 
     for grp, lx, band_w in [
-        (LEGEND_LEFT, float(MG), left_w),
-        (LEGEND_RIGHT, leg_x_r, right_w),
+        (legend_left, float(MG), left_w),
+        (legend_right, leg_x_r, right_w),
     ]:
         cy = y
         for p in grp:
@@ -363,7 +366,7 @@ def generate_fujishoji_pdf(
                          _legend_text(p))
             cy -= legend_rh
 
-    y -= max(len(LEGEND_LEFT), len(LEGEND_RIGHT)) * legend_rh + 4 * mm
+    y -= max(len(legend_left), len(legend_right)) * legend_rh + 4 * mm
 
     # ════════════════════════════════════════
     # 4. ①8:00便
