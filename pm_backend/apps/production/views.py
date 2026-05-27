@@ -6469,6 +6469,7 @@ class ProductionPlanLockSettingView(APIView):
 class ProductionRecordInquirySettingView(APIView):
     PROCESS_PREV_DAY_SHIFT_RULES_KEY = 'production.process_prev_day_shift_rules'
     PROCESS_GANTT_START_TIME_RULES_KEY = 'production.process_gantt_start_time_rules'
+    PLANNED_STOCK_RULES_KEY = 'production.planned_stock_calc_rules'
     TAB_KEYS = ['tank', 'floor', FLOOR_SHIPPING_TAB_KEY, 'blade', 'laser', 'brake', 'spot']
     DEFAULT_TARGET_LINE_CODES_BY_TAB = {
         'tank': ['L2200', 'L2201'],
@@ -6578,6 +6579,42 @@ class ProductionRecordInquirySettingView(APIView):
             })
         return normalized
 
+    def _normalize_planned_stock_calc_rules(self, rows):
+        source = rows if isinstance(rows, list) else []
+        normalized = []
+        seen = set()
+        allowed_targets = {'STOCK', 'PLANNED_STOCK', 'DEMAND'}
+        allowed_settings = {'PARENT_PLAN', 'ACTUAL_OR_PLAN'}
+        for row in source:
+            line_code = self._normalize((row or {}).get('lineCode'))
+            process_code = self._normalize((row or {}).get('processCode'))
+            # 旧形式(item/mode)と新形式(calcTarget/setting)の両方を受ける
+            calc_target = self._normalize((row or {}).get('calcTarget') or 'PLANNED_STOCK')
+            setting = self._normalize((row or {}).get('setting'))
+            old_item = self._normalize((row or {}).get('item'))
+            old_mode = self._normalize((row or {}).get('mode'))
+            if old_item == 'PARENT_SHIPMENT_SOURCE' and old_mode == 'PLAN':
+                setting = 'PARENT_PLAN'
+            if old_item == 'PARENT_SHIPMENT_SOURCE' and calc_target not in allowed_targets:
+                calc_target = 'PLANNED_STOCK'
+            if not line_code or not process_code:
+                continue
+            if calc_target not in allowed_targets:
+                continue
+            if setting not in allowed_settings:
+                continue
+            key = f'{line_code}|{process_code}|{calc_target}'
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append({
+                'lineCode': line_code,
+                'processCode': process_code,
+                'calcTarget': calc_target,
+                'setting': setting,
+            })
+        return normalized
+
     def _build_response_payload(self):
         target_line_codes_by_tab = {
             key: list(self.DEFAULT_TARGET_LINE_CODES_BY_TAB.get(key, []))
@@ -6585,7 +6622,7 @@ class ProductionRecordInquirySettingView(APIView):
         }
         mappings_by_tab = {key: [] for key in self.TAB_KEYS}
 
-        special_rules = {'prev_day_shift_rules': [], 'gantt_start_time_rules': []}
+        special_rules = {'prev_day_shift_rules': [], 'gantt_start_time_rules': [], 'planned_stock_calc_rules': []}
         rows = ProductionRecordInquirySetting.objects.filter(tab_key__in=self.TAB_KEYS)
         for row in rows:
             target_line_codes_by_tab[row.tab_key] = self._normalize_line_codes(row.target_line_codes)
@@ -6604,6 +6641,13 @@ class ProductionRecordInquirySettingView(APIView):
             except Exception:
                 parsed = []
             special_rules['gantt_start_time_rules'] = self._normalize_gantt_start_time_rules(parsed)
+        planned_stock_row = SystemSetting.objects.filter(key=self.PLANNED_STOCK_RULES_KEY).first()
+        if planned_stock_row:
+            try:
+                parsed = json.loads(planned_stock_row.value or '[]')
+            except Exception:
+                parsed = []
+            special_rules['planned_stock_calc_rules'] = self._normalize_planned_stock_calc_rules(parsed)
 
         return {
             'target_line_codes_by_tab': target_line_codes_by_tab,
@@ -6668,6 +6712,16 @@ class ProductionRecordInquirySettingView(APIView):
                 defaults={
                     'value': json.dumps(rules, ensure_ascii=False),
                     'description': 'ライン工程別のガント開始時刻設定',
+                    'updated_by': user,
+                },
+            )
+        if 'planned_stock_calc_rules' in raw_special_rules:
+            rules = self._normalize_planned_stock_calc_rules(raw_special_rules.get('planned_stock_calc_rules'))
+            SystemSetting.objects.update_or_create(
+                key=self.PLANNED_STOCK_RULES_KEY,
+                defaults={
+                    'value': json.dumps(rules, ensure_ascii=False),
+                    'description': 'ライン工程別の計画在庫計算特例設定',
                     'updated_by': user,
                 },
             )

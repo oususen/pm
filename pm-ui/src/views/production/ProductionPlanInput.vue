@@ -947,6 +947,37 @@
         </div>
         <div v-if="!ganttStartTimeRules.length" class="settings-note">設定なし</div>
       </div>
+      <div class="settings-note" style="margin-top: 12px;">計算特例（ライン×工程×計算対象×設定）</div>
+      <div class="settings-rule-editor">
+        <select v-model="plannedStockCalcDraft.lineCode">
+          <option value="">ライン選択</option>
+          <option v-for="line in lines" :key="`psc-line-${line.id}`" :value="normalizeLineCode(line.line_code)">
+            {{ line.line_code }} - {{ line.line_name }}
+          </option>
+        </select>
+        <select v-model="plannedStockCalcDraft.processCode">
+          <option value="">工程選択</option>
+          <option v-for="proc in processOptions" :key="`psc-proc-${proc.id}`" :value="normalizeProcessCode(proc.process_code)">
+            {{ proc.process_code }} - {{ proc.process_name }}
+          </option>
+        </select>
+        <select v-model="plannedStockCalcDraft.calcTarget">
+          <option value="PLANNED_STOCK">計画在庫</option>
+          <option value="STOCK">在庫</option>
+          <option value="DEMAND">需要</option>
+        </select>
+        <select v-model="plannedStockCalcDraft.setting">
+          <option value="PARENT_PLAN">後工程計画使用</option>
+        </select>
+        <button class="btn" type="button" @click="addPlannedStockCalcRule">追加</button>
+      </div>
+      <div class="settings-list settings-rules">
+        <div v-for="(rule, idx) in plannedStockCalcRules" :key="`psc-rule-${rule.lineCode}-${rule.processCode}-${rule.calcTarget}`" class="settings-rule-row">
+          <span>{{ rule.lineCode }} / {{ rule.processCode }} / {{ rule.calcTargetLabel || rule.calcTarget }} / {{ rule.settingLabel || rule.setting }}</span>
+          <button class="btn" type="button" @click="removePlannedStockCalcRule(idx)">削除</button>
+        </div>
+        <div v-if="!plannedStockCalcRules.length" class="settings-note">設定なし</div>
+      </div>
       <div class="settings-actions">
         <button class="btn" type="button" @click="saveLineSettings">保存</button>
       </div>
@@ -1274,6 +1305,13 @@ const ganttStartTimeDraft = ref({
   processCode: '',
   startTime: '08:00',
 })
+const plannedStockCalcRules = ref([])
+const plannedStockCalcDraft = ref({
+  lineCode: '',
+  processCode: '',
+  calcTarget: 'PLANNED_STOCK',
+  setting: 'PARENT_PLAN',
+})
 const processOptions = ref([])
 
 const lines = ref([])
@@ -1433,6 +1471,37 @@ const normalizeGanttStartTimeRules = (rows) => {
   })
   return normalized
 }
+const normalizePlannedStockCalcRules = (rows) => {
+  const source = Array.isArray(rows) ? rows : []
+  const seen = new Set()
+  const normalized = []
+  source.forEach((row) => {
+    const lineCode = normalizeLineCode(row?.lineCode)
+    const processCode = normalizeProcessCode(row?.processCode)
+    // 旧形式(item/mode)との互換
+    let calcTarget = String(row?.calcTarget || '').trim().toUpperCase()
+    let setting = String(row?.setting || '').trim().toUpperCase()
+    const oldItem = String(row?.item || '').trim().toUpperCase()
+    const oldMode = String(row?.mode || '').trim().toUpperCase()
+    if (!calcTarget && oldItem === 'PARENT_SHIPMENT_SOURCE') calcTarget = 'PLANNED_STOCK'
+    if (!setting && oldMode === 'PLAN') setting = 'PARENT_PLAN'
+    if (!lineCode || !processCode) return
+    if (calcTarget !== 'PLANNED_STOCK' && calcTarget !== 'STOCK' && calcTarget !== 'DEMAND') return
+    if (setting !== 'PARENT_PLAN' && setting !== 'ACTUAL_OR_PLAN') return
+    const key = `${lineCode}|${processCode}|${calcTarget}`
+    if (seen.has(key)) return
+    seen.add(key)
+    normalized.push({
+      lineCode,
+      processCode,
+      calcTarget,
+      setting,
+      calcTargetLabel: calcTarget === 'STOCK' ? '在庫' : (calcTarget === 'DEMAND' ? '需要' : '計画在庫'),
+      settingLabel: setting === 'PARENT_PLAN' ? '後工程計画使用' : '標準（実績優先）',
+    })
+  })
+  return normalized
+}
 const userUnitLines = computed(() => {
   const unitLines = authState.user?.profile?.unit_lines
   return Array.isArray(unitLines) ? unitLines : []
@@ -1541,6 +1610,7 @@ const loadLineCodesByTab = async () => {
     lineCodesByTab.value = merged
     prevDayShiftRules.value = normalizePrevDayShiftRules(dbSpecialRules?.prev_day_shift_rules)
     ganttStartTimeRules.value = normalizeGanttStartTimeRules(dbSpecialRules?.gantt_start_time_rules)
+    plannedStockCalcRules.value = normalizePlannedStockCalcRules(dbSpecialRules?.planned_stock_calc_rules)
     saveLineCodesByTab()
   } catch (e) {
     console.warn('ライン編集設定DB取得失敗', e)
@@ -1555,6 +1625,7 @@ const syncLineCodesByTabToServer = async () => {
     special_rules: {
       prev_day_shift_rules: normalizePrevDayShiftRules(prevDayShiftRules.value),
       gantt_start_time_rules: normalizeGanttStartTimeRules(ganttStartTimeRules.value),
+      planned_stock_calc_rules: normalizePlannedStockCalcRules(plannedStockCalcRules.value),
     },
   }
   const res = await api.productionRecordSettings.saveSettings(payload)
@@ -1570,6 +1641,7 @@ const syncLineCodesByTabToServer = async () => {
   lineCodesByTab.value = normalized
   prevDayShiftRules.value = normalizePrevDayShiftRules(dbSpecialRules?.prev_day_shift_rules)
   ganttStartTimeRules.value = normalizeGanttStartTimeRules(dbSpecialRules?.gantt_start_time_rules)
+  plannedStockCalcRules.value = normalizePlannedStockCalcRules(dbSpecialRules?.planned_stock_calc_rules)
   saveLineCodesByTab()
 }
 const addPrevDayShiftRule = async () => {
@@ -1648,6 +1720,45 @@ const removeGanttStartTimeRule = async (index) => {
   lineSettingsMessage.value = dbSyncFailed
     ? 'ガント開始時刻設定を削除しました。（DB同期は失敗しました）'
     : 'ガント開始時刻設定を削除しました。'
+}
+const addPlannedStockCalcRule = async () => {
+  const rule = {
+    lineCode: normalizeLineCode(plannedStockCalcDraft.value.lineCode),
+    processCode: normalizeProcessCode(plannedStockCalcDraft.value.processCode),
+    calcTarget: String(plannedStockCalcDraft.value.calcTarget || '').trim().toUpperCase(),
+    setting: String(plannedStockCalcDraft.value.setting || '').trim().toUpperCase(),
+  }
+  const normalized = normalizePlannedStockCalcRules([rule])
+  if (!normalized.length) {
+    alert('ライン・工程・項目を正しく入力してください。')
+    return
+  }
+  plannedStockCalcRules.value = normalizePlannedStockCalcRules([...plannedStockCalcRules.value, ...normalized])
+  lineSettingsMessage.value = ''
+  let dbSyncFailed = false
+  try {
+    await syncLineCodesByTabToServer()
+  } catch (e) {
+    dbSyncFailed = true
+    console.warn('計算特例設定DB保存失敗', e)
+  }
+  lineSettingsMessage.value = dbSyncFailed
+    ? '計算特例設定を追加しました。（DB同期は失敗しました）'
+    : '計算特例設定を追加しました。'
+}
+const removePlannedStockCalcRule = async (index) => {
+  plannedStockCalcRules.value = plannedStockCalcRules.value.filter((_, i) => i !== index)
+  lineSettingsMessage.value = ''
+  let dbSyncFailed = false
+  try {
+    await syncLineCodesByTabToServer()
+  } catch (e) {
+    dbSyncFailed = true
+    console.warn('計算特例設定DB保存失敗', e)
+  }
+  lineSettingsMessage.value = dbSyncFailed
+    ? '計算特例設定を削除しました。（DB同期は失敗しました）'
+    : '計算特例設定を削除しました。'
 }
 const isLineSelectedForTargetTab = (lineCode) => {
   const code = normalizeLineCode(lineCode)
@@ -4254,6 +4365,14 @@ const fetchAndApplyData = async () => {
   currentLineRoutingFilterMode.value = lineRoutingFilter?.mode || 'fallback'
   const backlogData = backlogRes.data?.results || backlogRes.data || []
   const planData = planRes.data?.results || planRes.data || []
+    const selectedLineCode = normalizeLineCode(lines.value.find((line) => String(line.id) === String(selectedLine.value))?.line_code)
+    const processCodeById = new Map((processOptions.value || []).map((proc) => [String(proc.id), normalizeProcessCode(proc.process_code)]))
+    const plannedStockRuleMap = new Map(
+      (plannedStockCalcRules.value || []).map((rule) => [
+        `${normalizeLineCode(rule.lineCode)}|${normalizeProcessCode(rule.processCode)}|${String(rule.calcTarget || '').trim().toUpperCase()}`,
+        String(rule.setting || '').trim().toUpperCase(),
+      ]),
+    )
     const filterRowsByCurrentLineRouting = (items) => {
       const list = Array.isArray(items) ? items : []
       if (lineRoutingFilter?.mode === 'fallback') {
@@ -4349,7 +4468,10 @@ const fetchAndApplyData = async () => {
       const planIdVal = d.plan_id || ''
       const isDemandRow = seqNo === 0 && planQtyVal <= 0 && planIdVal === ''
       if (isDemandRow) {
-        const current = Number(d.order_qty || 0)
+        const processCode = processCodeById.get(String(d.process)) || normalizeProcessCode(d.process_code)
+        const demandRuleKey = `${selectedLineCode}|${processCode}|DEMAND`
+        const useParentPlanDemand = plannedStockRuleMap.get(demandRuleKey) === 'PARENT_PLAN'
+        const current = Number(useParentPlanDemand ? (d.demand_qty_plan || 0) : (d.order_qty || 0))
         const prev = demandMap.get(dateKey)
         demandMap.set(dateKey, prev == null ? current : Math.max(prev, current))
       }

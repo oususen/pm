@@ -4,6 +4,7 @@ LineBacklogの在庫・計画在庫を再計算するためのユーティリテ
 """
 from datetime import datetime, timedelta
 from decimal import Decimal
+import json
 from django.db.models import F
 from orders.models import OrderLine
 from orders.utils.calendar_utils import get_business_today
@@ -13,6 +14,43 @@ from ..models_line_backlog_adjustment import LineBacklogAdjustment
 from ..serializers_process_realtime import _resolve_product_process_line
 from .lead_time_utils import resolve_lead_days_for_step
 from quality.models_scrap import ScrapRecord, ScrapRecordDetail
+
+PLANNED_STOCK_CALC_RULES_KEY = 'production.planned_stock_calc_rules'
+
+
+def _load_planned_stock_calc_rule_map():
+    """
+    計算特例設定を読み込み、(line_code, process_code, calc_target) -> setting の辞書で返す。
+    """
+    row = SystemSetting.objects.filter(key=PLANNED_STOCK_CALC_RULES_KEY).first()
+    if not row or not row.value:
+        return {}
+    try:
+        raw = json.loads(row.value)
+    except Exception:
+        return {}
+    if not isinstance(raw, list):
+        return {}
+    result = {}
+    for item in raw:
+        line_code = str((item or {}).get('lineCode') or '').strip().upper()
+        process_code = str((item or {}).get('processCode') or '').strip().upper()
+        calc_target = str((item or {}).get('calcTarget') or '').strip().upper()
+        setting = str((item or {}).get('setting') or '').strip().upper()
+        # 旧形式互換
+        old_item = str((item or {}).get('item') or '').strip().upper()
+        old_mode = str((item or {}).get('mode') or '').strip().upper()
+        if old_item == 'PARENT_SHIPMENT_SOURCE' and old_mode == 'PLAN':
+            calc_target = calc_target or 'PLANNED_STOCK'
+            setting = 'PARENT_PLAN'
+        if not line_code or not process_code:
+            continue
+        if calc_target not in {'STOCK', 'PLANNED_STOCK'}:
+            continue
+        if setting not in {'PARENT_PLAN', 'ACTUAL_OR_PLAN'}:
+            continue
+        result[(line_code, process_code, calc_target)] = setting
+    return result
 
 
 def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None, product_ids=None):
@@ -1099,6 +1137,33 @@ def recalculate_stock_qty(
     inventory_lock_date = SystemSetting.get_lock_date('inventory')
     stock_by_date = {}
     firm_map = firm_map or {}
+    calc_rule_map = _load_planned_stock_calc_rule_map()
+    line_code_cache = {}
+    process_code_cache = {}
+
+    def _resolve_line_code(line_id_value):
+        lid = int(line_id_value or 0)
+        if lid <= 0:
+            return ''
+        if lid in line_code_cache:
+            return line_code_cache[lid]
+        from masters.models import Line
+        line = Line.objects.filter(id=lid).only('line_code').first()
+        code = str(getattr(line, 'line_code', '') or '').strip().upper()
+        line_code_cache[lid] = code
+        return code
+
+    def _resolve_process_code(process_id_value):
+        pid = int(process_id_value or 0)
+        if pid <= 0:
+            return ''
+        if pid in process_code_cache:
+            return process_code_cache[pid]
+        from masters.models import Process
+        proc = Process.objects.filter(id=pid).only('process_code').first()
+        code = str(getattr(proc, 'process_code', '') or '').strip().upper()
+        process_code_cache[pid] = code
+        return code
 
     # 計画在庫は calc_start_date の stock_qty を初期値として参照するため、
     # 在庫の再計算範囲を calc_start_date まで広げて stock_qty を常に最新に保つ。
@@ -1180,8 +1245,15 @@ def recalculate_stock_qty(
             if is_final:
                 actual_shipment = firm_map.get((sample.product_id, plan_date), Decimal('0'))
             else:
-                # 親の actual_qty + scrap_qty を出庫として計算
-                actual_shipment = _calculate_parent_actual_shipment(sample)
+                line_code = _resolve_line_code(getattr(sample, 'line_id', None))
+                process_code = _resolve_process_code(getattr(sample, 'process_id', None))
+                setting = calc_rule_map.get((line_code, process_code, 'STOCK'), '')
+                if setting == 'PARENT_PLAN':
+                    # 特例: 在庫計算でも後工程計画値を出庫として使用
+                    actual_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days, {})
+                else:
+                    # 標準: 親の actual_qty + scrap_qty を出庫として計算
+                    actual_shipment = _calculate_parent_actual_shipment(sample)
         else:
             actual_shipment = Decimal('0')
         actual_shipment = int(actual_shipment or 0)
@@ -1335,6 +1407,33 @@ def recalculate_planned_stock_qty(
     planned_by_date = {}
     firm_map = firm_map or {}
     floor_shipping_cache = {}
+    calc_rule_map = _load_planned_stock_calc_rule_map()
+    line_code_cache = {}
+    process_code_cache = {}
+
+    def _resolve_line_code(line_id_value):
+        lid = int(line_id_value or 0)
+        if lid <= 0:
+            return ''
+        if lid in line_code_cache:
+            return line_code_cache[lid]
+        from masters.models import Line
+        line = Line.objects.filter(id=lid).only('line_code').first()
+        code = str(getattr(line, 'line_code', '') or '').strip().upper()
+        line_code_cache[lid] = code
+        return code
+
+    def _resolve_process_code(process_id_value):
+        pid = int(process_id_value or 0)
+        if pid <= 0:
+            return ''
+        if pid in process_code_cache:
+            return process_code_cache[pid]
+        from masters.models import Process
+        proc = Process.objects.filter(id=pid).only('process_code').first()
+        code = str(getattr(proc, 'process_code', '') or '').strip().upper()
+        process_code_cache[pid] = code
+        return code
 
     # 計算開始日以前の実在庫を初期値として取得
     # 最終品: calc_start_date 当日（__lte）の在庫を使う
@@ -1432,6 +1531,12 @@ def recalculate_planned_stock_qty(
 
         is_final = bool(getattr(sample.product, 'is_final_product', False))
         is_line_final = bool(getattr(sample.product, 'is_line_final_product', False))
+        line_code = _resolve_line_code(getattr(sample, 'line_id', None))
+        process_code = _resolve_process_code(getattr(sample, 'process_id', None))
+        forced_parent_shipment_mode = calc_rule_map.get(
+            (line_code, process_code, 'PLANNED_STOCK'),
+            ''
+        )
         if is_final:
             firm_qty = firm_map.get((sample.product_id, plan_date), Decimal('0'))
             # 完成品の過去/未来判定は business_today に統一する。
@@ -1447,7 +1552,9 @@ def recalculate_planned_stock_qty(
             else:
                 planned_shipment = firm_qty if firm_qty > 0 else Decimal(str(order_total))
         elif is_line_final:
-            if plan_date < business_today:
+            if forced_parent_shipment_mode == 'PARENT_PLAN':
+                planned_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days, floor_shipping_cache)
+            elif plan_date < business_today:
                 # ライン最終品でも過去日は実績優先で整合を取る。
                 # 親参照がない（BOM未設定）場合のみ需要(order_qty)にフォールバック。
                 planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days, floor_shipping_cache)
@@ -1456,7 +1563,9 @@ def recalculate_planned_stock_qty(
             else:
                 planned_shipment = Decimal(str(order_total))
         else:
-            if plan_date < business_today:
+            if forced_parent_shipment_mode == 'PARENT_PLAN':
+                planned_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days, floor_shipping_cache)
+            elif plan_date < business_today:
                 planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days, floor_shipping_cache)
             else:
                 planned_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days, floor_shipping_cache)
