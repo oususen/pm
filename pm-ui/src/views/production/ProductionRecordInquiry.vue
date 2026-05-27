@@ -110,6 +110,14 @@
           <option value="true">除く</option>
         </select>
       </div>
+      <div class="filter-row">
+        <label>連産表示</label>
+        <select v-model="coproductMode">
+          <option value="child_only">子のみ</option>
+          <option value="parent_only">親のみ</option>
+          <option value="both">両方</option>
+        </select>
+      </div>
       <div class="actions">
         <button class="btn" :disabled="loading || !needsSearch" @click="loadSessions">検索</button>
         <button class="btn btn-secondary" :disabled="loading" @click="resetFilters">リセット</button>
@@ -453,6 +461,7 @@ const status = ref('')
 const hasIssue = ref('')
 const unclosed = ref('')
 const excludeZeroProduction = ref('')
+const coproductMode = ref('child_only')
 const favorites = ref([])
 const selectedFavoriteId = ref('')
 const favoriteName = ref('')
@@ -834,6 +843,7 @@ const loadSessions = async () => {
         if (productCode.value.trim()) pwsParams.product_code = productCode.value.trim()
         if (status.value) pwsParams.status = status.value
         if (unclosed.value) pwsParams.unclosed = unclosed.value
+        pwsParams.coproduct_mode = coproductMode.value
         const pwsRes = await api.processRealtime.getSessions(pwsParams)
         const pwsAll = normalizeList(pwsRes.data)
         const allowedProcessIds = tankProcessIdSet.value
@@ -927,6 +937,7 @@ const loadSessions = async () => {
     if (status.value) params.status = status.value
     if (hasIssue.value) params.has_issue = hasIssue.value
     if (unclosed.value) params.unclosed = unclosed.value
+    params.coproduct_mode = coproductMode.value
 
     const res = await api.processRealtime.getSessions(params)
     const items = res.data || []
@@ -937,7 +948,6 @@ const loadSessions = async () => {
     const filteredByProduction = excludeZeroProduction.value === 'true'
       ? filteredByTab.filter((row) => Number(row?.production_qty || 0) !== 0)
       : filteredByTab
-
     if (wantsCancelOnly) {
       rawSessions.value = filteredByProduction.filter((row) => isCanceledSession(row))
     } else if (sessionType.value === 'PAUSE') {
@@ -968,6 +978,7 @@ const resetFilters = async () => {
   hasIssue.value = ''
   unclosed.value = ''
   excludeZeroProduction.value = ''
+  coproductMode.value = 'child_only'
   startDate.value = nextDefaultDateRange.start
   endDate.value = nextDefaultDateRange.end
   dateSearchMode.value = 'plan'
@@ -991,6 +1002,7 @@ const toFavoritePayload = () => ({
   hasIssue: String(hasIssue.value || ''),
   unclosed: String(unclosed.value || ''),
   excludeZeroProduction: String(excludeZeroProduction.value || ''),
+  coproductMode: String(coproductMode.value || 'child_only'),
 })
 
 const applyFavoritePayload = (payload) => {
@@ -1009,6 +1021,10 @@ const applyFavoritePayload = (payload) => {
   hasIssue.value = String(payload?.hasIssue || '')
   unclosed.value = String(payload?.unclosed || '')
   excludeZeroProduction.value = String(payload?.excludeZeroProduction || '')
+  {
+    const nextMode = String(payload?.coproductMode || 'child_only')
+    coproductMode.value = ['child_only', 'parent_only', 'both'].includes(nextMode) ? nextMode : 'child_only'
+  }
 }
 
 const loadFavorites = async () => {
@@ -1059,7 +1075,7 @@ const saveFavorite = async () => {
 
 // フィルタが変更されたら再検索が必要な状態にする
 watch(
-  [startDate, endDate, dateSearchMode, lineId, processId, productCode, sessionType, status, hasIssue, unclosed, excludeZeroProduction],
+  [startDate, endDate, dateSearchMode, lineId, processId, productCode, sessionType, status, hasIssue, unclosed, excludeZeroProduction, coproductMode],
   () => { needsSearch.value = true }
 )
 

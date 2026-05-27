@@ -707,21 +707,30 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 ))
 
         result_rows = []
+        coproduct_mode = (request.query_params.get('coproduct_mode') or 'child_only').strip().lower()
+        if coproduct_mode not in ('child_only', 'parent_only', 'both'):
+            coproduct_mode = 'child_only'
         for row in base_rows:
             session_id = row.get('id')
             child_rows = child_rows_by_session.get(session_id) or []
             if child_rows:
-                # 連産子がある場合は親ではなく子のみ表示
-                for child in child_rows:
-                    expanded = dict(row)
-                    expanded['product'] = child.get('product_id')
-                    expanded['product_code'] = child.get('product_code')
-                    expanded['product_name'] = child.get('product_name')
-                    expanded['production_qty'] = child.get('production_qty') or 0
-                    expanded['is_coproduct_child'] = True
-                    expanded['coproduct_parent_product_code'] = child.get('coproduct_parent_product_code')
-                    enrich_row_metrics(expanded)
-                    result_rows.append(expanded)
+                if coproduct_mode in ('parent_only', 'both'):
+                    parent_row = dict(row)
+                    parent_row['is_coproduct_child'] = False
+                    parent_row['coproduct_parent_product_code'] = None
+                    enrich_row_metrics(parent_row)
+                    result_rows.append(parent_row)
+                if coproduct_mode in ('child_only', 'both'):
+                    for child in child_rows:
+                        expanded = dict(row)
+                        expanded['product'] = child.get('product_id')
+                        expanded['product_code'] = child.get('product_code')
+                        expanded['product_name'] = child.get('product_name')
+                        expanded['production_qty'] = child.get('production_qty') or 0
+                        expanded['is_coproduct_child'] = True
+                        expanded['coproduct_parent_product_code'] = child.get('coproduct_parent_product_code')
+                        enrich_row_metrics(expanded)
+                        result_rows.append(expanded)
                 continue
 
             expanded = dict(row)
