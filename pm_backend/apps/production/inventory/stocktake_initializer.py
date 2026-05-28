@@ -19,7 +19,7 @@ from .inventory_calculator import (
     _calculate_parent_actual_shipment,
     _get_shipment_scrap_qty,
     aggregate_scrap_to_backlog,
-    _build_firm_order_map,
+    _build_demand_map,
     _get_max_parent_bom_lead_time,
 )
 from .lead_time_utils import resolve_lead_days_for_step
@@ -471,7 +471,7 @@ def recalculate_inventory_from_stocktake(line_id, baseline_date, end_date):
     from masters.models import Line, Calendar, CalendarDay
 
     aggregate_scrap_to_backlog(line_id, baseline_date, end_date)
-    firm_map = _build_firm_order_map(line_id, baseline_date, end_date)
+    demand_map = _build_demand_map(line_id, baseline_date, end_date)
 
     product_ids = list(
         LineBacklog.objects.filter(
@@ -526,11 +526,11 @@ def recalculate_inventory_from_stocktake(line_id, baseline_date, end_date):
     for product_id in product_ids:
         _stocktake_recalc_stock(
             line_id, product_id, baseline_date, end_date,
-            firm_map, today, get_prev_working_day,
+            demand_map, today, get_prev_working_day,
         )
         _stocktake_recalc_planned_stock(
             line_id, product_id, baseline_date, end_date,
-            firm_map, today, get_prev_working_day, shift_working_days,
+            demand_map, today, get_prev_working_day, shift_working_days,
             is_working_day=is_working_day,
             reference_date=baseline_date,
         )
@@ -1059,7 +1059,7 @@ def _stocktake_recalc_progress(
 
 
 def _stocktake_recalc_stock(line_id, product_id, start_date, end_date,
-                             firm_map, today, get_prev_working_day):
+                             demand_map, today, get_prev_working_day):
     """
     棚卸専用: 実在庫を日次で再計算。
 
@@ -1096,7 +1096,7 @@ def _stocktake_recalc_stock(line_id, product_id, start_date, end_date,
     last_stock = 0
     stock_by_date = {}
     backlogs_to_update = []
-    firm_map = firm_map or {}
+    demand_map = demand_map or {}
 
     for plan_date in sorted(by_date.keys()):
         rows = by_date[plan_date]
@@ -1122,7 +1122,7 @@ def _stocktake_recalc_stock(line_id, product_id, start_date, end_date,
 
         if plan_date <= today:
             if is_final:
-                actual_shipment = firm_map.get((sample.product_id, plan_date), Decimal('0'))
+                actual_shipment = demand_map.get((sample.product_id, plan_date), Decimal('0'))
             else:
                 actual_shipment = _calculate_parent_actual_shipment(sample)
         else:
@@ -1154,7 +1154,7 @@ def _stocktake_recalc_stock(line_id, product_id, start_date, end_date,
 
 
 def _stocktake_recalc_planned_stock(line_id, product_id, start_date, end_date,
-                                     firm_map, today, get_prev_working_day, shift_working_days,
+                                     demand_map, today, get_prev_working_day, shift_working_days,
                                      is_working_day=None, reference_date=None):
     """
     棚卸専用: 計画在庫を日次で再計算。
@@ -1194,7 +1194,7 @@ def _stocktake_recalc_planned_stock(line_id, product_id, start_date, end_date,
     last_planned = 0
     planned_by_date = {}
     backlogs_to_update = []
-    firm_map = firm_map or {}
+    demand_map = demand_map or {}
     step_cache = {}
 
     for plan_date in sorted(by_date.keys()):
@@ -1221,11 +1221,7 @@ def _stocktake_recalc_planned_stock(line_id, product_id, start_date, end_date,
         is_final = bool(getattr(sample.product, 'is_final_product', False))
         is_line_final = bool(getattr(sample.product, 'is_line_final_product', False))
         if is_final:
-            firm_qty = firm_map.get((sample.product_id, plan_date), Decimal('0'))
-            if plan_date <= today:
-                planned_shipment = firm_qty
-            else:
-                planned_shipment = firm_qty if firm_qty > 0 else Decimal(str(order_total))
+            planned_shipment = demand_map.get((sample.product_id, plan_date), Decimal('0'))
         elif is_line_final or bool(getattr(sample.product, 'is_purchase_product', False)) or getattr(sample, 'process_code', '') == 'PURCHASE':
             # is_line_final または 購入品の場合
             # LT後の日付が過去なら親の実績(Planフォールバックなし)、そうでなければ計需（order_total）
@@ -1447,7 +1443,7 @@ def calculate_pipeline_demand(
     baseline_date,
     line_id=None,
     today=None,
-    firm_map=None,
+    demand_map=None,
     final_flags=None,
     reference_date=None,
 ):
@@ -1515,37 +1511,12 @@ def calculate_pipeline_demand(
 
         if today is None:
             today = get_business_today()
-        firm_map = firm_map or {}
+        demand_map = demand_map or {}
 
         total_demand = Decimal('0')
         for k in range(1, lt + 1):
             target_date = shift_working_days(baseline_date, k)
-
-            demand_qs = LineBacklog.objects.filter(
-                product_id=product_id,
-                plan_date=target_date,
-                sequence_no=0,
-            )
-            if line_id is not None:
-                demand_qs = demand_qs.filter(line_id=line_id)
-
-            order_total = demand_qs.aggregate(total=Sum('order_qty')).get('total') or 0
-            firm_qty = Decimal(str(firm_map.get((product_id, target_date), 0) or 0))
-
-            if is_final:
-                # 通常計算と同じ扱い:
-                # 過去/今日=firmのみ、将来=firm優先で無ければorder
-                if target_date <= today:
-                    use_qty = firm_qty
-                else:
-                    use_qty = firm_qty if firm_qty > 0 else Decimal(str(order_total))
-            else:
-                # ライン最終品: 過去/今日は実需(firm_qty)優先、将来はorder_qty
-                if target_date <= today:
-                    use_qty = firm_qty if firm_qty > 0 else Decimal(str(order_total))
-                else:
-                    use_qty = Decimal(str(order_total))
-
+            use_qty = demand_map.get((product_id, target_date), Decimal('0'))
             total_demand += use_qty
 
         return int(total_demand)
@@ -1634,8 +1605,8 @@ def initialize_planned_stock(line_ids, baseline_date):
     today = get_business_today()
     line_ids_used = sorted({bl.line_id for bl in backlogs if bl.line_id is not None})
 
-    # 最終品のfirm需要をライン単位でキャッシュ
-    line_firm_map = {}
+    # 最終品の需要をライン単位でキャッシュ
+    line_demand_map = {}
     for line_id in line_ids_used:
         line_products = [bl for bl in backlogs if bl.line_id == line_id]
         max_lt = 0
@@ -1649,9 +1620,8 @@ def initialize_planned_stock(line_ids, baseline_date):
             )
             if lt_days > max_lt:
                 max_lt = lt_days
-        # 余裕を持って先の日付までfirm需要を取得
-        firm_end = baseline_date + timedelta(days=max_lt + 30)
-        line_firm_map[line_id] = _build_firm_order_map(line_id, baseline_date, firm_end)
+        demand_end = baseline_date + timedelta(days=max_lt + 30)
+        line_demand_map[line_id] = _build_demand_map(line_id, baseline_date, demand_end)
 
     final_flags = {
         bl.product_id: {
@@ -1668,7 +1638,7 @@ def initialize_planned_stock(line_ids, baseline_date):
             baseline_date,
             line_id=bl.line_id,
             today=today,
-            firm_map=line_firm_map.get(bl.line_id, {}),
+            demand_map=line_demand_map.get(bl.line_id, {}),
             final_flags=final_flags,
             reference_date=baseline_date,
         )

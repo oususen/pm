@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import json
 from django.db.models import F
-from orders.models import OrderLine
 from orders.utils.calendar_utils import get_business_today
 from system_settings.models import SystemSetting
 from ..models_line_backlog import LineBacklog
@@ -219,110 +218,45 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None, pro
         ScrapRecordDetail.objects.filter(id__in=processed_detail_ids).update(is_backlog_processed=True)
 
 
-def _build_firm_order_map(line_id, start_date, end_date):
+def _build_demand_map(line_id, start_date, end_date):
     """
-    最終品（is_final_product=True）の確定数量を (product_id, plan_date) で集計。
-    plan_date はリードタイムと稼働日を考慮して決定する。
+    最終品（is_final_product=True）の需要を (product_id, plan_date) で集計。
+    LineDemandから取得（plan_dateはLTシフト済み）。確定優先。
     """
     from collections import defaultdict
-    from masters.models import RoutingStep, Line, Calendar, CalendarDay
+    from production.models import LineDemand
 
-    steps_on_line = RoutingStep.objects.filter(
-        line_id=line_id
-    ).select_related('output_product', 'routing__product', 'line')
+    demands = LineDemand.objects.filter(
+        line_id=line_id,
+        product__is_final_product=True,
+        plan_date__gte=start_date,
+        plan_date__lte=end_date,
+    )
 
-    product_step_map = {}
-    final_products = set()
-    max_lead_days = 0
+    firm_by_key = defaultdict(Decimal)
+    forecast_by_key = defaultdict(Decimal)
+    shifted_keys = set()
+    for ld in demands:
+        key = (ld.product_id, ld.plan_date)
+        firm_qty = Decimal(str(ld.firm_qty or 0))
+        forecast_qty = Decimal(str(ld.forecast_qty or 0))
+        if firm_qty > 0:
+            firm_by_key[key] += firm_qty
+        if forecast_qty > 0:
+            forecast_by_key[key] += forecast_qty
+        if ld.is_shifted or ld.firm_is_shifted or ld.forecast_is_shifted:
+            shifted_keys.add(key)
 
-    for step in steps_on_line:
-        product = step.output_product or (step.routing.product if step.routing_id else None)
-        if not product:
-            continue
-        if product.id not in product_step_map:
-            product_step_map[product.id] = step
-        if product.is_final_product:
-            final_products.add(product.id)
-            lead_days = step.lead_time_days or (step.line.lead_time_days if step.line else 0) or 0
-            if lead_days > max_lead_days:
-                max_lead_days = lead_days
+    demand_map = {}
+    for key in set(firm_by_key) | set(forecast_by_key):
+        firm = firm_by_key.get(key, Decimal('0'))
+        forecast = forecast_by_key.get(key, Decimal('0'))
+        if key in shifted_keys and firm > 0 and forecast > 0:
+            demand_map[key] = firm + forecast
+        else:
+            demand_map[key] = firm if firm > 0 else forecast
 
-    if not final_products:
-        return {}
-
-    line_obj = Line.objects.filter(id=line_id).first()
-    calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
-        calendar_code='daiso'
-    ).values_list('id', flat=True).first()
-    workday_cache = {}
-
-    def is_working_day(target_date):
-        # カレンダー未設定時は土日を非稼働日として扱う
-        if not calendar_id:
-            return target_date.weekday() < 5
-        if target_date in workday_cache:
-            return workday_cache[target_date]
-        cal = CalendarDay.objects.filter(
-            calendar_id=calendar_id,
-            target_date=target_date
-        ).first()
-        # カレンダ未登録日は週末を非稼働日扱い
-        is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
-        workday_cache[target_date] = is_work
-        return is_work
-
-    def shift_business_days(target_date, days):
-        if not days:
-            if not calendar_id:
-                return target_date
-            if is_working_day(target_date):
-                return target_date
-            current = target_date
-            while True:
-                current = current - timedelta(days=1)
-                if is_working_day(current):
-                    return current
-        if not calendar_id:
-            return target_date + timedelta(days=-days)
-
-        step = -1 if days > 0 else 1
-        remaining = abs(int(days))
-        current = target_date
-        while remaining > 0:
-            current = current + timedelta(days=step)
-            if is_working_day(current):
-                remaining -= 1
-        return current
-
-    def resolve_lead_time_days(product_id):
-        step = product_step_map.get(product_id)
-        if step and step.lead_time_days:
-            return step.lead_time_days
-        if step and step.line and step.line.lead_time_days:
-            return step.line.lead_time_days
-        return 0
-
-    due_end = end_date + timedelta(days=max_lead_days + 7)
-    order_lines = OrderLine.objects.filter(
-        order__status='OPEN',
-        product_id__in=final_products,
-        due_date__gte=start_date,
-        due_date__lte=due_end,
-    ).select_related('order')
-
-    firm_map = defaultdict(Decimal)
-    for ol in order_lines:
-        if not ol.product_id or not ol.due_date:
-            continue
-        if (ol.order.order_type or '').upper() != 'FIRM':
-            continue
-        lead_days = resolve_lead_time_days(ol.product_id)
-        plan_date = shift_business_days(ol.due_date, lead_days)
-        if plan_date < start_date or plan_date > end_date:
-            continue
-        firm_map[(ol.product_id, plan_date)] += Decimal(str(ol.quantity or 0))
-
-    return firm_map
+    return demand_map
 
 
 def _get_direct_parent_bom_lead_time(product_id):
@@ -449,9 +383,8 @@ def _get_max_parent_bom_lead_time(product_id):
 def _get_final_product_delivery_lt(line_id, product_id):
     """
     最終品のデリバリLT（RoutingStep / Line.lead_time_days）を取得する。
-    _build_firm_order_map の resolve_lead_time_days と同じ解決ロジック。
-    firm_map はこの LT で due_date をシフトしているため、
-    計画在庫初期値の LT 調整にも同じ値を使う必要がある。
+    計画在庫初期値のLT調整に使用するデリバリLT。
+    demand_map（LineDemand由来）のplan_dateは同じLTでシフト済み。
     """
     from masters.models import RoutingStep
     from django.db.models import Q
@@ -709,7 +642,7 @@ def _calculate_parent_actual_shipment(backlog, shift_fn=None):
     return total_shipment
 
 
-def _compute_planned_stock_lt_adjustment(product_id, initial_date, max_lt, shift_fn, firm_map=None, final_delivery_lt=None):
+def _compute_planned_stock_lt_adjustment(product_id, initial_date, max_lt, shift_fn, demand_map=None, final_delivery_lt=None):
     """
     計画在庫初期値のLT調整量を計算する。
 
@@ -727,10 +660,10 @@ def _compute_planned_stock_lt_adjustment(product_id, initial_date, max_lt, shift
 
     total_adjustment = Decimal('0')
 
-    # 最終品：calc_start_date（initial_date）から後ろ向きにデリバリLT日分の実需を差し引く。
+    # 最終品：calc_start_date（initial_date）から後ろ向きにデリバリLT日分の需要を差し引く。
     #
-    # firm_map はデリバリLT（RoutingStep/Line.lead_time_days）で due_date をシフト済み。
-    # そのため同じ LT 分だけ在庫の初期値から差し引いて計画在庫の初期値とする：
+    # demand_map はLineDemandから取得（plan_dateはLTシフト済み）。
+    # LT 分だけ在庫の初期値から差し引いて計画在庫の初期値とする：
     #   LT=1: demand[initial_date]
     #   LT=2: demand[initial_date] + demand[initial_date - 1営業日]
     #   LT=N: demand[initial_date] + ... + demand[initial_date - (N-1)営業日]
@@ -746,7 +679,7 @@ def _compute_planned_stock_lt_adjustment(product_id, initial_date, max_lt, shift
     if delivery_lt >= 0:
         for offset in range(delivery_lt):  # 0, 1, ..., delivery_lt-1
             adj_date = shift_fn(initial_date, -offset)  # initial_date から後ろ向きにシフト
-            qty = firm_map.get((product_id, adj_date), Decimal('0')) if firm_map else Decimal('0')
+            qty = demand_map.get((product_id, adj_date), Decimal('0')) if demand_map else Decimal('0')
             total_adjustment += Decimal(str(qty))
         return int(total_adjustment)
 
@@ -1015,7 +948,7 @@ def recalculate_stock_qty(
     product_id,
     start_date,
     end_date,
-    firm_map=None,
+    demand_map=None,
     stock_adjust_map=None,
     reference_today=None,
     max_parent_lt=None,
@@ -1136,7 +1069,7 @@ def recalculate_stock_qty(
         calc_today = get_prev_working_day(calc_today)
     inventory_lock_date = SystemSetting.get_lock_date('inventory')
     stock_by_date = {}
-    firm_map = firm_map or {}
+    demand_map = demand_map or {}
     calc_rule_map = _load_planned_stock_calc_rule_map()
     line_code_cache = {}
     process_code_cache = {}
@@ -1243,7 +1176,7 @@ def recalculate_stock_qty(
 
         if plan_date <= business_today:
             if is_final:
-                actual_shipment = firm_map.get((sample.product_id, plan_date), Decimal('0'))
+                actual_shipment = demand_map.get((sample.product_id, plan_date), Decimal('0'))
             else:
                 line_code = _resolve_line_code(getattr(sample, 'line_id', None))
                 process_code = _resolve_process_code(getattr(sample, 'process_id', None))
@@ -1293,7 +1226,7 @@ def recalculate_planned_stock_qty(
     product_id,
     start_date,
     end_date,
-    firm_map=None,
+    demand_map=None,
     planned_stock_adjust_map=None,
     reference_today=None,
     max_parent_lt=None,
@@ -1379,7 +1312,7 @@ def recalculate_planned_stock_qty(
         max_parent_lt = _get_direct_parent_bom_lead_time(product_id)
     max_lt = int(max_parent_lt or 0)
     # 最終品はデリバリLT分だけ初期値を調整するため、計算窓を広げる。
-    # self_lt_days（製造LT）ではなく firm_map と同じデリバリLT（RoutingStep/Line）を使う。
+    # self_lt_days（製造LT）ではなく demand_map と同じデリバリLT（RoutingStep/Line）を使う。
     sample_product = backlogs[0].product if backlogs else None
     is_final_product = bool(sample_product and getattr(sample_product, 'is_final_product', False))
     final_delivery_lt = 0
@@ -1405,7 +1338,7 @@ def recalculate_planned_stock_qty(
 
     inventory_lock_date = SystemSetting.get_lock_date('inventory')
     planned_by_date = {}
-    firm_map = firm_map or {}
+    demand_map = demand_map or {}
     floor_shipping_cache = {}
     calc_rule_map = _load_planned_stock_calc_rule_map()
     line_code_cache = {}
@@ -1455,7 +1388,7 @@ def recalculate_planned_stock_qty(
         # 最終品：デリバリLT分先の firm 需要を差し引く
         lt_adjustment = _compute_planned_stock_lt_adjustment(
             product_id, initial_backlog.plan_date, max_lt, shift_working_days,
-            firm_map=firm_map,            final_delivery_lt=final_delivery_lt if is_final_product else None,
+            demand_map=demand_map,            final_delivery_lt=final_delivery_lt if is_final_product else None,
         )
         last_planned = (initial_backlog.stock_qty or 0) - lt_adjustment
         planned_by_date[initial_backlog.plan_date] = last_planned
@@ -1538,19 +1471,7 @@ def recalculate_planned_stock_qty(
             ''
         )
         if is_final:
-            firm_qty = firm_map.get((sample.product_id, plan_date), Decimal('0'))
-            # 完成品の過去/未来判定は business_today に統一する。
-            # 休日当日で firm_qty=0 の場合のみ order_qty にフォールバックして
-            # 計画出庫の欠落を防ぐ。
-            if plan_date < business_today:
-                planned_shipment = firm_qty
-            elif plan_date == business_today:
-                if (not is_working_day(business_today)) and firm_qty <= 0:
-                    planned_shipment = Decimal(str(order_total))
-                else:
-                    planned_shipment = firm_qty
-            else:
-                planned_shipment = firm_qty if firm_qty > 0 else Decimal(str(order_total))
+            planned_shipment = demand_map.get((sample.product_id, plan_date), Decimal('0'))
         elif is_line_final:
             if forced_parent_shipment_mode == 'PARENT_PLAN':
                 planned_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days, floor_shipping_cache)
@@ -1660,11 +1581,11 @@ def recalculate_inventory_for_line(
         )
         logger.info("仕損集計時間: %.3fs", time.perf_counter() - scrap_start)
 
-        firm_start = time.perf_counter()
-        firm_map = _build_firm_order_map(line_id, start_date, end_date)
-        logger.info("確定受注マップ作成時間: %.3fs", time.perf_counter() - firm_start)
+        demand_start = time.perf_counter()
+        demand_map = _build_demand_map(line_id, start_date, end_date)
+        logger.info("需要マップ作成時間: %.3fs", time.perf_counter() - demand_start)
     else:
-        firm_map = {}
+        demand_map = {}
 
     adjustment_maps = _build_adjustment_maps(
         line_id,
@@ -1723,7 +1644,7 @@ def recalculate_inventory_for_line(
                 product_id,
                 start_date,
                 end_date,
-                firm_map=firm_map,
+                demand_map=demand_map,
                 stock_adjust_map=adjustment_maps.get('STOCK'),
                 max_parent_lt=direct_lt,
                 calendar_id=shared_calendar_id,
@@ -1741,7 +1662,7 @@ def recalculate_inventory_for_line(
                 product_id,
                 start_date,
                 end_date,
-                firm_map=firm_map,
+                demand_map=demand_map,
                 planned_stock_adjust_map=adjustment_maps.get('PLANNED_STOCK'),
                 max_parent_lt=direct_lt,
                 calendar_id=shared_calendar_id,

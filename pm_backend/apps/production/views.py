@@ -1066,117 +1066,29 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 routing_q
             ).select_related('output_product', 'routing__product', 'line')
 
-            product_steps_map = defaultdict(list)
             final_products = set()
-            max_lead_days = 0
-
             for step in steps_on_line:
                 product = step.output_product or (step.routing.product if step.routing_id else None)
-                if not product:
-                    continue
-                product_steps_map[product.id].append(step)
-                if product.is_final_product:
+                if product and product.is_final_product:
                     final_products.add(product.id)
-                    # 最終品は工程LT優先、未設定時にラインLTを使用
-                    lead_days = int(step.lead_time_days or 0)
-                    if lead_days <= 0:
-                        lead_days = (step.line.lead_time_days or 0) if step.line_id and step.line else 0
-                    if lead_days > max_lead_days:
-                        max_lead_days = lead_days
 
             if not final_products:
                 continue
 
-            due_end = max_date + timedelta(days=max_lead_days + 7)
-            order_lines = OrderLine.objects.filter(
-                order__status='OPEN',
+            # LineDemandから確定/内示数量を取得（LTシフト済みのplan_dateを使用）
+            demands = LineDemand.objects.filter(
+                line_id=line_id,
                 product_id__in=final_products,
-                due_date__gte=min_date,
-                due_date__lte=due_end,
-            ).select_related('order')
+                plan_date__gte=min_date,
+                plan_date__lte=max_date,
+            )
 
             firm_map = defaultdict(int)
             forecast_map = defaultdict(int)
-            workday_cache = {}
-
-            def is_working_day(target_date):
-                if not calendar_id:
-                    # カレンダー未設定時は週末を非稼働日扱い（pickupと同一ルール）
-                    return target_date.weekday() < 5
-                if target_date in workday_cache:
-                    return workday_cache[target_date]
-                cal = CalendarDay.objects.filter(
-                    calendar_id=calendar_id,
-                    target_date=target_date
-                ).first()
-                # カレンダ未登録日も週末は非稼働日扱い（pickupと同一ルール）
-                is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
-                workday_cache[target_date] = is_work
-                return is_work
-
-            def shift_business_days(target_date, days):
-                if not days:
-                    if not calendar_id:
-                        return target_date
-                    if is_working_day(target_date):
-                        return target_date
-                    current = target_date
-                    while True:
-                        current = current - timedelta(days=1)
-                        if is_working_day(current):
-                            return current
-                if not calendar_id:
-                    return target_date + timedelta(days=-days)
-
-                step = -1 if days > 0 else 1
-                remaining = abs(int(days))
-                current = target_date
-                while remaining > 0:
-                    current = current + timedelta(days=step)
-                    if is_working_day(current):
-                        remaining -= 1
-                return current
-
-            def _pick_effective_step(product_id, reference_date):
-                """plan_dateに有効なstepを選ぶ。有効期間内のstepがなければNone。"""
-                candidates = product_steps_map.get(product_id, [])
-                if not candidates:
-                    return None
-                ref_dt = normalize_routing_reference_datetime(reference_date)
-                for s in candidates:
-                    r = getattr(s, 'routing', None)
-                    if not r or not getattr(r, 'is_active', False):
-                        continue
-                    vf = getattr(r, 'valid_from_datetime', None)
-                    vt = getattr(r, 'valid_to_datetime', None)
-                    if vf and vf > ref_dt:
-                        continue
-                    if vt and vt < ref_dt:
-                        continue
-                    return s
-                return None
-
-            def resolve_lead_time_days(product_id, reference_date=None):
-                # 統一ルール: step.lead_time_days を使用（0 は有効、未設定時のみ line fallback）
-                step = _pick_effective_step(product_id, reference_date)
-                if step:
-                    return resolve_lead_days_for_step(step)
-                return 0
-
-            for ol in order_lines:
-                if not ol.product_id or not ol.due_date:
-                    continue
-                lead_days = resolve_lead_time_days(ol.product_id, ol.due_date)
-                plan_date = shift_business_days(ol.due_date, lead_days)
-                if plan_date < min_date or plan_date > max_date:
-                    continue
-                qty = ol.quantity or 0
-                key = (ol.product_id, plan_date)
-                order_type = (ol.order.order_type or '').upper()
-                if order_type == 'FIRM':
-                    firm_map[key] += int(qty)
-                else:
-                    forecast_map[key] += int(qty)
+            for ld in demands:
+                key = (ld.product_id, ld.plan_date)
+                firm_map[key] += int(ld.firm_qty or 0)
+                forecast_map[key] += int(ld.forecast_qty or 0)
 
             for item in line_items:
                 if item.product_id not in final_products:
@@ -1577,46 +1489,37 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             demand_map[(existing.product_id, existing.plan_date)] = Decimal('0')
         logger.info("pickup: existing_backlogs=%s", len(existing_backlogs))
 
-        # 最終品はOrderLineから、中間品は後工程から需要を取得
+        # 最終品はLineDemandから、中間品は後工程から需要を取得
 
-        # A. 最終品（is_final_product=True）はOrderLineから取得
+        # A. 最終品（is_final_product=True）はLineDemandから取得
         if final_products:
-            order_lines_qs = OrderLine.objects.filter(
-                order__status='OPEN',
-                product_id__in=final_products
-            ).select_related('order', 'product')
+            demand_qs = LineDemand.objects.filter(
+                line_id=line_id,
+                product_id__in=final_products,
+            )
+            if start_dt:
+                demand_qs = demand_qs.filter(plan_date__gte=start_dt)
+            if source_end_dt or end_dt:
+                demand_qs = demand_qs.filter(plan_date__lte=source_end_dt or end_dt)
 
-            if start_date:
-                order_lines_qs = order_lines_qs.filter(due_date__gte=start_date)
-            if source_end_dt or end_date:
-                order_lines_qs = order_lines_qs.filter(due_date__lte=source_end_dt or end_date)
-
-            order_lines = list(order_lines_qs)
-
-            logger.info("pickup: order_lines=%s", len(order_lines))
+            line_demands = list(demand_qs)
+            logger.info("pickup: line_demands=%s", len(line_demands))
 
             firm_map = defaultdict(Decimal)
             forecast_map = defaultdict(Decimal)
             shifted_keys = set()
-            for ol in order_lines:
-                if not ol.product_id:
+            for ld in line_demands:
+                if not ld.product_id:
                     continue
-                step = product_step_map.get(ol.product_id)
-                if not step:
-                    continue
-
-                lead_days = resolve_lead_time_days(ol.product_id)
-                plan_date = shift_business_days(ol.due_date, lead_days)
-                key = (ol.product_id, plan_date)
-                if plan_date != ol.due_date:
+                key = (ld.product_id, ld.plan_date)
+                firm_qty = Decimal(str(ld.firm_qty or 0))
+                forecast_qty = Decimal(str(ld.forecast_qty or 0))
+                if firm_qty > 0:
+                    firm_map[key] += firm_qty
+                if forecast_qty > 0:
+                    forecast_map[key] += forecast_qty
+                if ld.is_shifted or ld.firm_is_shifted or ld.forecast_is_shifted:
                     shifted_keys.add(key)
-
-                qty = Decimal(str(ol.quantity or 0))
-                order_type = (ol.order.order_type or '').upper()
-                if order_type == 'FIRM':
-                    firm_map[key] += qty
-                else:
-                    forecast_map[key] += qty
 
             for key in set(firm_map) | set(forecast_map):
                 firm_qty = firm_map.get(key, Decimal('0'))

@@ -282,7 +282,7 @@ def _recalculate_child_stock_after_record_edit(parent_plan_date, today, child_pr
     from .inventory.inventory_calculator import (
         recalculate_stock_qty,
         recalculate_planned_stock_qty,
-        _build_firm_order_map,
+        _build_demand_map,
         _get_max_parent_bom_lead_time,
     )
 
@@ -339,15 +339,15 @@ def _recalculate_child_stock_after_record_edit(parent_plan_date, today, child_pr
                 parent_plan_date,
                 -(_get_max_parent_bom_lead_time(child_id) + 1),
             )
-            firm_start = min(stock_start, planned_start)
-            firm_map = _build_firm_order_map(line_id, firm_start, today)
+            demand_start = min(stock_start, planned_start)
+            demand_map = _build_demand_map(line_id, demand_start, today)
 
             recalculate_stock_qty(
                 line_id,
                 child_id,
                 stock_start,
                 today,
-                firm_map=firm_map,
+                demand_map=demand_map,
                 reference_today=parent_plan_date,
             )
             recalculate_planned_stock_qty(
@@ -355,7 +355,7 @@ def _recalculate_child_stock_after_record_edit(parent_plan_date, today, child_pr
                 child_id,
                 planned_start,
                 today,
-                firm_map=firm_map,
+                demand_map=demand_map,
                 reference_today=parent_plan_date,
             )
 
