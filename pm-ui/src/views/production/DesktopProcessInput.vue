@@ -65,24 +65,24 @@
         <div class="section-title" style="margin-top:12px">表示設定</div>
         <div class="filter-area">
           <label class="filter-item">
-            <span class="toggle-label">加工済み表示</span>
+            <span class="toggle-label">加工済</span>
             <input type="checkbox" v-model="showDone" class="toggle-input" />
             <span class="toggle-track" :class="{ on: showDone }"></span>
           </label>
-          <label class="filter-item">
-            <span class="toggle-label">明日の計画</span>
+          <label class="filter-item filter-item-reverse">
             <input type="checkbox" v-model="showTomorrow" class="toggle-input" @change="onTomorrowToggle" />
             <span class="toggle-track" :class="{ on: showTomorrow }"></span>
+            <span class="toggle-label">明日計画</span>
           </label>
           <label class="filter-item">
             <span class="toggle-label">前日表示</span>
             <input type="checkbox" v-model="showYesterday" class="toggle-input" @change="onYesterdayToggle" />
             <span class="toggle-track" :class="{ on: showYesterday }"></span>
           </label>
-          <label class="filter-item">
-            <span class="toggle-label">現在時刻のみ</span>
+          <label class="filter-item filter-item-reverse">
             <input type="checkbox" v-model="filterCurrentTime" class="toggle-input" @change="onCurrentTimeToggle" :disabled="isPlannedProductsLoading" />
             <span class="toggle-track" :class="{ on: filterCurrentTime }"></span>
+            <span class="toggle-label">現在時刻のみ</span>
           </label>
         </div>
         <div v-if="timeSlots.length" class="slot-nav">
@@ -147,6 +147,7 @@
               selected: String(record.product_id) === String(item.product),
               'current-processing': isCurrentProcessingProduct(item.product),
               'temp-ended': isTempEndedProduct(item.product),
+              'plan-edited': editedPlanIds.has(item.gantt_plan_id),
             }"
             @click="selectPlannedProduct(item)"
           >
@@ -1152,6 +1153,7 @@ const editingPlanQty = ref(false)
 const editPlanQtyValue = ref(0)
 const editPlanStartTime = ref('08:00')
 const editPlanEndTime = ref('09:00')
+const editedPlanIds = ref(new Set())
 
 const selectedPlanItem = computed(() => {
   const productId = record.value.product_id
@@ -1208,7 +1210,7 @@ const savePlanQty = async () => {
       const planDate = currentDateYmd.value
       const startTime = `${planDate}T${editPlanStartTime.value}:00`
       const endTime = `${planDate}T${editPlanEndTime.value}:00`
-      await api.lineGanttPlans.manualAdd({
+      const res = await api.lineGanttPlans.manualAdd({
         line_id: lineId,
         process_id: processId,
         output_product_id: item.product,
@@ -1216,7 +1218,10 @@ const savePlanQty = async () => {
         end_time: endTime,
         quantity: qty,
       })
+      const newPlanId = res?.data?.plan_id
+      if (newPlanId) editedPlanIds.value.add(newPlanId)
     }
+    if (item.gantt_plan_id) editedPlanIds.value.add(item.gantt_plan_id)
     editingPlanQty.value = false
     await loadPlannedProducts()
   } catch (e) {
@@ -2890,14 +2895,16 @@ onMounted(async () => {
 }
 
 /* コントロール列 */
-.record-type-area { display: flex; flex-direction: column; gap: 4px; }
+.record-type-area { display: flex; flex-direction: row; gap: 4px; }
 .record-type-btn {
-  width: 100%; height: 32px; border: 2px solid #ccc; border-radius: 6px;
-  background: #fff; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.15s;
+  flex: 1; height: 26px; border: 2px solid #ccc; border-radius: 4px;
+  background: #fff; cursor: pointer; font-size: 11px; font-weight: 600; transition: all 0.15s; padding: 0;
 }
 .record-type-btn.active { border-color: #4a7ae5; background: #eff6ff; color: #4a7ae5; }
 .filter-area { display: flex; flex-direction: column; gap: 8px; }
-.filter-item { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.filter-item { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 0; border-bottom: 1px solid #9aa5b4; }
+.filter-item:last-child { border-bottom: none; }
+.filter-item-reverse { flex-direction: row; }
 .toggle-label { font-size: 13px; flex: 1; }
 .toggle-input { display: none; }
 .toggle-track {
@@ -3041,6 +3048,7 @@ onMounted(async () => {
 .plan-qty-btn { padding: 2px 8px; border: 1px solid #b8c3d6; border-radius: 4px; background: #fff; cursor: pointer; font-size: 13px; }
 .plan-qty-btn.save { background: #1d74d8; color: #fff; border-color: #1d74d8; }
 .plan-qty-btn.cancel { background: #f5f5f5; }
+.plan-item.plan-edited { background: #fffde7; }
 .qty-input-area { display: flex; flex-direction: column; gap: 8px; }
 .qty-row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; }
 .qty-col { display: flex; flex-direction: column; gap: 4px; }

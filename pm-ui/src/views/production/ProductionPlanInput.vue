@@ -881,103 +881,139 @@
 
     <div v-else class="settings-panel">
       <h3 class="settings-title">ライン編集</h3>
-      <p class="settings-note">タブごとに表示対象のラインを選択して保存します。</p>
-      <div class="settings-selector">
-        <label>対象タブ</label>
-        <select v-model="settingsTargetTab">
-          <option v-for="tab in configurablePlanTabs" :key="`plan-line-setting-${tab.key}`" :value="tab.key">
-            {{ tab.label }}
-          </option>
-        </select>
-      </div>
-      <div class="settings-list">
-        <label v-for="line in lines" :key="`plan-target-${line.id}`" class="settings-check">
-          <input
-            type="checkbox"
-            :checked="isLineSelectedForTargetTab(line.line_code)"
-            @change="toggleLineForTargetTab(line.line_code)"
-          />
-          <span>{{ line.line_code }} - {{ line.line_name }}</span>
-        </label>
-      </div>
-      <div class="settings-note" style="margin-top: 12px;">前日シフト台数設定（ライン×工程）</div>
-      <div class="settings-rule-editor">
-        <select v-model="prevDayShiftDraft.lineCode">
-          <option value="">ライン選択</option>
-          <option v-for="line in lines" :key="`shift-line-${line.id}`" :value="normalizeLineCode(line.line_code)">
-            {{ line.line_code }} - {{ line.line_name }}
-          </option>
-        </select>
-        <select v-model="prevDayShiftDraft.processCode">
-          <option value="">工程選択</option>
-          <option v-for="proc in processOptions" :key="`shift-proc-${proc.id}`" :value="normalizeProcessCode(proc.process_code)">
-            {{ proc.process_code }} - {{ proc.process_name }}
-          </option>
-        </select>
-        <input v-model.number="prevDayShiftDraft.shiftQty" type="number" min="1" step="1" placeholder="台数" />
-        <button class="btn" type="button" @click="addPrevDayShiftRule">追加</button>
-      </div>
-      <div class="settings-list settings-rules">
-        <div v-for="(rule, idx) in prevDayShiftRules" :key="`shift-rule-${rule.lineCode}-${rule.processCode}`" class="settings-rule-row">
-          <span>{{ rule.lineCode }} / {{ rule.processCode }} / 前日シフト {{ rule.shiftQty }}台</span>
-          <button class="btn" type="button" @click="removePrevDayShiftRule(idx)">削除</button>
+
+      <div class="settings-section">
+        <div class="settings-section-header" @click="settingsCollapsed.lines = !settingsCollapsed.lines">
+          <span class="settings-section-arrow">{{ settingsCollapsed.lines ? '▶' : '▼' }}</span>
+          タブ別ライン選択
         </div>
-        <div v-if="!prevDayShiftRules.length" class="settings-note">設定なし</div>
-      </div>
-      <div class="settings-note" style="margin-top: 12px;">ガント開始時刻設定（ライン×工程）</div>
-      <div class="settings-rule-editor">
-        <select v-model="ganttStartTimeDraft.lineCode">
-          <option value="">ライン選択</option>
-          <option v-for="line in lines" :key="`gst-line-${line.id}`" :value="normalizeLineCode(line.line_code)">
-            {{ line.line_code }} - {{ line.line_name }}
-          </option>
-        </select>
-        <select v-model="ganttStartTimeDraft.processCode">
-          <option value="">工程選択</option>
-          <option v-for="proc in processOptions" :key="`gst-proc-${proc.id}`" :value="normalizeProcessCode(proc.process_code)">
-            {{ proc.process_code }} - {{ proc.process_name }}
-          </option>
-        </select>
-        <input v-model="ganttStartTimeDraft.startTime" type="time" step="60" />
-        <button class="btn" type="button" @click="addGanttStartTimeRule">追加</button>
-      </div>
-      <div class="settings-list settings-rules">
-        <div v-for="(rule, idx) in ganttStartTimeRules" :key="`gst-rule-${rule.lineCode}-${rule.processCode}`" class="settings-rule-row">
-          <span>{{ rule.lineCode }} / {{ rule.processCode }} / 開始 {{ rule.startTime }}</span>
-          <button class="btn" type="button" @click="removeGanttStartTimeRule(idx)">削除</button>
+        <div v-show="!settingsCollapsed.lines" class="settings-section-body">
+          <p class="settings-note">タブごとに表示対象のラインを選択して保存します。</p>
+          <div class="settings-selector">
+            <label>対象タブ</label>
+            <select v-model="settingsTargetTab">
+              <option v-for="tab in configurablePlanTabs" :key="`plan-line-setting-${tab.key}`" :value="tab.key">
+                {{ tab.label }}
+              </option>
+            </select>
+          </div>
+          <div class="settings-list">
+            <label v-for="line in lines" :key="`plan-target-${line.id}`" class="settings-check">
+              <input
+                type="checkbox"
+                :checked="isLineSelectedForTargetTab(line.line_code)"
+                @change="toggleLineForTargetTab(line.line_code)"
+              />
+              <span>{{ line.line_code }} - {{ line.line_name }}</span>
+            </label>
+          </div>
         </div>
-        <div v-if="!ganttStartTimeRules.length" class="settings-note">設定なし</div>
       </div>
-      <div class="settings-note" style="margin-top: 12px;">計算特例（ライン×工程×計算対象×設定）</div>
-      <div class="settings-rule-editor">
-        <select v-model="plannedStockCalcDraft.lineCode">
-          <option value="">ライン選択</option>
-          <option v-for="line in lines" :key="`psc-line-${line.id}`" :value="normalizeLineCode(line.line_code)">
-            {{ line.line_code }} - {{ line.line_name }}
-          </option>
-        </select>
-        <select v-model="plannedStockCalcDraft.processCode">
-          <option value="">工程選択</option>
-          <option v-for="proc in processOptions" :key="`psc-proc-${proc.id}`" :value="normalizeProcessCode(proc.process_code)">
-            {{ proc.process_code }} - {{ proc.process_name }}
-          </option>
-        </select>
-        <select v-model="plannedStockCalcDraft.calcTarget">
-          <option value="PLANNED_STOCK">計画在庫</option>
-          <option value="STOCK">在庫</option>
-          <option value="DEMAND">需要</option>
-        </select>
-        <select v-model="plannedStockCalcDraft.setting">
-          <option value="PARENT_PLAN">後工程計画使用</option>
-        </select>
-        <button class="btn" type="button" @click="addPlannedStockCalcRule">追加</button>
-      </div>
-      <div class="settings-list settings-rules">
-        <div v-for="(rule, idx) in plannedStockCalcRules" :key="`psc-rule-${rule.lineCode}-${rule.processCode}-${rule.calcTarget}`" class="settings-rule-row">
-          <span>{{ rule.lineCode }} / {{ rule.processCode }} / {{ rule.calcTargetLabel || rule.calcTarget }} / {{ rule.settingLabel || rule.setting }}</span>
-          <button class="btn" type="button" @click="removePlannedStockCalcRule(idx)">削除</button>
+
+      <div class="settings-section">
+        <div class="settings-section-header" @click="settingsCollapsed.prevDayShift = !settingsCollapsed.prevDayShift">
+          <span class="settings-section-arrow">{{ settingsCollapsed.prevDayShift ? '▶' : '▼' }}</span>
+          前日シフト台数設定（ライン×工程）
+          <span class="settings-section-count">{{ prevDayShiftRules.length }}件</span>
         </div>
-        <div v-if="!plannedStockCalcRules.length" class="settings-note">設定なし</div>
+        <div v-show="!settingsCollapsed.prevDayShift" class="settings-section-body">
+          <div class="settings-rule-editor">
+            <select v-model="prevDayShiftDraft.lineCode">
+              <option value="">ライン選択</option>
+              <option v-for="line in lines" :key="`shift-line-${line.id}`" :value="normalizeLineCode(line.line_code)">
+                {{ line.line_code }} - {{ line.line_name }}
+              </option>
+            </select>
+            <select v-model="prevDayShiftDraft.processCode">
+              <option value="">工程選択</option>
+              <option v-for="proc in processOptions" :key="`shift-proc-${proc.id}`" :value="normalizeProcessCode(proc.process_code)">
+                {{ proc.process_code }} - {{ proc.process_name }}
+              </option>
+            </select>
+            <input v-model.number="prevDayShiftDraft.shiftQty" type="number" min="1" step="1" placeholder="台数" />
+            <button class="btn" type="button" @click="addPrevDayShiftRule">追加</button>
+          </div>
+          <div class="settings-list settings-rules">
+            <div v-for="(rule, idx) in prevDayShiftRules" :key="`shift-rule-${rule.lineCode}-${rule.processCode}`" class="settings-rule-row">
+              <span>{{ rule.lineCode }} / {{ rule.processCode }} / 前日シフト {{ rule.shiftQty }}台</span>
+              <button class="btn" type="button" @click="removePrevDayShiftRule(idx)">削除</button>
+            </div>
+            <div v-if="!prevDayShiftRules.length" class="settings-note">設定なし</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-header" @click="settingsCollapsed.ganttStartTime = !settingsCollapsed.ganttStartTime">
+          <span class="settings-section-arrow">{{ settingsCollapsed.ganttStartTime ? '▶' : '▼' }}</span>
+          ガント開始時刻設定（ライン×工程）
+          <span class="settings-section-count">{{ ganttStartTimeRules.length }}件</span>
+        </div>
+        <div v-show="!settingsCollapsed.ganttStartTime" class="settings-section-body">
+          <div class="settings-rule-editor">
+            <select v-model="ganttStartTimeDraft.lineCode">
+              <option value="">ライン選択</option>
+              <option v-for="line in lines" :key="`gst-line-${line.id}`" :value="normalizeLineCode(line.line_code)">
+                {{ line.line_code }} - {{ line.line_name }}
+              </option>
+            </select>
+            <select v-model="ganttStartTimeDraft.processCode">
+              <option value="">工程選択</option>
+              <option v-for="proc in processOptions" :key="`gst-proc-${proc.id}`" :value="normalizeProcessCode(proc.process_code)">
+                {{ proc.process_code }} - {{ proc.process_name }}
+              </option>
+            </select>
+            <input v-model="ganttStartTimeDraft.startTime" type="time" step="60" />
+            <button class="btn" type="button" @click="addGanttStartTimeRule">追加</button>
+          </div>
+          <div class="settings-list settings-rules">
+            <div v-for="(rule, idx) in ganttStartTimeRules" :key="`gst-rule-${rule.lineCode}-${rule.processCode}`" class="settings-rule-row">
+              <span>{{ rule.lineCode }} / {{ rule.processCode }} / 開始 {{ rule.startTime }}</span>
+              <button class="btn" type="button" @click="removeGanttStartTimeRule(idx)">削除</button>
+            </div>
+            <div v-if="!ganttStartTimeRules.length" class="settings-note">設定なし</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-header" @click="settingsCollapsed.calcSpecial = !settingsCollapsed.calcSpecial">
+          <span class="settings-section-arrow">{{ settingsCollapsed.calcSpecial ? '▶' : '▼' }}</span>
+          計算特例（ライン×工程×計算対象×設定）
+          <span class="settings-section-count">{{ plannedStockCalcRules.length }}件</span>
+        </div>
+        <div v-show="!settingsCollapsed.calcSpecial" class="settings-section-body">
+          <div class="settings-rule-editor">
+            <select v-model="plannedStockCalcDraft.lineCode">
+              <option value="">ライン選択</option>
+              <option v-for="line in lines" :key="`psc-line-${line.id}`" :value="normalizeLineCode(line.line_code)">
+                {{ line.line_code }} - {{ line.line_name }}
+              </option>
+            </select>
+            <select v-model="plannedStockCalcDraft.processCode">
+              <option value="">工程選択</option>
+              <option v-for="proc in processOptions" :key="`psc-proc-${proc.id}`" :value="normalizeProcessCode(proc.process_code)">
+                {{ proc.process_code }} - {{ proc.process_name }}
+              </option>
+            </select>
+            <select v-model="plannedStockCalcDraft.calcTarget">
+              <option value="PLANNED_STOCK">計画在庫</option>
+              <option value="STOCK">在庫</option>
+              <option value="DEMAND">需要</option>
+            </select>
+            <select v-model="plannedStockCalcDraft.setting">
+              <option value="PARENT_PLAN">後工程計画使用</option>
+            </select>
+            <button class="btn" type="button" @click="addPlannedStockCalcRule">追加</button>
+          </div>
+          <div class="settings-list settings-rules">
+            <div v-for="(rule, idx) in plannedStockCalcRules" :key="`psc-rule-${rule.lineCode}-${rule.processCode}-${rule.calcTarget}`" class="settings-rule-row">
+              <span>{{ rule.lineCode }} / {{ rule.processCode }} / {{ rule.calcTargetLabel || rule.calcTarget }} / {{ rule.settingLabel || rule.setting }}</span>
+              <button class="btn" type="button" @click="removePlannedStockCalcRule(idx)">削除</button>
+            </div>
+            <div v-if="!plannedStockCalcRules.length" class="settings-note">設定なし</div>
+          </div>
+        </div>
       </div>
       <div class="settings-actions">
         <button class="btn" type="button" @click="saveLineSettings">保存</button>
@@ -1327,6 +1363,7 @@ const productOrderActiveCode = ref('')
 const productOrderCache = ref(new Map())
 const productColorCache = ref(new Map())
 const lineSettingsMessage = ref('')
+const settingsCollapsed = ref({ lines: false, prevDayShift: true, ganttStartTime: true, calcSpecial: true })
 const prevDayShiftRules = ref([])
 const prevDayShiftDraft = ref({
   lineCode: '',
@@ -5372,6 +5409,28 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
   margin: 0;
   font-size: 17px;
 }
+.settings-section {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  margin-top: 10px;
+  overflow: hidden;
+}
+.settings-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: #f8fafc;
+  font-weight: 600;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+  user-select: none;
+}
+.settings-section-header:hover { background: #f1f5f9; }
+.settings-section-arrow { font-size: 10px; color: #6b7280; width: 12px; }
+.settings-section-count { margin-left: auto; font-weight: 400; font-size: 12px; color: #6b7280; }
+.settings-section-body { padding: 8px 12px 12px; }
 .settings-note {
   margin: 6px 0 12px;
   color: #64748b;

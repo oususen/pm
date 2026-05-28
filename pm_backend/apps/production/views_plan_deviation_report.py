@@ -15,6 +15,9 @@ from orders.utils.calendar_utils import get_business_today, WorkingDayCalculator
 from masters.models import Line
 from production.models_laser_actual import LaserActual, LaserActualDetail
 from production.models_line_backlog import LineBacklog
+from production.models_gantt_display_product_map import GanttDisplayProductMap
+from production.models_line_gantt_plan import LineGanttPlan
+from production.models_plan_deviation_config import PlanDeviationLineConfig
 from production.models_record_confirmation import ProductionRecordConfirmation
 
 
@@ -69,24 +72,33 @@ class PlanDeviationReportView(APIView):
         )
         coproduct_exclude_ids = coproduct_parent_ids | coproduct_non_driver_ids
 
-        # 工程・製品別に計画数を集計（全ライン: LineBacklog sequence_no>0）
+        # LineGanttPlanを使用するライン一覧
+        gantt_line_ids = set(
+            PlanDeviationLineConfig.objects.values_list('line_id', flat=True)
+        )
+
+        # 工程・製品別に計画数を集計
         # key: (line_id, process_id, product_id)
         plan_map = {}  # key -> plan_qty
         info_map = {}  # key -> {line_code, process_name, ...}
-        plan_filter = Q(
+
+        # --- LineBacklog から取得するライン（gantt_line_ids 以外） ---
+        backlog_plan_filter = Q(
             plan_date=target_date,
             sequence_no__gt=0,
         )
         if line_id:
-            plan_filter &= Q(line_id=line_id)
+            backlog_plan_filter &= Q(line_id=line_id)
         if line_type:
-            plan_filter &= Q(line__line_type=line_type)
+            backlog_plan_filter &= Q(line__line_type=line_type)
         if process_id:
-            plan_filter &= Q(process_id=process_id)
+            backlog_plan_filter &= Q(process_id=process_id)
+        if gantt_line_ids:
+            backlog_plan_filter &= ~Q(line_id__in=gantt_line_ids)
 
         for row in (
             LineBacklog.objects
-            .filter(plan_filter)
+            .filter(backlog_plan_filter)
             .exclude(plan_qty=0)
             .exclude(product_id__in=coproduct_exclude_ids)
             .values(
@@ -110,6 +122,59 @@ class PlanDeviationReportView(APIView):
                     'product_code': row['product__product_code'],
                     'product_name': row['product__product_name'],
                 }
+
+        # --- LineGanttPlan から取得するライン ---
+        if gantt_line_ids:
+            gantt_filter = Q(plan_date=target_date)
+            if line_id:
+                if int(line_id) in gantt_line_ids:
+                    gantt_filter &= Q(line_id=line_id)
+                else:
+                    gantt_filter = None
+            else:
+                gantt_filter &= Q(line_id__in=gantt_line_ids)
+                if line_type:
+                    gantt_filter &= Q(line__line_type=line_type)
+
+            if gantt_filter is not None:
+                gantt_plans = (
+                    LineGanttPlan.objects
+                    .filter(gantt_filter)
+                    .select_related('line', 'product')
+                )
+                from masters.models import Process
+                process_cache = {}
+                for gp in gantt_plans:
+                    if not gp.processes_plan:
+                        continue
+                    for proc in gp.processes_plan:
+                        proc_id = proc.get('process_id')
+                        qty = proc.get('quantity', 0)
+                        output_product_id = proc.get('output_product_id')
+                        if not proc_id or not qty or not output_product_id:
+                            continue
+                        if process_id and proc_id != process_id:
+                            continue
+                        key = (gp.line_id, proc_id, output_product_id)
+                        plan_map[key] = plan_map.get(key, 0) + int(qty)
+                        if key not in info_map:
+                            if proc_id not in process_cache:
+                                try:
+                                    process_cache[proc_id] = Process.objects.get(id=proc_id)
+                                except Process.DoesNotExist:
+                                    process_cache[proc_id] = None
+                            proc_obj = process_cache[proc_id]
+                            info_map[key] = {
+                                'line_id': gp.line_id,
+                                'line_code': gp.line.line_code,
+                                'line_name': gp.line.line_name,
+                                'process_id': proc_id,
+                                'process_code': proc.get('process_code', proc_obj.process_code if proc_obj else ''),
+                                'process_name': proc.get('process_name', proc_obj.process_name if proc_obj else ''),
+                                'product_id': output_product_id,
+                                'product_code': proc.get('output_product_code', ''),
+                                'product_name': proc.get('output_product_name', ''),
+                            }
 
         # 実績数取得（sequence_no=0）
         actual_filter = Q(plan_date=target_date, sequence_no=0)
@@ -151,9 +216,27 @@ class PlanDeviationReportView(APIView):
         # 全キーを統合（計画あり or 実績あり）
         all_keys = set(plan_map.keys()) | set(actual_map.keys())
 
+        # ガント適用ライン: 表示マップに登録された(line, process, display_product)のみ許可
+        gantt_allowed_keys = set()
+        gantt_lines_with_map = set()
+        if gantt_line_ids:
+            for row in (
+                GanttDisplayProductMap.objects
+                .filter(line_id__in=gantt_line_ids)
+                .values_list('line_id', 'process_id', 'display_product_id')
+            ):
+                gantt_allowed_keys.add(row)
+                gantt_lines_with_map.add(row[0])
+
         # 乖離データ構築
         items = []
         for key in all_keys:
+            line_id_of_key = key[0]
+
+            # マップ登録があるガント適用ラインのみフィルタ
+            if line_id_of_key in gantt_lines_with_map and key not in gantt_allowed_keys:
+                continue
+
             plan_qty = plan_map.get(key, 0)
             actual_qty = actual_map.get(key, 0)
             deviation = actual_qty - plan_qty
@@ -224,6 +307,7 @@ class PlanDeviationReportView(APIView):
             },
             'laser_duplicates': laser_duplicates,
             'confirmation': confirmation,
+            'gantt_line_ids': sorted(gantt_line_ids),
         })
 
     @staticmethod
@@ -277,3 +361,35 @@ class PlanDeviationReportView(APIView):
         # 数量の大きい順
         duplicates.sort(key=lambda x: x['total_qty'], reverse=True)
         return duplicates
+
+
+class PlanDeviationLineConfigView(APIView):
+    """計画乖離レポートのライン設定（LineGanttPlan使用ライン）"""
+
+    def get(self, request):
+        line_ids = list(
+            PlanDeviationLineConfig.objects.values_list('line_id', flat=True)
+        )
+        return Response({'gantt_line_ids': sorted(line_ids)})
+
+    def post(self, request):
+        line_id = request.data.get('line_id')
+        enabled = request.data.get('enabled', True)
+        if not line_id:
+            return Response({'detail': 'line_id は必須です'}, status=400)
+        try:
+            line_id = int(line_id)
+        except (ValueError, TypeError):
+            return Response({'detail': 'line_id が不正です'}, status=400)
+        if not Line.objects.filter(id=line_id).exists():
+            return Response({'detail': 'ライン不明'}, status=404)
+
+        if enabled:
+            PlanDeviationLineConfig.objects.get_or_create(line_id=line_id)
+        else:
+            PlanDeviationLineConfig.objects.filter(line_id=line_id).delete()
+
+        line_ids = list(
+            PlanDeviationLineConfig.objects.values_list('line_id', flat=True)
+        )
+        return Response({'gantt_line_ids': sorted(line_ids)})

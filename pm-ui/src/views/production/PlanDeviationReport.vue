@@ -42,6 +42,7 @@
           placeholder="お気に入り名"
         />
         <button class="btn-favorite" title="お気に入り登録" @click="saveFavorite" :disabled="loading">★</button>
+        <button class="btn-gantt-config" @click="showGanttConfig = true" title="ガント計画適用ライン設定">⚙</button>
         <button class="btn-reload" @click="loadReport" :disabled="loading">更新</button>
         <button
           class="btn-confirm"
@@ -120,7 +121,7 @@
           <td>{{ item.process_name }}</td>
           <td>{{ item.product_code }}</td>
           <td>{{ item.product_name }}</td>
-          <td class="num">{{ item.plan_qty }}</td>
+          <td class="num">{{ item.plan_qty }}<span v-if="ganttLineIds.has(item.line_id)" class="gantt-badge" title="ガント計画">G</span></td>
           <td class="num">{{ item.actual_qty }}</td>
           <td class="num" :class="item.status">
             {{ item.deviation > 0 ? '+' : '' }}{{ item.deviation }}
@@ -138,6 +139,49 @@
     </table>
 
     <div v-else class="no-data">乖離データはありません</div>
+
+    <!-- ガント計画適用ライン設定モーダル -->
+    <div v-if="showGanttConfig" class="ds-overlay" @click.self="showGanttConfig = false">
+      <div class="ds-modal" style="max-width: 500px;">
+        <div class="ds-header">
+          <h3>計画データソース設定</h3>
+          <button class="ds-close" @click="showGanttConfig = false">×</button>
+        </div>
+        <div style="padding: 12px 18px 6px; font-size: 13px; color: #555;">
+          ON: LineGanttPlanから計画数取得 / OFF: LineBacklogから取得（デフォルト）
+        </div>
+        <div style="padding: 4px 18px 6px; font-size: 12px; color: #c62828; background: #ffebee; margin: 6px 18px; border-radius: 4px; padding: 8px 12px; line-height: 1.6;">
+          ⚠ ONにする前に、対象ラインの全製品の<strong>ガントチャート表示品マップ</strong>を設定してください。マップ未登録の製品は乖離レポートに表示されません。
+        </div>
+        <div style="padding: 8px 18px 16px; max-height: 400px; overflow-y: auto;">
+          <table class="ds-table">
+            <thead>
+              <tr>
+                <th>コード</th>
+                <th>ライン名</th>
+                <th style="text-align: center;">ガント計画</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="line in configLines" :key="line.id">
+                <td style="font-family: monospace;">{{ line.line_code }}</td>
+                <td>{{ line.line_name }}</td>
+                <td style="text-align: center;">
+                  <label class="toggle-switch">
+                    <input
+                      type="checkbox"
+                      :checked="ganttLineIds.has(line.id)"
+                      @change="toggleGanttLine(line.id, $event.target.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
 
     <div v-if="showDataSource" class="ds-overlay" @click.self="showDataSource = false">
       <div class="ds-modal">
@@ -183,6 +227,25 @@ const confirming = ref(false)
 const favorites = ref([])
 const selectedFavoriteId = ref('')
 const favoriteName = ref('')
+
+const showGanttConfig = ref(false)
+const ganttLineIds = ref(new Set())
+
+const configLines = computed(() => {
+  if (!lineTypeFilter.value) return lines.value
+  return lines.value.filter(l => l.line_type === lineTypeFilter.value)
+})
+
+async function toggleGanttLine(lineId, enabled) {
+  try {
+    const res = await api.planDeviationLineConfig.toggle(lineId, enabled)
+    ganttLineIds.value = new Set(res.data.gantt_line_ids || [])
+    loadReport()
+  } catch (e) {
+    console.error('ガント設定エラー:', e)
+    alert('設定の保存に失敗しました。')
+  }
+}
 
 const FAVORITE_SCREEN_KEY = 'production.plan_deviation_report'
 
@@ -338,6 +401,9 @@ async function loadReport() {
     summary.value = res.data.summary || null
     laserDuplicates.value = res.data.laser_duplicates || []
     confirmation.value = res.data.confirmation || null
+    if (res.data.gantt_line_ids) {
+      ganttLineIds.value = new Set(res.data.gantt_line_ids)
+    }
     // 初回ロード時、サーバーが返した日付（前営業日）をセット
     if (!targetDate.value && res.data.date) {
       targetDate.value = res.data.date
@@ -641,6 +707,58 @@ td.unplanned {
   background: #fff3e0;
   color: #e65100;
 }
+.btn-gantt-config {
+  padding: 6px 10px;
+  background: #f0fdf4;
+  color: #166534;
+  border: 1px solid #86efac;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.btn-gantt-config:hover { background: #dcfce7; }
+
+.gantt-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  background: #dcfce7;
+  color: #166534;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: bold;
+  vertical-align: middle;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: #cbd5e1;
+  border-radius: 20px;
+  transition: .2s;
+}
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+  background: #fff;
+  border-radius: 50%;
+  transition: .2s;
+}
+.toggle-switch input:checked + .toggle-slider { background: #22c55e; }
+.toggle-switch input:checked + .toggle-slider::before { transform: translateX(16px); }
+
 .ds-btn { margin-left: 8px; padding: 4px 6px; border: 1px solid #94a3b8; border-radius: 4px; background: #f8fafc; color: #475569; cursor: pointer; vertical-align: middle; display: inline-flex; align-items: center; }
 .ds-btn:hover { background: #e2e8f0; }
 .ds-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 9999; display: flex; align-items: center; justify-content: center; }

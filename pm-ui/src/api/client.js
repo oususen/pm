@@ -55,7 +55,7 @@ import { createSpotLineActualsAPI } from './resources/spotLineActuals'
 import { createSystemSettingsAPI } from './resources/systemSettings'
 import { createGanttDisplayProductMapsAPI } from './resources/ganttDisplayProductMaps'
 import { createLineProductDisplayOrdersAPI } from './resources/lineProductDisplayOrders'
-import { createPlanDeviationReportAPI, createRecordConfirmationAPI } from './resources/planDeviationReport'
+import { createPlanDeviationReportAPI, createRecordConfirmationAPI, createPlanDeviationLineConfigAPI } from './resources/planDeviationReport'
 import { createKubotaSakaiTrucksAPI } from './resources/kubotaSakaiTrucks'
 import { createKubotaSakaiDueAdjustmentsAPI } from './resources/kubotaSakaiDueAdjustments'
 import { createKubotaSakaiTripAssignmentsAPI } from './resources/kubotaSakaiTripAssignments'
@@ -193,6 +193,7 @@ export default {
   ganttDisplayProductMaps: createGanttDisplayProductMapsAPI(client),
   lineProductDisplayOrders: createLineProductDisplayOrdersAPI(client),
   planDeviationReport: createPlanDeviationReportAPI(client),
+  planDeviationLineConfig: createPlanDeviationLineConfigAPI(client),
   recordConfirmations: createRecordConfirmationAPI(client),
   kubotaSakaiTrucks: createKubotaSakaiTrucksAPI(client),
   kubotaSakaiDueAdjustments: createKubotaSakaiDueAdjustmentsAPI(client),
