@@ -60,7 +60,9 @@
     </div>
 
     <div class="note">
-      各製品計画数（sequence_no&gt;0）と実績数（sequence_no=0）を比較して表示します。計画数が0で実績数がある場合は「計画外」として表示されます。
+      計画数と実績数を比較して乖離を表示します。ガンチャートの計画数との比較するとき、上⚙ボタン（更新ボタンの左）で当該ラインを適応設定してください<br/>
+      計画数: 通常ラインはLineBacklog（seq&gt;0）、<span class="gantt-badge">G</span>ラインはLineGanttPlanから取得。<br/>
+      実績数: 全ラインLineBacklog（seq=0）から取得。
     </div>
 
     <!-- レーザ重複実績セクション -->
