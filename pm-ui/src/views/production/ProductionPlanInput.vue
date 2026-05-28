@@ -5857,7 +5857,7 @@ thead tr.head-level2 th.sticky-col {
   max-width: 25px !important;
 }
 .day-end {
-  border-right: 2px solid #000 !important;
+  border-right: 3px solid #000 !important;
 }
 .week-gap {
   width: 6px !important;
@@ -6095,6 +6095,10 @@ thead .sticky-col {
 }
 .stock {
   background: #f7f9fb;
+  font-family: Consolas, "Courier New", monospace;
+}
+.stock .readonly-value.negative {
+  color: #b8860b;
 }
 .plan {
   background: #fffbe6;
@@ -6105,13 +6109,14 @@ thead .sticky-col {
 .stock-plan {
   background: #f1f7ff;
   padding-right: 0.5px !important;
+  font-family: "Noto Sans JP", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 }
 .plan-grid tbody tr[style] td:not(.week-gap) {
   background: inherit !important;
   color: inherit !important;
 }
 .plan-grid tbody tr[style] td.day-end {
-  border-right: 2px solid #000 !important;
+  border-right: 3px solid #000 !important;
 }
 .plan-grid tbody tr[style] td.sticky-col {
   background: inherit !important;
