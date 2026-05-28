@@ -187,9 +187,14 @@ class PlanDeviationReportView(APIView):
 
         actual_map = {}
         actual_info = {}
+
+        # ガント適用ライン以外: 連産品除外
+        non_gantt_actual_filter = actual_filter
+        if gantt_line_ids:
+            non_gantt_actual_filter = actual_filter & ~Q(line_id__in=gantt_line_ids)
         for row in (
             LineBacklog.objects
-            .filter(actual_filter)
+            .filter(non_gantt_actual_filter)
             .exclude(actual_qty=0)
             .exclude(product_id__in=coproduct_exclude_ids)
             .values(
@@ -212,6 +217,37 @@ class PlanDeviationReportView(APIView):
                 'product_code': row['product__product_code'],
                 'product_name': row['product__product_name'],
             }
+
+        # ガント適用ライン: 連産品除外しない
+        if gantt_line_ids:
+            gantt_actual_filter = actual_filter & Q(line_id__in=gantt_line_ids)
+            if line_id and int(line_id) not in gantt_line_ids:
+                gantt_actual_filter = None
+            if gantt_actual_filter is not None:
+                for row in (
+                    LineBacklog.objects
+                    .filter(gantt_actual_filter)
+                    .exclude(actual_qty=0)
+                    .values(
+                        'line_id', 'line__line_code', 'line__line_name',
+                        'process_id', 'process__process_code', 'process__process_name',
+                        'product_id', 'product__product_code', 'product__product_name',
+                        'actual_qty',
+                    )
+                ):
+                    key = (row['line_id'], row['process_id'], row['product_id'])
+                    actual_map[key] = row['actual_qty'] or 0
+                    actual_info[key] = {
+                        'line_id': row['line_id'],
+                        'line_code': row['line__line_code'],
+                        'line_name': row['line__line_name'],
+                        'process_id': row['process_id'],
+                        'process_code': row['process__process_code'],
+                        'process_name': row['process__process_name'],
+                        'product_id': row['product_id'],
+                        'product_code': row['product__product_code'],
+                        'product_name': row['product__product_name'],
+                    }
 
         # 全キーを統合（計画あり or 実績あり）
         all_keys = set(plan_map.keys()) | set(actual_map.keys())
