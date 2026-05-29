@@ -109,6 +109,14 @@ const tiles = computed(() => {
       resource: "production.process_input",
     },
     {
+      to: "/production/dual-process-input",
+      label: "１人２工程入力",
+      icon: "👤",
+      category: "input",
+      required: "edit",
+      resource: "production.process_input",
+    },
+    {
       to: "/production/simultaneous-process-input",
       label: t("productionMenu.tiles.simultaneousInput"),
       icon: "🔄",

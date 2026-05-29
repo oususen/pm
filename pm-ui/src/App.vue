@@ -1,7 +1,7 @@
 <template>
   <div class="app-root" :class="{ 'dev-env': isDev }">
     <!-- 開発環境バナー -->
-    <div v-if="isDev" class="dev-banner">開発環境</div>
+    <div v-if="isDev && showLayout" class="dev-banner">開発環境</div>
     <!-- グローバルナビゲーション -->
     <GlobalNavigation v-if="showLayout" :is-mobile="isMobile" :today-text="todayText" />
 
@@ -29,7 +29,7 @@ const isMobile = ref(false);
 let mediaQuery = null;
 
 const route = useRoute();
-const showLayout = computed(() => !route.meta?.hideLayout);
+const showLayout = computed(() => !route.meta?.hideLayout && route.query.embed !== 'tablet');
 
 // 開発環境かどうか判定（本番IP以外は全て開発環境）
 const isDev = computed(() => {

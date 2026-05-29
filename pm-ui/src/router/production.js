@@ -180,6 +180,16 @@ const production = [
     },
   },
   {
+    path: "/production/dual-process-input",
+    name: "DualProcessInput",
+    component: () => import("@/views/production/DualProcessInput.vue"),
+    meta: {
+      pageTitle: "１人２工程入力",
+      allowedRecordTypes: ["PRODUCTION", "EQUIPMENT_STATE"],
+      manualPath: "生産/工程作業入力.md",
+    },
+  },
+  {
     path: "/production/simultaneous-process-input",
     name: "SimultaneousProcessInput",
     component: () => import("@/views/production/SimultaneousProcessInput.vue"),

@@ -1,57 +1,99 @@
 <template>
-  <div class="desktop-process-input" :class="[pageModeClass]">
+  <div class="desktop-process-input" :class="[pageModeClass, { 'embed-tablet': isEmbeddedTablet, 'show-recent': showRecentPanel }]">
     <!-- ヘッダー -->
-    <div class="header">
-      <h2 class="page-title">工程作業記録 <button v-if="authState.user?.is_superuser" class="ds-btn" @click="showDataSource = true" title="データソース"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></button></h2>
-      <button class="btn-checksheet-nav" @click="openIntegratedChecksheetOperation">チェックシート</button>
-      <button class="btn-inspection-nav" @click="openEquipmentInspection">設備点検</button>
-      <div class="header-controls">
-        <label class="header-label">ライン</label>
-        <div class="line-select-wrapper">
-          <select v-model="selectedLineId" @change="onLineChange" class="process-select">
-            <option value="">-- ライン選択 --</option>
-            <option v-for="line in availableLines" :key="line.id" :value="String(line.id)">
-              {{ line.line_code }} - {{ line.line_name }}
+    <div class="header" :class="{ 'header-embed': isEmbeddedTablet }">
+      <template v-if="!isEmbeddedTablet">
+        <h2 class="page-title">工程作業記録 <button v-if="authState.user?.is_superuser" class="ds-btn" @click="showDataSource = true" title="データソース"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></button></h2>
+      </template>
+      <button :class="isEmbeddedTablet ? 'embed-icon-btn' : 'btn-checksheet-nav'" @click="openIntegratedChecksheetOperation" :title="isEmbeddedTablet ? 'チェックシート' : ''">
+        <template v-if="isEmbeddedTablet"><span class="embed-text-icon">CS</span></template>
+        <template v-else>チェックシート</template>
+      </button>
+      <button :class="isEmbeddedTablet ? 'embed-icon-btn' : 'btn-inspection-nav'" @click="openEquipmentInspection" :title="isEmbeddedTablet ? '設備点検' : ''">
+        <template v-if="isEmbeddedTablet"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></template>
+        <template v-else>設備点検</template>
+      </button>
+      <template v-if="isEmbeddedTablet">
+        <div class="embed-separator"></div>
+        <button
+          v-for="type in availableRecordTypes"
+          :key="type.value"
+          class="embed-icon-btn"
+          :class="{ active: record.record_type === type.value }"
+          @click="record.record_type = type.value"
+          :title="type.label"
+        >
+          <svg v-if="type.value === 'EQUIPMENT_STATE'" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="15" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>
+          <svg v-else-if="type.value === 'PRODUCTION'" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+          <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+        </button>
+        <div class="embed-separator"></div>
+        <button class="embed-icon-btn" :class="{ active: showDone }" @click="showDone = !showDone" title="加工済">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </button>
+        <button class="embed-icon-btn" :class="{ active: showTomorrow }" @click="showTomorrow = !showTomorrow; onTomorrowToggle()" title="明日計画">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="M16 14l-4 4-2-2"/></svg>
+        </button>
+        <button class="embed-icon-btn" :class="{ active: showYesterday }" @click="showYesterday = !showYesterday; onYesterdayToggle()" title="前日表示">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <button class="embed-icon-btn" :class="{ active: filterCurrentTime }" @click="filterCurrentTime = !filterCurrentTime; onCurrentTimeToggle()" :disabled="isPlannedProductsLoading" title="現在時刻のみ">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </button>
+        <div class="embed-separator"></div>
+        <button class="btn-recent-toggle" :class="{ active: showRecentPanel }" @click="showRecentPanel = !showRecentPanel" title="最近の記録">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
+        </button>
+      </template>
+      <template v-if="!isEmbeddedTablet">
+        <div class="header-controls">
+          <label class="header-label">ライン</label>
+          <div class="line-select-wrapper">
+            <select v-model="selectedLineId" @change="onLineChange" class="process-select">
+              <option value="">-- ライン選択 --</option>
+              <option v-for="line in availableLines" :key="line.id" :value="String(line.id)">
+                {{ line.line_code }} - {{ line.line_name }}
+              </option>
+            </select>
+            <button
+              v-if="showSupportToggle"
+              type="button"
+              class="support-toggle-btn"
+              :class="{ active: isSupportMode }"
+              @click="toggleSupportMode"
+            >{{ isSupportMode ? '応援ON' : '応援OFF' }}</button>
+          </div>
+          <label class="header-label">工程</label>
+          <select v-model="selectedProcessId" @change="onProcessChange" class="process-select" :disabled="!selectedLineId">
+            <option value="">-- 工程選択 --</option>
+            <option v-for="p in filteredProcesses" :key="p.id" :value="p.id">
+              {{ p.process_code }} - {{ p.process_name }}
             </option>
           </select>
-          <button
-            v-if="showSupportToggle"
-            type="button"
-            class="support-toggle-btn"
-            :class="{ active: isSupportMode }"
-            @click="toggleSupportMode"
-          >{{ isSupportMode ? '応援ON' : '応援OFF' }}</button>
+          <span class="date-display">{{ currentDate }}</span>
+          <div
+            v-if="selectedProcessId && currentProcessingLabel"
+            class="header-processing clickable"
+            @click="jumpToProcessingProduct"
+          >
+            <span class="processing-chip">{{ currentProcessingLabel }}</span>
+          </div>
+          <div
+            v-else-if="selectedProcessId && pauseNoticeLabel"
+            class="header-processing pause"
+          >
+            <span class="processing-chip">{{ pauseNoticeLabel }}</span>
+          </div>
+          <div v-else class="header-processing empty">加工中なし</div>
         </div>
-        <label class="header-label">工程</label>
-        <select v-model="selectedProcessId" @change="onProcessChange" class="process-select" :disabled="!selectedLineId">
-          <option value="">-- 工程選択 --</option>
-          <option v-for="p in filteredProcesses" :key="p.id" :value="p.id">
-            {{ p.process_code }} - {{ p.process_name }}
-          </option>
-        </select>
-        <span class="date-display">{{ currentDate }}</span>
-        <div
-          v-if="selectedProcessId && currentProcessingLabel"
-          class="header-processing clickable"
-          @click="jumpToProcessingProduct"
-        >
-          <span class="processing-chip">{{ currentProcessingLabel }}</span>
-        </div>
-        <div
-          v-else-if="selectedProcessId && pauseNoticeLabel"
-          class="header-processing pause"
-        >
-          <span class="processing-chip">{{ pauseNoticeLabel }}</span>
-        </div>
-        <div v-else class="header-processing empty">加工中なし</div>
-      </div>
+      </template>
     </div>
 
     <!-- 4列レイアウト -->
     <div class="four-col-layout">
 
       <!-- 列①: コントロール -->
-      <div class="col-controls">
+      <div v-if="!isEmbeddedTablet" class="col-controls">
         <div class="section-title">記録種別</div>
         <div class="record-type-area">
           <button
@@ -235,7 +277,7 @@
 
             <!-- オペレータアクション -->
             <div v-if="shouldShowOperatorActionRow" class="action-btns-section">
-              <label class="equip-label">アクション <span class="required-mark">*</span></label>
+              <label class="equip-label">{{ isEmbeddedTablet ? 'AC' : 'アクション' }} <span class="required-mark">*</span></label>
               <div v-if="shouldShowAutoStartAction" class="op-action-btns">
                 <button type="button" class="op-action-btn action-start active" disabled>
                   {{ t(OPERATOR_ACTION_LABEL_KEYS.START) }}
@@ -311,6 +353,10 @@
                     :placeholder="t('processInput.batchNoPlaceholder')"
                     class="batch-input"
                   />
+                </div>
+                <div v-if="isEmbeddedTablet" class="qty-col">
+                  <label class="qty-label">作業日 <span class="required-mark">*</span></label>
+                  <input type="date" v-model="workDateStr" class="work-date-input" />
                 </div>
               </div>
             </div>
@@ -393,13 +439,15 @@
             <div
               v-if="record.record_type === 'PRODUCTION' && (selectedCoproductNoticeLoading || selectedCoproductChildren.length)"
               class="coproduct-notice"
+              :class="{ 'coproduct-collapsed': isEmbeddedTablet && !coproductExpanded }"
             >
               <div v-if="selectedCoproductNoticeLoading" class="coproduct-notice-loading">読み込み中...</div>
               <template v-else>
-                <div class="coproduct-notice-title">
-                  {{ t('processInput.coproductNotice.message', { code: selectedCoproductParentCode || record.product_code || '' }) }}
+                <div class="coproduct-notice-title" :class="{ 'coproduct-toggle': isEmbeddedTablet }" @click="isEmbeddedTablet && (coproductExpanded = !coproductExpanded)">
+                  <template v-if="isEmbeddedTablet">連産品 {{ selectedCoproductChildren.length }}件 {{ coproductExpanded ? '▲' : '▼' }}</template>
+                  <template v-else>{{ t('processInput.coproductNotice.message', { code: selectedCoproductParentCode || record.product_code || '' }) }}</template>
                 </div>
-                <div class="coproduct-notice-children">
+                <div v-if="!isEmbeddedTablet || coproductExpanded" class="coproduct-notice-children">
                   <span v-for="child in selectedCoproductChildren" :key="child.product_id" class="coproduct-chip">
                     {{ child.product_code }}
                     <span v-if="child.product_name" class="coproduct-chip-name">{{ child.product_name }}</span>
@@ -424,7 +472,7 @@
               </div>
             </div>
 
-            <div class="work-date-area">
+            <div v-if="!isEmbeddedTablet" class="work-date-area">
               <label class="qty-label">作業日 <span class="required-mark">*</span></label>
               <input type="date" v-model="workDateStr" class="work-date-input" />
               <div class="work-date-hint">上部の日付は表示用です。保存は作業日で行います。</div>
@@ -451,7 +499,7 @@
       </div>
 
       <!-- 列④: 最近の実績 -->
-      <div class="col-recent">
+      <div v-show="!isEmbeddedTablet || showRecentPanel" class="col-recent">
         <div class="section-title">最近の記録</div>
         <div v-if="recentRecordsForDisplay.length" class="recent-list">
           <div
@@ -1487,6 +1535,10 @@ const getRecentRecordColorStyle = (rec) => {
 // ──────────────────────────────
 // ページモードクラス
 // ──────────────────────────────
+const isEmbeddedTablet = computed(() => String(route.query.embed || '') === 'tablet')
+const showRecentPanel = ref(false)
+const coproductExpanded = ref(false)
+
 const pageModeClass = computed(() => {
   switch (record.value.equipment_state) {
     case 'RUNNING': return 'page-run'
@@ -2844,6 +2896,22 @@ watch(totalPages, (pages) => {
   if (currentPage.value > pages) currentPage.value = pages
 })
 
+// embed時: 加工中情報を親フレームに通知
+if (isEmbeddedTablet.value) {
+  watch(currentProcessingLabel, (label) => {
+    window.parent.postMessage({
+      type: 'processing-status',
+      processId: String(route.query.process_id || ''),
+      label: label || '',
+    }, '*')
+  }, { immediate: true })
+  window.addEventListener('message', (e) => {
+    if (e.data?.type === 'jump-to-processing' && e.data.processId === String(route.query.process_id || '')) {
+      jumpToProcessingProduct()
+    }
+  })
+}
+
 // ──────────────────────────────
 // 初期化
 // ──────────────────────────────
@@ -3058,6 +3126,9 @@ onMounted(async () => {
 .product-name { font-size: 14px; color: #555; margin-top: 2px; }
 .product-time-label { font-size: 12px; color: #0f172a; font-weight: 600; margin-top: 4px; }
 .action-btns-section { display: flex; flex-direction: column; gap: 6px; }
+.embed-tablet .action-btns-section { flex-direction: row; align-items: center; gap: 4px; }
+.embed-tablet .op-action-btns { gap: 4px; }
+.embed-tablet .op-action-btn { height: 26px; padding: 0 6px; font-size: 11px; border-radius: 4px; border-width: 1px; }
 .equip-label { font-size: 12px; color: #555; }
 .required-mark { color: #e53935; margin-left: 2px; }
 .op-action-btns { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -3137,6 +3208,8 @@ onMounted(async () => {
 }
 .coproduct-notice-loading { font-size: 12px; color: #92400e; font-weight: 600; }
 .coproduct-notice-title { font-size: 13px; font-weight: 700; color: #92400e; }
+.coproduct-toggle { cursor: pointer; font-size: 12px; }
+.coproduct-collapsed { padding: 4px 8px; gap: 0; }
 .coproduct-notice-children { display: flex; flex-wrap: wrap; gap: 6px; }
 .coproduct-chip {
   display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px;
@@ -3229,4 +3302,57 @@ onMounted(async () => {
 .ds-table th { background: #f8fafc; font-weight: 600; color: #374151; }
 .ds-table td:first-child { white-space: nowrap; font-weight: 500; color: #2563eb; }
 .ds-table td:nth-child(2) { font-family: monospace; font-size: 12px; color: #0f172a; }
+
+/* embed-tablet: 親フレーム（DualProcessInput）から iframe で埋め込まれた時 */
+.header-embed {
+  padding: 2px 8px;
+  gap: 6px;
+}
+.embed-icon-btn, .btn-recent-toggle {
+  height: 30px; width: 30px; padding: 0; border: 1px solid #cbd5e1; background: #fff; color: #64748b;
+  border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.embed-icon-btn:hover, .btn-recent-toggle:hover { background: #f1f5f9; }
+.embed-icon-btn.active { border-color: #14532d; background: #15803d; color: #fff; }
+.btn-recent-toggle.active { border-color: #14532d; background: #15803d; color: #fff; }
+.embed-separator { width: 1px; height: 20px; background: #d1d5db; flex-shrink: 0; }
+.embed-text-icon { font-size: 12px; font-weight: 800; line-height: 1; }
+.desktop-process-input.embed-tablet .four-col-layout {
+  grid-template-columns: 35fr 65fr;
+}
+.desktop-process-input.embed-tablet.show-recent .four-col-layout {
+  grid-template-columns: 35fr 65fr 180px;
+}
+.desktop-process-input.embed-tablet .col-list,
+.desktop-process-input.embed-tablet .col-form,
+.desktop-process-input.embed-tablet .col-recent {
+  padding: 0;
+}
+.desktop-process-input.embed-tablet .plan-item {
+  padding: 2px 4px; border-radius: 4px;
+}
+.embed-tablet .form-area { gap: 4px; padding: 4px !important; }
+.embed-tablet .product-header { padding-bottom: 2px; }
+.embed-tablet .product-code-large { font-size: 16px; }
+.embed-tablet .product-name { margin-top: 0; font-size: 12px; }
+.embed-tablet .product-time-label { margin-top: 0; font-size: 11px; }
+.embed-tablet .stats-and-actions { gap: 4px; }
+.embed-tablet .current-actual { gap: 8px; }
+.embed-tablet .stat-label { font-size: 10px; }
+.embed-tablet .stat-value { font-size: 16px; }
+.embed-tablet .reason-area { gap: 2px; }
+.embed-tablet .reason-area textarea { padding: 4px; }
+.embed-tablet .work-date-area { margin-bottom: 4px; }
+.embed-tablet .action-bar { gap: 4px; }
+.embed-tablet .coproduct-notice { padding: 4px 8px; gap: 4px; }
+.embed-tablet .qty-input-area { gap: 4px; }
+.embed-tablet .qty-row { gap: 8px; }
+.embed-tablet .qty-input { height: 30px; width: 54px; font-size: 14px; padding: 0 4px; border-width: 1px; border-radius: 4px; }
+.embed-tablet .batch-input { height: 30px; width: 82px; font-size: 12px; padding: 0 4px; border-radius: 4px; }
+.embed-tablet .qty-label { font-size: 11px; }
+.embed-tablet .btn-quick { padding: 2px 8px; font-size: 12px; border-radius: 4px; }
+.embed-tablet .work-date-input { height: 30px; font-size: 12px; padding: 0 4px; border-radius: 4px; }
+.embed-tablet .plan-qty-input { width: 46px; font-size: 13px; }
+.embed-tablet .plan-time-input { width: 60px; font-size: 12px; }
+.embed-tablet .plan-qty-btn { padding: 1px 6px; font-size: 11px; }
 </style>
