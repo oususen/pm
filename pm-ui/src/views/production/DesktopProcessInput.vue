@@ -423,6 +423,12 @@
               </div>
             </div>
 
+            <div class="work-date-area">
+              <label class="qty-label">作業日 <span class="required-mark">*</span></label>
+              <input type="date" v-model="workDateStr" class="work-date-input" />
+              <div class="work-date-hint">上部の日付は表示用です。保存は作業日で行います。</div>
+            </div>
+
             <div class="action-bar">
               <button class="btn-save" :disabled="!canSubmit || submitting" @click="submitRecord">
                 {{ submitting ? t('processInput.submitting') : t('processInput.submit') }}
@@ -761,6 +767,8 @@ const addCalendarDays = (baseDate, direction) => {
   d.setDate(d.getDate() + direction)
   return d
 }
+
+const workDateStr = ref(fmtYmd(getBusinessToday()))
 
 const currentDateYmd = computed(() => {
   const today = getBusinessToday()
@@ -2019,6 +2027,11 @@ const submitRecord = async () => {
       }
     }
     data.remarks = record.value.remarks
+    const targetWorkDate = (workDateStr.value || '').trim()
+    if (targetWorkDate && targetWorkDate !== currentDateYmd.value) {
+      if (!window.confirm(`表示日(${currentDateYmd.value})と作業日(${targetWorkDate})が異なります。作業日 ${targetWorkDate} で保存しますか？`)) return
+    }
+    if (targetWorkDate) data.work_date = targetWorkDate
     const checksheetReady = await ensureProductChecksheetBeforeRealtime(data)
     if (!checksheetReady) return
     const res = await api.processRealtime.create(data)
@@ -3097,6 +3110,9 @@ onMounted(async () => {
   color: #78350f; font-size: 12px; font-weight: 700;
 }
 .coproduct-chip-name { font-weight: 500; }
+.work-date-area { margin-bottom: 12px; }
+.work-date-input { padding: 6px 8px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
+.work-date-hint { font-size: 11px; color: #888; margin-top: 2px; }
 .action-bar { display: flex; gap: 8px; }
 .btn-save {
   height: 44px; padding: 0 24px; background: #4e7cbf; color: #fff; border: none;

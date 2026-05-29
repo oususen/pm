@@ -1188,6 +1188,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
     operator_name = serializers.CharField(max_length=50, required=False, allow_blank=True)
     remarks = serializers.CharField(required=False, allow_blank=True)
     event_data = serializers.JSONField(required=False, allow_null=True)
+    work_date = serializers.DateField(required=False, allow_null=True)
 
     def validate(self, attrs):
         if attrs.get('record_type') in ['PRODUCTION', 'SCRAP']:
@@ -1222,10 +1223,14 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
         except Process.DoesNotExist as exc:
             raise serializers.ValidationError({'process_id': '指定された工程が存在しません。'}) from exc
 
+        override_work_date = validated_data.pop('work_date', None)
         now = timezone.now()
         if timezone.is_aware(now):
             now = timezone.localtime(now).replace(tzinfo=None)
-        plan_date = resolve_workday_date_for_process(process, now)
+        if override_work_date:
+            plan_date = override_work_date
+        else:
+            plan_date = resolve_workday_date_for_process(process, now)
 
         product = None
         product_id = validated_data.pop('product_id', None)
@@ -1260,6 +1265,8 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                 raise serializers.ValidationError({'production_qty': '終了時に数量0を入力する場合は備考の入力が必要です。'})
             if not product:
                 raise serializers.ValidationError({'product_id': '終了実績の保存には製品の指定が必要です。'})
+
+        validated_data.pop('work_date', None)
 
         with transaction.atomic():
             parent_record = ProcessRealtimeRecord.objects.create(
