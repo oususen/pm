@@ -32,7 +32,8 @@
         <span class="date-display">{{ currentDate }}</span>
         <div
           v-if="selectedProcessId && currentProcessingLabel"
-          class="header-processing"
+          class="header-processing clickable"
+          @click="jumpToProcessingProduct"
         >
           <span class="processing-chip">{{ currentProcessingLabel }}</span>
         </div>
@@ -428,6 +429,16 @@
               <input type="date" v-model="workDateStr" class="work-date-input" />
               <div class="work-date-hint">上部の日付は表示用です。保存は作業日で行います。</div>
             </div>
+            <div v-if="isWorkDateChanged" class="reason-area">
+              <label class="qty-label">作業日変更理由 <span class="required-mark">*</span></label>
+              <select v-model="workDateChangeReason" class="reason-select">
+                <option value="">-- 選択 --</option>
+                <option value="入力忘れ">入力忘れ</option>
+                <option value="先行生産">先行生産</option>
+                <option value="OTHER">その他</option>
+              </select>
+              <input v-if="workDateChangeReason === 'OTHER'" type="text" v-model="workDateChangeReasonDetail" placeholder="理由を入力" class="reason-input" style="margin-top: 4px;" />
+            </div>
 
             <div class="action-bar">
               <button class="btn-save" :disabled="!canSubmit || submitting" @click="submitRecord">
@@ -769,6 +780,10 @@ const addCalendarDays = (baseDate, direction) => {
 }
 
 const workDateStr = ref(fmtYmd(getBusinessToday()))
+const workDateChangeReason = ref('')
+const workDateChangeReasonDetail = ref('')
+const businessTodayYmd = fmtYmd(getBusinessToday())
+const isWorkDateChanged = computed(() => (workDateStr.value || '') !== businessTodayYmd)
 
 const currentDateYmd = computed(() => {
   const today = getBusinessToday()
@@ -1096,6 +1111,13 @@ const currentProcessingLabel = computed(() => {
 })
 
 const isProductionRunning = computed(() => !!currentProcessingProductId.value)
+
+const jumpToProcessingProduct = () => {
+  const productId = currentProcessingProductId.value
+  if (!productId) return
+  const item = filteredListItems.value.find((it) => String(it.product) === String(productId))
+  if (item) selectPlannedProduct(item)
+}
 
 const tempEndedProductIds = computed(() => {
   const ids = new Set()
@@ -2028,10 +2050,20 @@ const submitRecord = async () => {
     }
     data.remarks = record.value.remarks
     const targetWorkDate = (workDateStr.value || '').trim()
-    if (targetWorkDate && targetWorkDate !== currentDateYmd.value) {
-      if (!window.confirm(`表示日(${currentDateYmd.value})と作業日(${targetWorkDate})が異なります。作業日 ${targetWorkDate} で保存しますか？`)) return
+    if (isWorkDateChanged.value) {
+      if (!workDateChangeReason.value) {
+        alert('作業日が今日と異なります。変更理由を選択してください。')
+        return
+      }
+      if (workDateChangeReason.value === 'OTHER' && !(workDateChangeReasonDetail.value || '').trim()) {
+        alert('その他の場合、理由の入力は必須です。')
+        return
+      }
+      const reasonText = workDateChangeReason.value === 'OTHER' ? workDateChangeReasonDetail.value.trim() : workDateChangeReason.value
+      if (!window.confirm(`作業日 ${targetWorkDate} で保存しますか？\n理由: ${reasonText}`)) return
+      data.work_date = targetWorkDate
+      data.remarks = ((data.remarks || '') + `\n【作業日変更: ${targetWorkDate}】${reasonText}`).trim()
     }
-    if (targetWorkDate) data.work_date = targetWorkDate
     const checksheetReady = await ensureProductChecksheetBeforeRealtime(data)
     if (!checksheetReady) return
     const res = await api.processRealtime.create(data)
@@ -2890,6 +2922,8 @@ onMounted(async () => {
 .header-processing.pause { background: #ffedd5; color: #9a3412; }
 .header-processing.empty { background: #f5f5f5; color: #999; font-weight: 400; }
 .processing-chip { white-space: nowrap; }
+.header-processing.clickable { cursor: pointer; }
+.header-processing.clickable:hover { filter: brightness(0.92); }
 
 /* 4列レイアウト */
 .four-col-layout {

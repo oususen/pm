@@ -193,6 +193,7 @@ def _resolve_inventory_effective_start_date(line_id, requested_start_date, end_d
             product_qs = product_qs.filter(product__is_line_final_product=True)
         product_ids_for_line = list(product_qs.values_list('product_id', flat=True).distinct())
 
+    # ここは在庫専用なので直親LT固定。進度の開始日は _resolve_product_recalc_start_date で算出
     max_lt = 0
     if product_ids_for_line:
         max_lt = max(
@@ -203,12 +204,13 @@ def _resolve_inventory_effective_start_date(line_id, requested_start_date, end_d
     return min(requested_start_date, stock_start_dt, inventory_start_dt)
 
 
-def _resolve_product_recalc_start_date(line_id, end_date, product_ids=None):
+def _resolve_product_recalc_start_date(line_id, end_date, product_ids=None, progress_only=False):
     """
     表示品番だけ再計算用の内部開始日を返す。
     画面の表示開始日は使わず、計算上必要な開始日だけを採用する。
+    在庫は直親LT、進度は累積LTを使用。
     """
-    from .inventory.inventory_calculator import _get_direct_parent_bom_lead_time
+    from .inventory.inventory_calculator import _get_direct_parent_bom_lead_time, _get_max_parent_bom_lead_time
 
     line_obj = Line.objects.filter(id=line_id).first()
     calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
@@ -264,10 +266,13 @@ def _resolve_product_recalc_start_date(line_id, end_date, product_ids=None):
             ).values_list('product_id', flat=True).distinct()
         )
 
+    # LT使い分け: 在庫=直親LT / 進度=累積LT（batch_adjust_info・progress_calculator と統一）
+    # 棚卸初期化(stocktake_initializer.py)は独自ロジックのため影響なし
+    lt_func = _get_max_parent_bom_lead_time if progress_only else _get_direct_parent_bom_lead_time
     max_lt = 0
     if product_ids_for_line:
         max_lt = max(
-            (int(_get_direct_parent_bom_lead_time(pid) or 0) for pid in product_ids_for_line),
+            (int(lt_func(pid) or 0) for pid in product_ids_for_line),
             default=0,
         )
     inventory_start_dt = shift_working_days(today, -(int(max_lt) + 1))
@@ -4122,6 +4127,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         except ValueError as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+        progress_only_raw = mutable_data.get('progress_only', False)
+        is_progress_only = str(progress_only_raw).lower() in ('true', '1', 'yes') if isinstance(progress_only_raw, str) else bool(progress_only_raw)
+
         if line_id and end_date:
             try:
                 end_dt = datetime.strptime(str(end_date), '%Y-%m-%d').date()
@@ -4129,6 +4137,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     int(line_id),
                     end_dt,
                     product_ids=requested_product_ids or None,
+                    progress_only=is_progress_only,
                 )
                 mutable_data['start_date'] = effective_start_dt.isoformat()
             except (TypeError, ValueError):
