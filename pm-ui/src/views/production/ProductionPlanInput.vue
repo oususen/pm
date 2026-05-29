@@ -144,6 +144,12 @@
             休憩明けに補正
           </label>
         </div>
+        <div class="field checkbox-field">
+          <label>
+            <input type="checkbox" v-model="hideEmptyRows" @change="localStorage.setItem(HIDE_EMPTY_ROWS_KEY, hideEmptyRows ? '1' : '0')" />
+            空行非表示
+          </label>
+        </div>
         <button class="btn" @click="bulkDeletePlans" :disabled="processing || !selectedLine">計画一括削除</button>
         <button
           v-if="activePlanTab === 'floor-shipping'"
@@ -1245,6 +1251,8 @@ const TOOLBAR_COLLAPSED_KEY = 'productionPlanInput.toolbarCollapsed'
 const toolbarCollapsed = ref(localStorage.getItem(TOOLBAR_COLLAPSED_KEY) === '1')
 const HIDE_WEEKENDS_KEY = 'productionPlanInput.hideWeekends'
 const hideWeekends = ref(localStorage.getItem(HIDE_WEEKENDS_KEY) === '1')
+const HIDE_EMPTY_ROWS_KEY = 'productionPlanInput.hideEmptyRows'
+const hideEmptyRows = ref(localStorage.getItem(HIDE_EMPTY_ROWS_KEY) === '1')
 const openManual = (path) => { window.open(`/manual?path=${encodeURIComponent(path)}`, '_blank') }
 const toggleToolbar = () => {
   toolbarCollapsed.value = !toolbarCollapsed.value
@@ -2581,13 +2589,30 @@ const sortRowsForLine = (inputRows) => {
   })
 }
 
+const isRowEmpty = (row) => {
+  if (!row.daily) return true
+  for (const key of Object.keys(row.daily)) {
+    const d = row.daily[key]
+    if (!d) continue
+    if (Number(d.stock) || Number(d.actual) || Number(d.demand) || Number(d.plan) || Number(d.plan_stock))
+      return false
+  }
+  return true
+}
+
 const filteredRows = computed(() => {
-  if (!keyword.value) return rows.value
-  const k = keyword.value.toLowerCase()
-  return rows.value.filter((r) => {
-    const txt = `${r.product_code || ''}${r.product_name || ''}${getProductCode(r.product_id)}${getProductName(r.product_id)}`.toLowerCase()
-    return txt.includes(k)
-  })
+  let result = rows.value
+  if (keyword.value) {
+    const k = keyword.value.toLowerCase()
+    result = result.filter((r) => {
+      const txt = `${r.product_code || ''}${r.product_name || ''}${getProductCode(r.product_id)}${getProductName(r.product_id)}`.toLowerCase()
+      return txt.includes(k)
+    })
+  }
+  if (hideEmptyRows.value) {
+    result = result.filter((r) => !isRowEmpty(r))
+  }
+  return result
 })
 
 const displayValue = (val) => {

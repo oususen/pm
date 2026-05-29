@@ -136,8 +136,8 @@ def _is_kubota_delivery_line(line_obj):
     return any(label in f'{line_code} {line_name}' for label in KUBOTA_DELIVERY_LABELS)
 
 
-def _resolve_inventory_effective_start_date(line_id, requested_start_date, end_date, product_ids=None, line_final_only=False):
-    from .inventory.inventory_calculator import _get_direct_parent_bom_lead_time
+def _resolve_inventory_effective_start_date(line_id, requested_start_date, end_date, product_ids=None, line_final_only=False, include_progress=False):
+    from .inventory.inventory_calculator import _get_direct_parent_bom_lead_time, _get_max_parent_bom_lead_time
     line_obj = Line.objects.filter(id=line_id).first()
     calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
         calendar_code='daiso'
@@ -193,11 +193,12 @@ def _resolve_inventory_effective_start_date(line_id, requested_start_date, end_d
             product_qs = product_qs.filter(product__is_line_final_product=True)
         product_ids_for_line = list(product_qs.values_list('product_id', flat=True).distinct())
 
-    # ここは在庫専用なので直親LT固定。進度の開始日は _resolve_product_recalc_start_date で算出
+    # LT使い分け: 在庫=直親LT / 進度=累積LT（batch_adjust_info・progress_calculator と統一）
+    lt_func = _get_max_parent_bom_lead_time if include_progress else _get_direct_parent_bom_lead_time
     max_lt = 0
     if product_ids_for_line:
         max_lt = max(
-            (int(_get_direct_parent_bom_lead_time(pid) or 0) for pid in product_ids_for_line),
+            (int(lt_func(pid) or 0) for pid in product_ids_for_line),
             default=0,
         )
     inventory_start_dt = shift_working_days(today, -(int(max_lt) + 1))
@@ -4092,6 +4093,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             end_dt,
             product_ids=requested_product_ids or None,
             line_final_only=line_final_only,
+            include_progress=include_progress or progress_only,
         )
 
         try:
