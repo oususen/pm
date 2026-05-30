@@ -186,7 +186,7 @@ const production = [
     meta: {
       pageTitle: "１人２工程入力",
       allowedRecordTypes: ["PRODUCTION", "EQUIPMENT_STATE"],
-      manualPath: "生産/工程作業入力.md",
+      manualPath: "生産/１人２工程入力.md",
     },
   },
   {
