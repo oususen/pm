@@ -6,11 +6,11 @@
         <h2 class="page-title">工程作業記録 <button v-if="authState.user?.is_superuser" class="ds-btn" @click="showDataSource = true" title="データソース"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></button></h2>
       </template>
       <button :class="isEmbeddedTablet ? 'embed-icon-btn' : 'btn-checksheet-nav'" @click="openIntegratedChecksheetOperation" :title="isEmbeddedTablet ? 'チェックシート' : ''">
-        <template v-if="isEmbeddedTablet"><span class="embed-text-icon">CS</span></template>
+        <template v-if="isEmbeddedTablet"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/><polyline points="-2 8 5 17 18 -4" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg></template>
         <template v-else>チェックシート</template>
       </button>
       <button :class="isEmbeddedTablet ? 'embed-icon-btn' : 'btn-inspection-nav'" @click="openEquipmentInspection" :title="isEmbeddedTablet ? '設備点検' : ''">
-        <template v-if="isEmbeddedTablet"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></template>
+        <template v-if="isEmbeddedTablet"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/><polyline points="1 6 6 13 15 -5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></template>
         <template v-else>設備点検</template>
       </button>
       <template v-if="isEmbeddedTablet">
@@ -23,19 +23,19 @@
           @click="record.record_type = type.value"
           :title="type.label"
         >
-          <svg v-if="type.value === 'EQUIPMENT_STATE'" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="15" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>
+          <svg v-if="type.value === 'EQUIPMENT_STATE'" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="2 2 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="15" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/><line x1="6" y1="12" x2="11" y2="12" stroke="#22c55e" stroke-width="2.5"/><line x1="6" y1="15" x2="11" y2="15" stroke="#eab308" stroke-width="2.5"/><line x1="6" y1="18" x2="11" y2="18" stroke="#ef4444" stroke-width="2.5"/><path d="M18 9 l3 3 -8 8 -3 0 0 -3 8 -8z" stroke="currentColor" stroke-width="0.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <svg v-else-if="type.value === 'PRODUCTION'" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
           <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
         </button>
         <div class="embed-separator"></div>
         <button class="embed-icon-btn" :class="{ active: showDone }" @click="showDone = !showDone" title="加工済">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-        </button>
-        <button class="embed-icon-btn" :class="{ active: showTomorrow }" @click="showTomorrow = !showTomorrow; onTomorrowToggle()" title="明日計画">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="M16 14l-4 4-2-2"/></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="7 12 10 15 17 9"/></svg>
         </button>
         <button class="embed-icon-btn" :class="{ active: showYesterday }" @click="showYesterday = !showYesterday; onYesterdayToggle()" title="前日表示">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h6"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><text x="13" y="21" font-family="'Segoe UI', Arial, sans-serif" font-size="10.5" font-weight="900" fill="currentColor" stroke="none">-1</text></svg>
+        </button>
+        <button class="embed-icon-btn" :class="{ active: showTomorrow }" @click="showTomorrow = !showTomorrow; onTomorrowToggle()" title="明日計画">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h6"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><text x="13" y="21" font-family="'Segoe UI', Arial, sans-serif" font-size="10.5" font-weight="900" fill="currentColor" stroke="none">+1</text></svg>
         </button>
         <button class="embed-icon-btn" :class="{ active: filterCurrentTime }" @click="filterCurrentTime = !filterCurrentTime; onCurrentTimeToggle()" :disabled="isPlannedProductsLoading" title="現在時刻のみ">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -221,9 +221,26 @@
         </div>
 
         <div v-if="record.record_type === 'PRODUCTION' || record.record_type === 'SCRAP'" class="manual-toggle-area">
+          <button
+            v-if="isEmbeddedTablet && filterCurrentTime"
+            type="button"
+            class="btn-manual-nav"
+            :disabled="!canPrevProduct"
+            @click="goPrevProduct"
+          >＜</button>
           <button type="button" class="btn-link" @click="toggleManualProduct">
             {{ manualProduct ? t('processInput.backToSearch') : t('processInput.manualInput') }}
           </button>
+          <button
+            v-if="isEmbeddedTablet && filterCurrentTime"
+            type="button"
+            class="btn-manual-nav"
+            :disabled="!canNextProduct"
+            @click="goNextProduct"
+          >＞</button>
+        </div>
+        <div v-if="isEmbeddedTablet && filterCurrentTime && plannedTimeLabel" class="planned-time-inline">
+          予定加工時間: {{ plannedTimeLabel }}
         </div>
       </div>
 
@@ -959,6 +976,49 @@ const filteredListItems = computed(() => {
     if (planDiff !== 0) return planDiff
     return String(a?.product_code || '').localeCompare(String(b?.product_code || ''))
   })
+})
+
+const navProductItems = computed(() => {
+  if (!filterCurrentTime.value) return filteredListItems.value
+  let items = mergeProductionProductsByProduct(allPlanProducts.value)
+  if (!showDone.value) items = items.filter(item => !isDone(item))
+  const keyword = String(productCodeFilter.value || '').trim().toUpperCase()
+  if (keyword) {
+    items = items.filter((item) => {
+      const code = String(item.product_code || '').toUpperCase()
+      const name = String(item.product_name || '').toUpperCase()
+      return code.includes(keyword) || name.includes(keyword)
+    })
+  }
+  return [...items].sort((a, b) => {
+    const seqDiff = getSequenceSortValue(a) - getSequenceSortValue(b)
+    if (seqDiff !== 0) return seqDiff
+    const planDiff = toSafeNumber(b.plan_qty) - toSafeNumber(a.plan_qty)
+    if (planDiff !== 0) return planDiff
+    return String(a?.product_code || '').localeCompare(String(b?.product_code || ''))
+  })
+})
+
+const currentNavIndex = computed(() => {
+  const list = navProductItems.value
+  if (!list.length) return -1
+  const selectedId = String(record.value.product_id || '')
+  if (selectedId) {
+    const idx = list.findIndex((it) => String(it.product || it.id) === selectedId)
+    if (idx >= 0) return idx
+  }
+  const firstVisibleId = String(filteredListItems.value?.[0]?.product || '')
+  if (firstVisibleId) {
+    const visibleIdx = list.findIndex((it) => String(it.product || it.id) === firstVisibleId)
+    if (visibleIdx >= 0) return visibleIdx
+  }
+  return 0
+})
+
+const canPrevProduct = computed(() => currentNavIndex.value > 0)
+const canNextProduct = computed(() => {
+  const idx = currentNavIndex.value
+  return idx >= 0 && idx < navProductItems.value.length - 1
 })
 
 const effectivePageSize = computed(() => (filterCurrentTime.value ? Math.max(filteredListItems.value.length, 1) : PAGE_SIZE))
@@ -1877,6 +1937,36 @@ function prevPage() { if (currentPage.value > 1) currentPage.value-- }
 function nextPage() { if (currentPage.value < totalPages.value) currentPage.value++ }
 function goFirstPage() { currentPage.value = 1 }
 function goLastPage() { currentPage.value = totalPages.value }
+
+const findSlotIndexByProduct = (productId) => {
+  const pid = String(productId || '').trim()
+  if (!pid || !Array.isArray(timeSlots.value) || !timeSlots.value.length) return -1
+  return timeSlots.value.findIndex((slot) =>
+    Array.isArray(slot?.items) && slot.items.some((it) => String(it?.product || '').trim() === pid)
+  )
+}
+
+const moveProductBy = (delta) => {
+  const list = navProductItems.value
+  if (!list.length) return
+  const baseIdx = currentNavIndex.value < 0 ? 0 : currentNavIndex.value
+  const nextIdx = Math.min(Math.max(baseIdx + delta, 0), list.length - 1)
+  if (nextIdx === baseIdx) return
+  const target = list[nextIdx]
+  const targetId = String(target?.product || target?.id || '')
+  if (!targetId) return
+  if (filterCurrentTime.value) {
+    const slotIdx = findSlotIndexByProduct(targetId)
+    if (slotIdx >= 0) {
+      activeSlotIndex.value = slotIdx
+      applyTimeSlotFilter()
+    }
+  }
+  selectPlannedProduct(target)
+}
+
+const goPrevProduct = () => moveProductBy(-1)
+const goNextProduct = () => moveProductBy(1)
 
 // ──────────────────────────────
 // リセット
@@ -3104,10 +3194,30 @@ onMounted(async () => {
 .page-btn:disabled { opacity: 0.4; cursor: default; }
 .page-info { font-size: 12px; color: #666; padding: 0 4px; }
 .manual-toggle-area { margin-top: 8px; text-align: center; }
+.manual-toggle-area { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.planned-time-inline {
+  margin-top: 6px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+}
 .btn-link {
   padding: 0; border: none; background: transparent; color: #4a7ae5;
   font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: underline;
 }
+.btn-manual-nav {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-manual-nav:disabled { opacity: 0.45; cursor: default; }
 
 /* フォーム列 */
 .no-selection {
