@@ -125,6 +125,14 @@ const tiles = computed(() => {
       resource: "production.process_input",
     },
     {
+      to: "/production/two-person-one-equipment-input",
+      label: "2人１設備",
+      icon: "👥",
+      category: "input",
+      required: "edit",
+      resource: "production.process_input",
+    },
+    {
       to: "/production/laser-process-input",
       label: "レーザー実績入力",
       icon: "✳",

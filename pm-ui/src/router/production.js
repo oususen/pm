@@ -200,6 +200,16 @@ const production = [
     },
   },
   {
+    path: "/production/two-person-one-equipment-input",
+    name: "TwoPersonOneEquipmentInput",
+    component: () => import("@/views/production/TwoPersonOneEquipmentInput.vue"),
+    meta: {
+      pageTitle: "2人1設備入力",
+      allowedRecordTypes: ["PRODUCTION", "EQUIPMENT_STATE"],
+      manualPath: "生産/１人２工程入力.md",
+    },
+  },
+  {
     path: "/production/laser-process-input",
     name: "LaserProcessInput",
     component: () => import("@/views/production/LaserProcessInput.vue"),
@@ -261,7 +271,7 @@ const production = [
     meta: {
       pageTitle: "工程作業記録（デスクトップ）",
       allowedRecordTypes: ["PRODUCTION", "EQUIPMENT_STATE"],
-      manualPath: "生産/工程作業入力.md",
+      manualPath: "生産/工程作業入力_デスクトップ.md",
     },
   },
   {
