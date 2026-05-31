@@ -44,6 +44,14 @@
           @blur="resolveSecondaryWorker"
           @keydown.enter="resolveSecondaryWorker"
         />
+        <button
+          type="button"
+          class="support-toggle-btn"
+          :class="{ active: isSecondarySupportMode }"
+          @click="toggleSecondarySupportMode"
+        >
+          {{ isSecondarySupportMode ? t('tabletProcessInput.supportOn') : t('tabletProcessInput.supportOff') }}
+        </button>
         <span class="toolbar-worker-name" :class="{ found: secondaryWorkerResolved, 'not-found': secondaryWorkerInput && !secondaryWorkerResolved }">
           {{ secondaryWorkerResolved || (secondaryWorkerInput ? '該当なし' : '') }}
         </span>
@@ -103,6 +111,7 @@ const primaryProcessId = ref('')
 const secondaryProcessId = ref('')
 const secondaryWorkerInput = ref('')
 const secondaryWorkerResolved = ref('')
+const secondaryWorkerResolvedId = ref('')
 const primaryIframe = ref(null)
 const secondaryIframe = ref(null)
 const primaryProcessingLabel = ref('')
@@ -111,8 +120,10 @@ const secondaryProcessingLabel = ref('')
 const onMessage = (e) => {
   if (e.data?.type !== 'processing-status') return
   const pid = e.data.processId
-  if (pid === primaryProcessId.value) primaryProcessingLabel.value = e.data.label
-  if (pid === secondaryProcessId.value) secondaryProcessingLabel.value = e.data.label
+  const fromPrimary = primaryIframe.value?.contentWindow && e.source === primaryIframe.value.contentWindow
+  const fromSecondary = secondaryIframe.value?.contentWindow && e.source === secondaryIframe.value.contentWindow
+  if (fromPrimary && pid === primaryProcessId.value) primaryProcessingLabel.value = e.data.label
+  if (fromSecondary && pid === secondaryProcessId.value) secondaryProcessingLabel.value = e.data.label
 }
 
 const jumpToProcessing = (panel) => {
@@ -125,6 +136,7 @@ const jumpToProcessing = (panel) => {
 
 window.addEventListener('message', onMessage)
 const isSupportMode = ref(false)
+const isSecondarySupportMode = ref(false)
 
 const userUnitLines = computed(() => {
   const unitLines = authState.user?.profile?.unit_lines
@@ -171,9 +183,31 @@ const filteredProcesses = computed(() => {
 
 const userMap = computed(() => {
   const map = new Map()
+  const toHalfWidthDigits = (value) =>
+    String(value || '').replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+  const normalizeKey = (value) => toHalfWidthDigits(value).trim().toLowerCase()
+  const normalizeNumericKey = (value) => normalizeKey(value).replace(/^0+/, '')
   for (const u of users.value) {
     const name = `${u.last_name || ''} ${u.first_name || ''}`.trim() || u.username
-    map.set(u.username.toLowerCase(), name)
+    const uid = u?.id
+    const profile = u.profile || {}
+    const keys = [
+      u.username,
+      u.user_code,
+      u.employee_code,
+      profile.employee_code,
+      profile.user_code,
+      u.code,
+      u.staff_code,
+      u.login_id,
+    ]
+      .map((v) => normalizeKey(v))
+      .filter(Boolean)
+    for (const key of keys) {
+      map.set(key, { name, id: uid })
+      const numericKey = normalizeNumericKey(key)
+      if (numericKey) map.set(numericKey, { name, id: uid })
+    }
   }
   return map
 })
@@ -185,20 +219,26 @@ const primaryWorkerName = computed(() => {
 })
 
 const resolveSecondaryWorker = () => {
-  const input = (secondaryWorkerInput.value || '').trim().toLowerCase()
+  const input = String(secondaryWorkerInput.value || '').trim().toLowerCase()
   if (!input) {
     secondaryWorkerResolved.value = ''
+    secondaryWorkerResolvedId.value = ''
     return
   }
-  secondaryWorkerResolved.value = userMap.value.get(input) || ''
+  const numericInput = input.replace(/^0+/, '')
+  const resolved = userMap.value.get(input) || userMap.value.get(numericInput) || null
+  secondaryWorkerResolved.value = resolved?.name || ''
+  secondaryWorkerResolvedId.value = resolved?.id ? String(resolved.id) : ''
 }
 
 const frameBasePath = '/production/desktop-process-input'
-const supportModeParam = computed(() => (isSupportMode.value ? 'on' : 'off'))
+const primarySupportModeParam = computed(() => (isSupportMode.value ? 'on' : 'off'))
+const secondarySupportModeParam = computed(() => (isSecondarySupportMode.value ? 'on' : 'off'))
 
 const primaryFrameSrc = computed(() => {
   if (!primaryProcessId.value) return ''
-  return `${frameBasePath}?process_id=${encodeURIComponent(primaryProcessId.value)}&embed=tablet&support_mode=${supportModeParam.value}`
+  const primaryUserId = authState.user?.id ? String(authState.user.id) : ''
+  return `${frameBasePath}?process_id=${encodeURIComponent(primaryProcessId.value)}&embed=tablet&support_mode=${primarySupportModeParam.value}&two_person_same_equipment=1&operator_name=${encodeURIComponent(primaryWorkerName.value || '')}&operator_user_id=${encodeURIComponent(primaryUserId)}`
 })
 
 const secondaryIframeKey = computed(() =>
@@ -207,7 +247,7 @@ const secondaryIframeKey = computed(() =>
 
 const secondaryFrameSrc = computed(() => {
   if (!secondaryProcessId.value || !secondaryWorkerResolved.value) return ''
-  return `${frameBasePath}?process_id=${encodeURIComponent(secondaryProcessId.value)}&embed=tablet&support_mode=${supportModeParam.value}&operator_name=${encodeURIComponent(secondaryWorkerResolved.value)}`
+  return `${frameBasePath}?process_id=${encodeURIComponent(secondaryProcessId.value)}&embed=tablet&support_mode=${secondarySupportModeParam.value}&two_person_same_equipment=1&operator_name=${encodeURIComponent(secondaryWorkerResolved.value)}&operator_user_id=${encodeURIComponent(secondaryWorkerResolvedId.value || '')}`
 })
 
 watch(selectedLineId, () => {
@@ -244,8 +284,19 @@ const loadProcesses = async () => {
 }
 
 const loadUsers = async () => {
-  const res = await api.accounts.getUsers({ is_active: true })
-  users.value = res.data.results || res.data || []
+  const pageSize = 500
+  let page = 1
+  const merged = []
+  while (true) {
+    const res = await api.accounts.getUsers({ is_active: true, page_size: pageSize, page })
+    const payload = res.data || {}
+    const rows = Array.isArray(payload.results) ? payload.results : (Array.isArray(payload) ? payload : [])
+    merged.push(...rows)
+    if (!payload.next || !rows.length) break
+    page += 1
+    if (page > 50) break
+  }
+  users.value = merged
 }
 
 const applyInitialLineSelection = () => {
@@ -273,6 +324,10 @@ const toggleSupportMode = () => {
     return
   }
   selectedLineId.value = ownLines.value.length ? String(ownLines.value[0].id) : ''
+}
+
+const toggleSecondarySupportMode = () => {
+  isSecondarySupportMode.value = !isSecondarySupportMode.value
 }
 
 onMounted(async () => {

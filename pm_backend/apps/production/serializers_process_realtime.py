@@ -790,6 +790,21 @@ def apply_operator_action_session(process, product, action, action_record, plan_
 
     issues = []
     action_time = action_record.timestamp
+    action_event_data = dict(getattr(action_record, 'event_data', None) or {})
+    two_person_same_equipment = bool(action_event_data.get('two_person_same_equipment'))
+    current_operator_name = str(getattr(action_record, 'operator_name', '') or '').strip().lower()
+
+    def should_mark_overlap(other_session):
+        if not other_session:
+            return False
+        if not two_person_same_equipment:
+            return True
+        other_start_record = getattr(other_session, 'start_record', None)
+        other_operator_name = str(getattr(other_start_record, 'operator_name', '') or '').strip().lower()
+        # 2人1設備モード時のみ、作業者が明確に異なる場合は重複不整合を付けない
+        if current_operator_name and other_operator_name and current_operator_name != other_operator_name:
+            return False
+        return True
 
     def create_work(start_action):
         return _create_session(
@@ -818,7 +833,7 @@ def apply_operator_action_session(process, product, action, action_record, plan_
             issues.append('DUPLICATE_START')
         else:
             session = create_work('START')
-        if other_open_session:
+        if should_mark_overlap(other_open_session):
             issues.append('OVERLAP_OTHER_PRODUCT')
             issues.append(f"OVERLAP_SESSION_ID_{other_open_session.id}")
 
@@ -854,7 +869,7 @@ def apply_operator_action_session(process, product, action, action_record, plan_
             session = create_work('RESUME')
         else:
             issues.append('RESUME_WHILE_WORK')
-        if other_open_session:
+        if should_mark_overlap(other_open_session):
             issues.append('OVERLAP_OTHER_PRODUCT')
             issues.append(f"OVERLAP_SESSION_ID_{other_open_session.id}")
 

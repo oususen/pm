@@ -180,6 +180,7 @@
             @input="currentPage = 1"
           />
         </div>
+        <div v-if="twoPersonScopeWarning" class="scope-warning">{{ twoPersonScopeWarning }}</div>
 
         <div class="plan-list" v-if="!isPlannedProductsLoading">
           <div
@@ -1596,6 +1597,15 @@ const getRecentRecordColorStyle = (rec) => {
 // ページモードクラス
 // ──────────────────────────────
 const isEmbeddedTablet = computed(() => String(route.query.embed || '') === 'tablet')
+const isTwoPersonSameEquipmentMode = computed(() => String(route.query.two_person_same_equipment || '') === '1')
+const normalizeOperatorName = (value) => String(value || '').trim().toLowerCase()
+const operatorScopeName = computed(() => normalizeOperatorName(record.value.operator_name || defaultOperatorName.value || ''))
+const operatorScopeUserId = computed(() => String(route.query.operator_user_id || '').trim())
+const twoPersonScopeWarning = computed(() => {
+  if (!isTwoPersonSameEquipmentMode.value) return ''
+  if (operatorScopeUserId.value) return ''
+  return '作業者ID未指定のため加工中が混在表示されます'
+})
 const showRecentPanel = ref(false)
 const coproductExpanded = ref(false)
 
@@ -2149,6 +2159,8 @@ const submitRecord = async () => {
       const targetEndIso = toIsoDateTimeOrNull(selectedPlanTarget.end) || toIsoDateTimeOrNull(activeSlot?.end)
       data.event_data = {
         action: effectiveOperatorAction.value,
+        two_person_same_equipment: isTwoPersonSameEquipmentMode.value ? true : undefined,
+        operator_user_id: route.query.operator_user_id ? String(route.query.operator_user_id) : undefined,
         plan_target: {
           line_id: selectedLineId.value || null, process_id: selectedProcessId.value || null,
           plan_date: selectedPlanTarget.plan_date || currentDateYmd.value || null,
@@ -2277,6 +2289,19 @@ const loadStartedProductIds = async () => {
     const items = res.data.results || res.data || []
     const latestActionByProduct = new Map()
     ;(Array.isArray(items) ? items : []).forEach((rec) => {
+      if (isTwoPersonSameEquipmentMode.value) {
+        const scopeUserId = operatorScopeUserId.value
+        if (scopeUserId) {
+          const recUserId = String(rec?.event_data?.operator_user_id || '').trim()
+          if (recUserId !== scopeUserId) return
+        } else {
+          const scope = operatorScopeName.value
+          if (scope) {
+            const recOperator = normalizeOperatorName(rec?.operator_name || rec?.event_data?.operator_name || '')
+            if (recOperator !== scope) return
+          }
+        }
+      }
       const pid = getOperatorActionProductId(rec)
       if (pid === null || pid === undefined || pid === '') return
       const productId = String(pid)
@@ -2982,6 +3007,13 @@ watch(() => [record.value.product_id, record.value.product_code], () => { ensure
 watch(() => [selectedLineId.value, selectedProcessId.value], () => restoreEquipmentStateIfNeeded())
 
 watch(() => route.query.support_mode, () => applySupportModeFromQuery())
+watch(
+  () => [isTwoPersonSameEquipmentMode.value, operatorScopeName.value, operatorScopeUserId.value, selectedProcessId.value],
+  () => {
+    if (!selectedProcessId.value) return
+    loadStartedProductIds()
+  },
+)
 watch(totalPages, (pages) => {
   if (currentPage.value > pages) currentPage.value = pages
 })
@@ -3155,6 +3187,16 @@ onMounted(async () => {
 /* 製品リスト列 */
 .list-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .list-count { font-size: 12px; color: #888; white-space: nowrap; }
+.scope-warning {
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #9a3412;
+  background: #ffedd5;
+  border: 1px solid #fdba74;
+  border-radius: 4px;
+  padding: 3px 6px;
+}
 .list-filter-input {
   flex: 1; height: 28px; padding: 0 6px; border: 1px solid #ccc;
   border-radius: 4px; font-size: 12px; box-sizing: border-box; min-width: 0;
@@ -3437,6 +3479,8 @@ onMounted(async () => {
 .desktop-process-input.embed-tablet .col-form,
 .desktop-process-input.embed-tablet .col-recent {
   padding: 0;
+  grid-column: auto;
+  grid-row: auto;
 }
 .desktop-process-input.embed-tablet .plan-item {
   padding: 2px 4px; border-radius: 4px;
