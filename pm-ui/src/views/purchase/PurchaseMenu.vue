@@ -138,6 +138,14 @@ const tiles = computed(() => [
     resource: "purchase.supplier_calendar",
   },
   {
+    to: "/purchase/delivery-schedule",
+    label: "納入予定",
+    icon: "📄",
+    category: "plan",
+    required: "edit",
+    resource: "purchase.plan_input",
+  },
+  {
     to: "/settings/supplier-order-pattern",
     label: "納入パターン設定",
     icon: "🔄",
@@ -269,4 +277,3 @@ const onTileClick = (event, tile) => {
   }
 }
 </style>
-

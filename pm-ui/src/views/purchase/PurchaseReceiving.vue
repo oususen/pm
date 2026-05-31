@@ -9,14 +9,20 @@
             {{ s.supplier_code }} {{ s.supplier_name }}
           </option>
         </select>
-        <input type="date" v-model="targetDate" @change="loadReceivingData" />
-        <button class="btn-primary" @click="loadReceivingData" :disabled="!selectedSupplier">検収データ取得</button>
+        <input type="date" v-model="targetDate" @change="onTargetDateChange" />
+        <button class="btn-primary" @click="loadCurrentTabData" :disabled="!selectedSupplier">検収データ取得</button>
         <button v-if="rows.length" class="btn-excel" @click="exportExcel">Excel出力</button>
         <button v-if="selectedSupplier" class="btn-history" @click="toggleHistory">検収履歴</button>
       </div>
     </div>
 
     <div class="page-content">
+      <div class="receiving-tabs">
+        <button :class="['tab-btn', { active: activeTab === 'progress' }]" @click="activeTab = 'progress'">進度方式</button>
+        <button :class="['tab-btn', { active: activeTab === 'delivery_list' }]" @click="switchToDeliveryList">納入リスト</button>
+      </div>
+
+      <template v-if="activeTab === 'progress'">
       <div v-if="selectedSupplier && !loading" class="pattern-info">
         <span class="pattern-label">納入パターン:</span>
         <span class="pattern-value">{{ patternInfo ? `${patternInfo.pattern_name} (${patternInfo.recurrence_type_display})` : '未設定（毎日納入）' }}</span>
@@ -142,6 +148,65 @@
         </table>
         <div v-else class="no-data">検収履歴がありません</div>
       </div>
+      </template>
+
+      <template v-else>
+        <div v-if="deliveryListLoading" class="no-data">読み込み中...</div>
+        <div v-else-if="deliveryListRows.length" class="filter-bar">
+          <label>品番:
+            <input v-model="filterProductCodeDelivery" class="filter-input" placeholder="部分一致" />
+          </label>
+          <div class="btn-group">
+            <span class="filter-label">数変更:</span>
+            <button :class="['btn-filter', { active: filterHeldDelivery === '' }]" @click="filterHeldDelivery = ''">全</button>
+            <button :class="['btn-filter', { active: filterHeldDelivery === 'yes' }]" @click="filterHeldDelivery = 'yes'">有</button>
+            <button :class="['btn-filter', { active: filterHeldDelivery === 'no' }]" @click="filterHeldDelivery = 'no'">無</button>
+          </div>
+          <div class="btn-group">
+            <span class="filter-label">差異:</span>
+            <button :class="['btn-filter', { active: filterDiffDelivery === '' }]" @click="filterDiffDelivery = ''">全</button>
+            <button :class="['btn-filter', { active: filterDiffDelivery === 'yes' }]" @click="filterDiffDelivery = 'yes'">有</button>
+            <button :class="['btn-filter', { active: filterDiffDelivery === 'no' }]" @click="filterDiffDelivery = 'no'">無</button>
+          </div>
+          <div class="btn-group">
+            <span class="filter-label">実績:</span>
+            <button :class="['btn-filter', { active: filterActualDelivery === '' }]" @click="filterActualDelivery = ''">全</button>
+            <button :class="['btn-filter', { active: filterActualDelivery === 'yes' }]" @click="filterActualDelivery = 'yes'">有</button>
+            <button :class="['btn-filter', { active: filterActualDelivery === 'no' }]" @click="filterActualDelivery = 'no'">無</button>
+          </div>
+        </div>
+        <table v-if="filteredDeliveryListRows.length" class="data-table">
+          <thead>
+            <tr>
+              <th>品番</th>
+              <th>品名</th>
+              <th class="num">納入予定</th>
+              <th class="num">実績</th>
+              <th class="num">実数</th>
+              <th>備考</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in filteredDeliveryListRows" :key="r.product_id" :class="{ 'row-held': r.held }">
+              <td>
+                {{ r.product_code }}
+                <button class="btn-hold" :class="{ active: r.held }" @click="toggleHoldDelivery(r)">数変更</button>
+              </td>
+              <td>{{ r.product_name }}</td>
+              <td class="num">{{ r.expected_qty }}</td>
+              <td class="num">{{ r.actual_qty || '' }}</td>
+              <td class="num"><input type="number" v-model.number="r.received_qty" min="0" class="input-qty" /></td>
+              <td><input v-model="r.note" class="input-note" /></td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-else-if="deliveryListRows.length" class="no-data">表示条件に一致するデータがありません。</div>
+        <div v-else class="no-data">この日の納入予定は未登録です（事務員が納入予定画面で登録）。</div>
+        <div v-if="deliveryListRows.length" class="form-actions">
+          <button v-if="filterHeldDelivery !== 'yes'" class="btn-success" :disabled="saving" @click="saveDeliveryListReceiving">検収確定</button>
+          <button v-if="filterHeldDelivery === 'yes'" class="btn-held-confirm" :disabled="saving" @click="saveDeliveryListHeldReceiving">数変更検収確定</button>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -155,6 +220,9 @@ const suppliers = ref([])
 const selectedSupplier = ref('')
 const targetDate = ref(new Date().toISOString().slice(0, 10))
 const basis = ref('progress')
+const activeTab = ref('progress')
+const deliveryListLoading = ref(false)
+const deliveryListRows = ref([])
 const loading = ref(false)
 const saving = ref(false)
 const rows = ref([])
@@ -169,6 +237,10 @@ const filterActual = ref('')
 const filterProductCode = ref('')
 const filterHeld = ref('')
 const filterDiff = ref('')
+const filterHeldDelivery = ref('')
+const filterDiffDelivery = ref('')
+const filterActualDelivery = ref('')
+const filterProductCodeDelivery = ref('')
 
 const destOptions = computed(() => {
   const set = new Set()
@@ -195,6 +267,18 @@ const filteredRows = computed(() => {
     return true
   })
 })
+const filteredDeliveryListRows = computed(() => {
+  return deliveryListRows.value.filter((r) => {
+    if (filterProductCodeDelivery.value && !String(r.product_code || '').toUpperCase().includes(filterProductCodeDelivery.value.toUpperCase())) return false
+    if (filterHeldDelivery.value === 'yes' && !r.held) return false
+    if (filterHeldDelivery.value === 'no' && r.held) return false
+    if (filterDiffDelivery.value === 'yes' && r.actual_qty && r.actual_qty === r.expected_qty) return false
+    if (filterDiffDelivery.value === 'no' && (!r.actual_qty || r.actual_qty !== r.expected_qty)) return false
+    if (filterActualDelivery.value === 'yes' && !r.actual_qty) return false
+    if (filterActualDelivery.value === 'no' && r.actual_qty) return false
+    return true
+  })
+})
 
 const DAY_NAMES = ['日', '月', '火', '水', '木', '金', '土']
 const formatDateParts = (isoStr) => {
@@ -214,6 +298,15 @@ const switchBasis = (b) => {
   if (selectedSupplier.value) loadReceivingData()
 }
 
+const loadCurrentTabData = () => {
+  if (activeTab.value === 'delivery_list') return loadDeliveryListData()
+  return loadReceivingData()
+}
+
+const onTargetDateChange = () => {
+  loadCurrentTabData()
+}
+
 const onSupplierChange = () => {
   rows.value = []
   coverageDates.value = []
@@ -226,7 +319,20 @@ const onSupplierChange = () => {
   filterHeld.value = ''
   filterDiff.value = ''
   filterActual.value = ''
-  if (selectedSupplier.value) loadReceivingData()
+  filterHeldDelivery.value = ''
+  filterDiffDelivery.value = ''
+  filterActualDelivery.value = ''
+  filterProductCodeDelivery.value = ''
+  deliveryListRows.value = []
+  if (selectedSupplier.value) {
+    if (activeTab.value === 'progress') loadReceivingData()
+    else loadDeliveryListData()
+  }
+}
+
+const switchToDeliveryList = async () => {
+  activeTab.value = 'delivery_list'
+  await loadDeliveryListData()
 }
 
 const loadReceivingData = async () => {
@@ -386,6 +492,90 @@ const exportExcel = () => {
   XLSX.writeFile(wb, `仕入れ検収_${name}_${targetDate.value}.xlsx`)
 }
 
+const loadDeliveryListData = async () => {
+  if (!selectedSupplier.value) return
+  deliveryListLoading.value = true
+  deliveryListRows.value = []
+  try {
+    const res = await api.client.get('/purchase-delivery-schedules/', {
+      params: { supplier_id: selectedSupplier.value, target_date: targetDate.value },
+    })
+    const items = res.data.items || []
+    deliveryListRows.value = items.map((r) => ({
+      ...r,
+      received_qty: r.expected_qty,
+      held: false,
+      note: '',
+    }))
+  } catch (e) {
+    console.error('納入リスト取得エラー', e)
+  } finally {
+    deliveryListLoading.value = false
+  }
+}
+
+const saveDeliveryListReceiving = async () => {
+  const targets = filteredDeliveryListRows.value.filter((r) => !r.held && Number(r.received_qty) > 0)
+  if (!targets.length) {
+    alert('検収対象がありません。')
+    return
+  }
+  saving.value = true
+  try {
+    await api.client.post('/purchase-receiving/', {
+      supplier_id: selectedSupplier.value,
+      target_date: targetDate.value,
+      items: targets.map((r) => ({
+        product_id: r.product_id,
+        expected_qty: r.expected_qty,
+        received_qty: r.received_qty,
+        note: r.note || '',
+      })),
+    })
+    alert('検収を確定しました。')
+    await loadDeliveryListData()
+  } catch (e) {
+    console.error('納入リスト検収確定エラー', e)
+    alert('検収の確定に失敗しました。')
+  } finally {
+    saving.value = false
+  }
+}
+
+const saveDeliveryListHeldReceiving = async () => {
+  const targets = filteredDeliveryListRows.value.filter((r) => r.held && Number(r.received_qty) > 0)
+  if (!targets.length) {
+    alert('数変更の検収対象がありません。')
+    return
+  }
+  saving.value = true
+  try {
+    await api.client.post('/purchase-receiving/', {
+      supplier_id: selectedSupplier.value,
+      target_date: targetDate.value,
+      items: targets.map((r) => ({
+        product_id: r.product_id,
+        expected_qty: r.expected_qty,
+        received_qty: r.received_qty,
+        note: r.note || '',
+      })),
+    })
+    alert('数変更検収を確定しました。')
+    await loadDeliveryListData()
+  } catch (e) {
+    console.error('納入リスト数変更検収確定エラー', e)
+    alert('数変更検収の確定に失敗しました。')
+  } finally {
+    saving.value = false
+  }
+}
+
+const toggleHoldDelivery = (row) => {
+  row.held = !row.held
+  if (row.held) row.received_qty = 0
+  else row.received_qty = row.expected_qty
+}
+
 onMounted(fetchSuppliers)
 </script>
 
@@ -399,6 +589,26 @@ onMounted(fetchSuppliers)
   border-radius: 6px;
   margin-bottom: 12px;
   font-size: 13px;
+}
+.receiving-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.tab-btn {
+  padding: 6px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #fff;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tab-btn.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
 }
 .pattern-label { font-weight: 600; color: #475569; }
 .pattern-value { color: #1e293b; }

@@ -27,6 +27,8 @@ from .views import (
     PurchaseActualInquiryView,
     PurchaseActualProgressView,
     PurchaseActualRegisterView,
+    PurchaseDeliveryScheduleView,
+    PurchaseReceivingDeliveryListTemplateView,
     PurchasePlanLockSettingView,
     PurchaseReceivingHistoryView,
     PurchaseReceivingView,
@@ -60,4 +62,6 @@ urlpatterns = [
     path('purchase-order-approval-config/', PurchaseOrderApprovalConfigView.as_view(), name='purchase-order-approval-config'),
     path('purchase-receiving/', PurchaseReceivingView.as_view(), name='purchase-receiving'),
     path('purchase-receiving/history/', PurchaseReceivingHistoryView.as_view(), name='purchase-receiving-history'),
+    path('purchase-receiving/delivery-list-template/', PurchaseReceivingDeliveryListTemplateView.as_view(), name='purchase-receiving-delivery-list-template'),
+    path('purchase-delivery-schedules/', PurchaseDeliveryScheduleView.as_view(), name='purchase-delivery-schedules'),
 ]

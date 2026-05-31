@@ -1826,6 +1826,133 @@ class PurchaseReceivingView(APIView):
         }, status=status.HTTP_201_CREATED)
 
 
+class PurchaseReceivingDeliveryListTemplateView(APIView):
+    """納品リスト方式: テンプレ出力用の仕入先対象製品一覧"""
+
+    def get(self, request):
+        supplier_id = request.query_params.get('supplier_id')
+        if not supplier_id:
+            return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            supplier_id = int(supplier_id)
+        except (TypeError, ValueError):
+            return Response({'detail': 'invalid supplier_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+        supplier = Supplier.objects.filter(id=supplier_id).first()
+        if not supplier:
+            return Response({'detail': 'supplier not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        child_product_ids = list(
+            BOMItem.objects.filter(
+                supplier_id=supplier_id,
+                child_product_id__isnull=False,
+            ).values_list('child_product_id', flat=True).distinct()
+        )
+        products = Product.objects.filter(id__in=child_product_ids).order_by('product_code')
+        items = [
+            {
+                'product_id': p.id,
+                'product_code': p.product_code or '',
+                'product_name': p.product_name or '',
+            }
+            for p in products
+        ]
+        return Response({
+            'supplier': {
+                'id': supplier.id,
+                'supplier_code': supplier.supplier_code or '',
+                'supplier_name': supplier.supplier_name or '',
+            },
+            'items': items,
+        })
+
+
+class PurchaseDeliveryScheduleView(APIView):
+    """納入予定（事務員入力）"""
+
+    def get(self, request):
+        supplier_id = request.query_params.get('supplier_id')
+        target_date_str = request.query_params.get('target_date')
+        if not supplier_id:
+            return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        supplier = Supplier.objects.filter(id=int(supplier_id)).first()
+        if not supplier:
+            return Response({'items': []})
+        target = date.fromisoformat(target_date_str) if target_date_str else date.today()
+        line = _resolve_purchase_line(supplier)
+        purchase_process = Process.objects.filter(process_code='PURCHASE').first()
+        if not line or not purchase_process:
+            return Response({'items': []})
+
+        plan_qs = LineBacklog.objects.filter(
+            line_id=line.id,
+            process_id=purchase_process.id,
+            plan_date=target,
+            sequence_no=1,
+            plan_qty__gt=0,
+        ).select_related('product').order_by('product__product_code')
+
+        actual_qs = LineBacklog.objects.filter(
+            line_id=line.id,
+            process_id=purchase_process.id,
+            plan_date=target,
+            sequence_no=0,
+            actual_qty__gt=0,
+        )
+        actual_by_product = defaultdict(int)
+        for b in actual_qs:
+            actual_by_product[b.product_id] = max(actual_by_product[b.product_id], int(b.actual_qty or 0))
+
+        items = []
+        for b in plan_qs:
+            items.append({
+                'product_id': b.product_id,
+                'product_code': b.product.product_code if b.product else '',
+                'product_name': b.product.product_name if b.product else '',
+                'expected_qty': int(b.plan_qty or 0),
+                'actual_qty': int(actual_by_product.get(b.product_id, 0)),
+            })
+        return Response({'items': items})
+
+    @transaction.atomic
+    def post(self, request):
+        supplier_id = request.data.get('supplier_id')
+        target_date_str = request.data.get('target_date')
+        items = request.data.get('items', [])
+        if not supplier_id or not items:
+            return Response({'detail': 'supplier_id and items are required'}, status=status.HTTP_400_BAD_REQUEST)
+        supplier = Supplier.objects.filter(id=int(supplier_id)).first()
+        if not supplier:
+            return Response({'detail': 'supplier not found'}, status=status.HTTP_400_BAD_REQUEST)
+        target = date.fromisoformat(target_date_str) if target_date_str else date.today()
+        line = _resolve_purchase_line(supplier)
+        purchase_process = Process.objects.filter(process_code='PURCHASE').first()
+        if not line or not purchase_process:
+            return Response({'detail': 'purchase line/process not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 同日・同製品のみ上書き（他製品の既存計画は保持）
+        saved_count = 0
+        for item in items:
+            product_id = item.get('product_id')
+            qty = int(item.get('qty') or 0)
+            if not product_id or qty < 0:
+                continue
+            LineBacklog.objects.update_or_create(
+                line_id=line.id,
+                process_id=purchase_process.id,
+                product_id=product_id,
+                plan_date=target,
+                sequence_no=1,
+                defaults={
+                    'plan_qty': qty,
+                    'actual_qty': 0,
+                },
+            )
+            saved_count += 1
+        return Response({'detail': f'{saved_count}件保存しました'})
+
+
 class PurchaseReceivingHistoryView(APIView):
     def get(self, request):
         supplier_id = request.query_params.get('supplier_id')

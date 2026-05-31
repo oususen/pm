@@ -36,6 +36,12 @@ const purchase = [
     meta: { pageTitle: "仕入れ検収", manualPath: "仕入れ/仕入れ検収.md", resource: "purchase.receiving" },
   },
   {
+    path: "/purchase/delivery-schedule",
+    name: "PurchaseDeliverySchedule",
+    component: () => import("@/views/purchase/PurchaseDeliverySchedule.vue"),
+    meta: { pageTitle: "納入予定", manualPath: "仕入れ/納入予定.md", resource: "purchase.plan_input" },
+  },
+  {
     path: "/purchase/actual-input",
     name: "PurchaseActualInput",
     component: () => import("@/views/purchase/PurchaseActualInput.vue"),
