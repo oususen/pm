@@ -2352,6 +2352,10 @@ const parseSeqNo = (raw) => {
 const productSeqKey = (item) => {
   const pid = String(item?.product || '')
   const seq = parseSeqNo(item?.sequence_no)
+  const planId = item?.gantt_plan_id || ''
+  if (planId) {
+    return seq !== null ? `${pid}_seq${seq}_${planId}` : `${pid}_${planId}`
+  }
   return seq !== null ? `${pid}_seq${seq}` : pid
 }
 
@@ -2559,11 +2563,12 @@ const buildCurrentTimePlanItems = async (lineId, processId, existingItems = []) 
         if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return
         if (now < start || now > end) return
         const productId = pp.output_product_id ?? plan.product; if (!productId) return
-        const key = `${productId}_${processId}`; if (map.has(key)) return
+        const actualKey = `${productId}_${processId}`
+        const key = `${productId}_${processId}_${plan.plan_id || ''}`; if (map.has(key)) return
         map.set(key, {
           plan_date: targetDate, product: productId, product_code: pp.output_product_code || plan.product_code || '',
           product_name: pp.output_product_name || plan.product_name || '', process: processId,
-          plan_qty: pp.quantity ?? plan.plan_qty ?? 0, actual_qty: actualLookup.has(key) ? actualLookup.get(key) : 0,
+          plan_qty: pp.quantity ?? plan.plan_qty ?? 0, actual_qty: actualLookup.has(actualKey) ? actualLookup.get(actualKey) : 0,
           sequence_no: plan.sequence_no ?? null, gantt_plan_id: plan.plan_id || null,
         })
       })
@@ -2799,10 +2804,11 @@ const loadPlannedProducts = async () => {
         const pid = String(productId)
         if (!ganttEntriesByProduct.has(pid)) ganttEntriesByProduct.set(pid, new Map())
         const seqMap = ganttEntriesByProduct.get(pid)
-        const seqKey = seq !== null ? seq : 'none'
+        const ganttPlanId = item?.gantt_plan_id || ''
+        const seqKey = ganttPlanId ? `${seq !== null ? seq : 'none'}__${ganttPlanId}` : (seq !== null ? seq : 'none')
         const prev = seqMap.get(seqKey)
         const startMs = item?.start instanceof Date ? item.start.getTime() : Number.POSITIVE_INFINITY
-        if (!prev) { seqMap.set(seqKey, { qty: toSafeNumber(item?.plan_qty), startMs, gantt_plan_id: item?.gantt_plan_id || null }) }
+        if (!prev) { seqMap.set(seqKey, { qty: toSafeNumber(item?.plan_qty), startMs, gantt_plan_id: ganttPlanId }) }
         else { prev.qty += toSafeNumber(item?.plan_qty); prev.startMs = Math.min(prev.startMs, startMs) }
       })
     })
@@ -2844,7 +2850,9 @@ const loadPlannedProducts = async () => {
         return
       }
       entries.forEach((entry, seqKey) => {
-        expanded.push({ ...item, plan_qty: toSafeNumber(entry.qty), sequence_no: seqKey === 'none' ? null : seqKey, gantt_start_ms: Number.isFinite(entry.startMs) ? entry.startMs : null, gantt_plan_id: entry.gantt_plan_id || null })
+        const seqPart = String(seqKey).split('__')[0]
+        const seqNo = seqPart === 'none' ? null : Number(seqPart)
+        expanded.push({ ...item, plan_qty: toSafeNumber(entry.qty), sequence_no: Number.isFinite(seqNo) ? seqNo : null, gantt_start_ms: Number.isFinite(entry.startMs) ? entry.startMs : null, gantt_plan_id: entry.gantt_plan_id || null })
       })
     })
     mapFilteredForProduction = expanded
@@ -2855,6 +2863,31 @@ const loadPlannedProducts = async () => {
       if (key && !dedupMap.has(key)) dedupMap.set(key, item)
     })
     mapFilteredForProduction = Array.from(dedupMap.values())
+
+    // 同一製品の複数計画（本体 + hakogumi_prev等）に実績を開始時刻順に分配
+    const planGroupsByProduct = new Map()
+    mapFilteredForProduction.forEach((item, idx) => {
+      if (!item?.gantt_plan_id) return
+      const pid = String(item?.product || '')
+      if (!pid) return
+      if (!planGroupsByProduct.has(pid)) planGroupsByProduct.set(pid, [])
+      planGroupsByProduct.get(pid).push(idx)
+    })
+    planGroupsByProduct.forEach((indices, pid) => {
+      if (indices.length <= 1) return
+      const totalActual = toSafeNumber(backlogActualByProduct.get(pid))
+      const sorted = indices
+        .map((idx) => ({ idx, startMs: mapFilteredForProduction[idx]?.gantt_start_ms ?? Number.POSITIVE_INFINITY }))
+        .sort((a, b) => a.startMs - b.startMs)
+      let remaining = totalActual
+      sorted.forEach(({ idx }, i) => {
+        const planQty = toSafeNumber(mapFilteredForProduction[idx].plan_qty)
+        const isLast = i === sorted.length - 1
+        const attributed = isLast ? Math.max(remaining, 0) : Math.min(Math.max(remaining, 0), planQty)
+        mapFilteredForProduction[idx] = { ...mapFilteredForProduction[idx], actual_qty: attributed }
+        remaining -= attributed
+      })
+    })
 
     allPlanProducts.value = [...mapFilteredForProduction]
     applyTimeSlotFilter()
