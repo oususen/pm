@@ -173,13 +173,13 @@
         <button class="btn" @click="savePlan" :disabled="processing || !rows.length || !selectedLine">保存</button>
         <button class="btn" @click="openProductOrderDialog" :disabled="processing || !selectedLine || !rows.length">表示順</button>
         <button
-          v-if="canShowFloorSpotAutoPlanButton"
+          v-if="canShowFloorSpotAutoPlanButton && activePlanTab !== 'floor-shipping'"
           class="btn"
           @click="doFloorSpotAutoPlan"
           :disabled="processing || !selectedLine"
         >自動計画</button>
         <button
-          v-if="canShowFloorSpotAutoPlanButton"
+          v-if="canShowFloorSpotAutoPlanButton && activePlanTab !== 'floor-shipping'"
           class="btn"
           @click="openAggregateSettingsDialog"
         >まとめ設定</button>
@@ -192,45 +192,17 @@
         <button
           v-if="canShowFloorDeliveryDetailPDFButton"
           class="btn"
-          style="background: #70AD47; color: #fff;"
-          @click="downloadFloorShippingPDF"
-          :disabled="processing || !selectedLine"
-        >配送明細</button>
-        <button
-          v-if="canShowFloorDeliveryDetailPDFButton"
-          class="btn"
           style="background: #2E86C1; color: #fff;"
           @click="downloadFloorShippingNewPDF"
           :disabled="processing || !selectedLine"
-        >新配送明細</button>
-        <button
-          v-if="canShowFloorDeliveryDetailPDFButton"
-          class="btn"
-          style="background: #C07000; color: #fff;"
-          @click="downloadFloorShippingLapPDF"
-          :disabled="processing || !selectedLine"
-        >配送明細(ラップ)</button>
-        <button
-          v-if="canShowDeliveryDetailPDFButton"
-          class="btn"
-          style="background: #1f4e78; color: #fff;"
-          @click="downloadHokushinDeliveryListPDF"
-          :disabled="processing || !selectedLine"
-        >北進納入リスト</button>
+        >配送明細</button>
         <button
           v-if="canShowDeliveryDetailPDFButton"
           class="btn"
           style="background: #2E86C1; color: #fff;"
           @click="downloadHokushinDeliveryListNewPDF"
           :disabled="processing || !selectedLine"
-        >新納入リスト</button>
-        <button
-          v-if="canShowDeliveryDetailPDFButton"
-          class="btn"
-          style="background: #C07000; color: #fff;"
-          @click="downloadHokushinDeliveryListLapPDF"
-          :disabled="processing || !selectedLine"
-        >納入リスト(ラップ)</button>
+        >納入リスト</button>
         <button
           v-if="canShowDeliveryDetailPDFButton"
           class="btn"
@@ -238,13 +210,6 @@
           @click="downloadHokushinDeliveryPDF"
           :disabled="processing || !selectedLine"
         >納品書</button>
-        <button
-          v-if="canShowDeliveryDetailPDFButton"
-          class="btn"
-          style="background: #C00000; color: #fff;"
-          @click="downloadHokushinDeliveryAllPDF"
-          :disabled="processing || !selectedLine"
-        >納品書２</button>
       </div>
     </div>
 
@@ -3944,7 +3909,7 @@ const downloadFloorShippingNewPDF = async () => {
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
   } catch (e) {
-    console.error('新配送明細PDF生成エラー', e)
+    console.error('配送明細PDF生成エラー', e)
     alert('PDF生成に失敗しました: ' + (e.response?.data?.detail || e.message))
   }
 }
