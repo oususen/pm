@@ -1540,6 +1540,10 @@ const parseSeqNo = (raw) => {
 const productSeqKey = (item) => {
   const pid = String(item?.product || '')
   const seq = parseSeqNo(item?.sequence_no)
+  const planId = item?.plan_id || ''
+  if (planId) {
+    return seq !== null ? `${pid}_seq${seq}_${planId}` : `${pid}_${planId}`
+  }
   return seq !== null ? `${pid}_seq${seq}` : pid
 }
 
@@ -1642,15 +1646,22 @@ const applySlotActualProgress = (slotItems, planBeforeMap, totalActualMap) => {
   })
 }
 
-const getPlanQtyState = (item) => {
-  const planQty = toSafeNumber(item?.plan_qty)
+const getActualQtyForItem = (item) => {
+  if (item?.plan_id) {
+    return toSafeNumber(item?.actual_qty)
+  }
   const productIdKey = String(item?.product || '').trim()
   const productCodeKey = String(item?.product_code || '').trim()
-  const actualQty = toSafeNumber(
+  return toSafeNumber(
     actualQtyByProductFromBacklog.value.get(productIdKey) ??
     actualQtyByProductCodeFromBacklog.value.get(productCodeKey) ??
     0
   )
+}
+
+const getPlanQtyState = (item) => {
+  const planQty = toSafeNumber(item?.plan_qty)
+  const actualQty = getActualQtyForItem(item)
   if (planQty > 0 && actualQty === planQty) {
     return 'done'
   }
@@ -1663,13 +1674,7 @@ const getPlanQtyState = (item) => {
 const getPlanQtyBadgeLabel = (item) => {
   const state = getPlanQtyState(item)
   const planQty = toSafeNumber(item?.plan_qty)
-  const productIdKey = String(item?.product || '').trim()
-  const productCodeKey = String(item?.product_code || '').trim()
-  const actualQty = toSafeNumber(
-    actualQtyByProductFromBacklog.value.get(productIdKey) ??
-    actualQtyByProductCodeFromBacklog.value.get(productCodeKey) ??
-    0
-  )
+  const actualQty = getActualQtyForItem(item)
   if (state === 'done') {
     return t('processInput.planQtyDone')
   }
@@ -2625,9 +2630,10 @@ const buildCurrentTimePlanItems = async (lineId, processId, existingItems = []) 
 
         const productId = pp.output_product_id ?? plan.product
         if (!productId) return
-        const key = `${productId}_${processId}`
+        const actualKey = `${productId}_${processId}`
+        const key = `${productId}_${processId}_${plan.plan_id || ''}`
         if (map.has(key)) return
-        const actualQty = actualLookup.has(key) ? actualLookup.get(key) : 0
+        const actualQty = actualLookup.has(actualKey) ? actualLookup.get(actualKey) : 0
         map.set(key, {
           plan_date: targetDate,
           product: productId,
@@ -2637,6 +2643,7 @@ const buildCurrentTimePlanItems = async (lineId, processId, existingItems = []) 
           plan_qty: pp.quantity ?? plan.plan_qty ?? 0,
           actual_qty: actualQty,
           sequence_no: plan.sequence_no ?? null,
+          plan_id: plan.plan_id || null,
         })
       })
     })
@@ -2687,6 +2694,7 @@ const buildPlanTimeSlots = async (lineId, processId, existingItems = []) => {
           start,
           end,
           sequence_no: plan.sequence_no ?? null,
+          plan_id: plan.plan_id || null,
         }
 
         const slotKey = `${start.toISOString()}_${end.toISOString()}`
@@ -2999,10 +3007,11 @@ const loadPlannedProducts = async () => {
         const pid = String(productId)
         if (!ganttEntriesByProduct.has(pid)) ganttEntriesByProduct.set(pid, new Map())
         const seqMap = ganttEntriesByProduct.get(pid)
-        const seqKey = seq !== null ? seq : 'none'
+        const planId = item?.plan_id || ''
+        const seqKey = planId ? `${seq !== null ? seq : 'none'}__${planId}` : (seq !== null ? seq : 'none')
         const startMs = item?.start instanceof Date ? item.start.getTime() : Number.POSITIVE_INFINITY
         const prev = seqMap.get(seqKey)
-        if (!prev) { seqMap.set(seqKey, { qty: toSafeNumber(item?.plan_qty), startMs }) }
+        if (!prev) { seqMap.set(seqKey, { qty: toSafeNumber(item?.plan_qty), startMs, planId }) }
         else { prev.qty += toSafeNumber(item?.plan_qty); prev.startMs = Math.min(prev.startMs, startMs) }
       })
     })
@@ -3058,7 +3067,9 @@ const loadPlannedProducts = async () => {
         return
       }
       entries.forEach((entry, seqKey) => {
-        expanded.push({ ...item, plan_qty: toSafeNumber(entry.qty), sequence_no: seqKey === 'none' ? null : seqKey, gantt_start_ms: Number.isFinite(entry.startMs) ? entry.startMs : null })
+        const seqPart = String(seqKey).split('__')[0]
+        const seqNo = seqPart === 'none' ? null : Number(seqPart)
+        expanded.push({ ...item, plan_qty: toSafeNumber(entry.qty), sequence_no: Number.isFinite(seqNo) ? seqNo : null, plan_id: entry.planId || null, gantt_start_ms: Number.isFinite(entry.startMs) ? entry.startMs : null })
       })
     })
     mapFilteredForProduction = expanded
@@ -3069,6 +3080,31 @@ const loadPlannedProducts = async () => {
       if (key && !dedupMap.has(key)) dedupMap.set(key, item)
     })
     mapFilteredForProduction = Array.from(dedupMap.values())
+
+    // 同一製品の複数計画（本体 + hakogumi_prev等）に実績を開始時刻順に分配
+    const planGroupsByProduct = new Map()
+    mapFilteredForProduction.forEach((item, idx) => {
+      if (!item?.plan_id) return
+      const pid = String(item?.product || '')
+      if (!pid) return
+      if (!planGroupsByProduct.has(pid)) planGroupsByProduct.set(pid, [])
+      planGroupsByProduct.get(pid).push(idx)
+    })
+    planGroupsByProduct.forEach((indices, pid) => {
+      if (indices.length <= 1) return
+      const totalActual = toSafeNumber(backlogActualByProduct.get(pid))
+      const sorted = indices
+        .map((idx) => ({ idx, startMs: mapFilteredForProduction[idx]?.gantt_start_ms ?? Number.POSITIVE_INFINITY }))
+        .sort((a, b) => a.startMs - b.startMs)
+      let remaining = totalActual
+      sorted.forEach(({ idx }, i) => {
+        const planQty = toSafeNumber(mapFilteredForProduction[idx].plan_qty)
+        const isLast = i === sorted.length - 1
+        const attributed = isLast ? Math.max(remaining, 0) : Math.min(Math.max(remaining, 0), planQty)
+        mapFilteredForProduction[idx] = { ...mapFilteredForProduction[idx], actual_qty: attributed }
+        remaining -= attributed
+      })
+    })
 
     // 生産記録用リスト（全時間帯）を保持
     allPlanProducts.value = [...mapFilteredForProduction]
