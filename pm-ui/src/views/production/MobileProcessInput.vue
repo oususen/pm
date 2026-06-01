@@ -2172,7 +2172,12 @@ const isEndOperatorAction = computed(() => {
   return String(effectiveOperatorAction.value || '').toUpperCase() === 'END'
 })
 
+const isPauseOperatorAction = computed(() => {
+  return String(effectiveOperatorAction.value || '').toUpperCase() === 'PAUSE'
+})
+
 const qtyInputMin = computed(() => {
+  if (isPauseOperatorAction.value) return 0
   return isEndOperatorAction.value && hasFilledText(record.value.remarks) ? 0 : 1
 })
 
@@ -2186,9 +2191,10 @@ const hasRequiredProductionFields = ({ requireQty = true } = {}) => {
       !Number.isNaN(qtyValue)
     if (!hasQty) return false
 
-    const allowZeroOnEndWithRemarks =
-      isEndOperatorAction.value && hasFilledText(record.value.remarks)
-    if (allowZeroOnEndWithRemarks) {
+    const allowZero =
+      isPauseOperatorAction.value ||
+      (isEndOperatorAction.value && hasFilledText(record.value.remarks))
+    if (allowZero) {
       if (qtyValue < 0) return false
     } else if (qtyValue <= 0) {
       return false

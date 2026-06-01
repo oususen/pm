@@ -1218,7 +1218,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                 raise serializers.ValidationError({'product_id': '作業時刻記録は製品の指定が必要です。'})
             if action == 'PAUSE':
                 pause_qty = attrs.get('qty')
-                if pause_qty is None or pause_qty <= 0:
+                if pause_qty is None or pause_qty < 0:
                     raise serializers.ValidationError({'qty': '中断時は数量の入力が必要です。'})
             if action == 'END':
                 production_qty = attrs.get('production_qty')

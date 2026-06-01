@@ -1182,7 +1182,11 @@ const requiresTempEndOtherRemarks = computed(() => {
   return String(effectiveOperatorAction.value || '').toUpperCase() === 'TEMP_END'
 })
 const isEndOperatorAction = computed(() => String(effectiveOperatorAction.value || '').toUpperCase() === 'END')
-const qtyInputMin = computed(() => isEndOperatorAction.value && hasFilledText(record.value.remarks) ? 0 : 1)
+const isPauseOperatorAction = computed(() => String(effectiveOperatorAction.value || '').toUpperCase() === 'PAUSE')
+const qtyInputMin = computed(() => {
+  if (isPauseOperatorAction.value) return 0
+  return isEndOperatorAction.value && hasFilledText(record.value.remarks) ? 0 : 1
+})
 
 // ──────────────────────────────
 // 加工中・中断中
@@ -1829,8 +1833,8 @@ const hasRequiredProductionFields = ({ requireQty = true } = {}) => {
     const qtyValue = Number(record.value.qty)
     const hasQty = record.value.qty !== null && record.value.qty !== '' && !Number.isNaN(qtyValue)
     if (!hasQty) return false
-    const allowZeroOnEndWithRemarks = isEndOperatorAction.value && hasFilledText(record.value.remarks)
-    if (allowZeroOnEndWithRemarks) { if (qtyValue < 0) return false }
+    const allowZero = isPauseOperatorAction.value || (isEndOperatorAction.value && hasFilledText(record.value.remarks))
+    if (allowZero) { if (qtyValue < 0) return false }
     else if (qtyValue <= 0) return false
   }
   if (!hasFilledText(record.value.operator_name)) return false
