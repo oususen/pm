@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <div>
-        <h2 class="page-title">仕入れ在庫 / 残量一覧</h2>
+        <h2 class="page-title">仕入れ在庫 / 残量一覧 <button v-if="authState.user?.is_superuser" class="ds-btn" @click="showDataSource = true" title="データソース"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></button></h2>
         <p class="subtitle">購入品を対象に、日付別の数量を右に並べて表示します。</p>
       </div>
       <div class="page-actions">
@@ -223,18 +223,42 @@
         <p class="processing-sub">少々お待ちください</p>
       </div>
     </div>
+
+    <!-- データソースモーダル -->
+    <div v-if="showDataSource" class="ds-overlay" @click.self="showDataSource = false">
+      <div class="ds-modal">
+        <div class="ds-header"><h3>データソース</h3><button class="ds-close" @click="showDataSource = false">&times;</button></div>
+        <table class="ds-table">
+          <thead><tr><th>操作</th><th>テーブル</th><th>説明</th></tr></thead>
+          <tbody>
+            <tr class="ds-section"><td colspan="3"><strong>在庫・進度データ</strong></td></tr>
+            <tr><td>需要/実績 読み書き</td><td>line_backlog</td><td>需要(seq=0)・計画実績(seq&gt;0)・調整数・仕損</td></tr>
+            <tr><td>在庫再計算 書き込み</td><td>line_backlog</td><td>在庫・計画在庫・進度の再計算結果</td></tr>
+            <tr class="ds-section"><td colspan="3"><strong>マスタ</strong></td></tr>
+            <tr><td>仕入先 読み取り</td><td>m_supplier</td><td>仕入先マスタ</td></tr>
+            <tr><td>製品 読み取り</td><td>m_product</td><td>製品マスタ（購入品フィルタ）</td></tr>
+            <tr><td>BOM 読み取り</td><td>m_bom / m_bom_item</td><td>部品表（逆展開・子製品表示）</td></tr>
+            <tr><td>ルーティング 読み取り</td><td>m_routing_step</td><td>ルーティング工程（仕入先→製品特定）</td></tr>
+            <tr><td>ライン 読み取り</td><td>m_line</td><td>ラインマスタ（仕入先ライン解決）</td></tr>
+            <tr><td>カレンダー 読み取り</td><td>m_calendar / m_calendar_day</td><td>営業日カレンダー（休日表示）</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onBeforeUnmount, onUpdated, nextTick, ref } from "vue";
 import api from "@/api/client";
+import { authState } from "@/auth";
 import { addDays, formatISODate, parseISODate } from "@/utils/dateUtil";
 import {
   compareBySpecialOrderThenProductCode,
   resolveSpecialDisplayOrder,
 } from "@/utils/groupSort";
 
+const showDataSource = ref(false);
 const selectedSupplier = ref("");
 const productFilter = ref("");
 const defaultStart = new Date();
@@ -1424,5 +1448,18 @@ onUpdated(() => {
   border-color: #7c3aed !important;
   &:hover { background: #6d28d9; }
 }
+.ds-btn { margin-left: 8px; padding: 4px 6px; border: 1px solid #94a3b8; border-radius: 4px; background: #f8fafc; color: #475569; cursor: pointer; vertical-align: middle; display: inline-flex; align-items: center; }
+.ds-btn:hover { background: #e2e8f0; }
+.ds-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+.ds-modal { background: #fff; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,.2); max-width: 700px; width: 90%; max-height: 80vh; overflow: auto; }
+.ds-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #e5e7eb; }
+.ds-header h3 { margin: 0; font-size: 15px; }
+.ds-close { border: none; background: none; font-size: 22px; cursor: pointer; color: #64748b; }
+.ds-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ds-table th, .ds-table td { padding: 8px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; }
+.ds-table th { background: #f8fafc; font-weight: 600; color: #374151; }
+.ds-table td:first-child { white-space: nowrap; font-weight: 500; color: #2563eb; }
+.ds-table td:nth-child(2) { font-family: monospace; font-size: 12px; color: #0f172a; }
+.ds-section td { background: #f0f4ff; padding: 6px 12px; }
 </style>
 

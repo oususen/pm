@@ -127,10 +127,24 @@
         <table class="ds-table">
           <thead><tr><th>操作</th><th>テーブル</th><th>説明</th></tr></thead>
           <tbody>
+            <tr class="ds-section"><td colspan="3"><strong>提案書管理</strong></td></tr>
             <tr><td>提案書 読み書き</td><td>purchase_order_proposal</td><td>発注提案書ヘッダ（仕入先・発注日・ステータス）</td></tr>
             <tr><td>提案書明細 読み書き</td><td>purchase_order_proposal_line</td><td>提案書の品目明細（製品・数量・在庫スナップショット）</td></tr>
             <tr><td>承認 読み書き</td><td>purchase_order_proposal_approval</td><td>承認履歴</td></tr>
+            <tr><td>タスク 読み書き</td><td>purchase_order_task</td><td>発注タスク（承認依頼・発注指示等）</td></tr>
+            <tr class="ds-section"><td colspan="3"><strong>自動提案（数量算出）</strong></td></tr>
+            <tr><td>計画在庫/進度 読み取り</td><td>line_backlog</td><td>計画在庫・進度から不足数を算出</td></tr>
+            <tr><td>安全在庫 読み取り</td><td>stock_allocation</td><td>最低在庫数（計画在庫ベース時の基準）</td></tr>
+            <tr><td>在庫再計算 書き込み</td><td>line_backlog</td><td>提案前に在庫・進度を再計算</td></tr>
+            <tr class="ds-section"><td colspan="3"><strong>納入日・パターン</strong></td></tr>
+            <tr><td>スケジュール 読み取り</td><td>supplier_order_schedule</td><td>仕入先×パターン割当（リードタイム）</td></tr>
+            <tr><td>パターン 読み取り</td><td>supplier_order_pattern</td><td>納入パターン定義（次回納入日算出）</td></tr>
+            <tr class="ds-section"><td colspan="3"><strong>マスタ</strong></td></tr>
             <tr><td>仕入先 読み取り</td><td>m_supplier</td><td>仕入先マスタ</td></tr>
+            <tr><td>製品 読み取り</td><td>m_product</td><td>製品マスタ（発注ロット倍数・最低ロット）</td></tr>
+            <tr><td>ルーティング 読み取り</td><td>m_routing_step</td><td>仕入先→製品の紐付け特定</td></tr>
+            <tr><td>ライン 読み取り</td><td>m_line</td><td>仕入先コードからライン解決</td></tr>
+            <tr><td>カレンダー 読み取り</td><td>m_calendar</td><td>営業日判定（納入日・パターン計算）</td></tr>
           </tbody>
         </table>
       </div>
@@ -346,6 +360,7 @@ onMounted(async () => {
 .ds-table th { background: #f8fafc; font-weight: 600; color: #374151; }
 .ds-table td:first-child { white-space: nowrap; font-weight: 500; color: #2563eb; }
 .ds-table td:nth-child(2) { font-family: monospace; font-size: 12px; color: #0f172a; }
+.ds-section td { background: #f0f4ff; padding: 6px 12px; }
 </style>
 
 
