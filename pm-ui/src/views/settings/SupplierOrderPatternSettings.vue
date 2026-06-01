@@ -124,10 +124,6 @@
             <label>間隔営業日数 *</label>
             <input v-model.number="patternForm.interval_days" type="number" min="1" required placeholder="例: 2（2営業日ごと）" />
           </div>
-          <div class="form-group" v-if="patternForm.recurrence_type === 'EVERY_N_BUSINESS_DAYS'">
-            <label>開始基準日 *</label>
-            <input v-model="patternForm.start_date" type="date" required />
-          </div>
           <div class="form-group">
             <label>
               <input v-model="patternForm.is_active" type="checkbox" />
@@ -167,6 +163,10 @@
                 {{ p.pattern_code }} - {{ p.pattern_name }}
               </option>
             </select>
+          </div>
+          <div class="form-group" v-if="selectedSchedulePattern?.recurrence_type === 'EVERY_N_BUSINESS_DAYS'">
+            <label>開始基準日 *</label>
+            <input v-model="scheduleForm.start_date" type="date" required />
           </div>
           <div class="form-group">
             <label>リードタイム(日)</label>
@@ -237,7 +237,6 @@ const defaultPatternForm = () => ({
   nth_weeks: [],
   days_of_month: [],
   interval_days: 2,
-  start_date: '',
   is_active: true,
   note: '',
 })
@@ -248,12 +247,18 @@ const scheduleForm = ref({
   id: null,
   supplier: '',
   pattern: '',
+  start_date: '',
   lead_time_days: 0,
   is_enabled: true,
   note: '',
 })
 
 const activePatterns = computed(() => patternRows.value.filter(p => p.is_active))
+const selectedSchedulePattern = computed(() => {
+  const id = Number(scheduleForm.value.pattern)
+  if (!id) return null
+  return patternRows.value.find((p) => Number(p.id) === id) || null
+})
 
 const dayLabel = (value) => {
   const found = dayOptions.find((item) => item.value === Number(value))
@@ -273,7 +278,7 @@ const conditionLabel = (row) => {
     return `${weeks} ${daysLabel(row.days_of_week)}`
   }
   if (row.recurrence_type === 'EVERY_BUSINESS_DAY') return '毎営業日'
-  if (row.recurrence_type === 'EVERY_N_BUSINESS_DAYS') return `${row.interval_days}営業日ごと (基準: ${row.start_date})`
+  if (row.recurrence_type === 'EVERY_N_BUSINESS_DAYS') return `${row.interval_days}営業日ごと`
   return ''
 }
 
@@ -335,7 +340,6 @@ const buildPatternPayload = () => {
   }
   if (patternForm.value.recurrence_type === 'EVERY_N_BUSINESS_DAYS') {
     payload.interval_days = Number(patternForm.value.interval_days)
-    payload.start_date = patternForm.value.start_date
   }
   return payload
 }
@@ -364,7 +368,7 @@ const removePattern = async (id) => {
 
 const openNewSchedule = () => {
   isEditSchedule.value = false
-  scheduleForm.value = { id: null, supplier: '', pattern: '', lead_time_days: 0, is_enabled: true, note: '' }
+  scheduleForm.value = { id: null, supplier: '', pattern: '', start_date: '', lead_time_days: 0, is_enabled: true, note: '' }
   showScheduleDialog.value = true
 }
 
@@ -375,9 +379,11 @@ const openEditSchedule = (row) => {
 }
 
 const saveSchedule = async () => {
+  const isEveryNBusinessDays = selectedSchedulePattern.value?.recurrence_type === 'EVERY_N_BUSINESS_DAYS'
   const payload = {
     supplier: scheduleForm.value.supplier,
     pattern: scheduleForm.value.pattern,
+    start_date: isEveryNBusinessDays ? (scheduleForm.value.start_date || null) : null,
     lead_time_days: Number(scheduleForm.value.lead_time_days || 0),
     is_enabled: Boolean(scheduleForm.value.is_enabled),
     note: scheduleForm.value.note || '',

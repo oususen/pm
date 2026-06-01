@@ -298,7 +298,7 @@ def _generate_raw_pattern_dates(schedule: SupplierOrderSchedule, start_date: dat
 
     if recurrence == SupplierOrderPattern.RECURRENCE_EVERY_N_BUSINESS_DAYS:
         interval = int(pattern.interval_days or 1)
-        ref_date = pattern.start_date
+        ref_date = schedule.start_date or pattern.start_date
         if not ref_date or interval < 1 or not calculator:
             return
         # 基準日から営業日をカウントし、interval営業日ごとの日を算出

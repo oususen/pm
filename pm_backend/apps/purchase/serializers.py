@@ -47,7 +47,6 @@ class SupplierOrderPatternSerializer(serializers.ModelSerializer):
             'nth_weeks',
             'days_of_month',
             'interval_days',
-            'start_date',
             'is_active',
             'note',
         ]
@@ -110,11 +109,8 @@ class SupplierOrderPatternSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'days_of_week': '曜日を1つ以上指定してください。'})
         elif recurrence_type == SupplierOrderPattern.RECURRENCE_EVERY_N_BUSINESS_DAYS:
             interval_days = attrs.get('interval_days', getattr(self.instance, 'interval_days', None))
-            start_date = attrs.get('start_date', getattr(self.instance, 'start_date', None))
             if not interval_days or interval_days < 1:
                 raise serializers.ValidationError({'interval_days': '間隔日数は1以上で指定してください。'})
-            if not start_date:
-                raise serializers.ValidationError({'start_date': '開始基準日を指定してください。'})
 
         return attrs
 
@@ -135,10 +131,18 @@ class SupplierOrderScheduleSerializer(serializers.ModelSerializer):
             'pattern',
             'pattern_code',
             'pattern_name',
+            'start_date',
             'lead_time_days',
             'is_enabled',
             'note',
         ]
+
+    def validate(self, attrs):
+        pattern = attrs.get('pattern', getattr(self.instance, 'pattern', None))
+        start_date = attrs.get('start_date', getattr(self.instance, 'start_date', None))
+        if pattern and pattern.recurrence_type == SupplierOrderPattern.RECURRENCE_EVERY_N_BUSINESS_DAYS and not start_date:
+            raise serializers.ValidationError({'start_date': '開始基準日を指定してください。'})
+        return attrs
 
 
 class PurchaseOrderProposalLineSerializer(serializers.ModelSerializer):

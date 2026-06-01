@@ -70,6 +70,7 @@ class SupplierOrderSchedule(models.Model):
         related_name='schedules',
         verbose_name='納入パターン',
     )
+    start_date = models.DateField(null=True, blank=True, verbose_name='開始基準日')
     lead_time_days = models.PositiveIntegerField(default=0)
     is_enabled = models.BooleanField(default=True)
     note = models.CharField(max_length=200, null=True, blank=True)
