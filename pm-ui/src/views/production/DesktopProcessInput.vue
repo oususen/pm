@@ -223,22 +223,22 @@
 
         <div v-if="record.record_type === 'PRODUCTION' || record.record_type === 'SCRAP'" class="manual-toggle-area">
           <button
-            v-if="isEmbeddedTablet && filterCurrentTime"
+            v-if="isEmbeddedTablet && filterCurrentTime && timeSlots.length > 1"
             type="button"
             class="btn-manual-nav"
-            :disabled="!canPrevProduct"
-            @click="goPrevProduct"
-          >＜</button>
+            :disabled="!canPrevSlot"
+            @click="goPrevSlot"
+          >«</button>
           <button type="button" class="btn-link" @click="toggleManualProduct">
             {{ manualProduct ? t('processInput.backToSearch') : t('processInput.manualInput') }}
           </button>
           <button
-            v-if="isEmbeddedTablet && filterCurrentTime"
+            v-if="isEmbeddedTablet && filterCurrentTime && timeSlots.length > 1"
             type="button"
             class="btn-manual-nav"
-            :disabled="!canNextProduct"
-            @click="goNextProduct"
-          >＞</button>
+            :disabled="!canNextSlot"
+            @click="goNextSlot"
+          >»</button>
         </div>
         <div v-if="isEmbeddedTablet && filterCurrentTime && plannedTimeLabel" class="planned-time-inline">
           予定加工時間: {{ plannedTimeLabel }}
@@ -1016,11 +1016,6 @@ const currentNavIndex = computed(() => {
   return 0
 })
 
-const canPrevProduct = computed(() => currentNavIndex.value > 0)
-const canNextProduct = computed(() => {
-  const idx = currentNavIndex.value
-  return idx >= 0 && idx < navProductItems.value.length - 1
-})
 
 const effectivePageSize = computed(() => (filterCurrentTime.value ? Math.max(filteredListItems.value.length, 1) : PAGE_SIZE))
 
@@ -1979,8 +1974,6 @@ const moveProductBy = (delta) => {
   selectPlannedProduct(target)
 }
 
-const goPrevProduct = () => moveProductBy(-1)
-const goNextProduct = () => moveProductBy(1)
 
 // ──────────────────────────────
 // リセット
