@@ -21,7 +21,7 @@ from orders.utils.calendar_utils import get_business_today
 
 from production.services.floor_shipping_pdf import (
     PRODUCT_ORDER,
-    PRODUCT_ORDER_LAP,
+    PRODUCT_ORDER_NEW,
     _collect_floor_shipping_data,
     _get_calendar_id,
     _build_working_day_cache,
@@ -238,7 +238,6 @@ def _resolve_hokushin_context(
     am_delivery_date: date = None,
     yoi_delivery_date: date = None,
     include_all: bool = False,
-    use_lap: bool = True,
 ):
     """北進塗装納品書用のコンテキストを構築
 
@@ -247,8 +246,8 @@ def _resolve_hokushin_context(
                 am_dispatch_date, yoi_dispatch_date,
                 am_items, yoi_items }
     """
-    product_order = PRODUCT_ORDER_LAP if use_lap else PRODUCT_ORDER
-    use_alias = not use_lap
+    product_order = PRODUCT_ORDER_NEW
+    use_alias = False
 
     line = Line.objects.filter(id=line_id).first()
     if not line:
