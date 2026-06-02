@@ -599,10 +599,38 @@ const applyRange = async () => {
   applyingRange.value = true
   try {
     const existingRows = await fetchCalendarDaysByRange(range.value.start, range.value.end)
-    const workingRows = existingRows.filter((row) => !!row.is_working_day)
+    const existingMap = new Map()
+    existingRows.forEach((r) => existingMap.set(r.target_date, r))
+
+    let workingRows = existingRows.filter((row) => !!row.is_working_day)
 
     if (!workingRows.length) {
-      alert('対象期間に出勤日がありません。先に出勤日を設定してください。')
+      // DBにレコードがない場合、表示と同じフォールバックで出勤日を判定して作成
+      await loadDaisoCalendarDays()
+      const createOps = []
+      const start = new Date(range.value.start + 'T00:00:00')
+      const end = new Date(range.value.end + 'T00:00:00')
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dateStr = ymd(d)
+        if (existingMap.has(dateStr)) continue
+        const daiso = daisoDayMap.value.get(dateStr)
+        const isWorking = daiso ? !!daiso.is_working_day : d.getDay() !== 0 && d.getDay() !== 6
+        if (!isWorking) continue
+        createOps.push(api.calendars.createCalendarDay({
+          calendar: selectedCalendar.value,
+          target_date: dateStr,
+          is_working_day: true,
+          work_minutes: range.value.workMinutes,
+          work_pattern: range.value.workPattern || null,
+        }))
+      }
+      if (!createOps.length) {
+        alert('対象期間に出勤日がありません。先に出勤日を設定してください。')
+        return
+      }
+      await Promise.all(createOps)
+      await loadCalendarDays()
+      alert(`出勤日 ${createOps.length} 件を作成し勤務パターンを適用しました。`)
       return
     }
 
