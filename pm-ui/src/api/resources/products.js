@@ -56,6 +56,11 @@ export const createProductsAPI = (client) => ({
     if (processId) params.process_id = processId
     return client.get('/products/line-final-candidates/', { params })
   },
+  getDisplayProductCandidates(lineId, processId) {
+    return client.get('/products/display-product-candidates/', {
+      params: { line_id: lineId, process_id: processId },
+    })
+  },
   bulkUpdateLineFinal(updates) {
     return client.post('/products/bulk-update-line-final/', { updates })
   },

@@ -132,6 +132,7 @@ const finalProductOptionsByLine = ref({})
 const processOptionsByFinalLine = ref({})
 const routingDetailCache = ref({})
 const allDisplayProductOptions = ref([])
+const displayProductsByLineProcess = ref({})
 
 const loading = ref(false)
 const saving = ref(false)
@@ -168,10 +169,13 @@ const uniqById = (list) => {
 const parseLineFinalCandidates = (responseData) => {
   const rows = Array.isArray(responseData) ? responseData : []
   if (!rows.length) return []
+  let products
   if (Array.isArray(rows[0]?.products)) {
-    return uniqById(rows.flatMap((row) => row.products || []))
+    products = uniqById(rows.flatMap((row) => row.products || []))
+  } else {
+    products = uniqById(rows)
   }
-  return uniqById(rows)
+  return products.filter((p) => p.is_line_final_product)
 }
 
 const formatProductLabel = (product) => {
@@ -228,7 +232,7 @@ const loadMasterData = async () => {
     api.products.getProducts({ is_active: true, page_size: 5000 }),
   ])
 
-  lineOptions.value = toArray(lineRes).sort((a, b) => sortByCode(a, b, 'line_code', 'line_name'))
+  lineOptions.value = toArray(lineRes).filter((l) => l.line_type === 'PROD').sort((a, b) => sortByCode(a, b, 'line_code', 'line_name'))
   processOptions.value = toArray(processRes).sort((a, b) => sortByCode(a, b, 'process_code', 'process_name'))
   finalProductOptions.value = toArray(finalProductRes).sort((a, b) => sortByCode(a, b, 'product_code', 'product_name'))
   allDisplayProductOptions.value = toArray(displayProductRes).sort((a, b) => sortByCode(a, b, 'product_code', 'product_name'))
@@ -326,14 +330,7 @@ const ensureProcessOptionsForForm = async () => {
 const getFinalProductCandidates = () => {
   if (!form.value.line) return finalProductOptions.value
   const key = String(form.value.line)
-  const lineCandidates = finalProductOptionsByLine.value[key] || []
-  const merged = [...lineCandidates]
-  const idSet = new Set(lineCandidates.map((product) => Number(product.id)))
-  finalProductOptions.value.forEach((product) => {
-    const id = Number(product.id)
-    if (!idSet.has(id)) merged.push(product)
-  })
-  return merged
+  return finalProductOptionsByLine.value[key] || []
 }
 
 const finalSuggestions = computed(() => {
@@ -365,10 +362,36 @@ const processOptionsForForm = computed(() => {
   return processOptions.value.filter((p) => !p.line || Number(p.line) === lineId)
 })
 
+const ensureDisplayProductsForLineProcess = async (lineId, processId) => {
+  if (!lineId || !processId) return
+  const key = `${lineId}:${processId}`
+  if (Object.prototype.hasOwnProperty.call(displayProductsByLineProcess.value, key)) return
+  try {
+    const res = await api.products.getDisplayProductCandidates(lineId, processId)
+    const candidates = toArray(res).sort((a, b) => sortByCode(a, b, 'product_code', 'product_name'))
+    displayProductsByLineProcess.value = { ...displayProductsByLineProcess.value, [key]: candidates }
+  } catch (error) {
+    console.error('表示品候補の取得に失敗しました', error)
+    displayProductsByLineProcess.value = { ...displayProductsByLineProcess.value, [key]: [] }
+  }
+}
+
+const getDisplayProductCandidates = () => {
+  const lineId = Number(form.value.line || 0)
+  const processId = Number(form.value.process || 0)
+  if (!lineId || !processId) return allDisplayProductOptions.value
+  const key = `${lineId}:${processId}`
+  const cached = displayProductsByLineProcess.value[key]
+  if (Array.isArray(cached)) return cached.length ? cached : allDisplayProductOptions.value
+  void ensureDisplayProductsForLineProcess(lineId, processId)
+  return allDisplayProductOptions.value
+}
+
 const displaySuggestions = computed(() => {
   const keyword = String(form.value.display_product_query || '').trim().toLowerCase()
-  if (!keyword) return allDisplayProductOptions.value.slice(0, 30)
-  return allDisplayProductOptions.value
+  const candidates = getDisplayProductCandidates()
+  if (!keyword) return candidates.slice(0, 30)
+  return candidates
     .filter((p) => {
       const code = String(p.product_code || '').toLowerCase()
       const name = String(p.product_name || '').toLowerCase()
@@ -433,7 +456,12 @@ const onDisplayProductInput = () => {
   }
 }
 
-const openDisplaySuggestions = () => {
+const openDisplaySuggestions = async () => {
+  const lineId = Number(form.value.line || 0)
+  const processId = Number(form.value.process || 0)
+  if (lineId && processId) {
+    await ensureDisplayProductsForLineProcess(lineId, processId)
+  }
   form.value.showDisplaySuggestions = true
 }
 
@@ -500,7 +528,12 @@ const applyCreatePrefillFromQuery = async () => {
 
   if (queryLine > 0) {
     form.value.line = queryLine
-    await ensureFinalProductsForLine(queryLine)
+  } else {
+    const prodLine = lineOptions.value.find((l) => l.line_type === 'PROD')
+    if (prodLine) form.value.line = prodLine.id
+  }
+  if (form.value.line) {
+    await ensureFinalProductsForLine(form.value.line)
   }
 
   if (queryFinal > 0) {

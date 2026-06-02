@@ -231,6 +231,49 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             })
         return Response(result)
 
+    @action(detail=False, methods=['get'], url_path='display-product-candidates')
+    def display_product_candidates(self, request):
+        """ライン+工程のoutput_product＋連産品を返す（ガント表示品マップ用）"""
+        line_id = request.query_params.get('line_id')
+        process_id = request.query_params.get('process_id')
+        if not line_id or not process_id:
+            return Response([])
+
+        steps_qs = RoutingStep.objects.filter(
+            line_id=line_id, process_id=process_id,
+        ).filter(
+            build_effective_routing_q(prefix='routing__')
+        ).select_related('output_product')
+
+        product_map = {}
+        output_ids = set()
+        for step in steps_qs:
+            p = step.output_product
+            if not p:
+                continue
+            output_ids.add(p.id)
+            product_map[p.id] = {
+                'id': p.id,
+                'product_code': p.product_code,
+                'product_name': p.product_name,
+            }
+
+        driver_items = BOMItem.objects.filter(
+            bom__is_coproduct=True, bom__is_active=True,
+            is_coproduct_driver=True, child_product_id__in=output_ids,
+        ).select_related('bom__parent_product')
+        for item in driver_items:
+            pp = item.bom.parent_product
+            if pp and pp.id not in product_map:
+                product_map[pp.id] = {
+                    'id': pp.id,
+                    'product_code': pp.product_code,
+                    'product_name': pp.product_name,
+                }
+
+        result = sorted(product_map.values(), key=lambda x: x['product_code'])
+        return Response(result)
+
     @action(detail=False, methods=['post'], url_path='bulk-update-line-final')
     def bulk_update_line_final(self, request):
         """ライン最終品フラグを一括更新"""
