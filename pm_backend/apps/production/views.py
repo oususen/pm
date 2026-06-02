@@ -3036,53 +3036,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         affected_keys.add((child_target_product_id, step.process_id, target_date, seq_key))
 
             if affected_keys:
-                # 親計画を手修正した際、旧plan_id由来の子展開行が残ると累積するため、
-                # 今回のbase_plansに含まれない同日同親プレフィックス行のみ先に削除する。
-                expected_plan_ids = {str(p.get('plan_id')) for p in base_plans if p.get('plan_id')}
-                plan_dates = sorted({p.get('plan_date') for p in base_plans if p.get('plan_date')})
-                source_product_ids = sorted({int(p.get('product_id')) for p in base_plans if p.get('product_id')})
-                product_code_map = {}
-                if source_product_ids:
-                    product_code_map = {
-                        int(pid): str(code or '')
-                        for pid, code in Product.objects.filter(id__in=source_product_ids).values_list('id', 'product_code')
-                    }
-                prefixes_by_date = {}
-                for p in base_plans:
-                    dt = p.get('plan_date')
-                    pid = p.get('product_id')
-                    code = product_code_map.get(int(pid), '') if pid is not None else ''
-                    if not dt or not code:
-                        continue
-                    prefixes_by_date.setdefault(dt, set()).add(f"{code}_{dt.strftime('%Y%m%d')}_")
-
-                stale_row_ids = []
-                stale_plan_ids = []
-                if expected_plan_ids and prefixes_by_date and plan_dates:
-                    candidate_rows = LineBacklog.objects.filter(
-                        line_id=line_id,
-                        sequence_no__gt=0,
-                        plan_date__in=plan_dates,
-                    ).exclude(plan_id__isnull=True).exclude(plan_id='').only('id', 'plan_id', 'plan_date')
-                    for row in candidate_rows:
-                        pid_text = str(row.plan_id or '')
-                        if pid_text in expected_plan_ids:
-                            continue
-                        prefixes = prefixes_by_date.get(row.plan_date) or set()
-                        if any(pid_text.startswith(prefix) for prefix in prefixes):
-                            stale_row_ids.append(row.id)
-                            stale_plan_ids.append(pid_text)
-                if stale_row_ids:
-                    LineBacklog.objects.filter(id__in=stale_row_ids).delete()
-                debug_stale_deleted_count = len(stale_row_ids)
-                debug_stale_deleted_plan_ids_sample = stale_plan_ids[:10]
-                logger.warning(
-                    '[expand_processes] stale rows deleted line=%s count=%s sample=%s',
-                    line_id,
-                    debug_stale_deleted_count,
-                    debug_stale_deleted_plan_ids_sample,
-                )
-
                 q_filter = Q()
                 for product_id, process_id, plan_date, seq_key in affected_keys:
                     q_filter |= Q(
@@ -3093,6 +3046,60 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         sequence_no=seq_key,
                     )
                 LineBacklog.objects.filter(q_filter).delete()
+
+        # 旧plan_id由来のstale行削除（items有無に関係なく実行）
+        # 親計画のsequence_noが変更された際、旧sequence_noの子品展開行が残るのを防ぐ
+        if not read_only and base_plans:
+            # LinePlanに存在するplan_idは絶対に消さない（誤削除防止のガード）
+            protected_plan_ids = set(
+                LinePlan.objects.filter(
+                    line_id=line_id,
+                    plan_id__isnull=False,
+                ).values_list('plan_id', flat=True)
+            )
+            plan_dates = sorted({p.get('plan_date') for p in base_plans if p.get('plan_date')})
+            source_product_ids = sorted({int(p.get('product_id')) for p in base_plans if p.get('product_id')})
+            product_code_map = {}
+            if source_product_ids:
+                product_code_map = {
+                    int(pid): str(code or '')
+                    for pid, code in Product.objects.filter(id__in=source_product_ids).values_list('id', 'product_code')
+                }
+            prefixes_by_date = {}
+            for p in base_plans:
+                dt = p.get('plan_date')
+                pid = p.get('product_id')
+                code = product_code_map.get(int(pid), '') if pid is not None else ''
+                if not dt or not code:
+                    continue
+                prefixes_by_date.setdefault(dt, set()).add(f"{code}_{dt.strftime('%Y%m%d')}_")
+
+            stale_row_ids = []
+            stale_plan_ids = []
+            if protected_plan_ids is not None and prefixes_by_date and plan_dates:
+                candidate_rows = LineBacklog.objects.filter(
+                    line_id=line_id,
+                    sequence_no__gt=0,
+                    plan_date__in=plan_dates,
+                ).exclude(plan_id__isnull=True).exclude(plan_id='').only('id', 'plan_id', 'plan_date')
+                for row in candidate_rows:
+                    pid_text = str(row.plan_id or '')
+                    if pid_text in protected_plan_ids:
+                        continue
+                    prefixes = prefixes_by_date.get(row.plan_date) or set()
+                    if any(pid_text.startswith(prefix) for prefix in prefixes):
+                        stale_row_ids.append(row.id)
+                        stale_plan_ids.append(pid_text)
+            if stale_row_ids:
+                LineBacklog.objects.filter(id__in=stale_row_ids).delete()
+            debug_stale_deleted_count = len(stale_row_ids)
+            debug_stale_deleted_plan_ids_sample = stale_plan_ids[:10]
+            logger.warning(
+                '[expand_processes] stale rows deleted line=%s count=%s sample=%s',
+                line_id,
+                debug_stale_deleted_count,
+                debug_stale_deleted_plan_ids_sample,
+            )
 
         # 集計結果を保持（共用部品の加算に対応）
         aggregated = {}
