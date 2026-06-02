@@ -1155,15 +1155,25 @@
   <div v-if="showAutoPlanConfirm" class="modal-overlay" @click.self="cancelAutoPlanConfirm">
     <div class="modal-content" style="max-width: 480px;">
       <h2 style="margin: 0 0 10px; font-size: 16px;">自動計画の確認</h2>
-      <p style="margin: 0 0 4px;">表示期間内の需要数を計画数へセットして自動計画を実行します。</p>
       <p style="margin: 0 0 4px;">ライン: <strong>{{ autoPlanConfirmLine }}</strong></p>
-      <p style="margin: 0 0 8px;">期間: <strong>{{ autoPlanConfirmPeriod }}</strong></p>
-      <p style="margin: 0 0 10px;">需要取込→保存（工程展開・在庫計算・ガント生成）を実行します。</p>
-      <p style="margin: 0; color: #c00; font-weight: 700; font-size: 13px;">※ まとめ生産の対象期間は表示期間内のデータのみ使用します。表示期間末尾では需要が不足する場合があります。</p>
-      <div style="text-align: right; margin-top: 14px; display: flex; gap: 8px; justify-content: flex-end;">
-        <button class="btn" @click="cancelAutoPlanConfirm">キャンセル</button>
-        <button class="btn primary" @click="confirmAutoPlan">OK</button>
-      </div>
+      <p style="margin: 0 0 4px; font-size: 15px; font-weight: 700; color: #b91c1c;">{{ autoPlanStartDate }} ～ {{ endDate }}</p>
+      <template v-if="!autoPlanDateEditing">
+        <p style="margin: 6px 0 10px;">この期間で自動計画を実行しますか？</p>
+        <div style="text-align: right; margin-top: 14px; display: flex; gap: 8px; justify-content: flex-end;">
+          <button class="btn" @click="cancelAutoPlanConfirm">キャンセル</button>
+          <button class="btn" @click="autoPlanDateEditing = true">いいえ</button>
+          <button class="btn primary" @click="confirmAutoPlan">はい</button>
+        </div>
+      </template>
+      <template v-else>
+        <p style="margin: 6px 0 4px;">開始日を変更:</p>
+        <input type="date" v-model="autoPlanStartDate" :min="startDate" :max="endDate" style="font-size:14px;padding:4px 6px;width:160px;">
+        <p style="margin: 6px 0 0; color: #c00; font-weight: 700; font-size: 13px;">※ まとめ生産の対象期間は表示期間内のデータのみ使用します。</p>
+        <div style="text-align: right; margin-top: 14px; display: flex; gap: 8px; justify-content: flex-end;">
+          <button class="btn" @click="cancelAutoPlanConfirm">キャンセル</button>
+          <button class="btn primary" @click="confirmAutoPlan">OK</button>
+        </div>
+      </template>
     </div>
   </div>
 
@@ -4845,7 +4855,7 @@ const applyDemandToPlanForDay = (dateKey) => {
   })
 }
 
-const applyDemandToPlanForVisiblePeriod = () => {
+const applyDemandToPlanForVisiblePeriod = (fromDate = null) => {
   const getWeekday = (dateKey) => {
     const dt = new Date(`${dateKey}T00:00:00`)
     return dt.getDay()
@@ -4874,6 +4884,7 @@ const applyDemandToPlanForVisiblePeriod = () => {
   let autoPlanCount = 0
   rows.value.forEach((row) => {
     dateColumns.value.forEach((c) => {
+      if (fromDate && c.key < fromDate) return
       const daily = ensureDailyCell(row, c.key)
       let demandQty = 0
       const productCode = String(row?.product_code || '').trim()
@@ -4904,15 +4915,31 @@ const applyDemandToPlanForVisiblePeriod = () => {
 
 const showAutoPlanConfirm = ref(false)
 const autoPlanConfirmLine = ref('')
-const autoPlanConfirmPeriod = ref('')
+const autoPlanStartDate = ref('')
+const autoPlanDateEditing = ref(false)
 let autoPlanConfirmResolve = null
+
+const getAutoPlanDefaultStartDate = () => {
+  const now = new Date()
+  if (now.getHours() < 8) now.setDate(now.getDate() - 1)
+  now.setDate(now.getDate() + 2)
+  const y = now.getFullYear()
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  const dayAfterTomorrow = `${y}-${m}-${d}`
+  if (dayAfterTomorrow < startDate.value) return startDate.value
+  if (dayAfterTomorrow > endDate.value) return startDate.value
+  return dayAfterTomorrow
+}
 
 const cancelAutoPlanConfirm = () => {
   showAutoPlanConfirm.value = false
+  autoPlanDateEditing.value = false
   if (autoPlanConfirmResolve) { autoPlanConfirmResolve(false); autoPlanConfirmResolve = null }
 }
 const confirmAutoPlan = () => {
   showAutoPlanConfirm.value = false
+  autoPlanDateEditing.value = false
   if (autoPlanConfirmResolve) { autoPlanConfirmResolve(true); autoPlanConfirmResolve = null }
 }
 
@@ -4920,7 +4947,8 @@ const doFloorSpotAutoPlan = async () => {
   if (!selectedLine.value) return
   if (!canShowFloorSpotAutoPlanButton.value) return
   autoPlanConfirmLine.value = selectedLineLabel.value || `ID:${selectedLine.value}`
-  autoPlanConfirmPeriod.value = `${startDate.value} ～ ${endDate.value}`
+  autoPlanStartDate.value = getAutoPlanDefaultStartDate()
+  autoPlanDateEditing.value = false
   showAutoPlanConfirm.value = true
   const confirmed = await new Promise((resolve) => { autoPlanConfirmResolve = resolve })
   if (!confirmed) return
@@ -4934,9 +4962,9 @@ const doFloorSpotAutoPlan = async () => {
       end_date: endDate.value,
     })
     await fetchAndApplyData()
-    const autoPlanCount = applyDemandToPlanForVisiblePeriod()
+    const autoPlanCount = applyDemandToPlanForVisiblePeriod(autoPlanStartDate.value)
     if (!autoPlanCount) {
-      alert('表示期間内に需要がないため、自動計画を実行しませんでした。')
+      alert('対象期間内に需要がないため、自動計画を実行しませんでした。')
       return
     }
   } catch (e) {
