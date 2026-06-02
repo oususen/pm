@@ -188,82 +188,124 @@
             </div>
           </div>
           <div v-if="canEdit && showCreateStepRow" class="create-step-row">
-            <input
-              v-model.number="newStepDraft.step_no"
-              type="number"
-              min="1"
-              step="1"
-              class="duration-input"
-              placeholder="工程番号"
-              :disabled="creatingStep"
-            />
-            <input
-              v-model.number="newStepDraft.parallel_group"
-              type="number"
-              min="1"
-              step="1"
-              class="duration-input"
-              placeholder="並列G"
-              :disabled="creatingStep"
-            />
-            <select v-model="newStepDraft.process" class="step-select" :disabled="creatingStep || loadingProcesses">
-              <option value="">{{ loadingProcesses ? '工程読込中...' : '工程を選択' }}</option>
-              <option v-for="proc in processOptions" :key="proc.id" :value="proc.id">
-                {{ proc.process_code }} - {{ proc.process_name }}
-              </option>
-            </select>
-            <select v-model="newStepDraft.line" class="step-select" :disabled="creatingStep || loadingLines">
-              <option value="">ライン未設定</option>
-              <option v-for="line in lines" :key="line.id" :value="line.id">
-                {{ line.line_code }} - {{ line.line_name }}
-              </option>
-            </select>
-            <select v-model="newStepDraft.supplier" class="step-select" :disabled="creatingStep || loadingSuppliers">
-              <option value="">外作先未設定</option>
-              <option v-for="supplier in supplierOptions" :key="supplier.id" :value="supplier.id">
-                {{ supplier.supplier_code }} - {{ supplier.supplier_name }}
-              </option>
-            </select>
-            <select v-model="newStepDraft.output_product" class="step-select" :disabled="creatingStep || loadingProducts">
-              <option value="">加工後品目未設定</option>
-              <option v-for="product in sortedProducts" :key="product.id" :value="product.id">
-                {{ product.product_code }} - {{ product.product_name }}
-              </option>
-            </select>
-            <select v-model="newStepDraft.time_unit" class="step-select step-select--small" :disabled="creatingStep">
-              <option value="DAY">日</option>
-              <option value="MINUTE">分</option>
-            </select>
-            <input
-              v-if="newStepDraft.time_unit === 'DAY'"
-              v-model.number="newStepDraft.lead_time_days"
-              type="number"
-              min="0"
-              step="1"
-              class="duration-input"
-              placeholder="LT(日)"
-              :disabled="creatingStep"
-            />
-            <input
-              v-else
-              v-model.number="newStepDraft.duration_min"
-              type="number"
-              min="1"
-              step="1"
-              class="duration-input"
-              placeholder="所要時間(分)"
-              :disabled="creatingStep"
-            />
-            <input
-              v-model.trim="newStepDraft.remark"
-              type="text"
-              class="create-input"
-              placeholder="親製品（任意）"
-              :disabled="creatingStep"
-            />
-            <button class="btn-primary" :disabled="isCreateStepDisabled" @click="createStep">
-              {{ creatingStep ? '追加中...' : '工程追加保存' }}
-            </button>
+            <div class="create-step-field">
+              <label class="create-step-label">工程番号</label>
+              <input v-model.number="newStepDraft.step_no" type="number" min="1" step="1" class="duration-input" :disabled="creatingStep" />
+            </div>
+            <div class="create-step-field">
+              <label class="create-step-label">並列G</label>
+              <input v-model.number="newStepDraft.parallel_group" type="number" min="1" step="1" class="duration-input" :disabled="creatingStep" />
+            </div>
+            <div class="create-step-field">
+              <label class="create-step-label">工程</label>
+              <select v-model="newStepDraft.process" class="step-select" :disabled="creatingStep || loadingProcesses">
+                <option value="">{{ loadingProcesses ? '読込中...' : '選択' }}</option>
+                <option v-for="proc in processOptions" :key="proc.id" :value="proc.id">
+                  {{ proc.process_code }} - {{ proc.process_name }}
+                </option>
+              </select>
+            </div>
+            <div class="create-step-field">
+              <label class="create-step-label">ライン</label>
+              <select v-model="newStepDraft.line" class="step-select" :disabled="creatingStep || loadingLines">
+                <option value="">未設定</option>
+                <option v-for="line in lines" :key="line.id" :value="line.id">
+                  {{ line.line_code }} - {{ line.line_name }}
+                </option>
+              </select>
+            </div>
+            <div class="create-step-field">
+              <label class="create-step-label">外作先</label>
+              <select v-model="newStepDraft.supplier" class="step-select" :disabled="creatingStep || loadingSuppliers">
+                <option value="">未設定</option>
+                <option v-for="supplier in supplierOptions" :key="supplier.id" :value="supplier.id">
+                  {{ supplier.supplier_code }} - {{ supplier.supplier_name }}
+                </option>
+              </select>
+            </div>
+            <div class="create-step-field">
+              <label class="create-step-label">調達区分</label>
+              <select v-model="newStepDraft.sourcing_type" class="step-select step-select--small" :disabled="creatingStep">
+                <option value="MAKE">自社製造</option>
+                <option value="BUY">購買</option>
+                <option value="SUBCON">外注</option>
+              </select>
+            </div>
+            <div class="create-step-field" style="position:relative;">
+              <label class="create-step-label">加工後品目</label>
+              <input
+                v-model="outputProductSearch"
+                type="text"
+                class="step-select"
+                placeholder="品番/品名で検索"
+                :disabled="creatingStep || loadingProducts"
+                @focus="outputProductDropOpen = true"
+                @input="outputProductDropOpen = true; newStepDraft.output_product = ''"
+                @blur="outputProductDropOpen = false"
+              />
+              <ul v-if="outputProductDropOpen && filteredOutputProducts.length" class="autocomplete-list">
+                <li
+                  v-for="product in filteredOutputProducts"
+                  :key="product.id"
+                  @mousedown.prevent="selectOutputProduct(product)"
+                  class="autocomplete-item"
+                >
+                  {{ product.product_code }} - {{ product.product_name }}
+                </li>
+              </ul>
+            </div>
+            <div class="create-step-field">
+              <label class="create-step-label">時間単位</label>
+              <select v-model="newStepDraft.time_unit" class="step-select step-select--small" :disabled="creatingStep">
+                <option value="DAY">日</option>
+                <option value="MINUTE">分</option>
+              </select>
+            </div>
+            <div class="create-step-field">
+              <label class="create-step-label">{{ newStepDraft.time_unit === 'DAY' ? 'LT(日)' : '所要時間(分)' }}</label>
+              <input
+                v-if="newStepDraft.time_unit === 'DAY'"
+                v-model.number="newStepDraft.lead_time_days"
+                type="number" min="0" step="1" class="duration-input" :disabled="creatingStep"
+              />
+              <input
+                v-else
+                v-model.number="newStepDraft.duration_min"
+                type="number" min="1" step="1" class="duration-input" :disabled="creatingStep"
+              />
+            </div>
+            <div class="create-step-field">
+              <label class="create-step-label">使用個数</label>
+              <input v-model.number="newStepDraft.usage_quantity" type="number" min="0" step="1" class="duration-input" :disabled="creatingStep" />
+            </div>
+            <div class="create-step-field" style="position:relative;">
+              <label class="create-step-label">親製品</label>
+              <input
+                v-model="remarkProductSearch"
+                type="text"
+                class="create-input"
+                placeholder="品番で検索"
+                :disabled="creatingStep || loadingProducts"
+                @focus="remarkProductDropOpen = true"
+                @input="remarkProductDropOpen = true"
+                @blur="remarkProductDropOpen = false"
+              />
+              <ul v-if="remarkProductDropOpen && filteredRemarkProducts.length" class="autocomplete-list">
+                <li
+                  v-for="product in filteredRemarkProducts"
+                  :key="product.id"
+                  @mousedown.prevent="selectRemarkProduct(product)"
+                  class="autocomplete-item"
+                >
+                  {{ product.product_code }} - {{ product.product_name }}
+                </li>
+              </ul>
+            </div>
+            <div class="create-step-field" style="align-self:flex-end;">
+              <button class="btn-primary" :disabled="isCreateStepDisabled" @click="createStep">
+                {{ creatingStep ? '追加中...' : '工程追加保存' }}
+              </button>
+            </div>
           </div>
           <div class="step-filter-row">
             <label>工程</label>
@@ -506,12 +548,48 @@ const newStepDraft = ref({
   process: '',
   line: '',
   supplier: '',
+  sourcing_type: 'MAKE',
   output_product: '',
   time_unit: 'DAY',
   lead_time_days: 0,
   duration_min: '',
+  usage_quantity: '',
   remark: '',
 })
+
+const outputProductSearch = ref('')
+const outputProductDropOpen = ref(false)
+const filteredOutputProducts = computed(() => {
+  const kw = (outputProductSearch.value || '').trim().toLowerCase()
+  if (!kw) return sortedProducts.value.slice(0, 30)
+  return sortedProducts.value.filter((p) => {
+    const code = (p.product_code || '').toLowerCase()
+    const name = (p.product_name || '').toLowerCase()
+    return code.includes(kw) || name.includes(kw)
+  }).slice(0, 30)
+})
+const selectOutputProduct = (product) => {
+  newStepDraft.value.output_product = product.id
+  outputProductSearch.value = `${product.product_code} - ${product.product_name}`
+  outputProductDropOpen.value = false
+}
+
+const remarkProductSearch = ref('')
+const remarkProductDropOpen = ref(false)
+const filteredRemarkProducts = computed(() => {
+  const kw = (remarkProductSearch.value || '').trim().toLowerCase()
+  if (!kw) return sortedProducts.value.slice(0, 30)
+  return sortedProducts.value.filter((p) => {
+    const code = (p.product_code || '').toLowerCase()
+    const name = (p.product_name || '').toLowerCase()
+    return code.includes(kw) || name.includes(kw)
+  }).slice(0, 30)
+})
+const selectRemarkProduct = (product) => {
+  newStepDraft.value.remark = product.product_code
+  remarkProductSearch.value = `${product.product_code} - ${product.product_name}`
+  remarkProductDropOpen.value = false
+}
 
 // 在庫移行機能
 const lines = ref([])
@@ -1089,7 +1167,7 @@ const fetchProducts = async () => {
 const fetchProcesses = async () => {
   loadingProcesses.value = true
   try {
-    const res = await api.processes.getProcesses({ is_active: true, page_size: 500 })
+    const res = await api.processes.getProcesses({ page_size: 500 })
     processes.value = normalizeList(res?.data)
   } catch (error) {
     console.error('工程一覧取得エラー:', error)
@@ -1150,18 +1228,27 @@ const fetchCustomerProductCodeSet = async (customerCode) => {
 }
 
 const resetCreateStepDraft = () => {
+  const defaultProduct = selectedRouting.value?.product || ''
+  const defaultProductCode = selectedRouting.value?.product_code || ''
+  const defaultProductName = selectedRouting.value?.product_name || ''
   newStepDraft.value = {
     step_no: '',
     parallel_group: 1,
     process: '',
     line: '',
     supplier: '',
-    output_product: selectedRouting.value?.product || '',
+    sourcing_type: 'MAKE',
+    output_product: defaultProduct,
     time_unit: 'DAY',
     lead_time_days: 0,
     duration_min: '',
-    remark: selectedRouting.value?.product_code || '',
+    usage_quantity: '',
+    remark: defaultProductCode,
   }
+  outputProductSearch.value = defaultProduct ? `${defaultProductCode} - ${defaultProductName}` : ''
+  outputProductDropOpen.value = false
+  remarkProductSearch.value = defaultProductCode ? `${defaultProductCode} - ${defaultProductName}` : ''
+  remarkProductDropOpen.value = false
 }
 
 const toggleCreateStepRow = () => {
@@ -1187,6 +1274,8 @@ const createStep = async () => {
       time_unit: newStepDraft.value.time_unit === 'MINUTE' ? 'MINUTE' : 'DAY',
       lead_time_days: newStepDraft.value.time_unit === 'DAY' ? Number(newStepDraft.value.lead_time_days || 0) : 0,
       duration_min: newStepDraft.value.time_unit === 'MINUTE' ? Number(newStepDraft.value.duration_min) : null,
+      sourcing_type: newStepDraft.value.sourcing_type || 'MAKE',
+      usage_quantity: newStepDraft.value.usage_quantity !== '' && newStepDraft.value.usage_quantity != null ? Number(newStepDraft.value.usage_quantity) : null,
       remark: String(newStepDraft.value.remark || '').trim() || null,
     }
     await api.routings.createRoutingStep(payload)
@@ -1375,12 +1464,50 @@ onMounted(async () => {
 
 .create-step-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 6px;
   padding: 8px 12px;
   border-bottom: 1px solid #eceff5;
   background: #f7fafc;
   flex-wrap: wrap;
+}
+.create-step-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.create-step-label {
+  font-size: 10px;
+  color: #6b7280;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.autocomplete-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #d5d7dd;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.15);
+  z-index: 100;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.autocomplete-item {
+  padding: 5px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.autocomplete-item:hover {
+  background: #e0edff;
 }
 
 .create-select {

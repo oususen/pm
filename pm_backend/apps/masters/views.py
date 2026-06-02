@@ -3207,8 +3207,59 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             self._sync_step_fields_to_bom(step, sync_fields)
 
     def perform_create(self, serializer):
-        # 新規工程作成時もBOMItem側に値を伝播し、後続編集で発生しがちなBOM/Routingのズレを防ぐ
         step = serializer.save()
+
+        # BOMItem自動作成/更新: 親製品(remark)と加工後品目(output_product)が指定されている場合
+        if step.output_product_id and step.remark:
+            bom = self._resolve_sync_target_bom(step)
+            if bom:
+                usage_qty = self.request.data.get('usage_quantity')
+                if usage_qty is not None and str(usage_qty).strip() not in ('', 'null'):
+                    try:
+                        from decimal import Decimal
+                        qty = Decimal(str(usage_qty))
+                    except Exception:
+                        qty = Decimal('1')
+                else:
+                    qty = Decimal('1')
+
+                raw_sourcing = str(self.request.data.get('sourcing_type') or '').upper()
+                sourcing_type = raw_sourcing if raw_sourcing in ('MAKE', 'BUY', 'SUBCON') else ('SUBCON' if step.supplier_id else 'MAKE')
+
+                existing_item = BOMItem.objects.filter(
+                    bom=bom,
+                    child_product_id=step.output_product_id,
+                ).first()
+                if existing_item:
+                    existing_item.quantity = qty
+                    existing_item.process_id = step.process_id
+                    existing_item.line_id = step.line_id
+                    existing_item.supplier_id = step.supplier_id
+                    existing_item.sourcing_type = sourcing_type
+                    existing_item.time_unit = step.time_unit or 'DAY'
+                    existing_item.lead_time_days = step.lead_time_days or 0
+                    existing_item.duration_min = step.duration_min
+                    existing_item.save()
+                    step.source_bom_item = existing_item
+                    step.save(update_fields=['source_bom_item'])
+                else:
+                    new_item = BOMItem.objects.create(
+                        bom=bom,
+                        child_product_id=step.output_product_id,
+                        quantity=qty,
+                        sourcing_type=sourcing_type,
+                        process_id=step.process_id,
+                        line_id=step.line_id,
+                        supplier_id=step.supplier_id,
+                        time_unit=step.time_unit or 'DAY',
+                        lead_time_days=step.lead_time_days or 0,
+                        duration_min=step.duration_min,
+                    )
+                    step.source_bom_item = new_item
+                    step.save(update_fields=['source_bom_item'])
+            return
+
+        # BOM自動作成が不要な場合は既存のLT/所要時間同期のみ
         sync_fields = [key for key in ('lead_time_days', 'duration_min') if key in serializer.validated_data]
         if sync_fields:
             self._sync_step_fields_to_bom(step, sync_fields)
