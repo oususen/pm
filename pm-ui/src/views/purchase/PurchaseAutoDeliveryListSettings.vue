@@ -92,7 +92,7 @@
 
         <div class="form-group">
           <label>返信先メールアドレス（Reply-To） <span class="required">*</span></label>
-          <input v-model="form.reply_to_email" class="input-full" placeholder="reply@example.com" required />
+          <input type="email" v-model="form.reply_to_email" class="input-full" placeholder="reply@example.com" required />
         </div>
 
         <div class="form-group">
@@ -234,6 +234,19 @@ const save = async () => {
   if (!form.notify_on_non_delivery_user_ids.length) errors.push('納入日でないときの通知先')
   if (errors.length) {
     alert(`以下の項目は必須です:\n${errors.join('\n')}`)
+    return
+  }
+  const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  const badEmails = []
+  if (form.reply_to_email && !emailRe.test(form.reply_to_email.trim())) {
+    badEmails.push(`返信先: ${form.reply_to_email.trim()}`)
+  }
+  for (const line of (form.cc_emails || '').split('\n')) {
+    const addr = line.trim()
+    if (addr && !emailRe.test(addr)) badEmails.push(`CC: ${addr}`)
+  }
+  if (badEmails.length) {
+    alert(`メールアドレスの形式が不正です:\n${badEmails.join('\n')}`)
     return
   }
   saving.value = true

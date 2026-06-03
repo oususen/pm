@@ -2174,6 +2174,21 @@ class PurchaseReceivingHistoryView(APIView):
         return Response({'records': records})
 
 
+def _validate_email_fields(data):
+    """reply_to_email と cc_emails のメールアドレス形式をチェック"""
+    import re
+    email_re = re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+    errors = []
+    reply_to = (data.get('reply_to_email') or '').strip()
+    if reply_to and not email_re.match(reply_to):
+        errors.append(f'返信先メールアドレスの形式が不正です: {reply_to}')
+    for line in (data.get('cc_emails') or '').splitlines():
+        addr = line.strip()
+        if addr and not email_re.match(addr):
+            errors.append(f'CC送信先メールの形式が不正です: {addr}')
+    return errors
+
+
 class PurchaseAutoDeliveryListConfigListCreateView(APIView):
     """自動納入リスト送信設定 一覧/新規作成"""
 
@@ -2204,6 +2219,9 @@ class PurchaseAutoDeliveryListConfigListCreateView(APIView):
         return Response(result)
 
     def post(self, request):
+        email_errors = _validate_email_fields(request.data)
+        if email_errors:
+            return Response({'detail': '\n'.join(email_errors)}, status=status.HTTP_400_BAD_REQUEST)
         supplier_id = request.data.get('supplier_id')
         if not supplier_id:
             return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2234,6 +2252,9 @@ class PurchaseAutoDeliveryListConfigDetailView(APIView):
     """自動納入リスト送信設定 更新/削除"""
 
     def put(self, request, pk):
+        email_errors = _validate_email_fields(request.data)
+        if email_errors:
+            return Response({'detail': '\n'.join(email_errors)}, status=status.HTTP_400_BAD_REQUEST)
         config = PurchaseAutoDeliveryListConfig.objects.filter(pk=pk).first()
         if not config:
             return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)

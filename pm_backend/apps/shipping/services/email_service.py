@@ -187,8 +187,9 @@ class EmailService:
             mime_subtypes = {
                 '.xlsx': 'vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 '.xls': 'vnd.ms-excel',
+                '.pdf': 'pdf',
             }
-            subtype = mime_subtypes.get(ext, 'pdf')
+            subtype = mime_subtypes.get(ext, 'octet-stream')
             attachment = MIMEApplication(attachment_data.read(), _subtype=subtype)
             attachment.add_header(
                 'Content-Disposition',

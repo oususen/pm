@@ -81,7 +81,7 @@ const purchase = [
     path: "/purchase/auto-delivery-list",
     name: "PurchaseAutoDeliveryList",
     component: () => import("@/views/purchase/PurchaseAutoDeliveryListSettings.vue"),
-    meta: { pageTitle: "自動納入リスト送信", resource: "purchase.auto_delivery_list" },
+    meta: { pageTitle: "自動納入リスト送信", manualPath: "仕入れ/自動納入リスト送信.md", resource: "purchase.auto_delivery_list" },
   },
 ];
 
