@@ -642,13 +642,24 @@ class BOMService:
                 'self_lt_days': max(int(getattr(self_step, 'lead_time_days', 0) or 0), 0),
             }
 
-        line_type = context.get('line_type')
-        if line_type == 'PURCHASE' or product.category == 'PURCHASED':
-            sourcing_type = 'BUY'
-        elif line_type == 'OUTSOURCE':
-            sourcing_type = 'SUBCON'
+        # BOMItemのsourcing_typeを一次情報として使用（正しい調達区分はBOMに記録されている）
+        bom_sourcing = (
+            BOMItem.objects
+            .filter(child_product_id=product_id, bom__is_active=True)
+            .order_by('-bom__valid_from_datetime', '-id')
+            .values_list('sourcing_type', flat=True)
+            .first()
+        )
+        if bom_sourcing:
+            sourcing_type = bom_sourcing
         else:
-            sourcing_type = 'MAKE'
+            line_type = context.get('line_type')
+            if line_type == 'PURCHASE' or product.category == 'PURCHASED':
+                sourcing_type = 'BUY'
+            elif line_type == 'OUTSOURCE':
+                sourcing_type = 'SUBCON'
+            else:
+                sourcing_type = 'MAKE'
 
         return {
             'product_id': product.id,
