@@ -1,5 +1,5 @@
 <template>
-  <div class="desktop-process-input" :class="[pageModeClass, { 'embed-tablet': isEmbeddedTablet, 'show-recent': showRecentPanel }]">
+  <div class="desktop-process-input" :class="[pageModeClass, { 'embed-tablet': isEmbeddedTablet, 'compact-form-tablet': isCompactFormTablet, 'show-recent': showRecentPanel }]">
     <!-- ヘッダー -->
     <div class="header" :class="{ 'header-embed': isEmbeddedTablet }">
       <template v-if="!isEmbeddedTablet">
@@ -295,7 +295,7 @@
 
             <!-- オペレータアクション -->
             <div v-if="shouldShowOperatorActionRow" class="action-btns-section">
-              <label class="equip-label">{{ isEmbeddedTablet ? 'AC' : 'アクション' }} <span class="required-mark">*</span></label>
+              <label class="equip-label">{{ isCompactFormTablet ? 'AC' : 'アクション' }} <span class="required-mark">*</span></label>
               <div v-if="shouldShowAutoStartAction" class="op-action-btns">
                 <button type="button" class="op-action-btn action-start active" disabled>
                   {{ t(OPERATOR_ACTION_LABEL_KEYS.START) }}
@@ -372,7 +372,7 @@
                     class="batch-input"
                   />
                 </div>
-                <div v-if="isEmbeddedTablet" class="qty-col">
+                <div v-if="isCompactFormTablet" class="qty-col">
                   <label class="qty-label">作業日 <span class="required-mark">*</span></label>
                   <input type="date" v-model="workDateStr" class="work-date-input" />
                 </div>
@@ -457,15 +457,15 @@
             <div
               v-if="record.record_type === 'PRODUCTION' && (selectedCoproductNoticeLoading || selectedCoproductChildren.length)"
               class="coproduct-notice"
-              :class="{ 'coproduct-collapsed': isEmbeddedTablet && !coproductExpanded }"
+              :class="{ 'coproduct-collapsed': isCompactFormTablet && !coproductExpanded }"
             >
               <div v-if="selectedCoproductNoticeLoading" class="coproduct-notice-loading">読み込み中...</div>
               <template v-else>
-                <div class="coproduct-notice-title" :class="{ 'coproduct-toggle': isEmbeddedTablet }" @click="isEmbeddedTablet && (coproductExpanded = !coproductExpanded)">
-                  <template v-if="isEmbeddedTablet">連産品 {{ selectedCoproductChildren.length }}件 {{ coproductExpanded ? '▲' : '▼' }}</template>
+                <div class="coproduct-notice-title" :class="{ 'coproduct-toggle': isCompactFormTablet }" @click="isCompactFormTablet && (coproductExpanded = !coproductExpanded)">
+                  <template v-if="isCompactFormTablet">連産品 {{ selectedCoproductChildren.length }}件 {{ coproductExpanded ? '▲' : '▼' }}</template>
                   <template v-else>{{ t('processInput.coproductNotice.message', { code: selectedCoproductParentCode || record.product_code || '' }) }}</template>
                 </div>
-                <div v-if="!isEmbeddedTablet || coproductExpanded" class="coproduct-notice-children">
+                <div v-if="!isCompactFormTablet || coproductExpanded" class="coproduct-notice-children">
                   <span v-for="child in selectedCoproductChildren" :key="child.product_id" class="coproduct-chip">
                     {{ child.product_code }}
                     <span v-if="child.product_name" class="coproduct-chip-name">{{ child.product_name }}</span>
@@ -490,7 +490,7 @@
               </div>
             </div>
 
-            <div v-if="!isEmbeddedTablet" class="work-date-area">
+            <div v-if="!isCompactFormTablet" class="work-date-area">
               <label class="qty-label">作業日 <span class="required-mark">*</span></label>
               <input type="date" v-model="workDateStr" class="work-date-input" />
               <div class="work-date-hint">上部の日付は表示用です。保存は作業日で行います。</div>
@@ -1607,6 +1607,7 @@ const twoPersonScopeWarning = computed(() => {
 })
 const showRecentPanel = ref(false)
 const coproductExpanded = ref(false)
+const isCompactFormTablet = computed(() => true)
 
 const pageModeClass = computed(() => {
   switch (record.value.equipment_state) {
@@ -3515,6 +3516,37 @@ onMounted(async () => {
 .desktop-process-input.embed-tablet .plan-item {
   padding: 2px 4px; border-radius: 4px;
 }
+.desktop-process-input.compact-form-tablet .form-area { gap: 4px; padding: 4px !important; }
+.desktop-process-input.compact-form-tablet .product-header { padding-bottom: 2px; }
+.desktop-process-input.compact-form-tablet .product-code-large { font-size: 16px; }
+.desktop-process-input.compact-form-tablet .product-name { margin-top: 0; font-size: 12px; }
+.desktop-process-input.compact-form-tablet .product-time-label { margin-top: 0; font-size: 11px; }
+.desktop-process-input.compact-form-tablet .action-btns-section { flex-direction: row; align-items: center; gap: 4px; }
+.desktop-process-input.compact-form-tablet .op-action-btns { gap: 4px; }
+.desktop-process-input.compact-form-tablet .op-action-btn { height: 26px; padding: 0 6px; font-size: 11px; border-radius: 4px; border-width: 1px; }
+.desktop-process-input.compact-form-tablet .stats-and-actions { gap: 4px; }
+.desktop-process-input.compact-form-tablet .current-actual { gap: 8px; }
+.desktop-process-input.compact-form-tablet .stat-label { font-size: 10px; }
+.desktop-process-input.compact-form-tablet .stat-value { font-size: 16px; }
+.desktop-process-input.compact-form-tablet .qty-input-area { gap: 4px; }
+.desktop-process-input.compact-form-tablet .qty-row { gap: 8px; }
+.desktop-process-input.compact-form-tablet .qty-input { height: 30px; width: 54px; font-size: 14px; padding: 0 4px; border-width: 1px; border-radius: 4px; }
+.desktop-process-input.compact-form-tablet .batch-input { height: 30px; width: 82px; font-size: 12px; padding: 0 4px; border-radius: 4px; }
+.desktop-process-input.compact-form-tablet .qty-label { font-size: 11px; }
+.desktop-process-input.compact-form-tablet .btn-quick { padding: 2px 8px; font-size: 12px; border-radius: 4px; }
+.desktop-process-input.compact-form-tablet .reason-area { gap: 2px; }
+.desktop-process-input.compact-form-tablet .reason-area textarea { padding: 4px; }
+.desktop-process-input.compact-form-tablet .work-date-area { margin-bottom: 4px; }
+.desktop-process-input.compact-form-tablet .work-date-input { height: 30px; font-size: 12px; padding: 0 4px; border-radius: 4px; }
+.desktop-process-input.compact-form-tablet .coproduct-notice { padding: 4px 8px; gap: 4px; }
+.desktop-process-input.compact-form-tablet .coproduct-notice-children { gap: 4px; }
+.desktop-process-input.compact-form-tablet .coproduct-chip { padding: 2px 6px; font-size: 11px; }
+.desktop-process-input.compact-form-tablet .action-bar { gap: 4px; }
+.desktop-process-input.compact-form-tablet .btn-save { height: 34px; padding: 0 16px; font-size: 13px; border-radius: 6px; }
+.desktop-process-input.compact-form-tablet .btn-cancel { height: 34px; padding: 0 12px; font-size: 12px; border-radius: 6px; }
+.desktop-process-input.compact-form-tablet .plan-qty-input { width: 46px; font-size: 13px; }
+.desktop-process-input.compact-form-tablet .plan-time-input { width: 60px; font-size: 12px; }
+.desktop-process-input.compact-form-tablet .plan-qty-btn { padding: 1px 6px; font-size: 11px; }
 .embed-tablet .form-area { gap: 4px; padding: 4px !important; }
 .embed-tablet .product-header { padding-bottom: 2px; }
 .embed-tablet .product-code-large { font-size: 16px; }
