@@ -971,6 +971,14 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             for line_id, process_id in purchase_process_rows:
                 purchase_processes_by_line.setdefault(line_id, process_id)
 
+        # 同じ(line, product, date)に実process_idがある組み合わせを収集
+        # → PURCHASEフォールバックの過剰適用防止（外作品が購買と外作で2ブロック表示になるのを防ぐ）
+        triplets_with_real_process = {
+            (row['line_id'], row['product_id'], row['plan_date'])
+            for row in demand_rows
+            if row.get('routing_step__process_id')
+        }
+
         candidate_keys = set()
         skipped_no_process = 0
         for row in demand_rows:
@@ -980,7 +988,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             process_id = row.get('routing_step__process_id')
 
             if not process_id and row.get('line__line_type') == 'PURCHASE':
-                process_id = purchase_processes_by_line.get(line_id)
+                # 同じ(line, product, date)に既に実processがある場合はフォールバックしない
+                if (line_id, product_id, plan_date) not in triplets_with_real_process:
+                    process_id = purchase_processes_by_line.get(line_id)
 
             if not line_id or not product_id or not plan_date or not process_id:
                 skipped_no_process += 1
