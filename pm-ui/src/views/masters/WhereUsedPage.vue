@@ -132,7 +132,7 @@ const categoryMap = {
 const sourcingTypeMap = {
   'MAKE': '自社製造',
   'BUY': '購買',
-  'SUBCON': '外注',
+  'SUBCON': '外作',
 }
 const getCategoryLabel = (value) => categoryMap[value] || value || '-'
 const getSourcingTypeLabel = (value) => sourcingTypeMap[value] || value

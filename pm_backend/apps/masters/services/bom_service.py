@@ -646,7 +646,7 @@ class BOMService:
         bom_sourcing = (
             BOMItem.objects
             .filter(child_product_id=product_id, bom__is_active=True)
-            .order_by('-bom__valid_from_datetime', '-id')
+            .order_by('-bom__valid_from', '-id')
             .values_list('sourcing_type', flat=True)
             .first()
         )
