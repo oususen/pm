@@ -228,7 +228,7 @@
               <select v-model="newStepDraft.sourcing_type" class="step-select step-select--small" :disabled="creatingStep">
                 <option value="MAKE">自社製造</option>
                 <option value="BUY">購買</option>
-                <option value="SUBCON">外注</option>
+                <option value="SUBCON">外作</option>
               </select>
             </div>
             <div class="create-step-field" style="position:relative;">

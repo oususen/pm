@@ -37,7 +37,7 @@
           <option value="">すべて</option>
           <option value="MAKE">製造</option>
           <option value="BUY">購買</option>
-          <option value="SUBCON">外注</option>
+          <option value="SUBCON">外作</option>
         </select>
       </div>
       <div class="filter-item filter-negative">
@@ -362,7 +362,7 @@ const formatSourcingType = (type) => {
   const map = {
     MAKE: "製造",
     BUY: "購買",
-    SUBCON: "外注",
+    SUBCON: "外作",
   };
   return map[type] || type || "-";
 };
