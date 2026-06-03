@@ -1991,10 +1991,13 @@ const downloadPreviewPdf = async () => {
   pdfLoading.value = true
   try {
     const res = await api.integratedChecksheets.previewPdf(form.value.id)
+    const disposition = res.headers?.['content-disposition'] || ''
+    const match = disposition.match(/filename\*?=(?:utf-8''|"?)([^";]+)/i)
+    const serverName = match ? decodeURIComponent(match[1]) : ''
     const url = URL.createObjectURL(res.data)
     const a = document.createElement('a')
     a.href = url
-    a.download = `integrated_checksheet_${form.value.id}.pdf`
+    a.download = serverName || `${form.value.name || 'checksheet'}.pdf`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)

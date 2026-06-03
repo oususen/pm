@@ -123,8 +123,88 @@ def _draw_header_page(template):
     return img
 
 
-def _draw_process_page(template, block, block_index, total_blocks):
-    """工程ブロック1ページ: 色付きヘッダ帯 + 台紙背景 + フィールド枠 + チェック項目テーブル"""
+def _draw_item_table_header(draw, y, col_defs, total_w, row_h, colors):
+    """項目テーブルのヘッダ行を描画"""
+    table_x = MARGIN
+    cx = table_x
+    draw.rectangle((cx, y, cx + total_w, y + row_h), fill=colors["table_head"])
+    for col_name, col_w in col_defs:
+        draw.rectangle((cx, y, cx + col_w, y + row_h), outline="#999999")
+        draw.text((cx + 4, y + 5), col_name, fill=colors["accent"], font=_font(16, bold=True))
+        cx += col_w
+    return y + row_h
+
+
+def _draw_item_rows(draw, y, items, start_idx, col_defs, total_w, row_h, bottom, record_type_labels):
+    """項目行を描画し、描画した行数を返す"""
+    table_x = MARGIN
+    font_td = _font(14)
+    drawn = 0
+    for i, item in enumerate(items):
+        if y + row_h > bottom:
+            break
+        idx = start_idx + i
+        cx = table_x
+        values = [
+            str(idx + 1),
+            item.item_name or "",
+            item.standard or "",
+            item.frequency or "",
+            item.method or "",
+            record_type_labels.get(item.record_type, item.record_type),
+            item.unit or "",
+            item.criteria or "",
+            "●" if item.is_required else "",
+        ]
+        bg_fill = "#f8f8f8" if idx % 2 == 0 else "white"
+        draw.rectangle((cx, y, cx + total_w, y + row_h), fill=bg_fill)
+        for (col_name, col_w), val in zip(col_defs, values):
+            draw.rectangle((cx, y, cx + col_w, y + row_h), outline="#cccccc")
+            text = val[:int(col_w / 8)] if len(val) > col_w / 8 else val
+            draw.text((cx + 4, y + 6), text, fill="black", font=font_td)
+            cx += col_w
+        y += row_h
+        drawn += 1
+    return drawn
+
+
+def _make_col_defs():
+    col_defs = [
+        ("No", 50),
+        ("点検項目", 360),
+        ("規格", 260),
+        ("頻度", 100),
+        ("方法", 260),
+        ("記録種別", 90),
+        ("単位", 70),
+        ("判定基準", 260),
+        ("必須", 50),
+    ]
+    total_w = sum(c[1] for c in col_defs)
+    if total_w + MARGIN * 2 > PAGE_W:
+        scale_factor = (PAGE_W - MARGIN * 2) / total_w
+        col_defs = [(name, int(w * scale_factor)) for name, w in col_defs]
+        total_w = sum(c[1] for c in col_defs)
+    return col_defs, total_w
+
+
+def _draw_continuation_banner(draw, block_index, total_blocks, process_name, product_code, page_num, colors):
+    """続きページ用の小さめバナー"""
+    banner_h = 44
+    draw.rectangle((0, 0, PAGE_W, banner_h), fill=colors["banner"])
+    side_bar_w = 8
+    draw.rectangle((0, banner_h, side_bar_w, PAGE_H), fill=colors["banner"])
+    draw.rectangle((PAGE_W - side_bar_w, banner_h, PAGE_W, PAGE_H), fill=colors["banner"])
+    title_text = f"工程 {block_index + 1}/{total_blocks}: {process_name}    [{product_code}]  (続き {page_num})"
+    font_title = _font(26, bold=True)
+    bbox = draw.textbbox((0, 0), title_text, font=font_title)
+    ty = (banner_h - (bbox[3] - bbox[1])) // 2
+    draw.text((MARGIN, ty), title_text, fill=colors["banner_text"], font=font_title)
+    return banner_h
+
+
+def _draw_process_pages(template, block, block_index, total_blocks):
+    """工程ブロックのページ群を生成（項目が多い場合は複数ページ）"""
     colors = _color_for_block(block_index)
     img, draw = _new_page()
 
@@ -149,14 +229,20 @@ def _draw_process_page(template, block, block_index, total_blocks):
     has_sketch = bool(block.sketch_image)
     has_items = bool(items)
 
-    # 工程ページ内の縦レイアウト比率:
-    # 台紙:項目 = 4:1（両方ある場合）
     content_bottom = PAGE_H - MARGIN
     content_h = max(content_bottom - y, 200)
     gap_between = 20
+    row_h = 30
+    MIN_SKETCH_H = 200
+
     if has_sketch and has_items:
         usable_h = max(content_h - gap_between, 120)
-        sketch_area_h = int(usable_h * 4 / 5)
+        required_table_h = (len(items) + 1) * row_h + 10
+        default_sketch_h = int(usable_h * 4 / 5)
+        if usable_h - default_sketch_h < required_table_h:
+            sketch_area_h = max(usable_h - required_table_h, MIN_SKETCH_H)
+        else:
+            sketch_area_h = default_sketch_h
         table_area_h = usable_h - sketch_area_h
     elif has_sketch:
         sketch_area_h = max(content_h - 10, 120)
@@ -175,7 +261,6 @@ def _draw_process_page(template, block, block_index, total_blocks):
             new_h = int(bg.height * scale)
             bg_resized = bg.resize((new_w, new_h), Image.LANCZOS)
             offset_x = MARGIN + (sketch_area_w - new_w) // 2
-            # 3:2比率で確保した台紙エリア内に上下中央寄せ
             offset_y = y + max((sketch_area_h - new_h) // 2, 0)
 
             bg_rgb = Image.new("RGB", bg_resized.size, "white")
@@ -208,41 +293,14 @@ def _draw_process_page(template, block, block_index, total_blocks):
         draw.text((MARGIN + 20, y), "（台紙画像未設定 — フィールド定義あり）", fill="#888888", font=_font(16))
         y += 30
 
+    pages = [img]
+
     if items:
         y += 10
         table_top = y
         table_bottom = content_bottom if table_area_h <= 0 else min(content_bottom, table_top + table_area_h)
-        font_th = _font(16, bold=True)
-        font_td = _font(14)
-        row_h = 30
 
-        col_defs = [
-            ("No", 50),
-            ("点検項目", 360),
-            ("規格", 260),
-            ("頻度", 100),
-            ("方法", 260),
-            ("記録種別", 90),
-            ("単位", 70),
-            ("判定基準", 260),
-            ("必須", 50),
-        ]
-
-        total_w = sum(c[1] for c in col_defs)
-        table_x = MARGIN
-        if total_w + MARGIN * 2 > PAGE_W:
-            scale_factor = (PAGE_W - MARGIN * 2) / total_w
-            col_defs = [(name, int(w * scale_factor)) for name, w in col_defs]
-            total_w = sum(c[1] for c in col_defs)
-
-        cx = table_x
-        draw.rectangle((cx, y, cx + total_w, y + row_h), fill=colors["table_head"])
-        for col_name, col_w in col_defs:
-            draw.rectangle((cx, y, cx + col_w, y + row_h), outline="#999999")
-            draw.text((cx + 4, y + 5), col_name, fill=colors["accent"], font=font_th)
-            cx += col_w
-        y += row_h
-
+        col_defs, total_w = _make_col_defs()
         record_type_labels = {
             "CHECK": "チェック",
             "NUMERIC": "数値",
@@ -251,32 +309,32 @@ def _draw_process_page(template, block, block_index, total_blocks):
             "TEXT": "文字",
         }
 
-        for idx, item in enumerate(items):
-            if y + row_h > table_bottom:
-                draw.text((table_x, y + 4), "... 以下省略 ...", fill="#888888", font=font_td)
-                break
-            cx = table_x
-            values = [
-                str(idx + 1),
-                item.item_name or "",
-                item.standard or "",
-                item.frequency or "",
-                item.method or "",
-                record_type_labels.get(item.record_type, item.record_type),
-                item.unit or "",
-                item.criteria or "",
-                "●" if item.is_required else "",
-            ]
-            bg_fill = "#f8f8f8" if idx % 2 == 0 else "white"
-            draw.rectangle((cx, y, cx + total_w, y + row_h), fill=bg_fill)
-            for (col_name, col_w), val in zip(col_defs, values):
-                draw.rectangle((cx, y, cx + col_w, y + row_h), outline="#cccccc")
-                text = val[:int(col_w / 8)] if len(val) > col_w / 8 else val
-                draw.text((cx + 4, y + 6), text, fill="black", font=font_td)
-                cx += col_w
-            y += row_h
+        y = _draw_item_table_header(draw, y, col_defs, total_w, row_h, colors)
+        drawn = _draw_item_rows(draw, y, items, 0, col_defs, total_w, row_h, table_bottom, record_type_labels)
+        remaining = items[drawn:]
+        item_offset = drawn
 
-    return img
+        cont_page_num = 2
+        while remaining:
+            cont_img, cont_draw = _new_page()
+            bh = _draw_continuation_banner(
+                cont_draw, block_index, total_blocks,
+                block.process.process_name, product_code, cont_page_num, colors,
+            )
+            cy = bh + 16
+            cy = _draw_item_table_header(cont_draw, cy, col_defs, total_w, row_h, colors)
+            d = _draw_item_rows(
+                cont_draw, cy, remaining, item_offset,
+                col_defs, total_w, row_h, PAGE_H - MARGIN, record_type_labels,
+            )
+            pages.append(cont_img)
+            remaining = remaining[d:]
+            item_offset += d
+            cont_page_num += 1
+            if d == 0:
+                break
+
+    return pages
 
 
 def generate_integrated_template_pdf(template):
@@ -297,8 +355,8 @@ def generate_integrated_template_pdf(template):
     pages.append(header_page)
 
     for idx, block in enumerate(blocks):
-        proc_page = _draw_process_page(template, block, idx, len(blocks))
-        pages.append(proc_page)
+        proc_pages = _draw_process_pages(template, block, idx, len(blocks))
+        pages.extend(proc_pages)
 
     if not pages:
         return None

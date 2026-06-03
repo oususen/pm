@@ -489,8 +489,8 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
                 {"detail": "PDFを生成できませんでした。"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        product_code = template.product.product_code if template.product else "template"
-        filename = f"integrated_{product_code}_v{template.version}.pdf"
+        template_name = template.name or template.document_title or "template"
+        filename = f"{template_name}.pdf"
         return FileResponse(pdf_buffer, as_attachment=True, filename=filename, content_type="application/pdf")
 
     @action(detail=True, methods=["post"])
