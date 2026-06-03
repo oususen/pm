@@ -146,6 +146,7 @@ class EmailService:
         cc_emails: Optional[List[str]] = None,
         user_id: Optional[int] = None,
         extra_attachments: Optional[List[Dict]] = None,
+        reply_to: Optional[str] = None,
     ) -> Dict:
         """
         添付ファイル付きメールを送信
@@ -176,6 +177,8 @@ class EmailService:
             msg['Subject'] = subject
             if cc_emails:
                 msg['Cc'] = ', '.join(cc_emails)
+            if reply_to:
+                msg['Reply-To'] = reply_to
 
             msg.attach(MIMEText(body, 'plain', 'utf-8'))
 

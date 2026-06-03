@@ -2191,6 +2191,8 @@ class PurchaseAutoDeliveryListConfigListCreateView(APIView):
                 'scheduled_minute': c.scheduled_minute,
                 'lead_time_days': c.lead_time_days,
                 'progress_days_back': c.progress_days_back,
+                'progress_days_forward': c.progress_days_forward,
+                'reply_to_email': c.reply_to_email,
                 'cc_emails': c.cc_emails,
                 'notify_on_failure_user_ids': list(c.notify_on_failure.values_list('id', flat=True)),
                 'notify_on_non_delivery_user_ids': list(c.notify_on_non_delivery.values_list('id', flat=True)),
@@ -2215,6 +2217,8 @@ class PurchaseAutoDeliveryListConfigListCreateView(APIView):
             scheduled_minute=int(request.data.get('scheduled_minute', 0)),
             lead_time_days=int(request.data.get('lead_time_days', 2)),
             progress_days_back=int(request.data.get('progress_days_back', 7)),
+            progress_days_forward=int(request.data.get('progress_days_forward', 30)),
+            reply_to_email=request.data.get('reply_to_email', ''),
             cc_emails=request.data.get('cc_emails', ''),
         )
         failure_ids = request.data.get('notify_on_failure_user_ids', [])
@@ -2250,6 +2254,10 @@ class PurchaseAutoDeliveryListConfigDetailView(APIView):
             config.lead_time_days = int(request.data['lead_time_days'])
         if 'progress_days_back' in request.data:
             config.progress_days_back = int(request.data['progress_days_back'])
+        if 'progress_days_forward' in request.data:
+            config.progress_days_forward = int(request.data['progress_days_forward'])
+        if 'reply_to_email' in request.data:
+            config.reply_to_email = request.data['reply_to_email']
         if 'cc_emails' in request.data:
             config.cc_emails = request.data['cc_emails']
         config.save()

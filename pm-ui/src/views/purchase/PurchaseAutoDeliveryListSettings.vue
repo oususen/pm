@@ -59,28 +59,30 @@
         </div>
 
         <div class="form-group">
-          <label>実行時刻</label>
+          <label>実行時刻 <span class="required">*</span></label>
           <div class="time-row">
-            <input type="number" min="0" max="23" v-model.number="form.scheduled_hour" class="time-input" />
+            <input type="number" min="0" max="23" v-model.number="form.scheduled_hour" class="time-input" required />
             <span class="suffix">時</span>
-            <input type="number" min="0" max="59" v-model.number="form.scheduled_minute" class="time-input" />
+            <input type="number" min="0" max="59" v-model.number="form.scheduled_minute" class="time-input" required />
             <span class="suffix">分</span>
           </div>
         </div>
 
         <div class="form-group">
-          <label>納入日（実行日から何営業日後）</label>
+          <label>納入日（実行日から何営業日後） <span class="required">*</span></label>
           <div class="time-row">
-            <input type="number" min="1" max="30" v-model.number="form.lead_time_days" class="time-input" />
+            <input type="number" min="1" max="30" v-model.number="form.lead_time_days" class="time-input" required />
             <span class="suffix">営業日後</span>
           </div>
         </div>
 
         <div class="form-group">
-          <label>進度表（今日の何営業日前から）</label>
+          <label>進度表期間 <span class="required">*</span></label>
           <div class="time-row">
-            <input type="number" min="1" max="90" v-model.number="form.progress_days_back" class="time-input" />
-            <span class="suffix">営業日前</span>
+            <input type="number" min="1" max="90" v-model.number="form.progress_days_back" class="time-input" required />
+            <span class="suffix">営業日前 ～</span>
+            <input type="number" min="1" max="120" v-model.number="form.progress_days_forward" class="time-input" required />
+            <span class="suffix">日後</span>
           </div>
         </div>
 
@@ -89,17 +91,22 @@
         </div>
 
         <div class="form-group">
-          <label>業務員CC送信先メール（改行区切り、後追加可能）</label>
-          <textarea v-model="form.cc_emails" rows="3" class="input-full" placeholder="user1@example.com&#10;user2@example.com"></textarea>
+          <label>返信先メールアドレス（Reply-To） <span class="required">*</span></label>
+          <input v-model="form.reply_to_email" class="input-full" placeholder="reply@example.com" required />
         </div>
 
         <div class="form-group">
-          <label>失敗時の通知先</label>
+          <label>業務員CC送信先メール（改行区切り、後追加可能） <span class="required">*</span></label>
+          <textarea v-model="form.cc_emails" rows="3" class="input-full" placeholder="user1@example.com&#10;user2@example.com" required></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>失敗時の通知先 <span class="required">*</span></label>
           <UserChipSelect :userList="userList" v-model="form.notify_on_failure_user_ids" />
         </div>
 
         <div class="form-group">
-          <label>納入日でないときの通知先</label>
+          <label>納入日でないときの通知先 <span class="required">*</span></label>
           <UserChipSelect :userList="userList" v-model="form.notify_on_non_delivery_user_ids" />
         </div>
 
@@ -134,6 +141,8 @@ const form = reactive({
   scheduled_minute: 0,
   lead_time_days: 2,
   progress_days_back: 7,
+  progress_days_forward: 30,
+  reply_to_email: '',
   cc_emails: '',
   notify_on_failure_user_ids: [],
   notify_on_non_delivery_user_ids: [],
@@ -176,6 +185,8 @@ const resetForm = () => {
   form.scheduled_minute = 0
   form.lead_time_days = 2
   form.progress_days_back = 7
+  form.progress_days_forward = 30
+  form.reply_to_email = ''
   form.cc_emails = ''
   form.notify_on_failure_user_ids = []
   form.notify_on_non_delivery_user_ids = []
@@ -197,6 +208,8 @@ const openEdit = (c) => {
   form.scheduled_minute = c.scheduled_minute
   form.lead_time_days = c.lead_time_days ?? 2
   form.progress_days_back = c.progress_days_back ?? 7
+  form.progress_days_forward = c.progress_days_forward ?? 30
+  form.reply_to_email = c.reply_to_email || ''
   form.cc_emails = c.cc_emails || ''
   form.notify_on_failure_user_ids = [...(c.notify_on_failure_user_ids || [])]
   form.notify_on_non_delivery_user_ids = [...(c.notify_on_non_delivery_user_ids || [])]
@@ -208,8 +221,19 @@ const closeModal = () => {
 }
 
 const save = async () => {
-  if (!form.supplier_id) {
-    alert('仕入先を選択してください。')
+  const errors = []
+  if (!form.supplier_id) errors.push('仕入先')
+  if (form.scheduled_hour === null || form.scheduled_hour === '') errors.push('実行時刻（時）')
+  if (form.scheduled_minute === null || form.scheduled_minute === '') errors.push('実行時刻（分）')
+  if (!form.lead_time_days) errors.push('納入日（営業日後）')
+  if (!form.progress_days_back) errors.push('進度表（営業日前）')
+  if (!form.progress_days_forward) errors.push('進度表（日後）')
+  if (!form.reply_to_email?.trim()) errors.push('返信先メールアドレス')
+  if (!form.cc_emails?.trim()) errors.push('業務員CC送信先メール')
+  if (!form.notify_on_failure_user_ids.length) errors.push('失敗時の通知先')
+  if (!form.notify_on_non_delivery_user_ids.length) errors.push('納入日でないときの通知先')
+  if (errors.length) {
+    alert(`以下の項目は必須です:\n${errors.join('\n')}`)
     return
   }
   saving.value = true
@@ -221,6 +245,8 @@ const save = async () => {
       scheduled_minute: form.scheduled_minute,
       lead_time_days: form.lead_time_days,
       progress_days_back: form.progress_days_back,
+      progress_days_forward: form.progress_days_forward,
+      reply_to_email: form.reply_to_email,
       cc_emails: form.cc_emails,
       notify_on_failure_user_ids: form.notify_on_failure_user_ids,
       notify_on_non_delivery_user_ids: form.notify_on_non_delivery_user_ids,

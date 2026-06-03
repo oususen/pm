@@ -370,7 +370,9 @@ class PurchaseAutoDeliveryListConfig(models.Model):
     scheduled_hour = models.PositiveSmallIntegerField(default=7, verbose_name='実行時（時）')
     scheduled_minute = models.PositiveSmallIntegerField(default=0, verbose_name='実行時（分）')
     lead_time_days = models.PositiveSmallIntegerField(default=2, verbose_name='納入日（何営業日後）')
-    progress_days_back = models.PositiveSmallIntegerField(default=7, verbose_name='進度表（何日前から）')
+    progress_days_back = models.PositiveSmallIntegerField(default=7, verbose_name='進度表（何営業日前から）')
+    progress_days_forward = models.PositiveSmallIntegerField(default=30, verbose_name='進度表（何日後まで）')
+    reply_to_email = models.EmailField(blank=True, default='', verbose_name='返信先メールアドレス')
     cc_emails = models.TextField(blank=True, default='', verbose_name='業務員CC送信先メール（改行区切り）')
     notify_on_failure = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
