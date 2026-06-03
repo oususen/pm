@@ -459,6 +459,7 @@
               <th>仕入先</th>
               <th>工程</th>
               <th>ライン</th>
+              <th>LT</th>
               <th>時間</th>
               <th v-if="selectedBOM.is_coproduct">代表</th>
               <th>操作</th>
@@ -473,9 +474,10 @@
               <td>{{ getSupplierName(item.supplier) }}</td>
               <td>{{ getProcessName(item.process) }}</td>
               <td>{{ getLineName(item.line) }}</td>
+              <td>{{ item.lead_time_days ?? 0 }}</td>
               <td>
                 <span v-if="item.time_unit === 'MINUTE'">分 {{ item.duration_min || '-' }}</span>
-                <span v-else>日 {{ item.lead_time_days }}</span>
+                <span v-else>日</span>
               </td>
               <td v-if="selectedBOM.is_coproduct">{{ item.is_coproduct_driver ? '✓' : '' }}</td>
               <td>
@@ -983,12 +985,12 @@ const filteredFinalLines = computed(() => {
 const sourcingTypeMap = {
   'MAKE': '自社製造',
   'BUY': '購買',
-  'SUBCON': '外注'
+  'SUBCON': '外作品'
 }
 const sourcingTypeOptions = [
   { value: 'MAKE', label: '自社製造' },
   { value: 'BUY', label: '購買' },
-  { value: 'SUBCON', label: '外注' }
+  { value: 'SUBCON', label: '外作品' }
 ]
 
 const resetFilters = () => {
@@ -1311,9 +1313,17 @@ const applySourcingSideEffects = () => {
     if (!itemForm.value.time_unit) itemForm.value.time_unit = 'MINUTE'
   }
   if (itemForm.value.sourcing_type === 'SUBCON') {
-    if (!itemForm.value.time_unit) itemForm.value.time_unit = 'DAY'
+    itemForm.value.time_unit = 'DAY'
     const outsourceProcessId = getOutsourceProcessId()
     if (outsourceProcessId) itemForm.value.process = outsourceProcessId
+    if (
+      itemForm.value.lead_time_days === null ||
+      itemForm.value.lead_time_days === undefined ||
+      itemForm.value.lead_time_days === '' ||
+      Number(itemForm.value.lead_time_days) === 0
+    ) {
+      itemForm.value.lead_time_days = 1
+    }
     if (itemForm.value.supplier) {
       const supplier = suppliers.value.find((s) => `${s.id}` === `${itemForm.value.supplier}`)
       const matchingLine = supplier && lines.value.find(

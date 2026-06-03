@@ -1654,6 +1654,11 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         ws_input.append(['YD60000441', 'YD40000608S', 'YD40000608', 1, '4053', '', 'L2200', '', '自社製造', '', '', 0, 20, '分'])
         ws_input.append(['YD60000441', 'YD40000608', 'YD40000608H', 1, '4019', '', 'L2200', '', '自社製造', '', '', 0, 16, '分'])
 
+        # 工程コード(E列)を文字列書式に設定
+        from openpyxl.styles import numbers
+        for row_no in range(1, 5001):
+            ws_input[f'E{row_no}'].number_format = numbers.FORMAT_TEXT
+
         # 工程コード(E列)入力時に工程名(F列)を自動表示
         for row_no in range(2, 5001):
             ws_input[f'F{row_no}'] = f'=IFERROR(VLOOKUP(E{row_no},工程!A:B,2,FALSE),"")'
@@ -1705,6 +1710,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         # 参照用マスタシート（DB値）
         ws_process = wb.create_sheet('工程')
         ws_process.append(['工程コード', '工程名', 'ラインコード', 'ライン名', '有効'])
+        proc_row_no = 2
         for p in Process.objects.select_related('line').order_by('process_code'):
             ws_process.append([
                 p.process_code,
@@ -1713,6 +1719,8 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 p.line.line_name if p.line else '',
                 '有効' if p.is_active else '無効',
             ])
+            ws_process[f'A{proc_row_no}'].number_format = numbers.FORMAT_TEXT
+            proc_row_no += 1
 
         ws_line = wb.create_sheet('ライン')
         ws_line.append(['ラインコード', 'ライン名', 'ライン種別', '有効'])
