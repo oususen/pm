@@ -77,6 +77,12 @@ const purchase = [
     component: () => import("@/views/purchase/PurchaseOrderProposalDetail.vue"),
     meta: { pageTitle: "発注提案書詳細", resource: "purchase.order_proposals" },
   },
+  {
+    path: "/purchase/auto-delivery-list",
+    name: "PurchaseAutoDeliveryList",
+    component: () => import("@/views/purchase/PurchaseAutoDeliveryListSettings.vue"),
+    meta: { pageTitle: "自動納入リスト送信", resource: "purchase.auto_delivery_list" },
+  },
 ];
 
 export default purchase;

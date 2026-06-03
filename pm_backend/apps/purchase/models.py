@@ -349,3 +349,52 @@ class EngineeringChangePart(models.Model):
             models.Index(fields=['old_part']),
             models.Index(fields=['new_part']),
         ]
+
+
+class PurchaseAutoDeliveryListConfig(models.Model):
+    """自動納入リスト送信設定"""
+    STATUS_CHOICES = [
+        ('SUCCESS', '成功'),
+        ('FAILED', '失敗'),
+        ('RUNNING', '実行中'),
+        ('SKIPPED', 'スキップ'),
+    ]
+
+    supplier = models.OneToOneField(
+        Supplier,
+        on_delete=models.CASCADE,
+        related_name='auto_delivery_list_config',
+        verbose_name='対象仕入先',
+    )
+    is_enabled = models.BooleanField(default=True, verbose_name='有効')
+    scheduled_hour = models.PositiveSmallIntegerField(default=7, verbose_name='実行時（時）')
+    scheduled_minute = models.PositiveSmallIntegerField(default=0, verbose_name='実行時（分）')
+    lead_time_days = models.PositiveSmallIntegerField(default=2, verbose_name='納入日（何営業日後）')
+    progress_days_back = models.PositiveSmallIntegerField(default=7, verbose_name='進度表（何日前から）')
+    cc_emails = models.TextField(blank=True, default='', verbose_name='業務員CC送信先メール（改行区切り）')
+    notify_on_failure = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='auto_delivery_list_failure_notifications',
+        verbose_name='失敗時の通知先',
+    )
+    notify_on_non_delivery = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='auto_delivery_list_non_delivery_notifications',
+        verbose_name='納入日でないときの通知先',
+    )
+    last_run_at = models.DateTimeField(null=True, blank=True, verbose_name='最終実行日時')
+    last_run_status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, null=True, blank=True, verbose_name='最終実行結果',
+    )
+    last_run_message = models.TextField(blank=True, default='', verbose_name='最終実行メッセージ')
+    last_run_duration_seconds = models.FloatField(null=True, blank=True, verbose_name='最終実行時間（秒）')
+
+    class Meta:
+        db_table = 'purchase_auto_delivery_list_config'
+        verbose_name = '自動納入リスト送信設定'
+        verbose_name_plural = '自動納入リスト送信設定'
+
+    def __str__(self):
+        return f'{self.supplier} {self.scheduled_hour:02d}:{self.scheduled_minute:02d}'

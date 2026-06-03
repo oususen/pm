@@ -41,11 +41,12 @@ import { authState } from "@/auth";
 import { hasPermission } from "@/router";
 
 const PERMISSION_MODE = "hide"; // "disable" or "hide"
-const SECTION_ORDER = ["records", "plan", "inventory", "other"];
+const SECTION_ORDER = ["records", "plan", "inventory", "automation", "other"];
 const SECTION_LABELS = {
   records: "実績・発注",
   plan: "計画・設定",
   inventory: "在庫・進度",
+  automation: "業務自動タスク",
   other: "その他",
 };
 
@@ -168,6 +169,14 @@ const tiles = computed(() => [
     category: "records",
     required: "view",
     resource: "purchase.order_proposals",
+  },
+  {
+    to: "/purchase/auto-delivery-list",
+    label: "自動納入リスト送信",
+    icon: "📬",
+    category: "automation",
+    required: "edit",
+    resource: "purchase.auto_delivery_list",
   },
 ].map((tile) => ({
   ...tile,

@@ -1,6 +1,7 @@
 # apps/shipping/services/email_service.py
 """メール送信サービス"""
 
+import os
 import smtplib
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
@@ -144,6 +145,7 @@ class EmailService:
         attachment_filename: str,
         cc_emails: Optional[List[str]] = None,
         user_id: Optional[int] = None,
+        extra_attachments: Optional[List[Dict]] = None,
     ) -> Dict:
         """
         添付ファイル付きメールを送信
@@ -178,13 +180,30 @@ class EmailService:
             msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
             attachment_data.seek(0)
-            attachment = MIMEApplication(attachment_data.read(), _subtype='pdf')
+            ext = os.path.splitext(attachment_filename)[1].lower()
+            mime_subtypes = {
+                '.xlsx': 'vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                '.xls': 'vnd.ms-excel',
+            }
+            subtype = mime_subtypes.get(ext, 'pdf')
+            attachment = MIMEApplication(attachment_data.read(), _subtype=subtype)
             attachment.add_header(
                 'Content-Disposition',
                 'attachment',
                 filename=attachment_filename,
             )
             msg.attach(attachment)
+
+            if extra_attachments:
+                for ea in extra_attachments:
+                    ea_data = ea['data']
+                    ea_filename = ea['filename']
+                    ea_data.seek(0)
+                    ea_ext = os.path.splitext(ea_filename)[1].lower()
+                    ea_subtype = mime_subtypes.get(ea_ext, 'octet-stream')
+                    ea_attach = MIMEApplication(ea_data.read(), _subtype=ea_subtype)
+                    ea_attach.add_header('Content-Disposition', 'attachment', filename=ea_filename)
+                    msg.attach(ea_attach)
 
             recipients = list(to_emails)
             if cc_emails:

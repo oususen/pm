@@ -132,22 +132,32 @@ const downloadTemplate = async () => {
   }
   loadingTemplate.value = true
   try {
-    const data = await fetchTemplateProducts()
-    const supplierCode = data?.supplier?.supplier_code || ''
-    const list = (data.items || []).map((r) => ({
-      品番: r.product_code || '',
-      品名: r.product_name || '',
-      数量: '',
-      納品日: targetDate.value,
-      仕入先コード: supplierCode,
-      伝票番号: '',
-    }))
-    const ws = XLSX.utils.json_to_sheet(list, {
-      header: ['品番', '品名', '数量', '納品日', '仕入先コード', '伝票番号'],
+    const res = await api.client.get('/purchase-receiving/delivery-list-excel/', {
+      params: { supplier_id: selectedSupplier.value, target_date: targetDate.value },
+      responseType: 'blob',
     })
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, '納品リスト')
-    await saveWorkbookFile(wb, `納品リストテンプレ_${supplierCode}_${targetDate.value}.xlsx`)
+    const supplier = suppliers.value.find((s) => s.id === selectedSupplier.value)
+    const code = supplier ? supplier.supplier_code : ''
+    const filename = `納品リスト_${code}_${targetDate.value}.xlsx`
+
+    if (window?.showSaveFilePicker) {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: filename,
+          types: [{ description: 'Excel', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }],
+        })
+        const stream = await handle.createWritable()
+        await stream.write(res.data)
+        await stream.close()
+        return
+      } catch (_) { /* picker cancel fallback */ }
+    }
+    const url = URL.createObjectURL(res.data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
   } catch (e) {
     const detail = e?.response?.data?.detail
     alert(`納品リストテンプレ出力に失敗しました。${detail ? `\n${detail}` : ''}`)

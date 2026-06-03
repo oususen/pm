@@ -27,8 +27,42 @@ from production.inventory.inventory_calculator import (
     recalculate_inventory_for_line,
 )
 
-from .models import EngineeringChangeCase, EngineeringChangePart, PurchasePlanLockSetting
+from .models import (
+    EngineeringChangeCase,
+    EngineeringChangePart,
+    PurchaseAutoDeliveryListConfig,
+    PurchasePlanLockSetting,
+)
 from .serializers import PurchasePlanLockSettingSerializer
+
+
+def _calc_progress_quantities(line, coverage_dates):
+    """進度方式で納入予定数量を算出（LineDemand ベース）
+    Returns: dict[product_id] → {product_id, product_code, product_name, expected_qty, daily: {iso_date: qty}}
+    """
+    from production.models import LineDemand
+
+    product_map = {}
+    demand_qs = LineDemand.objects.filter(
+        line=line,
+        plan_date__in=coverage_dates,
+    ).filter(Q(firm_qty__gt=0) | Q(forecast_qty__gt=0)).select_related('product')
+    for d in demand_qs:
+        pid = d.product_id
+        if pid not in product_map:
+            prod = d.product
+            product_map[pid] = {
+                'product_id': pid,
+                'product_code': prod.product_code if prod else d.product_code,
+                'product_name': prod.product_name if prod else '',
+                'expected_qty': 0,
+                'daily': {},
+            }
+        qty = int(d.firm_qty or 0) + int(d.forecast_qty or 0)
+        product_map[pid]['expected_qty'] += qty
+        key = d.plan_date.isoformat()
+        product_map[pid]['daily'][key] = product_map[pid]['daily'].get(key, 0) + qty
+    return product_map
 
 
 def _normalize_product_code(text: str) -> str:
@@ -1868,6 +1902,152 @@ class PurchaseReceivingDeliveryListTemplateView(APIView):
         })
 
 
+class PurchaseDeliveryListAutoTemplateView(APIView):
+    """納品リスト自動テンプレ: 2営業日後の納入日判定＋進度方式で数量算出"""
+
+    def get(self, request):
+        from .models import SupplierOrderSchedule
+        from .order_proposal_views import _generate_raw_pattern_dates
+        from orders.utils.calendar_utils import WorkingDayCalculator
+
+        supplier_id = request.query_params.get('supplier_id')
+        target_date_str = request.query_params.get('target_date')
+        if not supplier_id:
+            return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            supplier_id = int(supplier_id)
+        except (TypeError, ValueError):
+            return Response({'detail': 'invalid supplier_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+        supplier = Supplier.objects.filter(id=supplier_id).first()
+        if not supplier:
+            return Response({'detail': 'supplier not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        base_date = date.fromisoformat(target_date_str) if target_date_str else date.today()
+
+        daiso_cal = Calendar.objects.filter(calendar_code='daiso').first()
+        calc = WorkingDayCalculator(daiso_cal)
+        delivery_date = calc.add_working_days(base_date, 2)
+
+        schedule = SupplierOrderSchedule.objects.filter(
+            supplier_id=supplier_id, is_enabled=True
+        ).select_related('pattern').first()
+
+        if not schedule or not schedule.pattern:
+            return Response({
+                'is_delivery_day': False,
+                'delivery_date': delivery_date.isoformat(),
+                'message': '納入パターンが未設定です',
+                'items': [],
+            })
+
+        window_start = delivery_date - timedelta(days=7)
+        window_end = delivery_date + timedelta(days=90)
+        pattern_dates = sorted(set(_generate_raw_pattern_dates(schedule, window_start, window_end, calc)))
+
+        is_delivery_day = delivery_date in pattern_dates
+        if not is_delivery_day:
+            return Response({
+                'is_delivery_day': False,
+                'delivery_date': delivery_date.isoformat(),
+                'message': f'{delivery_date.isoformat()} は納入日ではありません',
+                'items': [],
+            })
+
+        future = [d for d in pattern_dates if d > delivery_date]
+        next_delivery_date = future[0] if future else None
+
+        if next_delivery_date:
+            coverage_dates = []
+            d = delivery_date
+            while d < next_delivery_date:
+                coverage_dates.append(d)
+                d += timedelta(days=1)
+        else:
+            coverage_dates = [delivery_date]
+
+        line = _resolve_purchase_line(supplier)
+        items = []
+        if line and coverage_dates:
+            product_map = _calc_progress_quantities(line, coverage_dates)
+            items = sorted(product_map.values(), key=lambda x: x['product_code'])
+
+        return Response({
+            'is_delivery_day': True,
+            'delivery_date': delivery_date.isoformat(),
+            'next_delivery_date': next_delivery_date.isoformat() if next_delivery_date else None,
+            'coverage_dates': [d.isoformat() for d in coverage_dates],
+            'supplier': {
+                'id': supplier.id,
+                'supplier_code': supplier.supplier_code or '',
+                'supplier_name': supplier.supplier_name or '',
+            },
+            'items': items,
+        })
+
+
+class PurchaseDeliveryListExcelDownloadView(APIView):
+    """納品リストExcelダウンロード（手動テンプレ出力用）
+    target_date をそのまま納入日として扱い、パターンからカバー範囲を算出して数量入りExcelを返す
+    """
+
+    def get(self, request):
+        from django.http import HttpResponse
+        from .models import SupplierOrderSchedule
+        from .order_proposal_views import _generate_raw_pattern_dates
+        from .tasks_auto_delivery_list import _generate_excel
+        from orders.utils.calendar_utils import WorkingDayCalculator
+
+        supplier_id = request.query_params.get('supplier_id')
+        target_date_str = request.query_params.get('target_date')
+        if not supplier_id:
+            return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        supplier = Supplier.objects.filter(id=int(supplier_id)).first()
+        if not supplier:
+            return Response({'detail': 'supplier not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        delivery_date = date.fromisoformat(target_date_str) if target_date_str else date.today()
+
+        daiso_cal = Calendar.objects.filter(calendar_code='daiso').first()
+        calc = WorkingDayCalculator(daiso_cal)
+
+        schedule = SupplierOrderSchedule.objects.filter(
+            supplier_id=supplier.id, is_enabled=True,
+        ).select_related('pattern').first()
+
+        coverage_dates = [delivery_date]
+        if schedule and schedule.pattern:
+            window_start = delivery_date - timedelta(days=7)
+            window_end = delivery_date + timedelta(days=90)
+            pattern_dates = sorted(set(_generate_raw_pattern_dates(schedule, window_start, window_end, calc)))
+            future = [d for d in pattern_dates if d > delivery_date]
+            if future:
+                next_dd = future[0]
+                coverage_dates = []
+                d = delivery_date
+                while d < next_dd:
+                    coverage_dates.append(d)
+                    d += timedelta(days=1)
+
+        line = _resolve_purchase_line(supplier)
+        items = []
+        if line and coverage_dates:
+            product_map = _calc_progress_quantities(line, coverage_dates)
+            items = sorted(product_map.values(), key=lambda x: x['product_code'])
+
+        excel_data = _generate_excel(items, delivery_date, coverage_dates, supplier)
+
+        filename = f'納品リスト_{supplier.supplier_code}_{delivery_date}.xlsx'
+        response = HttpResponse(
+            excel_data.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+
 class PurchaseDeliveryScheduleView(APIView):
     """納入予定（事務員入力）"""
 
@@ -1992,3 +2172,119 @@ class PurchaseReceivingHistoryView(APIView):
             })
 
         return Response({'records': records})
+
+
+class PurchaseAutoDeliveryListConfigListCreateView(APIView):
+    """自動納入リスト送信設定 一覧/新規作成"""
+
+    def get(self, request):
+        configs = PurchaseAutoDeliveryListConfig.objects.select_related('supplier').all()
+        result = []
+        for c in configs:
+            result.append({
+                'id': c.id,
+                'supplier_id': c.supplier_id,
+                'supplier_code': c.supplier.supplier_code if c.supplier else '',
+                'supplier_name': c.supplier.supplier_name if c.supplier else '',
+                'is_enabled': c.is_enabled,
+                'scheduled_hour': c.scheduled_hour,
+                'scheduled_minute': c.scheduled_minute,
+                'lead_time_days': c.lead_time_days,
+                'progress_days_back': c.progress_days_back,
+                'cc_emails': c.cc_emails,
+                'notify_on_failure_user_ids': list(c.notify_on_failure.values_list('id', flat=True)),
+                'notify_on_non_delivery_user_ids': list(c.notify_on_non_delivery.values_list('id', flat=True)),
+                'last_run_at': c.last_run_at.strftime('%Y-%m-%d %H:%M') if c.last_run_at else None,
+                'last_run_status': c.last_run_status,
+                'last_run_message': c.last_run_message,
+                'last_run_duration_seconds': c.last_run_duration_seconds,
+            })
+        return Response(result)
+
+    def post(self, request):
+        supplier_id = request.data.get('supplier_id')
+        if not supplier_id:
+            return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if PurchaseAutoDeliveryListConfig.objects.filter(supplier_id=supplier_id).exists():
+            return Response({'detail': 'この仕入先の設定は既に存在します'}, status=status.HTTP_400_BAD_REQUEST)
+
+        config = PurchaseAutoDeliveryListConfig.objects.create(
+            supplier_id=supplier_id,
+            is_enabled=request.data.get('is_enabled', True),
+            scheduled_hour=int(request.data.get('scheduled_hour', 7)),
+            scheduled_minute=int(request.data.get('scheduled_minute', 0)),
+            lead_time_days=int(request.data.get('lead_time_days', 2)),
+            progress_days_back=int(request.data.get('progress_days_back', 7)),
+            cc_emails=request.data.get('cc_emails', ''),
+        )
+        failure_ids = request.data.get('notify_on_failure_user_ids', [])
+        non_delivery_ids = request.data.get('notify_on_non_delivery_user_ids', [])
+        if failure_ids:
+            config.notify_on_failure.set(failure_ids)
+        if non_delivery_ids:
+            config.notify_on_non_delivery.set(non_delivery_ids)
+        return Response({'id': config.id}, status=status.HTTP_201_CREATED)
+
+
+class PurchaseAutoDeliveryListConfigDetailView(APIView):
+    """自動納入リスト送信設定 更新/削除"""
+
+    def put(self, request, pk):
+        config = PurchaseAutoDeliveryListConfig.objects.filter(pk=pk).first()
+        if not config:
+            return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        new_supplier_id = request.data.get('supplier_id')
+        if new_supplier_id and int(new_supplier_id) != config.supplier_id:
+            if PurchaseAutoDeliveryListConfig.objects.filter(supplier_id=new_supplier_id).exclude(pk=pk).exists():
+                return Response({'detail': 'この仕入先の設定は既に存在します'}, status=status.HTTP_400_BAD_REQUEST)
+            config.supplier_id = int(new_supplier_id)
+
+        if 'is_enabled' in request.data:
+            config.is_enabled = request.data['is_enabled']
+        if 'scheduled_hour' in request.data:
+            config.scheduled_hour = int(request.data['scheduled_hour'])
+        if 'scheduled_minute' in request.data:
+            config.scheduled_minute = int(request.data['scheduled_minute'])
+        if 'lead_time_days' in request.data:
+            config.lead_time_days = int(request.data['lead_time_days'])
+        if 'progress_days_back' in request.data:
+            config.progress_days_back = int(request.data['progress_days_back'])
+        if 'cc_emails' in request.data:
+            config.cc_emails = request.data['cc_emails']
+        config.save()
+
+        if 'notify_on_failure_user_ids' in request.data:
+            config.notify_on_failure.set(request.data['notify_on_failure_user_ids'])
+        if 'notify_on_non_delivery_user_ids' in request.data:
+            config.notify_on_non_delivery.set(request.data['notify_on_non_delivery_user_ids'])
+
+        return Response({'detail': '保存しました'})
+
+    def delete(self, request, pk):
+        config = PurchaseAutoDeliveryListConfig.objects.filter(pk=pk).first()
+        if not config:
+            return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+        config.delete()
+        return Response({'detail': '削除しました'})
+
+
+class PurchaseAutoDeliveryListRunNowView(APIView):
+    """自動納入リスト送信 手動即時実行"""
+
+    def post(self, request, pk):
+        config = PurchaseAutoDeliveryListConfig.objects.filter(pk=pk).first()
+        if not config:
+            return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        from .tasks_auto_delivery_list import run_auto_delivery_list_send
+        import threading
+        config.last_run_status = 'RUNNING'
+        config.last_run_message = '手動実行中...'
+        config.last_run_at = datetime.now()
+        config.save(update_fields=['last_run_status', 'last_run_message', 'last_run_at'])
+
+        thread = threading.Thread(target=run_auto_delivery_list_send, kwargs={'config_id': config.id})
+        thread.start()
+
+        return Response({'detail': '実行を開始しました', 'async': True})
