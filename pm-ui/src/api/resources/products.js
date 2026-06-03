@@ -78,8 +78,9 @@ export const createProductsAPI = (client) => ({
   downloadUpdateImportTemplateXlsx() {
     return client.get('/products/update_import_template_xlsx/', { responseType: 'blob' })
   },
-  bulkUpdateImport(formData) {
-    return client.post('/products/bulk_update_import/', formData, {
+  bulkUpdateImport(formData, { dryRun = false } = {}) {
+    const params = dryRun ? '?dry_run=true' : ''
+    return client.post(`/products/bulk_update_import/${params}`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },

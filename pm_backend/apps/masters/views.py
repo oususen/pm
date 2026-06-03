@@ -380,7 +380,7 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         Product.objects.bulk_create(to_create)
         return {'created': len(to_create), 'skipped': len(skipped), 'skipped_codes': skipped}
 
-    def _bulk_update_products(self, items):
+    def _bulk_update_products(self, items, dry_run=False):
         """品番コードで照合し、既存は更新・未登録は新規作成（upsert）。空欄項目はスキップ。"""
         CATEGORY_MAP = {
             '集合部品': 'ASSEMBLY', '組立品': 'ASSEMBLY',
@@ -599,12 +599,14 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 changed_fields.append('capacity')
 
             if is_new:
-                product.save()
-                existing_products[code] = product
+                if not dry_run:
+                    product.save()
+                    existing_products[code] = product
                 created.append(code)
             elif changed_fields:
-                changed_fields.append('updated_at')
-                product.save(update_fields=changed_fields)
+                if not dry_run:
+                    changed_fields.append('updated_at')
+                    product.save(update_fields=changed_fields)
                 updated.append(code)
             else:
                 skipped.append(code)
@@ -707,8 +709,10 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             seen.add(code)
             items.append(row)
 
+        dry_run = request.query_params.get('dry_run', '').lower() in ('true', '1')
+
         try:
-            result = self._bulk_update_products(items)
+            result = self._bulk_update_products(items, dry_run=dry_run)
         except serializers.ValidationError as e:
             return Response(e.detail, status=status.HTTP_400_BAD_REQUEST)
         return Response(result)

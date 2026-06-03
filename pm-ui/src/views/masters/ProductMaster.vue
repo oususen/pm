@@ -522,22 +522,29 @@
 
         <div class="form-group">
           <label>取込ファイル</label>
-          <input type="file" accept=".csv,.xlsx,.xlsm" @change="onUpdateFileSelected" />
+          <input type="file" accept=".csv,.xlsx,.xlsm" @change="onUpdateFileSelected" ref="updateFileInput" />
         </div>
 
-        <div v-if="updateImportResult" class="csv-result-area">
-          <span class="result-created">新規登録: {{ updateImportResult.created || 0 }}件</span>
-          <span class="result-created">更新: {{ updateImportResult.updated || 0 }}件</span>
-          <span class="result-skipped">変更なし: {{ updateImportResult.skipped || 0 }}件</span>
-          <div v-if="updateImportResult.created_codes && updateImportResult.created_codes.length > 0" class="skipped-codes">
-            新規: {{ updateImportResult.created_codes.join(', ') }}
+        <div v-if="updateImportPreview" class="csv-result-area">
+          <span class="result-created">新規登録: {{ updateImportPreview.created || 0 }}件</span>
+          <span class="result-created">更新: {{ updateImportPreview.updated || 0 }}件</span>
+          <span class="result-skipped">変更なし: {{ updateImportPreview.skipped || 0 }}件</span>
+          <div v-if="updateImportPreview.created_codes && updateImportPreview.created_codes.length > 0" class="skipped-codes">
+            新規: {{ updateImportPreview.created_codes.join(', ') }}
           </div>
-          <div v-if="updateImportResult.updated_codes && updateImportResult.updated_codes.length > 0" class="skipped-codes">
-            更新: {{ updateImportResult.updated_codes.join(', ') }}
+          <div v-if="updateImportPreview.updated_codes && updateImportPreview.updated_codes.length > 0" class="skipped-codes">
+            更新: {{ updateImportPreview.updated_codes.join(', ') }}
           </div>
+        </div>
+
+        <div v-if="updateImportDone" class="csv-result-area" style="border-color: #28a745; background: #d4edda;">
+          <strong>取込完了</strong>
         </div>
 
         <div class="form-actions">
+          <button v-if="updateImportPreview && !updateImportDone" @click="executeUpdateImport" :disabled="updateImporting" class="btn-primary">
+            {{ updateImporting ? '取込中...' : '取り込みしますか？' }}
+          </button>
           <button @click="closeUpdateImport" class="btn-secondary">閉じる</button>
         </div>
       </div>
@@ -894,8 +901,10 @@ const executeFileImport = async (file) => {
 
 // 統合取込
 const showUpdateImportDialog = ref(false)
-const updateImportResult = ref(null)
+const updateImportPreview = ref(null)
+const updateImportDone = ref(false)
 const updateImporting = ref(false)
+const updateImportFile = ref(null)
 
 const downloadUpdateImportTemplateXlsx = async () => {
   try {
@@ -918,13 +927,15 @@ const downloadUpdateImportTemplateXlsx = async () => {
 }
 
 const openUpdateImport = () => {
-  updateImportResult.value = null
+  updateImportPreview.value = null
+  updateImportDone.value = false
+  updateImportFile.value = null
   showUpdateImportDialog.value = true
 }
 
 const closeUpdateImport = () => {
   showUpdateImportDialog.value = false
-  if ((updateImportResult.value?.updated || 0) > 0 || (updateImportResult.value?.created || 0) > 0) {
+  if (updateImportDone.value) {
     fetchProducts(1)
   }
 }
@@ -934,18 +945,41 @@ const onUpdateFileSelected = async (e) => {
   if (!file) return
   if (updateImporting.value) return
   updateImporting.value = true
+  updateImportPreview.value = null
+  updateImportDone.value = false
+  updateImportFile.value = file
   try {
     const fd = new FormData()
     fd.append('file', file)
+    const res = await api.products.bulkUpdateImport(fd, { dryRun: true })
+    updateImportPreview.value = res.data
+  } catch (error) {
+    console.error('統合取込プレビューエラー:', error)
+    const detail = error?.response?.data?.detail || '統合取込のプレビューに失敗しました'
+    alert(detail)
+    updateImportFile.value = null
+  } finally {
+    updateImporting.value = false
+    if (e?.target) e.target.value = ''
+  }
+}
+
+const executeUpdateImport = async () => {
+  if (updateImporting.value || !updateImportFile.value) return
+  updateImporting.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', updateImportFile.value)
     const res = await api.products.bulkUpdateImport(fd)
-    updateImportResult.value = res.data
+    updateImportPreview.value = res.data
+    updateImportDone.value = true
+    updateImportFile.value = null
   } catch (error) {
     console.error('統合取込エラー:', error)
     const detail = error?.response?.data?.detail || '統合取込に失敗しました'
     alert(detail)
   } finally {
     updateImporting.value = false
-    if (e?.target) e.target.value = ''
   }
 }
 
