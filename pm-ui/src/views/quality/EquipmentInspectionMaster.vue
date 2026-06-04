@@ -653,7 +653,7 @@ const RECORD_TYPE_LABELS = {
   TEXT: "文字",
 }
 
-const FREQUENCY_OPTIONS = ["始業時", "週初め", "週末", "月初め", "月末"]
+const FREQUENCY_OPTIONS = ["始業時", "週初め", "週末", "月初め", "月末", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日", "日曜日"]
 function isPresetFrequency(val) {
   return FREQUENCY_OPTIONS.includes(val)
 }

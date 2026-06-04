@@ -235,6 +235,18 @@ def _is_frequency_required(frequency, operation_date, calendar):
 
     freq = frequency.strip()
     PRESET_FREQUENCIES = {"始業時", "週初め", "週末", "月初め", "月末"}
+    WEEKDAY_FREQUENCIES = {
+        "月曜日": 0,
+        "火曜日": 1,
+        "水曜日": 2,
+        "木曜日": 3,
+        "金曜日": 4,
+        "土曜日": 5,
+        "日曜日": 6,
+    }
+    if freq in WEEKDAY_FREQUENCIES:
+        return operation_date.weekday() == WEEKDAY_FREQUENCIES[freq]
+
     if freq not in PRESET_FREQUENCIES:
         return True
 
