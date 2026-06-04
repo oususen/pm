@@ -174,7 +174,7 @@ const loadSuppliers = async () => {
 }
 
 const loadUsers = async () => {
-  const res = await api.accounts.getUsers({ is_active: true })
+  const res = await api.accounts.getUsers({ is_active: true, page_size: 9999 })
   userList.value = res.data?.results || res.data || []
 }
 
