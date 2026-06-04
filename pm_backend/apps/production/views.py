@@ -2175,6 +2175,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         if requested_product_ids:
             routing_steps = routing_steps.filter(output_product_id__in=requested_product_ids)
 
+        # ルーティングステップのG工程 or 外作区分でBUY/SUBCONを判定
+        # pickup_purchase文脈ではrouting_stepsは仕入先ライン限定のため、
+        # process_code='G' または process.is_outsource=True の工程のみSUBCONとみなす
+        subcon_product_process_map = {}
         for step in routing_steps:
             source_parent_id = None
             if step.routing_id and getattr(step.routing, 'product_id', None):
@@ -2185,6 +2189,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             if not source_parent_id or not child_id:
                 continue
 
+            # SUBCON判定（G工程または外作フラグ）
+            process = getattr(step, 'process', None)
+            if process and step.process_id and (process.process_code == 'G' or process.is_outsource):
+                subcon_product_process_map.setdefault(child_id, step.process_id)
+
             qty = Decimal('1')
             lead_time_days = int(step.lead_time_days or 0)
             parent_ids.add(source_parent_id)
@@ -2194,19 +2203,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 continue
             relation_keys.add(key)
             parent_to_children[source_parent_id].append((child_id, qty, lead_time_days))
-
-        # ルーティングステップのG工程 or 外作区分でBUY/SUBCONを判定
-        # pickup_purchase文脈ではrouting_stepsは仕入先ライン限定のため、
-        # process_code='G' または process.is_outsource=True の工程のみSUBCONとみなす
-        subcon_product_process_map = {}
-        for step in routing_steps:
-            process = getattr(step, 'process', None)
-            if not process:
-                continue
-            if not (process.process_code == 'G' or process.is_outsource):
-                continue
-            if step.output_product_id and step.process_id:
-                subcon_product_process_map.setdefault(step.output_product_id, step.process_id)
 
         _t2 = _time.perf_counter()
         logger.info('[pickup_purchase] bom+routing scan: %.3fs (parents=%d, children=%d, subcon=%d)', _t2 - _t1, len(parent_ids), len(child_ids), len(subcon_product_process_map))
