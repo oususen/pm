@@ -2171,7 +2171,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             routing_source_q
         ).filter(
             Q(supplier_id=supplier_id) | Q(line_id=line_id)
-        ).select_related('routing')
+        ).select_related('routing', 'process')
         if requested_product_ids:
             routing_steps = routing_steps.filter(output_product_id__in=requested_product_ids)
 
@@ -2195,11 +2195,16 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             relation_keys.add(key)
             parent_to_children[source_parent_id].append((child_id, qty, lead_time_days))
 
-        # ルーティングステップのprocess_idの有無でBUY/SUBCONを判定
+        # ルーティングステップのG工程 or 外作区分でBUY/SUBCONを判定
         # pickup_purchase文脈ではrouting_stepsは仕入先ライン限定のため、
-        # process_idあり=SUBCON（外作品）、process_idなし=BUY（購買品）
+        # process_code='G' または process.is_outsource=True の工程のみSUBCONとみなす
         subcon_product_process_map = {}
         for step in routing_steps:
+            process = getattr(step, 'process', None)
+            if not process:
+                continue
+            if not (process.process_code == 'G' or process.is_outsource):
+                continue
             if step.output_product_id and step.process_id:
                 subcon_product_process_map.setdefault(step.output_product_id, step.process_id)
 
@@ -2443,7 +2448,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         _t4 = _time.perf_counter()
         logger.info('[pickup_purchase] demand calc: %.3fs (demand_map=%d, target_products=%d)', _t4 - _t3, len(demand_map), len(target_product_ids))
 
-        # SUBCON品はG工程、BUY品はPURCHASEプロセスで既存レコードを検索
+        # SUBCON品はG工程（または外作区分）、BUY品はPURCHASEプロセスで既存レコードを検索
         all_process_ids = {process_id} | set(subcon_product_process_map.values())
         existing_qs = LineBacklog.objects.filter(
             line_id=line_id,
@@ -2468,7 +2473,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         for (child_id, plan_date), demand in demand_map.items():
             qty_val = int(demand)
-            # SUBCON品はG工程、BUY品はPURCHASEプロセス
+            # SUBCON品はG工程（または外作区分）、BUY品はPURCHASEプロセス
             child_process_id = subcon_product_process_map.get(child_id, process_id)
             existing_obj = existing_map.pop((child_id, plan_date, child_process_id), None)
             if existing_obj:
