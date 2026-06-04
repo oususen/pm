@@ -2195,8 +2195,16 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             relation_keys.add(key)
             parent_to_children[source_parent_id].append((child_id, qty, lead_time_days))
 
+        # ルーティングステップのprocess_idの有無でBUY/SUBCONを判定
+        # pickup_purchase文脈ではrouting_stepsは仕入先ライン限定のため、
+        # process_idあり=SUBCON（外作品）、process_idなし=BUY（購買品）
+        subcon_product_process_map = {}
+        for step in routing_steps:
+            if step.output_product_id and step.process_id:
+                subcon_product_process_map.setdefault(step.output_product_id, step.process_id)
+
         _t2 = _time.perf_counter()
-        logger.info('[pickup_purchase] bom+routing scan: %.3fs (parents=%d, children=%d)', _t2 - _t1, len(parent_ids), len(child_ids))
+        logger.info('[pickup_purchase] bom+routing scan: %.3fs (parents=%d, children=%d, subcon=%d)', _t2 - _t1, len(parent_ids), len(child_ids), len(subcon_product_process_map))
 
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
             calendar_code='daiso'
@@ -2435,9 +2443,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         _t4 = _time.perf_counter()
         logger.info('[pickup_purchase] demand calc: %.3fs (demand_map=%d, target_products=%d)', _t4 - _t3, len(demand_map), len(target_product_ids))
 
+        # SUBCON品はG工程、BUY品はPURCHASEプロセスで既存レコードを検索
+        all_process_ids = {process_id} | set(subcon_product_process_map.values())
         existing_qs = LineBacklog.objects.filter(
             line_id=line_id,
-            process_id=process_id,
+            process_id__in=all_process_ids,
             product_id__in=target_product_ids,
         )
         if start_dt:
@@ -2445,7 +2455,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         if end_dt:
             existing_qs = existing_qs.filter(plan_date__lte=end_dt)
 
-        existing_map = {(obj.product_id, obj.plan_date): obj for obj in existing_qs}
+        # キーに process_id を含めてBUY/SUBCON両方を管理
+        existing_map = {(obj.product_id, obj.plan_date, obj.process_id): obj for obj in existing_qs}
 
         _t5 = _time.perf_counter()
         logger.info('[pickup_purchase] existing query: %.3fs (existing=%d)', _t5 - _t4, len(existing_map))
@@ -2457,7 +2468,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         for (child_id, plan_date), demand in demand_map.items():
             qty_val = int(demand)
-            existing_obj = existing_map.pop((child_id, plan_date), None)
+            # SUBCON品はG工程、BUY品はPURCHASEプロセス
+            child_process_id = subcon_product_process_map.get(child_id, process_id)
+            existing_obj = existing_map.pop((child_id, plan_date, child_process_id), None)
             if existing_obj:
                 if (existing_obj.order_qty or 0) != qty_val or (existing_obj.demand_qty_plan or 0) != qty_val:
                     existing_obj.order_qty = qty_val
@@ -2467,7 +2480,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             else:
                 to_create.append(LineBacklog(
                     plan_date=plan_date,
-                    process_id=process_id,
+                    process_id=child_process_id,
                     product_id=child_id,
                     line_id=line_id,
                     sequence_no=0,
