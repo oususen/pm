@@ -200,9 +200,15 @@ class Line(models.Model):
 
 class Supplier(models.Model):
     """仕入先マスタ"""
+    SUPPLIER_TYPE_CHOICES = [
+        ('outsource', '外作'),
+        ('purchase', '購入'),
+        ('both', '両方'),
+    ]
     id = models.BigAutoField(primary_key=True)
     supplier_code = models.CharField(max_length=20, unique=True, verbose_name='仕入先コード')
     supplier_name = models.CharField(max_length=100, verbose_name='仕入先名')
+    supplier_type = models.CharField(max_length=20, choices=SUPPLIER_TYPE_CHOICES, default='both', verbose_name='仕入先区分')
     order_email = models.EmailField(blank=True, default='', verbose_name='送信メールアドレス')
     calendar = models.ForeignKey(
         'Calendar',

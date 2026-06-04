@@ -53,6 +53,12 @@
           </select>
         </label>
         <div class="btn-group">
+          <span class="filter-label">G:</span>
+          <button :class="['btn-filter', { active: filterG === '' }]" @click="filterG = ''">全</button>
+          <button :class="['btn-filter', { active: filterG === 'yes' }]" @click="filterG = 'yes'">有</button>
+          <button :class="['btn-filter', { active: filterG === 'no' }]" @click="filterG = 'no'">無</button>
+        </div>
+        <div class="btn-group">
           <span class="filter-label">数変更:</span>
           <button :class="['btn-filter', { active: filterHeld === '' }]" @click="filterHeld = ''">全</button>
           <button :class="['btn-filter', { active: filterHeld === 'yes' }]" @click="filterHeld = 'yes'">有</button>
@@ -156,6 +162,12 @@
           <label>品番:
             <input v-model="filterProductCodeDelivery" class="filter-input" placeholder="部分一致" />
           </label>
+          <div class="btn-group">
+            <span class="filter-label">G:</span>
+            <button :class="['btn-filter', { active: filterGDelivery === '' }]" @click="filterGDelivery = ''">全</button>
+            <button :class="['btn-filter', { active: filterGDelivery === 'yes' }]" @click="filterGDelivery = 'yes'">有</button>
+            <button :class="['btn-filter', { active: filterGDelivery === 'no' }]" @click="filterGDelivery = 'no'">無</button>
+          </div>
           <div class="btn-group">
             <span class="filter-label">数変更:</span>
             <button :class="['btn-filter', { active: filterHeldDelivery === '' }]" @click="filterHeldDelivery = ''">全</button>
@@ -265,10 +277,12 @@ const filterActual = ref('')
 const filterProductCode = ref('')
 const filterHeld = ref('')
 const filterDiff = ref('')
+const filterG = ref('yes')
 const filterHeldDelivery = ref('')
 const filterDiffDelivery = ref('')
 const filterActualDelivery = ref('')
 const filterProductCodeDelivery = ref('')
+const filterGDelivery = ref('yes')
 
 const destOptions = computed(() => {
   const set = new Set()
@@ -292,6 +306,8 @@ const filteredRows = computed(() => {
     if (filterDiff.value === 'no' && (!r.actual_qty || r.actual_qty !== r.expected_qty)) return false
     if (filterActual.value === 'yes' && !r.actual_qty) return false
     if (filterActual.value === 'no' && r.actual_qty) return false
+    if (filterG.value === 'yes' && !r.product_code.endsWith('G')) return false
+    if (filterG.value === 'no' && r.product_code.endsWith('G')) return false
     return true
   })
 })
@@ -304,6 +320,8 @@ const filteredDeliveryListRows = computed(() => {
     if (filterDiffDelivery.value === 'no' && (!r.actual_qty || r.actual_qty !== r.expected_qty)) return false
     if (filterActualDelivery.value === 'yes' && !r.actual_qty) return false
     if (filterActualDelivery.value === 'no' && r.actual_qty) return false
+    if (filterGDelivery.value === 'yes' && !String(r.product_code || '').endsWith('G')) return false
+    if (filterGDelivery.value === 'no' && String(r.product_code || '').endsWith('G')) return false
     return true
   })
 })
@@ -335,6 +353,14 @@ const onTargetDateChange = () => {
   loadCurrentTabData()
 }
 
+const getDefaultGFilter = () => {
+  const supplier = suppliers.value.find((s) => s.id === selectedSupplier.value)
+  if (!supplier) return 'yes'
+  if (supplier.supplier_type === 'outsource') return 'yes'
+  if (supplier.supplier_type === 'purchase') return 'no'
+  return ''
+}
+
 const onSupplierChange = () => {
   rows.value = []
   coverageDates.value = []
@@ -347,10 +373,13 @@ const onSupplierChange = () => {
   filterHeld.value = ''
   filterDiff.value = ''
   filterActual.value = ''
+  const gDefault = getDefaultGFilter()
+  filterG.value = gDefault
   filterHeldDelivery.value = ''
   filterDiffDelivery.value = ''
   filterActualDelivery.value = ''
   filterProductCodeDelivery.value = ''
+  filterGDelivery.value = gDefault
   deliveryListRows.value = []
   if (selectedSupplier.value) {
     if (activeTab.value === 'progress') loadReceivingData()

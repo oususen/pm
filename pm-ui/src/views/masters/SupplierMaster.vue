@@ -9,20 +9,36 @@
     </div>
 
     <div class="page-content">
+      <div class="filter-bar">
+        <label>検索:
+          <input v-model="filterText" class="filter-input" placeholder="コード・名前" />
+        </label>
+        <div class="btn-group">
+          <span class="filter-label">区分:</span>
+          <button :class="['btn-filter', { active: filterType === '' }]" @click="filterType = ''">全</button>
+          <button :class="['btn-filter', { active: filterType === 'outsource' }]" @click="filterType = 'outsource'">外作</button>
+          <button :class="['btn-filter', { active: filterType === 'purchase' }]" @click="filterType = 'purchase'">購入</button>
+          <button :class="['btn-filter', { active: filterType === 'both' }]" @click="filterType = 'both'">両方</button>
+        </div>
+        <span class="filter-count">{{ filteredSuppliers.length }} / {{ suppliers.length }}件</span>
+      </div>
+
       <table class="data-table">
         <thead>
           <tr>
             <th>仕入先コード</th>
             <th>仕入先名</th>
+            <th>区分</th>
             <th>送信メールアドレス</th>
             <th>専用カレンダー</th>
             <th>操作</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="supplier in suppliers" :key="supplier.id">
+          <tr v-for="supplier in filteredSuppliers" :key="supplier.id">
             <td>{{ supplier.supplier_code }}</td>
             <td>{{ supplier.supplier_name }}</td>
+            <td>{{ supplierTypeLabel(supplier.supplier_type) }}</td>
             <td>{{ supplier.order_email || '-' }}</td>
             <td>{{ getCalendarLabelBySupplier(supplier) }}</td>
             <td>
@@ -33,7 +49,7 @@
         </tbody>
       </table>
 
-      <div v-if="suppliers.length === 0" class="no-data">
+      <div v-if="filteredSuppliers.length === 0" class="no-data">
         データがありません
       </div>
     </div>
@@ -50,6 +66,14 @@
           <div class="form-group">
             <label>仕入先名 *</label>
             <input v-model="formData.supplier_name" required :disabled="!canEdit" />
+          </div>
+          <div class="form-group">
+            <label>仕入先区分</label>
+            <select v-model="formData.supplier_type" :disabled="!canEdit">
+              <option value="outsource">外作</option>
+              <option value="purchase">購入</option>
+              <option value="both">両方</option>
+            </select>
           </div>
           <div class="form-group">
             <label>送信メールアドレス</label>
@@ -91,6 +115,22 @@ const formData = ref({
   calendar: null,
 })
 const canEdit = computed(() => canAccessMasterResource('masters.supplier', 'edit'))
+const filterText = ref('')
+const filterType = ref('')
+
+const SUPPLIER_TYPE_MAP = { outsource: '外作', purchase: '購入', both: '両方' }
+const supplierTypeLabel = (type) => SUPPLIER_TYPE_MAP[type] || '両方'
+
+const filteredSuppliers = computed(() => {
+  return suppliers.value.filter((s) => {
+    if (filterType.value && s.supplier_type !== filterType.value) return false
+    if (filterText.value) {
+      const q = filterText.value.toUpperCase()
+      if (!s.supplier_code.toUpperCase().includes(q) && !s.supplier_name.toUpperCase().includes(q)) return false
+    }
+    return true
+  })
+})
 
 const fetchSuppliers = async () => {
   try {
@@ -140,6 +180,7 @@ const showNewDialog = () => {
   formData.value = {
     supplier_code: '',
     supplier_name: '',
+    supplier_type: 'both',
     order_email: '',
     calendar: null,
   }
@@ -202,6 +243,28 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.filter-bar label { display: flex; align-items: center; gap: 4px; color: #475569; font-weight: 600; }
+.filter-input { padding: 2px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; width: 140px; }
+.btn-group { display: flex; align-items: center; gap: 2px; }
+.filter-label { color: #475569; font-weight: 600; margin-right: 2px; }
+.btn-filter {
+  padding: 2px 8px;
+  font-size: 12px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #64748b;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.btn-filter.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+.filter-count { color: #94a3b8; margin-left: auto; }
 .modal-overlay {
   position: fixed;
   top: 0;
