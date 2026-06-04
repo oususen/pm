@@ -87,6 +87,7 @@
             <th class="col-name">品名</th>
             <th class="col-dest">移動先</th>
             <th class="num col-total">予定</th>
+            <th class="col-confirm"></th>
             <th class="num col-actual">実績</th>
             <th v-for="d in coverageDates" :key="d" class="num col-date">
               <div>{{ formatDateParts(d).date }}</div>
@@ -98,7 +99,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in filteredRows" :key="row.product_id" :class="{ 'row-held': row.held, 'row-done': !row.held && row.actual_qty > 0 && row.actual_qty === row.expected_qty }">
+          <tr v-for="row in filteredRows" :key="row.product_id" :class="{ 'row-held': row.held, 'row-confirmed': row.confirmed, 'row-done': !row.held && !row.confirmed && row.actual_qty > 0 && row.actual_qty === row.expected_qty }">
             <td class="col-code">
               {{ row.product_code }}
               <button class="btn-hold" :class="{ active: row.held }" @click="toggleHold(row)">数変更</button>
@@ -106,10 +107,15 @@
             <td class="col-name">{{ row.product_name }}</td>
             <td class="col-dest">{{ row.transfer_destination_label || '' }}</td>
             <td class="num col-total bold">{{ row.expected_qty }}</td>
+            <td class="col-confirm">
+              <button v-if="!row.actual_qty || row.actual_qty < row.expected_qty" class="btn-confirmed" :class="{ active: row.confirmed }" @click="row.confirmed = !row.confirmed">確認済</button>
+              <span v-else class="badge-received">検収済</span>
+            </td>
             <td class="num col-actual">{{ row.actual_qty || '' }}</td>
             <td v-for="d in coverageDates" :key="d" class="num col-date">{{ row.daily[d] || '' }}</td>
             <td class="num col-recv">
-              <input type="number" v-model.number="row.received_qty" min="0" class="input-qty" />
+              <input v-if="!row.actual_qty || row.actual_qty < row.expected_qty" type="number" v-model.number="row.received_qty" min="0" class="input-qty" />
+              <span v-else class="text-muted">-</span>
             </td>
             <td class="num col-diff" :class="{ 'diff-over': row.expected_qty - (row.actual_qty || 0) < 0, 'diff-short': row.expected_qty - (row.actual_qty || 0) > 0 }">{{ row.actual_qty ? row.expected_qty - row.actual_qty : '' }}</td>
             <td class="col-note">
@@ -122,9 +128,13 @@
         {{ isDeliveryDay ? '本日の納入予定データがありません' : '本日は納入日ではありません' }}
       </div>
 
-      <div v-if="filteredRows.length" class="form-actions">
-        <button v-if="filterHeld !== 'yes'" class="btn-success" @click="saveReceiving" :disabled="saving">検収確定</button>
-        <button v-if="filterHeld === 'yes'" class="btn-held-confirm" @click="saveHeldReceiving" :disabled="saving">数変更検収確定</button>
+      <div v-if="selectedSupplier && !loading" class="add-row-area">
+        <button class="btn-add" @click="openAddModal('progress')">+ 製品追加</button>
+      </div>
+
+      <div v-if="filteredRows.length || rows.length" class="form-actions">
+        <button v-if="filterHeld !== 'yes'" class="btn-success" @click="saveReceiving" :disabled="saving || !allTargetsConfirmed">検収確定</button>
+        <button v-if="filterHeld === 'yes'" class="btn-held-confirm" @click="saveHeldReceiving" :disabled="saving || !allHeldConfirmed">数変更検収確定</button>
       </div>
 
       <div v-if="showHistory" class="history-panel">
@@ -193,32 +203,65 @@
               <th>品番</th>
               <th>品名</th>
               <th class="num">納入予定</th>
+              <th class="col-confirm"></th>
               <th class="num">実績</th>
               <th class="num">実数</th>
               <th>備考</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in filteredDeliveryListRows" :key="r.product_id" :class="{ 'row-held': r.held }">
+            <tr v-for="r in filteredDeliveryListRows" :key="r.product_id" :class="{ 'row-held': r.held, 'row-confirmed': r.confirmed, 'row-done': r.actual_qty && r.actual_qty >= r.expected_qty }">
               <td>
                 {{ r.product_code }}
                 <button class="btn-hold" :class="{ active: r.held }" @click="toggleHoldDelivery(r)">数変更</button>
               </td>
               <td>{{ r.product_name }}</td>
               <td class="num">{{ r.expected_qty }}</td>
+              <td class="col-confirm">
+                <button v-if="!r.actual_qty || r.actual_qty < r.expected_qty" class="btn-confirmed" :class="{ active: r.confirmed }" @click="r.confirmed = !r.confirmed">確認済</button>
+                <span v-else class="badge-received">検収済</span>
+              </td>
               <td class="num">{{ r.actual_qty || '' }}</td>
-              <td class="num"><input type="number" v-model.number="r.received_qty" min="0" class="input-qty" /></td>
+              <td class="num">
+                <input v-if="!r.actual_qty || r.actual_qty < r.expected_qty" type="number" v-model.number="r.received_qty" min="0" class="input-qty" />
+                <span v-else class="text-muted">-</span>
+              </td>
               <td><input v-model="r.note" class="input-note" /></td>
             </tr>
           </tbody>
         </table>
         <div v-else-if="deliveryListRows.length" class="no-data">表示条件に一致するデータがありません。</div>
         <div v-else class="no-data">この日の納入予定は未登録です（事務員が納入予定画面で登録）。</div>
+
+        <div v-if="selectedSupplier" class="add-row-area">
+          <button class="btn-add" @click="openAddModal('delivery')">+ 製品追加</button>
+        </div>
+
         <div v-if="deliveryListRows.length" class="form-actions">
-          <button v-if="filterHeldDelivery !== 'yes'" class="btn-success" :disabled="saving" @click="saveDeliveryListReceiving">検収確定</button>
-          <button v-if="filterHeldDelivery === 'yes'" class="btn-held-confirm" :disabled="saving" @click="saveDeliveryListHeldReceiving">数変更検収確定</button>
+          <button v-if="filterHeldDelivery !== 'yes'" class="btn-success" :disabled="saving || !allDeliveryTargetsConfirmed" @click="saveDeliveryListReceiving">検収確定</button>
+          <button v-if="filterHeldDelivery === 'yes'" class="btn-held-confirm" :disabled="saving || !allDeliveryHeldConfirmed" @click="saveDeliveryListHeldReceiving">数変更検収確定</button>
         </div>
       </template>
+    </div>
+
+    <!-- 製品追加モーダル -->
+    <div v-if="showAddModal" class="ds-overlay" @click.self="closeAddModal">
+      <div class="add-modal">
+        <div class="ds-header">
+          <h3>製品追加</h3>
+          <button class="ds-close" @click="closeAddModal">&times;</button>
+        </div>
+        <div class="add-modal-body">
+          <input v-model="addModalSearch" class="add-modal-input" placeholder="品番・品名で検索" ref="addModalInputRef" />
+          <div class="add-modal-list">
+            <div v-for="p in addModalResults" :key="p.product_id" class="add-dropdown-item" @click="onAddModalSelect(p)">
+              <span class="add-code">{{ p.product_code }}</span>
+              <span class="add-name">{{ p.product_name }}</span>
+            </div>
+            <div v-if="addModalSearch && !addModalResults.length" class="add-modal-empty">該当する製品がありません</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- データソースモーダル -->
@@ -270,6 +313,97 @@ const coverageDates = ref([])
 const patternInfo = ref(null)
 const isDeliveryDay = ref(false)
 const nextDeliveryDate = ref('')
+
+const supplierProducts = ref([])
+const showAddModal = ref(false)
+const addModalSearch = ref('')
+const addModalTarget = ref('')
+const addModalInputRef = ref(null)
+
+const addModalResults = computed(() => {
+  const q = addModalSearch.value.trim().toUpperCase()
+  if (!q) return supplierProducts.value
+  return supplierProducts.value.filter((p) =>
+    p.product_code.toUpperCase().includes(q) || p.product_name.toUpperCase().includes(q)
+  )
+})
+
+const openAddModal = (target) => {
+  addModalTarget.value = target
+  addModalSearch.value = ''
+  showAddModal.value = true
+  setTimeout(() => addModalInputRef.value?.focus(), 50)
+}
+
+const closeAddModal = () => {
+  showAddModal.value = false
+  addModalSearch.value = ''
+}
+
+const onAddModalSelect = (product) => {
+  if (addModalTarget.value === 'progress') addProductToRows(product)
+  else addProductToDeliveryRows(product)
+}
+
+const fetchSupplierProducts = async () => {
+  if (!selectedSupplier.value) { supplierProducts.value = []; return }
+  try {
+    const res = await api.client.get('/purchase-receiving/delivery-list-template/', {
+      params: { supplier_id: selectedSupplier.value },
+    })
+    supplierProducts.value = res.data.items || []
+  } catch { supplierProducts.value = [] }
+}
+
+const addProductToRows = (product) => {
+  const existing = rows.value.find((r) => r.product_id === product.product_id)
+  if (existing && isReceived(existing)) {
+    if (!confirm(`${product.product_code} は検収済みです。追加検収行を作成しますか？`)) return
+  } else if (existing) {
+    alert(`${product.product_code} は既にリストにあります。`)
+    return
+  }
+  rows.value.push({
+    product_id: product.product_id,
+    product_code: product.product_code,
+    product_name: product.product_name,
+    transfer_destination: '',
+    transfer_destination_label: '',
+    next_process_name: '',
+    expected_qty: 0,
+    actual_qty: 0,
+    daily: {},
+    received_qty: 0,
+    held: false,
+    confirmed: false,
+    note: product.product_code,
+    _manual: true,
+  })
+  addModalSearch.value = ''
+}
+
+const addProductToDeliveryRows = (product) => {
+  const existing = deliveryListRows.value.find((r) => r.product_id === product.product_id)
+  if (existing && isReceived(existing)) {
+    if (!confirm(`${product.product_code} は検収済みです。追加検収行を作成しますか？`)) return
+  } else if (existing) {
+    alert(`${product.product_code} は既にリストにあります。`)
+    return
+  }
+  deliveryListRows.value.push({
+    product_id: product.product_id,
+    product_code: product.product_code,
+    product_name: product.product_name,
+    expected_qty: 0,
+    actual_qty: 0,
+    received_qty: 0,
+    held: false,
+    confirmed: false,
+    note: product.product_code,
+    _manual: true,
+  })
+  addModalSearch.value = ''
+}
 
 const filterDest = ref('')
 const filterNextProcess = ref('')
@@ -381,7 +515,9 @@ const onSupplierChange = () => {
   filterProductCodeDelivery.value = ''
   filterGDelivery.value = gDefault
   deliveryListRows.value = []
+  showAddModal.value = false
   if (selectedSupplier.value) {
+    fetchSupplierProducts()
     if (activeTab.value === 'progress') loadReceivingData()
     else loadDeliveryListData()
   }
@@ -420,7 +556,8 @@ const loadReceivingData = async () => {
         ...item,
         received_qty: s ? s.received_qty : item.expected_qty,
         held: s ? true : false,
-        note: s ? s.note : '',
+        confirmed: false,
+        note: s ? s.note : item.product_code || '',
       }
     })
   } catch (e) {
@@ -431,20 +568,21 @@ const loadReceivingData = async () => {
   }
 }
 
+const isReceived = (r) => !r._manual && r.actual_qty && r.actual_qty >= r.expected_qty
+
 const saveReceiving = async () => {
   if (!rows.value.length) return
-  const targets = filteredRows.value.filter((r) => !r.held)
-  const withActual = targets.filter((r) => r.actual_qty)
-  if (withActual.length) {
-    const codes = withActual.map((r) => r.product_code).join(', ')
-    if (!confirm(`実績がある製品が${withActual.length}件あります:\n${codes}\n\n検収を続行しますか？`)) return
+  const targets = filteredRows.value.filter((r) => !r.held && !isReceived(r))
+  if (!targets.length) {
+    alert('検収対象がありません。')
+    return
   }
   saving.value = true
   try {
     await api.client.post('/purchase-receiving/', {
       supplier_id: selectedSupplier.value,
       target_date: targetDate.value,
-      items: filteredRows.value.filter((r) => !r.held).map((r) => ({
+      items: targets.map((r) => ({
         product_id: r.product_id,
         expected_qty: r.expected_qty,
         received_qty: r.received_qty,
@@ -476,9 +614,13 @@ const loadHeldState = () => {
 }
 
 const hasHeldRows = computed(() => rows.value.some((r) => r.held))
+const allTargetsConfirmed = computed(() => filteredRows.value.filter((r) => !r.held && !isReceived(r)).every((r) => r.confirmed))
+const allHeldConfirmed = computed(() => filteredRows.value.filter((r) => r.held && !isReceived(r)).every((r) => r.confirmed))
+const allDeliveryTargetsConfirmed = computed(() => filteredDeliveryListRows.value.filter((r) => !r.held && !isReceived(r)).every((r) => r.confirmed))
+const allDeliveryHeldConfirmed = computed(() => filteredDeliveryListRows.value.filter((r) => r.held && !isReceived(r)).every((r) => r.confirmed))
 
 const saveHeldReceiving = async () => {
-  const heldItems = filteredRows.value.filter((r) => r.held)
+  const heldItems = filteredRows.value.filter((r) => r.held && !isReceived(r))
   saving.value = true
   try {
     await api.client.post('/purchase-receiving/', {
@@ -562,7 +704,8 @@ const loadDeliveryListData = async () => {
       ...r,
       received_qty: r.expected_qty,
       held: false,
-      note: '',
+      confirmed: false,
+      note: r.product_code || '',
     }))
   } catch (e) {
     console.error('納入リスト取得エラー', e)
@@ -572,7 +715,7 @@ const loadDeliveryListData = async () => {
 }
 
 const saveDeliveryListReceiving = async () => {
-  const targets = filteredDeliveryListRows.value.filter((r) => !r.held && Number(r.received_qty) > 0)
+  const targets = filteredDeliveryListRows.value.filter((r) => !r.held && !isReceived(r) && Number(r.received_qty) > 0)
   if (!targets.length) {
     alert('検収対象がありません。')
     return
@@ -600,7 +743,7 @@ const saveDeliveryListReceiving = async () => {
 }
 
 const saveDeliveryListHeldReceiving = async () => {
-  const targets = filteredDeliveryListRows.value.filter((r) => r.held && Number(r.received_qty) > 0)
+  const targets = filteredDeliveryListRows.value.filter((r) => r.held && !isReceived(r) && Number(r.received_qty) > 0)
   if (!targets.length) {
     alert('数変更の検収対象がありません。')
     return
@@ -720,6 +863,68 @@ onMounted(fetchSuppliers)
   color: #92400e;
   font-weight: 600;
 }
+.btn-confirmed {
+  margin-left: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  border: 1px solid #d1d5db;
+  border-radius: 3px;
+  background: #fff;
+  color: #64748b;
+  cursor: pointer;
+}
+.btn-confirmed.active {
+  background: #dcfce7;
+  border-color: #22c55e;
+  color: #166534;
+  font-weight: 600;
+}
+.badge-received {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #e2e8f0;
+  color: #64748b;
+  border-radius: 3px;
+}
+.text-muted { color: #94a3b8; }
+.add-row-area { margin: 8px 0; }
+.btn-add {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px dashed #94a3b8;
+  border-radius: 4px;
+  background: #fff;
+  color: #475569;
+  cursor: pointer;
+}
+.btn-add:hover { background: #f1f5f9; }
+.add-modal {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.2);
+  width: 480px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+.add-modal-body { padding: 12px 18px 18px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+.add-modal-input { width: 100%; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 14px; }
+.add-modal-list { overflow-y: auto; max-height: 50vh; border: 1px solid #e5e7eb; border-radius: 4px; }
+.add-modal-empty { padding: 12px; color: #94a3b8; font-size: 13px; text-align: center; }
+.add-dropdown-item {
+  display: flex;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.add-dropdown-item:hover { background: #eff6ff; }
+.add-code { font-weight: 600; color: #1e293b; min-width: 140px; }
+.add-name { color: #64748b; }
+.row-confirmed { background: #f0fdf4; }
 .row-held { background: #fffbeb; }
 .row-held td { color: #94a3b8; }
 .col-name { min-width: 120px; }

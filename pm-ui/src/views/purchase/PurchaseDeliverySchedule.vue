@@ -10,6 +10,12 @@
           </option>
         </select>
         <input type="date" v-model="targetDate" />
+        <div class="btn-group">
+          <span class="filter-label">G:</span>
+          <button :class="['btn-filter', { active: filterG === '' }]" @click="filterG = ''">全</button>
+          <button :class="['btn-filter', { active: filterG === 'yes' }]" @click="filterG = 'yes'">有</button>
+          <button :class="['btn-filter', { active: filterG === 'no' }]" @click="filterG = 'no'">無</button>
+        </div>
         <button class="btn-excel" :disabled="loadingTemplate" @click="downloadTemplate">
           {{ loadingTemplate ? 'テンプレ作成中...' : '納品リストテンプレ出力' }}
         </button>
@@ -79,7 +85,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import * as XLSX from 'xlsx'
 import api from '@/api/client'
 
@@ -91,6 +97,16 @@ const saving = ref(false)
 const rows = ref([])
 const errors = ref([])
 const fileInputRef = ref(null)
+const filterG = ref('')
+
+watch(selectedSupplier, (id) => {
+  if (!id) { filterG.value = ''; return }
+  const s = suppliers.value.find((sup) => sup.id === id)
+  if (!s) { filterG.value = ''; return }
+  if (s.supplier_type === 'outsource') filterG.value = 'yes'
+  else if (s.supplier_type === 'purchase') filterG.value = 'no'
+  else filterG.value = ''
+})
 
 const fetchSuppliers = async () => {
   const res = await api.suppliers.getSuppliers()
@@ -133,7 +149,7 @@ const downloadTemplate = async () => {
   loadingTemplate.value = true
   try {
     const res = await api.client.get('/purchase-receiving/delivery-list-excel/', {
-      params: { supplier_id: selectedSupplier.value, target_date: targetDate.value },
+      params: { supplier_id: selectedSupplier.value, target_date: targetDate.value, g_filter: filterG.value },
       responseType: 'blob',
     })
     const supplier = suppliers.value.find((s) => s.id === selectedSupplier.value)
@@ -290,6 +306,18 @@ onMounted(fetchSuppliers)
 </script>
 
 <style scoped>
+.btn-group { display: flex; align-items: center; gap: 2px; }
+.filter-label { color: #475569; font-weight: 600; margin-right: 2px; font-size: 13px; }
+.btn-filter {
+  padding: 2px 8px;
+  font-size: 12px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #64748b;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.btn-filter.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
 .page-content { display: grid; gap: 10px; }
 .error-box {
   background: #fff1f2;

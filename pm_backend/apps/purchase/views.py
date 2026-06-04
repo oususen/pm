@@ -2031,11 +2031,18 @@ class PurchaseDeliveryListExcelDownloadView(APIView):
                     coverage_dates.append(d)
                     d += timedelta(days=1)
 
+        g_filter = request.query_params.get('g_filter', '')
+
         line = _resolve_purchase_line(supplier)
         items = []
         if line and coverage_dates:
             product_map = _calc_progress_quantities(line, coverage_dates)
             items = sorted(product_map.values(), key=lambda x: x['product_code'])
+
+        if g_filter == 'yes':
+            items = [i for i in items if i['product_code'].endswith('G')]
+        elif g_filter == 'no':
+            items = [i for i in items if not i['product_code'].endswith('G')]
 
         excel_data = _generate_excel(items, delivery_date, coverage_dates, supplier)
 
