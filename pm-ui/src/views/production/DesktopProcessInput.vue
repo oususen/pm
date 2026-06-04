@@ -288,7 +288,35 @@
         <template v-else>
           <div class="form-area" :class="formModeClass">
             <div class="product-header">
-              <div class="product-code-large">{{ selectedProductCode }}</div>
+              <div class="product-code-row">
+                <div class="product-code-large">{{ selectedProductCode }}</div>
+                <button
+                  type="button"
+                  class="product-photo-trigger product-photo-view-trigger"
+                  :class="{ disabled: !canOpenProductPhotoDialog }"
+                  :disabled="!canOpenProductPhotoDialog"
+                  @click="openProductPhotoDialog"
+                  title="製品写真を表示"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  class="product-photo-trigger"
+                  :class="{ disabled: !canCaptureProductPhoto }"
+                  :disabled="!canOpenProductPhotoDialog"
+                  @click="openProductPhotoDialog"
+                  title="製品写真"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14.5 4h-5L7.5 6H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2.5z"/>
+                    <circle cx="12" cy="13" r="3.5"/>
+                  </svg>
+                </button>
+              </div>
               <div class="product-name">{{ selectedProductName }}</div>
               <div v-if="selectedProductTimeLabel" class="product-time-label">{{ selectedProductTimeLabel }}</div>
             </div>
@@ -548,6 +576,46 @@
       <div v-if="toast.show" class="toast" :class="toast.type">{{ toast.message }}</div>
     </transition>
 
+    <div
+      v-if="showProductPhotoDialog"
+      class="product-photo-overlay"
+      @click.self="closeProductPhotoDialog"
+    >
+      <div class="product-photo-dialog">
+        <div class="product-photo-dialog-header">
+          <div class="product-photo-dialog-title">{{ selectedProductCode }}</div>
+          <button type="button" class="product-photo-close" @click="closeProductPhotoDialog">×</button>
+        </div>
+        <div class="product-photo-dialog-body">
+          <img
+            v-if="productPhotoDisplayUrl"
+            :src="productPhotoDisplayUrl"
+            class="product-photo-dialog-image"
+            alt="製品写真"
+          />
+          <div v-else class="product-photo-dialog-empty">写真未登録です。撮影して保存できます。</div>
+        </div>
+        <div class="product-photo-dialog-actions">
+          <button
+            type="button"
+            class="btn-save product-photo-save-btn"
+            :disabled="!canCaptureProductPhoto"
+            @click="openProductCamera"
+          >
+            {{ productPhotoUploading ? '保存中...' : '撮影して保存' }}
+          </button>
+          <input
+            ref="productPhotoInputRef"
+            type="file"
+            accept="image/*"
+            capture="environment"
+            class="product-photo-file-input"
+            @change="onProductPhotoSelected"
+          />
+        </div>
+      </div>
+    </div>
+
     <div v-if="showDataSource" class="ds-overlay" @click.self="showDataSource = false">
       <div class="ds-modal">
         <div class="ds-header">
@@ -594,6 +662,7 @@ const recentRecords = ref([])
 const ganttPlanQtyMap = ref({})
 const submitting = ref(false)
 const qtyInputRef = ref(null)
+const productPhotoInputRef = ref(null)
 
 const apiBaseUrl =
   import.meta.env.VITE_API_BASE_URL ||
@@ -1041,6 +1110,22 @@ const selectedProductCode = computed(() =>
 const selectedProductName = computed(() =>
   selectedProductObj.value?.product_name || ''
 )
+const selectedProductImageUrl = computed(() => {
+  const pid = selectedProductObj.value?.product ?? selectedProductObj.value?.id ?? record.value.product_id
+  if (pid === null || pid === undefined || pid === '') return ''
+  return (
+    selectedProductObj.value?.image_url ||
+    productImageMap.value[String(pid)] ||
+    productImageMap.value[pid] ||
+    ''
+  )
+})
+const showProductPhotoDialog = ref(false)
+const productPhotoPreviewUrl = ref('')
+const productPhotoUploading = ref(false)
+const canOpenProductPhotoDialog = computed(() => !!selectedProductCode.value)
+const canCaptureProductPhoto = computed(() => !!record.value.product_id && !productPhotoUploading.value)
+const productPhotoDisplayUrl = computed(() => productPhotoPreviewUrl.value || selectedProductImageUrl.value || '')
 
 // ──────────────────────────────
 // アバターカラー
@@ -1900,6 +1985,7 @@ const cancelSelection = () => {
   record.value.product_id = ''
   record.value.product_code = ''
   selectedOperatorAction.value = ''
+  closeProductPhotoDialog()
 }
 
 const toggleManualProduct = () => {
@@ -1911,6 +1997,76 @@ const toggleManualProduct = () => {
   } else {
     record.value.product_id = ''
     record.value.product_code = ''
+  }
+  closeProductPhotoDialog()
+}
+
+const revokeProductPhotoPreviewUrl = () => {
+  if (productPhotoPreviewUrl.value && productPhotoPreviewUrl.value.startsWith('blob:')) {
+    URL.revokeObjectURL(productPhotoPreviewUrl.value)
+  }
+}
+
+const openProductPhotoDialog = () => {
+  if (!canOpenProductPhotoDialog.value) return
+  revokeProductPhotoPreviewUrl()
+  productPhotoPreviewUrl.value = ''
+  showProductPhotoDialog.value = true
+}
+
+const closeProductPhotoDialog = () => {
+  showProductPhotoDialog.value = false
+  revokeProductPhotoPreviewUrl()
+  productPhotoPreviewUrl.value = ''
+}
+
+const openProductCamera = () => {
+  if (!record.value.product_id) {
+    showToast('マスタ登録品番のみ写真を保存できます', 'error')
+    return
+  }
+  if (productPhotoUploading.value) return
+  productPhotoInputRef.value?.click()
+}
+
+const onProductPhotoSelected = async (event) => {
+  const file = event?.target?.files?.[0]
+  const productId = record.value.product_id
+  if (!file || !productId) return
+
+  let objectUrl = ''
+  try {
+    objectUrl = URL.createObjectURL(file)
+    productPhotoPreviewUrl.value = objectUrl
+  } catch {
+    objectUrl = ''
+  }
+
+  productPhotoUploading.value = true
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await api.products.uploadProductImage(productId, formData)
+    const imageUrl = String(res?.data?.image_url || '').trim()
+    if (imageUrl) {
+      productImageMap.value = {
+        ...productImageMap.value,
+        [productId]: imageUrl,
+        [String(productId)]: imageUrl,
+      }
+      if (!objectUrl) productPhotoPreviewUrl.value = imageUrl
+    }
+    showToast('製品写真を保存しました')
+  } catch (e) {
+    if (objectUrl) {
+      URL.revokeObjectURL(objectUrl)
+      objectUrl = ''
+    }
+    productPhotoPreviewUrl.value = ''
+    showToast(e?.response?.data?.detail || '製品写真の保存に失敗しました', 'error')
+  } finally {
+    productPhotoUploading.value = false
+    if (event?.target) event.target.value = ''
   }
 }
 
@@ -3305,9 +3461,119 @@ onMounted(async () => {
   background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 14px;
 }
 .product-header { padding-bottom: 10px; border-bottom: 1px solid #e8e8e8; }
+.product-code-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .product-code-large { font-size: 22px; font-weight: 900; letter-spacing: 0.5px; overflow-wrap: anywhere; }
+.product-photo-trigger {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #475569;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.product-photo-trigger:hover:not(:disabled) {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+.product-photo-view-trigger:hover:not(:disabled) {
+  background: #f0fdf4;
+  border-color: #86efac;
+  color: #15803d;
+}
+.product-photo-trigger.disabled,
+.product-photo-trigger:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .product-name { font-size: 14px; color: #555; margin-top: 2px; }
 .product-time-label { font-size: 12px; color: #0f172a; font-weight: 600; margin-top: 4px; }
+.product-photo-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.64);
+  z-index: 9998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.product-photo-dialog {
+  width: min(920px, 100%);
+  max-height: min(88vh, 900px);
+  background: #fff;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+  display: flex;
+  flex-direction: column;
+}
+.product-photo-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.product-photo-dialog-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: #0f172a;
+}
+.product-photo-close {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  cursor: pointer;
+  font-size: 24px;
+  line-height: 1;
+}
+.product-photo-dialog-body {
+  padding: 18px;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+}
+.product-photo-dialog-image {
+  display: block;
+  max-width: 100%;
+  max-height: calc(88vh - 120px);
+  object-fit: contain;
+  border-radius: 12px;
+  background: #fff;
+}
+.product-photo-dialog-empty {
+  font-size: 16px;
+  font-weight: 700;
+  color: #64748b;
+}
+.product-photo-dialog-actions {
+  padding: 14px 18px 18px;
+  display: flex;
+  justify-content: center;
+  border-top: 1px solid #e2e8f0;
+  background: #fff;
+}
+.product-photo-save-btn {
+  min-width: 220px;
+}
+.product-photo-file-input {
+  display: none;
+}
 .action-btns-section { display: flex; flex-direction: column; gap: 6px; }
 .embed-tablet .action-btns-section { flex-direction: row; align-items: center; gap: 4px; }
 .embed-tablet .op-action-btns { gap: 4px; }
