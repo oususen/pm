@@ -2018,6 +2018,7 @@ const openProductPhotoDialog = (mode = 'view') => {
 
 const closeProductPhotoDialog = () => {
   showProductPhotoDialog.value = false
+  productPhotoDialogMode.value = 'view'
   revokeProductPhotoPreviewUrl()
   productPhotoPreviewUrl.value = ''
 }
