@@ -79,6 +79,12 @@ def run_auto_delivery_list_send(config_id):
         product_map = _calc_progress_quantities(line, coverage_dates)
         items = sorted(product_map.values(), key=lambda x: x['product_code'])
 
+        supplier_type = getattr(supplier, 'supplier_type', 'both') or 'both'
+        if supplier_type == 'outsource':
+            items = [i for i in items if i['product_code'].endswith('G')]
+        elif supplier_type == 'purchase':
+            items = [i for i in items if not i['product_code'].endswith('G')]
+
         if not items:
             _finish(config, start_time, 'SUCCESS', f'{delivery_date} の納入予定品目なし（0件）')
             return
