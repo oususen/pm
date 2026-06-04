@@ -1183,9 +1183,14 @@ def recalculate_stock_qty(
                 setting = calc_rule_map.get((line_code, process_code, 'STOCK'), '')
                 if setting == 'PARENT_PLAN':
                     # 特例: 在庫計算でも後工程計画値を出庫として使用
-                    actual_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days, {})
+                    # 非営業日はスキップ: LTシフトで複数日が同じ親計画を参照し
+                    # 二重カウントする問題を防ぐ（計画在庫と同じ考え方）
+                    if is_working_day(plan_date):
+                        actual_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days, {})
+                    else:
+                        actual_shipment = Decimal('0')
                 else:
-                    # 標準: 親の actual_qty + scrap_qty を出庫として計算
+                    # 標準: 親の actual_qty + scrap_qty を出庫として計算（休日実績も反映）
                     actual_shipment = _calculate_parent_actual_shipment(sample)
         else:
             actual_shipment = Decimal('0')
