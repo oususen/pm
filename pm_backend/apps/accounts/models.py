@@ -41,6 +41,7 @@ class UserProfile(models.Model):
         ('chief', '係長'),
         ('supervisor', '班長'),
         ('leader', 'リーダー'),
+        ('office_staff', '事務員'),
         ('staff', '一般'),
     ]
 

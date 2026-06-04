@@ -234,6 +234,7 @@ const ROLE_CHOICES = [
   { value: 'chief', label: '係長' },
   { value: 'supervisor', label: '班長' },
   { value: 'leader', label: 'リーダー' },
+  { value: 'office_staff', label: '事務員' },
   { value: 'staff', label: '一般' },
 ]
 

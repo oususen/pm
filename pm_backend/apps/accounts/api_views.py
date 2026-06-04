@@ -173,6 +173,7 @@ class PositionListView(viewsets.ViewSet):
                 'position_name', flat=True
             )
         )
+        names.update({'manager', 'chief', 'supervisor', 'leader', 'office_staff', 'staff'})
         return Response(sorted(names))
 
 
@@ -251,6 +252,7 @@ class DepartmentPositionListView(viewsets.ViewSet):
             .exclude(position_name='')
             .values_list('position_name', flat=True)
         )
+        names.update({'manager', 'chief', 'supervisor', 'leader', 'office_staff', 'staff'})
         return Response(sorted(names))
 
 
