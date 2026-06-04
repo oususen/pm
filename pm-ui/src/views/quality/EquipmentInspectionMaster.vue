@@ -1315,7 +1315,7 @@ const printCurrentTemplate = () => {
             <tr>
               <th>No</th>
               <th>項目</th>
-              <th>設定</th>
+              <th>設定・規格</th>
               <th>確認方法</th>
               <th>参考値</th>
               <th>実測値</th>
@@ -1450,7 +1450,8 @@ const quarterlyTitle = computed(() => {
   if (schedType === "WEEKDAY") {
     const days = form.value.measurement_weekdays
     if (!days || days.length === 0) return "定期実測項目"
-    return `定期実測項目（${days.join("・")}）`
+    const formatted = days.map((d) => ["週末", "週初め"].includes(d) ? d : `毎週${d}曜日`)
+    return `定期実測項目（${formatted.join("・")}）`
   }
   const months = form.value.measurement_months
   if (!months || months.length === 0) return "定期実測項目"
