@@ -19,6 +19,12 @@
         <button class="btn-excel" :disabled="loadingTemplate" @click="downloadTemplate">
           {{ loadingTemplate ? 'テンプレ作成中...' : '納品リストテンプレ出力' }}
         </button>
+        <button class="btn-progress" :disabled="loadingProgressExcel || !selectedSupplier" @click="downloadProgressExcel">
+          {{ loadingProgressExcel ? '作成中...' : '進度表Excel' }}
+        </button>
+        <button class="btn-progress" :disabled="loadingProgressPdf || !selectedSupplier" @click="downloadProgressPdf">
+          {{ loadingProgressPdf ? '作成中...' : '進度表PDF' }}
+        </button>
         <input ref="fileInputRef" type="file" accept=".xlsx,.xls" @change="onFileChange" />
       </div>
     </div>
@@ -93,6 +99,8 @@ const suppliers = ref([])
 const selectedSupplier = ref('')
 const targetDate = ref(new Date().toISOString().slice(0, 10))
 const loadingTemplate = ref(false)
+const loadingProgressExcel = ref(false)
+const loadingProgressPdf = ref(false)
 const saving = ref(false)
 const rows = ref([])
 const errors = ref([])
@@ -179,6 +187,51 @@ const downloadTemplate = async () => {
     alert(`納品リストテンプレ出力に失敗しました。${detail ? `\n${detail}` : ''}`)
   } finally {
     loadingTemplate.value = false
+  }
+}
+
+const _downloadBlob = (blob, filename) => {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+const downloadProgressExcel = async () => {
+  if (!selectedSupplier.value) return
+  loadingProgressExcel.value = true
+  try {
+    const res = await api.client.get('/purchase-receiving/progress-excel/', {
+      params: { supplier_id: selectedSupplier.value },
+      responseType: 'blob',
+    })
+    const supplier = suppliers.value.find((s) => s.id === selectedSupplier.value)
+    const code = supplier ? supplier.supplier_code : ''
+    _downloadBlob(res.data, `進度表_${code}_${targetDate.value}.xlsx`)
+  } catch (e) {
+    alert('進度表Excelの出力に失敗しました。')
+  } finally {
+    loadingProgressExcel.value = false
+  }
+}
+
+const downloadProgressPdf = async () => {
+  if (!selectedSupplier.value) return
+  loadingProgressPdf.value = true
+  try {
+    const res = await api.client.get('/purchase-receiving/progress-pdf/', {
+      params: { supplier_id: selectedSupplier.value },
+      responseType: 'blob',
+    })
+    const supplier = suppliers.value.find((s) => s.id === selectedSupplier.value)
+    const code = supplier ? supplier.supplier_code : ''
+    _downloadBlob(res.data, `進度表_${code}_${targetDate.value}.pdf`)
+  } catch (e) {
+    alert('進度表PDFの出力に失敗しました。')
+  } finally {
+    loadingProgressPdf.value = false
   }
 }
 
@@ -318,6 +371,17 @@ onMounted(fetchSuppliers)
   border-radius: 3px;
 }
 .btn-filter.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+.btn-progress {
+  padding: 6px 12px;
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn-progress:disabled { opacity: 0.5; cursor: not-allowed; }
 .page-content { display: grid; gap: 10px; }
 .error-box {
   background: #fff1f2;

@@ -2055,6 +2055,76 @@ class PurchaseDeliveryListExcelDownloadView(APIView):
         return response
 
 
+class PurchaseProgressExcelDownloadView(APIView):
+    """進度表Excelダウンロード"""
+
+    def get(self, request):
+        from django.http import HttpResponse
+        from .tasks_auto_delivery_list import _generate_progress_excel
+
+        supplier_id = request.query_params.get('supplier_id')
+        if not supplier_id:
+            return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        supplier = Supplier.objects.filter(id=int(supplier_id)).first()
+        if not supplier:
+            return Response({'detail': 'supplier not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        line = _resolve_purchase_line(supplier)
+        if not line:
+            return Response({'detail': 'ラインが見つかりません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        days_back = int(request.query_params.get('days_back', 7))
+        days_forward = int(request.query_params.get('days_forward', 30))
+
+        excel_data = _generate_progress_excel(supplier, line, days_back, days_forward)
+        if not excel_data:
+            return Response({'detail': '進度データがありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        filename = f'進度表_{supplier.supplier_code}_{date.today()}.xlsx'
+        response = HttpResponse(
+            excel_data.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+
+class PurchaseProgressPdfDownloadView(APIView):
+    """進度表PDFダウンロード"""
+
+    def get(self, request):
+        from django.http import HttpResponse
+        from .tasks_auto_delivery_list import _generate_progress_pdf
+
+        supplier_id = request.query_params.get('supplier_id')
+        if not supplier_id:
+            return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        supplier = Supplier.objects.filter(id=int(supplier_id)).first()
+        if not supplier:
+            return Response({'detail': 'supplier not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        line = _resolve_purchase_line(supplier)
+        if not line:
+            return Response({'detail': 'ラインが見つかりません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        days_back = int(request.query_params.get('days_back', 7))
+        days_forward = int(request.query_params.get('days_forward', 30))
+
+        pdf_data = _generate_progress_pdf(supplier, line, days_back, days_forward)
+        if not pdf_data:
+            return Response({'detail': '進度データがありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        filename = f'進度表_{supplier.supplier_code}_{date.today()}.pdf'
+        response = HttpResponse(
+            pdf_data.getvalue(),
+            content_type='application/pdf',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+
 class PurchaseDeliveryScheduleView(APIView):
     """納入予定（事務員入力）"""
 
