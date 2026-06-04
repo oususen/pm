@@ -25,7 +25,10 @@
         <button class="btn-progress" :disabled="loadingProgressPdf || !selectedSupplier" @click="downloadProgressPdf">
           {{ loadingProgressPdf ? '作成中...' : '進度表PDF' }}
         </button>
-        <input ref="fileInputRef" type="file" accept=".xlsx,.xls" @change="onFileChange" />
+        <label class="btn-upload">
+          返送Excel取込
+          <input ref="fileInputRef" type="file" accept=".xlsx,.xls" @change="onFileChange" style="display:none" />
+        </label>
       </div>
     </div>
 
@@ -382,6 +385,16 @@ onMounted(fetchSuppliers)
   font-size: 13px;
 }
 .btn-progress:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-upload {
+  padding: 6px 12px;
+  background: #f59e0b;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
 .page-content { display: grid; gap: 10px; }
 .error-box {
   background: #fff1f2;
