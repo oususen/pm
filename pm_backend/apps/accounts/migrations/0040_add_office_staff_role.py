@@ -4,7 +4,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('accounts', '0018_alter_departmentpermission_resource_and_more'),
+        ('accounts', '0039_add_purchase_auto_delivery_list_permission'),
     ]
 
     operations = [

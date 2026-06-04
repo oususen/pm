@@ -7,6 +7,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from .models import (
+    Department,
     UnitLineMapping,
     UserProfile,
     UserPermission,
@@ -105,6 +106,34 @@ def _merge_permissions(base, overrides):
     return base
 
 
+def _collect_effective_department_ids(profile):
+    if not profile:
+        return []
+
+    ids = set()
+    for field in ('department', 'division', 'group', 'team'):
+        dept = getattr(profile, field, None)
+        if dept:
+            ids.add(dept.id)
+
+    leader_units = getattr(profile, 'leader_units', None)
+    if leader_units is not None:
+        ids.update(leader_units.values_list('id', flat=True))
+
+    if ids:
+        children = set(
+            Department.objects.filter(parent_id__in=ids).values_list('id', flat=True)
+        )
+        ids |= children
+        if children:
+            grandchildren = set(
+                Department.objects.filter(parent_id__in=children).values_list('id', flat=True)
+            )
+            ids |= grandchildren
+
+    return list(ids)
+
+
 def _build_effective_permissions(user):
     """
     ユーザーの有効権限を計算する。
@@ -124,12 +153,12 @@ def _build_effective_permissions(user):
         ]
 
     profile = _safe_get_profile(user)
-    department_id = profile.department_id if profile else None
     position_name = profile.role if profile and profile.role else ''
+    department_ids = _collect_effective_department_ids(profile)
 
     # 1. 部署のみの権限
-    if department_id:
-        dept_permissions = DepartmentPermission.objects.filter(department_id=department_id)
+    if department_ids:
+        dept_permissions = DepartmentPermission.objects.filter(department_id__in=department_ids)
         permission_map = _merge_permissions(permission_map, _permissions_to_map(dept_permissions))
 
     # 2. 役職のみの権限
@@ -138,9 +167,9 @@ def _build_effective_permissions(user):
         permission_map = _merge_permissions(permission_map, _permissions_to_map(position_permissions))
 
     # 3. 部署×役職の権限
-    if department_id and position_name:
+    if department_ids and position_name:
         combined_permissions = DepartmentPositionPermission.objects.filter(
-            department_id=department_id,
+            department_id__in=department_ids,
             position_name=position_name,
         )
         permission_map = _merge_permissions(permission_map, _permissions_to_map(combined_permissions))
