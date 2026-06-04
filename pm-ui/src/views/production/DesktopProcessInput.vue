@@ -295,7 +295,7 @@
                   class="product-photo-trigger product-photo-view-trigger"
                   :class="{ disabled: !canOpenProductPhotoDialog }"
                   :disabled="!canOpenProductPhotoDialog"
-                  @click="openProductPhotoDialog"
+                  @click="openProductPhotoDialog('view')"
                   title="製品写真を表示"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -307,9 +307,9 @@
                   type="button"
                   class="product-photo-trigger"
                   :class="{ disabled: !canCaptureProductPhoto }"
-                  :disabled="!canOpenProductPhotoDialog"
-                  @click="openProductPhotoDialog"
-                  title="製品写真"
+                  :disabled="!canCaptureProductPhoto"
+                  @click="openProductPhotoDialog('capture')"
+                  title="製品写真を撮影"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M14.5 4h-5L7.5 6H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2.5z"/>
@@ -595,7 +595,7 @@
           />
           <div v-else class="product-photo-dialog-empty">写真未登録です。撮影して保存できます。</div>
         </div>
-        <div class="product-photo-dialog-actions">
+        <div v-if="productPhotoDialogMode === 'capture'" class="product-photo-dialog-actions">
           <button
             type="button"
             class="btn-save product-photo-save-btn"
@@ -1121,6 +1121,7 @@ const selectedProductImageUrl = computed(() => {
   )
 })
 const showProductPhotoDialog = ref(false)
+const productPhotoDialogMode = ref('view')
 const productPhotoPreviewUrl = ref('')
 const productPhotoUploading = ref(false)
 const canOpenProductPhotoDialog = computed(() => !!selectedProductCode.value)
@@ -2007,8 +2008,9 @@ const revokeProductPhotoPreviewUrl = () => {
   }
 }
 
-const openProductPhotoDialog = () => {
+const openProductPhotoDialog = (mode = 'view') => {
   if (!canOpenProductPhotoDialog.value) return
+  productPhotoDialogMode.value = mode
   revokeProductPhotoPreviewUrl()
   productPhotoPreviewUrl.value = ''
   showProductPhotoDialog.value = true
