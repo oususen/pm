@@ -2074,8 +2074,11 @@ class PurchaseProgressExcelDownloadView(APIView):
         if not line:
             return Response({'detail': 'ラインが見つかりません'}, status=status.HTTP_400_BAD_REQUEST)
 
-        days_back = int(request.query_params.get('days_back', 7))
-        days_forward = int(request.query_params.get('days_forward', 30))
+        auto_cfg = PurchaseAutoDeliveryListConfig.objects.filter(supplier=supplier).first()
+        default_back = auto_cfg.progress_days_back if auto_cfg else 7
+        default_fwd = auto_cfg.progress_days_forward if auto_cfg else 30
+        days_back = int(request.query_params.get('days_back', default_back))
+        days_forward = int(request.query_params.get('days_forward', default_fwd))
 
         excel_data = _generate_progress_excel(supplier, line, days_back, days_forward)
         if not excel_data:
@@ -2109,8 +2112,11 @@ class PurchaseProgressPdfDownloadView(APIView):
         if not line:
             return Response({'detail': 'ラインが見つかりません'}, status=status.HTTP_400_BAD_REQUEST)
 
-        days_back = int(request.query_params.get('days_back', 7))
-        days_forward = int(request.query_params.get('days_forward', 30))
+        auto_cfg = PurchaseAutoDeliveryListConfig.objects.filter(supplier=supplier).first()
+        default_back = auto_cfg.progress_days_back if auto_cfg else 7
+        default_fwd = auto_cfg.progress_days_forward if auto_cfg else 30
+        days_back = int(request.query_params.get('days_back', default_back))
+        days_forward = int(request.query_params.get('days_forward', default_fwd))
 
         pdf_data = _generate_progress_pdf(supplier, line, days_back, days_forward)
         if not pdf_data:
