@@ -181,11 +181,11 @@ def _build_workbook(order_items: dict[str, ExtractedItem], progress_items: dict[
     warn_fill = PatternFill("solid", fgColor="FFF2CC")
     diff_fill = PatternFill("solid", fgColor="FCE4D6")
     group_fills = [
-        PatternFill("solid", fgColor="FFFFFF"),
-        PatternFill("solid", fgColor="EAF4FF"),
-        PatternFill("solid", fgColor="F3F8E8"),
-        PatternFill("solid", fgColor="FFF4E6"),
-        PatternFill("solid", fgColor="F2ECFF"),
+        PatternFill("solid", fgColor="D9EAF7"),
+        PatternFill("solid", fgColor="DDEBF7"),
+        PatternFill("solid", fgColor="E2F0D9"),
+        PatternFill("solid", fgColor="FCE4D6"),
+        PatternFill("solid", fgColor="E4DFEC"),
     ]
     red_font = Font(color="C00000")
     blue_font = Font(color="0000FF")
