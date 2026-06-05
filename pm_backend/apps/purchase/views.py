@@ -2131,6 +2131,37 @@ class PurchaseProgressPdfDownloadView(APIView):
         return response
 
 
+class PurchaseOutsourceProgressCompareView(APIView):
+    """外作注文書PDFと進度表PDFの比較Excelダウンロード"""
+
+    def post(self, request):
+        from django.http import HttpResponse
+        from .services.outsource_progress_compare import generate_compare_excel
+
+        order_pdf = request.FILES.get('order_pdf')
+        progress_pdf = request.FILES.get('progress_pdf')
+        if not order_pdf or not progress_pdf:
+            return Response({'detail': 'order_pdf and progress_pdf are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            wb = generate_compare_excel(order_pdf, progress_pdf)
+        except Exception as exc:
+            return Response({'detail': f'比較表の作成に失敗しました: {exc}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from io import BytesIO
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        filename = f'外作注文書_進度表_比較表_{date.today()}.xlsx'
+        response = HttpResponse(
+            output.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+
 class PurchaseDeliveryScheduleView(APIView):
     """納入予定（事務員入力）"""
 

@@ -40,7 +40,7 @@
             <th>{{ t('approvalList.col.date') }}</th>
             <th>{{ t('approvalList.col.team') }}</th>
             <th>{{ t('approvalList.col.group') }}</th>
-            <th>{{ t('approvalList.col.applicant') }}</th>
+            <th class="name-col">{{ t('approvalList.col.applicant') }}</th>
             <th>{{ t('approvalList.col.type') }}</th>
             <th>勤務時間</th>
             <th>{{ t('approvalList.col.timeRange') }}</th>
@@ -59,7 +59,7 @@
             <td class="nowrap">{{ app.work_date }}</td>
             <td>{{ app.team_name || '-' }}</td>
             <td>{{ app.group_name || '-' }}</td>
-            <td>{{ app.applicant_name }}</td>
+            <td class="name-col">{{ app.applicant_name }}</td>
             <td>{{ app.type_display }}</td>
             <td class="nowrap time-cell">{{ app.work_start_time || '-' }}{{ app.work_start_time ? ' 〜 ' + (app.scheduled_end_time || '-') : '' }}</td>
             <td class="nowrap time-cell">{{ app.start_time }} 〜 {{ app.end_time }}</td>
@@ -350,7 +350,7 @@ onMounted(fetchList)
 <style scoped>
 .ot-approval-page {
   padding: 24px;
-  max-width: 1200px;
+  max-width: 1600px;
   margin: 0 auto;
 }
 .page-header {
@@ -407,6 +407,7 @@ onMounted(fetchList)
 .ot-table tr:last-child td { border-bottom: none; }
 .ot-table tr.selected td { background: #f0fdf4; }
 .check-col { width: 36px; text-align: center; }
+.name-col { min-width: 240px; }
 .num { text-align: right; }
 .nowrap { white-space: nowrap; }
 .time-cell { color: #1f2a44; }

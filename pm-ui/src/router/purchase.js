@@ -42,6 +42,12 @@ const purchase = [
     meta: { pageTitle: "納入予定", manualPath: "仕入れ/納入予定.md", resource: "purchase.plan_input" },
   },
   {
+    path: "/purchase/outsource-progress-compare",
+    name: "OutsourceProgressCompare",
+    component: () => import("@/views/purchase/OutsourceProgressCompare.vue"),
+    meta: { pageTitle: "外作注文書・進度表比較", resource: "purchase.progress" },
+  },
+  {
     path: "/purchase/actual-input",
     name: "PurchaseActualInput",
     component: () => import("@/views/purchase/PurchaseActualInput.vue"),

@@ -505,8 +505,9 @@ def _generate_progress_excel(supplier, line, days_back, days_forward=30):
 
         ws.cell(row=current_row, column=1, value=info['product_code'])
         ws.cell(row=current_row, column=1).font = Font(bold=True, size=10)
-        ws.cell(row=current_row, column=2, value=info['product_name'])
-        ws.cell(row=current_row, column=2).font = Font(size=9)
+        current_row += 1
+        ws.cell(row=current_row, column=1, value=info['product_name'])
+        ws.cell(row=current_row, column=1).font = Font(size=9, color='555555')
 
         date_header_row = current_row
         carry_col = 3
@@ -633,7 +634,7 @@ def _generate_progress_pdf(supplier, line, days_back, days_forward=30):
     c = pdf_canvas.Canvas(buf, pagesize=landscape(A4))
 
     date_chunks = [date_list[i:i + DATES_PER_PAGE] for i in range(0, len(date_list), DATES_PER_PAGE)]
-    product_block_h = (len(ROW_DEFS) + 1) * ROW_H + HEADER_H
+    product_block_h = (len(ROW_DEFS) + 2) * ROW_H + HEADER_H
     usable_h = page_h - margin_top - margin_bottom - 10 * mm
     products_per_page = max(1, int(usable_h / product_block_h))
 
@@ -676,13 +677,17 @@ def _generate_progress_pdf(supplier, line, days_back, days_forward=30):
                 demands = demand_by_product_date[pid]
                 backlogs = backlog_by_product_date[pid]
 
-                # 品番・品名行
+                # 品番行
                 x = margin_left
                 c.setFillColor(colors.black)
                 c.setFont(FONT_NAME, 6)
                 c.drawString(x, y - ROW_H * 0.75, info['product_code'])
+                y -= ROW_H
+                # 品名行
                 c.setFont(FONT_NAME, 5)
-                c.drawString(x + CODE_W, y - ROW_H * 0.75, (info['product_name'] or '')[:8])
+                c.setFillColor(colors.Color(0.3, 0.3, 0.3))
+                c.drawString(x + 1 * mm, y - ROW_H * 0.75, info['product_name'] or '')
+                c.setFillColor(colors.black)
                 y -= ROW_H
 
                 GRID_COLOR = colors.Color(0.5, 0.5, 0.5)

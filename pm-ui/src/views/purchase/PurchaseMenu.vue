@@ -99,6 +99,14 @@ const tiles = computed(() => [
     resource: "purchase.progress",
   },
   {
+    to: "/purchase/outsource-progress-compare",
+    label: "注文書・進度表比較",
+    icon: "🔎",
+    category: "inventory",
+    required: "view",
+    resource: "purchase.progress",
+  },
+  {
     to: "/purchase/receiving",
     label: "仕入れ検収",
     icon: "📥",
