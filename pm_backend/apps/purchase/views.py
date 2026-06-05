@@ -8,6 +8,7 @@ from django.db import transaction
 from django.db.models import Sum
 from django.db.models import Q
 from rest_framework import status
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -2133,6 +2134,7 @@ class PurchaseProgressPdfDownloadView(APIView):
 
 class PurchaseOutsourceProgressCompareView(APIView):
     """外作注文書PDFと進度表PDFの比較Excelダウンロード"""
+    parser_classes = (MultiPartParser, FormParser)
 
     def post(self, request):
         from django.http import HttpResponse
