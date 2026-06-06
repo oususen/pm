@@ -234,6 +234,8 @@ class UserPermission(models.Model):
         ('shipping.trip_progress', '出荷: 便確認（業務員）'),
         ('shipping.trip_progress_summary', '出荷: 便進捗確認（一覧）'),
         ('inventory', '在庫'),
+        ('stocktake', '在庫: 棚卸入力'),
+        ('stocktake.delete', '在庫: 棚卸履歴削除'),
         ('quality', '品質'),
         ('quality.equipment_inspection_master', '品質: 設備点検項目作成'),
         ('quality.equipment_inspection_operation', '品質: 設備点検実施'),

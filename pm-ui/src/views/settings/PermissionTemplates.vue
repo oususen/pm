@@ -304,6 +304,8 @@ const departmentTemplatePermissions = ref([])
   { value: 'shipping.trip_progress', label: '出荷: 便確認（業務員）' },
   { value: 'shipping.trip_progress_summary', label: '出荷: 便進捗確認（一覧）' },
   { value: 'inventory', label: '在庫' },
+  { value: 'stocktake', label: '在庫: 棚卸入力' },
+  { value: 'stocktake.delete', label: '在庫: 棚卸履歴削除' },
     { value: 'quality', label: '品質' },
     { value: 'quality.equipment_inspection_master', label: '品質: 設備点検表（点検項目作成）' },
     { value: 'quality.equipment_inspection_operation', label: '品質: 設備点検表（点検実施）' },

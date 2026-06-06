@@ -47,6 +47,7 @@ from production.views_gantt_display_product_map import GanttDisplayProductMapVie
 from production.views_line_product_display_order import LineProductDisplayOrderViewSet
 from production.views_plan_deviation_report import PlanDeviationReportView, PlanDeviationLineConfigView
 from production.views_record_confirmation import ProductionRecordConfirmationView
+from production.views_stocktake import StocktakeRecordView, StocktakeHistoryView, StocktakeRecorderView
 from production.views_camera_actual import (
     CameraAutoDetectView,
     CameraEventCreateView,
@@ -125,6 +126,9 @@ urlpatterns = [
     path('plan-deviation-report/', PlanDeviationReportView.as_view(), name='plan-deviation-report'),
     path('plan-deviation-line-config/', PlanDeviationLineConfigView.as_view(), name='plan-deviation-line-config'),
     path('record-confirmations/', ProductionRecordConfirmationView.as_view(), name='record-confirmations'),
+    path('stocktake-records/', StocktakeRecordView.as_view(), name='stocktake-records'),
+    path('stocktake-records/<int:product_id>/history/', StocktakeHistoryView.as_view(), name='stocktake-history'),
+    path('stocktake-recorders/', StocktakeRecorderView.as_view(), name='stocktake-recorders'),
     path('camera-events/', CameraEventCreateView.as_view(), name='camera-events'),
     path('camera-results-daily/', CameraResultDailyView.as_view(), name='camera-results-daily'),
     path('camera-auto-detect/', CameraAutoDetectView.as_view(), name='camera-auto-detect'),
