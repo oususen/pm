@@ -80,6 +80,8 @@ class ProductFilter(django_filters.FilterSet):
     supplier_code = django_filters.CharFilter(method='filter_supplier_code')
     product_code = django_filters.CharFilter(field_name='product_code', lookup_expr='exact')
     product_codes_in = django_filters.CharFilter(method='filter_product_codes_in')
+    stock_location = django_filters.CharFilter(field_name='stock_location', lookup_expr='icontains')
+    processing_area = django_filters.CharFilter(field_name='processing_area', lookup_expr='exact')
 
     class Meta:
         model = Product
@@ -101,6 +103,8 @@ class ProductFilter(django_filters.FilterSet):
             'created_to',
             'product_code',
             'product_codes_in',
+            'stock_location',
+            'processing_area',
         ]
 
     def filter_product_codes_in(self, queryset, name, value):
@@ -159,7 +163,7 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     serializer_class = ProductSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = ProductFilter
-    search_fields = ['product_code', 'product_name']
+    search_fields = ['product_code', 'product_name', 'stock_location']
     ordering_fields = ['product_code', 'created_at']
     ordering = ['product_code']
 

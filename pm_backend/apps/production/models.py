@@ -29,6 +29,7 @@ from .models_camera_actual import CameraCountEvent, ProductionResultDaily
 from .models_line_product_display_order import LineProductDisplayOrder
 from .models_auto_plan_aggregate_setting import AutoPlanAggregateSetting
 from .models_plan_deviation_config import PlanDeviationLineConfig
+from .models_stocktake_record import StocktakeRecord
 
 
 class LineDemand(models.Model):

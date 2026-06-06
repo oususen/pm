@@ -12,6 +12,12 @@ const inventory = [
     meta: { pageTitle: "在庫調整メニュー", manualPath: "在庫/在庫調整メニュー.md", resource: "inventory" },
   },
   {
+    path: "/inventory/stocktake-input",
+    name: "InventoryStocktakeInput",
+    component: () => import("@/views/inventory/StocktakeInput.vue"),
+    meta: { pageTitle: "棚卸現物入力", manualPath: "在庫/棚卸現物入力.md", resource: "inventory" },
+  },
+  {
     path: "/inventory/adjustments/progress",
     name: "InventoryProgressAdjustment",
     component: () => import("@/views/inventory/adjustments/ProgressAdjustment.vue"),

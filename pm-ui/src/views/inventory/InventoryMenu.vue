@@ -2,6 +2,11 @@
   <div class="inventory-menu">
     <h2 class="page-title">在庫管理メニュー</h2>
     <div class="tile-grid">
+      <RouterLink to="/inventory/stocktake-input" class="tile">
+        <div class="tile-icon">🗂️</div>
+        <div class="tile-title">棚卸現物入力</div>
+        <div class="tile-desc">場所・工程・写真を見ながら現物数を入力します。</div>
+      </RouterLink>
       <RouterLink to="/inventory/adjustments" class="tile">
         <div class="tile-icon">🛠️</div>
         <div class="tile-title">調整</div>

@@ -95,6 +95,19 @@
           </select>
         </div>
         <div class="filter-field">
+          <label>加工先</label>
+          <select v-model="filters.processing_area">
+            <option value="">すべて</option>
+            <option v-for="area in processingAreaOptions" :key="area.value" :value="area.value">
+              {{ area.label }}
+            </option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label>保管場所</label>
+          <input v-model="filters.stock_location" placeholder="場所で検索" />
+        </div>
+        <div class="filter-field">
           <label>後工程</label>
           <select v-model="filters.next_process">
             <option value="">すべて</option>
@@ -131,6 +144,8 @@
               <th>最小発注数</th>
               <th>発注倍数</th>
               <th>機種名</th>
+              <th>加工先</th>
+              <th>保管場所</th>
               <th>グループ</th>
               <th>容器</th>
               <th>容器入り数</th>
@@ -154,6 +169,8 @@
               <td>{{ product.order_lot_min ?? '-' }}</td>
               <td>{{ product.order_lot_multiple ?? 1 }}</td>
               <td>{{ product.model_name || '-' }}</td>
+              <td>{{ getProcessingAreaLabel(product.processing_area) }}</td>
+              <td>{{ product.stock_location || '-' }}</td>
               <td>{{ getProductGroupLabel(product.product_group) }}</td>
               <td>{{ getContainerLabel(product.used_container) }}</td>
               <td>{{ product.capacity ?? '-' }}</td>
@@ -289,6 +306,19 @@
                 <div class="form-group">
                   <label>機種名</label>
                   <input v-model="formData.model_name" placeholder="例: 17U" />
+                </div>
+                <div class="form-group">
+                  <label>加工先</label>
+                  <select v-model="formData.processing_area">
+                    <option :value="null">未設定</option>
+                    <option v-for="area in processingAreaOptions" :key="area.value" :value="area.value">
+                      {{ area.label }}
+                    </option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>保管場所</label>
+                  <input v-model="formData.stock_location" placeholder="例: レーザ横A棚" />
                 </div>
                 <div class="form-group">
                   <label>製品グループ</label>
@@ -648,9 +678,20 @@ const transferDestOptions = [
   { value: 'DIRECT', label: '直納' },
   { value: 'OTHER', label: 'その他' },
 ]
+const processingAreaOptions = [
+  { value: 'LASER', label: 'レーザ' },
+  { value: 'BRAKE', label: 'ブレーキ' },
+  { value: 'NUT', label: 'ナット' },
+  { value: 'WELD', label: '溶接' },
+  { value: 'SPOT', label: 'スポット' },
+  { value: 'ASSY', label: '組立' },
+  { value: 'OTHER', label: 'その他' },
+]
 
 const transferDestMap = Object.fromEntries(transferDestOptions.map(o => [o.value, o.label]))
+const processingAreaMap = Object.fromEntries(processingAreaOptions.map(o => [o.value, o.label]))
 const getTransferDestLabel = (value) => transferDestMap[value] || value || '-'
+const getProcessingAreaLabel = (value) => processingAreaMap[value] || value || '-'
 
 const createEmptyFormData = () => ({
   product_code: '',
@@ -670,6 +711,8 @@ const createEmptyFormData = () => ({
   used_container: null,
   capacity: null,
   transfer_destination: null,
+  processing_area: null,
+  stock_location: '',
   line: null,
   process: null,
   next_process: null,
@@ -704,6 +747,8 @@ const mapProductToFormData = (product, options = {}) => {
     used_container: source.used_container ?? null,
     capacity: source.capacity ?? null,
     transfer_destination: source.transfer_destination ?? null,
+    processing_area: source.processing_area ?? null,
+    stock_location: source.stock_location ?? '',
     image_url: asCopy ? '' : (source.image_url || ''),
   }
 }
@@ -731,6 +776,9 @@ const filters = ref({
   has_bom: '',
   customer_code: '',
   is_active: '',
+  process: '',
+  processing_area: '',
+  stock_location: '',
   created_from: '',
   created_to: ''
 })
@@ -1113,6 +1161,12 @@ const buildQueryParams = () => {
   if (filters.value.process) {
     params.process = filters.value.process
   }
+  if (filters.value.processing_area) {
+    params.processing_area = filters.value.processing_area
+  }
+  if (filters.value.stock_location.trim()) {
+    params.stock_location = filters.value.stock_location.trim()
+  }
   if (filters.value.next_process === '__none__') {
     params.next_process_unset = true
   } else if (filters.value.next_process) {
@@ -1280,6 +1334,8 @@ const resetFilters = async () => {
     customer_code: '',
     is_active: '',
     process: '',
+    processing_area: '',
+    stock_location: '',
     next_process: '',
     created_from: '',
     created_to: ''
@@ -1306,6 +1362,8 @@ const saveProduct = async () => {
       product_group: formData.value.product_group || null,
       used_container: formData.value.used_container || null,
       transfer_destination: formData.value.transfer_destination || null,
+      processing_area: formData.value.processing_area || null,
+      stock_location: String(formData.value.stock_location || '').trim(),
       standard_lt_days: normalizeNumber(formData.value.standard_lt_days),
       order_lot_min: normalizeNumber(formData.value.order_lot_min),
       order_lot_multiple: Math.max(1, Number(formData.value.order_lot_multiple || 1)),

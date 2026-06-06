@@ -16,6 +16,15 @@ class Product(models.Model):
         ('DAY', '日単位管理'),
         ('MINUTE', '分単位管理'),
     ]
+    PROCESSING_AREA_CHOICES = [
+        ('LASER', 'レーザ'),
+        ('BRAKE', 'ブレーキ'),
+        ('NUT', 'ナット'),
+        ('WELD', '溶接'),
+        ('SPOT', 'スポット'),
+        ('ASSY', '組立'),
+        ('OTHER', 'その他'),
+    ]
 
     id = models.BigAutoField(primary_key=True)
     product_code = models.CharField(max_length=30, unique=True, verbose_name='品番コード')
@@ -26,6 +35,14 @@ class Product(models.Model):
     unit_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True, verbose_name='単価')
     standard_lt_days = models.IntegerField(null=True, blank=True, verbose_name='標準LT(日)')
     image_url = models.CharField(max_length=255, null=True, blank=True, verbose_name='画像URL')
+    stock_location = models.CharField(max_length=100, null=True, blank=True, verbose_name='保管場所')
+    processing_area = models.CharField(
+        max_length=20,
+        choices=PROCESSING_AREA_CHOICES,
+        null=True,
+        blank=True,
+        verbose_name='加工先'
+    )
     line = models.ForeignKey('Line', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='ライン情報')
     process = models.ForeignKey('Process', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='工程情報')
     next_process = models.ForeignKey('Process', on_delete=models.SET_NULL, null=True, blank=True, related_name='next_process_products', verbose_name='後工程')
