@@ -215,23 +215,42 @@
     </header>
 
     <section class="layout-body">
-      <div v-if="loading" class="empty-state">読込中...</div>
-      <div v-else-if="locationTiles.length === 0" class="empty-state">置き場データがありません</div>
-      <div v-else class="layout-grid">
-        <div
-          v-for="tile in locationTiles"
-          :key="tile.location"
-          class="layout-tile"
-          :class="tile.statusClass"
-          @click="goToLocationList(tile.location)"
-        >
-          <div class="tile-name">{{ tile.location }}</div>
-          <div class="tile-count">{{ tile.total }}件</div>
-          <div class="tile-progress-bar">
-            <div class="tile-progress-fill" :style="{ width: tile.progressPct + '%' }"></div>
-          </div>
-          <div class="tile-status-text">済{{ tile.done }} / 未{{ tile.remaining }}</div>
+      <div class="layout-toolbar">
+        <div class="zoom-controls">
+          <button type="button" class="zoom-btn" @click="zoomOut">−</button>
+          <span class="zoom-label">{{ Math.round(layoutZoom * 100) }}%</span>
+          <button type="button" class="zoom-btn" @click="zoomIn">+</button>
         </div>
+      </div>
+
+      <div v-if="Object.keys(layoutCells).length === 0" class="layout-empty-msg">
+        まだレイアウトが設定されていません。<br />PCの在庫メニューから「棚卸レイアウト編集」で作成してください。
+      </div>
+
+      <div class="layout-map-scroll">
+      <div class="layout-map" :style="{ gridTemplateColumns: `repeat(${layoutCols}, 40px)`, gridTemplateRows: `repeat(${layoutRows}, 40px)`, transform: `scale(${layoutZoom})`, transformOrigin: 'top left' }">
+        <template v-for="cellKey in layoutCellKeys" :key="cellKey">
+          <div
+            v-if="!occupiedCells.has(cellKey)"
+            class="map-cell"
+            :class="mapCellClass(cellKey)"
+            :style="cellStyle(cellKey)"
+            @click="onMapCellClick(cellKey)"
+          >
+            <template v-if="layoutCells[cellKey]">
+              <div class="map-cell-name" :class="{ vertical: cellH(cellKey) > cellW(cellKey) }">{{ cellLocation(cellKey) }}</div>
+              <template v-if="cellType(cellKey) === 'location'">
+                <div class="map-cell-progress" v-if="locationProgressMap[cellLocation(cellKey)]">
+                  <div class="map-cell-bar">
+                    <div class="map-cell-bar-fill" :style="{ width: locationProgressMap[cellLocation(cellKey)].pct + '%' }"></div>
+                  </div>
+                  <div class="map-cell-count">{{ locationProgressMap[cellLocation(cellKey)].done }}/{{ locationProgressMap[cellLocation(cellKey)].total }}</div>
+                </div>
+              </template>
+            </template>
+          </div>
+        </template>
+      </div>
       </div>
     </section>
   </div>
@@ -272,7 +291,7 @@ const filters = reactive({
   stock_location: "",
   product_code: "",
   product_name: "",
-  has_image: true,
+  has_image: false,
   diff_only: false,
 });
 
@@ -288,7 +307,20 @@ const historyLoading = ref(false);
 const historyProductId = ref(null);
 const canDeleteHistory = computed(() => hasPermission(authState.user, "stocktake.delete", "edit"));
 const recorders = ref([]);
+const layoutCols = ref(4);
+const layoutRows = ref(4);
+const layoutCells = ref({});
+const layoutEditing = ref(false);
+const layoutSelectedLocation = ref(null);
+const placingType = ref('location');
+const placingW = ref(1);
+const placingH = ref(1);
+const layoutZoom = ref(1);
+const equipmentName = ref('');
 const showRecorderModal = ref(false);
+
+const zoomIn = () => { layoutZoom.value = Math.min(2, +(layoutZoom.value + 0.2).toFixed(1)); };
+const zoomOut = () => { layoutZoom.value = Math.max(0.4, +(layoutZoom.value - 0.2).toFixed(1)); };
 const newRecorderName = ref("");
 const selectedRecorder = ref("");
 const selectedProductId = ref(null);
@@ -395,16 +427,263 @@ const locationTiles = computed(() => {
     .sort((a, b) => a.location.localeCompare(b.location, 'ja'));
 });
 
-const openLayout = () => {
+const openLayout = async () => {
   filters.process_id = '';
   filters.stock_location = '';
   filters.product_code = '';
   viewMode.value = 'layout';
+  await loadLayoutConfig();
 };
 
 const goToLocationList = (location) => {
   filters.stock_location = location === '(未設定)' ? '' : location;
   viewMode.value = 'list';
+};
+
+const layoutCellKeys = computed(() => {
+  const keys = [];
+  for (let r = 0; r < layoutRows.value; r++) {
+    for (let c = 0; c < layoutCols.value; c++) {
+      keys.push(`${r}-${c}`);
+    }
+  }
+  return keys;
+});
+
+const allLocations = computed(() => {
+  const set = new Set();
+  for (const row of rows.value) {
+    if (row.stock_location) set.add(row.stock_location);
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, 'ja'));
+});
+
+const cellLocation = (cellKey) => {
+  const cell = layoutCells.value[cellKey];
+  if (!cell) return null;
+  return typeof cell === 'string' ? cell : cell.location;
+};
+
+const cellType = (cellKey) => {
+  const cell = layoutCells.value[cellKey];
+  if (!cell) return null;
+  if (typeof cell === 'string') return 'location';
+  return cell.type || 'location';
+};
+
+const cellW = (cellKey) => {
+  const cell = layoutCells.value[cellKey];
+  if (!cell || typeof cell === 'string') return 1;
+  return cell.w || 1;
+};
+
+const cellH = (cellKey) => {
+  const cell = layoutCells.value[cellKey];
+  if (!cell || typeof cell === 'string') return 1;
+  return cell.h || 1;
+};
+
+const occupiedCells = computed(() => {
+  const set = new Set();
+  for (const [key, cell] of Object.entries(layoutCells.value)) {
+    if (!cell) continue;
+    const [r, c] = key.split('-').map(Number);
+    const w = typeof cell === 'string' ? 1 : (cell.w || 1);
+    const h = typeof cell === 'string' ? 1 : (cell.h || 1);
+    for (let dr = 0; dr < h; dr++) {
+      for (let dc = 0; dc < w; dc++) {
+        if (dr === 0 && dc === 0) continue;
+        set.add(`${r + dr}-${c + dc}`);
+      }
+    }
+  }
+  return set;
+});
+
+const placedLocations = computed(() => {
+  const set = new Set();
+  for (const cell of Object.values(layoutCells.value)) {
+    if (!cell) continue;
+    const type = typeof cell === 'string' ? 'location' : (cell.type || 'location');
+    if (type === 'location') set.add(typeof cell === 'string' ? cell : cell.location);
+  }
+  return set;
+});
+
+const placedEquipments = computed(() => {
+  const list = [];
+  for (const cell of Object.values(layoutCells.value)) {
+    if (!cell || typeof cell === 'string') continue;
+    if (cell.type === 'equipment') list.push(cell.location);
+  }
+  return list;
+});
+
+const unplacedEquipments = computed(() => {
+  const placed = new Set(placedEquipments.value);
+  const all = new Set();
+  for (const cell of Object.values(layoutCells.value)) {
+    if (!cell || typeof cell === 'string') continue;
+    if (cell.type === 'equipment') all.add(cell.location);
+  }
+  return [...all].filter((eq) => !placed.has(eq));
+});
+
+const unplacedLocations = computed(() =>
+  allLocations.value.filter((loc) => !placedLocations.value.has(loc))
+);
+
+const locationProgressMap = computed(() => {
+  const map = {};
+  for (const t of locationTiles.value) {
+    map[t.location] = { total: t.total, done: t.done, pct: t.progressPct };
+  }
+  return map;
+});
+
+const cellColorMap = {
+  red: { bg: "#fecaca", border: "#f87171" },
+  orange: { bg: "#fed7aa", border: "#fb923c" },
+  yellow: { bg: "#fef08a", border: "#facc15" },
+  green: { bg: "#bbf7d0", border: "#4ade80" },
+  blue: { bg: "#bfdbfe", border: "#60a5fa" },
+  purple: { bg: "#ddd6fe", border: "#a78bfa" },
+  pink: { bg: "#fbcfe8", border: "#f472b6" },
+  brown: { bg: "#d7ccc8", border: "#a1887f" },
+};
+
+const cellStyle = (cellKey) => {
+  const cell = layoutCells.value[cellKey];
+  const [r, c] = cellKey.split('-').map(Number);
+  const style = { gridRow: `${r + 1}`, gridColumn: `${c + 1}` };
+  if (cell) {
+    const w = typeof cell === 'string' ? 1 : (cell.w || 1);
+    const h = typeof cell === 'string' ? 1 : (cell.h || 1);
+    if (w > 1) style.gridColumn = `${c + 1} / span ${w}`;
+    if (h > 1) style.gridRow = `${r + 1} / span ${h}`;
+    const clr = typeof cell === 'string' ? '' : (cell.color || '');
+    if (clr && cellColorMap[clr]) {
+      style.background = cellColorMap[clr].bg;
+      style.borderColor = cellColorMap[clr].border;
+    }
+  }
+  return style;
+};
+
+const mapCellClass = (cellKey) => {
+  const loc = cellLocation(cellKey);
+  if (!loc) return layoutEditing.value ? 'map-cell-empty-edit' : 'map-cell-empty';
+  if (cellType(cellKey) === 'equipment') return 'tile-equipment';
+  const prog = locationProgressMap.value[loc];
+  if (!prog || prog.done === 0) return 'tile-none';
+  if (prog.done >= prog.total) return 'tile-complete';
+  return 'tile-partial';
+};
+
+const selectLocationToPlace = (loc) => {
+  layoutSelectedLocation.value = loc;
+  placingType.value = 'location';
+  placingW.value = 1;
+  placingH.value = 1;
+};
+
+const selectEquipmentToPlace = (eq) => {
+  layoutSelectedLocation.value = eq;
+  placingType.value = 'equipment';
+  placingW.value = 1;
+  placingH.value = 1;
+};
+
+const addEquipment = () => {
+  if (!equipmentName.value) return;
+  layoutSelectedLocation.value = equipmentName.value;
+  placingType.value = 'equipment';
+  placingW.value = 1;
+  placingH.value = 1;
+  equipmentName.value = '';
+};
+
+const canPlace = (r, c, w, h) => {
+  for (let dr = 0; dr < h; dr++) {
+    for (let dc = 0; dc < w; dc++) {
+      const k = `${r + dr}-${c + dc}`;
+      if (r + dr >= layoutRows.value || c + dc >= layoutCols.value) return false;
+      if (layoutCells.value[k] || occupiedCells.value.has(k)) return false;
+    }
+  }
+  return true;
+};
+
+const onMapCellClick = (cellKey) => {
+  if (layoutEditing.value) {
+    if (layoutSelectedLocation.value && !layoutCells.value[cellKey] && !occupiedCells.value.has(cellKey)) {
+      const [r, c] = cellKey.split('-').map(Number);
+      const w = placingW.value;
+      const h = placingH.value;
+      if (!canPlace(r, c, w, h)) {
+        alert('この位置にはこのサイズで配置できません');
+        return;
+      }
+      layoutCells.value = {
+        ...layoutCells.value,
+        [cellKey]: { location: layoutSelectedLocation.value, w, h, type: placingType.value },
+      };
+      layoutSelectedLocation.value = null;
+    }
+  } else {
+    if (cellType(cellKey) === 'equipment') return;
+    const loc = cellLocation(cellKey);
+    if (loc) goToLocationList(loc);
+  }
+};
+
+const removeLayoutCell = (cellKey) => {
+  const newCells = { ...layoutCells.value };
+  delete newCells[cellKey];
+  layoutCells.value = newCells;
+};
+
+const loadLayoutConfig = async () => {
+  try {
+    const res = await api.stocktakeRecords.getLayoutConfig();
+    layoutCols.value = res.data.cols || 4;
+    layoutRows.value = res.data.rows || 4;
+    const raw = res.data.cells || {};
+    const converted = {};
+    for (const [key, val] of Object.entries(raw)) {
+      converted[key] = typeof val === 'string' ? { location: val, w: 1, h: 1 } : val;
+    }
+    layoutCells.value = converted;
+    if (Object.keys(layoutCells.value).length === 0) {
+      layoutEditing.value = true;
+    }
+  } catch (e) {
+    console.error("レイアウト設定取得エラー:", e);
+    layoutEditing.value = true;
+  }
+};
+
+const saveLayoutConfig = async () => {
+  try {
+    await api.stocktakeRecords.saveLayoutConfig({
+      cols: layoutCols.value,
+      rows: layoutRows.value,
+      cells: layoutCells.value,
+    });
+  } catch (e) {
+    console.error("レイアウト設定保存エラー:", e);
+    alert("レイアウト保存に失敗しました。");
+  }
+};
+
+const toggleLayoutEdit = async () => {
+  if (layoutEditing.value) {
+    await saveLayoutConfig();
+    layoutEditing.value = false;
+    layoutSelectedLocation.value = null;
+  } else {
+    layoutEditing.value = true;
+  }
 };
 
 const onActualInput = (productId, event) => {
@@ -577,10 +856,10 @@ watch(() => filters.stocktake_date, () => {
 
 <style scoped>
 .stocktake-mobile {
-  width: 344px;
+  max-width: 600px;
   margin: 0 auto;
   min-height: 100vh;
-  padding: 0 0 88px;
+  padding: 10px 10px 88px;
   background: #9ccf39;
   color: #1f2937;
   font-family: "Noto Sans JP", "Segoe UI", sans-serif;
@@ -626,79 +905,341 @@ watch(() => filters.stocktake_date, () => {
 }
 
 .layout-body {
-  padding: 6px 4px;
+  padding: 4px;
 }
 
-.layout-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 5px;
+.layout-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
 }
 
-.layout-tile {
-  padding: 8px 8px 6px;
-  border-radius: 6px;
-  border: 1px solid #d1d5db;
+.layout-mode-btn {
+  padding: 3px 12px;
+  border: 1px solid #9ca3af;
+  background: #f8fafc;
+  font-size: 11px;
   cursor: pointer;
+  border-radius: 4px;
 }
 
-.layout-tile:active {
-  opacity: 0.85;
+.layout-mode-btn.active {
+  background: #2f5eae;
+  color: #fff;
+  border-color: #2f5eae;
+}
+
+.layout-size-label {
+  font-size: 10px;
+  color: #475569;
+}
+
+.layout-size-input {
+  width: 36px;
+  height: 22px;
+  border: 1px solid #9ca3af;
+  text-align: center;
+  font-size: 11px;
+  margin-left: 2px;
+}
+
+.layout-step-guide {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+}
+
+.step-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #166534;
+}
+
+.layout-empty-msg {
+  text-align: center;
+  padding: 24px 8px;
+  font-size: 13px;
+  color: #6b7280;
+  line-height: 1.6;
+}
+
+.layout-placing-hint {
+  font-size: 11px;
+  color: #1e40af;
+  background: #dbeafe;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+}
+
+.layout-cancel-btn {
+  border: none;
+  background: transparent;
+  color: #ef4444;
+  font-size: 11px;
+  cursor: pointer;
+  margin-left: 6px;
+}
+
+.span-label {
+  margin-left: 6px;
+  font-size: 11px;
+}
+
+.span-input {
+  width: 32px;
+  padding: 1px 2px;
+  font-size: 11px;
+  border: 1px solid #93c5fd;
+  border-radius: 3px;
+  margin-left: 2px;
+}
+
+.layout-map-scroll {
+  overflow: auto;
+  max-height: 70vh;
+  -webkit-overflow-scrolling: touch;
+}
+
+.layout-map {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 6px;
+  width: max-content;
+}
+
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.zoom-btn {
+  width: 26px;
+  height: 26px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.zoom-label {
+  font-size: 11px;
+  min-width: 32px;
+  text-align: center;
+}
+
+.map-cell {
+  position: relative;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 4px 2px;
+  min-height: 36px;
+}
+
+.map-cell-empty {
+  background: #f3f4f6;
+  border: 1px dashed #d1d5db;
+}
+
+.map-cell-empty-edit {
+  background: #f0f9ff;
+  border: 1px dashed #93c5fd;
+}
+
+.map-cell-empty-edit:hover {
+  background: #dbeafe;
 }
 
 .tile-none {
   background: #e5e7eb;
-  border-color: #d1d5db;
+  border: 1px solid #d1d5db;
 }
 
 .tile-partial {
   background: #fff3cd;
-  border-color: #f59e0b;
+  border: 1px solid #f59e0b;
 }
 
 .tile-complete {
   background: #d1fae5;
-  border-color: #10b981;
+  border: 1px solid #10b981;
 }
 
-.tile-name {
-  font-size: 13px;
+.tile-equipment {
+  background: #c7d2fe;
+  border: 1px solid #6366f1;
+  cursor: default;
+}
+
+.map-cell-name {
+  font-size: 9px;
   font-weight: 700;
   color: #1f2937;
-  margin-bottom: 2px;
+  text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  width: 100%;
 }
 
-.tile-count {
+.map-cell-name.vertical {
+  writing-mode: vertical-rl;
+  white-space: normal;
+  width: auto;
+  text-overflow: clip;
+}
+
+.map-cell-progress {
+  width: 100%;
+  margin-top: 2px;
+}
+
+.map-cell-bar {
+  height: 3px;
+  background: #e5e7eb;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.map-cell-bar-fill {
+  height: 100%;
+  background: #10b981;
+  border-radius: 2px;
+}
+
+.tile-partial .map-cell-bar-fill {
+  background: #f59e0b;
+}
+
+.map-cell-count {
+  font-size: 7px;
+  color: #6b7280;
+  text-align: center;
+}
+
+.map-cell-remove {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 14px;
+  height: 14px;
+  border: none;
+  background: #ef4444;
+  color: #fff;
+  font-size: 8px;
+  line-height: 14px;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 0 4px 0 4px;
+}
+
+.layout-location-palette {
+  margin-bottom: 6px;
+}
+
+.palette-title {
   font-size: 10px;
   color: #6b7280;
   margin-bottom: 4px;
 }
 
-.tile-progress-bar {
-  height: 6px;
-  background: #e5e7eb;
-  border-radius: 3px;
-  overflow: hidden;
+.palette-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.palette-item {
+  padding: 3px 8px;
+  border: 1px solid #d1d5db;
+  background: #f8fafc;
+  font-size: 10px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.palette-item.selected {
+  background: #2f5eae;
+  color: #fff;
+  border-color: #2f5eae;
+}
+
+.palette-item-equip {
+  background: #e8e0ff;
+  border-color: #a5b4fc;
+}
+
+.palette-item-equip.selected {
+  background: #6366f1;
+  border-color: #6366f1;
+}
+
+.layout-palette-section {
+  margin-bottom: 6px;
+}
+
+.palette-header {
+  font-size: 10px;
+  font-weight: 700;
+  color: #374151;
   margin-bottom: 3px;
 }
 
-.tile-progress-fill {
-  height: 100%;
-  background: #10b981;
-  border-radius: 3px;
-  transition: width 0.3s;
+.palette-empty {
+  font-size: 10px;
+  color: #9ca3af;
 }
 
-.tile-partial .tile-progress-fill {
-  background: #f59e0b;
+.equipment-add-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
 }
 
-.tile-status-text {
+.equipment-input {
+  flex: 1;
+  padding: 3px 6px;
+  font-size: 11px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+}
+
+.equipment-add-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  border: 1px solid #6366f1;
+  background: #6366f1;
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.equipment-add-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.placing-type-badge.equip {
   font-size: 9px;
-  color: #6b7280;
+  background: #6366f1;
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 4px;
 }
 
 .search-strip {

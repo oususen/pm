@@ -58,3 +58,19 @@ class StocktakeRecorder(models.Model):
 
     def __str__(self):
         return f'{self.stocktake_date} {self.name}'
+
+
+class StocktakeLayoutConfig(models.Model):
+    """棚卸レイアウト配置設定"""
+
+    name = models.CharField(max_length=50, default='default', unique=True, verbose_name='設定名')
+    cols = models.IntegerField(default=8, verbose_name='列数')
+    row_count = models.IntegerField(default=6, verbose_name='行数')
+    cells = models.JSONField(default=dict, verbose_name='セル配置')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'production_stocktake_layout_config'
+
+    def __str__(self):
+        return self.name

@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 from accounts.permissions import HasResourcePermissionOrReadOnly
 from masters.models import Process, Product
 
-from .models_stocktake_record import StocktakeRecord, StocktakeRecorder
+from .models_stocktake_record import StocktakeRecord, StocktakeRecorder, StocktakeLayoutConfig
 from .models_line_backlog import LineBacklog
 
 
@@ -299,3 +299,24 @@ class StocktakeRecorderView(APIView):
             return Response({'detail': 'id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
         deleted, _ = StocktakeRecorder.objects.filter(id=recorder_id).delete()
         return Response({'deleted': deleted})
+
+
+class StocktakeLayoutConfigView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        config = StocktakeLayoutConfig.objects.filter(name='default').first()
+        if not config:
+            return Response({'cols': 8, 'rows': 6, 'cells': {}})
+        return Response({'cols': config.cols, 'rows': config.row_count, 'cells': config.cells})
+
+    def post(self, request):
+        cols = int(request.data.get('cols', 8))
+        row_count = int(request.data.get('rows', 6))
+        cells = request.data.get('cells', {})
+
+        config, _ = StocktakeLayoutConfig.objects.update_or_create(
+            name='default',
+            defaults={'cols': cols, 'row_count': row_count, 'cells': cells},
+        )
+        return Response({'cols': config.cols, 'rows': config.row_count, 'cells': config.cells})
