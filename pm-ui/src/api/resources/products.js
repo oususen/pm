@@ -43,6 +43,9 @@ export const createProductsAPI = (client) => ({
   deleteProduct(id) {
     return client.delete(`/products/${id}/`)
   },
+  setStockLocations(id, locations) {
+    return client.post(`/products/${id}/stock-locations/`, { locations })
+  },
   getWhereUsed(id, recursive = false, referenceDate = null) {
     const params = { recursive: recursive ? 'true' : 'false' }
     if (referenceDate) params.reference_date = referenceDate

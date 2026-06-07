@@ -3,7 +3,8 @@ from django.db.models import Sum
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact,
-    KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping
+    KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
+    ProductStockLocation,
 )
 
 def build_media_absolute_url(request, raw_url):
@@ -23,8 +24,15 @@ def build_media_absolute_url(request, raw_url):
     return f"{media_url}/{path}"
 
 
+class ProductStockLocationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductStockLocation
+        fields = ['id', 'location_name', 'sort_order']
+
+
 class ProductSerializer(serializers.ModelSerializer):
     next_process_name = serializers.CharField(source='next_process.process_name', read_only=True)
+    stock_locations_list = ProductStockLocationSerializer(source='stock_locations', many=True, read_only=True)
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

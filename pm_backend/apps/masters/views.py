@@ -18,7 +18,8 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact,
-    KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping
+    KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
+    ProductStockLocation,
 )
 from .serializers import (
     ProductSerializer, CustomerSerializer, ProcessSerializer, LineSerializer,
@@ -80,7 +81,7 @@ class ProductFilter(django_filters.FilterSet):
     supplier_code = django_filters.CharFilter(method='filter_supplier_code')
     product_code = django_filters.CharFilter(field_name='product_code', lookup_expr='exact')
     product_codes_in = django_filters.CharFilter(method='filter_product_codes_in')
-    stock_location = django_filters.CharFilter(field_name='stock_location', lookup_expr='icontains')
+    stock_location = django_filters.CharFilter(method='filter_stock_location')
     processing_area = django_filters.CharFilter(field_name='processing_area', lookup_expr='exact')
 
     class Meta:
@@ -150,6 +151,14 @@ class ProductFilter(django_filters.FilterSet):
         )
         return queryset.annotate(_has_supplier=Exists(supplier_items)).filter(_has_supplier=True)
 
+    def filter_stock_location(self, queryset, name, value):
+        if not value:
+            return queryset
+        loc_product_ids = ProductStockLocation.objects.filter(
+            location_name__icontains=value
+        ).values_list('product_id', flat=True)
+        return queryset.filter(Q(stock_location__icontains=value) | Q(id__in=loc_product_ids))
+
     def filter_next_process_unset(self, queryset, name, value):
         if value is None:
             return queryset
@@ -159,11 +168,11 @@ class ProductFilter(django_filters.FilterSet):
 
 
 class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
-    queryset = Product.objects.all()
+    queryset = Product.objects.prefetch_related('stock_locations').all()
     serializer_class = ProductSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = ProductFilter
-    search_fields = ['product_code', 'product_name', 'stock_location']
+    search_fields = ['product_code', 'product_name', 'stock_location', 'stock_locations__location_name']
     ordering_fields = ['product_code', 'created_at']
     ordering = ['product_code']
 
@@ -182,6 +191,23 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         product.save(update_fields=['image_url', 'updated_at'])
         absolute_url = build_media_absolute_url(request, url)
         return Response({'image_url': absolute_url}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='stock-locations')
+    def set_stock_locations(self, request, pk=None):
+        product = self.get_object()
+        locations = request.data.get('locations', [])
+        ProductStockLocation.objects.filter(product=product).delete()
+        for i, loc in enumerate(locations):
+            name = str(loc.get('location_name', '') if isinstance(loc, dict) else loc).strip()
+            if name:
+                ProductStockLocation.objects.create(product=product, location_name=name, sort_order=i)
+        primary = locations[0] if locations else None
+        primary_name = (primary.get('location_name', '') if isinstance(primary, dict) else str(primary)).strip() if primary else ''
+        product.stock_location = primary_name
+        product.save(update_fields=['stock_location', 'updated_at'])
+        return Response({'stock_locations': list(
+            product.stock_locations.values('id', 'location_name', 'sort_order')
+        )})
 
     @action(detail=False, methods=['get'], url_path='line-final-candidates')
     def line_final_candidates(self, request):

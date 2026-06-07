@@ -170,7 +170,7 @@
               <td>{{ product.order_lot_multiple ?? 1 }}</td>
               <td>{{ product.model_name || '-' }}</td>
               <td>{{ getProcessingAreaLabel(product.processing_area) }}</td>
-              <td>{{ product.stock_location || '-' }}</td>
+              <td>{{ formatStockLocations(product) }}</td>
               <td>{{ getProductGroupLabel(product.product_group) }}</td>
               <td>{{ getContainerLabel(product.used_container) }}</td>
               <td>{{ product.capacity ?? '-' }}</td>
@@ -318,7 +318,13 @@
                 </div>
                 <div class="form-group">
                   <label>保管場所</label>
-                  <input v-model="formData.stock_location" placeholder="例: レーザ横A棚" />
+                  <div class="stock-locations-edit">
+                    <div v-for="(loc, idx) in formData.stock_locations_edit" :key="idx" class="stock-loc-row">
+                      <input v-model="formData.stock_locations_edit[idx]" placeholder="例: レーザ横A棚" />
+                      <button type="button" class="btn-sm btn-danger" @click="removeStockLocation(idx)">×</button>
+                    </div>
+                    <button type="button" class="btn-sm" @click="addStockLocation">+ 置き場追加</button>
+                  </div>
                 </div>
                 <div class="form-group">
                   <label>製品グループ</label>
@@ -713,6 +719,7 @@ const createEmptyFormData = () => ({
   transfer_destination: null,
   processing_area: null,
   stock_location: '',
+  stock_locations_edit: [''],
   line: null,
   process: null,
   next_process: null,
@@ -749,6 +756,9 @@ const mapProductToFormData = (product, options = {}) => {
     transfer_destination: source.transfer_destination ?? null,
     processing_area: source.processing_area ?? null,
     stock_location: source.stock_location ?? '',
+    stock_locations_edit: source.stock_locations_list && source.stock_locations_list.length
+      ? source.stock_locations_list.map(sl => sl.location_name)
+      : (source.stock_location ? [source.stock_location] : ['']),
     image_url: asCopy ? '' : (source.image_url || ''),
   }
 }
@@ -791,6 +801,20 @@ const processModeTitle = computed(() => {
   if (processMode.value === 'view') return '製品照会'
   return '製品新規作成'
 })
+
+const addStockLocation = () => {
+  formData.value.stock_locations_edit.push('')
+}
+const removeStockLocation = (idx) => {
+  formData.value.stock_locations_edit.splice(idx, 1)
+  if (formData.value.stock_locations_edit.length === 0) formData.value.stock_locations_edit.push('')
+}
+const formatStockLocations = (product) => {
+  if (product.stock_locations_list && product.stock_locations_list.length) {
+    return product.stock_locations_list.map(sl => sl.location_name).join(', ')
+  }
+  return product.stock_location || '-'
+}
 
 // CSVインポート
 const showCsvImportDialog = ref(false)
@@ -1363,7 +1387,7 @@ const saveProduct = async () => {
       used_container: formData.value.used_container || null,
       transfer_destination: formData.value.transfer_destination || null,
       processing_area: formData.value.processing_area || null,
-      stock_location: String(formData.value.stock_location || '').trim(),
+      stock_location: (formData.value.stock_locations_edit.find(s => s.trim()) || '').trim(),
       standard_lt_days: normalizeNumber(formData.value.standard_lt_days),
       order_lot_min: normalizeNumber(formData.value.order_lot_min),
       order_lot_multiple: Math.max(1, Number(formData.value.order_lot_multiple || 1)),
@@ -1375,13 +1399,18 @@ const saveProduct = async () => {
       size_thickness: normalizeNumber(formData.value.size_thickness),
       unit_price: normalizeNumber(formData.value.unit_price),
     }
+    delete payload.stock_locations_edit
+    delete payload.stock_locations_list
+    const locationsPayload = formData.value.stock_locations_edit.filter(s => s.trim()).map(s => ({ location_name: s.trim() }))
     if (processMode.value === 'edit') {
       await api.products.updateProduct(payload.id, payload)
+      await api.products.setStockLocations(payload.id, locationsPayload)
       alert('更新しました')
     } else {
       const response = await api.products.createProduct(payload)
       const created = response?.data
       if (created?.id) {
+        await api.products.setStockLocations(created.id, locationsPayload)
         processMode.value = 'edit'
         processTargetId.value = created.id
         formData.value = mapProductToFormData(created)
@@ -1789,6 +1818,9 @@ watch(
   font-size: 12px;
   color: #6b7280;
 }
+.stock-locations-edit { display: flex; flex-direction: column; gap: 4px; }
+.stock-loc-row { display: flex; gap: 4px; align-items: center; }
+.stock-loc-row input { flex: 1; }
 </style>
 
 <style scoped>

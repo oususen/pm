@@ -65,7 +65,7 @@
           </div>
           <div class="cell location-cell">
             <div class="cell-label">置き場:</div>
-            <div class="cell-value">{{ row.stock_location || "-" }}</div>
+            <div class="cell-value">{{ formatRowLocations(row) }}</div>
           </div>
           <div class="cell photo-cell">
             <img v-if="row.image_url" :src="row.image_url" :alt="row.product_name" />
@@ -127,7 +127,7 @@
         </label>
         <label class="detail-field">
           <span>置き場</span>
-          <input :value="selectedRow.stock_location || '-'" type="text" readonly />
+          <input :value="formatRowLocations(selectedRow)" type="text" readonly />
         </label>
       </div>
 
@@ -238,7 +238,7 @@
             @click="onMapCellClick(cellKey)"
           >
             <template v-if="layoutCells[cellKey]">
-              <div class="map-cell-name" :class="{ vertical: cellH(cellKey) > cellW(cellKey) }">{{ cellLocation(cellKey) }}</div>
+              <div class="map-cell-name" :class="{ vertical: cellH(cellKey) > cellW(cellKey) }" :style="cellFontStyle(cellKey)">{{ cellLocation(cellKey) }}</div>
               <template v-if="cellType(cellKey) === 'location'">
                 <div class="map-cell-progress" v-if="locationProgressMap[cellLocation(cellKey)]">
                   <div class="map-cell-bar">
@@ -409,16 +409,33 @@ const selectedIndexLabel = computed(() => {
 const canMovePrev = computed(() => selectedRowIndex.value > 0);
 const canMoveNext = computed(() => selectedRowIndex.value >= 0 && selectedRowIndex.value < filteredRows.value.length - 1);
 
+const getRowLocations = (row) => {
+  if (row.stock_locations && row.stock_locations.length) return row.stock_locations;
+  if (row.stock_location) return [row.stock_location];
+  return [];
+};
+const formatRowLocations = (row) => {
+  const locs = getRowLocations(row);
+  return locs.length ? locs.join(', ') : '-';
+};
+
 const locationTiles = computed(() => {
   const map = {};
   for (const row of rows.value) {
-    const loc = row.stock_location || '(未設定)';
-    if (!map[loc]) map[loc] = { location: loc, total: 0, done: 0 };
-    map[loc].total++;
-    if (row.record_count > 0) map[loc].done++;
+    const locs = getRowLocations(row);
+    const keys = locs.length ? locs : ['(未設定)'];
+    for (const loc of keys) {
+      if (!map[loc]) map[loc] = { location: loc, total: 0, done: 0, productIds: new Set() };
+      if (!map[loc].productIds.has(row.product_id)) {
+        map[loc].productIds.add(row.product_id);
+        map[loc].total++;
+        if (row.record_count > 0) map[loc].done++;
+      }
+    }
   }
   return Object.values(map)
     .map((t) => {
+      delete t.productIds;
       t.remaining = t.total - t.done;
       t.progressPct = t.total > 0 ? Math.round((t.done / t.total) * 100) : 0;
       t.statusClass = t.done === 0 ? 'tile-none' : t.remaining === 0 ? 'tile-complete' : 'tile-partial';
@@ -453,7 +470,7 @@ const layoutCellKeys = computed(() => {
 const allLocations = computed(() => {
   const set = new Set();
   for (const row of rows.value) {
-    if (row.stock_location) set.add(row.stock_location);
+    for (const loc of getRowLocations(row)) set.add(loc);
   }
   return [...set].sort((a, b) => a.localeCompare(b, 'ja'));
 });
@@ -568,6 +585,14 @@ const cellStyle = (cellKey) => {
     }
   }
   return style;
+};
+
+const cellFontStyle = (cellKey) => {
+  const cell = layoutCells.value[cellKey];
+  if (!cell || typeof cell === 'string') return {};
+  const fs = cell.fontSize;
+  if (!fs) return {};
+  return { fontSize: `${fs}px` };
 };
 
 const mapCellClass = (cellKey) => {

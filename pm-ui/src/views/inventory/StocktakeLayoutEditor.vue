@@ -95,7 +95,7 @@
                 @click="onCellClick(cellKey)"
               >
                 <template v-if="cells[cellKey]">
-                  <div class="cell-label" :class="{ vertical: isVerticalCell(cellKey) }">{{ getCellLocation(cellKey) }}</div>
+                  <div class="cell-label" :class="{ vertical: isVerticalCell(cellKey) }" :style="getCellFontStyle(cellKey)">{{ getCellLocation(cellKey) }}</div>
                   <div class="cell-type-indicator" v-if="getCellType(cellKey) === 'equipment'">設備</div>
                   <div class="cell-edit-hint">クリックで編集</div>
                 </template>
@@ -146,6 +146,12 @@
               ></button>
             </div>
           </div>
+          <div class="edit-field">
+            <span class="edit-field-label">文字サイズ</span>
+            <div class="font-size-row">
+              <button v-for="fs in fontSizeOptions" :key="fs.value" type="button" class="font-size-btn" :class="{ active: editCellFontSize === fs.value }" @click="editCellFontSize = fs.value">{{ fs.label }}</button>
+            </div>
+          </div>
         </div>
         <div class="edit-modal-footer">
           <button type="button" class="edit-delete-btn" @click="deleteEditingCell">削除</button>
@@ -181,6 +187,17 @@ const editCellW = ref(1);
 const editCellH = ref(1);
 const editCellType = ref("location");
 const editCellColor = ref("");
+const editCellFontSize = ref("");
+
+const fontSizeOptions = [
+  { value: "", label: "標準" },
+  { value: "8", label: "8" },
+  { value: "10", label: "10" },
+  { value: "12", label: "12" },
+  { value: "14", label: "14" },
+  { value: "16", label: "16" },
+  { value: "20", label: "20" },
+];
 
 const colorOptions = [
   { value: "", label: "デフォルト", bg: "#e5e7eb", border: "#d1d5db" },
@@ -302,6 +319,14 @@ const isVerticalCell = (cellKey) => {
   return (cell.h || 1) > (cell.w || 1);
 };
 
+const getCellFontStyle = (cellKey) => {
+  const cell = cells.value[cellKey];
+  if (!cell || typeof cell === "string") return {};
+  const fs = cell.fontSize;
+  if (!fs) return {};
+  return { fontSize: `${fs}px` };
+};
+
 const canPlace = (r, c, w, h) => {
   for (let dr = 0; dr < h; dr++) {
     for (let dc = 0; dc < w; dc++) {
@@ -348,6 +373,7 @@ const openCellEditor = (cellKey) => {
   editCellH.value = typeof cell === "string" ? 1 : (cell.h || 1);
   editCellType.value = typeof cell === "string" ? "location" : (cell.type || "location");
   editCellColor.value = typeof cell === "string" ? "" : (cell.color || "");
+  editCellFontSize.value = typeof cell === "string" ? "" : (cell.fontSize || "");
 };
 
 const saveEditingCell = () => {
@@ -388,7 +414,7 @@ const saveEditingCell = () => {
   }
   cells.value = {
     ...cells.value,
-    [key]: { location: editCellName.value, w: newW, h: newH, type: editCellType.value, color: editCellColor.value },
+    [key]: { location: editCellName.value, w: newW, h: newH, type: editCellType.value, color: editCellColor.value, fontSize: editCellFontSize.value },
   };
   editingCellKey.value = null;
 };
@@ -962,5 +988,28 @@ onMounted(async () => {
 .color-swatch.selected {
   outline: 2px solid #2563eb;
   outline-offset: 1px;
+}
+
+.font-size-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.font-size-btn {
+  padding: 3px 8px;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  min-width: 32px;
+  text-align: center;
+}
+
+.font-size-btn.active {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
 }
 </style>

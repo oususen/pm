@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import HasResourcePermissionOrReadOnly
-from masters.models import Process, Product
+from masters.models import Process, Product, ProductStockLocation
 
 from .models_stocktake_record import StocktakeRecord, StocktakeRecorder, StocktakeLayoutConfig
 from .models_line_backlog import LineBacklog
@@ -72,7 +72,10 @@ class StocktakeRecordView(APIView):
 
         stock_location = str(request.query_params.get('stock_location') or '').strip()
         if stock_location:
-            qs = qs.filter(stock_location__icontains=stock_location)
+            loc_product_ids = ProductStockLocation.objects.filter(
+                location_name__icontains=stock_location
+            ).values_list('product_id', flat=True)
+            qs = qs.filter(Q(stock_location__icontains=stock_location) | Q(id__in=loc_product_ids))
 
         product_code = str(request.query_params.get('product_code') or '').strip()
         if product_code:
@@ -87,7 +90,7 @@ class StocktakeRecordView(APIView):
             qs = qs.exclude(image_url__isnull=True).exclude(image_url__exact='')
 
         products = list(
-            qs.select_related('line', 'process').order_by(
+            qs.select_related('line', 'process').prefetch_related('stock_locations').order_by(
                 'process__process_code', 'stock_location', 'product_code'
             )[:5000]
         )
@@ -130,6 +133,7 @@ class StocktakeRecordView(APIView):
                 'processing_area': product.processing_area or '',
                 'processing_area_label': processing_area_label,
                 'stock_location': product.stock_location or '',
+                'stock_locations': [sl.location_name for sl in product.stock_locations.all()],
                 'image_url': product.image_url or '',
                 'line_id': product.line_id,
                 'line_code': getattr(product.line, 'line_code', '') if product.line_id else '',
@@ -153,7 +157,13 @@ class StocktakeRecordView(APIView):
         if diff_only:
             rows = [row for row in rows if row['diff_qty'] not in (None, 0)]
 
-        locations = sorted({product.stock_location for product in products if product.stock_location})
+        loc_set = set()
+        for product in products:
+            if product.stock_location:
+                loc_set.add(product.stock_location)
+            for sl in product.stock_locations.all():
+                loc_set.add(sl.location_name)
+        locations = sorted(loc_set)
         processes = sorted(
             [
                 {

@@ -108,6 +108,25 @@ class Product(models.Model):
         return f"{self.product_code} - {self.product_name}"
 
 
+class ProductStockLocation(models.Model):
+    """製品保管場所（1製品に複数の置き場を持てる）"""
+    id = models.BigAutoField(primary_key=True)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='stock_locations', verbose_name='製品')
+    location_name = models.CharField(max_length=100, verbose_name='置き場名')
+    sort_order = models.IntegerField(default=0, verbose_name='表示順')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+
+    class Meta:
+        db_table = 'm_product_stock_location'
+        verbose_name = '製品保管場所'
+        verbose_name_plural = '製品保管場所'
+        unique_together = [['product', 'location_name']]
+        ordering = ['sort_order', 'id']
+
+    def __str__(self):
+        return f"{self.product.product_code} - {self.location_name}"
+
+
 class ProductCodeMapping(models.Model):
     """品番変換マスタ（全体適用）"""
     id = models.BigAutoField(primary_key=True)
