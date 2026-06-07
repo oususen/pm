@@ -47,7 +47,7 @@ from production.views_gantt_display_product_map import GanttDisplayProductMapVie
 from production.views_line_product_display_order import LineProductDisplayOrderViewSet
 from production.views_plan_deviation_report import PlanDeviationReportView, PlanDeviationLineConfigView
 from production.views_record_confirmation import ProductionRecordConfirmationView
-from production.views_stocktake import StocktakeRecordView, StocktakeHistoryView, StocktakeRecorderView, StocktakeLayoutConfigView
+from production.views_stocktake import StocktakeRecordView, StocktakeHistoryView, StocktakeRecorderView, StocktakeLayoutConfigView, StocktakeAreaView
 from production.views_camera_actual import (
     CameraAutoDetectView,
     CameraEventCreateView,
@@ -130,6 +130,7 @@ urlpatterns = [
     path('stocktake-records/<int:product_id>/history/', StocktakeHistoryView.as_view(), name='stocktake-history'),
     path('stocktake-recorders/', StocktakeRecorderView.as_view(), name='stocktake-recorders'),
     path('stocktake-layout-config/', StocktakeLayoutConfigView.as_view(), name='stocktake-layout-config'),
+    path('stocktake-areas/', StocktakeAreaView.as_view(), name='stocktake-areas'),
     path('camera-events/', CameraEventCreateView.as_view(), name='camera-events'),
     path('camera-results-daily/', CameraResultDailyView.as_view(), name='camera-results-daily'),
     path('camera-auto-detect/', CameraAutoDetectView.as_view(), name='camera-auto-detect'),

@@ -60,6 +60,24 @@ class StocktakeRecorder(models.Model):
         return f'{self.stocktake_date} {self.name}'
 
 
+class StocktakeArea(models.Model):
+    """棚卸エリア（置き場のグルーピング）"""
+    name = models.CharField(max_length=50, unique=True, verbose_name='エリア名')
+    locations = models.JSONField(default=list, verbose_name='所属置き場リスト')
+    sort_order = models.IntegerField(default=0, verbose_name='表示順')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'production_stocktake_area'
+        verbose_name = '棚卸エリア'
+        verbose_name_plural = '棚卸エリア'
+        ordering = ['sort_order', 'name']
+
+    def __str__(self):
+        return self.name
+
+
 class StocktakeLayoutConfig(models.Model):
     """棚卸レイアウト配置設定"""
 

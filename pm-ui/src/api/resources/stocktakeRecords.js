@@ -26,4 +26,13 @@ export const createStocktakeRecordsAPI = (client) => ({
   saveLayoutConfig(payload) {
     return client.post('/stocktake-layout-config/', payload)
   },
+  listAreas() {
+    return client.get('/stocktake-areas/')
+  },
+  saveArea(payload) {
+    return client.post('/stocktake-areas/', payload)
+  },
+  deleteArea(id) {
+    return client.delete('/stocktake-areas/', { data: { id } })
+  },
 })

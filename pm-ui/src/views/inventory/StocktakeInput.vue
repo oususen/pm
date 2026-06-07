@@ -1,20 +1,29 @@
 <template>
   <div class="stocktake-mobile" v-if="viewMode === 'list'">
     <header class="top-tabs">
-      <span class="active">板金班棚卸 <button type="button" class="recorder-icon-btn" @click="showRecorderModal = true">&#x1F464;</button></span>
+      <span class="active">
+        <select v-model="filters.area_id" class="area-select">
+          <option value="">全エリア</option>
+          <option v-for="area in areas" :key="area.id" :value="area.id">{{ area.name }}</option>
+        </select>
+        <button type="button" class="recorder-icon-btn" @click="showRecorderModal = true">&#x1F464;</button>
+      </span>
       <input type="date" class="top-date" v-model="filters.stocktake_date" />
-      <span class="tab-link" @click="openLayout">レイアウト</span>
+      <span style="display:flex;gap:4px;justify-content:flex-end;align-items:center">
+        <span class="tab-link" @click="showAreaModal = true">&#x1F3E2;</span>
+        <span class="tab-link" @click="openLayout">レイアウト</span>
+      </span>
     </header>
 
     <section class="search-strip">
       <div class="search-grid">
         <label class="search-block">
-          <span class="search-label">加工先検索 <button type="button" class="field-reset-btn" @click="clearProcessFilter" aria-label="加工先クリア">クリア</button></span>
+          <span class="search-label">ライン検索 <button type="button" class="field-reset-btn" @click="clearLineFilter" aria-label="ラインクリア">クリア</button></span>
           <div class="search-input-wrap">
-            <select v-model="filters.process_id">
+            <select v-model="filters.line_id">
               <option value="">すべて</option>
-              <option v-for="process in processOptions" :key="process.id" :value="process.id">
-                {{ process.process_name || process.process_code }}
+              <option v-for="line in lineOptions" :key="line.id" :value="line.id">
+                {{ line.line_name || line.line_code }}
               </option>
             </select>
           </div>
@@ -24,7 +33,7 @@
           <div class="search-input-wrap">
             <select v-model="filters.stock_location">
               <option value="">すべて</option>
-              <option v-for="location in locations" :key="location" :value="location">
+              <option v-for="location in filteredLocations" :key="location" :value="location">
                 {{ location }}
               </option>
             </select>
@@ -102,7 +111,7 @@
   <div v-else-if="viewMode === 'detail'" class="stocktake-detail-mobile">
     <header class="detail-header">
       <button class="detail-back" type="button" @click="closeDetail">‹</button>
-      <div class="detail-title">板金班棚卸入力</div>
+      <div class="detail-title">{{ selectedArea ? selectedArea.name : '棚卸' }}入力</div>
       <button class="detail-save" type="button" @click="saveCurrent" :disabled="saving || !selectedRow || normalizeNumber(editValues[selectedRow.product_id]) === null || !selectedRecorder">
         保存
       </button>
@@ -209,7 +218,7 @@
 
   <div v-else-if="viewMode === 'layout'" class="stocktake-mobile">
     <header class="top-tabs">
-      <span class="tab-link" @click="viewMode = 'list'">板金班棚卸</span>
+      <span class="tab-link" @click="viewMode = 'list'">&#9664; 一覧</span>
       <input type="date" class="top-date" v-model="filters.stocktake_date" />
       <span class="active">レイアウト</span>
     </header>
@@ -276,6 +285,48 @@
       </div>
     </div>
   </div>
+
+  <div v-if="showAreaModal" class="modal-overlay" @click.self="showAreaModal = false">
+    <div class="modal-box area-modal">
+      <div class="modal-header">エリア管理</div>
+      <div class="modal-body">
+        <div class="area-edit-section" v-if="editingArea">
+          <div class="area-edit-name-row">
+            <input v-model.trim="editingArea.name" placeholder="エリア名" />
+            <button type="button" class="btn-save" @click="saveEditArea" :disabled="!editingArea.name">保存</button>
+            <button type="button" class="btn-cancel" @click="editingArea = null">戻る</button>
+          </div>
+          <div class="area-loc-title">所属置き場 (タップで追加/解除)</div>
+          <div class="area-loc-chips">
+            <span
+              v-for="loc in allKnownLocations"
+              :key="loc"
+              class="area-loc-chip"
+              :class="{ selected: editingArea.locations.includes(loc) }"
+              @click="toggleAreaLocation(loc)"
+            >{{ loc }}</span>
+          </div>
+          <div v-if="allKnownLocations.length === 0" class="empty-state">置き場データがありません。先に製品マスタで保管場所を設定してください。</div>
+        </div>
+        <div v-else>
+          <div class="recorder-add-row">
+            <input v-model.trim="newAreaName" placeholder="新規エリア名" @keyup.enter="createArea" />
+            <button type="button" @click="createArea" :disabled="!newAreaName">追加</button>
+          </div>
+          <div v-if="areas.length === 0" class="empty-state">エリアがありません</div>
+          <div v-else class="recorder-list">
+            <div v-for="area in areas" :key="area.id" class="recorder-item">
+              <span @click="startEditArea(area)" style="cursor:pointer;flex:1">{{ area.name }} <small style="color:#6b7280">({{ area.locations.length }}置き場)</small></span>
+              <button type="button" class="history-delete-btn" @click="deleteArea(area.id)">✕</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" @click="showAreaModal = false; editingArea = null">閉じる</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -287,19 +338,20 @@ import { hasPermission } from "@/router";
 
 const filters = reactive({
   stocktake_date: formatISODate(new Date()),
-  process_id: "",
+  line_id: "",
   stock_location: "",
   product_code: "",
   product_name: "",
   has_image: false,
   diff_only: false,
+  area_id: "",
 });
 
 const loading = ref(false);
 const saving = ref(false);
 const rows = ref([]);
 const locations = ref([]);
-const processOptions = ref([]);
+const lineOptions = ref([]);
 const editValues = ref({});
 const noteValues = ref({});
 const historyItems = ref([]);
@@ -318,6 +370,11 @@ const placingH = ref(1);
 const layoutZoom = ref(1);
 const equipmentName = ref('');
 const showRecorderModal = ref(false);
+const showAreaModal = ref(false);
+const areas = ref([]);
+const newAreaName = ref('');
+const editingArea = ref(null);
+const allKnownLocations = ref([]);
 
 const zoomIn = () => { layoutZoom.value = Math.min(2, +(layoutZoom.value + 0.2).toFixed(1)); };
 const zoomOut = () => { layoutZoom.value = Math.max(0.4, +(layoutZoom.value - 0.2).toFixed(1)); };
@@ -359,7 +416,7 @@ const reload = async () => {
   try {
     const response = await api.stocktakeRecords.list({
       stocktake_date: filters.stocktake_date,
-      process_id: filters.process_id || undefined,
+      line_id: filters.line_id || undefined,
       stock_location: filters.stock_location || undefined,
       product_code: filters.product_code || undefined,
       product_name: filters.product_name || undefined,
@@ -367,8 +424,8 @@ const reload = async () => {
       diff_only: filters.diff_only ? "true" : undefined,
     });
     rows.value = Array.isArray(response.data?.rows) ? response.data.rows : [];
-    if (!processOptions.value.length) {
-      processOptions.value = Array.isArray(response.data?.processes) ? response.data.processes : [];
+    if (!lineOptions.value.length) {
+      lineOptions.value = Array.isArray(response.data?.lines) ? response.data.lines : [];
     }
     if (!locations.value.length) {
       locations.value = Array.isArray(response.data?.locations) ? response.data.locations : [];
@@ -398,8 +455,25 @@ const isDirty = (row) => {
 };
 
 const hasDiff = (row) => calcDiff(row) !== 0;
+const selectedArea = computed(() => {
+  if (!filters.area_id) return null;
+  return areas.value.find(a => a.id === Number(filters.area_id)) || null;
+});
+const filteredLocations = computed(() => {
+  if (!selectedArea.value) return locations.value;
+  return locations.value.filter(l => selectedArea.value.locations.includes(l));
+});
+const areaFilteredRows = computed(() => {
+  if (!selectedArea.value) return rows.value;
+  const locs = new Set(selectedArea.value.locations);
+  return rows.value.filter(row => {
+    const rowLocs = getRowLocations(row);
+    if (!rowLocs.length) return false;
+    return rowLocs.some(l => locs.has(l));
+  });
+});
 const diffCount = computed(() => filteredRows.value.filter((row) => hasDiff(row)).length);
-const filteredRows = computed(() => rows.value);
+const filteredRows = computed(() => areaFilteredRows.value);
 const selectedRow = computed(() => filteredRows.value.find((row) => row.product_id === selectedProductId.value) || null);
 const selectedRowIndex = computed(() => filteredRows.value.findIndex((row) => row.product_id === selectedProductId.value));
 const selectedIndexLabel = computed(() => {
@@ -445,7 +519,7 @@ const locationTiles = computed(() => {
 });
 
 const openLayout = async () => {
-  filters.process_id = '';
+  filters.line_id = '';
   filters.stock_location = '';
   filters.product_code = '';
   viewMode.value = 'layout';
@@ -805,8 +879,8 @@ const removeRecorder = async (id) => {
   }
 };
 
-const clearProcessFilter = () => {
-  filters.process_id = "";
+const clearLineFilter = () => {
+  filters.line_id = "";
 };
 
 const clearLocationFilter = () => {
@@ -815,6 +889,85 @@ const clearLocationFilter = () => {
 
 const clearProductCodeFilter = () => {
   filters.product_code = "";
+};
+
+const loadAreas = async () => {
+  try {
+    const res = await api.stocktakeRecords.listAreas();
+    areas.value = Array.isArray(res.data?.areas) ? res.data.areas : [];
+  } catch (e) {
+    console.error('エリア取得エラー:', e);
+  }
+};
+
+const loadAllKnownLocations = async () => {
+  try {
+    const res = await api.stocktakeRecords.list({
+      stocktake_date: filters.stocktake_date,
+    });
+    const locs = new Set();
+    const rows = Array.isArray(res.data?.rows) ? res.data.rows : [];
+    for (const row of rows) {
+      if (row.stock_locations && row.stock_locations.length) {
+        row.stock_locations.forEach(l => locs.add(l));
+      } else if (row.stock_location) {
+        locs.add(row.stock_location);
+      }
+    }
+    const apiLocs = Array.isArray(res.data?.locations) ? res.data.locations : [];
+    apiLocs.forEach(l => locs.add(l));
+    allKnownLocations.value = [...locs].sort((a, b) => a.localeCompare(b, 'ja'));
+  } catch (e) {
+    console.error('置き場一覧取得エラー:', e);
+  }
+};
+
+const createArea = async () => {
+  if (!newAreaName.value) return;
+  try {
+    await api.stocktakeRecords.saveArea({ name: newAreaName.value, locations: [] });
+    newAreaName.value = '';
+    await loadAreas();
+  } catch (e) {
+    alert('エリア追加に失敗しました');
+  }
+};
+
+const deleteArea = async (id) => {
+  if (!confirm('このエリアを削除しますか？')) return;
+  try {
+    await api.stocktakeRecords.deleteArea(id);
+    if (String(filters.area_id) === String(id)) filters.area_id = '';
+    await loadAreas();
+  } catch (e) {
+    alert('エリア削除に失敗しました');
+  }
+};
+
+const startEditArea = (area) => {
+  editingArea.value = { ...area, locations: [...area.locations] };
+  loadAllKnownLocations();
+};
+
+const toggleAreaLocation = (loc) => {
+  const idx = editingArea.value.locations.indexOf(loc);
+  if (idx >= 0) editingArea.value.locations.splice(idx, 1);
+  else editingArea.value.locations.push(loc);
+};
+
+const saveEditArea = async () => {
+  if (!editingArea.value?.name) return;
+  try {
+    await api.stocktakeRecords.saveArea({
+      id: editingArea.value.id,
+      name: editingArea.value.name,
+      locations: editingArea.value.locations,
+    });
+    editingArea.value = null;
+    await loadAreas();
+  } catch (e) {
+    alert('エリア保存に失敗しました');
+  }
 };
 
 const buildSaveItems = (targetRows) =>
@@ -865,10 +1018,11 @@ const formatDateTime = (value) => {
 onMounted(() => {
   reload();
   loadRecorders();
+  loadAreas();
 });
 
 watch(
-  () => [filters.stocktake_date, filters.process_id, filters.stock_location, filters.product_code],
+  () => [filters.stocktake_date, filters.line_id, filters.stock_location, filters.product_code],
   () => {
     reload();
   }
@@ -1748,13 +1902,13 @@ watch(() => filters.stocktake_date, () => {
 }
 
 .stocktake-detail-mobile {
-  width: 344px;
+  max-width: 600px;
   margin: 0 auto;
   min-height: 100vh;
   background: #ffffff;
   color: #1f2937;
   font-family: "Noto Sans JP", "Segoe UI", sans-serif;
-  padding-bottom: 16px;
+  padding: 0 10px 16px;
 }
 
 .detail-header {
@@ -1886,5 +2040,40 @@ watch(() => filters.stocktake_date, () => {
     grid-column: 2;
     grid-row: 1 / span 4;
   }
+}
+
+.area-select {
+  font-size: 13px;
+  font-weight: 700;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.5);
+  border-radius: 4px;
+  color: #fff;
+  padding: 2px 4px;
+  max-width: 120px;
+}
+.area-select option { color: #1f2937; background: #fff; }
+
+.area-modal { max-width: 440px; }
+.area-edit-name-row { display: flex; gap: 6px; margin-bottom: 8px; }
+.area-edit-name-row input { flex: 1; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+.btn-save { padding: 4px 12px; background: #16a34a; color: #fff; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.btn-save:disabled { opacity: 0.5; }
+.btn-cancel { padding: 4px 12px; background: #6b7280; color: #fff; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.area-loc-title { font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+.area-loc-chips { display: flex; flex-wrap: wrap; gap: 6px; max-height: 300px; overflow-y: auto; }
+.area-loc-chip {
+  padding: 4px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 16px;
+  font-size: 13px;
+  cursor: pointer;
+  background: #f3f4f6;
+  transition: all 0.15s;
+}
+.area-loc-chip.selected {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
 }
 </style>

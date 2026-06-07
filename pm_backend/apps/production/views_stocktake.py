@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 from accounts.permissions import HasResourcePermissionOrReadOnly
 from masters.models import Process, Product, ProductStockLocation
 
-from .models_stocktake_record import StocktakeRecord, StocktakeRecorder, StocktakeLayoutConfig
+from .models_stocktake_record import StocktakeRecord, StocktakeRecorder, StocktakeLayoutConfig, StocktakeArea
 from .models_line_backlog import LineBacklog
 
 
@@ -61,14 +61,9 @@ class StocktakeRecordView(APIView):
 
         qs = Product.objects.filter(is_active=True)
 
-        process_id = request.query_params.get('process_id')
-        if process_id:
-            process_obj = Process.objects.filter(pk=process_id).only('id', 'process_code', 'process_name').first()
-            processing_area = self._resolve_processing_area_from_process(process_obj)
-            if processing_area:
-                qs = qs.filter(Q(process_id=process_id) | Q(processing_area=processing_area))
-            else:
-                qs = qs.filter(process_id=process_id)
+        line_id = request.query_params.get('line_id')
+        if line_id:
+            qs = qs.filter(line_id=line_id)
 
         stock_location = str(request.query_params.get('stock_location') or '').strip()
         if stock_location:
@@ -164,30 +159,22 @@ class StocktakeRecordView(APIView):
             for sl in product.stock_locations.all():
                 loc_set.add(sl.location_name)
         locations = sorted(loc_set)
-        processes = sorted(
-            [
-                {
-                    'id': product.process_id,
-                    'process_code': product.process.process_code,
-                    'process_name': product.process.process_name,
-                }
-                for product in products
-                if product.process_id and product.process
-            ],
-            key=lambda item: (item['process_code'], item['process_name'])
-        )
-        unique_processes = []
-        seen_process_ids = set()
-        for item in processes:
-            if item['id'] in seen_process_ids:
-                continue
-            seen_process_ids.add(item['id'])
-            unique_processes.append(item)
+        seen_line_ids = set()
+        unique_lines = []
+        for product in products:
+            if product.line_id and product.line and product.line_id not in seen_line_ids:
+                seen_line_ids.add(product.line_id)
+                unique_lines.append({
+                    'id': product.line_id,
+                    'line_code': product.line.line_code,
+                    'line_name': product.line.line_name,
+                })
+        unique_lines.sort(key=lambda x: x['line_code'])
 
         return Response({
             'rows': rows,
             'locations': locations,
-            'processes': unique_processes,
+            'lines': unique_lines,
         })
 
     def post(self, request):
@@ -330,3 +317,43 @@ class StocktakeLayoutConfigView(APIView):
             defaults={'cols': cols, 'row_count': row_count, 'cells': cells},
         )
         return Response({'cols': config.cols, 'rows': config.row_count, 'cells': config.cells})
+
+
+class StocktakeAreaView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        areas = StocktakeArea.objects.all()
+        return Response({
+            'areas': [
+                {'id': a.id, 'name': a.name, 'locations': a.locations, 'sort_order': a.sort_order}
+                for a in areas
+            ]
+        })
+
+    def post(self, request):
+        name = str(request.data.get('name', '')).strip()
+        if not name:
+            return Response({'detail': 'エリア名は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+        locations = request.data.get('locations', [])
+        sort_order = int(request.data.get('sort_order', 0))
+        area_id = request.data.get('id')
+        if area_id:
+            try:
+                area = StocktakeArea.objects.get(id=area_id)
+                area.name = name
+                area.locations = locations
+                area.sort_order = sort_order
+                area.save()
+            except StocktakeArea.DoesNotExist:
+                return Response({'detail': 'エリアが見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            area = StocktakeArea.objects.create(name=name, locations=locations, sort_order=sort_order)
+        return Response({'id': area.id, 'name': area.name, 'locations': area.locations, 'sort_order': area.sort_order})
+
+    def delete(self, request):
+        area_id = request.data.get('id')
+        if not area_id:
+            return Response({'detail': 'id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+        deleted, _ = StocktakeArea.objects.filter(id=area_id).delete()
+        return Response({'deleted': deleted})
