@@ -133,6 +133,7 @@
       </div>
 
       <div v-if="filteredRows.length || rows.length" class="form-actions">
+        <button v-if="isAdminUser && hasConfirmableProgressRows" class="btn-confirm-all" type="button" @click="confirmAllProgressRows">全確認済み</button>
         <button v-if="filterHeld !== 'yes'" class="btn-success" @click="saveReceiving" :disabled="saving || !allTargetsConfirmed">検収確定</button>
         <button v-if="filterHeld === 'yes'" class="btn-held-confirm" @click="saveHeldReceiving" :disabled="saving || !allHeldConfirmed">数変更検収確定</button>
       </div>
@@ -238,6 +239,7 @@
         </div>
 
         <div v-if="deliveryListRows.length" class="form-actions">
+          <button v-if="isAdminUser && hasConfirmableDeliveryRows" class="btn-confirm-all" type="button" @click="confirmAllDeliveryRows">全確認済み</button>
           <button v-if="filterHeldDelivery !== 'yes'" class="btn-success" :disabled="saving || !allDeliveryTargetsConfirmed" @click="saveDeliveryListReceiving">検収確定</button>
           <button v-if="filterHeldDelivery === 'yes'" class="btn-held-confirm" :disabled="saving || !allDeliveryHeldConfirmed" @click="saveDeliveryListHeldReceiving">数変更検収確定</button>
         </div>
@@ -618,6 +620,20 @@ const allTargetsConfirmed = computed(() => filteredRows.value.filter((r) => !r.h
 const allHeldConfirmed = computed(() => filteredRows.value.filter((r) => r.held && !isReceived(r)).every((r) => r.confirmed))
 const allDeliveryTargetsConfirmed = computed(() => filteredDeliveryListRows.value.filter((r) => !r.held && !isReceived(r)).every((r) => r.confirmed))
 const allDeliveryHeldConfirmed = computed(() => filteredDeliveryListRows.value.filter((r) => r.held && !isReceived(r)).every((r) => r.confirmed))
+const hasConfirmableProgressRows = computed(() => filteredRows.value.some((r) => !isReceived(r) && !r.confirmed))
+const hasConfirmableDeliveryRows = computed(() => filteredDeliveryListRows.value.some((r) => !isReceived(r) && !r.confirmed))
+
+const confirmAllProgressRows = () => {
+  for (const row of filteredRows.value) {
+    if (!isReceived(row)) row.confirmed = true
+  }
+}
+
+const confirmAllDeliveryRows = () => {
+  for (const row of filteredDeliveryListRows.value) {
+    if (!isReceived(row)) row.confirmed = true
+  }
+}
 
 const saveHeldReceiving = async () => {
   const heldItems = filteredRows.value.filter((r) => r.held && !isReceived(r))
@@ -648,6 +664,7 @@ const saveHeldReceiving = async () => {
 const showHistory = ref(false)
 const historyLoading = ref(false)
 const historyRows = ref([])
+const isAdminUser = computed(() => authState.user?.username === 'admin')
 
 const toggleHistory = async () => {
   showHistory.value = !showHistory.value
@@ -969,6 +986,16 @@ onMounted(fetchSuppliers)
   cursor: pointer;
 }
 .btn-held-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-confirm-all {
+  padding: 6px 16px;
+  background: #0f766e;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-confirm-all:hover { background: #0d9488; }
 .btn-history {
   padding: 6px 16px;
   background: #6366f1;

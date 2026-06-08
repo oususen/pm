@@ -72,6 +72,8 @@
         <ul class="rule-list">
           <li>テンプレ出力前に「仕入先」を選択してください。テンプレには対象品番・品名が入ります。</li>
           <li>取込ヘッダーは「品番 / 品名 / 数量 / 納品日 / 仕入先コード / 伝票番号」を使用してください。</li>
+          <li class="rule-important">納品日は `YYYY-MM-DD` / `YYYY/MM/DD` / `YYYY/M/D` 形式のみ取込可能です（例: 2026-06-08, 2026/06/08, 2026/6/8）。</li>
+          <li class="rule-important">返送Excel内の納品日は全行同一、かつ画面の対象日と一致している必要があります。</li>
           <li class="rule-important">数量が空白の行は取込時に除外されます（保存しません）。</li>
           <li class="rule-important">数量が0の行は前回取り込んだ同日同製品の計画数を取消として保存され、同日同製品の計画数量を0へ上書きします。</li>
           <li>数量が1以上の行は計画として保存されます。</li>
@@ -240,6 +242,36 @@ const downloadProgressPdf = async () => {
 
 const normalizeHeader = (v) => String(v || '').trim().replace(/\s/g, '')
 const readCell = (row, map, name) => row[map[name] ?? -1]
+const DATE_PATTERN = /^(\d{4})([-/])(\d{1,2})\2(\d{1,2})$/
+
+const formatNormalizedDate = (year, month, day) => `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+
+const buildDateResult = (year, month, day, fallbackValue) => {
+  if (
+    !Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day) ||
+    month < 1 || month > 12 || day < 1 || day > 31
+  ) {
+    return { blank: false, valid: false, value: fallbackValue }
+  }
+  return { blank: false, valid: true, value: formatNormalizedDate(year, month, day) }
+}
+
+const parseDeliveryDateStrict = (v) => {
+  if (v instanceof Date && !Number.isNaN(v.getTime())) {
+    return buildDateResult(v.getFullYear(), v.getMonth() + 1, v.getDate(), String(v))
+  }
+  if (typeof v === 'number' && Number.isFinite(v)) {
+    const parsed = XLSX.SSF.parse_date_code(v)
+    if (!parsed) return { blank: false, valid: false, value: String(v) }
+    return buildDateResult(parsed.y, parsed.m, parsed.d, String(v))
+  }
+  const raw = String(v ?? '').trim()
+  if (!raw) return { blank: true, valid: false, value: '' }
+  const match = raw.match(DATE_PATTERN)
+  if (!match) return { blank: false, valid: false, value: raw }
+  return buildDateResult(Number(match[1]), Number(match[3]), Number(match[4]), raw)
+}
+
 const parseQty = (v) => {
   const raw = String(v ?? '').trim()
   if (raw === '') return { blank: true, qty: 0, invalid: false }
@@ -283,15 +315,29 @@ const onFileChange = async (event) => {
 
     const grouped = new Map()
     const rowErrors = []
+    const deliveryDateErrors = []
+    const deliveryDates = new Set()
     for (let i = 1; i < matrix.length; i += 1) {
       const row = matrix[i]
       const rowNo = i + 1
       const productCode = String(readCell(row, idx, '品番') || '').trim().toUpperCase()
+      if (!productCode) continue
+
       const qtyInfo = parseQty(readCell(row, idx, '数量'))
-      const deliveryDate = String(readCell(row, idx, '納品日') || '').trim() || targetDate.value
+      const deliveryDateInfo = parseDeliveryDateStrict(readCell(row, idx, '納品日'))
       const supplierCodeRaw = String(readCell(row, idx, '仕入先コード') || '').trim().toUpperCase()
       const slipNo = String(readCell(row, idx, '伝票番号') || '').trim()
-      if (!productCode) continue
+
+      if (deliveryDateInfo.blank) {
+        deliveryDateErrors.push(`${rowNo}行目: 納品日は必須です。YYYY-MM-DD / YYYY/MM/DD / YYYY/M/D 形式で入力してください。`)
+        continue
+      }
+      if (!deliveryDateInfo.valid) {
+        deliveryDateErrors.push(`${rowNo}行目: 納品日はYYYY-MM-DD / YYYY/MM/DD / YYYY/M/D 形式のみ取込可能です (${deliveryDateInfo.value})`)
+        continue
+      }
+      deliveryDates.add(deliveryDateInfo.value)
+
       if (!productMap.has(productCode)) {
         rowErrors.push(`${rowNo}行目: 品番が対象外です (${productCode})`)
         continue
@@ -316,7 +362,7 @@ const onFileChange = async (event) => {
           product_code: product.product_code,
           product_name: product.product_name,
           received_qty: 0,
-          delivery_date: deliveryDate,
+          delivery_date: deliveryDateInfo.value,
           supplier_code: supplierCode,
           slip_no: slipNo,
           note: '',
@@ -326,6 +372,26 @@ const onFileChange = async (event) => {
       current.received_qty += qtyInfo.qty
       if (!current.slip_no && slipNo) current.slip_no = slipNo
     }
+
+    if (deliveryDateErrors.length) {
+      errors.value = deliveryDateErrors
+      rows.value = []
+      return
+    }
+
+    if (deliveryDates.size > 1) {
+      errors.value = ['返送Excel内の納品日は全行同一である必要があります。複数の日付が含まれています。']
+      rows.value = []
+      return
+    }
+
+    const [importDeliveryDate] = [...deliveryDates]
+    if (importDeliveryDate && importDeliveryDate !== targetDate.value) {
+      errors.value = [`返送Excelの納品日 (${importDeliveryDate}) が画面の対象日 (${targetDate.value}) と一致していません。`]
+      rows.value = []
+      return
+    }
+
     rows.value = [...grouped.values()].sort((a, b) => (a.product_code || '').localeCompare(b.product_code || ''))
     errors.value = rowErrors
   } catch (e) {
