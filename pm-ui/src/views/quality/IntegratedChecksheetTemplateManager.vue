@@ -289,6 +289,7 @@
                         <select v-model="item.record_type" class="cell-input">
                           <option value="CHECK">チェック</option>
                           <option value="NUMERIC">数値</option>
+                          <option value="NUMERIC_CHECK">数値＋チェック</option>
                           <option value="PHOTO_NUMERIC">写真＋数値</option>
                           <option value="PHOTO">写真のみ</option>
                           <option value="TEXT">文字</option>
@@ -951,6 +952,7 @@ const recordTypeLabel = (recordType) => {
   const v = String(recordType || '')
   if (v === 'CHECK') return 'チェック'
   if (v === 'NUMERIC') return '数値'
+  if (v === 'NUMERIC_CHECK') return '数値＋チェック'
   if (v === 'PHOTO_NUMERIC') return '写真＋数値'
   if (v === 'PHOTO') return '写真のみ'
   if (v === 'TEXT') return '文字'

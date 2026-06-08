@@ -364,6 +364,39 @@
                       :disabled="!canEdit"
                     >{{ t('integratedOperation.reworkFlow') }}</button>
                   </template>
+                  <!-- NUMERIC_CHECK -->
+                  <template v-else-if="item.record_type === 'NUMERIC_CHECK'">
+                    <div class="numeric-check-row">
+                      <input
+                        type="number"
+                        step="any"
+                        class="numeric-input"
+                        :value="modalResponses[item.id]?.numeric_value ?? ''"
+                        @input="setNumericOnly(item.id, $event.target.value)"
+                        :disabled="!canEdit"
+                        :placeholder="item.criteria || '数値'"
+                      />
+                      <span v-if="item.unit" class="unit-label">{{ item.unit }}</span>
+                      <button
+                        class="judge-btn ok"
+                        :class="{ active: modalResponses[item.id]?.judgement === 'OK' }"
+                        @click="setJudgement(item.id, 'OK')"
+                        :disabled="!canEdit"
+                      >OK</button>
+                      <button
+                        class="judge-btn ng"
+                        :class="{ active: modalResponses[item.id]?.judgement === 'NG' }"
+                        @click="setJudgement(item.id, 'NG')"
+                        :disabled="!canEdit"
+                      >NG</button>
+                      <button
+                        class="judge-btn rework"
+                        :class="{ active: modalResponses[item.id]?.judgement === '修正流動' }"
+                        @click="setJudgement(item.id, '修正流動')"
+                        :disabled="!canEdit"
+                      >{{ t('integratedOperation.reworkFlow') }}</button>
+                    </div>
+                  </template>
                   <!-- NUMERIC -->
                   <template v-else-if="isNumericRecordType(item.record_type)">
                     <input
@@ -710,6 +743,7 @@ const recordTypeLabel = (rt) => {
   switch (rt) {
     case 'CHECK': return 'C'
     case 'NUMERIC': return 'N'
+    case 'NUMERIC_CHECK': return '数+C'
     case 'PHOTO_NUMERIC': return '写+数'
     case 'PHOTO': return '写'
     case 'TEXT': return 'T'
@@ -761,6 +795,11 @@ const cellDisplay = (unit, item) => {
     if (check.judgement === '修正流動') return '修正流動'
     return ''
   }
+  if (item.record_type === 'NUMERIC_CHECK') {
+    const num = check.numeric_value != null ? check.numeric_value : ''
+    const jdg = check.judgement === 'OK' ? '✓' : check.judgement === 'NG' ? '✗' : check.judgement === '修正流動' ? '修' : ''
+    return jdg ? `${num} ${jdg}` : String(num)
+  }
   if (isNumericRecordType(item.record_type)) {
     return check.numeric_value != null ? check.numeric_value : ''
   }
@@ -775,7 +814,7 @@ const cellClass = (unit, block, item) => {
   if (isBlockLocked(unit, block)) return 'cell-locked'
   const check = getCheckForItem(unit, item)
   if (!check) return 'cell-empty'
-  if (item.record_type === 'CHECK') {
+  if (item.record_type === 'CHECK' || item.record_type === 'NUMERIC_CHECK') {
     if (check.judgement === 'OK') return 'cell-ok'
     if (check.judgement === 'NG') return 'cell-ng'
     if (check.judgement === '修正流動') return 'cell-rework'
@@ -1357,6 +1396,14 @@ const setNumeric = (itemId, val) => {
   }
 }
 
+const setNumericOnly = (itemId, val) => {
+  if (!canEdit.value) return
+  if (!modalResponses.value[itemId]) {
+    modalResponses.value[itemId] = { judgement: '', numeric_value: null, text_value: '' }
+  }
+  modalResponses.value[itemId].numeric_value = val !== '' ? parseFloat(val) : null
+}
+
 const setText = (itemId, val) => {
   if (!canEdit.value) return
   if (!modalResponses.value[itemId]) {
@@ -1372,6 +1419,7 @@ const hasMissingRequiredItems = (block) => {
     const r = modalResponses.value[item.id]
     if (!r) return true
     if (item.record_type === 'CHECK') return !r.judgement
+    if (item.record_type === 'NUMERIC_CHECK') return !r.judgement || r.numeric_value === null || r.numeric_value === '' || r.numeric_value === undefined
     if (isNumericRecordType(item.record_type)) return r.numeric_value === null || r.numeric_value === '' || r.numeric_value === undefined
     return !r.text_value
   })
@@ -1445,6 +1493,7 @@ const saveBlockChecks = async (block, options = {}) => {
     const r = modalResponses.value[item.id]
     if (!r) return true
     if (item.record_type === 'CHECK') return !r.judgement
+    if (item.record_type === 'NUMERIC_CHECK') return !r.judgement || r.numeric_value === null || r.numeric_value === '' || r.numeric_value === undefined
     if (isNumericRecordType(item.record_type)) return r.numeric_value === null || r.numeric_value === '' || r.numeric_value === undefined
     return !r.text_value
   })
@@ -1478,6 +1527,9 @@ const saveBlockChecks = async (block, options = {}) => {
       if (!r) continue
       const entry = { item: item.id }
       if (item.record_type === 'CHECK') {
+        entry.judgement = r.judgement || ''
+      } else if (item.record_type === 'NUMERIC_CHECK') {
+        entry.numeric_value = r.numeric_value
         entry.judgement = r.judgement || ''
       } else if (isNumericRecordType(item.record_type)) {
         entry.numeric_value = r.numeric_value
@@ -2071,6 +2123,7 @@ onMounted(async () => {
 .unit-label { font-size: 12px; color: #6b7280; }
 .numeric-input.numeric-ok { border-color: #059669; background: #ecfdf5; }
 .numeric-input.numeric-ng { border-color: #dc2626; background: #fef2f2; }
+.numeric-check-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .auto-judge-badge { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 3px; }
 .auto-judge-badge.ok { background: #d1fae5; color: #065f46; }
 .auto-judge-badge.ng { background: #fee2e2; color: #991b1b; }
