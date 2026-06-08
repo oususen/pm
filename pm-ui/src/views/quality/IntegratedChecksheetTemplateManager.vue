@@ -280,9 +280,8 @@
                       <td>
                         <span v-if="itemDiffStatus(block, item) === 'new'" class="diff-badge diff-badge-new">新規</span>
                         <span v-else-if="itemDiffStatus(block, item) === 'changed'" class="diff-badge diff-badge-changed">{{ diffLabel }}</span>
-                        <input v-model.trim="item.item_name" class="cell-input" />
-                      </td>
-                      <td><input v-model.trim="item.standard" class="cell-input" /></td>
+                        <textarea v-model.trim="item.item_name" class="cell-input cell-multiline" rows="1" @input="autoResize($event)" /></td>
+                      <td><textarea v-model.trim="item.standard" class="cell-input cell-multiline" rows="1" @input="autoResize($event)" /></td>
                       <td><input v-model.trim="item.frequency" class="cell-input cell-sm" /></td>
                       <td><input v-model.trim="item.method" class="cell-input cell-sm" /></td>
                       <td>
@@ -948,6 +947,12 @@ const deletedItemsByBlock = (block) => {
   return blockDiffCache.value?.[block?._key]?.deleted || []
 }
 
+const autoResize = (e) => {
+  const el = e.target
+  el.style.height = 'auto'
+  el.style.height = el.scrollHeight + 'px'
+}
+
 const recordTypeLabel = (recordType) => {
   const v = String(recordType || '')
   if (v === 'CHECK') return 'チェック'
@@ -1184,6 +1189,8 @@ const selectTemplate = async (id) => {
     }
     editMode.value = true
     markSavedSnapshot()
+    await nextTick()
+    document.querySelectorAll('.cell-multiline').forEach(el => { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px' })
   } catch (e) {
     console.error('テンプレート詳細取得失敗:', e)
     alert('テンプレート詳細の取得に失敗しました。')
@@ -2508,6 +2515,12 @@ watch(copyItemsSourceTemplateId, async (templateId) => {
   border: 1px solid #cbd5e1;
   border-radius: 3px;
   font-size: 13px;
+}
+textarea.cell-multiline {
+  resize: vertical;
+  overflow: hidden;
+  min-height: 24px;
+  font-family: inherit;
 }
 .cell-sm {
   max-width: 80px;

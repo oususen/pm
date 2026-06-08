@@ -328,9 +328,46 @@
               <span v-if="isBlockLockedForModal(block)" class="lock-label">{{ t('integratedOperation.lockedByPrevious') }}</span>
             </div>
 
-            <!-- 略図プレースホルダー -->
-            <div v-if="block.sketch_image_url && !isBlockLockedForModal(block)" class="sketch-placeholder">
-              <img :src="block.sketch_image_url" alt="略図" class="sketch-img" />
+            <!-- 略図 + フィールドオーバーレイ -->
+            <div v-if="block.sketch_image_url && !isBlockLockedForModal(block)" class="sketch-container" :ref="el => setSketchContainerRef(block.id, el)">
+              <img :src="block.sketch_image_url" alt="略図" class="sketch-img" @load="onSketchImgLoad(block.id, $event)" />
+              <div
+                v-for="field in (block.sketch_fields || [])"
+                :key="'sf-'+field.id"
+                class="sketch-field-overlay"
+                :style="sketchFieldStyle(block.id, field)"
+              >
+                <template v-if="field.field_type === 'checkbox'">
+                  <button
+                    class="sketch-overlay-btn"
+                    :class="{ checked: modalSketchFieldResponses[block.id]?.[field.key] === true }"
+                    @click="setSketchFieldValue(block.id, field.key, modalSketchFieldResponses[block.id]?.[field.key] === true ? null : true)"
+                    :disabled="!canEdit"
+                  >{{ modalSketchFieldResponses[block.id]?.[field.key] === true ? '✓' : '' }}</button>
+                </template>
+                <template v-else-if="field.field_type === 'pen'">
+                  <canvas
+                    :ref="el => setPenCanvasRef(block.id, field.key, el)"
+                    class="pen-canvas-overlay"
+                    :width="field.width || 120"
+                    :height="field.height || 40"
+                    @pointerdown="penDown(block.id, field.key, $event)"
+                    @pointermove="penMove(block.id, field.key, $event)"
+                    @pointerup="penUp(block.id, field.key, $event)"
+                    @pointerleave="penUp(block.id, field.key, $event)"
+                  />
+                  <button v-if="canEdit" class="btn-pen-clear-overlay" title="クリア" @click="penClear(block.id, field.key)">&#10005;</button>
+                </template>
+                <template v-else>
+                  <input
+                    type="text"
+                    class="sketch-overlay-input"
+                    :value="modalSketchFieldResponses[block.id]?.[field.key] ?? ''"
+                    @input="setSketchFieldValue(block.id, field.key, $event.target.value)"
+                    :disabled="!canEdit"
+                  />
+                </template>
+              </div>
             </div>
 
             <!-- チェック項目 -->
@@ -497,7 +534,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
@@ -651,6 +688,7 @@ const isBlockedByPreferredProcess = (block) => {
 // --- モーダル ---
 const modalUnit = ref(null)
 const modalResponses = ref({})
+const modalSketchFieldResponses = ref({})
 const modalSelectedBlockId = ref(null)
 const savingBlock = ref(null)
 
@@ -1312,6 +1350,15 @@ const openUnitModal = (unit, blockId = null) => {
     }
   }
   modalResponses.value = resp
+  const sketchResp = {}
+  if (unit.sketch_responses) {
+    for (const sr of unit.sketch_responses) {
+      const blockId = Number(sr.process_block)
+      const fr = sr.field_responses && typeof sr.field_responses === 'object' ? { ...sr.field_responses } : {}
+      sketchResp[blockId] = fr
+    }
+  }
+  modalSketchFieldResponses.value = sketchResp
 }
 
 const moveModalUnit = (delta) => {
@@ -1468,10 +1515,110 @@ const shouldShowHoldMark = (unit) => {
   return hasUnitAnyCheckValue(unit) && hasUnitMissingRequired(unit)
 }
 
+const sketchScales = ref({})
+const sketchContainerRefs = {}
+
+const setSketchContainerRef = (blockId, el) => {
+  sketchContainerRefs[blockId] = el
+}
+
+const onSketchImgLoad = (blockId, e) => {
+  const img = e.target
+  const naturalW = img.naturalWidth
+  const displayW = img.clientWidth
+  sketchScales.value[blockId] = naturalW > 0 ? displayW / naturalW : 1
+}
+
+const sketchFieldStyle = (blockId, field) => {
+  const scale = sketchScales.value[blockId] || 1
+  return {
+    position: 'absolute',
+    left: `${field.x * scale}px`,
+    top: `${field.y * scale}px`,
+    width: `${field.width * scale}px`,
+    height: `${field.height * scale}px`,
+  }
+}
+
+const setSketchFieldValue = (blockId, fieldKey, value) => {
+  if (!canEdit.value) return
+  if (!modalSketchFieldResponses.value[blockId]) {
+    modalSketchFieldResponses.value[blockId] = {}
+  }
+  modalSketchFieldResponses.value[blockId][fieldKey] = value
+}
+
+const penCanvasRefs = {}
+const penDrawingState = {}
+
+const setPenCanvasRef = (blockId, fieldKey, el) => {
+  const k = `${blockId}_${fieldKey}`
+  penCanvasRefs[k] = el
+  if (el) {
+    nextTick(() => {
+      const data = modalSketchFieldResponses.value[blockId]?.[fieldKey]
+      if (data && typeof data === 'string' && data.startsWith('data:')) {
+        const img = new Image()
+        img.onload = () => { el.getContext('2d').drawImage(img, 0, 0) }
+        img.src = data
+      }
+    })
+  }
+}
+
+const penDown = (blockId, fieldKey, e) => {
+  if (!canEdit.value) return
+  const k = `${blockId}_${fieldKey}`
+  const canvas = penCanvasRefs[k]
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  const x = (e.clientX - rect.left) * (canvas.width / rect.width)
+  const y = (e.clientY - rect.top) * (canvas.height / rect.height)
+  penDrawingState[k] = true
+  const ctx = canvas.getContext('2d')
+  ctx.beginPath()
+  ctx.moveTo(x, y)
+  ctx.lineWidth = 2
+  ctx.lineCap = 'round'
+  ctx.strokeStyle = '#000'
+  canvas.setPointerCapture(e.pointerId)
+}
+
+const penMove = (blockId, fieldKey, e) => {
+  const k = `${blockId}_${fieldKey}`
+  if (!penDrawingState[k]) return
+  const canvas = penCanvasRefs[k]
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  const x = (e.clientX - rect.left) * (canvas.width / rect.width)
+  const y = (e.clientY - rect.top) * (canvas.height / rect.height)
+  const ctx = canvas.getContext('2d')
+  ctx.lineTo(x, y)
+  ctx.stroke()
+}
+
+const penUp = (blockId, fieldKey, e) => {
+  const k = `${blockId}_${fieldKey}`
+  if (!penDrawingState[k]) return
+  penDrawingState[k] = false
+  const canvas = penCanvasRefs[k]
+  if (!canvas) return
+  setSketchFieldValue(blockId, fieldKey, canvas.toDataURL('image/png'))
+}
+
+const penClear = (blockId, fieldKey) => {
+  const k = `${blockId}_${fieldKey}`
+  const canvas = penCanvasRefs[k]
+  if (!canvas) return
+  canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height)
+  setSketchFieldValue(blockId, fieldKey, null)
+}
+
 const getSketchPayloadForBlock = (unit, blockId, hold, holdReason = '') => {
   const existing = (unit?.sketch_responses || []).find((resp) => Number(resp.process_block) === Number(blockId))
   const drawingData = existing?.drawing_data && typeof existing.drawing_data === 'object' ? existing.drawing_data : {}
-  const fieldResponses = existing?.field_responses && typeof existing.field_responses === 'object' ? { ...existing.field_responses } : {}
+  const modalFieldValues = modalSketchFieldResponses.value[blockId] || {}
+  const fieldResponses = { ...modalFieldValues }
   fieldResponses._hold = Boolean(hold)
   if (hold) {
     fieldResponses._hold_reason = String(holdReason || '').trim()
@@ -1859,7 +2006,7 @@ onMounted(async () => {
 }
 
 .td-process { position: sticky; left: 0; z-index: 1; background: #fff; font-size: 11px; color: #6b7280; }
-.td-item { position: sticky; left: 60px; z-index: 1; background: #fff; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.td-item { position: sticky; left: 60px; z-index: 1; background: #fff; max-width: 200px; white-space: pre-line; }
 .td-type { position: sticky; left: 200px; z-index: 1; background: #fff; text-align: center; }
 .td-cell { text-align: center; cursor: pointer; min-width: 52px; }
 .td-cell:hover { background: #f0f4ff; }
@@ -1870,7 +2017,7 @@ onMounted(async () => {
 }
 .td-cell.cell-disabled-by-process:hover { background: #f3f4f6; }
 
-.item-standard { font-size: 10px; color: #9ca3af; display: block; }
+.item-standard { font-size: 10px; color: #9ca3af; display: block; white-space: pre-line; }
 
 .type-tag { font-size: 10px; font-weight: 700; padding: 1px 4px; border-radius: 3px; }
 .type-tag.type-CHECK { background: #dbeafe; color: #1d4ed8; }
@@ -2087,8 +2234,8 @@ onMounted(async () => {
 }
 .item-row:last-child { border-bottom: none; }
 .item-label-area { flex: 1; min-width: 0; }
-.item-name { font-size: 13px; font-weight: 500; }
-.item-hint { font-size: 11px; color: #9ca3af; margin-left: 4px; }
+.item-name { font-size: 13px; font-weight: 500; white-space: pre-line; }
+.item-hint { font-size: 11px; color: #9ca3af; margin-left: 4px; white-space: pre-line; }
 .item-input-area { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 
 /* OK/NGボタン */
@@ -2124,6 +2271,13 @@ onMounted(async () => {
 .numeric-input.numeric-ok { border-color: #059669; background: #ecfdf5; }
 .numeric-input.numeric-ng { border-color: #dc2626; background: #fef2f2; }
 .numeric-check-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sketch-container { position: relative; border-bottom: 1px solid #e5e7eb; overflow: auto; }
+.sketch-field-overlay { box-sizing: border-box; overflow: hidden; }
+.sketch-overlay-btn { width: 100%; height: 100%; border: 1px solid #94a3b8; background: rgba(255,255,255,0.7); font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.sketch-overlay-btn.checked { background: rgba(209,250,229,0.8); color: #065f46; font-weight: 700; }
+.sketch-overlay-input { width: 100%; height: 100%; box-sizing: border-box; border: 1px solid #94a3b8; background: rgba(255,255,255,0.7); font-size: 11px; padding: 1px 3px; }
+.pen-canvas-overlay { width: 100%; height: 100%; touch-action: none; cursor: crosshair; background: rgba(255,255,255,0.5); border: 1px solid #94a3b8; box-sizing: border-box; }
+.btn-pen-clear-overlay { position: absolute; top: 0; right: 0; font-size: 10px; padding: 0 3px; background: rgba(255,255,255,0.8); color: #dc2626; border: none; cursor: pointer; line-height: 1.4; }
 .auto-judge-badge { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 3px; }
 .auto-judge-badge.ok { background: #d1fae5; color: #065f46; }
 .auto-judge-badge.ng { background: #fee2e2; color: #991b1b; }
