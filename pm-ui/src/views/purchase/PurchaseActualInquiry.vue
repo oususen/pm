@@ -239,15 +239,13 @@ const onMappingSupplierChange = async () => {
   mappingError.value = ''
   mappingSaveMsg.value = ''
   try {
-    // 品番候補 (delivery-list-template) と保存済みマッピングを並列取得
-    const [templateRes, savedRes] = await Promise.all([
-      api.client.get('/purchase-receiving/delivery-list-template/', {
-        params: { supplier_id: mappingSupplier.value },
-      }),
+    // 品番候補（BOMItem + RoutingStep）と保存済みマッピングを並列取得
+    const [candidatesRes, savedRes] = await Promise.all([
+      api.purchaseActualKikanMapping.getCandidates(mappingSupplier.value),
       api.purchaseActualKikanMapping.getMapping(mappingSupplier.value),
     ])
 
-    const templateItems = Array.isArray(templateRes.data) ? templateRes.data : []
+    const templateItems = Array.isArray(candidatesRes.data) ? candidatesRes.data : []
     const savedMappings = Array.isArray(savedRes.data?.mappings) ? savedRes.data.mappings : []
     const savedMap = new Map(
       savedMappings.map((m) => [String(m.appProductCode || '').trim().toUpperCase(), m])

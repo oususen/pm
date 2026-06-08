@@ -2434,6 +2434,47 @@ class PurchaseAutoDeliveryListRunNowView(APIView):
         thread.start()
 
 
+class PurchaseActualKikanMappingCandidatesView(APIView):
+    """仕入先に紐づく品番候補一覧（BOMItem + RoutingStep の両方から取得）"""
+
+    def get(self, request):
+        supplier_id = request.query_params.get('supplier_id')
+        if not supplier_id:
+            return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            supplier_id = int(supplier_id)
+        except (TypeError, ValueError):
+            return Response({'detail': 'invalid supplier_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # BOMItem 経由（K購入品）
+        bom_product_ids = set(
+            BOMItem.objects.filter(
+                supplier_id=supplier_id,
+                child_product_id__isnull=False,
+            ).values_list('child_product_id', flat=True).distinct()
+        )
+
+        # RoutingStep 経由（G外作品）
+        routing_product_ids = set(
+            RoutingStep.objects.filter(
+                supplier_id=supplier_id,
+                output_product_id__isnull=False,
+            ).values_list('output_product_id', flat=True).distinct()
+        )
+
+        all_product_ids = bom_product_ids | routing_product_ids
+        products = Product.objects.filter(id__in=all_product_ids).order_by('product_code')
+        items = [
+            {
+                'product_id': p.id,
+                'product_code': p.product_code or '',
+                'product_name': p.product_name or '',
+            }
+            for p in products
+        ]
+        return Response(items)
+
+
 class PurchaseActualKikanMappingView(APIView):
     """仕入先納入実績 基幹システム入力用マッピング設定"""
 

@@ -18,6 +18,7 @@ from .order_proposal_views import (
     SupplierOrderScheduleListCreateView,
 )
 from .views import (
+    PurchaseActualKikanMappingCandidatesView,
     PurchaseActualKikanMappingView,
     PurchaseActualDetailView,
     EngineeringChangeCaseRecalculateView,
@@ -82,4 +83,5 @@ urlpatterns = [
     path('purchase-auto-delivery-list-configs/<int:pk>/', PurchaseAutoDeliveryListConfigDetailView.as_view(), name='purchase-auto-delivery-list-config-detail'),
     path('purchase-auto-delivery-list-configs/<int:pk>/run-now/', PurchaseAutoDeliveryListRunNowView.as_view(), name='purchase-auto-delivery-list-run-now'),
     path('purchase-actual-kikan-mapping/', PurchaseActualKikanMappingView.as_view(), name='purchase-actual-kikan-mapping'),
+    path('purchase-actual-kikan-mapping/candidates/', PurchaseActualKikanMappingCandidatesView.as_view(), name='purchase-actual-kikan-mapping-candidates'),
 ]
