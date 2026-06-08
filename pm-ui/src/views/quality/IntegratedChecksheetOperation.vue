@@ -328,53 +328,16 @@
                 {{ getBlockProgress(block).done }} / {{ getBlockProgress(block).total }}
               </span>
               <span v-if="isBlockLockedForModal(block)" class="lock-label">{{ t('integratedOperation.lockedByPrevious') }}</span>
-            </div>
-
-            <!-- 略図 + フィールドオーバーレイ -->
-            <div v-if="block.sketch_image_url && !isBlockLockedForModal(block)" class="sketch-container" :ref="el => setSketchContainerRef(block.id, el)">
-              <img :src="block.sketch_image_url" alt="略図" class="sketch-img" @load="onSketchImgLoad(block.id, $event)" />
-              <div
-                v-for="field in (block.sketch_fields || [])"
-                :key="'sf-'+field.id"
-                class="sketch-field-overlay"
-                :style="sketchFieldStyle(block.id, field)"
-              >
-                <template v-if="field.field_type === 'checkbox'">
-                  <button
-                    class="sketch-overlay-btn"
-                    :class="{ checked: modalSketchFieldResponses[block.id]?.[field.key] === true }"
-                    @click="setSketchFieldValue(block.id, field.key, modalSketchFieldResponses[block.id]?.[field.key] === true ? null : true)"
-                    :disabled="!canEdit"
-                  >{{ modalSketchFieldResponses[block.id]?.[field.key] === true ? '✓' : '' }}</button>
-                </template>
-                <template v-else-if="field.field_type === 'pen'">
-                  <canvas
-                    :ref="el => setPenCanvasRef(block.id, field.key, el)"
-                    class="pen-canvas-overlay"
-                    :width="field.width || 120"
-                    :height="field.height || 40"
-                    @pointerdown="penDown(block.id, field.key, $event)"
-                    @pointermove="penMove(block.id, field.key, $event)"
-                    @pointerup="penUp(block.id, field.key, $event)"
-                    @pointerleave="penUp(block.id, field.key, $event)"
-                  />
-                  <button v-if="canEdit" class="btn-pen-clear-overlay" title="クリア" @click="penClear(block.id, field.key)">&#10005;</button>
-                </template>
-                <template v-else>
-                  <input
-                    type="text"
-                    class="sketch-overlay-input"
-                    :value="modalSketchFieldResponses[block.id]?.[field.key] ?? ''"
-                    @input="setSketchFieldValue(block.id, field.key, $event.target.value)"
-                    :disabled="!canEdit"
-                  />
-                </template>
-              </div>
+              <button
+                v-if="block.sketch_image_url && !isBlockLockedForModal(block)"
+                class="btn-sketch-toggle"
+                @click="sketchCollapsed[block.id] = !sketchCollapsed[block.id]"
+              >{{ sketchCollapsed[block.id] ? '▶ 台紙表示' : '▼ 台紙非表示' }}</button>
             </div>
 
             <!-- チェック項目 -->
             <div v-if="!isBlockLockedForModal(block)" class="items-list">
-              <div v-for="(item, itemIdx) in block.items" :key="'mi-'+item.id" class="item-row">
+              <div v-for="(item, itemIdx) in block.items" :key="'mi-'+item.id" class="item-row" :class="{ 'item-optional': !item.is_required }">
                 <span class="item-no">{{ itemIdx + 1 }}</span>
                 <div class="item-label-area">
                   <span class="item-name">{{ item.item_name }}</span>
@@ -467,6 +430,62 @@
               </div>
             </div>
 
+            <!-- 略図 + フィールドオーバーレイ -->
+            <div
+              v-if="block.sketch_image_url && !isBlockLockedForModal(block)"
+              v-show="!sketchCollapsed[block.id]"
+              class="sketch-container"
+              :ref="el => setSketchContainerRef(block.id, el)"
+            >
+              <div class="sketch-zoom-bar">
+                <button class="btn-zoom" @click="setSketchZoom(block.id, -0.2)">−</button>
+                <span class="zoom-label">{{ Math.round((sketchZoom[block.id] || 1) * 100) }}%</span>
+                <button class="btn-zoom" @click="setSketchZoom(block.id, 0.2)">＋</button>
+                <button class="btn-zoom" @click="sketchZoom[block.id] = 1">リセット</button>
+              </div>
+              <div class="sketch-inner" :style="{ width: ((sketchZoom[block.id] || 1) * 100) + '%' }">
+                <img :src="block.sketch_image_url" alt="略図" class="sketch-img" @load="onSketchImgLoad(block.id, $event)" />
+                <div
+                  v-for="field in (block.sketch_fields || [])"
+                  :key="'sf-'+field.id"
+                  class="sketch-field-overlay"
+                  :style="sketchFieldStyle(block.id, field)"
+                >
+                  <template v-if="field.field_type === 'checkbox'">
+                    <button
+                      class="sketch-overlay-btn"
+                      :class="{ checked: modalSketchFieldResponses[block.id]?.[field.key] === true }"
+                      @click="setSketchFieldValue(block.id, field.key, modalSketchFieldResponses[block.id]?.[field.key] === true ? null : true)"
+                      :disabled="!canEdit"
+                    >{{ modalSketchFieldResponses[block.id]?.[field.key] === true ? '✓' : '' }}</button>
+                  </template>
+                  <template v-else-if="field.field_type === 'pen'">
+                    <canvas
+                      :ref="el => setPenCanvasRef(block.id, field.key, el)"
+                      class="pen-canvas-overlay"
+                      :class="{ 'pen-inactive': !penModeActive[block.id] }"
+                      :width="field.width || 120"
+                      :height="field.height || 40"
+                      @pointerdown="penDown(block.id, field.key, $event)"
+                      @pointermove="penMove(block.id, field.key, $event)"
+                      @pointerup="penUp(block.id, field.key, $event)"
+                      @pointerleave="penUp(block.id, field.key, $event)"
+                    />
+                    <button v-if="canEdit && penModeActive[block.id]" class="btn-pen-clear-overlay" title="クリア" @click="penClear(block.id, field.key)">&#10005;</button>
+                  </template>
+                  <template v-else>
+                    <input
+                      type="text"
+                      class="sketch-overlay-input"
+                      :value="modalSketchFieldResponses[block.id]?.[field.key] ?? ''"
+                      @input="setSketchFieldValue(block.id, field.key, $event.target.value)"
+                      :disabled="!canEdit"
+                    />
+                  </template>
+                </div>
+              </div>
+            </div>
+
             <!-- ロック中表示 -->
             <div v-else class="locked-message">
               {{ t('integratedOperation.completePreviousRequired') }}
@@ -475,6 +494,12 @@
           </div>
           <div class="modal-save-bar">
             <div class="modal-save-bar-main">
+              <button
+                v-if="canEdit && modalVisibleBlocks.some(b => b.sketch_image_url && (b.sketch_fields || []).some(f => f.field_type === 'pen'))"
+                class="btn-pen-mode-toggle"
+                :class="{ active: modalPenModeOn }"
+                @click="toggleModalPenMode"
+              >{{ modalPenModeOn ? '✏️ 描画ON' : '✏️ 描画OFF' }}</button>
               <span class="modal-unit-label">台目 #{{ modalUnit.sequence_no }} 入力</span>
               <button
                 class="btn-secondary btn-sm"
@@ -1379,6 +1404,7 @@ const closeModal = () => {
   modalUnit.value = null
   modalResponses.value = {}
   modalSelectedBlockId.value = null
+  penModeActive.value = {}
 }
 
 const setJudgement = (itemId, val) => {
@@ -1518,28 +1544,44 @@ const shouldShowHoldMark = (unit) => {
   return hasUnitAnyCheckValue(unit) && hasUnitMissingRequired(unit)
 }
 
-const sketchScales = ref({})
+const sketchNaturalSizes = ref({})
 const sketchContainerRefs = {}
 
+const sketchTouchCleanups = {}
 const setSketchContainerRef = (blockId, el) => {
+  if (sketchTouchCleanups[blockId]) {
+    sketchTouchCleanups[blockId]()
+    delete sketchTouchCleanups[blockId]
+  }
   sketchContainerRefs[blockId] = el
+  if (!el) return
+  const onTS = (e) => onSketchTouchStart(blockId, e)
+  const onTM = (e) => onSketchTouchMove(blockId, e)
+  const onTE = () => onSketchTouchEnd(blockId)
+  el.addEventListener('touchstart', onTS, { passive: false })
+  el.addEventListener('touchmove', onTM, { passive: false })
+  el.addEventListener('touchend', onTE)
+  sketchTouchCleanups[blockId] = () => {
+    el.removeEventListener('touchstart', onTS)
+    el.removeEventListener('touchmove', onTM)
+    el.removeEventListener('touchend', onTE)
+  }
 }
 
 const onSketchImgLoad = (blockId, e) => {
   const img = e.target
-  const naturalW = img.naturalWidth
-  const displayW = img.clientWidth
-  sketchScales.value[blockId] = naturalW > 0 ? displayW / naturalW : 1
+  sketchNaturalSizes.value[blockId] = { w: img.naturalWidth, h: img.naturalHeight }
 }
 
 const sketchFieldStyle = (blockId, field) => {
-  const scale = sketchScales.value[blockId] || 1
+  const nat = sketchNaturalSizes.value[blockId]
+  if (!nat || !nat.w || !nat.h) return { position: 'absolute', left: '0', top: '0' }
   return {
     position: 'absolute',
-    left: `${field.x * scale}px`,
-    top: `${field.y * scale}px`,
-    width: `${field.width * scale}px`,
-    height: `${field.height * scale}px`,
+    left: `${(field.x / nat.w) * 100}%`,
+    top: `${(field.y / nat.h) * 100}%`,
+    width: `${(field.width / nat.w) * 100}%`,
+    height: `${(field.height / nat.h) * 100}%`,
   }
 }
 
@@ -1551,8 +1593,50 @@ const setSketchFieldValue = (blockId, fieldKey, value) => {
   modalSketchFieldResponses.value[blockId][fieldKey] = value
 }
 
+const sketchCollapsed = ref({})
+const sketchZoom = ref({})
+const setSketchZoom = (blockId, delta) => {
+  const cur = sketchZoom.value[blockId] || 1
+  sketchZoom.value[blockId] = Math.max(0.4, Math.min(3, +(cur + delta).toFixed(1)))
+}
+const pinchState = {}
+const onSketchTouchStart = (blockId, e) => {
+  if (e.touches.length === 2) {
+    e.preventDefault()
+    const dx = e.touches[0].clientX - e.touches[1].clientX
+    const dy = e.touches[0].clientY - e.touches[1].clientY
+    pinchState[blockId] = { dist: Math.hypot(dx, dy), zoom: sketchZoom.value[blockId] || 1 }
+  }
+}
+const onSketchTouchMove = (blockId, e) => {
+  if (e.touches.length === 2 && pinchState[blockId]) {
+    e.preventDefault()
+    const dx = e.touches[0].clientX - e.touches[1].clientX
+    const dy = e.touches[0].clientY - e.touches[1].clientY
+    const dist = Math.hypot(dx, dy)
+    const ratio = dist / pinchState[blockId].dist
+    sketchZoom.value[blockId] = Math.max(0.4, Math.min(3, +(pinchState[blockId].zoom * ratio).toFixed(2)))
+  }
+}
+const onSketchTouchEnd = (blockId) => {
+  delete pinchState[blockId]
+}
+
 const penCanvasRefs = {}
 const penDrawingState = {}
+const penModeActive = ref({})
+
+const modalPenModeOn = computed(() => {
+  return modalVisibleBlocks.value.some(b => penModeActive.value[b.id])
+})
+const toggleModalPenMode = () => {
+  const next = !modalPenModeOn.value
+  for (const b of modalVisibleBlocks.value) {
+    if (b.sketch_image_url && (b.sketch_fields || []).some(f => f.field_type === 'pen')) {
+      penModeActive.value[b.id] = next
+    }
+  }
+}
 
 const setPenCanvasRef = (blockId, fieldKey, el) => {
   const k = `${blockId}_${fieldKey}`
@@ -1570,7 +1654,7 @@ const setPenCanvasRef = (blockId, fieldKey, el) => {
 }
 
 const penDown = (blockId, fieldKey, e) => {
-  if (!canEdit.value) return
+  if (!canEdit.value || !penModeActive.value[blockId]) return
   const k = `${blockId}_${fieldKey}`
   const canvas = penCanvasRefs[k]
   if (!canvas) return
@@ -2159,11 +2243,6 @@ onMounted(async () => {
   border-radius: 6px;
   overflow: hidden;
 }
-.process-section.ratio-4-1 {
-  display: grid;
-  grid-template-rows: auto 4fr 1fr;
-  min-height: min(72dvh, 820px);
-}
 .process-section-header {
   display: flex;
   align-items: center;
@@ -2184,15 +2263,7 @@ onMounted(async () => {
   max-height: 340px;
   overflow: hidden;
 }
-.process-section.ratio-4-1 .sketch-placeholder {
-  max-height: none;
-  height: 100%;
-}
-.sketch-img { width: 100%; object-fit: contain; max-height: 340px; }
-.process-section.ratio-4-1 .sketch-img {
-  max-height: none;
-  height: 100%;
-}
+.sketch-img { width: 100%; height: auto; display: block; }
 .sketch-overlay {
   position: absolute;
   inset: 0;
@@ -2226,10 +2297,6 @@ onMounted(async () => {
 
 /* チェック項目リスト */
 .items-list { padding: 6px 10px; }
-.process-section.ratio-4-1 .items-list {
-  height: 100%;
-  overflow: auto;
-}
 .item-row {
   display: flex;
   align-items: center;
@@ -2238,6 +2305,7 @@ onMounted(async () => {
   border-bottom: 1px solid #f3f4f6;
 }
 .item-row:last-child { border-bottom: none; }
+.item-row.item-optional { background: #dcfce7; }
 .item-label-area { flex: 1; min-width: 0; }
 .item-no { font-size: 12px; color: #6b7280; min-width: 20px; text-align: center; flex-shrink: 0; }
 .item-name { font-size: 13px; font-weight: 500; white-space: pre-line; }
@@ -2277,12 +2345,20 @@ onMounted(async () => {
 .numeric-input.numeric-ok { border-color: #059669; background: #ecfdf5; }
 .numeric-input.numeric-ng { border-color: #dc2626; background: #fef2f2; }
 .numeric-check-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.sketch-container { position: relative; border-bottom: 1px solid #e5e7eb; overflow: auto; }
+.sketch-container { border-bottom: 1px solid #e5e7eb; overflow: auto; touch-action: pan-x pan-y; }
+.sketch-zoom-bar { position: sticky; top: 0; left: 0; z-index: 3; display: flex; align-items: center; gap: 4px; padding: 2px 6px; background: rgba(248,250,252,0.9); }
+.btn-zoom { padding: 1px 8px; font-size: 14px; border: 1px solid #cbd5e1; border-radius: 3px; background: #fff; cursor: pointer; }
+.zoom-label { font-size: 12px; color: #64748b; min-width: 40px; text-align: center; }
+.sketch-inner { position: relative; display: inline-block; width: 100%; }
 .sketch-field-overlay { box-sizing: border-box; overflow: hidden; }
 .sketch-overlay-btn { width: 100%; height: 100%; border: 1px solid #94a3b8; background: rgba(255,255,255,0.7); font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .sketch-overlay-btn.checked { background: rgba(209,250,229,0.8); color: #065f46; font-weight: 700; }
 .sketch-overlay-input { width: 100%; height: 100%; box-sizing: border-box; border: 1px solid #94a3b8; background: rgba(255,255,255,0.7); font-size: 11px; padding: 1px 3px; }
-.pen-canvas-overlay { width: 100%; height: 100%; touch-action: none; cursor: crosshair; background: rgba(255,255,255,0.5); border: 1px solid #94a3b8; box-sizing: border-box; }
+.pen-canvas-overlay { width: 100%; height: 100%; touch-action: none; cursor: crosshair; background: rgba(255,255,255,0.01); border: 1px solid #94a3b8; box-sizing: border-box; }
+.pen-canvas-overlay.pen-inactive { pointer-events: none; touch-action: auto; cursor: default; }
+.btn-sketch-toggle { margin-left: 8px; padding: 1px 8px; font-size: 11px; border: 1px solid rgba(255,255,255,0.4); border-radius: 3px; background: transparent; color: #cbd5e1; cursor: pointer; }
+.btn-pen-mode-toggle { margin-right: auto; padding: 4px 12px; font-size: 13px; border: 2px solid #94a3b8; border-radius: 4px; background: #f8fafc; color: #475569; cursor: pointer; white-space: nowrap; }
+.btn-pen-mode-toggle.active { background: #fef3c7; border-color: #f59e0b; color: #92400e; }
 .btn-pen-clear-overlay { position: absolute; top: 0; right: 0; font-size: 10px; padding: 0 3px; background: rgba(255,255,255,0.8); color: #dc2626; border: none; cursor: pointer; line-height: 1.4; }
 .auto-judge-badge { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 3px; }
 .auto-judge-badge.ok { background: #d1fae5; color: #065f46; }
