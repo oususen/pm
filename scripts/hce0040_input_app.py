@@ -122,6 +122,58 @@ def wait_for_screen_change(hwnd, min_wait=0.3, max_wait=8.0, interval=0.15, stop
         pass
 
 
+def wait_for_koukei_blue(hwnd, min_wait=0.3, max_wait=10.0, interval=0.1, stop_check=None, log_func=None):
+    """品番確定後、工程情報テーブルの青行出現をピクセル検知して次へ進む（G外作品専用）。
+    SSE0040と同じロジック。青ピクセル数が閾値超えかつ安定したら完了とみなす。
+    """
+    time.sleep(min_wait)
+    if not hwnd:
+        return
+    try:
+        rect = win32gui.GetWindowRect(hwnd)
+        x, y, x2, y2 = rect
+        w, h = x2 - x, y2 - y
+        # HCE0040の工程情報テーブルエリア（画面中段あたり）
+        region = (x + int(w * 0.03), y + int(h * 0.28), int(w * 0.50), int(h * 0.12))
+        if log_func:
+            log_func(f"[DEBUG] 工程青検知エリア: ウィンドウ({w}x{h}) region={region}")
+        elapsed = min_wait
+        first_log = True
+        while elapsed < max_wait:
+            time.sleep(interval)
+            if stop_check:
+                stop_check()
+            img = ImageGrab.grab(
+                bbox=(region[0], region[1], region[0] + region[2], region[1] + region[3]),
+                all_screens=True,
+            )
+            pixels = list(img.getdata())
+            blue_count = sum(1 for r, _, b in pixels if b > 80 and b > r + 30)
+            if log_func and first_log:
+                log_func(f"[DEBUG] 青ピクセル数={blue_count}（1000超で検知）")
+                first_log = False
+            if blue_count > 1000:
+                # 安定確認: 0.3秒後に再測定して同じ値なら完了
+                time.sleep(0.3)
+                img2 = ImageGrab.grab(
+                    bbox=(region[0], region[1], region[0] + region[2], region[1] + region[3]),
+                    all_screens=True,
+                )
+                blue_count2 = sum(1 for r, g, b in img2.getdata() if b > 80 and b > r + 30)
+                if log_func:
+                    log_func(f"[DEBUG] 工程青行検知 blue={blue_count}→{blue_count2}")
+                if blue_count2 == blue_count:
+                    return
+            elapsed += interval
+        if log_func:
+            log_func(f"[DEBUG] 工程青検知タイムアウト（最終blue={blue_count}）")
+    except InterruptedError:
+        raise
+    except Exception as e:
+        if log_func:
+            log_func(f"[DEBUG] 工程青検知エラー: {e}")
+
+
 def check_error_dialog(hwnd):
     if not hwnd:
         return
@@ -185,6 +237,7 @@ def input_one_record(record, cfg, hwnd=None, stop_check=None, log_func=None):
     tabs_hinban  = int(record['品番後Tabキー回数'] or 1)
     tabs_nyuuko  = int(record['入荷数後Tabキー回数'] or 0)
     nyuuko_su    = str(int(float(record['入荷数'])))
+    item_type    = str(record.get('品目区分') or 'G').strip().upper()
 
     # 入荷日
     input_field(nyukobi)
@@ -193,10 +246,16 @@ def input_one_record(record, cfg, hwnd=None, stop_check=None, log_func=None):
     input_field(kikan_hinban)
     # 品番確定後 待機
     tab_to(1)
-    wait_for_screen_change(hwnd, min_wait=0.3, max_wait=cfg["delay_hinban"], stop_check=stop_check)
-    _poll_sleep(delay_hinban * 0.5)
+    if item_type == 'G':
+        # G外作品: 工程テーブルの青行出現をピクセル検知（遅い基幹でも確実に待つ）
+        wait_for_koukei_blue(hwnd, min_wait=0.3, max_wait=10.0, stop_check=stop_check, log_func=log_func)
+        _poll_sleep(delay_hinban)
+    else:
+        # K購入品: 工程テーブルなし、通常の画面変化検知
+        wait_for_screen_change(hwnd, min_wait=0.3, max_wait=cfg["delay_hinban"], stop_check=stop_check)
+        _poll_sleep(delay_hinban * 0.3)
     check_error_dialog(hwnd)
-    # 追加Tab（2か所=2のとき1回追加）
+    # 追加Tab（G2か所=2のとき1回追加）
     if tabs_hinban >= 2:
         tab_to(tabs_hinban - 1)
     # 仕入先コード
