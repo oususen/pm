@@ -78,6 +78,16 @@
       <div v-if="mappingLoading" class="settings-info">読込中...</div>
       <div v-else-if="mappingError" class="settings-error">{{ mappingError }}</div>
 
+      <div class="settings-actions">
+        <button class="btn" :disabled="!mappingSupplier || mappingLoading" @click="saveMappings">保存</button>
+        <button class="btn btn-secondary" :disabled="!mappingSupplier || mappingLoading" @click="downloadMappingTemplate">テンプレ出力</button>
+        <label class="btn btn-secondary" :class="{ disabled: !mappingSupplier || mappingLoading }">
+          Excelから導入
+          <input ref="importFileRef" type="file" accept=".xlsx,.xls" style="display:none" @change="onImportExcel" />
+        </label>
+      </div>
+      <div v-if="mappingSaveMsg" class="settings-message">{{ mappingSaveMsg }}</div>
+
       <div v-if="mappingSupplier" class="table-wrap settings-table-wrap">
         <table class="list-table mapping-table">
           <thead>
@@ -97,6 +107,7 @@
               <td>{{ item.productName }}</td>
               <td>
                 <select v-model="item.itemType" class="map-select">
+                  <option value="">-- 未設定 --</option>
                   <option value="G">G（外作）</option>
                   <option value="K">K（購入）</option>
                 </select>
@@ -121,15 +132,6 @@
         </table>
       </div>
 
-      <div class="settings-actions">
-        <button class="btn" :disabled="!mappingSupplier || mappingLoading" @click="saveMappings">保存</button>
-        <button class="btn btn-secondary" :disabled="!mappingSupplier || mappingLoading" @click="downloadMappingTemplate">テンプレ出力</button>
-        <label class="btn btn-secondary" :class="{ disabled: !mappingSupplier || mappingLoading }">
-          Excelから導入
-          <input ref="importFileRef" type="file" accept=".xlsx,.xls" style="display:none" @change="onImportExcel" />
-        </label>
-      </div>
-      <div v-if="mappingSaveMsg" class="settings-message">{{ mappingSaveMsg }}</div>
     </div>
   </div>
 </template>
@@ -184,7 +186,10 @@ const load = async () => {
     if (filterSupplierId.value) {
       const sup = suppliers.value.find((s) => String(s.id) === filterSupplierId.value)
       if (sup) {
-        data = data.filter((r) => r.supplier === sup.supplier_name || r.supplier === sup.supplier_code)
+        data = data.filter((r) => {
+          const s = r.supplier || ''
+          return s === sup.supplier_name || s === sup.supplier_code || s.includes(sup.supplier_name) || s.includes(sup.supplier_code)
+        })
       }
     }
     rows.value = data
@@ -263,10 +268,10 @@ const onMappingSupplierChange = async () => {
       return {
         appProductCode: item.product_code || '',
         productName: item.product_name || '',
-        itemType: saved?.itemType || 'G',
+        itemType: saved?.itemType || '',
         coreProductCode: saved?.coreProductCode || '',
         supplierCode: saved?.supplierCode || '',
-        tabsAfterHinban: saved?.tabsAfterHinban ?? 1,
+        tabsAfterHinban: saved?.tabsAfterHinban ?? '',
       }
     })
   } catch (_e) {
@@ -288,10 +293,10 @@ const downloadMappingTemplate = () => {
   const rows = mappingRows.value.map((item) => [
     item.appProductCode,
     item.productName,
-    item.itemType || 'G',
+    item.itemType || '',
     item.coreProductCode || '',
     item.supplierCode || '',
-    item.tabsAfterHinban ?? 1,
+    item.tabsAfterHinban !== '' && item.tabsAfterHinban != null ? item.tabsAfterHinban : '',
   ])
   const wb = XLSX.utils.book_new()
   const ws = XLSX.utils.aoa_to_sheet([MAPPING_HEADERS, ...rows])
@@ -352,10 +357,10 @@ const onImportExcel = (event) => {
         updated.push({
           appProductCode: appCode,
           productName: existing?.productName || String(row[idxName] || ''),
-          itemType: itemType === 'K' ? 'K' : 'G',
+          itemType: itemType === 'K' ? 'K' : itemType === 'G' ? 'G' : (existing?.itemType || ''),
           coreProductCode: String(row[idxCore] || '').trim(),
           supplierCode: idxSup >= 0 ? String(row[idxSup] || '').trim() : (existing?.supplierCode || ''),
-          tabsAfterHinban: Number.isFinite(tabs) && tabs >= 1 ? tabs : (existing?.tabsAfterHinban ?? 1),
+          tabsAfterHinban: Number.isFinite(tabs) && tabs >= 1 ? tabs : (existing?.tabsAfterHinban ?? ''),
         })
       }
       // Excel未記載だった品番は既存のまま残す

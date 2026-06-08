@@ -231,6 +231,7 @@
         <table class="data-table matrix-table">
           <thead>
             <tr>
+              <th class="th-no">№</th>
               <th class="th-process">工程</th>
               <th class="th-item">チェック項目</th>
               <th class="th-type">種別</th>
@@ -253,7 +254,7 @@
             <template v-for="block in matrixVisibleBlocks" :key="'blk-'+block.id">
               <!-- 工程ヘッダー行 -->
               <tr class="block-header-row">
-                <td :colspan="3" class="block-header-cell">
+                <td :colspan="4" class="block-header-cell">
                   <div class="block-header-inner">
                     <span class="block-title-left">
                       {{ block.process_code }} {{ block.process_name }}
@@ -273,7 +274,8 @@
               </td>
               </tr>
               <!-- 各チェック項目行 -->
-              <tr v-for="item in block.items" :key="'item-'+item.id">
+              <tr v-for="(item, itemIdx) in block.items" :key="'item-'+item.id">
+                <td class="td-no">{{ itemIdx + 1 }}</td>
                 <td class="td-process">{{ block.process_code }}</td>
                 <td class="td-item">
                   {{ item.item_name }}
@@ -372,7 +374,8 @@
 
             <!-- チェック項目 -->
             <div v-if="!isBlockLockedForModal(block)" class="items-list">
-              <div v-for="item in block.items" :key="'mi-'+item.id" class="item-row">
+              <div v-for="(item, itemIdx) in block.items" :key="'mi-'+item.id" class="item-row">
+                <span class="item-no">{{ itemIdx + 1 }}</span>
                 <div class="item-label-area">
                   <span class="item-name">{{ item.item_name }}</span>
                   <span v-if="item.is_required" class="required-mark">*</span>
@@ -1983,9 +1986,9 @@ onMounted(async () => {
 .matrix-scroll { overflow: auto; max-height: calc(100vh - 160px); border: 1px solid #dde2ea; border-radius: 4px; }
 .matrix-table { border-collapse: collapse; }
 .matrix-table th, .matrix-table td { padding: 3px 6px; border: 1px solid #e5e7eb; font-size: 12px; white-space: nowrap; }
-.th-process { min-width: 60px; position: sticky; left: 0; z-index: 2; background: #f7f9fb; }
-.th-item { min-width: 140px; position: sticky; left: 60px; z-index: 2; background: #f7f9fb; }
-.th-type { min-width: 28px; position: sticky; left: 200px; z-index: 2; background: #f7f9fb; text-align: center; }
+.th-process { min-width: 60px; position: sticky; left: 30px; z-index: 2; background: #f7f9fb; }
+.th-item { min-width: 140px; position: sticky; left: 90px; z-index: 2; background: #f7f9fb; }
+.th-type { min-width: 28px; position: sticky; left: 230px; z-index: 2; background: #f7f9fb; text-align: center; }
 .th-unit { min-width: 52px; text-align: center; cursor: pointer; }
 .th-unit:hover { background: #dbeafe; }
 .unit-header { display: flex; flex-direction: column; align-items: center; gap: 2px; }
@@ -2005,9 +2008,11 @@ onMounted(async () => {
   line-height: 1;
 }
 
-.td-process { position: sticky; left: 0; z-index: 1; background: #fff; font-size: 11px; color: #6b7280; }
-.td-item { position: sticky; left: 60px; z-index: 1; background: #fff; max-width: 200px; white-space: pre-line; }
-.td-type { position: sticky; left: 200px; z-index: 1; background: #fff; text-align: center; }
+.th-no { position: sticky; left: 0; z-index: 2; min-width: 30px; }
+.td-no { position: sticky; left: 0; z-index: 1; background: #fff; font-size: 11px; color: #6b7280; text-align: center; min-width: 30px; }
+.td-process { position: sticky; left: 30px; z-index: 1; background: #fff; font-size: 11px; color: #6b7280; }
+.td-item { position: sticky; left: 90px; z-index: 1; background: #fff; max-width: 200px; white-space: pre-line; }
+.td-type { position: sticky; left: 230px; z-index: 1; background: #fff; text-align: center; }
 .td-cell { text-align: center; cursor: pointer; min-width: 52px; }
 .td-cell:hover { background: #f0f4ff; }
 .td-cell.cell-disabled-by-process {
@@ -2234,6 +2239,7 @@ onMounted(async () => {
 }
 .item-row:last-child { border-bottom: none; }
 .item-label-area { flex: 1; min-width: 0; }
+.item-no { font-size: 12px; color: #6b7280; min-width: 20px; text-align: center; flex-shrink: 0; }
 .item-name { font-size: 13px; font-weight: 500; white-space: pre-line; }
 .item-hint { font-size: 11px; color: #9ca3af; margin-left: 4px; white-space: pre-line; }
 .item-input-area { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
