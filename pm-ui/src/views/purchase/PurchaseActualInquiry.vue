@@ -123,6 +123,11 @@
 
       <div class="settings-actions">
         <button class="btn" :disabled="!mappingSupplier || mappingLoading" @click="saveMappings">保存</button>
+        <button class="btn btn-secondary" :disabled="!mappingSupplier || mappingLoading" @click="downloadMappingTemplate">テンプレ出力</button>
+        <label class="btn btn-secondary" :class="{ disabled: !mappingSupplier || mappingLoading }">
+          Excelから導入
+          <input ref="importFileRef" type="file" accept=".xlsx,.xls" style="display:none" @change="onImportExcel" />
+        </label>
       </div>
       <div v-if="mappingSaveMsg" class="settings-message">{{ mappingSaveMsg }}</div>
     </div>
@@ -132,6 +137,7 @@
 <script setup>
 import { formatISODate } from '@/utils/dateUtil'
 import { onMounted, ref } from 'vue'
+import * as XLSX from 'xlsx'
 import api from '@/api/client'
 import { exportPurchaseKikanExcel } from '@/utils/purchaseActualKikanExport'
 
@@ -275,6 +281,101 @@ const copyCode = (item) => {
   item.coreProductCode = item.appProductCode
 }
 
+// ====== テンプレ出力 ======
+const MAPPING_HEADERS = ['アプリ品番', '品名', '品目区分(G/K)', '基幹品番', '仕入先コード', '品番後Tabキー回数']
+
+const downloadMappingTemplate = () => {
+  const rows = mappingRows.value.map((item) => [
+    item.appProductCode,
+    item.productName,
+    item.itemType || 'G',
+    item.coreProductCode || '',
+    item.supplierCode || '',
+    item.tabsAfterHinban ?? 1,
+  ])
+  const wb = XLSX.utils.book_new()
+  const ws = XLSX.utils.aoa_to_sheet([MAPPING_HEADERS, ...rows])
+  // 列幅設定
+  ws['!cols'] = [{ wch: 20 }, { wch: 24 }, { wch: 14 }, { wch: 20 }, { wch: 14 }, { wch: 16 }]
+  XLSX.utils.book_append_sheet(wb, ws, 'マッピング')
+  const sup = suppliers.value.find((s) => String(s.id) === mappingSupplier.value)
+  const code = sup?.supplier_code || 'supplier'
+  const data = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+  const blob = new Blob([data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `マッピングテンプレ_${code}.xlsx`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+// ====== Excelから導入 ======
+const importFileRef = ref(null)
+
+const onImportExcel = (event) => {
+  const file = event.target.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' })
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+      if (raw.length < 2) {
+        alert('データがありません。')
+        return
+      }
+      const headers = raw[0].map((h) => String(h || '').trim())
+      const idxApp    = headers.indexOf('アプリ品番')
+      const idxName   = headers.indexOf('品名')
+      const idxType   = headers.indexOf('品目区分(G/K)')
+      const idxCore   = headers.indexOf('基幹品番')
+      const idxSup    = headers.indexOf('仕入先コード')
+      const idxTabs   = headers.indexOf('品番後Tabキー回数')
+      if (idxApp < 0 || idxCore < 0) {
+        alert('「アプリ品番」「基幹品番」列が見つかりません。テンプレ出力したExcelを使用してください。')
+        return
+      }
+      // 既存のmappingRowsをアプリ品番で引く（品名を保持するため）
+      const existingMap = new Map(mappingRows.value.map((r) => [r.appProductCode.trim().toUpperCase(), r]))
+
+      const importedCodes = new Set()
+      const updated = []
+      for (const row of raw.slice(1)) {
+        const appCode = String(row[idxApp] || '').trim()
+        if (!appCode) continue
+        importedCodes.add(appCode.toUpperCase())
+        const existing = existingMap.get(appCode.toUpperCase())
+        const itemType = String(row[idxType] || '').trim().toUpperCase()
+        const tabs = parseInt(row[idxTabs], 10)
+        updated.push({
+          appProductCode: appCode,
+          productName: existing?.productName || String(row[idxName] || ''),
+          itemType: itemType === 'K' ? 'K' : 'G',
+          coreProductCode: String(row[idxCore] || '').trim(),
+          supplierCode: idxSup >= 0 ? String(row[idxSup] || '').trim() : (existing?.supplierCode || ''),
+          tabsAfterHinban: Number.isFinite(tabs) && tabs >= 1 ? tabs : (existing?.tabsAfterHinban ?? 1),
+        })
+      }
+      // Excel未記載だった品番は既存のまま残す
+      for (const row of mappingRows.value) {
+        if (!importedCodes.has(row.appProductCode.trim().toUpperCase())) {
+          updated.push(row)
+        }
+      }
+      mappingRows.value = updated
+      mappingSaveMsg.value = `${updated.length} 件を読み込みました。内容を確認して「保存」を押してください。`
+    } catch (err) {
+      alert(`Excel読み込みエラー: ${err.message || err}`)
+    } finally {
+      // 同じファイルを再選択できるようリセット
+      if (importFileRef.value) importFileRef.value.value = ''
+    }
+  }
+  reader.readAsArrayBuffer(file)
+}
+
 const saveMappings = async () => {
   if (!mappingSupplier.value) return
   mappingSaveMsg.value = ''
@@ -329,7 +430,9 @@ onMounted(async () => {
 .map-input { width: 100%; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; }
 .map-input-narrow { width: 60px !important; text-align: center; }
 .map-select { width: 100%; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; }
-.settings-actions { margin-top: 12px; display: flex; gap: 8px; }
+.settings-actions { margin-top: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.settings-actions label.btn { cursor: pointer; }
+.settings-actions label.btn.disabled { opacity: 0.6; pointer-events: none; }
 .settings-message { margin-top: 8px; color: #166534; font-size: 13px; font-weight: 700; }
 .settings-info { margin: 8px 0; color: #1e3a8a; font-size: 13px; font-weight: 700; }
 .settings-error { margin: 8px 0; color: #991b1b; font-size: 13px; font-weight: 700; }
