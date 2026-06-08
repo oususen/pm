@@ -35,6 +35,9 @@ export const createIntegratedChecksheetsAPI = (client) => ({
   uploadSketch(templateId, blockId, formData) {
     return client.post(`/integrated-checksheet-templates/${templateId}/upload_sketch/${blockId}/`, formData)
   },
+  uploadAttachmentImage(formData) {
+    return client.post('/integrated-checksheet-templates/upload-attachment-image/', formData)
+  },
   listBatches(params = {}) {
     return client.get('/integrated-checksheet-batches/', { params })
   },

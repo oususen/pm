@@ -4,6 +4,7 @@ from .models_integrated_checksheet import (
     IntegratedChecksheetBatch,
     IntegratedChecksheetCheck,
     IntegratedChecksheetItem,
+    IntegratedChecksheetItemAttachment,
     IntegratedChecksheetProcessBlock,
     IntegratedChecksheetSketchField,
     IntegratedChecksheetSketchResponse,
@@ -26,12 +27,24 @@ class IntegratedChecksheetSketchFieldSerializer(serializers.ModelSerializer):
         fields = ["id", "key", "label", "field_type", "x", "y", "width", "height", "required", "sort_order"]
 
 
+class IntegratedChecksheetItemAttachmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = IntegratedChecksheetItemAttachment
+        fields = [
+            "id", "display_order", "title", "description",
+            "check_point", "ok_example", "ng_example", "image_url",
+        ]
+
+
 class IntegratedChecksheetItemSerializer(serializers.ModelSerializer):
+    attachments = IntegratedChecksheetItemAttachmentSerializer(many=True, read_only=True)
+
     class Meta:
         model = IntegratedChecksheetItem
         fields = [
             "id", "sort_order", "item_name", "standard", "frequency",
-            "method", "record_type", "unit", "criteria", "is_required",
+            "method", "record_type", "unit", "criteria", "remarks", "is_required",
+            "attachments",
         ]
 
 

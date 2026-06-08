@@ -280,6 +280,7 @@
                 <td class="td-item">
                   {{ item.item_name }}
                   <span v-if="item.standard" class="item-standard">{{ item.standard }}</span>
+                  <button v-if="item.attachments?.length" class="btn-attachment-ref btn-attachment-sm" @click.stop="openAttachmentViewer(item)">付表({{ item.attachments.length }})</button>
                 </td>
                 <td class="td-type">
                   <span class="type-tag" :class="'type-' + item.record_type">{{ recordTypeLabel(item.record_type) }}</span>
@@ -345,6 +346,11 @@
                   <span v-if="item.standard" class="item-hint">{{ item.standard }}</span>
                   <span v-if="item.unit" class="item-hint">[{{ item.unit }}]</span>
                 </div>
+                <button
+                  v-if="item.attachments?.length"
+                  class="btn-attachment-ref"
+                  @click="openAttachmentViewer(item)"
+                >付表({{ item.attachments.length }})</button>
                 <div class="item-input-area">
                   <!-- CHECK -->
                   <template v-if="item.record_type === 'CHECK'">
@@ -553,6 +559,32 @@
         </div>
       </div>
     </div>
+
+    <!-- 付表閲覧モーダル -->
+    <div v-if="attachmentViewer.visible" class="modal-backdrop att-backdrop" @click.self="closeAttachmentViewer">
+      <div class="modal-panel att-modal-panel">
+        <div class="att-modal-header">
+          <div>
+            <h3 class="att-modal-title">付表参照</h3>
+            <div class="att-modal-item-name">{{ attachmentViewer.itemName }}</div>
+          </div>
+          <button class="btn-secondary btn-sm" @click="closeAttachmentViewer">閉じる</button>
+        </div>
+        <div v-if="attachmentViewer.attachments.length" class="att-list">
+          <div v-for="(att, aIdx) in attachmentViewer.attachments" :key="aIdx" class="att-card">
+            <div class="att-card-title">{{ att.title || `付表 ${att.display_order || aIdx + 1}` }}</div>
+            <div v-if="att.image_url" class="att-image-wrap">
+              <img :src="att.image_url" :alt="att.title || '付表画像'" />
+            </div>
+            <div class="att-text"><strong>補足説明:</strong> {{ att.description || '-' }}</div>
+            <div class="att-text"><strong>確認ポイント:</strong> {{ att.check_point || '-' }}</div>
+            <div class="att-text"><strong>OK例:</strong> {{ att.ok_example || '-' }}</div>
+            <div class="att-text"><strong>NG例:</strong> {{ att.ng_example || '-' }}</div>
+          </div>
+        </div>
+        <div v-else class="no-data">付表はありません。</div>
+      </div>
+    </div>
   </div>
 
   <div class="page-container" v-else>
@@ -684,6 +716,17 @@ const units = ref([])
 const loadingUnits = ref(false)
 const actionLoading = ref(false)
 const templateBlocks = ref([])
+const attachmentViewer = ref({ visible: false, itemName: '', attachments: [] })
+const openAttachmentViewer = (item) => {
+  attachmentViewer.value = {
+    visible: true,
+    itemName: item.item_name || '',
+    attachments: item.attachments || [],
+  }
+}
+const closeAttachmentViewer = () => {
+  attachmentViewer.value = { visible: false, itemName: '', attachments: [] }
+}
 const matrixVisibleBlocks = computed(() => {
   if (!preferredProcessId.value) return templateBlocks.value
   return templateBlocks.value.filter((b) => !isBlockedByPreferredProcess(b))
@@ -2372,5 +2415,48 @@ onMounted(async () => {
   font-size: 13px;
   background: #f9fafb;
 }
+.btn-attachment-ref {
+  font-size: 11px;
+  padding: 1px 6px;
+  border: 1px solid #3b82f6;
+  border-radius: 4px;
+  background: #eff6ff;
+  color: #2563eb;
+  cursor: pointer;
+  white-space: nowrap;
+  margin-left: 4px;
+}
+.btn-attachment-ref:hover { background: #dbeafe; }
+.btn-attachment-sm { font-size: 10px; padding: 0 4px; }
+.att-backdrop { z-index: 200; }
+.att-modal-panel {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(15,23,42,.25);
+  max-width: 600px;
+  width: 95%;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.att-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.att-modal-title { font-size: 16px; font-weight: 700; margin: 0; }
+.att-modal-item-name { font-size: 12px; color: #64748b; margin-top: 2px; }
+.att-list { padding: 12px 16px; }
+.att-card {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+.att-card-title { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+.att-image-wrap { margin-bottom: 8px; }
+.att-image-wrap img { max-width: 100%; max-height: 300px; border: 1px solid #cbd5e1; object-fit: contain; }
+.att-text { font-size: 12px; margin-bottom: 3px; line-height: 1.4; }
 
 </style>

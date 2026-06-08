@@ -132,6 +132,7 @@ class IntegratedChecksheetItem(models.Model):
     record_type = models.CharField(max_length=20, choices=RECORD_CHOICES, default=RECORD_CHECK, verbose_name="記録種別")
     unit = models.CharField(max_length=30, blank=True, default="", verbose_name="単位")
     criteria = models.TextField(blank=True, default="", verbose_name="判定基準")
+    remarks = models.TextField(blank=True, default="", verbose_name="備考")
     is_required = models.BooleanField(default=True, verbose_name="必須")
 
     class Meta:
@@ -142,6 +143,33 @@ class IntegratedChecksheetItem(models.Model):
 
     def __str__(self):
         return f"{self.process_block} - {self.item_name}"
+
+
+class IntegratedChecksheetItemAttachment(models.Model):
+    """チェック項目ごとの付表（写真＋補足情報）"""
+
+    item = models.ForeignKey(
+        IntegratedChecksheetItem, on_delete=models.CASCADE,
+        related_name="attachments", verbose_name="チェック項目",
+    )
+    display_order = models.PositiveIntegerField(default=1, verbose_name="表示順")
+    title = models.CharField(max_length=200, blank=True, default="", verbose_name="タイトル")
+    description = models.TextField(blank=True, default="", verbose_name="補足説明")
+    check_point = models.TextField(blank=True, default="", verbose_name="確認ポイント")
+    ok_example = models.TextField(blank=True, default="", verbose_name="OK例")
+    ng_example = models.TextField(blank=True, default="", verbose_name="NG例")
+    image_url = models.CharField(max_length=255, blank=True, default="", verbose_name="画像URL")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="作成日時")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新日時")
+
+    class Meta:
+        db_table = "quality_integrated_cs_item_attachment"
+        verbose_name = "チェック項目付表"
+        verbose_name_plural = "チェック項目付表"
+        ordering = ["display_order", "id"]
+
+    def __str__(self):
+        return f"{self.item_id}:{self.display_order}"
 
 
 class IntegratedChecksheetSketchField(models.Model):

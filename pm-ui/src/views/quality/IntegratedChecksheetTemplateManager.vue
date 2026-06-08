@@ -239,6 +239,16 @@
                   <span class="field-inline-label">並び順</span>
                   <input type="number" v-model.number="block.sort_order" min="0" />
                 </label>
+                <div class="excel-import-wrap">
+                  <button class="btn-secondary btn-sm" @click="triggerExcelImport(bIdx)" :disabled="!canEditContent">Excel読取</button>
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls"
+                    :ref="(el) => { excelInputRefs[bIdx] = el }"
+                    style="display:none"
+                    @change="onExcelFileSelected($event, block)"
+                  />
+                </div>
               </div>
               <p class="order-warning">※重要: 並び順は工程順（ロック順）です。実際の工程順で設定してください。</p>
 
@@ -262,8 +272,9 @@
                       <th style="width: 100px">記録種別</th>
                       <th>単位</th>
                       <th>判定基準</th>
+                      <th>備考</th>
                       <th style="width: 40px">必須</th>
-                      <th style="width: 30px"></th>
+                      <th style="width: 80px">操作</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -296,10 +307,14 @@
                       </td>
                       <td><input v-model.trim="item.unit" class="cell-input cell-xs" /></td>
                       <td><input v-model.trim="item.criteria" class="cell-input" /></td>
+                      <td><textarea v-model.trim="item.remarks" class="cell-input cell-multiline" rows="1" @input="autoResize($event)" /></td>
                       <td class="center">
                         <input type="checkbox" v-model="item.is_required" />
                       </td>
-                      <td class="center">
+                      <td class="center action-cell">
+                        <button class="btn-secondary btn-xs" @click="openAttachmentDialog(block, item)">
+                          付表{{ item.attachments?.length ? `(${item.attachments.length})` : '' }}
+                        </button>
                         <button class="btn-icon btn-icon-danger" title="削除" @click="removeItem(block, iIdx)">&#10005;</button>
                       </td>
                     </tr>
@@ -319,6 +334,7 @@
                       <td>{{ recordTypeLabel(deleted.record_type) }}</td>
                       <td>{{ deleted.unit || '-' }}</td>
                       <td>{{ deleted.criteria || '-' }}</td>
+                      <td>{{ deleted.remarks || '-' }}</td>
                       <td class="center">{{ deleted.is_required ? '✔' : '-' }}</td>
                       <td></td>
                     </tr>
@@ -663,6 +679,42 @@
         </div>
       </div>
     </div>
+
+    <!-- 付表モーダル -->
+    <div v-if="attachmentDialogVisible" class="modal-backdrop" @click.self="closeAttachmentDialog">
+      <div class="modal-panel attachment-modal">
+        <div class="modal-header">
+          <div>
+            <h3 class="panel-title">付表編集</h3>
+            <div class="attachment-target-name">{{ attachmentTargetItem?.item_name || '未選択' }}</div>
+          </div>
+          <button class="btn-secondary btn-sm" @click="closeAttachmentDialog">閉じる</button>
+        </div>
+        <div v-if="attachmentTargetItem" class="attachment-body">
+          <div class="attachment-actions">
+            <button class="btn-primary btn-sm" @click="addAttachment" :disabled="!canEditContent">付表追加</button>
+          </div>
+          <div v-if="!attachmentTargetItem.attachments?.length" class="no-data">付表はまだありません。</div>
+          <div v-for="att in attachmentTargetItem.attachments" :key="att._key" class="attachment-card">
+            <div class="attachment-card-header">
+              <strong>付表 {{ att.display_order }}</strong>
+              <button class="btn-danger btn-sm" @click="removeAttachment(att)" :disabled="!canEditContent">削除</button>
+            </div>
+            <div class="attachment-form-grid">
+              <label>タイトル<input v-model.trim="att.title" :disabled="!canEditContent" /></label>
+              <label>画像<input type="file" accept="image/*" :disabled="!canEditContent" @change="uploadAttachmentImage($event, att)" /></label>
+              <label class="wide">補足説明<textarea v-model="att.description" rows="2" :disabled="!canEditContent" /></label>
+              <label class="wide">確認ポイント<textarea v-model="att.check_point" rows="2" :disabled="!canEditContent" /></label>
+              <label class="wide">OK例<textarea v-model="att.ok_example" rows="2" :disabled="!canEditContent" /></label>
+              <label class="wide">NG例<textarea v-model="att.ng_example" rows="2" :disabled="!canEditContent" /></label>
+            </div>
+            <div v-if="att.image_url" class="attachment-preview">
+              <img :src="att.image_url" :alt="att.title || '付表画像'" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="page-container" v-else>
@@ -677,6 +729,7 @@ import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import * as XLSX from 'xlsx'
 
 // --- 権限 ---
 const canAccessQuality = (resource, level = 'view', aliases = []) => {
@@ -750,6 +803,8 @@ const availableProcessOptions = computed(() => {
 const lineOptions = ref([])
 const processOptions = ref([])
 const userOptions = ref([])
+const attachmentDialogVisible = ref(false)
+const attachmentTargetItem = ref(null)
 const productSearch = ref('')
 const productSuggestions = ref([])
 const productSearching = ref(false)
@@ -775,6 +830,174 @@ const copyItemsSourceBlocks = ref([])
 const copyItemsSourceBlocksLoading = ref(false)
 let itemKeySeq = 0
 const nextKey = () => `_k${++itemKeySeq}`
+
+// --- Excel読取 ---
+const excelInputRefs = ref({})
+
+const triggerExcelImport = (bIdx) => {
+  const input = excelInputRefs.value[bIdx]
+  if (input) input.click()
+}
+
+const HEADER_MAP = {
+  '項目': 'item_name',
+  '点検項目': 'item_name',
+  '確認項目': 'item_name',
+  '規格': 'standard',
+  '基準値': 'standard',
+  '頻度': 'frequency',
+  '確認頻度': 'frequency',
+  '方法': 'method',
+  '検査方法': 'method',
+  '備考': 'remarks',
+  '注記': 'remarks',
+}
+
+const parseExcelCheckItems = (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: 'array' })
+        const ws = wb.Sheets[wb.SheetNames[0]]
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+
+        let headerRowIdx = -1
+        let colMap = {}
+        for (let r = 0; r < Math.min(rows.length, 20); r++) {
+          const row = rows[r]
+          if (!Array.isArray(row)) continue
+          const found = {}
+          for (let c = 0; c < row.length; c++) {
+            const cell = String(row[c] || '').trim()
+            for (const [keyword, field] of Object.entries(HEADER_MAP)) {
+              if (cell === keyword && !found[field]) {
+                found[field] = c
+                break
+              }
+            }
+          }
+          if (found.item_name && found.standard) {
+            headerRowIdx = r
+            colMap = found
+            break
+          }
+        }
+        if (headerRowIdx < 0) {
+          reject(new Error('ヘッダー行が見つかりません。「項目」「規格」列を含む行が必要です。'))
+          return
+        }
+
+        const items = []
+        for (let r = headerRowIdx + 1; r < rows.length; r++) {
+          const row = rows[r]
+          if (!Array.isArray(row)) continue
+          const name = String(row[colMap.item_name] || '').trim()
+          if (!name) continue
+          items.push({
+            item_name: name,
+            standard: colMap.standard != null ? String(row[colMap.standard] || '').trim() : '',
+            frequency: colMap.frequency != null ? String(row[colMap.frequency] || '').trim() : '',
+            method: colMap.method != null ? String(row[colMap.method] || '').trim() : '',
+            remarks: colMap.remarks != null ? String(row[colMap.remarks] || '').trim() : '',
+          })
+        }
+        resolve(items)
+      } catch (err) {
+        reject(err)
+      }
+    }
+    reader.onerror = () => reject(new Error('ファイル読み取りに失敗しました'))
+    reader.readAsArrayBuffer(file)
+  })
+}
+
+const onExcelFileSelected = async (event, block) => {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  try {
+    const parsed = await parseExcelCheckItems(file)
+    if (!parsed.length) {
+      alert('チェック項目が見つかりませんでした。')
+      return
+    }
+    const msg = `${parsed.length}件のチェック項目を読み取りました。\n\n` +
+      parsed.slice(0, 5).map((it, i) => `${i + 1}. ${it.item_name} / ${it.standard}`).join('\n') +
+      (parsed.length > 5 ? `\n...他${parsed.length - 5}件` : '') +
+      '\n\n追加しますか？'
+    if (!window.confirm(msg)) return
+    const startOrder = (block.items?.length || 0) + 1
+    parsed.forEach((it, i) => {
+      block.items.push({
+        id: null,
+        sort_order: startOrder + i,
+        item_name: it.item_name,
+        standard: it.standard,
+        frequency: it.frequency,
+        method: it.method,
+        record_type: 'CHECK',
+        unit: '',
+        criteria: '',
+        remarks: it.remarks || '',
+        is_required: true,
+        _key: nextKey(),
+        attachments: [],
+      })
+    })
+    resequenceBlockItems(block)
+    autoResizeAllTextareas()
+  } catch (err) {
+    alert(`Excel読取エラー: ${err.message || err}`)
+  }
+}
+
+// --- 付表操作 ---
+const openAttachmentDialog = (block, item) => {
+  if (!item.attachments) item.attachments = []
+  attachmentTargetItem.value = item
+  attachmentDialogVisible.value = true
+}
+const closeAttachmentDialog = () => {
+  attachmentDialogVisible.value = false
+  attachmentTargetItem.value = null
+}
+const addAttachment = () => {
+  const item = attachmentTargetItem.value
+  if (!item) return
+  if (!item.attachments) item.attachments = []
+  item.attachments.push({
+    id: null,
+    display_order: item.attachments.length + 1,
+    title: '',
+    description: '',
+    check_point: '',
+    ok_example: '',
+    ng_example: '',
+    image_url: '',
+    _key: nextKey(),
+  })
+}
+const removeAttachment = (att) => {
+  const item = attachmentTargetItem.value
+  if (!item?.attachments) return
+  const idx = item.attachments.indexOf(att)
+  if (idx >= 0) item.attachments.splice(idx, 1)
+  item.attachments.forEach((a, i) => { a.display_order = i + 1 })
+}
+const uploadAttachmentImage = async (event, att) => {
+  const file = event.target.files?.[0]
+  if (!file) return
+  const formData = new FormData()
+  formData.append('file', file)
+  try {
+    const res = await api.integratedChecksheets.uploadAttachmentImage(formData)
+    att.image_url = res.data.image_url
+  } catch (err) {
+    console.error('付表画像アップロード失敗:', err)
+    alert('付表画像のアップロードに失敗しました。')
+  }
+}
 
 const createEmptyForm = () => ({
   id: null,
@@ -841,7 +1064,18 @@ const buildComparablePayload = () => ({
       record_type: item.record_type || 'CHECK',
       unit: item.unit || '',
       criteria: item.criteria || '',
+      remarks: item.remarks || '',
       is_required: Boolean(item.is_required),
+      attachments: (item.attachments || []).map((att) => ({
+        id: att.id || null,
+        display_order: att.display_order || 1,
+        title: att.title || '',
+        description: att.description || '',
+        check_point: att.check_point || '',
+        ok_example: att.ok_example || '',
+        ng_example: att.ng_example || '',
+        image_url: att.image_url || '',
+      })),
     })),
     sketch_fields: b.sketch_fields || [],
   })),
@@ -873,7 +1107,7 @@ const canEditContent = computed(() =>
 const currentUserId = computed(() => Number(authState.user?.id || 0))
 const normalizeStatus = (status) => String(status || '').trim().toUpperCase()
 const normalizedFormStatus = computed(() => normalizeStatus(form.value.status) || 'DRAFT')
-const DIFF_FIELDS = ['sort_order', 'item_name', 'standard', 'frequency', 'method', 'record_type', 'unit', 'criteria', 'is_required']
+const DIFF_FIELDS = ['sort_order', 'item_name', 'standard', 'frequency', 'method', 'record_type', 'unit', 'criteria', 'remarks', 'is_required']
 const PENDING_STATUSES = ['SUPERVISOR_PENDING', 'CHIEF_PENDING', 'MANAGER_PENDING']
 const isSnapshotDiff = computed(() => {
   const snapshot = form.value.submitted_items_snapshot
@@ -951,6 +1185,14 @@ const autoResize = (e) => {
   const el = e.target
   el.style.height = 'auto'
   el.style.height = el.scrollHeight + 'px'
+}
+const autoResizeAllTextareas = () => {
+  nextTick(() => {
+    document.querySelectorAll('.item-table .cell-multiline').forEach((el) => {
+      el.style.height = 'auto'
+      el.style.height = el.scrollHeight + 'px'
+    })
+  })
 }
 
 const recordTypeLabel = (recordType) => {
@@ -1174,8 +1416,20 @@ const selectTemplate = async (id) => {
           record_type: item.record_type || 'CHECK',
           unit: item.unit || '',
           criteria: item.criteria || '',
+          remarks: item.remarks || '',
           is_required: Boolean(item.is_required),
           _key: nextKey(),
+          attachments: (item.attachments || []).map((att) => ({
+            id: att.id || null,
+            display_order: att.display_order || 1,
+            title: att.title || '',
+            description: att.description || '',
+            check_point: att.check_point || '',
+            ok_example: att.ok_example || '',
+            ng_example: att.ng_example || '',
+            image_url: att.image_url || '',
+            _key: nextKey(),
+          })),
         })),
         sketch_fields: b.sketch_fields || [],
       })),
@@ -1239,6 +1493,11 @@ const copyTemplate = () => {
         ...JSON.parse(JSON.stringify(item)),
         id: null,
         _key: nextKey(),
+        attachments: (item.attachments || []).map((att) => ({
+          ...JSON.parse(JSON.stringify(att)),
+          id: null,
+          _key: nextKey(),
+        })),
       })),
       sketch_fields: (b.sketch_fields || []).map((sf) => ({
         ...JSON.parse(JSON.stringify(sf)),
@@ -1339,8 +1598,10 @@ const addItem = (block) => {
     record_type: 'CHECK',
     unit: '',
     criteria: '',
-    is_required: false,
+    remarks: '',
+    is_required: true,
     _key: nextKey(),
+    attachments: [],
   })
   resequenceBlockItems(block)
 }
@@ -1389,8 +1650,14 @@ const confirmCopyItems = () => {
     record_type: item.record_type || 'CHECK',
     unit: item.unit || '',
     criteria: item.criteria || '',
+    remarks: item.remarks || '',
     is_required: Boolean(item.is_required),
     _key: nextKey(),
+    attachments: (item.attachments || []).map((att) => ({
+      ...att,
+      id: null,
+      _key: nextKey(),
+    })),
   }))
   targetBlock.items.push(...copiedItems)
   resequenceBlockItems(targetBlock)
@@ -1802,7 +2069,18 @@ const persistCurrentTemplate = async () => {
       record_type: item.record_type,
       unit: item.unit,
       criteria: item.criteria,
+      remarks: item.remarks || '',
       is_required: item.is_required,
+      attachments: (item.attachments || []).map((att) => ({
+        id: att.id || undefined,
+        display_order: att.display_order,
+        title: att.title || '',
+        description: att.description || '',
+        check_point: att.check_point || '',
+        ok_example: att.ok_example || '',
+        ng_example: att.ng_example || '',
+        image_url: att.image_url || '',
+      })),
     })),
     sketch_fields: b.sketch_fields || [],
   }))
@@ -2344,6 +2622,10 @@ watch(copyItemsSourceTemplateId, async (templateId) => {
   flex-direction: row;
   align-items: center;
   gap: 6px;
+}
+.excel-import-wrap {
+  display: inline-flex;
+  align-items: center;
 }
 .field-inline-label {
   white-space: nowrap;
@@ -2922,5 +3204,82 @@ tr.diff-deleted td {
   .form-grid {
     grid-template-columns: 1fr 1fr;
   }
+}
+.action-cell {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+}
+.btn-xs {
+  font-size: 11px;
+  padding: 2px 6px;
+}
+.attachment-modal {
+  max-width: 700px;
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: 0;
+}
+.attachment-modal .modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.attachment-target-name {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 2px;
+}
+.attachment-body {
+  padding: 12px 16px;
+}
+.attachment-actions {
+  margin-bottom: 10px;
+}
+.attachment-card {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+.attachment-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.attachment-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.attachment-form-grid label {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+.attachment-form-grid label.wide {
+  grid-column: 1 / -1;
+}
+.attachment-form-grid input,
+.attachment-form-grid textarea {
+  font-size: 13px;
+  padding: 4px 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+}
+.attachment-preview {
+  margin-top: 8px;
+}
+.attachment-preview img {
+  max-width: 100%;
+  max-height: 260px;
+  border: 1px solid #cbd5e1;
+  object-fit: contain;
 }
 </style>

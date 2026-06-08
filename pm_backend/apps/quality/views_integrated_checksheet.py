@@ -15,6 +15,7 @@ from .models_integrated_checksheet import (
     IntegratedChecksheetBatch,
     IntegratedChecksheetCheck,
     IntegratedChecksheetItem,
+    IntegratedChecksheetItemAttachment,
     IntegratedChecksheetProcessBlock,
     IntegratedChecksheetSketchField,
     IntegratedChecksheetSketchResponse,
@@ -493,6 +494,26 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
         filename = f"{template_name}.pdf"
         return FileResponse(pdf_buffer, as_attachment=True, filename=filename, content_type="application/pdf")
 
+    @action(
+        detail=False, methods=["post"], url_path="upload-attachment-image",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def upload_attachment_image(self, request):
+        import os
+        import uuid
+
+        from django.core.files.storage import default_storage
+
+        file_obj = request.FILES.get("file")
+        if not file_obj:
+            return Response({"detail": "ファイルがありません。"}, status=status.HTTP_400_BAD_REQUEST)
+        ext = os.path.splitext(file_obj.name)[1] or ""
+        filename = f"integrated_checksheet_attachments/{uuid.uuid4().hex}{ext}"
+        saved_path = default_storage.save(filename, file_obj)
+        base_url = request.build_absolute_uri("/")[:-1]
+        image_url = f"{base_url}{default_storage.url(saved_path)}"
+        return Response({"image_url": image_url}, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=["post"])
     def save_structure(self, request, pk=None):
         """工程ブロック・項目・台紙フィールドを一括保存"""
@@ -555,7 +576,7 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
                 items_data = b_data.get("items", [])
                 block.items.all().delete()
                 for idx, item_data in enumerate(items_data):
-                    IntegratedChecksheetItem.objects.create(
+                    item_obj = IntegratedChecksheetItem.objects.create(
                         process_block=block,
                         sort_order=item_data.get("sort_order", idx + 1),
                         item_name=item_data.get("item_name", ""),
@@ -565,8 +586,20 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
                         record_type=item_data.get("record_type", IntegratedChecksheetItem.RECORD_CHECK),
                         unit=item_data.get("unit", ""),
                         criteria=item_data.get("criteria", ""),
+                        remarks=item_data.get("remarks", ""),
                         is_required=item_data.get("is_required", True),
                     )
+                    for att_idx, att_data in enumerate(item_data.get("attachments", [])):
+                        IntegratedChecksheetItemAttachment.objects.create(
+                            item=item_obj,
+                            display_order=att_data.get("display_order", att_idx + 1),
+                            title=att_data.get("title", ""),
+                            description=att_data.get("description", ""),
+                            check_point=att_data.get("check_point", ""),
+                            ok_example=att_data.get("ok_example", ""),
+                            ng_example=att_data.get("ng_example", ""),
+                            image_url=att_data.get("image_url", ""),
+                        )
 
                 sketch_fields_data = b_data.get("sketch_fields", [])
                 block.sketch_fields.all().delete()
