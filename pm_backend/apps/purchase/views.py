@@ -34,6 +34,7 @@ from .models import (
     PurchaseAutoDeliveryListConfig,
     PurchasePlanLockSetting,
 )
+from .models_kikan_mapping import PurchaseActualKikanMapping
 from .serializers import PurchasePlanLockSettingSerializer
 
 
@@ -2431,5 +2432,72 @@ class PurchaseAutoDeliveryListRunNowView(APIView):
 
         thread = threading.Thread(target=run_auto_delivery_list_send, kwargs={'config_id': config.id})
         thread.start()
+
+
+class PurchaseActualKikanMappingView(APIView):
+    """仕入先納入実績 基幹システム入力用マッピング設定"""
+
+    def _normalize_mappings(self, raw):
+        result = []
+        for item in (raw if isinstance(raw, list) else []):
+            app_code = str(item.get('appProductCode') or '').strip()
+            core_code = str(item.get('coreProductCode') or '').strip()
+            item_type = str(item.get('itemType') or '').strip().upper()
+            supplier_code = str(item.get('supplierCode') or '').strip()
+            tabs_after_hinban = item.get('tabsAfterHinban')
+            try:
+                tabs_after_hinban = int(tabs_after_hinban)
+                if tabs_after_hinban < 1 or tabs_after_hinban > 10:
+                    tabs_after_hinban = 1
+            except (TypeError, ValueError):
+                tabs_after_hinban = 1
+            if item_type not in ('G', 'K'):
+                item_type = 'G'
+            result.append({
+                'appProductCode': app_code,
+                'coreProductCode': core_code,
+                'itemType': item_type,
+                'supplierCode': supplier_code,
+                'tabsAfterHinban': tabs_after_hinban,
+            })
+        return result
+
+    def get(self, request):
+        supplier_id = request.query_params.get('supplier_id')
+        if not supplier_id:
+            return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            supplier_id = int(supplier_id)
+        except (TypeError, ValueError):
+            return Response({'detail': 'invalid supplier_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+        mapping = PurchaseActualKikanMapping.objects.filter(supplier_id=supplier_id).first()
+        return Response({
+            'supplier_id': supplier_id,
+            'mappings': mapping.mappings if mapping else [],
+        })
+
+    def post(self, request):
+        supplier_id = request.data.get('supplier_id')
+        if not supplier_id:
+            return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            supplier_id = int(supplier_id)
+        except (TypeError, ValueError):
+            return Response({'detail': 'invalid supplier_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+        supplier = Supplier.objects.filter(id=supplier_id).first()
+        if not supplier:
+            return Response({'detail': 'supplier not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        raw_mappings = request.data.get('mappings', [])
+        mappings = self._normalize_mappings(raw_mappings)
+        user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+
+        PurchaseActualKikanMapping.objects.update_or_create(
+            supplier=supplier,
+            defaults={'mappings': mappings, 'updated_by': user},
+        )
+        return Response({'detail': '保存しました', 'supplier_id': supplier_id, 'mappings': mappings})
 
         return Response({'detail': '実行を開始しました', 'async': True})
