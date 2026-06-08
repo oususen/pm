@@ -490,28 +490,21 @@ const applyDailySeqMarkers = (procEntry) => {
       allBars.push(bar)
     })
   })
+  const DAY_CHANGE_HOUR = 8
   const days = Array.isArray(displayDays.value) ? displayDays.value : []
   days.forEach((day) => {
-    const dayStart = new Date(`${day.date}T00:00:00`).getTime()
+    const dayStart = new Date(`${day.date}T00:00:00`).getTime() + (DAY_CHANGE_HOUR * 60 * 60 * 1000)
     if (!Number.isFinite(dayStart)) return
     const dayEnd = dayStart + (24 * 60 * 60 * 1000)
     const candidates = allBars.filter((bar) => {
-      const seq = Number(bar?.sequenceNo)
-      if (!Number.isFinite(seq) || seq <= 0) return false
       const startMs = new Date(bar?.startTime).getTime()
       const endMs = new Date(bar?.endTime).getTime()
       if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return false
       return !(startMs >= dayEnd || endMs <= dayStart)
     })
     if (!candidates.length) return
-    const minSeq = Math.min(...candidates.map((bar) => Number(bar.sequenceNo)))
-    const maxSeq = Math.max(...candidates.map((bar) => Number(bar.sequenceNo)))
-    const startBar = candidates
-      .filter((bar) => Number(bar.sequenceNo) === minSeq)
-      .sort((a, b) => a.startTime - b.startTime)[0]
-    const endBar = candidates
-      .filter((bar) => Number(bar.sequenceNo) === maxSeq)
-      .sort((a, b) => b.endTime - a.endTime)[0]
+    const startBar = candidates.slice().sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())[0]
+    const endBar = candidates.slice().sort((a, b) => new Date(b.endTime).getTime() - new Date(a.endTime).getTime())[0]
     if (startBar) startBar.isDaySeqStart = true
     if (endBar) endBar.isDaySeqEnd = true
   })
