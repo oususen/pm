@@ -412,6 +412,7 @@
               {{ saving ? '保存中...' : (form.id ? '下書き更新' : '下書き保存') }}
             </button>
             <button class="btn-secondary" @click="downloadPreviewPdf" :disabled="!form.id || saving || pdfLoading">{{ pdfLoading ? 'PDF生成中...' : 'PDF出力' }}</button>
+            <button v-if="form.id" class="btn-secondary" @click="openTestOperation" :disabled="saving || actionLoading">テスト実施</button>
             <button v-if="canSubmitForReview" class="btn-request" @click="submitForReview" :disabled="saving || actionLoading">確認依頼</button>
             <button v-if="canReview" class="btn-chief" @click="reviewTemplate" :disabled="saving || actionLoading">
               {{ reviewActionLabel }}
@@ -1984,6 +1985,16 @@ const reviseTemplate = async () => {
   } finally {
     saving.value = false
   }
+}
+
+const openTestOperation = () => {
+  if (!form.value.id) return
+  router.push({
+    path: '/quality/product-checksheet/integrated/operation',
+    query: {
+      test_template_id: String(form.value.id),
+    },
+  })
 }
 
 const downloadPreviewPdf = async () => {

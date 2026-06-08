@@ -3,9 +3,14 @@
     <!-- ページヘッダー -->
     <div v-show="!activeBatch" class="page-header">
       <h2 class="page-title">{{ pageTitleText }}
-        <span v-if="!isReviewMode" class="page-title-note">{{ t('integratedOperation.pageNote') }}</span>
+        <span v-if="!isReviewMode && !isTestMode" class="page-title-note">{{ t('integratedOperation.pageNote') }}</span>
       </h2>
       <div class="page-actions">
+        <button
+          v-if="isTestMode"
+          class="btn-secondary"
+          @click="backToTemplateFromTest"
+        >テンプレートへ戻る</button>
         <button
           v-if="showBackToProcessInput"
           class="btn-secondary"
@@ -16,12 +21,44 @@
           class="btn-secondary"
           @click="openNewBatchSection"
         >{{ t('integratedOperation.btn.newBatch') }}</button>
-        <button class="btn-secondary" @click="refreshAll" :disabled="loading">{{ t('common.update') }}</button>
+        <button v-if="!isTestMode" class="btn-secondary" @click="refreshAll" :disabled="loading">{{ t('common.update') }}</button>
       </div>
     </div>
 
+    <section v-if="isTestMode && !activeBatch" class="panel test-panel">
+      <div class="panel-title-row">
+        <h3 class="panel-title">テスト実施</h3>
+      </div>
+      <div v-if="loadingTestTemplate" class="no-data">テンプレート読込中...</div>
+      <div v-else-if="testTemplate" class="prepare-form">
+        <label>
+          <span class="field-label">ライン</span>
+          <input :value="testTemplate.line_code || '-'" type="text" disabled style="width:140px" />
+        </label>
+        <label>
+          <span class="field-label">製品</span>
+          <input :value="testTemplate.product_code || '-'" type="text" disabled style="width:180px" />
+        </label>
+        <label>
+          <span class="field-label">テンプレート</span>
+          <input :value="`${testTemplate.name || '-'} (v${testTemplate.version || 1})`" type="text" disabled style="width:260px" />
+        </label>
+        <label>
+          <span class="field-label">台数</span>
+          <input v-model.number="testBatch.quantity" type="number" min="1" style="width:80px" />
+        </label>
+        <label>
+          <span class="field-label">対象日</span>
+          <input v-model="testBatch.plan_date" type="date" style="width:140px" />
+        </label>
+        <button class="btn-primary" @click="startTestBatch" :disabled="!canEdit || !testBatch.quantity || !testBatch.plan_date">テスト開始</button>
+      </div>
+      <p v-if="testTemplate" class="test-note">テスト実施の入力内容はDB保存されません。画面を閉じると破棄されます。</p>
+      <div v-else-if="!loadingTestTemplate" class="no-data">テスト対象テンプレートを読めませんでした。</div>
+    </section>
+
     <!-- フィルタパネル -->
-    <section v-show="!activeBatch" class="panel filter-panel">
+    <section v-show="!activeBatch && !isTestMode" class="panel filter-panel">
       <div class="prepare-form filter-form">
         <label>
           <span class="field-label">{{ t('integratedOperation.line') }}</span>
@@ -51,7 +88,7 @@
     </section>
 
     <!-- 新規バッチ作成 -->
-    <section v-if="isReviewMode && !activeBatch" class="panel" ref="newBatchSectionRef">
+    <section v-if="isReviewMode && !activeBatch && !isTestMode" class="panel" ref="newBatchSectionRef">
       <div class="panel-title-row">
         <h3 class="panel-title">{{ t('integratedOperation.newBatchTitle') }}</h3>
         <button class="btn-secondary btn-sm" @click="showNewBatchSection = !showNewBatchSection">
@@ -92,7 +129,7 @@
     </section>
 
     <!-- バッチ一覧 -->
-    <section v-show="!activeBatch" class="panel">
+    <section v-show="!activeBatch && !isTestMode" class="panel">
       <h3 class="panel-title">{{ t('integratedOperation.batchList') }}</h3>
       <div v-if="loadingBatches" class="no-data">{{ t('integratedOperation.loading') }}</div>
       <div v-else-if="!batches.length" class="no-data">{{ t('integratedOperation.noBatches') }}</div>
@@ -448,8 +485,11 @@ const canAccessQuality = (resource, level = 'view', aliases = [], fallbackToQual
   return fallbackToQuality ? hasPermission(user, 'quality', level) : false
 }
 const isReviewMode = computed(() => route.name === 'IntegratedChecksheetReview')
+const isTestMode = computed(() => Boolean(route.query?.test_template_id) && !isReviewMode.value)
 const pageTitleText = computed(() => (
-  isReviewMode.value ? t('integratedOperation.pageTitleReview') : t('integratedOperation.pageTitleWork')
+  isTestMode.value
+    ? '工程一体チェックシート テスト実施'
+    : (isReviewMode.value ? t('integratedOperation.pageTitleReview') : t('integratedOperation.pageTitleWork'))
 ))
 const isSupervisorUser = computed(() => {
   const user = authState.user
@@ -534,6 +574,9 @@ const newBatch = reactive({ product: '', line: '', quantity: 1, plan_date: '', l
 const preparing = ref(false)
 const showNewBatchSection = ref(true)
 const newBatchSectionRef = ref(null)
+const loadingTestTemplate = ref(false)
+const testTemplate = ref(null)
+const testBatch = reactive({ quantity: 1, plan_date: '', lot_no: 'TEST' })
 
 // --- バッチ詳細 ---
 const activeBatchId = ref(null)
@@ -584,6 +627,15 @@ const formatDateTime = (value) => {
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
   return d.toLocaleString('ja-JP')
+}
+const formatDate = (value) => {
+  if (!value) return ''
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 const reviewRoleLabel = computed(() => {
@@ -780,6 +832,10 @@ const ensureLineFinalProducts = async (lineId) => {
 }
 
 const loadBatches = async () => {
+  if (isTestMode.value) {
+    batches.value = []
+    return
+  }
   loadingBatches.value = true
   try {
     const params = {}
@@ -797,6 +853,7 @@ const loadBatches = async () => {
 }
 
 const loadBatchUnits = async (batchId) => {
+  if (isTestMode.value) return
   loadingUnits.value = true
   try {
     const [unitsRes, batchRes] = await Promise.all([
@@ -816,6 +873,123 @@ const loadBatchUnits = async (batchId) => {
     templateBlocks.value = []
   } finally {
     loadingUnits.value = false
+  }
+}
+
+const isCheckFilled = (check) => {
+  if (!check) return false
+  if (check.judgement) return true
+  if (check.numeric_value !== null && check.numeric_value !== '' && check.numeric_value !== undefined) return true
+  if (check.text_value) return true
+  return false
+}
+
+const buildUnitProcessProgress = (unitChecks = [], blocks = templateBlocks.value) => {
+  const checksByItem = new Map(unitChecks.map((check) => [Number(check.item), check]))
+  return (blocks || []).map((block) => {
+    const items = Array.isArray(block.items) ? block.items : []
+    const requiredItems = items.filter((item) => item.is_required)
+    const done = items.filter((item) => isCheckFilled(checksByItem.get(Number(item.id)))).length
+    const requiredDone = requiredItems.filter((item) => isCheckFilled(checksByItem.get(Number(item.id)))).length
+    return {
+      process_block_id: block.id,
+      process_code: block.process_code || '',
+      process_name: block.process_name || '',
+      sort_order: block.sort_order || 0,
+      total: items.length,
+      done,
+      complete: requiredItems.length === 0 || requiredDone >= requiredItems.length,
+    }
+  })
+}
+
+const buildBatchProcessProgress = (targetUnits, blocks = templateBlocks.value) => {
+  const totalUnits = Array.isArray(targetUnits) ? targetUnits.length : 0
+  return (blocks || []).map((block) => {
+    const requiredItemIds = new Set((block.items || []).filter((item) => item.is_required).map((item) => Number(item.id)))
+    const doneUnits = requiredItemIds.size === 0
+      ? totalUnits
+      : (targetUnits || []).filter((unit) => {
+          const checkedIds = new Set((unit.checks || []).filter(isCheckFilled).map((check) => Number(check.item)))
+          return [...requiredItemIds].every((itemId) => checkedIds.has(itemId))
+        }).length
+    return {
+      process_block_id: block.id,
+      process_code: block.process_code || '',
+      process_name: block.process_name || '',
+      done_units: doneUnits,
+      total_units: totalUnits,
+    }
+  })
+}
+
+const buildLocalUnitStatus = (unit) => {
+  const progress = buildUnitProcessProgress(unit.checks || [])
+  if (!progress.length) return 'PENDING'
+  if (progress.every((item) => item.complete)) return 'COMPLETED'
+  if ((unit.checks || []).some(isCheckFilled) || hasUnitHoldFlag(unit)) return 'IN_PROGRESS'
+  return 'PENDING'
+}
+
+const buildLocalUnit = (sequenceNo) => {
+  const unit = {
+    id: `test-unit-${sequenceNo}`,
+    sequence_no: sequenceNo,
+    status: 'PENDING',
+    completed_at: null,
+    approved_at: null,
+    approved_by: null,
+    checks: [],
+    sketch_responses: [],
+    process_progress: [],
+  }
+  unit.process_progress = buildUnitProcessProgress(unit.checks)
+  return unit
+}
+
+const refreshTestBatchState = () => {
+  if (!isTestMode.value) return
+  units.value = units.value.map((unit) => {
+    const nextStatus = buildLocalUnitStatus(unit)
+    const completedAt = nextStatus === 'COMPLETED' ? (unit.completed_at || new Date().toISOString()) : null
+    return {
+      ...unit,
+      status: nextStatus,
+      completed_at: completedAt,
+      process_progress: buildUnitProcessProgress(unit.checks || []),
+    }
+  })
+  if (activeBatch.value) {
+    const completedCount = units.value.filter((unit) => unit.status === 'COMPLETED').length
+    activeBatch.value = {
+      ...activeBatch.value,
+      quantity: units.value.length,
+      unit_count: units.value.length,
+      completed_count: completedCount,
+      status: completedCount >= units.value.length && units.value.length > 0 ? 'COMPLETED' : 'OPEN',
+      process_progress: buildBatchProcessProgress(units.value),
+    }
+  }
+}
+
+const loadTestTemplate = async () => {
+  const templateId = Number(route.query?.test_template_id || 0)
+  if (!templateId) return
+  loadingTestTemplate.value = true
+  try {
+    const res = await api.integratedChecksheets.getTemplate(templateId)
+    testTemplate.value = res.data
+    templateBlocks.value = Array.isArray(res.data?.process_blocks) ? res.data.process_blocks : []
+    if (!testBatch.plan_date) {
+      testBatch.plan_date = formatDate(new Date())
+    }
+  } catch (error) {
+    console.error('テストテンプレート取得失敗:', error)
+    testTemplate.value = null
+    templateBlocks.value = []
+    alert(`テストテンプレートの取得に失敗しました: ${error.response?.data?.detail || error.message}`)
+  } finally {
+    loadingTestTemplate.value = false
   }
 }
 
@@ -918,10 +1092,13 @@ const closeBatchDetail = () => {
   activeBatch.value = null
   reviewRole.value = ''
   units.value = []
-  templateBlocks.value = []
+  if (!isTestMode.value) {
+    templateBlocks.value = []
+  }
 }
 
 const refreshAll = () => {
+  if (isTestMode.value) return
   loadBatches()
   if (activeBatchId.value) {
     loadBatchUnits(activeBatchId.value)
@@ -949,7 +1126,16 @@ const backToProcessInput = () => {
   })
 }
 
+const backToTemplateFromTest = () => {
+  const templateId = Number(route.query?.test_template_id || 0)
+  router.push({
+    path: '/quality/product-checksheet/integrated/templates',
+    query: templateId ? { id: String(templateId) } : {},
+  })
+}
+
 const applyInitialFiltersFromQuery = async () => {
+  if (isTestMode.value) return
   preferredProcessId.value = route.query?.process_id ? String(route.query.process_id) : ''
   const lineIdFromQuery = route.query?.line_id ? String(route.query.line_id) : ''
   lockedLineIdFromRoute.value = lineIdFromQuery || ''
@@ -958,6 +1144,35 @@ const applyInitialFiltersFromQuery = async () => {
   if (!exists) return
   selectedLine.value = lineIdFromQuery
   await ensureLineFinalProducts(lineIdFromQuery)
+}
+
+const startTestBatch = () => {
+  if (!canEdit.value || !testTemplate.value) return
+  const quantity = Number(testBatch.quantity || 0)
+  if (quantity <= 0 || !testBatch.plan_date) return
+  const nextUnits = Array.from({ length: quantity }, (_, index) => buildLocalUnit(index + 1))
+  units.value = nextUnits
+  activeBatchId.value = `test-template-${testTemplate.value.id}`
+  activeBatch.value = {
+    id: activeBatchId.value,
+    template: testTemplate.value.id,
+    template_name: testTemplate.value.name || '',
+    product: testTemplate.value.product,
+    product_code: testTemplate.value.product_code || '',
+    product_name: testTemplate.value.product_name || '',
+    line: testTemplate.value.line,
+    line_code: testTemplate.value.line_code || '',
+    plan_date: testBatch.plan_date,
+    quantity,
+    lot_no: testBatch.lot_no || 'TEST',
+    status: 'OPEN',
+    unit_count: quantity,
+    completed_count: 0,
+    process_progress: buildBatchProcessProgress(nextUnits),
+    created_at: null,
+    updated_at: null,
+  }
+  refreshTestBatchState()
 }
 
 // --- バッチ作成 ---
@@ -1272,11 +1487,48 @@ const saveBlockChecks = async (block, options = {}) => {
       }
       checks.push(entry)
     }
+    const sketchPayload = getSketchPayloadForBlock(modalUnit.value, block.id, hold, holdReason)
+    if (isTestMode.value) {
+      const currentChecks = Array.isArray(modalUnit.value.checks) ? [...modalUnit.value.checks] : []
+      const nextChecks = currentChecks.filter((check) => !block.items.some((item) => Number(item.id) === Number(check.item)))
+      nextChecks.push(...checks)
+      const currentSketches = Array.isArray(modalUnit.value.sketch_responses) ? [...modalUnit.value.sketch_responses] : []
+      const sketchIndex = currentSketches.findIndex((resp) => Number(resp.process_block) === Number(block.id))
+      const sketchPatch = {
+        ...(sketchIndex >= 0 ? currentSketches[sketchIndex] : {}),
+        process_block: block.id,
+        drawing_data: sketchPayload.drawing_data,
+        field_responses: sketchPayload.field_responses,
+      }
+      if (sketchIndex >= 0) currentSketches[sketchIndex] = sketchPatch
+      else currentSketches.push(sketchPatch)
+      const nextStatus = buildLocalUnitStatus({
+        ...modalUnit.value,
+        checks: nextChecks,
+        sketch_responses: currentSketches,
+      })
+      const updatedUnit = {
+        ...modalUnit.value,
+        checks: nextChecks,
+        sketch_responses: currentSketches,
+        status: nextStatus,
+        completed_at: nextStatus === 'COMPLETED' ? (modalUnit.value.completed_at || new Date().toISOString()) : null,
+        process_progress: buildUnitProcessProgress(nextChecks),
+      }
+      updateUnitInList(updatedUnit)
+      modalUnit.value = updatedUnit
+      refreshTestBatchState()
+      const currentIdx = units.value.findIndex((u) => u.id === savedUnitId)
+      if (currentIdx >= 0 && currentIdx + 1 < units.value.length) {
+        const nextUnit = units.value[currentIdx + 1]
+        if (nextUnit) openUnitModal(nextUnit, modalSelectedBlockId.value)
+      }
+      return
+    }
     const res = await api.integratedChecksheets.saveChecks(modalUnit.value.id, {
       process_block_id: block.id,
       checks,
     })
-    const sketchPayload = getSketchPayloadForBlock(modalUnit.value, block.id, hold, holdReason)
     await api.integratedChecksheets.saveSketch(modalUnit.value.id, {
       process_block_id: block.id,
       drawing_data: sketchPayload.drawing_data,
@@ -1359,6 +1611,10 @@ watch(() => newBatch.line, async () => {
 onMounted(async () => {
   if (!canView.value) return
   await loadMasters()
+  if (isTestMode.value) {
+    await loadTestTemplate()
+    return
+  }
   await applyInitialFiltersFromQuery()
   await loadBatches()
 })
@@ -1378,6 +1634,7 @@ onMounted(async () => {
 .page-title { margin: 0; font-size: 20px; font-weight: 700; color: #0f172a; }
 .page-title-note { font-size: 12px; font-weight: 400; color: #2563eb; margin-left: 8px; }
 .page-actions { display: flex; gap: 8px; }
+.test-note { margin: 8px 0 0; font-size: 12px; color: #b45309; }
 
 /* パネル */
 .panel {
