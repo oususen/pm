@@ -186,7 +186,10 @@ const load = async () => {
     if (filterSupplierId.value) {
       const sup = suppliers.value.find((s) => String(s.id) === filterSupplierId.value)
       if (sup) {
-        data = data.filter((r) => r.supplier === sup.supplier_name || r.supplier === sup.supplier_code)
+        data = data.filter((r) => {
+          const s = r.supplier || ''
+          return s === sup.supplier_name || s === sup.supplier_code || s.includes(sup.supplier_name) || s.includes(sup.supplier_code)
+        })
       }
     }
     rows.value = data
