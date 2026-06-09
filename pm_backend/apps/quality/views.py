@@ -1059,6 +1059,19 @@ class EquipmentInspectionTemplateViewSet(viewsets.ModelViewSet):
         serializer = EquipmentInspectionWorkflowLogSerializer(logs, many=True)
         return Response(serializer.data)
 
+    @action(detail=True, methods=["get"])
+    def prepare_test(self, request, pk=None):
+        template = self.get_object()
+        section_type = str(
+            request.query_params.get("section_type") or EquipmentInspectionItem.SECTION_DAILY
+        ).strip().upper()
+        from datetime import date as _date
+        operation_date = _date.today()
+        payload = _build_default_record_payload(
+            template, operation_date, section_type, request.user, request,
+        )
+        return Response({"record": payload})
+
 
 class EquipmentInspectionTaskListView(APIView):
     permission_classes = [IsAuthenticated]

@@ -32,6 +32,9 @@ export const createQualityEquipmentInspectionsAPI = (client) => ({
   workflowLogs(id) {
     return client.get(`/equipment-inspection-templates/${id}/workflow_logs/`);
   },
+  prepareTest(id, params = {}) {
+    return client.get(`/equipment-inspection-templates/${id}/prepare_test/`, { params });
+  },
   uploadAttachmentImage(formData) {
     return client.post("/equipment-inspection-templates/upload_attachment_image/", formData, {
       headers: { "Content-Type": "multipart/form-data" },

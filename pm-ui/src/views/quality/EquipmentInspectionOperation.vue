@@ -1,25 +1,34 @@
 <template>
   <div class="page-container inspection-operation" v-if="canView">
     <div class="page-header">
-      <h2 class="page-title">点検実施</h2>
+      <h2 class="page-title">{{ isTestMode ? '設備点検 テスト実施' : '点検実施' }}</h2>
       <div class="page-actions">
         <button
-          v-if="showBackToProcessInput"
+          v-if="isTestMode"
+          class="btn-secondary"
+          @click="backToTemplate"
+        >
+          テンプレートに戻る
+        </button>
+        <button
+          v-if="showBackToProcessInput && !isTestMode"
           class="btn-secondary"
           @click="backToProcessInput"
         >
           工程作業入力へ戻る
         </button>
-        <button class="btn-secondary" @click="loadTemplates" :disabled="loadingOptions || loadingRecord">
+        <button v-if="!isTestMode" class="btn-secondary" @click="loadTemplates" :disabled="loadingOptions || loadingRecord">
           テンプレート更新
         </button>
-        <button class="btn-secondary" @click="reloadRecord" :disabled="loadingRecord || !selectedSheetCode || !selectedDate">
+        <button v-if="!isTestMode" class="btn-secondary" @click="reloadRecord" :disabled="loadingRecord || !selectedSheetCode || !selectedDate">
           再読込
         </button>
       </div>
     </div>
 
-    <section class="panel filter-panel">
+    <p v-if="isTestMode" class="test-note">テスト実施の入力内容はDB保存されません。画面を閉じると破棄されます。</p>
+
+    <section v-if="!isTestMode" class="panel filter-panel">
       <label>
         ライン
         <select
@@ -68,7 +77,7 @@
       </div>
     </section>
 
-    <section class="panel" v-if="selectedSheetCode">
+    <section class="panel" v-if="selectedSheetCode || isTestMode">
       <div class="record-summary">
         <div>
           <div class="summary-month">{{ inspectionYearMonthLabel }}</div>
@@ -223,7 +232,7 @@
         対象項目がありません。
       </div>
 
-      <div class="record-actions">
+      <div v-if="!isTestMode" class="record-actions">
         <button
           v-if="!isCompleted"
           class="btn-primary"
@@ -304,6 +313,9 @@ const processOptions = ref([])
 const currentTemplate = ref(null)
 const isLocked = ref(false)
 
+const isTestMode = computed(() => Boolean(route.query?.test_template_id))
+const testTemplateId = computed(() => Number(route.query?.test_template_id || 0))
+
 const selectedSheetCode = ref(String(route.query.sheet_code || ""))
 const selectedDate = ref(String(route.query.date || formatISODate(new Date())))
 const sectionType = ref(String(route.query.section_type || "DAILY").toUpperCase())
@@ -367,8 +379,8 @@ const canEdit = computed(() =>
   canAccessQuality("quality.equipment_inspection_operation", "edit", ["quality.equipment_inspection"])
 )
 const isCompleted = computed(() => String(form.value.status || "").toUpperCase() === "COMPLETED")
-const canEditRecord = computed(() => canEdit.value && !isLocked.value && !isCompleted.value)
-const canEditComment = computed(() => canEdit.value && !isLocked.value)
+const canEditRecord = computed(() => isTestMode.value || (canEdit.value && !isLocked.value && !isCompleted.value))
+const canEditComment = computed(() => isTestMode.value || (canEdit.value && !isLocked.value))
 const isQuarterlySection = computed(() => String(sectionType.value || "").toUpperCase() === "QUARTERLY")
 const showBackToProcessInput = computed(() => {
   const source = String(route.query?.source || "").trim()
@@ -667,6 +679,32 @@ const syncQuery = () => {
       source: route.query?.source ? String(route.query.source) : undefined,
     },
   })
+}
+
+const backToTemplate = () => {
+  const templateId = testTemplateId.value
+  router.push({
+    path: '/quality/equipment-inspection/master',
+    query: templateId ? { id: String(templateId) } : {},
+  })
+}
+
+const loadTestRecord = async () => {
+  if (!testTemplateId.value) return
+  loadingRecord.value = true
+  try {
+    const response = await api.qualityEquipmentInspections.prepareTest(
+      testTemplateId.value,
+      { section_type: sectionType.value },
+    )
+    form.value = normalizeRecord(response.data?.record || createEmptyForm())
+  } catch (error) {
+    console.error("テストデータ準備に失敗:", error)
+    form.value = createEmptyForm()
+    alert("テストデータの取得に失敗しました。")
+  } finally {
+    loadingRecord.value = false
+  }
 }
 
 const backToProcessInput = () => {
@@ -1024,7 +1062,7 @@ const closeAttachmentViewer = () => {
 }
 
 watch([selectedSheetCode, selectedDate, sectionType], async () => {
-  if (!canView.value) return
+  if (!canView.value || isTestMode.value) return
   syncQuery()
   if (selectedSheetCode.value && selectedDate.value) {
     await loadPreparedRecord()
@@ -1032,7 +1070,7 @@ watch([selectedSheetCode, selectedDate, sectionType], async () => {
 })
 
 watch([selectedLineId, selectedProcessId], async () => {
-  if (!canView.value) return
+  if (!canView.value || isTestMode.value) return
   syncQuery()
   await loadTemplates()
 })
@@ -1048,6 +1086,10 @@ watch(selectedLineId, (lineId) => {
 
 onMounted(async () => {
   if (!canView.value) return
+  if (isTestMode.value) {
+    await loadTestRecord()
+    return
+  }
   await loadFilterOptions()
   await loadTemplates()
   if (selectedSheetCode.value && selectedDate.value) {
@@ -1062,6 +1104,16 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+.test-note {
+  margin: 0;
+  padding: 8px 12px;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  color: #92400e;
+  font-size: 13px;
+  font-weight: 700;
 }
 .panel {
   background: #fff;

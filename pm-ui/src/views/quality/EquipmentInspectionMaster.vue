@@ -243,6 +243,7 @@
             :disabled="!canEditFields || excelImportLoading"
             @change="onOperationExcelFileChange"
           />
+          <button v-if="form.id" class="btn-secondary" @click="openTestOperation" :disabled="saving || actionLoading">テスト実施</button>
           <button class="btn-approve" @click="submitForReview" :disabled="!canSubmitForReview || actionLoading">
             確認依頼
           </button>
@@ -2365,6 +2366,14 @@ const saveTemplate = async () => {
   } finally {
     saving.value = false
   }
+}
+
+const openTestOperation = () => {
+  if (!form.value.id) return
+  router.push({
+    path: '/quality/equipment-inspection/operation',
+    query: { test_template_id: String(form.value.id) },
+  })
 }
 
 const submitForReview = () => {
