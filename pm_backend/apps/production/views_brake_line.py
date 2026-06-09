@@ -1179,6 +1179,29 @@ class BrakeLineSessionDetailView(APIView):
         new_ended_at = self._parse_dt(request.data.get('ended_at'))
         production_qty_raw = request.data.get('production_qty')
 
+        new_product_code = request.data.get('product_code')
+        new_product = None
+        product_changed = False
+        if new_product_code is not None:
+            new_product_code = str(new_product_code).strip()
+            if not new_product_code:
+                return Response({'detail': '品番は必須です。'}, status=400)
+            new_product = Product.objects.filter(product_code=new_product_code).first()
+            if not new_product:
+                return Response({'detail': f'品番 {new_product_code} が見つかりません。'}, status=400)
+            ref_record = end_record or start_record or record
+            if ref_record.product_id != new_product.id:
+                product_changed = True
+
+        if product_changed and old_qty:
+            self._apply_backlog_delta(end_record, -old_qty)
+
+        if product_changed:
+            for rec in [r for r in (start_record, end_record) if r]:
+                rec.product = new_product
+                rec.product_code = new_product.product_code
+                rec.save(update_fields=['product_id', 'product_code'])
+
         if new_started_at and start_record:
             start_record.recorded_at = new_started_at
             start_record.save(update_fields=['recorded_at'])
@@ -1195,7 +1218,12 @@ class BrakeLineSessionDetailView(APIView):
                 return Response({'detail': 'production_qty は0以上で入力してください。'}, status=400)
             end_record.qty = new_qty
             end_record.save(update_fields=['qty'])
-            self._apply_backlog_delta(end_record, new_qty - old_qty)
+            if product_changed:
+                self._apply_backlog_delta(end_record, new_qty)
+            else:
+                self._apply_backlog_delta(end_record, new_qty - old_qty)
+        elif product_changed and old_qty:
+            self._apply_backlog_delta(end_record, old_qty)
 
         return Response({'detail': '更新しました。'})
 

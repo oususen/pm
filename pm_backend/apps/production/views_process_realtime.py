@@ -864,6 +864,18 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         ended_at = session.ended_at
         production_qty = session.production_qty
         defect_qty = session.defect_qty
+        new_product = None
+        product_changed = False
+
+        if 'product_code' in payload:
+            new_code = str(payload.get('product_code') or '').strip()
+            if not new_code:
+                return Response({'detail': '品番は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+            new_product = Product.objects.filter(product_code=new_code).first()
+            if not new_product:
+                return Response({'detail': f'品番 {new_code} が見つかりません。'}, status=status.HTTP_400_BAD_REQUEST)
+            if session.product_id != new_product.id:
+                product_changed = True
 
         if 'started_at' in payload:
             next_started = payload.get('started_at')
@@ -898,14 +910,24 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         if started_at and ended_at and ended_at < started_at:
             return Response({'detail': '終了時刻は開始時刻以降にしてください。'}, status=status.HTTP_400_BAD_REQUEST)
 
-        old_qty = int(session.production_qty or 0) if _is_countable_session_for_actual(session.session_type, session.end_action) else 0
-        new_qty = int(production_qty or 0) if _is_countable_session_for_actual(session.session_type, session.end_action) else 0
-        delta = new_qty - old_qty
+        is_countable = _is_countable_session_for_actual(session.session_type, session.end_action)
+        old_qty = int(session.production_qty or 0) if is_countable else 0
+        new_qty = int(production_qty or 0) if is_countable else 0
 
         old_defect = int(session.defect_qty or 0)
         defect_delta = defect_qty - old_defect
 
+        update_fields = [
+            'started_at', 'ended_at', 'production_qty', 'defect_qty',
+            'status', 'duration_seconds', 'updated_at',
+        ]
+
         with transaction.atomic():
+            if product_changed and old_qty:
+                _adjust_backlog_actual_for_session(session, -old_qty)
+                _adjust_coproduct_children_backlog(session, -old_qty)
+                _apply_delta_to_inventory_and_progress(session, -old_qty)
+
             session.started_at = started_at
             session.ended_at = ended_at
             session.production_qty = production_qty
@@ -915,21 +937,28 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 session.duration_seconds = int((ended_at - started_at).total_seconds())
             else:
                 session.duration_seconds = 0
-            session.save(update_fields=[
-                'started_at',
-                'ended_at',
-                'production_qty',
-                'defect_qty',
-                'status',
-                'duration_seconds',
-                'updated_at',
-            ])
 
-            if delta:
-                _adjust_backlog_actual_for_session(session, delta)
-                _adjust_coproduct_children_backlog(session, delta)
-                _update_coproduct_children_records(session, production_qty)
-                _apply_delta_to_inventory_and_progress(session, delta)
+            if product_changed:
+                session.product = new_product
+                session.product_code = new_product.product_code
+                session.product_name = new_product.product_name or ''
+                update_fields += ['product_id', 'product_code', 'product_name']
+
+            session.save(update_fields=update_fields)
+
+            if product_changed:
+                if new_qty:
+                    _adjust_backlog_actual_for_session(session, new_qty)
+                    _adjust_coproduct_children_backlog(session, new_qty)
+                    _update_coproduct_children_records(session, production_qty)
+                    _apply_delta_to_inventory_and_progress(session, new_qty)
+            else:
+                delta = new_qty - old_qty
+                if delta:
+                    _adjust_backlog_actual_for_session(session, delta)
+                    _adjust_coproduct_children_backlog(session, delta)
+                    _update_coproduct_children_records(session, production_qty)
+                    _apply_delta_to_inventory_and_progress(session, delta)
 
             if defect_delta:
                 _adjust_backlog_scrap_for_session(session, defect_delta)
