@@ -1115,10 +1115,14 @@ class KubotaSakaiTruckViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 class CustomerViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Customer.objects.all()
     serializer_class = CustomerSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['is_active']
     search_fields = ['customer_code', 'customer_name']
     ordering_fields = ['customer_code', 'created_at']
     ordering = ['customer_code']
+
+    def get_queryset(self):
+        return super().get_queryset().order_by('customer_code', 'id')
 
 
 class ProcessViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
