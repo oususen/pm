@@ -628,15 +628,35 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 product.capacity = v
                 changed_fields.append('capacity')
 
+            # 置き場
+            loc_names = []
+            for loc_key in ('stock_location_1', 'stock_location_2', 'stock_location_3', 'stock_location_4'):
+                val = str(item.get(loc_key) or '').strip()
+                if val:
+                    loc_names.append(val)
+            has_locations = bool(loc_names)
+
             if is_new:
                 if not dry_run:
                     product.save()
                     existing_products[code] = product
+                    if has_locations:
+                        for i, name in enumerate(loc_names):
+                            ProductStockLocation.objects.create(product=product, location_name=name, sort_order=i)
+                        product.stock_location = loc_names[0]
+                        product.save(update_fields=['stock_location'])
                 created.append(code)
-            elif changed_fields:
+            elif changed_fields or has_locations:
                 if not dry_run:
-                    changed_fields.append('updated_at')
-                    product.save(update_fields=changed_fields)
+                    if changed_fields:
+                        changed_fields.append('updated_at')
+                        product.save(update_fields=changed_fields)
+                    if has_locations:
+                        ProductStockLocation.objects.filter(product=product).delete()
+                        for i, name in enumerate(loc_names):
+                            ProductStockLocation.objects.create(product=product, location_name=name, sort_order=i)
+                        product.stock_location = loc_names[0]
+                        product.save(update_fields=['stock_location', 'updated_at'])
                 updated.append(code)
             else:
                 skipped.append(code)
@@ -685,6 +705,10 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             '発注倍数': 'order_lot_multiple',
             '最小発注数': 'order_lot_min',
             '容器入り数': 'capacity',
+            '置き場1': 'stock_location_1',
+            '置き場2': 'stock_location_2',
+            '置き場3': 'stock_location_3',
+            '置き場4': 'stock_location_4',
         }
 
         if filename.endswith('.xlsx') or filename.endswith('.xlsm'):
@@ -765,6 +789,7 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             '移動先',
             '比重(g/cm³)', '縦(mm)', '横(mm)', '厚さ(mm)',
             '発注倍数', '最小発注数', '容器入り数',
+            '置き場1', '置き場2', '置き場3', '置き場4',
         ]
         ws.append(headers)
         ws.append([''] * len(headers))
@@ -797,6 +822,7 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         ws_guide.append(['管理区分', '日 / 分'])
         ws_guide.append(['最終品・ライン最終品', 'はい / いいえ'])
         ws_guide.append(['移動先', '社内ライン / 社内塗装 / CWL / 興和 / 直納 / その他'])
+        ws_guide.append(['置き場1〜4', '置き場名を最大4つまで入力可。置き場1が主置き場になります。空欄時は既存の置き場を維持。'])
         ws_guide.append(['注意', '同じ構成品番が複数行ある場合は先頭行のみ取込対象です。'])
 
         ws_process = wb.create_sheet('工程')
