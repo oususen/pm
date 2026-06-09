@@ -1254,9 +1254,9 @@ watch(() => filters.stocktake_date, () => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   cursor: pointer;
-  padding: 4px 2px;
+  padding: 2px 2px;
   min-height: 36px;
 }
 
