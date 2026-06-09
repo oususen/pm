@@ -143,8 +143,8 @@ def _has_open_brake_or_spot_action(user):
     """
     ブレーキ/ナット（スポット）アクション実績の未終了を判定する。
     同一キー（工程・品目・設備）の最新アクションが START/RESUME かつ
-    その START/RESUME を行ったのが対象ユーザーなら未終了扱い。
-    他ユーザーが同キーを END していれば終了済みとみなす。
+    その最新アクションを行ったのが対象ユーザー本人の場合のみ未終了扱い。
+    別ユーザーが同キーで START/RESUME していても、申請者には影響しない。
     戻り値: (bool, list[dict]) — 未終了有無と、未終了アイテムの詳細リスト
     """
     _DISPLAY_FIELDS = [
@@ -256,7 +256,7 @@ def _has_open_brake_or_spot_action(user):
         if not latest:
             continue
         action = str(latest.get('operator_action') or '').upper()
-        if action in {'START', 'RESUME'}:
+        if action in {'START', 'RESUME'} and latest.get('operator_user_id') == user.id:
             user_row = user_rows_by_key[item_key]
             plan_date = user_row.get('plan_date')
             open_items.append({
