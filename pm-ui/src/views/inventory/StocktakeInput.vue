@@ -51,6 +51,7 @@
 
     <section class="candidate-list">
       <div v-if="loading" class="empty-state">読込中...</div>
+      <div v-else-if="!hasFilter" class="empty-state">エリア・置き場・品番のいずれかを選択してください</div>
       <div v-else-if="filteredRows.length === 0" class="empty-state">対象がありません</div>
       <div v-else class="list-stack">
         <article
@@ -434,7 +435,30 @@ const syncSelectedRow = (items) => {
   }
 };
 
+const hasFilter = computed(() =>
+  !!(filters.area_id || filters.line_id || filters.stock_location || filters.product_code)
+);
+
 const reload = async () => {
+  if (!hasFilter.value) {
+    rows.value = [];
+    selectedProductId.value = null;
+    if (!lineOptions.value.length || !locations.value.length) {
+      try {
+        const response = await api.stocktakeRecords.list({
+          stocktake_date: filters.stocktake_date,
+          product_code: '__NONE__',
+        });
+        if (!lineOptions.value.length) {
+          lineOptions.value = Array.isArray(response.data?.lines) ? response.data.lines : [];
+        }
+        if (!locations.value.length) {
+          locations.value = Array.isArray(response.data?.locations) ? response.data.locations : [];
+        }
+      } catch (_) {}
+    }
+    return;
+  }
   loading.value = true;
   try {
     const response = await api.stocktakeRecords.list({
@@ -1046,7 +1070,7 @@ onMounted(() => {
 });
 
 watch(
-  () => [filters.stocktake_date, filters.line_id, filters.stock_location, filters.product_code],
+  () => [filters.stocktake_date, filters.area_id, filters.line_id, filters.stock_location, filters.product_code],
   () => {
     reload();
   }
