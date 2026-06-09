@@ -281,6 +281,12 @@ const production = [
     meta: { pageTitle: "製品写真アップロード", manualPath: "README.md" },
   },
   {
+    path: "/production/product-info-editor",
+    name: "ProductInfoEditor",
+    component: () => import("@/views/production/ProductInfoEditor.vue"),
+    meta: { pageTitle: "製品情報編集" },
+  },
+  {
     path: "/production/plan-deviation-report",
     name: "PlanDeviationReport",
     component: () => import("@/views/production/PlanDeviationReport.vue"),

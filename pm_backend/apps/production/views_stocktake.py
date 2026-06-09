@@ -85,9 +85,9 @@ class StocktakeRecordView(APIView):
         stock_location = str(request.query_params.get('stock_location') or '').strip()
         if stock_location:
             loc_product_ids = ProductStockLocation.objects.filter(
-                location_name__icontains=stock_location
+                location_name=stock_location
             ).values_list('product_id', flat=True)
-            qs = qs.filter(Q(stock_location__icontains=stock_location) | Q(id__in=loc_product_ids))
+            qs = qs.filter(Q(stock_location=stock_location) | Q(id__in=loc_product_ids))
 
         product_code = str(request.query_params.get('product_code') or '').strip()
         if product_code:

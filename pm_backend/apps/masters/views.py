@@ -155,9 +155,9 @@ class ProductFilter(django_filters.FilterSet):
         if not value:
             return queryset
         loc_product_ids = ProductStockLocation.objects.filter(
-            location_name__icontains=value
+            location_name=value
         ).values_list('product_id', flat=True)
-        return queryset.filter(Q(stock_location__icontains=value) | Q(id__in=loc_product_ids))
+        return queryset.filter(Q(stock_location=value) | Q(id__in=loc_product_ids))
 
     def filter_next_process_unset(self, queryset, name, value):
         if value is None:

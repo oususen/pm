@@ -304,6 +304,14 @@ const tiles = computed(() => {
       resource: "production",
     },
     {
+      to: "/production/product-info-editor",
+      label: "製品情報編集",
+      icon: "📸",
+      category: "other",
+      required: "edit",
+      resource: "production.process_input",
+    },
+    {
       to: "/masters/mobile-device",
       label: "携帯端末管理",
       icon: "📱",
