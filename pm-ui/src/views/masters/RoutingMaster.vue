@@ -1279,8 +1279,13 @@ const createStep = async () => {
       remark: String(newStepDraft.value.remark || '').trim() || null,
     }
     await api.routings.createRoutingStep(payload)
-    await fetchStepsAndMaterials(selectedRoutingId.value)
     resetCreateStepDraft()
+    try {
+      await fetchStepsAndMaterials(selectedRoutingId.value)
+    } catch (refreshError) {
+      console.error('工程追加後の再読込エラー:', refreshError)
+      errorMessage.value = '工程は追加済みですが、一覧の再読込に失敗しました。更新してください。'
+    }
   } catch (error) {
     console.error('工程追加エラー:', error)
     const detail =
@@ -1931,7 +1936,6 @@ onMounted(async () => {
   }
 }
 </style>
-
 
 
 
