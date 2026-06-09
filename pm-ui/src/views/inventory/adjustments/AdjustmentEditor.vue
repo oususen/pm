@@ -463,7 +463,7 @@ const resolveLineIdByCode = async (lineCode) => {
   if (!code) return null;
   if (lineCodeIdCache.value.has(code)) return lineCodeIdCache.value.get(code);
   try {
-    const res = await api.lines.getLines();
+    const res = await api.lines.getLines({ page_size: 500 });
     const rows = normalizeList(res.data);
     const matched = rows.find((row) => String(row.line_code || "").trim() === code);
     const id = matched?.id || null;

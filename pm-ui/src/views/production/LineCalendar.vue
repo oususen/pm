@@ -407,7 +407,7 @@ const cellClass = (day) => ({
 })
 
 const loadLines = async () => {
-  const res = await api.lines.getLines()
+  const res = await api.lines.getLines({ page_size: 500 })
   const rows = res.data.results || res.data || []
   lines.value = [...rows].sort((a, b) => {
     const aCode = String(a?.line_code || '')

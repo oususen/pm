@@ -189,7 +189,7 @@ export default {
     },
     async fetchLines() {
       try {
-        const res = await api.lines.getLines()
+        const res = await api.lines.getLines({ page_size: 500 })
         this.lines = res.data?.results || res.data || []
       } catch (error) {
         console.error('ライン取得エラー', error)

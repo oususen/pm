@@ -803,7 +803,7 @@ onMounted(async () => {
 
     const [supplierRes, lineRes, processRes] = await Promise.all([
       api.suppliers.getSuppliers(),
-      api.lines.getLines(),
+      api.lines.getLines({ page_size: 500 }),
       api.processes.getProcesses({ is_active: true }),
     ])
     suppliers.value = supplierRes.data?.results || supplierRes.data || []

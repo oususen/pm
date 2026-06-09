@@ -1095,6 +1095,7 @@ class ContainerCapacityViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 class EquipmentViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Equipment.objects.all().select_related('line', 'process')
     serializer_class = EquipmentSerializer
+    pagination_class = None
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['is_active', 'line', 'process']
     search_fields = ['equipment_code', 'equipment_name', 'line__line_code', 'line__line_name', 'process__process_code', 'process__process_name']
@@ -1105,6 +1106,7 @@ class EquipmentViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 class KubotaSakaiTruckViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = KubotaSakaiTruck.objects.all()
     serializer_class = KubotaSakaiTruckSerializer
+    pagination_class = None
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['is_active', 'default_use']
     search_fields = ['name', 'alias_name']
@@ -1115,6 +1117,7 @@ class KubotaSakaiTruckViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 class CustomerViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Customer.objects.all()
     serializer_class = CustomerSerializer
+    pagination_class = None
     filterset_fields = ['is_active']
     search_fields = ['customer_code', 'customer_name']
     ordering_fields = ['customer_code', 'created_at']
@@ -1124,6 +1127,7 @@ class CustomerViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 class ProcessViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Process.objects.all()
     serializer_class = ProcessSerializer
+    pagination_class = None
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['is_active', 'is_outsource', 'line']
     search_fields = ['process_code', 'process_name']
@@ -1278,6 +1282,7 @@ class ProcessViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 class LineViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Line.objects.all()
     serializer_class = LineSerializer
+    pagination_class = None
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['is_active', 'line_type']
     search_fields = ['line_code', 'line_name']
@@ -1289,6 +1294,7 @@ class ProductionLineViewSet(viewsets.ReadOnlyModelViewSet):
     """生産ライン一覧（読み取り専用）。生産計画など他機能からも参照されるため認証のみで許可"""
     queryset = Line.objects.filter(line_type='PROD')
     serializer_class = LineSerializer
+    pagination_class = None
     permission_classes = [IsAuthenticated]
     filterset_fields = ['is_active']
     search_fields = ['line_code', 'line_name']
@@ -1299,6 +1305,7 @@ class ProductionLineViewSet(viewsets.ReadOnlyModelViewSet):
 class SupplierViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Supplier.objects.all()
     serializer_class = SupplierSerializer
+    pagination_class = None
     search_fields = ['supplier_code', 'supplier_name', 'order_email']
     ordering_fields = ['supplier_code']
     ordering = ['supplier_code']
@@ -1307,6 +1314,7 @@ class SupplierViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 class CalendarViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Calendar.objects.all()
     serializer_class = CalendarSerializer
+    pagination_class = None
     search_fields = ['calendar_code', 'calendar_name']
     ordering_fields = ['calendar_code', 'created_at']
     ordering = ['calendar_code']
@@ -1419,6 +1427,7 @@ class CalendarDayViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = BOM.objects.all()
     serializer_class = BOMSerializer
+    pagination_class = None
     filterset_fields = ['parent_product', 'is_active']
     ordering_fields = ['created_at']
     ordering = ['-created_at']
@@ -2881,6 +2890,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = BOMItem.objects.all()
     serializer_class = BOMItemSerializer
+    pagination_class = None
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['bom', 'child_product', 'sourcing_type', 'process', 'line', 'time_unit', 'supplier']
     ordering_fields = ['created_at']
@@ -3045,6 +3055,7 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 class RoutingViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Routing.objects.all().select_related('product')
     serializer_class = RoutingSerializer
+    pagination_class = None
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['product', 'is_active', 'is_default']
     ordering_fields = ['created_at']
@@ -3110,6 +3121,7 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         'source_bom_item',
     ).all()
     serializer_class = RoutingStepSerializer
+    pagination_class = None
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['routing', 'process', 'line', 'supplier', 'time_unit', 'source_bom_item']
     ordering_fields = ['step_no']

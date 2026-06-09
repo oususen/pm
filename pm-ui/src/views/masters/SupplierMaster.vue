@@ -153,7 +153,7 @@ const fetchCalendars = async () => {
 
 const fetchPurchaseLines = async () => {
   try {
-    const response = await api.lines.getLines()
+    const response = await api.lines.getLines({ page_size: 500 })
     const lines = response.data.results || response.data || []
     purchaseLines.value = lines.filter((row) => row.line_type === 'PURCHASE')
   } catch (error) {

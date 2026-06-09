@@ -392,7 +392,7 @@ const formatNumber = (value) => {
 
 const loadLines = async () => {
   try {
-    const res = await api.lines.getLines()
+    const res = await api.lines.getLines({ page_size: 500 })
     lines.value = res.data.results || res.data || []
   } catch (error) {
     console.error('ライン一覧取得エラー:', error)

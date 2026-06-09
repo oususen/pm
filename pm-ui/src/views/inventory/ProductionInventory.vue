@@ -354,7 +354,7 @@ const buildWeekendSet = () => {
 const ensureLineList = async () => {
   if (lineList?.value?.length) return;
   try {
-    const res = await api.lines.getLines();
+    const res = await api.lines.getLines({ page_size: 500 });
     lineList.value = res.data?.results || res.data || [];
   } catch (e) {
     console.error("ライン一覧の取得に失敗:", e);
@@ -1062,7 +1062,7 @@ const fetchCodeLookupData = async () => {
   lookupLoading.value = true;
   try {
     const [lineRes, processRes] = await Promise.all([
-      api.lines.getLines(),
+      api.lines.getLines({ page_size: 500 }),
       api.processes.getProcesses({ is_active: true }),
     ]);
     lineList.value = lineRes.data?.results || lineRes.data || [];

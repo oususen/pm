@@ -215,7 +215,7 @@ const resetFilters = () => {
 const fetchLines = async () => {
   // 1st: 既存APIクライアント（/lines/）
   try {
-    const res = await api.lines.getLines()
+    const res = await api.lines.getLines({ page_size: 500 })
     lines.value = res.data?.results || res.data || []
     if (Array.isArray(lines.value)) return
   } catch (e) {

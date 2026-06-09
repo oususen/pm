@@ -185,7 +185,7 @@ export default {
       try {
         const [processRes, lineRes] = await Promise.all([
           api.processes.getProcesses({ is_active: true }),
-          api.lines.getLines()
+          api.lines.getLines({ page_size: 500 })
         ])
         this.processes = processRes.data?.results || processRes.data || []
         this.lines = lineRes.data?.results || lineRes.data || []

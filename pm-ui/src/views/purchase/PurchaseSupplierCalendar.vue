@@ -309,7 +309,7 @@ const loadSuppliers = async () => {
 }
 
 const loadLines = async () => {
-  const res = await api.lines.getLines()
+  const res = await api.lines.getLines({ page_size: 500 })
   lines.value = (res.data.results || res.data || []).filter((x) => x.line_type === 'PURCHASE')
 }
 

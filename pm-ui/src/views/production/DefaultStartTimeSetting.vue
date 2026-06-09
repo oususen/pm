@@ -120,7 +120,7 @@ const reload = async () => {
   loading.value = true
   try {
     const [lineRes, settingRes] = await Promise.all([
-      api.lines.getLines(),
+      api.lines.getLines({ page_size: 500 }),
       api.lineDefaultScheduleSettings.getLineDefaultScheduleSettings(),
     ])
     const lines = (lineRes.data?.results || lineRes.data || []).sort((a, b) =>

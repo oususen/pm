@@ -868,7 +868,7 @@ const doDisplayOnly = async () => {
     if (!lineId) {
       const supplier = suppliers.value.find((s) => Number(s.id) === Number(selectedSupplier.value))
       if (supplier?.supplier_code) {
-        const linesRes = await api.lines.getLines()
+        const linesRes = await api.lines.getLines({ page_size: 500 })
         const lines = linesRes.data.results || linesRes.data || []
         const purchaseLine = lines.find((l) => l.line_code === supplier.supplier_code)
         lineId = purchaseLine?.id || ''

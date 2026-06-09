@@ -1229,7 +1229,7 @@ const fetchProducts = async (page = 1) => {
 
 const fetchLines = async () => {
   try {
-    const response = await api.lines.getLines()
+    const response = await api.lines.getLines({ page_size: 500 })
     lines.value = response.data.results || response.data
   } catch (error) {
     console.error('ライン取得エラー:', error)

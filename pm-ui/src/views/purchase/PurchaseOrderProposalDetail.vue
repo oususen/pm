@@ -376,7 +376,7 @@ const fetchMasterData = async () => {
   const [supplierRes, productRes, lineRes] = await Promise.all([
     api.suppliers.getSuppliers(),
     api.products.getProducts({ page_size: 10000 }),
-    api.lines.getLines(),
+    api.lines.getLines({ page_size: 500 }),
   ])
   suppliers.value = supplierRes.data.results || supplierRes.data || []
   products.value = productRes.data.results || productRes.data || []
