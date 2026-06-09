@@ -447,6 +447,11 @@ class OrderExpansionService:
 
         correction_by_product: Dict[int, Decimal] = {}
         for product_id, routed_mult in routed_multiplier_by_product.items():
+            if product_id == product.id:
+                # 同一品番を複数工程で流すルーティングでは、
+                # 完成品自身の数量を工程数で按分してはいけない。
+                correction_by_product[product_id] = Decimal('1')
+                continue
             expected_mult = bom_multiplier.get(product_id)
             if expected_mult is not None and routed_mult > 0:
                 correction_by_product[product_id] = expected_mult / routed_mult

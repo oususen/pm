@@ -3272,14 +3272,59 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             if changed_fields:
                 item.save(update_fields=changed_fields + ['updated_at'])
 
+    def _normalize_final_step_flags(self, routing_id):
+        if not routing_id:
+            return
+
+        step_list = list(
+            RoutingStep.objects.filter(routing_id=routing_id)
+            .select_related('routing')
+            .order_by('step_no', 'parallel_group', 'id')
+        )
+        if not step_list:
+            return
+
+        routing_product_id = None
+        sample_routing = getattr(step_list[0], 'routing', None)
+        if sample_routing:
+            routing_product_id = getattr(sample_routing, 'product_id', None)
+        if not routing_product_id:
+            return
+
+        final_candidates = [
+            step for step in step_list
+            if step.output_product_id == routing_product_id
+        ]
+        if not final_candidates:
+            return
+
+        final_step_id = final_candidates[-1].id
+        for step in final_candidates:
+            raw_path = str(step.hierarchy_path or '').strip()
+            expected_path = 'final' if step.id == final_step_id else ''
+            expected_depth = 0
+            changed_fields = []
+
+            if raw_path != expected_path:
+                step.hierarchy_path = expected_path
+                changed_fields.append('hierarchy_path')
+            if int(getattr(step, 'hierarchy_depth', 0) or 0) != expected_depth:
+                step.hierarchy_depth = expected_depth
+                changed_fields.append('hierarchy_depth')
+
+            if changed_fields:
+                step.save(update_fields=changed_fields + ['updated_at'])
+
     def perform_update(self, serializer):
         sync_fields = [key for key in ('lead_time_days', 'duration_min') if key in serializer.validated_data]
         step = serializer.save()
+        self._normalize_final_step_flags(step.routing_id)
         if sync_fields:
             self._sync_step_fields_to_bom(step, sync_fields)
 
     def perform_create(self, serializer):
         step = serializer.save()
+        self._normalize_final_step_flags(step.routing_id)
 
         # BOMItem自動作成/更新: 親製品(remark)と加工後品目(output_product)が指定されている場合
         if step.output_product_id and step.remark:

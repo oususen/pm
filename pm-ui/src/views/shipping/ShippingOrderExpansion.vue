@@ -255,6 +255,41 @@ const dedupeNodesByProduct = (nodes) => {
   });
 };
 
+const normalizeNumber = (value) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+};
+
+const buildGroupKey = (row) => {
+  const pid = normalizeNumber(row?.product);
+  const lineId = normalizeNumber(row?.line);
+  const processId = normalizeNumber(row?.process);
+  return `${pid}|${lineId}|${processId}`;
+};
+
+const buildGroupMetaMap = (rows) => {
+  const map = new Map();
+  rows.forEach((row) => {
+    const pid = normalizeNumber(row?.product);
+    if (!pid) return;
+    const key = buildGroupKey(row);
+    const prev = map.get(key);
+    const nextStepNo = normalizeNumber(row?.step_no);
+    map.set(key, {
+      key,
+      product_id: pid,
+      line_id: normalizeNumber(row?.line),
+      line_code: String(row?.line_code || prev?.line_code || "").trim(),
+      line_name: String(row?.line_name || prev?.line_name || "").trim(),
+      process_id: normalizeNumber(row?.process),
+      process_code: String(row?.process_code || prev?.process_code || "").trim(),
+      process_name: String(row?.process_name || prev?.process_name || "").trim(),
+      step_no: prev?.step_no ? Math.min(prev.step_no, nextStepNo || prev.step_no) : nextStepNo,
+    });
+  });
+  return map;
+};
+
 const buildByProductDateMap = (rows, mapper) => {
   const map = new Map();
   rows.forEach((row) => {
@@ -269,30 +304,28 @@ const buildByProductDateMap = (rows, mapper) => {
   return map;
 };
 
-const buildProcessByProductMap = (rows) => {
+const buildByGroupDateMap = (rows, mapper) => {
   const map = new Map();
   rows.forEach((row) => {
-    const pid = Number(row.product || 0);
-    if (!pid) return;
-    if (!map.has(pid)) map.set(pid, new Set());
-    const code = String(row.process_code || "").trim();
-    const name = String(row.process_name || "").trim();
-    const label = [code, name].filter(Boolean).join(" ");
-    if (label) map.get(pid).add(label);
+    const key = buildGroupKey(row);
+    const date = toDate(row.plan_date);
+    if (!key || !date) return;
+    if (!map.has(key)) map.set(key, {});
+    const cell = map.get(key);
+    if (!cell[date]) cell[date] = mapper.init();
+    mapper.add(cell[date], row);
   });
   return map;
 };
 
-const buildLineByProductMap = (rows) => {
-  const map = new Map();
-  rows.forEach((row) => {
-    const pid = Number(row.product || 0);
-    if (!pid) return;
-    if (!map.has(pid)) map.set(pid, new Set());
-    const lineName = String(row.line_name || "").trim();
-    if (lineName) map.get(pid).add(lineName);
-  });
-  return map;
+const buildGroupDisplay = (meta, type) => {
+  if (!meta) return "-";
+  if (type === "line") {
+    return meta.line_name || meta.line_code || "-";
+  }
+  const code = String(meta.process_code || "").trim();
+  const name = String(meta.process_name || "").trim();
+  return [code, name].filter(Boolean).join(" ") || "-";
 };
 
 const buildSeriesByDate = (perBacklog, perDemand, cols) => {
@@ -437,7 +470,15 @@ const load = async () => {
     const demands = normalizeList(demandsRes.data || []);
     const shipmentActuals = normalizeList(shipmentActualsRes.data || []);
 
-    const backlogMap = buildByProductDateMap(backlogs, {
+    const backlogByProductMap = buildByProductDateMap(backlogs, {
+      init: () => ({ pp: 0, adj: 0, p: 0 }),
+      add: (cell, row) => {
+        cell.pp += Number(row.actual_qty || 0);
+        cell.adj += Number(row.adjust_qty || 0);
+        cell.p += Number(row.progress_qty || 0);
+      },
+    });
+    const backlogGroupMap = buildByGroupDateMap(backlogs, {
       init: () => ({ pp: 0, adj: 0, p: 0 }),
       add: (cell, row) => {
         cell.pp += Number(row.actual_qty || 0);
@@ -452,27 +493,51 @@ const load = async () => {
         cell.firm += Number(row.firm_qty || 0);
       },
     });
-    // ライン/工程表示はルーティング展開結果(LineDemand)を優先する
-    const processMap = buildProcessByProductMap(demands);
-    const lineMap = buildLineByProductMap(demands);
+    const demandGroupMap = buildByGroupDateMap(demands, {
+      init: () => ({ forecast: 0, firm: 0 }),
+      add: (cell, row) => {
+        cell.forecast += Number(row.forecast_qty || 0);
+        cell.firm += Number(row.firm_qty || 0);
+      },
+    });
+    const groupMetaMap = buildGroupMetaMap([...demands, ...backlogs]);
 
-    const mappedBlocks = nodes.map((n) => {
-      const perBacklog = backlogMap.get(n.product_id) || {};
-      const perDemand = demandMap.get(n.product_id) || {};
-      const processSet = processMap.get(n.product_id) || new Set();
-      const lineSet = lineMap.get(n.product_id) || new Set();
-      return {
+    const mappedBlocks = nodes.flatMap((n) => {
+      const groups = Array.from(groupMetaMap.values())
+        .filter((meta) => meta.product_id === n.product_id)
+        .sort((a, b) => {
+          const left = normalizeNumber(a.step_no) || -1;
+          const right = normalizeNumber(b.step_no) || -1;
+          if (left !== right) return right - left;
+          return String(buildGroupDisplay(b, "process")).localeCompare(String(buildGroupDisplay(a, "process")));
+        });
+
+      if (!groups.length) {
+        return [{
+          ...n,
+          ...buildSeriesByDate({}, {}, columns.value),
+          process_display: "-",
+          line_display: "-",
+        }];
+      }
+
+      return groups.map((meta) => ({
         ...n,
-        ...buildSeriesByDate(perBacklog, perDemand, columns.value),
-        process_display: Array.from(processSet).join(", "),
-        line_display: Array.from(lineSet).join(", "),
-      };
+        key: `${n.key}-${meta.key}`,
+        ...buildSeriesByDate(
+          backlogGroupMap.get(meta.key) || {},
+          demandGroupMap.get(meta.key) || {},
+          columns.value,
+        ),
+        process_display: buildGroupDisplay(meta, "process"),
+        line_display: buildGroupDisplay(meta, "line"),
+      }));
     });
 
     // 先頭(Lv0)に「出荷進度照会」ブロックを挿入
     const rootNode = nodes.find((n) => n.level === 0);
     if (rootNode) {
-      const rootBacklog = backlogMap.get(rootNode.product_id) || {};
+      const rootBacklog = backlogByProductMap.get(rootNode.product_id) || {};
       const shippingSummaryBlock = {
         ...rootNode,
         key: `shipping-summary-${rootNode.product_id}`,
@@ -558,4 +623,3 @@ load();
 }
 .floating-x-scroll-inner { height: 1px; }
 </style>
-

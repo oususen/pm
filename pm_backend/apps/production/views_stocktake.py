@@ -62,6 +62,7 @@ class StocktakeRecordView(APIView):
         if request.query_params.get('masters_only') == 'true':
             loc_names = sorted(
                 ProductStockLocation.objects.filter(product__is_active=True)
+                .order_by()
                 .values_list('location_name', flat=True).distinct()
             )
             lines = list(

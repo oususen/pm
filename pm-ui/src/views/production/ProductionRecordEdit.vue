@@ -156,7 +156,16 @@
           <tr v-for="row in sessions" :key="row.row_key">
             <td>{{ row.id }}</td>
             <td>{{ row.process_code }} / {{ row.process_name }}</td>
-            <td>{{ row.product_code || '—' }}</td>
+            <td>
+              <input
+                v-if="row.record_source === 'PROCESS' || row.record_source === 'BRAKE'"
+                v-model="edits[row.row_key].product_code"
+                type="text"
+                class="product-code-input"
+                :disabled="!canEdit"
+              />
+              <span v-else>{{ row.product_code || '—' }}</span>
+            </td>
             <td>
               <input v-model="edits[row.row_key].started_at" type="datetime-local" :disabled="!canEdit || row.record_source === 'LASER'" />
             </td>
@@ -405,6 +414,7 @@ const buildEditMap = (rows) => {
       ended_at: toLocalDateTimeInput(row.ended_at),
       production_qty: Number(row.production_qty || 0),
       defect_qty: Number(row.defect_qty || 0),
+      product_code: row.product_code || '',
     }
   })
   edits.value = map
@@ -548,6 +558,9 @@ const saveRow = async (row) => {
     }
     if (String(row?.record_source || '').toUpperCase() === 'PROCESS') {
       payload.defect_qty = Number(edit.defect_qty || 0)
+      if (edit.product_code && edit.product_code !== (row.product_code || '')) {
+        payload.product_code = edit.product_code.trim()
+      }
     }
     if (String(row?.record_source || '').toUpperCase() === 'LASER') {
       if (!row.detail_id) {
@@ -558,11 +571,15 @@ const saveRow = async (row) => {
         total_qty: Number(edit.production_qty || 0),
       })
     } else if (String(row?.record_source || '').toUpperCase() === 'BRAKE') {
-      await api.brakeLineActuals.updateSession(id, {
+      const brakePayload = {
         ...payload,
         start_record_id: row?.start_record_id ?? null,
         end_record_id: row?.end_record_id ?? null,
-      })
+      }
+      if (edit.product_code && edit.product_code !== (row.product_code || '')) {
+        brakePayload.product_code = edit.product_code.trim()
+      }
+      await api.brakeLineActuals.updateSession(id, brakePayload)
     } else {
       await api.processRealtime.updateSession(id, payload)
     }
@@ -843,6 +860,13 @@ onMounted(async () => {
 .qty-input {
   width: 100px;
   text-align: right;
+}
+.product-code-input {
+  width: 180px;
+  padding: 4px 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 13px;
 }
 .action-cell {
   display: flex;
