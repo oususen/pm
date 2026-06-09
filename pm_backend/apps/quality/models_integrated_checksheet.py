@@ -331,6 +331,7 @@ class IntegratedChecksheetCheck(models.Model):
     judgement = models.CharField(max_length=10, choices=JUDGEMENT_CHOICES, blank=True, default="", verbose_name="判定")
     numeric_value = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True, verbose_name="数値")
     text_value = models.TextField(blank=True, default="", verbose_name="テキスト")
+    photo_url = models.CharField(max_length=500, blank=True, default="", verbose_name="写真URL")
     checked_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,
         on_delete=models.SET_NULL, related_name="+", verbose_name="入力者",

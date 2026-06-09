@@ -421,6 +421,29 @@
                     <span v-if="item.unit" class="unit-label">{{ item.unit }}</span>
                     <span v-if="modalResponses[item.id]?.judgement && item.criteria" class="auto-judge-badge" :class="modalResponses[item.id].judgement === 'OK' ? 'ok' : 'ng'">{{ modalResponses[item.id].judgement }}</span>
                   </template>
+                  <!-- PHOTO / PHOTO_NUMERIC -->
+                  <template v-else-if="item.record_type === 'PHOTO' || item.record_type === 'PHOTO_NUMERIC'">
+                    <div class="photo-input-row">
+                      <label class="photo-upload-btn" :class="{ disabled: !canEdit }">
+                        {{ modalResponses[item.id]?.photo_url ? '写真変更' : '写真撮影' }}
+                        <input type="file" accept="image/*" capture="environment" :disabled="!canEdit" @change="uploadCheckPhoto($event, item.id)" style="display:none" />
+                      </label>
+                      <div v-if="modalResponses[item.id]?.photo_url" class="photo-preview-mini">
+                        <img :src="modalResponses[item.id].photo_url" alt="撮影写真" @click="previewPhoto(modalResponses[item.id].photo_url)" />
+                      </div>
+                      <span v-if="modalResponses[item.id]?.photo_url" class="photo-ok-badge">撮影済</span>
+                    </div>
+                    <div v-if="item.record_type === 'PHOTO_NUMERIC'" class="photo-numeric-sub">
+                      <input
+                        type="number" step="any" class="numeric-input"
+                        :value="modalResponses[item.id]?.numeric_value ?? ''"
+                        @input="setNumeric(item.id, $event.target.value)"
+                        :disabled="!canEdit"
+                        :placeholder="item.criteria || '数値'"
+                      />
+                      <span v-if="item.unit" class="unit-label">{{ item.unit }}</span>
+                    </div>
+                  </template>
                   <!-- TEXT -->
                   <template v-else>
                     <textarea
@@ -913,7 +936,7 @@ const cellDisplay = (unit, item) => {
     return check.numeric_value != null ? check.numeric_value : ''
   }
   if (isPhotoOnlyRecordType(item.record_type)) {
-    return check.text_value ? '写真' : ''
+    return check.photo_url ? '📷' : ''
   }
   return check.text_value || ''
 }
@@ -937,7 +960,7 @@ const cellClass = (unit, block, item) => {
       return (okMin && okMax) ? 'cell-ok' : 'cell-ng'
     }
   }
-  if (check.numeric_value != null || check.text_value) return 'cell-filled'
+  if (check.numeric_value != null || check.text_value || check.photo_url) return 'cell-filled'
   return 'cell-empty'
 }
 
@@ -1029,6 +1052,7 @@ const isCheckFilled = (check) => {
   if (check.judgement) return true
   if (check.numeric_value !== null && check.numeric_value !== '' && check.numeric_value !== undefined) return true
   if (check.text_value) return true
+  if (check.photo_url) return true
   return false
 }
 
@@ -1409,6 +1433,7 @@ const openUnitModal = (unit, blockId = null) => {
         judgement: c.judgement || '',
         numeric_value: c.numeric_value,
         text_value: c.text_value || '',
+        photo_url: c.photo_url || '',
       }
     }
   }
@@ -1416,7 +1441,7 @@ const openUnitModal = (unit, blockId = null) => {
   for (const block of templateBlocks.value) {
     for (const item of block.items) {
       if (!resp[item.id]) {
-        resp[item.id] = { judgement: '', numeric_value: null, text_value: '' }
+        resp[item.id] = { judgement: '', numeric_value: null, text_value: '', photo_url: '' }
       }
     }
   }
@@ -1531,6 +1556,28 @@ const setText = (itemId, val) => {
   modalResponses.value[itemId].text_value = val
 }
 
+const uploadCheckPhoto = async (event, itemId) => {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  const formData = new FormData()
+  formData.append('file', file)
+  try {
+    const res = await api.integratedChecksheets.uploadAttachmentImage(formData)
+    if (!modalResponses.value[itemId]) {
+      modalResponses.value[itemId] = { judgement: '', numeric_value: null, text_value: '', photo_url: '' }
+    }
+    modalResponses.value[itemId].photo_url = res.data.image_url
+  } catch (err) {
+    console.error('写真アップロード失敗:', err)
+    alert('写真のアップロードに失敗しました。')
+  }
+}
+
+const previewPhoto = (url) => {
+  window.open(url, '_blank')
+}
+
 const hasMissingRequiredItems = (block) => {
   if (!block || !Array.isArray(block.items)) return false
   return block.items.some((item) => {
@@ -1540,6 +1587,8 @@ const hasMissingRequiredItems = (block) => {
     if (item.record_type === 'CHECK') return !r.judgement
     if (item.record_type === 'NUMERIC_CHECK') return !r.judgement || r.numeric_value === null || r.numeric_value === '' || r.numeric_value === undefined
     if (isNumericRecordType(item.record_type)) return r.numeric_value === null || r.numeric_value === '' || r.numeric_value === undefined
+    if (item.record_type === 'PHOTO') return !r.photo_url
+    if (item.record_type === 'PHOTO_NUMERIC') return !r.photo_url || r.numeric_value === null || r.numeric_value === '' || r.numeric_value === undefined
     return !r.text_value
   })
 }
@@ -1560,7 +1609,7 @@ const hasUnitMissingRequired = (unit) => {
   if (!requiredIds.length) return false
   const checkedIds = new Set()
   for (const c of (unit.checks || [])) {
-    if (c.judgement || c.numeric_value !== null && c.numeric_value !== undefined || c.text_value) {
+    if (c.judgement || c.numeric_value !== null && c.numeric_value !== undefined || c.text_value || c.photo_url) {
       checkedIds.add(c.item)
     }
   }
@@ -1570,7 +1619,7 @@ const hasUnitMissingRequired = (unit) => {
 const hasUnitAnyCheckValue = (unit) => {
   if (!unit) return false
   for (const c of (unit.checks || [])) {
-    if (c.judgement || c.numeric_value !== null && c.numeric_value !== undefined || c.text_value) {
+    if (c.judgement || c.numeric_value !== null && c.numeric_value !== undefined || c.text_value || c.photo_url) {
       return true
     }
   }
@@ -1772,6 +1821,8 @@ const saveBlockChecks = async (block, options = {}) => {
     if (item.record_type === 'CHECK') return !r.judgement
     if (item.record_type === 'NUMERIC_CHECK') return !r.judgement || r.numeric_value === null || r.numeric_value === '' || r.numeric_value === undefined
     if (isNumericRecordType(item.record_type)) return r.numeric_value === null || r.numeric_value === '' || r.numeric_value === undefined
+    if (item.record_type === 'PHOTO') return !r.photo_url
+    if (item.record_type === 'PHOTO_NUMERIC') return !r.photo_url || r.numeric_value === null || r.numeric_value === '' || r.numeric_value === undefined
     return !r.text_value
   })
   if (missingItems.length > 0) {
@@ -1811,6 +1862,11 @@ const saveBlockChecks = async (block, options = {}) => {
       } else if (isNumericRecordType(item.record_type)) {
         entry.numeric_value = r.numeric_value
         entry.judgement = r.judgement || ''
+      } else if (item.record_type === 'PHOTO' || item.record_type === 'PHOTO_NUMERIC') {
+        entry.photo_url = r.photo_url || ''
+        if (item.record_type === 'PHOTO_NUMERIC') {
+          entry.numeric_value = r.numeric_value
+        }
       } else {
         entry.text_value = r.text_value || ''
       }
@@ -2458,5 +2514,40 @@ onMounted(async () => {
 .att-image-wrap { margin-bottom: 8px; }
 .att-image-wrap img { max-width: 100%; max-height: 300px; border: 1px solid #cbd5e1; object-fit: contain; }
 .att-text { font-size: 12px; margin-bottom: 3px; line-height: 1.4; }
+.photo-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.photo-upload-btn {
+  display: inline-block;
+  padding: 4px 12px;
+  font-size: 13px;
+  border: 1px solid #3b82f6;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #2563eb;
+  cursor: pointer;
+}
+.photo-upload-btn:hover { background: #dbeafe; }
+.photo-upload-btn.disabled { opacity: .5; pointer-events: none; }
+.photo-preview-mini img {
+  height: 40px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  cursor: pointer;
+  object-fit: cover;
+}
+.photo-ok-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #16a34a;
+}
+.photo-numeric-sub {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
 
 </style>

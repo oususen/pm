@@ -857,7 +857,7 @@ class IntegratedChecksheetBatchViewSet(
         for unit in batch.units.prefetch_related("checks").all():
             checked_ids = set()
             for check in unit.checks.all():
-                if check.judgement or check.numeric_value is not None or check.text_value:
+                if check.judgement or check.numeric_value is not None or check.text_value or check.photo_url:
                     checked_ids.add(check.item_id)
             if not required_item_ids.issubset(checked_ids):
                 return False
@@ -929,7 +929,7 @@ class IntegratedChecksheetUnitViewSet(viewsets.GenericViewSet):
                 existing = set(
                     IntegratedChecksheetCheck.objects
                     .filter(unit=unit, item__process_block=block)
-                    .exclude(judgement="", numeric_value__isnull=True, text_value="")
+                    .exclude(judgement="", numeric_value__isnull=True, text_value="", photo_url="")
                     .values_list("item_id", flat=True)
                 )
                 required_items = [it for it in items if it.is_required]
@@ -955,6 +955,8 @@ class IntegratedChecksheetUnitViewSet(viewsets.GenericViewSet):
                     defaults["numeric_value"] = check_data["numeric_value"]
                 if "text_value" in check_data:
                     defaults["text_value"] = check_data["text_value"]
+                if "photo_url" in check_data:
+                    defaults["photo_url"] = check_data["photo_url"]
 
                 IntegratedChecksheetCheck.objects.update_or_create(
                     unit=unit, item_id=item_id, defaults=defaults,
@@ -994,7 +996,7 @@ class IntegratedChecksheetUnitViewSet(viewsets.GenericViewSet):
         checked_ids = set(
             IntegratedChecksheetCheck.objects
             .filter(unit=unit)
-            .exclude(judgement="", numeric_value__isnull=True, text_value="")
+            .exclude(judgement="", numeric_value__isnull=True, text_value="", photo_url="")
             .values_list("item_id", flat=True)
         )
         all_done = all(it.id in checked_ids for it in all_required_items)

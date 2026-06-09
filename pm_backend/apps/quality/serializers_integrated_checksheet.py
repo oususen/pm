@@ -170,7 +170,7 @@ class IntegratedChecksheetCheckSerializer(serializers.ModelSerializer):
         model = IntegratedChecksheetCheck
         fields = [
             "id", "item", "item_name", "record_type", "process_block_id",
-            "judgement", "numeric_value", "text_value",
+            "judgement", "numeric_value", "text_value", "photo_url",
             "checked_by", "checked_by_name", "checked_at",
         ]
 
