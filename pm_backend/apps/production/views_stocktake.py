@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import HasResourcePermissionOrReadOnly
-from masters.models import Process, Product, ProductStockLocation
+from masters.models import Line, Process, Product, ProductStockLocation
 
 from .models_stocktake_record import StocktakeRecord, StocktakeRecorder, StocktakeLayoutConfig, StocktakeArea
 from .models_line_backlog import LineBacklog
@@ -58,6 +58,22 @@ class StocktakeRecordView(APIView):
         stocktake_date = self._parse_date(request.query_params.get('stocktake_date'))
         if not stocktake_date:
             return Response({'detail': 'stocktake_date は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if request.query_params.get('masters_only') == 'true':
+            loc_names = sorted(
+                ProductStockLocation.objects.filter(product__is_active=True)
+                .values_list('location_name', flat=True).distinct()
+            )
+            lines = list(
+                Line.objects.filter(product__is_active=True)
+                .distinct().order_by('line_code')
+                .values('id', 'line_code', 'line_name')
+            )
+            return Response({
+                'rows': [],
+                'locations': loc_names,
+                'lines': [{'id': l['id'], 'line_code': l['line_code'], 'line_name': l['line_name']} for l in lines],
+            })
 
         qs = Product.objects.filter(is_active=True)
 

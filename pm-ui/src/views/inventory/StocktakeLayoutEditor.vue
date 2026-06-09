@@ -516,9 +516,11 @@ const loadConfig = async () => {
 
 const loadLocations = async () => {
   try {
-    const res = await api.stocktakeRecords.list({ stocktake_date: new Date().toISOString().slice(0, 10) });
-    const locs = res.data.locations || [];
-    allLocations.value = locs;
+    const res = await api.stocktakeRecords.list({
+      stocktake_date: new Date().toISOString().slice(0, 10),
+      masters_only: 'true',
+    });
+    allLocations.value = res.data.locations || [];
   } catch (e) {
     console.error("置き場取得エラー:", e);
   }
@@ -534,6 +536,25 @@ const saveConfig = async () => {
     };
     if (selectedAreaId.value) payload.area_id = selectedAreaId.value;
     await api.stocktakeRecords.saveLayoutConfig(payload);
+
+    if (selectedAreaId.value) {
+      const layoutLocs = [];
+      for (const cell of Object.values(cells.value)) {
+        if (!cell) continue;
+        const type = typeof cell === "string" ? "location" : (cell.type || "location");
+        if (type === "location") {
+          const name = typeof cell === "string" ? cell : cell.location;
+          if (name && !layoutLocs.includes(name)) layoutLocs.push(name);
+        }
+      }
+      const area = areas.value.find(a => a.id === Number(selectedAreaId.value));
+      if (area) {
+        const merged = [...new Set([...area.locations, ...layoutLocs])];
+        await api.stocktakeRecords.saveArea({ id: area.id, name: area.name, locations: merged });
+        await loadAreas();
+      }
+    }
+
     alert("保存しました");
   } catch (e) {
     console.error("保存エラー:", e);

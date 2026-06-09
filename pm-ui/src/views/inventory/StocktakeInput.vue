@@ -439,24 +439,21 @@ const hasFilter = computed(() =>
   !!(filters.area_id || filters.line_id || filters.stock_location || filters.product_code)
 );
 
+const loadMasters = async () => {
+  try {
+    const response = await api.stocktakeRecords.list({
+      stocktake_date: filters.stocktake_date,
+      masters_only: 'true',
+    });
+    lineOptions.value = Array.isArray(response.data?.lines) ? response.data.lines : [];
+    locations.value = Array.isArray(response.data?.locations) ? response.data.locations : [];
+  } catch (_) {}
+};
+
 const reload = async () => {
   if (!hasFilter.value) {
     rows.value = [];
     selectedProductId.value = null;
-    if (!lineOptions.value.length || !locations.value.length) {
-      try {
-        const response = await api.stocktakeRecords.list({
-          stocktake_date: filters.stocktake_date,
-          product_code: '__NONE__',
-        });
-        if (!lineOptions.value.length) {
-          lineOptions.value = Array.isArray(response.data?.lines) ? response.data.lines : [];
-        }
-        if (!locations.value.length) {
-          locations.value = Array.isArray(response.data?.locations) ? response.data.locations : [];
-        }
-      } catch (_) {}
-    }
     return;
   }
   loading.value = true;
@@ -471,12 +468,6 @@ const reload = async () => {
       diff_only: filters.diff_only ? "true" : undefined,
     });
     rows.value = Array.isArray(response.data?.rows) ? response.data.rows : [];
-    if (!lineOptions.value.length) {
-      lineOptions.value = Array.isArray(response.data?.lines) ? response.data.lines : [];
-    }
-    if (!locations.value.length) {
-      locations.value = Array.isArray(response.data?.locations) ? response.data.locations : [];
-    }
     hydrateEditors(rows.value);
     syncSelectedRow(rows.value);
   } catch (error) {
@@ -952,19 +943,10 @@ const loadAllKnownLocations = async () => {
   try {
     const res = await api.stocktakeRecords.list({
       stocktake_date: filters.stocktake_date,
+      masters_only: 'true',
     });
-    const locs = new Set();
-    const rows = Array.isArray(res.data?.rows) ? res.data.rows : [];
-    for (const row of rows) {
-      if (row.stock_locations && row.stock_locations.length) {
-        row.stock_locations.forEach(l => locs.add(l));
-      } else if (row.stock_location) {
-        locs.add(row.stock_location);
-      }
-    }
     const apiLocs = Array.isArray(res.data?.locations) ? res.data.locations : [];
-    apiLocs.forEach(l => locs.add(l));
-    allKnownLocations.value = [...locs].sort((a, b) => a.localeCompare(b, 'ja'));
+    allKnownLocations.value = apiLocs.sort((a, b) => a.localeCompare(b, 'ja'));
   } catch (e) {
     console.error('置き場一覧取得エラー:', e);
   }
@@ -1064,6 +1046,7 @@ const formatDateTime = (value) => {
 };
 
 onMounted(() => {
+  loadMasters();
   reload();
   loadRecorders();
   loadAreas();
@@ -1331,8 +1314,10 @@ watch(() => filters.stocktake_date, () => {
 }
 
 .map-cell-progress {
-  width: 100%;
-  margin-top: 2px;
+  position: absolute;
+  bottom: 1px;
+  left: 2px;
+  right: 2px;
 }
 
 .map-cell-bar {
