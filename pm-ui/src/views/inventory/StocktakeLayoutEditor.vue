@@ -1,8 +1,14 @@
 <template>
   <div class="layout-editor">
     <div class="editor-header">
-      <h2 class="page-title">棚卸レイアウト編集</h2>
+      <h2 class="page-title">棚卸レイアウト編集
+        <button v-if="authState.user?.is_superuser" class="ds-btn" @click="showDataSource = true" title="データソース"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></button>
+      </h2>
       <div class="editor-actions">
+        <select v-model="selectedAreaId" class="area-select" @change="onAreaChange">
+          <option value="">全体（デフォルト）</option>
+          <option v-for="area in areas" :key="area.id" :value="area.id">{{ area.name }}</option>
+        </select>
         <button type="button" class="save-btn" @click="saveConfig" :disabled="saving">{{ saving ? '保存中...' : '保存' }}</button>
       </div>
     </div>
@@ -161,12 +167,31 @@
         </div>
       </div>
     </div>
+
+    <div v-if="showDataSource" class="ds-overlay" @click.self="showDataSource = false">
+      <div class="ds-modal">
+        <div class="ds-header">
+          <h3>データソース — 棚卸レイアウト</h3>
+          <button class="ds-close" @click="showDataSource = false">×</button>
+        </div>
+        <table class="ds-table">
+          <thead><tr><th>操作</th><th>テーブル</th><th>説明</th></tr></thead>
+          <tbody>
+            <tr><td>取得/保存</td><td>production_stocktake_layout_config</td><td>レイアウト配置設定（エリア別グリッド・セル配置）</td></tr>
+            <tr><td>取得</td><td>production_stocktake_area</td><td>棚卸エリア（置き場のグルーピング）</td></tr>
+            <tr><td>取得</td><td>production_stocktake_record</td><td>棚卸現物入力記録（進捗表示用）</td></tr>
+            <tr><td>取得</td><td>m_product_stock_location</td><td>製品別置き場マスタ（配置候補一覧）</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import api from "@/api/client";
+import { authState } from "@/auth";
 
 const cols = ref(8);
 const rowCount = ref(6);
@@ -181,6 +206,9 @@ const saving = ref(false);
 const loading = ref(false);
 const allLocations = ref([]);
 const equipmentList = ref([]);
+const areas = ref([]);
+const selectedAreaId = ref("");
+const showDataSource = ref(false);
 const editingCellKey = ref(null);
 const editCellName = ref("");
 const editCellW = ref(1);
@@ -466,7 +494,8 @@ const removeCell = (cellKey) => {
 const loadConfig = async () => {
   loading.value = true;
   try {
-    const res = await api.stocktakeRecords.getLayoutConfig();
+    const params = selectedAreaId.value ? { area_id: selectedAreaId.value } : {};
+    const res = await api.stocktakeRecords.getLayoutConfig(params);
     cols.value = res.data.cols || 8;
     rowCount.value = res.data.rows || 6;
     const raw = res.data.cells || {};
@@ -498,11 +527,13 @@ const loadLocations = async () => {
 const saveConfig = async () => {
   saving.value = true;
   try {
-    await api.stocktakeRecords.saveLayoutConfig({
+    const payload = {
       cols: cols.value,
       rows: rowCount.value,
       cells: cells.value,
-    });
+    };
+    if (selectedAreaId.value) payload.area_id = selectedAreaId.value;
+    await api.stocktakeRecords.saveLayoutConfig(payload);
     alert("保存しました");
   } catch (e) {
     console.error("保存エラー:", e);
@@ -511,8 +542,21 @@ const saveConfig = async () => {
   saving.value = false;
 };
 
+const loadAreas = async () => {
+  try {
+    const res = await api.stocktakeRecords.listAreas();
+    areas.value = Array.isArray(res.data?.areas) ? res.data.areas : [];
+  } catch (e) {
+    console.error("エリア取得エラー:", e);
+  }
+};
+
+const onAreaChange = () => {
+  loadConfig();
+};
+
 onMounted(async () => {
-  await Promise.all([loadConfig(), loadLocations()]);
+  await Promise.all([loadConfig(), loadLocations(), loadAreas()]);
 });
 </script>
 
@@ -533,6 +577,20 @@ onMounted(async () => {
   margin: 0;
   font-size: 18px;
   font-weight: 700;
+}
+
+.editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.area-select {
+  padding: 5px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fff;
 }
 
 .save-btn {
@@ -1012,4 +1070,17 @@ onMounted(async () => {
   color: #fff;
   border-color: #2563eb;
 }
+
+.ds-btn { margin-left: 8px; padding: 4px 6px; border: 1px solid #94a3b8; border-radius: 4px; background: #f8fafc; color: #475569; cursor: pointer; vertical-align: middle; display: inline-flex; align-items: center; }
+.ds-btn:hover { background: #e2e8f0; }
+.ds-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+.ds-modal { background: #fff; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,.2); max-width: 700px; width: 90%; max-height: 80vh; overflow: auto; }
+.ds-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #e5e7eb; }
+.ds-header h3 { margin: 0; font-size: 15px; }
+.ds-close { border: none; background: none; font-size: 22px; cursor: pointer; color: #64748b; }
+.ds-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ds-table th, .ds-table td { padding: 8px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; }
+.ds-table th { background: #f8fafc; font-weight: 600; color: #374151; }
+.ds-table td:first-child { white-space: nowrap; font-weight: 500; color: #2563eb; }
+.ds-table td:nth-child(2) { font-family: monospace; font-size: 12px; color: #0f172a; }
 </style>

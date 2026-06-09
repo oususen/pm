@@ -744,7 +744,8 @@ const removeLayoutCell = (cellKey) => {
 
 const loadLayoutConfig = async () => {
   try {
-    const res = await api.stocktakeRecords.getLayoutConfig();
+    const params = filters.area_id ? { area_id: filters.area_id } : {};
+    const res = await api.stocktakeRecords.getLayoutConfig(params);
     layoutCols.value = res.data.cols || 4;
     layoutRows.value = res.data.rows || 4;
     const raw = res.data.cells || {};

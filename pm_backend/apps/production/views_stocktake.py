@@ -301,19 +301,28 @@ class StocktakeRecorderView(APIView):
 class StocktakeLayoutConfigView(APIView):
     permission_classes = [IsAuthenticated]
 
+    def _config_name(self, area_id):
+        if area_id:
+            return f'area_{area_id}'
+        return 'default'
+
     def get(self, request):
-        config = StocktakeLayoutConfig.objects.filter(name='default').first()
+        area_id = request.query_params.get('area_id', '')
+        config_name = self._config_name(area_id)
+        config = StocktakeLayoutConfig.objects.filter(name=config_name).first()
         if not config:
             return Response({'cols': 8, 'rows': 6, 'cells': {}})
         return Response({'cols': config.cols, 'rows': config.row_count, 'cells': config.cells})
 
     def post(self, request):
+        area_id = request.data.get('area_id', '')
+        config_name = self._config_name(area_id)
         cols = int(request.data.get('cols', 8))
         row_count = int(request.data.get('rows', 6))
         cells = request.data.get('cells', {})
 
         config, _ = StocktakeLayoutConfig.objects.update_or_create(
-            name='default',
+            name=config_name,
             defaults={'cols': cols, 'row_count': row_count, 'cells': cells},
         )
         return Response({'cols': config.cols, 'rows': config.row_count, 'cells': config.cells})
