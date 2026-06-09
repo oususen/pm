@@ -506,10 +506,10 @@ const load = async () => {
       const groups = Array.from(groupMetaMap.values())
         .filter((meta) => meta.product_id === n.product_id)
         .sort((a, b) => {
-          const left = normalizeNumber(a.step_no) || Number.MAX_SAFE_INTEGER;
-          const right = normalizeNumber(b.step_no) || Number.MAX_SAFE_INTEGER;
-          if (left !== right) return left - right;
-          return String(buildGroupDisplay(a, "process")).localeCompare(String(buildGroupDisplay(b, "process")));
+          const left = normalizeNumber(a.step_no) || -1;
+          const right = normalizeNumber(b.step_no) || -1;
+          if (left !== right) return right - left;
+          return String(buildGroupDisplay(b, "process")).localeCompare(String(buildGroupDisplay(a, "process")));
         });
 
       if (!groups.length) {
