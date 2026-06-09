@@ -123,6 +123,33 @@ def _draw_header_page(template):
     return img
 
 
+def _wrap_text(draw, text, font, max_w):
+    if not text:
+        return []
+    lines = []
+    for raw_line in text.split("\n"):
+        if not raw_line:
+            lines.append("")
+            continue
+        bbox = draw.textbbox((0, 0), raw_line, font=font)
+        if bbox[2] - bbox[0] <= max_w:
+            lines.append(raw_line)
+            continue
+        current = ""
+        for ch in raw_line:
+            test = current + ch
+            bbox = draw.textbbox((0, 0), test, font=font)
+            if bbox[2] - bbox[0] > max_w:
+                if current:
+                    lines.append(current)
+                current = ch
+            else:
+                current = test
+        if current:
+            lines.append(current)
+    return lines or [""]
+
+
 def _draw_item_table_header(draw, y, col_defs, total_w, row_h, colors):
     """項目テーブルのヘッダ行を描画"""
     table_x = MARGIN
@@ -135,16 +162,25 @@ def _draw_item_table_header(draw, y, col_defs, total_w, row_h, colors):
     return y + row_h
 
 
+def _calc_row_height(draw, values, col_defs, font, base_h, line_h):
+    max_lines = 1
+    for (_, col_w), val in zip(col_defs, values):
+        wrapped = _wrap_text(draw, val, font, col_w - 8)
+        if len(wrapped) > max_lines:
+            max_lines = len(wrapped)
+    return max(base_h, 12 + line_h * max_lines)
+
+
 def _draw_item_rows(draw, y, items, start_idx, col_defs, total_w, row_h, bottom, record_type_labels):
     """項目行を描画し、描画した行数を返す"""
     table_x = MARGIN
     font_td = _font(14)
+    line_h = 20
     drawn = 0
     for i, item in enumerate(items):
         if y + row_h > bottom:
             break
         idx = start_idx + i
-        cx = table_x
         values = [
             str(idx + 1),
             item.item_name or "",
@@ -156,35 +192,47 @@ def _draw_item_rows(draw, y, items, start_idx, col_defs, total_w, row_h, bottom,
             item.criteria or "",
             "●" if item.is_required else "",
         ]
+        actual_h = _calc_row_height(draw, values, col_defs, font_td, row_h, line_h)
+        if y + actual_h > bottom:
+            break
         bg_fill = "#f8f8f8" if idx % 2 == 0 else "white"
-        draw.rectangle((cx, y, cx + total_w, y + row_h), fill=bg_fill)
+        cx = table_x
+        draw.rectangle((cx, y, cx + total_w, y + actual_h), fill=bg_fill)
         for (col_name, col_w), val in zip(col_defs, values):
-            draw.rectangle((cx, y, cx + col_w, y + row_h), outline="#cccccc")
-            text = val[:int(col_w / 8)] if len(val) > col_w / 8 else val
-            draw.text((cx + 4, y + 6), text, fill="black", font=font_td)
+            draw.rectangle((cx, y, cx + col_w, y + actual_h), outline="#cccccc")
+            wrapped = _wrap_text(draw, val, font_td, col_w - 8)
+            ty = y + 6
+            for wl in wrapped:
+                draw.text((cx + 4, ty), wl, fill="black", font=font_td)
+                ty += line_h
             cx += col_w
-        y += row_h
+        y += actual_h
         drawn += 1
     return drawn
 
 
 def _make_col_defs():
+    available_w = PAGE_W - MARGIN * 2
     col_defs = [
         ("No", 50),
-        ("点検項目", 360),
-        ("規格", 260),
+        ("点検項目", 500),
+        ("規格", 380),
         ("頻度", 100),
-        ("方法", 260),
+        ("方法", 380),
         ("記録種別", 90),
         ("単位", 70),
-        ("判定基準", 260),
+        ("判定基準", 380),
         ("必須", 50),
     ]
     total_w = sum(c[1] for c in col_defs)
-    if total_w + MARGIN * 2 > PAGE_W:
-        scale_factor = (PAGE_W - MARGIN * 2) / total_w
+    if total_w != available_w:
+        scale_factor = available_w / total_w
         col_defs = [(name, int(w * scale_factor)) for name, w in col_defs]
         total_w = sum(c[1] for c in col_defs)
+        diff = available_w - total_w
+        if diff != 0:
+            col_defs[1] = (col_defs[1][0], col_defs[1][1] + diff)
+            total_w = sum(c[1] for c in col_defs)
     return col_defs, total_w
 
 
