@@ -1534,11 +1534,17 @@ watch(() => filters.stocktake_date, () => {
 
 .photo-cell {
   background: #f7a614;
-  min-height: 38px;
+  height: 38px;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+}
+
+.photo-cell img {
+  max-width: 100%;
+  max-height: 38px;
+  object-fit: cover;
 }
 
 .list-photo img,
