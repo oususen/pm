@@ -4,14 +4,14 @@ from django.test import TestCase
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from masters.models import BOM, BOMItem, Line, Process, Product, Routing
+from masters.models import BOM, BOMItem, Line, Process, Product, Routing, Supplier
 from masters.serializers import BOMItemSerializer
 from masters.services.routing_service import (
     build_effective_routing_range_q,
     normalize_routing_reference_datetime,
     resolve_effective_routing,
 )
-from masters.views import BOMViewSet
+from masters.views import BOMViewSet, SupplierViewSet
 
 
 class RoutingEffectiveDatetimeTest(TestCase):
@@ -235,3 +235,33 @@ class BOMItemValidationTest(TestCase):
 
         self.assertFalse(serializer.is_valid())
         self.assertIn('child_product', serializer.errors)
+
+
+class SupplierAutoLineTest(TestCase):
+    def test_supplier_create_also_creates_purchase_line_with_same_code_and_name(self):
+        user = get_user_model().objects.create_user(
+            username='supplier_line_tester',
+            password='testpass123',
+        )
+        factory = APIRequestFactory()
+        request = factory.post(
+            '/api/suppliers/',
+            {
+                'supplier_code': '000722',
+                'supplier_name': '株式会社ハツメック',
+                'supplier_type': 'both',
+                'order_email': '',
+                'calendar': None,
+            },
+            format='json',
+        )
+        force_authenticate(request, user=user)
+
+        response = SupplierViewSet.as_view({'post': 'create'})(request)
+
+        self.assertEqual(response.status_code, 201)
+        supplier = Supplier.objects.get(supplier_code='000722')
+        line = Line.objects.get(line_code='000722')
+        self.assertEqual(line.line_name, supplier.supplier_name)
+        self.assertEqual(line.line_type, 'PURCHASE')
+        self.assertTrue(line.is_active)

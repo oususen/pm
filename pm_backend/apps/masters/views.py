@@ -69,6 +69,37 @@ def get_overlapping_default_routings(routing):
     return qs
 
 
+def ensure_supplier_purchase_line(supplier):
+    """仕入先に対応する購買ラインを作成または更新する。"""
+    if not supplier:
+        return None
+
+    line_obj, _ = Line.objects.get_or_create(
+        line_code=supplier.supplier_code,
+        defaults={
+            'line_name': supplier.supplier_name[:50],
+            'line_type': 'PURCHASE',
+            'is_active': True,
+        }
+    )
+
+    update_fields = []
+    expected_name = supplier.supplier_name[:50]
+    if line_obj.line_name != expected_name:
+        line_obj.line_name = expected_name
+        update_fields.append('line_name')
+    if line_obj.line_type != 'PURCHASE':
+        line_obj.line_type = 'PURCHASE'
+        update_fields.append('line_type')
+    if not line_obj.is_active:
+        line_obj.is_active = True
+        update_fields.append('is_active')
+    if update_fields:
+        line_obj.save(update_fields=update_fields + ['updated_at'])
+
+    return line_obj
+
+
 class ProductFilter(django_filters.FilterSet):
     created_from = django_filters.DateFilter(field_name='created_at', lookup_expr='gte')
     created_to = django_filters.DateFilter(field_name='created_at', lookup_expr='lte')
@@ -1314,6 +1345,14 @@ class SupplierViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     ordering_fields = ['supplier_code']
     ordering = ['supplier_code']
 
+    def perform_create(self, serializer):
+        supplier = serializer.save()
+        ensure_supplier_purchase_line(supplier)
+
+    def perform_update(self, serializer):
+        supplier = serializer.save()
+        ensure_supplier_purchase_line(supplier)
+
 
 class CalendarViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Calendar.objects.all()
@@ -2480,18 +2519,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         """
         仕入先に対応する仮想ライン（仕入先コード）とPURCHASE工程を取得または作成する。
         """
-        line_code = supplier.supplier_code
-        line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
-        if len(line_name) > 50:
-            line_name = line_name[:50]
-        line_obj, _ = Line.objects.get_or_create(
-            line_code=line_code,
-            defaults={
-                'line_name': line_name,
-                'line_type': 'PURCHASE',
-                'is_active': True,
-            }
-        )
+        line_obj = ensure_supplier_purchase_line(supplier)
 
         process_code = 'PURCHASE'
         process_name = '購買'
@@ -2511,18 +2539,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         外作品（SUBCON）用: 仕入先の仕入ラインと外作工程(G)を取得する。
         購買と同様に仕入先コードのラインを使い、工程は外作工程(process_code='G')。
         """
-        line_code = supplier.supplier_code
-        line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
-        if len(line_name) > 50:
-            line_name = line_name[:50]
-        line_obj, _ = Line.objects.get_or_create(
-            line_code=line_code,
-            defaults={
-                'line_name': line_name,
-                'line_type': 'PURCHASE',
-                'is_active': True,
-            }
-        )
+        line_obj = ensure_supplier_purchase_line(supplier)
 
         try:
             process_obj = Process.objects.get(process_code='G')
@@ -2904,18 +2921,7 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         if not supplier:
             return None, None
 
-        line_code = supplier.supplier_code
-        line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
-        if len(line_name) > 50:
-            line_name = line_name[:50]
-        line_obj, _ = Line.objects.get_or_create(
-            line_code=line_code,
-            defaults={
-                'line_name': line_name,
-                'line_type': 'PURCHASE',
-                'is_active': True,
-            }
-        )
+        line_obj = ensure_supplier_purchase_line(supplier)
 
         process_obj = Process.objects.filter(process_code='K').first()
 
@@ -2925,18 +2931,7 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         if not supplier:
             return None, None
 
-        line_code = supplier.supplier_code
-        line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
-        if len(line_name) > 50:
-            line_name = line_name[:50]
-        line_obj, _ = Line.objects.get_or_create(
-            line_code=line_code,
-            defaults={
-                'line_name': line_name,
-                'line_type': 'PURCHASE',
-                'is_active': True,
-            }
-        )
+        line_obj = ensure_supplier_purchase_line(supplier)
 
         process_obj = Process.objects.filter(process_code='G').first()
 
