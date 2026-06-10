@@ -61,12 +61,28 @@
       <span v-if="!canEdit" class="readonly-note">閲覧のみ（編集権限なし）</span>
     </div>
     <div v-if="canEdit && showCreateRow" class="create-row">
-      <select v-model="newRoutingDraft.product" class="create-select" :disabled="creatingRouting || loadingProducts">
-        <option value="">{{ loadingProducts ? '品番読込中...' : '品番を選択' }}</option>
-        <option v-for="product in sortedProducts" :key="product.id" :value="product.id">
-          {{ product.product_code }} - {{ product.product_name }}
-        </option>
-      </select>
+      <div class="create-step-field" style="position:relative;">
+        <input
+          v-model="newRoutingProductSearch"
+          type="text"
+          class="create-select"
+          placeholder="品番/品名で検索"
+          :disabled="creatingRouting || loadingProducts"
+          @focus="newRoutingProductDropOpen = true"
+          @input="newRoutingProductDropOpen = true; newRoutingDraft.product = ''"
+          @blur="newRoutingProductDropOpen = false"
+        />
+        <ul v-if="newRoutingProductDropOpen && filteredNewRoutingProducts.length" class="autocomplete-list">
+          <li
+            v-for="product in filteredNewRoutingProducts"
+            :key="product.id"
+            @mousedown.prevent="selectNewRoutingProduct(product)"
+            class="autocomplete-item"
+          >
+            {{ product.product_code }} - {{ product.product_name }}
+          </li>
+        </ul>
+      </div>
       <input
         v-model.trim="newRoutingDraft.routing_code"
         class="create-input"
@@ -571,6 +587,22 @@ const newRoutingDraft = ref({
   is_default: false,
   is_active: true,
 })
+const newRoutingProductSearch = ref('')
+const newRoutingProductDropOpen = ref(false)
+const filteredNewRoutingProducts = computed(() => {
+  const kw = (newRoutingProductSearch.value || '').trim().toLowerCase()
+  if (!kw) return sortedProducts.value.slice(0, 30)
+  return sortedProducts.value.filter((p) => {
+    const code = (p.product_code || '').toLowerCase()
+    const name = (p.product_name || '').toLowerCase()
+    return code.includes(kw) || name.includes(kw)
+  }).slice(0, 30)
+})
+const selectNewRoutingProduct = (product) => {
+  newRoutingDraft.value.product = product.id
+  newRoutingProductSearch.value = `${product.product_code} - ${product.product_name}`
+  newRoutingProductDropOpen.value = false
+}
 const showCreateStepRow = ref(false)
 const showRoutingList = ref(true)
 const creatingStep = ref(false)
@@ -1228,6 +1260,8 @@ const resetCreateDraft = () => {
     is_default: false,
     is_active: true,
   }
+  newRoutingProductSearch.value = ''
+  newRoutingProductDropOpen.value = false
 }
 
 const toggleCreateRow = () => {

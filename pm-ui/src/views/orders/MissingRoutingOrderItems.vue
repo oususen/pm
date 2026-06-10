@@ -5,7 +5,10 @@
         <h1 class="page-title">ルーティング未設定の注文品 <DataSourceDialog title="ルーティング未設定の注文品" :sources="dsSources" /></h1>
         <p class="page-subtitle">受注明細のうち、製品にルーティングが未設定の注文品を一覧表示します。</p>
       </div>
-      <button class="btn-primary" :disabled="loading" @click="load">更新</button>
+      <div class="header-actions">
+        <button class="btn-secondary" :disabled="loading || !filteredItems.length" @click="exportExcel">Excel出力</button>
+        <button class="btn-primary" :disabled="loading" @click="load">更新</button>
+      </div>
     </div>
 
     <div class="page-content">
@@ -59,6 +62,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import * as XLSX from 'xlsx'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
@@ -105,6 +109,35 @@ const filteredItems = computed(() => {
   })
 })
 
+const formatDateForFile = () => {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  return `${y}${m}${d}`
+}
+
+const exportExcel = () => {
+  if (!filteredItems.value.length) return
+
+  const rows = filteredItems.value.map((item) => ({
+    得意先コード: item.customer_code || item.order?.customer?.customer_code || '',
+    得意先名: item.customer_name || item.order?.customer?.customer_name || '',
+    受注番号: item.order_no || '',
+    行: item.line_no ?? '',
+    品番: item.product_code || '',
+    品名: item.product_name || '',
+    数量: Number(item.quantity || 0),
+    納期: item.due_date || '',
+    備考: item.remark || '',
+  }))
+
+  const worksheet = XLSX.utils.json_to_sheet(rows)
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, '未設定品')
+  XLSX.writeFile(workbook, `ルーティング未設定注文品_${formatDateForFile()}.xlsx`)
+}
+
 const load = async () => {
   loading.value = true
   errorMessage.value = ''
@@ -128,6 +161,7 @@ onMounted(() => {
 <style scoped>
 .page-container { padding: 16px; }
 .page-header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px; }
+.header-actions { display:flex; gap:8px; }
 .page-title { margin:0; font-size:22px; }
 .page-subtitle { margin:4px 0 0; color:#64748b; font-size:13px; }
 .page-content { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:12px; }
@@ -145,4 +179,6 @@ onMounted(() => {
 .no-data { color:#64748b; }
 .btn-primary { border:none; border-radius:8px; background:#284b8f; color:#fff; padding:8px 12px; cursor:pointer; }
 .btn-primary:disabled { opacity:.6; cursor:not-allowed; }
+.btn-secondary { border:1px solid #284b8f; border-radius:8px; background:#fff; color:#284b8f; padding:8px 12px; cursor:pointer; }
+.btn-secondary:disabled { opacity:.6; cursor:not-allowed; }
 </style>
