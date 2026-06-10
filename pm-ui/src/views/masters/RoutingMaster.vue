@@ -362,7 +362,26 @@
                   <td>{{ step.process_name || step.process || '-' }}</td>
                   <td>{{ step.line_name || step.line || '-' }}</td>
                   <td>{{ step.supplier_name || '-' }}</td>
-                  <td>{{ step.output_product_code || '-' }}</td>
+                  <td>
+                    <div class="duration-editor">
+                      <input
+                        v-model.trim="outputProductDraftByStepId[step.id]"
+                        type="text"
+                        class="step-code-input"
+                        placeholder="品番コード"
+                        :disabled="!canEdit || savingOutputProductStepId === step.id"
+                        @keydown.enter.prevent="saveOutputProduct(step)"
+                      />
+                      <button
+                        class="duration-save-btn"
+                        :class="{ 'duration-save-btn--active': isOutputProductDirty(step) }"
+                        :disabled="!canEdit || !isOutputProductDirty(step) || savingOutputProductStepId === step.id"
+                        @click="saveOutputProduct(step)"
+                      >
+                        {{ savingOutputProductStepId === step.id ? '保存中' : '保存' }}
+                      </button>
+                    </div>
+                  </td>
                   <td>{{ isRepresentativePart(step) ? '○' : '' }}</td>
                   <td>{{ displayTimeUnit(step.time_unit) }}</td>
                   <td>
@@ -431,7 +450,26 @@
                       </button>
                     </div>
                   </td>
-                  <td>{{ step.remark || '' }}</td>
+                  <td>
+                    <div class="duration-editor">
+                      <input
+                        v-model.trim="parentProductDraftByStepId[step.id]"
+                        type="text"
+                        class="step-code-input"
+                        placeholder="親製品コード"
+                        :disabled="!canEdit || savingParentProductStepId === step.id"
+                        @keydown.enter.prevent="saveParentProduct(step)"
+                      />
+                      <button
+                        class="duration-save-btn"
+                        :class="{ 'duration-save-btn--active': isParentProductDirty(step) }"
+                        :disabled="!canEdit || !isParentProductDirty(step) || savingParentProductStepId === step.id"
+                        @click="saveParentProduct(step)"
+                      >
+                        {{ savingParentProductStepId === step.id ? '保存中' : '保存' }}
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -555,6 +593,10 @@ const leadTimeDraftByStepId = ref({})
 const savingLeadTimeStepId = ref(null)
 const usageQuantityDraftByStepId = ref({})
 const savingUsageQuantityStepId = ref(null)
+const outputProductDraftByStepId = ref({})
+const savingOutputProductStepId = ref(null)
+const parentProductDraftByStepId = ref({})
+const savingParentProductStepId = ref(null)
 const routingHeaderDraft = ref({
   is_default: false,
   is_active: true,
@@ -695,6 +737,21 @@ const compareSteps = (a, b) => {
 
 const productCode = (routing) => routing?.product_code || ''
 const productName = (routing) => routing?.product_name || ''
+const productSearchLabel = (product) => {
+  if (!product) return ''
+  const code = String(product.product_code || '').trim()
+  const name = String(product.product_name || '').trim()
+  if (code && name) return `${code} - ${name}`
+  return code || name
+}
+const extractProductCode = (value) => String(value || '').trim().split(' - ')[0].trim()
+const findProductByInput = (value) => {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  const code = extractProductCode(raw).toLowerCase()
+  if (!code) return null
+  return sortedProducts.value.find((product) => String(product.product_code || '').trim().toLowerCase() === code) || null
+}
 
 const selectedRouting = computed(() => routings.value.find((r) => r.id === selectedRoutingId.value) || null)
 const pad2 = (value) => String(value).padStart(2, '0')
@@ -926,6 +983,22 @@ const resetUsageQuantityDrafts = (stepList) => {
   usageQuantityDraftByStepId.value = draftMap
 }
 
+const resetOutputProductDrafts = (stepList) => {
+  const draftMap = {}
+  stepList.forEach((step) => {
+    draftMap[step.id] = step.output_product_code || ''
+  })
+  outputProductDraftByStepId.value = draftMap
+}
+
+const resetParentProductDrafts = (stepList) => {
+  const draftMap = {}
+  stepList.forEach((step) => {
+    draftMap[step.id] = step.remark || ''
+  })
+  parentProductDraftByStepId.value = draftMap
+}
+
 const isMinuteStep = (step) => step?.time_unit === 'MINUTE'
 
 const parseDuration = (value) => {
@@ -977,6 +1050,20 @@ const isUsageQuantityDirty = (step) => {
     return !(current === '' || current === null || current === undefined)
   }
   return String(draft) !== String(current ?? '')
+}
+
+const isOutputProductDirty = (step) => {
+  const draftProduct = findProductByInput(outputProductDraftByStepId.value[step.id])
+  const draftCode = draftProduct?.product_code || extractProductCode(outputProductDraftByStepId.value[step.id])
+  const currentCode = String(step?.output_product_code || '').trim()
+  return String(draftCode || '') !== currentCode
+}
+
+const isParentProductDirty = (step) => {
+  const draftProduct = findProductByInput(parentProductDraftByStepId.value[step.id])
+  const draftCode = draftProduct?.product_code || extractProductCode(parentProductDraftByStepId.value[step.id])
+  const currentCode = String(step?.remark || '').trim()
+  return String(draftCode || '') !== currentCode
 }
 
 const saveLeadTime = async (step) => {
@@ -1056,6 +1143,58 @@ const saveUsageQuantity = async (step) => {
   } finally {
     if (savingUsageQuantityStepId.value === step.id) {
       savingUsageQuantityStepId.value = null
+    }
+  }
+}
+
+const saveOutputProduct = async (step) => {
+  if (!canEdit.value || !step?.id) return
+  if (!isOutputProductDirty(step)) return
+
+  const product = findProductByInput(outputProductDraftByStepId.value[step.id])
+  if (!product) {
+    alert('加工後品目は既存の品番コードで入力してください。')
+    return
+  }
+
+  savingOutputProductStepId.value = step.id
+  errorMessage.value = ''
+  try {
+    await api.routings.patchRoutingStep(step.id, { output_product: Number(product.id) })
+    await fetchStepsAndMaterials(selectedRoutingId.value)
+  } catch (error) {
+    console.error('加工後品目更新エラー:', error)
+    const detail = error?.response?.data?.detail || error?.response?.data?.non_field_errors?.[0] || '加工後品目の更新に失敗しました'
+    alert(detail)
+  } finally {
+    if (savingOutputProductStepId.value === step.id) {
+      savingOutputProductStepId.value = null
+    }
+  }
+}
+
+const saveParentProduct = async (step) => {
+  if (!canEdit.value || !step?.id) return
+  if (!isParentProductDirty(step)) return
+
+  const product = findProductByInput(parentProductDraftByStepId.value[step.id])
+  if (!product) {
+    alert('親製品は既存の品番コードで入力してください。')
+    return
+  }
+
+  savingParentProductStepId.value = step.id
+  errorMessage.value = ''
+  try {
+    await api.routings.patchRoutingStep(step.id, { remark: product.product_code })
+    await fetchStepsAndMaterials(selectedRoutingId.value)
+  } catch (error) {
+    console.error('親製品更新エラー:', error)
+    const detail = error?.response?.data?.detail || error?.response?.data?.non_field_errors?.[0] || '親製品の更新に失敗しました'
+    alert(detail)
+  } finally {
+    if (savingParentProductStepId.value === step.id) {
+      savingParentProductStepId.value = null
     }
   }
 }
@@ -1197,6 +1336,8 @@ const fetchStepsAndMaterials = async (routingId) => {
     resetDurationDrafts(stepList)
     resetLeadTimeDrafts(stepList)
     resetUsageQuantityDrafts(stepList)
+    resetOutputProductDrafts(stepList)
+    resetParentProductDrafts(stepList)
 
     // ルーティングID一括取得（ステップ数分のN+1リクエストを回避）
     // routing 指定時はサーバー側でページネーション無効化のため page_size 不要
@@ -1466,6 +1607,8 @@ watch(selectedRoutingId, async (routingId) => {
     durationDraftByStepId.value = {}
     leadTimeDraftByStepId.value = {}
     usageQuantityDraftByStepId.value = {}
+    outputProductDraftByStepId.value = {}
+    parentProductDraftByStepId.value = {}
     processFilter.value = ''
     return
   }
@@ -1899,6 +2042,14 @@ onMounted(async () => {
   border-radius: 4px;
   font-size: 12px;
   text-align: right;
+}
+
+.step-code-input {
+  width: 150px;
+  padding: 2px 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 12px;
 }
 
 .duration-save-btn {

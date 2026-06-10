@@ -3168,8 +3168,8 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         context['representative_child_ids'] = representative_child_ids
         return context
 
-    def _resolve_sync_target_bom(self, step: RoutingStep):
-        if getattr(step, 'source_bom_item_id', None):
+    def _resolve_sync_target_bom(self, step: RoutingStep, prefer_source=True):
+        if prefer_source and getattr(step, 'source_bom_item_id', None):
             src = getattr(step, 'source_bom_item', None)
             if src and getattr(src, 'bom_id', None):
                 return src.bom
@@ -3202,8 +3202,8 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         return base_qs.order_by('-valid_from', '-id').first()
 
-    def _select_sync_target_items(self, step: RoutingStep, bom: BOM):
-        if getattr(step, 'source_bom_item_id', None):
+    def _select_sync_target_items(self, step: RoutingStep, bom: BOM, prefer_source=True):
+        if prefer_source and getattr(step, 'source_bom_item_id', None):
             return BOMItem.objects.filter(id=step.source_bom_item_id)
 
         is_final_step = str(getattr(step, 'hierarchy_path', '') or '').strip().lower() == 'final'
@@ -3339,6 +3339,103 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 item.quantity = usage_quantity
                 item.save(update_fields=['quantity', 'updated_at'])
 
+    def _resolve_step_usage_quantity(self, step: RoutingStep):
+        if getattr(step, 'source_bom_item_id', None):
+            src = getattr(step, 'source_bom_item', None)
+            if src and getattr(src, 'quantity', None) is not None:
+                return src.quantity
+
+        parent_step_ids = []
+        if step.hierarchy_path and '.' in step.hierarchy_path:
+            parent_path = step.hierarchy_path.rsplit('.', 1)[0]
+            parent_step_ids = list(
+                RoutingStep.objects.filter(
+                    routing_id=step.routing_id,
+                    hierarchy_path=parent_path,
+                ).values_list('id', flat=True)
+            )
+
+        if not parent_step_ids and step.remark:
+            parent_step_ids = list(
+                RoutingStep.objects.filter(
+                    routing_id=step.routing_id,
+                    output_product__product_code=step.remark,
+                ).values_list('id', flat=True)
+            )
+
+        if parent_step_ids and step.output_product_id:
+            material = RoutingStepMaterial.objects.filter(
+                routing_step_id__in=parent_step_ids,
+                component_id=step.output_product_id,
+            ).order_by('id').first()
+            if material and material.quantity is not None:
+                return material.quantity
+
+        bom = self._resolve_sync_target_bom(step, prefer_source=False)
+        if not bom:
+            return None
+
+        item = self._select_sync_target_items(step, bom, prefer_source=False).order_by('id').first()
+        if item and item.quantity is not None:
+            return item.quantity
+        return None
+
+    def _sync_step_bom_linkage(self, step: RoutingStep, usage_quantity: Decimal = None):
+        if not step.output_product_id or not step.remark:
+            if getattr(step, 'source_bom_item_id', None):
+                step.source_bom_item = None
+                step.save(update_fields=['source_bom_item', 'updated_at'])
+            return
+
+        bom = self._resolve_sync_target_bom(step, prefer_source=False)
+        if not bom:
+            if getattr(step, 'source_bom_item_id', None):
+                step.source_bom_item = None
+                step.save(update_fields=['source_bom_item', 'updated_at'])
+            return
+
+        qty = usage_quantity if usage_quantity is not None else self._resolve_step_usage_quantity(step)
+        if qty is None:
+            qty = Decimal('1')
+
+        raw_sourcing = str(self.request.data.get('sourcing_type') or '').upper()
+        sourcing_type = raw_sourcing if raw_sourcing in ('MAKE', 'BUY', 'SUBCON') else ('SUBCON' if step.supplier_id else 'MAKE')
+
+        existing_item = BOMItem.objects.filter(
+            bom=bom,
+            child_product_id=step.output_product_id,
+        ).order_by('id').first()
+
+        if existing_item:
+            existing_item.quantity = qty
+            existing_item.process_id = step.process_id
+            existing_item.line_id = step.line_id
+            existing_item.supplier_id = step.supplier_id
+            existing_item.sourcing_type = sourcing_type
+            existing_item.time_unit = step.time_unit or 'DAY'
+            existing_item.lead_time_days = step.lead_time_days or 0
+            existing_item.duration_min = step.duration_min
+            existing_item.save()
+            if step.source_bom_item_id != existing_item.id:
+                step.source_bom_item = existing_item
+                step.save(update_fields=['source_bom_item', 'updated_at'])
+            return
+
+        new_item = BOMItem.objects.create(
+            bom=bom,
+            child_product_id=step.output_product_id,
+            quantity=qty,
+            sourcing_type=sourcing_type,
+            process_id=step.process_id,
+            line_id=step.line_id,
+            supplier_id=step.supplier_id,
+            time_unit=step.time_unit or 'DAY',
+            lead_time_days=step.lead_time_days or 0,
+            duration_min=step.duration_min,
+        )
+        step.source_bom_item = new_item
+        step.save(update_fields=['source_bom_item', 'updated_at'])
+
     def _normalize_final_step_flags(self, routing_id):
         if not routing_id:
             return
@@ -3387,6 +3484,8 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         sync_fields = [key for key in ('lead_time_days', 'duration_min') if key in serializer.validated_data]
         step = serializer.save()
         self._normalize_final_step_flags(step.routing_id)
+        if any(key in serializer.validated_data for key in ('output_product', 'remark')):
+            self._sync_step_bom_linkage(step, usage_quantity)
         if sync_fields:
             self._sync_step_fields_to_bom(step, sync_fields)
         if usage_quantity is not None:
@@ -3399,44 +3498,7 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         # BOMItem自動作成/更新: 親製品(remark)と加工後品目(output_product)が指定されている場合
         if step.output_product_id and step.remark:
-            bom = self._resolve_sync_target_bom(step)
-            if bom:
-                qty = usage_quantity if usage_quantity is not None else Decimal('1')
-
-                raw_sourcing = str(self.request.data.get('sourcing_type') or '').upper()
-                sourcing_type = raw_sourcing if raw_sourcing in ('MAKE', 'BUY', 'SUBCON') else ('SUBCON' if step.supplier_id else 'MAKE')
-
-                existing_item = BOMItem.objects.filter(
-                    bom=bom,
-                    child_product_id=step.output_product_id,
-                ).first()
-                if existing_item:
-                    existing_item.quantity = qty
-                    existing_item.process_id = step.process_id
-                    existing_item.line_id = step.line_id
-                    existing_item.supplier_id = step.supplier_id
-                    existing_item.sourcing_type = sourcing_type
-                    existing_item.time_unit = step.time_unit or 'DAY'
-                    existing_item.lead_time_days = step.lead_time_days or 0
-                    existing_item.duration_min = step.duration_min
-                    existing_item.save()
-                    step.source_bom_item = existing_item
-                    step.save(update_fields=['source_bom_item'])
-                else:
-                    new_item = BOMItem.objects.create(
-                        bom=bom,
-                        child_product_id=step.output_product_id,
-                        quantity=qty,
-                        sourcing_type=sourcing_type,
-                        process_id=step.process_id,
-                        line_id=step.line_id,
-                        supplier_id=step.supplier_id,
-                        time_unit=step.time_unit or 'DAY',
-                        lead_time_days=step.lead_time_days or 0,
-                        duration_min=step.duration_min,
-                    )
-                    step.source_bom_item = new_item
-                    step.save(update_fields=['source_bom_item'])
+            self._sync_step_bom_linkage(step, usage_quantity)
             return
 
         # BOM自動作成が不要な場合は既存のLT/所要時間同期のみ
