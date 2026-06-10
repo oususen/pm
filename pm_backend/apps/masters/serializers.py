@@ -280,6 +280,24 @@ class RoutingStepSerializer(serializers.ModelSerializer):
         model = RoutingStep
         fields = '__all__'
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        process = attrs.get('process')
+        if not process and self.instance is not None:
+            process = getattr(self.instance, 'process', None)
+
+        should_fill_line = False
+        if self.instance is None:
+            should_fill_line = not attrs.get('line')
+        elif 'process' in attrs and 'line' not in attrs:
+            should_fill_line = True
+        elif 'line' in attrs and not attrs.get('line'):
+            should_fill_line = True
+
+        if should_fill_line and process and getattr(process, 'line_id', None):
+            attrs['line'] = process.line
+        return attrs
+
     def get_display_label(self, obj: RoutingStep) -> str:
         """
         A compact label used by UI dropdowns: step_no / process / line / output product code.

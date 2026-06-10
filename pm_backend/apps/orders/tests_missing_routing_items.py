@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -63,3 +63,31 @@ class MissingRoutingItemsAPITest(TestCase):
         self.assertEqual(response.data['results'][0]['product_code'], 'P001')
         self.assertEqual(response.data['results'][0]['order_no'], 'ORD-001')
         self.assertEqual(response.data['results'][0]['customer_code'], 'C001')
+
+    def test_missing_routing_items_does_not_truncate_results_before_deduplication(self):
+        customer = Customer.objects.create(customer_code='C002', customer_name='顧客B')
+        base_date = date.today() + timedelta(days=1)
+
+        for idx in range(501):
+            product = Product.objects.create(product_code=f'P{idx:03d}', product_name=f'品目{idx}')
+            order = Order.objects.create(
+                customer=customer,
+                order_no=f'ORD-{idx:03d}',
+                order_type='FIRM',
+                status='OPEN',
+                order_date=base_date,
+            )
+            OrderLine.objects.create(
+                order=order,
+                line_no=1,
+                product=product,
+                product_code=product.product_code,
+                quantity=1,
+                due_date=base_date,
+            )
+
+        response = self.client.get('/api/order-lines/missing-routing-items/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(response.data['count'], 501)
+        self.assertTrue(any(item['product_code'] == 'P500' for item in response.data['results']))

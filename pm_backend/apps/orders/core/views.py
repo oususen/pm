@@ -8,6 +8,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 import django_filters
 from django.db.models import Exists, OuterRef, Q
 import csv
+from datetime import date
 
 from masters.models import Routing
 
@@ -131,7 +132,7 @@ class OrderLineViewSet(viewsets.ModelViewSet):
             .order_by('due_date', 'order__customer__customer_code', 'product_code')
         )
 
-        records = list(qs[:500])
+        records = list(qs)
         deduped = {}
         for record in records:
             key = (record.product_code or '').strip().lower()
@@ -151,7 +152,17 @@ class OrderLineViewSet(viewsets.ModelViewSet):
             if record_order_time and current_order_time and record_order_time == current_order_time and (record.order_id or 0) > (current.order_id or 0):
                 deduped[key] = record
 
-        serializer = self.get_serializer(list(deduped.values()), many=True)
+        deduped_list = sorted(
+            deduped.values(),
+            key=lambda item: (
+                item.due_date or date.max,
+                (item.order.customer.customer_code if item.order and item.order.customer else ''),
+                item.product_code or '',
+                item.order_id or 0,
+            ),
+        )
+
+        serializer = self.get_serializer(deduped_list, many=True)
         return Response({
             'count': len(deduped),
             'results': serializer.data,

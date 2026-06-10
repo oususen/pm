@@ -3284,6 +3284,66 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             if changed_fields:
                 item.save(update_fields=changed_fields + ['updated_at'])
 
+    def _parse_usage_quantity_from_request(self):
+        if 'usage_quantity' not in self.request.data:
+            return None
+
+        raw_value = self.request.data.get('usage_quantity')
+        if raw_value is None or str(raw_value).strip() in ('', 'null'):
+            return None
+
+        try:
+            quantity = Decimal(str(raw_value))
+        except (InvalidOperation, TypeError, ValueError):
+            raise serializers.ValidationError({'usage_quantity': '使用個数は0以上の整数で入力してください。'})
+
+        if quantity < 0 or quantity != quantity.to_integral_value():
+            raise serializers.ValidationError({'usage_quantity': '使用個数は0以上の整数で入力してください。'})
+        return quantity
+
+    def _sync_step_usage_quantity(self, step: RoutingStep, usage_quantity: Decimal):
+        if not step.output_product_id:
+            return
+
+        parent_step_ids = []
+        if step.hierarchy_path and '.' in step.hierarchy_path:
+            parent_path = step.hierarchy_path.rsplit('.', 1)[0]
+            parent_step_ids = list(
+                RoutingStep.objects.filter(
+                    routing_id=step.routing_id,
+                    hierarchy_path=parent_path,
+                ).values_list('id', flat=True)
+            )
+
+        if not parent_step_ids and step.remark:
+            parent_step_ids = list(
+                RoutingStep.objects.filter(
+                    routing_id=step.routing_id,
+                    output_product__product_code=step.remark,
+                ).values_list('id', flat=True)
+            )
+
+        if parent_step_ids:
+            material = RoutingStepMaterial.objects.filter(
+                routing_step_id__in=parent_step_ids,
+                component_id=step.output_product_id,
+            ).order_by('id').first()
+            if material:
+                if material.quantity != usage_quantity:
+                    material.quantity = usage_quantity
+                    material.save(update_fields=['quantity', 'updated_at'])
+                return
+
+        bom = self._resolve_sync_target_bom(step)
+        if not bom:
+            return
+
+        items = self._select_sync_target_items(step, bom)
+        for item in items:
+            if item.quantity != usage_quantity:
+                item.quantity = usage_quantity
+                item.save(update_fields=['quantity', 'updated_at'])
+
     def _normalize_final_step_flags(self, routing_id):
         if not routing_id:
             return
@@ -3328,13 +3388,17 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 step.save(update_fields=changed_fields + ['updated_at'])
 
     def perform_update(self, serializer):
+        usage_quantity = self._parse_usage_quantity_from_request()
         sync_fields = [key for key in ('lead_time_days', 'duration_min') if key in serializer.validated_data]
         step = serializer.save()
         self._normalize_final_step_flags(step.routing_id)
         if sync_fields:
             self._sync_step_fields_to_bom(step, sync_fields)
+        if usage_quantity is not None:
+            self._sync_step_usage_quantity(step, usage_quantity)
 
     def perform_create(self, serializer):
+        usage_quantity = self._parse_usage_quantity_from_request()
         step = serializer.save()
         self._normalize_final_step_flags(step.routing_id)
 
@@ -3342,15 +3406,7 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         if step.output_product_id and step.remark:
             bom = self._resolve_sync_target_bom(step)
             if bom:
-                usage_qty = self.request.data.get('usage_quantity')
-                if usage_qty is not None and str(usage_qty).strip() not in ('', 'null'):
-                    try:
-                        from decimal import Decimal
-                        qty = Decimal(str(usage_qty))
-                    except Exception:
-                        qty = Decimal('1')
-                else:
-                    qty = Decimal('1')
+                qty = usage_quantity if usage_quantity is not None else Decimal('1')
 
                 raw_sourcing = str(self.request.data.get('sourcing_type') or '').upper()
                 sourcing_type = raw_sourcing if raw_sourcing in ('MAKE', 'BUY', 'SUBCON') else ('SUBCON' if step.supplier_id else 'MAKE')
