@@ -378,6 +378,7 @@
                       />
                       <button
                         class="duration-save-btn"
+                        :class="{ 'duration-save-btn--active': isLeadTimeDirty(step) }"
                         :disabled="!canEdit || !isLeadTimeDirty(step) || savingLeadTimeStepId === step.id"
                         @click="saveLeadTime(step)"
                       >
@@ -399,6 +400,7 @@
                         />
                         <button
                           class="duration-save-btn"
+                          :class="{ 'duration-save-btn--active': isDurationDirty(step) }"
                           :disabled="!canEdit || !isDurationDirty(step) || savingDurationStepId === step.id"
                           @click="saveDuration(step)"
                         >
@@ -421,6 +423,7 @@
                       />
                       <button
                         class="duration-save-btn"
+                        :class="{ 'duration-save-btn--active': isUsageQuantityDirty(step) }"
                         :disabled="!canEdit || !isUsageQuantityDirty(step) || savingUsageQuantityStepId === step.id"
                         @click="saveUsageQuantity(step)"
                       >
@@ -1906,6 +1909,12 @@ onMounted(async () => {
   color: #374151;
   font-size: 12px;
   cursor: pointer;
+}
+
+.duration-save-btn--active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
 }
 
 .duration-save-btn:disabled {
