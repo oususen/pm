@@ -63,7 +63,15 @@
     <!-- ====== マッピング設定タブ ====== -->
     <div v-show="activeTab === 'mapping'" class="settings-panel">
       <h3 class="settings-title">マッピング設定</h3>
-      <p class="settings-note">仕入先を選択し、品番ごとに基幹品番・品目区分(G/K)・仕入先コード・Tab回数を設定してください。</p>
+      <div class="settings-note">
+        <strong>注意ポイント</strong>
+        <ul>
+          <li>仕入先を選択したあと、各アプリ品番ごとに基幹品番・品目区分(G/K)・仕入先コード・品番後Tab回数を設定してください。</li>
+          <li>品目区分は G=外作、K=購入品です。自動入力処理では G は工程テーブル待ち、K は通常画面遷移待ちになります。</li>
+          <li>品番後Tab回数は「品番入力後、仕入先コードまでに押すTabの合計回数」です。HCE0040実装では G1か所=1、G2か所=3、K=1 です。</li>
+          <li>仕入先コードは G では加工先CD、K では仕入先コードを入れてください。入荷数後のTab回数は自動設定されます。</li>
+        </ul>
+      </div>
 
       <div class="settings-selector">
         <label>仕入先</label>
@@ -97,7 +105,7 @@
               <th>品目区分</th>
               <th>基幹品番</th>
               <th>仕入先コード<br><small>加工先CD(G) / 仕入先コード(K)</small></th>
-              <th>品番後Tab回数<br><small>G1か所=1、G2か所=2、K=1</small></th>
+              <th>品番後Tab回数<br><small>G1か所=1、G2か所=3、K=1</small></th>
               <th>操作</th>
             </tr>
           </thead>
