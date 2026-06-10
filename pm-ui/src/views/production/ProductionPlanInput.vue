@@ -11,7 +11,7 @@
       >
         {{ tab.label }}
       </button>
-      <button v-if="authState.user?.is_superuser" class="ds-btn" @click="showDataSource = true" title="データソース"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></button>
+      <DataSourceDialog title="" :sources="dsSources" />
     </div>
 
     <div v-if="!activePlanTab" class="no-tab-placeholder">タブを選択してください</div>
@@ -1177,37 +1177,6 @@
     </div>
   </div>
 
-  <!-- データソースモーダル -->
-  <div v-if="showDataSource" class="ds-overlay" @click.self="showDataSource = false">
-    <div class="ds-modal">
-      <div class="ds-header"><h3>データソース</h3><button class="ds-close" @click="showDataSource = false">&times;</button></div>
-      <table class="ds-table">
-        <thead><tr><th>操作</th><th>テーブル</th><th>説明</th></tr></thead>
-        <tbody>
-          <tr><td colspan="3" style="background:#eef2ff;font-weight:600;color:#3730a3;">計画データ</td></tr>
-          <tr><td>計画 読み書き</td><td>line_plan</td><td>ライン別日別生産計画</td></tr>
-          <tr><td>需要/実績 読み書き</td><td>line_backlog</td><td>需要(seq=0)・計画実績(seq&gt;0)管理</td></tr>
-          <tr><td>需要 読み取り</td><td>line_demand</td><td>顧客需要（内示/確定）</td></tr>
-          <tr><td>ガント 生成</td><td>line_gantt_plan</td><td>ガントチャート計画データ</td></tr>
-          <tr><td>計画変更ログ</td><td>production_plan_change_log</td><td>計画変更の履歴ログ</td></tr>
-          <tr><td colspan="3" style="background:#eef2ff;font-weight:600;color:#3730a3;">設定</td></tr>
-          <tr><td>表示順 読み書き</td><td>t_line_product_display_order</td><td>製品の表示順設定</td></tr>
-          <tr><td>日別スケジュール 読み書き</td><td>line_daily_schedule_setting</td><td>日別の稼働時間・シフト設定</td></tr>
-          <tr><td>デフォルトスケジュール</td><td>t_line_default_schedule_setting</td><td>ライン別デフォルト稼働設定</td></tr>
-          <tr><td>自動計画集約 読み書き</td><td>t_auto_plan_aggregate_setting</td><td>自動計画の集約パターン設定</td></tr>
-          <tr><td>計画ロック 読み取り</td><td>production_plan_lock_setting</td><td>計画変更ロック日設定</td></tr>
-          <tr><td>計算特例 読み書き</td><td>system_setting</td><td>計画在庫計算の特例ルール（キー: production.*）</td></tr>
-          <tr><td colspan="3" style="background:#eef2ff;font-weight:600;color:#3730a3;">マスタ</td></tr>
-          <tr><td>ライン 読み取り</td><td>m_line</td><td>ラインマスタ</td></tr>
-          <tr><td>製品 読み取り</td><td>m_product</td><td>製品マスタ</td></tr>
-          <tr><td>工程 読み取り</td><td>m_process</td><td>工程マスタ</td></tr>
-          <tr><td>BOM 読み取り</td><td>m_bom / m_bom_item</td><td>部品表（材料構成）</td></tr>
-          <tr><td>カレンダー 読み取り</td><td>m_calendar / m_calendar_day</td><td>営業日カレンダー</td></tr>
-          <tr><td>勤務パターン 読み取り</td><td>m_work_pattern</td><td>勤務パターンマスタ</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
 </template>
 
 <script setup>
@@ -1216,11 +1185,11 @@ import { useRouter } from 'vue-router'
 import * as XLSX from 'xlsx'
 import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
 import ProcessGanttView from './ProcessGanttView.vue'
 import LaserPatternEditor from './LaserPatternEditor.vue'
 import LaserMonthlyMaterialSummary from './LaserMonthlyMaterialSummary.vue'
 const router = useRouter()
-const showDataSource = ref(false)
 const selectedLine = ref('')
 const TOOLBAR_COLLAPSED_KEY = 'productionPlanInput.toolbarCollapsed'
 const toolbarCollapsed = ref(localStorage.getItem(TOOLBAR_COLLAPSED_KEY) === '1')

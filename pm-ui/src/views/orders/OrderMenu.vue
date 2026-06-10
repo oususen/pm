@@ -92,6 +92,14 @@ const tiles = computed(() => [
     resource: "orders.csv_import",
   },
   {
+    key: "missing_routing_items",
+    to: "/orders/missing-routing-items",
+    label: "ルーティング未設定の注文品",
+    icon: "⚠️",
+    required: "view",
+    resource: "orders.list",
+  },
+  {
     key: "kubota_analysis",
     to: "/orders/kubota-naiji-analysis",
     label: "クボタ内示分析",

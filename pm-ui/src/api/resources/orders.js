@@ -75,6 +75,9 @@ export const createOrdersAPI = (client) => ({
   getOrderLines(orderId) {
     return client.get(`/order-lines/?order=${orderId}`)
   },
+  getMissingRoutingOrderItems(params = {}) {
+    return client.get('/order-lines/missing-routing-items/', { params })
+  },
   listOrderLines(params = {}) {
     const query = { page_size: 10000, ...params }
     return client.get('/order-lines/', { params: query })

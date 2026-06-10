@@ -3,7 +3,7 @@
 
     <div class="tab-bar">
       <div class="tab-nav-actions">
-        <button v-if="authState.user?.is_superuser" class="ds-btn" @click="showDataSource = true" title="データソース"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></button>
+        <DataSourceDialog title="レーザー実績入力" :sources="dsSources" />
         <button class="btn-inspection-nav btn-checksheet-nav" @click="openIntegratedChecksheetOperation">チェックシート実施</button>
         <button class="btn-inspection-nav" @click="openEquipmentInspection">設備点検</button>
       </div>
@@ -605,33 +605,22 @@
         </div>
     </section>
 
-    <div v-if="showDataSource" class="ds-overlay" @click.self="showDataSource = false">
-      <div class="ds-modal">
-        <div class="ds-header">
-          <h3>データソース — レーザー実績入力</h3>
-          <button class="ds-close" @click="showDataSource = false">×</button>
-        </div>
-        <table class="ds-table">
-          <thead><tr><th>操作</th><th>テーブル</th><th>説明</th></tr></thead>
-          <tbody>
-            <tr><td>取得/保存/削除</td><td>t_laser_actual / t_laser_actual_detail</td><td>レーザー実績・明細（ショット記録・品番別数量）</td></tr>
-            <tr><td>取得/保存/更新/削除</td><td>t_laser_shift_record</td><td>レーザーシフト記録（勤務時間・稼働時間の管理）</td></tr>
-            <tr><td>取得</td><td>t_laser_pattern</td><td>レーザーパターンマスタ（品番構成・1ショットあたり数量）</td></tr>
-            <tr><td>取得</td><td>masters_equipment</td><td>設備マスタ（レーザー設備一覧）</td></tr>
-            <tr><td>更新</td><td>line_backlog</td><td>実績数(actual_qty)の加算（実績登録時）</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { authState } from '@/auth'
-const showDataSource = ref(false)
 import { useRouter } from 'vue-router'
 import api from '@/api/client'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '取得/保存/削除', table: 't_laser_actual / t_laser_actual_detail', desc: 'レーザー実績・明細（ショット記録・品番別数量）' },
+  { op: '取得/保存/更新/削除', table: 't_laser_shift_record', desc: 'レーザーシフト記録（勤務時間・稼働時間の管理）' },
+  { op: '取得', table: 't_laser_pattern', desc: 'レーザーパターンマスタ（品番構成・1ショットあたり数量）' },
+  { op: '取得', table: 'masters_equipment', desc: '設備マスタ（レーザー設備一覧）' },
+]
 import { getLocaleCode } from '@/i18n'
 
 const router = useRouter()

@@ -47,7 +47,7 @@
       <button class="btn detail-btn" :disabled="loading" @click="showTruckDetail = !showTruckDetail">
         便詳細
       </button>
-      <button v-if="authState.user?.is_superuser" class="ds-btn" @click="showDataSource = true" title="データソース"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></button>
+      <DataSourceDialog title="" :sources="dsSources" />
       <button class="btn pseudo-product-btn" :disabled="loading" @click="togglePseudoProductPanel">
         擬似便対象製品
       </button>
@@ -373,23 +373,6 @@
       :style="cursorProductBubbleStyle"
     >{{ cursorProductCode }}</div>
 
-    <!-- データソースモーダル -->
-    <div v-if="showDataSource" class="ds-overlay" @click.self="showDataSource = false">
-      <div class="ds-modal">
-        <div class="ds-header"><h3>データソース</h3><button class="ds-close" @click="showDataSource = false">&times;</button></div>
-        <table class="ds-table">
-          <thead><tr><th>操作</th><th>テーブル</th><th>説明</th></tr></thead>
-          <tbody>
-            <tr><td>便割付 読み書き</td><td>t_kubota_sakai_trip_assignment</td><td>納期調整→便への割付データ</td></tr>
-            <tr><td>納期調整 読み取り</td><td>t_kubota_sakai_due_adjustment</td><td>出荷数(delivery_qty)の参照元</td></tr>
-            <tr><td>便マスタ 読み取り</td><td>m_kubota_sakai_truck</td><td>便名・積載量</td></tr>
-            <tr><td>擬似便製品 読み書き</td><td>m_kubota_sakai_pseudo_truck_product</td><td>擬似便自動振分の製品マスタ</td></tr>
-            <tr><td>お気に入り 読み書き</td><td>user_favorite</td><td>画面フィルタのお気に入り保存</td></tr>
-            <tr><td>カレンダー 読み取り</td><td>m_calendar / m_calendar_day</td><td>営業日判定</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -397,8 +380,16 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
-const showDataSource = ref(false)
+const dsSources = [
+  { op: '便割付 読み書き', table: 't_kubota_sakai_trip_assignment', desc: '納期調整→便への割付データ' },
+  { op: '納期調整 読み取り', table: 't_kubota_sakai_due_adjustment', desc: '出荷数(delivery_qty)の参照元' },
+  { op: '便マスタ 読み取り', table: 'm_kubota_sakai_truck', desc: '便名・積載量' },
+  { op: '擬似便製品 読み書き', table: 'm_kubota_sakai_pseudo_truck_product', desc: '擬似便自動振分の製品マスタ' },
+  { op: 'お気に入り 読み書き', table: 'user_favorite', desc: '画面フィルタのお気に入り保存' },
+  { op: 'カレンダー 読み取り', table: 'm_calendar / m_calendar_day', desc: '営業日判定' },
+]
 const theadRef = ref(null)
 const tableWrapRef = ref(null)
 
@@ -1933,17 +1924,5 @@ onUnmounted(() => {
   padding: 0 6px;
   color: #94a3b8;
 }
-.ds-btn { margin-left: 8px; padding: 4px 6px; border: 1px solid #94a3b8; border-radius: 4px; background: #f8fafc; color: #475569; cursor: pointer; vertical-align: middle; display: inline-flex; align-items: center; }
-.ds-btn:hover { background: #e2e8f0; }
-.ds-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 9999; display: flex; align-items: center; justify-content: center; }
-.ds-modal { background: #fff; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,.2); max-width: 700px; width: 90%; max-height: 80vh; overflow: auto; }
-.ds-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #e5e7eb; }
-.ds-header h3 { margin: 0; font-size: 15px; }
-.ds-close { border: none; background: none; font-size: 22px; cursor: pointer; color: #64748b; }
-.ds-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.ds-table th, .ds-table td { padding: 8px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; }
-.ds-table th { background: #f8fafc; font-weight: 600; color: #374151; }
-.ds-table td:first-child { white-space: nowrap; font-weight: 500; color: #2563eb; }
-.ds-table td:nth-child(2) { font-family: monospace; font-size: 12px; color: #0f172a; }
 </style>
 

@@ -6,8 +6,10 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 import django_filters
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 import csv
+
+from masters.models import Routing
 
 from .models import (
     Order,
@@ -112,6 +114,48 @@ class OrderLineViewSet(viewsets.ModelViewSet):
     search_fields = ['product_code']
     ordering_fields = ['due_date', 'line_no']
     ordering = ['line_no']
+
+    @action(detail=False, methods=['get'], url_path='missing-routing-items')
+    def missing_routing_items(self, request):
+        """ルーティング未設定の受注明細を一覧化する。"""
+        qs = (
+            self.get_queryset()
+            .filter(product__isnull=False)
+            .annotate(
+                has_routing=Exists(
+                    Routing.objects.filter(product=OuterRef('product'), is_active=True)
+                )
+            )
+            .filter(has_routing=False)
+            .select_related('order', 'order__customer', 'product')
+            .order_by('due_date', 'order__customer__customer_code', 'product_code')
+        )
+
+        records = list(qs[:500])
+        deduped = {}
+        for record in records:
+            key = (record.product_code or '').strip().lower()
+            if not key:
+                continue
+
+            current = deduped.get(key)
+            if current is None:
+                deduped[key] = record
+                continue
+
+            current_order_time = current.order.updated_at or current.order.created_at or current.updated_at or current.created_at
+            record_order_time = record.order.updated_at or record.order.created_at or record.updated_at or record.created_at
+            if record_order_time and current_order_time and record_order_time > current_order_time:
+                deduped[key] = record
+                continue
+            if record_order_time and current_order_time and record_order_time == current_order_time and (record.order_id or 0) > (current.order_id or 0):
+                deduped[key] = record
+
+        serializer = self.get_serializer(list(deduped.values()), many=True)
+        return Response({
+            'count': len(deduped),
+            'results': serializer.data,
+        })
 
     @action(detail=False, methods=['get'], url_path='customer-product-codes')
     def customer_product_codes(self, request):

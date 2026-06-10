@@ -3,7 +3,7 @@
     <div class="page-header">
       <h2 class="page-title">生産実績照会</h2>
       <p class="subtitle">開始〜終了をセッション単位で照会します（中断区間も表示。期間は08:00〜翌07:59で判定）。
-        <button v-if="authState.user?.is_superuser" class="ds-btn" @click="showDataSource = true" title="データソース"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></button>
+        <DataSourceDialog title="生産実績照会" :sources="dsSources" />
       </p>
     </div>
 
@@ -374,33 +374,13 @@
       <div v-if="mappingSaveMessage" class="settings-message">{{ mappingSaveMessage }}</div>
     </div>
 
-    <div v-if="showDataSource" class="ds-overlay" @click.self="showDataSource = false">
-      <div class="ds-modal">
-        <div class="ds-header">
-          <h3>データソース — 生産実績照会</h3>
-          <button class="ds-close" @click="showDataSource = false">×</button>
-        </div>
-        <table class="ds-table">
-          <thead><tr><th>操作</th><th>テーブル</th><th>説明</th></tr></thead>
-          <tbody>
-            <tr><td>取得</td><td>t_process_realtime_record</td><td>工程リアルタイム記録（生産完成・設備状態・作業者アクション）</td></tr>
-            <tr><td>取得</td><td>t_laser_actual / t_laser_actual_detail</td><td>レーザー実績・明細</td></tr>
-            <tr><td>取得</td><td>brake_line_record</td><td>ブレーキライン実績</td></tr>
-            <tr><td>取得</td><td>t_production_record_confirmation</td><td>確認済みフラグ</td></tr>
-            <tr><td>取得/保存</td><td>production_record_inquiry_setting</td><td>タブ別の対象ライン・品番マッピング設定</td></tr>
-            <tr><td>取得/保存</td><td>system_setting</td><td>特殊ルール（前日シフト・ガント開始時刻・計算特例）</td></tr>
-            <tr><td>取得/保存</td><td>user_favorite</td><td>お気に入りフィルタ条件</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-const showDataSource = ref(false)
 import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
 import api from '@/api/client'
 import { hasPermission } from '@/router'
 import { addDays, formatISODate, getBusinessDate } from '@/utils/dateUtil'
@@ -422,6 +402,16 @@ import {
   exportExcel as _exportExcel,
   exportPdf as _exportPdf,
 } from '@/utils/productionRecordExport'
+
+const dsSources = [
+  { op: '取得', table: 't_process_realtime_record', desc: '工程リアルタイム記録（生産完成・設備状態・作業者アクション）' },
+  { op: '取得', table: 't_laser_actual / t_laser_actual_detail', desc: 'レーザー実績・明細' },
+  { op: '取得', table: 'brake_line_record', desc: 'ブレーキライン実績' },
+  { op: '取得', table: 't_production_record_confirmation', desc: '確認済みフラグ' },
+  { op: '取得/保存', table: 'production_record_inquiry_setting', desc: 'タブ別の対象ライン・品番マッピング設定' },
+  { op: '取得/保存', table: 'system_setting', desc: '特殊ルール（前日シフト・ガント開始時刻・計算特例）' },
+  { op: '取得/保存', table: 'user_favorite', desc: 'お気に入りフィルタ条件' },
+]
 
 const loading = ref(false)
 const error = ref('')
@@ -1870,17 +1860,5 @@ onMounted(async () => {
   border-radius: 6px;
   font-size: 13px;
 }
-.ds-btn { margin-left: 8px; padding: 4px 6px; border: 1px solid #94a3b8; border-radius: 4px; background: #f8fafc; color: #475569; cursor: pointer; vertical-align: middle; display: inline-flex; align-items: center; }
-.ds-btn:hover { background: #e2e8f0; }
-.ds-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 9999; display: flex; align-items: center; justify-content: center; }
-.ds-modal { background: #fff; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,.2); max-width: 700px; width: 90%; max-height: 80vh; overflow: auto; }
-.ds-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #e5e7eb; }
-.ds-header h3 { margin: 0; font-size: 15px; }
-.ds-close { border: none; background: none; font-size: 22px; cursor: pointer; color: #64748b; }
-.ds-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.ds-table th, .ds-table td { padding: 8px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; }
-.ds-table th { background: #f8fafc; font-weight: 600; color: #374151; }
-.ds-table td:first-child { white-space: nowrap; font-weight: 500; color: #2563eb; }
-.ds-table td:nth-child(2) { font-family: monospace; font-size: 12px; color: #0f172a; }
 </style>
 

@@ -12,6 +12,12 @@ const orders = [
     meta: { pageTitle: "クボタ内示変化推移分析", manualPath: "受注/クボタ内示変化推移分析.md", resource: "orders" },
   },
   {
+    path: "/orders/missing-routing-items",
+    name: "MissingRoutingOrderItems",
+    component: () => import("@/views/orders/MissingRoutingOrderItems.vue"),
+    meta: { pageTitle: "ルーティング未設定の注文品", manualPath: "受注/受注一覧.md", resource: "orders" },
+  },
+  {
     path: "/orders",
     name: "OrderList",
     component: () => import("@/views/orders/OrderList.vue"),
