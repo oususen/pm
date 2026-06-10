@@ -1,6 +1,6 @@
 <template>
   <div class="page-container">
-    <h2 class="page-title">分割計画取込</h2>
+    <h2 class="page-title">分割計画取込 <DataSourceDialog title="分割計画取込" :sources="dsSources" /></h2>
 
     <div class="tab-row">
       <button class="tab-btn" :class="{ active: tab === 'import' }" @click="tab = 'import'">取込</button>
@@ -134,6 +134,13 @@
 <script setup>
 import { ref } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_outsource_order / t_outsource_order_line', desc: '分割計画Excel取込・BOM展開' },
+  { op: '読み取り', table: 't_outsource_split_import_log', desc: '取込履歴の表示' },
+]
 
 const tab = ref('import')
 const file = ref(null)

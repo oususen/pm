@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">受注一覧</h1>
+      <h1 class="page-title">受注一覧 <DataSourceDialog title="受注一覧" :sources="dsSources" /></h1>
       <div class="page-actions">
         <label class="page-size">
           <span>表示件数</span>
@@ -149,6 +149,12 @@ import { ref, onMounted, computed } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_order', desc: '受注ヘッダ' },
+  { op: '読み取り', table: 't_order_line', desc: '受注明細' },
+]
 
 const canDelete = computed(() => {
   const user = authState.user

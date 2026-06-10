@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">製品グループマスタ</h1>
+      <h1 class="page-title">製品グループマスタ <DataSourceDialog title="製品グループマスタ" :sources="dsSources" /></h1>
       <div class="page-actions">
         <button @click="fetchProductGroups" class="btn-primary">更新</button>
         <button v-if="canEdit" @click="showNewDialog" class="btn-success">新規</button>
@@ -73,7 +73,13 @@
 <script setup>
 import { computed, ref, onMounted } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
 import { canAccessMasterResource } from '@/utils/masterPermissions'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'm_product_group', desc: '製品グループマスタ' },
+]
 
 const productGroups = ref([])
 const showDialog = ref(false)

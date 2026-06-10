@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">仕入先マスタ</h1>
+      <h1 class="page-title">仕入先マスタ <DataSourceDialog title="仕入先マスタ" :sources="dsSources" /></h1>
       <div class="page-actions">
         <button @click="fetchSuppliers" class="btn-primary">更新</button>
         <button v-if="canEdit" @click="showNewDialog" class="btn-success">新規</button>
@@ -101,7 +101,15 @@
 <script setup>
 import { computed, ref, onMounted } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
 import { canAccessMasterResource } from '@/utils/masterPermissions'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'm_supplier', desc: '仕入先マスタ' },
+  { op: '読み取り', table: 'm_calendar', desc: 'カレンダ（選択肢）' },
+  { op: '読み取り', table: 'm_line', desc: 'ライン（購買ライン参照）' },
+]
 
 const suppliers = ref([])
 const calendars = ref([])

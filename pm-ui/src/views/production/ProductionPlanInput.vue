@@ -1187,6 +1187,26 @@ import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 import ProcessGanttView from './ProcessGanttView.vue'
+
+const dsSources = [
+  { op: '計画 読み書き', table: 'line_plan', desc: 'ライン別日別生産計画' },
+  { op: '需要/実績 読み書き', table: 'line_backlog', desc: '需要(seq=0)・計画実績(seq>0)管理' },
+  { op: '需要 読み取り', table: 'line_demand', desc: '顧客需要（内示/確定）' },
+  { op: 'ガント 生成', table: 'line_gantt_plan', desc: 'ガントチャート計画データ' },
+  { op: '計画変更ログ', table: 'production_plan_change_log', desc: '計画変更の履歴ログ' },
+  { op: '表示順 読み書き', table: 't_line_product_display_order', desc: '製品の表示順設定' },
+  { op: '日別スケジュール 読み書き', table: 'line_daily_schedule_setting', desc: '日別の稼働時間・シフト設定' },
+  { op: 'デフォルトスケジュール', table: 't_line_default_schedule_setting', desc: 'ライン別デフォルト稼働設定' },
+  { op: '自動計画集約 読み書き', table: 't_auto_plan_aggregate_setting', desc: '自動計画の集約パターン設定' },
+  { op: '計画ロック 読み取り', table: 'production_plan_lock_setting', desc: '計画変更ロック日設定' },
+  { op: '計算特例 読み書き', table: 'system_setting', desc: '計画在庫計算の特例ルール（キー: production.*）' },
+  { op: 'ライン 読み取り', table: 'm_line', desc: 'ラインマスタ' },
+  { op: '製品 読み取り', table: 'm_product', desc: '製品マスタ' },
+  { op: '工程 読み取り', table: 'm_process', desc: '工程マスタ' },
+  { op: 'BOM 読み取り', table: 'm_bom / m_bom_item', desc: '部品表（材料構成）' },
+  { op: 'カレンダー 読み取り', table: 'm_calendar / m_calendar_day', desc: '営業日カレンダー' },
+  { op: '勤務パターン 読み取り', table: 'm_work_pattern', desc: '勤務パターンマスタ' },
+]
 import LaserPatternEditor from './LaserPatternEditor.vue'
 import LaserMonthlyMaterialSummary from './LaserMonthlyMaterialSummary.vue'
 const router = useRouter()

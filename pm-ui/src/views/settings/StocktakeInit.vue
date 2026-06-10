@@ -1,6 +1,6 @@
 <template>
   <div class="settings-container">
-    <h2 class="page-title">棚卸初期化</h2>
+    <h2 class="page-title">棚卸初期化 <DataSourceDialog title="棚卸初期化" :sources="dsSources" /></h2>
 
     <div class="card">
       <div class="field">
@@ -96,6 +96,12 @@ import { computed, ref } from "vue";
 import api from "@/api/client";
 import { authState } from "@/auth";
 import { hasPermission } from "@/router";
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'production_stocktake_*', desc: '棚卸データ取込・初期化計算' },
+  { op: '読み書き', table: 'line_backlog', desc: '在庫・計画在庫反映' },
+]
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 const templateUrl = `${API_BASE_URL}/line-backlogs/download_stocktake_template/`;

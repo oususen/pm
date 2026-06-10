@@ -1,6 +1,6 @@
 <template>
   <div class="settings-container">
-    <h2 class="page-title">自動計画設定</h2>
+    <h2 class="page-title">自動計画設定 <DataSourceDialog title="自動計画設定" :sources="dsSources" /></h2>
     <div v-if="!canView" class="card no-permission">
       この画面を開く権限がありません。
     </div>
@@ -271,6 +271,11 @@ import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_auto_plan_*', desc: '自動計画設定' },
+]
 
 const configs = ref([])
 const lineToAddProd = ref('')

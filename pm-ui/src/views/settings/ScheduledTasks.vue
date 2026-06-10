@@ -1,7 +1,7 @@
 <template>
   <div class="settings-container">
     <div class="page-header">
-      <h2 class="page-title">定時タスク設定</h2>
+      <h2 class="page-title">定時タスク設定 <DataSourceDialog title="定時タスク設定" :sources="dsSources" /></h2>
       <button class="btn" type="button" @click="openManual">マニュアル</button>
     </div>
 
@@ -991,6 +991,12 @@ import { useRoute } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'django_celery_beat_*', desc: '定時タスクスケジュール設定' },
+  { op: '読み書き', table: 't_auto_plan_*', desc: '自動計画設定' },
+]
 
 const route = useRoute()
 const configs = ref([])

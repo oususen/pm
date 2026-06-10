@@ -1,7 +1,7 @@
 <template>
   <div class="page-container inspection-monthly-review" v-if="canView">
     <div class="page-header">
-      <h2 class="page-title">月間確認</h2>
+      <h2 class="page-title">月間確認 <DataSourceDialog title="月間確認" :sources="dsSources" /></h2>
       <div class="page-actions">
         <button class="btn-secondary" @click="loadTemplates" :disabled="loadingOptions || loadingOverview">
           テンプレート更新
@@ -184,6 +184,11 @@ import { RouterLink, useRoute, useRouter } from "vue-router"
 import api from "@/api/client"
 import { authState } from "@/auth"
 import { hasPermission } from "@/router"
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_equipment_inspection', desc: '設備点検記録・月間確認' },
+]
 
 const route = useRoute()
 const router = useRouter()

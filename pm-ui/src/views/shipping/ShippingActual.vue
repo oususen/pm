@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <div>
-        <h2 class="page-title">出荷実績</h2>
+        <h2 class="page-title">出荷実績 <DataSourceDialog title="出荷実績" :sources="dsSources" /></h2>
         <p class="subtitle">{{ canEdit ? '出荷実績の検索・登録・修正・削除ができます。' : '出荷実績の検索・閲覧ができます。' }}</p>
       </div>
       <div class="page-actions">
@@ -141,6 +141,11 @@ import { onMounted, reactive, ref, computed } from "vue";
 import api from "@/api/client";
 import { authState } from "@/auth";
 import { hasPermission } from "@/router";
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_shipment_actual', desc: '出荷実績データ' },
+]
 
 const canEdit = computed(() => {
   const user = authState.user;

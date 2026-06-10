@@ -1,6 +1,6 @@
 <template>
   <div class="page-container">
-    <h2 class="page-title">FB外作マスタ管理</h2>
+    <h2 class="page-title">FB外作マスタ管理 <DataSourceDialog title="FB外作マスタ管理" :sources="dsSources" /></h2>
 
     <div class="tab-bar">
       <button
@@ -145,6 +145,16 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_outsource_subcontractor', desc: '外作先マスタの管理' },
+  { op: '読み書き', table: 't_outsource_item', desc: '品目マスタの管理' },
+  { op: '読み書き', table: 't_outsource_component_material', desc: '構成品マスタの管理' },
+  { op: '読み書き', table: 't_outsource_bom_line', desc: 'BOMの管理' },
+  { op: '読み取り', table: 't_supplier', desc: '仕入先マスタの参照' },
+]
 
 const tabs = [
   { id: 'subcontractor', label: '外作先' },

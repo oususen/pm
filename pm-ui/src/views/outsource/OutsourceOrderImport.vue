@@ -1,6 +1,6 @@
 <template>
   <div class="page-container">
-    <h2 class="page-title">FB受注取込</h2>
+    <h2 class="page-title">FB受注取込 <DataSourceDialog title="FB受注取込" :sources="dsSources" /></h2>
 
     <div class="import-section">
       <div class="file-input-row">
@@ -72,6 +72,12 @@
 <script setup>
 import { ref } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_outsource_order / t_outsource_order_line', desc: 'CSV取込による受注データ作成' },
+]
 
 const file = ref(null)
 const encoding = ref('utf-8')

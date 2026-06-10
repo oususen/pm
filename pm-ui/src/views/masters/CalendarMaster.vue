@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <div class="page-header">
-      <h1 class="page-title">カレンダマスタ</h1>
+      <h1 class="page-title">カレンダマスタ <DataSourceDialog title="カレンダマスタ" :sources="dsSources" /></h1>
       <div class="page-actions">
         <button class="btn" @click="fetchCalendars">更新</button>
         <button v-if="canEdit" class="btn btn-primary" @click="showNewDialog">新規</button>
@@ -165,7 +165,15 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
 import { canAccessMasterResource } from '@/utils/masterPermissions'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'm_calendar', desc: 'カレンダマスタ' },
+  { op: '読み書き', table: 'm_calendar_day', desc: 'カレンダ日データ' },
+  { op: '読み取り', table: 'm_work_pattern', desc: '勤務パターン（選択肢）' },
+]
 
 const calendars = ref([])
 const calendarDays = ref([])

@@ -1,6 +1,6 @@
 <template>
   <div class="hirakata-pickup">
-    <h2 class="page-title">📦 枚方集荷依頼書</h2>
+    <h2 class="page-title">📦 枚方集荷依頼書 <DataSourceDialog title="枚方集荷依頼書" :sources="dsSources" /></h2>
 
     <div class="card">
       <div class="card-header">
@@ -288,8 +288,15 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+
+const dsSources = [
+  { op: '読み取り', table: 't_shipping_instruction', desc: '出荷指示（集荷対象データ）' },
+  { op: '読み取り', table: 'm_product', desc: '製品情報' },
+]
 
 // 状態管理
 const startDate = ref('');

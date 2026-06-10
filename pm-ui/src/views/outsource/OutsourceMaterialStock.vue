@@ -1,6 +1,6 @@
 <template>
   <div class="page-container">
-    <h2 class="page-title">材料在庫</h2>
+    <h2 class="page-title">材料在庫 <DataSourceDialog title="材料在庫" :sources="dsSources" /></h2>
 
     <div class="tab-row">
       <button class="tab-btn" :class="{ active: tab === 'list' }" @click="tab = 'list'">在庫一覧</button>
@@ -160,6 +160,14 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 't_outsource_material_stock', desc: '材料在庫サマリ・履歴の取得' },
+  { op: '読み書き', table: 't_outsource_material_stock', desc: '棚卸調整の登録' },
+  { op: '読み取り', table: 't_outsource_component_material', desc: '材料マスタの取得' },
+]
 
 function formatLocalDate(date = new Date()) {
   const y = date.getFullYear()

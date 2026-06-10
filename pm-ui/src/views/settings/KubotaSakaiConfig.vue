@@ -1,6 +1,6 @@
 <template>
   <div class="page">
-    <h1 class="page-title">クボタ堺便計画設定</h1>
+    <h1 class="page-title">クボタ堺便計画設定 <DataSourceDialog title="クボタ堺便計画設定" :sources="dsSources" /></h1>
     <div class="card">
       <div class="row">
         <label>未割付期限（日）</label>
@@ -18,6 +18,12 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'system_setting', desc: 'クボタ堺便計画設定' },
+]
 
 const KEY = 'kubota_sakai.assignment_deadline_days'
 const loading = ref(false)

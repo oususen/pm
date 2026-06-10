@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">クボタ堺 確定取り込み通知設定</h1>
+      <h1 class="page-title">クボタ堺 確定取り込み通知設定 <DataSourceDialog title="クボタ堺 確定取り込み通知設定" :sources="dsSources" /></h1>
     </div>
 
     <div v-if="!canViewPage" class="page-content">
@@ -56,6 +56,11 @@ import { computed, ref, onMounted } from 'vue'
 import axios from 'axios'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'system_setting', desc: 'クボタ堺取り込み通知設定' },
+]
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
 

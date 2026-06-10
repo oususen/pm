@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2 class="page-title">案件詳細: {{ order?.case_no }}</h2>
+      <h2 class="page-title">案件詳細: {{ order?.case_no }} <DataSourceDialog title="案件詳細" :sources="dsSources" /></h2>
       <div class="header-actions">
         <button class="btn-recalc" :disabled="loading || recalculating || !order?.id" @click="recalculateConstraints">
           {{ recalculating ? '再計算中...' : '制約日を再計算' }}
@@ -90,6 +90,12 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_outsource_order / t_outsource_order_line', desc: '案件・分割計画の取得・更新' },
+]
 
 const route = useRoute()
 const STATUS_MAP = {

@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">システム設定</h1>
+      <h1 class="page-title">システム設定 <DataSourceDialog title="システム設定" :sources="dsSources" /></h1>
       <div class="page-actions">
         <button @click="fetchSettings" class="btn-primary" :disabled="loading">更新</button>
         <button @click="showNewDialog = true" class="btn-secondary" :disabled="!canEdit">新規</button>
@@ -92,6 +92,11 @@
 import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'system_setting', desc: 'システム設定キー・値管理' },
+]
 
 const loading = ref(false)
 const settings = ref([])

@@ -1,6 +1,6 @@
 <template>
   <div class="naiji-analysis">
-    <h2 class="page-title">クボタ内示分析</h2>
+    <h2 class="page-title">クボタ内示分析 <DataSourceDialog title="クボタ内示分析" :sources="dsSources" /></h2>
 
     <!-- タブバー -->
     <div class="tab-bar">
@@ -615,7 +615,13 @@
 <script setup>
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
 import * as XLSX from 'xlsx'
+
+const dsSources = [
+  { op: '読み取り', table: 't_stg_order_daily', desc: '日次受注ステージング（内示分析）' },
+]
 import {
   Chart,
   RadarController, LineElement, PointElement, RadialLinearScale, Filler,

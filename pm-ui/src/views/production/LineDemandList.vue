@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2 class="page-title">ライン需要一覧</h2>
+      <h2 class="page-title">ライン需要一覧 <DataSourceDialog title="ライン需要一覧" :sources="dsSources" /></h2>
       <div class="page-actions">
         <input
           type="text"
@@ -71,6 +71,12 @@
 <script setup>
 import { ref, computed } from "vue";
 import api from "@/api/client";
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 'line_demand', desc: 'ライン需要データ' },
+]
 
 const lineFilter = ref("");
 const processFilter = ref("");

@@ -1,6 +1,6 @@
 <template>
   <div class="page-container">
-    <h2 class="page-title">納入・出荷管理</h2>
+    <h2 class="page-title">納入・出荷管理 <DataSourceDialog title="納入・出荷管理" :sources="dsSources" /></h2>
 
     <div class="toolbar">
       <div class="tab-btns">
@@ -85,6 +85,13 @@
 import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 't_outsource_order / t_outsource_order_line', desc: '案件・分割情報の取得' },
+  { op: '読み書き', table: 't_outsource_delivery', desc: '納入（検収）実績の登録・削除' },
+  { op: '読み書き', table: 't_outsource_shipment', desc: '顧客出荷実績の登録・削除' },
+]
 
 const STATUS_MAP = {
   IMPORTED: '取込済',

@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <div class="header-left">
-        <h1 class="page-title">在庫引当一覧</h1>
+        <h1 class="page-title">在庫引当一覧 <DataSourceDialog title="在庫引当一覧" :sources="dsSources" /></h1>
         <p class="helper-text">
           可用在庫と最小在庫を並べて確認し、引当/解除を素早く実行します。
         </p>
@@ -178,9 +178,15 @@
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_stock_allocation', desc: '在庫引当データ（引当/解除）' },
+]
 
 export default {
   name: 'StockAllocationList',
+  components: { DataSourceDialog },
   data() {
     return {
       allocations: [],

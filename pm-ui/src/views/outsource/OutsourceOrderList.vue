@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2 class="page-title">FB受注一覧</h2>
+      <h2 class="page-title">FB受注一覧 <DataSourceDialog title="FB受注一覧" :sources="dsSources" /></h2>
       <RouterLink to="/outsource/orders/import" class="btn-primary">CSV取込</RouterLink>
     </div>
 
@@ -70,6 +70,12 @@
 import { ref, onMounted } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 't_outsource_order / t_outsource_order_line', desc: '受注一覧の取得' },
+]
 
 const router = useRouter()
 const orders = ref([])

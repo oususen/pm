@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <div>
-        <h1 class="page-title">在庫引当 {{ isEdit ? '編集' : '新規登録' }}</h1>
+        <h1 class="page-title">在庫引当 {{ isEdit ? '編集' : '新規登録' }} <DataSourceDialog title="在庫引当" :sources="dsSources" /></h1>
         <p class="helper-text">
           製品×保管場所の在庫・最小在庫・引当数量を管理します。可用在庫はリアルタイムで計算されます。
         </p>
@@ -89,9 +89,16 @@
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_stock_allocation', desc: '在庫引当データ' },
+  { op: '読み取り', table: 'm_product', desc: '製品選択肢' },
+]
 
 export default {
   name: 'StockAllocationForm',
+  components: { DataSourceDialog },
   data() {
     return {
       form: {

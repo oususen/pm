@@ -1,6 +1,6 @@
 <template>
   <div class="stats-page">
-    <h1 class="page-title">加工費集計</h1>
+    <h1 class="page-title">加工費集計 <DataSourceDialog title="加工費集計" :sources="dsSources" /></h1>
 
     <div class="filters">
       <div class="filter-item">
@@ -142,6 +142,14 @@
 import { computed, onMounted, ref } from 'vue'
 import * as XLSX from 'xlsx'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 't_overtime_application', desc: '残業申請データの取得' },
+  { op: '読み取り', table: 't_user / t_user_profile', desc: '作業者一覧の取得' },
+  { op: '読み取り', table: 'レーザー/ブレーキ/工程実績', desc: '加工実績集計の取得' },
+]
 
 const today = new Date()
 const pad = (n) => String(n).padStart(2, '0')

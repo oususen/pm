@@ -1,7 +1,7 @@
 <template>
   <div class="tablet-process-input">
     <div class="toolbar">
-      <h2 class="toolbar-title">１人２工程入力</h2>
+      <h2 class="toolbar-title">１人２工程入力 <DataSourceDialog title="１人２工程入力" :sources="dsSources" /></h2>
       <label class="toolbar-label">{{ t('processInput.line') }}</label>
       <div class="toolbar-select-row">
         <select v-model="selectedLineId">
@@ -77,6 +77,12 @@ import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
 import { t } from '@/i18n'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 'm_line', desc: 'ライン選択肢' },
+  { op: '読み取り', table: 'm_process', desc: '工程選択肢' },
+]
 
 const lines = ref([])
 const processes = ref([])

@@ -1,6 +1,6 @@
 <template>
   <div class="page-container">
-    <h2 class="page-title">材料手配（将来承認タスク実装予定）</h2>
+    <h2 class="page-title">材料手配（将来承認タスク実装予定） <DataSourceDialog title="材料手配" :sources="dsSources" /></h2>
 
     <div class="toolbar">
       <select v-model="filterOrdered" @change="fetchMaterials" class="filter-select">
@@ -102,6 +102,14 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_outsource_material', desc: '材料発注ステータスの取得・更新' },
+  { op: '読み取り', table: 't_outsource_material_stock', desc: '材料在庫数の参照' },
+  { op: '読み取り', table: 't_outsource_procurement', desc: '注文書Excel出力' },
+]
 
 const materials = ref([])
 const materialStockMap = ref({})

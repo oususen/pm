@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">構成マスタ（BOM）</h1>
+      <h1 class="page-title">構成マスタ（BOM） <DataSourceDialog title="構成マスタ（BOM）" :sources="dsSources" /></h1>
       <div class="page-actions">
         <button @click="fetchBOMs" class="btn-primary">更新</button>
         <button v-if="canEdit" @click="downloadBomImportTemplateXlsx" class="btn-secondary">取込テンプレートExcel</button>
@@ -762,7 +762,19 @@ import { formatISODate } from '@/utils/dateUtil'
 import { ref, onMounted, computed, h, defineComponent, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
+import { authState } from '@/auth'
 import { canAccessMasterResource } from '@/utils/masterPermissions'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'm_bom', desc: 'BOMヘッダ' },
+  { op: '読み書き', table: 'm_bom_item', desc: 'BOM明細' },
+  { op: '読み取り', table: 'm_product', desc: '製品（選択肢）' },
+  { op: '読み取り', table: 'm_supplier', desc: '仕入先（選択肢）' },
+  { op: '読み取り', table: 'm_process', desc: '工程（選択肢）' },
+  { op: '読み取り', table: 'm_line', desc: 'ライン（選択肢）' },
+  { op: '読み書き', table: 'm_routing', desc: 'ルーティング（自動生成）' },
+]
 
 const route = useRoute()
 const router = useRouter()

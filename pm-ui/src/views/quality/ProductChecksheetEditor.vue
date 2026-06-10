@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <div>
-        <h1 class="page-title">製品チェックシート配置編集</h1>
+        <h1 class="page-title">製品チェックシート配置編集 <DataSourceDialog title="製品チェックシート配置編集" :sources="dsSources" /></h1>
         <p class="helper-text" v-if="templateObj">
           {{ templateObj.line_code }} / {{ templateObj.process_code }} / {{ templateObj.product_code }} - {{ templateObj.name }}
         </p>
@@ -134,6 +134,11 @@ import { RouterLink, useRoute } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_product_checksheet', desc: 'テンプレートフィールド配置' },
+]
 
 const route = useRoute()
 const templateObj = ref(null)

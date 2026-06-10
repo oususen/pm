@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">仕入れ先スケジュール設定</h1>
+      <h1 class="page-title">仕入れ先スケジュール設定 <DataSourceDialog title="仕入れ先スケジュール設定" :sources="dsSources" /></h1>
       <div class="page-actions">
         <button class="btn-primary" @click="fetchSchedules" :disabled="!canViewPage">更新</button>
         <button class="btn-success" @click="openNew" :disabled="!canEditPage">新規</button>
@@ -91,6 +91,11 @@ import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_supplier_order_schedule', desc: '仕入れ先スケジュール設定' },
+]
 
 const rows = ref([])
 const suppliers = ref([])

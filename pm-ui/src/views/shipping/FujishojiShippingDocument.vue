@@ -1,6 +1,6 @@
 <template>
   <div class="fujishoji-document">
-    <h2 class="page-title">富士商事出荷指示書</h2>
+    <h2 class="page-title">富士商事出荷指示書 <DataSourceDialog title="富士商事出荷指示書" :sources="dsSources" /></h2>
 
     <div class="card">
       <div class="card-header">
@@ -215,6 +215,12 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 't_fujishoji_document', desc: '富士商事出荷指示書データ' },
+]
 
 const targetDate     = ref('')
 const loading        = ref(false)

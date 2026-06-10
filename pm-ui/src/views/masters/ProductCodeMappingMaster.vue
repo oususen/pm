@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2 class="page-title">品番変換マスタ</h2>
+      <h2 class="page-title">品番変換マスタ <DataSourceDialog title="品番変換マスタ" :sources="dsSources" /></h2>
       <div class="page-actions">
         <button class="btn" @click="loadMappings" :disabled="loading">更新</button>
       </div>
@@ -67,6 +67,12 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_product_code_mapping', desc: '品番変換マスタ' },
+]
 
 const loading = ref(false)
 const saving = ref(false)

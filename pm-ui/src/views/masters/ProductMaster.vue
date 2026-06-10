@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">製品マスタ</h1>
+      <h1 class="page-title">製品マスタ <DataSourceDialog title="製品マスタ" :sources="dsSources" /></h1>
       <div class="page-actions">
         <button v-if="canEdit" @click="openLineFinalDialog" class="btn-secondary">ライン最終品 一括設定</button>
         <button v-if="canEdit" @click="downloadUpdateImportTemplateXlsx" class="btn-secondary">取込テンプレートExcel</button>
@@ -652,7 +652,18 @@
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
 import { canAccessMasterResource } from '@/utils/masterPermissions'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'm_product', desc: '製品マスタ' },
+  { op: '読み取り', table: 'm_line', desc: 'ライン（選択肢）' },
+  { op: '読み取り', table: 'm_process', desc: '工程（選択肢）' },
+  { op: '読み取り', table: 'm_product_group', desc: '製品グループ（選択肢）' },
+  { op: '読み取り', table: 'm_container_capacity', desc: '容器（選択肢）' },
+  { op: '読み取り', table: 'm_customer', desc: '得意先（選択肢）' },
+]
 
 // カテゴリマッピング (DB英語 ⇔ UI日本語)
 const categoryMap = {

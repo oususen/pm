@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <div>
-        <h2 class="page-title">出荷進度照会</h2>
+        <h2 class="page-title">出荷進度照会 <DataSourceDialog title="出荷進度照会" :sources="dsSources" /></h2>
         <p class="subtitle">受注明細を基準に、日付別の内示・確定・実績・調整・進度を一覧化します。</p>
       </div>
       <div class="page-actions">
@@ -221,11 +221,21 @@
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import api from "@/api/client";
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
 import {
   compareBySpecialOrderThenProductCode,
   resolveSpecialDisplayOrder,
 } from "@/utils/groupSort";
 import { addDays, formatISODate, parseISODate } from "@/utils/dateUtil";
+
+const dsSources = [
+  { op: '読み取り', table: 'order / order_line', desc: '受注データ' },
+  { op: '読み取り', table: 't_shipment_actual', desc: '出荷実績' },
+  { op: '読み取り', table: 'line_backlog', desc: '生産計画・実績' },
+  { op: '読み取り', table: 't_ship_to_lead_time', desc: '納入先リードタイム' },
+  { op: '読み取り', table: 'm_product', desc: '製品マスタ' },
+]
 
 const productFilter = ref("");
 const customerFilter = ref("");

@@ -1,6 +1,6 @@
 <template>
   <div class="page">
-    <h2 class="page-title">新規タイル</h2>
+    <h2 class="page-title">新規タイル <DataSourceDialog title="新規タイル" :sources="dsSources" /></h2>
     <div class="card">
       <p>この画面は現在未実装です。</p>
       <p class="sub">要件確定後に実装します。</p>
@@ -9,6 +9,12 @@
 </template>
 
 <script setup>
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_engineering_change', desc: '設計変更の登録（将来実装）' },
+]
 </script>
 
 <style scoped>

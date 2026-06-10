@@ -1,6 +1,6 @@
 <template>
   <div class="settings-container">
-    <h2 class="page-title">クボタ堺納期調整ロック設定</h2>
+    <h2 class="page-title">クボタ堺納期調整ロック設定 <DataSourceDialog title="クボタ堺納期調整ロック設定" :sources="dsSources" /></h2>
     <div v-if="!canView" class="card no-permission">この画面を開く権限がありません。</div>
     <div v-else class="card">
       <div class="field">
@@ -24,6 +24,11 @@ import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'system_setting', desc: 'クボタ堺納期調整ロック日数' },
+]
 
 const LOCK_KEY = 'lock_days.kubota_sakai_due_plan'
 const lockDays = ref(0)

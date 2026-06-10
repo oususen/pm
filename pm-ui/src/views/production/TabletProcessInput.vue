@@ -1,7 +1,7 @@
 <template>
   <div class="tablet-process-input">
     <div class="header">
-      <h2>{{ t('tabletProcessInput.title') }}</h2>
+      <h2>{{ t('tabletProcessInput.title') }} <DataSourceDialog title="タブレット工程入力" :sources="dsSources" /></h2>
       <button class="btn-inspection-nav" @click="openIntegratedChecksheetOperation">チェックシート実施</button>
     </div>
 
@@ -80,6 +80,13 @@ import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
 import { t } from '@/i18n'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 'm_line', desc: 'ライン選択肢' },
+  { op: '読み取り', table: 'm_process', desc: '工程選択肢' },
+]
+
 const router = useRouter()
 
 const lines = ref([])

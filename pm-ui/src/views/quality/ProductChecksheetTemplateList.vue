@@ -1,7 +1,7 @@
 <template>
   <div class="page-container checksheet-master" v-if="canView">
     <div class="page-header">
-      <h2 class="page-title">品質チェックシート作成</h2>
+      <h2 class="page-title">品質チェックシート作成 <DataSourceDialog title="品質チェックシート作成" :sources="dsSources" /></h2>
       <div class="page-actions">
         <button class="btn-secondary" @click="loadTemplateList" :disabled="loadingList || detailLoading">
           更新
@@ -339,6 +339,12 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_checksheet_template', desc: 'チェックシートテンプレート管理' },
+  { op: '読み取り', table: 'm_product', desc: '製品マスタ参照' },
+]
 
 const STATUS_LABELS = {
   DRAFT: '下書き',

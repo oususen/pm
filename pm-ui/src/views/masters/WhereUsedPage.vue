@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <div>
-        <h2 class="page-title">逆展開（Where Used）</h2>
+        <h2 class="page-title">逆展開（Where Used） <DataSourceDialog title="逆展開（Where Used）" :sources="dsSources" /></h2>
         <p class="subtitle">指定した製品がどの親製品で使われているかを確認します。</p>
       </div>
     </div>
@@ -109,6 +109,13 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 'm_bom', desc: 'BOMヘッダ' },
+  { op: '読み取り', table: 'm_bom_item', desc: 'BOM明細' },
+]
 
 const route = useRoute()
 

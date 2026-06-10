@@ -1,6 +1,6 @@
 <template>
   <div class="history-page">
-    <div class="caption">[SSE0031] 調整履歴</div>
+    <div class="caption">[SSE0031] 調整履歴 <DataSourceDialog title="調整履歴" :sources="dsSources" /></div>
 
     <div class="filters">
       <label class="filter-field">
@@ -78,6 +78,13 @@
 <script setup>
 import { ref } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 't_stock_adjustment', desc: '在庫調整履歴' },
+  { op: '読み取り', table: 't_progress_adjustment', desc: '進度調整履歴' },
+]
 
 const filters = ref({
   process_code: '',

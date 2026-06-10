@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">SMTP設定管理</h1>
+      <h1 class="page-title">SMTP設定管理 <DataSourceDialog title="SMTP設定管理" :sources="dsSources" /></h1>
       <div class="page-actions">
         <button @click="fetchConfigs" class="btn-primary" :disabled="loading || !canViewPage">更新</button>
         <button @click="showNewDialog" class="btn-success" :disabled="!canEditPage">新規</button>
@@ -111,6 +111,11 @@ import { computed, ref, onMounted } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'smtp_config', desc: 'SMTP設定' },
+]
 
 const configs = ref([])
 const users = ref([])

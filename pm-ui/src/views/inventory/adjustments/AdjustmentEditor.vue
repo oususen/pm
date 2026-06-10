@@ -1,6 +1,6 @@
 <template>
   <div class="adjust-screen">
-    <div class="caption">[SSE0030] {{ title }}</div>
+    <div class="caption">[SSE0030] {{ title }} <DataSourceDialog :title="title" :sources="dsSources" /></div>
     <div class="toolbar">
       <label class="toolbar-field">
         <span>実行日</span>
@@ -280,12 +280,25 @@
 import { formatISODate } from '@/utils/dateUtil'
 import { onMounted, reactive, ref, computed } from "vue";
 import api from "@/api/client";
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
 const props = defineProps({
   title: { type: String, default: "生産進度調整入力" },
   description: { type: String, default: "" },
   adjustType: { type: String, required: true },
 });
+
+const dsSources = computed(() => {
+  const isStock = ['STOCK', 'PLANNED_STOCK'].includes(props.adjustType)
+  const table = isStock ? 't_stock_adjustment' : 't_progress_adjustment'
+  const desc = isStock ? '在庫調整値' : '進度調整値'
+  return [
+    { op: '読み書き', table, desc },
+    { op: '読み取り', table: 'line_backlog', desc: '在庫・計画データ参照' },
+    { op: '読み取り', table: 'line_demand', desc: '需要データ参照' },
+  ]
+})
 
 const today = formatISODate(new Date());
 const adjustDate = ref(today);

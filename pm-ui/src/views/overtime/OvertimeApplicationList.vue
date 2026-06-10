@@ -1,7 +1,7 @@
 <template>
   <div class="ot-list-page">
     <div class="page-header">
-      <h1 class="page-title">{{ t('overtimeList.pageTitle') }}</h1>
+      <h1 class="page-title">{{ t('overtimeList.pageTitle') }} <DataSourceDialog title="残業申請一覧" :sources="dsSources" /></h1>
       <RouterLink to="/overtime/apply" class="btn btn-primary">{{ t('overtimeList.newApplication') }}</RouterLink>
     </div>
 
@@ -217,6 +217,12 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import api from '@/api/client'
 import { t } from '@/i18n'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_overtime_application', desc: '残業申請の取得・削除・PDF出力' },
+]
 
 const applications = ref([])
 const loading = ref(false)

@@ -1,6 +1,6 @@
 <template>
   <div class="page-container">
-    <h2 class="page-title">外作先展開Excel出力</h2>
+    <h2 class="page-title">外作先展開Excel出力 <DataSourceDialog title="外作先展開Excel出力" :sources="dsSources" /></h2>
 
     <div class="filter-row">
       <select v-model="filterStatus" @change="fetchOrders" class="filter-select">
@@ -93,6 +93,13 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 't_outsource_order / t_outsource_order_line', desc: '案件一覧の取得' },
+  { op: '読み書き', table: 't_outsource_order', desc: 'Excel出力・制約日再計算' },
+]
 
 function monthRange(d) {
   const y = d.getFullYear(), m = d.getMonth()

@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">発注タスク一覧</h1>
+      <h1 class="page-title">発注タスク一覧 <DataSourceDialog title="発注タスク一覧" :sources="dsSources" /></h1>
       <div class="page-actions">
         <button class="btn-primary" @click="fetchTasks">更新</button>
       </div>
@@ -74,8 +74,15 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
 const router = useRouter()
+
+const dsSources = [
+  { op: '読み取り', table: 'purchase_order_task', desc: '発注タスクデータ' },
+]
+
 const rows = ref([])
 
 const filters = ref({

@@ -1,7 +1,7 @@
 <template>
   <div class="monitor-container">
     <div class="toolbar">
-      <h2 class="page-title">ライン稼働監視</h2>
+      <h2 class="page-title">ライン稼働監視 <DataSourceDialog title="ライン稼働監視" :sources="dsSources" /></h2>
       <div class="toolbar-right">
         <button class="btn" @click="loadData" :disabled="loading">
           {{ loading ? '更新中...' : '再読込' }}
@@ -153,6 +153,14 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 't_line_realtime', desc: 'ラインリアルタイム状態' },
+  { op: '読み取り', table: 'm_line', desc: 'ライン一覧' },
+  { op: '読み取り', table: 't_process_realtime_record', desc: '工程リアルタイム実績' },
+]
 
 const lines = ref([])
 const loading = ref(false)

@@ -1,6 +1,6 @@
 <template>
   <div class="notification-list-page">
-    <h2 class="page-title">通知一覧</h2>
+    <h2 class="page-title">通知一覧 <DataSourceDialog title="通知一覧" :sources="dsSources" /></h2>
 
     <div class="list-card">
       <div class="list-header">
@@ -146,6 +146,12 @@ import { ref, computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { authState } from "@/auth";
 import api from "@/api/client";
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_notification', desc: '通知の取得・既読・全件既読・削除' },
+  { op: '読み取り', table: 't_department', desc: '事業部一覧の取得' },
+]
 
 const router = useRouter();
 const notifications = ref([]);

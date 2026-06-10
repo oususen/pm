@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">組織管理</h1>
+      <h1 class="page-title">組織管理 <DataSourceDialog title="組織管理" :sources="dsSources" /></h1>
       <div class="page-actions">
         <button @click="loadAll" class="btn-primary" :disabled="loading || !canView">更新</button>
         <button @click="showCreate(null, 'division')" class="btn-success" :disabled="!canEdit">事業部を追加</button>
@@ -126,6 +126,11 @@ import { computed, ref, onMounted } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_department', desc: '組織（事業部・係・班・グループ）' },
+]
 
 const loading = ref(false)
 const saving = ref(false)

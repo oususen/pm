@@ -2,7 +2,7 @@
   <div class="laser-material-summary">
     <div class="toolbar-block">
       <div class="toolbar-row">
-        <span class="toolbar-label budget-label">予算（加工期間）</span>
+        <span class="toolbar-label budget-label">予算（加工期間） <DataSourceDialog title="レーザ月次材料集計" :sources="dsSources" /></span>
         <div class="field">
           <label>開始日</label>
           <input v-model="budgetStartDate" type="date" />
@@ -315,6 +315,12 @@ import { formatISODate } from '@/utils/dateUtil'
 import { computed, onMounted, ref, watch } from 'vue'
 import * as XLSX from 'xlsx'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 't_laser_pattern', desc: 'レーザパターン（月次材料集計）' },
+]
 
 const today = new Date()
 const toDateStr = (d) => formatISODate(d)

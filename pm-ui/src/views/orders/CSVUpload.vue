@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">CSV Upload</h1>
+      <h1 class="page-title">CSV Upload <DataSourceDialog title="CSV Upload" :sources="dsSources" /></h1>
     </div>
 
     <div class="page-content">
@@ -201,6 +201,16 @@
 import { ref, onMounted, computed } from 'vue'
 import api from '@/api/client'
 import axios from 'axios'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_stg_order_raw', desc: 'CSV生データ取込' },
+  { op: '読み書き', table: 't_stg_order_daily', desc: '日次受注ステージング' },
+  { op: '読み書き', table: 't_order', desc: '受注ヘッダ（生成）' },
+  { op: '読み書き', table: 't_order_line', desc: '受注明細（生成）' },
+  { op: '読み取り', table: 'm_customer', desc: '得意先（選択肢）' },
+]
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
 

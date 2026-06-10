@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <div>
-        <h1 class="page-title">ルーティング未設定の注文品</h1>
+        <h1 class="page-title">ルーティング未設定の注文品 <DataSourceDialog title="ルーティング未設定の注文品" :sources="dsSources" /></h1>
         <p class="page-subtitle">受注明細のうち、製品にルーティングが未設定の注文品を一覧表示します。</p>
       </div>
       <button class="btn-primary" :disabled="loading" @click="load">更新</button>
@@ -60,6 +60,13 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 't_order', desc: '受注ヘッダ' },
+  { op: '読み取り', table: 't_order_line', desc: '受注明細（ルーティング未設定）' },
+]
 
 const items = ref([])
 const loading = ref(false)

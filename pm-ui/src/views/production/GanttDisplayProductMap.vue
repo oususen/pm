@@ -1,6 +1,6 @@
 <template>
   <div class="settings-container">
-    <h2 class="page-title">ガントチャート生成表示品マップ 一覧</h2>
+    <h2 class="page-title">ガントチャート生成表示品マップ 一覧 <DataSourceDialog title="ガントチャート生成表示品マップ" :sources="dsSources" /></h2>
     <p class="helper-text">
       ガントチャート生成時に探索する表示品マップを管理します。新規登録や既存データ編集、同一最終品への工程追加ができます。
     </p>
@@ -74,9 +74,15 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
 import { hasPermission } from '@/router'
 
 const router = useRouter()
+
+const dsSources = [
+  { op: '読み書き', table: 'gantt_display_product_map', desc: 'ガントチャート表示品マップ' },
+  { op: '読み取り', table: 'm_line', desc: 'ライン選択肢' },
+]
 
 const rows = ref([])
 const lineOptions = ref([])

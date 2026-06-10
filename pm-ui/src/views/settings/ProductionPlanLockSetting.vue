@@ -1,6 +1,6 @@
 <template>
   <div class="settings-container">
-    <h2 class="page-title">生産計画ロック設定</h2>
+    <h2 class="page-title">生産計画ロック設定 <DataSourceDialog title="生産計画ロック設定" :sources="dsSources" /></h2>
     <div v-if="!canView" class="card no-permission">この画面を開く権限がありません。</div>
     <div v-else class="card">
       <div class="field">
@@ -24,6 +24,11 @@ import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: '*_lock_setting', desc: '生産計画ロック日数' },
+]
 
 const lockDays = ref(0)
 const saving = ref(false)

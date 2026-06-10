@@ -1,6 +1,6 @@
 <template>
   <div class="page">
-    <h2 class="page-title">納入実績編集</h2>
+    <h2 class="page-title">納入実績編集 <DataSourceDialog title="納入実績編集" :sources="dsSources" /></h2>
     <div class="filters">
       <label>開始日 <input v-model="startDate" type="date" /></label>
       <label>終了日 <input v-model="endDate" type="date" /></label>
@@ -77,6 +77,12 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_purchase_actual', desc: '納入実績データ' },
+  { op: '読み取り', table: 'm_supplier', desc: '仕入先選択肢' },
+]
 
 const loading = ref(false)
 const saving = ref(false)

@@ -1,6 +1,6 @@
 <template>
   <div class="page-container">
-    <h2 class="page-title">材料検収</h2>
+    <h2 class="page-title">材料検収 <DataSourceDialog title="材料検収" :sources="dsSources" /></h2>
 
     <div class="toolbar">
       <select v-model="filterOrdered" @change="fetchRows" class="input">
@@ -56,6 +56,13 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 't_outsource_material', desc: '材料所要一覧の取得' },
+  { op: '読み書き', table: 't_outsource_material_stock', desc: '材料検収（入庫）登録' },
+]
 
 function monthRange(d) {
   const y = d.getFullYear()

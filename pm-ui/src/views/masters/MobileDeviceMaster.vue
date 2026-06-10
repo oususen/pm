@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">携帯端末管理</h1>
+      <h1 class="page-title">携帯端末管理 <DataSourceDialog title="携帯端末管理" :sources="dsSources" /></h1>
       <div class="page-actions">
         <template v-if="activeTab === 'list'">
           <button @click="fetchDevices" class="btn-primary" :disabled="loading">更新</button>
@@ -184,6 +184,12 @@ import { ref, computed, onMounted } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'm_mobile_device', desc: '携帯端末台帳' },
+]
 
 const devices = ref([])
 const loading = ref(false)

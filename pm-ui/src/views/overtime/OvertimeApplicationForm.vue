@@ -1,6 +1,6 @@
 <template>
   <div class="ot-form-page">
-    <h1 class="page-title">{{ isEdit ? t('overtime.pageTitleEdit') : t('overtime.pageTitle') }}</h1>
+    <h1 class="page-title">{{ isEdit ? t('overtime.pageTitleEdit') : t('overtime.pageTitle') }} <DataSourceDialog title="残業申請" :sources="dsSources" /></h1>
     <p class="company-note-top">{{ t('overtime.companyNote') }}</p>
 
     <form class="ot-form" @submit.prevent="handleSubmit">
@@ -176,6 +176,13 @@ import SignaturePad from 'signature_pad'
 import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
 import { t } from '@/i18n'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_overtime_application', desc: '残業申請の作成・更新・提出・署名アップロード' },
+  { op: '読み取り', table: 't_user / t_user_profile', desc: '対象者一覧の取得' },
+  { op: '読み取り', table: 't_work_pattern', desc: '勤務パターンの取得' },
+]
 
 // "800" "0800" "8:00" "08:00" → "08:00"、変換不能なら元の値を返す
 function toHHMM(val) {

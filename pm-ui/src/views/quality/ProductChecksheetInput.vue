@@ -2,7 +2,7 @@
   <div class="page-container" v-if="canViewInput">
     <div class="page-header">
       <div>
-        <h1 class="page-title">製品チェックシート入力</h1>
+        <h1 class="page-title">製品チェックシート入力 <DataSourceDialog title="製品チェックシート入力" :sources="dsSources" /></h1>
         <p class="helper-text" v-if="batch">
           {{ batch.product_code }} / {{ batch.process_code }} / ロット {{ batch.lot_no || '-' }}:
           {{ completedCount }} / {{ batch.quantity }} 枚入力済み
@@ -120,6 +120,11 @@ import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_product_checksheet', desc: 'チェックシート入力データ' },
+]
 
 const route = useRoute()
 const router = useRouter()

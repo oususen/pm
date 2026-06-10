@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">勤務パターンマスタ</h1>
+      <h1 class="page-title">勤務パターンマスタ <DataSourceDialog title="勤務パターンマスタ" :sources="dsSources" /></h1>
       <div class="page-actions">
         <button @click="fetchPatterns" class="btn-primary">更新</button>
         <button v-if="canEdit" @click="toggleForm" class="btn-success">{{ showForm ? 'フォームを閉じる' : '新規作成' }}</button>
@@ -109,7 +109,14 @@
 <script setup>
 import { computed, ref, onMounted } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
 import { canAccessMasterResource } from '@/utils/masterPermissions'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'm_work_pattern', desc: '勤務パターン' },
+  { op: '読み書き', table: 'm_work_pattern_break', desc: '休憩時間' },
+]
 
 const patterns = ref([])
 const showForm = ref(false)

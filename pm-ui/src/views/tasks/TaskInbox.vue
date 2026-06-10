@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">タスク受信箱</h1>
+      <h1 class="page-title">タスク受信箱 <DataSourceDialog title="タスク受信箱" :sources="dsSources" /></h1>
       <div class="page-actions">
         <button class="btn-primary" @click="fetchTasks" :disabled="loading">
           {{ loading ? "更新中..." : "更新" }}
@@ -93,6 +93,12 @@
 import { computed, onMounted, ref } from "vue"
 import { useRouter } from "vue-router"
 import api from "@/api/client"
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 't_task', desc: '各業務のタスク一覧取得（購買・品質・チェックシート）' },
+]
 
 const router = useRouter()
 const loading = ref(false)

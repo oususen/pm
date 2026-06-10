@@ -1,6 +1,6 @@
 <template>
   <div class="notification-sources">
-    <h2 class="page-title">通知入力</h2>
+    <h2 class="page-title">通知入力 <DataSourceDialog title="通知入力" :sources="dsSources" /></h2>
     <p class="page-note">
       時限設定を忘れないように設定してください。<br/>
       ・有効終了日なしの通知は作成から5日後に非表示、10日後にDB削除されます<br/>
@@ -228,6 +228,14 @@ import { ref, computed, onMounted, watch } from "vue";
 import { authState } from "@/auth";
 import { hasPermission } from "@/router";
 import api from "@/api/client";
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_notification_source', desc: '通知元データの一覧取得・登録・更新・削除' },
+  { op: '読み取り', table: 't_department', desc: '事業部・係・班の取得' },
+  { op: '読み取り', table: 't_user', desc: 'ユーザー一覧の取得' },
+  { op: '読み取り', table: 't_department_position', desc: '役職一覧の取得' },
+]
 
 const canView = computed(() => hasPermission(authState.user, "notifications", "view"));
 const canEdit = computed(() => hasPermission(authState.user, "notifications", "edit"));

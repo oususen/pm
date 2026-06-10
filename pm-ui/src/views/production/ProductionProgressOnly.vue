@@ -242,7 +242,6 @@ const props = defineProps({
   },
 });
 
-const showDataSource = ref(false);
 const lineFilter = ref("");
 const processFilter = ref("");
 const productFilter = ref("");

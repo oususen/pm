@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">クボタ堺便マスタ</h1>
+      <h1 class="page-title">クボタ堺便マスタ <DataSourceDialog title="クボタ堺便マスタ" :sources="dsSources" /></h1>
       <div class="page-actions">
         <button @click="fetchTrucks" class="btn-primary" :disabled="loading">更新</button>
         <button v-if="canEdit" @click="showNewDialog" class="btn-success">新規</button>
@@ -135,7 +135,13 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
 import { canAccessMasterResource } from '@/utils/masterPermissions'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'm_kubota_sakai_truck', desc: 'クボタ堺便マスタ' },
+]
 
 const trucks = ref([])
 const loading = ref(false)

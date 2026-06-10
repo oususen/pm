@@ -1,6 +1,6 @@
 <template>
   <div class="page-container">
-    <h2 class="page-title">材料支給</h2>
+    <h2 class="page-title">材料支給 <DataSourceDialog title="材料支給" :sources="dsSources" /></h2>
 
     <div class="toolbar">
       <select v-model="filterSupplied" @change="fetchMaterials" class="filter-select">
@@ -124,6 +124,12 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_outsource_material', desc: '材料支給ステータスの取得・更新' },
+]
 
 const materials = ref([])
 const loading = ref(false)

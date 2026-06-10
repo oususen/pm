@@ -2,7 +2,7 @@
   <div class="laser-pattern-editor">
     <div class="header-row">
       <div class="search-block">
-        <label>パターン検索</label>
+        <label>パターン検索 <DataSourceDialog title="レーザパターン編集" :sources="dsSources" /></label>
         <input v-model.trim="searchKeyword" type="text" placeholder="パターン番号で検索" />
       </div>
       <div class="filter-block">
@@ -201,7 +201,15 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
 import LookupSelectInput from '@/components/LookupSelectInput.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_laser_pattern', desc: 'レーザパターンデータ' },
+  { op: '読み取り', table: 'm_product', desc: '製品選択肢' },
+  { op: '読み取り', table: 'm_equipment', desc: '設備選択肢' },
+]
 
 const loading = ref(false)
 const saving = ref(false)

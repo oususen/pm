@@ -1,6 +1,6 @@
 <template>
   <div class="settings-container">
-    <h2 class="page-title">締め日管理</h2>
+    <h2 class="page-title">締め日管理 <DataSourceDialog title="締め日管理" :sources="dsSources" /></h2>
     <div v-if="!canView" class="card no-permission">この画面を開く権限がありません。</div>
     <div v-else class="card">
       <p class="desc">締め日以前のデータは計算・取込・編集の対象外になります。</p>
@@ -65,6 +65,11 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'system_setting', desc: '締め日設定（カテゴリ別ロック日付）' },
+]
 
 const saving = ref(false)
 

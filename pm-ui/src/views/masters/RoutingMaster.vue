@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">ルーティングマスタ</h1>
+      <h1 class="page-title">ルーティングマスタ <DataSourceDialog title="ルーティングマスタ" :sources="dsSources" /></h1>
       <div class="page-actions">
         <button
           v-if="canEdit"
@@ -392,7 +392,26 @@
                       <span v-else>{{ step.duration_min ?? '' }}</span>
                     </div>
                   </td>
-                  <td>{{ usageQuantity(step) }}</td>
+                  <td>
+                    <div class="duration-editor">
+                      <input
+                        v-model.number="usageQuantityDraftByStepId[step.id]"
+                        type="number"
+                        min="0"
+                        step="1"
+                        class="duration-input"
+                        :disabled="!canEdit || savingUsageQuantityStepId === step.id"
+                        @keydown.enter.prevent="saveUsageQuantity(step)"
+                      />
+                      <button
+                        class="duration-save-btn"
+                        :disabled="!canEdit || !isUsageQuantityDirty(step) || savingUsageQuantityStepId === step.id"
+                        @click="saveUsageQuantity(step)"
+                      >
+                        {{ savingUsageQuantityStepId === step.id ? '保存中' : '保存' }}
+                      </button>
+                    </div>
+                  </td>
                   <td>{{ step.remark || '' }}</td>
                 </tr>
               </tbody>
@@ -488,6 +507,17 @@ import { computed, onMounted, ref, watch } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'm_routing', desc: 'ルーティングヘッダ' },
+  { op: '読み書き', table: 'm_routing_step', desc: 'ルーティングステップ' },
+  { op: '読み取り', table: 'm_product', desc: '製品（選択肢）' },
+  { op: '読み取り', table: 'm_process', desc: '工程（選択肢）' },
+  { op: '読み取り', table: 'm_line', desc: 'ライン（選択肢）' },
+  { op: '読み取り', table: 'm_supplier', desc: '仕入先（選択肢）' },
+  { op: '読み取り', table: 'm_customer', desc: '得意先（フィルタ）' },
+]
 
 const routings = ref([])
 const selectedRoutingId = ref(null)
@@ -504,6 +534,8 @@ const durationDraftByStepId = ref({})
 const savingDurationStepId = ref(null)
 const leadTimeDraftByStepId = ref({})
 const savingLeadTimeStepId = ref(null)
+const usageQuantityDraftByStepId = ref({})
+const savingUsageQuantityStepId = ref(null)
 const routingHeaderDraft = ref({
   is_default: false,
   is_active: true,
@@ -851,6 +883,14 @@ const resetLeadTimeDrafts = (stepList) => {
   leadTimeDraftByStepId.value = draftMap
 }
 
+const resetUsageQuantityDrafts = (stepList) => {
+  const draftMap = {}
+  stepList.forEach((step) => {
+    draftMap[step.id] = usageQuantity(step)
+  })
+  usageQuantityDraftByStepId.value = draftMap
+}
+
 const isMinuteStep = (step) => step?.time_unit === 'MINUTE'
 
 const parseDuration = (value) => {
@@ -881,6 +921,23 @@ const isLeadTimeDirty = (step) => {
 const isDurationDirty = (step) => {
   const draft = durationDraftByStepId.value[step.id]
   const current = step.duration_min
+  if (draft === '' || draft === null || draft === undefined) {
+    return !(current === '' || current === null || current === undefined)
+  }
+  return String(draft) !== String(current ?? '')
+}
+
+const parseUsageQuantity = (value) => {
+  if (value === '' || value === null || value === undefined) return null
+  const num = Number(value)
+  if (!Number.isFinite(num) || !Number.isInteger(num)) return null
+  if (num < 0) return null
+  return num
+}
+
+const isUsageQuantityDirty = (step) => {
+  const draft = usageQuantityDraftByStepId.value[step.id]
+  const current = step.usage_quantity
   if (draft === '' || draft === null || draft === undefined) {
     return !(current === '' || current === null || current === undefined)
   }
@@ -937,6 +994,33 @@ const saveDuration = async (step) => {
   } finally {
     if (savingDurationStepId.value === step.id) {
       savingDurationStepId.value = null
+    }
+  }
+}
+
+const saveUsageQuantity = async (step) => {
+  if (!canEdit.value || !step?.id) return
+  if (!isUsageQuantityDirty(step)) return
+
+  const usageQuantity = parseUsageQuantity(usageQuantityDraftByStepId.value[step.id])
+  if (usageQuantity === null) {
+    alert('使用個数は0以上の整数で入力してください。')
+    return
+  }
+
+  savingUsageQuantityStepId.value = step.id
+  errorMessage.value = ''
+  try {
+    await api.routings.patchRoutingStep(step.id, { usage_quantity: usageQuantity })
+    step.usage_quantity = usageQuantity
+    usageQuantityDraftByStepId.value[step.id] = usageQuantity
+  } catch (error) {
+    console.error('使用個数更新エラー:', error)
+    const detail = error?.response?.data?.detail || '使用個数の更新に失敗しました'
+    alert(detail)
+  } finally {
+    if (savingUsageQuantityStepId.value === step.id) {
+      savingUsageQuantityStepId.value = null
     }
   }
 }
@@ -1077,6 +1161,7 @@ const fetchStepsAndMaterials = async (routingId) => {
     steps.value = stepList
     resetDurationDrafts(stepList)
     resetLeadTimeDrafts(stepList)
+    resetUsageQuantityDrafts(stepList)
 
     // ルーティングID一括取得（ステップ数分のN+1リクエストを回避）
     // routing 指定時はサーバー側でページネーション無効化のため page_size 不要
@@ -1175,6 +1260,11 @@ const fetchProcesses = async () => {
   } finally {
     loadingProcesses.value = false
   }
+}
+
+const syncLineFromProcess = (processId) => {
+  const selectedProcess = processes.value.find((proc) => String(proc.id) === String(processId))
+  newStepDraft.value.line = selectedProcess?.line ? Number(selectedProcess.line) : ''
 }
 
 const fetchSuppliers = async () => {
@@ -1338,10 +1428,19 @@ watch(selectedRoutingId, async (routingId) => {
     representativeChildProductIds.value = new Set()
     durationDraftByStepId.value = {}
     leadTimeDraftByStepId.value = {}
+    usageQuantityDraftByStepId.value = {}
     processFilter.value = ''
     return
   }
   await fetchStepsAndMaterials(routingId)
+})
+
+watch(() => newStepDraft.value.process, (processId) => {
+  if (!processId) {
+    newStepDraft.value.line = ''
+    return
+  }
+  syncLineFromProcess(processId)
 })
 
 watch(selectedRouting, (routing) => {
@@ -1936,6 +2035,3 @@ onMounted(async () => {
   }
 }
 </style>
-
-
-

@@ -1,6 +1,6 @@
 <template>
   <div class="actual-progress-page">
-    <h2 class="page-title">実進度求め</h2>
+    <h2 class="page-title">実進度求め <DataSourceDialog title="実進度求め" :sources="dsSources" /></h2>
     <p class="page-desc">実進度 = 全状態在庫合計（部品換算） - 完成品別需要窓合計（明日〜完成品別累積LT）</p>
 
     <section class="panel">
@@ -190,6 +190,15 @@ import { formatISODate } from '@/utils/dateUtil'
 import { computed, onMounted, reactive, ref } from "vue";
 import * as XLSX from "xlsx";
 import api from "@/api/client";
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 'line_backlog', desc: '在庫データ参照' },
+  { op: '読み取り', table: 'line_demand', desc: '需要データ参照' },
+  { op: '読み取り', table: 'm_product', desc: '製品マスタ参照' },
+  { op: '読み取り', table: 'm_calendar', desc: 'カレンダ参照' },
+]
 
 const today = formatISODate(new Date());
 const baseDate = ref(today);

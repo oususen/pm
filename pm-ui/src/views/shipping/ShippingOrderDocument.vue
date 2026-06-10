@@ -1,6 +1,6 @@
 <template>
   <div class="shipping-order-document">
-    <h2 class="page-title">出荷指示書</h2>
+    <h2 class="page-title">出荷指示書 <DataSourceDialog title="出荷指示書" :sources="dsSources" /></h2>
 
     <div class="card">
       <div class="card-header">
@@ -264,6 +264,13 @@
 import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
 import { formatISODate } from '@/utils/dateUtil';
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 't_shipping_instruction', desc: '出荷指示データ' },
+  { op: '取得', table: 't_shipment', desc: '出荷データ（PDF生成）' },
+]
 
 // 状態管理
 const targetDate = ref('');

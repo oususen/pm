@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2 class="page-title">進捗管理</h2>
+      <h2 class="page-title">進捗管理 <DataSourceDialog title="進捗管理" :sources="dsSources" /></h2>
       <div class="page-actions">
         <input
           type="text"
@@ -95,11 +95,18 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue";
 import api from "@/api/client";
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
 import { addDays, formatISODate, parseISODate } from "@/utils/dateUtil";
 import {
   compareBySpecialOrderThenProductCode,
   resolveSpecialDisplayOrder,
 } from "@/utils/groupSort";
+
+const dsSources = [
+  { op: '読み取り', table: 'line_backlog', desc: '生産計画・実績データ' },
+  { op: '読み取り', table: 'm_line', desc: 'ライン一覧' },
+]
 
 const lineFilter = ref("");
 const processFilter = ref("");

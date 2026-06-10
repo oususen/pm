@@ -1,7 +1,7 @@
 <template>
   <div class="photo-upload-page">
     <header class="page-header">
-      <h1>製品写真アップロード</h1>
+      <h1>製品写真アップロード <DataSourceDialog title="製品写真アップロード" :sources="dsSources" /></h1>
       <p>フィルタして品番を選び、写真を保存します。</p>
     </header>
 
@@ -112,6 +112,15 @@
 <script setup>
 import { onMounted, ref } from "vue";
 import api from "@/api/client";
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'm_product', desc: '製品マスタ（写真アップロード）' },
+  { op: '読み取り', table: 'm_supplier', desc: '購入先選択肢' },
+  { op: '読み取り', table: 'm_line', desc: 'ライン選択肢' },
+  { op: '読み取り', table: 'm_process', desc: '工程選択肢' },
+]
 
 const products = ref([]);
 const loading = ref(false);

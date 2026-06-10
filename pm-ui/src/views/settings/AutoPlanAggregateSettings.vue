@@ -1,6 +1,6 @@
 <template>
   <div class="settings-container">
-    <h2 class="page-title">まとめ生産設定</h2>
+    <h2 class="page-title">まとめ生産設定 <DataSourceDialog title="まとめ生産設定" :sources="dsSources" /></h2>
 
     <div class="form-row">
       <select v-model="form.line">
@@ -61,6 +61,12 @@
 import { onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_auto_plan_*', desc: 'まとめ生産設定' },
+]
 
 const route = useRoute()
 

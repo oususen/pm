@@ -1,6 +1,6 @@
 <template>
   <div class="camera-actual-page">
-    <h2>実績入力（カメラ）</h2>
+    <h2>実績入力（カメラ） <DataSourceDialog title="実績入力（カメラ）" :sources="dsSources" /></h2>
 
     <div class="panel">
       <div class="row">
@@ -106,6 +106,15 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import api from "@/api/client"
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_camera_actual', desc: 'カメラ実績データ' },
+  { op: '読み取り', table: 'm_line', desc: 'ライン選択肢' },
+  { op: '読み取り', table: 'm_process', desc: '工程選択肢' },
+  { op: '読み取り', table: 'm_product', desc: '製品選択肢' },
+]
 
 const QUEUE_STORAGE_KEY = "camera-actual-queue-v1"
 const DEVICE_STORAGE_KEY = "camera-actual-device-id-v1"

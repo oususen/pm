@@ -2,7 +2,7 @@
   <div class="page-container" v-if="canViewReview">
     <div class="page-header">
       <div>
-        <h1 class="page-title">製品チェックシート品質確認一覧</h1>
+        <h1 class="page-title">製品チェックシート品質確認一覧 <DataSourceDialog title="製品チェックシート品質確認一覧" :sources="dsSources" /></h1>
         <p class="helper-text">入力済みチェックシートを出荷日・台目・ロット単位で確認し、承認PDFを生成します。</p>
       </div>
       <div class="page-actions">
@@ -102,6 +102,11 @@ import { RouterLink } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_product_checksheet', desc: 'チェックシートレコード承認' },
+]
 
 const records = ref([])
 const allLines = ref([])

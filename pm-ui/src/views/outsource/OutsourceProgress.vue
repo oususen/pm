@@ -1,6 +1,6 @@
 <template>
   <div class="page-container">
-    <h2 class="page-title">FB外作進捗管理</h2>
+    <h2 class="page-title">FB外作進捗管理 <DataSourceDialog title="FB外作進捗管理" :sources="dsSources" /></h2>
 
     <div class="filter-row">
       <select v-model="filterStatus" @change="fetchOrders" class="filter-select">
@@ -125,6 +125,12 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_outsource_order / t_outsource_order_line', desc: '案件・分割進捗の取得・更新' },
+]
 
 const orders = ref([])
 const filterStatus = ref('')
