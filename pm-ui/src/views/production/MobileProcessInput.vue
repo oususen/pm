@@ -1,7 +1,7 @@
 <template>
   <div class="mobile-input" :class="[pageModeClass, { 'tablet-input': isTabletLayout, 'embed-tablet': isEmbeddedTablet }]">
     <div class="mobile-header">
-      <h2>{{ pageTitle }} <button v-if="authState.user?.is_superuser" class="ds-btn" @click="showDataSource = true" title="データソース"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></button></h2>
+      <h2>{{ pageTitle }} <DataSourceDialog :title="pageTitle" :sources="dsSources" /></h2>
       <div class="header-info">
         <span class="date">{{ currentDate }}</span>
         <div class="header-actions">
@@ -560,25 +560,6 @@
       </div>
     </div>
 
-    <div v-if="showDataSource" class="ds-overlay" @click.self="showDataSource = false">
-      <div class="ds-modal">
-        <div class="ds-header">
-          <h3>データソース — {{ pageTitle }}</h3>
-          <button class="ds-close" @click="showDataSource = false">×</button>
-        </div>
-        <table class="ds-table">
-          <thead><tr><th>操作</th><th>テーブル</th><th>説明</th></tr></thead>
-          <tbody>
-            <tr><td>取得/保存</td><td>t_process_realtime_record</td><td>工程リアルタイム記録（生産完成・仕損・設備状態・作業者アクション）</td></tr>
-            <tr><td>保存</td><td>t_scrap_record / t_scrap_record_detail</td><td>仕損記録・仕損明細（仕損登録時に自動作成）</td></tr>
-            <tr><td>取得</td><td>line_backlog</td><td>計画品番リスト・計画数・実績数の表示</td></tr>
-            <tr><td>更新</td><td>line_backlog</td><td>実績数(actual_qty)・仕損数(scrap_qty)の加算</td></tr>
-            <tr><td>取得</td><td>masters_product / masters_bom / masters_bomitem</td><td>製品マスタ・BOM展開（仕損対象の子部品取得）</td></tr>
-            <tr><td>取得</td><td>masters_routing / masters_routingstep / masters_routingstepmaterial</td><td>ルーティング展開（工程別の対象製品取得）</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -586,9 +567,18 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
-const showDataSource = ref(false)
 import { authState, ensureAuth } from '@/auth'
 import { t, getLocaleCode } from '@/i18n'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '取得/保存', table: 't_process_realtime_record', desc: '工程リアルタイム記録（生産完成・仕損・設備状態・作業者アクション）' },
+  { op: '保存', table: 't_scrap_record / t_scrap_record_detail', desc: '仕損記録・仕損明細（仕損登録時に自動作成）' },
+  { op: '取得', table: 'line_backlog', desc: '計画品番リスト・計画数・実績数の表示' },
+  { op: '更新', table: 'line_backlog', desc: '実績数(actual_qty)・仕損数(scrap_qty)の加算' },
+  { op: '取得', table: 'masters_product / masters_bom / masters_bomitem', desc: '製品マスタ・BOM展開（仕損対象の子部品取得）' },
+  { op: '取得', table: 'masters_routing / masters_routingstep / masters_routingstepmaterial', desc: 'ルーティング展開（工程別の対象製品取得）' },
+]
 import { getBusinessDate, formatISODate } from '@/utils/dateUtil'
 
 const route = useRoute()
@@ -4762,14 +4752,4 @@ label {
 }
 .ds-btn { margin-left: 8px; padding: 4px 6px; border: 1px solid #94a3b8; border-radius: 4px; background: #f8fafc; color: #475569; cursor: pointer; vertical-align: middle; display: inline-flex; align-items: center; }
 .ds-btn:hover { background: #e2e8f0; }
-.ds-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 9999; display: flex; align-items: center; justify-content: center; }
-.ds-modal { background: #fff; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,.2); max-width: 700px; width: 90%; max-height: 80vh; overflow: auto; }
-.ds-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #e5e7eb; }
-.ds-header h3 { margin: 0; font-size: 15px; }
-.ds-close { border: none; background: none; font-size: 22px; cursor: pointer; color: #64748b; }
-.ds-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.ds-table th, .ds-table td { padding: 8px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; }
-.ds-table th { background: #f8fafc; font-weight: 600; color: #374151; }
-.ds-table td:first-child { white-space: nowrap; font-weight: 500; color: #2563eb; }
-.ds-table td:nth-child(2) { font-family: monospace; font-size: 12px; color: #0f172a; }
 </style>

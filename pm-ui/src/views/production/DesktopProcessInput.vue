@@ -3,7 +3,7 @@
     <!-- ヘッダー -->
     <div class="header" :class="{ 'header-embed': isEmbeddedTablet }">
       <template v-if="!isEmbeddedTablet">
-        <h2 class="page-title">工程作業記録 <button v-if="authState.user?.is_superuser" class="ds-btn" @click="showDataSource = true" title="データソース"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></button></h2>
+        <h2 class="page-title">工程作業記録 <DataSourceDialog title="工程作業記録（デスクトップ）" :sources="dsSources" /></h2>
       </template>
       <button :class="isEmbeddedTablet ? 'embed-icon-btn' : 'btn-checksheet-nav'" @click="openIntegratedChecksheetOperation" :title="isEmbeddedTablet ? 'チェックシート' : ''">
         <template v-if="isEmbeddedTablet"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/><polyline points="-2 8 5 17 18 -4" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg></template>
@@ -616,35 +616,25 @@
       </div>
     </div>
 
-    <div v-if="showDataSource" class="ds-overlay" @click.self="showDataSource = false">
-      <div class="ds-modal">
-        <div class="ds-header">
-          <h3>データソース — 工程作業記録（デスクトップ）</h3>
-          <button class="ds-close" @click="showDataSource = false">×</button>
-        </div>
-        <table class="ds-table">
-          <thead><tr><th>操作</th><th>テーブル</th><th>説明</th></tr></thead>
-          <tbody>
-            <tr><td>取得/保存</td><td>t_process_realtime_record</td><td>工程リアルタイム記録（生産完成・仕損・設備状態・作業者アクション）</td></tr>
-            <tr><td>取得/更新</td><td>line_backlog</td><td>計画品番リスト・計画数・実績数の表示と更新</td></tr>
-            <tr><td>取得/更新</td><td>line_gantt_plan</td><td>ガント計画（計画数変更時の更新）</td></tr>
-            <tr><td>保存</td><td>production_plan_change_log</td><td>計画数変更ログの記録</td></tr>
-            <tr><td>取得</td><td>masters_product / masters_bom / masters_bomitem</td><td>製品マスタ・BOM展開</td></tr>
-            <tr><td>取得</td><td>masters_routing / masters_routingstep / masters_routingstepmaterial</td><td>ルーティング展開（工程別の対象製品取得）</td></tr>
-            <tr><td>取得</td><td>gantt_display_product_map</td><td>ガント表示用の品番マッピング</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
-const showDataSource = ref(false)
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '取得/保存', table: 't_process_realtime_record', desc: '工程リアルタイム記録（生産完成・仕損・設備状態・作業者アクション）' },
+  { op: '取得/更新', table: 'line_backlog', desc: '計画品番リスト・計画数・実績数の表示と更新' },
+  { op: '取得/更新', table: 'line_gantt_plan', desc: 'ガント計画（計画数変更時の更新）' },
+  { op: '保存', table: 'production_plan_change_log', desc: '計画数変更ログの記録' },
+  { op: '取得', table: 'masters_product / masters_bom / masters_bomitem', desc: '製品マスタ・BOM展開' },
+  { op: '取得', table: 'masters_routing / masters_routingstep / masters_routingstepmaterial', desc: 'ルーティング展開（工程別の対象製品取得）' },
+  { op: '取得', table: 'gantt_display_product_map', desc: 'ガント表示用の品番マッピング' },
+]
 import { t, getLocaleCode } from '@/i18n'
 import { getBusinessDate, formatISODate } from '@/utils/dateUtil'
 
@@ -3744,17 +3734,6 @@ onMounted(async () => {
 }
 .ds-btn { margin-left: 8px; padding: 4px 6px; border: 1px solid #94a3b8; border-radius: 4px; background: #f8fafc; color: #475569; cursor: pointer; vertical-align: middle; display: inline-flex; align-items: center; }
 .ds-btn:hover { background: #e2e8f0; }
-.ds-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 9999; display: flex; align-items: center; justify-content: center; }
-.ds-modal { background: #fff; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,.2); max-width: 700px; width: 90%; max-height: 80vh; overflow: auto; }
-.ds-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #e5e7eb; }
-.ds-header h3 { margin: 0; font-size: 15px; }
-.ds-close { border: none; background: none; font-size: 22px; cursor: pointer; color: #64748b; }
-.ds-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.ds-table th, .ds-table td { padding: 8px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; }
-.ds-table th { background: #f8fafc; font-weight: 600; color: #374151; }
-.ds-table td:first-child { white-space: nowrap; font-weight: 500; color: #2563eb; }
-.ds-table td:nth-child(2) { font-family: monospace; font-size: 12px; color: #0f172a; }
-
 /* embed-tablet: 親フレーム（DualProcessInput）から iframe で埋め込まれた時 */
 .header-embed {
   padding: 2px 8px;

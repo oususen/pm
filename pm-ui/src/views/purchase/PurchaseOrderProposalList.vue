@@ -120,35 +120,6 @@
       </div>
     </div>
 
-    <!-- データソースモーダル -->
-    <div v-if="showDataSource" class="ds-overlay" @click.self="showDataSource = false">
-      <div class="ds-modal">
-        <div class="ds-header"><h3>データソース</h3><button class="ds-close" @click="showDataSource = false">&times;</button></div>
-        <table class="ds-table">
-          <thead><tr><th>操作</th><th>テーブル</th><th>説明</th></tr></thead>
-          <tbody>
-            <tr class="ds-section"><td colspan="3"><strong>提案書管理</strong></td></tr>
-            <tr><td>提案書 読み書き</td><td>purchase_order_proposal</td><td>発注提案書ヘッダ（仕入先・発注日・ステータス）</td></tr>
-            <tr><td>提案書明細 読み書き</td><td>purchase_order_proposal_line</td><td>提案書の品目明細（製品・数量・在庫スナップショット）</td></tr>
-            <tr><td>承認 読み書き</td><td>purchase_order_proposal_approval</td><td>承認履歴</td></tr>
-            <tr><td>タスク 読み書き</td><td>purchase_order_task</td><td>発注タスク（承認依頼・発注指示等）</td></tr>
-            <tr class="ds-section"><td colspan="3"><strong>自動提案（数量算出）</strong></td></tr>
-            <tr><td>計画在庫/進度 読み取り</td><td>line_backlog</td><td>計画在庫・進度から不足数を算出</td></tr>
-            <tr><td>安全在庫 読み取り</td><td>stock_allocation</td><td>最低在庫数（計画在庫ベース時の基準）</td></tr>
-            <tr><td>在庫再計算 書き込み</td><td>line_backlog</td><td>提案前に在庫・進度を再計算</td></tr>
-            <tr class="ds-section"><td colspan="3"><strong>納入日・パターン</strong></td></tr>
-            <tr><td>スケジュール 読み取り</td><td>supplier_order_schedule</td><td>仕入先×パターン割当（リードタイム）</td></tr>
-            <tr><td>パターン 読み取り</td><td>supplier_order_pattern</td><td>納入パターン定義（次回納入日算出）</td></tr>
-            <tr class="ds-section"><td colspan="3"><strong>マスタ</strong></td></tr>
-            <tr><td>仕入先 読み取り</td><td>m_supplier</td><td>仕入先マスタ</td></tr>
-            <tr><td>製品 読み取り</td><td>m_product</td><td>製品マスタ（発注ロット倍数・最低ロット）</td></tr>
-            <tr><td>ルーティング 読み取り</td><td>m_routing_step</td><td>仕入先→製品の紐付け特定</td></tr>
-            <tr><td>ライン 読み取り</td><td>m_line</td><td>仕入先コードからライン解決</td></tr>
-            <tr><td>カレンダー 読み取り</td><td>m_calendar</td><td>営業日判定（納入日・パターン計算）</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -160,7 +131,26 @@ import api from '@/api/client'
 import { authState } from '@/auth'
 
 const router = useRouter()
-const showDataSource = ref(false)
+const dsSources = [
+  { section: '提案書管理' },
+  { op: '提案書 読み書き', table: 'purchase_order_proposal', desc: '発注提案書ヘッダ（仕入先・発注日・ステータス）' },
+  { op: '提案書明細 読み書き', table: 'purchase_order_proposal_line', desc: '提案書の品目明細（製品・数量・在庫スナップショット）' },
+  { op: '承認 読み書き', table: 'purchase_order_proposal_approval', desc: '承認履歴' },
+  { op: 'タスク 読み書き', table: 'purchase_order_task', desc: '発注タスク（承認依頼・発注指示等）' },
+  { section: '自動提案（数量算出）' },
+  { op: '計画在庫/進度 読み取り', table: 'line_backlog', desc: '計画在庫・進度から不足数を算出' },
+  { op: '安全在庫 読み取り', table: 'stock_allocation', desc: '最低在庫数（計画在庫ベース時の基準）' },
+  { op: '在庫再計算 書き込み', table: 'line_backlog', desc: '提案前に在庫・進度を再計算' },
+  { section: '納入日・パターン' },
+  { op: 'スケジュール 読み取り', table: 'supplier_order_schedule', desc: '仕入先×パターン割当（リードタイム）' },
+  { op: 'パターン 読み取り', table: 'supplier_order_pattern', desc: '納入パターン定義（次回納入日算出）' },
+  { section: 'マスタ' },
+  { op: '仕入先 読み取り', table: 'm_supplier', desc: '仕入先マスタ' },
+  { op: '製品 読み取り', table: 'm_product', desc: '製品マスタ（発注ロット倍数・最低ロット）' },
+  { op: 'ルーティング 読み取り', table: 'm_routing_step', desc: '仕入先→製品の紐付け特定' },
+  { op: 'ライン 読み取り', table: 'm_line', desc: '仕入先コードからライン解決' },
+  { op: 'カレンダー 読み取り', table: 'm_calendar', desc: '営業日判定（納入日・パターン計算）' },
+]
 
 const rows = ref([])
 const suppliers = ref([])
@@ -350,19 +340,7 @@ onMounted(async () => {
 }
 .ds-btn { margin-left: 8px; padding: 4px 6px; border: 1px solid #94a3b8; border-radius: 4px; background: #f8fafc; color: #475569; cursor: pointer; vertical-align: middle; display: inline-flex; align-items: center; }
 .ds-btn:hover { background: #e2e8f0; }
-.ds-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 9999; display: flex; align-items: center; justify-content: center; }
-.ds-modal { background: #fff; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,.2); max-width: 700px; width: 90%; max-height: 80vh; overflow: auto; }
-.ds-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #e5e7eb; }
-.ds-header h3 { margin: 0; font-size: 15px; }
-.ds-close { border: none; background: none; font-size: 22px; cursor: pointer; color: #64748b; }
-.ds-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.ds-table th, .ds-table td { padding: 8px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; }
-.ds-table th { background: #f8fafc; font-weight: 600; color: #374151; }
-.ds-table td:first-child { white-space: nowrap; font-weight: 500; color: #2563eb; }
-.ds-table td:nth-child(2) { font-family: monospace; font-size: 12px; color: #0f172a; }
-.ds-section td { background: #f0f4ff; padding: 6px 12px; }
 </style>
-
 
 
 
