@@ -273,7 +273,6 @@ def _draw_process_pages(template, block, block_index, total_blocks):
     y = banner_h + 16
 
     items = list(block.items.order_by("sort_order", "id"))
-    sketch_fields = list(block.sketch_fields.order_by("sort_order", "id"))
     has_sketch = bool(block.sketch_image)
     has_items = bool(items)
 
@@ -315,31 +314,12 @@ def _draw_process_pages(template, block, block_index, total_blocks):
             bg_rgb.paste(bg_resized, mask=bg_resized.split()[3] if bg_resized.mode == "RGBA" else None)
             img.paste(bg_rgb, (offset_x, offset_y))
 
-            overlay = Image.new("RGBA", (new_w, new_h), (0, 0, 0, 0))
-            od = ImageDraw.Draw(overlay)
-            for sf in sketch_fields:
-                fx = int(sf.x * scale)
-                fy = int(sf.y * scale)
-                fw = int(sf.width * scale)
-                fh = int(sf.height * scale)
-                od.rectangle((fx, fy, fx + fw, fy + fh), outline=(30, 64, 175, 140), width=2)
-                od.rectangle((fx + 1, fy + 1, fx + fw - 1, fy + fh - 1), fill=(230, 240, 255, 80))
-                if sf.label:
-                    fsz = max(min(fh - 4, 16), 8)
-                    ff = _font(int(fsz * scale) if scale > 0.5 else fsz)
-                    od.text((fx + 3, fy + 2), sf.label, fill=(30, 64, 175, 200), font=ff)
-
-            overlay_rgb = overlay.convert("RGB")
-            mask = overlay.split()[3]
-            img.paste(overlay_rgb, (offset_x, offset_y), mask)
-
             y += sketch_area_h + gap_between
         except Exception:
             draw.text((MARGIN + 20, y), "（台紙画像の読み込みに失敗）", fill="red", font=_font(18))
             y += 40 + (sketch_area_h if sketch_area_h > 40 else 0)
-    elif sketch_fields:
-        draw.text((MARGIN + 20, y), "（台紙画像未設定 — フィールド定義あり）", fill="#888888", font=_font(16))
-        y += 30
+    elif not has_sketch and not has_items:
+        pass
 
     pages = [img]
 
