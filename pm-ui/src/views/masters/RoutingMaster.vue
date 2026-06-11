@@ -335,6 +335,9 @@
             <div v-if="isSameParentChild" class="create-step-warning">
               親製品と加工後品目が同じです（中間工程）。BOM明細は作成されません。
             </div>
+            <div v-if="autoFillProcessWarning" class="create-step-warning" style="color:#dc2626;">
+              {{ autoFillProcessWarning }}
+            </div>
           </div>
           <div class="step-filter-row">
             <label>工程</label>
@@ -1241,11 +1244,10 @@ const saveHierarchyPath = async (step) => {
   errorMessage.value = ''
   try {
     await api.routings.patchRoutingStep(step.id, { hierarchy_path: newPath })
-    step.hierarchy_path = newPath
-    hierarchyPathDraftByStepId.value[step.id] = newPath
+    await fetchStepsAndMaterials(selectedRoutingId.value)
   } catch (error) {
     console.error('階層更新エラー:', error)
-    const detail = error?.response?.data?.detail || '階層の更新に失敗しました'
+    const detail = error?.response?.data?.hierarchy_path?.[0] || error?.response?.data?.detail || '階層の更新に失敗しました'
     alert(detail)
   } finally {
     if (savingHierarchyPathStepId.value === step.id) {
@@ -1597,6 +1599,7 @@ const resetCreateStepDraft = () => {
   outputProductDropOpen.value = false
   remarkProductSearch.value = ''
   remarkProductDropOpen.value = false
+  autoFillProcessWarning.value = ''
 }
 
 const toggleCreateStepRow = () => {
@@ -1616,7 +1619,7 @@ const createStep = async () => {
       routing: Number(selectedRoutingId.value),
       step_no: Number(newStepDraft.value.step_no),
       parallel_group: Number(newStepDraft.value.parallel_group || 1),
-      process: Number(newStepDraft.value.process),
+      process: newStepDraft.value.process ? Number(newStepDraft.value.process) : null,
       line: newStepDraft.value.line ? Number(newStepDraft.value.line) : null,
       supplier: newStepDraft.value.supplier ? Number(newStepDraft.value.supplier) : null,
       output_product: newStepDraft.value.output_product ? Number(newStepDraft.value.output_product) : null,
@@ -1638,9 +1641,12 @@ const createStep = async () => {
     }
   } catch (error) {
     console.error('工程追加エラー:', error)
+    const data = error?.response?.data || {}
     const detail =
-      error?.response?.data?.detail ||
-      error?.response?.data?.non_field_errors?.[0] ||
+      data.hierarchy_path?.[0] ||
+      data.process?.[0] ||
+      data.detail ||
+      data.non_field_errors?.[0] ||
       '工程の追加に失敗しました'
     alert(detail)
   } finally {
@@ -1705,7 +1711,10 @@ watch(() => newStepDraft.value.process, (processId) => {
   syncLineFromProcess(processId)
 })
 
+const autoFillProcessWarning = ref('')
+
 const autoFillSupplierLineAndProcess = () => {
+  autoFillProcessWarning.value = ''
   const st = newStepDraft.value.sourcing_type
   if (st === 'MAKE') {
     newStepDraft.value.supplier = ''
@@ -1713,7 +1722,13 @@ const autoFillSupplierLineAndProcess = () => {
   }
   const processCode = st === 'SUBCON' ? 'G' : 'K'
   const proc = processOptions.value.find(p => p.process_code === processCode)
-  if (proc) newStepDraft.value.process = proc.id
+  if (proc) {
+    newStepDraft.value.process = proc.id
+  } else {
+    newStepDraft.value.process = ''
+    const label = st === 'SUBCON' ? '外注(G)' : '購入(K)'
+    autoFillProcessWarning.value = `工程マスタに「${label}」が未登録です。先に工程マスタで作成してください。`
+  }
 
   const supplierId = Number(newStepDraft.value.supplier)
   if (!supplierId) return

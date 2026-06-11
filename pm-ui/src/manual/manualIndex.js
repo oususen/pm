@@ -18,6 +18,7 @@ export const manualSections = [
     items: [
       { title: "カレンダ一覧", path: "マスタ/カレンダ一覧.md" },
       { title: "BOM作成マニュアル", path: "マスタ/BOM作成マニュアル.md" },
+      { title: "ルーティング工程作成ルール", path: "マスタ/ルーティング工程作成ルール.md" },
     ],
   },
   {

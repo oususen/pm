@@ -393,11 +393,17 @@ watch(currentPath, () => {
 }
 
 .manual-body :deep(pre) {
-  background: #0f172a;
-  color: #e2e8f0;
+  background: #f1f5f9;
+  color: #1e293b;
   padding: 12px;
   border-radius: 8px;
   overflow: auto;
+}
+
+.manual-body :deep(pre code) {
+  background: transparent;
+  padding: 0;
+  color: inherit;
 }
 
 .manual-body :deep(a) {

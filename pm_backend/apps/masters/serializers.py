@@ -1,3 +1,4 @@
+import re
 from rest_framework import serializers
 from django.db.models import Sum
 from .models import (
@@ -292,8 +293,45 @@ class RoutingStepSerializer(serializers.ModelSerializer):
         model = RoutingStep
         fields = '__all__'
 
+    _HIERARCHY_PATH_RE = re.compile(r'^[0-9]+(\.[0-9]+)*$')
+
+    def _validate_hierarchy_path(self, attrs):
+        hp = attrs.get('hierarchy_path')
+        if hp is None and self.instance is not None:
+            return
+        if hp is not None:
+            hp = str(hp).strip()
+        if not hp:
+            raise serializers.ValidationError({'hierarchy_path': '階層パスは必須です。'})
+        if hp == 'final':
+            raise serializers.ValidationError({'hierarchy_path': 'finalは予約語のため手入力できません。自動設定されます。'})
+        if not self._HIERARCHY_PATH_RE.match(hp):
+            raise serializers.ValidationError({'hierarchy_path': '階層パスは数字とドット区切りのみ有効です（例: 1, 1.1, 1.2.1）。'})
+
+        routing = attrs.get('routing')
+        if not routing and self.instance:
+            routing = self.instance.routing
+        if routing:
+            qs = RoutingStep.objects.filter(routing=routing, hierarchy_path=hp)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({'hierarchy_path': f'階層パス "{hp}" は同一ルーティング内で重複しています。'})
+
+            if '.' in hp:
+                parent_path = hp.rsplit('.', 1)[0]
+                parent_qs = RoutingStep.objects.filter(routing=routing, hierarchy_path=parent_path)
+                if self.instance:
+                    parent_qs = parent_qs.exclude(pk=self.instance.pk)
+                if not parent_qs.exists():
+                    raise serializers.ValidationError({'hierarchy_path': f'親パス "{parent_path}" が存在しません。先に親工程を作成してください。'})
+
+        attrs['hierarchy_path'] = hp
+
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        self._validate_hierarchy_path(attrs)
+
         process = attrs.get('process')
         if not process and self.instance is not None:
             process = getattr(self.instance, 'process', None)

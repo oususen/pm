@@ -75,13 +75,13 @@ const masters = [
     path: "/masters/bom",
     name: "BOMMaster",
     component: () => import("@/views/masters/BOMMaster.vue"),
-    meta: { pageTitle: "構成マスタ（BOM）", resource: "masters.bom" },
+    meta: { pageTitle: "構成マスタ（BOM）", manualPath: "マスタ/BOM作成マニュアル.md", resource: "masters.bom" },
   },
   {
     path: "/masters/routing",
     name: "RoutingMaster",
     component: () => import("@/views/masters/RoutingMaster.vue"),
-    meta: { pageTitle: "ルーティングマスタ", resource: "masters.routing" },
+    meta: { pageTitle: "ルーティングマスタ", manualPath: "マスタ/ルーティング工程作成ルール.md", resource: "masters.routing" },
   },
   {
     path: "/masters/contact",
