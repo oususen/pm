@@ -188,7 +188,7 @@
             :key="`${item.plan_date}-${item.product}-${item.process}-${item.sequence_no || ''}`"
             class="plan-item"
             :class="{
-              selected: String(record.product_id) === String(item.product),
+              selected: String(record.product_id) === String(item.product) && (!selectedGanttPlanId || selectedGanttPlanId === (item.gantt_plan_id || '')),
               'current-processing': isCurrentProcessingProduct(item.product),
               'temp-ended': isTempEndedProduct(item.product),
               'plan-edited': editedPlanIds.has(item.gantt_plan_id),
@@ -680,6 +680,7 @@ const allScrapProducts = ref([])
 const scrapRelationFilter = ref('')
 const scrapSearchText = ref('')
 const defaultProductId = ref(null)
+const selectedGanttPlanId = ref('')
 const productImageMap = ref({})
 const productMetaMap = ref({})
 const filterCurrentTime = ref(true)
@@ -1092,6 +1093,11 @@ const pageEnd = computed(() => Math.min(currentPage.value * effectivePageSize.va
 const selectedProductObj = computed(() => {
   const pid = String(record.value.product_id || '').trim()
   if (!pid) return null
+  const ganttId = selectedGanttPlanId.value
+  if (ganttId) {
+    const exact = effectiveProductList.value.find(p => String(p.product || p.id) === pid && p.gantt_plan_id === ganttId)
+    if (exact) return exact
+  }
   return effectiveProductList.value.find(p => String(p.product || p.id) === pid) || null
 })
 const selectedProductCode = computed(() =>
@@ -1349,11 +1355,21 @@ const toSafeNumber = (value) => {
   return Number.isFinite(num) ? num : 0
 }
 
+const findProductionProductBySelection = (productId) => {
+  if (!productId) return null
+  const ganttId = selectedGanttPlanId.value
+  if (ganttId) {
+    const exact = productionProducts.value.find((p) => String(p.product) === String(productId) && p.gantt_plan_id === ganttId)
+    if (exact) return exact
+  }
+  return productionProducts.value.find((p) => String(p.product) === String(productId)) || null
+}
+
 const planStatus = computed(() => {
   if (record.value.record_type !== 'PRODUCTION') return null
   const productId = record.value.product_id
   if (!productId) return null
-  const target = productionProducts.value.find((p) => String(p.product) === String(productId))
+  const target = findProductionProductBySelection(productId)
   if (!target) return null
   const planQty = toSafeNumber(target.plan_qty)
   const actualQty = toSafeNumber(target.actual_qty)
@@ -1372,7 +1388,7 @@ const editedPlanIds = ref(new Set())
 const selectedPlanItem = computed(() => {
   const productId = record.value.product_id
   if (!productId) return null
-  return productionProducts.value.find((p) => String(p.product) === String(productId)) || null
+  return findProductionProductBySelection(productId)
 })
 
 const startEditPlanQty = async () => {
@@ -1813,11 +1829,15 @@ const selectedProductTimeLabel = computed(() => {
   if (!timeSlots.value.length) return ''
   const productId = String(record.value.product_id || '').trim()
   if (!productId) return ''
+  const ganttId = selectedGanttPlanId.value
   let startTime = null
   let endTime = null
   ;(timeSlots.value || []).forEach((slot) => {
     const slotItems = Array.isArray(slot?.items) ? slot.items : []
-    if (!slotItems.some((item) => String(item?.product || '').trim() === productId)) return
+    const matched = ganttId
+      ? slotItems.some((item) => String(item?.product || '').trim() === productId && item?.gantt_plan_id === ganttId)
+      : slotItems.some((item) => String(item?.product || '').trim() === productId)
+    if (!matched) return
     const slotStart = slot?.start instanceof Date ? slot.start : new Date(slot?.start)
     const slotEnd = slot?.end instanceof Date ? slot.end : new Date(slot?.end)
     if (Number.isNaN(slotStart.getTime()) || Number.isNaN(slotEnd.getTime())) return
@@ -1954,10 +1974,13 @@ const isOperatorActionActive = (action) =>
 
 const selectPlannedProduct = (p) => {
   const nextProductId = p?.product ?? ''
+  const nextGanttPlanId = p?.gantt_plan_id || ''
   const isSameProduct = String(record.value.product_id || '') === String(nextProductId || '')
-  if (isSameProduct) {
+  const isSameGanttPlan = selectedGanttPlanId.value === nextGanttPlanId
+  if (isSameProduct && isSameGanttPlan) {
     record.value.product_id = ''
     record.value.product_code = ''
+    selectedGanttPlanId.value = ''
     if (record.value.record_type === 'PRODUCTION') {
       record.value.qty = null
       record.value.operator_action_reason = ''
@@ -1967,6 +1990,7 @@ const selectPlannedProduct = (p) => {
   }
   record.value.product_id = p.product || p.id || ''
   record.value.product_code = p.product_code || ''
+  selectedGanttPlanId.value = nextGanttPlanId
   manualProduct.value = false
   if (record.value.record_type === 'PRODUCTION') record.value.qty = null
   applyScrapTypeDefaults(p)
@@ -1975,6 +1999,7 @@ const selectPlannedProduct = (p) => {
 const cancelSelection = () => {
   record.value.product_id = ''
   record.value.product_code = ''
+  selectedGanttPlanId.value = ''
   selectedOperatorAction.value = ''
   closeProductPhotoDialog()
 }
@@ -1984,10 +2009,12 @@ const toggleManualProduct = () => {
   if (manualProduct.value) {
     record.value.product_id = ''
     record.value.product_code = ''
+    selectedGanttPlanId.value = ''
     loadManualProducts(selectedProcessId.value)
   } else {
     record.value.product_id = ''
     record.value.product_code = ''
+    selectedGanttPlanId.value = ''
   }
   closeProductPhotoDialog()
 }
@@ -2136,6 +2163,7 @@ const resetForm = () => {
     equipment_state: '', batch_no: '', operator_name: defaultOperatorName.value || '', remarks: '',
   }
   manualProduct.value = false
+  selectedGanttPlanId.value = ''
   selectedOperatorAction.value = ''
   scrapRelationFilter.value = ''
   scrapSearchText.value = ''
@@ -2550,12 +2578,16 @@ const buildPlanBeforeActiveSlotByProduct = (slots, activeIndex) => {
   return planBeforeMap
 }
 
-const applySlotActualProgress = (slotItems, planBeforeMap, totalActualMap) => {
+const applySlotActualProgress = (slotItems, planBeforeMap, totalActualMap, totalPlanByProduct) => {
   return (Array.isArray(slotItems) ? slotItems : []).map((item) => {
     const key = String(item?.product || ''); if (!key) return item
     const totalActual = toSafeNumber(totalActualMap.get(key))
     const plannedBefore = toSafeNumber(planBeforeMap.get(key))
-    return { ...item, actual_qty: Math.max(totalActual - plannedBefore, 0) }
+    const slotActual = Math.max(totalActual - plannedBefore, 0)
+    const planQty = toSafeNumber(item.plan_qty)
+    const totalPlan = toSafeNumber(totalPlanByProduct?.get(key))
+    const isLastSlotForProduct = (plannedBefore + planQty) >= totalPlan
+    return { ...item, actual_qty: isLastSlotForProduct ? slotActual : Math.min(slotActual, planQty) }
   })
 }
 
@@ -2685,8 +2717,16 @@ const applyTimeSlotFilter = () => {
   activeSlotIndex.value = index
   const mergedSlotItems = mergeProductionProductsByProduct(slots[index]?.items || [])
   const planBeforeMap = buildPlanBeforeActiveSlotByProduct(slots, index)
-  const totalActualMap = buildTotalActualByProduct(allPlanProducts.value)
-  const slotItems = applySlotActualProgress(mergedSlotItems, planBeforeMap, totalActualMap)
+  const planDerivedMap = buildTotalActualByProduct(allPlanProducts.value)
+  const backlogActuals = actualQtyByProductFromBacklog.value
+  const totalActualMap = new Map(planDerivedMap)
+  backlogActuals.forEach((qty, pid) => totalActualMap.set(pid, qty))
+  const totalPlanByProduct = new Map()
+  allPlanProducts.value.forEach((item) => {
+    const pid = String(item?.product || ''); if (!pid) return
+    totalPlanByProduct.set(pid, toSafeNumber(totalPlanByProduct.get(pid)) + toSafeNumber(item?.plan_qty))
+  })
+  const slotItems = applySlotActualProgress(mergedSlotItems, planBeforeMap, totalActualMap, totalPlanByProduct)
   productionProducts.value = [...slotItems]
   const slotProductIds = new Set(slotItems.map((p) => String(p.product)))
   let filteredScrap = allScrapProducts.value.filter((p) => slotProductIds.has(String(p.product)))
