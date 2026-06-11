@@ -209,43 +209,12 @@
               <input v-model.number="newStepDraft.step_no" type="number" min="1" step="1" class="duration-input" :disabled="creatingStep" />
             </div>
             <div class="create-step-field">
+              <label class="create-step-label">階層</label>
+              <input v-model.trim="newStepDraft.hierarchy_path" type="text" class="hierarchy-input" placeholder="必須" :disabled="creatingStep" />
+            </div>
+            <div class="create-step-field">
               <label class="create-step-label">並列G</label>
               <input v-model.number="newStepDraft.parallel_group" type="number" min="1" step="1" class="duration-input" :disabled="creatingStep" />
-            </div>
-            <div class="create-step-field">
-              <label class="create-step-label">工程</label>
-              <select v-model="newStepDraft.process" class="step-select" :disabled="creatingStep || loadingProcesses">
-                <option value="">{{ loadingProcesses ? '読込中...' : '選択' }}</option>
-                <option v-for="proc in processOptions" :key="proc.id" :value="proc.id">
-                  {{ proc.process_code }} - {{ proc.process_name }}
-                </option>
-              </select>
-            </div>
-            <div class="create-step-field">
-              <label class="create-step-label">ライン</label>
-              <select v-model="newStepDraft.line" class="step-select" :disabled="creatingStep || loadingLines">
-                <option value="">未設定</option>
-                <option v-for="line in lines" :key="line.id" :value="line.id">
-                  {{ line.line_code }} - {{ line.line_name }}
-                </option>
-              </select>
-            </div>
-            <div class="create-step-field">
-              <label class="create-step-label">外作先</label>
-              <select v-model="newStepDraft.supplier" class="step-select" :disabled="creatingStep || loadingSuppliers">
-                <option value="">未設定</option>
-                <option v-for="supplier in supplierOptions" :key="supplier.id" :value="supplier.id">
-                  {{ supplier.supplier_code }} - {{ supplier.supplier_name }}
-                </option>
-              </select>
-            </div>
-            <div class="create-step-field">
-              <label class="create-step-label">調達区分</label>
-              <select v-model="newStepDraft.sourcing_type" class="step-select step-select--small" :disabled="creatingStep">
-                <option value="MAKE">自社製造</option>
-                <option value="BUY">購買</option>
-                <option value="SUBCON">外作</option>
-              </select>
             </div>
             <div class="create-step-field" style="position:relative;">
               <label class="create-step-label">加工後品目</label>
@@ -270,30 +239,6 @@
                 </li>
               </ul>
             </div>
-            <div class="create-step-field">
-              <label class="create-step-label">時間単位</label>
-              <select v-model="newStepDraft.time_unit" class="step-select step-select--small" :disabled="creatingStep">
-                <option value="DAY">日</option>
-                <option value="MINUTE">分</option>
-              </select>
-            </div>
-            <div class="create-step-field">
-              <label class="create-step-label">{{ newStepDraft.time_unit === 'DAY' ? 'LT(日)' : '所要時間(分)' }}</label>
-              <input
-                v-if="newStepDraft.time_unit === 'DAY'"
-                v-model.number="newStepDraft.lead_time_days"
-                type="number" min="0" step="1" class="duration-input" :disabled="creatingStep"
-              />
-              <input
-                v-else
-                v-model.number="newStepDraft.duration_min"
-                type="number" min="1" step="1" class="duration-input" :disabled="creatingStep"
-              />
-            </div>
-            <div class="create-step-field">
-              <label class="create-step-label">使用個数</label>
-              <input v-model.number="newStepDraft.usage_quantity" type="number" min="0" step="1" class="duration-input" :disabled="creatingStep" />
-            </div>
             <div class="create-step-field" style="position:relative;">
               <label class="create-step-label">親製品</label>
               <input
@@ -317,10 +262,78 @@
                 </li>
               </ul>
             </div>
+            <div class="create-step-field">
+              <label class="create-step-label">使用個数</label>
+              <input v-model.number="newStepDraft.usage_quantity" type="number" min="0" step="1" class="duration-input" :disabled="creatingStep" />
+            </div>
+            <div class="create-step-field">
+              <label class="create-step-label">調達区分</label>
+              <select v-model="newStepDraft.sourcing_type" class="step-select step-select--small" :disabled="creatingStep">
+                <option value="MAKE">自社製造</option>
+                <option value="BUY">購買</option>
+                <option value="SUBCON">外作</option>
+              </select>
+            </div>
+            <div class="create-step-field">
+              <label class="create-step-label">外作先{{ newStepDraft.sourcing_type !== 'MAKE' ? ' *' : '' }}</label>
+              <select v-model="newStepDraft.supplier" class="step-select"
+                :disabled="creatingStep || loadingSuppliers || newStepDraft.sourcing_type === 'MAKE'">
+                <option value="">未設定</option>
+                <option v-for="supplier in supplierOptions" :key="supplier.id" :value="supplier.id">
+                  {{ supplier.supplier_code }} - {{ supplier.supplier_name }}
+                </option>
+              </select>
+            </div>
+            <div class="create-step-field">
+              <label class="create-step-label">工程{{ newStepDraft.sourcing_type === 'MAKE' ? ' *' : '' }}</label>
+              <select v-model="newStepDraft.process" class="step-select"
+                :disabled="creatingStep || loadingProcesses || newStepDraft.sourcing_type === 'BUY' || newStepDraft.sourcing_type === 'SUBCON'">
+                <option value="">{{ loadingProcesses ? '読込中...' : '選択' }}</option>
+                <option v-for="proc in processOptions" :key="proc.id" :value="proc.id">
+                  {{ proc.process_code }} - {{ proc.process_name }}
+                </option>
+              </select>
+            </div>
+            <div class="create-step-field">
+              <label class="create-step-label">ライン{{ newStepDraft.sourcing_type === 'MAKE' ? ' *' : '' }}</label>
+              <select v-model="newStepDraft.line" class="step-select"
+                :disabled="creatingStep || loadingLines || newStepDraft.sourcing_type === 'BUY' || newStepDraft.sourcing_type === 'SUBCON'">
+                <option value="">未設定</option>
+                <option v-for="line in lines" :key="line.id" :value="line.id">
+                  {{ line.line_code }} - {{ line.line_name }}
+                </option>
+              </select>
+            </div>
+            <div class="create-step-field">
+              <label class="create-step-label">時間単位{{ newStepDraft.sourcing_type === 'MAKE' ? ' *' : '' }}</label>
+              <select v-model="newStepDraft.time_unit" class="step-select step-select--small"
+                :disabled="creatingStep || newStepDraft.sourcing_type === 'BUY'">
+                <option value="DAY">日</option>
+                <option value="MINUTE">分</option>
+              </select>
+            </div>
+            <div class="create-step-field">
+              <label class="create-step-label">LT(日){{ newStepDraft.sourcing_type !== 'MAKE' ? ' *' : '' }}</label>
+              <input
+                v-model.number="newStepDraft.lead_time_days"
+                type="number" min="0" step="1" class="duration-input" :disabled="creatingStep"
+              />
+            </div>
+            <div class="create-step-field">
+              <label class="create-step-label">所要時間(分){{ newStepDraft.time_unit === 'MINUTE' && newStepDraft.sourcing_type !== 'BUY' ? ' *' : '' }}</label>
+              <input
+                v-model.number="newStepDraft.duration_min"
+                type="number" min="1" step="1" class="duration-input"
+                :disabled="creatingStep || newStepDraft.time_unit === 'DAY' || newStepDraft.sourcing_type === 'BUY'"
+              />
+            </div>
             <div class="create-step-field" style="align-self:flex-end;">
               <button class="btn-primary" :disabled="isCreateStepDisabled" @click="createStep">
                 {{ creatingStep ? '追加中...' : '工程追加保存' }}
               </button>
+            </div>
+            <div v-if="isSameParentChild" class="create-step-warning">
+              親製品と加工後品目が同じです（中間工程）。BOM明細は作成されません。
             </div>
           </div>
           <div class="step-filter-row">
@@ -356,7 +369,26 @@
               </thead>
               <tbody>
                 <tr v-for="step in filteredSteps" :key="step.id">
-                  <td>{{ step.hierarchy_path || '-' }}</td>
+                  <td>
+                    <div class="duration-editor">
+                      <input
+                        v-model.trim="hierarchyPathDraftByStepId[step.id]"
+                        type="text"
+                        class="hierarchy-input"
+                        placeholder="必須"
+                        :disabled="!canEdit || savingHierarchyPathStepId === step.id"
+                        @keydown.enter.prevent="saveHierarchyPath(step)"
+                      />
+                      <button
+                        class="duration-save-btn"
+                        :class="{ 'duration-save-btn--active': isHierarchyPathDirty(step) }"
+                        :disabled="!canEdit || !isHierarchyPathDirty(step) || savingHierarchyPathStepId === step.id"
+                        @click="saveHierarchyPath(step)"
+                      >
+                        {{ savingHierarchyPathStepId === step.id ? '保存中' : '保存' }}
+                      </button>
+                    </div>
+                  </td>
                   <td>{{ step.step_no }}</td>
                   <td>{{ step.parallel_group }}</td>
                   <td>{{ step.process_name || step.process || '-' }}</td>
@@ -597,6 +629,8 @@ const outputProductDraftByStepId = ref({})
 const savingOutputProductStepId = ref(null)
 const parentProductDraftByStepId = ref({})
 const savingParentProductStepId = ref(null)
+const hierarchyPathDraftByStepId = ref({})
+const savingHierarchyPathStepId = ref(null)
 const routingHeaderDraft = ref({
   is_default: false,
   is_active: true,
@@ -653,6 +687,7 @@ const showRoutingList = ref(true)
 const creatingStep = ref(false)
 const newStepDraft = ref({
   step_no: '',
+  hierarchy_path: '',
   parallel_group: 1,
   process: '',
   line: '',
@@ -699,6 +734,14 @@ const selectRemarkProduct = (product) => {
   remarkProductSearch.value = `${product.product_code} - ${product.product_name}`
   remarkProductDropOpen.value = false
 }
+
+const isSameParentChild = computed(() => {
+  const outputId = newStepDraft.value.output_product
+  const remarkCode = String(newStepDraft.value.remark || '').trim()
+  if (!outputId || !remarkCode) return false
+  const p = sortedProducts.value.find(item => item.id === Number(outputId))
+  return p && p.product_code === remarkCode
+})
 
 // 在庫移行機能
 const lines = ref([])
@@ -860,6 +903,9 @@ const isCreateStepDisabled = computed(() => {
   if (!canEdit.value) return true
   if (!selectedRoutingId.value || creatingStep.value) return true
   if (!newStepDraft.value.process) return true
+  if (!String(newStepDraft.value.hierarchy_path || '').trim()) return true
+  if (!newStepDraft.value.output_product) return true
+  if (!String(newStepDraft.value.remark || '').trim()) return true
   const stepNo = Number(newStepDraft.value.step_no)
   const parallelGroup = Number(newStepDraft.value.parallel_group)
   if (!Number.isInteger(stepNo) || stepNo <= 0) return true
@@ -999,6 +1045,14 @@ const resetParentProductDrafts = (stepList) => {
   parentProductDraftByStepId.value = draftMap
 }
 
+const resetHierarchyPathDrafts = (stepList) => {
+  const draftMap = {}
+  stepList.forEach((step) => {
+    draftMap[step.id] = step.hierarchy_path || ''
+  })
+  hierarchyPathDraftByStepId.value = draftMap
+}
+
 const isMinuteStep = (step) => step?.time_unit === 'MINUTE'
 
 const parseDuration = (value) => {
@@ -1057,6 +1111,12 @@ const isOutputProductDirty = (step) => {
   const draftCode = draftProduct?.product_code || extractProductCode(outputProductDraftByStepId.value[step.id])
   const currentCode = String(step?.output_product_code || '').trim()
   return String(draftCode || '') !== currentCode
+}
+
+const isHierarchyPathDirty = (step) => {
+  const draft = String(hierarchyPathDraftByStepId.value[step.id] || '').trim()
+  const current = String(step?.hierarchy_path || '').trim()
+  return draft !== current
 }
 
 const isParentProductDirty = (step) => {
@@ -1169,6 +1229,27 @@ const saveOutputProduct = async (step) => {
   } finally {
     if (savingOutputProductStepId.value === step.id) {
       savingOutputProductStepId.value = null
+    }
+  }
+}
+
+const saveHierarchyPath = async (step) => {
+  if (!canEdit.value || !step?.id) return
+  if (!isHierarchyPathDirty(step)) return
+  const newPath = String(hierarchyPathDraftByStepId.value[step.id] || '').trim()
+  savingHierarchyPathStepId.value = step.id
+  errorMessage.value = ''
+  try {
+    await api.routings.patchRoutingStep(step.id, { hierarchy_path: newPath })
+    step.hierarchy_path = newPath
+    hierarchyPathDraftByStepId.value[step.id] = newPath
+  } catch (error) {
+    console.error('階層更新エラー:', error)
+    const detail = error?.response?.data?.detail || '階層の更新に失敗しました'
+    alert(detail)
+  } finally {
+    if (savingHierarchyPathStepId.value === step.id) {
+      savingHierarchyPathStepId.value = null
     }
   }
 }
@@ -1338,6 +1419,7 @@ const fetchStepsAndMaterials = async (routingId) => {
     resetUsageQuantityDrafts(stepList)
     resetOutputProductDrafts(stepList)
     resetParentProductDrafts(stepList)
+    resetHierarchyPathDrafts(stepList)
 
     // ルーティングID一括取得（ステップ数分のN+1リクエストを回避）
     // routing 指定時はサーバー側でページネーション無効化のため page_size 不要
@@ -1496,26 +1578,24 @@ const fetchCustomerProductCodeSet = async (customerCode) => {
 }
 
 const resetCreateStepDraft = () => {
-  const defaultProduct = selectedRouting.value?.product || ''
-  const defaultProductCode = selectedRouting.value?.product_code || ''
-  const defaultProductName = selectedRouting.value?.product_name || ''
   newStepDraft.value = {
     step_no: '',
+    hierarchy_path: '',
     parallel_group: 1,
     process: '',
     line: '',
     supplier: '',
     sourcing_type: 'MAKE',
-    output_product: defaultProduct,
+    output_product: '',
     time_unit: 'DAY',
     lead_time_days: 0,
     duration_min: '',
     usage_quantity: '',
-    remark: defaultProductCode,
+    remark: '',
   }
-  outputProductSearch.value = defaultProduct ? `${defaultProductCode} - ${defaultProductName}` : ''
+  outputProductSearch.value = ''
   outputProductDropOpen.value = false
-  remarkProductSearch.value = defaultProductCode ? `${defaultProductCode} - ${defaultProductName}` : ''
+  remarkProductSearch.value = ''
   remarkProductDropOpen.value = false
 }
 
@@ -1531,6 +1611,7 @@ const createStep = async () => {
   creatingStep.value = true
   errorMessage.value = ''
   try {
+    const hierarchyPath = String(newStepDraft.value.hierarchy_path || '').trim()
     const payload = {
       routing: Number(selectedRoutingId.value),
       step_no: Number(newStepDraft.value.step_no),
@@ -1546,6 +1627,7 @@ const createStep = async () => {
       usage_quantity: newStepDraft.value.usage_quantity !== '' && newStepDraft.value.usage_quantity != null ? Number(newStepDraft.value.usage_quantity) : null,
       remark: String(newStepDraft.value.remark || '').trim() || null,
     }
+    payload.hierarchy_path = hierarchyPath
     await api.routings.createRoutingStep(payload)
     resetCreateStepDraft()
     try {
@@ -1621,6 +1703,34 @@ watch(() => newStepDraft.value.process, (processId) => {
     return
   }
   syncLineFromProcess(processId)
+})
+
+const autoFillSupplierLineAndProcess = () => {
+  const st = newStepDraft.value.sourcing_type
+  if (st === 'MAKE') {
+    newStepDraft.value.supplier = ''
+    return
+  }
+  const processCode = st === 'SUBCON' ? 'G' : 'K'
+  const proc = processOptions.value.find(p => p.process_code === processCode)
+  if (proc) newStepDraft.value.process = proc.id
+
+  const supplierId = Number(newStepDraft.value.supplier)
+  if (!supplierId) return
+  const supplier = supplierOptions.value.find(s => s.id === supplierId)
+  if (!supplier) return
+  const matchLine = lines.value.find(l => l.line_code === supplier.supplier_code)
+  if (matchLine) newStepDraft.value.line = matchLine.id
+}
+
+watch(() => newStepDraft.value.sourcing_type, () => {
+  autoFillSupplierLineAndProcess()
+})
+
+watch(() => newStepDraft.value.supplier, () => {
+  if (newStepDraft.value.sourcing_type !== 'MAKE') {
+    autoFillSupplierLineAndProcess()
+  }
 })
 
 watch(selectedRouting, (routing) => {
@@ -2044,6 +2154,24 @@ onMounted(async () => {
   text-align: right;
 }
 
+.create-step-warning {
+  width: 100%;
+  padding: 4px 8px;
+  margin-top: 2px;
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.hierarchy-input {
+  width: 60px;
+  padding: 2px 4px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 12px;
+  text-align: center;
+}
 .step-code-input {
   width: 150px;
   padding: 2px 6px;

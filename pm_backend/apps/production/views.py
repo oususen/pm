@@ -879,7 +879,7 @@ class LinePlanViewSet(viewsets.ModelViewSet):
 
 
 class LineBacklogViewSet(viewsets.ModelViewSet):
-    queryset = LineBacklog.objects.all().select_related('process', 'product', 'line')
+    queryset = LineBacklog.objects.all().select_related('process', 'product', 'line', 'source_routing_step')
     serializer_class = LineBacklogSerializer
     pagination_class = None
     filter_backends = [DjangoFilterBackend, OrderingFilter]

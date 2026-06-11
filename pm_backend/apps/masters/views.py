@@ -24,7 +24,7 @@ from .models import (
 from .serializers import (
     ProductSerializer, CustomerSerializer, ProcessSerializer, LineSerializer,
     SupplierSerializer, CalendarSerializer, CalendarDaySerializer, WorkPatternSerializer, BreakTimeSerializer,
-    BOMSerializer, BOMItemSerializer, RoutingSerializer, RoutingListSerializer, RoutingStepSerializer,
+    BOMSerializer, BOMListSerializer, BOMItemSerializer, RoutingSerializer, RoutingListSerializer, RoutingStepSerializer,
     RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer, EquipmentSerializer, ContactSerializer,
     KubotaSakaiTruckSerializer, MobileDeviceSerializer, MobileDeviceInventorySerializer, ProductCodeMappingSerializer
 )
@@ -1468,22 +1468,20 @@ class CalendarDayViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
 
 class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
-    queryset = BOM.objects.all()
+    queryset = BOM.objects.select_related('parent_product').all()
     serializer_class = BOMSerializer
-    pagination_class = None
     filterset_fields = ['parent_product', 'is_active']
     ordering_fields = ['created_at']
     ordering = ['-created_at']
 
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return BOMListSerializer
+        return BOMSerializer
+
     def get_queryset(self):
         queryset = super().get_queryset()
 
-        # デバッグログ
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"BOM Filter Params: {dict(self.request.query_params)}")
-
-        # 親製品（品番/品名）検索
         search = self.request.query_params.get('search', None)
         if search:
             queryset = queryset.filter(
@@ -1491,48 +1489,36 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 Q(parent_product__product_name__icontains=search)
             )
 
-        # 最終品フィルタ（親製品のis_final_productフィールドで絞り込み）
         is_final = self.request.query_params.get('parent_is_final', None)
         if is_final is not None and is_final != '':
             is_final_bool = is_final.lower() == 'true'
             queryset = queryset.filter(parent_product__is_final_product=is_final_bool)
 
-        # ライン最終品フィルタ（親製品のis_line_final_productフィールドで絞り込み）
         is_line_final = self.request.query_params.get('parent_is_line_final', None)
         if is_line_final is not None and is_line_final != '':
             is_line_final_bool = is_line_final.lower() == 'true'
             queryset = queryset.filter(parent_product__is_line_final_product=is_line_final_bool)
 
-        # 連産品フィルタ
         is_coproduct = self.request.query_params.get('is_coproduct', None)
         if is_coproduct is not None and is_coproduct != '':
             is_coproduct_bool = is_coproduct.lower() == 'true'
             queryset = queryset.filter(is_coproduct=is_coproduct_bool)
 
-        # 版フィルタ
         version = self.request.query_params.get('version', None)
         if version:
             queryset = queryset.filter(version__icontains=version)
 
-        # 作成日フィルタ（From）
         created_from = self.request.query_params.get('created_from', None)
         if created_from:
-            logger.info(f"Filtering by created_from: {created_from}")
-            from datetime import datetime
             created_from_dt = datetime.strptime(created_from, '%Y-%m-%d')
             queryset = queryset.filter(created_at__gte=created_from_dt)
 
-        # 作成日フィルタ（To）
         created_to = self.request.query_params.get('created_to', None)
         if created_to:
-            logger.info(f"Filtering by created_to: {created_to}")
-            from datetime import datetime, timedelta
             created_to_dt = datetime.strptime(created_to, '%Y-%m-%d')
-            # その日の23:59:59まで含めるため、翌日の00:00:00未満とする
             created_to_dt = created_to_dt + timedelta(days=1)
             queryset = queryset.filter(created_at__lt=created_to_dt)
 
-        logger.info(f"Final queryset count: {queryset.count()}")
         return queryset
 
     def _serialize_product(self, product: Product):
@@ -3380,18 +3366,40 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             return item.quantity
         return None
 
+    def _cleanup_old_bom_item(self, old_bom_item_id, new_bom_item_id):
+        """旧source_bom_itemが他工程から参照されていなければ削除"""
+        if not old_bom_item_id or old_bom_item_id == new_bom_item_id:
+            return
+        other_refs = RoutingStep.objects.filter(
+            source_bom_item_id=old_bom_item_id,
+        ).exclude(source_bom_item_id=new_bom_item_id).exists()
+        if not other_refs:
+            BOMItem.objects.filter(id=old_bom_item_id).delete()
+
     def _sync_step_bom_linkage(self, step: RoutingStep, usage_quantity: Decimal = None):
+        old_bom_item_id = getattr(step, 'source_bom_item_id', None)
+
         if not step.output_product_id or not step.remark:
-            if getattr(step, 'source_bom_item_id', None):
+            if old_bom_item_id:
                 step.source_bom_item = None
                 step.save(update_fields=['source_bom_item', 'updated_at'])
+                self._cleanup_old_bom_item(old_bom_item_id, None)
             return
 
         bom = self._resolve_sync_target_bom(step, prefer_source=False)
         if not bom:
-            if getattr(step, 'source_bom_item_id', None):
+            if old_bom_item_id:
                 step.source_bom_item = None
                 step.save(update_fields=['source_bom_item', 'updated_at'])
+                self._cleanup_old_bom_item(old_bom_item_id, None)
+            return
+
+        # 子と親が同じ製品の場合（中間工程）はBOM明細を作らない
+        if step.output_product_id == bom.parent_product_id:
+            if old_bom_item_id:
+                step.source_bom_item = None
+                step.save(update_fields=['source_bom_item', 'updated_at'])
+                self._cleanup_old_bom_item(old_bom_item_id, None)
             return
 
         qty = usage_quantity if usage_quantity is not None else self._resolve_step_usage_quantity(step)
@@ -3419,6 +3427,7 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             if step.source_bom_item_id != existing_item.id:
                 step.source_bom_item = existing_item
                 step.save(update_fields=['source_bom_item', 'updated_at'])
+                self._cleanup_old_bom_item(old_bom_item_id, existing_item.id)
             return
 
         new_item = BOMItem.objects.create(
@@ -3435,6 +3444,7 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         )
         step.source_bom_item = new_item
         step.save(update_fields=['source_bom_item', 'updated_at'])
+        self._cleanup_old_bom_item(old_bom_item_id, new_item.id)
 
     def _normalize_final_step_flags(self, routing_id):
         if not routing_id:
@@ -3465,16 +3475,28 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         final_step_id = final_candidates[-1].id
         for step in final_candidates:
             raw_path = str(step.hierarchy_path or '').strip()
-            expected_path = 'final' if step.id == final_step_id else ''
-            expected_depth = 0
             changed_fields = []
 
-            if raw_path != expected_path:
-                step.hierarchy_path = expected_path
-                changed_fields.append('hierarchy_path')
-            if int(getattr(step, 'hierarchy_depth', 0) or 0) != expected_depth:
-                step.hierarchy_depth = expected_depth
-                changed_fields.append('hierarchy_depth')
+            if step.id == final_step_id:
+                if raw_path != 'final':
+                    # 子工程の階層パスから旧パスの接頭辞を除去
+                    if raw_path:
+                        old_prefix = raw_path + '.'
+                        for sibling in step_list:
+                            sib_path = str(sibling.hierarchy_path or '').strip()
+                            if sib_path.startswith(old_prefix):
+                                sibling.hierarchy_path = sib_path[len(old_prefix):]
+                                sibling.save(update_fields=['hierarchy_path', 'updated_at'])
+                    step.hierarchy_path = 'final'
+                    changed_fields.append('hierarchy_path')
+                if int(getattr(step, 'hierarchy_depth', 0) or 0) != 0:
+                    step.hierarchy_depth = 0
+                    changed_fields.append('hierarchy_depth')
+            else:
+                # 非final中間工程: 'final'が付いていたら除去、それ以外は手動設定を維持
+                if raw_path == 'final':
+                    step.hierarchy_path = ''
+                    changed_fields.append('hierarchy_path')
 
             if changed_fields:
                 step.save(update_fields=changed_fields + ['updated_at'])

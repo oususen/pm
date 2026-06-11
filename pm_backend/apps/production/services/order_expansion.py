@@ -478,6 +478,45 @@ class OrderExpansionService:
             parent_path = path.rsplit('.', 1)[0] if '.' in path else None
             children_map.setdefault(parent_path, []).append(path)
 
+        # 中間工程の階層補正: 非final・加工後品目=ルーティング製品・hierarchy_path未設定
+        # の工程を仮想パスでツリーに組み込み、remark(親製品コード)で子部品を再配置
+        _orphan_vpath_map = {}
+        _existing_step_ids = {s.id for s in path_step_map.values()}
+        _orphan_int_steps = [
+            s for s in steps
+            if s.hierarchy_path != 'final'
+            and s.id not in _existing_step_ids
+            and s.output_product_id == product.id
+        ]
+        if _orphan_int_steps:
+            _orphan_int_steps.sort(key=lambda s: s.step_no, reverse=True)
+            _int_vpaths = []
+            for _ois in _orphan_int_steps:
+                _vp = f"_oi_{_ois.id}"
+                path_step_map[_vp] = _ois
+                _orphan_vpath_map[_ois.id] = _vp
+                _int_vpaths.append(_vp)
+            children_map.setdefault(None, []).append(_int_vpaths[0])
+            for _i in range(1, len(_int_vpaths)):
+                children_map.setdefault(_int_vpaths[_i - 1], []).append(_int_vpaths[_i])
+            _output_to_path = {}
+            for _p, _s in path_step_map.items():
+                if _s.output_product_id and _s.output_product:
+                    _output_to_path[_s.output_product.product_code] = _p
+            for _rp in list(children_map.get(None, [])):
+                if _rp.startswith('_oi_'):
+                    continue
+                _rs = path_step_map.get(_rp)
+                if not _rs:
+                    continue
+                _remark = (_rs.remark or '').strip()
+                if not _remark:
+                    continue
+                _parent_path = _output_to_path.get(_remark)
+                if _parent_path and _parent_path != _rp:
+                    children_map[None].remove(_rp)
+                    children_map.setdefault(_parent_path, []).append(_rp)
+
         final_step = next((step for step in steps if step.hierarchy_path == 'final'), None)
         if final_step:
             final_calendar_id = self._resolve_calendar_id(final_step.line_id)
@@ -527,6 +566,8 @@ class OrderExpansionService:
                 target_date = final_required_date
             elif step.hierarchy_path in required_by_path:
                 target_date = required_by_path[step.hierarchy_path]
+            elif step.id in _orphan_vpath_map and _orphan_vpath_map[step.id] in required_by_path:
+                target_date = required_by_path[_orphan_vpath_map[step.id]]
             else:
                 target_date = self._shift_business_days(calendar_id, required_date, lead_days)
 

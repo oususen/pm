@@ -221,6 +221,18 @@ class BOMItemSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class BOMListSerializer(serializers.ModelSerializer):
+    """一覧用の軽量シリアライザ（itemsを含まない）"""
+    parent_product_name = serializers.CharField(source='parent_product.product_name', read_only=True)
+    parent_product_code = serializers.CharField(source='parent_product.product_code', read_only=True)
+    parent_is_final = serializers.BooleanField(source='parent_product.is_final_product', read_only=True, default=False)
+    parent_is_line_final = serializers.BooleanField(source='parent_product.is_line_final_product', read_only=True, default=False)
+
+    class Meta:
+        model = BOM
+        fields = '__all__'
+
+
 class BOMSerializer(serializers.ModelSerializer):
     items = BOMItemSerializer(many=True, read_only=True)
     parent_product_name = serializers.CharField(source='parent_product.product_name', read_only=True)

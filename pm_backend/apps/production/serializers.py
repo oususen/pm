@@ -46,6 +46,7 @@ class LineDemandSerializer(serializers.ModelSerializer):
     process = serializers.SerializerMethodField()
     process_code = serializers.SerializerMethodField()
     process_name = serializers.SerializerMethodField()
+    step_no = serializers.SerializerMethodField()
 
     class Meta:
         model = LineDemand
@@ -55,7 +56,7 @@ class LineDemandSerializer(serializers.ModelSerializer):
             'plan_date', 'lead_time_days', 'is_shifted',
             'forecast_qty', 'firm_qty', 'plan_qty', 'actual_qty',
             'plan_progress', 'actual_progress', 'required_qty',
-            'order_numbers', 'created_at', 'updated_at',
+            'order_numbers', 'step_no', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'plan_progress', 'actual_progress', 'required_qty']
 
@@ -84,6 +85,11 @@ class LineDemandSerializer(serializers.ModelSerializer):
     def get_process_name(self, obj):
         if obj.routing_step_id and obj.routing_step and obj.routing_step.process_id:
             return obj.routing_step.process.process_name
+        return None
+
+    def get_step_no(self, obj):
+        if obj.routing_step_id and obj.routing_step:
+            return obj.routing_step.step_no
         return None
 
 
@@ -128,7 +134,13 @@ class LineBacklogSerializer(serializers.ModelSerializer):
         return getattr(obj, 'computed_time_min', None)
 
     def get_step_no(self, obj):
-        return getattr(obj, 'step_no', None)
+        val = getattr(obj, 'step_no', None)
+        if val is not None:
+            return val
+        src = getattr(obj, 'source_routing_step', None)
+        if src:
+            return src.step_no
+        return None
 
     def get_cycle_time_min(self, obj):
         return getattr(obj, 'cycle_time_min', None)
