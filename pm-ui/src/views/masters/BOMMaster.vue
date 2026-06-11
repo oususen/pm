@@ -76,7 +76,7 @@
         </div>
       </div>
 
-      <div class="bom-list-area">
+      <div class="bom-list-area" v-if="hasSearched && boms.length > 0">
         <table class="data-table bom-list-table">
           <thead>
             <tr>
@@ -134,8 +134,11 @@
         </button>
       </div>
 
-      <div v-if="boms.length === 0" class="no-data">
-        データがありません
+      <div v-if="!hasSearched" class="no-data">
+        検索条件を入力して「検索」ボタンを押してください
+      </div>
+      <div v-else-if="boms.length === 0" class="no-data">
+        該当するBOMがありません
       </div>
     </div>
 
@@ -810,6 +813,7 @@ const currentPage = ref(1)
 const totalCount = ref(0)
 const totalPages = ref(0)
 const pageSize = ref(20)
+const hasSearched = ref(false)
 
 const showDetailsDialog = ref(false)
 const selectedBOM = ref({})
@@ -1016,10 +1020,15 @@ const resetFilters = () => {
     created_to: '',
     is_active: ''
   }
-  fetchBOMs(1)
+  boms.value = []
+  totalCount.value = 0
+  totalPages.value = 0
+  currentPage.value = 1
+  hasSearched.value = false
 }
 
 const fetchBOMs = async (page = 1) => {
+  hasSearched.value = true
   const targetPage = typeof page === 'number' ? page : 1
   try {
     const params = {
@@ -2293,7 +2302,6 @@ onMounted(async () => {
     fetchProcesses(),
     fetchLines(),
   ])
-  await fetchBOMs(1)
   if (isStandaloneDetail.value && routeBomId.value) {
     await openDetailFromRoute()
   }
