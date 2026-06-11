@@ -34,12 +34,22 @@
             <input v-model.trim="filters.product_code" type="text" placeholder="品番の一部を入力" />
           </div>
         </label>
+        <label class="search-block">
+          <span class="search-label">写真 <button type="button" class="field-reset-btn" @click="filters.has_image = ''">クリア</button></span>
+          <div class="search-input-wrap">
+            <select v-model="filters.has_image">
+              <option value="">すべて</option>
+              <option value="true">あり</option>
+              <option value="false">なし</option>
+            </select>
+          </div>
+        </label>
       </div>
     </section>
 
     <section class="candidate-list">
       <div v-if="loading" class="empty-state">読込中...</div>
-      <div v-else-if="!hasFilter" class="empty-state">ライン・置き場・品番のいずれかを選択してください</div>
+      <div v-else-if="!hasFilter" class="empty-state">ライン・置き場・品番・写真のいずれかを選択してください</div>
       <div v-else-if="filteredRows.length === 0" class="empty-state">対象がありません</div>
       <div v-else class="list-stack">
         <article
@@ -143,6 +153,7 @@ const filters = ref({
   line_id: '',
   stock_location: '',
   product_code: '',
+  has_image: '',
 })
 
 const editLocations = ref([])
@@ -150,7 +161,7 @@ const photoFile = ref(null)
 const photoPreview = ref('')
 
 const hasFilter = computed(() =>
-  !!(filters.value.line_id || filters.value.stock_location || filters.value.product_code)
+  !!(filters.value.line_id || filters.value.stock_location || filters.value.product_code || filters.value.has_image)
 )
 
 const filteredRows = computed(() => {
@@ -199,6 +210,7 @@ const loadProducts = async () => {
     const params = { is_active: true, page_size: 5000 }
     if (filters.value.line_id) params.line = filters.value.line_id
     if (filters.value.stock_location) params.stock_location = filters.value.stock_location
+    if (filters.value.has_image !== '') params.has_image = filters.value.has_image === 'true'
     if (filters.value.product_code && !filters.value.line_id && !filters.value.stock_location) {
       params.search = filters.value.product_code
     }
@@ -217,8 +229,8 @@ const loadProducts = async () => {
   }
 }
 
-watch(() => [filters.value.line_id, filters.value.stock_location], () => {
-  if (filters.value.line_id || filters.value.stock_location) loadProducts()
+watch(() => [filters.value.line_id, filters.value.stock_location, filters.value.has_image], () => {
+  if (filters.value.line_id || filters.value.stock_location || filters.value.has_image) loadProducts()
 })
 
 let searchTimer = null
@@ -332,7 +344,7 @@ onMounted(() => {
 }
 .top-tabs .active { text-align: left; color: #fff9cc; }
 .search-strip { padding: 0; background: #9ccf39; }
-.search-grid { display: grid; grid-template-columns: 1fr 1fr 1.35fr; gap: 0; }
+.search-grid { display: grid; grid-template-columns: 1fr 1fr 1.35fr 0.8fr; gap: 0; }
 .search-block { font-size: 9px; color: #23360a; min-width: 0; overflow: hidden; }
 .search-label { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1px; }
 .field-reset-btn { border: none; background: transparent; padding: 0; font-size: 10px; cursor: pointer; color: inherit; }
