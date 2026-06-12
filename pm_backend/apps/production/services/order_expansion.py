@@ -205,8 +205,10 @@ class OrderExpansionService:
         return queryset.order_by('id')
 
     def _expand_incremental(self) -> Dict[str, object]:
+        open_firm_source_keys = self._collect_open_firm_source_keys()
         forecast_aggregated, _ = self._aggregate_order_lines(
-            self._get_open_order_lines_queryset(order_type='FORECAST')
+            self._get_open_order_lines_queryset(order_type='FORECAST'),
+            exclude_forecast_source_keys=open_firm_source_keys,
         )
         firm_aggregated, processed_firm_line_ids = self._aggregate_order_lines(
             self._get_open_order_lines_queryset(order_type='FIRM', is_expanded=False)
@@ -235,13 +237,19 @@ class OrderExpansionService:
         }
 
     def _full_rebuild_open_orders(self) -> Dict[str, object]:
-        order_lines = self._get_open_order_lines_queryset()
-        aggregated, _ = self._aggregate_order_lines(order_lines)
+        open_firm_source_keys = self._collect_open_firm_source_keys()
+        forecast_aggregated, _ = self._aggregate_order_lines(
+            self._get_open_order_lines_queryset(order_type='FORECAST'),
+            exclude_forecast_source_keys=open_firm_source_keys,
+        )
+        firm_aggregated, _ = self._aggregate_order_lines(
+            self._get_open_order_lines_queryset(order_type='FIRM')
+        )
+        aggregated = self._merge_aggregated_demands(forecast_aggregated, firm_aggregated)
         existing_map = self._load_existing_demands()
 
         objects_to_create: List[LineDemand] = []
         for key, entry in aggregated.items():
-            self._apply_firm_priority_to_entry(entry)
             existing = existing_map.get(key)
             objects_to_create.append(self._build_line_demand(entry, existing=existing))
 
@@ -288,12 +296,6 @@ class OrderExpansionService:
             existing = existing_map.get(key)
 
             if entry:
-                # 確定優先: 既存FIRMがあるキーはFORECASTを展開しない
-                if existing is not None and (existing.firm_qty or Decimal('0')) > 0:
-                    entry = dict(entry)
-                    entry['forecast_qty'] = Decimal('0')
-                    entry['forecast_is_shifted'] = False
-                    entry['forecast_order_numbers'] = set()
                 if existing is None:
                     existing = self._build_line_demand(entry)
                     existing_map[key] = existing
@@ -361,10 +363,6 @@ class OrderExpansionService:
                 existing.firm_order_numbers,
                 self._normalize_order_numbers(entry['firm_order_numbers']),
             )
-            # 確定優先: FIRMが入ったキーのFORECASTは0化
-            existing.forecast_qty = Decimal('0')
-            existing.forecast_is_shifted = False
-            existing.forecast_order_numbers = ''
             self._refresh_demand_fields(existing)
             to_update.append(existing)
 
@@ -384,13 +382,6 @@ class OrderExpansionService:
             'created': len(to_create),
             'updated': len(to_update),
         }
-
-    def _apply_firm_priority_to_entry(self, entry):
-        """同一キーに確定がある場合、内示は無効化する。"""
-        if (entry.get('firm_qty') or Decimal('0')) > 0:
-            entry['forecast_qty'] = Decimal('0')
-            entry['forecast_is_shifted'] = False
-            entry['forecast_order_numbers'] = set()
 
     def _load_existing_demands(self):
         return {
@@ -414,17 +405,29 @@ class OrderExpansionService:
         for demand in refreshed:
             existing_map[(demand.line_id, demand.product_code, demand.plan_date)] = demand
 
-    def _aggregate_order_lines(self, order_lines: Iterable[OrderLine]):
+    def _aggregate_order_lines(self, order_lines: Iterable[OrderLine], exclude_forecast_source_keys=None):
         aggregated: Dict[Tuple[int, str, object], Dict[str, object]] = {}
         processed_ids: List[int] = []
 
         for order_line in order_lines:
             processed_ids.append(order_line.id)
-            self._accumulate_order_line(aggregated, order_line)
+            self._accumulate_order_line(
+                aggregated,
+                order_line,
+                exclude_forecast_source_keys=exclude_forecast_source_keys,
+            )
 
         return aggregated, processed_ids
 
-    def _accumulate_order_line(self, aggregated, order_line: OrderLine):
+    def _accumulate_order_line(self, aggregated, order_line: OrderLine, exclude_forecast_source_keys=None):
+        source_key = self._build_source_demand_key(order_line)
+        if (
+            order_line.order.order_type == 'FORECAST'
+            and exclude_forecast_source_keys
+            and source_key in exclude_forecast_source_keys
+        ):
+            return
+
         product = order_line.product
         if not product:
             return
@@ -612,6 +615,50 @@ class OrderExpansionService:
 
             if step.hierarchy_path == 'final':
                 required_date = target_date
+
+    def _build_source_demand_key(self, order_line: OrderLine):
+        return (
+            order_line.order.customer_id,
+            order_line.product_code,
+            (order_line.ship_to_code or '').strip(),
+            order_line.due_date,
+        )
+
+    def _collect_open_firm_source_keys(self):
+        return {
+            self._build_source_demand_key(order_line)
+            for order_line in self._get_open_order_lines_queryset(order_type='FIRM')
+        }
+
+    def _merge_aggregated_demands(self, forecast_aggregated, firm_aggregated):
+        merged = {}
+        for source in (forecast_aggregated, firm_aggregated):
+            for key, entry in source.items():
+                existing = merged.get(key)
+                if existing is None:
+                    merged[key] = {
+                        'line_id': entry['line_id'],
+                        'routing_step_id': entry['routing_step_id'],
+                        'product_id': entry['product_id'],
+                        'product_code': entry['product_code'],
+                        'plan_date': entry['plan_date'],
+                        'lead_time_days': entry['lead_time_days'],
+                        'firm_qty': entry['firm_qty'],
+                        'forecast_qty': entry['forecast_qty'],
+                        'firm_is_shifted': bool(entry['firm_is_shifted']),
+                        'forecast_is_shifted': bool(entry['forecast_is_shifted']),
+                        'firm_order_numbers': set(entry['firm_order_numbers']),
+                        'forecast_order_numbers': set(entry['forecast_order_numbers']),
+                    }
+                    continue
+
+                existing['firm_qty'] += entry['firm_qty']
+                existing['forecast_qty'] += entry['forecast_qty']
+                existing['firm_is_shifted'] = bool(existing['firm_is_shifted'] or entry['firm_is_shifted'])
+                existing['forecast_is_shifted'] = bool(existing['forecast_is_shifted'] or entry['forecast_is_shifted'])
+                existing['firm_order_numbers'].update(entry['firm_order_numbers'])
+                existing['forecast_order_numbers'].update(entry['forecast_order_numbers'])
+        return merged
 
     def _build_line_demand(self, entry, existing: LineDemand | None = None):
         actual_qty = existing.actual_qty if existing is not None else Decimal('0')
