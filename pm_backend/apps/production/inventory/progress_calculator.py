@@ -39,8 +39,8 @@ def recalculate_progress_qty(
 
     需要の取得:
     - LineDemandから取得（受注をRoutingでLT遡りして展開済み）
-    - 前倒しあり（lead_time_days > 0）で確定/内示が同日にある場合は合算
-    - それ以外は従来どおり確定優先（確定が無ければ内示）
+    - 展開時点で同一親需要のFORECAST重複は除外済みのため、
+      進度では firm_qty と forecast_qty をそのまま合算して需要採用する
     - どちらもなければ 0
 
     Args:
@@ -229,15 +229,9 @@ def recalculate_progress_qty(
             demand_qs = demand_qs.filter(product_id=product_id)
 
         for demand in demand_qs:
-            qty = Decimal('0')
             firm_qty = demand.firm_qty if demand.firm_qty and demand.firm_qty > 0 else Decimal('0')
             forecast_qty = demand.forecast_qty if demand.forecast_qty and demand.forecast_qty > 0 else Decimal('0')
-            if firm_qty > 0:
-                qty = firm_qty
-            elif forecast_qty > 0:
-                qty = forecast_qty
-            else:
-                qty = Decimal('0')
+            qty = firm_qty + forecast_qty
             if demand.routing_step_id:
                 key = (demand.plan_date, demand.routing_step_id)
                 demand_by_step[key] = demand_by_step.get(key, Decimal('0')) + qty
@@ -296,7 +290,7 @@ def recalculate_progress_qty(
         # 進度計算では scrap_qty を引かない（自製品の仕損は actual_qty 減算で対応済み）
 
         # LineDemandから需要を取得（LT遡り済み）
-        # 確定優先、なければ内示、どちらもなければ0
+        # 同一親需要の重複は展開時に除外済みのため、firm + forecast を需要採用する
         demand_qty = Decimal('0')
         process_id = rows[0].process_id if rows else None
         step_id = step_map.get((process_id, product_id)) if process_id else None
