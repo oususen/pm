@@ -292,7 +292,7 @@
     <div class="modal-box area-modal">
       <div class="modal-header">エリア管理</div>
       <div class="modal-body">
-        <div class="area-edit-section" v-if="editingArea">
+        <div class="area-edit-section" v-if="canEdit && editingArea">
           <div class="area-edit-name-row">
             <input v-model.trim="editingArea.name" placeholder="エリア名" />
             <button type="button" class="btn-save" @click="saveEditArea" :disabled="!editingArea.name">保存</button>
@@ -311,15 +311,16 @@
           <div v-if="allKnownLocations.length === 0" class="empty-state">置き場データがありません。先に製品マスタで保管場所を設定してください。</div>
         </div>
         <div v-else>
-          <div class="recorder-add-row">
+          <div v-if="canEdit" class="recorder-add-row">
             <input v-model.trim="newAreaName" placeholder="新規エリア名" @keyup.enter="createArea" />
             <button type="button" @click="createArea" :disabled="!newAreaName">追加</button>
           </div>
           <div v-if="areas.length === 0" class="empty-state">エリアがありません</div>
           <div v-else class="recorder-list">
             <div v-for="area in areas" :key="area.id" class="recorder-item">
-              <span @click="startEditArea(area)" style="cursor:pointer;flex:1">{{ area.name }} <small style="color:#6b7280">({{ area.locations.length }}置き場)</small></span>
-              <button type="button" class="history-delete-btn" @click="deleteArea(area.id)">✕</button>
+              <span v-if="canEdit" @click="startEditArea(area)" style="cursor:pointer;flex:1">{{ area.name }} <small style="color:#6b7280">({{ area.locations.length }}置き場)</small></span>
+              <span v-else style="flex:1">{{ area.name }} <small style="color:#6b7280">({{ area.locations.length }}置き場)</small></span>
+              <button v-if="canEdit" type="button" class="history-delete-btn" @click="deleteArea(area.id)">✕</button>
             </div>
           </div>
         </div>
@@ -362,6 +363,7 @@ const historyItems = ref([]);
 const historyLoading = ref(false);
 const historyProductId = ref(null);
 const canDeleteHistory = computed(() => hasPermission(authState.user, "stocktake.delete", "edit"));
+const canEdit = computed(() => hasPermission(authState.user, "stocktake", "edit"));
 const recorders = ref([]);
 const layoutCols = ref(4);
 const layoutRows = ref(4);
@@ -382,7 +384,7 @@ const dsSources = [
   { op: '取得', table: 'production_stocktake_layout_config', desc: 'レイアウト配置設定（エリア別）' },
   { op: '取得', table: 'm_product', desc: '製品マスタ（品番・品名・画像）' },
   { op: '取得', table: 'm_product_stock_location', desc: '製品別置き場マスタ' },
-  { op: '取得', table: 'production_inventory', desc: '在庫（机上在庫数の算出元）' },
+  { op: '取得', table: 'line_backlog', desc: '在庫（机上在庫数の算出元）' },
 ]
 const areas = ref([]);
 const newAreaName = ref('');

@@ -95,7 +95,7 @@
           </select>
         </div>
         <div class="filter-field">
-          <label>加工先</label>
+          <label>加工先(将来用)</label>
           <select v-model="filters.processing_area">
             <option value="">すべて</option>
             <option v-for="area in processingAreaOptions" :key="area.value" :value="area.value">
@@ -144,7 +144,7 @@
               <th>最小発注数</th>
               <th>発注倍数</th>
               <th>機種名</th>
-              <th>加工先</th>
+              <th>加工先(将来用)</th>
               <th>保管場所</th>
               <th>グループ</th>
               <th>容器</th>
@@ -308,7 +308,7 @@
                   <input v-model="formData.model_name" placeholder="例: 17U" />
                 </div>
                 <div class="form-group">
-                  <label>加工先</label>
+                  <label>加工先(将来用)</label>
                   <select v-model="formData.processing_area">
                     <option :value="null">未設定</option>
                     <option v-for="area in processingAreaOptions" :key="area.value" :value="area.value">
