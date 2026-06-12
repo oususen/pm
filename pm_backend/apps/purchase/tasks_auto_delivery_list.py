@@ -34,7 +34,17 @@ def run_auto_delivery_list_send(config_id):
     try:
         today = date.today()
         daiso_cal = Calendar.objects.filter(calendar_code='daiso').first()
+        if not daiso_cal:
+            calendar_missing_message = 'ダイソウカレンダーが未設定のため、自動納品リスト実行できません'
+            _finish(config, start_time, 'FAILED', calendar_missing_message)
+            _notify_users(config.notify_on_failure, calendar_missing_message)
+            return
         calc = WorkingDayCalculator(daiso_cal)
+        if not calc.is_working_day(today):
+            holiday_message = '本日は休日のため、自動納入リストは実行しません'
+            _finish(config, start_time, 'SKIPPED', holiday_message)
+            _notify_users(config.notify_on_non_delivery, holiday_message)
+            return
         delivery_date = calc.add_working_days(today, config.lead_time_days or 2)
 
         schedule = SupplierOrderSchedule.objects.filter(
