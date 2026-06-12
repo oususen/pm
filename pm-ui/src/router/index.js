@@ -56,6 +56,7 @@ const router = createRouter({
 });
 
 const DEFAULT_TITLE = "pm-ui";
+const CHUNK_RELOAD_KEY = "pm-ui:chunk-reload";
 
 export const hasPermission = (user, resource, level = "view") => {
   if (!resource) return true;
@@ -73,6 +74,32 @@ export const hasPermission = (user, resource, level = "view") => {
 router.afterEach((to) => {
   const pageTitle = to.meta?.pageTitle;
   document.title = pageTitle || DEFAULT_TITLE;
+});
+
+router.onError((error, to) => {
+  const message = String(error?.message || "");
+  const isChunkLoadError =
+    message.includes("Failed to fetch dynamically imported module") ||
+    message.includes("Importing a module script failed") ||
+    message.includes("Loading chunk") ||
+    message.includes("ChunkLoadError");
+
+  if (!isChunkLoadError) {
+    console.error("router error:", error);
+    return;
+  }
+
+  const targetPath = to?.fullPath || window.location.pathname || "/";
+  const reloadedPath = sessionStorage.getItem(CHUNK_RELOAD_KEY);
+  if (reloadedPath === targetPath) {
+    sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+    console.error("chunk reload failed after retry:", error);
+    return;
+  }
+
+  // デプロイ直後の古いchunk参照を1回だけ自動復旧する
+  sessionStorage.setItem(CHUNK_RELOAD_KEY, targetPath);
+  window.location.assign(targetPath);
 });
 
 router.beforeEach(async (to) => {
