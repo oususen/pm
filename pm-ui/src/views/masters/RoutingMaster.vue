@@ -905,7 +905,7 @@ const customerOptions = computed(() => {
 const isCreateStepDisabled = computed(() => {
   if (!canEdit.value) return true
   if (!selectedRoutingId.value || creatingStep.value) return true
-  if (!newStepDraft.value.process) return true
+  if (!newStepDraft.value.process && newStepDraft.value.sourcing_type !== 'BUY') return true
   if (!String(newStepDraft.value.hierarchy_path || '').trim()) return true
   if (!newStepDraft.value.output_product) return true
   if (!String(newStepDraft.value.remark || '').trim()) return true
@@ -1720,14 +1720,16 @@ const autoFillSupplierLineAndProcess = () => {
     newStepDraft.value.supplier = ''
     return
   }
-  const processCode = st === 'SUBCON' ? 'G' : 'K'
-  const proc = processOptions.value.find(p => p.process_code === processCode)
-  if (proc) {
-    newStepDraft.value.process = proc.id
+  if (st === 'SUBCON') {
+    const proc = processOptions.value.find(p => p.process_code === 'G')
+    if (proc) {
+      newStepDraft.value.process = proc.id
+    } else {
+      newStepDraft.value.process = ''
+      autoFillProcessWarning.value = `工程マスタに「外注(G)」が未登録です。先に工程マスタで作成してください。`
+    }
   } else {
     newStepDraft.value.process = ''
-    const label = st === 'SUBCON' ? '外注(G)' : '購入(K)'
-    autoFillProcessWarning.value = `工程マスタに「${label}」が未登録です。先に工程マスタで作成してください。`
   }
 
   const supplierId = Number(newStepDraft.value.supplier)

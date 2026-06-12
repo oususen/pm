@@ -876,8 +876,9 @@ const doDisplayOnly = async () => {
     if (!purchaseProcessId.value) {
       const stepsRes = await api.routings.getRoutingSteps({ line: lineId })
       const steps = stepsRes.data.results || stepsRes.data || []
-      if (steps.length > 0) {
-        purchaseProcessId.value = steps[0].process
+      const stepWithProcess = steps.find(s => s.process)
+      if (stepWithProcess) {
+        purchaseProcessId.value = stepWithProcess.process
       }
     }
 

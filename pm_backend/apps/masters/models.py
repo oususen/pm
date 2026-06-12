@@ -466,7 +466,7 @@ class RoutingStep(models.Model):
     id = models.BigAutoField(primary_key=True)
     routing = models.ForeignKey(Routing, on_delete=models.CASCADE, related_name='steps', verbose_name='ルーティング')
     step_no = models.IntegerField(verbose_name='工程番号')
-    process = models.ForeignKey(Process, on_delete=models.CASCADE, verbose_name='工程')
+    process = models.ForeignKey(Process, on_delete=models.PROTECT, null=True, blank=True, verbose_name='工程')
     line = models.ForeignKey(Line, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='ライン')
     supplier = models.ForeignKey(Supplier, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='外作先')
     output_product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='加工後品目')

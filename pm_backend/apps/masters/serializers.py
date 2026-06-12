@@ -274,7 +274,7 @@ class BOMSerializer(serializers.ModelSerializer):
 
 
 class RoutingStepSerializer(serializers.ModelSerializer):
-    process_name = serializers.CharField(source='process.process_name', read_only=True)
+    process_name = serializers.CharField(source='process.process_name', read_only=True, default='')
     line_name = serializers.CharField(source='line.line_name', read_only=True)
     output_product_code = serializers.CharField(source='output_product.product_code', read_only=True)
     output_product_name = serializers.CharField(source='output_product.product_name', read_only=True)
