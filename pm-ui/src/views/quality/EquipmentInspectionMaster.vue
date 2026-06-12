@@ -286,15 +286,21 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="item in dailyItems" :key="item.local_key" :class="{ 'diff-new': itemDiffStatus(item) === 'new', 'diff-changed': itemDiffStatus(item) === 'changed' }">
+                <tr v-for="(item, iIdx) in dailyItems" :key="item.local_key" :class="{ 'diff-new': itemDiffStatus(item) === 'new', 'diff-changed': itemDiffStatus(item) === 'changed' }">
                   <td class="col-no">
-                    <input
-                      class="no-input"
-                      type="number"
-                      min="1"
-                      v-model.number="item.inspection_no"
-                      :disabled="!canEditFields"
-                    />
+                    <div class="no-cell-wrap">
+                      <input
+                        class="no-input"
+                        type="number"
+                        min="1"
+                        v-model.number="item.inspection_no"
+                        :disabled="!canEditFields"
+                      />
+                      <span class="no-move-buttons" v-if="canEditFields">
+                        <button class="btn-no-move" :disabled="iIdx === 0" @click="moveItemUp('DAILY', iIdx)">↑</button>
+                        <button class="btn-no-move" :disabled="iIdx === dailyItems.length - 1" @click="moveItemDown('DAILY', iIdx)">↓</button>
+                      </span>
+                    </div>
                   </td>
                   <td>
                     <span v-if="itemDiffStatus(item) === 'new'" class="diff-badge diff-badge-new">新規</span>
@@ -399,15 +405,21 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="item in quarterlyItems" :key="item.local_key" :class="{ 'diff-new': itemDiffStatus(item) === 'new', 'diff-changed': itemDiffStatus(item) === 'changed' }">
+                <tr v-for="(item, iIdx) in quarterlyItems" :key="item.local_key" :class="{ 'diff-new': itemDiffStatus(item) === 'new', 'diff-changed': itemDiffStatus(item) === 'changed' }">
                   <td class="col-no">
-                    <input
-                      class="no-input"
-                      type="number"
-                      min="1"
-                      v-model.number="item.inspection_no"
-                      :disabled="!canEditFields"
-                    />
+                    <div class="no-cell-wrap">
+                      <input
+                        class="no-input"
+                        type="number"
+                        min="1"
+                        v-model.number="item.inspection_no"
+                        :disabled="!canEditFields"
+                      />
+                      <span class="no-move-buttons" v-if="canEditFields">
+                        <button class="btn-no-move" :disabled="iIdx === 0" @click="moveItemUp('QUARTERLY', iIdx)">↑</button>
+                        <button class="btn-no-move" :disabled="iIdx === quarterlyItems.length - 1" @click="moveItemDown('QUARTERLY', iIdx)">↓</button>
+                      </span>
+                    </div>
                   </td>
                   <td>
                     <span v-if="itemDiffStatus(item) === 'new'" class="diff-badge diff-badge-new">新規</span>
@@ -1485,6 +1497,32 @@ const resequenceSection = (sectionType) => {
   targetItems.forEach((item, index) => {
     item.display_order = index + 1
   })
+}
+
+const moveItemUp = (sectionType, fromIdx) => {
+  const items = sectionType === 'DAILY' ? dailyItems.value : quarterlyItems.value
+  if (fromIdx <= 0 || fromIdx >= items.length) return
+  const cur = items[fromIdx]
+  const prev = items[fromIdx - 1]
+  const tmpOrder = cur.display_order
+  cur.display_order = prev.display_order
+  prev.display_order = tmpOrder
+  const tmpNo = cur.inspection_no
+  cur.inspection_no = prev.inspection_no
+  prev.inspection_no = tmpNo
+}
+
+const moveItemDown = (sectionType, fromIdx) => {
+  const items = sectionType === 'DAILY' ? dailyItems.value : quarterlyItems.value
+  if (fromIdx < 0 || fromIdx >= items.length - 1) return
+  const cur = items[fromIdx]
+  const next = items[fromIdx + 1]
+  const tmpOrder = cur.display_order
+  cur.display_order = next.display_order
+  next.display_order = tmpOrder
+  const tmpNo = cur.inspection_no
+  cur.inspection_no = next.inspection_no
+  next.inspection_no = tmpNo
 }
 
 const addItem = (sectionType) => {
@@ -2685,11 +2723,11 @@ tr.diff-deleted td {
 .data-table.compact td {
   font-weight: 400;
 }
-.daily-inspection-table th.col-no,
-.daily-inspection-table td.col-no {
-  width: 72px;
-  min-width: 72px;
-  max-width: 72px;
+.data-table th.col-no,
+.data-table td.col-no {
+  width: 90px;
+  min-width: 90px;
+  max-width: 90px;
 }
 .daily-inspection-table td.col-no {
   padding-left: 4px;
@@ -2700,6 +2738,32 @@ tr.diff-deleted td {
   text-align: right;
   padding-left: 4px;
   padding-right: 4px;
+}
+.no-cell-wrap {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.no-move-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.btn-no-move {
+  width: 18px;
+  height: 18px;
+  border: 1px solid #cbd5e1;
+  border-radius: 3px;
+  background: #fff;
+  color: #334155;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  font-size: 11px;
+}
+.btn-no-move:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .data-table.compact tbody tr {
   cursor: pointer;
