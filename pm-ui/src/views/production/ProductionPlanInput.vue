@@ -334,6 +334,7 @@
             </td>
             <td class="sticky-col name-col">
               <span class="product-info">{{ row.product_name || getProductName(row.product_id) }}</span>
+              <span v-if="rowVisibleReason(row)" class="row-visible-reason">{{ rowVisibleReason(row) }}</span>
             </td>
             <template v-for="(c, colIdx) in visibleDateColumns" :key="c.key">
               <td class="num stock" :class="c.dayClass">
@@ -1216,7 +1217,7 @@ const toolbarCollapsed = ref(localStorage.getItem(TOOLBAR_COLLAPSED_KEY) === '1'
 const HIDE_WEEKENDS_KEY = 'productionPlanInput.hideWeekends'
 const hideWeekends = ref(localStorage.getItem(HIDE_WEEKENDS_KEY) === '1')
 const HIDE_EMPTY_ROWS_KEY = 'productionPlanInput.hideEmptyRows'
-const hideEmptyRows = ref(localStorage.getItem(HIDE_EMPTY_ROWS_KEY) === '1')
+const hideEmptyRows = ref(localStorage.getItem(HIDE_EMPTY_ROWS_KEY) !== '0')
 const openManual = (path) => { window.open(`/manual?path=${encodeURIComponent(path)}`, '_blank') }
 const toggleToolbar = () => {
   toolbarCollapsed.value = !toolbarCollapsed.value
@@ -2558,10 +2559,23 @@ const isRowEmpty = (row) => {
   for (const key of Object.keys(row.daily)) {
     const d = row.daily[key]
     if (!d) continue
-    if (Number(d.stock) || Number(d.actual) || Number(d.demand) || Number(d.plan) || Number(d.plan_stock))
+    if (Number(d.stock) || Number(d.actual) || Number(d.demand) || Number(d.plan) || Number(d.plan_stock)
+      || Number(d.progress) || Number(d.line_demand_qty))
       return false
   }
   return true
+}
+
+const rowVisibleReason = (row) => {
+  if (!row.daily || !isProgressMode.value) return ''
+  let hasStock = false
+  for (const key of Object.keys(row.daily)) {
+    const d = row.daily[key]
+    if (!d) continue
+    if (Number(d.actual) || Number(d.plan) || Number(d.progress) || Number(d.line_demand_qty)) return ''
+    if (Number(d.stock) || Number(d.plan_stock)) hasStock = true
+  }
+  return hasStock ? '表示理由：在庫' : ''
 }
 
 const filteredRows = computed(() => {
@@ -5960,6 +5974,12 @@ thead .sticky-col {
   font-size: 11px;
   line-height: 1.15;
   text-align: center;
+}
+.row-visible-reason {
+  display: block;
+  font-size: 9px;
+  color: #dc2626;
+  line-height: 1;
 }
 .row-controls {
   display: flex;
