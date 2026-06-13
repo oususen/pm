@@ -146,10 +146,9 @@ class BOMService:
         where-used行で表示する親品の工程・ライン・自LTを解決する。
 
         優先順:
-        1) 親品を出力する有効RoutingStep
-        2) 親品を子に持つ有効BOMItem（次工程側の定義）
-        3) 親品の有効ルーティング全体から自LTを推定
-        4) Productの標準LT
+        1) 親品を子に持つ有効BOMItem（最も信頼できるデータソース）
+        2) 親品を出力する有効RoutingStep
+        3) Productマスタ（最終フォールバック）
         """
         parent_id = getattr(parent_product, 'id', None)
         cache_key = ('where_used_parent_ctx', parent_id, reference_date)
@@ -157,17 +156,46 @@ class BOMService:
             return context_cache[cache_key]
 
         context = {
-            'line_id': getattr(parent_product, 'line_id', None),
-            'line_code': getattr(getattr(parent_product, 'line', None), 'line_code', None),
-            'line_name': getattr(getattr(parent_product, 'line', None), 'line_name', None),
-            'line_type': getattr(getattr(parent_product, 'line', None), 'line_type', None),
-            'process_id': getattr(parent_product, 'process_id', None),
-            'process_code': getattr(getattr(parent_product, 'process', None), 'process_code', None),
-            'process_name': getattr(getattr(parent_product, 'process', None), 'process_name', None),
+            'line_id': None,
+            'line_code': None,
+            'line_name': None,
+            'line_type': None,
+            'process_id': None,
+            'process_code': None,
+            'process_name': None,
             'self_lt_days': None,
         }
 
-        # 1) 親品の有効ルーティングを1本解決
+        # 1) 親品を子に持つBOMItem（最優先）
+        parent_item_key = ('where_used_parent_item', parent_id)
+        if context_cache is not None and parent_item_key in context_cache:
+            parent_as_child_item = context_cache[parent_item_key]
+        else:
+            parent_as_child_item = (
+                BOMItem.objects
+                .filter(child_product_id=parent_id, bom__is_active=True)
+                .select_related('line', 'process')
+                .order_by('-bom__valid_from', '-bom_id', '-id')
+                .first()
+            )
+            if context_cache is not None:
+                context_cache[parent_item_key] = parent_as_child_item
+
+        if parent_as_child_item is not None:
+            item_line = getattr(parent_as_child_item, 'line', None)
+            item_process = getattr(parent_as_child_item, 'process', None)
+            if item_line is not None:
+                context['line_id'] = parent_as_child_item.line_id
+                context['line_code'] = item_line.line_code
+                context['line_name'] = item_line.line_name
+                context['line_type'] = item_line.line_type
+            if item_process is not None:
+                context['process_id'] = parent_as_child_item.process_id
+                context['process_code'] = item_process.process_code
+                context['process_name'] = item_process.process_name
+            context['self_lt_days'] = max(int(getattr(parent_as_child_item, 'lead_time_days', 0) or 0), 0)
+
+        # 2) 親品の有効RoutingStep（BOMItemで未解決の場合）
         parent_routing_key = ('where_used_parent_routing', parent_id, reference_date)
         if context_cache is not None and parent_routing_key in context_cache:
             parent_routing = context_cache[parent_routing_key]
@@ -176,7 +204,6 @@ class BOMService:
             if context_cache is not None:
                 context_cache[parent_routing_key] = parent_routing
 
-        # 2) 親品の実工程（有効ルーティング内の出力ステップ）を最優先
         parent_step_key = ('where_used_parent_step', parent_id, reference_date)
         if context_cache is not None and parent_step_key in context_cache:
             parent_step = context_cache[parent_step_key]
@@ -208,47 +235,30 @@ class BOMService:
         if parent_step is not None:
             step_line = getattr(parent_step, 'line', None)
             step_process = getattr(parent_step, 'process', None)
-            if step_line is not None:
+            if not context.get('line_id') and step_line is not None:
                 context['line_id'] = parent_step.line_id
                 context['line_code'] = step_line.line_code
                 context['line_name'] = step_line.line_name
                 context['line_type'] = step_line.line_type
-            if step_process is not None:
+            if not context.get('process_id') and step_process is not None:
                 context['process_id'] = parent_step.process_id
                 context['process_code'] = step_process.process_code
                 context['process_name'] = step_process.process_name
-            # where-usedの自LTは工程一覧の「LT(日)」をそのまま使う
-            context['self_lt_days'] = max(int(getattr(parent_step, 'lead_time_days', 0) or 0), 0)
-
-        # 3) 親品を子に持つBOMItem（次工程）を補完情報として使用
-        parent_item_key = ('where_used_parent_item', parent_id)
-        if context_cache is not None and parent_item_key in context_cache:
-            parent_as_child_item = context_cache[parent_item_key]
-        else:
-            parent_as_child_item = (
-                BOMItem.objects
-                .filter(child_product_id=parent_id, bom__is_active=True)
-                .select_related('line', 'process')
-                .order_by('-bom__valid_from', '-bom_id', '-id')
-                .first()
-            )
-            if context_cache is not None:
-                context_cache[parent_item_key] = parent_as_child_item
-
-        if parent_as_child_item is not None:
-            item_line = getattr(parent_as_child_item, 'line', None)
-            item_process = getattr(parent_as_child_item, 'process', None)
-            if not context.get('line_id') and item_line is not None:
-                context['line_id'] = parent_as_child_item.line_id
-                context['line_code'] = item_line.line_code
-                context['line_name'] = item_line.line_name
-                context['line_type'] = item_line.line_type
-            if not context.get('process_id') and item_process is not None:
-                context['process_id'] = parent_as_child_item.process_id
-                context['process_code'] = item_process.process_code
-                context['process_name'] = item_process.process_name
             if context['self_lt_days'] is None:
-                context['self_lt_days'] = max(int(getattr(parent_as_child_item, 'lead_time_days', 0) or 0), 0)
+                context['self_lt_days'] = max(int(getattr(parent_step, 'lead_time_days', 0) or 0), 0)
+
+        # 3) Productマスタ（最終フォールバック）
+        if not context.get('line_id') and getattr(parent_product, 'line_id', None):
+            p_line = getattr(parent_product, 'line', None)
+            context['line_id'] = parent_product.line_id
+            context['line_code'] = getattr(p_line, 'line_code', None)
+            context['line_name'] = getattr(p_line, 'line_name', None)
+            context['line_type'] = getattr(p_line, 'line_type', None)
+        if not context.get('process_id') and getattr(parent_product, 'process_id', None):
+            p_process = getattr(parent_product, 'process', None)
+            context['process_id'] = parent_product.process_id
+            context['process_code'] = getattr(p_process, 'process_code', None)
+            context['process_name'] = getattr(p_process, 'process_name', None)
 
         # 4) Product.self_lt_days（既存保持値）をフォールバックで利用
         if context['self_lt_days'] is None and getattr(parent_product, 'self_lt_days', None) is not None:
