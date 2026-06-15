@@ -1912,105 +1912,114 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         # 4. LineBacklogに保存（order_qtyのみ更新、他の数量は維持）- bulk操作で高速化
         upserted_items = []
         upsert_start = time.perf_counter()
-
-        # 対象キーを収集
-        target_keys = []
-        target_key_set = set()
-        for (product_id, plan_date), order_qty in demand_map.items():
-            if start_dt and plan_date < start_dt:
-                continue
-            if end_dt and plan_date > end_dt:
-                continue
-            process_id = product_process_map.get(product_id)
-            if not process_id:
-                continue
-            key = (product_id, plan_date, process_id)
-            target_keys.append((product_id, plan_date, process_id, order_qty))
-            target_key_set.add(key)
-
-        # 期間内の全日付に対して、存在しない場合はsequence_no=0の行を用意する
-        if start_dt and end_dt:
-            # sequence_no=0(需要行)の存在だけを判定する。
-            # 計画行(sequence_no>0)が存在していても、需要行が無ければ新規作成する。
-            existing_any = set(
-                LineBacklog.objects.filter(
-                    line_id=line_id,
-                    product_id__in=target_products,
-                    plan_date__range=[start_dt, end_dt],
-                    sequence_no=0,
-                ).values_list('product_id', 'plan_date', 'process_id')
-            )
-            total_days = (end_dt - start_dt).days + 1
-            for product_id in target_products:
+        try:
+            # 対象キーを収集
+            target_keys = []
+            target_key_set = set()
+            for (product_id, plan_date), order_qty in demand_map.items():
+                if start_dt and plan_date < start_dt:
+                    continue
+                if end_dt and plan_date > end_dt:
+                    continue
                 process_id = product_process_map.get(product_id)
                 if not process_id:
                     continue
-                for offset in range(total_days):
-                    plan_date = start_dt + timedelta(days=offset)
-                    key = (product_id, plan_date, process_id)
-                    if key in existing_any or key in target_key_set:
-                        continue
-                    target_keys.append((product_id, plan_date, process_id, Decimal('0')))
-                    target_key_set.add(key)
-
-        if target_keys:
-            # 既存レコードを一括取得（巨大ORを避ける）
-            target_product_ids = sorted({product_id for product_id, _, _, _ in target_keys})
-            target_process_ids = sorted({process_id for _, _, process_id, _ in target_keys})
-            target_plan_dates = [plan_date for _, plan_date, _, _ in target_keys]
-            existing_qs = LineBacklog.objects.filter(
-                line_id=line_id,
-                sequence_no=0,
-                product_id__in=target_product_ids,
-                process_id__in=target_process_ids,
-            )
-            if target_plan_dates:
-                min_plan_date = min(target_plan_dates)
-                max_plan_date = max(target_plan_dates)
-                existing_qs = existing_qs.filter(plan_date__gte=min_plan_date, plan_date__lte=max_plan_date)
-            existing_records = {
-                (r.product_id, r.plan_date, r.process_id): r
-                for r in existing_qs
-            }
-
-            to_create = []
-            to_update = []
-            for product_id, plan_date, process_id, order_qty in target_keys:
                 key = (product_id, plan_date, process_id)
-                if key in existing_records:
-                    obj = existing_records[key]
-                    obj.order_qty = order_qty
-                    obj.demand_qty_plan = order_qty
-                    # sequence_no=0 は需要行なので、計画数は常に0を維持する
-                    obj.plan_qty = 0
-                    to_update.append(obj)
-                else:
-                    to_create.append(LineBacklog(
-                        plan_date=plan_date,
-                        process_id=process_id,
-                        product_id=product_id,
+                target_keys.append((product_id, plan_date, process_id, order_qty))
+                target_key_set.add(key)
+
+            # 期間内の全日付に対して、存在しない場合はsequence_no=0の行を用意する
+            if start_dt and end_dt:
+                # sequence_no=0(需要行)の存在だけを判定する。
+                # 計画行(sequence_no>0)が存在していても、需要行が無ければ新規作成する。
+                existing_any = set(
+                    LineBacklog.objects.filter(
                         line_id=line_id,
+                        product_id__in=target_products,
+                        plan_date__range=[start_dt, end_dt],
                         sequence_no=0,
-                        order_qty=order_qty,
-                        demand_qty_plan=order_qty,
-                        plan_qty=0,
-                    ))
+                    ).values_list('product_id', 'plan_date', 'process_id')
+                )
+                total_days = (end_dt - start_dt).days + 1
+                for product_id in target_products:
+                    process_id = product_process_map.get(product_id)
+                    if not process_id:
+                        continue
+                    for offset in range(total_days):
+                        plan_date = start_dt + timedelta(days=offset)
+                        key = (product_id, plan_date, process_id)
+                        if key in existing_any or key in target_key_set:
+                            continue
+                        target_keys.append((product_id, plan_date, process_id, Decimal('0')))
+                        target_key_set.add(key)
 
-            # bulk_create と bulk_update を実行
-            if to_create:
-                LineBacklog.objects.bulk_create(to_create)
-            if to_update:
-                LineBacklog.objects.bulk_update(to_update, ['order_qty', 'demand_qty_plan', 'plan_qty'])
+            if target_keys:
+                # 既存レコードを一括取得（巨大ORを避ける）
+                target_product_ids = sorted({product_id for product_id, _, _, _ in target_keys})
+                target_process_ids = sorted({process_id for _, _, process_id, _ in target_keys})
+                target_plan_dates = [plan_date for _, plan_date, _, _ in target_keys]
+                existing_qs = LineBacklog.objects.filter(
+                    line_id=line_id,
+                    sequence_no=0,
+                    product_id__in=target_product_ids,
+                    process_id__in=target_process_ids,
+                )
+                if target_plan_dates:
+                    min_plan_date = min(target_plan_dates)
+                    max_plan_date = max(target_plan_dates)
+                    existing_qs = existing_qs.filter(plan_date__gte=min_plan_date, plan_date__lte=max_plan_date)
+                existing_records = {
+                    (r.product_id, r.plan_date, r.process_id): r
+                    for r in existing_qs
+                }
 
-            upserted_items = to_create + to_update
+                to_create = []
+                to_update = []
+                for product_id, plan_date, process_id, order_qty in target_keys:
+                    key = (product_id, plan_date, process_id)
+                    if key in existing_records:
+                        obj = existing_records[key]
+                        obj.order_qty = order_qty
+                        obj.demand_qty_plan = order_qty
+                        # sequence_no=0 は需要行なので、計画数は常に0を維持する
+                        obj.plan_qty = 0
+                        to_update.append(obj)
+                    else:
+                        to_create.append(LineBacklog(
+                            plan_date=plan_date,
+                            process_id=process_id,
+                            product_id=product_id,
+                            line_id=line_id,
+                            sequence_no=0,
+                            order_qty=order_qty,
+                            demand_qty_plan=order_qty,
+                            plan_qty=0,
+                        ))
 
-        logger.info(
-            "pickup: upserted_items=%s (create=%s, update=%s) time=%.3fs",
-            len(upserted_items),
-            len(to_create) if target_keys else 0,
-            len(to_update) if target_keys else 0,
-            time.perf_counter() - upsert_start,
-        )
+                # bulk_create と bulk_update を実行
+                if to_create:
+                    LineBacklog.objects.bulk_create(to_create)
+                if to_update:
+                    LineBacklog.objects.bulk_update(to_update, ['order_qty', 'demand_qty_plan', 'plan_qty'])
+
+                upserted_items = to_create + to_update
+
+            logger.info(
+                "pickup: upserted_items=%s (create=%s, update=%s) time=%.3fs",
+                len(upserted_items),
+                len(to_create) if target_keys else 0,
+                len(to_update) if target_keys else 0,
+                time.perf_counter() - upsert_start,
+            )
+        except Exception as e:
+            logger.error(
+                "pickup: upsert失敗 line_id=%s %.3fs: %s",
+                line_id,
+                time.perf_counter() - upsert_start,
+                e,
+                exc_info=True,
+            )
+            raise
 
         # 5. 最新状態を返す
         items_to_serialize = upserted_items
