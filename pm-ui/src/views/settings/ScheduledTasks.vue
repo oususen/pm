@@ -993,12 +993,40 @@ import { authState } from '@/auth'
 import { hasPermission } from '@/router'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
-const dsSources = [
-  { op: '読み書き', table: 'django_celery_beat_*', desc: '定時タスクスケジュール設定' },
-  { op: '読み書き', table: 't_auto_plan_*', desc: '自動計画設定' },
-]
-
 const route = useRoute()
+const dsSources = computed(() => {
+  const mode = String(route.query?.mode || '').toLowerCase()
+
+  if (mode === 'inventory') {
+    return [
+      { op: '読み書き', table: 'production_schedule_config', desc: '取り込み・在庫・進度・整合チェック・計画実績自動セットの定時設定' },
+      { op: '読み取り', table: 'm_line', desc: '計画実績自動セットの対象ライン選択' },
+      { op: '読み取り', table: 'm_process', desc: '計画実績自動セットの対象工程選択' },
+      { op: '読み書き', table: 'production_purchase_actual_reconcile_report*', desc: '納入実績整合チェックのレポート' },
+      { op: '読み書き', table: 'production_production_actual_reconcile_report*', desc: '生産実績整合チェックのレポート' },
+    ]
+  }
+
+  if (mode === 'safety-stock') {
+    return [
+      { op: '読み書き', table: 'production_schedule_config', desc: '自動安全在庫タスク設定' },
+    ]
+  }
+
+  if (mode === 'order-expansion') {
+    return [
+      { op: '読み書き', table: 'production_schedule_config', desc: '自動受注展開タスク設定' },
+    ]
+  }
+
+  return [
+    { op: '読み書き', table: 'production_schedule_config', desc: '定時タスク共通設定' },
+    { op: '読み書き', table: 't_auto_plan_*', desc: '自動計画設定' },
+    { op: '読み書き', table: 'production_purchase_actual_reconcile_report*', desc: '納入実績整合チェックのレポート' },
+    { op: '読み書き', table: 'production_production_actual_reconcile_report*', desc: '生産実績整合チェックのレポート' },
+  ]
+})
+
 const configs = ref([])
 const saving = reactive(new Set())
 const running = reactive(new Set())
@@ -1920,4 +1948,3 @@ onUnmounted(() => {
   font-weight: 600;
 }
 </style>
-
