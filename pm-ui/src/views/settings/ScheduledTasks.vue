@@ -239,6 +239,51 @@
         </label>
       </div>
 
+      <div class="field" style="margin-top: 12px">
+        <label>失敗時通知先</label>
+        <div class="notify-search">
+          <input
+            v-model="cfg.searchCode"
+            :disabled="!canEdit"
+            class="notify-search-input"
+            placeholder="社員コード/氏名/ユーザー名で検索して追加"
+            @keyup.enter.prevent="addFirstCandidate(cfg)"
+          />
+        </div>
+        <div
+          v-if="candidateList(cfg).length"
+          class="candidate-list"
+        >
+          <div
+            v-for="u in candidateList(cfg)"
+            :key="u.id"
+            class="candidate-item"
+            @click="addUser(cfg, u)"
+          >
+            <span class="candidate-code">{{ codeLabel(u) }}</span>
+            <span class="candidate-name">{{ nameLabel(u) }}</span>
+          </div>
+        </div>
+        <div class="selected-list" v-if="cfg.notify_user_codes.length">
+          <span
+            class="chip"
+            v-for="code in cfg.notify_user_codes"
+            :key="code"
+          >
+            <span class="chip-code">{{ code }}</span>
+            <span class="chip-name">{{ chipName(cfg, code) }}</span>
+            <button
+              type="button"
+              class="chip-remove"
+              :disabled="!canEdit"
+              @click="removeCode(cfg, code)"
+            >
+              ×
+            </button>
+          </span>
+        </div>
+      </div>
+
       <div class="actions">
         <button
           class="btn primary"

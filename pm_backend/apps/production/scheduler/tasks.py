@@ -10,6 +10,8 @@ from django.test import RequestFactory
 from rest_framework.parsers import JSONParser
 from rest_framework.request import Request
 
+from notifications.models import Notification
+
 logger = logging.getLogger('production')
 CANCEL_REQUEST_MARKER = '[CANCEL_REQUESTED]'
 
@@ -466,5 +468,24 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
             f'recalc={recalc_count}, progress={progress_count}, canceled={canceled}, '
             f'{round(duration, 1)}秒, エラー={len(errors)}件'
         )
+
+        if config and not success and config.notify_users.exists():
+            try:
+                today = datetime.now().date()
+                notification = Notification.objects.create(
+                    title=f"[自動タスク失敗] {task_spec['label']}",
+                    category='システム',
+                    domain='生産',
+                    description=(config.last_run_message or '詳細なし'),
+                    valid_from=None,
+                    valid_to=today + timedelta(days=7),
+                    operator_name='admin',
+                )
+                notification.target_users.set(config.notify_users.all())
+            except Exception as notify_err:
+                logger.error(
+                    f'[スケジューラ] {task_name}: 失敗通知の作成に失敗: {notify_err}',
+                    exc_info=True,
+                )
 
     return result
