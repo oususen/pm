@@ -249,6 +249,7 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
     progress_count = 0
     canceled = False
     cancel_message = ''
+    result = {}
 
     def should_cancel(checkpoint):
         nonlocal canceled, cancel_message
@@ -264,193 +265,206 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
     viewset.format_kwarg = None
     viewset.kwargs = {}
 
-    if task_spec['pickup_prod'] and not should_cancel('取り込み開始前'):
-        prod_lines = Line.objects.filter(is_active=True, line_type='PROD')
-        logger.info(f'[スケジューラ] Step 1: pickup開始 ({prod_lines.count()}ライン)')
+    try:
+        if task_spec['pickup_prod'] and not should_cancel('取り込み開始前'):
+            prod_lines = Line.objects.filter(is_active=True, line_type='PROD')
+            logger.info(f'[スケジューラ] Step 1: pickup開始 ({prod_lines.count()}ライン)')
 
-        for line in prod_lines:
-            if should_cancel(f'pickup前 line={line.line_code}'):
-                break
-            try:
-                logger.info(
-                    f'[スケジューラ] pickup: ライン {line.line_code} ({line.line_name})'
-                )
-                request = _create_drf_request({
-                    'line_id': line.id,
-                    'start_date': start_date_str,
-                    'end_date': end_date_str,
-                })
-                viewset.request = request
-                viewset.pickup(request)
-                pickup_count += 1
-            except Exception as e:
-                error_msg = f'pickup {line.line_code}: {str(e)}'
-                logger.error(f'[スケジューラ] {error_msg}', exc_info=True)
-                errors.append(error_msg)
-
-    if task_spec['pickup_purchase'] and not should_cancel('購買取り込み開始前'):
-        supplier_ids = list(
-            BOMItem.objects.filter(
-                sourcing_type__in=['BUY', 'SUBCON'],
-                bom__is_active=True,
-                supplier_id__isnull=False,
-            ).values_list('supplier_id', flat=True).distinct()
-        )
-        logger.info(
-            f'[スケジューラ] Step 2: pickup_purchase開始 ({len(supplier_ids)}仕入先)'
-        )
-
-        for supplier_id in supplier_ids:
-            if should_cancel(f'pickup_purchase前 supplier_id={supplier_id}'):
-                break
-            try:
-                logger.info(
-                    f'[スケジューラ] pickup_purchase: supplier_id={supplier_id}'
-                )
-                request = _create_drf_request({
-                    'supplier_id': supplier_id,
-                    'start_date': start_date_str,
-                    'end_date': end_date_str,
-                })
-                viewset.request = request
-                viewset.pickup_purchase(request)
-                purchase_count += 1
-            except Exception as e:
-                error_msg = f'pickup_purchase supplier_id={supplier_id}: {str(e)}'
-                logger.error(f'[スケジューラ] {error_msg}', exc_info=True)
-                errors.append(error_msg)
-
-    active_lines = Line.objects.filter(is_active=True)
-    if task_spec['inventory'] and not should_cancel('在庫再計算開始前'):
-        logger.info(
-            f'[スケジューラ] Step 3: 在庫再計算開始 ({active_lines.count()}ライン)'
-        )
-        for line in active_lines:
-            if should_cancel(f'在庫再計算前 line={line.line_code}'):
-                break
-            try:
-                effective_start_date = _resolve_effective_start_date(
-                    line,
-                    start_date,
-                    end_date,
-                    today,
-                    include_stock_anchor=True,
-                    include_lt_anchor=True,
-                )
-                logger.info(
-                    f'[スケジューラ] 在庫再計算: ライン {line.line_code} ({line.line_name}) '
-                    f'要求開始={start_date} 実効開始={effective_start_date}'
-                )
-                recalc_result = recalculate_inventory_for_line(
-                    line_id=line.id,
-                    start_date=effective_start_date,
-                    end_date=end_date,
-                    include_progress=task_spec['include_progress_in_inventory'],
-                    line_final_only=False,
-                )
-                recalc_count += 1
-                if task_spec['include_progress_in_inventory'] and isinstance(recalc_result, dict):
-                    progress_count += int(
-                        recalc_result.get('progress_product_count')
-                        or recalc_result.get('product_count')
-                        or 0
+            for line in prod_lines:
+                if should_cancel(f'pickup前 line={line.line_code}'):
+                    break
+                try:
+                    logger.info(
+                        f'[スケジューラ] pickup: ライン {line.line_code} ({line.line_name})'
                     )
-            except Exception as e:
-                error_msg = f'在庫再計算 {line.line_code}: {str(e)}'
-                logger.error(f'[スケジューラ] {error_msg}', exc_info=True)
-                errors.append(error_msg)
+                    request = _create_drf_request({
+                        'line_id': line.id,
+                        'start_date': start_date_str,
+                        'end_date': end_date_str,
+                    })
+                    viewset.request = request
+                    viewset.pickup(request)
+                    pickup_count += 1
+                except Exception as e:
+                    error_msg = f'pickup {line.line_code}: {str(e)}'
+                    logger.error(f'[スケジューラ] {error_msg}', exc_info=True)
+                    errors.append(error_msg)
 
-    if task_spec['progress'] and not should_cancel('進度再計算開始前'):
-        logger.info(
-            f'[スケジューラ] Step 4: 進度再計算開始 ({active_lines.count()}ライン)'
-        )
-        for line in active_lines:
-            if should_cancel(f'進度再計算前 line={line.line_code}'):
-                break
-            try:
-                line_effective_start_date = _resolve_effective_start_date(
-                    line,
-                    start_date,
-                    end_date,
-                    today,
-                    include_stock_anchor=False,
-                    include_lt_anchor=True,
-                )
-                logger.info(
-                    f'[スケジューラ] 進度再計算: ライン {line.line_code} ({line.line_name}) '
-                    f'要求開始={start_date} 実効開始={line_effective_start_date}'
-                )
-                adjustment_maps = _build_adjustment_maps(line.id, line_effective_start_date, end_date)
-                products = (
-                    LineBacklog.objects.filter(
+        if task_spec['pickup_purchase'] and not should_cancel('購買取り込み開始前'):
+            supplier_ids = list(
+                BOMItem.objects.filter(
+                    sourcing_type__in=['BUY', 'SUBCON'],
+                    bom__is_active=True,
+                    supplier_id__isnull=False,
+                ).values_list('supplier_id', flat=True).distinct()
+            )
+            logger.info(
+                f'[スケジューラ] Step 2: pickup_purchase開始 ({len(supplier_ids)}仕入先)'
+            )
+
+            for supplier_id in supplier_ids:
+                if should_cancel(f'pickup_purchase前 supplier_id={supplier_id}'):
+                    break
+                try:
+                    logger.info(
+                        f'[スケジューラ] pickup_purchase: supplier_id={supplier_id}'
+                    )
+                    request = _create_drf_request({
+                        'supplier_id': supplier_id,
+                        'start_date': start_date_str,
+                        'end_date': end_date_str,
+                    })
+                    viewset.request = request
+                    viewset.pickup_purchase(request)
+                    purchase_count += 1
+                except Exception as e:
+                    error_msg = f'pickup_purchase supplier_id={supplier_id}: {str(e)}'
+                    logger.error(f'[スケジューラ] {error_msg}', exc_info=True)
+                    errors.append(error_msg)
+
+        active_lines = Line.objects.filter(is_active=True)
+        if task_spec['inventory'] and not should_cancel('在庫再計算開始前'):
+            logger.info(
+                f'[スケジューラ] Step 3: 在庫再計算開始 ({active_lines.count()}ライン)'
+            )
+            for line in active_lines:
+                if should_cancel(f'在庫再計算前 line={line.line_code}'):
+                    break
+                try:
+                    effective_start_date = _resolve_effective_start_date(
+                        line,
+                        start_date,
+                        end_date,
+                        today,
+                        include_stock_anchor=True,
+                        include_lt_anchor=True,
+                    )
+                    logger.info(
+                        f'[スケジューラ] 在庫再計算: ライン {line.line_code} ({line.line_name}) '
+                        f'要求開始={start_date} 実効開始={effective_start_date}'
+                    )
+                    recalc_result = recalculate_inventory_for_line(
                         line_id=line.id,
-                        plan_date__range=[line_effective_start_date, end_date],
+                        start_date=effective_start_date,
+                        end_date=end_date,
+                        include_progress=task_spec['include_progress_in_inventory'],
+                        line_final_only=False,
                     )
-                    .values('product_id')
-                    .annotate(min_process_id=Min('process_id'))
-                    .filter(product_id__isnull=False, min_process_id__isnull=False)
-                )
-                for row in products:
-                    if should_cancel(f'進度再計算前 line={line.line_code} product_id={row["product_id"]}'):
-                        break
-                    product_effective_start_date = _resolve_effective_start_date(
+                    recalc_count += 1
+                    if task_spec['include_progress_in_inventory'] and isinstance(recalc_result, dict):
+                        progress_count += int(
+                            recalc_result.get('progress_product_count')
+                            or recalc_result.get('product_count')
+                            or 0
+                        )
+                except Exception as e:
+                    error_msg = f'在庫再計算 {line.line_code}: {str(e)}'
+                    logger.error(f'[スケジューラ] {error_msg}', exc_info=True)
+                    errors.append(error_msg)
+
+        if task_spec['progress'] and not should_cancel('進度再計算開始前'):
+            logger.info(
+                f'[スケジューラ] Step 4: 進度再計算開始 ({active_lines.count()}ライン)'
+            )
+            for line in active_lines:
+                if should_cancel(f'進度再計算前 line={line.line_code}'):
+                    break
+                try:
+                    line_effective_start_date = _resolve_effective_start_date(
                         line,
                         start_date,
                         end_date,
                         today,
                         include_stock_anchor=False,
                         include_lt_anchor=True,
-                        product_id=row['product_id'],
                     )
-                    recalculate_progress_qty(
-                        line_id=line.id,
-                        product_id=row['product_id'],
-                        start_date=product_effective_start_date,
-                        end_date=end_date,
-                        progress_adjust_map=adjustment_maps.get('PROGRESS'),
-                        planned_progress_adjust_map=adjustment_maps.get('PLANNED_PROGRESS'),
+                    logger.info(
+                        f'[スケジューラ] 進度再計算: ライン {line.line_code} ({line.line_name}) '
+                        f'要求開始={start_date} 実効開始={line_effective_start_date}'
                     )
-                    progress_count += 1
-            except Exception as e:
-                error_msg = f'進度再計算 {line.line_code}: {str(e)}'
-                logger.error(f'[スケジューラ] {error_msg}', exc_info=True)
-                errors.append(error_msg)
+                    adjustment_maps = _build_adjustment_maps(line.id, line_effective_start_date, end_date)
+                    products = (
+                        LineBacklog.objects.filter(
+                            line_id=line.id,
+                            plan_date__range=[line_effective_start_date, end_date],
+                        )
+                        .values('product_id')
+                        .annotate(min_process_id=Min('process_id'))
+                        .filter(product_id__isnull=False, min_process_id__isnull=False)
+                    )
+                    for row in products:
+                        if should_cancel(f'進度再計算前 line={line.line_code} product_id={row["product_id"]}'):
+                            break
+                        product_effective_start_date = _resolve_effective_start_date(
+                            line,
+                            start_date,
+                            end_date,
+                            today,
+                            include_stock_anchor=False,
+                            include_lt_anchor=True,
+                            product_id=row['product_id'],
+                        )
+                        recalculate_progress_qty(
+                            line_id=line.id,
+                            product_id=row['product_id'],
+                            start_date=product_effective_start_date,
+                            end_date=end_date,
+                            progress_adjust_map=adjustment_maps.get('PROGRESS'),
+                            planned_progress_adjust_map=adjustment_maps.get('PLANNED_PROGRESS'),
+                        )
+                        progress_count += 1
+                except Exception as e:
+                    error_msg = f'進度再計算 {line.line_code}: {str(e)}'
+                    logger.error(f'[スケジューラ] {error_msg}', exc_info=True)
+                    errors.append(error_msg)
 
-    duration = time.perf_counter() - start_time
-    success = len(errors) == 0 and not canceled
+    except Exception as e:
+        error_msg = f'予期しないエラー: {str(e)}'
+        logger.error(f'[スケジューラ] {task_name}: {error_msg}', exc_info=True)
+        errors.append(error_msg)
 
-    result = {
-        'pickup_lines': pickup_count,
-        'purchase_suppliers': purchase_count,
-        'recalc_lines': recalc_count,
-        'progress_products': progress_count,
-        'start_date': start_date_str,
-        'end_date': end_date_str,
-        'duration_seconds': round(duration, 2),
-        'errors': errors,
-        'canceled': canceled,
-    }
+    finally:
+        duration = time.perf_counter() - start_time
+        success = len(errors) == 0 and not canceled
 
-    if config:
-        config.last_run_status = 'SUCCESS' if success else 'FAILED'
-        config.last_run_duration_seconds = round(duration, 2)
-        error_summary = '\n'.join(errors) if errors else ''
-        cancel_summary = f'\n状態: {cancel_message}' if canceled else ''
-        config.last_run_message = (
-            f'[{task_spec["label"]}] 期間: {start_date_str}〜{end_date_str}, '
-            f'取込: {pickup_count}ライン, 購買取込: {purchase_count}仕入先, '
-            f'在庫再計算: {recalc_count}ライン, 進度再計算: {progress_count}製品 ({round(duration, 1)}秒)'
-            + cancel_summary
-            + (f'\nエラー: {error_summary}' if error_summary else '')
+        result = {
+            'pickup_lines': pickup_count,
+            'purchase_suppliers': purchase_count,
+            'recalc_lines': recalc_count,
+            'progress_products': progress_count,
+            'start_date': start_date_str,
+            'end_date': end_date_str,
+            'duration_seconds': round(duration, 2),
+            'errors': errors,
+            'canceled': canceled,
+        }
+
+        if config:
+            config.last_run_status = 'SUCCESS' if success else 'FAILED'
+            config.last_run_duration_seconds = round(duration, 2)
+            error_summary = '\n'.join(errors) if errors else ''
+            cancel_summary = f'\n状態: {cancel_message}' if canceled else ''
+            config.last_run_message = (
+                f'[{task_spec["label"]}] 期間: {start_date_str}〜{end_date_str}, '
+                f'取込: {pickup_count}ライン, 購買取込: {purchase_count}仕入先, '
+                f'在庫再計算: {recalc_count}ライン, 進度再計算: {progress_count}製品 ({round(duration, 1)}秒)'
+                + cancel_summary
+                + (f'\nエラー: {error_summary}' if error_summary else '')
+            )
+            try:
+                config.save(update_fields=[
+                    'last_run_status', 'last_run_message', 'last_run_duration_seconds',
+                ])
+            except Exception as save_err:
+                logger.error(
+                    f'[スケジューラ] {task_name}: ステータス更新に失敗しました: {save_err}',
+                    exc_info=True,
+                )
+
+        logger.info(
+            f'[スケジューラ] 完了({task_name}): pickup={pickup_count}, purchase={purchase_count}, '
+            f'recalc={recalc_count}, progress={progress_count}, canceled={canceled}, '
+            f'{round(duration, 1)}秒, エラー={len(errors)}件'
         )
-        config.save(update_fields=[
-            'last_run_status', 'last_run_message', 'last_run_duration_seconds',
-        ])
-
-    logger.info(
-        f'[スケジューラ] 完了({task_name}): pickup={pickup_count}, purchase={purchase_count}, '
-        f'recalc={recalc_count}, progress={progress_count}, canceled={canceled}, '
-        f'{round(duration, 1)}秒, エラー={len(errors)}件'
-    )
 
     return result
