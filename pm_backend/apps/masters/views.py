@@ -1689,7 +1689,9 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 child_bom = pick_child_bom(item.child_product) if item.child_product else None
                 if child_bom and child_bom.id not in visited:
                     child_prefix = parent_prefix + ('   ' if is_last else '│  ')
-                    walk_bom(child_bom, parent_prefix=child_prefix, level=level + 1, visited=visited, cumulative_lt=item_cumulative_lt)
+                    # visited.copy() で枝ごとに独立させ、同一BOMが複数箇所に現れても全て展開する
+                    # （visited はあくまで同一枝内の循環参照防止用）
+                    walk_bom(child_bom, parent_prefix=child_prefix, level=level + 1, visited=visited.copy(), cumulative_lt=item_cumulative_lt)
 
         walk_bom(bom, parent_prefix='', level=0, visited=set())
         return rows
