@@ -128,6 +128,11 @@ const filterType = ref('')
 
 const SUPPLIER_TYPE_MAP = { outsource: '外作', purchase: '購入', both: '両方' }
 const supplierTypeLabel = (type) => SUPPLIER_TYPE_MAP[type] || '両方'
+const normalizeSupplierCode = (value) => {
+  const text = String(value || '').trim()
+  if (!/^\d+$/.test(text)) return text
+  return text.padStart(6, '0')
+}
 
 const filteredSuppliers = computed(() => {
   return suppliers.value.filter((s) => {
@@ -209,8 +214,11 @@ const closeDialog = () => {
 const saveSupplier = async () => {
   if (!canEdit.value) return
   try {
+    const normalizedSupplierCode = normalizeSupplierCode(formData.value.supplier_code)
+    formData.value.supplier_code = normalizedSupplierCode
     const payload = {
       ...formData.value,
+      supplier_code: normalizedSupplierCode,
       order_email: (formData.value.order_email || '').trim(),
       calendar: formData.value.calendar || null,
     }
@@ -343,4 +351,3 @@ onMounted(() => {
   background-color: #f5f5f5;
 }
 </style>
-

@@ -373,9 +373,33 @@ const groups = computed(() => {
     return within && okProd;
   });
 
+  const buildGroupKey = (row) => {
+    return `${row.line || row.line_name || ""}__${row.product_code || ""}`;
+  };
+
+  const chooseRepresentativeProcess = (group, row) => {
+    const nextId = row.process ?? null;
+    const nextCode = row.process_code || row.process || "";
+    const nextName = row.process_name || "";
+    if (!group.process_id && !group.process_code) {
+      group.process_id = nextId;
+      group.process_code = nextCode;
+      group.process_name = nextName;
+      return;
+    }
+    if (String(group.process_code || "").toUpperCase() === "PURCHASE") {
+      return;
+    }
+    if (String(nextCode || "").toUpperCase() === "PURCHASE") {
+      group.process_id = nextId;
+      group.process_code = nextCode;
+      group.process_name = nextName;
+    }
+  };
+
   const map = new Map();
   for (const d of filtered) {
-    const key = `${d.line || d.line_name || ""}__${d.process_code || d.process || ""}__${d.product_code || ""}`;
+    const key = buildGroupKey(d);
     const specialDisplayOrder = resolveSpecialDisplayOrder(d);
     if (!map.has(key)) {
         map.set(key, {
@@ -400,6 +424,7 @@ const groups = computed(() => {
         });
       }
       const g = map.get(key);
+      chooseRepresentativeProcess(g, d);
       if (specialDisplayOrder !== null) {
         const currentOrder = resolveSpecialDisplayOrder(g);
         if (currentOrder === null || specialDisplayOrder < currentOrder) {
@@ -523,13 +548,21 @@ const isAdjustSaving = (group, date) => {
 };
 
 const updateAdjustDemand = (group, date, adjustQty) => {
-  const idx = demands.value.findIndex(
+  let idx = demands.value.findIndex(
     (d) =>
       d.line === group.line_id &&
       d.process === group.process_id &&
       d.product === group.product_id &&
       d.plan_date === date
   );
+  if (idx < 0) {
+    idx = demands.value.findIndex(
+      (d) =>
+        d.line === group.line_id &&
+        d.product === group.product_id &&
+        d.plan_date === date
+    );
+  }
   if (idx >= 0) {
     demands.value[idx].adjust_qty = adjustQty;
     return;

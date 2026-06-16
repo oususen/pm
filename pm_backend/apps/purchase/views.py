@@ -617,22 +617,17 @@ class PurchaseActualRegisterView(APIView):
             process_obj = Process.objects.filter(id=process_id).first()
 
         if not process_obj and effective_line_id:
-            process_obj = (
-                Process.objects.filter(line_id=effective_line_id, process_code='PURCHASE').first()
-                or Process.objects.filter(line_id=effective_line_id).order_by('id').first()
-            )
+            process_obj = Process.objects.filter(
+                line_id=effective_line_id,
+                process_code='PURCHASE',
+            ).first()
 
         if not process_obj and canonical_line:
-            process_obj = (
-                Process.objects.filter(line_id=canonical_line.id, process_code='PURCHASE').first()
-                or Process.objects.filter(line_id=canonical_line.id).order_by('id').first()
-            )
+            process_obj = Process.objects.filter(
+                line_id=canonical_line.id,
+                process_code='PURCHASE',
+            ).first()
 
-        if not process_obj:
-            process_obj = (
-                Process.objects.filter(process_code='PURCHASE').first()
-                or Process.objects.filter(process_name__icontains='購買').first()
-            )
         if not process_obj:
             return Response({'detail': 'purchase process not found'}, status=status.HTTP_400_BAD_REQUEST)
 

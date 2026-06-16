@@ -102,6 +102,18 @@ class LineSerializer(serializers.ModelSerializer):
 
 
 class SupplierSerializer(serializers.ModelSerializer):
+    @staticmethod
+    def _normalize_supplier_code(value):
+        text = str(value or '').strip()
+        if not text:
+            return text
+        if re.fullmatch(r'\d+', text):
+            return text.zfill(6)
+        return text
+
+    def validate_supplier_code(self, value):
+        return self._normalize_supplier_code(value)
+
     class Meta:
         model = Supplier
         fields = '__all__'

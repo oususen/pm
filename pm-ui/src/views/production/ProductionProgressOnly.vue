@@ -107,9 +107,13 @@
               <span class="info-label">ライン</span>
               <span class="info-value">{{ formatLine(g) }}</span>
             </div>
-            <div class="info-row">
+            <div v-if="props.mode !== 'purchase'" class="info-row">
               <span class="info-label">工程</span>
               <span class="info-value">{{ g.process_code || "-" }} / {{ g.process_name || "-" }}</span>
+            </div>
+            <div v-else-if="g.process_display" class="info-row">
+              <span class="info-label">工程</span>
+              <span class="info-value">{{ g.process_display }}</span>
             </div>
             <div class="info-row">
               <span class="info-label">品名</span>
@@ -957,9 +961,30 @@ const groups = computed(() => {
     return demandMap.get(k1) || demandMap.get(k2) || null;
   };
 
+  const buildGroupKey = (row) => {
+    if (props.mode === "purchase") {
+      return `${row.line || row.line_name || ""}__${row.product_code || ""}`;
+    }
+    return `${row.line || row.line_name || ""}__${row.process_code || row.process || ""}__${row.product_code || ""}`;
+  };
+
+  const updateRepresentativeProcess = (group, row) => {
+    const nextCode = row.process_code || row.process || "";
+    const nextName = row.process_name || "";
+    if ((!group.process_id && !group.process_code) || String(nextCode || "").toUpperCase() === "PURCHASE") {
+      group.process_id = row.process;
+      group.process_code = nextCode;
+      group.process_name = nextName;
+    }
+    const label = `${nextCode}${nextName ? ` / ${nextName}` : ""}`.trim();
+    if (label) {
+      group.process_labels.add(label);
+    }
+  };
+
   const map = new Map();
   for (const d of filtered) {
-    const key = `${d.line || d.line_name || ""}__${d.process_code || d.process || ""}__${d.product_code || ""}`;
+    const key = buildGroupKey(d);
     const specialDisplayOrder = resolveSpecialDisplayOrder(d);
     if (!map.has(key)) {
       map.set(key, {
@@ -976,9 +1001,12 @@ const groups = computed(() => {
         is_virtual_set: Boolean(d.is_virtual_set),
         special_display_order: specialDisplayOrder,
         cells: {},
+        process_labels: new Set(),
+        process_display: "",
       });
     }
     const g = map.get(key);
+    updateRepresentativeProcess(g, d);
     if (specialDisplayOrder !== null) {
       const currentOrder = resolveSpecialDisplayOrder(g);
       if (currentOrder === null || specialDisplayOrder < currentOrder) {
@@ -1006,6 +1034,11 @@ const groups = computed(() => {
   }
 
   const result = Array.from(map.values());
+  result.forEach((group) => {
+    if (props.mode !== "purchase") return;
+    const labels = Array.from(group.process_labels);
+    group.process_display = labels.length === 1 ? labels[0] : "";
+  });
   result.sort((a, b) => {
     const aVirtual = Boolean(a?.is_virtual_set);
     const bVirtual = Boolean(b?.is_virtual_set);
@@ -1089,7 +1122,7 @@ const exportToExcel = () => {
       const isFirst = idx === 0;
       const cells = [
         isFirst ? (formatLine(g)) : '',
-        isFirst ? (`${g.process_code || ''}${g.process_name ? ' ' + g.process_name : ''}`.trim()) : '',
+        isFirst ? (props.mode === 'purchase' ? (g.process_display || '') : `${g.process_code || ''}${g.process_name ? ' ' + g.process_name : ''}`.trim()) : '',
         isFirst ? (g.product_code || '') : '',
         isFirst ? (g.product_name || '') : '',
         row.label,

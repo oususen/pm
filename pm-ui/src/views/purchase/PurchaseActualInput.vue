@@ -162,6 +162,22 @@
           <label class="bulk-label-tag">担当者</label>
           <input :value="operatorName" type="text" readonly class="bulk-operator-input" />
         </div>
+        <div class="bulk-header-row">
+          <label class="bulk-label-tag">CSV取込</label>
+          <button class="btn" type="button" @click="openBulkCsvSelector">資材入荷外注納入一覧表</button>
+          <select v-model="bulkCsvEncoding" class="bulk-encoding-select">
+            <option value="Shift_JIS">Shift_JIS</option>
+            <option value="UTF-8">UTF-8</option>
+          </select>
+          <span class="bulk-import-note">CSVの仕入先・納入日・品番・数量を一括行へ反映</span>
+          <input
+            ref="bulkCsvInputRef"
+            type="file"
+            accept=".csv"
+            style="display:none"
+            @change="onBulkCsvSelected"
+          />
+        </div>
       </div>
 
       <table class="bulk-table">
@@ -501,6 +517,8 @@ const bulkLineId = ref('')
 const bulkProcessId = ref('')
 const bulkRows = ref([])
 const bulkSubmitting = ref(false)
+const bulkCsvInputRef = ref(null)
+const bulkCsvEncoding = ref('Shift_JIS')
 
 // 直近14日分の日付列（計画日±7日）
 const dateColumns = computed(() => {
@@ -529,11 +547,103 @@ const createBulkRow = (opts = {}) => ({
   selectedKey: '',
   resolved: opts.resolved || false,
   planQty: opts.planQty || 0,
-  qty: null,
+  qty: opts.qty ?? null,
   actualsByDate: opts.actualsByDate || {},
   error: '',
   result: '',
 })
+
+const parseCsvLine = (line) => {
+  const cols = []
+  let current = ''
+  let inQuotes = false
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i]
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"'
+        i += 1
+      } else {
+        inQuotes = !inQuotes
+      }
+    } else if (ch === ',' && !inQuotes) {
+      cols.push(current.trim())
+      current = ''
+    } else {
+      current += ch
+    }
+  }
+  cols.push(current.trim())
+  return cols
+}
+
+const normalizeSupplierCode = (value) => {
+  const digits = String(value || '').replace(/\D/g, '')
+  if (!digits) return ''
+  return String(Number(digits))
+}
+
+const findSupplierFromCsv = (supplierCode, supplierName) => {
+  const normalizedCode = normalizeSupplierCode(supplierCode)
+  const normalizedName = String(supplierName || '').trim()
+  return (
+    suppliers.value.find((item) => normalizeSupplierCode(item.supplier_code) === normalizedCode) ||
+    suppliers.value.find((item) => String(item.supplier_name || '').trim() === normalizedName) ||
+    null
+  )
+}
+
+const normalizeMappingCode = (value) => String(value || '').trim().toUpperCase()
+
+const normalizeImportDateText = (value) => {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+
+  const parts = raw.split(/\D+/).filter(Boolean)
+  let year = null
+  let month = null
+  let day = null
+
+  if (parts.length === 3 && parts[0].length === 4) {
+    year = Number(parts[0])
+    month = Number(parts[1])
+    day = Number(parts[2])
+  } else {
+    const digits = raw.replace(/\D/g, '')
+    if (digits.length !== 8) return ''
+    year = Number(digits.slice(0, 4))
+    month = Number(digits.slice(4, 6))
+    day = Number(digits.slice(6, 8))
+  }
+
+  if (!year || !month || !day) return ''
+  const normalized = new Date(year, month - 1, day)
+  if (
+    normalized.getFullYear() !== year ||
+    normalized.getMonth() + 1 !== month ||
+    normalized.getDate() !== day
+  ) {
+    return ''
+  }
+  return `${year}/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`
+}
+
+const resolveCsvImportMapping = (rawProductCode, inputType, mappings) => {
+  const sourceCode = String(rawProductCode || '').trim()
+  const sourceKey = normalizeMappingCode(sourceCode)
+  const candidates = (Array.isArray(mappings) ? mappings : []).filter(
+    (item) => normalizeMappingCode(item.coreProductCode) === sourceKey,
+  )
+  if (!candidates.length) {
+    return { mapped: false, required: inputType === '外注納入', productCode: sourceCode }
+  }
+  const selected = candidates[0]
+  const mappedCode = String(selected?.appProductCode || '').trim()
+  if (!mappedCode) {
+    return { mapped: false, required: inputType === '外注納入', productCode: sourceCode }
+  }
+  return { mapped: true, required: false, productCode: mappedCode }
+}
 
 const normalizeBulkPlanDate = () => {
   const raw = String(bulkPlanDate.value || '').trim()
@@ -561,6 +671,10 @@ const onBulkPlanDateBlur = async () => {
   // 納入日が未入力なら計画日と同じ値をセット
   if (!arrivalDate.value && bulkPlanDate.value) arrivalDate.value = bulkPlanDate.value
   if (bulkSupplierId.value) await loadBulkItems()
+}
+
+const openBulkCsvSelector = () => {
+  bulkCsvInputRef.value?.click()
 }
 
 const loadBulkItems = async () => {
@@ -600,6 +714,173 @@ const loadBulkItems = async () => {
     console.error('一括アイテム取得失敗:', e)
     bulkRows.value = [createBulkRow()]
   }
+}
+
+const onBulkCsvSelected = (event) => {
+  const file = event.target.files?.[0]
+  if (!file) return
+
+  const reader = new FileReader()
+  reader.onload = async (e) => {
+    try {
+      const text = String(e.target?.result || '')
+      const linesRaw = text.split(/\r?\n/).filter((line) => line.trim())
+      if (linesRaw.length < 2) {
+        alert('CSVにデータがありません。')
+        return
+      }
+
+      const headers = parseCsvLine(linesRaw[0]).map((item) => String(item || '').trim())
+      const getIndex = (name) => headers.indexOf(name)
+      const idxInputType = getIndex('入力区分')
+      const idxArrivalDate = getIndex('入荷日')
+      const idxProductCode = getIndex('品番')
+      const idxProductName = getIndex('品名規格')
+      const idxSupplierCode = getIndex('仕入先CD')
+      const idxSupplierName = getIndex('仕入先名')
+      const idxInboundQty = getIndex('入荷数量')
+      const idxProductionQty = getIndex('生産数量')
+      const requiredIndexes = [idxArrivalDate, idxProductCode, idxSupplierCode, idxSupplierName]
+      if (requiredIndexes.some((idx) => idx < 0) || (idxInboundQty < 0 && idxProductionQty < 0)) {
+        alert('CSVヘッダーを認識できません。資材入荷外注納入一覧表の形式を確認してください。')
+        return
+      }
+
+      const supplierKeys = new Set()
+      const arrivalDates = new Set()
+      const aggregated = new Map()
+
+      for (const [index, line] of linesRaw.slice(1).entries()) {
+        const cols = parseCsvLine(line)
+        const inputType = idxInputType >= 0 ? String(cols[idxInputType] || '').trim() : ''
+        if (inputType && !['資材入荷', '外注納入'].includes(inputType)) continue
+
+        const productCode = String(cols[idxProductCode] || '').trim()
+        if (!productCode) continue
+
+        const supplierCode = String(cols[idxSupplierCode] || '').trim()
+        const supplierName = String(cols[idxSupplierName] || '').trim()
+        const arrivalDateText = String(cols[idxArrivalDate] || '').trim()
+        const normalizedArrivalDate = normalizeImportDateText(arrivalDateText)
+        if (!normalizedArrivalDate) {
+          alert(`CSVの入荷日を解釈できません。${index + 2}行目: ${arrivalDateText}`)
+          return
+        }
+        const inboundQty = idxInboundQty >= 0 ? Number(String(cols[idxInboundQty] || '').trim() || 0) : 0
+        const productionQty = idxProductionQty >= 0 ? Number(String(cols[idxProductionQty] || '').trim() || 0) : 0
+        const qty = inputType === '外注納入'
+          ? productionQty
+          : inputType === '資材入荷'
+            ? inboundQty
+            : 0
+        if (!qty || qty <= 0) continue
+
+        supplierKeys.add(`${supplierCode}__${supplierName}`)
+        arrivalDates.add(normalizedArrivalDate)
+
+        const current = aggregated.get(productCode) || {
+          productCode,
+          inputType,
+          productName: String(cols[idxProductName] || '').trim(),
+          qty: 0,
+        }
+        current.qty += qty
+        if (!current.productName) current.productName = String(cols[idxProductName] || '').trim()
+        aggregated.set(productCode, current)
+      }
+
+      if (!aggregated.size) {
+        alert('取込対象の数量行がありません。')
+        return
+      }
+      if (supplierKeys.size !== 1) {
+        alert('複数の仕入先が含まれるCSVは取込できません。仕入先ごとに分けてください。')
+        return
+      }
+      if (arrivalDates.size !== 1) {
+        alert('複数の入荷日が含まれるCSVは取込できません。入荷日ごとに分けてください。')
+        return
+      }
+
+      const [supplierKey] = Array.from(supplierKeys)
+      const [supplierCode, supplierName] = supplierKey.split('__')
+      const supplier = findSupplierFromCsv(supplierCode, supplierName)
+      if (!supplier?.id) {
+        alert(`仕入先を特定できません。CSV: ${supplierCode} ${supplierName}`)
+        return
+      }
+
+      let mappings = []
+      try {
+        const mappingRes = await api.purchaseActualKikanMapping.getMapping(supplier.id)
+        mappings = Array.isArray(mappingRes.data?.mappings) ? mappingRes.data.mappings : []
+      } catch (_mappingError) {
+        alert('マッピング設定の取得に失敗しました。')
+        return
+      }
+
+      const mappedAggregated = new Map()
+      const unresolvedOutsourceCodes = []
+      for (const item of Array.from(aggregated.values())) {
+        const resolvedMapping = resolveCsvImportMapping(item.productCode, item.inputType, mappings)
+        if (!resolvedMapping.mapped && resolvedMapping.required) {
+          unresolvedOutsourceCodes.push(item.productCode)
+          continue
+        }
+
+        const targetCode = resolvedMapping.productCode || item.productCode
+        const current = mappedAggregated.get(targetCode) || {
+          productCode: targetCode,
+          productName: item.productName,
+          qty: 0,
+        }
+        current.qty += item.qty
+        mappedAggregated.set(targetCode, current)
+      }
+
+      if (unresolvedOutsourceCodes.length > 0) {
+        alert(`外注納入の品番マッピングが未設定です。\n${unresolvedOutsourceCodes.join('\n')}`)
+        return
+      }
+      if (!mappedAggregated.size) {
+        alert('マッピング後に取込対象の品番がありません。')
+        return
+      }
+
+      const [arrivalDateText] = Array.from(arrivalDates)
+      bulkSupplierId.value = String(supplier.id)
+      bulkPlanDate.value = arrivalDateText
+      arrivalDate.value = arrivalDateText
+      await loadBulkItems()
+
+      const existingRowsByCode = new Map(
+        bulkRows.value.map((row) => [String(row.productCode || row.barcode || '').trim().toUpperCase(), row])
+      )
+      bulkRows.value = Array.from(mappedAggregated.values()).map((item) => {
+        const existing = existingRowsByCode.get(String(item.productCode || '').trim().toUpperCase())
+        return createBulkRow({
+          productCode: item.productCode,
+          productName: existing?.productName || item.productName,
+          productId: existing?.productId || null,
+          lineId: existing?.lineId || bulkLineId.value,
+          processId: existing?.processId || bulkProcessId.value,
+          planQty: existing?.planQty || 0,
+          actualsByDate: existing?.actualsByDate || {},
+          resolved: Boolean((existing?.lineId || bulkLineId.value) && (existing?.processId || bulkProcessId.value)),
+          qty: item.qty,
+        })
+      })
+
+      const unresolvedCount = bulkRows.value.filter((row) => !row.resolved).length
+      alert(`${bulkRows.value.length}件をCSVから読み込みました。${unresolvedCount > 0 ? ` ${unresolvedCount}件はラインまたは工程の解決が必要です。` : ''}`)
+    } catch (err) {
+      console.error('CSV取込失敗:', err)
+      alert(`CSVの読み込みに失敗しました。${err?.message || ''}`)
+    } finally {
+      if (bulkCsvInputRef.value) bulkCsvInputRef.value.value = ''
+    }
+  }
+  reader.readAsText(file, bulkCsvEncoding.value)
 }
 
 const _applyBulkCandidate = (row, c) => {
@@ -696,9 +977,13 @@ const clearBulkRows = () => {
 const submitBulk = async () => {
   if (!canEdit.value) return
 
-  const toRegister = bulkRows.value.filter((r) => r.resolved && r.qty > 0 && !r.result)
+  const toRegister = bulkRows.value.filter((r) => {
+    const hasProductCode = Boolean(String(r.productCode || r.barcode || '').trim())
+    const hasQty = Number(r.qty || 0) > 0
+    return hasProductCode && hasQty && !r.result
+  })
   if (toRegister.length === 0) {
-    alert('登録可能な行がありません。品番と入荷数を入力してください。')
+    alert('登録可能な行がありません。品番と入荷数を確認してください。')
     return
   }
 
@@ -864,10 +1149,12 @@ onMounted(async () => {
 .bulk-header-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .bulk-label-tag { background: #4f6f82; color: #fff; padding: 4px 10px; white-space: nowrap; }
 .bulk-supplier-select { border: 1px solid #9ca3af; background: #f5f2bc; padding: 4px 6px; font-size: 13px; min-width: 200px; }
+.bulk-encoding-select { border: 1px solid #9ca3af; background: #f5f2bc; padding: 4px 6px; font-size: 13px; width: 120px; }
 .bulk-line-input { border: 1px solid #9ca3af; background: #e6e6e6; padding: 4px 6px; font-size: 13px; flex: 1; min-width: 150px; max-width: 280px; }
 .bulk-date-input { border: 1px solid #9ca3af; background: #f5f2bc; padding: 4px 6px; font-size: 13px; width: 110px; }
 .bulk-date-active { background: #c9e8ff; }
 .bulk-operator-input { border: 1px solid #9ca3af; background: #e6e6e6; padding: 4px 6px; font-size: 13px; width: 120px; }
+.bulk-import-note { font-size: 12px; color: #475569; }
 .bulk-table { width: 100%; border-collapse: collapse; background: #efefef; }
 .bulk-table th { background: #4f6f82; color: #fff; padding: 4px 6px; font-size: 12px; text-align: center; white-space: nowrap; }
 .bulk-table td { border: 1px solid #8a8f92; padding: 3px 4px; font-size: 12px; }

@@ -265,3 +265,30 @@ class SupplierAutoLineTest(TestCase):
         self.assertEqual(line.line_name, supplier.supplier_name)
         self.assertEqual(line.line_type, 'PURCHASE')
         self.assertTrue(line.is_active)
+
+    def test_supplier_create_zero_pads_numeric_code_to_six_digits(self):
+        user = get_user_model().objects.create_user(
+            username='supplier_code_padding_tester',
+            password='testpass123',
+        )
+        factory = APIRequestFactory()
+        request = factory.post(
+            '/api/suppliers/',
+            {
+                'supplier_code': '95',
+                'supplier_name': '有限会社ゼンツー',
+                'supplier_type': 'both',
+                'order_email': '',
+                'calendar': None,
+            },
+            format='json',
+        )
+        force_authenticate(request, user=user)
+
+        response = SupplierViewSet.as_view({'post': 'create'})(request)
+
+        self.assertEqual(response.status_code, 201)
+        supplier = Supplier.objects.get(supplier_name='有限会社ゼンツー')
+        line = Line.objects.get(line_code='000095')
+        self.assertEqual(supplier.supplier_code, '000095')
+        self.assertEqual(line.line_code, '000095')
