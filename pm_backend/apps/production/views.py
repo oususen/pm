@@ -1211,6 +1211,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             routing_candidate_q
         ).select_related('output_product', 'routing__product', 'process')
 
+        current_line_steps_by_product = defaultdict(list)
+        current_line_steps_by_routing_output = defaultdict(list)
+        product_process_ids_map = defaultdict(set)
         steps_on_line_count = 0
         max_source_lt_days = 0
         for step in steps_on_line:
@@ -1219,8 +1222,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             if product:
                 target_products.add(product.id)
                 product_process_map[product.id] = step.process_id
+                product_process_ids_map[product.id].add(step.process_id)
+                current_line_steps_by_product[product.id].append(step)
                 if product.id not in product_step_map:
                     product_step_map[product.id] = step
+            if step.routing_id and getattr(step.routing, 'product_id', None) and step.output_product_id:
+                current_line_steps_by_routing_output[(step.routing.product_id, step.output_product_id)].append(step)
 
                 # ライン最終品と中間品を分類
                 # is_final_product がTrueなら最終品扱い
@@ -1258,6 +1265,16 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 for product_id, process_id in product_process_map.items()
                 if product_id in target_products
             }
+            product_process_ids_map = {
+                product_id: process_ids
+                for product_id, process_ids in product_process_ids_map.items()
+                if product_id in target_products
+            }
+            current_line_steps_by_product = {
+                product_id: steps
+                for product_id, steps in current_line_steps_by_product.items()
+                if product_id in target_products
+            }
             product_step_map = {
                 product_id: step
                 for product_id, step in product_step_map.items()
@@ -1273,7 +1290,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             prefix='routing__',
         )
 
-        # 需要を計算：(product_id, plan_date) -> order_qty
+        # 需要を計算：(product_id, plan_date, process_id, parent_product_id) -> order_qty
         demand_map = defaultdict(Decimal)
 
         # 使用するカレンダ（ライン紐付があれば優先、無ければdaiso）
@@ -1494,6 +1511,72 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 return bom_item.lead_time_days
             return 0
 
+        def get_effective_current_output_steps(product_id, reference_date=None):
+            steps = []
+            for step in current_line_steps_by_product.get(product_id, []):
+                if getattr(step, 'output_product_id', None) != product_id:
+                    continue
+                steps.append(step)
+            return sorted(steps, key=lambda s: ((s.step_no or 0), s.id or 0))
+
+        def filter_bom_items_by_current_routing(product_id, bom_items, reference_date=None):
+            current_steps = get_effective_current_output_steps(product_id, reference_date)
+            if not current_steps or not bom_items:
+                return bom_items
+
+            filtered = []
+            for bom_item in bom_items:
+                parent_product_id = getattr(getattr(bom_item, 'bom', None), 'parent_product_id', None)
+                if not parent_product_id:
+                    continue
+                matched = False
+                for current_step in current_steps:
+                    routing_product_id = getattr(getattr(current_step, 'routing', None), 'product_id', None)
+                    if not routing_product_id:
+                        continue
+                    parent_steps = current_line_steps_by_routing_output.get((routing_product_id, parent_product_id), [])
+                    if not parent_steps:
+                        continue
+                    current_step_no = current_step.step_no or 0
+                    for parent_step in parent_steps:
+                        parent_step_no = parent_step.step_no or 0
+                        if parent_step_no > current_step_no:
+                            matched = True
+                            break
+                    if matched:
+                        break
+                if matched:
+                    filtered.append(bom_item)
+            return filtered or bom_items
+
+        def resolve_target_process_ids_for_parent(product_id, parent_product_id=None, reference_date=None):
+            child_steps = get_effective_current_output_steps(product_id, reference_date)
+            if not child_steps:
+                fallback_process_id = product_process_map.get(product_id)
+                return [fallback_process_id] if fallback_process_id else []
+            if len(child_steps) == 1 or not parent_product_id:
+                return [child_steps[0].process_id]
+
+            consumer_steps = get_effective_current_output_steps(parent_product_id, reference_date)
+            if len(consumer_steps) == 1:
+                consumer_step_no = consumer_steps[0].step_no or 0
+                earlier_steps = [s for s in child_steps if (s.step_no or 0) < consumer_step_no]
+                if earlier_steps:
+                    chosen = max(earlier_steps, key=lambda s: ((s.step_no or 0), s.id or 0))
+                    return [chosen.process_id]
+
+            fallback_process_id = product_process_map.get(product_id)
+            if fallback_process_id:
+                return [fallback_process_id]
+            return [child_steps[0].process_id]
+
+        def add_demand(product_id, plan_date, qty, parent_product_id=None):
+            process_ids = resolve_target_process_ids_for_parent(product_id, parent_product_id, plan_date)
+            for process_id in process_ids:
+                if not process_id:
+                    continue
+                demand_map[(product_id, plan_date, process_id, parent_product_id)] += qty
+
         # 既存バックログを先に取得し、ゼロ需要でもレコードを返せるよう初期化
         backlog_qs = self.get_queryset().filter(line_id=line_id, product_id__in=target_products).select_related('product', 'process')
         if start_date:
@@ -1502,7 +1585,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             backlog_qs = backlog_qs.filter(plan_date__lte=end_date)
         existing_backlogs = list(backlog_qs)
         for existing in existing_backlogs:
-            demand_map[(existing.product_id, existing.plan_date)] = Decimal('0')
+            demand_map[(existing.product_id, existing.plan_date, existing.process_id, None)] = Decimal('0')
         logger.info("pickup: existing_backlogs=%s", len(existing_backlogs))
 
         # 最終品はLineDemandから、中間品は後工程から需要を取得
@@ -1546,7 +1629,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     demand_qty = firm_qty + forecast_qty
                 else:
                     demand_qty = firm_qty if firm_qty > 0 else forecast_qty
-                demand_map[key] = demand_qty
+                add_demand(key[0], key[1], demand_qty, None)
 
         # B. 中間品は後工程から需要を取得
 
@@ -1564,7 +1647,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         parent_product_ids = set()
         if intermediate_products:
             all_bom_items = list(BOMItem.objects.filter(
-                child_product_id__in=intermediate_products
+                child_product_id__in=intermediate_products,
+                bom__is_coproduct=False,
             ).select_related('bom', 'bom__parent_product'))
             logger.info("pickup: bom_items_for_intermediate=%s", len(all_bom_items))
             for bom_item in all_bom_items:
@@ -1595,7 +1679,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             current_output_product = product_id
 
             # ステップ2: この製品を子部品として使うBOMを取得（キャッシュから）
-            bom_items = bom_items_by_child.get(current_output_product, [])
+            bom_items = filter_bom_items_by_current_routing(
+                current_output_product,
+                bom_items_by_child.get(current_output_product, []),
+                start_dt,
+            )
 
             for bom_item in bom_items:
                 parent_product = bom_item.bom.parent_product
@@ -1698,8 +1786,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                                 effective_lt_days = 1 if force_pm_by_sequence else (2 if lot_index == 0 else 1)
                                 shifted_date = shift_business_days(plan_date, effective_lt_days) if effective_lt_days else plan_date
                                 shifted_date = shift_business_days(shifted_date, 0)
-                                key = (current_output_product, shifted_date)
-                                demand_map[key] += qty * total_qty_per
+                                add_demand(current_output_product, shifted_date, qty * total_qty_per, parent_product.id)
                                 downstream_found = True
                         continue
 
@@ -1792,8 +1879,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                                 # クボタ便側カレンダで算出した需要日が自ライン休日に当たる場合は、
                                 # 自ライン前営業日に寄せて在庫計算側との休日判定差異を吸収する。
                                 shifted_date = shift_business_days(shifted_date, 0)
-                                key = (current_output_product, shifted_date)
-                                demand_map[key] += qty * total_qty_per
+                                add_demand(current_output_product, shifted_date, qty * total_qty_per, parent_product.id)
                                 downstream_found = True
                         continue
 
@@ -1834,8 +1920,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             continue
                         shifted_date = shift_business_days(plan_date, lt_days) if lt_days else plan_date
                         shifted_date = shift_business_days(shifted_date, 0)
-                        key = (current_output_product, shifted_date)
-                        demand_map[key] += qty * total_qty_per
+                        add_demand(current_output_product, shifted_date, qty * total_qty_per, parent_product.id)
                         downstream_found = True
 
         # 2. RoutingStepベースの展開が失敗した場合、BOMベースの展開を試みる（中間品のみ）
@@ -1843,7 +1928,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             # BOMItemを一括取得（line_idが現在ラインと一致するもの）
             bom_items_for_line = BOMItem.objects.filter(
                 child_product_id__in=intermediate_products,
-                line_id=line_id
+                line_id=line_id,
+                bom__is_coproduct=False,
             ).select_related('bom', 'bom__parent_product')
 
             # 親製品IDを収集
@@ -1884,7 +1970,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
             for product_id in intermediate_products:
                 current_output_product = product_id
-                bom_items = bom_items_by_child_line.get(current_output_product, [])
+                bom_items = filter_bom_items_by_current_routing(
+                    current_output_product,
+                    bom_items_by_child_line.get(current_output_product, []),
+                    start_dt,
+                )
 
                 for bom_item in bom_items:
                     parent_product = bom_item.bom.parent_product
@@ -1905,8 +1995,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         if lt_days:
                             plan_date = shift_business_days(plan_date, lt_days)
                         plan_date = shift_business_days(plan_date, 0)
-                        key = (current_output_product, plan_date)
-                        demand_map[key] += Decimal(str(plan_qty or 0)) * qty_per
+                        add_demand(
+                            current_output_product,
+                            plan_date,
+                            Decimal(str(plan_qty or 0)) * qty_per,
+                            parent_product.id,
+                        )
                         downstream_found = True
 
         # 4. LineBacklogに保存（order_qtyのみ更新、他の数量は維持）- bulk操作で高速化
@@ -1914,19 +2008,20 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         upsert_start = time.perf_counter()
         try:
             # 対象キーを収集
-            target_keys = []
-            target_key_set = set()
-            for (product_id, plan_date), order_qty in demand_map.items():
+            target_key_qty_map = defaultdict(Decimal)
+            for (product_id, plan_date, process_id, _parent_product_id), order_qty in demand_map.items():
                 if start_dt and plan_date < start_dt:
                     continue
                 if end_dt and plan_date > end_dt:
                     continue
-                process_id = product_process_map.get(product_id)
-                if not process_id:
-                    continue
                 key = (product_id, plan_date, process_id)
-                target_keys.append((product_id, plan_date, process_id, order_qty))
-                target_key_set.add(key)
+                target_key_qty_map[key] += order_qty
+
+            target_keys = [
+                (product_id, plan_date, process_id, order_qty)
+                for (product_id, plan_date, process_id), order_qty in target_key_qty_map.items()
+            ]
+            target_key_set = set(target_key_qty_map.keys())
 
             # 期間内の全日付に対して、存在しない場合はsequence_no=0の行を用意する
             if start_dt and end_dt:
@@ -1942,16 +2037,20 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 )
                 total_days = (end_dt - start_dt).days + 1
                 for product_id in target_products:
-                    process_id = product_process_map.get(product_id)
-                    if not process_id:
-                        continue
+                    process_ids = sorted(product_process_ids_map.get(product_id, set()))
+                    if not process_ids:
+                        fallback_process_id = product_process_map.get(product_id)
+                        process_ids = [fallback_process_id] if fallback_process_id else []
                     for offset in range(total_days):
                         plan_date = start_dt + timedelta(days=offset)
-                        key = (product_id, plan_date, process_id)
-                        if key in existing_any or key in target_key_set:
-                            continue
-                        target_keys.append((product_id, plan_date, process_id, Decimal('0')))
-                        target_key_set.add(key)
+                        for process_id in process_ids:
+                            if not process_id:
+                                continue
+                            key = (product_id, plan_date, process_id)
+                            if key in existing_any or key in target_key_set:
+                                continue
+                            target_keys.append((product_id, plan_date, process_id, Decimal('0')))
+                            target_key_set.add(key)
 
             if target_keys:
                 # 既存レコードを一括取得（巨大ORを避ける）

@@ -456,6 +456,83 @@ def _resolve_day_adjustment(rows, ad_map):
     return int(total)
 
 
+_ROUTING_PARENT_STEP_CACHE = {}
+
+
+def _filter_parent_bom_items_by_routing(backlog, parent_bom_items):
+    from masters.models import RoutingStep
+
+    items = list(parent_bom_items)
+    if not items:
+        return items
+
+    current_steps = list(
+        RoutingStep.objects.filter(
+            line_id=backlog.line_id,
+            output_product_id=backlog.product_id,
+            process_id=backlog.process_id,
+        ).select_related('routing')
+    )
+    if not current_steps:
+        return items
+
+    filtered = []
+    routing_product_ids = {
+        step.routing.product_id
+        for step in current_steps
+        if getattr(step, 'routing_id', None) and getattr(step.routing, 'product_id', None)
+    }
+    if not routing_product_ids:
+        return items
+
+    child_step_nos = [int(step.step_no or 0) for step in current_steps]
+    parent_ids = {
+        getattr(getattr(item, 'bom', None), 'parent_product_id', None)
+        for item in items
+    }
+    parent_ids.discard(None)
+    if not parent_ids:
+        return items
+
+    cache_key = (tuple(sorted(routing_product_ids)), tuple(sorted(parent_ids)))
+    parent_steps_map = _ROUTING_PARENT_STEP_CACHE.get(cache_key)
+    if parent_steps_map is None:
+        parent_steps_map = {}
+        qs = (
+            RoutingStep.objects.filter(
+                routing__product_id__in=routing_product_ids,
+                output_product_id__in=parent_ids,
+            )
+            .select_related('routing')
+            .order_by('output_product_id', 'step_no', 'id')
+        )
+        for step in qs:
+            key = (step.routing.product_id, step.output_product_id)
+            parent_steps_map.setdefault(key, []).append(step)
+        _ROUTING_PARENT_STEP_CACHE[cache_key] = parent_steps_map
+
+    for item in items:
+        parent_product_id = getattr(getattr(item, 'bom', None), 'parent_product_id', None)
+        if not parent_product_id:
+            continue
+        matched = False
+        for current_step in current_steps:
+            routing_product_id = getattr(getattr(current_step, 'routing', None), 'product_id', None)
+            if not routing_product_id:
+                continue
+            parent_steps = parent_steps_map.get((routing_product_id, parent_product_id), [])
+            if not parent_steps:
+                continue
+            current_step_no = int(current_step.step_no or 0)
+            if any(int(parent_step.step_no or 0) > current_step_no for parent_step in parent_steps):
+                matched = True
+                break
+        if matched:
+            filtered.append(item)
+
+    return filtered or items
+
+
 def _sum_parent_shipments(backlog, pick_qty, shift_fn=None):
     from masters.models import BOMItem
 
@@ -471,7 +548,7 @@ def _sum_parent_shipments(backlog, pick_qty, shift_fn=None):
         return Decimal('0')
 
     total_shipment = Decimal('0')
-    for bom_item in parent_bom_items:
+    for bom_item in _filter_parent_bom_items_by_routing(backlog, parent_bom_items):
         parent_product = bom_item.bom.parent_product
         if not parent_product:
             continue
@@ -608,7 +685,7 @@ def _calculate_parent_actual_shipment(backlog, shift_fn=None):
     from django.db.models import Sum
 
     total_shipment = Decimal('0')
-    for bom_item in parent_bom_items:
+    for bom_item in _filter_parent_bom_items_by_routing(backlog, parent_bom_items):
         parent_product = bom_item.bom.parent_product
         if not parent_product:
             continue
@@ -757,7 +834,7 @@ def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None, floor_ship
 
     fs_cache = floor_shipping_cache if floor_shipping_cache is not None else {}
     total_shipment = Decimal('0')
-    for bom_item in parent_bom_items:
+    for bom_item in _filter_parent_bom_items_by_routing(backlog, parent_bom_items):
         parent_product = bom_item.bom.parent_product
         if not parent_product:
             continue
@@ -830,7 +907,7 @@ def _calculate_parent_planned_shipment(backlog, today, shift_fn, floor_shipping_
 
     fs_cache = floor_shipping_cache if floor_shipping_cache is not None else {}
     total_shipment = Decimal('0')
-    for bom_item in parent_bom_items:
+    for bom_item in _filter_parent_bom_items_by_routing(backlog, parent_bom_items):
         parent_product = bom_item.bom.parent_product
         if not parent_product:
             continue
@@ -895,7 +972,7 @@ def calculate_actual_shipment(backlog):
     total_shipment = 0
     found_actual = False
 
-    for bom_item in parent_bom_items:
+    for bom_item in _filter_parent_bom_items_by_routing(backlog, parent_bom_items):
         # 後工程の実績を取得
         # ※ リードタイムを考慮する場合は plan_date を調整
         downstream_backlogs = LineBacklog.objects.filter(
@@ -931,7 +1008,7 @@ def has_downstream_actual(backlog):
         bom__is_active=True
     )
 
-    for bom_item in parent_bom_items:
+    for bom_item in _filter_parent_bom_items_by_routing(backlog, parent_bom_items):
         downstream_backlogs = LineBacklog.objects.filter(
             product=bom_item.bom.parent_product,
             plan_date=backlog.plan_date,
