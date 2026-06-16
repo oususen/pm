@@ -449,6 +449,15 @@ const groups = computed(() => {
   console.log("[ShippingProgress] グループ化開始");
   console.log("[ShippingProgress] 期間範囲:", columns.value[0], "～", columns.value[columns.value.length - 1]);
 
+  // 確定優先: 同一品番・得意先・納入先・納期でFIRMがある内示を除外
+  const firmSourceKeys = new Set();
+  for (const order of orderLines.value) {
+    if (order.order_type !== 'FORECAST' && order.due_date && order.product_code) {
+      const sk = `${order.product_code}__${order.customer_code || ''}__${(order.ship_to_code || '').trim()}__${order.due_date.slice(0, 10)}`;
+      firmSourceKeys.add(sk);
+    }
+  }
+
   // 製品コード別にグループ化
   const map = new Map();
   let processedCount = 0;
@@ -545,11 +554,13 @@ const groups = computed(() => {
     const cell = group.cells[dueDate];
     const qty = Number(order.quantity || 0);
 
-    // 受注タイプ別に集計
+    // 受注タイプ別に集計（確定優先: 同一source_keyのFIRMがあれば内示スキップ）
     if (order.order_type === "FORECAST") {
-      cell.forecast += qty;
+      const sk = `${order.product_code}__${customerCode}__${shipToCode}__${order.due_date.slice(0, 10)}`;
+      if (!firmSourceKeys.has(sk)) {
+        cell.forecast += qty;
+      }
     } else {
-      // FIRM または未設定の場合は確定として扱う
       cell.firm += qty;
     }
   }

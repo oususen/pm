@@ -345,6 +345,16 @@ const buildSeriesByDate = (perBacklog, perDemand, cols) => {
 };
 
 const buildShippingSummarySeriesByOrderLines = (rows, cols) => {
+  // 確定優先: 同一品番・得意先・納入先・納期でFIRMがある内示を除外
+  const firmSourceKeys = new Set();
+  rows.forEach((row) => {
+    const ot = String(row.effective_order_type || row.order_type || "").toUpperCase();
+    if (ot !== "FORECAST" && row.due_date && row.product_code) {
+      const sk = `${row.product_code}__${row.customer_code || ''}__${(row.ship_to_code || '').trim()}__${String(row.due_date).slice(0, 10)}`;
+      firmSourceKeys.add(sk);
+    }
+  });
+
   const byDate = new Map();
   rows.forEach((row) => {
     const d = toDate(row.due_date);
@@ -354,7 +364,10 @@ const buildShippingSummarySeriesByOrderLines = (rows, cols) => {
     const qty = Number(row.quantity || 0);
     const orderType = String(row.effective_order_type || row.order_type || "").toUpperCase();
     if (orderType === "FORECAST") {
-      cell.forecast += qty;
+      const sk = `${row.product_code || ''}__${row.customer_code || ''}__${(row.ship_to_code || '').trim()}__${String(row.due_date).slice(0, 10)}`;
+      if (!firmSourceKeys.has(sk)) {
+        cell.forecast += qty;
+      }
     } else {
       cell.firm += qty;
     }
