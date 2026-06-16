@@ -1526,13 +1526,12 @@ const cancelEdit = () => {
 // --- 工程ブロック色 ---
 const BLOCK_COLORS = [
   { bg: '#2962a8', light: '#dce5f2', border: '#2962a8' },
-  { bg: '#a83832', light: '#f5d7d5', border: '#a83832' },
   { bg: '#2e8550', light: '#d4eedc', border: '#2e8550' },
   { bg: '#9c6e1e', light: '#f5ebc8', border: '#9c6e1e' },
-  { bg: '#6a3a94', light: '#e6daf0', border: '#6a3a94' },
-  { bg: '#1e8296', light: '#cdebf2', border: '#1e8296' },
-  { bg: '#b45a28', light: '#f5e1d2', border: '#b45a28' },
   { bg: '#505050', light: '#e1e1e1', border: '#505050' },
+  { bg: '#1e8296', light: '#cdebf2', border: '#1e8296' },
+  { bg: '#6f4e37', light: '#ede0d6', border: '#6f4e37' },
+  { bg: '#0f766e', light: '#d6f3ef', border: '#0f766e' },
 ]
 const blockColorStyle = (idx) => ({
   borderLeft: `4px solid ${BLOCK_COLORS[idx % BLOCK_COLORS.length].border}`,

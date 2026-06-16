@@ -15,13 +15,12 @@ DPI = 200.0
 
 BLOCK_COLORS = [
     {"banner": (41, 98, 168), "banner_text": (255, 255, 255), "table_head": (210, 225, 245), "accent": (41, 98, 168)},
-    {"banner": (168, 56, 50), "banner_text": (255, 255, 255), "table_head": (245, 215, 213), "accent": (168, 56, 50)},
     {"banner": (46, 133, 80), "banner_text": (255, 255, 255), "table_head": (212, 238, 220), "accent": (46, 133, 80)},
     {"banner": (156, 110, 30), "banner_text": (255, 255, 255), "table_head": (245, 235, 200), "accent": (156, 110, 30)},
-    {"banner": (106, 58, 148), "banner_text": (255, 255, 255), "table_head": (230, 218, 240), "accent": (106, 58, 148)},
-    {"banner": (30, 130, 150), "banner_text": (255, 255, 255), "table_head": (205, 235, 242), "accent": (30, 130, 150)},
-    {"banner": (180, 90, 40), "banner_text": (255, 255, 255), "table_head": (245, 225, 210), "accent": (180, 90, 40)},
     {"banner": (80, 80, 80), "banner_text": (255, 255, 255), "table_head": (225, 225, 225), "accent": (80, 80, 80)},
+    {"banner": (30, 130, 150), "banner_text": (255, 255, 255), "table_head": (205, 235, 242), "accent": (30, 130, 150)},
+    {"banner": (111, 78, 55), "banner_text": (255, 255, 255), "table_head": (237, 224, 214), "accent": (111, 78, 55)},
+    {"banner": (15, 118, 110), "banner_text": (255, 255, 255), "table_head": (214, 243, 239), "accent": (15, 118, 110)},
 ]
 
 

@@ -121,6 +121,45 @@ def _resolve_purchase_line(supplier: Supplier | None):
     return line_obj
 
 
+def _resolve_supplier_purchase_process(
+    supplier: Supplier | None,
+    line: Line | None = None,
+    preferred_process_id=None,
+):
+    if not supplier:
+        return None
+
+    supplier_type = str(getattr(supplier, 'supplier_type', 'both') or 'both').strip().lower()
+    target_line = line or _resolve_purchase_line(supplier)
+
+    def find_process_by_code(process_code: str):
+        if target_line:
+            process = Process.objects.filter(
+                line_id=target_line.id,
+                process_code=process_code,
+            ).first()
+            if process:
+                return process
+        return Process.objects.filter(process_code=process_code).first()
+
+    if supplier_type == 'outsource':
+        return find_process_by_code('G')
+
+    if supplier_type == 'purchase':
+        return find_process_by_code('PURCHASE')
+
+    preferred_process = Process.objects.filter(id=preferred_process_id).first() if preferred_process_id else None
+    if preferred_process:
+        return preferred_process
+
+    if target_line:
+        process = Process.objects.filter(line_id=target_line.id).order_by('id').first()
+        if process:
+            return process
+
+    return find_process_by_code('PURCHASE') or find_process_by_code('G')
+
+
 def _resolve_inventory_effective_start_date(
     line_id: int,
     requested_start_date: date,
@@ -533,10 +572,6 @@ class PurchaseActualCandidatesView(APIView):
             if str(item.sourcing_type or '').upper() in ('BUY', 'SUBCON') or item.supplier_id
         ]
 
-        process_purchase = (
-            Process.objects.filter(process_code='PURCHASE').first()
-            or Process.objects.filter(process_name__icontains='購買').first()
-        )
         line_by_name = {str(l.line_name or '').strip(): l for l in Line.objects.filter(is_active=True)}
         line_by_code = {str(l.line_code or '').strip(): l for l in Line.objects.filter(is_active=True)}
 
@@ -551,13 +586,11 @@ class PurchaseActualCandidatesView(APIView):
                 line = item.line
             if not line:
                 line = line_by_name.get(str(supplier.supplier_name or '').strip()) or line_by_code.get(str(supplier.supplier_code or '').strip())
-            process = item.process or process_purchase
-            if not process and line:
-                process = Process.objects.filter(
-                    line_id=line.id, process_code='PURCHASE'
-                ).first()
-            if not process and line:
-                process = Process.objects.filter(line_id=line.id).order_by('id').first()
+            process = _resolve_supplier_purchase_process(
+                supplier=supplier,
+                line=line,
+                preferred_process_id=getattr(item.process, 'id', None),
+            )
 
             candidates.append({
                 'key': f'{item.id}-{idx}',
@@ -612,21 +645,13 @@ class PurchaseActualRegisterView(APIView):
         canonical_line = _resolve_purchase_line(supplier_obj) if supplier_obj else None
         effective_line_id = canonical_line.id if canonical_line else line_id
 
-        process_obj = None
-        if process_id:
-            process_obj = Process.objects.filter(id=process_id).first()
-
+        process_obj = _resolve_supplier_purchase_process(
+            supplier=supplier_obj,
+            line=canonical_line,
+            preferred_process_id=process_id,
+        )
         if not process_obj and effective_line_id:
-            process_obj = Process.objects.filter(
-                line_id=effective_line_id,
-                process_code='PURCHASE',
-            ).first()
-
-        if not process_obj and canonical_line:
-            process_obj = Process.objects.filter(
-                line_id=canonical_line.id,
-                process_code='PURCHASE',
-            ).first()
+            process_obj = Process.objects.filter(line_id=effective_line_id).order_by('id').first()
 
         if not process_obj:
             return Response({'detail': 'purchase process not found'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1085,10 +1110,7 @@ class PurchaseActualBulkItemsView(APIView):
             except ValueError:
                 pass
 
-        process = (
-            Process.objects.filter(line=line, process_code='PURCHASE').first()
-            or Process.objects.filter(line=line).order_by('id').first()
-        )
+        process = _resolve_supplier_purchase_process(supplier=supplier, line=line)
 
         # 仕入計画は LineBacklog.plan_qty (sequence_no=1) に格納されている
         backlogs = (
