@@ -349,7 +349,7 @@ const buildShippingSummarySeriesByOrderLines = (rows, cols) => {
   const firmSourceKeys = new Set();
   rows.forEach((row) => {
     const ot = String(row.effective_order_type || row.order_type || "").toUpperCase();
-    if (ot !== "FORECAST" && row.due_date && row.product_code) {
+    if (ot === "FIRM" && row.due_date && row.product_code) {
       const sk = `${row.product_code}__${row.customer_code || ''}__${(row.ship_to_code || '').trim()}__${String(row.due_date).slice(0, 10)}`;
       firmSourceKeys.add(sk);
     }

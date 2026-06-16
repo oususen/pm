@@ -452,7 +452,8 @@ const groups = computed(() => {
   // 確定優先: 同一品番・得意先・納入先・納期でFIRMがある内示を除外
   const firmSourceKeys = new Set();
   for (const order of orderLines.value) {
-    if (order.order_type !== 'FORECAST' && order.due_date && order.product_code) {
+    const ot = String(order.effective_order_type || order.order_type || "").toUpperCase();
+    if (ot === 'FIRM' && order.due_date && order.product_code) {
       const sk = `${order.product_code}__${order.customer_code || ''}__${(order.ship_to_code || '').trim()}__${order.due_date.slice(0, 10)}`;
       firmSourceKeys.add(sk);
     }
@@ -555,7 +556,8 @@ const groups = computed(() => {
     const qty = Number(order.quantity || 0);
 
     // 受注タイプ別に集計（確定優先: 同一source_keyのFIRMがあれば内示スキップ）
-    if (order.order_type === "FORECAST") {
+    const orderType = String(order.effective_order_type || order.order_type || "").toUpperCase();
+    if (orderType === "FORECAST") {
       const sk = `${order.product_code}__${customerCode}__${shipToCode}__${order.due_date.slice(0, 10)}`;
       if (!firmSourceKeys.has(sk)) {
         cell.forecast += qty;
