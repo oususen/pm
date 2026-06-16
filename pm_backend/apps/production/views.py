@@ -2759,18 +2759,36 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         return None
             return None
 
-        fallback_descendant_multiplier_cache = {}
+        fallback_process_aware_multiplier_cache = {}
         fallback_process_output_cache = {}
 
-        def collect_descendant_multipliers(parent_id, plan_date):
+        def collect_descendant_process_multipliers(parent_id, plan_date):
             """
-            非連産BOMを再帰展開し、parent_id配下の子孫品番倍率を返す。
-            戻り値: {product_id: Decimal倍率}（parent_id自身は含まない）
+            非連産BOMを再帰展開し、parent_id配下の子孫品番倍率を「どの工程の出力分か」
+            まで区別して返す。
+
+            同一品番が当ライン上の複数工程で出力される場合（例: 06SUBが5速1STと
+            5速3STの両方で出力される）、各工程の出力step_noと、その品番を消費する
+            BOM親品番自身の出力step_noの前後関係でペアリングし、二重計上を防ぐ。
+            （5速1ST産の06SUBは直後の5速2ST=01SUB組立で消費され、5速3ST産の06SUBは
+            直後の5速4ST=4ST組立で消費される、という生産順序に基づく対応付け）
+
+            ペアリングが一意に決まらない場合（消費側の出力工程が複数/不明など）は、
+            従来通り該当する全工程に同額を計上する（安全側のフォールバック）。
+
+            戻り値: {(product_id, process_id): Decimal倍率}
             """
             cache_key = (parent_id, plan_date)
-            cached = fallback_descendant_multiplier_cache.get(cache_key)
+            cached = fallback_process_aware_multiplier_cache.get(cache_key)
             if cached is not None:
                 return cached
+
+            def get_output_steps(product_id):
+                steps = [
+                    s for s in steps_map.get(product_id, [])
+                    if s.output_product_id == product_id and is_step_effective_for_reference(s, plan_date)
+                ]
+                return sorted(steps, key=lambda s: (s.step_no or 0, s.id or 0))
 
             result = defaultdict(Decimal)
 
@@ -2792,11 +2810,31 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         continue
                     if next_multiplier == 0:
                         continue
-                    result[child_id] += next_multiplier
+
+                    child_steps = get_output_steps(child_id)
+                    if len(child_steps) <= 1:
+                        if child_steps:
+                            result[(child_id, child_steps[0].process_id)] += next_multiplier
+                        # 当ラインに出力工程が無い品番はここでは計上せず、より下位の子孫側で判定する
+                    else:
+                        consumer_steps = get_output_steps(current_id) if current_id != parent_id else []
+                        chosen = None
+                        if len(consumer_steps) == 1:
+                            consumer_step_no = consumer_steps[0].step_no or 0
+                            earlier = [s for s in child_steps if (s.step_no or 0) < consumer_step_no]
+                            if earlier:
+                                chosen = max(earlier, key=lambda s: (s.step_no or 0))
+                        if chosen is not None:
+                            result[(child_id, chosen.process_id)] += next_multiplier
+                        else:
+                            # 消費側の工程が一意に決まらない場合は従来通り全工程に計上
+                            for cs in child_steps:
+                                result[(child_id, cs.process_id)] += next_multiplier
+
                     walk(child_id, next_multiplier, path | {child_id})
 
             walk(parent_id, Decimal('1'), {parent_id})
-            fallback_descendant_multiplier_cache[cache_key] = result
+            fallback_process_aware_multiplier_cache[cache_key] = result
             return result
 
         def get_effective_output_products_for_process(process_id, plan_date):
@@ -2826,8 +2864,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             targets = {}
             if base_target_product_id in effective_output_ids:
                 targets[base_target_product_id] = Decimal('1')
-            descendant_multipliers = collect_descendant_multipliers(base_target_product_id, plan_date)
-            for descendant_id, multiplier in descendant_multipliers.items():
+            descendant_process_multipliers = collect_descendant_process_multipliers(base_target_product_id, plan_date)
+            for (descendant_id, descendant_process_id), multiplier in descendant_process_multipliers.items():
+                if descendant_process_id != process_id:
+                    continue
                 if descendant_id in effective_output_ids and multiplier != 0:
                     targets[descendant_id] = targets.get(descendant_id, Decimal('0')) + Decimal(multiplier)
             return targets
@@ -3042,14 +3082,23 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             fallback_targets = collect_fallback_process_targets(
                                 target_product_id, proc.id, plan_date
                             )
-                            for expanded_target_id in fallback_targets.keys():
-                                affected_keys.add((expanded_target_id, proc.id, plan_date, seq_key))
+                            child_fallback_targets = {}
                             if include_coproduct_children and child_target_product_id and child_target_product_id != target_product_id:
                                 child_fallback_targets = collect_fallback_process_targets(
                                     child_target_product_id, proc.id, plan_date
                                 )
-                                for child_expanded_target_id in child_fallback_targets.keys():
-                                    affected_keys.add((child_expanded_target_id, proc.id, plan_date, seq_key))
+                            if target_product_id != product_id:
+                                supplemental_targets = collect_fallback_process_targets(
+                                    product_id, proc.id, plan_date
+                                )
+                                for supplemental_id in supplemental_targets.keys():
+                                    if supplemental_id in fallback_targets or supplemental_id in child_fallback_targets:
+                                        continue
+                                    affected_keys.add((supplemental_id, proc.id, plan_date, seq_key))
+                            for expanded_target_id in fallback_targets.keys():
+                                affected_keys.add((expanded_target_id, proc.id, plan_date, seq_key))
+                            for child_expanded_target_id in child_fallback_targets.keys():
+                                affected_keys.add((child_expanded_target_id, proc.id, plan_date, seq_key))
                     elif is_l2201_line and product_id in line_final_plan_product_ids and plan_process_id:
                         affected_keys.add((product_id, plan_process_id, plan_date, seq_key))
                     continue
@@ -3200,6 +3249,23 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         fallback_targets = collect_fallback_process_targets(
                             target_product_id, proc.id, plan_date
                         )
+                        child_fallback_targets = {}
+                        if include_coproduct_children and child_target_product_id and child_target_product_id != target_product_id:
+                            child_fallback_targets = collect_fallback_process_targets(
+                                child_target_product_id, proc.id, plan_date
+                            )
+                        if target_product_id != product_id:
+                            # 連産品セットへのリダイレクトにより、当工程で同時に出力される
+                            # 連産品ドライバ以外の品番（通常BOM経由でのみ辿れるもの。例: 06SUB）が
+                            # 計上漏れになるため、元品番からの通常BOM展開で補完する。
+                            # すでにリダイレクト側で計上済みの品番は補完しない（二重計上防止）。
+                            supplemental_targets = collect_fallback_process_targets(
+                                product_id, proc.id, plan_date
+                            )
+                            for supplemental_id, supplemental_multiplier in supplemental_targets.items():
+                                if supplemental_id in fallback_targets or supplemental_id in child_fallback_targets:
+                                    continue
+                                fallback_targets[supplemental_id] = supplemental_multiplier
                         for expanded_target_id, multiplier in fallback_targets.items():
                             scaled_plan_qty = Decimal(plan_qty or 0) * Decimal(multiplier or 0)
                             scaled_order_qty = Decimal(order_qty or 0) * Decimal(multiplier or 0)
@@ -3246,10 +3312,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             if parent_plan_id:
                                 entry['plan_ids'].add(parent_plan_id)
 
-                        if include_coproduct_children and child_target_product_id and child_target_product_id != target_product_id:
-                            child_fallback_targets = collect_fallback_process_targets(
-                                child_target_product_id, proc.id, plan_date
-                            )
+                        if child_fallback_targets:
                             for child_expanded_target_id, child_multiplier in child_fallback_targets.items():
                                 scaled_child_plan_qty = Decimal(plan_qty or 0) * Decimal(child_multiplier or 0)
                                 scaled_child_order_qty = Decimal(order_qty or 0) * Decimal(child_multiplier or 0)
