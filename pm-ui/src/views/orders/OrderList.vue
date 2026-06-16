@@ -3,12 +3,6 @@
     <div class="page-header">
       <h1 class="page-title">受注一覧 <DataSourceDialog title="受注一覧" :sources="dsSources" /></h1>
       <div class="page-actions">
-        <label class="page-size">
-          <span>表示件数</span>
-          <select v-model.number="pageSize" class="page-size-select">
-            <option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }}</option>
-          </select>
-        </label>
         <button @click="fetchOrders" class="btn-primary">更新</button>
       </div>
     </div>
@@ -56,6 +50,24 @@
                 {{ option.label }}
               </option>
             </select>
+          </label>
+        </div>
+        <div class="filter-row">
+          <label class="filter-item">
+            <span>製品コード</span>
+            <input v-model="filters.productCode" class="filter-input" type="text" placeholder="部分一致" />
+          </label>
+          <label class="filter-item">
+            <span>納期</span>
+            <div style="display:flex;gap:4px;align-items:center">
+              <input v-model="filters.dueDateFrom" class="filter-input" type="date" />
+              <span>～</span>
+              <input v-model="filters.dueDateTo" class="filter-input" type="date" />
+            </div>
+          </label>
+          <label class="filter-item">
+            <span>納入地</span>
+            <input v-model="filters.shipToCode" class="filter-input" type="text" placeholder="部分一致" />
           </label>
         </div>
         <div class="filter-actions">
@@ -114,6 +126,24 @@
           <p><strong>取込システム:</strong> {{ selectedOrder.source_system || '-' }}</p>
         </div>
         <h3>受注明細</h3>
+        <div class="detail-filter-row">
+          <label class="detail-filter-item">
+            <span>製品コード</span>
+            <input v-model="lineFilters.productCode" class="filter-input" type="text" />
+          </label>
+          <label class="detail-filter-item">
+            <span>納期</span>
+            <div style="display:flex;gap:4px;align-items:center">
+              <input v-model="lineFilters.dueDateFrom" class="filter-input" type="date" />
+              <span>～</span>
+              <input v-model="lineFilters.dueDateTo" class="filter-input" type="date" />
+            </div>
+          </label>
+          <label class="detail-filter-item" style="flex:0 1 75px;min-width:75px">
+            <span>納入地</span>
+            <input v-model="lineFilters.shipToCode" class="filter-input" type="text" />
+          </label>
+        </div>
         <table class="data-table">
           <thead>
             <tr>
@@ -122,16 +152,18 @@
               <th>製品名</th>
               <th>数量</th>
               <th>納期</th>
+              <th>納入地</th>
               <th>備考</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="line in orderLines" :key="line.id">
+            <tr v-for="line in filteredOrderLines" :key="line.id">
               <td>{{ line.line_no }}</td>
               <td>{{ line.product_code }}</td>
               <td>{{ line.product_name || '-' }}</td>
-              <td>{{ line.quantity }}</td>
+              <td>{{ Math.round(Number(line.quantity)) }}</td>
               <td>{{ line.due_date }}</td>
+              <td>{{ line.ship_to_code || '-' }}</td>
               <td>{{ line.remark || '-' }}</td>
             </tr>
           </tbody>
@@ -145,7 +177,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
@@ -170,10 +202,9 @@ const orders = ref([])
 const showDetailsDialog = ref(false)
 const selectedOrder = ref({})
 const orderLines = ref([])
+const lineFilters = ref({ productCode: '', dueDateFrom: '', dueDateTo: '', shipToCode: '' })
 const loading = ref(false)
 const errorMessage = ref('')
-const pageSizeOptions = [50, 100, 200, 500, 1000]
-const pageSize = ref(500)
 const filters = ref({
   orderNo: '',
   sourceFile: '',
@@ -181,6 +212,10 @@ const filters = ref({
   orderType: '',
   orderDate: '',
   status: '',
+  productCode: '',
+  dueDateFrom: '',
+  dueDateTo: '',
+  shipToCode: '',
 })
 
 const normalizeText = (value) => (value ?? '').toString().toLowerCase()
@@ -255,11 +290,27 @@ const filteredOrders = computed(() => {
   })
 })
 
+const filteredOrderLines = computed(() => {
+  const f = lineFilters.value
+  return orderLines.value.filter((line) => {
+    if (f.productCode && !normalizeText(line.product_code).includes(normalizeText(f.productCode))) return false
+    if (f.dueDateFrom && (line.due_date || '') < f.dueDateFrom) return false
+    if (f.dueDateTo && (line.due_date || '') > f.dueDateTo) return false
+    if (f.shipToCode && !normalizeText(line.ship_to_code).includes(normalizeText(f.shipToCode))) return false
+    return true
+  })
+})
+
 const fetchOrders = async (retry = 2) => {
   loading.value = true
   errorMessage.value = ''
   try {
-    const response = await api.orders.getOrders({ page_size: pageSize.value })
+    const params = { page_size: 0 }
+    if (filters.value.productCode) params.product_code = filters.value.productCode
+    if (filters.value.dueDateFrom) params.due_date_from = filters.value.dueDateFrom
+    if (filters.value.dueDateTo) params.due_date_to = filters.value.dueDateTo
+    if (filters.value.shipToCode) params.ship_to_code = filters.value.shipToCode
+    const response = await api.orders.getOrders(params)
     orders.value = response.data.results || response.data
   } catch (error) {
     console.error('Error fetching orders:', error)
@@ -273,6 +324,15 @@ const fetchOrders = async (retry = 2) => {
   }
 }
 
+let debounceTimer = null
+watch(
+  () => [filters.value.productCode, filters.value.dueDateFrom, filters.value.dueDateTo, filters.value.shipToCode],
+  () => {
+    clearTimeout(debounceTimer)
+    debounceTimer = setTimeout(() => fetchOrders(), 400)
+  }
+)
+
 const resetFilters = () => {
   filters.value = {
     orderNo: '',
@@ -281,11 +341,16 @@ const resetFilters = () => {
     orderType: '',
     orderDate: '',
     status: '',
+    productCode: '',
+    dueDateFrom: '',
+    dueDateTo: '',
+    shipToCode: '',
   }
 }
 
 const viewDetails = async (order) => {
   selectedOrder.value = order
+  lineFilters.value = { productCode: '', dueDateFrom: '', dueDateTo: '', shipToCode: '' }
   try {
     const response = await api.orders.getOrderLines(order.id)
     orderLines.value = response.data.results || response.data
@@ -320,6 +385,23 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.detail-filter-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.detail-filter-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 150px;
+  flex: 1 1 150px;
+  font-size: 13px;
+  color: #555;
+}
+
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -471,20 +553,5 @@ onMounted(() => {
   gap: 10px;
 }
 
-.page-size {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: #555;
-}
-
-.page-size-select {
-  padding: 6px 8px;
-  border: 1px solid #d6dbe7;
-  border-radius: 4px;
-  font-size: 13px;
-  background: #fff;
-}
 </style>
 

@@ -30,12 +30,43 @@ from .serializers import (
 from .services.csv_import import CSVImportService
 
 
+class OrderFilter(django_filters.FilterSet):
+    product_code = django_filters.CharFilter(method='filter_product_code')
+    due_date_from = django_filters.DateFilter(method='filter_due_date_from')
+    due_date_to = django_filters.DateFilter(method='filter_due_date_to')
+    ship_to_code = django_filters.CharFilter(method='filter_ship_to_code')
+
+    class Meta:
+        model = Order
+        fields = ['customer', 'order_type', 'status', 'order_date']
+
+    def filter_product_code(self, queryset, name, value):
+        if not value:
+            return queryset
+        return queryset.filter(lines__product_code__icontains=value).distinct()
+
+    def filter_due_date_from(self, queryset, name, value):
+        if not value:
+            return queryset
+        return queryset.filter(lines__due_date__gte=value).distinct()
+
+    def filter_due_date_to(self, queryset, name, value):
+        if not value:
+            return queryset
+        return queryset.filter(lines__due_date__lte=value).distinct()
+
+    def filter_ship_to_code(self, queryset, name, value):
+        if not value:
+            return queryset
+        return queryset.filter(lines__ship_to_code__icontains=value).distinct()
+
+
 class OrderViewSet(viewsets.ModelViewSet):
     """受注ヘッダViewSet"""
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['customer', 'order_type', 'status', 'order_date']
+    filterset_class = OrderFilter
     search_fields = ['order_no', 'source_file']
     ordering_fields = ['order_date', 'created_at', 'id']
     ordering = ['-order_date', '-id']

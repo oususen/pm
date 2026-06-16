@@ -1,6 +1,6 @@
 export const createOrdersAPI = (client) => ({
   getOrders(params = {}) {
-    const query = { page_size: 500, ...params }
+    const query = { page_size: 0, ...params }
     return client.get('/orders/', { params: query })
   },
   getProductionOrders(params = {}) {
@@ -73,7 +73,7 @@ export const createOrdersAPI = (client) => ({
 
   // Order Lines
   getOrderLines(orderId) {
-    return client.get(`/order-lines/?order=${orderId}`)
+    return client.get(`/order-lines/?order=${orderId}&page_size=0`)
   },
   getMissingRoutingOrderItems(params = {}) {
     return client.get('/order-lines/missing-routing-items/', { params })
