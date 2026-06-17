@@ -292,6 +292,7 @@ const incomingCalls = ref([])
 const mutedIncomingCallIds = ref(new Set())
 const ringtoneInterval = ref(null)
 const audioContextRef = ref(null)
+const audioUnlocked = ref(false)
 const pushSubscriptionEndpoint = ref('')
 // デフォルト値（サーバー設定取得前のフォールバック）
 let NOTIFICATION_POLLING_MS = 60000
@@ -572,12 +573,15 @@ const getAudioContext = async () => {
   if (audioContextRef.value.state === 'suspended') {
     await audioContextRef.value.resume()
   }
+  if (audioContextRef.value.state === 'running') {
+    audioUnlocked.value = true
+  }
   return audioContextRef.value
 }
 
 const triggerIncomingVibration = () => {
   if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return
-  navigator.vibrate([220, 120, 220])
+  navigator.vibrate([300, 180, 300, 180, 300])
 }
 
 const cancelIncomingVibration = () => {
@@ -586,16 +590,29 @@ const cancelIncomingVibration = () => {
 }
 
 const unlockAudioPlayback = async () => {
+  if (audioUnlocked.value) {
+    detachAudioUnlockListeners()
+    return
+  }
   try {
     const audioContext = await getAudioContext()
     if (audioContext?.state === 'running') {
-      if (incomingCalls.value.length) {
-        playIncomingRingtone()
-      }
+      detachAudioUnlockListeners()
     }
   } catch (error) {
     console.error('音声再生の有効化に失敗しました:', error)
   }
+}
+
+const attachAudioUnlockListeners = () => {
+  if (audioUnlocked.value) return
+  document.addEventListener('pointerdown', unlockAudioPlayback, { passive: true })
+  document.addEventListener('keydown', unlockAudioPlayback)
+}
+
+const detachAudioUnlockListeners = () => {
+  document.removeEventListener('pointerdown', unlockAudioPlayback)
+  document.removeEventListener('keydown', unlockAudioPlayback)
 }
 
 const playIncomingRingtone = async () => {
@@ -635,6 +652,9 @@ const startIncomingRingtone = () => {
   triggerIncomingVibration()
   playIncomingRingtone()
   ringtoneInterval.value = setInterval(() => {
+    if (!audioUnlocked.value) {
+      triggerIncomingVibration()
+    }
     playIncomingRingtone()
   }, 1800)
 }
@@ -906,17 +926,9 @@ const handleClickOutside = (event) => {
   }
 }
 
-const handleVisibilityChange = () => {
-  if (document.visibilityState === 'visible') {
-    unlockAudioPlayback()
-  }
-}
-
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
-  document.addEventListener('pointerdown', unlockAudioPlayback, { passive: true })
-  document.addEventListener('keydown', unlockAudioPlayback)
-  document.addEventListener('visibilitychange', handleVisibilityChange)
+  attachAudioUnlockListeners()
   // ログイン済みならポーリング開始
   if (authState.user) {
     startPolling()
@@ -925,9 +937,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
-  document.removeEventListener('pointerdown', unlockAudioPlayback)
-  document.removeEventListener('keydown', unlockAudioPlayback)
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  detachAudioUnlockListeners()
   stopPolling()
 })
 
@@ -945,9 +955,13 @@ watch(
   () => authState.user,
   (newUser) => {
     if (newUser) {
+      audioUnlocked.value = false
+      attachAudioUnlockListeners()
       startPolling()
     } else {
       stopPolling()
+      detachAudioUnlockListeners()
+      audioUnlocked.value = false
       notifications.value = []
       incomingCalls.value = []
       pendingTaskCount.value = 0
