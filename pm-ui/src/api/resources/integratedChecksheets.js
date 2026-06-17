@@ -62,6 +62,12 @@ export const createIntegratedChecksheetsAPI = (client) => ({
   saveSketch(unitId, data) {
     return client.post(`/integrated-checksheet-units/${unitId}/save_sketch/`, data)
   },
+  releaseHold(unitId, data) {
+    return client.post(`/integrated-checksheet-units/${unitId}/release_hold/`, data)
+  },
+  searchUnitHistory(params) {
+    return client.get('/integrated-checksheet-units/search_history/', { params })
+  },
   leaderConfirm(batchId) {
     return client.post(`/integrated-checksheet-batches/${batchId}/leader_confirm/`)
   },

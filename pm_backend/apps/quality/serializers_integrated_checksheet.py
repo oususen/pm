@@ -195,7 +195,7 @@ class IntegratedChecksheetUnitSerializer(serializers.ModelSerializer):
     class Meta:
         model = IntegratedChecksheetUnit
         fields = [
-            "id", "sequence_no", "status",
+            "id", "sequence_no", "sei_ban", "status",
             "completed_at", "approved_at", "approved_by",
             "checks", "sketch_responses", "process_progress",
         ]

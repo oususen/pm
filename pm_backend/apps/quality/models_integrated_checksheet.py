@@ -291,6 +291,7 @@ class IntegratedChecksheetUnit(models.Model):
         related_name="units", verbose_name="バッチ",
     )
     sequence_no = models.PositiveIntegerField(verbose_name="台目番号")
+    sei_ban = models.CharField(max_length=50, blank=True, default="", verbose_name="製番")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING, verbose_name="状態")
     completed_at = models.DateTimeField(null=True, blank=True, verbose_name="完了日時")
     approved_at = models.DateTimeField(null=True, blank=True, verbose_name="承認日時")

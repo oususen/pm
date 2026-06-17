@@ -144,6 +144,7 @@
               <th>最小発注数</th>
               <th>発注倍数</th>
               <th>機種名</th>
+              <th>識別記号</th>
               <th>加工先(将来用)</th>
               <th>保管場所</th>
               <th>グループ</th>
@@ -169,6 +170,7 @@
               <td>{{ product.order_lot_min ?? '-' }}</td>
               <td>{{ product.order_lot_multiple ?? 1 }}</td>
               <td>{{ product.model_name || '-' }}</td>
+              <td>{{ product.identification_code || '-' }}</td>
               <td>{{ getProcessingAreaLabel(product.processing_area) }}</td>
               <td>{{ formatStockLocations(product) }}</td>
               <td>{{ getProductGroupLabel(product.product_group) }}</td>
@@ -306,6 +308,10 @@
                 <div class="form-group">
                   <label>機種名</label>
                   <input v-model="formData.model_name" placeholder="例: 17U" />
+                </div>
+                <div class="form-group">
+                  <label>識別記号</label>
+                  <input v-model="formData.identification_code" placeholder="例: 7a" />
                 </div>
                 <div class="form-group">
                   <label>加工先(将来用)</label>
@@ -553,7 +559,7 @@
         <div class="csv-format-note">
           <strong>品番コードで照合し、既存は更新・未登録は新規登録します。</strong><br>
           <small>空欄の列はスキップ（元の値を維持）します。</small><br>
-          <small>対応列: 構成品番(必須), 品名規格, 品番区分名, 単位, 単価, 標準LT, 自工程LT, ライン情報, 工程情報, 後工程, 管理区分, 最終品, ライン最終品, 機種名, 製品グループ, 移動先, 比重, 縦, 横, 厚さ, 発注倍数, 最小発注数, 容器入り数</small>
+          <small>対応列: 構成品番(必須), 品名規格, 品番区分名, 単位, 単価, 標準LT, 自工程LT, ライン情報, 工程情報, 後工程, 管理区分, 最終品, ライン最終品, 機種名, 識別記号, 製品グループ, 移動先, 比重, 縦, 横, 厚さ, 発注倍数, 最小発注数, 容器入り数</small>
         </div>
 
         <div class="form-group">
@@ -714,6 +720,7 @@ const createEmptyFormData = () => ({
   product_code: '',
   product_name: '',
   model_name: '',
+  identification_code: '',
   category: '',
   unit: '個',
   unit_price: null,
@@ -751,6 +758,7 @@ const mapProductToFormData = (product, options = {}) => {
     id: asCopy ? undefined : source.id,
     product_code: asCopy ? '' : (source.product_code ?? ''),
     model_name: source.model_name ?? '',
+    identification_code: source.identification_code ?? '',
     order_lot_min: source.order_lot_min ?? null,
     order_lot_multiple: source.order_lot_multiple ?? 1,
     line: source.line ?? null,

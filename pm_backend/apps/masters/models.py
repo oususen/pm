@@ -91,6 +91,7 @@ class Product(models.Model):
 
     # 出荷指示書用フィールド
     model_name = models.CharField(max_length=50, null=True, blank=True, verbose_name='機種名')
+    identification_code = models.CharField(max_length=20, blank=True, default='', verbose_name='識別記号')
     product_group = models.ForeignKey('ProductGroup', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='製品グループ')
     used_container = models.ForeignKey('ContainerCapacity', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='使用容器')
     capacity = models.IntegerField(null=True, blank=True, verbose_name='容器入り数')

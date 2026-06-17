@@ -84,6 +84,12 @@
             <option value="SUPERVISOR_CONFIRMED">{{ t('integratedOperation.status.supervisorConfirmed') }}</option>
           </select>
         </label>
+        <label>
+          <span class="field-label">刻印番号</span>
+          <input v-model="seiBanFilter" type="text" placeholder="部分一致検索" style="width:160px" :disabled="loading" @keydown.enter="doSearch()" />
+        </label>
+        <button class="btn-secondary btn-sm" @click="doSearch()" :disabled="loading" style="align-self:flex-end">検索</button>
+        <button class="btn-secondary btn-sm" @click="resetFilters()" :disabled="loading" style="align-self:flex-end">リセット</button>
       </div>
     </section>
 
@@ -211,6 +217,53 @@
       </div>
     </section>
 
+    <!-- 刻印番号 履歴照会 -->
+    <section v-if="isReviewMode && !activeBatch && !isTestMode && historyResults.length" class="panel">
+      <h3 class="panel-title">刻印番号 履歴照会</h3>
+      <div v-for="item in historyResults" :key="item.unit_id" class="history-unit-card">
+        <div class="history-unit-header">
+          <span class="history-sei-ban">{{ item.sei_ban }}</span>
+          <span class="history-meta">{{ item.product_code }} {{ item.product_name }} | {{ item.line_code }} | 計画日: {{ item.plan_date || '-' }} | ロット: {{ item.lot_no || '-' }} | 台目#{{ item.sequence_no }}</span>
+        </div>
+        <table class="data-table compact history-table">
+          <thead>
+            <tr>
+              <th style="width:100px">工程</th>
+              <th>チェック項目</th>
+              <th style="width:60px">種別</th>
+              <th style="width:70px">判定</th>
+              <th style="width:100px">値</th>
+              <th style="width:90px">実施者</th>
+              <th style="width:80px">実施日</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="proc in item.processes" :key="proc.block_id">
+              <tr class="history-process-header">
+                <td :colspan="7">
+                  <strong>{{ proc.process_code }} {{ proc.process_name }}</strong>
+                  <span v-if="proc.hold && proc.hold.status === 'held'" class="history-hold-badge held">保留中: {{ proc.hold.reason }}</span>
+                  <span v-if="proc.hold && proc.hold.status === 'released'" class="history-hold-badge released">保留解除済 (理由: {{ proc.hold.hold_reason }} → 解除: {{ proc.hold.release_reason }}, {{ proc.hold.released_by }}, {{ formatHistoryDate(proc.hold.released_at) }})</span>
+                </td>
+              </tr>
+              <tr v-if="!proc.checks.length">
+                <td :colspan="7" class="no-data" style="padding:2px 8px;font-size:11px">チェック記録なし</td>
+              </tr>
+              <tr v-for="(chk, ci) in proc.checks" :key="proc.block_id + '-' + ci">
+                <td>{{ proc.process_code }}</td>
+                <td>{{ chk.item_name }}</td>
+                <td>{{ historyRecordTypeLabel(chk.record_type) }}</td>
+                <td :class="historyJudgementClass(chk.judgement)">{{ chk.judgement || '-' }}</td>
+                <td>{{ chk.numeric_value || chk.text_value || '-' }}</td>
+                <td>{{ chk.checked_by || '-' }}</td>
+                <td>{{ formatHistoryDate(chk.checked_at) }}</td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- バッチ詳細（マトリクス） -->
     <section v-if="activeBatch" class="panel matrix-panel">
       <div class="matrix-header">
@@ -245,7 +298,8 @@
                 <div class="unit-header">
                   <span>{{ u.sequence_no }}</span>
                   <span class="status-chip mini" :class="statusClass(u.status)">{{ statusShort(u.status) }}</span>
-                  <span v-if="shouldShowHoldMark(u)" class="unit-hold-mark">保</span>
+                  <span v-if="shouldShowHoldMark(u)" class="unit-hold-mark">保留</span>
+                  <span v-if="u.sei_ban" class="unit-sei-ban">{{ u.sei_ban }}</span>
                 </div>
               </th>
             </tr>
@@ -267,10 +321,12 @@
                 v-for="u in units"
                 :key="'bh-'+block.id+'-'+u.id"
                 class="block-checker-cell"
-                :class="{ 'cell-disabled-by-process': isBlockedByPreferredProcess(block) }"
+                :class="{ 'cell-disabled-by-process': isBlockedByPreferredProcess(block), 'block-held': isBlockHeld(u, block.id) }"
                 @click="canEdit && !isBlockedByPreferredProcess(block) ? openUnitModal(u, block.id) : null"
               >
+                <span v-if="isBlockHeld(u, block.id)" class="block-hold-mark" :title="getBlockHoldReason(u, block.id)">保留</span>
                 {{ getBlockCheckerName(u, block.id) || '-' }}
+                <span v-if="getBlockCheckedDate(u, block.id)" class="checker-date">{{ getBlockCheckedDate(u, block.id) }}</span>
               </td>
               </tr>
               <!-- 各チェック項目行 -->
@@ -321,23 +377,30 @@
             v-for="block in modalVisibleBlocks"
             :key="'mb-'+block.id"
             class="process-section"
-            :class="{ 'ratio-4-1': block.sketch_image_url && !isBlockLockedForModal(block) && block.items?.length }"
+            :class="{ 'ratio-4-1': block.sketch_image_url && (!isBlockLockedForModal(block) || isBlockViewOnlyForModal(block)) && block.items?.length }"
           >
-            <div class="process-section-header" :class="{ locked: isBlockLockedForModal(block) }">
+            <div class="process-section-header" :class="{ locked: isBlockLockedForModal(block) && !isBlockViewOnlyForModal(block), 'view-only-header': isBlockViewOnlyForModal(block) }">
               <strong>{{ block.process_code }} {{ block.process_name }}</strong>
               <span v-if="getBlockProgress(block)" class="progress-text">
                 {{ getBlockProgress(block).done }} / {{ getBlockProgress(block).total }}
               </span>
-              <span v-if="isBlockLockedForModal(block)" class="lock-label">{{ t('integratedOperation.lockedByPrevious') }}</span>
+              <span v-if="modalUnit?.sei_ban" class="sei-ban-label">刻印番号: {{ modalUnit.sei_ban }}</span>
+              <span v-if="isBlockHeld(modalUnit, block.id)" class="lock-label hold-lock">
+                この工程は保留中です
+                <button v-if="isLeaderOrAbove" class="btn-release-hold" @click="releaseHold(block.id)">保留解除</button>
+              </span>
+              <span v-else-if="isBlockLockedForModal(block) && isBlockLockedByHold(modalUnit, block)" class="lock-label hold-lock">前工程が保留中のためロック</span>
+              <span v-else-if="isBlockViewOnlyForModal(block)" class="lock-label" style="color:#16a34a">チェック完了（閲覧のみ）</span>
+              <span v-else-if="isBlockLockedForModal(block)" class="lock-label">{{ t('integratedOperation.lockedByPrevious') }}</span>
               <button
-                v-if="block.sketch_image_url && !isBlockLockedForModal(block)"
+                v-if="block.sketch_image_url && (!isBlockLockedForModal(block) || isBlockViewOnlyForModal(block))"
                 class="btn-sketch-toggle"
                 @click="sketchCollapsed[block.id] = !sketchCollapsed[block.id]"
               >{{ sketchCollapsed[block.id] ? '▶ 台紙表示' : '▼ 台紙非表示' }}</button>
             </div>
 
             <!-- チェック項目 -->
-            <div v-if="!isBlockLockedForModal(block)" class="items-list">
+            <div v-if="!isBlockLockedForModal(block) || isBlockViewOnlyForModal(block)" class="items-list" :class="{ 'view-only': isBlockViewOnlyForModal(block) }">
               <div v-for="(item, itemIdx) in block.items" :key="'mi-'+item.id" class="item-row" :class="{ 'item-optional': !item.is_required }">
                 <span class="item-no">{{ itemIdx + 1 }}</span>
                 <div class="item-label-area">
@@ -461,7 +524,7 @@
 
             <!-- 略図 + フィールドオーバーレイ -->
             <div
-              v-if="block.sketch_image_url && !isBlockLockedForModal(block)"
+              v-if="block.sketch_image_url && (!isBlockLockedForModal(block) || isBlockViewOnlyForModal(block))"
               v-show="!sketchCollapsed[block.id]"
               class="sketch-container"
               :ref="el => setSketchContainerRef(block.id, el)"
@@ -517,19 +580,26 @@
 
             <!-- ロック中表示 -->
             <div v-else class="locked-message">
-              {{ t('integratedOperation.completePreviousRequired') }}
+              <template v-if="isBlockHeld(modalUnit, block.id)">
+                <div class="hold-reason-display">
+                  <strong>保留理由:</strong> {{ getBlockHoldReason(modalUnit, block.id) || '未記入' }}
+                </div>
+              </template>
+              <template v-else>
+                {{ t('integratedOperation.completePreviousRequired') }}
+              </template>
             </div>
 
           </div>
           <div class="modal-save-bar">
             <div class="modal-save-bar-main">
               <button
-                v-if="canEdit && modalVisibleBlocks.some(b => b.sketch_image_url && (b.sketch_fields || []).some(f => f.field_type === 'pen'))"
+                v-if="!isReviewMode && canEdit && modalVisibleBlocks.some(b => b.sketch_image_url && (b.sketch_fields || []).some(f => f.field_type === 'pen'))"
                 class="btn-pen-mode-toggle"
                 :class="{ active: modalPenModeOn }"
                 @click="toggleModalPenMode"
               >{{ modalPenModeOn ? '✏️ 描画ON' : '✏️ 描画OFF' }}</button>
-              <span class="modal-unit-label">台目 #{{ modalUnit.sequence_no }} 入力</span>
+              <span class="modal-unit-label">台目 #{{ modalUnit.sequence_no }} {{ isReviewMode ? '確認' : '入力' }}{{ modalUnit.sei_ban ? ' | 刻印番号: ' + modalUnit.sei_ban : '' }}</span>
               <button
                 class="btn-secondary btn-sm"
                 @click="moveModalUnit(-1)"
@@ -542,7 +612,7 @@
               >{{ t('integratedOperation.nextUnit') }}</button>
               <span class="status-chip" :class="statusClass(modalHeaderStatusCode)">{{ modalHeaderStatusLabel }}</span>
               <button
-                v-if="modalVisibleBlocks.length === 1 && !isBlockLockedForModal(modalVisibleBlocks[0]) && modalVisibleBlocks[0].items?.length"
+                v-if="!isReviewMode && modalVisibleBlocks.length === 1 && !isBlockLockedForModal(modalVisibleBlocks[0]) && !isBlockViewOnlyForModal(modalVisibleBlocks[0]) && modalVisibleBlocks[0].items?.length"
                 class="btn-primary btn-sm"
                 @click="saveBlockChecks(modalVisibleBlocks[0], { hold: false })"
                 :disabled="savingBlock === modalVisibleBlocks[0].id || !canEdit"
@@ -550,7 +620,7 @@
                 {{ savingBlock === modalVisibleBlocks[0].id ? t('common.saving') : t('integratedOperation.saveThisProcess') }}
               </button>
               <button
-                v-if="modalVisibleBlocks.length === 1 && !isBlockLockedForModal(modalVisibleBlocks[0]) && modalVisibleBlocks[0].items?.length"
+                v-if="!isReviewMode && isLeaderOrAbove && modalVisibleBlocks.length === 1 && !isBlockLockedForModal(modalVisibleBlocks[0]) && !isBlockViewOnlyForModal(modalVisibleBlocks[0]) && modalVisibleBlocks[0].items?.length"
                 class="btn-secondary btn-sm btn-hold"
                 @click="saveBlockChecks(modalVisibleBlocks[0], { hold: true })"
                 :disabled="savingBlock === modalVisibleBlocks[0].id || !canEdit"
@@ -644,6 +714,13 @@ const pageTitleText = computed(() => (
     ? '工程一体チェックシート テスト実施'
     : (isReviewMode.value ? t('integratedOperation.pageTitleReview') : t('integratedOperation.pageTitleWork'))
 ))
+const isLeaderOrAbove = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_superuser) return true
+  const role = user.profile?.role || ''
+  return ['leader', 'supervisor', 'chief', 'manager'].includes(role)
+})
 const isSupervisorUser = computed(() => {
   const user = authState.user
   if (!user) return false
@@ -686,23 +763,6 @@ const allLines = ref([])
 const allProducts = ref([])
 const lineOptions = computed(() => allLines.value)
 const lineFinalProductsByLine = ref({})
-const lineFinalProductIdSet = computed(() => new Set(allProducts.value.map((p) => Number(p.id))))
-const uniqById = (list) => {
-  const map = new Map()
-  list.forEach((item) => {
-    if (!item || item.id == null) return
-    map.set(Number(item.id), item)
-  })
-  return [...map.values()]
-}
-const parseLineFinalCandidates = (responseData) => {
-  const rows = Array.isArray(responseData) ? responseData : []
-  if (!rows.length) return []
-  const raw = Array.isArray(rows[0]?.products)
-    ? rows.flatMap((row) => row.products || [])
-    : rows
-  return uniqById(raw).filter((p) => lineFinalProductIdSet.value.has(Number(p.id)))
-}
 const filteredProductOptions = computed(() => {
   if (!selectedLine.value) return allProducts.value
   return lineFinalProductsByLine.value[String(selectedLine.value)] || []
@@ -716,6 +776,7 @@ const newBatchProductOptions = computed(() => {
 const selectedLine = ref('')
 const selectedProduct = ref('')
 const batchStatusFilter = ref('OPEN')
+const seiBanFilter = ref('')
 
 // --- バッチ一覧 ---
 const batches = ref([])
@@ -730,6 +791,45 @@ const newBatchSectionRef = ref(null)
 const loadingTestTemplate = ref(false)
 const testTemplate = ref(null)
 const testBatch = reactive({ quantity: 1, plan_date: '', lot_no: 'TEST' })
+
+// --- 刻印番号 履歴照会 ---
+const historyResults = ref([])
+const loadingHistory = ref(false)
+
+const searchHistory = async () => {
+  if (!seiBanFilter.value.trim()) {
+    historyResults.value = []
+    return
+  }
+  loadingHistory.value = true
+  try {
+    const res = await api.integratedChecksheets.searchUnitHistory({ sei_ban: seiBanFilter.value.trim() })
+    historyResults.value = res.data || []
+  } catch {
+    historyResults.value = []
+  } finally {
+    loadingHistory.value = false
+  }
+}
+
+const formatHistoryDate = (isoStr) => {
+  if (!isoStr) return '-'
+  const d = new Date(isoStr)
+  if (isNaN(d.getTime())) return '-'
+  return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+const historyRecordTypeLabel = (rt) => {
+  const map = { CHECK: 'C', NUMERIC: 'N', NUMERIC_CHECK: 'NC', PHOTO_NUMERIC: 'PN', PHOTO: 'P', TEXT: 'T' }
+  return map[rt] || rt
+}
+
+const historyJudgementClass = (j) => {
+  if (j === 'OK') return 'history-ok'
+  if (j === 'NG') return 'history-ng'
+  if (j === '修正流動') return 'history-rework'
+  return ''
+}
 
 // --- バッチ詳細 ---
 const activeBatchId = ref(null)
@@ -834,6 +934,16 @@ const getBlockCheckerName = (unit, blockId) => {
   return checks[0]?.checked_by_name || ''
 }
 
+const getBlockCheckedDate = (unit, blockId) => {
+  if (!unit?.checks || !Array.isArray(unit.checks)) return ''
+  const checks = unit.checks
+    .filter((c) => Number(c.process_block_id) === Number(blockId) && c.checked_at)
+    .sort((a, b) => new Date(b.checked_at).getTime() - new Date(a.checked_at).getTime())
+  if (!checks[0]?.checked_at) return ''
+  const d = new Date(checks[0].checked_at)
+  return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
+}
+
 
 const statusClass = (st) => {
   switch (st) {
@@ -893,17 +1003,46 @@ const getUnitProcessProgress = (unit) => {
 
 const isBlockLocked = (unit, block) => {
   const progress = getUnitProcessProgress(unit)
+  let holdFound = false
   for (const pp of progress) {
-    if (pp.process_block_id === block.id) return false
-    // この工程ブロックより前の工程で、必須項目が未完了ならロック
+    if (holdFound) return true
+    if (isBlockHeld(unit, pp.process_block_id)) holdFound = true
+    if (pp.process_block_id === block.id) return holdFound
     if (!pp.complete && pp.total > 0) return true
   }
   return false
 }
 
+const isBlockCompleted = (unit, block) => {
+  if (!unit) return false
+  const progress = getUnitProcessProgress(unit)
+  const pp = progress.find((p) => p.process_block_id === block.id)
+  return pp?.complete && pp?.total > 0
+}
+
+const isBlockViewOnly = (unit, block) => {
+  if (isReviewMode.value) return true
+  return isBlockCompleted(unit, block)
+}
+
 const isBlockLockedForModal = (block) => {
   if (!modalUnit.value) return false
   return isBlockLocked(modalUnit.value, block)
+}
+
+const isBlockLockedByHold = (unit, block) => {
+  if (!unit) return false
+  const progress = getUnitProcessProgress(unit)
+  for (const pp of progress) {
+    if (pp.process_block_id === block.id) return false
+    if (isBlockHeld(unit, pp.process_block_id)) return true
+  }
+  return false
+}
+
+const isBlockViewOnlyForModal = (block) => {
+  if (!modalUnit.value) return false
+  return isBlockViewOnly(modalUnit.value, block)
 }
 
 const getBlockProgress = (block) => {
@@ -985,21 +1124,50 @@ const ensureLineFinalProducts = async (lineId) => {
     return lineFinalProductsByLine.value[key]
   }
   try {
-    const res = await api.products.getLineFinalCandidates(lineId)
-    const products = parseLineFinalCandidates(res?.data)
+    const res = await api.integratedChecksheets.listTemplates({ line: lineId, is_active: true, page_size: 1000 })
+    const templates = res.data?.results || res.data || []
+    const productMap = new Map()
+    templates.forEach((t) => {
+      if (t.product && !productMap.has(Number(t.product))) {
+        productMap.set(Number(t.product), {
+          id: t.product,
+          product_code: t.product_code || '',
+          product_name: t.product_name || '',
+        })
+      }
+    })
+    const products = [...productMap.values()]
     lineFinalProductsByLine.value = {
       ...lineFinalProductsByLine.value,
       [key]: products,
     }
     return products
   } catch (error) {
-    console.error('ライン最終品候補の取得に失敗:', error)
+    console.error('ライン製品候補の取得に失敗:', error)
     lineFinalProductsByLine.value = {
       ...lineFinalProductsByLine.value,
       [key]: [],
     }
     return []
   }
+}
+
+const doSearch = () => {
+  loadBatches()
+  if (seiBanFilter.value.trim()) {
+    searchHistory()
+  } else {
+    historyResults.value = []
+  }
+}
+
+const resetFilters = () => {
+  if (!isLineLockedFromRoute.value) selectedLine.value = ''
+  selectedProduct.value = ''
+  batchStatusFilter.value = 'OPEN'
+  seiBanFilter.value = ''
+  historyResults.value = []
+  loadBatches()
 }
 
 const loadBatches = async () => {
@@ -1014,6 +1182,7 @@ const loadBatches = async () => {
     if (effectiveLineId) params.line = effectiveLineId
     if (selectedProduct.value) params.product = selectedProduct.value
     if (batchStatusFilter.value) params.status = batchStatusFilter.value
+    if (seiBanFilter.value) params.sei_ban = seiBanFilter.value
     const res = await api.integratedChecksheets.listBatches(params)
     batches.value = res.data?.results || res.data || []
   } catch {
@@ -1631,9 +1800,20 @@ const hasUnitHoldFlag = (unit) => {
   return unit.sketch_responses.some((resp) => Boolean(resp?.field_responses?._hold))
 }
 
+const isBlockHeld = (unit, blockId) => {
+  if (!unit || !Array.isArray(unit.sketch_responses)) return false
+  const resp = unit.sketch_responses.find((r) => Number(r.process_block) === Number(blockId))
+  return Boolean(resp?.field_responses?._hold)
+}
+
+const getBlockHoldReason = (unit, blockId) => {
+  if (!unit || !Array.isArray(unit.sketch_responses)) return ''
+  const resp = unit.sketch_responses.find((r) => Number(r.process_block) === Number(blockId))
+  return String(resp?.field_responses?._hold_reason || '')
+}
+
 const shouldShowHoldMark = (unit) => {
-  if (hasUnitHoldFlag(unit)) return true
-  return hasUnitAnyCheckValue(unit) && hasUnitMissingRequired(unit)
+  return hasUnitHoldFlag(unit)
 }
 
 const sketchNaturalSizes = ref({})
@@ -1805,6 +1985,37 @@ const getSketchPayloadForBlock = (unit, blockId, hold, holdReason = '') => {
     delete fieldResponses._hold_reason
   }
   return { drawing_data: drawingData, field_responses: fieldResponses }
+}
+
+const releaseHold = async (blockId) => {
+  if (!modalUnit.value) return
+  let releaseReason = ''
+  while (!releaseReason) {
+    const input = window.prompt('保留解除の理由を入力してください:')
+    if (input === null) return
+    releaseReason = String(input).trim()
+    if (!releaseReason) alert('理由は必須です。')
+  }
+  try {
+    const res = await api.integratedChecksheets.releaseHold(modalUnit.value.id, { process_block_id: blockId, release_reason: releaseReason })
+    const updatedUnit = {
+      ...res.data,
+      sketch_responses: (modalUnit.value.sketch_responses || []).map((sr) => {
+        if (Number(sr.process_block) !== Number(blockId)) return sr
+        const fr = { ...sr.field_responses }
+        delete fr._hold
+        delete fr._hold_reason
+        return { ...sr, field_responses: fr }
+      }),
+    }
+    updateUnitInList(updatedUnit)
+    modalUnit.value = updatedUnit
+    if (activeBatch.value) await loadBatchUnits(activeBatch.value.id)
+    const refreshed = units.value.find((u) => u.id === updatedUnit.id)
+    if (refreshed) modalUnit.value = refreshed
+  } catch (e) {
+    alert(`保留解除に失敗しました: ${e.response?.data?.detail || e.message}`)
+  }
 }
 
 // 工程ブロック単位で保存
@@ -2190,6 +2401,23 @@ onMounted(async () => {
   font-weight: 700;
   line-height: 1;
 }
+.unit-sei-ban {
+  display: block;
+  font-size: 9px;
+  color: #6b7280;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+.sei-ban-label {
+  margin-left: 12px;
+  padding: 2px 8px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e40af;
+}
 
 .th-no { position: sticky; left: 0; z-index: 2; min-width: 30px; }
 .td-no { position: sticky; left: 0; z-index: 1; background: #fff; font-size: 11px; color: #6b7280; text-align: center; min-width: 30px; }
@@ -2235,6 +2463,7 @@ onMounted(async () => {
   min-width: 52px;
   cursor: pointer;
 }
+.block-checker-cell .checker-date { display: block; font-size: 9px; opacity: 0.7; font-weight: 400; }
 .block-checker-cell:hover { background: #334155; color: #ffffff; }
 .block-checker-cell.cell-disabled-by-process {
   cursor: not-allowed;
@@ -2244,6 +2473,18 @@ onMounted(async () => {
 .block-checker-cell.cell-disabled-by-process:hover {
   background: #334155;
   color: #94a3b8;
+}
+.block-checker-cell.block-held { background: #78350f; }
+.block-hold-mark {
+  display: inline-block;
+  background: #fbbf24;
+  color: #78350f;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 3px;
+  margin-right: 3px;
+  line-height: 1.4;
 }
 .sketch-badge { font-size: 10px; background: #fbbf24; color: #78350f; padding: 1px 6px; border-radius: 3px; margin-left: 6px; font-weight: 400; }
 
@@ -2354,6 +2595,19 @@ onMounted(async () => {
 .process-section-header.locked { background: #9ca3af; }
 .progress-text { font-size: 12px; font-weight: 400; color: #94a3b8; }
 .lock-label { font-size: 11px; color: #fbbf24; margin-left: auto; }
+.lock-label.hold-lock { color: #f87171; font-weight: 600; }
+.btn-release-hold {
+  margin-left: 8px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #fff;
+  color: #dc2626;
+  border: 1px solid #dc2626;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-release-hold:hover { background: #fef2f2; }
 
 /* 略図 */
 .sketch-placeholder {
@@ -2464,6 +2718,15 @@ onMounted(async () => {
 .auto-judge-badge.ng { background: #fee2e2; color: #991b1b; }
 
 /* ロック中メッセージ */
+.hold-reason-display {
+  padding: 8px 16px;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+  color: #92400e;
+  font-size: 13px;
+  display: inline-block;
+}
 .locked-message {
   padding: 12px;
   text-align: center;
@@ -2549,5 +2812,25 @@ onMounted(async () => {
   gap: 4px;
   margin-top: 4px;
 }
+
+/* ビューモード（完了済み工程） */
+.items-list.view-only { pointer-events: none; opacity: 0.75; }
+.view-only-header { background: #064e3b; }
+
+/* 刻印番号 履歴照会 */
+.history-unit-card { margin-bottom: 12px; border: 1px solid #e2e8f0; border-radius: 4px; overflow: hidden; }
+.history-unit-header { background: #1e293b; color: #e2e8f0; padding: 6px 10px; font-size: 12px; display: flex; gap: 12px; align-items: center; }
+.history-sei-ban { font-weight: 700; font-size: 13px; color: #38bdf8; }
+.history-meta { opacity: 0.85; }
+.history-table { margin: 0; }
+.history-table th { font-size: 11px; padding: 3px 6px; }
+.history-table td { font-size: 11px; padding: 2px 6px; }
+.history-process-header td { background: #f1f5f9; font-size: 12px; padding: 4px 8px; }
+.history-hold-badge { font-size: 10px; margin-left: 8px; padding: 1px 6px; border-radius: 3px; }
+.history-hold-badge.held { background: #fef3c7; color: #92400e; }
+.history-hold-badge.released { background: #d1fae5; color: #065f46; }
+.history-ok { color: #16a34a; font-weight: 600; }
+.history-ng { color: #dc2626; font-weight: 600; }
+.history-rework { color: #d97706; font-weight: 600; }
 
 </style>

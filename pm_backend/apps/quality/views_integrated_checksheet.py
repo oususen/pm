@@ -33,6 +33,39 @@ from .serializers_integrated_checksheet import (
     IntegratedChecksheetUnitSerializer,
 )
 
+def _generate_sei_ban(batch):
+    """バッチ内の全ユニットの刻印番号を生成する。
+    台目順に連番を振る（保留状態に関わらず維持）。
+    フォーマット: YYYY MM DD NN 識別記号（スペース区切り）
+    """
+    plan_date = batch.plan_date
+    if not plan_date:
+        return
+    if isinstance(plan_date, str):
+        plan_date = datetime.strptime(plan_date, "%Y-%m-%d").date()
+    yyyy = f"{plan_date.year:04d}"
+    mm = f"{plan_date.month:02d}"
+    dd = f"{plan_date.day:02d}"
+
+    identification_code = getattr(batch.product, 'identification_code', '') or ''
+
+    units = list(batch.units.order_by('sequence_no'))
+
+    to_update = []
+    for unit in units:
+        nn = f"{unit.sequence_no:02d}"
+        parts = [yyyy, mm, dd, nn]
+        if identification_code:
+            parts.append(identification_code)
+        new_sei_ban = ' '.join(parts)
+        if unit.sei_ban != new_sei_ban:
+            unit.sei_ban = new_sei_ban
+            to_update.append(unit)
+
+    if to_update:
+        IntegratedChecksheetUnit.objects.bulk_update(to_update, ['sei_ban'])
+
+
 def _display_name(user):
     if not user:
         return ""
@@ -733,6 +766,7 @@ class IntegratedChecksheetBatchViewSet(
         else:
             batch.save(update_fields=update_fields)
 
+        _generate_sei_ban(batch)
         batch = self.get_queryset().get(pk=batch.pk)
         return Response(IntegratedChecksheetBatchSerializer(batch).data)
 
@@ -766,6 +800,9 @@ class IntegratedChecksheetBatchViewSet(
             qs = qs.filter(line_id=line_id)
         if status_val:
             qs = qs.filter(status=status_val)
+        sei_ban = self.request.query_params.get("sei_ban")
+        if sei_ban:
+            qs = qs.filter(units__sei_ban__icontains=sei_ban).distinct()
         return qs
 
     @action(detail=True, methods=["get"])
@@ -838,6 +875,8 @@ class IntegratedChecksheetBatchViewSet(
                 IntegratedChecksheetUnit(batch=batch, sequence_no=seq)
                 for seq in range(1, quantity + 1)
             ])
+            batch.refresh_from_db()
+            _generate_sei_ban(batch)
 
         batch = self.get_queryset().get(pk=batch.pk)
         return Response(IntegratedChecksheetBatchSerializer(batch).data, status=status.HTTP_201_CREATED)
@@ -982,7 +1021,136 @@ class IntegratedChecksheetUnitViewSet(viewsets.GenericViewSet):
             unit=unit, process_block_id=process_block_id,
             defaults={"drawing_data": drawing_data, "field_responses": field_responses},
         )
+
         return Response({"ok": True})
+
+    @action(detail=True, methods=["post"])
+    def release_hold(self, request, pk=None):
+        """工程ブロックの保留を解除する（リーダー以上のみ）"""
+        user = request.user
+        role = getattr(getattr(user, 'profile', None), 'role', '')
+        if not user.is_superuser and role not in ('leader', 'supervisor', 'chief', 'manager'):
+            return Response({"detail": "保留解除はリーダー以上の権限が必要です。"}, status=status.HTTP_403_FORBIDDEN)
+
+        unit = self.get_object()
+        process_block_id = request.data.get("process_block_id")
+        if not process_block_id:
+            return Response({"detail": "process_block_id は必須です。"}, status=status.HTTP_400_BAD_REQUEST)
+
+        resp = IntegratedChecksheetSketchResponse.objects.filter(
+            unit=unit, process_block_id=process_block_id,
+        ).first()
+        if not resp:
+            return Response({"detail": "対象の台紙データがありません。"}, status=status.HTTP_404_NOT_FOUND)
+
+        release_reason = str(request.data.get("release_reason", "")).strip()
+        if not release_reason:
+            return Response({"detail": "解除理由は必須です。"}, status=status.HTTP_400_BAD_REQUEST)
+
+        fr = resp.field_responses if isinstance(resp.field_responses, dict) else {}
+        fr.pop('_hold', None)
+        fr['_hold_released'] = True
+        fr['_hold_reason_original'] = fr.pop('_hold_reason', '')
+        fr['_release_reason'] = release_reason
+        fr['_released_by'] = user.get_full_name() or str(user)
+        fr['_released_at'] = datetime.now().isoformat()
+        resp.field_responses = fr
+        resp.save(update_fields=['field_responses', 'updated_at'])
+
+        unit.refresh_from_db()
+        return Response(IntegratedChecksheetUnitSerializer(unit).data)
+
+    @action(detail=False, methods=["get"])
+    def search_history(self, request):
+        """刻印番号でユニットを検索し、全工程のチェック履歴を返す"""
+        sei_ban = request.query_params.get("sei_ban", "").strip()
+        if not sei_ban:
+            return Response({"detail": "sei_ban は必須です。"}, status=status.HTTP_400_BAD_REQUEST)
+
+        units = (
+            IntegratedChecksheetUnit.objects
+            .filter(sei_ban__icontains=sei_ban)
+            .select_related(
+                "batch__template", "batch__product", "batch__line",
+                "batch__leader_confirmed_by", "batch__supervisor_confirmed_by",
+            )
+            .prefetch_related(
+                "checks__item__process_block__process",
+                "checks__checked_by",
+                "sketch_responses__process_block__process",
+            )
+            .order_by("-batch__plan_date", "sequence_no")
+        )
+
+        results = []
+        for unit in units:
+            batch = unit.batch
+            template = batch.template
+            blocks = list(
+                template.process_blocks
+                .select_related("process")
+                .order_by("sort_order")
+            )
+            checks_by_block = {}
+            for check in unit.checks.all():
+                bid = check.item.process_block_id
+                if bid not in checks_by_block:
+                    checks_by_block[bid] = []
+                checks_by_block[bid].append({
+                    "item_name": check.item.item_name,
+                    "record_type": check.item.record_type,
+                    "judgement": check.judgement,
+                    "numeric_value": str(check.numeric_value) if check.numeric_value is not None else None,
+                    "text_value": check.text_value,
+                    "photo_url": check.photo_url,
+                    "checked_by": check.checked_by.get_full_name() or str(check.checked_by) if check.checked_by else "",
+                    "checked_at": check.checked_at.isoformat() if check.checked_at else None,
+                })
+
+            sketch_map = {}
+            for sr in unit.sketch_responses.all():
+                fr = sr.field_responses if isinstance(sr.field_responses, dict) else {}
+                hold_info = None
+                if fr.get("_hold"):
+                    hold_info = {"status": "held", "reason": fr.get("_hold_reason", "")}
+                elif fr.get("_hold_released"):
+                    hold_info = {
+                        "status": "released",
+                        "hold_reason": fr.get("_hold_reason_original", ""),
+                        "release_reason": fr.get("_release_reason", ""),
+                        "released_by": fr.get("_released_by", ""),
+                        "released_at": fr.get("_released_at", ""),
+                    }
+                sketch_map[sr.process_block_id] = hold_info
+
+            process_results = []
+            for block in blocks:
+                process_results.append({
+                    "process_code": block.process.process_code,
+                    "process_name": block.process.process_name,
+                    "block_id": block.id,
+                    "checks": checks_by_block.get(block.id, []),
+                    "hold": sketch_map.get(block.id),
+                })
+
+            results.append({
+                "unit_id": unit.id,
+                "sei_ban": unit.sei_ban,
+                "sequence_no": unit.sequence_no,
+                "status": unit.status,
+                "completed_at": unit.completed_at.isoformat() if unit.completed_at else None,
+                "batch_id": batch.id,
+                "plan_date": str(batch.plan_date) if batch.plan_date else "",
+                "lot_no": batch.lot_no,
+                "product_code": batch.product.product_code,
+                "product_name": batch.product.product_name,
+                "line_code": batch.line.line_code if batch.line else "",
+                "line_name": batch.line.line_name if batch.line else "",
+                "batch_status": batch.status,
+                "processes": process_results,
+            })
+
+        return Response(results)
 
     def _update_unit_status(self, unit, blocks):
         all_required_items = []

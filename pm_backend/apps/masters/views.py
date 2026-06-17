@@ -612,6 +612,11 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 product.model_name = val
                 changed_fields.append('model_name')
 
+            # 識別記号
+            if 'identification_code' in item:
+                product.identification_code = str(item.get('identification_code') or '').strip()
+                changed_fields.append('identification_code')
+
             # 製品グループ
             val = str(item.get('product_group_code') or '').strip()
             if val:
@@ -727,6 +732,7 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             '最終品': 'is_final_product',
             'ライン最終品': 'is_line_final_product',
             '機種名': 'model_name',
+            '識別記号': 'identification_code',
             '製品グループ': 'product_group_code', 'グループコード': 'product_group_code',
             '移動先': 'transfer_destination',
             '比重': 'specific_gravity', '比重(g/cm³)': 'specific_gravity',
