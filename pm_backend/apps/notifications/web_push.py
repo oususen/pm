@@ -44,6 +44,7 @@ def send_web_push(subscription, payload):
             vapid_private_key=config['private_key'],
             vapid_claims={'sub': config['subject']},
         )
+        logger.info('Push 通知送信成功: user_id=%s, tag=%s', subscription.user_id, payload.get('tag', ''))
         return True
     except WebPushException as error:
         status_code = getattr(getattr(error, 'response', None), 'status_code', None)

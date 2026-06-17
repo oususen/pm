@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pm-ui-v4'
+const CACHE_NAME = 'pm-ui-v5'
 const PRECACHE_URLS = [
   '/',
   '/index.html',
@@ -76,6 +76,7 @@ self.addEventListener('push', (event) => {
     console.warn('Push payload parse failed:', error)
   }
 
+  const isCall = !!(payload.data && payload.data.session_id)
   const title = payload.title || '新着通知'
   const options = {
     body: payload.body || '',
@@ -89,11 +90,24 @@ self.addEventListener('push', (event) => {
     renotify: true,
   }
 
+  if (isCall) {
+    options.requireInteraction = true
+    options.vibrate = [300, 150, 300, 150, 300, 150, 300]
+    options.actions = [
+      { action: 'open_call', title: '通話画面へ' },
+      { action: 'dismiss', title: '閉じる' },
+    ]
+  }
+
   event.waitUntil(self.registration.showNotification(title, options))
 })
 
 self.addEventListener('notificationclick', (event) => {
+  const action = event.action
   event.notification.close()
+
+  if (action === 'dismiss') return
+
   const targetUrl = new URL(event.notification.data?.url || '/', self.location.origin).href
 
   event.waitUntil((async () => {
