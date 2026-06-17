@@ -64,6 +64,17 @@
         </div>
       </div>
       <div class="nav-actions">
+        <button
+          v-if="incomingCallCount"
+          class="nav-action-btn incoming-call-btn"
+          type="button"
+          title="着信中"
+          @click="openIncomingCallCenter"
+        >
+          <span>📞</span>
+          <span class="btn-label">着信中</span>
+          <span class="task-badge">{{ incomingCallCount }}</span>
+        </button>
         <div v-if="showNotificationBell" class="notification-wrapper" @click.stop>
           <button
             class="nav-action-btn notification-btn"
@@ -80,9 +91,15 @@
           <div v-if="showNotificationMenu" class="notification-menu" @click.stop @mousedown.stop>
             <div class="notification-menu-header">{{ t('nav.unreadTitle') }}</div>
             <div v-if="unreadNotifications.length" class="notification-list">
-              <div v-for="item in unreadNotifications" :key="item.id" class="notification-item">
+              <button
+                v-for="item in unreadNotifications"
+                :key="item.id"
+                type="button"
+                class="notification-item"
+                @click="handleNotificationClick(item)"
+              >
                 <div class="notification-title">{{ item.title }}</div>
-              </div>
+              </button>
             </div>
             <div v-else class="notification-empty">{{ t('nav.unreadEmpty') }}</div>
             <RouterLink
@@ -116,6 +133,27 @@
       </div>
     </div>
   </nav>
+  <div v-if="incomingCallPopupVisible" class="incoming-call-overlay" @click.self="openIncomingCallCenter">
+    <div class="incoming-call-popup">
+      <div class="incoming-call-header">
+        <div class="incoming-call-title">着信中</div>
+        <div class="incoming-call-subtitle">{{ incomingCallTypeLabel }}</div>
+      </div>
+      <div class="incoming-call-name">{{ primaryIncomingCall?.caller_name || '発信者不明' }}</div>
+      <div class="incoming-call-note">通話センターへ移動して応答してください。</div>
+      <div class="incoming-call-actions">
+        <button class="incoming-btn open-btn" type="button" @click="openIncomingCallCenter">
+          通話画面へ
+        </button>
+        <button class="incoming-btn mute-btn" type="button" @click="silenceIncomingCall">
+          消音
+        </button>
+        <button class="incoming-btn decline-btn" type="button" @click="declineIncomingCall">
+          辞退
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -249,9 +287,15 @@ const pendingTaskCount = ref(0)
 const previousNotificationIds = ref(new Set())
 const pollingInterval = ref(null)
 const taskPollingInterval = ref(null)
+const callPollingInterval = ref(null)
+const incomingCalls = ref([])
+const mutedIncomingCallIds = ref(new Set())
+const ringtoneInterval = ref(null)
+const audioContextRef = ref(null)
 // デフォルト値（サーバー設定取得前のフォールバック）
 let NOTIFICATION_POLLING_MS = 60000
 let TASK_POLLING_MS = 120000
+const CALL_POLLING_MS = 3000
 const localeOptions = getLocaleOptions()
 const selectedLocale = computed({
   get: () => locale.value,
@@ -366,6 +410,13 @@ const unreadNotifications = computed(() => {
 })
 
 const notificationCount = computed(() => unreadNotifications.value.length)
+const incomingCallCount = computed(() => incomingCalls.value.length)
+const primaryIncomingCall = computed(() => incomingCalls.value[0] || null)
+const incomingCallPopupVisible = computed(() => Boolean(primaryIncomingCall.value))
+const incomingCallTypeLabel = computed(() => {
+  if (!primaryIncomingCall.value) return ''
+  return primaryIncomingCall.value.call_type === 'video' ? 'ビデオ通話' : '音声通話'
+})
 
 const loadNotifications = async () => {
   if (!canAccessNotifications.value) {
@@ -416,6 +467,34 @@ const loadDepartments = async () => {
     console.error('部署一覧の取得に失敗しました:', error)
     departments.value = []
   }
+}
+
+const parseCallSessionId = (item) => {
+  const source = `${item?.description || ''}\n${item?.title || ''}`
+  const matched = source.match(/対象セッションID:\s*(\d+)/)
+  return matched ? Number(matched[1]) : null
+}
+
+const isIncomingCallNotification = (item) => {
+  return String(item?.domain || '') === 'call' || String(item?.category || '') === 'incoming_call'
+}
+
+const handleNotificationClick = async (item) => {
+  closeNotificationMenu()
+  const sessionId = parseCallSessionId(item)
+  if (isIncomingCallNotification(item) && sessionId) {
+    try {
+      if (!item.is_read) {
+        await api.notifications.markRead(item.id)
+        await loadNotifications()
+      }
+    } catch (error) {
+      console.error('通知既読化に失敗しました:', error)
+    }
+    router.push(`/notifications/calls?session=${sessionId}`)
+    return
+  }
+  router.push('/notifications')
 }
 
 const toggleUserMenu = () => {
@@ -473,6 +552,77 @@ const playChimeSound = () => {
   }
 }
 
+const getAudioContext = async () => {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext
+  if (!AudioContextClass) return null
+  if (!audioContextRef.value) {
+    audioContextRef.value = new AudioContextClass()
+  }
+  if (audioContextRef.value.state === 'suspended') {
+    await audioContextRef.value.resume()
+  }
+  return audioContextRef.value
+}
+
+const playIncomingRingtone = async () => {
+  try {
+    const audioContext = await getAudioContext()
+    if (!audioContext) return
+    const sequence = [
+      { freq: 880, start: 0.0, duration: 0.20 },
+      { freq: 988.88, start: 0.22, duration: 0.20 },
+      { freq: 880, start: 0.52, duration: 0.20 },
+      { freq: 659.25, start: 0.74, duration: 0.30 },
+    ]
+    sequence.forEach(({ freq, start, duration }) => {
+      const oscillator = audioContext.createOscillator()
+      const gainNode = audioContext.createGain()
+      oscillator.connect(gainNode)
+      gainNode.connect(audioContext.destination)
+      oscillator.frequency.value = freq
+      oscillator.type = 'sine'
+      const baseTime = audioContext.currentTime + start
+      gainNode.gain.setValueAtTime(0, baseTime)
+      gainNode.gain.linearRampToValueAtTime(0.22, baseTime + 0.03)
+      gainNode.gain.linearRampToValueAtTime(0, baseTime + duration)
+      oscillator.start(baseTime)
+      oscillator.stop(baseTime + duration + 0.02)
+    })
+  } catch (error) {
+    console.error('着信音の再生に失敗しました:', error)
+  }
+}
+
+const startIncomingRingtone = () => {
+  if (ringtoneInterval.value || !incomingCalls.value.length) return
+  playIncomingRingtone()
+  ringtoneInterval.value = setInterval(() => {
+    playIncomingRingtone()
+  }, 1800)
+}
+
+const stopIncomingRingtone = () => {
+  if (ringtoneInterval.value) {
+    clearInterval(ringtoneInterval.value)
+    ringtoneInterval.value = null
+  }
+}
+
+const updateIncomingRingtone = () => {
+  const activeCallIds = new Set(incomingCalls.value.map((item) => item.id))
+  const hasAudibleCall = incomingCalls.value.some((item) => !mutedIncomingCallIds.value.has(item.id))
+  mutedIncomingCallIds.value.forEach((id) => {
+    if (!activeCallIds.has(id)) {
+      mutedIncomingCallIds.value.delete(id)
+    }
+  })
+  if (hasAudibleCall) {
+    startIncomingRingtone()
+  } else {
+    stopIncomingRingtone()
+  }
+}
+
 // 新着通知をチェックしてチャイム音を鳴らす
 const checkForNewNotifications = (currentIds) => {
   if (previousNotificationIds.value.size === 0) {
@@ -494,6 +644,22 @@ const checkForNewNotifications = (currentIds) => {
   }
 
   previousNotificationIds.value = currentIds
+}
+
+const loadIncomingCalls = async () => {
+  if (!authState.user) {
+    incomingCalls.value = []
+    return
+  }
+  try {
+    const res = await api.notifications.listCallSessions({ status: 'ringing' })
+    const data = res.data?.results || res.data || []
+    const rows = Array.isArray(data) ? data : []
+    incomingCalls.value = rows.filter((item) => Number(item.callee) === Number(authState.user?.id))
+    updateIncomingRingtone()
+  } catch (error) {
+    console.error('着信一覧の取得に失敗しました:', error)
+  }
 }
 
 // 通知ポーリング（departments は初回のみ取得済みのため除外）
@@ -520,6 +686,11 @@ const pollTasks = async () => {
   } catch (error) {
     console.error('タスクポーリングエラー:', error)
   }
+}
+
+const pollIncomingCalls = async () => {
+  if (!authState.user) return
+  await loadIncomingCalls()
 }
 
 // サーバーからポーリング間隔設定を取得して反映
@@ -551,10 +722,12 @@ const startPolling = async () => {
   // 初回実行
   pollNotifications()
   loadPendingTaskCount()
+  loadIncomingCalls()
 
   // 定期実行（通知とタスクを別々の間隔で）
   pollingInterval.value = setInterval(pollNotifications, NOTIFICATION_POLLING_MS)
   taskPollingInterval.value = setInterval(pollTasks, TASK_POLLING_MS)
+  callPollingInterval.value = setInterval(pollIncomingCalls, CALL_POLLING_MS)
 }
 
 // ポーリング停止
@@ -566,6 +739,39 @@ const stopPolling = () => {
   if (taskPollingInterval.value) {
     clearInterval(taskPollingInterval.value)
     taskPollingInterval.value = null
+  }
+  if (callPollingInterval.value) {
+    clearInterval(callPollingInterval.value)
+    callPollingInterval.value = null
+  }
+  stopIncomingRingtone()
+}
+
+const openIncomingCallCenter = () => {
+  const sessionId = primaryIncomingCall.value?.id
+  if (sessionId) {
+    mutedIncomingCallIds.value.add(sessionId)
+  }
+  updateIncomingRingtone()
+  router.push(sessionId ? `/notifications/calls?session=${sessionId}` : '/notifications/calls')
+}
+
+const silenceIncomingCall = () => {
+  const sessionId = primaryIncomingCall.value?.id
+  if (!sessionId) return
+  mutedIncomingCallIds.value.add(sessionId)
+  updateIncomingRingtone()
+}
+
+const declineIncomingCall = async () => {
+  const sessionId = primaryIncomingCall.value?.id
+  if (!sessionId) return
+  try {
+    await api.notifications.declineCall(sessionId)
+    mutedIncomingCallIds.value.add(sessionId)
+    await Promise.all([loadIncomingCalls(), loadNotifications()])
+  } catch (error) {
+    console.error('着信辞退に失敗しました:', error)
   }
 }
 
@@ -613,8 +819,10 @@ watch(
     } else {
       stopPolling()
       notifications.value = []
+      incomingCalls.value = []
       pendingTaskCount.value = 0
       previousNotificationIds.value = new Set()
+      mutedIncomingCallIds.value = new Set()
     }
   }
 )
@@ -958,8 +1166,20 @@ const handleLogout = async () => {
 }
 
 .notification-item {
+  display: block;
+  width: 100%;
+  text-align: left;
   padding: 8px 12px;
   border-top: 1px solid #f1f5f9;
+  background: #fff;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  cursor: pointer;
+}
+
+.notification-item:hover {
+  background: #f8fafc;
 }
 
 .notification-title {
@@ -1002,6 +1222,96 @@ const handleLogout = async () => {
 
 .nav-action-btn.active {
   background: rgba(255, 255, 255, 0.35);
+}
+
+.incoming-call-btn {
+  background: #dc2626;
+}
+
+.incoming-call-btn:hover {
+  background: #b91c1c;
+}
+
+.incoming-call-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.28);
+  z-index: 1200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 70px 20px 20px;
+}
+
+.incoming-call-popup {
+  width: min(360px, 100%);
+  background: #fff;
+  border: 2px solid #fecaca;
+  border-radius: 16px;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.18);
+  padding: 18px;
+}
+
+.incoming-call-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.incoming-call-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #991b1b;
+}
+
+.incoming-call-subtitle {
+  font-size: 12px;
+  color: #b45309;
+  background: #fff7ed;
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+
+.incoming-call-name {
+  margin-top: 14px;
+  font-size: 24px;
+  font-weight: 700;
+  color: #10243f;
+}
+
+.incoming-call-note {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.incoming-call-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+
+.incoming-btn {
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  padding: 10px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.open-btn {
+  background: #2563eb;
+}
+
+.mute-btn {
+  background: #64748b;
+}
+
+.decline-btn {
+  background: #dc2626;
 }
 
 .btn-label {
