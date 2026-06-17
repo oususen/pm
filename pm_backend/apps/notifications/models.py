@@ -57,3 +57,86 @@ class NotificationRead(models.Model):
         unique_together = ['notification', 'user']
         verbose_name = '通知既読'
         verbose_name_plural = '通知既読'
+
+
+class CallSession(models.Model):
+    """社内通話セッション"""
+
+    CALL_TYPE_CHOICES = [
+        ('voice', '音声'),
+        ('video', 'ビデオ'),
+    ]
+
+    STATUS_CHOICES = [
+        ('ringing', '呼出中'),
+        ('accepted', '通話中'),
+        ('declined', '辞退'),
+        ('ended', '終了'),
+        ('missed', '不在'),
+        ('canceled', 'キャンセル'),
+    ]
+
+    caller = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='outgoing_call_sessions',
+        verbose_name='発信者'
+    )
+    callee = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='incoming_call_sessions',
+        verbose_name='着信者'
+    )
+    call_type = models.CharField(max_length=10, choices=CALL_TYPE_CHOICES, verbose_name='通話種別')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='ringing', verbose_name='状態')
+    initiated_at = models.DateTimeField(auto_now_add=True, verbose_name='発信日時')
+    accepted_at = models.DateTimeField(null=True, blank=True, verbose_name='応答日時')
+    ended_at = models.DateTimeField(null=True, blank=True, verbose_name='終了日時')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'call_sessions'
+        ordering = ['-initiated_at', '-id']
+        verbose_name = '通話セッション'
+        verbose_name_plural = '通話セッション'
+
+
+class CallSignal(models.Model):
+    """WebRTC用シグナリングデータ"""
+
+    SIGNAL_TYPE_CHOICES = [
+        ('offer', 'Offer'),
+        ('answer', 'Answer'),
+        ('ice_candidate', 'ICE Candidate'),
+        ('hangup', 'Hangup'),
+    ]
+
+    session = models.ForeignKey(
+        CallSession,
+        on_delete=models.CASCADE,
+        related_name='signals',
+        verbose_name='通話セッション'
+    )
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='sent_call_signals',
+        verbose_name='送信者'
+    )
+    target_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='received_call_signals',
+        verbose_name='送信先ユーザー'
+    )
+    signal_type = models.CharField(max_length=20, choices=SIGNAL_TYPE_CHOICES, verbose_name='シグナル種別')
+    payload = models.JSONField(default=dict, blank=True, verbose_name='シグナル内容')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+
+    class Meta:
+        db_table = 'call_signals'
+        ordering = ['id']
+        verbose_name = '通話シグナル'
+        verbose_name_plural = '通話シグナル'

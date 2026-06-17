@@ -1,6 +1,6 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
-from .models import Notification, NotificationRead
+from .models import Notification, NotificationRead, CallSession, CallSignal
 from accounts.models import Department, UserProfile
 
 User = get_user_model()
@@ -163,3 +163,63 @@ class NotificationSerializer(serializers.ModelSerializer):
             result.append(user)
 
         return result
+
+
+def _display_name(user):
+    full_name = f"{user.last_name or ''}{user.first_name or ''}".strip()
+    return full_name or user.username
+
+
+class CallSignalSerializer(serializers.ModelSerializer):
+    sender_name = serializers.SerializerMethodField()
+    target_user_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CallSignal
+        fields = [
+            'id',
+            'session',
+            'sender',
+            'sender_name',
+            'target_user',
+            'target_user_name',
+            'signal_type',
+            'payload',
+            'created_at',
+        ]
+        read_only_fields = ['id', 'session', 'sender', 'sender_name', 'target_user_name', 'created_at']
+
+    def get_sender_name(self, obj):
+        return _display_name(obj.sender)
+
+    def get_target_user_name(self, obj):
+        return _display_name(obj.target_user)
+
+
+class CallSessionSerializer(serializers.ModelSerializer):
+    caller_name = serializers.SerializerMethodField()
+    callee_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CallSession
+        fields = [
+            'id',
+            'caller',
+            'caller_name',
+            'callee',
+            'callee_name',
+            'call_type',
+            'status',
+            'initiated_at',
+            'accepted_at',
+            'ended_at',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = fields
+
+    def get_caller_name(self, obj):
+        return _display_name(obj.caller)
+
+    def get_callee_name(self, obj):
+        return _display_name(obj.callee)

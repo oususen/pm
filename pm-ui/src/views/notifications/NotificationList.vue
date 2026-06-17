@@ -6,6 +6,9 @@
       <div class="list-header">
         <div class="list-note">通知の一覧を表示します。</div>
         <div class="header-actions">
+          <button class="btn call-center-btn" type="button" @click="openCallCenter">
+            通話
+          </button>
           <label class="filter-label">
             カテゴリ:
             <select v-model="filterDomain" class="filter-select">
@@ -167,6 +170,7 @@ const domainOptions = [
   { value: "equipment", label: "設備" },
   { value: "overtime", label: "残業" },
   { value: "common", label: "共通" },
+  { value: "call", label: "通話" },
 ];
 
 const filterDomain = ref("");
@@ -404,6 +408,10 @@ const isPurchaseOrderNotification = (item) => {
 
 const openTaskInbox = () => {
   router.push("/tasks");
+};
+
+const openCallCenter = () => {
+  router.push("/notifications/calls");
 };
 
 const handleMarkRead = async (id) => {
@@ -666,6 +674,15 @@ onMounted(() => {
   color: #fff;
 }
 
+.call-center-btn {
+  background: #2563eb;
+  color: #fff;
+}
+
+.call-center-btn:hover {
+  background: #1d4ed8;
+}
+
 .delete-all-btn:hover:not(:disabled) {
   background: #b91c1c;
 }
@@ -713,4 +730,3 @@ onMounted(() => {
   }
 }
 </style>
-

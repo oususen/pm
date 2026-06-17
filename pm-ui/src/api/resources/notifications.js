@@ -20,4 +20,28 @@ export const createNotificationsAPI = (client) => ({
   markAllRead(notificationIds = []) {
     return client.post('/notifications/mark_all_read/', { notification_ids: notificationIds })
   },
+  listCallSessions(params = {}) {
+    return client.get('/call-sessions/', { params })
+  },
+  getCallSession(id) {
+    return client.get(`/call-sessions/${id}/`)
+  },
+  startCall(data) {
+    return client.post('/call-sessions/start/', data)
+  },
+  acceptCall(id) {
+    return client.post(`/call-sessions/${id}/accept/`)
+  },
+  declineCall(id) {
+    return client.post(`/call-sessions/${id}/decline/`)
+  },
+  finishCall(id) {
+    return client.post(`/call-sessions/${id}/finish/`)
+  },
+  getCallSignals(id, params = {}) {
+    return client.get(`/call-sessions/${id}/signals/`, { params })
+  },
+  sendCallSignal(id, data) {
+    return client.post(`/call-sessions/${id}/signals/`, data)
+  },
 })
