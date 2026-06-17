@@ -292,6 +292,7 @@ const incomingCalls = ref([])
 const mutedIncomingCallIds = ref(new Set())
 const ringtoneInterval = ref(null)
 const audioContextRef = ref(null)
+const pushSubscriptionEndpoint = ref('')
 // デフォルト値（サーバー設定取得前のフォールバック）
 let NOTIFICATION_POLLING_MS = 60000
 let TASK_POLLING_MS = 120000
@@ -721,6 +722,84 @@ const loadPollingSettings = async () => {
   }
 }
 
+const isPushSupported = () => {
+  return (
+    typeof window !== 'undefined' &&
+    window.isSecureContext &&
+    'serviceWorker' in navigator &&
+    'PushManager' in window &&
+    'Notification' in window
+  )
+}
+
+const urlBase64ToUint8Array = (base64String) => {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const normalized = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const rawData = window.atob(normalized)
+  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)))
+}
+
+const ensurePushSubscription = async () => {
+  if (!authState.user || !isPushSupported()) return
+  try {
+    const configResponse = await api.notifications.getPushSubscriptionConfig()
+    const config = configResponse.data || {}
+    if (!config.enabled || !config.public_key) return
+
+    const registration = await navigator.serviceWorker.getRegistration()
+    if (!registration) return
+
+    let permission = Notification.permission
+    if (permission === 'default') {
+      permission = await Notification.requestPermission()
+    }
+    if (permission !== 'granted') return
+
+    const readyRegistration = await navigator.serviceWorker.ready
+    let subscription = await readyRegistration.pushManager.getSubscription()
+    if (!subscription) {
+      subscription = await readyRegistration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(config.public_key),
+      })
+    }
+
+    const subscriptionData = subscription.toJSON()
+    pushSubscriptionEndpoint.value = subscription.endpoint || ''
+    await api.notifications.subscribePush({
+      endpoint: subscription.endpoint,
+      p256dh_key: subscriptionData.keys?.p256dh || '',
+      auth_key: subscriptionData.keys?.auth || '',
+      user_agent: navigator.userAgent || '',
+    })
+  } catch (error) {
+    console.error('Push購読の登録に失敗しました:', error)
+  }
+}
+
+const clearPushSubscription = async () => {
+  if (!isPushSupported()) return
+  try {
+    const registration = await navigator.serviceWorker.getRegistration()
+    if (!registration) return
+    const subscription = await registration.pushManager.getSubscription()
+    if (!subscription) return
+
+    const endpoint = pushSubscriptionEndpoint.value || subscription.endpoint || ''
+    if (endpoint) {
+      try {
+        await api.notifications.unsubscribePush(endpoint)
+      } catch (error) {
+        console.error('Push購読解除APIに失敗しました:', error)
+      }
+    }
+    await subscription.unsubscribe()
+    pushSubscriptionEndpoint.value = ''
+  } catch (error) {
+    console.error('Push購読の解除に失敗しました:', error)
+  }
+}
+
 // ポーリング開始
 const startPolling = async () => {
   if (!authState.user) return
@@ -738,6 +817,7 @@ const startPolling = async () => {
   pollingInterval.value = setInterval(pollNotifications, NOTIFICATION_POLLING_MS)
   taskPollingInterval.value = setInterval(pollTasks, TASK_POLLING_MS)
   callPollingInterval.value = setInterval(pollIncomingCalls, CALL_POLLING_MS)
+  ensurePushSubscription()
 }
 
 // ポーリング停止
@@ -838,6 +918,7 @@ watch(
 )
 
 const handleLogout = async () => {
+  await clearPushSubscription()
   await logout()
   router.replace('/login')
 }

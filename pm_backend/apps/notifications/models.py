@@ -140,3 +140,26 @@ class CallSignal(models.Model):
         ordering = ['id']
         verbose_name = '通話シグナル'
         verbose_name_plural = '通話シグナル'
+
+
+class PushSubscription(models.Model):
+    """Web Push購読情報"""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='push_subscriptions',
+        verbose_name='ユーザー'
+    )
+    endpoint = models.TextField(unique=True, verbose_name='エンドポイント')
+    p256dh_key = models.TextField(verbose_name='公開鍵')
+    auth_key = models.TextField(verbose_name='認証鍵')
+    user_agent = models.CharField(max_length=255, blank=True, verbose_name='ユーザーエージェント')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'push_subscriptions'
+        ordering = ['-updated_at', '-id']
+        verbose_name = 'Push購読'
+        verbose_name_plural = 'Push購読'

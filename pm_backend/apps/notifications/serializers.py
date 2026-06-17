@@ -1,6 +1,6 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
-from .models import Notification, NotificationRead, CallSession, CallSignal
+from .models import Notification, NotificationRead, CallSession, CallSignal, PushSubscription
 from accounts.models import Department, UserProfile
 
 User = get_user_model()
@@ -223,3 +223,18 @@ class CallSessionSerializer(serializers.ModelSerializer):
 
     def get_callee_name(self, obj):
         return _display_name(obj.callee)
+
+
+class PushSubscriptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PushSubscription
+        fields = [
+            'id',
+            'endpoint',
+            'p256dh_key',
+            'auth_key',
+            'user_agent',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']

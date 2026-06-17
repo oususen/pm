@@ -7,8 +7,14 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Notification, NotificationRead, CallSession, CallSignal
-from .serializers import NotificationSerializer, CallSessionSerializer, CallSignalSerializer
+from .models import Notification, NotificationRead, CallSession, CallSignal, PushSubscription
+from .serializers import (
+    NotificationSerializer,
+    CallSessionSerializer,
+    CallSignalSerializer,
+    PushSubscriptionSerializer,
+)
+from .web_push import get_web_push_config, send_web_push
 
 
 def _get_business_today():
@@ -125,6 +131,20 @@ class CallSessionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, views
         )
         notification.target_users.set([callee])
 
+        push_payload = {
+            'title': title,
+            'body': 'タップして通話画面を開いてください。',
+            'tag': f'call-session-{session.id}',
+            'url': f'/notifications/calls?session={session.id}',
+            'data': {
+                'session_id': session.id,
+                'call_type': call_type,
+                'caller_name': _display_name(request.user),
+            },
+        }
+        for subscription in callee.push_subscriptions.all():
+            send_web_push(subscription, push_payload)
+
         return Response(self.get_serializer(session).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'])
@@ -223,3 +243,54 @@ class CallSessionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, views
         )
         serializer = CallSignalSerializer(signal)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class PushSubscriptionViewSet(
+    mixins.ListModelMixin,
+    mixins.CreateModelMixin,
+    viewsets.GenericViewSet,
+):
+    queryset = PushSubscription.objects.all()
+    serializer_class = PushSubscriptionSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = None
+
+    def get_queryset(self):
+        return self.queryset.filter(user=self.request.user)
+
+    @action(detail=False, methods=['get'])
+    def config(self, request):
+        config = get_web_push_config()
+        return Response({
+            'enabled': config['enabled'],
+            'public_key': config['public_key'],
+        })
+
+    def create(self, request, *args, **kwargs):
+        endpoint = (request.data.get('endpoint') or '').strip()
+        p256dh_key = (request.data.get('p256dh_key') or '').strip()
+        auth_key = (request.data.get('auth_key') or '').strip()
+        user_agent = (request.data.get('user_agent') or '')[:255]
+
+        if not endpoint or not p256dh_key or not auth_key:
+            return Response({'detail': 'endpoint / p256dh_key / auth_key は必須です。'}, status=400)
+
+        subscription, _created = PushSubscription.objects.update_or_create(
+            endpoint=endpoint,
+            defaults={
+                'user': request.user,
+                'p256dh_key': p256dh_key,
+                'auth_key': auth_key,
+                'user_agent': user_agent,
+            },
+        )
+        serializer = self.get_serializer(subscription)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'])
+    def unsubscribe(self, request):
+        endpoint = (request.data.get('endpoint') or '').strip()
+        if not endpoint:
+            return Response({'detail': 'endpoint は必須です。'}, status=400)
+        deleted, _detail = self.get_queryset().filter(endpoint=endpoint).delete()
+        return Response({'deleted': deleted})

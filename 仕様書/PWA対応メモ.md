@@ -13,6 +13,7 @@ Android Chromeで「アプリをインストール」を表示し、アドレス
 - `pm-ui/vite.config.js`（HTTPS対応）
 - `pm-ui/.env`（`VITE_HTTPS=true`）
 - `pm-ui/scripts/generate-dev-certs.ps1`（IP自動反映の証明書生成）
+- `pm_backend/apps/notifications/`（Push購読API / 着信Push送信）
 
 ## 開発PCでのHTTPS/PWA手順
 1) 証明書を生成  
@@ -89,6 +90,24 @@ docker-compose restart pm-frontend
 - `CORS_ALLOWED_ORIGINS`: `https://10.0.1.232:8501`
 - `CSRF_TRUSTED_ORIGINS`: `https://10.0.1.232:8501`
 
+### Push通知設定
+- PWAインストールだけではバックグラウンド着信通知は届かない
+- `Service Worker` と `Web Push` の購読登録が必要
+- Django 側で以下の環境変数を設定する
+  - `WEB_PUSH_VAPID_PUBLIC_KEY`
+  - `WEB_PUSH_VAPID_PRIVATE_KEY`
+  - `WEB_PUSH_VAPID_SUBJECT`
+- バックエンド依存に `pywebpush` を追加しているため、本番反映時は `pip install -r requirements.txt` を含む再デプロイが必要
+- 着信者がログイン中かつ通知許可済みで購読登録されていれば、通話着信時に Push 通知を送る
+- Push 通知タップ時は `/notifications/calls?session=<id>` を開く
+
 ### PWAが出ない場合の確認
 - `manifest.webmanifest` のレスポンスヘッダ `Content-Type` が `application/manifest+json` になっていること
 - `pm-ui/nginx.conf` に `.webmanifest` のMIME設定があること（追加後はnginx/Docker再起動）
+
+### Push通知が届かない場合の確認
+- 端末/ブラウザで通知許可が `許可` になっていること
+- HTTPS が有効であること
+- Service Worker が有効であること
+- Django に VAPID 環境変数が設定されていること
+- 発信相手のブラウザで一度ログインして購読登録済みであること

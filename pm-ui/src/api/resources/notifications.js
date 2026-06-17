@@ -44,4 +44,16 @@ export const createNotificationsAPI = (client) => ({
   sendCallSignal(id, data) {
     return client.post(`/call-sessions/${id}/signals/`, data)
   },
+  getPushSubscriptionConfig() {
+    return client.get('/push-subscriptions/config/')
+  },
+  listPushSubscriptions() {
+    return client.get('/push-subscriptions/')
+  },
+  subscribePush(data) {
+    return client.post('/push-subscriptions/', data)
+  },
+  unsubscribePush(endpoint) {
+    return client.post('/push-subscriptions/unsubscribe/', { endpoint })
+  },
 })
