@@ -575,10 +575,36 @@ const getAudioContext = async () => {
   return audioContextRef.value
 }
 
+const triggerIncomingVibration = () => {
+  if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return
+  navigator.vibrate([220, 120, 220])
+}
+
+const cancelIncomingVibration = () => {
+  if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return
+  navigator.vibrate(0)
+}
+
+const unlockAudioPlayback = async () => {
+  try {
+    const audioContext = await getAudioContext()
+    if (audioContext?.state === 'running') {
+      if (incomingCalls.value.length) {
+        playIncomingRingtone()
+      }
+    }
+  } catch (error) {
+    console.error('音声再生の有効化に失敗しました:', error)
+  }
+}
+
 const playIncomingRingtone = async () => {
   try {
     const audioContext = await getAudioContext()
-    if (!audioContext) return
+    if (!audioContext || audioContext.state !== 'running') {
+      triggerIncomingVibration()
+      return
+    }
     const sequence = [
       { freq: 880, start: 0.0, duration: 0.20 },
       { freq: 988.88, start: 0.22, duration: 0.20 },
@@ -606,6 +632,7 @@ const playIncomingRingtone = async () => {
 
 const startIncomingRingtone = () => {
   if (ringtoneInterval.value || !incomingCalls.value.length) return
+  triggerIncomingVibration()
   playIncomingRingtone()
   ringtoneInterval.value = setInterval(() => {
     playIncomingRingtone()
@@ -617,6 +644,7 @@ const stopIncomingRingtone = () => {
     clearInterval(ringtoneInterval.value)
     ringtoneInterval.value = null
   }
+  cancelIncomingVibration()
 }
 
 const updateIncomingRingtone = () => {
@@ -878,8 +906,17 @@ const handleClickOutside = (event) => {
   }
 }
 
+const handleVisibilityChange = () => {
+  if (document.visibilityState === 'visible') {
+    unlockAudioPlayback()
+  }
+}
+
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
+  document.addEventListener('pointerdown', unlockAudioPlayback, { passive: true })
+  document.addEventListener('keydown', unlockAudioPlayback)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   // ログイン済みならポーリング開始
   if (authState.user) {
     startPolling()
@@ -888,6 +925,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  document.removeEventListener('pointerdown', unlockAudioPlayback)
+  document.removeEventListener('keydown', unlockAudioPlayback)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   stopPolling()
 })
 
