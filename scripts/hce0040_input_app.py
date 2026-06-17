@@ -150,9 +150,9 @@ def wait_for_koukei_blue(hwnd, min_wait=0.3, max_wait=10.0, interval=0.1, stop_c
             pixels = list(img.getdata())
             blue_count = sum(1 for r, _, b in pixels if b > 80 and b > r + 30)
             if log_func and first_log:
-                log_func(f"[DEBUG] 青ピクセル数={blue_count}（1000超で検知）")
+                log_func(f"[DEBUG] 青ピクセル数={blue_count}（500超で検知）")
                 first_log = False
-            if blue_count > 1000:
+            if blue_count > 500:
                 # 安定確認: 0.3秒後に再測定して同じ値なら完了
                 time.sleep(0.3)
                 img2 = ImageGrab.grab(
@@ -166,7 +166,7 @@ def wait_for_koukei_blue(hwnd, min_wait=0.3, max_wait=10.0, interval=0.1, stop_c
                     return
             elapsed += interval
         if log_func:
-            log_func(f"[DEBUG] 工程青検知タイムアウト（最終blue={blue_count}）")
+            log_func(f"[DEBUG] 工程青行検知タイムアウト（最終blue={blue_count}）")
     except InterruptedError:
         raise
     except Exception as e:
@@ -195,10 +195,10 @@ def check_error_dialog(hwnd):
 # ============================================================
 def input_one_record(record, cfg, hwnd=None, stop_check=None, log_func=None):
     """
-    G外作:
-        入荷日 → Tab → 品番 → Tab×tabs_after_hinban → 仕入先コード → Tab → Tab → 入荷数 → F12
-    K購入:
-        入荷日 → Tab → 品番 → Tab×tabs_after_hinban → 仕入先コード → Tab → Tab → 入荷数 → Tab → F12
+    G外作1か所(品番後Tab=1): 入荷日→Tab→品番→Tab×1→仕入先コード→Tab×2→生産数→F12
+    G外作2か所(品番後Tab=3): 入荷日→Tab→品番→Tab×3→仕入先コード→Tab×2→生産数→F12
+    K購入品  (品番後Tab=1): 入荷日→Tab→品番→Tab×1→仕入先コード→Tab×3→納入数→Tab→F12
+    ※ 品番後Tabキー回数はExcel列の合計値。コードは最初にTab1回押した後、残り(合計-1)回追加押しする。
     """
     delay_key    = cfg["delay_key"]
     delay_hinban = cfg["delay_hinban"]
@@ -255,13 +255,13 @@ def input_one_record(record, cfg, hwnd=None, stop_check=None, log_func=None):
         wait_for_screen_change(hwnd, min_wait=0.3, max_wait=cfg["delay_hinban"], stop_check=stop_check)
         _poll_sleep(delay_hinban * 0.3)
     check_error_dialog(hwnd)
-    # 追加Tab（G2か所=2のとき1回追加）
+    # 追加Tab（G1か所=合計1回→追加0、G2か所=合計3回→追加2）
     if tabs_hinban >= 2:
         tab_to(tabs_hinban - 1)
     # 仕入先コード
     input_field(supplier_cd)
-    # 仕入先コード → 入荷数（Tab×2）
-    tab_to(2)
+    # 仕入先コード → 入荷数（G外作=Tab×2、K購入品=Tab×3）
+    tab_to(3 if item_type == 'K' else 2)
     # 入荷数
     input_field(nyuuko_su)
     # 入荷数後Tab（K=1回）
@@ -327,7 +327,24 @@ class HCE0040InputApp:
         self._mouse_locked = False
         self._right_button_prev = False
         self._right_click_last_time = 0.0
+        self.history_set = self._load_history()
         self._build_ui()
+
+    # ---- 入力履歴 ----
+    def _load_history(self):
+        """ログファイルから処理済み (入荷日, 基幹品番) をセットとして読み込む"""
+        result = set()
+        if not LOG_FILE.exists():
+            return result
+        try:
+            with open(LOG_FILE, encoding='utf-8') as f:
+                for line in f:
+                    parts = line.strip().split(',')
+                    if len(parts) >= 2 and parts[0] != '入荷日':
+                        result.add((format_nyukobi(parts[0]), parts[1]))
+        except Exception:
+            pass
+        return result
 
     # ---- 設定 ----
     def _load_config(self):
@@ -442,6 +459,131 @@ class HCE0040InputApp:
         self.btn_stop.grid(row=0, column=1, padx=8)
         self.lbl_status = ttk.Label(frm_btn, text="待機中", foreground="gray")
         self.lbl_status.grid(row=0, column=2, padx=16)
+        ttk.Button(frm_btn, text="？  ヘルプ", command=self._show_help, width=12).grid(row=0, column=3, padx=8)
+
+    # ---- ヘルプ ----
+    def _show_help(self):
+        win = tk.Toplevel(self.root)
+        win.title("使い方・マニュアル")
+        win.resizable(True, True)
+        win.attributes("-topmost", True)
+        w, h = 700, 640
+        sx, sy = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        win.geometry(f"{w}x{h}+{(sx-w)//2}+{(sy-h)//2}")
+
+        txt = tk.Text(win, wrap="word", font=("Yu Gothic UI", 10),
+                      bg="#fafafa", fg="#222", padx=12, pady=8, spacing1=2, spacing3=4)
+        sb = ttk.Scrollbar(win, command=txt.yview)
+        txt.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        txt.pack(side="left", fill="both", expand=True)
+
+        txt.tag_configure("h1",  font=("Yu Gothic UI", 16, "bold"), foreground="#1a1a6e", spacing1=8, spacing3=4)
+        txt.tag_configure("h2",  font=("Yu Gothic UI", 13, "bold"), foreground="#1a5276", spacing1=10, spacing3=2)
+        txt.tag_configure("h3",  font=("Yu Gothic UI", 11, "bold"), foreground="#1f618d", spacing1=6, spacing3=2)
+        txt.tag_configure("th",  font=("Yu Gothic UI", 10, "bold"), foreground="#555", background="#e8eaf6")
+        txt.tag_configure("td",  font=("Yu Gothic UI", 10))
+        txt.tag_configure("sep", foreground="#cccccc")
+        txt.tag_configure("key", font=("Consolas", 10, "bold"), foreground="#c0392b", background="#fdf2f8")
+        txt.tag_configure("note", foreground="#7d6608", background="#fef9e7")
+
+        def ins(text, tag=None):
+            txt.insert("end", text, tag) if tag else txt.insert("end", text)
+
+        ins("HCE0040 仕入先納入自動入力ツール  使い方\n", "h1")
+        ins("─" * 60 + "\n", "sep")
+
+        ins("\n【概要】\n", "h2")
+        ins("仕入先納入実績照会の「基幹システム入力用Excel」を読み込み、\n"
+            "基幹システム（HCE0040 資材入荷外注纳入力）へ自動でキー入力するツールです。\n\n")
+
+        ins("【使用手順】\n", "h2")
+        ins("① ", "th"); ins("生産管理アプリにログイン → 購買 → 仕入先納入実績照会を開く\n")
+        ins("② ", "th"); ins("仕入先を選択して照会 → 「基幹システム入力用Excel」をダウンロード・保存\n")
+        ins("③ ", "th"); ins("基幹システムにログイン → HCE0040（資材入荷外注纳入力）を開く\n")
+        ins("④ ", "th"); ins("「仕入先納入自動入力.exe」を起動する\n")
+        ins("⑤ ", "th"); ins("「参照...」で②のExcelファイルを選択 → 「読み込み」\n")
+        ins("⑥ ", "th"); ins("プレビューで入力対象レコードを確認（橙色=入力済み）\n")
+        ins("⑦ ", "th"); ins("「▶ 入力開始」をクリック\n")
+        ins("⑧ ", "th"); ins("カウントダウン中に基幹システムに切り替えて入荷日フィールドにカーソルを置く\n")
+        ins("⑨ ", "th"); ins("カウントダウン終了後、自動入力開始（マウスが固定される）\n\n")
+
+        ins("【入力フロー（区分ごと）】\n", "h2")
+        flows = [
+            ("G外作品 1か所", "品番後Tab=1", "入荷日→Tab→品番→Tab×1→仕入先コード→Tab×2→生産数→F12"),
+            ("G外作品 2か所", "品番後Tab=3", "入荷日→Tab→品番→Tab×3→仕入先コード→Tab×2→生産数→F12"),
+            ("K購入品",       "品番後Tab=1", "入荷日→Tab→品番→Tab×1→仕入先コード→Tab×3→納入数→Tab→F12"),
+        ]
+        for name, tab_hint, flow in flows:
+            ins(f"  {name}（{tab_hint}）\n", "th")
+            ins(f"    {flow}\n\n", "td")
+        ins("  ※ マッピング設定の「品番後Tabキー回数」: G外作1か所=1、G外作2か所=3、K購入品=1\n\n", "note")
+
+        ins("【入力中の操作】\n", "h2")
+        ins("  右クリック 1回  ", "key"); ins(" … マウス固定を解除（入力は継続）\n")
+        ins("  右ダブルクリック", "key"); ins(" … 即座に停止\n")
+        ins("  Ctrl + P        ", "key"); ins(" … 停止リクエスト\n")
+        ins("  マウスを左上角  ", "key"); ins(" … フェイルセーフ緊急停止\n\n")
+
+        ins("【重複入力検知】\n", "h2")
+        ins("  Excelを読み込む際、過去の入力ログ（hce0040_input_log.txt）と照合します。\n"
+            "  ログ済みの（入荷日×基幹品番）は橙色でハイライトされ、警告ダイアログが表示されます。\n"
+            "  重複が疑われる場合は基幹システム側で確認してから入力してください。\n\n")
+
+        ins("【エラーダイアログ検出時の動作】\n", "h2")
+        ins("  登録後に基幹システムのエラーダイアログを検出した場合、自動的に入力を中止します。\n"
+            "  ログに行番号・品番・ダイアログ内容が記録されます。\n"
+            "  中止後は該当レコードを基幹システム側で確認・手動入力してください。\n\n", "note")
+
+        ins("【待機時間設定】\n", "h2")
+        ins("  通常は変更不要です。基幹システムが極端に重い場合のみ値を大きくしてください。\n\n", "note")
+        rows = [
+            ("キー間",      "1.0秒",  "各Tabキー入力間の待機時間"),
+            ("品番確定後",  "2.0秒",  "G外作品の工程青行検知後の追加待機時間"),
+            ("登録後",      "1.5秒",  "F12登録後のローディング消滅までの最大待機時間"),
+            ("開始前",      "10秒",   "入力開始前カウントダウン秒数"),
+        ]
+        for name, default, desc in rows:
+            ins(f"  {name:<10}", "th")
+            ins(f"  デフォルト:", "td")
+            ins(f" {default} ", "key")
+            ins(f"  {desc}\n", "td")
+        ins("\n")
+
+        ins("【マッピング設定について】\n", "h2")
+        ins("  生産管理アプリの「購買 → 仕入先納入実績照会 → マッピング設定タブ」で設定します。\n\n")
+        cols = [
+            ("品目区分",         "G（外作品）またはK（購入品）を選択"),
+            ("基幹品番",         "基幹システムに登録されている品番を入力"),
+            ("仕入先コード",     "基幹システムの仕入先コード（3〜6桁）を入力"),
+            ("品番後Tabキー回数","G外作1か所=1、G外作2か所=3、K購入品=1"),
+        ]
+        for col, desc in cols:
+            ins(f"  {col:<16}", "th"); ins(f"  {desc}\n", "td")
+        ins("\n")
+
+        ins("【注意事項】\n", "h2")
+        ins("  ⚠ 入力中はキーボード・マウス操作をしないこと（誤入力の原因）\n", "note")
+        ins("  ⚠ 基幹システムの画面を前面に保つこと（別ウィンドウが前面に出ると入力がずれる）\n", "note")
+        ins("  ⚠ 入力結果は必ず基幹システム側で確認すること（登録成否の完全な保証はない）\n", "note")
+        ins("  ⚠ 設定は hce0040_input_config.json に保存されます\n", "note")
+        ins("\n")
+
+        ins("【トラブルシューティング】\n", "h2")
+        troubles = [
+            ("基幹ウィンドウが見つからない",   "HCE0040を開いてから再実行。ウィンドウタイトルを確認"),
+            ("品番確定後に止まる（G外作品）",   "「品番確定後」待機時間を増やす。基幹が遅い場合は3〜5秒に"),
+            ("重複警告が出たが入力したい",       "警告を閉じた後そのまま入力開始できます（スキップはしません）"),
+            ("入力がズレる",                     "Tab回数設定を見直す。マッピングの品番後Tabキー回数を確認"),
+            ("途中で止まる",                     "ログ表示ボタンで確認。エラーダイアログ検出の場合は品番・行番号がログに出る"),
+            ("動作が遅い / 入力が抜ける",        "「キー間」待機時間を1.5〜2.0秒に増やす"),
+        ]
+        for symptom, solution in troubles:
+            ins(f"  症状: {symptom}\n", "th")
+            ins(f"         → {solution}\n\n", "td")
+
+        txt.config(state="disabled")
+        ttk.Button(win, text="閉じる", command=win.destroy).pack(pady=6)
 
     # ---- ファイル操作 ----
     def _browse(self):
@@ -461,10 +603,21 @@ class HCE0040InputApp:
         try:
             records, skipped, unmapped = load_excel(path)
             self.records = records
+
+            # 重複チェック（ログ済みの入荷日×基幹品番）
+            dup_keys = set()
+            for r in records:
+                key = (format_nyukobi(r['入荷日']), str(r.get('基幹品番', '')).strip())
+                if key in self.history_set:
+                    dup_keys.add(key)
+
             for row in self.tree.get_children():
                 self.tree.delete(row)
+            self.tree.tag_configure("duplicate", background="#ffe0b2")
             for r in records:
-                self.tree.insert("", "end", values=(
+                key = (format_nyukobi(r['入荷日']), str(r.get('基幹品番', '')).strip())
+                tags = ("duplicate",) if key in dup_keys else ()
+                self.tree.insert("", "end", tags=tags, values=(
                     r.get('品目区分', ''),
                     r.get('入荷日', ''),
                     r.get('基幹品番', ''),
@@ -476,10 +629,19 @@ class HCE0040InputApp:
             msg = f"{len(records)} 件"
             if skipped:
                 msg += f"  （スキップ {len(skipped)} 件）"
+            if dup_keys:
+                msg += f"  （入力済み {len(dup_keys)} 件あり）"
             self.lbl_count.config(text=msg)
             self._log(f"読み込み完了: {len(records)} 件")
             if skipped:
                 self._log(f"スキップ: {', '.join(skipped[:5])}" + (" ..." if len(skipped) > 5 else ""))
+            if dup_keys:
+                lines = "\n".join(f"  入荷日: {k[0]}  基幹品番: {k[1]}" for k in sorted(dup_keys))
+                messagebox.showwarning(
+                    "入力済み確認",
+                    f"以下の組み合わせはすでにログに記録されています。\n\n{lines}\n\n"
+                    f"重複入力の可能性があります。確認してください。"
+                )
             if unmapped:
                 messagebox.showwarning(
                     "マッピング未設定",
@@ -681,12 +843,15 @@ class HCE0040InputApp:
 
     def _record_log(self, record):
         try:
+            nyukobi      = format_nyukobi(record.get('入荷日'))
+            kikan_hinban = str(record.get('基幹品番', '')).strip()
             write_header = not LOG_FILE.exists()
             with open(LOG_FILE, 'a', encoding='utf-8') as f:
                 if write_header:
                     f.write('入荷日,基幹品番,品目区分,入力日時\n')
                 dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                f.write(f"{record.get('入荷日')},{record.get('基幹品番')},{record.get('品目区分')},{dt}\n")
+                f.write(f"{nyukobi},{kikan_hinban},{record.get('品目区分')},{dt}\n")
+            self.history_set.add((nyukobi, kikan_hinban))
         except Exception as e:
             self._log(f"ログ保存エラー: {e}")
 
