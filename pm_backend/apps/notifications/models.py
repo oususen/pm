@@ -151,7 +151,7 @@ class PushSubscription(models.Model):
         related_name='push_subscriptions',
         verbose_name='ユーザー'
     )
-    endpoint = models.TextField(unique=True, verbose_name='エンドポイント')
+    endpoint = models.CharField(max_length=500, unique=True, verbose_name='エンドポイント')
     p256dh_key = models.TextField(verbose_name='公開鍵')
     auth_key = models.TextField(verbose_name='認証鍵')
     user_agent = models.CharField(max_length=255, blank=True, verbose_name='ユーザーエージェント')
