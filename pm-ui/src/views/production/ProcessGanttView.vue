@@ -237,6 +237,7 @@ const props = defineProps({
   presetStartDate: { type: String, default: '' },
   presetEndDate: { type: String, default: '' },
   showAddAnchors: { type: Boolean, default: true },
+  hideEmptyRows: { type: Boolean, default: false },
 })
 const emit = defineEmits(['dirty-change', 'mode-change', 'edit-dirty-change', 'structure-dirty-change'])
 const TANK_LINE_CODE = 'L2200'
@@ -471,13 +472,39 @@ const workBands = computed(() => {
   return bands
 })
 
+const selectedDisplayRange = computed(() => {
+  const days = Array.isArray(displayDays.value) ? displayDays.value : []
+  if (!days.length) return null
+  const start = new Date(`${days[0].date}T00:00:00`)
+  start.setHours(businessDayBoundaryHour, 0, 0, 0)
+  const end = new Date(`${days[days.length - 1].date}T00:00:00`)
+  end.setDate(end.getDate() + 1)
+  end.setHours(businessDayBoundaryHour, 0, 0, 0)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null
+  return { startMs: start.getTime(), endMs: end.getTime() }
+})
+
+const hasBarInSelectedDisplayRange = (bar) => {
+  const range = selectedDisplayRange.value
+  if (!range) return true
+  const startMs = new Date(bar?.startTime).getTime()
+  const endMs = new Date(bar?.endTime).getTime()
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return false
+  return startMs < range.endMs && endMs > range.startMs
+}
+
 const renderedProcessGantt = computed(() =>
   processGanttData.value.map((proc) => ({
     ...proc,
-    items: proc.items.map((item) => ({
-      ...item,
-      displayBars: mergeConsecutive.value ? mergeBars(item.bars) : item.bars,
-    })),
+    items: proc.items
+      .map((item) => ({
+        ...item,
+        displayBars: mergeConsecutive.value ? mergeBars(item.bars) : item.bars,
+      }))
+      .filter((item) =>
+        !props.hideEmptyRows ||
+        (Array.isArray(item.displayBars) && item.displayBars.some((bar) => hasBarInSelectedDisplayRange(bar)))
+      ),
   }))
 )
 

@@ -492,6 +492,16 @@
               ＋表示
             </label>
           </div>
+          <div class="field checkbox-field gantt-toggle-field">
+            <label>
+              <input
+                type="checkbox"
+                v-model="hideEmptyGanttRows"
+                @change="localStorage.setItem(HIDE_EMPTY_GANTT_ROWS_KEY, hideEmptyGanttRows ? '1' : '0')"
+              />
+              空行非表示
+            </label>
+          </div>
           <button
             class="btn gantt-save-btn"
             :class="{ 'gantt-save-dirty': ganttEditDirty }"
@@ -519,6 +529,7 @@
         :preset-start-date="startDate"
         :preset-end-date="endDate"
         :show-add-anchors="showGanttAddAnchors"
+        :hide-empty-rows="hideEmptyGanttRows"
         @dirty-change="onGanttDirtyChange"
         @mode-change="onGanttModeChange"
         @edit-dirty-change="onGanttEditDirtyChange"
@@ -590,6 +601,14 @@
         <label class="footer-gantt-toggle">
           <input type="checkbox" v-model="showGanttAddAnchors" />
           ＋表示
+        </label>
+        <label class="footer-gantt-toggle">
+          <input
+            type="checkbox"
+            v-model="hideEmptyGanttRows"
+            @change="localStorage.setItem(HIDE_EMPTY_GANTT_ROWS_KEY, hideEmptyGanttRows ? '1' : '0')"
+          />
+          空行非表示
         </label>
         <button
           class="btn-secondary footer-gantt-save-btn"
@@ -1218,6 +1237,8 @@ const HIDE_WEEKENDS_KEY = 'productionPlanInput.hideWeekends'
 const hideWeekends = ref(localStorage.getItem(HIDE_WEEKENDS_KEY) === '1')
 const HIDE_EMPTY_ROWS_KEY = 'productionPlanInput.hideEmptyRows'
 const hideEmptyRows = ref(localStorage.getItem(HIDE_EMPTY_ROWS_KEY) !== '0')
+const HIDE_EMPTY_GANTT_ROWS_KEY = 'productionPlanInput.hideEmptyGanttRows'
+const hideEmptyGanttRows = ref(localStorage.getItem(HIDE_EMPTY_GANTT_ROWS_KEY) !== '0')
 const openManual = (path) => { window.open(`/manual?path=${encodeURIComponent(path)}`, '_blank') }
 const toggleToolbar = () => {
   toolbarCollapsed.value = !toolbarCollapsed.value
