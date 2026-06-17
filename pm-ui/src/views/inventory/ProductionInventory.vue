@@ -126,13 +126,9 @@
               <span class="info-label">翌々月</span>
               <span class="info-value"></span>
             </div>
-            <div class="info-row">
-              <span class="info-label">完成品向けLT</span>
-              <span class="info-value">{{ fmt(g.total_lt_days) }}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">自LT</span>
-              <span class="info-value">{{ fmt(g.self_lt_days) }}</span>
+            <div class="info-row lt-row">
+              <span class="lt-item"><span class="info-label">自LT</span> {{ g.self_lt_days ?? "-" }}</span>
+              <span class="lt-item"><span class="info-label">出荷LT</span> {{ g.total_lt_days ?? "-" }}</span>
             </div>
             </div>
 
@@ -1327,6 +1323,14 @@ const exportToExcel = () => {
 .info-value {
   color: #111827;
   margin-left: 8px;
+}
+.lt-row {
+  display: flex;
+  gap: 12px;
+}
+.lt-item {
+  font-size: 12px;
+  color: #374151;
 }
 .expand-btn {
   margin-left: 8px;

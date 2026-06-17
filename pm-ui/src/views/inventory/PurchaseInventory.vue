@@ -115,13 +115,9 @@
                 <span class="info-label">翌々月</span>
                 <span class="info-value"></span>
               </div>
-              <div class="info-row">
-                <span class="info-label">完成品向けLT</span>
-                <span class="info-value">{{ fmt(g.total_lt_days) }}</span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">自LT</span>
-                <span class="info-value">{{ fmt(g.self_lt_days) }}</span>
+              <div class="info-row lt-row">
+                <span class="lt-item"><span class="info-label">自LT</span> {{ g.self_lt_days ?? "-" }}</span>
+                <span class="lt-item"><span class="info-label">出荷LT</span> {{ g.total_lt_days ?? "-" }}</span>
               </div>
             </div>
 
@@ -1040,7 +1036,7 @@ const exportToExcel = () => {
   lines.push('');
 
   // ヘッダー行（日付をYYYY/M/D形式に）
-  const headerRow = ['品番', '品名', '完成品向けLT', '自LT', '項目', ...columns.value.map(formatDateSlash)];
+  const headerRow = ['品番', '品名', '出荷LT', '自LT', '項目', ...columns.value.map(formatDateSlash)];
   lines.push(headerRow.map(escapeCsv).join(','));
 
   // データ行（品番・品名は各品番の最初の行のみ出力）
@@ -1212,6 +1208,14 @@ onUpdated(() => {
 .info-value {
   color: #111827;
   margin-left: 8px;
+}
+.lt-row {
+  display: flex;
+  gap: 12px;
+}
+.lt-item {
+  font-size: 12px;
+  color: #374151;
 }
 .matrix-block {
   --fixed-left: 260px;

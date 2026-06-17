@@ -119,6 +119,10 @@
               <span class="info-label">品名</span>
               <span class="info-value">{{ g.product_name || "-" }}</span>
             </div>
+            <div class="info-row lt-row">
+              <span class="lt-item"><span class="info-label">自LT</span> {{ g.self_lt_days ?? "-" }}</span>
+              <span class="lt-item"><span class="info-label">出荷LT</span> {{ g.total_lt_days ?? "-" }}</span>
+            </div>
             </div>
 
             <div class="matrix-block">
@@ -1000,12 +1004,16 @@ const groups = computed(() => {
         product_name: d.product_name,
         is_virtual_set: Boolean(d.is_virtual_set),
         special_display_order: specialDisplayOrder,
+        self_lt_days: d.self_lt_days ?? null,
+        total_lt_days: d.total_lt_days ?? null,
         cells: {},
         process_labels: new Set(),
         process_display: "",
       });
     }
     const g = map.get(key);
+    if (g.self_lt_days === null && d.self_lt_days != null) g.self_lt_days = d.self_lt_days;
+    if (g.total_lt_days === null && d.total_lt_days != null) g.total_lt_days = d.total_lt_days;
     updateRepresentativeProcess(g, d);
     if (specialDisplayOrder !== null) {
       const currentOrder = resolveSpecialDisplayOrder(g);
@@ -1258,6 +1266,14 @@ const getCellClass = (group, date, rowKey) => {
 .info-value {
   color: #111827;
   margin-left: 8px;
+}
+.lt-row {
+  display: flex;
+  gap: 12px;
+}
+.lt-item {
+  font-size: 12px;
+  color: #374151;
 }
 .expand-btn {
   margin-left: 8px;
