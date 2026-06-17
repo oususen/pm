@@ -412,7 +412,17 @@ const unreadNotifications = computed(() => {
 const notificationCount = computed(() => unreadNotifications.value.length)
 const incomingCallCount = computed(() => incomingCalls.value.length)
 const primaryIncomingCall = computed(() => incomingCalls.value[0] || null)
-const incomingCallPopupVisible = computed(() => Boolean(primaryIncomingCall.value))
+const activeCallScreenSessionId = computed(() => {
+  if (!route.path.startsWith('/notifications/calls')) return null
+  const session = Number(route.query.session || 0)
+  return session > 0 ? session : null
+})
+const incomingCallPopupVisible = computed(() => {
+  if (!primaryIncomingCall.value) return false
+  if (!route.path.startsWith('/notifications/calls')) return true
+  if (!activeCallScreenSessionId.value) return false
+  return Number(primaryIncomingCall.value.id) !== Number(activeCallScreenSessionId.value)
+})
 const incomingCallTypeLabel = computed(() => {
   if (!primaryIncomingCall.value) return ''
   return primaryIncomingCall.value.call_type === 'video' ? 'ビデオ通話' : '音声通話'
