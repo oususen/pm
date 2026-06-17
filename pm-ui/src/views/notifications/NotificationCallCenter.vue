@@ -458,7 +458,7 @@ const createPeerConnection = (session) => {
 };
 
 const loadUsers = async () => {
-  const res = await api.accounts.getUsers({ is_active: true, ordering: "username" });
+  const res = await api.accounts.getUsers({ is_active: true, ordering: "username", page_size: 0 });
   const data = res.data?.results || res.data || [];
   users.value = Array.isArray(data) ? data.filter((user) => Number(user.id) !== Number(myUserId.value)) : [];
 };
