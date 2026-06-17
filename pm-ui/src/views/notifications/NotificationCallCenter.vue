@@ -119,6 +119,15 @@
               {{ cameraEnabled ? 'カメラOFF' : 'カメラON' }}
             </button>
             <button
+              v-if="hasVideoTrack"
+              class="btn secondary-btn"
+              type="button"
+              @click="switchCameraFacing"
+              :disabled="busy || switchingCamera"
+            >
+              {{ currentFacingModeLabel }}
+            </button>
+            <button
               v-if="canAcceptCurrentSession"
               class="btn accept-btn"
               type="button"
@@ -180,6 +189,8 @@ const signalTimerId = ref(null);
 const sessionTimerId = ref(null);
 const micEnabled = ref(true);
 const cameraEnabled = ref(true);
+const preferredFacingMode = ref("user");
+const switchingCamera = ref(false);
 
 const rtcConfig = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
@@ -216,6 +227,10 @@ const canFinishCurrentSession = computed(() => {
 
 const hasVideoTrack = computed(() => {
   return Boolean(localStream.value?.getVideoTracks()?.length);
+});
+
+const currentFacingModeLabel = computed(() => {
+  return preferredFacingMode.value === "environment" ? "前面へ切替" : "背面へ切替";
 });
 
 const showLocalVideo = computed(() => {
@@ -399,7 +414,11 @@ const ensureLocalStream = async (callType) => {
 
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: true,
-    video: needVideo,
+    video: needVideo
+      ? {
+          facingMode: preferredFacingMode.value,
+        }
+      : false,
   });
   localStream.value = stream;
   environmentWarning.value = "";
@@ -407,6 +426,20 @@ const ensureLocalStream = async (callType) => {
   cameraEnabled.value = needVideo;
   updateVideoBindings();
   return stream;
+};
+
+const replacePeerConnectionTrack = async (kind, nextTrack, previousTrack = null, stream = localStream.value) => {
+  const sender = peerConnection.value?.getSenders().find((item) => item.track?.kind === kind);
+  if (sender) {
+    await sender.replaceTrack(nextTrack || null);
+    return;
+  }
+  if (nextTrack && peerConnection.value && stream) {
+    peerConnection.value.addTrack(nextTrack, stream);
+    if (previousTrack) {
+      previousTrack.stop();
+    }
+  }
 };
 
 const createPeerConnection = (session) => {
@@ -695,6 +728,51 @@ const toggleCamera = () => {
   localStream.value.getVideoTracks().forEach((track) => {
     track.enabled = cameraEnabled.value;
   });
+};
+
+const switchCameraFacing = async () => {
+  if (!localStream.value || !hasVideoTrack.value || switchingCamera.value) return;
+  switchingCamera.value = true;
+  const nextFacingMode = preferredFacingMode.value === "environment" ? "user" : "environment";
+  const previousFacingMode = preferredFacingMode.value;
+  const currentAudioTracks = localStream.value.getAudioTracks();
+  const currentVideoTrack = localStream.value.getVideoTracks()[0] || null;
+
+  try {
+    preferredFacingMode.value = nextFacingMode;
+    const videoStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: preferredFacingMode.value,
+      },
+      audio: false,
+    });
+    const nextVideoTrack = videoStream.getVideoTracks()[0];
+    if (!nextVideoTrack) {
+      throw new Error("video_track_not_found");
+    }
+    nextVideoTrack.enabled = cameraEnabled.value;
+
+    const nextStream = new MediaStream([
+      ...currentAudioTracks,
+      nextVideoTrack,
+    ]);
+
+    await replacePeerConnectionTrack("video", nextVideoTrack, currentVideoTrack, nextStream);
+
+    if (currentVideoTrack) {
+      localStream.value.removeTrack(currentVideoTrack);
+      currentVideoTrack.stop();
+    }
+
+    localStream.value = nextStream;
+    updateVideoBindings();
+  } catch (error) {
+    preferredFacingMode.value = previousFacingMode;
+    console.error("カメラ切替失敗", error);
+    window.alert("カメラの切替に失敗しました。端末が背面カメラ切替に対応していない可能性があります。");
+  } finally {
+    switchingCamera.value = false;
+  }
 };
 
 const maybeOpenSessionFromQuery = async () => {
