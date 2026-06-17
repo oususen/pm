@@ -15,7 +15,7 @@ class Migration(migrations.Migration):
             name='PushSubscription',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('endpoint', models.TextField(unique=True, verbose_name='エンドポイント')),
+                ('endpoint', models.CharField(max_length=500, unique=True, verbose_name='エンドポイント')),
                 ('p256dh_key', models.TextField(verbose_name='公開鍵')),
                 ('auth_key', models.TextField(verbose_name='認証鍵')),
                 ('user_agent', models.CharField(blank=True, max_length=255, verbose_name='ユーザーエージェント')),
