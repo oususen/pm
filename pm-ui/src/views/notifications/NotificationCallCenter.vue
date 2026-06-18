@@ -394,6 +394,60 @@ const getMediaErrorMessage = (error, callType) => {
   return `${mediaLabel}の取得に失敗しました。`;
 };
 
+const isFacingModeMatch = (label, facingMode) => {
+  const normalized = String(label || "").toLowerCase();
+  if (!normalized) return false;
+  if (facingMode === "environment") {
+    return ["back", "rear", "environment", "world", "背面", "リア", "後"].some((word) =>
+      normalized.includes(word)
+    );
+  }
+  return ["front", "user", "face", "前面", "フロント"].some((word) => normalized.includes(word));
+};
+
+const getFallbackCameraDeviceId = async (targetFacingMode, currentTrack = null) => {
+  if (!navigator.mediaDevices?.enumerateDevices) return "";
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const videoInputs = devices.filter((device) => device.kind === "videoinput");
+  if (!videoInputs.length) return "";
+
+  const currentDeviceId =
+    currentTrack?.getSettings?.().deviceId ||
+    currentTrack?.getConstraints?.().deviceId ||
+    "";
+
+  const matchedDevice = videoInputs.find(
+    (device) => device.deviceId !== currentDeviceId && isFacingModeMatch(device.label, targetFacingMode)
+  );
+  if (matchedDevice) return matchedDevice.deviceId;
+
+  const fallbackDevice = videoInputs.find((device) => device.deviceId !== currentDeviceId);
+  return fallbackDevice?.deviceId || "";
+};
+
+const openVideoStreamForFacingMode = async (targetFacingMode, currentTrack = null) => {
+  const baseConstraints = { audio: false };
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      ...baseConstraints,
+      video: {
+        facingMode: { ideal: targetFacingMode },
+      },
+    });
+  } catch (error) {
+    const fallbackDeviceId = await getFallbackCameraDeviceId(targetFacingMode, currentTrack);
+    if (!fallbackDeviceId) {
+      throw error;
+    }
+    return navigator.mediaDevices.getUserMedia({
+      ...baseConstraints,
+      video: {
+        deviceId: { exact: fallbackDeviceId },
+      },
+    });
+  }
+};
+
 const ensureLocalStream = async (callType) => {
   const environmentError = getMediaEnvironmentError();
   if (environmentError) {
@@ -742,12 +796,7 @@ const switchCameraFacing = async () => {
 
   try {
     preferredFacingMode.value = nextFacingMode;
-    const videoStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { exact: preferredFacingMode.value },
-      },
-      audio: false,
-    });
+    const videoStream = await openVideoStreamForFacingMode(preferredFacingMode.value, currentVideoTrack);
     const nextVideoTrack = videoStream.getVideoTracks()[0];
     if (!nextVideoTrack) {
       throw new Error("video_track_not_found");
