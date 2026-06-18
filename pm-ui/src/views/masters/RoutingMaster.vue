@@ -2182,7 +2182,7 @@ onMounted(async () => {
   font-size: 12px;
 }
 .hierarchy-input {
-  width: 60px;
+  width: 120px;
   padding: 2px 4px;
   border: 1px solid #d1d5db;
   border-radius: 4px;
