@@ -144,10 +144,13 @@ class CallSessionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, views
                 'caller_name': _display_name(request.user),
             },
         }
-        for subscription in callee.push_subscriptions.all():
-            send_web_push(subscription, push_payload)
-        for device in callee.native_push_tokens.filter(is_active=True, platform=NativePushToken.PLATFORM_ANDROID):
-            send_fcm_push(device, push_payload)
+        native_devices = list(callee.native_push_tokens.filter(is_active=True, platform=NativePushToken.PLATFORM_ANDROID))
+        if native_devices:
+            for device in native_devices:
+                send_fcm_push(device, push_payload)
+        else:
+            for subscription in callee.push_subscriptions.all():
+                send_web_push(subscription, push_payload)
 
         return Response(self.get_serializer(session).data, status=status.HTTP_201_CREATED)
 

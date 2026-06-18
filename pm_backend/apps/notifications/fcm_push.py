@@ -95,26 +95,16 @@ def send_fcm_push(device, payload):
         return False
 
     url = f"https://fcm.googleapis.com/v1/projects/{config['project_id']}/messages:send"
+    data = _build_data_payload(payload)
+    data['title'] = payload.get('title') or ''
+    data['body'] = payload.get('body') or ''
     body = {
         'message': {
             'token': device.token,
-            'notification': {
-                'title': payload.get('title') or '',
-                'body': payload.get('body') or '',
-            },
-            'data': _build_data_payload(payload),
+            'data': data,
             'android': {
                 'priority': 'high',
                 'ttl': '30s',
-                'notification': {
-                    'channel_id': 'incoming_calls',
-                    'sound': 'default',
-                    'default_sound': True,
-                    'default_vibrate_timings': True,
-                    'visibility': 'PUBLIC',
-                    'notification_priority': 'PRIORITY_MAX',
-                    'tag': str(payload.get('tag') or ''),
-                },
             },
         },
     }
