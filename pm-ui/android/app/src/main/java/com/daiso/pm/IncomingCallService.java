@@ -19,13 +19,14 @@ import com.google.firebase.messaging.RemoteMessage;
 
 public class IncomingCallService extends FirebaseMessagingService {
 
-    private static final String CHANNEL_ID = "incoming_calls";
+    private static final String CHANNEL_ALARM = "incoming_calls_alarm";
+    private static final String CHANNEL_NOTIFY = "incoming_calls_notify";
     private static final String WAKELOCK_TAG = "com.daiso.pm:incoming_call";
 
     @Override
     public void onCreate() {
         super.onCreate();
-        ensureChannel();
+        ensureChannels();
     }
 
     @Override
@@ -40,24 +41,10 @@ public class IncomingCallService extends FirebaseMessagingService {
         wakeLock.acquire(30_000);
 
         try {
-            ensureChannel();
+            ensureChannels();
 
-            String title = "";
-            String body = "";
-
-            RemoteMessage.Notification notification = message.getNotification();
-            if (notification != null) {
-                title = notification.getTitle() != null ? notification.getTitle() : "";
-                body = notification.getBody() != null ? notification.getBody() : "";
-            }
-
-            if (title.isEmpty()) {
-                title = message.getData().getOrDefault("title", "着信");
-            }
-            if (body.isEmpty()) {
-                body = message.getData().getOrDefault("body", "タップして通話画面を開いてください。");
-            }
-
+            String title = message.getData().getOrDefault("title", "着信");
+            String body = message.getData().getOrDefault("body", "タップして通話画面を開いてください。");
             String tag = message.getData().getOrDefault("tag", "");
 
             Intent intent = getPackageManager().getLaunchIntentForPackage(getPackageName());
@@ -75,25 +62,38 @@ public class IncomingCallService extends FirebaseMessagingService {
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
             );
 
-            Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+            int baseId = tag.isEmpty() ? (int) System.currentTimeMillis() : tag.hashCode();
 
-            NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
+            // 通知1: アラーム音（大きい音）
+            NotificationCompat.Builder alarmBuilder = new NotificationCompat.Builder(this, CHANNEL_ALARM)
                     .setSmallIcon(android.R.drawable.ic_menu_call)
                     .setContentTitle(title)
                     .setContentText(body)
                     .setPriority(NotificationCompat.PRIORITY_MAX)
                     .setCategory(NotificationCompat.CATEGORY_CALL)
                     .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                    .setSound(soundUri)
+                    .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM))
                     .setVibrate(new long[]{0, 500, 200, 500, 200, 500})
                     .setAutoCancel(true)
                     .setContentIntent(pendingIntent)
                     .setFullScreenIntent(pendingIntent, true)
                     .setOngoing(true);
 
+            // 通知2: 通知音（通常の着信音）
+            NotificationCompat.Builder notifyBuilder = new NotificationCompat.Builder(this, CHANNEL_NOTIFY)
+                    .setSmallIcon(android.R.drawable.ic_menu_call)
+                    .setContentTitle(title)
+                    .setContentText(body)
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setCategory(NotificationCompat.CATEGORY_CALL)
+                    .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                    .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))
+                    .setAutoCancel(true)
+                    .setContentIntent(pendingIntent);
+
             NotificationManager manager = getSystemService(NotificationManager.class);
-            int notificationId = tag.isEmpty() ? (int) System.currentTimeMillis() : tag.hashCode();
-            manager.notify(notificationId, builder.build());
+            manager.notify(baseId, alarmBuilder.build());
+            manager.notify(baseId + 1, notifyBuilder.build());
         } finally {
             if (wakeLock.isHeld()) {
                 wakeLock.release();
@@ -101,30 +101,52 @@ public class IncomingCallService extends FirebaseMessagingService {
         }
     }
 
-    private void ensureChannel() {
+    private void ensureChannels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
 
         NotificationManager manager = getSystemService(NotificationManager.class);
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return;
 
-        Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
-        AudioAttributes audioAttributes = new AudioAttributes.Builder()
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-                .build();
+        // アラーム音チャネル
+        if (manager.getNotificationChannel(CHANNEL_ALARM) == null) {
+            Uri alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
+            AudioAttributes alarmAttr = new AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .build();
 
-        NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID,
-                "社内通話着信",
-                NotificationManager.IMPORTANCE_HIGH
-        );
-        channel.setDescription("社内通話の着信通知");
-        channel.setSound(soundUri, audioAttributes);
-        channel.enableVibration(true);
-        channel.setVibrationPattern(new long[]{0, 500, 200, 500, 200, 500});
-        channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-        channel.setBypassDnd(true);
+            NotificationChannel alarmChannel = new NotificationChannel(
+                    CHANNEL_ALARM,
+                    "社内通話着信（アラーム）",
+                    NotificationManager.IMPORTANCE_MAX
+            );
+            alarmChannel.setDescription("社内通話の着信通知（アラーム音）");
+            alarmChannel.setSound(alarmUri, alarmAttr);
+            alarmChannel.enableVibration(true);
+            alarmChannel.setVibrationPattern(new long[]{0, 500, 200, 500, 200, 500});
+            alarmChannel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+            alarmChannel.setBypassDnd(true);
+            manager.createNotificationChannel(alarmChannel);
+        }
 
-        manager.createNotificationChannel(channel);
+        // 通知音チャネル
+        if (manager.getNotificationChannel(CHANNEL_NOTIFY) == null) {
+            Uri ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+            AudioAttributes notifyAttr = new AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                    .build();
+
+            NotificationChannel notifyChannel = new NotificationChannel(
+                    CHANNEL_NOTIFY,
+                    "社内通話着信（通知音）",
+                    NotificationManager.IMPORTANCE_HIGH
+            );
+            notifyChannel.setDescription("社内通話の着信通知（通知音）");
+            notifyChannel.setSound(ringtoneUri, notifyAttr);
+            notifyChannel.enableVibration(true);
+            notifyChannel.setVibrationPattern(new long[]{0, 500, 200, 500, 200, 500});
+            notifyChannel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+            manager.createNotificationChannel(notifyChannel);
+        }
     }
 }
