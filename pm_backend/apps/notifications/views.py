@@ -7,13 +7,15 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Notification, NotificationRead, CallSession, CallSignal, PushSubscription
+from .models import Notification, NotificationRead, CallSession, CallSignal, PushSubscription, NativePushToken
 from .serializers import (
     NotificationSerializer,
     CallSessionSerializer,
     CallSignalSerializer,
     PushSubscriptionSerializer,
+    NativePushTokenSerializer,
 )
+from .fcm_push import get_fcm_config, send_fcm_push
 from .web_push import get_web_push_config, send_web_push
 
 
@@ -144,6 +146,8 @@ class CallSessionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, views
         }
         for subscription in callee.push_subscriptions.all():
             send_web_push(subscription, push_payload)
+        for device in callee.native_push_tokens.filter(is_active=True, platform=NativePushToken.PLATFORM_ANDROID):
+            send_fcm_push(device, push_payload)
 
         return Response(self.get_serializer(session).data, status=status.HTTP_201_CREATED)
 
@@ -293,4 +297,63 @@ class PushSubscriptionViewSet(
         if not endpoint:
             return Response({'detail': 'endpoint は必須です。'}, status=400)
         deleted, _detail = self.get_queryset().filter(endpoint=endpoint).delete()
+        return Response({'deleted': deleted})
+
+
+class NativePushTokenViewSet(
+    mixins.ListModelMixin,
+    mixins.CreateModelMixin,
+    viewsets.GenericViewSet,
+):
+    queryset = NativePushToken.objects.all()
+    serializer_class = NativePushTokenSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = None
+
+    def get_queryset(self):
+        return self.queryset.filter(user=self.request.user, is_active=True)
+
+    @action(detail=False, methods=['get'])
+    def config(self, request):
+        config = get_fcm_config()
+        return Response({
+            'enabled': config['enabled'],
+            'project_id': config['project_id'],
+        })
+
+    def create(self, request, *args, **kwargs):
+        platform = (request.data.get('platform') or '').strip().lower()
+        token = (request.data.get('token') or '').strip()
+        device_id = (request.data.get('device_id') or '').strip()[:255]
+        device_name = (request.data.get('device_name') or '').strip()[:255]
+        app_version = (request.data.get('app_version') or '').strip()[:100]
+
+        if platform not in {NativePushToken.PLATFORM_ANDROID, NativePushToken.PLATFORM_IOS}:
+            return Response({'detail': 'platform は android または ios を指定してください。'}, status=400)
+        if not token:
+            return Response({'detail': 'token は必須です。'}, status=400)
+
+        push_token, _created = NativePushToken.objects.update_or_create(
+            token=token,
+            defaults={
+                'user': request.user,
+                'platform': platform,
+                'device_id': device_id,
+                'device_name': device_name,
+                'app_version': app_version,
+                'is_active': True,
+            },
+        )
+        if device_id:
+            self.get_queryset().filter(platform=platform, device_id=device_id).exclude(id=push_token.id).delete()
+
+        serializer = self.get_serializer(push_token)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'])
+    def unregister(self, request):
+        token = (request.data.get('token') or '').strip()
+        if not token:
+            return Response({'detail': 'token は必須です。'}, status=400)
+        deleted, _detail = self.get_queryset().filter(token=token).delete()
         return Response({'deleted': deleted})

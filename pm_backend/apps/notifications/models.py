@@ -163,3 +163,37 @@ class PushSubscription(models.Model):
         ordering = ['-updated_at', '-id']
         verbose_name = 'Push購読'
         verbose_name_plural = 'Push購読'
+
+
+class NativePushToken(models.Model):
+    """ネイティブ Push トークン"""
+
+    PLATFORM_ANDROID = 'android'
+    PLATFORM_IOS = 'ios'
+
+    PLATFORM_CHOICES = [
+        (PLATFORM_ANDROID, 'Android'),
+        (PLATFORM_IOS, 'iOS'),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='native_push_tokens',
+        verbose_name='ユーザー'
+    )
+    platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES, verbose_name='プラットフォーム')
+    token = models.CharField(max_length=512, unique=True, verbose_name='トークン')
+    device_id = models.CharField(max_length=255, blank=True, verbose_name='端末ID')
+    device_name = models.CharField(max_length=255, blank=True, verbose_name='端末名')
+    app_version = models.CharField(max_length=100, blank=True, verbose_name='アプリバージョン')
+    is_active = models.BooleanField(default=True, verbose_name='有効')
+    last_seen_at = models.DateTimeField(auto_now=True, verbose_name='最終確認日時')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'native_push_tokens'
+        ordering = ['-updated_at', '-id']
+        verbose_name = 'ネイティブ Push トークン'
+        verbose_name_plural = 'ネイティブ Push トークン'

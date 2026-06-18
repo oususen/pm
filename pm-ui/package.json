@@ -8,9 +8,20 @@
     "dev:https": "npm run build && npm run preview",
     "build": "vite build",
     "preview": "vite preview",
-    "check:date-utc": "node scripts/check-no-utc-date.js"
+    "check:date-utc": "node scripts/check-no-utc-date.js",
+    "cap:sync": "npx cap sync android",
+    "cap:copy": "npx cap copy android",
+    "android:open": "npx cap open android",
+    "android:prepare": "npm run build && npx cap sync android",
+    "android:prepare:devpc": "set CAPACITOR_SERVER_URL=http://10.0.1.194:8501&& set CAPACITOR_CLEAR_TEXT=true&& npm run android:prepare",
+    "android:prepare:prod": "set CAPACITOR_SERVER_URL=https://10.0.1.232:8501&& set CAPACITOR_CLEAR_TEXT=false&& npm run android:prepare",
+    "android:prepare:bundle": "set CAPACITOR_SERVER_URL=&& set CAPACITOR_CLEAR_TEXT=false&& npm run android:prepare"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.0",
+    "@capacitor/cli": "^7.6.6",
+    "@capacitor/core": "^8.4.0",
+    "@capacitor/push-notifications": "^8.1.1",
     "axios": "^1.13.2",
     "chart.js": "^4.5.1",
     "dompurify": "^3.1.6",
@@ -23,6 +34,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.1",
+    "typescript": "^6.0.3",
     "vite": "^7.2.4"
   }
 }

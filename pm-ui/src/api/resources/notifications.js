@@ -56,4 +56,16 @@ export const createNotificationsAPI = (client) => ({
   unsubscribePush(endpoint) {
     return client.post('/push-subscriptions/unsubscribe/', { endpoint })
   },
+  getNativePushConfig() {
+    return client.get('/native-push-tokens/config/')
+  },
+  listNativePushTokens() {
+    return client.get('/native-push-tokens/')
+  },
+  registerNativePushToken(data) {
+    return client.post('/native-push-tokens/', data)
+  },
+  unregisterNativePushToken(token) {
+    return client.post('/native-push-tokens/unregister/', { token })
+  },
 })

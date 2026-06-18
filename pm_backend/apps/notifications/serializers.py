@@ -1,6 +1,6 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
-from .models import Notification, NotificationRead, CallSession, CallSignal, PushSubscription
+from .models import Notification, NotificationRead, CallSession, CallSignal, PushSubscription, NativePushToken
 from accounts.models import Department, UserProfile
 
 User = get_user_model()
@@ -238,3 +238,21 @@ class PushSubscriptionSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class NativePushTokenSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NativePushToken
+        fields = [
+            'id',
+            'platform',
+            'token',
+            'device_id',
+            'device_name',
+            'app_version',
+            'is_active',
+            'last_seen_at',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'last_seen_at', 'created_at', 'updated_at']

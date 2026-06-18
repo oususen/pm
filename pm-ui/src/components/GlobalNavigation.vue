@@ -163,6 +163,7 @@ import { authState, logout } from '../auth'
 import { hasPermission } from '../router'
 import api from '@/api/client'
 import { locale, t, setLocale, getLocaleOptions } from '@/i18n'
+import { syncNativePushRegistration } from '@/nativePush'
 
 const props = defineProps({
   isMobile: {
@@ -866,6 +867,7 @@ const startPolling = async () => {
   taskPollingInterval.value = setInterval(pollTasks, TASK_POLLING_MS)
   callPollingInterval.value = setInterval(pollIncomingCalls, CALL_POLLING_MS)
   ensurePushSubscription()
+  syncNativePushRegistration(authState.user)
 }
 
 // ポーリング停止
@@ -958,9 +960,11 @@ watch(
       audioUnlocked.value = false
       attachAudioUnlockListeners()
       startPolling()
+      syncNativePushRegistration(newUser)
     } else {
       stopPolling()
       detachAudioUnlockListeners()
+      syncNativePushRegistration(null)
       audioUnlocked.value = false
       notifications.value = []
       incomingCalls.value = []
@@ -973,6 +977,7 @@ watch(
 
 const handleLogout = async () => {
   await clearPushSubscription()
+  await syncNativePushRegistration(null)
   await logout()
   router.replace('/login')
 }

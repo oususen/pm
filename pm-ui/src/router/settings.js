@@ -142,6 +142,12 @@ const settings = [
     component: () => import("@/views/settings/SystemSettings.vue"),
     meta: { pageTitle: "システム設定", resource: "settings" },
   },
+  {
+    path: "/settings/android-app",
+    name: "AndroidAppDownload",
+    component: () => import("@/views/settings/AndroidAppDownload.vue"),
+    meta: { pageTitle: "Androidアプリ配布", resource: "settings" },
+  },
 ];
 
 export default settings;

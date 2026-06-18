@@ -92,6 +92,7 @@ const tiles = computed(() => {
     { to: "/settings/kubota-sakai-config", label: "クボタ堺便計画設定", icon: "🚛", category: "kubota", resource: "settings.kubota_sakai_config" },
     { to: "/settings/smtp", label: "SMTP設定", icon: "📧", category: "system", resource: "settings.smtp" },
     { to: "/settings/lock-date", label: "締め日管理", icon: "📅", category: "system", resource: "settings.lock_date" },
+    { to: "/settings/android-app", label: "Androidアプリ配布", icon: "📱", category: "system", resource: "settings" },
     { to: "/settings/system", label: "システム設定", icon: "⚙️", category: "system", resource: "settings" },
   ];
 
@@ -179,4 +180,3 @@ const groupedTiles = computed(() => {
   }
 }
 </style>
-

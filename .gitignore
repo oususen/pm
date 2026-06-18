@@ -60,6 +60,9 @@ pm_db_backup.sql
 参照ファイル/
 create_table.py
 create_userprofile_table.sql
+pm-ui/android/app/google-services.json
+pm_backend/firebase-service-account.json
+pm_backend/firebase-service-account-*.json
 # output/       
 
 # Image files
