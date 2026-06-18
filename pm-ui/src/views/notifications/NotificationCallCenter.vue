@@ -303,9 +303,11 @@ const goNotificationList = () => {
 const updateVideoBindings = () => {
   if (localVideoRef.value) {
     localVideoRef.value.srcObject = localStream.value;
+    localVideoRef.value.play().catch(() => {});
   }
   if (remoteVideoRef.value) {
     remoteVideoRef.value.srcObject = remoteStream.value;
+    remoteVideoRef.value.play().catch(() => {});
   }
 };
 
@@ -742,7 +744,7 @@ const switchCameraFacing = async () => {
     preferredFacingMode.value = nextFacingMode;
     const videoStream = await navigator.mediaDevices.getUserMedia({
       video: {
-        facingMode: preferredFacingMode.value,
+        facingMode: { exact: preferredFacingMode.value },
       },
       audio: false,
     });
