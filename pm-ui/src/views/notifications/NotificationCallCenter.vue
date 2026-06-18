@@ -191,6 +191,7 @@ const micEnabled = ref(true);
 const cameraEnabled = ref(true);
 const preferredFacingMode = ref("user");
 const switchingCamera = ref(false);
+const currentVideoDeviceId = ref("");
 
 const rtcConfig = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
@@ -405,13 +406,18 @@ const isFacingModeMatch = (label, facingMode) => {
   return ["front", "user", "face", "前面", "フロント"].some((word) => normalized.includes(word));
 };
 
-const getFallbackCameraDeviceId = async (targetFacingMode, currentTrack = null) => {
+const listVideoInputDevices = async () => {
   if (!navigator.mediaDevices?.enumerateDevices) return "";
   const devices = await navigator.mediaDevices.enumerateDevices();
-  const videoInputs = devices.filter((device) => device.kind === "videoinput");
+  return devices.filter((device) => device.kind === "videoinput");
+};
+
+const getFallbackCameraDeviceId = async (targetFacingMode, currentTrack = null) => {
+  const videoInputs = await listVideoInputDevices();
   if (!videoInputs.length) return "";
 
   const currentDeviceId =
+    currentVideoDeviceId.value ||
     currentTrack?.getSettings?.().deviceId ||
     currentTrack?.getConstraints?.().deviceId ||
     "";
@@ -423,6 +429,26 @@ const getFallbackCameraDeviceId = async (targetFacingMode, currentTrack = null) 
 
   const fallbackDevice = videoInputs.find((device) => device.deviceId !== currentDeviceId);
   return fallbackDevice?.deviceId || "";
+};
+
+const getNextCameraDevice = async (targetFacingMode, currentTrack = null) => {
+  const videoInputs = await listVideoInputDevices();
+  if (!videoInputs.length) return { deviceId: "", facingMode: targetFacingMode };
+
+  const currentDeviceId =
+    currentVideoDeviceId.value ||
+    currentTrack?.getSettings?.().deviceId ||
+    currentTrack?.getConstraints?.().deviceId ||
+    "";
+
+  const currentIndex = videoInputs.findIndex((device) => device.deviceId === currentDeviceId);
+  if (currentIndex >= 0 && videoInputs.length > 1) {
+    const nextIndex = (currentIndex + 1) % videoInputs.length;
+    return { deviceId: videoInputs[nextIndex].deviceId, facingMode: targetFacingMode };
+  }
+
+  const fallbackDeviceId = await getFallbackCameraDeviceId(targetFacingMode, currentTrack);
+  return { deviceId: fallbackDeviceId, facingMode: targetFacingMode };
 };
 
 const openVideoStreamForFacingMode = async (targetFacingMode, currentTrack = null) => {
@@ -437,7 +463,16 @@ const openVideoStreamForFacingMode = async (targetFacingMode, currentTrack = nul
   } catch (error) {
     const fallbackDeviceId = await getFallbackCameraDeviceId(targetFacingMode, currentTrack);
     if (!fallbackDeviceId) {
-      throw error;
+      const nextCamera = await getNextCameraDevice(targetFacingMode, currentTrack);
+      if (!nextCamera.deviceId) {
+        throw error;
+      }
+      return navigator.mediaDevices.getUserMedia({
+        ...baseConstraints,
+        video: {
+          deviceId: { exact: nextCamera.deviceId },
+        },
+      });
     }
     return navigator.mediaDevices.getUserMedia({
       ...baseConstraints,
@@ -477,6 +512,7 @@ const ensureLocalStream = async (callType) => {
       : false,
   });
   localStream.value = stream;
+  currentVideoDeviceId.value = stream.getVideoTracks?.()[0]?.getSettings?.().deviceId || "";
   environmentWarning.value = "";
   micEnabled.value = true;
   cameraEnabled.value = needVideo;
@@ -796,7 +832,15 @@ const switchCameraFacing = async () => {
 
   try {
     preferredFacingMode.value = nextFacingMode;
-    const videoStream = await openVideoStreamForFacingMode(preferredFacingMode.value, currentVideoTrack);
+    const nextCamera = await getNextCameraDevice(preferredFacingMode.value, currentVideoTrack);
+    const videoStream = nextCamera.deviceId
+      ? await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            deviceId: { exact: nextCamera.deviceId },
+          },
+        })
+      : await openVideoStreamForFacingMode(preferredFacingMode.value, currentVideoTrack);
     const nextVideoTrack = videoStream.getVideoTracks()[0];
     if (!nextVideoTrack) {
       throw new Error("video_track_not_found");
@@ -816,6 +860,7 @@ const switchCameraFacing = async () => {
     }
 
     localStream.value = nextStream;
+    currentVideoDeviceId.value = nextVideoTrack.getSettings?.().deviceId || nextCamera.deviceId || "";
     updateVideoBindings();
   } catch (error) {
     preferredFacingMode.value = previousFacingMode;
