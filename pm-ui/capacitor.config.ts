@@ -9,7 +9,7 @@ const cleartext = ['1', 'true', 'yes', 'on'].includes(
 
 const config: CapacitorConfig = {
   appId: 'com.daiso.pm',
-  appName: 'DAISO管理システム',
+  appName: 'オーシャン',
   webDir: 'dist',
   plugins: {
     PushNotifications: {
