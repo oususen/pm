@@ -86,8 +86,19 @@
           </div>
 
           <div class="media-grid" :class="{ single: !showRemoteVideo }">
-            <div class="video-card remote">
-              <video ref="remoteVideoRef" autoplay playsinline></video>
+            <div
+              class="video-card remote"
+              @touchstart="handleRemoteTouchStart"
+              @touchmove="handleRemoteTouchMove"
+              @touchend="handleRemoteTouchEnd"
+              @touchcancel="handleRemoteTouchEnd"
+            >
+              <video
+                ref="remoteVideoRef"
+                autoplay
+                playsinline
+                :style="remoteVideoStyle"
+              ></video>
             </div>
             <div class="video-card local">
               <video ref="localVideoRef" autoplay muted playsinline :class="{ mirrored: isFrontCameraActive }"></video>
@@ -184,6 +195,9 @@ const preferredFacingMode = ref("user");
 const switchingCamera = ref(false);
 const currentVideoDeviceId = ref("");
 const availableVideoInputCount = ref(0);
+const remoteVideoScale = ref(1);
+const remotePinchStartDistance = ref(0);
+const remotePinchStartScale = ref(1);
 
 const turnUrl = (import.meta.env.VITE_TURN_URL || "").trim();
 const turnUsername = (import.meta.env.VITE_TURN_USERNAME || "").trim();
@@ -266,6 +280,13 @@ const showRemoteVideo = computed(() => {
   return Boolean(remoteStream.value?.getVideoTracks()?.length);
 });
 
+const remoteVideoStyle = computed(() => {
+  return {
+    transform: `scale(${remoteVideoScale.value})`,
+    transformOrigin: "center center",
+  };
+});
+
 const remotePlaceholder = computed(() => {
   if (!currentSession.value) return "未接続";
   return counterpartName(currentSession.value);
@@ -334,6 +355,41 @@ const updateVideoBindings = () => {
     remoteVideoRef.value.srcObject = remoteStream.value;
     remoteVideoRef.value.play().catch(() => {});
   }
+};
+
+const getTouchDistance = (touches) => {
+  if (!touches || touches.length < 2) return 0;
+  const [first, second] = touches;
+  const dx = first.clientX - second.clientX;
+  const dy = first.clientY - second.clientY;
+  return Math.hypot(dx, dy);
+};
+
+const clampScale = (value) => {
+  return Math.min(3, Math.max(1, value));
+};
+
+const handleRemoteTouchStart = (event) => {
+  if (event.touches.length !== 2) return;
+  remotePinchStartDistance.value = getTouchDistance(event.touches);
+  remotePinchStartScale.value = remoteVideoScale.value;
+};
+
+const handleRemoteTouchMove = (event) => {
+  if (event.touches.length !== 2 || !remotePinchStartDistance.value) return;
+  event.preventDefault();
+  const nextDistance = getTouchDistance(event.touches);
+  if (!nextDistance) return;
+  const ratio = nextDistance / remotePinchStartDistance.value;
+  remoteVideoScale.value = clampScale(remotePinchStartScale.value * ratio);
+};
+
+const handleRemoteTouchEnd = () => {
+  if (remotePinchStartDistance.value && remoteVideoScale.value < 1.02) {
+    remoteVideoScale.value = 1;
+  }
+  remotePinchStartDistance.value = 0;
+  remotePinchStartScale.value = remoteVideoScale.value;
 };
 
 const stopTracks = (stream) => {
@@ -1366,8 +1422,17 @@ onBeforeUnmount(() => {
   display: block;
 }
 
+.video-card.remote {
+  touch-action: none;
+}
+
 .video-card.local video.mirrored {
   transform: scaleX(-1);
+}
+
+.video-card.local video {
+  object-fit: contain;
+  background: #0f172a;
 }
 
 .video-card.local {
