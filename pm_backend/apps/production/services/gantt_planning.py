@@ -718,11 +718,12 @@ def _build_coproduct_parent_map(plan_date) -> Dict[int, Product]:
     return parent_map
 
 
-def _build_display_product_map_by_final(line_id: int) -> Dict[int, Dict[int, Product]]:
+def _build_display_product_map_by_final(line_id: int) -> Tuple[Dict[int, Dict[int, Product]], Dict[int, Dict[int, set]]]:
     """
     ラインごとの表示品マップを構築する。
     Returns:
-        { final_product_id: { process_id: display_product } }
+        primary_map: { final_product_id: { process_id: display_product } }  (先頭1件)
+        all_ids_map: { final_product_id: { process_id: set(display_product_ids) } }
     """
     rows = (
         GanttDisplayProductMap.objects
@@ -730,15 +731,19 @@ def _build_display_product_map_by_final(line_id: int) -> Dict[int, Dict[int, Pro
         .select_related('display_product')
         .order_by('final_product_id', 'process_id', 'id')
     )
-    result: Dict[int, Dict[int, Product]] = {}
+    primary: Dict[int, Dict[int, Product]] = {}
+    all_ids: Dict[int, Dict[int, set]] = {}
     for row in rows:
         final_id = int(row.final_product_id)
         process_id = int(row.process_id)
-        process_map = result.setdefault(final_id, {})
-        # 同一(最終品, 工程)に複数行ある場合は先頭を採用
+        process_map = primary.setdefault(final_id, {})
         if process_id not in process_map and row.display_product_id:
             process_map[process_id] = row.display_product
-    return result
+        ids_map = all_ids.setdefault(final_id, {})
+        id_set = ids_map.setdefault(process_id, set())
+        if row.display_product_id:
+            id_set.add(int(row.display_product_id))
+    return primary, all_ids
 
 
 def _resolve_display_product_override(
@@ -748,14 +753,20 @@ def _resolve_display_product_override(
     default_product_id: Optional[int],
     default_product_code: str,
     default_product_name: str,
+    all_display_ids: Optional[Dict[int, set]] = None,
 ) -> Tuple[Optional[int], str, str]:
     """
     工程単位の表示品マップがある場合は表示品を上書きする。
+    ただし、現在の出力品が同じ工程の表示品マップに登録済みならそのまま維持する。
     マップ未登録の工程は従来ロジックの値をそのまま返す。
     """
     mapped = display_map.get(int(process_id)) if display_map else None
     if not mapped:
         return default_product_id, default_product_code, default_product_name
+    if all_display_ids and default_product_id:
+        ids_for_process = all_display_ids.get(int(process_id))
+        if ids_for_process and int(default_product_id) in ids_for_process:
+            return default_product_id, default_product_code, default_product_name
     return mapped.id, mapped.product_code or '', mapped.product_name or ''
 
 
@@ -1019,6 +1030,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
     # 各工程の終了時刻を追跡（plan_dateとprocess_idごと）
     # キー: (plan_date, process_id), 値: 前のsequenceの終了時刻
     previous_process_end_by_date: Dict[Tuple[date, int], datetime] = {}
+    remaining_shift_by_process_date: Dict[Tuple[date, int], Decimal] = {}
 
     # 連産品マップを日付ごとにキャッシュ（ループ外で構築）
     _coproduct_cache: Dict[date, tuple] = {}
@@ -1029,7 +1041,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
     _coproduct_driver_cache: Dict[Tuple[int, date], Optional[Tuple[int, float]]] = {}
     _cycle_from_final_routing_cache: Dict[Tuple[int, int, int, date], Optional[RoutingStep]] = {}
     # ライン最終品×工程の表示品マップ（ライン単位で1回だけ取得）
-    display_product_map_by_final = _build_display_product_map_by_final(line_id)
+    display_product_map_by_final, display_product_all_ids_by_final = _build_display_product_map_by_final(line_id)
 
     tank_prev_day_plans = []
 
@@ -1037,6 +1049,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
     for obj in base_plans:
         product = obj.product
         display_product_map = display_product_map_by_final.get(int(product.id), {})
+        display_product_all_ids = display_product_all_ids_by_final.get(int(product.id), {})
         backlog_key = (obj.product_id, obj.plan_date, obj.sequence_no or 0)
         plan_backlog_rows = backlog_rows_by_key.get(backlog_key, [])
         # キャッシュ付きBOM乗数マップ
@@ -1403,6 +1416,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 )
                 prev_day_shift_qty = prev_day_shift_qty_by_line_process.get((line_code_upper, str(spec.process_code or '').strip().upper()), Decimal('0'))
                 prev_day_shift_first = prev_day_shift_qty > 0 and process_key not in previous_process_end_by_date
+                bw_effective_shift = prev_day_shift_qty if prev_day_shift_first else remaining_shift_by_process_date.get(process_key, Decimal('0'))
 
                 if is_tank_special_proc:
                     # タンクライン特例: コンプ/箱組は8:00開始チェーン方式
@@ -1411,8 +1425,8 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                         (line_code_upper, str(spec.process_code or '').strip().upper()),
                         time(8, 0),
                     )
-                    if prev_day_shift_first:
-                        bw_qty = max(entry['process_qty'] - prev_day_shift_qty, Decimal('0'))
+                    if bw_effective_shift > 0:
+                        bw_qty = max(entry['process_qty'] - bw_effective_shift, Decimal('0'))
                         bw_total = _calculate_total_minutes(spec, bw_qty)
                         tank_bw_effective = bw_total / max(spec.parallel_count, 1)
                     if process_key in previous_process_end_by_date:
@@ -1427,8 +1441,8 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                     start_time = anchor_dt
                     end_time = current_end_time
                 else:
-                    if prev_day_shift_first:
-                        bw_qty = max(entry['process_qty'] - prev_day_shift_qty, Decimal('0'))
+                    if bw_effective_shift > 0:
+                        bw_qty = max(entry['process_qty'] - bw_effective_shift, Decimal('0'))
                         bw_total = _calculate_total_minutes(spec, bw_qty)
                         effective_minutes = bw_total / max(spec.parallel_count, 1)
                     # 後方パイプライン制約を適用
@@ -1486,16 +1500,18 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 start_time = scheduled_times[i]['start']
                 end_time = scheduled_times[i]['end']
 
-                # タンクライン箱組特例: SEQ1は数量-2、2台分は前日ガント
+                # 前日シフト: 残量があればSEQ2以降にも繰り越し適用
                 process_key = (obj.plan_date, spec.process_id)
                 prev_day_shift_qty = prev_day_shift_qty_by_line_process.get((line_code_upper, str(spec.process_code or '').strip().upper()), Decimal('0'))
                 prev_day_shift_first = prev_day_shift_qty > 0 and process_key not in previous_process_end_by_date
+                effective_shift = prev_day_shift_qty if prev_day_shift_first else remaining_shift_by_process_date.get(process_key, Decimal('0'))
                 tank_prev_qty = Decimal('0')
-                if prev_day_shift_first:
-                    tank_prev_qty = min(prev_day_shift_qty, process_qty)
+                if effective_shift > 0:
+                    tank_prev_qty = min(effective_shift, process_qty)
                     process_qty = max(process_qty - tank_prev_qty, Decimal('0'))
                     total_minutes = _calculate_total_minutes(spec, process_qty)
                     effective_minutes = total_minutes / max(spec.parallel_count, 1)
+                    remaining_shift_by_process_date[process_key] = effective_shift - tank_prev_qty
 
                 output_product_id = spec.output_product_id
                 output_product_code = spec.output_product_code
@@ -1515,6 +1531,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                     default_product_id=output_product_id,
                     default_product_code=output_product_code,
                     default_product_name=output_product_name,
+                    all_display_ids=display_product_all_ids,
                 )
                 process_plan = {
                     'process_id': spec.process_id,
@@ -1543,8 +1560,8 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 # この工程の終了時刻を記録（次のsequenceが同じ工程の直後から開始できるように）
                 previous_process_end_by_date[process_key] = end_time
 
-                # タンクライン箱組: 前日ガントエントリ生成
-                if prev_day_shift_first and tank_prev_qty > 0:
+                # 前日ガントエントリ生成
+                if tank_prev_qty > 0:
                     _generate_prev_day_shift_entry(
                         tank_prev_day_plans, calendar, spec, entry,
                         tank_prev_qty, obj, product, plan_id, line_id,
@@ -1570,14 +1587,15 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                     (line_code_upper, str(spec.process_code or '').strip().upper())
                 )
                 prev_day_shift_qty = prev_day_shift_qty_by_line_process.get((line_code_upper, str(spec.process_code or '').strip().upper()), Decimal('0'))
-                prev_day_shift_first = False
+                prev_day_shift_first = prev_day_shift_qty > 0 and process_key not in previous_process_end_by_date
+                effective_shift = prev_day_shift_qty if prev_day_shift_first else remaining_shift_by_process_date.get(process_key, Decimal('0'))
                 tank_prev_qty = Decimal('0')
-                if prev_day_shift_qty > 0 and process_key not in previous_process_end_by_date:
-                    prev_day_shift_first = True
-                    tank_prev_qty = min(prev_day_shift_qty, process_qty)
+                if effective_shift > 0:
+                    tank_prev_qty = min(effective_shift, process_qty)
                     process_qty = max(process_qty - tank_prev_qty, Decimal('0'))
                     total_minutes = _calculate_total_minutes(spec, process_qty)
                     effective_minutes = total_minutes / max(spec.parallel_count, 1)
+                    remaining_shift_by_process_date[process_key] = effective_shift - tank_prev_qty
 
                 if is_tank_special_proc:
                     # タンクライン特例: コンプ/箱組は8:00開始チェーン方式
@@ -1636,6 +1654,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                     default_product_id=output_product_id,
                     default_product_code=output_product_code,
                     default_product_name=output_product_name,
+                    all_display_ids=display_product_all_ids,
                 )
                 process_plan = {
                     'process_id': spec.process_id,
@@ -1664,8 +1683,8 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 # この工程の終了時刻を記録（次のsequenceが同じ工程の直後から開始できるように）
                 previous_process_end_by_date[process_key] = end_time
 
-                # タンクライン箱組: 前日ガントエントリ生成
-                if prev_day_shift_first and tank_prev_qty > 0:
+                # 前日ガントエントリ生成
+                if tank_prev_qty > 0:
                     _generate_prev_day_shift_entry(
                         tank_prev_day_plans, calendar, spec, entry,
                         tank_prev_qty, obj, product, plan_id, line_id,
