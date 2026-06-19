@@ -1,9 +1,19 @@
 <template>
   <div class="call-center-page">
     <div class="page-header">
-      <div>
+      <div class="page-heading">
         <h2 class="page-title">社内通話</h2>
-        <p class="page-note">音声通話とビデオ通話を行います。</p>
+        <button
+          v-if="incomingSessions.length"
+          type="button"
+          class="incoming-summary-button"
+          @click="focusIncomingSession(incomingSessions[0])"
+        >
+          <span class="incoming-summary-label">着信中</span>
+          <span class="incoming-summary-name">{{ incomingSessions[0].caller_name }}</span>
+          <span class="incoming-summary-type">{{ incomingSessions[0].call_type === 'video' ? 'ビデオ通話' : '音声通話' }}</span>
+          <span class="incoming-summary-time">{{ formatDateTime(incomingSessions[0].initiated_at) }}</span>
+        </button>
       </div>
       <div class="header-actions">
         <button class="btn secondary-btn" type="button" @click="reloadAll" :disabled="loading">
@@ -18,11 +28,13 @@
     <div class="layout">
       <aside class="sidebar">
         <section class="panel">
-          <div class="panel-title">発信</div>
+          <div class="caller-row">
+            <div class="panel-title compact">発信</div>
+            <label class="field-label inline-label" for="peer-select">相手</label>
+          </div>
           <div v-if="environmentWarning" class="warning-box">
             {{ environmentWarning }}
           </div>
-          <label class="field-label" for="peer-select">相手</label>
           <select id="peer-select" v-model="selectedPeerId" class="select">
             <option value="">選択してください</option>
             <option v-for="user in users" :key="user.id" :value="String(user.id)">
@@ -37,25 +49,6 @@
               ビデオ発信
             </button>
           </div>
-          <p class="helper">着信時はこの画面を開いたままにしてください。</p>
-        </section>
-
-        <section class="panel">
-          <div class="panel-title">着信中</div>
-          <div v-if="incomingSessions.length" class="session-list">
-            <button
-              v-for="session in incomingSessions"
-              :key="session.id"
-              type="button"
-              class="session-card incoming"
-              @click="focusIncomingSession(session)"
-            >
-              <strong>{{ session.caller_name }}</strong>
-              <span>{{ session.call_type === 'video' ? 'ビデオ通話' : '音声通話' }}</span>
-              <span>{{ formatDateTime(session.initiated_at) }}</span>
-            </button>
-          </div>
-          <div v-else class="empty">着信はありません。</div>
         </section>
 
         <section class="panel">
@@ -82,26 +75,19 @@
       <main class="main-panel">
         <section class="call-stage">
           <div class="stage-header">
-            <div>
-              <div class="stage-title">
-                {{ currentSession ? counterpartName(currentSession) : '通話未選択' }}
-              </div>
+            <div class="stage-status-line">
               <div class="stage-subtitle">
-                {{ currentSession ? `${currentSession.call_type === 'video' ? 'ビデオ通話' : '音声通話'} / ${statusLabel(currentSession.status)}` : '相手を選択して発信してください。' }}
+                {{ currentSession ? `${currentSession.call_type === 'video' ? 'ビデオ通話' : '音声通話'}` : '相手を選択して発信してください。' }}
               </div>
-            </div>
-            <div class="status-badge" :class="statusClass">
-              {{ statusMessage }}
+              <div class="status-badge" :class="statusClass">
+                {{ statusMessage }}
+              </div>
             </div>
           </div>
 
           <div class="media-grid" :class="{ single: !showRemoteVideo }">
             <div class="video-card remote">
               <video ref="remoteVideoRef" autoplay playsinline></video>
-              <div v-if="!showRemoteVideo" class="video-placeholder">
-                <div class="placeholder-name">{{ remotePlaceholder }}</div>
-                <div class="placeholder-note">相手の映像または音声を待機中</div>
-              </div>
             </div>
             <div class="video-card local">
               <video ref="localVideoRef" autoplay muted playsinline :class="{ mirrored: isFrontCameraActive }"></video>
@@ -1127,41 +1113,85 @@ onBeforeUnmount(() => {
 .call-center-page {
   max-width: 1400px;
   margin: 0 auto;
-  padding: 20px;
+  padding: 0 20px;
 }
 
 .page-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 0;
+}
+
+.page-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
 .page-title {
   margin: 0;
-  font-size: 24px;
+  font-size: 12px;
   color: #10243f;
 }
 
-.page-note {
-  margin: 4px 0 0;
+.incoming-summary-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 12px;
   color: #5c6b82;
-  font-size: 13px;
+  flex-wrap: wrap;
+  border: 1px solid #d8bf2f;
+  border-radius: 999px;
+  background: #fff7b8;
+  padding: 6px 12px;
+  cursor: pointer;
+  text-align: left;
+  animation: incoming-blink 1.1s ease-in-out infinite;
+}
+
+.incoming-summary-label {
+  color: #8a6d00;
+  font-weight: 700;
+}
+
+.incoming-summary-name {
+  color: #10243f;
+  font-weight: 700;
+}
+
+@keyframes incoming-blink {
+  0%,
+  100% {
+    background: #fff7b8;
+    border-color: #d8bf2f;
+    box-shadow: 0 0 0 rgba(216, 191, 47, 0);
+  }
+  50% {
+    background: #f1d94a;
+    border-color: #c4a900;
+    box-shadow: 0 0 0 4px rgba(196, 169, 0, 0.2);
+  }
 }
 
 .header-actions,
 .action-row,
 .control-row {
   display: flex;
-  gap: 8px;
+  column-gap: 8px;
+  row-gap: 0;
   flex-wrap: wrap;
 }
 
 .layout {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
-  gap: 16px;
+  column-gap: 16px;
+  row-gap: 0;
 }
 
 .sidebar,
@@ -1178,8 +1208,8 @@ onBeforeUnmount(() => {
 }
 
 .panel {
-  padding: 14px;
-  margin-bottom: 14px;
+  padding: 0 14px;
+  margin-bottom: 0;
 }
 
 .panel-title {
@@ -1189,11 +1219,26 @@ onBeforeUnmount(() => {
   margin-bottom: 10px;
 }
 
+.panel-title.compact {
+  margin-bottom: 0;
+}
+
+.caller-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
 .field-label {
   display: block;
   font-size: 12px;
   color: #51627c;
   margin-bottom: 6px;
+}
+
+.inline-label {
+  margin-bottom: 0;
 }
 
 .select {
@@ -1223,7 +1268,7 @@ onBeforeUnmount(() => {
 
 .session-list {
   display: grid;
-  gap: 8px;
+  gap: 0;
 }
 
 .session-card {
@@ -1231,10 +1276,10 @@ onBeforeUnmount(() => {
   border-radius: 10px;
   background: #f7f9fc;
   text-align: left;
-  padding: 10px;
+  padding: 0 10px;
   cursor: pointer;
   display: grid;
-  gap: 4px;
+  gap: 0;
 }
 
 .session-card.active {
@@ -1249,21 +1294,20 @@ onBeforeUnmount(() => {
 
 .stage-header {
   display: flex;
-  justify-content: space-between;
   gap: 12px;
   align-items: center;
-  padding: 16px;
+  padding: 0 16px;
   border-bottom: 1px solid #e3e8f0;
 }
 
-.stage-title {
-  font-size: 22px;
-  font-weight: 700;
-  color: #10243f;
+.stage-status-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .stage-subtitle {
-  margin-top: 4px;
   color: #61728a;
   font-size: 13px;
 }
@@ -1298,8 +1342,9 @@ onBeforeUnmount(() => {
 .media-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 280px;
-  gap: 12px;
-  padding: 16px;
+  column-gap: 12px;
+  row-gap: 0;
+  padding: 0 16px;
 }
 
 .media-grid.single {
@@ -1370,7 +1415,7 @@ onBeforeUnmount(() => {
 }
 
 .control-row {
-  padding: 0 16px 16px;
+  padding: 0 16px;
 }
 
 .btn {
@@ -1413,15 +1458,59 @@ onBeforeUnmount(() => {
     grid-template-columns: 1fr;
   }
 
+  .sidebar {
+    display: contents;
+  }
+
+  .main-panel {
+    order: 2;
+  }
+
+  .sidebar .panel:first-child {
+    order: 1;
+  }
+
+  .sidebar .panel:nth-child(2) {
+    order: 3;
+  }
+
+  .sidebar .panel:nth-child(3) {
+    order: 4;
+  }
+
   .media-grid,
   .media-grid.single {
     grid-template-columns: 1fr;
+  }
+
+  .video-card.remote {
+    min-height: 52vh;
+  }
+
+  .video-card.local {
+    min-height: 22vh;
+    max-height: 28vh;
   }
 
   .page-header,
   .stage-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .stage-status-line {
+    align-items: flex-start;
+  }
+
+  .page-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .incoming-summary-button {
+    width: 100%;
+    border-radius: 12px;
   }
 }
 </style>
