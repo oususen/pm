@@ -14,6 +14,10 @@
     <div class="page-content">
       <div class="filter-row">
         <label class="filter-item">
+          <span>納期開始日</span>
+          <input v-model="dueDateFrom" class="filter-input" type="date" @change="load" />
+        </label>
+        <label class="filter-item">
           <span>客先</span>
           <select v-model="customerFilter" class="filter-input">
             <option value="">すべて</option>
@@ -75,6 +79,12 @@ const dsSources = [
 const items = ref([])
 const loading = ref(false)
 const errorMessage = ref('')
+const defaultDueDateFrom = () => {
+  const d = new Date()
+  d.setDate(d.getDate() - 90)
+  return d.toISOString().slice(0, 10)
+}
+const dueDateFrom = ref(defaultDueDateFrom())
 const customerFilter = ref('')
 
 const formatDate = (value) => (value ? String(value).replace(/-/g, '/') : '-')
@@ -142,7 +152,9 @@ const load = async () => {
   loading.value = true
   errorMessage.value = ''
   try {
-    const response = await api.orders.getMissingRoutingOrderItems()
+    const params = {}
+    if (dueDateFrom.value) params.due_date__gte = dueDateFrom.value
+    const response = await api.orders.getMissingRoutingOrderItems(params)
     items.value = Array.isArray(response.data?.results) ? response.data.results : []
   } catch (error) {
     console.error('Failed to load missing routing items', error)

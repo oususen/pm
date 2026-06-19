@@ -7,9 +7,15 @@ Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://
 ## PWA and HTTPS
 
 - PWA assets live in `public/manifest.webmanifest` and `public/sw.js`.
+- `npm run dev` is configured to use HTTPS by default in development.
 - HTTPS is controlled by env vars:
+  - `VITE_HTTPS=false` to force HTTP on `vite dev`.
   - `VITE_HTTPS=true` to enable HTTPS on `vite dev`/`vite preview`.
   - `VITE_HTTPS_KEY` and `VITE_HTTPS_CERT` to provide a trusted TLS cert.
+  - `VITE_TURN_URL`, `VITE_TURN_USERNAME`, `VITE_TURN_CREDENTIAL` to enable TURN for WebRTC calls.
+- Trusted cert generation:
+  - `powershell -ExecutionPolicy Bypass -File .\scripts\generate-dev-certs.ps1`
+  - This writes `pm-ui/.env.local` with the HTTPS settings for the generated cert files.
 
 ## Android APK 配布
 
@@ -17,7 +23,7 @@ Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://
 - APK のURLは以下で切り替える。
   - `VITE_ANDROID_APP_DOWNLOAD_URL`
   - `VITE_ANDROID_APP_RELEASE_LABEL`
-- 未設定時は `public/downloads/pm-android-latest.apk` を参照する。
+- 未設定時は `public/downloads/app-debug.apk` を参照する。
 
 ## Capacitor / Android
 
@@ -30,7 +36,7 @@ Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://
   - `.\gradlew.bat assembleDebug` は `JAVA_HOME` 未設定で停止
 - 主要コマンド:
   - `npm run android:prepare` : Web ビルド後に Android プロジェクトへ同期
-  - `npm run android:prepare:devpc` : 開発PC `http://10.0.1.194:8501` を直接表示する APK 用
+  - `npm run android:prepare:devpc` : 開発PC `https://10.0.1.194:8501` を直接表示する APK 用
   - `npm run android:prepare:prod` : 本番 `https://10.0.1.232:8501` を直接表示する APK 用
   - `npm run android:prepare:bundle` : `dist` を内包する APK 用
   - `npm run android:open` : Android Studio で開く

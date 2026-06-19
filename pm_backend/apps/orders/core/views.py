@@ -162,6 +162,9 @@ class OrderLineViewSet(viewsets.ModelViewSet):
             .select_related('order', 'order__customer', 'product')
             .order_by('due_date', 'order__customer__customer_code', 'product_code')
         )
+        due_date_gte = request.query_params.get('due_date__gte')
+        if due_date_gte:
+            qs = qs.filter(due_date__gte=due_date_gte)
 
         records = list(qs)
         deduped = {}

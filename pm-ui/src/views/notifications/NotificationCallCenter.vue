@@ -76,6 +76,7 @@
           </div>
           <div v-else class="empty">履歴はありません。</div>
         </section>
+
       </aside>
 
       <main class="main-panel">
@@ -103,7 +104,10 @@
               </div>
             </div>
             <div class="video-card local">
-              <video ref="localVideoRef" autoplay muted playsinline></video>
+              <video ref="localVideoRef" autoplay muted playsinline :class="{ mirrored: isFrontCameraActive }"></video>
+              <div v-if="hasVideoTrack" class="camera-facing-badge">
+                {{ currentCameraLabel }}
+              </div>
               <div v-if="!showLocalVideo" class="video-placeholder small">
                 <div class="placeholder-name">自分</div>
                 <div class="placeholder-note">カメラオフ</div>
@@ -119,7 +123,7 @@
               {{ cameraEnabled ? 'カメラOFF' : 'カメラON' }}
             </button>
             <button
-              v-if="hasVideoTrack"
+              v-if="hasVideoTrack && canSwitchCamera"
               class="btn secondary-btn"
               type="button"
               @click="switchCameraFacing"
@@ -187,14 +191,30 @@ const peerConnection = ref(null);
 const lastSignalId = ref(0);
 const signalTimerId = ref(null);
 const sessionTimerId = ref(null);
+const connectionStateTimerId = ref(null);
 const micEnabled = ref(true);
 const cameraEnabled = ref(true);
 const preferredFacingMode = ref("user");
 const switchingCamera = ref(false);
 const currentVideoDeviceId = ref("");
+const availableVideoInputCount = ref(0);
 
+const turnUrl = (import.meta.env.VITE_TURN_URL || "").trim();
+const turnUsername = (import.meta.env.VITE_TURN_USERNAME || "").trim();
+const turnCredential = (import.meta.env.VITE_TURN_CREDENTIAL || "").trim();
+const rtcIceServers = [{ urls: "stun:stun.l.google.com:19302" }];
+if (turnUrl && turnUsername && turnCredential) {
+  rtcIceServers.push({
+    urls: turnUrl,
+    username: turnUsername,
+    credential: turnCredential,
+  });
+}
+const CONNECTION_DISCONNECTED_GRACE_MS = 5000;
 const rtcConfig = {
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  iceServers: rtcIceServers,
+  iceTransportPolicy: "all",
+  iceCandidatePoolSize: 2,
 };
 
 const myUserId = computed(() => authState.user?.id ?? null);
@@ -232,6 +252,24 @@ const hasVideoTrack = computed(() => {
 
 const currentFacingModeLabel = computed(() => {
   return preferredFacingMode.value === "environment" ? "前面へ切替" : "背面へ切替";
+});
+
+const canSwitchCamera = computed(() => {
+  return availableVideoInputCount.value > 1;
+});
+
+const currentTrackFacingMode = computed(() => {
+  const track = localStream.value?.getVideoTracks?.()[0] || null;
+  return getTrackFacingMode(track);
+});
+
+const isFrontCameraActive = computed(() => {
+  return String(currentTrackFacingMode.value || "").toLowerCase() === "user";
+});
+
+const currentCameraLabel = computed(() => {
+  if (!hasVideoTrack.value) return "";
+  return isFrontCameraActive.value ? "前面カメラ" : "背面カメラ";
 });
 
 const showLocalVideo = computed(() => {
@@ -318,6 +356,7 @@ const stopTracks = (stream) => {
 };
 
 const closePeerConnection = () => {
+  stopConnectionStateTimer();
   if (peerConnection.value) {
     peerConnection.value.onicecandidate = null;
     peerConnection.value.ontrack = null;
@@ -350,6 +389,13 @@ const stopSessionPolling = () => {
   if (sessionTimerId.value) {
     window.clearInterval(sessionTimerId.value);
     sessionTimerId.value = null;
+  }
+};
+
+const stopConnectionStateTimer = () => {
+  if (connectionStateTimerId.value) {
+    window.clearTimeout(connectionStateTimerId.value);
+    connectionStateTimerId.value = null;
   }
 };
 
@@ -406,14 +452,78 @@ const isFacingModeMatch = (label, facingMode) => {
   return ["front", "user", "face", "前面", "フロント"].some((word) => normalized.includes(word));
 };
 
+const pickDeviceByFacingMode = (videoInputs, facingMode, excludedDeviceId = "") => {
+  const candidates = videoInputs.filter((device) => device.deviceId && device.deviceId !== excludedDeviceId);
+  if (!candidates.length) return "";
+
+  const matchedDevice = candidates.find((device) => isFacingModeMatch(device.label, facingMode));
+  if (matchedDevice) return matchedDevice.deviceId;
+
+  if (!excludedDeviceId && candidates.length >= 2) {
+    return facingMode === "environment"
+      ? candidates[candidates.length - 1].deviceId
+      : candidates[0].deviceId;
+  }
+
+  return candidates[0].deviceId;
+};
+
 const listVideoInputDevices = async () => {
-  if (!navigator.mediaDevices?.enumerateDevices) return "";
+  if (!navigator.mediaDevices?.enumerateDevices) return [];
   const devices = await navigator.mediaDevices.enumerateDevices();
   return devices.filter((device) => device.kind === "videoinput");
 };
 
-const getFallbackCameraDeviceId = async (targetFacingMode, currentTrack = null) => {
+const refreshVideoInputCount = async () => {
   const videoInputs = await listVideoInputDevices();
+  availableVideoInputCount.value = videoInputs.length;
+  return videoInputs;
+};
+
+const getTrackDeviceId = (track) => {
+  const settingsDeviceId = track?.getSettings?.().deviceId || "";
+  const constrainedDeviceId = track?.getConstraints?.().deviceId;
+  if (typeof constrainedDeviceId === "string") return constrainedDeviceId;
+  if (constrainedDeviceId?.exact) return constrainedDeviceId.exact;
+  if (constrainedDeviceId?.ideal) return constrainedDeviceId.ideal;
+  return settingsDeviceId;
+};
+
+const getTrackFacingMode = (track) => {
+  const settingsFacingMode = track?.getSettings?.().facingMode;
+  const constrainedFacingMode = track?.getConstraints?.().facingMode;
+  if (typeof constrainedFacingMode === "string") return constrainedFacingMode;
+  if (constrainedFacingMode?.exact) return constrainedFacingMode.exact;
+  if (constrainedFacingMode?.ideal) return constrainedFacingMode.ideal;
+  return settingsFacingMode || "";
+};
+
+const openVideoStreamByDeviceId = async (deviceId) => {
+  return navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: {
+      deviceId: { exact: deviceId },
+    },
+  });
+};
+
+const waitForCameraRelease = (ms = 180) => {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+};
+
+const isSameVideoInputTrack = (nextTrack, currentTrack) => {
+  const nextDeviceId = getTrackDeviceId(nextTrack);
+  const currentDeviceId = getTrackDeviceId(currentTrack);
+  if (nextDeviceId && currentDeviceId) {
+    return nextDeviceId === currentDeviceId;
+  }
+  return false;
+};
+
+const getFallbackCameraDeviceId = async (targetFacingMode, currentTrack = null) => {
+  const videoInputs = await refreshVideoInputCount();
   if (!videoInputs.length) return "";
 
   const currentDeviceId =
@@ -422,17 +532,11 @@ const getFallbackCameraDeviceId = async (targetFacingMode, currentTrack = null) 
     currentTrack?.getConstraints?.().deviceId ||
     "";
 
-  const matchedDevice = videoInputs.find(
-    (device) => device.deviceId !== currentDeviceId && isFacingModeMatch(device.label, targetFacingMode)
-  );
-  if (matchedDevice) return matchedDevice.deviceId;
-
-  const fallbackDevice = videoInputs.find((device) => device.deviceId !== currentDeviceId);
-  return fallbackDevice?.deviceId || "";
+  return pickDeviceByFacingMode(videoInputs, targetFacingMode, currentDeviceId);
 };
 
 const getNextCameraDevice = async (targetFacingMode, currentTrack = null) => {
-  const videoInputs = await listVideoInputDevices();
+  const videoInputs = await refreshVideoInputCount();
   if (!videoInputs.length) return { deviceId: "", facingMode: targetFacingMode };
 
   const currentDeviceId =
@@ -440,6 +544,11 @@ const getNextCameraDevice = async (targetFacingMode, currentTrack = null) => {
     currentTrack?.getSettings?.().deviceId ||
     currentTrack?.getConstraints?.().deviceId ||
     "";
+
+  const preferredDeviceId = pickDeviceByFacingMode(videoInputs, targetFacingMode, currentDeviceId);
+  if (preferredDeviceId) {
+    return { deviceId: preferredDeviceId, facingMode: targetFacingMode };
+  }
 
   const currentIndex = videoInputs.findIndex((device) => device.deviceId === currentDeviceId);
   if (currentIndex >= 0 && videoInputs.length > 1) {
@@ -457,30 +566,78 @@ const openVideoStreamForFacingMode = async (targetFacingMode, currentTrack = nul
     return await navigator.mediaDevices.getUserMedia({
       ...baseConstraints,
       video: {
-        facingMode: { ideal: targetFacingMode },
+        facingMode: { exact: targetFacingMode },
       },
     });
-  } catch (error) {
-    const fallbackDeviceId = await getFallbackCameraDeviceId(targetFacingMode, currentTrack);
-    if (!fallbackDeviceId) {
-      const nextCamera = await getNextCameraDevice(targetFacingMode, currentTrack);
-      if (!nextCamera.deviceId) {
-        throw error;
+  } catch (exactError) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        ...baseConstraints,
+        video: {
+          facingMode: { ideal: targetFacingMode },
+        },
+      });
+    } catch (idealError) {
+      const fallbackDeviceId = await getFallbackCameraDeviceId(targetFacingMode, currentTrack);
+      if (!fallbackDeviceId) {
+        const nextCamera = await getNextCameraDevice(targetFacingMode, currentTrack);
+        if (!nextCamera.deviceId) {
+          throw idealError;
+        }
+        return navigator.mediaDevices.getUserMedia({
+          ...baseConstraints,
+          video: {
+            deviceId: { exact: nextCamera.deviceId },
+          },
+        });
       }
       return navigator.mediaDevices.getUserMedia({
         ...baseConstraints,
         video: {
-          deviceId: { exact: nextCamera.deviceId },
+          deviceId: { exact: fallbackDeviceId },
         },
       });
     }
-    return navigator.mediaDevices.getUserMedia({
-      ...baseConstraints,
-      video: {
-        deviceId: { exact: fallbackDeviceId },
-      },
-    });
   }
+};
+
+const openPreferredVideoStream = async (targetFacingMode, currentTrack = null) => {
+  const tryOpen = async () => {
+    const stream = await openVideoStreamForFacingMode(targetFacingMode, currentTrack);
+    const track = stream.getVideoTracks()[0];
+    if (!track || isTrackMatchingFacingMode(track, targetFacingMode)) {
+      return stream;
+    }
+
+    stopTracks(stream);
+    const videoInputs = await refreshVideoInputCount();
+    const preferredDeviceId = pickDeviceByFacingMode(videoInputs, targetFacingMode, getTrackDeviceId(currentTrack));
+    if (!preferredDeviceId) {
+      throw new Error("preferred_camera_not_found");
+    }
+    return openVideoStreamByDeviceId(preferredDeviceId);
+  };
+
+  try {
+    return await tryOpen();
+  } catch (error) {
+    if (error?.name === "NotReadableError") {
+      await waitForCameraRelease();
+      return tryOpen();
+    }
+    throw error;
+  }
+};
+
+const isTrackMatchingFacingMode = (track, facingMode) => {
+  const detectedFacingMode = String(getTrackFacingMode(track) || "").toLowerCase();
+  if (detectedFacingMode) {
+    if (facingMode === "environment") {
+      return ["environment", "rear", "back"].some((word) => detectedFacingMode.includes(word));
+    }
+    return ["user", "front", "face"].some((word) => detectedFacingMode.includes(word));
+  }
+  return false;
 };
 
 const ensureLocalStream = async (callType) => {
@@ -505,14 +662,22 @@ const ensureLocalStream = async (callType) => {
 
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: true,
-    video: needVideo
-      ? {
-          facingMode: preferredFacingMode.value,
-        }
-      : false,
+    video: false,
   });
+  if (needVideo) {
+    const videoStream = await openPreferredVideoStream(preferredFacingMode.value, null);
+    const videoTrack = videoStream.getVideoTracks?.()[0] || null;
+    if (videoTrack) {
+      stream.addTrack(videoTrack);
+    }
+  }
   localStream.value = stream;
-  currentVideoDeviceId.value = stream.getVideoTracks?.()[0]?.getSettings?.().deviceId || "";
+  const videoTrack = stream.getVideoTracks?.()[0] || null;
+  const videoInputs = await refreshVideoInputCount();
+  currentVideoDeviceId.value =
+    getTrackDeviceId(videoTrack) ||
+    pickDeviceByFacingMode(videoInputs, preferredFacingMode.value) ||
+    "";
   environmentWarning.value = "";
   micEnabled.value = true;
   cameraEnabled.value = needVideo;
@@ -571,10 +736,21 @@ const createPeerConnection = (session) => {
   pc.onconnectionstatechange = () => {
     const state = pc.connectionState;
     if (state === "connected") {
+      stopConnectionStateTimer();
       statusMessage.value = "接続中";
-    } else if (state === "disconnected" || state === "failed") {
+    } else if (state === "disconnected") {
+      statusMessage.value = "接続が不安定です";
+      stopConnectionStateTimer();
+      connectionStateTimerId.value = window.setTimeout(() => {
+        if (pc.connectionState === "disconnected") {
+          statusMessage.value = "接続が切れました";
+        }
+      }, CONNECTION_DISCONNECTED_GRACE_MS);
+    } else if (state === "failed") {
+      stopConnectionStateTimer();
       statusMessage.value = "接続が切れました";
     } else if (state === "closed") {
+      stopConnectionStateTimer();
       statusMessage.value = "終了";
     }
   };
@@ -824,6 +1000,7 @@ const toggleCamera = () => {
 
 const switchCameraFacing = async () => {
   if (!localStream.value || !hasVideoTrack.value || switchingCamera.value) return;
+  if (!canSwitchCamera.value) return;
   switchingCamera.value = true;
   const nextFacingMode = preferredFacingMode.value === "environment" ? "user" : "environment";
   const previousFacingMode = preferredFacingMode.value;
@@ -832,19 +1009,36 @@ const switchCameraFacing = async () => {
 
   try {
     preferredFacingMode.value = nextFacingMode;
-    const nextCamera = await getNextCameraDevice(preferredFacingMode.value, currentVideoTrack);
-    const videoStream = nextCamera.deviceId
-      ? await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            deviceId: { exact: nextCamera.deviceId },
-          },
-        })
-      : await openVideoStreamForFacingMode(preferredFacingMode.value, currentVideoTrack);
-    const nextVideoTrack = videoStream.getVideoTracks()[0];
+    if (currentVideoTrack) {
+      localStream.value.removeTrack(currentVideoTrack);
+      await replacePeerConnectionTrack("video", null, currentVideoTrack, localStream.value);
+      currentVideoTrack.stop();
+      await waitForCameraRelease();
+    }
+    let nextCamera = await getNextCameraDevice(preferredFacingMode.value, currentVideoTrack);
+    let videoStream = await openPreferredVideoStream(preferredFacingMode.value, currentVideoTrack);
+    let nextVideoTrack = videoStream.getVideoTracks()[0];
     if (!nextVideoTrack) {
       throw new Error("video_track_not_found");
     }
+
+    if (
+      !isTrackMatchingFacingMode(nextVideoTrack, preferredFacingMode.value) ||
+      isSameVideoInputTrack(nextVideoTrack, currentVideoTrack)
+    ) {
+      stopTracks(videoStream);
+      nextCamera = await getNextCameraDevice(preferredFacingMode.value, null);
+      if (!nextCamera.deviceId) {
+        preferredFacingMode.value = previousFacingMode;
+        return;
+      }
+      videoStream = await openVideoStreamByDeviceId(nextCamera.deviceId);
+      nextVideoTrack = videoStream.getVideoTracks()[0];
+      if (!nextVideoTrack) {
+        throw new Error("video_track_not_found");
+      }
+    }
+
     nextVideoTrack.enabled = cameraEnabled.value;
 
     const nextStream = new MediaStream([
@@ -852,20 +1046,43 @@ const switchCameraFacing = async () => {
       nextVideoTrack,
     ]);
 
-    await replacePeerConnectionTrack("video", nextVideoTrack, currentVideoTrack, nextStream);
-
-    if (currentVideoTrack) {
-      localStream.value.removeTrack(currentVideoTrack);
-      currentVideoTrack.stop();
-    }
+    await replacePeerConnectionTrack("video", nextVideoTrack, null, nextStream);
 
     localStream.value = nextStream;
-    currentVideoDeviceId.value = nextVideoTrack.getSettings?.().deviceId || nextCamera.deviceId || "";
+    const videoInputs = await refreshVideoInputCount();
+    currentVideoDeviceId.value =
+      getTrackDeviceId(nextVideoTrack) ||
+      nextCamera.deviceId ||
+      pickDeviceByFacingMode(videoInputs, preferredFacingMode.value) ||
+      "";
     updateVideoBindings();
   } catch (error) {
     preferredFacingMode.value = previousFacingMode;
     console.error("カメラ切替失敗", error);
-    window.alert("カメラの切替に失敗しました。端末が背面カメラ切替に対応していない可能性があります。");
+    if (currentVideoTrack) {
+      try {
+        await waitForCameraRelease();
+        const restoredVideoStream = await openPreferredVideoStream(previousFacingMode, null);
+        const restoredVideoTrack = restoredVideoStream.getVideoTracks()[0];
+        if (restoredVideoTrack) {
+          restoredVideoTrack.enabled = cameraEnabled.value;
+          const restoredStream = new MediaStream([
+            ...currentAudioTracks,
+            restoredVideoTrack,
+          ]);
+          await replacePeerConnectionTrack("video", restoredVideoTrack, null, restoredStream);
+          localStream.value = restoredStream;
+          const videoInputs = await refreshVideoInputCount();
+          currentVideoDeviceId.value =
+            getTrackDeviceId(restoredVideoTrack) ||
+            pickDeviceByFacingMode(videoInputs, previousFacingMode.value) ||
+            "";
+          updateVideoBindings();
+        }
+      } catch (restoreError) {
+        console.error("カメラ復元失敗", restoreError);
+      }
+    }
   } finally {
     switchingCamera.value = false;
   }
@@ -1103,8 +1320,25 @@ onBeforeUnmount(() => {
   display: block;
 }
 
+.video-card.local video.mirrored {
+  transform: scaleX(-1);
+}
+
 .video-card.local {
   min-height: 180px;
+}
+
+.camera-facing-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #f8fbff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .video-placeholder {

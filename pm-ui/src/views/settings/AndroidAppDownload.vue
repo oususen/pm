@@ -59,7 +59,7 @@
         <h2>運用メモ</h2>
         <ul class="notes">
           <li>APK本体は `VITE_ANDROID_APP_DOWNLOAD_URL` で差し替えできます。</li>
-          <li>未設定時は `/downloads/pm-android-latest.apk` を参照します。</li>
+          <li>未設定時は `/downloads/app-debug.apk` を参照します。</li>
           <li>社内配布ページなので Google Play 公開は不要です。</li>
           <li>更新時は APK 差し替え後、この画面の案内文だけで再配布できます。</li>
         </ul>
@@ -82,7 +82,7 @@ import QRCode from "qrcode";
 
 const configuredDownloadUrl = (import.meta.env.VITE_ANDROID_APP_DOWNLOAD_URL || "").trim();
 const configuredReleaseLabel = (import.meta.env.VITE_ANDROID_APP_RELEASE_LABEL || "").trim();
-const defaultDownloadPath = "/downloads/pm-android-latest.apk";
+const defaultDownloadPath = "/downloads/app-debug.apk";
 
 const qrCodeDataUrl = ref("");
 const message = ref("");
@@ -101,7 +101,7 @@ const releaseLabel = computed(() => configuredReleaseLabel || "latest");
 const displayDownloadUrl = computed(() => configuredDownloadUrl || defaultDownloadPath);
 const suggestedFilename = computed(() => {
   const normalized = releaseLabel.value.replace(/[^0-9A-Za-z._-]/g, "-");
-  return `pm-android-${normalized || "latest"}.apk`;
+  return normalized && normalized !== "latest" ? `app-debug-${normalized}.apk` : "app-debug.apk";
 });
 
 const buildQrCode = async () => {

@@ -21,6 +21,7 @@ db.sqlite3-journal
 /staticfiles
 pm_backend/media/
 .env
+.env.local
 *.db
 vapid_private.pem
 
@@ -61,6 +62,14 @@ pm_db_backup.sql
 create_table.py
 create_userprofile_table.sql
 pm-ui/android/app/google-services.json
+pm-ui/certs/pm-ui-ca.crt
+pm-ui/certs/pm-ui-ca.key
+pm-ui/certs/pm-ui-ca.srl
+pm-ui/certs/pm-ui.crt
+pm-ui/certs/pm-ui.csr
+pm-ui/certs/pm-ui.ext
+pm-ui/certs/pm-ui.key
+pm-ui/.env.local
 pm_backend/firebase-service-account.json
 pm_backend/firebase-service-account-*.json
 # output/       

@@ -13,7 +13,7 @@
     "cap:copy": "npx cap copy android",
     "android:open": "npx cap open android",
     "android:prepare": "npm run build && npx cap sync android",
-    "android:prepare:devpc": "set CAPACITOR_SERVER_URL=http://10.0.1.194:8501&& set CAPACITOR_CLEAR_TEXT=true&& npm run android:prepare",
+    "android:prepare:devpc": "set CAPACITOR_SERVER_URL=https://10.0.1.194:8501&& set CAPACITOR_CLEAR_TEXT=false&& npm run android:prepare",
     "android:prepare:prod": "set CAPACITOR_SERVER_URL=https://10.0.1.232:8501&& set CAPACITOR_CLEAR_TEXT=false&& npm run android:prepare",
     "android:prepare:bundle": "set CAPACITOR_SERVER_URL=&& set CAPACITOR_CLEAR_TEXT=false&& npm run android:prepare"
   },

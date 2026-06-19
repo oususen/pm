@@ -17,14 +17,26 @@ if (-not (Get-Command openssl -ErrorAction SilentlyContinue)) {
 
 New-Item -ItemType Directory -Force -Path $certDir | Out-Null
 
-$ips = Get-NetIPAddress -AddressFamily IPv4 |
-  Where-Object {
-    $_.IPAddress -and
-    $_.IPAddress -notlike "169.254*" -and
-    $_.IPAddress -ne "127.0.0.1" -and
-    $_.IPAddress -ne "0.0.0.0"
-  } |
-  Select-Object -ExpandProperty IPAddress -Unique
+try {
+  $ips = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+    Where-Object {
+      $_.IPAddress -and
+      $_.IPAddress -notlike "169.254*" -and
+      $_.IPAddress -ne "127.0.0.1" -and
+      $_.IPAddress -ne "0.0.0.0"
+    } |
+    Select-Object -ExpandProperty IPAddress -Unique
+} catch {
+  $ips = @(
+    ipconfig |
+      Select-String "IPv4 Address" |
+      ForEach-Object {
+        if ($_.Line -match ":\s*(\d+\.\d+\.\d+\.\d+)\s*$") {
+          $matches[1]
+        }
+      }
+  ) | Select-Object -Unique
+}
 
 $sanParts = @("DNS:localhost", "IP:127.0.0.1")
 if ($ips) {
@@ -50,7 +62,7 @@ $srvCrt = Join-Path $certDir "pm-ui.crt"
 & openssl req -new -key $srvKey -subj "/CN=pm-ui" -out $srvCsr | Out-Null
 & openssl x509 -req -in $srvCsr -CA $caCrt -CAkey $caKey -CAcreateserial -out $srvCrt -days 825 -sha256 -extfile (Join-Path $certDir "pm-ui.ext") | Out-Null
 
-Set-Content -Path $envLocal -Value "VITE_HTTPS_KEY=certs/pm-ui.key`nVITE_HTTPS_CERT=certs/pm-ui.crt`n" -Encoding ascii
+Set-Content -Path $envLocal -Value "VITE_HTTPS=true`nVITE_HTTPS_KEY=certs/pm-ui.key`nVITE_HTTPS_CERT=certs/pm-ui.crt`n" -Encoding ascii
 
 Write-Host "Done. SANs: $san"
 Write-Host "CA cert: $caCrt"
