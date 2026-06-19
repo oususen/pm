@@ -1010,8 +1010,6 @@ const switchCameraFacing = async () => {
   try {
     preferredFacingMode.value = nextFacingMode;
     if (currentVideoTrack) {
-      localStream.value.removeTrack(currentVideoTrack);
-      await replacePeerConnectionTrack("video", null, currentVideoTrack, localStream.value);
       currentVideoTrack.stop();
       await waitForCameraRelease();
     }
@@ -1048,6 +1046,9 @@ const switchCameraFacing = async () => {
 
     await replacePeerConnectionTrack("video", nextVideoTrack, null, nextStream);
 
+    if (currentVideoTrack) {
+      localStream.value.removeTrack(currentVideoTrack);
+    }
     localStream.value = nextStream;
     const videoInputs = await refreshVideoInputCount();
     currentVideoDeviceId.value =
