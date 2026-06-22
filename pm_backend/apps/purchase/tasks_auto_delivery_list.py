@@ -114,6 +114,12 @@ def run_auto_delivery_list_send(config_id):
         except Exception as e:
             logger.warning(f'進度表PDF生成エラー（送信は続行）: {e}')
 
+        delivery_note_pdf = None
+        try:
+            delivery_note_pdf = _generate_delivery_note_pdf(items, delivery_date, supplier)
+        except Exception as e:
+            logger.warning(f'外作納品書PDF生成エラー（送信は続行）: {e}')
+
         to_email = (supplier.order_email or '').strip()
         if not to_email:
             _finish(config, start_time, 'FAILED', f'仕入先 {supplier.supplier_code} のメールアドレスが未設定です')
@@ -135,6 +141,11 @@ def run_auto_delivery_list_send(config_id):
                 'data': progress_pdf,
                 'filename': f'進度表_{supplier.supplier_code}_{date.today()}.pdf',
             })
+        if delivery_note_pdf:
+            extra.append({
+                'data': delivery_note_pdf,
+                'filename': f'外作納品書_{supplier.supplier_code}_{delivery_date}.pdf',
+            })
 
         reply_to = (config.reply_to_email or '').strip()
         reply_line = f'\n※ 返送先: {reply_to}\n（このメールは送信専用です。返信は上記アドレスへお願いいたします。）\n' if reply_to else ''
@@ -150,6 +161,7 @@ def run_auto_delivery_list_send(config_id):
                 f'カバー期間: {coverage_dates[0]} ～ {coverage_dates[-1]}\n\n'
                 '添付のExcelの「確認・修正方法」シートを参照のうえ、数量確認・修正後にご返送ください。\n'
                 + ('進度表も添付しておりますのでご参照ください。\n' if progress_excel else '')
+                + ('外作納品書も添付しておりますのでご利用ください。\n' if delivery_note_pdf else '')
                 + reply_line
                 + '\n------------------------------\n'
                 'ダイソウ工業株式会社\n'
@@ -352,6 +364,115 @@ def _generate_excel(items, delivery_date, coverage_dates, supplier):
     ws3.column_dimensions['A'].width = 22
     ws3.column_dimensions['B'].width = 35
     ws3.freeze_panes = 'A2'
+
+    # --- シート4: 納品リスト印刷用 ---
+    from openpyxl.worksheet.properties import PageSetupProperties
+    ws4 = wb.create_sheet('納品リスト印刷用')
+    ws4.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+    ws4.page_setup.orientation = 'portrait'
+    ws4.page_setup.paperSize = ws4.PAPERSIZE_A4
+    ws4.page_setup.fitToWidth = 1
+    ws4.page_setup.fitToHeight = 0
+    ws4.page_margins.left = 0.3
+    ws4.page_margins.right = 0.3
+    ws4.page_margins.top = 0.3
+    ws4.page_margins.bottom = 0.3
+
+    s_code = supplier.supplier_code or ''
+    s_name = supplier.supplier_name or ''
+    d_str = delivery_date.strftime('%Y/%m/%d')
+
+    title_font_p = Font(bold=True, size=14)
+    info_font = Font(size=10)
+    info_font_bold = Font(bold=True, size=10)
+    tbl_header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+    tbl_header_font = Font(color='FFFFFF', bold=True, size=10)
+    tbl_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin'),
+    )
+
+    title_border = Border(bottom=Side(style='thin'))
+    ws4.merge_cells('A1:G1')
+    c_title = ws4.cell(row=1, column=1, value='納 品 書')
+    c_title.font = title_font_p
+    c_title.alignment = Alignment(horizontal='center')
+    for ci in range(1, 8):
+        ws4.cell(row=1, column=ci).border = title_border
+
+    ws4.merge_cells('A3:C3')
+    ws4.cell(row=3, column=1, value='ダイソウ工業株式会社　御中').font = info_font_bold
+
+    ws4.merge_cells('F3:G3')
+    ws4.cell(row=3, column=6, value=s_name).font = info_font
+    ws4.cell(row=3, column=6).alignment = Alignment(horizontal='right')
+
+    ws4.merge_cells('F4:G4')
+    ws4.cell(row=4, column=6, value=f'納品日　{d_str}').font = info_font
+    ws4.cell(row=4, column=6).alignment = Alignment(horizontal='right')
+
+    ROWS_PER_PAGE = 50
+    tbl_start = 6
+    p4_headers = ['No.', '品番', '品名', '数量', '単価', '金額', '備考']
+    p4_widths = [5, 22, 32, 10, 10, 12, 14]
+
+    for ci, h in enumerate(p4_headers, 1):
+        cell = ws4.cell(row=tbl_start, column=ci, value=h)
+        cell.font = tbl_header_font
+        cell.fill = tbl_header_fill
+        cell.border = tbl_border
+        cell.alignment = Alignment(horizontal='center')
+
+    for ci, w in enumerate(p4_widths, 1):
+        ws4.column_dimensions[get_column_letter(ci)].width = w
+
+    total_qty = 0
+    for idx, item in enumerate(items):
+        r = tbl_start + 1 + idx
+        ws4.cell(row=r, column=1, value=idx + 1).border = tbl_border
+        ws4.cell(row=r, column=1).alignment = Alignment(horizontal='center')
+        ws4.cell(row=r, column=2, value=item['product_code']).border = tbl_border
+        ws4.cell(row=r, column=3, value=item['product_name']).border = tbl_border
+        qty = item['expected_qty']
+        total_qty += qty
+        c_qty = ws4.cell(row=r, column=4, value=qty)
+        c_qty.border = tbl_border
+        c_qty.alignment = Alignment(horizontal='right')
+        ws4.cell(row=r, column=5, value='').border = tbl_border
+        ws4.cell(row=r, column=5).alignment = Alignment(horizontal='right')
+        ws4.cell(row=r, column=6, value='').border = tbl_border
+        ws4.cell(row=r, column=6).alignment = Alignment(horizontal='right')
+        ws4.cell(row=r, column=7, value='').border = tbl_border
+
+    r_total = tbl_start + 1 + len(items)
+    ws4.cell(row=r_total, column=3, value='合計').font = info_font_bold
+    ws4.cell(row=r_total, column=3).border = tbl_border
+    ws4.cell(row=r_total, column=3).alignment = Alignment(horizontal='right')
+    c_total = ws4.cell(row=r_total, column=4, value=total_qty)
+    c_total.font = info_font_bold
+    c_total.border = tbl_border
+    c_total.alignment = Alignment(horizontal='right')
+    ws4.cell(row=r_total, column=6).border = tbl_border
+
+    sign_font = Font(size=9)
+    sign_border_bottom = Border(bottom=Side(style='thin'))
+    r_sign = r_total + 3
+    ws4.cell(row=r_sign, column=1, value='受領').font = sign_font
+    ws4.merge_cells(start_row=r_sign, start_column=2, end_row=r_sign, end_column=3)
+    ws4.cell(row=r_sign, column=2).border = sign_border_bottom
+    ws4.cell(row=r_sign, column=3).border = sign_border_bottom
+
+    ws4.cell(row=r_sign, column=5, value='納入先').font = sign_font
+    ws4.merge_cells(start_row=r_sign, start_column=6, end_row=r_sign, end_column=7)
+    ws4.cell(row=r_sign, column=6).border = sign_border_bottom
+    ws4.cell(row=r_sign, column=7).border = sign_border_bottom
+
+    from openpyxl.worksheet.pagebreak import Break
+    ws4.print_title_rows = f'{tbl_start}:{tbl_start}'
+    if len(items) > ROWS_PER_PAGE:
+        for pg in range(1, (len(items) // ROWS_PER_PAGE) + 1):
+            break_row = tbl_start + pg * ROWS_PER_PAGE
+            ws4.row_breaks.append(Break(id=break_row))
 
     output = BytesIO()
     wb.save(output)
@@ -821,3 +942,328 @@ def _generate_progress_pdf(supplier, line, days_back, days_forward=30):
     c.save()
     buf.seek(0)
     return buf
+
+
+def _generate_delivery_note_pdf(items, delivery_date, supplier):
+    """外作納品書PDFを生成（品目ごとに納品書・受領書・購入先控の3枚組、1ページ3品目）"""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas as pdf_canvas
+    from shipping.services.shipping_pdf_generator import register_japanese_fonts
+
+    register_japanese_fonts()
+    FONT = 'MSGothic'
+
+    page_w, page_h = landscape(A4)
+    ML, MR, MT, MB = 10 * mm, 10 * mm, 3 * mm, 3 * mm
+    usable_w = page_w - ML - MR
+    usable_h = page_h - MT - MB
+    PER_PAGE = 3
+    BLOCK_H = usable_h / PER_PAGE
+    SEP = 5 * mm
+    ITEM_H = BLOCK_H - SEP
+
+    GAP = 4 * mm
+    NOHIN_W = usable_w * 0.50
+    SIDE_W = (usable_w - NOHIN_W - GAP * 2) / 2
+
+    s_code = supplier.supplier_code or ''
+    s_name = supplier.supplier_name or ''
+
+    buf = BytesIO()
+    c = pdf_canvas.Canvas(buf, pagesize=landscape(A4))
+    total_pages = max(1, -(-len(items) // PER_PAGE))
+
+    for pi in range(total_pages):
+        page_items = items[pi * PER_PAGE:(pi + 1) * PER_PAGE]
+        for ii, item in enumerate(page_items):
+            yt = page_h - MT - ii * BLOCK_H
+            pc = item['product_code']
+            pn = item['product_name']
+            qty = int(item['expected_qty'])
+            d_ymd = delivery_date.strftime('%Y/%m/%d')
+            d_mmdd = f'{delivery_date.month:02d}/{delivery_date.day:02d}'
+            qr_data = f'{pc},{delivery_date.isoformat()},{qty}'
+
+            _dn_nohin(c, ML, yt, NOHIN_W, ITEM_H,
+                      pc, pn, qty, d_ymd, d_mmdd, s_code, s_name, qr_data, FONT)
+            _dn_side(c, ML + NOHIN_W + GAP, yt, SIDE_W, ITEM_H,
+                     pc, pn, qty, d_ymd, d_mmdd, s_code, s_name, qr_data, FONT, '受領書')
+            _dn_side(c, ML + NOHIN_W + GAP + SIDE_W + GAP, yt, SIDE_W, ITEM_H,
+                     pc, pn, qty, d_ymd, d_mmdd, s_code, s_name, qr_data, FONT, '購入先控')
+
+            if ii < len(page_items) - 1:
+                sy = yt - BLOCK_H + SEP / 2
+                c.saveState()
+                c.setDash(4, 3)
+                c.setLineWidth(0.3)
+                c.setStrokeColor(colors.HexColor('#888888'))
+                c.line(ML, sy, page_w - MR, sy)
+                c.restoreState()
+
+        c.showPage()
+
+    c.save()
+    buf.seek(0)
+    return buf
+
+
+def _dn_nohin(c, x0, yt, W, H, pc, pn, qty, d_ymd, d_mmdd, s_code, s_name, qr_data, F):
+    """外作納品書 — 納品書セクション描画"""
+    from reportlab.lib.units import mm
+    from reportlab.graphics.barcode.qr import QrCodeWidget
+    from reportlab.graphics import renderPDF
+    from reportlab.graphics.shapes import Drawing
+
+    c.saveState()
+    c.setLineWidth(0.4)
+
+    TH = 6 * mm
+    R0, R1, R2 = 10 * mm, 14 * mm, 10 * mm
+    GH = H - TH
+    R3 = GH - R0 - R1 - R2
+
+    gy = yt - TH
+    y0 = gy
+    y1 = gy - R0
+    y2 = y1 - R1
+    y3 = y2 - R2
+    yb = y3 - R3
+
+    C1 = 63 * mm
+    xr = x0 + C1
+    RW = W - C1
+
+    # --- Title ---
+    c.setFont(F, 10)
+    c.drawString(x0 + 1 * mm, yt - 4.5 * mm, '納　品　書')
+    c.setFont(F, 10)
+    c.drawString(x0 + 35 * mm, yt - 4.5 * mm, 'ダイソウ工業株式会社　御中')
+    c.setFont(F, 6.5)
+    c.drawRightString(x0 + W - 1 * mm, yt - 4.5 * mm, f'発行日 {d_ymd}')
+
+    # --- Outer border ---
+    c.rect(x0, yb, W, GH)
+
+    # --- Row 0: 取引先 / 搬入場所 / 注文No. ---
+    bw = RW * 0.38
+    c.line(x0, y1, x0 + C1 + bw, y1)
+    c.line(xr, y0, xr, y2)
+    c.line(xr + bw, y0, xr + bw, y2)
+
+    c.setFont(F, 5)
+    c.drawString(x0 + 1 * mm, y0 - 3 * mm, '取引先')
+    c.setFont(F, 7)
+    s_label = f'{s_name}'
+    if c.stringWidth(s_label, F, 7) > C1 - 14 * mm:
+        c.setFont(F, 5.5)
+    c.drawString(x0 + 12 * mm, y0 - 3 * mm, s_label)
+    c.setFont(F, 7)
+    c.drawString(x0 + 1 * mm, y0 - 8 * mm, s_code)
+
+    c.setFont(F, 5)
+    c.drawString(xr + 1 * mm, y0 - 3 * mm, '搬入場所')
+    c.drawString(xr + bw + 1 * mm, y0 - 3 * mm, '注文No.')
+
+    # --- Row 1: 部品番号 / 搬入月日 / 搬入数 ---
+    c.line(x0, y2, x0 + W, y2)
+    hw = bw / 2
+    c.line(xr + hw, y1, xr + hw, y2)
+
+    c.setFont(F, 5)
+    c.drawString(x0 + 1 * mm, y1 - 3 * mm, '部 品 番 号')
+    pc_sz = 9
+    if c.stringWidth(pc, F, pc_sz) > C1 - 3 * mm:
+        pc_sz = 7
+    c.setFont(F, pc_sz)
+    c.drawString(x0 + 1 * mm, y1 - 10 * mm, pc)
+
+    c.setFont(F, 5)
+    c.drawString(xr + 1 * mm, y1 - 3 * mm, '搬入月日')
+    c.setFont(F, 12)
+    c.drawCentredString(xr + hw / 2, y1 - 11 * mm, d_mmdd)
+
+    c.setFont(F, 5)
+    c.drawString(xr + hw + 1 * mm, y1 - 3 * mm, '搬入数')
+    c.setFont(F, 12)
+    c.drawCentredString(xr + hw + hw / 2, y1 - 11 * mm, str(qty))
+
+    # --- Row 2: 部品名称 / 日付変更時 / 数量変更時 / 廃棄数 ---
+    c.line(x0, y3, x0 + W, y3)
+    tw = RW / 3
+    c.line(xr, y2, xr, y3)
+    c.line(xr + tw, y2, xr + tw, y3)
+    c.line(xr + 2 * tw, y2, xr + 2 * tw, y3)
+
+    c.setFont(F, 5)
+    c.drawString(x0 + 1 * mm, y2 - 3 * mm, '部 品 名 称')
+    pn_sz = 8
+    if c.stringWidth(pn, F, pn_sz) > C1 - 3 * mm:
+        pn_sz = 6
+    c.setFont(F, pn_sz)
+    c.drawString(x0 + 1 * mm, y2 - 8.5 * mm, pn)
+
+    c.setFont(F, 5)
+    c.drawString(xr + 1 * mm, y2 - 3 * mm, '日付変更時')
+    c.drawString(xr + tw + 1 * mm, y2 - 3 * mm, '数量変更時')
+    c.drawString(xr + 2 * tw + 1 * mm, y2 - 3 * mm, '廃棄数')
+
+    # --- Row 3: 得意先 / QR / 荷姿+発行受領入力 ---
+    qrw = 20 * mm
+    got_w = C1 - qrw
+
+    c.line(x0 + got_w, y3, x0 + got_w, yb)
+    c.line(xr, y3, xr, yb)
+
+    c.setFont(F, 5)
+    c.drawString(x0 + 0.5 * mm, y3 - 3 * mm, '得意先')
+
+    # QR code（欄いっぱいに大きく表示）
+    qr_sz = min(R3 - 2 * mm, qrw - 2 * mm)
+    if qr_sz > 4 * mm:
+        try:
+            qr = QrCodeWidget(qr_data, barWidth=qr_sz, barHeight=qr_sz)
+            d = Drawing(qr_sz, qr_sz)
+            d.add(qr)
+            qr_x = x0 + got_w + (qrw - qr_sz) / 2
+            qr_y = yb + (R3 - qr_sz) / 2
+            renderPDF.draw(d, c, qr_x, qr_y)
+        except Exception:
+            pass
+
+    sw = 8 * mm
+    nw = RW - sw * 3
+    c.line(xr + nw, y3, xr + nw, yb)
+    c.line(xr + nw + sw, y3, xr + nw + sw, yb)
+    c.line(xr + nw + sw * 2, y3, xr + nw + sw * 2, yb)
+
+    c.setFont(F, 5)
+    c.drawString(xr + 0.5 * mm, y3 - 3 * mm, '荷姿(入り数×台数)')
+    c.setFont(F, 6)
+    lh = 4 * mm
+    c.drawString(xr + 0.5 * mm, y3 - 8 * mm, '１ポリ(　　×　　)')
+    c.drawString(xr + 0.5 * mm, y3 - 8 * mm - lh, '２アミ(　　×　　)')
+    c.drawString(xr + 0.5 * mm, y3 - 8 * mm - lh * 2, '３専用(　　×　　)')
+
+    c.setFont(F, 5)
+    for i, lab in enumerate(['発行', '受領', '入力']):
+        sx = xr + nw + sw * i
+        c.drawCentredString(sx + sw / 2, y3 - 3 * mm, lab)
+
+    c.restoreState()
+
+
+def _dn_side(c, x0, yt, W, H, pc, pn, qty, d_ymd, d_mmdd, s_code, s_name, qr_data, F, title):
+    """外作納品書 — 受領書/購入先控セクション描画"""
+    from reportlab.lib.units import mm
+
+    c.saveState()
+    c.setLineWidth(0.4)
+
+    TH = 6 * mm
+    R0, R1, R2, R3, R4 = 8 * mm, 12 * mm, 7 * mm, 9 * mm, 7 * mm
+    GH = H - TH
+    R5 = GH - R0 - R1 - R2 - R3 - R4
+
+    gy = yt - TH
+    y0 = gy
+    y1 = y0 - R0
+    y2 = y1 - R1
+    y3 = y2 - R2
+    y4 = y3 - R3
+    y5 = y4 - R4
+    yb = y5 - R5
+
+    # --- Title ---
+    c.setFont(F, 7)
+    c.drawString(x0 + 0.5 * mm, yt - 4 * mm, title)
+    c.setFont(F, 5.5)
+    t_offset = 22 * mm if title == '購入先控' else 15 * mm
+    c.drawString(x0 + t_offset, yt - 4 * mm, 'ダイソウ工業㈱')
+    c.drawRightString(x0 + W - 0.5 * mm, yt - 4 * mm, d_ymd)
+
+    # --- Outer border ---
+    c.rect(x0, yb, W, GH)
+
+    # --- Row 0: 取引先 / 注文No. ---
+    hw0 = W * 0.65
+    c.line(x0, y1, x0 + W, y1)
+    c.line(x0 + hw0, y0, x0 + hw0, y1)
+    c.setFont(F, 5)
+    c.drawString(x0 + 0.5 * mm, y0 - 3 * mm, '取引先')
+    c.drawString(x0 + hw0 + 0.5 * mm, y0 - 3 * mm, '注文No.')
+    s_lbl = f'{s_code}  {s_name}'
+    s_sz = 5.5
+    if c.stringWidth(s_lbl, F, s_sz) > hw0 - 2 * mm:
+        s_sz = 4
+    c.setFont(F, s_sz)
+    c.drawString(x0 + 0.5 * mm, y0 - 6.5 * mm, s_lbl)
+
+    # --- Row 1: 部品番号 ---
+    c.line(x0, y2, x0 + W, y2)
+    c.setFont(F, 5)
+    c.drawString(x0 + 0.5 * mm, y1 - 3 * mm, '部 品 番 号')
+    pc_sz = 7
+    if c.stringWidth(pc, F, pc_sz) > W - 18 * mm:
+        pc_sz = 5
+    c.setFont(F, pc_sz)
+    c.drawString(x0 + 16 * mm, y1 - 3 * mm, pc)
+
+    # --- Row 2: 部品名称 ---
+    c.line(x0, y3, x0 + W, y3)
+    c.setFont(F, 5)
+    c.drawString(x0 + 0.5 * mm, y2 - 3 * mm, '部 品 名 称')
+    pn_sz = 6
+    if c.stringWidth(pn, F, pn_sz) > W - 2 * mm:
+        pn_sz = 4.5
+    c.setFont(F, pn_sz)
+    c.drawString(x0 + 10 * mm, y2 - 3 * mm - 3 * mm, pn)
+
+    # --- Row 3: 搬入月日 / 搬入数 ---
+    c.line(x0, y4, x0 + W, y4)
+    mid = W * 0.5
+    c.line(x0 + mid, y3, x0 + mid, y4)
+    c.setFont(F, 5)
+    c.drawString(x0 + 0.5 * mm, y3 - 3 * mm, '搬入月日')
+    c.drawString(x0 + mid + 0.5 * mm, y3 - 3 * mm, '搬入数')
+    c.setFont(F, 10)
+    c.drawCentredString(x0 + mid / 2, y3 - 7.5 * mm, d_mmdd)
+    c.drawCentredString(x0 + mid + (W - mid) / 2, y3 - 7.5 * mm, str(qty))
+
+    # --- Row 4: 日付変更時 / 数量変更時 / 廃棄数 ---
+    c.line(x0, y5, x0 + W, y5)
+    tw = W / 3
+    c.line(x0 + tw, y4, x0 + tw, y5)
+    c.line(x0 + 2 * tw, y4, x0 + 2 * tw, y5)
+    c.setFont(F, 5)
+    c.drawString(x0 + 0.5 * mm, y4 - 3 * mm, '日付変更時')
+    c.drawString(x0 + tw + 0.5 * mm, y4 - 3 * mm, '数量変更時')
+    c.drawString(x0 + 2 * tw + 0.5 * mm, y4 - 3 * mm, '廃棄数')
+
+    # --- Row 5: QR / 当社 / 取引先 ---
+    from reportlab.graphics.barcode.qr import QrCodeWidget
+    from reportlab.graphics.shapes import Drawing
+    from reportlab.graphics import renderPDF as _renderPDF
+    icw = W * 0.45
+    rest = W - icw
+    c.line(x0 + icw, y5, x0 + icw, yb)
+    c.line(x0 + icw + rest / 2, y5, x0 + icw + rest / 2, yb)
+
+    qr_sz = min(R5 - 2 * mm, icw - 2 * mm)
+    if qr_sz > 4 * mm:
+        try:
+            qr = QrCodeWidget(qr_data, barWidth=qr_sz, barHeight=qr_sz)
+            d = Drawing(qr_sz, qr_sz)
+            d.add(qr)
+            qr_x = x0 + (icw - qr_sz) / 2
+            qr_y = yb + (R5 - qr_sz) / 2
+            _renderPDF.draw(d, c, qr_x, qr_y)
+        except Exception:
+            pass
+
+    c.setFont(F, 5)
+    c.drawCentredString(x0 + icw + rest / 4, y5 - 3 * mm, '当社')
+    c.drawCentredString(x0 + icw + 3 * rest / 4, y5 - 3 * mm, '取引先')
+
+    c.restoreState()

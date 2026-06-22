@@ -2150,6 +2150,81 @@ class PurchaseProgressPdfDownloadView(APIView):
         return response
 
 
+class PurchaseDeliveryNotePdfDownloadView(APIView):
+    """外作納品書PDFダウンロード"""
+
+    def get(self, request):
+        from django.http import HttpResponse
+        from .models import SupplierOrderSchedule
+        from .order_proposal_views import _generate_raw_pattern_dates
+        from .tasks_auto_delivery_list import _generate_delivery_note_pdf
+        from orders.utils.calendar_utils import WorkingDayCalculator
+
+        supplier_id = request.query_params.get('supplier_id')
+        target_date_str = request.query_params.get('target_date')
+        if not supplier_id:
+            return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            supplier = Supplier.objects.filter(id=int(supplier_id)).first()
+        except (ValueError, TypeError):
+            return Response({'detail': 'supplier_id が不正です'}, status=status.HTTP_400_BAD_REQUEST)
+        if not supplier:
+            return Response({'detail': 'supplier not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            delivery_date = date.fromisoformat(target_date_str) if target_date_str else date.today()
+        except (ValueError, TypeError):
+            return Response({'detail': 'target_date が不正です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        daiso_cal = Calendar.objects.filter(calendar_code='daiso').first()
+        calc = WorkingDayCalculator(daiso_cal)
+
+        schedule = SupplierOrderSchedule.objects.filter(
+            supplier_id=supplier.id, is_enabled=True,
+        ).select_related('pattern').first()
+
+        coverage_dates = [delivery_date]
+        if schedule and schedule.pattern:
+            window_start = delivery_date - timedelta(days=7)
+            window_end = delivery_date + timedelta(days=90)
+            pattern_dates = sorted(set(_generate_raw_pattern_dates(schedule, window_start, window_end, calc)))
+            future = [d for d in pattern_dates if d > delivery_date]
+            if future:
+                next_dd = future[0]
+                coverage_dates = []
+                d = delivery_date
+                while d < next_dd:
+                    coverage_dates.append(d)
+                    d += timedelta(days=1)
+
+        g_filter = request.query_params.get('g_filter', '')
+
+        line = _resolve_purchase_line(supplier)
+        items = []
+        if line and coverage_dates:
+            product_map = _calc_progress_quantities(line, coverage_dates)
+            items = sorted(product_map.values(), key=lambda x: x['product_code'])
+
+        if g_filter == 'yes':
+            items = [i for i in items if i['product_code'].endswith('G')]
+        elif g_filter == 'no':
+            items = [i for i in items if not i['product_code'].endswith('G')]
+
+        if not items:
+            return Response({'detail': '対象品目がありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        pdf_data = _generate_delivery_note_pdf(items, delivery_date, supplier)
+
+        filename = f'外作納品書_{supplier.supplier_code}_{delivery_date}.pdf'
+        response = HttpResponse(
+            pdf_data.getvalue(),
+            content_type='application/pdf',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+
 class PurchaseOutsourceProgressCompareView(APIView):
     """外作注文書PDFと進度表PDFの比較Excelダウンロード"""
     parser_classes = (MultiPartParser, FormParser)
@@ -2449,6 +2524,8 @@ class PurchaseAutoDeliveryListRunNowView(APIView):
 
         thread = threading.Thread(target=run_auto_delivery_list_send, kwargs={'config_id': config.id})
         thread.start()
+
+        return Response({'detail': '手動実行を開始しました', 'config_id': config.id})
 
 
 class PurchaseActualKikanMappingCandidatesView(APIView):

@@ -25,6 +25,9 @@
         <button class="btn-progress" :disabled="loadingProgressPdf || !selectedSupplier" @click="downloadProgressPdf">
           {{ loadingProgressPdf ? '作成中...' : '進度表PDF' }}
         </button>
+        <button class="btn-delivery-note" :disabled="loadingDeliveryNote || !selectedSupplier" @click="downloadDeliveryNotePdf">
+          {{ loadingDeliveryNote ? '作成中...' : '納品書PDF' }}
+        </button>
         <label class="btn-upload">
           返送Excel取込
           <input ref="fileInputRef" type="file" accept=".xlsx,.xls" @change="onFileChange" style="display:none" />
@@ -106,6 +109,7 @@ const targetDate = ref(new Date().toISOString().slice(0, 10))
 const loadingTemplate = ref(false)
 const loadingProgressExcel = ref(false)
 const loadingProgressPdf = ref(false)
+const loadingDeliveryNote = ref(false)
 const saving = ref(false)
 const rows = ref([])
 const errors = ref([])
@@ -237,6 +241,24 @@ const downloadProgressPdf = async () => {
     alert('進度表PDFの出力に失敗しました。')
   } finally {
     loadingProgressPdf.value = false
+  }
+}
+
+const downloadDeliveryNotePdf = async () => {
+  if (!selectedSupplier.value) return
+  loadingDeliveryNote.value = true
+  try {
+    const res = await api.client.get('/purchase-receiving/delivery-note-pdf/', {
+      params: { supplier_id: selectedSupplier.value, target_date: targetDate.value, g_filter: filterG.value },
+      responseType: 'blob',
+    })
+    const supplier = suppliers.value.find((s) => s.id === selectedSupplier.value)
+    const code = supplier ? supplier.supplier_code : ''
+    _downloadBlob(res.data, `外作納品書_${code}_${targetDate.value}.pdf`)
+  } catch (e) {
+    alert('納品書PDFの出力に失敗しました。')
+  } finally {
+    loadingDeliveryNote.value = false
   }
 }
 
@@ -451,6 +473,17 @@ onMounted(fetchSuppliers)
   font-size: 13px;
 }
 .btn-progress:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-delivery-note {
+  padding: 6px 12px;
+  background: #10b981;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn-delivery-note:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-upload {
   padding: 6px 12px;
   background: #f59e0b;
