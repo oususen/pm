@@ -56,6 +56,11 @@
           </div>
         </form>
 
+        <div class="link-section">
+          <h3 class="section-title">アプリ</h3>
+          <router-link to="/settings/android-app" class="link-item">📱 Androidアプリ ダウンロード</router-link>
+        </div>
+
         <div class="favorites-section">
           <h3 class="section-title">お気に入り管理</h3>
           <p class="section-note">各画面で登録したお気に入りを削除できます。</p>
@@ -315,6 +320,21 @@ onMounted(() => {
   background-color: #d4edda;
   color: #155724;
   border: 1px solid #c3e6cb;
+}
+.link-section {
+  margin-top: 28px;
+}
+.link-item {
+  display: inline-block;
+  padding: 10px 16px;
+  background: #f0f0f0;
+  border-radius: 6px;
+  color: #333;
+  text-decoration: none;
+  font-size: 14px;
+}
+.link-item:hover {
+  background: #e0e0e0;
 }
 .favorites-section {
   margin-top: 28px;

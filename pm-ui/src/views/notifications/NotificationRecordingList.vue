@@ -1,12 +1,7 @@
 <template>
-  <div class="recording-list-page">
+  <div v-if="isReady" class="recording-list-page">
     <h2 class="page-title">通話録音一覧</h2>
-
-    <div v-if="!canUseRecordingFeatures" class="unauthorized-card">
-      この画面は現在利用できません。
-    </div>
-
-    <div v-else class="list-card">
+    <div class="list-card">
       <div class="list-header">
         <div class="list-note">保存済みの通話録音を確認します。</div>
         <div class="header-actions">
@@ -113,6 +108,7 @@ const calleeKeyword = ref("");
 const recordedByKeyword = ref("");
 const callTypeFilter = ref("");
 const hasLoaded = ref(false);
+const isReady = ref(false);
 
 const canUseRecordingFeatures = computed(() => {
   const username = String(authState.user?.username || "").toLowerCase();
@@ -230,7 +226,10 @@ onMounted(async () => {
   if (!canUseRecordingFeatures.value) {
     sessions.value = [];
     hasLoaded.value = false;
+    router.replace("/notifications");
+    return;
   }
+  isReady.value = true;
 });
 </script>
 
@@ -252,14 +251,6 @@ onMounted(async () => {
   background: #fff;
   border-radius: 12px;
   padding: 16px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
-}
-
-.unauthorized-card {
-  background: #fff;
-  border-radius: 12px;
-  padding: 20px;
-  color: #64748b;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
 }
 
