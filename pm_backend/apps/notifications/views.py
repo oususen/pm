@@ -4,14 +4,17 @@ from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status, mixins
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Notification, NotificationRead, CallSession, CallSignal, PushSubscription, NativePushToken
+from .models import Notification, NotificationRead, CallSession, CallSignal, CallRecording, PushSubscription, NativePushToken
 from .serializers import (
     NotificationSerializer,
     CallSessionSerializer,
     CallSignalSerializer,
+    CallRecordingSerializer,
+    CallRecordingUploadSerializer,
     PushSubscriptionSerializer,
     NativePushTokenSerializer,
 )
@@ -80,8 +83,16 @@ def _display_name(user):
     return full_name or user.username
 
 
+def _normalize_naive_datetime(value):
+    if value is None:
+        return None
+    if getattr(value, 'tzinfo', None) is not None:
+        return value.astimezone().replace(tzinfo=None)
+    return value
+
+
 class CallSessionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
-    queryset = CallSession.objects.select_related('caller', 'callee')
+    queryset = CallSession.objects.select_related('caller', 'callee', 'recording', 'recording__recorded_by')
     serializer_class = CallSessionSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = None
@@ -247,6 +258,72 @@ class CallSessionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, views
         )
         serializer = CallSignalSerializer(signal)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=['get', 'post'],
+        url_path='recording',
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def recording(self, request, pk=None):
+        session = self.get_object()
+        if request.user.id not in {session.caller_id, session.callee_id}:
+            return Response({'detail': '参加者のみアクセスできます。'}, status=403)
+
+        if request.method == 'GET':
+            recording = getattr(session, 'recording', None)
+            if not recording:
+                return Response({'detail': '録音はまだ登録されていません。'}, status=404)
+            serializer = CallRecordingSerializer(recording, context=self.get_serializer_context())
+            return Response(serializer.data)
+
+        serializer = CallRecordingUploadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        uploaded_file = serializer.validated_data['file']
+        mime_type = serializer.validated_data.get('mime_type') or getattr(uploaded_file, 'content_type', '') or 'application/octet-stream'
+        file_size = serializer.validated_data.get('file_size')
+        if file_size in (None, ''):
+            file_size = uploaded_file.size
+
+        recording_started_at = _normalize_naive_datetime(serializer.validated_data.get('recording_started_at'))
+        recording_ended_at = _normalize_naive_datetime(serializer.validated_data.get('recording_ended_at'))
+        duration_seconds = serializer.validated_data.get('duration_seconds')
+        if duration_seconds is None and recording_started_at and recording_ended_at:
+            duration_seconds = max((recording_ended_at - recording_started_at).total_seconds(), 0)
+
+        existing = getattr(session, 'recording', None)
+        old_file_name = existing.file.name if existing and existing.file else ''
+
+        if existing:
+            existing.file = uploaded_file
+            existing.mime_type = mime_type
+            existing.file_size = file_size
+            existing.duration_seconds = duration_seconds
+            existing.recording_started_at = recording_started_at
+            existing.recording_ended_at = recording_ended_at
+            existing.recorded_by = request.user
+            existing.save()
+            recording = existing
+        else:
+            recording = CallRecording.objects.create(
+                session=session,
+                file=uploaded_file,
+                mime_type=mime_type,
+                file_size=file_size,
+                duration_seconds=duration_seconds,
+                recording_started_at=recording_started_at,
+                recording_ended_at=recording_ended_at,
+                recorded_by=request.user,
+            )
+
+        if old_file_name and old_file_name != recording.file.name:
+            storage = recording.file.storage
+            if storage.exists(old_file_name):
+                storage.delete(old_file_name)
+
+        response_serializer = CallRecordingSerializer(recording, context=self.get_serializer_context())
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
 
 class PushSubscriptionViewSet(

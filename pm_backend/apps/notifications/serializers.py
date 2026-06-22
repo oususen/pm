@@ -1,6 +1,14 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
-from .models import Notification, NotificationRead, CallSession, CallSignal, PushSubscription, NativePushToken
+from .models import (
+    Notification,
+    NotificationRead,
+    CallSession,
+    CallSignal,
+    CallRecording,
+    PushSubscription,
+    NativePushToken,
+)
 from accounts.models import Department, UserProfile
 
 User = get_user_model()
@@ -196,9 +204,54 @@ class CallSignalSerializer(serializers.ModelSerializer):
         return _display_name(obj.target_user)
 
 
+class CallRecordingSerializer(serializers.ModelSerializer):
+    recorded_by_name = serializers.SerializerMethodField()
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CallRecording
+        fields = [
+            'id',
+            'session',
+            'file',
+            'file_url',
+            'mime_type',
+            'file_size',
+            'duration_seconds',
+            'recording_started_at',
+            'recording_ended_at',
+            'recorded_by',
+            'recorded_by_name',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = fields
+
+    def get_recorded_by_name(self, obj):
+        return _display_name(obj.recorded_by)
+
+    def get_file_url(self, obj):
+        if not obj.file:
+            return ''
+        request = self.context.get('request')
+        url = obj.file.url
+        return request.build_absolute_uri(url) if request else url
+
+
+class CallRecordingUploadSerializer(serializers.Serializer):
+    file = serializers.FileField()
+    mime_type = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    file_size = serializers.IntegerField(required=False, min_value=0)
+    duration_seconds = serializers.FloatField(required=False, allow_null=True, min_value=0)
+    recording_started_at = serializers.DateTimeField(required=False, allow_null=True)
+    recording_ended_at = serializers.DateTimeField(required=False, allow_null=True)
+
+
 class CallSessionSerializer(serializers.ModelSerializer):
     caller_name = serializers.SerializerMethodField()
     callee_name = serializers.SerializerMethodField()
+    has_recording = serializers.SerializerMethodField()
+    recording = CallRecordingSerializer(read_only=True)
 
     class Meta:
         model = CallSession
@@ -213,6 +266,8 @@ class CallSessionSerializer(serializers.ModelSerializer):
             'initiated_at',
             'accepted_at',
             'ended_at',
+            'has_recording',
+            'recording',
             'created_at',
             'updated_at',
         ]
@@ -223,6 +278,12 @@ class CallSessionSerializer(serializers.ModelSerializer):
 
     def get_callee_name(self, obj):
         return _display_name(obj.callee)
+
+    def get_has_recording(self, obj):
+        try:
+            return obj.recording is not None
+        except CallRecording.DoesNotExist:
+            return False
 
 
 class PushSubscriptionSerializer(serializers.ModelSerializer):

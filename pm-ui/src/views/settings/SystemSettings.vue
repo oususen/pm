@@ -18,6 +18,37 @@
         <div v-if="saveError" class="error-message">{{ saveError }}</div>
         <div v-if="saveSuccess" class="success-message">保存しました。</div>
 
+        <div v-if="canManageRecordingAccess" class="recording-access-section">
+          <div class="section-header">
+            <h3 class="section-title">通話録音許可ユーザー</h3>
+            <button
+              class="btn-success"
+              type="button"
+              :disabled="loading || !canEdit || recordingAccessSaving"
+              @click="saveRecordingAccessUsers"
+            >
+              保存
+            </button>
+          </div>
+          <div class="section-note">
+            チェックしたユーザーだけが録音機能と録音画面を利用できます。未選択なら誰も利用できません。
+          </div>
+          <div v-if="recordingAccessMessage" :class="recordingAccessError ? 'error-message' : 'success-message'">
+            {{ recordingAccessMessage }}
+          </div>
+          <div class="user-check-grid">
+            <label v-for="user in activeUsers" :key="user.id" class="user-check-item">
+              <input
+                v-model="selectedRecordingUsers"
+                type="checkbox"
+                :value="String(user.username || '').toLowerCase()"
+                :disabled="!canEdit"
+              />
+              <span>{{ getUserLabel(user) }}</span>
+            </label>
+          </div>
+        </div>
+
         <table class="data-table">
           <thead>
             <tr>
@@ -93,6 +124,11 @@ import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
+import {
+  CALL_RECORDING_ALLOWED_USERS_KEY,
+  parseAllowedRecordingUsernames,
+  serializeAllowedRecordingUsernames,
+} from '@/utils/callRecordingAccess'
 
 const dsSources = [
   { op: '読み書き', table: 'system_setting', desc: 'システム設定キー・値管理' },
@@ -106,9 +142,15 @@ const saveSuccess = ref(false)
 const showNewDialog = ref(false)
 const newForm = ref({ key: '', value: '', description: '' })
 const createError = ref('')
+const activeUsers = ref([])
+const selectedRecordingUsers = ref([])
+const recordingAccessSaving = ref(false)
+const recordingAccessMessage = ref('')
+const recordingAccessError = ref(false)
 
 const canView = computed(() => Boolean(authState.user))
 const canEdit = computed(() => authState.user?.is_superuser || authState.user?.is_staff)
+const canManageRecordingAccess = computed(() => String(authState.user?.username || '').toLowerCase() === 'admin')
 
 const hasChanges = computed(() => {
   return settings.value.some((item) => editValues.value[item.key] !== item.value)
@@ -125,10 +167,27 @@ const fetchSettings = async () => {
     res.data.forEach((item) => {
       editValues.value[item.key] = item.value
     })
+    const targetSetting = res.data.find((item) => item.key === CALL_RECORDING_ALLOWED_USERS_KEY)
+    selectedRecordingUsers.value = parseAllowedRecordingUsernames(targetSetting?.value || '')
   } catch (e) {
     console.error('システム設定の取得に失敗しました', e)
   } finally {
     loading.value = false
+  }
+}
+
+const fetchActiveUsers = async () => {
+  if (!canManageRecordingAccess.value) {
+    activeUsers.value = []
+    return
+  }
+  try {
+    const res = await api.accounts.getUsers({ is_active: true, ordering: 'username', page_size: 1000 })
+    const data = res.data?.results || res.data || []
+    activeUsers.value = Array.isArray(data) ? data : []
+  } catch (e) {
+    console.error('ユーザー一覧の取得に失敗しました', e)
+    activeUsers.value = []
   }
 }
 
@@ -195,12 +254,50 @@ const savePlanQtyPassword = async () => {
   }
 }
 
+const getUserLabel = (user) => {
+  const fullName = `${user?.last_name || ''}${user?.first_name || ''}`.trim()
+  const name = fullName || user?.username || '-'
+  return `${user?.username || '-'} / ${name}`
+}
+
+const saveRecordingAccessUsers = async () => {
+  if (!canManageRecordingAccess.value) return
+  recordingAccessSaving.value = true
+  recordingAccessMessage.value = ''
+  recordingAccessError.value = false
+  const value = serializeAllowedRecordingUsernames(selectedRecordingUsers.value)
+  const existing = settings.value.find((item) => item.key === CALL_RECORDING_ALLOWED_USERS_KEY)
+
+  try {
+    if (existing) {
+      await api.systemSettings.updateByKey({
+        [CALL_RECORDING_ALLOWED_USERS_KEY]: value,
+      })
+    } else {
+      await api.systemSettings.create({
+        key: CALL_RECORDING_ALLOWED_USERS_KEY,
+        value,
+        description: '通話録音機能を利用できるユーザー名一覧',
+      })
+    }
+    recordingAccessMessage.value = '通話録音許可ユーザーを保存しました。'
+    await fetchSettings()
+  } catch (e) {
+    recordingAccessError.value = true
+    recordingAccessMessage.value = e?.response?.data?.detail || '通話録音許可ユーザーの保存に失敗しました。'
+  } finally {
+    recordingAccessSaving.value = false
+  }
+}
+
 const formatDate = (val) => {
   if (!val) return '-'
   return new Date(val).toLocaleString('ja-JP')
 }
 
-onMounted(fetchSettings)
+onMounted(async () => {
+  await Promise.all([fetchSettings(), fetchActiveUsers()])
+})
 </script>
 
 <style scoped>
@@ -234,6 +331,37 @@ onMounted(fetchSettings)
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+}
+.recording-access-section {
+  margin-bottom: 18px;
+  padding: 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 6px;
+  background: #f8fbff;
+}
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.section-note {
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: #64748b;
+}
+.user-check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 12px;
+}
+.user-check-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #374151;
 }
 .data-table th,
 .data-table td {
@@ -382,4 +510,3 @@ onMounted(fetchSettings)
   width: 200px;
 }
 </style>
-

@@ -142,6 +142,37 @@ class CallSignal(models.Model):
         verbose_name_plural = '通話シグナル'
 
 
+class CallRecording(models.Model):
+    """社内通話録音"""
+
+    session = models.OneToOneField(
+        CallSession,
+        on_delete=models.CASCADE,
+        related_name='recording',
+        verbose_name='通話セッション'
+    )
+    file = models.FileField(upload_to='call_recordings/', verbose_name='録音ファイル')
+    mime_type = models.CharField(max_length=100, verbose_name='MIMEタイプ')
+    file_size = models.BigIntegerField(verbose_name='ファイルサイズ')
+    duration_seconds = models.FloatField(null=True, blank=True, verbose_name='録音時間（秒）')
+    recording_started_at = models.DateTimeField(null=True, blank=True, verbose_name='録音開始日時')
+    recording_ended_at = models.DateTimeField(null=True, blank=True, verbose_name='録音終了日時')
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='call_recordings',
+        verbose_name='録音登録者'
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'call_recordings'
+        ordering = ['-created_at', '-id']
+        verbose_name = '通話録音'
+        verbose_name_plural = '通話録音'
+
+
 class PushSubscription(models.Model):
     """Web Push購読情報"""
 

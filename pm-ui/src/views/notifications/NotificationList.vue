@@ -9,6 +9,14 @@
           <button class="btn call-center-btn" type="button" @click="openCallCenter">
             通話
           </button>
+          <button
+            v-if="canUseRecordingFeatures"
+            class="btn recording-list-btn"
+            type="button"
+            @click="openRecordingList"
+          >
+            録音
+          </button>
           <label class="filter-label">
             カテゴリ:
             <select v-model="filterDomain" class="filter-select">
@@ -150,6 +158,7 @@ import { useRouter } from "vue-router";
 import { authState } from "@/auth";
 import api from "@/api/client";
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
+import { CALL_RECORDING_ALLOWED_USERS_KEY, parseAllowedRecordingUsernames } from "@/utils/callRecordingAccess";
 
 const dsSources = [
   { op: '読み書き', table: 't_notification', desc: '通知の取得・既読・全件既読・削除' },
@@ -160,6 +169,7 @@ const router = useRouter();
 const notifications = ref([]);
 const expandedIds = ref(new Set());
 const departments = ref([]);
+const recordingAllowedUsers = ref([]);
 
 const domainOptions = [
   { value: "production", label: "生産" },
@@ -308,6 +318,11 @@ const sortedNotifications = computed(() => {
 
 const unreadCount = computed(() => filteredNotifications.value.filter((item) => !item.is_read).length);
 
+const canUseRecordingFeatures = computed(() => {
+  const username = String(authState.user?.username || "").toLowerCase();
+  return recordingAllowedUsers.value.includes(username);
+});
+
 const availableDomainOptions = computed(() => {
   const presentDomains = new Set(notifications.value.map((n) => String(n?.domain || "")).filter(Boolean));
   const known = domainOptions.filter((opt) => presentDomains.has(opt.value));
@@ -372,6 +387,17 @@ const loadDepartments = async () => {
   }
 };
 
+const loadRecordingSettings = async () => {
+  try {
+    const res = await api.systemSettings.getAll();
+    const rawValue = res.data?.[CALL_RECORDING_ALLOWED_USERS_KEY]?.value || "";
+    recordingAllowedUsers.value = parseAllowedRecordingUsernames(rawValue);
+  } catch (error) {
+    console.error("録音設定の取得に失敗しました:", error);
+    recordingAllowedUsers.value = [];
+  }
+};
+
 const toggleRow = (id) => {
   const next = new Set(expandedIds.value);
   if (next.has(id)) {
@@ -412,6 +438,10 @@ const openTaskInbox = () => {
 
 const openCallCenter = () => {
   router.push("/notifications/calls");
+};
+
+const openRecordingList = () => {
+  router.push("/notifications/recordings");
 };
 
 const handleMarkRead = async (id) => {
@@ -465,6 +495,7 @@ const handleDeleteFiltered = async () => {
 onMounted(() => {
   loadNotifications();
   loadDepartments();
+  loadRecordingSettings();
 });
 </script>
 
@@ -681,6 +712,15 @@ onMounted(() => {
 
 .call-center-btn:hover {
   background: #1d4ed8;
+}
+
+.recording-list-btn {
+  background: #7c3aed;
+  color: #fff;
+}
+
+.recording-list-btn:hover {
+  background: #6d28d9;
 }
 
 .delete-all-btn:hover:not(:disabled) {

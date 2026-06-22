@@ -17,6 +17,12 @@ const notifications = [
     component: () => import("@/views/notifications/NotificationCallCenter.vue"),
     meta: { pageTitle: "社内通話", resource: "notifications" },
   },
+  {
+    path: "/notifications/recordings",
+    name: "NotificationRecordingList",
+    component: () => import("@/views/notifications/NotificationRecordingList.vue"),
+    meta: { pageTitle: "通話録音一覧", resource: "notifications" },
+  },
 ];
 
 export default notifications;

@@ -54,18 +54,25 @@
         <section class="panel">
           <div class="panel-title">最近の通話</div>
           <div v-if="recentSessions.length" class="session-list">
-            <button
-              v-for="session in recentSessions"
-              :key="session.id"
-              type="button"
-              class="session-card"
-              :class="{ active: currentSession?.id === session.id }"
-              @click="selectSession(session)"
-            >
-              <strong>{{ counterpartName(session) }}</strong>
-              <span>{{ session.call_type === 'video' ? 'ビデオ通話' : '音声通話' }} / {{ statusLabel(session.status) }}</span>
-              <span>{{ formatDateTime(session.initiated_at) }}</span>
-            </button>
+            <div v-for="session in recentSessions" :key="session.id" class="session-entry">
+              <button
+                type="button"
+                class="session-card"
+                :class="{ active: currentSession?.id === session.id }"
+                @click="selectSession(session)"
+              >
+                <strong>{{ counterpartName(session) }}</strong>
+                <span>{{ session.call_type === 'video' ? 'ビデオ通話' : '音声通話' }} / {{ statusLabel(session.status) }}</span>
+                <span>{{ formatDateTime(session.initiated_at) }}</span>
+              </button>
+              <div
+                v-if="canUseRecordingFeatures && session.has_recording && session.recording?.file_url"
+                class="session-recording"
+              >
+                <span class="session-recording-label">録音あり</span>
+                <audio controls preload="none" :src="session.recording.file_url" @click.stop></audio>
+              </div>
+            </div>
           </div>
           <div v-else class="empty">履歴はありません。</div>
         </section>
@@ -82,6 +89,24 @@
               <div class="status-badge" :class="statusClass">
                 {{ statusMessage }}
               </div>
+            </div>
+            <div v-if="canUseRecordingFeatures" class="recording-status-group">
+              <div v-if="showRecordingBadge" class="recording-badge">
+                <span class="recording-dot"></span>
+                録音中
+              </div>
+              <div v-if="recordingStatusText" class="recording-status-text">
+                {{ recordingStatusText }}
+              </div>
+              <button
+                v-if="canRetryRecordingUpload"
+                class="btn secondary-btn retry-btn"
+                type="button"
+                @click="retryRecordingUpload"
+                :disabled="busy || recordingUploadInFlight"
+              >
+                録音再送
+              </button>
             </div>
           </div>
 
@@ -167,6 +192,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import api from "@/api/client";
 import { authState } from "@/auth";
+import { CALL_RECORDING_ALLOWED_USERS_KEY, parseAllowedRecordingUsernames } from "@/utils/callRecordingAccess";
 
 const router = useRouter();
 const route = useRoute();
@@ -198,10 +224,32 @@ const availableVideoInputCount = ref(0);
 const remoteVideoScale = ref(1);
 const remotePinchStartDistance = ref(0);
 const remotePinchStartScale = ref(1);
+const mediaRecorder = ref(null);
+const recordingState = ref("idle");
+const recordingErrorMessage = ref("");
+const recordingMimeType = ref("");
+const recordingStartedAt = ref(null);
+const recordingEndedAt = ref(null);
+const pendingRecordingBlob = ref(null);
+const pendingRecordingSessionId = ref(null);
+const pendingRecordingMimeType = ref("");
+const pendingRecordingDurationSeconds = ref(null);
+const recordingUploadInFlight = ref(false);
+
+let recordingAudioContext = null;
+let recordingDestination = null;
+let localRecordingSource = null;
+let remoteRecordingSources = new Map();
+let recordingChunks = [];
+let recordingStopPromise = null;
+let recordingStopResolver = null;
+let stopUploadAfterRecording = false;
+let stopRecordingSessionId = null;
 
 const turnUrl = (import.meta.env.VITE_TURN_URL || "").trim();
 const turnUsername = (import.meta.env.VITE_TURN_USERNAME || "").trim();
 const turnCredential = (import.meta.env.VITE_TURN_CREDENTIAL || "").trim();
+const recordingAllowedUsers = ref([]);
 const rtcIceServers = [{ urls: "stun:stun.l.google.com:19302" }];
 if (turnUrl && turnUsername && turnCredential) {
   rtcIceServers.push({
@@ -218,6 +266,10 @@ const rtcConfig = {
 };
 
 const myUserId = computed(() => authState.user?.id ?? null);
+const canUseRecordingFeatures = computed(() => {
+  const username = String(authState.user?.username || "").toLowerCase();
+  return recordingAllowedUsers.value.includes(username);
+});
 
 const recentSessions = computed(() => sessions.value.slice(0, 12));
 
@@ -300,6 +352,35 @@ const statusClass = computed(() => {
   return "closed";
 });
 
+const showRecordingBadge = computed(() => {
+  return Boolean(currentSession.value) && recordingState.value === "recording";
+});
+
+const recordingStatusText = computed(() => {
+  if (recordingUploadInFlight.value) {
+    return "録音アップロード中";
+  }
+  if (recordingState.value === "failed") {
+    return recordingErrorMessage.value || "録音アップロードに失敗しました";
+  }
+  if (currentSession.value?.has_recording) {
+    return "録音保存済み";
+  }
+  if (recordingState.value === "recording") {
+    return "通話を録音しています";
+  }
+  return "";
+});
+
+const canRetryRecordingUpload = computed(() => {
+  return (
+    Boolean(pendingRecordingBlob.value) &&
+    Boolean(currentSession.value?.id) &&
+    Number(pendingRecordingSessionId.value) === Number(currentSession.value?.id) &&
+    !recordingUploadInFlight.value
+  );
+});
+
 const formatUserLabel = (user) => {
   const name = displayName(user);
   const dept = user.profile?.division_name || user.profile?.department_name || "";
@@ -340,6 +421,17 @@ const formatDateTime = (value) => {
   const hh = String(d.getHours()).padStart(2, "0");
   const mm = String(d.getMinutes()).padStart(2, "0");
   return `${y}-${m}-${day} ${hh}:${mm}`;
+};
+
+const formatApiDateTime = (value) => {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return "";
+  const y = value.getFullYear();
+  const m = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  const hh = String(value.getHours()).padStart(2, "0");
+  const mm = String(value.getMinutes()).padStart(2, "0");
+  const ss = String(value.getSeconds()).padStart(2, "0");
+  return `${y}-${m}-${day}T${hh}:${mm}:${ss}`;
 };
 
 const goNotificationList = () => {
@@ -395,6 +487,242 @@ const handleRemoteTouchEnd = () => {
 const stopTracks = (stream) => {
   if (!stream) return;
   stream.getTracks().forEach((track) => track.stop());
+};
+
+const closeRecordingContext = async () => {
+  if (localRecordingSource) {
+    localRecordingSource.disconnect();
+    localRecordingSource = null;
+  }
+  remoteRecordingSources.forEach((source) => {
+    source.disconnect();
+  });
+  remoteRecordingSources = new Map();
+  if (recordingAudioContext) {
+    try {
+      await recordingAudioContext.close();
+    } catch (_error) {
+      // close失敗時も録音終了処理を優先する
+    }
+  }
+  recordingAudioContext = null;
+  recordingDestination = null;
+};
+
+const createAudioOnlyStream = (stream) => {
+  const audioTracks = stream?.getAudioTracks?.() || [];
+  if (!audioTracks.length) return null;
+  return new MediaStream(audioTracks);
+};
+
+const attachLocalAudioToRecorder = () => {
+  if (!recordingAudioContext || !recordingDestination || !localStream.value || localRecordingSource) return;
+  const audioOnlyStream = createAudioOnlyStream(localStream.value);
+  if (!audioOnlyStream) return;
+  localRecordingSource = recordingAudioContext.createMediaStreamSource(audioOnlyStream);
+  localRecordingSource.connect(recordingDestination);
+};
+
+const attachRemoteAudioToRecorder = (stream) => {
+  if (!recordingAudioContext || !recordingDestination || !stream?.id || remoteRecordingSources.has(stream.id)) return;
+  const audioOnlyStream = createAudioOnlyStream(stream);
+  if (!audioOnlyStream) return;
+  const remoteSource = recordingAudioContext.createMediaStreamSource(audioOnlyStream);
+  remoteSource.connect(recordingDestination);
+  remoteRecordingSources.set(stream.id, remoteSource);
+};
+
+const selectRecordingMimeType = () => {
+  if (typeof window === "undefined" || typeof window.MediaRecorder === "undefined") return "";
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+  ];
+  return candidates.find((candidate) => window.MediaRecorder.isTypeSupported?.(candidate)) || "";
+};
+
+const clearPendingRecording = () => {
+  pendingRecordingBlob.value = null;
+  pendingRecordingSessionId.value = null;
+  pendingRecordingMimeType.value = "";
+  pendingRecordingDurationSeconds.value = null;
+  recordingErrorMessage.value = "";
+};
+
+const uploadPendingRecording = async (sessionId) => {
+  if (!canUseRecordingFeatures.value) {
+    clearPendingRecording();
+    return;
+  }
+  if (!pendingRecordingBlob.value || !sessionId) return;
+
+  recordingUploadInFlight.value = true;
+  recordingErrorMessage.value = "";
+  try {
+    const extension = pendingRecordingMimeType.value.includes("mp4") ? "mp4" : "webm";
+    const formData = new FormData();
+    formData.append(
+      "file",
+      pendingRecordingBlob.value,
+      `call-recording-${sessionId}.${extension}`
+    );
+    formData.append("mime_type", pendingRecordingMimeType.value || pendingRecordingBlob.value.type || "application/octet-stream");
+    formData.append("file_size", String(pendingRecordingBlob.value.size || 0));
+    if (recordingStartedAt.value) {
+      formData.append("recording_started_at", formatApiDateTime(recordingStartedAt.value));
+    }
+    if (recordingEndedAt.value) {
+      formData.append("recording_ended_at", formatApiDateTime(recordingEndedAt.value));
+    }
+    if (pendingRecordingDurationSeconds.value != null) {
+      formData.append("duration_seconds", String(pendingRecordingDurationSeconds.value));
+    }
+
+    await api.notifications.uploadCallRecording(sessionId, formData);
+    clearPendingRecording();
+    recordingState.value = "uploaded";
+    await loadSessions();
+    if (currentSession.value?.id === sessionId) {
+      await refreshCurrentSession();
+    }
+  } catch (error) {
+    console.error("録音アップロード失敗", error);
+    recordingState.value = "failed";
+    recordingErrorMessage.value = "録音アップロードに失敗しました。再送してください。";
+  } finally {
+    recordingUploadInFlight.value = false;
+  }
+};
+
+const beginCallRecording = async (session) => {
+  if (!session) return;
+  if (!canUseRecordingFeatures.value) {
+    recordingState.value = "idle";
+    return;
+  }
+  if (typeof window === "undefined") {
+    return;
+  }
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (typeof window.MediaRecorder === "undefined" || typeof AudioContextClass === "undefined") {
+    recordingState.value = "failed";
+    recordingErrorMessage.value = "このブラウザでは録音に対応していません。";
+    return;
+  }
+  if (recordingState.value === "recording") return;
+
+  await closeRecordingContext();
+  clearPendingRecording();
+
+  recordingAudioContext = new AudioContextClass();
+  recordingDestination = recordingAudioContext.createMediaStreamDestination();
+  recordingChunks = [];
+  recordingStartedAt.value = new Date();
+  recordingEndedAt.value = null;
+  recordingMimeType.value = selectRecordingMimeType();
+
+  attachLocalAudioToRecorder();
+  if (remoteStream.value) {
+    attachRemoteAudioToRecorder(remoteStream.value);
+  }
+
+  const recorderOptions = recordingMimeType.value ? { mimeType: recordingMimeType.value } : undefined;
+  const recorder = new window.MediaRecorder(recordingDestination.stream, recorderOptions);
+  mediaRecorder.value = recorder;
+  recordingState.value = "recording";
+  recordingErrorMessage.value = "";
+
+  recorder.ondataavailable = (event) => {
+    if (event.data && event.data.size > 0) {
+      recordingChunks.push(event.data);
+    }
+  };
+
+  recorder.onstop = async () => {
+    const targetSessionId = stopRecordingSessionId || session.id;
+    const endedAt = recordingEndedAt.value || new Date();
+    recordingEndedAt.value = endedAt;
+    const mimeType = recordingMimeType.value || recorder.mimeType || "application/octet-stream";
+    const blob = recordingChunks.length ? new Blob(recordingChunks, { type: mimeType }) : null;
+    if (blob) {
+      pendingRecordingBlob.value = blob;
+      pendingRecordingSessionId.value = targetSessionId;
+      pendingRecordingMimeType.value = mimeType;
+      pendingRecordingDurationSeconds.value = recordingStartedAt.value
+        ? Math.max((endedAt.getTime() - recordingStartedAt.value.getTime()) / 1000, 0)
+        : null;
+    } else {
+      recordingState.value = "idle";
+    }
+
+    mediaRecorder.value = null;
+    recordingChunks = [];
+    await closeRecordingContext();
+
+    if (stopUploadAfterRecording && blob && targetSessionId) {
+      await uploadPendingRecording(targetSessionId);
+    }
+
+    if (recordingStopResolver) {
+      recordingStopResolver();
+    }
+    recordingStopPromise = null;
+    recordingStopResolver = null;
+    stopUploadAfterRecording = false;
+    stopRecordingSessionId = null;
+  };
+
+  recorder.start(1000);
+};
+
+const stopCallRecording = async (session, { upload = true } = {}) => {
+  const targetSessionId = Number(session?.id || pendingRecordingSessionId.value || currentSession.value?.id || 0);
+  if (!targetSessionId) return;
+
+  if (recordingStopPromise) {
+    await recordingStopPromise;
+    if (upload && pendingRecordingBlob.value && Number(pendingRecordingSessionId.value) === targetSessionId) {
+      await uploadPendingRecording(targetSessionId);
+    }
+    return;
+  }
+
+  const recorder = mediaRecorder.value;
+  if (recorder && recorder.state !== "inactive") {
+    recordingEndedAt.value = new Date();
+    stopUploadAfterRecording = upload;
+    stopRecordingSessionId = targetSessionId;
+    recordingStopPromise = new Promise((resolve) => {
+      recordingStopResolver = resolve;
+    });
+    recorder.stop();
+    await recordingStopPromise;
+    return;
+  }
+
+  if (upload && pendingRecordingBlob.value && Number(pendingRecordingSessionId.value) === targetSessionId) {
+    await uploadPendingRecording(targetSessionId);
+  }
+};
+
+const finalizeCallUi = async (session, { statusText = "", uploadRecording = true, refreshSession = true } = {}) => {
+  await stopCallRecording(session, { upload: uploadRecording });
+  stopSignalPolling();
+  closePeerConnection();
+  resetMedia();
+  if (statusText) {
+    statusMessage.value = statusText;
+  }
+  await loadSessions();
+  if (refreshSession && currentSession.value?.id) {
+    await refreshCurrentSession();
+  }
+};
+
+const retryRecordingUpload = async () => {
+  if (!canRetryRecordingUpload.value || !currentSession.value?.id) return;
+  await uploadPendingRecording(currentSession.value.id);
 };
 
 const closePeerConnection = () => {
@@ -759,6 +1087,9 @@ const createPeerConnection = (session) => {
         remoteStream.value.addTrack(track);
       }
     });
+    if (event.streams?.[0]) {
+      attachRemoteAudioToRecorder(event.streams[0]);
+    }
     updateVideoBindings();
   };
 
@@ -804,6 +1135,17 @@ const loadUsers = async () => {
   const res = await api.accounts.getUsers({ is_active: true, ordering: "username", page_size: 0 });
   const data = res.data?.results || res.data || [];
   users.value = Array.isArray(data) ? data.filter((user) => Number(user.id) !== Number(myUserId.value)) : [];
+};
+
+const loadRecordingSettings = async () => {
+  try {
+    const res = await api.systemSettings.getAll();
+    const rawValue = res.data?.[CALL_RECORDING_ALLOWED_USERS_KEY]?.value || "";
+    recordingAllowedUsers.value = parseAllowedRecordingUsernames(rawValue);
+  } catch (error) {
+    console.error("録音設定の取得失敗", error);
+    recordingAllowedUsers.value = [];
+  }
 };
 
 const loadSessions = async () => {
@@ -903,11 +1245,11 @@ const handleSignal = async (signal) => {
   }
 
   if (signal.signal_type === "hangup") {
-    statusMessage.value = "相手が通話を終了しました";
-    stopSignalPolling();
-    closePeerConnection();
-    resetMedia();
-    await refreshCurrentSession();
+    await finalizeCallUi(currentSession.value, {
+      statusText: "相手が通話を終了しました",
+      uploadRecording: true,
+      refreshSession: true,
+    });
   }
 };
 
@@ -941,6 +1283,7 @@ const joinSession = async (session, { createOffer }) => {
   updateVideoBindings();
   currentSession.value = session;
   statusMessage.value = createOffer ? "呼出中" : "接続準備中";
+  await beginCallRecording(session);
   startSignalPolling();
   if (createOffer) {
     await sendOffer(session);
@@ -990,14 +1333,15 @@ const acceptCurrentSession = async () => {
 
 const declineCurrentSession = async () => {
   if (!currentSession.value) return;
+  const session = currentSession.value;
   busy.value = true;
   try {
-    await api.notifications.declineCall(currentSession.value.id);
-    statusMessage.value = "辞退しました";
-    stopSignalPolling();
-    closePeerConnection();
-    resetMedia();
-    await loadSessions();
+    await api.notifications.declineCall(session.id);
+    await finalizeCallUi(session, {
+      statusText: "辞退しました",
+      uploadRecording: true,
+      refreshSession: false,
+    });
   } catch (error) {
     console.error("辞退失敗", error);
     window.alert(error?.response?.data?.detail || "辞退に失敗しました。");
@@ -1008,18 +1352,19 @@ const declineCurrentSession = async () => {
 
 const finishCurrentSession = async () => {
   if (!currentSession.value) return;
+  const session = currentSession.value;
   busy.value = true;
   try {
-    await api.notifications.finishCall(currentSession.value.id);
-    statusMessage.value = "終了しました";
+    await api.notifications.finishCall(session.id);
+    await finalizeCallUi(session, {
+      statusText: "終了しました",
+      uploadRecording: true,
+      refreshSession: false,
+    });
   } catch (error) {
     console.error("終了失敗", error);
     window.alert(error?.response?.data?.detail || "終了に失敗しました。");
   } finally {
-    stopSignalPolling();
-    closePeerConnection();
-    resetMedia();
-    await loadSessions();
     busy.value = false;
   }
 };
@@ -1147,7 +1492,7 @@ watch([localVideoRef, remoteVideoRef], () => {
 
 onMounted(async () => {
   environmentWarning.value = getMediaEnvironmentError();
-  await reloadAll();
+  await Promise.all([loadRecordingSettings(), reloadAll()]);
   stopSessionPolling();
   sessionTimerId.value = window.setInterval(async () => {
     await loadSessions();
@@ -1160,8 +1505,13 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   stopSignalPolling();
   stopSessionPolling();
+  if (mediaRecorder.value?.state && mediaRecorder.value.state !== "inactive") {
+    stopUploadAfterRecording = false;
+    mediaRecorder.value.stop();
+  }
   closePeerConnection();
   resetMedia();
+  closeRecordingContext();
 });
 </script>
 
@@ -1327,6 +1677,11 @@ onBeforeUnmount(() => {
   gap: 0;
 }
 
+.session-entry {
+  display: grid;
+  gap: 6px;
+}
+
 .session-card {
   border: 1px solid #d8e0eb;
   border-radius: 10px;
@@ -1348,8 +1703,26 @@ onBeforeUnmount(() => {
   background: #fff7e8;
 }
 
+.session-recording {
+  display: grid;
+  gap: 4px;
+  padding: 0 8px 10px;
+}
+
+.session-recording-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #b91c1c;
+}
+
+.session-recording audio {
+  width: 100%;
+  height: 32px;
+}
+
 .stage-header {
   display: flex;
+  justify-content: space-between;
   gap: 12px;
   align-items: center;
   padding: 0 16px;
@@ -1366,6 +1739,53 @@ onBeforeUnmount(() => {
 .stage-subtitle {
   color: #61728a;
   font-size: 13px;
+}
+
+.recording-status-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.recording-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.recording-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #dc2626;
+  animation: recording-pulse 1.1s ease-in-out infinite;
+}
+
+.recording-status-text {
+  font-size: 12px;
+  color: #51627c;
+}
+
+.retry-btn {
+  padding: 8px 12px;
+}
+
+@keyframes recording-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 
 .status-badge {

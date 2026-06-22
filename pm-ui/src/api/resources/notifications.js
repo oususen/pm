@@ -38,6 +38,12 @@ export const createNotificationsAPI = (client) => ({
   finishCall(id) {
     return client.post(`/call-sessions/${id}/finish/`)
   },
+  uploadCallRecording(id, formData) {
+    return client.post(`/call-sessions/${id}/recording/`, formData)
+  },
+  getCallRecording(id) {
+    return client.get(`/call-sessions/${id}/recording/`)
+  },
   getCallSignals(id, params = {}) {
     return client.get(`/call-sessions/${id}/signals/`, { params })
   },
