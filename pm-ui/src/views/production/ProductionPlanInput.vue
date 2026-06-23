@@ -502,6 +502,12 @@
               空行非表示
             </label>
           </div>
+          <div class="field checkbox-field gantt-toggle-field">
+            <label>
+              <input type="checkbox" v-model="ganttHideWeekends" />
+              土日非表示
+            </label>
+          </div>
           <button
             class="btn gantt-save-btn"
             :class="{ 'gantt-save-dirty': ganttEditDirty }"
@@ -609,6 +615,10 @@
             @change="localStorage.setItem(HIDE_EMPTY_GANTT_ROWS_KEY, hideEmptyGanttRows ? '1' : '0')"
           />
           空行非表示
+        </label>
+        <label class="footer-gantt-toggle">
+          <input type="checkbox" v-model="ganttHideWeekends" />
+          土日非表示
         </label>
         <button
           class="btn-secondary footer-gantt-save-btn"
@@ -1241,6 +1251,8 @@ const HIDE_EMPTY_ROWS_KEY = 'productionPlanInput.hideEmptyRows'
 const hideEmptyRows = ref(localStorage.getItem(HIDE_EMPTY_ROWS_KEY) !== '0')
 const HIDE_EMPTY_GANTT_ROWS_KEY = 'productionPlanInput.hideEmptyGanttRows'
 const hideEmptyGanttRows = ref(localStorage.getItem(HIDE_EMPTY_GANTT_ROWS_KEY) !== '0')
+const GANTT_HIDE_WEEKENDS_KEY = 'processGanttView.hideWeekends'
+const ganttHideWeekends = ref(localStorage.getItem(GANTT_HIDE_WEEKENDS_KEY) === '1')
 const openManual = (path) => { window.open(`/manual?path=${encodeURIComponent(path)}`, '_blank') }
 const toggleToolbar = () => {
   toolbarCollapsed.value = !toolbarCollapsed.value
@@ -3263,6 +3275,14 @@ const setGanttMergeMode = (isMerged) => {
     gantt.setMergeConsecutive(isMerged)
   }
 }
+
+watch(ganttHideWeekends, (v) => {
+  localStorage.setItem(GANTT_HIDE_WEEKENDS_KEY, v ? '1' : '0')
+  const gantt = ganttRef.value
+  if (gantt) {
+    gantt.hideWeekends = v
+  }
+})
 
 const saveGanttEditChanges = async () => {
   if (!showProcessGantt.value) {

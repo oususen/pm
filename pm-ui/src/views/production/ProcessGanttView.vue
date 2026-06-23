@@ -99,7 +99,7 @@
               <div class="timeline-label">品番</div>
               <div class="timeline-axis" :style="{ width: timelineWidthPx + 'px' }">
                 <div
-                  v-for="slot in timelineSlots"
+                  v-for="slot in visibleTimelineSlots"
                   :key="slot.key"
                   class="time-slot-header"
                   :class="slot.dayClass"
@@ -258,6 +258,8 @@ const baseDate = ref(formatISODate(new Date()))
 const lines = ref([])
 const processGanttData = ref([])
 const mergeConsecutive = ref(false)
+const HIDE_WEEKENDS_KEY = 'processGanttView.hideWeekends'
+const hideWeekends = ref(localStorage.getItem(HIDE_WEEKENDS_KEY) === '1')
 const slotHours = 4
 const pixelsPerSlot = 80
 const mergeGapToleranceMs = 60 * 1000 // 連続とみなす隙間（1分）
@@ -348,19 +350,85 @@ const displayDays = computed(() => {
   return days
 })
 
-const timelineWidthPx = computed(() => timelineSlots.value.length * pixelsPerSlot)
+const visibleTimelineSlots = computed(() => {
+  if (!hideWeekends.value) return timelineSlots.value
+  return timelineSlots.value.filter(s => s.dayClass !== 'sat' && s.dayClass !== 'sun')
+})
+
+const weekendMsRanges = computed(() => {
+  if (!hideWeekends.value) return []
+  const msPerSlot = slotHours * 60 * 60 * 1000
+  const ranges = []
+  for (const slot of timelineSlots.value) {
+    if (slot.dayClass === 'sat' || slot.dayClass === 'sun') {
+      const start = new Date(slot.key).getTime()
+      if (ranges.length > 0 && ranges[ranges.length - 1].end === start) {
+        ranges[ranges.length - 1].end = start + msPerSlot
+      } else {
+        ranges.push({ start, end: start + msPerSlot })
+      }
+    }
+  }
+  return ranges
+})
+
+function getWeekendMsBefore(timeMs) {
+  if (!hideWeekends.value || !timelineStart.value) return 0
+  const startMs = timelineStart.value.getTime()
+  let total = 0
+  for (const range of weekendMsRanges.value) {
+    if (range.end <= startMs) continue
+    if (range.start >= timeMs) break
+    const overlapStart = Math.max(range.start, startMs)
+    const overlapEnd = Math.min(range.end, timeMs)
+    if (overlapEnd > overlapStart) total += overlapEnd - overlapStart
+  }
+  return total
+}
+
+function timeToCollapsedPx(timeMs) {
+  if (!timelineStart.value) return 0
+  const msPerSlot = slotHours * 60 * 60 * 1000
+  const rawMs = timeMs - timelineStart.value.getTime()
+  const weekendMs = getWeekendMsBefore(timeMs)
+  return ((rawMs - weekendMs) / msPerSlot) * pixelsPerSlot
+}
+
+function collapsedPxToTimeMs(px) {
+  if (!timelineStart.value) return 0
+  const msPerSlot = slotHours * 60 * 60 * 1000
+  const targetCollapsedMs = (px / pixelsPerSlot) * msPerSlot
+  const startMs = timelineStart.value.getTime()
+  let accumulatedCollapsed = 0
+  let currentRealMs = startMs
+  for (const range of weekendMsRanges.value) {
+    const nonWeekendBefore = range.start - currentRealMs
+    if (accumulatedCollapsed + nonWeekendBefore >= targetCollapsedMs) {
+      return currentRealMs + (targetCollapsedMs - accumulatedCollapsed)
+    }
+    accumulatedCollapsed += nonWeekendBefore
+    currentRealMs = range.end
+  }
+  return currentRealMs + (targetCollapsedMs - accumulatedCollapsed)
+}
+
+const timelineWidthPx = computed(() => visibleTimelineSlots.value.length * pixelsPerSlot)
 const chartContentWidthPx = computed(() => processColWidthPx + productColWidthPx + timelineWidthPx.value)
 const rowAddAnchors = computed(() => {
   if (!timelineStart.value || !timelineEnd.value) return []
   const anchors = []
   const startMs = timelineStart.value.getTime()
   const endMs = timelineEnd.value.getTime()
-  const msPerSlot = slotHours * 60 * 60 * 1000
   const cursor = new Date(timelineStart.value)
   cursor.setHours(0, 0, 0, 0)
 
   while (cursor.getTime() < endMs) {
     const dateKey = formatDateKey(cursor)
+    const dayClass = getDayClass(dateKey)
+    if (hideWeekends.value && (dayClass === 'sat' || dayClass === 'sun')) {
+      cursor.setDate(cursor.getDate() + 1)
+      continue
+    }
     const workStart = getWorkStartForDate(dateKey)
     if (!workStart) {
       cursor.setDate(cursor.getDate() + 1)
@@ -374,7 +442,7 @@ const rowAddAnchors = computed(() => {
       anchors.push({
         key: dateKey,
         dateKey: dateKey,
-        leftPx: ((anchorMs - startMs) / msPerSlot) * pixelsPerSlot,
+        leftPx: timeToCollapsedPx(anchorMs),
         startAt: anchorTime,
       })
     }
@@ -385,13 +453,16 @@ const rowAddAnchors = computed(() => {
 const workMarkers = computed(() => {
   if (!timelineStart.value || !timelineEnd.value) return []
   const markers = []
-  const start = new Date(timelineStart.value)
   const end = new Date(timelineEnd.value)
-  const cursor = new Date(start)
+  const cursor = new Date(timelineStart.value)
   cursor.setHours(0, 0, 0, 0)
-  const msPerSlot = slotHours * 60 * 60 * 1000
   while (cursor <= end) {
     const dateKey = formatDateKey(cursor)
+    const dayClass = getDayClass(dateKey)
+    if (hideWeekends.value && (dayClass === 'sat' || dayClass === 'sun')) {
+      cursor.setDate(cursor.getDate() + 1)
+      continue
+    }
     const workStart = getWorkStartForDate(dateKey)
     if (!workStart) {
       cursor.setDate(cursor.getDate() + 1)
@@ -399,7 +470,7 @@ const workMarkers = computed(() => {
     }
     const startMarkerTime = new Date(cursor)
     startMarkerTime.setHours(workStart.hour, workStart.minute, 0, 0)
-    const startLeftPx = ((startMarkerTime.getTime() - start.getTime()) / msPerSlot) * pixelsPerSlot
+    const startLeftPx = timeToCollapsedPx(startMarkerTime.getTime())
     if (startLeftPx >= 0 && startLeftPx <= timelineWidthPx.value) {
       markers.push({
         key: `${dateKey}-start-${workStart.hour}-${workStart.minute}`,
@@ -413,7 +484,7 @@ const workMarkers = computed(() => {
       const endMarkerTime = new Date(cursor)
       endMarkerTime.setDate(endMarkerTime.getDate() + workEnd.dayOffset)
       endMarkerTime.setHours(workEnd.hour, workEnd.minute, 0, 0)
-      const endLeftPx = ((endMarkerTime.getTime() - start.getTime()) / msPerSlot) * pixelsPerSlot
+      const endLeftPx = timeToCollapsedPx(endMarkerTime.getTime())
       if (endLeftPx >= 0 && endLeftPx <= timelineWidthPx.value) {
         markers.push({
           key: `${dateKey}-end-${workEnd.hour}-${workEnd.minute}-${workEnd.dayOffset}`,
@@ -434,9 +505,13 @@ const workBands = computed(() => {
   const end = new Date(timelineEnd.value)
   const cursor = new Date(start)
   cursor.setHours(0, 0, 0, 0)
-  const msPerSlot = slotHours * 60 * 60 * 1000
   while (cursor <= end) {
     const dateKey = formatDateKey(cursor)
+    const dayClass = getDayClass(dateKey)
+    if (hideWeekends.value && (dayClass === 'sat' || dayClass === 'sun')) {
+      cursor.setDate(cursor.getDate() + 1)
+      continue
+    }
     const workStart = getWorkStartForDate(dateKey)
     if (!workStart) {
       cursor.setDate(cursor.getDate() + 1)
@@ -458,8 +533,8 @@ const workBands = computed(() => {
       const clampedStart = Math.max(startMs, start.getTime())
       const clampedEnd = Math.min(endMs, end.getTime())
       if (clampedEnd > clampedStart) {
-        const leftPx = ((clampedStart - start.getTime()) / msPerSlot) * pixelsPerSlot
-        const widthPx = ((clampedEnd - clampedStart) / msPerSlot) * pixelsPerSlot
+        const leftPx = timeToCollapsedPx(clampedStart)
+        const widthPx = timeToCollapsedPx(clampedEnd) - leftPx
         bands.push({
           key: `${dateKey}-${clampedStart}`,
           leftPx,
@@ -1143,7 +1218,7 @@ const clearQuantityEditedFlags = () => {
   })
 }
 
-defineExpose({ saveSchedule: saveEditChanges, saveEditChanges, saveStructureChanges, setMergeConsecutive })
+defineExpose({ saveSchedule: saveEditChanges, saveEditChanges, saveStructureChanges, setMergeConsecutive, hideWeekends })
 
 let draggedBar = null
 let draggedBarModel = null
@@ -1173,10 +1248,8 @@ function getDragTooltip() {
 function syncDraggedBarModelFromElement() {
   if (!draggedBar || !draggedBarModel || !timelineStart.value) return
   const currentLeft = parseFloat(draggedBar.style.left || '0')
-  const msPerSlot = slotHours * 60 * 60 * 1000
-  const msPerPixel = msPerSlot / pixelsPerSlot
   const roundMs = 1000 * 60 * 5
-  const newStartMs = timelineStart.value.getTime() + (currentLeft * msPerPixel)
+  const newStartMs = collapsedPxToTimeMs(currentLeft)
   const roundedStartMs = Math.round(newStartMs / roundMs) * roundMs
   draggedBarModel.startTime = new Date(roundedStartMs)
   draggedBarModel.endTime = new Date(roundedStartMs + Number(draggedBarModel.durationMs || 0))
@@ -1233,10 +1306,8 @@ function handleDragMove(e) {
 function updateDragTooltip(e) {
   const tooltip = getDragTooltip()
   if (!timelineStart.value) return
-  const msPerSlot = slotHours * 60 * 60 * 1000
-  const msPerPixel = msPerSlot / pixelsPerSlot
   const currentLeft = parseFloat(draggedBar.style.left || '0')
-  const newStartMs = timelineStart.value.getTime() + (currentLeft * msPerPixel)
+  const newStartMs = collapsedPxToTimeMs(currentLeft)
   const roundMs = 1000 * 60 * 5
   const roundedStartMs = Math.round(newStartMs / roundMs) * roundMs
   const newStartDate = new Date(roundedStartMs)
@@ -1491,9 +1562,8 @@ function roundToFiveMinutes(date) {
 
 function updateBarDisplay(bar) {
   if (!timelineStart.value) return
-  const msPerSlot = slotHours * 60 * 60 * 1000
-  bar.leftPx = ((bar.startTime.getTime() - timelineStart.value.getTime()) / msPerSlot) * pixelsPerSlot
-  bar.widthPx = Math.max((bar.durationMs / msPerSlot) * pixelsPerSlot, 20)
+  bar.leftPx = timeToCollapsedPx(bar.startTime.getTime())
+  bar.widthPx = Math.max(timeToCollapsedPx(bar.endTime.getTime()) - bar.leftPx, 20)
   bar.startLabel = formatDateTime(bar.startTime)
   bar.endLabel = formatDateTime(bar.endTime)
   bar.durationLabel = formatMinutesLabel(bar.totalMinutesRequired ?? bar.durationMs / 60000)
@@ -2137,6 +2207,15 @@ watch(
 watch([calendarDayMap, workPatternMap], () => {
   if (!timelineStart.value || !timelineEnd.value || !timelineSlots.value.length) return
   timelineSlots.value = buildTimelineSlots(timelineStart.value, timelineEnd.value)
+})
+
+watch(hideWeekends, (v) => {
+  localStorage.setItem(HIDE_WEEKENDS_KEY, v ? '1' : '0')
+  processGanttData.value.forEach((proc) => {
+    ;(proc.items || []).forEach((item) => {
+      ;(item.bars || []).forEach((bar) => updateBarDisplay(bar))
+    })
+  })
 })
 
 watch(
