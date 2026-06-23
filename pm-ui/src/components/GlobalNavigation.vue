@@ -298,7 +298,7 @@ const pushSubscriptionEndpoint = ref('')
 // デフォルト値（サーバー設定取得前のフォールバック）
 let NOTIFICATION_POLLING_MS = 60000
 let TASK_POLLING_MS = 120000
-const CALL_POLLING_MS = 3000
+let CALL_POLLING_MS = 3000
 const localeOptions = getLocaleOptions()
 const selectedLocale = computed({
   get: () => locale.value,
@@ -765,6 +765,10 @@ const loadPollingSettings = async () => {
     if (data.task_polling_sec?.value) {
       const sec = parseInt(data.task_polling_sec.value, 10)
       if (sec > 0) TASK_POLLING_MS = sec * 1000
+    }
+    if (data.call_polling_sec?.value) {
+      const sec = parseInt(data.call_polling_sec.value, 10)
+      if (sec > 0) CALL_POLLING_MS = sec * 1000
     }
   } catch (e) {
     console.warn('ポーリング設定の取得に失敗しました。デフォルト値を使用します。', e)

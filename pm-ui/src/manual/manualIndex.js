@@ -19,6 +19,7 @@ export const manualSections = [
       { title: "カレンダ一覧", path: "マスタ/カレンダ一覧.md" },
       { title: "BOM作成マニュアル", path: "マスタ/BOM作成マニュアル.md" },
       { title: "ルーティング工程作成ルール", path: "マスタ/ルーティング工程作成ルール.md" },
+      { title: "ルーティング変更後の在庫移行", path: "マスタ/ルーティング変更後の在庫移行.md" },
     ],
   },
   {
@@ -46,8 +47,20 @@ export const manualSections = [
     title: "仕入れ管理",
     items: [
       { title: "発注提案システム", path: "仕入れ/発注提案システム.md" },
+      { title: "仕入れ計画", path: "仕入れ/仕入計画入力.md" },
+      { title: "仕入れ先カレンダ", path: "仕入れ/仕入れ先カレンダ.md" },
       { title: "仕入れ検収", path: "仕入れ/仕入れ検収.md" },
+      { title: "納入予定", path: "仕入れ/納入予定.md" },
+      { title: "自動納入リスト送信", path: "仕入れ/自動納入リスト送信.md" },
       { title: "仕入れ在庫/残量一覧", path: "生産/仕入れ在庫残量一覧.md" },
+    ],
+  },
+  {
+    id: "notifications",
+    title: "通知",
+    items: [
+      { title: "通知一覧", path: "通知閲覧.md" },
+      { title: "通知作成", path: "通知作成.md" },
     ],
   },
   {
@@ -73,6 +86,7 @@ export const manualSections = [
     items: [
       { title: "在庫管理メニュー", path: "在庫/在庫管理メニュー.md" },
       { title: "在庫調整メニュー", path: "在庫/在庫調整メニュー.md" },
+      { title: "棚卸現物入力", path: "在庫/棚卸現物入力.md" },
       { title: "在庫調整", path: "在庫/在庫調整.md" },
       { title: "進度調整", path: "在庫/進度調整.md" },
       { title: "調整履歴", path: "在庫/調整履歴.md" },
@@ -89,9 +103,15 @@ export const manualSections = [
       { title: "工程作業入力（デスクトップ）", path: "生産/工程作業入力_デスクトップ.md" },
       { title: "１人２工程入力", path: "生産/１人２工程入力.md" },
       { title: "レーザー実績入力", path: "生産/レーザー実績入力.md" },
+      { title: "カメラ実績入力", path: "生産/カメラ実績入力.md" },
+      { title: "スポット実績入力", path: "生産/スポット実績入力.md" },
+      { title: "ブレーキライン実績入力", path: "生産/ブレーキライン実績入力.md" },
       { title: "仕損品記録", path: "生産/仕損品記録.md" },
       { title: "仕損履歴", path: "生産/仕損履歴.md" },
       { title: "進捗管理", path: "生産/進捗管理.md" },
+      { title: "進捗のみ", path: "生産/進捗のみ.md" },
+      { title: "安全在庫一覧", path: "生産/安全在庫一覧.md" },
+      { title: "生産実績照会", path: "生産/生産実績照会.md" },
       { title: "実進度求め", path: "在庫/実進度求め.md" },
       { title: "在庫/残量一覧", path: "生産/在庫残量一覧.md" },
       { title: "構成部品在庫一覧", path: "生産/構成部品在庫一覧.md" },
@@ -139,6 +159,7 @@ export const manualSections = [
       { title: "定時タスク設定", path: "設定/定時タスク設定.md" },
       { title: "自動計画生成タスク", path: "設定/自動計画生成タスク.md" },
       { title: "納入パターン設定", path: "設定/納入パターン設定.md" },
+      { title: "基幹自動入力ツール", path: "設定/基幹自動入力ツール.md" },
     ],
   },
 ];

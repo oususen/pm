@@ -236,6 +236,9 @@ const pendingRecordingMimeType = ref("");
 const pendingRecordingDurationSeconds = ref(null);
 const recordingUploadInFlight = ref(false);
 
+let CALL_SESSION_POLLING_MS = 3000;
+let CALL_SIGNAL_POLLING_MS = 1500;
+
 let recordingAudioContext = null;
 let recordingDestination = null;
 let localRecordingSource = null;
@@ -1148,6 +1151,27 @@ const loadRecordingSettings = async () => {
   }
 };
 
+const loadCallPollingSettings = async () => {
+  try {
+    const res = await api.systemSettings.getAll();
+    const data = res.data || {};
+    if (data.call_polling_sec?.value) {
+      const sec = parseInt(data.call_polling_sec.value, 10);
+      if (sec > 0) {
+        CALL_SESSION_POLLING_MS = sec * 1000;
+      }
+    }
+    if (data.call_signal_polling_ms?.value) {
+      const ms = parseInt(data.call_signal_polling_ms.value, 10);
+      if (ms > 0) {
+        CALL_SIGNAL_POLLING_MS = ms;
+      }
+    }
+  } catch (error) {
+    console.error("通話ポーリング設定の取得失敗", error);
+  }
+};
+
 const loadSessions = async () => {
   const res = await api.notifications.listCallSessions({
     status: "ringing,accepted,declined,ended,missed,canceled",
@@ -1273,7 +1297,7 @@ const startSignalPolling = () => {
   stopSignalPolling();
   signalTimerId.value = window.setInterval(() => {
     pollSignals();
-  }, 1500);
+  }, CALL_SIGNAL_POLLING_MS);
 };
 
 const joinSession = async (session, { createOffer }) => {
@@ -1492,14 +1516,14 @@ watch([localVideoRef, remoteVideoRef], () => {
 
 onMounted(async () => {
   environmentWarning.value = getMediaEnvironmentError();
-  await Promise.all([loadRecordingSettings(), reloadAll()]);
+  await Promise.all([loadRecordingSettings(), loadCallPollingSettings(), reloadAll()]);
   stopSessionPolling();
   sessionTimerId.value = window.setInterval(async () => {
     await loadSessions();
     if (currentSession.value) {
       await refreshCurrentSession();
     }
-  }, 3000);
+  }, CALL_SESSION_POLLING_MS);
 });
 
 onBeforeUnmount(() => {
