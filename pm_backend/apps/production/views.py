@@ -2927,8 +2927,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             result[(child_id, chosen.process_id)] += next_multiplier
                         else:
                             # 消費側の工程が一意に決まらない場合は従来通り全工程に計上
+                            # 同一process_idの重複ステップは1回だけ計上（複数ルーティングが同じ工程・同じ出力品を持つ場合の多重計上を防止）
+                            seen_process_ids = set()
                             for cs in child_steps:
-                                result[(child_id, cs.process_id)] += next_multiplier
+                                if cs.process_id not in seen_process_ids:
+                                    seen_process_ids.add(cs.process_id)
+                                    result[(child_id, cs.process_id)] += next_multiplier
 
                     walk(child_id, next_multiplier, path | {child_id})
 

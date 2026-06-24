@@ -433,17 +433,19 @@ const availableOperators = computed(() => {
 })
 
 const activeTab = ref('tank')
-const operationalTabKeys = ['tank', 'floor', 'laser']
+const operationalTabKeys = ['tank', 'floor', 'team2', 'laser']
 const settingsTargetTab = ref('tank')
 const configurableTabs = [
   { key: 'tank', label: 'タンク' },
   { key: 'floor', label: 'フロア' },
+  { key: 'team2', label: '2班' },
   { key: 'blade', label: 'ブレード' },
   { key: 'laser', label: '板金' },
 ]
 const baseRecordTabs = [
   { key: 'tank', label: 'タンク' },
   { key: 'floor', label: 'フロア' },
+  { key: 'team2', label: '2班' },
   { key: 'blade', label: 'ブレード' },
   { key: 'laser', label: '板金' },
 ]
@@ -1000,7 +1002,7 @@ const resetFilters = async () => {
 }
 
 const FAVORITE_SCREEN_KEY = 'production.record_inquiry'
-const FAVORITE_TAB_KEYS = ['tank', 'floor', 'blade', 'laser']
+const FAVORITE_TAB_KEYS = ['tank', 'floor', 'team2', 'blade', 'laser']
 
 const toFavoritePayload = () => ({
   activeTab: String(activeTab.value || 'tank'),
@@ -1861,4 +1863,3 @@ onMounted(async () => {
   font-size: 13px;
 }
 </style>
-

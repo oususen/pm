@@ -8,6 +8,7 @@ import {
 const TAB_FILE_LABELS = {
   tank: 'タンク',
   floor: 'フロア',
+  team2: '2班',
   blade: 'ブレード',
   laser: '板金',
   brake: 'ブレーキ',
@@ -92,13 +93,17 @@ export const buildProductionSummaryRows = (
 
 export const exportProductionSummaryExcel = (sessions, startDate, endDate, options = {}) => {
   const tabKey = options?.tabKey || 'tank'
-  const { headers, rows } = buildProductionSummaryRows(
-    sessions,
-    tabKey,
-    options?.mappingsByTab || null,
-    startDate,
-    endDate,
-  )
+  const builtRows = Array.isArray(options?.prebuiltRows) ? options.prebuiltRows : null
+  const builtHeaders = Array.isArray(options?.headers) ? options.headers : null
+  const { headers, rows } = builtRows
+    ? { headers: builtHeaders || [], rows: builtRows }
+    : buildProductionSummaryRows(
+      sessions,
+      tabKey,
+      options?.mappingsByTab || null,
+      startDate,
+      endDate,
+    )
   if (!rows.length) {
     alert('出力対象のデータがありません。')
     return
