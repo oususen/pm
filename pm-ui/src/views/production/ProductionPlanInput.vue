@@ -1282,7 +1282,7 @@ const spotExcelMissingProcesses = ref([])
 const settingsTargetTab = ref('tank')
 const planTabs = [
   { key: 'tank', label: 'タンク' },
-  { key: 'floor', label: 'フロア' },
+  { key: 'floor', label: '２班' },
   { key: 'kubota', label: 'クボタ' },
   { key: 'floor-shipping', label: 'フロア出荷' },
   { key: 'blade', label: 'ブレード' },

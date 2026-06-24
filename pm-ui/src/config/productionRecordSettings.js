@@ -2,10 +2,11 @@ const TARGET_LINE_CODES_KEY = 'production_record_target_line_codes'
 const PRODUCT_MAPPINGS_KEY = 'production_record_product_mappings'
 const DEFAULT_ENTER_COUNT = 2
 
-const TAB_KEYS = ['tank', 'floor', 'blade', 'laser', 'brake']
+const TAB_KEYS = ['tank', 'floor', 'team2', 'blade', 'laser', 'brake']
 const DEFAULT_TARGET_LINE_CODES_BY_TAB = {
   tank: ['L2200', 'L2201'],
   floor: ['L2100'],
+  team2: ['L2200', 'L2201', 'L2100'],
   blade: [],
   laser: [],
   brake: [],
@@ -51,6 +52,7 @@ const normalizeMappingRows = (rows) => (Array.isArray(rows) ? rows : [])
 export const createDefaultTargetLineCodesByTab = () => ({
   tank: [...DEFAULT_TARGET_LINE_CODES_BY_TAB.tank],
   floor: [...DEFAULT_TARGET_LINE_CODES_BY_TAB.floor],
+  team2: [...DEFAULT_TARGET_LINE_CODES_BY_TAB.team2],
   blade: [...DEFAULT_TARGET_LINE_CODES_BY_TAB.blade],
   laser: [...DEFAULT_TARGET_LINE_CODES_BY_TAB.laser],
   brake: [...DEFAULT_TARGET_LINE_CODES_BY_TAB.brake],
@@ -100,6 +102,7 @@ export const getTargetLineCodesByTab = (lineCodesByTab, tabKey) => {
 export const createDefaultMappingsByTab = () => ({
   tank: [],
   floor: [],
+  team2: [],
   blade: [],
   laser: [],
   brake: [],
