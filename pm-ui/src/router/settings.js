@@ -98,13 +98,12 @@ const settings = [
   {
     path: "/settings/supplier-order-pattern",
     name: "SupplierOrderPatternSettings",
-    component: () => import("@/views/settings/SupplierOrderPatternSettings.vue"),
-    meta: { pageTitle: "納入パターン設定", manualPath: "設定/納入パターン設定.md", resource: "settings.supplier_order_schedule" },
+    redirect: "/purchase/supplier-order-pattern",
   },
   {
     path: "/settings/supplier-order-schedule",
     name: "SupplierOrderScheduleSettings",
-    redirect: "/settings/supplier-order-pattern",
+    redirect: "/purchase/supplier-order-pattern",
   },
   {
     path: "/settings/purchase-order-approval",

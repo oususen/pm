@@ -58,7 +58,7 @@ const findPermission = (user, resource) => {
   return permissions.find((item) => item.resource === resource) || null;
 };
 
-const hasMenuPermission = (resource, level) => {
+const hasMenuPermission = (resource, level, fallbackResource = null, fallbackToPurchase = true) => {
   const user = authState.user;
   if (!user) return false;
   if (user.is_superuser) return true;
@@ -68,6 +68,19 @@ const hasMenuPermission = (resource, level) => {
     return level === "edit"
       ? Boolean(entry.can_edit)
       : Boolean(entry.can_view || entry.can_edit);
+  }
+
+  if (fallbackResource) {
+    const fallbackEntry = findPermission(user, fallbackResource);
+    if (fallbackEntry) {
+      return level === "edit"
+        ? Boolean(fallbackEntry.can_edit)
+        : Boolean(fallbackEntry.can_view || fallbackEntry.can_edit);
+    }
+  }
+
+  if (!fallbackToPurchase) {
+    return false;
   }
 
   return hasPermission(user, "purchase", level);
@@ -136,7 +149,8 @@ const tiles = computed(() => [
     icon: "✏️",
     category: "records",
     required: "edit",
-    resource: "purchase.actual_input",
+    resource: "purchase.actual_edit",
+    fallbackResource: "purchase.actual_input",
   },
   {
     to: "/purchase/supplier-calendar",
@@ -152,15 +166,17 @@ const tiles = computed(() => [
     icon: "📄",
     category: "plan",
     required: "edit",
-    resource: "purchase.plan_input",
+    resource: "purchase.delivery_schedule",
+    fallbackResource: "purchase.plan_input",
   },
   {
-    to: "/settings/supplier-order-pattern",
+    to: "/purchase/supplier-order-pattern",
     label: "納入パターン設定",
     icon: "🔄",
     category: "plan",
     required: "view",
-    resource: "settings.supplier_order_schedule",
+    resource: "purchase.supplier_order_pattern",
+    fallbackToPurchase: false,
   },
   {
     to: "/settings/purchase-order-approval",
@@ -188,7 +204,12 @@ const tiles = computed(() => [
   },
 ].map((tile) => ({
   ...tile,
-  disabled: !hasMenuPermission(tile.resource, tile.required),
+  disabled: !hasMenuPermission(
+    tile.resource,
+    tile.required,
+    tile.fallbackResource,
+    tile.fallbackToPurchase !== false,
+  ),
 })));
 
 const visibleTiles = computed(() => {

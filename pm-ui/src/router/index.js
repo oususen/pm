@@ -71,6 +71,47 @@ export const hasPermission = (user, resource, level = "view") => {
   return Boolean(perm.can_view || perm.can_edit);
 };
 
+const getExplicitPermission = (user, resource, level = "view") => {
+  if (!resource || !user) return null;
+  const permissions = Array.isArray(user.effective_permissions)
+    ? user.effective_permissions
+    : [];
+  const perm = permissions.find((item) => item.resource === resource);
+  if (!perm) return null;
+  if (level === "edit") return Boolean(perm.can_edit);
+  return Boolean(perm.can_view || perm.can_edit);
+};
+
+export const canAccessRouteResource = (
+  user,
+  resource,
+  level = "view",
+  fallbackResource = null,
+  fallbackToParent = true,
+) => {
+  if (!resource) return true;
+  if (!user) return false;
+  if (user.is_superuser) return true;
+
+  const explicit = getExplicitPermission(user, resource, level);
+  if (explicit !== null) return explicit;
+
+  if (fallbackResource) {
+    const legacy = getExplicitPermission(user, fallbackResource, level);
+    if (legacy !== null) return legacy;
+  }
+
+  if (!fallbackToParent) return false;
+
+  const parentResource = String(resource).split(".")[0];
+  if (parentResource && parentResource !== resource) {
+    const parent = getExplicitPermission(user, parentResource, level);
+    if (parent !== null) return parent;
+  }
+
+  return false;
+};
+
 router.afterEach((to) => {
   const pageTitle = to.meta?.pageTitle;
   document.title = pageTitle || DEFAULT_TITLE;
@@ -110,12 +151,13 @@ router.beforeEach(async (to) => {
     return { path: "/login", query: { next: to.fullPath } };
   }
 
-  // 権限チェックはフロントエンドUIレベルで行うため、routerでは行わない
-  // const resource = to.meta?.resource;
-  // const level = to.meta?.permission || "view";
-  // if (!hasPermission(user, resource, level)) {
-  //   return { path: "/" };
-  // }
+  const resource = to.meta?.resource;
+  const level = to.meta?.permission || "view";
+  const fallbackResource = to.meta?.fallbackResource || null;
+  const fallbackToParent = to.meta?.fallbackToParent !== false;
+  if (!canAccessRouteResource(user, resource, level, fallbackResource, fallbackToParent)) {
+    return { path: "/" };
+  }
 
   return true;
 });
