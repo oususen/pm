@@ -85,6 +85,14 @@
           <div v-if="templateSuccess" class="save-message success">
             {{ templateSuccess }}
           </div>
+          <button
+            type="button"
+            class="btn"
+            @click="clearTemplatePermissions"
+            :disabled="templateSaving || !selectedPositionName || !canEditPage"
+          >
+            一括外す
+          </button>
           <button type="button" class="btn primary" @click="saveTemplate" :disabled="templateSaving || !canEditPage">
             {{ templateSaving ? '保存中...' : '保存' }}
           </button>
@@ -149,6 +157,14 @@
           <div v-if="departmentTemplateSuccess" class="save-message success">
             {{ departmentTemplateSuccess }}
           </div>
+          <button
+            type="button"
+            class="btn"
+            @click="clearDepartmentTemplatePermissions"
+            :disabled="departmentTemplateSaving || !selectedDepartmentOnlyId || !canEditPage"
+          >
+            一括外す
+          </button>
           <button type="button" class="btn primary" @click="saveDepartmentTemplate" :disabled="departmentTemplateSaving || !canEditPage">
             {{ departmentTemplateSaving ? '保存中...' : '保存' }}
           </button>
@@ -213,6 +229,14 @@
           <div v-if="positionTemplateSuccess" class="save-message success">
             {{ positionTemplateSuccess }}
           </div>
+          <button
+            type="button"
+            class="btn"
+            @click="clearPositionTemplatePermissions"
+            :disabled="positionTemplateSaving || !selectedPositionOnlyName || !canEditPage"
+          >
+            一括外す
+          </button>
           <button type="button" class="btn primary" @click="savePositionTemplate" :disabled="positionTemplateSaving || !canEditPage">
             {{ positionTemplateSaving ? '保存中...' : '保存' }}
           </button>
@@ -459,6 +483,28 @@ const serializePermissions = () =>
       can_view: Boolean(perm.can_view),
       can_edit: Boolean(perm.can_edit),
     }))
+
+const clearPermissionList = (permissions) => {
+  permissions.forEach((perm) => {
+    perm.can_view = false
+    perm.can_edit = false
+  })
+}
+
+const clearTemplatePermissions = () => {
+  if (!canEditPage.value) return
+  clearPermissionList(templatePermissions.value)
+}
+
+const clearDepartmentTemplatePermissions = () => {
+  if (!canEditPage.value) return
+  clearPermissionList(departmentTemplatePermissions.value)
+}
+
+const clearPositionTemplatePermissions = () => {
+  if (!canEditPage.value) return
+  clearPermissionList(positionTemplatePermissions.value)
+}
 
 const onPermissionChange = (perm, field) => {
   if (!canEditPage.value) return
