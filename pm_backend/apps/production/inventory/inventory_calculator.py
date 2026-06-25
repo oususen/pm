@@ -1402,6 +1402,10 @@ def recalculate_planned_stock_qty(
         final_delivery_lt = _get_final_product_delivery_lt(line_id, product_id)
         max_lt = max(max_lt, final_delivery_lt)
     calc_start_date = shift_working_days(calc_today, -(max_lt + 1))
+    # start_date が calc_start_date より古い場合（過去から再計算等）、start_date から再計算する
+    # ※ recalculate_stock_qty の effective_start = min(start_date, calc_start_date) と同等
+    if start_date < calc_start_date:
+        calc_start_date = start_date
 
     # calc_start_date が start_date より古い場合、バックログを再取得
     if calc_start_date < start_date:
