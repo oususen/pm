@@ -382,26 +382,29 @@ def _get_max_parent_bom_lead_time(product_id):
 
 def _get_final_product_delivery_lt(line_id, product_id):
     """
-    最終品のデリバリLT（RoutingStep / Line.lead_time_days）を取得する。
+    ライン最終品/最終品のデリバリLT（RoutingStep / Line.lead_time_days）を取得する。
     計画在庫初期値のLT調整に使用するデリバリLT。
     demand_map（LineDemand由来）のplan_dateは同じLTでシフト済み。
     """
     from masters.models import RoutingStep
     from django.db.models import Q
     step = (
-        RoutingStep.objects.filter(line_id=line_id)
+        RoutingStep.objects.filter(
+            Q(line_id=line_id) | Q(line__isnull=True, process__line_id=line_id)
+        )
         .filter(
             Q(output_product_id=product_id)
             | Q(output_product_id__isnull=True, routing__product_id=product_id)
         )
-        .select_related('line')
+        .select_related('line', 'process__line')
         .first()
     )
     if step:
         if step.lead_time_days:
             return int(step.lead_time_days)
-        if step.line and step.line.lead_time_days:
-            return int(step.line.lead_time_days)
+        step_line = step.line or getattr(step.process, 'line', None)
+        if step_line and step_line.lead_time_days:
+            return int(step_line.lead_time_days)
     return 0
 
 
@@ -719,7 +722,15 @@ def _calculate_parent_actual_shipment(backlog, shift_fn=None):
     return total_shipment
 
 
-def _compute_planned_stock_lt_adjustment(product_id, initial_date, max_lt, shift_fn, demand_map=None, final_delivery_lt=None):
+def _compute_planned_stock_lt_adjustment(
+    product_id,
+    initial_date,
+    max_lt,
+    shift_fn,
+    demand_map=None,
+    final_delivery_lt=None,
+    line_id=None,
+):
     """
     計画在庫初期値のLT調整量を計算する。
 
@@ -728,18 +739,20 @@ def _compute_planned_stock_lt_adjustment(product_id, initial_date, max_lt, shift
     「initial_date+1 ～ initial_date+LT」の出庫分（LTシフト）を差し引く必要がある。
 
     社内品: 親製品の実績（BOM LT 分）を差し引く
-    最終品: デリバリLT分先の firm 需要を差し引く
+    最終品/ライン最終品: デリバリLT分の需要を差し引く
 
     ※ initial_date+LT ≤ today-1 の条件下では全て実績確定しているため値が安定する。
     """
-    from masters.models import BOMItem, Product
+    from masters.models import BOMItem
     from django.db.models import Sum
 
     total_adjustment = Decimal('0')
 
-    # 最終品：calc_start_date（initial_date）から後ろ向きにデリバリLT日分の需要を差し引く。
+    # 最終品/ライン最終品：calc_start_date（initial_date）から後ろ向きに
+    # デリバリLT日分の需要を差し引く。
     #
-    # demand_map はLineDemandから取得（plan_dateはLTシフト済み）。
+    # 最終品は demand_map（LineDemand由来）を優先し、
+    # ライン最終品など demand_map を持たないケースでは同日の order_qty を使用する。
     # LT 分だけ在庫の初期値から差し引いて計画在庫の初期値とする：
     #   LT=1: demand[initial_date]
     #   LT=2: demand[initial_date] + demand[initial_date - 1営業日]
@@ -757,6 +770,13 @@ def _compute_planned_stock_lt_adjustment(product_id, initial_date, max_lt, shift
         for offset in range(delivery_lt):  # 0, 1, ..., delivery_lt-1
             adj_date = shift_fn(initial_date, -offset)  # initial_date から後ろ向きにシフト
             qty = demand_map.get((product_id, adj_date), Decimal('0')) if demand_map else Decimal('0')
+            if not qty and line_id:
+                backlog_rows = LineBacklog.objects.filter(
+                    line_id=line_id,
+                    product_id=product_id,
+                    plan_date=adj_date,
+                )
+                qty = Decimal(str(sum(int(row.order_qty or 0) for row in backlog_rows)))
             total_adjustment += Decimal(str(qty))
         return int(total_adjustment)
 
@@ -1394,12 +1414,14 @@ def recalculate_planned_stock_qty(
     if max_parent_lt is None:
         max_parent_lt = _get_direct_parent_bom_lead_time(product_id)
     max_lt = int(max_parent_lt or 0)
-    # 最終品はデリバリLT分だけ初期値を調整するため、計算窓を広げる。
-    # self_lt_days（製造LT）ではなく demand_map と同じデリバリLT（RoutingStep/Line）を使う。
+    # 最終品/ライン最終品はデリバリLT分だけ初期値を調整するため、計算窓を広げる。
+    # self_lt_days（製造LT）ではなく、出庫基準と同じデリバリLT（RoutingStep/Line）を使う。
     sample_product = backlogs[0].product if backlogs else None
     is_final_product = bool(sample_product and getattr(sample_product, 'is_final_product', False))
+    is_line_final_product = bool(sample_product and getattr(sample_product, 'is_line_final_product', False))
     final_delivery_lt = 0
-    if is_final_product:
+    use_delivery_lt_initialization = is_final_product or is_line_final_product
+    if use_delivery_lt_initialization:
         final_delivery_lt = _get_final_product_delivery_lt(line_id, product_id)
         max_lt = max(max_lt, final_delivery_lt)
     calc_start_date = shift_working_days(calc_today, -(max_lt + 1))
@@ -1421,6 +1443,8 @@ def recalculate_planned_stock_qty(
             by_date.setdefault(backlog.plan_date, []).append(backlog)
         sample_product = backlogs[0].product if backlogs else None
         is_final_product = bool(sample_product and getattr(sample_product, 'is_final_product', False))
+        is_line_final_product = bool(sample_product and getattr(sample_product, 'is_line_final_product', False))
+        use_delivery_lt_initialization = is_final_product or is_line_final_product
 
     inventory_lock_date = SystemSetting.get_lock_date('inventory')
     planned_by_date = {}
@@ -1454,31 +1478,45 @@ def recalculate_planned_stock_qty(
         process_code_cache[pid] = code
         return code
 
-    # 計算開始日以前の実在庫を初期値として取得
-    # 最終品: calc_start_date 当日（__lte）の在庫を使う
-    #   → LT調整の基準日 = calc_start_date に一致させることで
-    #     「calc_start_date の在庫 - calc_start_date からLT日分の実需」が初期計庫になる
-    # 社内品: calc_start_date の前日（__lt）の在庫を使う（従来どおり）
-    _ib_date_lookup = 'plan_date__lte' if is_final_product else 'plan_date__lt'
-    initial_backlog = LineBacklog.objects.filter(
+    # 計画在庫の初期値は、まず「計算開始日より前の既存 planned_stock_qty」を優先する。
+    # これがあれば、在庫(stock_qty)を直接起点にせずに計庫の連鎖を継続できる。
+    planned_anchor = LineBacklog.objects.filter(
         line_id=line_id,
         product_id=product_id,
-        **{_ib_date_lookup: calc_start_date},
-        stock_qty__isnull=False
+        plan_date__lt=calc_start_date,
+        planned_stock_qty__isnull=False,
     ).order_by('-plan_date', 'sequence_no', 'id').first()
 
-    if initial_backlog:
+    if planned_anchor:
+        last_planned = planned_anchor.planned_stock_qty or 0
+        planned_by_date[planned_anchor.plan_date] = last_planned
+        initial_backlog = planned_anchor
+    else:
+        # 既存計庫が無い初回だけ、実在庫を基準に LT 分の需要を差し引いて初期化する。
+        # 最終品/ライン最終品: calc_start_date 当日（__lte）の在庫を使う
+        # 社内品: calc_start_date の前日（__lt）の在庫を使う
+        _ib_date_lookup = 'plan_date__lte' if use_delivery_lt_initialization else 'plan_date__lt'
+        initial_backlog = LineBacklog.objects.filter(
+            line_id=line_id,
+            product_id=product_id,
+            **{_ib_date_lookup: calc_start_date},
+            stock_qty__isnull=False
+        ).order_by('-plan_date', 'sequence_no', 'id').first()
+
+    if initial_backlog and not planned_anchor:
         # 実在庫はLTシフトなし、計画在庫はLTシフトありで計算するため、
         # initial_date+1 ～ initial_date+LT の出庫分（LTシフト）を差し引く。
         # 社内品：親の実績を BOM LT 分差し引く
-        # 最終品：デリバリLT分先の firm 需要を差し引く
+        # 最終品/ライン最終品：デリバリLT分の需要を差し引く
         lt_adjustment = _compute_planned_stock_lt_adjustment(
             product_id, initial_backlog.plan_date, max_lt, shift_working_days,
-            demand_map=demand_map,            final_delivery_lt=final_delivery_lt if is_final_product else None,
+            demand_map=demand_map,
+            final_delivery_lt=final_delivery_lt if use_delivery_lt_initialization else None,
+            line_id=line_id,
         )
         last_planned = (initial_backlog.stock_qty or 0) - lt_adjustment
         planned_by_date[initial_backlog.plan_date] = last_planned
-    else:
+    elif not initial_backlog:
         # calc_start_date以前にデータがない場合（初回投入時など）、
         # 対象範囲の最古のstock_qtyを初期値としてフォールバック
         fallback = backlogs[0] if backlogs else None
@@ -1510,13 +1548,13 @@ def recalculate_planned_stock_qty(
             continue
 
         # 計算開始日以前は通常計算をスキップ。
-        # 最終品: calc_start_date 当日の計庫 = stock[calc_start_date] - LT日分の実需 を初期値とするため、
+        # 最終品/ライン最終品: calc_start_date 当日の計庫を初期値とするため、
         #   当日もスキップ。ただし LT 調整済みの初期値を DB に書き戻す必要があるため bulk_update 対象に含める。
         # 社内品: calc_start_date から通常計算を開始する（従来どおり）。
         if plan_date < calc_start_date:
             planned_by_date[plan_date] = last_planned
             continue
-        if is_final_product and plan_date == calc_start_date:
+        if use_delivery_lt_initialization and not planned_anchor and plan_date == calc_start_date:
             planned_by_date[plan_date] = last_planned
             rep = pick_representative(rows)
             for row in rows:

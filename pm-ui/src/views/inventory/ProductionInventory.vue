@@ -609,15 +609,23 @@ const groups = computed(() => {
         c.firm = Math.max(c.firm, firmVal);
       }
     }
-    // 計画・在庫・計画在庫は line_backlog から取得
+    // 計画は全seq合算
     c.plan += Number(d.plan_qty || 0);
     // 実績: このラインの生産実績
     c.actual += Number(d.actual_qty || 0);
     c.adjust += Number(d.adjust_qty || 0); // 調整数
     c.scrap += Number(d.scrap_qty || 0); // 仕損数
-    c.stock += Number(d.stock_qty || 0);
-    c.planned_stock += Number(d.planned_stock_qty || 0);
-    c.progress += Number(d.progress_qty || 0);
+    // 在庫・計画在庫・進度は仕様どおり最小sequence_no行のみ採用
+    if (c.inventory_seq === undefined || seqVal < c.inventory_seq) {
+      c.inventory_seq = seqVal;
+      c.stock = Number(d.stock_qty || 0);
+      c.planned_stock = Number(d.planned_stock_qty || 0);
+      c.progress = Number(d.progress_qty || 0);
+    } else if (seqVal === c.inventory_seq) {
+      c.stock = Math.max(c.stock, Number(d.stock_qty || 0));
+      c.planned_stock = Math.max(c.planned_stock, Number(d.planned_stock_qty || 0));
+      c.progress = Math.max(c.progress, Number(d.progress_qty || 0));
+    }
   }
   const result = Array.from(map.values());
   result.sort((a, b) => {
@@ -1612,4 +1620,3 @@ const exportToExcel = () => {
   &:hover { background: #6d28d9; }
 }
 </style>
-
