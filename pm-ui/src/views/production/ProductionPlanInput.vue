@@ -5660,7 +5660,12 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
 .btn-danger {
   background: #e74c3c;
   color: #fff;
-  border-color: #c0392b;
+  border: 1px solid #c0392b;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
 }
 .btn-danger:hover {
   background: #c0392b;
