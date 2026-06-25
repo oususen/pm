@@ -2004,7 +2004,18 @@ const cancelSelection = () => {
   closeProductPhotoDialog()
 }
 
-const toggleManualProduct = () => {
+const toggleManualProduct = async () => {
+  if (!manualProduct.value) {
+    const pw = prompt('手入力するにはパスワードを入力してください')
+    if (!pw) return
+    try {
+      await api.systemSettings.verifyPlanQtyPassword({ password: pw })
+    } catch (e) {
+      const detail = e?.response?.data?.detail || 'パスワードが正しくありません。'
+      alert(detail)
+      return
+    }
+  }
   manualProduct.value = !manualProduct.value
   if (manualProduct.value) {
     record.value.product_id = ''
