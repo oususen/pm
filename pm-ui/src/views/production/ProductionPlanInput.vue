@@ -884,6 +884,26 @@
       <h3 class="settings-title">ライン編集</h3>
 
       <div class="settings-section">
+        <div class="settings-section-header" @click="settingsCollapsed.tabMgmt = !settingsCollapsed.tabMgmt">
+          <span class="settings-section-arrow">{{ settingsCollapsed.tabMgmt ? '▶' : '▼' }}</span>
+          タブ管理
+        </div>
+        <div v-show="!settingsCollapsed.tabMgmt" class="settings-section-body">
+          <div class="settings-rule-editor">
+            <input v-model="newTabDraft.key" type="text" placeholder="タブキー（英数字）" style="width:140px" />
+            <input v-model="newTabDraft.label" type="text" placeholder="タブ名" style="width:140px" />
+            <button class="btn" type="button" @click="createTab">追加</button>
+          </div>
+          <div class="settings-list settings-rules">
+            <div v-for="tab in configurablePlanTabs" :key="`tab-mgmt-${tab.key}`" class="settings-rule-row">
+              <span>{{ tab.key }} / {{ tab.label }}</span>
+              <button class="btn btn-danger" type="button" @click="deleteTab(tab.key)">削除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
         <div class="settings-section-header" @click="settingsCollapsed.lines = !settingsCollapsed.lines">
           <span class="settings-section-arrow">{{ settingsCollapsed.lines ? '▶' : '▼' }}</span>
           タブ別ライン選択
@@ -1280,7 +1300,7 @@ const spotExcelProcess4013Id = ref(null)
 const spotExcelMissingProducts = ref([])
 const spotExcelMissingProcesses = ref([])
 const settingsTargetTab = ref('tank')
-const planTabs = [
+const FALLBACK_PLAN_TABS = [
   { key: 'tank', label: 'タンク' },
   { key: 'floor', label: '２班' },
   { key: 'kubota', label: 'クボタ' },
@@ -1289,9 +1309,10 @@ const planTabs = [
   { key: 'laser', label: 'レーザ' },
   { key: 'brake', label: 'ブレーキ' },
   { key: 'spot', label: 'スポット' },
-  { key: 'line-settings', label: 'ライン編集' },
 ]
-const operationalPlanTabs = ['tank', 'floor', 'kubota', 'floor-shipping', 'blade', 'laser', 'brake', 'spot']
+const dbPlanTabs = ref([...FALLBACK_PLAN_TABS])
+const planTabs = computed(() => [...dbPlanTabs.value, { key: 'line-settings', label: 'ライン編集' }])
+const operationalPlanTabs = computed(() => dbPlanTabs.value.map((t) => t.key))
 const lineKeywordsByTab = {
   tank: ['タンク', 'tank'],
   floor: ['フロア', 'floor'],
@@ -1371,7 +1392,7 @@ const productOrderActiveCode = ref('')
 const productOrderCache = ref(new Map())
 const productColorCache = ref(new Map())
 const lineSettingsMessage = ref('')
-const settingsCollapsed = ref({ lines: false, prevDayShift: true, ganttStartTime: true, calcSpecial: true })
+const settingsCollapsed = ref({ tabMgmt: true, lines: false, prevDayShift: true, ganttStartTime: true, calcSpecial: true })
 const prevDayShiftRules = ref([])
 const prevDayShiftDraft = ref({
   lineCode: '',
@@ -1506,7 +1527,7 @@ const floorShippingCartCounts = computed(() => {
   })
   return result
 })
-const configurablePlanTabs = computed(() => planTabs.filter((tab) => operationalPlanTabs.includes(tab.key)))
+const configurablePlanTabs = computed(() => planTabs.value.filter((tab) => operationalPlanTabs.value.includes(tab.key)))
 const normalizeLineCode = (value) => String(value || '').trim().toUpperCase()
 const normalizeProcessCode = (value) => String(value || '').trim().toUpperCase()
 const normalizeLineCodes = (values) => Array.from(new Set(
@@ -1609,7 +1630,7 @@ const pickPreferredLineId = (candidates) => {
 const createDefaultLineCodesByTab = (lineList = []) => {
   const result = {}
   const allCodes = lineList.map((line) => normalizeLineCode(line?.line_code))
-  operationalPlanTabs.forEach((tabKey) => {
+  operationalPlanTabs.value.forEach((tabKey) => {
     if (tabKey === 'tank') {
       result[tabKey] = normalizeLineCodes(allCodes)
       return
@@ -1629,7 +1650,7 @@ const createDefaultLineCodesByTab = (lineList = []) => {
 }
 const lineCodesByTab = ref(createDefaultLineCodesByTab())
 const getLineCodesForTab = (tabKey) => normalizeLineCodes(lineCodesByTab.value?.[tabKey])
-const isOperationalPlanTab = (tabKey = activePlanTab.value) => operationalPlanTabs.includes(tabKey)
+const isOperationalPlanTab = (tabKey = activePlanTab.value) => operationalPlanTabs.value.includes(tabKey)
 const availableLines = computed(() => {
   if (!isOperationalPlanTab(activePlanTab.value)) return []
   const targetCodes = new Set(getLineCodesForTab(activePlanTab.value))
@@ -1655,19 +1676,19 @@ const loadLineCodesByTab = async () => {
   try {
     const raw = window.localStorage.getItem(PLAN_TARGET_LINES_KEY)
     if (!raw) {
-      operationalPlanTabs.forEach((tabKey) => {
+      operationalPlanTabs.value.forEach((tabKey) => {
         fromStorage[tabKey] = normalizeLineCodes(defaults[tabKey] || [])
       })
     } else {
       const parsed = JSON.parse(raw)
-      operationalPlanTabs.forEach((tabKey) => {
+      operationalPlanTabs.value.forEach((tabKey) => {
         const source = parsed?.[tabKey]
         const fallback = defaults[tabKey] || []
         fromStorage[tabKey] = normalizeLineCodes(Array.isArray(source) ? source : fallback)
       })
     }
   } catch (_e) {
-    operationalPlanTabs.forEach((tabKey) => {
+    operationalPlanTabs.value.forEach((tabKey) => {
       const fallback = defaults[tabKey] || []
       fromStorage[tabKey] = normalizeLineCodes(fallback)
     })
@@ -1676,11 +1697,15 @@ const loadLineCodesByTab = async () => {
 
   try {
     const res = await api.productionPlanLineSettings.getSettings()
+    const dbTabs = res?.data?.tabs
+    if (Array.isArray(dbTabs) && dbTabs.length > 0) {
+      dbPlanTabs.value = dbTabs.map((t) => ({ key: t.key, label: t.label || t.key }))
+    }
     const dbSettings = res?.data?.target_line_codes_by_tab
     const dbSpecialRules = res?.data?.special_rules
     if (!dbSettings || typeof dbSettings !== 'object' || Array.isArray(dbSettings)) return
     const merged = {}
-    operationalPlanTabs.forEach((tabKey) => {
+    operationalPlanTabs.value.forEach((tabKey) => {
       const hasDbValue = Object.prototype.hasOwnProperty.call(dbSettings, tabKey)
       const fallback = fromStorage[tabKey] || defaults[tabKey] || []
       const source = hasDbValue ? dbSettings[tabKey] : fallback
@@ -1697,7 +1722,7 @@ const loadLineCodesByTab = async () => {
 }
 const syncLineCodesByTabToServer = async () => {
   const payload = {
-    target_line_codes_by_tab: operationalPlanTabs.reduce((acc, tabKey) => {
+    target_line_codes_by_tab: operationalPlanTabs.value.reduce((acc, tabKey) => {
       acc[tabKey] = getLineCodesForTab(tabKey)
       return acc
     }, {}),
@@ -1712,7 +1737,7 @@ const syncLineCodesByTabToServer = async () => {
   const dbSpecialRules = res?.data?.special_rules
   if (!dbSettings || typeof dbSettings !== 'object' || Array.isArray(dbSettings)) return
   const normalized = {}
-  operationalPlanTabs.forEach((tabKey) => {
+  operationalPlanTabs.value.forEach((tabKey) => {
     const source = dbSettings?.[tabKey]
     const fallback = getLineCodesForTab(tabKey)
     normalized[tabKey] = normalizeLineCodes(Array.isArray(source) ? source : fallback)
@@ -1855,6 +1880,44 @@ const toggleLineForTargetTab = (lineCode) => {
     [tabKey]: Array.from(current),
   }
   lineSettingsMessage.value = ''
+}
+const newTabDraft = ref({ key: '', label: '' })
+const applyTabsFromResponse = (res) => {
+  const dbTabs = res?.data?.tabs
+  if (Array.isArray(dbTabs) && dbTabs.length > 0) {
+    dbPlanTabs.value = dbTabs.map((t) => ({ key: t.key, label: t.label || t.key }))
+  }
+}
+const createTab = async () => {
+  const key = newTabDraft.value.key.trim().toLowerCase()
+  const label = newTabDraft.value.label.trim()
+  if (!key || !label) { alert('タブキーとタブ名を入力してください'); return }
+  if (operationalPlanTabs.value.includes(key)) { alert('同じタブキーが既に存在します'); return }
+  try {
+    const res = await api.productionPlanLineSettings.saveSettings({ create_tab: { key, label } })
+    applyTabsFromResponse(res)
+    newTabDraft.value = { key: '', label: '' }
+    lineSettingsMessage.value = `タブ「${label}」を作成しました。`
+  } catch (e) {
+    console.warn('タブ作成失敗', e)
+    alert('タブ作成に失敗しました')
+  }
+}
+const deleteTab = async (tabKey) => {
+  const tab = dbPlanTabs.value.find((t) => t.key === tabKey)
+  if (!tab) return
+  if (!confirm(`タブ「${tab.label}」を削除しますか？`)) return
+  try {
+    const res = await api.productionPlanLineSettings.saveSettings({ delete_tab: tabKey })
+    applyTabsFromResponse(res)
+    if (settingsTargetTab.value === tabKey) {
+      settingsTargetTab.value = operationalPlanTabs.value[0] || ''
+    }
+    lineSettingsMessage.value = `タブ「${tab.label}」を削除しました。`
+  } catch (e) {
+    console.warn('タブ削除失敗', e)
+    alert('タブ削除に失敗しました')
+  }
 }
 const saveLineSettings = async () => {
   saveLineCodesByTab()
@@ -5564,6 +5627,14 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
   background: #f8fafc;
   padding: 6px 8px;
   font-size: 13px;
+}
+.btn-danger {
+  background: #e74c3c;
+  color: #fff;
+  border-color: #c0392b;
+}
+.btn-danger:hover {
+  background: #c0392b;
 }
 .settings-message {
   margin-top: 8px;

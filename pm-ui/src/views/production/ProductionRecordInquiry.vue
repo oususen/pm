@@ -271,6 +271,22 @@
     </div>
     <div v-show="activeTab === 'line-settings'" class="settings-panel">
       <h3 class="settings-title">対象ライン編集</h3>
+
+      <div class="settings-section-inline">
+        <h4 class="settings-subtitle">タブ管理</h4>
+        <div class="tab-mgmt-row">
+          <input v-model="newTabDraft.key" type="text" placeholder="タブキー（英数字）" style="width:140px" />
+          <input v-model="newTabDraft.label" type="text" placeholder="タブ名" style="width:140px" />
+          <button class="btn" type="button" @click="createTab">追加</button>
+        </div>
+        <div class="tab-mgmt-list">
+          <div v-for="tab in configurableTabs" :key="`tab-mgmt-${tab.key}`" class="tab-mgmt-item">
+            <span>{{ tab.key }} / {{ tab.label }}</span>
+            <button class="btn btn-danger-sm" type="button" @click="deleteTab(tab.key)">削除</button>
+          </div>
+        </div>
+      </div>
+
       <p class="settings-note">対象タブを選び、抽出するラインを設定します。</p>
       <div class="settings-selector">
         <label>対象タブ</label>
@@ -431,26 +447,22 @@ const availableOperators = computed(() => {
 })
 
 const activeTab = ref('tank')
-const operationalTabKeys = ['tank', 'floor', 'team2', 'laser']
+const FALLBACK_RECORD_TABS = [
+  { key: 'tank', label: 'タンク' },
+  { key: 'floor', label: 'フロア' },
+  { key: 'team2', label: '2班' },
+  { key: 'blade', label: 'ブレード' },
+  { key: 'laser', label: '板金' },
+]
+const dbRecordTabs = ref([...FALLBACK_RECORD_TABS])
+const operationalTabKeys = computed(() => dbRecordTabs.value.map((t) => t.key))
 const settingsTargetTab = ref('tank')
-const configurableTabs = [
-  { key: 'tank', label: 'タンク' },
-  { key: 'floor', label: 'フロア' },
-  { key: 'team2', label: '2班' },
-  { key: 'blade', label: 'ブレード' },
-  { key: 'laser', label: '板金' },
-]
-const baseRecordTabs = [
-  { key: 'tank', label: 'タンク' },
-  { key: 'floor', label: 'フロア' },
-  { key: 'team2', label: '2班' },
-  { key: 'blade', label: 'ブレード' },
-  { key: 'laser', label: '板金' },
-]
+const configurableTabs = computed(() => dbRecordTabs.value)
 const settingsTabs = [
   { key: 'line-settings', label: '対象ライン編集' },
   { key: 'mapping-settings', label: 'マッピング作成' },
 ]
+const newTabDraft = ref({ key: '', label: '' })
 
 const lines = ref([])
 const processes = ref([])
@@ -501,8 +513,8 @@ const canEditRecordInquirySettings = computed(() => {
 })
 const recordTabs = computed(() => (
   canEditRecordInquirySettings.value
-    ? [...baseRecordTabs, ...settingsTabs]
-    : baseRecordTabs
+    ? [...dbRecordTabs.value, ...settingsTabs]
+    : [...dbRecordTabs.value]
 ))
 
 const tankLineOptions = computed(() => {
@@ -511,7 +523,7 @@ const tankLineOptions = computed(() => {
 })
 
 const visibleLines = computed(() => {
-  if (operationalTabKeys.includes(activeTab.value)) return tankLineOptions.value
+  if (operationalTabKeys.value.includes(activeTab.value)) return tankLineOptions.value
   return lines.value
 })
 
@@ -527,7 +539,7 @@ const tankProcessIdSet = computed(() => {
 
 const filteredProcesses = computed(() => {
   let base = Array.isArray(processes.value) ? processes.value : []
-  if (operationalTabKeys.includes(activeTab.value)) {
+  if (operationalTabKeys.value.includes(activeTab.value)) {
     const allowed = tankProcessIdSet.value
     base = base.filter((p) => allowed.has(String(p.id)))
   }
@@ -683,6 +695,10 @@ const loadMasters = async () => {
 }
 
 const applyProductionRecordSettingsPayload = (payload) => {
+  const dbTabs = payload?.tabs
+  if (Array.isArray(dbTabs) && dbTabs.length > 0) {
+    dbRecordTabs.value = dbTabs.map((t) => ({ key: t.key, label: t.label || t.key }))
+  }
   targetLineCodesByTab.value = normalizeTargetLineCodesByTab(payload?.target_line_codes_by_tab)
   // 新形式（product_mappings: フラット配列）優先、なければ旧形式（mappings_by_tab）からマージ
   if (Array.isArray(payload?.product_mappings)) {
@@ -716,6 +732,42 @@ const saveProductionRecordSettings = async () => {
     targetLineCodesByTab.value = saveTargetLineCodesByTab(payload.target_line_codes_by_tab)
     productMappings.value = saveProductMappings(payload.product_mappings)
     throw e
+  }
+}
+
+const createTab = async () => {
+  const key = newTabDraft.value.key.trim().toLowerCase()
+  const label = newTabDraft.value.label.trim()
+  if (!key || !label) { alert('タブキーとタブ名を入力してください'); return }
+  if (operationalTabKeys.value.includes(key)) { alert('同じタブキーが既に存在します'); return }
+  try {
+    const res = await api.productionRecordSettings.saveSettings({ create_tab: { key, label } })
+    applyProductionRecordSettingsPayload(res.data || {})
+    newTabDraft.value = { key: '', label: '' }
+    targetLineSaveMessage.value = `タブ「${label}」を作成しました。`
+  } catch (e) {
+    console.warn('タブ作成失敗', e)
+    alert('タブ作成に失敗しました')
+  }
+}
+
+const deleteTab = async (tabKey) => {
+  const tab = dbRecordTabs.value.find((t) => t.key === tabKey)
+  if (!tab) return
+  if (!confirm(`タブ「${tab.label}」を削除しますか？`)) return
+  try {
+    const res = await api.productionRecordSettings.saveSettings({ delete_tab: tabKey })
+    applyProductionRecordSettingsPayload(res.data || {})
+    if (settingsTargetTab.value === tabKey) {
+      settingsTargetTab.value = operationalTabKeys.value[0] || ''
+    }
+    if (activeTab.value === tabKey) {
+      activeTab.value = operationalTabKeys.value[0] || ''
+    }
+    targetLineSaveMessage.value = `タブ「${tab.label}」を削除しました。`
+  } catch (e) {
+    console.warn('タブ削除失敗', e)
+    alert('タブ削除に失敗しました')
   }
 }
 
@@ -955,7 +1007,7 @@ const loadSessions = async () => {
 
     const res = await api.processRealtime.getSessions(params)
     const items = res.data || []
-    const filteredByTab = operationalTabKeys.includes(activeTab.value)
+    const filteredByTab = operationalTabKeys.value.includes(activeTab.value)
       ? items.filter((row) => tankProcessIdSet.value.has(String(row?.process || '')))
       : items
 
@@ -1000,7 +1052,7 @@ const resetFilters = async () => {
 }
 
 const FAVORITE_SCREEN_KEY = 'production.record_inquiry'
-const FAVORITE_TAB_KEYS = ['tank', 'floor', 'team2', 'blade', 'laser']
+const FAVORITE_TAB_KEYS = computed(() => operationalTabKeys.value)
 
 const toFavoritePayload = () => ({
   activeTab: String(activeTab.value || 'tank'),
@@ -1021,7 +1073,7 @@ const toFavoritePayload = () => ({
 
 const applyFavoritePayload = (payload) => {
   const nextTab = String(payload?.activeTab || 'tank')
-  activeTab.value = FAVORITE_TAB_KEYS.includes(nextTab) ? nextTab : 'tank'
+  activeTab.value = FAVORITE_TAB_KEYS.value.includes(nextTab) ? nextTab : 'tank'
   startDate.value = String(payload?.startDate || defaultDateRange.start)
   endDate.value = String(payload?.endDate || defaultDateRange.end)
   const mode = String(payload?.dateSearchMode || 'plan')
@@ -1102,7 +1154,7 @@ watch(activeTab, async (nextTab) => {
     await loadMappingCandidates(settingsTargetTab.value)
     return
   }
-  if (!operationalTabKeys.includes(nextTab)) return
+  if (!operationalTabKeys.value.includes(nextTab)) return
   // 板金タブはライン絞り込みを非表示にしているため、残留値をリセットする
   if (nextTab === 'laser') {
     lineId.value = ''
@@ -1247,7 +1299,7 @@ const saveTargetLines = async () => {
   }
   targetLineSaveMessage.value = '対象ラインを保存しました。'
 
-  if (operationalTabKeys.includes(activeTab.value)) {
+  if (operationalTabKeys.value.includes(activeTab.value)) {
     const selectedLineCode = lines.value.find((line) => String(line.id) === String(lineId.value))?.line_code
     const savedActiveCodes = getTargetLineCodesByTab(targetLineCodesByTab.value, activeTab.value)
     if (selectedLineCode && !savedActiveCodes.includes(String(selectedLineCode).toUpperCase())) {
@@ -1826,6 +1878,56 @@ onMounted(async () => {
   align-items: center;
   gap: 8px;
   font-size: 13px;
+}
+.settings-section-inline {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.settings-subtitle {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.tab-mgmt-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.tab-mgmt-row input {
+  padding: 3px 6px;
+  font-size: 13px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+}
+.tab-mgmt-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tab-mgmt-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  background: #f8fafc;
+  border: 1px solid #d7deea;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.btn-danger-sm {
+  background: #e74c3c;
+  color: #fff;
+  border: 1px solid #c0392b;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.btn-danger-sm:hover {
+  background: #c0392b;
 }
 .settings-actions {
   margin-top: 12px;

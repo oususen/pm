@@ -6643,16 +6643,6 @@ class ProductionRecordInquirySettingView(APIView):
     PROCESS_GANTT_START_TIME_RULES_KEY = 'production.process_gantt_start_time_rules'
     PLANNED_STOCK_RULES_KEY = 'production.planned_stock_calc_rules'
     PRODUCT_MAPPINGS_KEY = 'production.product_mappings'
-    TAB_KEYS = ['tank', 'floor', FLOOR_SHIPPING_TAB_KEY, 'blade', 'laser', 'brake', 'spot']
-    DEFAULT_TARGET_LINE_CODES_BY_TAB = {
-        'tank': ['L2200', 'L2201'],
-        'floor': ['L2100'],
-        FLOOR_SHIPPING_TAB_KEY: [],
-        'blade': [],
-        'laser': [],
-        'brake': [],
-        'spot': [],
-    }
 
     def _normalize(self, value):
         return str(value or '').strip().upper()
@@ -6789,15 +6779,9 @@ class ProductionRecordInquirySettingView(APIView):
         return normalized
 
     def _build_response_payload(self):
-        target_line_codes_by_tab = {
-            key: list(self.DEFAULT_TARGET_LINE_CODES_BY_TAB.get(key, []))
-            for key in self.TAB_KEYS
-        }
-
-        special_rules = {'prev_day_shift_rules': [], 'gantt_start_time_rules': [], 'planned_stock_calc_rules': []}
-        rows = ProductionRecordInquirySetting.objects.filter(tab_key__in=self.TAB_KEYS)
-        for row in rows:
-            target_line_codes_by_tab[row.tab_key] = self._normalize_line_codes(row.target_line_codes)
+        rows = ProductionRecordInquirySetting.objects.all()
+        tabs = [{'key': r.tab_key, 'label': r.tab_name or r.tab_key, 'sort_order': r.sort_order} for r in rows]
+        target_line_codes_by_tab = {r.tab_key: self._normalize_line_codes(r.target_line_codes) for r in rows}
 
         # フラットマッピング: SystemSettingから読込、なければタブ行からマージ（後方互換）
         flat_row = SystemSetting.objects.filter(key=self.PRODUCT_MAPPINGS_KEY).first()
@@ -6816,6 +6800,7 @@ class ProductionRecordInquirySettingView(APIView):
                         seen.add(key)
                         product_mappings.append(m)
 
+        special_rules = {'prev_day_shift_rules': [], 'gantt_start_time_rules': [], 'planned_stock_calc_rules': []}
         rules_row = SystemSetting.objects.filter(key=self.PROCESS_PREV_DAY_SHIFT_RULES_KEY).first()
         if rules_row:
             try:
@@ -6839,6 +6824,7 @@ class ProductionRecordInquirySettingView(APIView):
             special_rules['planned_stock_calc_rules'] = self._normalize_planned_stock_calc_rules(parsed)
 
         return {
+            'tabs': tabs,
             'target_line_codes_by_tab': target_line_codes_by_tab,
             'product_mappings': product_mappings,
             'special_rules': special_rules,
@@ -6849,30 +6835,45 @@ class ProductionRecordInquirySettingView(APIView):
 
     def post(self, request):
         payload = request.data if isinstance(request.data, dict) else {}
+        user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+
+        # タブ新規作成
+        new_tab = payload.get('create_tab')
+        if isinstance(new_tab, dict):
+            tab_key = str(new_tab.get('key') or '').strip().lower()
+            tab_name = str(new_tab.get('label') or '').strip()
+            if tab_key and tab_name:
+                max_order = ProductionRecordInquirySetting.objects.aggregate(m=Max('sort_order'))['m'] or 0
+                ProductionRecordInquirySetting.objects.update_or_create(
+                    tab_key=tab_key,
+                    defaults={
+                        'tab_name': tab_name,
+                        'sort_order': max_order + 1,
+                        'target_line_codes': [],
+                        'updated_by': user,
+                    },
+                )
+            return Response(self._build_response_payload())
+
+        # タブ削除
+        delete_tab_key = payload.get('delete_tab')
+        if delete_tab_key:
+            tab_key = str(delete_tab_key).strip().lower()
+            ProductionRecordInquirySetting.objects.filter(tab_key=tab_key).delete()
+            return Response(self._build_response_payload())
+
         raw_target = payload.get('target_line_codes_by_tab') if isinstance(payload.get('target_line_codes_by_tab'), dict) else {}
         raw_special_rules = payload.get('special_rules') if isinstance(payload.get('special_rules'), dict) else {}
-        user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
-        existing_rows = {
-            row.tab_key: row
-            for row in ProductionRecordInquirySetting.objects.filter(tab_key__in=self.TAB_KEYS)
-        }
 
-        for tab_key in self.TAB_KEYS:
-            existing = existing_rows.get(tab_key)
+        existing_rows = {row.tab_key: row for row in ProductionRecordInquirySetting.objects.all()}
+        for tab_key, row in existing_rows.items():
             if tab_key in raw_target:
-                target_source = raw_target.get(tab_key, [])
-            elif existing:
-                target_source = existing.target_line_codes
+                target_source = raw_target[tab_key]
             else:
-                target_source = self.DEFAULT_TARGET_LINE_CODES_BY_TAB.get(tab_key, [])
-            target_line_codes = self._normalize_line_codes(target_source)
-            ProductionRecordInquirySetting.objects.update_or_create(
-                tab_key=tab_key,
-                defaults={
-                    'target_line_codes': target_line_codes,
-                    'updated_by': user,
-                },
-            )
+                target_source = row.target_line_codes
+            row.target_line_codes = self._normalize_line_codes(target_source)
+            row.updated_by = user
+            row.save(update_fields=['target_line_codes', 'updated_by', 'updated_at'])
 
         # フラットマッピング保存
         if 'product_mappings' in payload:
@@ -8369,8 +8370,6 @@ class ProductionPlanLineSettingView(APIView):
     PROCESS_PREV_DAY_SHIFT_RULES_KEY = 'production.process_prev_day_shift_rules'
     PROCESS_GANTT_START_TIME_RULES_KEY = 'production.process_gantt_start_time_rules'
     PLANNED_STOCK_RULES_KEY = 'production.planned_stock_calc_rules'
-    PLAN_TAB_KEYS = ['tank', 'floor', 'kubota', FLOOR_SHIPPING_TAB_KEY, 'blade', 'laser', 'brake', 'spot']
-
     def _normalize(self, value):
         return str(value or '').strip().upper()
 
@@ -8479,42 +8478,61 @@ class ProductionPlanLineSettingView(APIView):
                 pass
         return special_rules
 
-    def get(self, request):
-        target_line_codes_by_tab = {}
+    def _build_response(self):
         rows = ProductionPlanLineSetting.objects.all()
-        db_map = {row.tab_key: row.target_line_codes for row in rows}
-        for tab_key in self.PLAN_TAB_KEYS:
-            if tab_key in db_map:
-                target_line_codes_by_tab[tab_key] = self._normalize_line_codes(db_map[tab_key])
-            else:
-                target_line_codes_by_tab[tab_key] = []
-        return Response({
+        tabs = [{'key': r.tab_key, 'label': r.tab_name or r.tab_key, 'sort_order': r.sort_order} for r in rows]
+        target_line_codes_by_tab = {r.tab_key: self._normalize_line_codes(r.target_line_codes) for r in rows}
+        return {
+            'tabs': tabs,
             'target_line_codes_by_tab': target_line_codes_by_tab,
             'special_rules': self._load_special_rules(),
-        })
+        }
+
+    def get(self, request):
+        return Response(self._build_response())
 
     def post(self, request):
         payload = request.data if isinstance(request.data, dict) else {}
-        raw_target = payload.get('target_line_codes_by_tab') if isinstance(payload.get('target_line_codes_by_tab'), dict) else {}
-        raw_special_rules = payload.get('special_rules') if isinstance(payload.get('special_rules'), dict) else {}
         user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
 
+        # タブ新規作成
+        new_tab = payload.get('create_tab')
+        if isinstance(new_tab, dict):
+            tab_key = str(new_tab.get('key') or '').strip().lower()
+            tab_name = str(new_tab.get('label') or '').strip()
+            if tab_key and tab_name:
+                max_order = ProductionPlanLineSetting.objects.aggregate(m=Max('sort_order'))['m'] or 0
+                ProductionPlanLineSetting.objects.update_or_create(
+                    tab_key=tab_key,
+                    defaults={
+                        'tab_name': tab_name,
+                        'sort_order': max_order + 1,
+                        'target_line_codes': [],
+                        'updated_by': user,
+                    },
+                )
+            return Response(self._build_response())
+
+        # タブ削除
+        delete_tab_key = payload.get('delete_tab')
+        if delete_tab_key:
+            tab_key = str(delete_tab_key).strip().lower()
+            ProductionPlanLineSetting.objects.filter(tab_key=tab_key).delete()
+            return Response(self._build_response())
+
+        # 通常のライン設定＋特殊ルール保存
+        raw_target = payload.get('target_line_codes_by_tab') if isinstance(payload.get('target_line_codes_by_tab'), dict) else {}
+        raw_special_rules = payload.get('special_rules') if isinstance(payload.get('special_rules'), dict) else {}
+
         existing_rows = {row.tab_key: row for row in ProductionPlanLineSetting.objects.all()}
-        for tab_key in self.PLAN_TAB_KEYS:
-            existing = existing_rows.get(tab_key)
+        for tab_key, row in existing_rows.items():
             if tab_key in raw_target:
                 target_source = raw_target[tab_key]
-            elif existing:
-                target_source = existing.target_line_codes
             else:
-                target_source = []
-            ProductionPlanLineSetting.objects.update_or_create(
-                tab_key=tab_key,
-                defaults={
-                    'target_line_codes': self._normalize_line_codes(target_source),
-                    'updated_by': user,
-                },
-            )
+                target_source = row.target_line_codes
+            row.target_line_codes = self._normalize_line_codes(target_source)
+            row.updated_by = user
+            row.save(update_fields=['target_line_codes', 'updated_by', 'updated_at'])
 
         if 'prev_day_shift_rules' in raw_special_rules:
             rules = self._normalize_prev_day_shift_rules(raw_special_rules['prev_day_shift_rules'])
@@ -8535,10 +8553,4 @@ class ProductionPlanLineSettingView(APIView):
                 defaults={'value': json.dumps(rules, ensure_ascii=False), 'description': 'ライン工程別の計画在庫計算特例設定', 'updated_by': user},
             )
 
-        target_line_codes_by_tab = {}
-        for row in ProductionPlanLineSetting.objects.all():
-            target_line_codes_by_tab[row.tab_key] = self._normalize_line_codes(row.target_line_codes)
-        return Response({
-            'target_line_codes_by_tab': target_line_codes_by_tab,
-            'special_rules': self._load_special_rules(),
-        })
+        return Response(self._build_response())
