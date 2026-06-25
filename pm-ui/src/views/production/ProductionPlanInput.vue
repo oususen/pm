@@ -902,7 +902,7 @@
                 :value="tab.label"
                 @change="renameTab(tab.key, $event.target.value)"
               />
-              <button class="btn btn-danger" type="button" @click="deleteTab(tab.key)">削除</button>
+              <button class="btn-danger" type="button" @click="deleteTab(tab.key)">削除</button>
             </div>
           </div>
         </div>
