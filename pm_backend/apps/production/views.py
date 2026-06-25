@@ -6855,6 +6855,15 @@ class ProductionRecordInquirySettingView(APIView):
                 )
             return Response(self._build_response_payload())
 
+        # タブ名変更
+        rename_tab = payload.get('rename_tab')
+        if isinstance(rename_tab, dict):
+            tab_key = str(rename_tab.get('key') or '').strip().lower()
+            new_name = str(rename_tab.get('label') or '').strip()
+            if tab_key and new_name:
+                ProductionRecordInquirySetting.objects.filter(tab_key=tab_key).update(tab_name=new_name, updated_by=user)
+            return Response(self._build_response_payload())
+
         # タブ削除
         delete_tab_key = payload.get('delete_tab')
         if delete_tab_key:
@@ -8511,6 +8520,15 @@ class ProductionPlanLineSettingView(APIView):
                         'updated_by': user,
                     },
                 )
+            return Response(self._build_response())
+
+        # タブ名変更
+        rename_tab = payload.get('rename_tab')
+        if isinstance(rename_tab, dict):
+            tab_key = str(rename_tab.get('key') or '').strip().lower()
+            new_name = str(rename_tab.get('label') or '').strip()
+            if tab_key and new_name:
+                ProductionPlanLineSetting.objects.filter(tab_key=tab_key).update(tab_name=new_name, updated_by=user)
             return Response(self._build_response())
 
         # タブ削除

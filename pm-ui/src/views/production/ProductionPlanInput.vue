@@ -896,7 +896,12 @@
           </div>
           <div class="settings-list settings-rules">
             <div v-for="tab in configurablePlanTabs" :key="`tab-mgmt-${tab.key}`" class="settings-rule-row">
-              <span>{{ tab.key }} / {{ tab.label }}</span>
+              <span class="tab-mgmt-key">{{ tab.key }}</span>
+              <input
+                class="tab-mgmt-name-input"
+                :value="tab.label"
+                @change="renameTab(tab.key, $event.target.value)"
+              />
               <button class="btn btn-danger" type="button" @click="deleteTab(tab.key)">削除</button>
             </div>
           </div>
@@ -1901,6 +1906,18 @@ const createTab = async () => {
   } catch (e) {
     console.warn('タブ作成失敗', e)
     alert('タブ作成に失敗しました')
+  }
+}
+const renameTab = async (tabKey, newLabel) => {
+  const label = (newLabel || '').trim()
+  if (!label) return
+  try {
+    const res = await api.productionPlanLineSettings.saveSettings({ rename_tab: { key: tabKey, label } })
+    applyTabsFromResponse(res)
+    lineSettingsMessage.value = `タブ名を「${label}」に変更しました。`
+  } catch (e) {
+    console.warn('タブ名変更失敗', e)
+    alert('タブ名変更に失敗しました')
   }
 }
 const deleteTab = async (tabKey) => {
@@ -5627,6 +5644,18 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
   background: #f8fafc;
   padding: 6px 8px;
   font-size: 13px;
+}
+.tab-mgmt-key {
+  font-size: 12px;
+  color: #6b7280;
+  min-width: 80px;
+}
+.tab-mgmt-name-input {
+  flex: 1;
+  padding: 2px 6px;
+  font-size: 13px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
 }
 .btn-danger {
   background: #e74c3c;
