@@ -363,7 +363,7 @@
             inputmode="numeric"
             class="input-large input-qty flex-input"
             :placeholder="t('processInput.qtyPlaceholder')"
-            :readonly="record.record_type === 'PRODUCTION'"
+            :readonly="shouldUseCounterInput"
           />
         </div>
         <div class="inline-group">
@@ -379,7 +379,7 @@
 
       <div v-if="counterQtyError" class="hint form-error">{{ counterQtyError }}</div>
 
-      <div class="quick-btns" v-if="shouldShowQtyInput && record.record_type !== 'PRODUCTION' && quickQtyPresets.length">
+      <div class="quick-btns" v-if="shouldShowQtyInput && !shouldUseCounterInput && quickQtyPresets.length">
         <button
           v-for="preset in quickQtyPresets"
           :key="preset"

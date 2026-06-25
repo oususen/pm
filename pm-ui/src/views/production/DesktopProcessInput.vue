@@ -378,7 +378,7 @@
             <!-- 数量入力 -->
             <div v-if="shouldShowQtyInput" class="qty-input-area">
               <div class="qty-row">
-                <div v-if="record.record_type === 'PRODUCTION'" class="qty-col">
+                <div v-if="shouldUseCounterInput" class="qty-col">
                   <label class="qty-label">
                     {{ t('processInput.counterQty') }}
                     <span class="required-mark">*</span>
@@ -408,7 +408,7 @@
                     inputmode="numeric"
                     class="qty-input"
                     :placeholder="t('processInput.qtyPlaceholder')"
-                    :readonly="record.record_type === 'PRODUCTION'"
+                    :readonly="shouldUseCounterInput"
                   />
                 </div>
                 <div class="qty-col">
@@ -428,7 +428,7 @@
             </div>
 
             <!-- クイック数量 -->
-            <div v-if="shouldShowQtyInput && record.record_type !== 'PRODUCTION' && quickQtyPresets.length" class="quick-btns">
+            <div v-if="shouldShowQtyInput && !shouldUseCounterInput && quickQtyPresets.length" class="quick-btns">
               <button
                 v-for="preset in quickQtyPresets"
                 :key="preset"
