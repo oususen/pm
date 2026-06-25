@@ -49,6 +49,7 @@
               <th>理由</th>
               <th>更新日時</th>
               <th>調整者</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -64,9 +65,12 @@
               <td class="reason">{{ row.reason || '—' }}</td>
               <td>{{ formatDatetime(row.updated_at) }}</td>
               <td>{{ row.updated_by_name ?? '—' }}</td>
+              <td class="del-cell">
+                <button class="btn-del" :disabled="deleting === row.id" @click="deleteRow(row)">削除</button>
+              </td>
             </tr>
             <tr v-if="rows.length === 0">
-              <td colspan="9" class="center">データなし</td>
+              <td colspan="10" class="center">データなし</td>
             </tr>
           </tbody>
         </table>
@@ -96,6 +100,7 @@ const filters = ref({
 const rows = ref([])
 const loading = ref(false)
 const error = ref('')
+const deleting = ref(null)
 
 const TYPE_LABELS = {
   STOCK: '在庫調整',
@@ -132,6 +137,20 @@ const load = async () => {
     error.value = e?.response?.data?.detail || '取得に失敗しました'
   } finally {
     loading.value = false
+  }
+}
+
+const deleteRow = async (row) => {
+  const label = `${row.plan_date} / ${typeLabel(row.adjust_type)} / ${row.product_code} / ${row.line_code}`
+  if (!confirm(`以下の調整を削除しますか？\n\n${label}`)) return
+  deleting.value = row.id
+  try {
+    await api.lineBacklogAdjustments.remove(row.id)
+    rows.value = rows.value.filter((r) => r.id !== row.id)
+  } catch (e) {
+    alert(e?.response?.data?.detail || '削除に失敗しました')
+  } finally {
+    deleting.value = null
   }
 }
 
@@ -226,5 +245,17 @@ load()
 .badge-progress { background: #dcfce7; color: #15803d; }
 .badge-planned-stock { background: #e0e7ff; color: #4338ca; }
 .badge-planned-progress { background: #fef9c3; color: #854d0e; }
+.del-cell { text-align: center; padding: 3px 6px; }
+.btn-del {
+  padding: 2px 8px;
+  background: #fee2e2;
+  color: #dc2626;
+  border: 1px solid #fca5a5;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.btn-del:hover { background: #fecaca; }
+.btn-del:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 

@@ -7018,6 +7018,17 @@ class LineBacklogAdjustmentView(APIView):
         serializer = LineBacklogAdjustmentSerializer(obj)
         return Response(serializer.data)
 
+    def delete(self, request):
+        pk = request.query_params.get('id')
+        if not pk:
+            return Response({'detail': 'id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            obj = LineBacklogAdjustment.objects.get(pk=pk)
+        except LineBacklogAdjustment.DoesNotExist:
+            return Response({'detail': '対象レコードが見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+        obj.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class ScheduleConfigView(APIView):
     """定時タスクスケジュール設定API"""
