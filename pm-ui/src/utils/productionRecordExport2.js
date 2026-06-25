@@ -1,7 +1,6 @@
 import * as XLSX from 'xlsx'
 import {
-  getProductionRecordMappingsByTab,
-  loadProductionRecordMappingsByTab,
+  loadProductMappings,
   resolveCoreMapping,
 } from '@/config/productionRecordSettings'
 
@@ -38,13 +37,11 @@ const formatTimeOnly = (value) => {
 
 export const buildProductionSummaryRows = (
   sessions,
-  tabKey = 'tank',
-  mappingsByTabInput = null,
+  mappingsInput = null,
   startDate = '',
   endDate = '',
 ) => {
-  const mappingsByTab = mappingsByTabInput || loadProductionRecordMappingsByTab()
-  const mappings = getProductionRecordMappingsByTab(mappingsByTab, tabKey)
+  const mappings = Array.isArray(mappingsInput) ? mappingsInput : loadProductMappings()
   const startKey = toDateKey(startDate)
   const endKey = toDateKey(endDate)
   const headers = ['生産日', 'アプリ品番', '基幹品番', '工程コード', '工順', '開始時間', '終了時間', '生産数量', '工程順行きエンター回数', 'マッピング状態']
@@ -99,8 +96,7 @@ export const exportProductionSummaryExcel = (sessions, startDate, endDate, optio
     ? { headers: builtHeaders || [], rows: builtRows }
     : buildProductionSummaryRows(
       sessions,
-      tabKey,
-      options?.mappingsByTab || null,
+      options?.productMappings || null,
       startDate,
       endDate,
     )

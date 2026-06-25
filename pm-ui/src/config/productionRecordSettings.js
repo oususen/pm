@@ -99,61 +99,40 @@ export const getTargetLineCodesByTab = (lineCodesByTab, tabKey) => {
   return normalizeLineCodes(DEFAULT_TARGET_LINE_CODES_BY_TAB[normalizedTabKey] || [])
 }
 
-export const createDefaultMappingsByTab = () => ({
-  tank: [],
-  floor: [],
-  team2: [],
-  blade: [],
-  laser: [],
-  brake: [],
-})
-
-export const normalizeProductionRecordMappingsByTab = (mappingsByTab) => {
-  const base = createDefaultMappingsByTab()
-  TAB_KEYS.forEach((tabKey) => {
-    base[tabKey] = normalizeMappingRows(mappingsByTab?.[tabKey])
-  })
-  return base
+export const normalizeProductMappings = (mappings) => {
+  if (Array.isArray(mappings)) return normalizeMappingRows(mappings)
+  // 旧形式（タブ別オブジェクト）→ フラット化
+  if (mappings && typeof mappings === 'object') {
+    const seen = new Set()
+    const result = []
+    for (const tabKey of Object.keys(mappings)) {
+      for (const row of normalizeMappingRows(mappings[tabKey])) {
+        const key = `${row.appProductCode}__${row.processCode}`
+        if (!seen.has(key)) {
+          seen.add(key)
+          result.push(row)
+        }
+      }
+    }
+    return result
+  }
+  return []
 }
 
-export const loadProductionRecordMappingsByTab = () => {
-  const defaults = createDefaultMappingsByTab()
-  if (!canUseStorage()) return defaults
-
+export const loadProductMappings = () => {
+  if (!canUseStorage()) return []
   const raw = window.localStorage.getItem(PRODUCT_MAPPINGS_KEY)
   const parsed = parseJson(raw, null)
-
-  if (Array.isArray(parsed)) {
-    // 旧形式互換: 全件を tank 扱い
-    return {
-      ...defaults,
-      tank: normalizeMappingRows(parsed),
-    }
-  }
-
-  if (!parsed || typeof parsed !== 'object') return defaults
-
-  const next = createDefaultMappingsByTab()
-  TAB_KEYS.forEach((tabKey) => {
-    next[tabKey] = normalizeMappingRows(parsed?.[tabKey])
-  })
-  return next
+  if (parsed === null) return []
+  return normalizeProductMappings(parsed)
 }
 
-export const saveProductionRecordMappingsByTab = (mappingsByTab) => {
-  const base = normalizeProductionRecordMappingsByTab(mappingsByTab)
+export const saveProductMappings = (mappings) => {
+  const normalized = normalizeMappingRows(Array.isArray(mappings) ? mappings : [])
   if (canUseStorage()) {
-    window.localStorage.setItem(PRODUCT_MAPPINGS_KEY, JSON.stringify(base))
+    window.localStorage.setItem(PRODUCT_MAPPINGS_KEY, JSON.stringify(normalized))
   }
-  return base
-}
-
-export const getProductionRecordMappingsByTab = (mappingsByTab, tabKey) => {
-  const normalizedTabKey = String(tabKey || '').trim().toLowerCase()
-  const source = mappingsByTab && typeof mappingsByTab === 'object'
-    ? mappingsByTab
-    : createDefaultMappingsByTab()
-  return normalizeMappingRows(source?.[normalizedTabKey])
+  return normalized
 }
 
 export const resolveCoreMapping = (appProductCode, processCode, mappings = []) => {

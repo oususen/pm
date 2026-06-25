@@ -33,6 +33,7 @@ from .models_line_default_schedule_setting import LineDefaultScheduleSetting
 from .models_auto_plan_aggregate_setting import AutoPlanAggregateSetting
 from .models_plan_change_log import ProductionPlanChangeLog
 from .models_plan_lock_setting import ProductionPlanLockSetting
+from .models_plan_line_setting import ProductionPlanLineSetting
 from .models_record_inquiry_setting import ProductionRecordInquirySetting
 from .models_schedule_config import ScheduleConfig
 from .models_purchase_actual_reconcile import (
@@ -6641,6 +6642,7 @@ class ProductionRecordInquirySettingView(APIView):
     PROCESS_PREV_DAY_SHIFT_RULES_KEY = 'production.process_prev_day_shift_rules'
     PROCESS_GANTT_START_TIME_RULES_KEY = 'production.process_gantt_start_time_rules'
     PLANNED_STOCK_RULES_KEY = 'production.planned_stock_calc_rules'
+    PRODUCT_MAPPINGS_KEY = 'production.product_mappings'
     TAB_KEYS = ['tank', 'floor', FLOOR_SHIPPING_TAB_KEY, 'blade', 'laser', 'brake', 'spot']
     DEFAULT_TARGET_LINE_CODES_BY_TAB = {
         'tank': ['L2200', 'L2201'],
@@ -6791,13 +6793,29 @@ class ProductionRecordInquirySettingView(APIView):
             key: list(self.DEFAULT_TARGET_LINE_CODES_BY_TAB.get(key, []))
             for key in self.TAB_KEYS
         }
-        mappings_by_tab = {key: [] for key in self.TAB_KEYS}
 
         special_rules = {'prev_day_shift_rules': [], 'gantt_start_time_rules': [], 'planned_stock_calc_rules': []}
         rows = ProductionRecordInquirySetting.objects.filter(tab_key__in=self.TAB_KEYS)
         for row in rows:
             target_line_codes_by_tab[row.tab_key] = self._normalize_line_codes(row.target_line_codes)
-            mappings_by_tab[row.tab_key] = self._normalize_mapping_rows(row.product_mappings)
+
+        # フラットマッピング: SystemSettingから読込、なければタブ行からマージ（後方互換）
+        flat_row = SystemSetting.objects.filter(key=self.PRODUCT_MAPPINGS_KEY).first()
+        if flat_row:
+            try:
+                product_mappings = self._normalize_mapping_rows(json.loads(flat_row.value or '[]'))
+            except Exception:
+                product_mappings = []
+        else:
+            seen = set()
+            product_mappings = []
+            for row in rows:
+                for m in self._normalize_mapping_rows(row.product_mappings):
+                    key = f"{m['appProductCode']}__{m['processCode']}"
+                    if key not in seen:
+                        seen.add(key)
+                        product_mappings.append(m)
+
         rules_row = SystemSetting.objects.filter(key=self.PROCESS_PREV_DAY_SHIFT_RULES_KEY).first()
         if rules_row:
             try:
@@ -6822,7 +6840,7 @@ class ProductionRecordInquirySettingView(APIView):
 
         return {
             'target_line_codes_by_tab': target_line_codes_by_tab,
-            'mappings_by_tab': mappings_by_tab,
+            'product_mappings': product_mappings,
             'special_rules': special_rules,
         }
 
@@ -6832,7 +6850,6 @@ class ProductionRecordInquirySettingView(APIView):
     def post(self, request):
         payload = request.data if isinstance(request.data, dict) else {}
         raw_target = payload.get('target_line_codes_by_tab') if isinstance(payload.get('target_line_codes_by_tab'), dict) else {}
-        raw_mappings = payload.get('mappings_by_tab') if isinstance(payload.get('mappings_by_tab'), dict) else {}
         raw_special_rules = payload.get('special_rules') if isinstance(payload.get('special_rules'), dict) else {}
         user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
         existing_rows = {
@@ -6849,19 +6866,25 @@ class ProductionRecordInquirySettingView(APIView):
             else:
                 target_source = self.DEFAULT_TARGET_LINE_CODES_BY_TAB.get(tab_key, [])
             target_line_codes = self._normalize_line_codes(target_source)
-
-            if tab_key in raw_mappings:
-                mapping_source = raw_mappings.get(tab_key, [])
-            elif existing:
-                mapping_source = existing.product_mappings
-            else:
-                mapping_source = []
-            product_mappings = self._normalize_mapping_rows(mapping_source)
             ProductionRecordInquirySetting.objects.update_or_create(
                 tab_key=tab_key,
                 defaults={
                     'target_line_codes': target_line_codes,
-                    'product_mappings': product_mappings,
+                    'updated_by': user,
+                },
+            )
+
+        # フラットマッピング保存
+        if 'product_mappings' in payload:
+            raw_product_mappings = payload.get('product_mappings', [])
+            flat_mappings = self._normalize_mapping_rows(
+                raw_product_mappings if isinstance(raw_product_mappings, list) else []
+            )
+            SystemSetting.objects.update_or_create(
+                key=self.PRODUCT_MAPPINGS_KEY,
+                defaults={
+                    'value': json.dumps(flat_mappings, ensure_ascii=False),
+                    'description': '生産実績照会 品番マッピング',
                     'updated_by': user,
                 },
             )
@@ -8339,3 +8362,183 @@ class HokushinDeliveryAllPDFView(APIView):
         filename = f'北進塗装納品書（全製品）_{today.strftime("%Y%m%d")}.pdf'
         response['Content-Disposition'] = f'inline; filename="{filename}"'
         return response
+
+
+class ProductionPlanLineSettingView(APIView):
+    """生産計画専用のライン設定API（実績照会テーブルとは分離）"""
+    PROCESS_PREV_DAY_SHIFT_RULES_KEY = 'production.process_prev_day_shift_rules'
+    PROCESS_GANTT_START_TIME_RULES_KEY = 'production.process_gantt_start_time_rules'
+    PLANNED_STOCK_RULES_KEY = 'production.planned_stock_calc_rules'
+    PLAN_TAB_KEYS = ['tank', 'floor', 'kubota', FLOOR_SHIPPING_TAB_KEY, 'blade', 'laser', 'brake', 'spot']
+
+    def _normalize(self, value):
+        return str(value or '').strip().upper()
+
+    def _normalize_line_codes(self, values):
+        source = values if isinstance(values, list) else []
+        result = []
+        seen = set()
+        for item in source:
+            code = self._normalize(item)
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            result.append(code)
+        return result
+
+    def _normalize_prev_day_shift_rules(self, rows):
+        source = rows if isinstance(rows, list) else []
+        normalized = []
+        seen = set()
+        for row in source:
+            line_code = self._normalize((row or {}).get('lineCode'))
+            process_code = self._normalize((row or {}).get('processCode'))
+            shift_qty_raw = (row or {}).get('shiftQty', 0)
+            try:
+                shift_qty = int(float(shift_qty_raw))
+            except (TypeError, ValueError):
+                shift_qty = 0
+            if not line_code or not process_code or shift_qty <= 0:
+                continue
+            key = f'{line_code}|{process_code}'
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append({'lineCode': line_code, 'processCode': process_code, 'shiftQty': shift_qty})
+        return normalized
+
+    def _normalize_gantt_start_time_rules(self, rows):
+        source = rows if isinstance(rows, list) else []
+        normalized = []
+        seen = set()
+        for row in source:
+            line_code = self._normalize((row or {}).get('lineCode'))
+            process_code = self._normalize((row or {}).get('processCode'))
+            start_time = str((row or {}).get('startTime') or '').strip()
+            if not line_code or not process_code:
+                continue
+            try:
+                parsed = datetime.strptime(start_time, '%H:%M').time()
+                start_time = parsed.strftime('%H:%M')
+            except (TypeError, ValueError):
+                continue
+            key = f'{line_code}|{process_code}'
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append({'lineCode': line_code, 'processCode': process_code, 'startTime': start_time})
+        return normalized
+
+    def _normalize_planned_stock_calc_rules(self, rows):
+        source = rows if isinstance(rows, list) else []
+        normalized = []
+        seen = set()
+        allowed_targets = {'STOCK', 'PLANNED_STOCK', 'DEMAND'}
+        allowed_settings = {'PARENT_PLAN', 'ACTUAL_OR_PLAN'}
+        for row in source:
+            line_code = self._normalize((row or {}).get('lineCode'))
+            process_code = self._normalize((row or {}).get('processCode'))
+            calc_target = self._normalize((row or {}).get('calcTarget') or 'PLANNED_STOCK')
+            setting = self._normalize((row or {}).get('setting'))
+            old_item = self._normalize((row or {}).get('item'))
+            old_mode = self._normalize((row or {}).get('mode'))
+            if old_item == 'PARENT_SHIPMENT_SOURCE' and old_mode == 'PLAN':
+                setting = 'PARENT_PLAN'
+            if old_item == 'PARENT_SHIPMENT_SOURCE' and calc_target not in allowed_targets:
+                calc_target = 'PLANNED_STOCK'
+            if not line_code or not process_code:
+                continue
+            if calc_target not in allowed_targets or setting not in allowed_settings:
+                continue
+            key = f'{line_code}|{process_code}|{calc_target}'
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append({'lineCode': line_code, 'processCode': process_code, 'calcTarget': calc_target, 'setting': setting})
+        return normalized
+
+    def _load_special_rules(self):
+        special_rules = {'prev_day_shift_rules': [], 'gantt_start_time_rules': [], 'planned_stock_calc_rules': []}
+        rules_row = SystemSetting.objects.filter(key=self.PROCESS_PREV_DAY_SHIFT_RULES_KEY).first()
+        if rules_row:
+            try:
+                special_rules['prev_day_shift_rules'] = self._normalize_prev_day_shift_rules(json.loads(rules_row.value or '[]'))
+            except Exception:
+                pass
+        start_time_row = SystemSetting.objects.filter(key=self.PROCESS_GANTT_START_TIME_RULES_KEY).first()
+        if start_time_row:
+            try:
+                special_rules['gantt_start_time_rules'] = self._normalize_gantt_start_time_rules(json.loads(start_time_row.value or '[]'))
+            except Exception:
+                pass
+        planned_stock_row = SystemSetting.objects.filter(key=self.PLANNED_STOCK_RULES_KEY).first()
+        if planned_stock_row:
+            try:
+                special_rules['planned_stock_calc_rules'] = self._normalize_planned_stock_calc_rules(json.loads(planned_stock_row.value or '[]'))
+            except Exception:
+                pass
+        return special_rules
+
+    def get(self, request):
+        target_line_codes_by_tab = {}
+        rows = ProductionPlanLineSetting.objects.all()
+        db_map = {row.tab_key: row.target_line_codes for row in rows}
+        for tab_key in self.PLAN_TAB_KEYS:
+            if tab_key in db_map:
+                target_line_codes_by_tab[tab_key] = self._normalize_line_codes(db_map[tab_key])
+            else:
+                target_line_codes_by_tab[tab_key] = []
+        return Response({
+            'target_line_codes_by_tab': target_line_codes_by_tab,
+            'special_rules': self._load_special_rules(),
+        })
+
+    def post(self, request):
+        payload = request.data if isinstance(request.data, dict) else {}
+        raw_target = payload.get('target_line_codes_by_tab') if isinstance(payload.get('target_line_codes_by_tab'), dict) else {}
+        raw_special_rules = payload.get('special_rules') if isinstance(payload.get('special_rules'), dict) else {}
+        user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+
+        existing_rows = {row.tab_key: row for row in ProductionPlanLineSetting.objects.all()}
+        for tab_key in self.PLAN_TAB_KEYS:
+            existing = existing_rows.get(tab_key)
+            if tab_key in raw_target:
+                target_source = raw_target[tab_key]
+            elif existing:
+                target_source = existing.target_line_codes
+            else:
+                target_source = []
+            ProductionPlanLineSetting.objects.update_or_create(
+                tab_key=tab_key,
+                defaults={
+                    'target_line_codes': self._normalize_line_codes(target_source),
+                    'updated_by': user,
+                },
+            )
+
+        if 'prev_day_shift_rules' in raw_special_rules:
+            rules = self._normalize_prev_day_shift_rules(raw_special_rules['prev_day_shift_rules'])
+            SystemSetting.objects.update_or_create(
+                key=self.PROCESS_PREV_DAY_SHIFT_RULES_KEY,
+                defaults={'value': json.dumps(rules, ensure_ascii=False), 'description': 'ライン工程別の前日シフト台数設定', 'updated_by': user},
+            )
+        if 'gantt_start_time_rules' in raw_special_rules:
+            rules = self._normalize_gantt_start_time_rules(raw_special_rules['gantt_start_time_rules'])
+            SystemSetting.objects.update_or_create(
+                key=self.PROCESS_GANTT_START_TIME_RULES_KEY,
+                defaults={'value': json.dumps(rules, ensure_ascii=False), 'description': 'ライン工程別のガント開始時刻設定', 'updated_by': user},
+            )
+        if 'planned_stock_calc_rules' in raw_special_rules:
+            rules = self._normalize_planned_stock_calc_rules(raw_special_rules['planned_stock_calc_rules'])
+            SystemSetting.objects.update_or_create(
+                key=self.PLANNED_STOCK_RULES_KEY,
+                defaults={'value': json.dumps(rules, ensure_ascii=False), 'description': 'ライン工程別の計画在庫計算特例設定', 'updated_by': user},
+            )
+
+        target_line_codes_by_tab = {}
+        for row in ProductionPlanLineSetting.objects.all():
+            target_line_codes_by_tab[row.tab_key] = self._normalize_line_codes(row.target_line_codes)
+        return Response({
+            'target_line_codes_by_tab': target_line_codes_by_tab,
+            'special_rules': self._load_special_rules(),
+        })

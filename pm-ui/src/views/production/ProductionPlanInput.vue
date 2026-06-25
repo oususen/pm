@@ -1675,7 +1675,7 @@ const loadLineCodesByTab = async () => {
   lineCodesByTab.value = fromStorage
 
   try {
-    const res = await api.productionRecordSettings.getSettings()
+    const res = await api.productionPlanLineSettings.getSettings()
     const dbSettings = res?.data?.target_line_codes_by_tab
     const dbSpecialRules = res?.data?.special_rules
     if (!dbSettings || typeof dbSettings !== 'object' || Array.isArray(dbSettings)) return
@@ -1707,7 +1707,7 @@ const syncLineCodesByTabToServer = async () => {
       planned_stock_calc_rules: normalizePlannedStockCalcRules(plannedStockCalcRules.value),
     },
   }
-  const res = await api.productionRecordSettings.saveSettings(payload)
+  const res = await api.productionPlanLineSettings.saveSettings(payload)
   const dbSettings = res?.data?.target_line_codes_by_tab
   const dbSpecialRules = res?.data?.special_rules
   if (!dbSettings || typeof dbSettings !== 'object' || Array.isArray(dbSettings)) return

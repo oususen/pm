@@ -386,15 +386,13 @@ import { hasPermission } from '@/router'
 import { addDays, formatISODate, getBusinessDate } from '@/utils/dateUtil'
 import { exportProductionSummaryExcel } from '@/utils/productionRecordExport2'
 import {
-  createDefaultMappingsByTab,
   createDefaultTargetLineCodesByTab,
-  getProductionRecordMappingsByTab,
   getTargetLineCodesByTab,
-  loadProductionRecordMappingsByTab,
+  loadProductMappings,
   loadTargetLineCodesByTab,
-  normalizeProductionRecordMappingsByTab,
+  normalizeProductMappings,
   normalizeTargetLineCodesByTab,
-  saveProductionRecordMappingsByTab,
+  saveProductMappings,
   saveTargetLineCodesByTab,
 } from '@/config/productionRecordSettings'
 import {
@@ -483,8 +481,8 @@ const selectedFavoriteId = ref('')
 const favoriteName = ref('')
 const targetLineCodesByTab = ref(createDefaultTargetLineCodesByTab())
 const targetLineSaveMessage = ref('')
-const mappingsByTab = ref(createDefaultMappingsByTab())
-const mappingEditRows = ref(getProductionRecordMappingsByTab(mappingsByTab.value, settingsTargetTab.value))
+const productMappings = ref([])
+const mappingEditRows = ref([])
 const mappingSaveMessage = ref('')
 const mappingCandidateLoading = ref(false)
 const mappingCandidateError = ref('')
@@ -686,8 +684,12 @@ const loadMasters = async () => {
 
 const applyProductionRecordSettingsPayload = (payload) => {
   targetLineCodesByTab.value = normalizeTargetLineCodesByTab(payload?.target_line_codes_by_tab)
-  mappingsByTab.value = normalizeProductionRecordMappingsByTab(payload?.mappings_by_tab)
-  mappingEditRows.value = getProductionRecordMappingsByTab(mappingsByTab.value, settingsTargetTab.value)
+  // 新形式（product_mappings: フラット配列）優先、なければ旧形式（mappings_by_tab）からマージ
+  if (Array.isArray(payload?.product_mappings)) {
+    productMappings.value = normalizeProductMappings(payload.product_mappings)
+  } else if (payload?.mappings_by_tab) {
+    productMappings.value = normalizeProductMappings(payload.mappings_by_tab)
+  }
 }
 
 const loadProductionRecordSettings = async () => {
@@ -696,27 +698,23 @@ const loadProductionRecordSettings = async () => {
     applyProductionRecordSettingsPayload(res.data || {})
   } catch (e) {
     console.error('生産実績照会設定取得失敗:', e)
-    // API障害時はローカル保存値で継続運用する
     targetLineCodesByTab.value = loadTargetLineCodesByTab()
-    mappingsByTab.value = loadProductionRecordMappingsByTab()
-    mappingEditRows.value = getProductionRecordMappingsByTab(mappingsByTab.value, settingsTargetTab.value)
+    productMappings.value = loadProductMappings()
   }
 }
 
 const saveProductionRecordSettings = async () => {
   const payload = {
     target_line_codes_by_tab: normalizeTargetLineCodesByTab(targetLineCodesByTab.value),
-    mappings_by_tab: normalizeProductionRecordMappingsByTab(mappingsByTab.value),
+    product_mappings: productMappings.value,
   }
   try {
     const res = await api.productionRecordSettings.saveSettings(payload)
     applyProductionRecordSettingsPayload(res.data || payload)
   } catch (e) {
     console.error('生産実績照会設定保存失敗:', e)
-    // API障害時はローカルへ退避
     targetLineCodesByTab.value = saveTargetLineCodesByTab(payload.target_line_codes_by_tab)
-    mappingsByTab.value = saveProductionRecordMappingsByTab(payload.mappings_by_tab)
-    mappingEditRows.value = getProductionRecordMappingsByTab(mappingsByTab.value, settingsTargetTab.value)
+    productMappings.value = saveProductMappings(payload.product_mappings)
     throw e
   }
 }
@@ -1147,7 +1145,13 @@ const loadMappingCandidates = async (tabKey = settingsTargetTab.value) => {
       targetProcesses.map((p) => [String(p.id), String(p?.process_code || '').trim()]),
     )
 
-    const existing = getProductionRecordMappingsByTab(mappingsByTab.value, tabKey)
+    // フラットマッピングから当タブの対象工程のみ抽出
+    const targetProcessCodes = new Set(
+      Array.from(targetProcessMap.values()).map((v) => String(v).trim().toUpperCase()),
+    )
+    const existing = productMappings.value.filter(
+      (row) => targetProcessCodes.has(String(row.processCode || '').trim().toUpperCase()),
+    )
     const exactMap = new Map(existing.map((row) => [buildMappingKey(row.appProductCode, row.processCode), row]))
     const fallbackMap = new Map(existing.map((row) => [String(row.appProductCode || '').trim().toUpperCase(), row]))
 
@@ -1204,7 +1208,7 @@ const loadMappingCandidates = async (tabKey = settingsTargetTab.value) => {
   } catch (e) {
     console.error('加工品一覧取得失敗:', e)
     mappingCandidateError.value = '加工品一覧の取得に失敗しました。'
-    mappingEditRows.value = getProductionRecordMappingsByTab(mappingsByTab.value, tabKey)
+    mappingEditRows.value = [...productMappings.value]
   } finally {
     mappingCandidateLoading.value = false
   }
@@ -1278,13 +1282,16 @@ const copyAppToCore = (row) => {
 const saveMappings = () => {
   if (!canEditRecordInquirySettings.value) return
   const persist = async () => {
-    const tabKey = settingsTargetTab.value
-    mappingsByTab.value = {
-      ...mappingsByTab.value,
-      [tabKey]: mappingEditRows.value,
-    }
+    // 編集中の品番×工程キーを取得
+    const editKeys = new Set(
+      mappingEditRows.value.map((r) => buildMappingKey(r.appProductCode, r.processCode)),
+    )
+    // 既存フラットリストから編集対象外を残し、編集行で上書き
+    const remaining = productMappings.value.filter(
+      (r) => !editKeys.has(buildMappingKey(r.appProductCode, r.processCode)),
+    )
+    productMappings.value = [...remaining, ...mappingEditRows.value]
     await saveProductionRecordSettings()
-    mappingEditRows.value = getProductionRecordMappingsByTab(mappingsByTab.value, tabKey)
     mappingSaveMessage.value = 'マッピングを保存しました。'
   }
 
@@ -1461,7 +1468,7 @@ const exportExcel2 = async () => {
     sessions.value,
     startDate.value,
     endDate.value,
-    { tabKey: activeTab.value, mappingsByTab: mappingsByTab.value },
+    { tabKey: activeTab.value, productMappings: productMappings.value },
   )
 }
 
