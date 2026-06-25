@@ -1314,6 +1314,7 @@ def recalculate_planned_stock_qty(
     max_parent_lt=None,
     calendar_id=None,
     shared_workday_cache=None,
+    force_from_start=False,
 ):
     """
     計画在庫を日次で再計算（時制考慮版）
@@ -1402,9 +1403,8 @@ def recalculate_planned_stock_qty(
         final_delivery_lt = _get_final_product_delivery_lt(line_id, product_id)
         max_lt = max(max_lt, final_delivery_lt)
     calc_start_date = shift_working_days(calc_today, -(max_lt + 1))
-    # start_date が calc_start_date より古い場合（過去から再計算等）、start_date から再計算する
-    # ※ recalculate_stock_qty の effective_start = min(start_date, calc_start_date) と同等
-    if start_date < calc_start_date:
+    # 過去から再計算（force_from_start=True）の場合のみ、start_date から再計算する
+    if force_from_start and start_date < calc_start_date:
         calc_start_date = start_date
 
     # calc_start_date が start_date より古い場合、バックログを再取得
@@ -1623,6 +1623,7 @@ def recalculate_inventory_for_line(
     product_ids=None,
     progress_only=False,
     progress_calc_start_date=None,
+    force_from_start=False,
 ):
     """
     指定ラインの在庫を再計算
@@ -1753,6 +1754,7 @@ def recalculate_inventory_for_line(
                 max_parent_lt=direct_lt,
                 calendar_id=shared_calendar_id,
                 shared_workday_cache=shared_workday_cache,
+                force_from_start=force_from_start,
             )
             planned_elapsed = time.perf_counter() - t1
             planned_total += planned_elapsed

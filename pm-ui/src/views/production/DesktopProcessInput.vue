@@ -176,7 +176,7 @@
           <input
             v-model.trim="productCodeFilter"
             class="list-filter-input"
-            placeholder="部番検索"
+            :placeholder="t('processInput.productCodeSearchPlaceholder')"
             @input="currentPage = 1"
           />
         </div>
@@ -338,6 +338,9 @@
                   :class="[`action-${action.value.toLowerCase()}`, { active: isOperatorActionActive(action.value) }]"
                   @click="selectOperatorAction(action.value)"
                 >{{ action.label }}</button>
+                <span v-if="shouldUseCounterInput" class="op-action-note">
+                  {{ t('processInput.counterQtyFormula', { actualQty: formatNumber(counterBaseQty) }) }}
+                </span>
               </div>
             </div>
 
@@ -345,7 +348,7 @@
             <div v-if="planStatus" class="stats-and-actions">
               <div class="current-actual">
                 <div class="stat-block">
-                  <span class="stat-label">計画数</span>
+                  <span class="stat-label">{{ t('processInput.planQtyLabel') }}</span>
                   <span v-if="!editingPlanQty" class="stat-value plan clickable" @click="startEditPlanQty">{{ formatNumber(planStatus.planQty) }}</span>
                   <span v-else class="plan-qty-edit">
                     <input v-model.number="editPlanQtyValue" type="number" min="0" class="plan-qty-input" @keyup.escape="cancelEditPlanQty" />
@@ -356,17 +359,17 @@
                   </span>
                 </div>
                 <div class="stat-block">
-                  <span class="stat-label">実績数</span>
+                  <span class="stat-label">{{ t('processInput.recordedQty') }}</span>
                   <span class="stat-value actual">{{ formatNumber(planStatus.actualQty) }}</span>
                 </div>
                 <div class="stat-block">
-                  <span class="stat-label">残り</span>
+                  <span class="stat-label">{{ t('processInput.remainingQty') }}</span>
                   <span class="stat-value remain" :class="{ over: planStatus.remaining <= 0 }">
                     {{ formatNumber(planStatus.remaining) }}
                   </span>
                 </div>
                 <div v-if="shouldShowQtyInput && record.qty" class="stat-block">
-                  <span class="stat-label">入力後残</span>
+                  <span class="stat-label">{{ t('processInput.remainingAfterEntry') }}</span>
                   <span class="stat-value remain">{{ formatNumber(planStatus.remainingAfterInput) }}</span>
                 </div>
               </div>
@@ -375,6 +378,22 @@
             <!-- 数量入力 -->
             <div v-if="shouldShowQtyInput" class="qty-input-area">
               <div class="qty-row">
+                <div v-if="record.record_type === 'PRODUCTION'" class="qty-col">
+                  <label class="qty-label">
+                    {{ t('processInput.counterQty') }}
+                    <span class="required-mark">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    v-model.number="record.counter_qty"
+                    :min="counterBaseQty"
+                    step="1"
+                    inputmode="numeric"
+                    class="qty-input"
+                    :placeholder="t('processInput.counterQtyPlaceholder')"
+                  />
+                  <div v-if="counterQtyError" class="hint-text text-danger">{{ counterQtyError }}</div>
+                </div>
                 <div class="qty-col">
                   <label class="qty-label">
                     {{ record.record_type === 'SCRAP' ? t('processInput.scrapQty') : t('processInput.productionQty') }}
@@ -389,6 +408,7 @@
                     inputmode="numeric"
                     class="qty-input"
                     :placeholder="t('processInput.qtyPlaceholder')"
+                    :readonly="record.record_type === 'PRODUCTION'"
                   />
                 </div>
                 <div class="qty-col">
@@ -408,7 +428,7 @@
             </div>
 
             <!-- クイック数量 -->
-            <div v-if="shouldShowQtyInput && quickQtyPresets.length" class="quick-btns">
+            <div v-if="shouldShowQtyInput && record.record_type !== 'PRODUCTION' && quickQtyPresets.length" class="quick-btns">
               <button
                 v-for="preset in quickQtyPresets"
                 :key="preset"
@@ -729,6 +749,7 @@ const record = ref({
   record_type: 'PRODUCTION',
   product_id: '',
   product_code: '',
+  counter_qty: null,
   qty: null,
   operator_action_reason: '',
   operator_action_reason_detail: '',
@@ -870,6 +891,9 @@ const availableLines = computed(() => {
 })
 const selectedLineObj = computed(() =>
   lines.value.find((line) => String(line.id) === String(selectedLineId.value)) || null
+)
+const selectedProcessObj = computed(() =>
+  processes.value.find((process) => String(process.id) === String(selectedProcessId.value)) || null
 )
 const isFloorLineSelected = computed(
   () => String(selectedLineObj.value?.line_code || '').trim().toUpperCase() === FLOOR_LINE_CODE
@@ -1377,6 +1401,35 @@ const planStatus = computed(() => {
   const remaining = Math.max(planQty - actualQty, 0)
   const remainingAfterInput = Math.max(planQty - actualQty - currentInput, 0)
   return { planQty, actualQty, remaining, remainingAfterInput }
+})
+
+const shouldUseCounterInput = computed(() => {
+  const lineCode = String(selectedLineObj.value?.line_code || '').trim().toUpperCase()
+  const processCode = String(selectedProcessObj.value?.process_code || '').trim()
+  return (
+    record.value.record_type === 'PRODUCTION' &&
+    shouldShowQtyInput.value &&
+    lineCode === 'L2200' &&
+    ['4019', '4053'].includes(processCode)
+  )
+})
+
+const counterBaseQty = computed(() => {
+  if (!shouldUseCounterInput.value) return 0
+  const productId = record.value.product_id
+  if (!productId) return 0
+  const target = findProductionProductBySelection(productId)
+  return Math.max(toSafeNumber(target?.actual_qty), 0)
+})
+
+const counterQtyError = computed(() => {
+  if (!shouldUseCounterInput.value) return ''
+  if (record.value.counter_qty === null || record.value.counter_qty === '') return ''
+  const counterQty = toSafeNumber(record.value.counter_qty)
+  if (counterQty < counterBaseQty.value) {
+    return t('processInput.counterQtyMinError', { actualQty: formatNumber(counterBaseQty.value) })
+  }
+  return ''
 })
 
 const editingPlanQty = ref(false)
@@ -1922,6 +1975,12 @@ const findSelectedProductCandidate = () => {
 const hasRequiredProductionFields = ({ requireQty = true } = {}) => {
   if (!hasSelectedProduct()) return false
   if (requireQty) {
+    if (shouldUseCounterInput.value) {
+      const counterQtyValue = Number(record.value.counter_qty)
+      const hasCounterQty = record.value.counter_qty !== null && record.value.counter_qty !== '' && !Number.isNaN(counterQtyValue)
+      if (!hasCounterQty) return false
+      if (counterQtyError.value) return false
+    }
     const qtyValue = Number(record.value.qty)
     const hasQty = record.value.qty !== null && record.value.qty !== '' && !Number.isNaN(qtyValue)
     if (!hasQty) return false
@@ -2168,7 +2227,7 @@ const moveProductBy = (delta) => {
 // ──────────────────────────────
 const resetForm = () => {
   record.value = {
-    record_type: 'PRODUCTION', product_id: '', product_code: '', qty: null,
+    record_type: 'PRODUCTION', product_id: '', product_code: '', counter_qty: null, qty: null,
     operator_action_reason: '', operator_action_reason_detail: '',
     reason: '', reason_detail: '', disposition_status: '', is_production_recorded: '',
     equipment_state: '', batch_no: '', operator_name: defaultOperatorName.value || '', remarks: '',
@@ -2187,6 +2246,7 @@ const prepareEquipmentStateForm = () => {
   record.value.record_type = 'EQUIPMENT_STATE'
   record.value.product_id = productId
   record.value.product_code = productCode
+  record.value.counter_qty = null
   record.value.qty = null
   record.value.batch_no = ''
   record.value.operator_action_reason = ''
@@ -3202,11 +3262,16 @@ watch(() => record.value.reason, (val) => { if (val !== 'OTHER') record.value.re
 watch(() => effectiveOperatorAction.value, (action) => {
   const actionKey = String(action || '').toUpperCase()
   if (!['PAUSE', 'TEMP_END'].includes(actionKey)) { record.value.operator_action_reason = ''; record.value.operator_action_reason_detail = '' }
+  if (!shouldUseCounterInput.value) record.value.counter_qty = null
 })
 
 watch(() => record.value.operator_action_reason, (val) => { if (val !== 'その他') record.value.operator_action_reason_detail = '' })
 
 watch(() => record.value.product_id, (pid) => {
+  if (record.value.record_type === 'PRODUCTION') {
+    record.value.counter_qty = null
+    record.value.qty = null
+  }
   if (!pid || record.value.record_type !== 'SCRAP') return
   const candidate = scrapProducts.value.find((p) => String(p.product) === String(pid)) || manualProducts.value.find((p) => String(p.id) === String(pid))
   if (candidate) applyScrapTypeDefaults(candidate)
@@ -3221,17 +3286,32 @@ watch(() => scrapRelationFilter.value, (val) => {
 watch(() => record.value.record_type, (type) => {
   if (!type) return
   if (type !== 'PRODUCTION') selectedOperatorAction.value = ''
-  if (type === 'EQUIPMENT_STATE') { record.value.qty = null; record.value.batch_no = ''; record.value.operator_name = ''; record.value.reason_detail = ''; record.value.reason = '' }
+  if (type === 'EQUIPMENT_STATE') { record.value.counter_qty = null; record.value.qty = null; record.value.batch_no = ''; record.value.operator_name = ''; record.value.reason_detail = ''; record.value.reason = '' }
   else if (type === 'SCRAP') { if (!(record.value.operator_name || '').trim()) record.value.operator_name = defaultOperatorName.value || ''; ensureScrapDefaults() }
   else { record.value.reason_detail = ''; record.value.reason = ''; record.value.disposition_status = ''; if (!(record.value.operator_name || '').trim()) record.value.operator_name = defaultOperatorName.value || '' }
   if (!record.value.product_id && defaultProductId.value) {
     record.value.product_id = defaultProductId.value
     const plan = currentProductList.value.find((p) => String(p.product) === String(defaultProductId.value))
-    if (plan) record.value.qty = null
+    if (plan) { record.value.counter_qty = null; record.value.qty = null }
   }
   restoreEquipmentStateIfNeeded()
   currentPage.value = 1
 }, { immediate: true })
+
+watch(
+  () => [record.value.counter_qty, counterBaseQty.value, shouldUseCounterInput.value],
+  () => {
+    if (!shouldUseCounterInput.value) return
+    if (record.value.counter_qty === null || record.value.counter_qty === '') {
+      record.value.qty = null
+      return
+    }
+    const counterQty = toSafeNumber(record.value.counter_qty)
+    const calculatedQty = counterQty - counterBaseQty.value
+    record.value.qty = calculatedQty >= 0 ? calculatedQty : null
+  },
+  { immediate: true },
+)
 
 watch(() => [record.value.product_id, record.value.product_code], () => { ensureScrapDefaults(); loadSelectedCoproductNotice() })
 
@@ -3625,6 +3705,12 @@ onMounted(async () => {
 .equip-label { font-size: 12px; color: #555; }
 .required-mark { color: #e53935; margin-left: 2px; }
 .op-action-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.op-action-note {
+  align-self: center;
+  font-size: 12px;
+  color: #475569;
+  font-weight: 600;
+}
 .op-action-btn {
   height: 36px; padding: 0 14px; border: 2px solid #ccc; border-radius: 6px;
   background: #fff; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.15s;
@@ -3668,6 +3754,10 @@ onMounted(async () => {
 .qty-input {
   height: 44px; width: 100px; padding: 0 8px; border: 2px solid #ccc; border-radius: 6px;
   font-size: 20px; font-weight: 700; text-align: center;
+}
+.qty-input[readonly] {
+  background: #f8fafc;
+  color: #475569;
 }
 .batch-input {
   height: 44px; width: 140px; padding: 0 8px; border: 1px solid #ccc;
