@@ -239,7 +239,7 @@ const tiles = computed(() => {
       iconLabel: "部品",
       category: "inventory",
       required: "view",
-      resource: "production.component_inventory",
+      resource: "production.inventory",
     },
     {
       to: "/production/scrap-history",

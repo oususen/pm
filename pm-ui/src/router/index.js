@@ -88,6 +88,7 @@ export const canAccessRouteResource = (
   level = "view",
   fallbackResource = null,
   fallbackToParent = true,
+  allowChildResources = false,
 ) => {
   if (!resource) return true;
   if (!user) return false;
@@ -102,6 +103,23 @@ export const canAccessRouteResource = (
   }
 
   if (!fallbackToParent) return false;
+
+  if (allowChildResources && !String(resource).includes(".")) {
+    const permissions = Array.isArray(user.effective_permissions)
+      ? user.effective_permissions
+      : [];
+    const childPrefix = `${resource}.`;
+    const hasChildPermission = permissions.some((item) => {
+      if (!item?.resource || !String(item.resource).startsWith(childPrefix)) {
+        return false;
+      }
+      if (level === "edit") {
+        return Boolean(item.can_edit);
+      }
+      return Boolean(item.can_view || item.can_edit);
+    });
+    if (hasChildPermission) return true;
+  }
 
   const parentResource = String(resource).split(".")[0];
   if (parentResource && parentResource !== resource) {
@@ -155,7 +173,8 @@ router.beforeEach(async (to) => {
   const level = to.meta?.permission || "view";
   const fallbackResource = to.meta?.fallbackResource || null;
   const fallbackToParent = to.meta?.fallbackToParent !== false;
-  if (!canAccessRouteResource(user, resource, level, fallbackResource, fallbackToParent)) {
+  const allowChildResources = to.meta?.allowChildResources === true;
+  if (!canAccessRouteResource(user, resource, level, fallbackResource, fallbackToParent, allowChildResources)) {
     return { path: "/" };
   }
 

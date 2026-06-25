@@ -113,7 +113,6 @@ const canEdit = computed(() => {
   if (user.is_superuser) return true
   const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
   const entry = permissions.find((item) => item.resource === 'purchase.actual_edit')
-    || permissions.find((item) => item.resource === 'purchase.actual_input')
     || permissions.find((item) => item.resource === 'purchase')
   if (entry) return Boolean(entry.can_edit)
   return hasPermission(user, 'purchase', 'edit')
@@ -267,6 +266,3 @@ onMounted(async () => {
 .span-2 { grid-column: span 2; }
 .edit-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
 </style>
-
-
-

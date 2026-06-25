@@ -150,7 +150,6 @@ const tiles = computed(() => [
     category: "records",
     required: "edit",
     resource: "purchase.actual_edit",
-    fallbackResource: "purchase.actual_input",
   },
   {
     to: "/purchase/supplier-calendar",
@@ -167,7 +166,6 @@ const tiles = computed(() => [
     category: "plan",
     required: "edit",
     resource: "purchase.delivery_schedule",
-    fallbackResource: "purchase.plan_input",
   },
   {
     to: "/purchase/supplier-order-pattern",

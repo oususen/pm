@@ -3,7 +3,7 @@ const settings = [
     path: "/settings",
     name: "SettingsMenu",
     component: () => import("@/views/settings/SettingsMenu.vue"),
-    meta: { pageTitle: "設定", resource: "settings" },
+    meta: { pageTitle: "設定", resource: "settings", allowChildResources: true },
   },
   {
     path: "/settings/profile",

@@ -3,7 +3,7 @@ const production = [
     path: "/production/menu",
     name: "ProductionMenu",
     component: () => import("@/views/production/ProductionMenu.vue"),
-    meta: { pageTitle: "生産管理メニュー", manualPath: "README.md" },
+    meta: { pageTitle: "生産管理メニュー", manualPath: "README.md", resource: "production", allowChildResources: true },
   },
   {
     path: "/production/unused",
@@ -21,7 +21,7 @@ const production = [
     path: "/production/line-calendars",
     name: "LineCalendar",
     component: () => import("@/views/production/LineCalendar.vue"),
-    meta: { pageTitle: "ライン勤務カレンダ", manualPath: "生産/ライン勤務カレンダ.md" },
+    meta: { pageTitle: "ライン勤務カレンダ", manualPath: "生産/ライン勤務カレンダ.md", resource: "production.line_calendars", permission: "edit" },
   },
   {
     path: "/production/progress",
@@ -33,19 +33,19 @@ const production = [
     path: "/production/progress-only",
     name: "ProductionProgressOnly",
     component: () => import("@/views/production/ProductionProgressOnly.vue"),
-    meta: { pageTitle: "進度のみ", manualPath: "生産/進捗のみ.md" },
+    meta: { pageTitle: "進度のみ", manualPath: "生産/進捗のみ.md", resource: "production.progress" },
   },
   {
     path: "/production/plan-input",
     name: "ProductionPlanInput",
     component: () => import("@/views/production/ProductionPlanInput.vue"),
-    meta: { pageTitle: "生産計画入力", manualPath: "生産/生産計画入力.md" },
+    meta: { pageTitle: "生産計画入力", manualPath: "生産/生産計画入力.md", resource: "production.plan_input", permission: "edit" },
   },
   {
     path: "/production/plan-change-history",
     name: "ProductionPlanChangeHistory",
     component: () => import("@/views/production/ProductionPlanChangeHistory.vue"),
-    meta: { pageTitle: "生産計画変更履歴", manualPath: "README.md" },
+    meta: { pageTitle: "生産計画変更履歴", manualPath: "README.md", resource: "production.plan_input" },
   },
   {
     path: "/production/gantt-display-product-map",
@@ -70,19 +70,19 @@ const production = [
     path: "/production/default-start-time",
     name: "DefaultStartTimeSetting",
     component: () => import("@/views/production/DefaultStartTimeSetting.vue"),
-    meta: { pageTitle: "デフォルト開始時刻設定", manualPath: "生産/デフォルト開始時刻設定.md" },
+    meta: { pageTitle: "デフォルト開始時刻設定", manualPath: "生産/デフォルト開始時刻設定.md", resource: "production.plan_input", permission: "edit" },
   },
   {
     path: "/production/inventory",
     name: "ProductionInventory",
     component: () => import("@/views/inventory/ProductionInventory.vue"),
-    meta: { pageTitle: "在庫 / 残量一覧", manualPath: "生産/在庫残量一覧.md" },
+    meta: { pageTitle: "在庫 / 残量一覧", manualPath: "生産/在庫残量一覧.md", resource: "production.inventory" },
   },
   {
     path: "/production/component-inventory",
     name: "ComponentInventory",
     component: () => import("@/views/inventory/ComponentInventory.vue"),
-    meta: { pageTitle: "構成部品在庫一覧", manualPath: "生産/構成部品在庫一覧.md" },
+    meta: { pageTitle: "構成部品在庫一覧", manualPath: "生産/構成部品在庫一覧.md", resource: "production.inventory" },
   },
   {
     path: "/production/stock-allocations",
@@ -94,7 +94,7 @@ const production = [
     path: "/production/safety-stock-list",
     name: "SafetyStockList",
     component: () => import("@/views/production/SafetyStockList.vue"),
-    meta: { pageTitle: "安全在庫一覧", manualPath: "生産/安全在庫一覧.md" },
+    meta: { pageTitle: "安全在庫一覧", manualPath: "生産/安全在庫一覧.md", resource: "production.inventory" },
   },
   {
     path: "/production/stock-allocations/new",
@@ -151,7 +151,7 @@ const production = [
     path: "/production/camera-actual-input",
     name: "CameraActualInput",
     component: () => import("@/views/production/CameraActualInput.vue"),
-    meta: { pageTitle: "実績入力（カメラ）", manualPath: "生産/カメラ実績入力.md" },
+    meta: { pageTitle: "実績入力（カメラ）", manualPath: "生産/カメラ実績入力.md", resource: "production.process_input", permission: "edit" },
   },
   {
     path: "/production/mobile-input",
@@ -167,6 +167,8 @@ const production = [
       pageTitle: "工程作業記録",
       allowedRecordTypes: ["PRODUCTION", "EQUIPMENT_STATE"],
       manualPath: "生産/工程作業入力.md",
+      resource: "production.process_input",
+      permission: "edit",
     },
   },
   {
@@ -177,6 +179,8 @@ const production = [
       pageTitle: "工程作業記録（タブレット）",
       allowedRecordTypes: ["PRODUCTION", "EQUIPMENT_STATE"],
       manualPath: "生産/工程作業入力.md",
+      resource: "production.process_input",
+      permission: "edit",
     },
   },
   {
@@ -187,6 +191,8 @@ const production = [
       pageTitle: "１人２工程入力",
       allowedRecordTypes: ["PRODUCTION", "EQUIPMENT_STATE"],
       manualPath: "生産/１人２工程入力.md",
+      resource: "production.process_input",
+      permission: "edit",
     },
   },
   {
@@ -197,6 +203,8 @@ const production = [
       pageTitle: "同時加工入力",
       allowedRecordTypes: ["PRODUCTION", "EQUIPMENT_STATE"],
       manualPath: "生産/工程作業入力.md",
+      resource: "production.process_input",
+      permission: "edit",
     },
   },
   {
@@ -207,6 +215,8 @@ const production = [
       pageTitle: "2人1設備入力",
       allowedRecordTypes: ["PRODUCTION", "EQUIPMENT_STATE"],
       manualPath: "生産/１人２工程入力.md",
+      resource: "production.process_input",
+      permission: "edit",
     },
   },
   {
@@ -216,6 +226,8 @@ const production = [
     meta: {
       pageTitle: "レーザー実績入力",
       manualPath: "生産/レーザー実績入力.md",
+      resource: "production.process_input",
+      permission: "edit",
     },
   },
   {
@@ -226,19 +238,21 @@ const production = [
       pageTitle: "仕損品記録",
       allowedRecordTypes: ["SCRAP"],
       manualPath: "生産/仕損品記録.md",
+      resource: "production.scrap_record",
+      permission: "edit",
     },
   },
   {
     path: "/production/record-inquiry",
     name: "ProductionRecordInquiry",
     component: () => import("@/views/production/ProductionRecordInquiry.vue"),
-    meta: { pageTitle: "生産実績照会", manualPath: "生産/生産実績照会.md" },
+    meta: { pageTitle: "生産実績照会", manualPath: "生産/生産実績照会.md", resource: "production.record_inquiry" },
   },
   {
     path: "/production/record-edit",
     name: "ProductionRecordEdit",
     component: () => import("@/views/production/ProductionRecordEdit.vue"),
-    meta: { pageTitle: "実績変更", manualPath: "生産/実績変更.md" },
+    meta: { pageTitle: "実績変更", manualPath: "生産/実績変更.md", resource: "production.record_edit", permission: "edit" },
   },
   {
     path: "/production/process-gantt",
@@ -250,19 +264,19 @@ const production = [
     path: "/production/scrap-history",
     name: "ScrapHistory",
     component: () => import("@/views/production/ScrapHistory.vue"),
-    meta: { pageTitle: "仕損履歴", manualPath: "生産/仕損履歴.md" },
+    meta: { pageTitle: "仕損履歴", manualPath: "生産/仕損履歴.md", resource: "production.scrap_history" },
   },
   {
     path: "/production/brake-line-input",
     name: "BrakeLineInput",
     component: () => import("@/views/production/BrakeLineInput.vue"),
-    meta: { pageTitle: "ブレーキライン実績入力", manualPath: "生産/ブレーキライン実績入力.md" },
+    meta: { pageTitle: "ブレーキライン実績入力", manualPath: "生産/ブレーキライン実績入力.md", resource: "production.process_input", permission: "edit" },
   },
   {
     path: "/production/spot-line-input",
     name: "SpotLineInput",
     component: () => import("@/views/production/SpotLineInput.vue"),
-    meta: { pageTitle: "スポット実績入力", manualPath: "生産/スポット実績入力.md" },
+    meta: { pageTitle: "スポット実績入力", manualPath: "生産/スポット実績入力.md", resource: "production.process_input", permission: "edit" },
   },
   {
     path: "/production/desktop-process-input",
@@ -272,25 +286,27 @@ const production = [
       pageTitle: "工程作業記録（デスクトップ）",
       allowedRecordTypes: ["PRODUCTION", "EQUIPMENT_STATE"],
       manualPath: "生産/工程作業入力_デスクトップ.md",
+      resource: "production.process_input",
+      permission: "edit",
     },
   },
   {
     path: "/production/product-photo-upload",
     name: "ProductPhotoUpload",
     component: () => import("@/views/production/ProductPhotoUpload.vue"),
-    meta: { pageTitle: "製品写真アップロード", manualPath: "README.md" },
+    meta: { pageTitle: "製品写真アップロード", manualPath: "README.md", resource: "production.process_input", permission: "edit" },
   },
   {
     path: "/production/product-info-editor",
     name: "ProductInfoEditor",
     component: () => import("@/views/production/ProductInfoEditor.vue"),
-    meta: { pageTitle: "製品情報編集" },
+    meta: { pageTitle: "製品情報編集", resource: "production.process_input", permission: "edit" },
   },
   {
     path: "/production/plan-deviation-report",
     name: "PlanDeviationReport",
     component: () => import("@/views/production/PlanDeviationReport.vue"),
-    meta: { pageTitle: "計画乖離レポート" },
+    meta: { pageTitle: "計画乖離レポート", resource: "production.record_inquiry" },
   },
 ];
 

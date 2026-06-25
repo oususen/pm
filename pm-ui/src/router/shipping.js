@@ -3,7 +3,7 @@ const shipping = [
     path: "/shipping/menu",
     name: "ShippingMenu",
     component: () => import("@/views/shipping/ShippingMenu.vue"),
-    meta: { pageTitle: "出荷管理メニュー", manualPath: "README.md", resource: "shipping" },
+    meta: { pageTitle: "出荷管理メニュー", manualPath: "README.md", resource: "shipping", allowChildResources: true },
   },
   {
     path: "/shipping/instruction",

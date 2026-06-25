@@ -3,7 +3,7 @@ const masters = [
     path: "/masters",
     name: "MasterMenu",
     component: () => import("@/views/masters/MasterMenu.vue"),
-    meta: { pageTitle: "マスタメンテ", resource: "masters" },
+    meta: { pageTitle: "マスタメンテ", resource: "masters", allowChildResources: true },
   },
   {
     path: "/masters/product",

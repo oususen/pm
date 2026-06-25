@@ -3,7 +3,7 @@ const purchase = [
     path: "/purchase/menu",
     name: "PurchaseMenu",
     component: () => import("@/views/purchase/PurchaseMenu.vue"),
-    meta: { pageTitle: "仕入れ管理メニュー", resource: "purchase" },
+    meta: { pageTitle: "仕入れ管理メニュー", resource: "purchase", allowChildResources: true },
   },
   {
     path: "/purchase/plan-input",
@@ -43,7 +43,6 @@ const purchase = [
       pageTitle: "納入予定",
       manualPath: "仕入れ/納入予定.md",
       resource: "purchase.delivery_schedule",
-      fallbackResource: "purchase.plan_input",
     },
   },
   {
@@ -82,7 +81,6 @@ const purchase = [
     meta: {
       pageTitle: "納入実績編集",
       resource: "purchase.actual_edit",
-      fallbackResource: "purchase.actual_input",
     },
   },
   {
